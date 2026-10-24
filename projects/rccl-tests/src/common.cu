@@ -1595,6 +1595,11 @@ static bool DiscoverRdmaNics(NetworkCounterContext& ctx) {
     }
     return true;
   }
+  const char* hca = getenv("NCCL_IB_HCA");
+  if (hca && hca[0] != '\0') {
+    fprintf(stderr, "# Warning: NCCL_IB_HCA=%s selects no IB device, disabling net counter collection\n", hca);
+    return false;
+  }
   std::vector<std::string> all_nics;
   NetCounterGetNetworkInterfaces(all_nics);
   for (const auto& nic : all_nics) {
@@ -1611,24 +1616,26 @@ static bool DiscoverRdmaNics(NetworkCounterContext& ctx) {
   return true;
 }
 
-static NicType DetectNicTypeFromIbDevices(const std::vector<std::string>& ib_names,
-                                          bool& mixed) {
-  NicType nic_type = NIC_UNKNOWN;
-  mixed = false;
-  for (size_t i = 0; i < ib_names.size(); i++) {
-    NicType t = NetCounterDetectNicType(ib_names[i]);
-    if (t == NIC_UNKNOWN) continue;
-    if (nic_type == NIC_UNKNOWN) {
-      nic_type = t;
-    } else if (t != nic_type) {
-      mixed = true;
-      break;
+// Use the most common NIC type's table. Discovered devices of another known
+// type (e.g. a frontend NIC) are skipped; an explicit NCCL_IB_HCA list is kept.
+static NicType SelectNicType(NetworkCounterContext& ctx, bool& mixed, std::vector<std::string>& skipped) {
+  std::vector<NicType> types;
+  for (const auto& ib : ctx.ib_names) { types.push_back(NetCounterDetectNicType(ib)); }
+  NicType nic_type = NetCounterDominantNicType(types, mixed);
+  const char* hca = getenv("NCCL_IB_HCA");
+  std::vector<bool> keep = NetCounterKeepDevices(types, nic_type, hca && hca[0] != '\0');
+  std::vector<std::string> nics, ibs;
+  for (size_t i = 0; i < types.size(); i++) {
+    if (!keep[i]) {
+      skipped.push_back(ctx.ib_names[i] + "(" + NicTypeStr(types[i]) + ")");
+      continue;
     }
+    nics.push_back(ctx.nic_names[i]);
+    ibs.push_back(ctx.ib_names[i]);
   }
-  if (mixed) {
-    fprintf(stderr,
-            "# Warning: mixed NIC types detected during counter table selection\n");
-  }
+  if (!skipped.empty()) { mixed = false; }
+  ctx.nic_names = nics;
+  ctx.ib_names = ibs;
   return nic_type;
 }
 
@@ -1653,8 +1660,9 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     return ctx;
   }
 
-  bool mixed_detect = false;
-  NicType nic_type = DetectNicTypeFromIbDevices(ctx.ib_names, mixed_detect);
+  bool mixed = false;
+  std::vector<std::string> skipped;
+  NicType nic_type = SelectNicType(ctx, mixed, skipped);
   ctx.selected_counters = NetCounterGetCounterList(nic_type);
 
   size_t ndevs = ctx.nic_names.size();
@@ -1682,7 +1690,12 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     }
   }
   printf("\n");
-  printf("# NIC type: %s\n", mixed_detect ? "MIXED" : NicTypeStr(nic_type));
+  printf("# NIC type: %s\n", mixed ? "MIXED" : NicTypeStr(nic_type));
+  if (!skipped.empty()) {
+    printf("# Skipped (other NIC type):");
+    for (const auto& s : skipped) { printf(" %s", s.c_str()); }
+    printf("\n");
+  }
   printf("# Counters (%zu):", ctx.selected_counters.size());
   for (const auto& d : ctx.selected_counters) { printf(" %s", d.name.c_str()); }
   printf("\n");

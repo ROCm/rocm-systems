@@ -12,10 +12,11 @@
 #include "collector.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
-#include <set>
+#include <dirent.h>
 #include <unistd.h>
 
 // =====================================================================
@@ -23,16 +24,21 @@
 // =====================================================================
 //
 // Each NIC type has its own table with actual hardware key names.
-// name          : counter key (used in output headers and primary sysfs path)
+// name          : column name; also the lookup key unless 'key' is set
 // source        : where to read the value
-// is_prefix     : true → prefix-match (expands to name0..name7)
-// fallback_name : alternative sysfs key to try if 'name' is not found (or NULL)
+// is_prefix     : true → sum of all keys starting with the key; a '*' in the
+//                 key matches a priority number (pfc_pri*_rx_transitions)
+// fallback_name : alternative key to try if the key is not found (or NULL)
+// key           : lookup key or pattern when it differs from name (or NULL)
+// debugfs       : if not read from 'source', try bnxt_re debugfs (needs root)
 
 struct CounterTableEntry {
   const char*   name;
   CounterSource source;
   bool          is_prefix;
   const char*   fallback_name;  // NULL = no fallback
+  const char*   key = nullptr;  // NULL = name
+  bool          debugfs = false;
 };
 
 // ----- IONIC (AINIC) counter table -----
@@ -70,14 +76,32 @@ static const CounterTableEntry bnxt_re_table[] = {
   {"rx_cnp_pkts",             COUNTER_SRC_IB_HW,    false, "rp_cnp_handled"},
   {"tx_cnp_pkts",             COUNTER_SRC_IB_HW,    false, "np_cnp_sent"},
   {"rx_roce_discards",        COUNTER_SRC_IB_HW,    false, NULL},
-  // debugfs (bnxt_re info)
-  {"rx_stat_discards",        COUNTER_SRC_DEBUGFS,  false, NULL},
-  {"to_retransmits",          COUNTER_SRC_DEBUGFS,  false, NULL},
-  {"max_retry_exceeded",      COUNTER_SRC_DEBUGFS,  false, NULL},
-  {"oos_drop_count",          COUNTER_SRC_DEBUGFS,  false, NULL},
-  {"seq_err_naks_rcvd",       COUNTER_SRC_DEBUGFS,  false, NULL},
+  {"rx_stat_discards",        COUNTER_SRC_ETHTOOL,  false, "rx_stat_discard", NULL, true},
+  {"to_retransmits",          COUNTER_SRC_IB_HW,    false, NULL, NULL, true},
+  {"max_retry_exceeded",      COUNTER_SRC_IB_HW,    false, NULL, NULL, true},
+  {"oos_drop_count",          COUNTER_SRC_IB_HW,    false, "oos_drop_count", "res_oos_drop_count", true},
+  {"seq_err_naks_rcvd",       COUNTER_SRC_IB_HW,    false, NULL, NULL, true},
+  // Appended to keep the earlier columns in place.
+  {"pfc_rx_transitions",      COUNTER_SRC_ETHTOOL,  true,  NULL, "pfc_pri*_rx_transitions"},
+  {"pfc_tx_transitions",      COUNTER_SRC_ETHTOOL,  true,  NULL, "pfc_pri*_tx_transitions"},
 };
 static const int bnxt_re_table_size = (int)(sizeof(bnxt_re_table) / sizeof(bnxt_re_table[0]));
+
+// ----- MLX5 (ConnectX) counter table -----
+static const CounterTableEntry mlx5_table[] = {
+  {"rx_prio_pause",              COUNTER_SRC_ETHTOOL,  true,  NULL, "rx_prio*_pause"},
+  {"tx_prio_pause",              COUNTER_SRC_ETHTOOL,  true,  NULL, "tx_prio*_pause"},
+  {"rp_cnp_handled",             COUNTER_SRC_IB_HW,    false, NULL},
+  {"np_cnp_sent",                COUNTER_SRC_IB_HW,    false, NULL},
+  {"np_ecn_marked_roce_packets", COUNTER_SRC_IB_HW,    false, NULL},
+  {"out_of_buffer",              COUNTER_SRC_IB_HW,    false, NULL},
+  {"out_of_sequence",            COUNTER_SRC_IB_HW,    false, NULL},
+  {"packet_seq_err",             COUNTER_SRC_IB_HW,    false, NULL},
+  {"local_ack_timeout_err",      COUNTER_SRC_IB_HW,    false, NULL},
+  {"rnr_nak_retry_err",          COUNTER_SRC_IB_HW,    false, NULL},
+  {"rx_discards_phy",            COUNTER_SRC_ETHTOOL,  false, NULL},
+};
+static const int mlx5_table_size = (int)(sizeof(mlx5_table) / sizeof(mlx5_table[0]));
 
 static void GetTable(NicType nic_type,
                      const CounterTableEntry*& table, int& size) {
@@ -90,12 +114,66 @@ static void GetTable(NicType nic_type,
       table = bnxt_re_table;
       size = bnxt_re_table_size;
       break;
+    case NIC_MLX5:
+      table = mlx5_table;
+      size = mlx5_table_size;
+      break;
     case NIC_UNKNOWN:
+    default:
       fprintf(stderr,
               "# Warning: NIC type unknown, defaulting to bnxt_re counter set\n");
       table = bnxt_re_table;
       size = bnxt_re_table_size;
       break;
+  }
+}
+
+// Match an ethtool/sysfs key against a prefix pattern ('*' = digits).
+static bool PrefixMatches(const std::string& pattern, const std::string& key) {
+  size_t star = pattern.find('*');
+  if (star == std::string::npos) { return key.compare(0, pattern.size(), pattern) == 0; }
+  std::string pre = pattern.substr(0, star), suf = pattern.substr(star + 1);
+  if (key.size() <= pre.size() + suf.size()) { return false; }
+  if (key.compare(0, pre.size(), pre) != 0) { return false; }
+  if (key.compare(key.size() - suf.size(), suf.size(), suf) != 0) { return false; }
+  for (size_t i = pre.size(); i < key.size() - suf.size(); i++) {
+    if (!isdigit((unsigned char)key[i])) { return false; }
+  }
+  return true;
+}
+
+static const std::string& LookupKey(const CounterDescriptor& d) {
+  return d.key.empty() ? d.name : d.key;
+}
+
+static std::string Trim(const std::string& s) {
+  size_t b = s.find_first_not_of(" \t\r");
+  if (b == std::string::npos) { return ""; }
+  return s.substr(b, s.find_last_not_of(" \t\r") - b + 1);
+}
+
+// Comma-separated list, trimmed, empty entries dropped.
+static std::vector<std::string> SplitList(const std::string& list) {
+  std::vector<std::string> out;
+  size_t pos = 0;
+  while (pos <= list.size()) {
+    size_t comma = list.find(',', pos);
+    if (comma == std::string::npos) { comma = list.size(); }
+    std::string token = Trim(list.substr(pos, comma - pos));
+    if (!token.empty()) { out.push_back(token); }
+    pos = comma + 1;
+  }
+  return out;
+}
+
+template <typename F>
+static void ForEachLine(const std::string& text, F f) {
+  size_t pos = 0;
+  while (pos < text.size()) {
+    size_t eol = text.find('\n', pos);
+    if (eol == std::string::npos) { eol = text.size(); }
+    f(text.substr(pos, eol - pos));
+    pos = eol + 1;
   }
 }
 
@@ -122,22 +200,8 @@ static const std::set<std::string>& RequestedCounterFilter() {
   static bool checked = false;
   if (!checked) {
     const char* env = getenv("RCCL_TESTS_NIC_COUNTER_LIST");
-    if (env && strlen(env) > 0) {
-      std::string list(env);
-      size_t pos = 0;
-      while (pos < list.size()) {
-        size_t comma = list.find(',', pos);
-        if (comma == std::string::npos) { comma = list.size(); }
-        std::string token = list.substr(pos, comma - pos);
-        while (!token.empty() && (token.front() == ' ' || token.front() == '\t')) {
-          token.erase(token.begin());
-        }
-        while (!token.empty() && (token.back() == ' ' || token.back() == '\t')) {
-          token.pop_back();
-        }
-        if (!token.empty()) { filter.insert(token); }
-        pos = comma + 1;
-      }
+    if (env) {
+      for (const auto& token : SplitList(env)) { filter.insert(token); }
     }
     checked = true;
   }
@@ -148,6 +212,7 @@ static bool CounterMatchesRequestedFilter(const CounterTableEntry& entry) {
   const std::set<std::string>& filter = RequestedCounterFilter();
   if (filter.empty()) { return true; }
   if (filter.count(entry.name) > 0) { return true; }
+  if (entry.key != NULL && filter.count(entry.key) > 0) { return true; }
   return entry.fallback_name != NULL && filter.count(entry.fallback_name) > 0;
 }
 
@@ -168,39 +233,77 @@ std::vector<CounterDescriptor> NetCounterGetCounterList(NicType nic_type) {
   for (int i = 0; i < size; i++) {
     if (!CounterMatchesRequestedFilter(table[i])) continue;
     result.push_back({table[i].name, table[i].source, table[i].is_prefix,
-                      table[i].fallback_name ? table[i].fallback_name : ""});
+                      table[i].fallback_name ? table[i].fallback_name : "",
+                      table[i].key ? table[i].key : "", table[i].debugfs});
+  }
+  return result;
+}
+
+// RCCL-like NCCL_IB_HCA matching: a leading '^' excludes, then '=' matches
+// names exactly, otherwise each entry is a prefix. Entries are name[:port].
+// Port 1 is collected unless an include entry names another port; an empty
+// list selects every device ('^' alone selects none).
+std::vector<std::string> NetCounterFilterIbHca(const char* env, std::vector<std::string> devs) {
+  std::vector<std::string> result;
+  if (!env || strlen(env) == 0) { return result; }
+
+  bool exclude = false, exact = false;
+  if (*env == '^') { exclude = true; env++; }
+  if (*env == '=') { exact = true; env++; }
+
+  struct Entry { std::string name; int port; };
+  std::vector<Entry> entries;
+  for (const auto& token : SplitList(env)) {
+    size_t colon = token.find(':');
+    std::string name = token.substr(0, colon);
+    if (name.empty()) { continue; }
+    int port = -1;
+    if (colon != std::string::npos && colon + 1 < token.size() && token[colon + 1] != ':') {
+      port = std::max(0, atoi(token.c_str() + colon + 1));  // 0 matches no port
+    }
+    entries.push_back({name, port});
+  }
+
+  std::sort(devs.begin(), devs.end(), [](const std::string& a, const std::string& b) {
+    return strverscmp(a.c_str(), b.c_str()) < 0;
+  });
+  auto matches = [&](const std::string& dev, const Entry& en) {
+    return exact ? dev == en.name : dev.compare(0, en.name.size(), en.name) == 0;
+  };
+
+  if (exclude) {
+    if (entries.empty()) { return result; }
+    for (const auto& dev : devs) {
+      bool hit = false;
+      for (const auto& en : entries) { hit |= matches(dev, en) && (en.port == -1 || en.port == 1); }
+      if (!hit) { result.push_back(dev); }
+    }
+    return result;
+  }
+  if (entries.empty()) { return devs; }
+  std::set<std::string> seen;  // dev:port, so "dev" and "dev:1" are one port
+  for (const auto& en : entries) {
+    if (en.port == 0) { continue; }
+    for (const auto& dev : devs) {
+      if (!matches(dev, en)) { continue; }
+      if (!seen.insert(dev + ":" + std::to_string(en.port > 0 ? en.port : 1)).second) { continue; }
+      result.push_back(en.port > 0 ? dev + ":" + std::to_string(en.port) : dev);
+    }
   }
   return result;
 }
 
 std::vector<std::string> NetCounterParseIbHcaList() {
-  std::vector<std::string> result;
-
   const char* env = getenv("NCCL_IB_HCA");
-  if (!env || strlen(env) == 0) { return result; }
-
-  std::string list(env);
-
-  size_t pos = 0;
-  while (pos < list.size()) {
-    size_t comma = list.find(',', pos);
-    if (comma == std::string::npos) { comma = list.size(); }
-
-    std::string token = list.substr(pos, comma - pos);
-
-    while (!token.empty() && (token.front() == ' ' || token.front() == '\t')) {
-      token.erase(token.begin());
-    }
-
-    while (!token.empty() && (token.back() == ' ' || token.back() == '\t')) {
-      token.pop_back();
-    }
-
-    if (!token.empty()) { result.push_back(token); }
-
-    pos = comma + 1;
+  if (!env || strlen(env) == 0) { return {}; }
+  std::vector<std::string> devs;
+  DIR* dir = opendir("/sys/class/infiniband");
+  if (dir) {
+    for (struct dirent* e; (e = readdir(dir)) != NULL;)
+      if (e->d_name[0] != '.') devs.push_back(e->d_name);
+    closedir(dir);
   }
-  return result;
+  return NetCounterFilterIbHca(env, devs);
 }
 
 // =====================================================================
@@ -313,6 +416,8 @@ NicType NetCounterDetectNicType(const std::string& ib_device) {
     return NIC_BNXT_RE;
   if (strcmp(drv, "ionic") == 0)
     return NIC_IONIC;
+  if (strcmp(drv, "mlx5_core") == 0)
+    return NIC_MLX5;
   return NIC_UNKNOWN;
 }
 
@@ -320,73 +425,113 @@ const char* NicTypeStr(NicType t) {
   switch (t) {
     case NIC_BNXT_RE: return "BNXT_RE";
     case NIC_IONIC:   return "IONIC";
+    case NIC_MLX5:    return "MLX5";
     default:          return "UNKNOWN";
   }
 }
 
-NicType DetectNicTypeFromSnapshots(
-    const std::vector<NetworkCounterSnapshot>& snaps, bool& mixed) {
-  NicType nic_type = NIC_UNKNOWN;
-  mixed = false;
-  for (size_t i = 0; i < snaps.size(); i++) {
-    if (snaps[i].nic_type == NIC_UNKNOWN) continue;
-    if (nic_type == NIC_UNKNOWN) {
-      nic_type = snaps[i].nic_type;
-    } else if (snaps[i].nic_type != nic_type) {
-      mixed = true;
-      break;
+NicType NetCounterDominantNicType(const std::vector<NicType>& types, bool& mixed) {
+  std::vector<NicType> order;
+  std::map<NicType, int> count;
+  for (NicType t : types) {
+    if (t == NIC_UNKNOWN) { continue; }
+    if (count[t]++ == 0) { order.push_back(t); }
+  }
+  mixed = order.size() > 1;
+  // On a tie prefer a non-MLX5 type: mlx5 is usually the frontend NIC.
+  NicType best = NIC_UNKNOWN;
+  for (NicType t : order) {
+    if (best == NIC_UNKNOWN || count[t] > count[best] || (count[t] == count[best] && best == NIC_MLX5)) {
+      best = t;
     }
   }
-  return nic_type;
+  return best;
+}
+
+std::vector<bool> NetCounterKeepDevices(const std::vector<NicType>& types, NicType dominant, bool explicit_list) {
+  std::vector<bool> keep(types.size(), true);
+  if (explicit_list) { return keep; }
+  for (size_t i = 0; i < types.size(); i++) {
+    keep[i] = types[i] == NIC_UNKNOWN || types[i] == dominant;
+  }
+  return keep;
+}
+
+NicType DetectNicTypeFromSnapshots(
+    const std::vector<NetworkCounterSnapshot>& snaps, bool& mixed) {
+  std::vector<NicType> types;
+  for (const auto& s : snaps) { types.push_back(s.nic_type); }
+  return NetCounterDominantNicType(types, mixed);
 }
 
 // =====================================================================
 // Per-source collection
 // =====================================================================
 
-static void CollectEthtoolCounters(const std::string& nic,
-                                   const std::vector<CounterDescriptor>& selected,
-                                   std::map<std::string, uint64_t>& out) {
-  std::set<std::string> exact;
-  std::vector<std::string> prefixes;
+void NetCounterParseEthtool(const std::string& text,
+                            const std::vector<CounterDescriptor>& selected,
+                            std::map<std::string, uint64_t>& out) {
+  std::map<std::string, uint64_t> stats;
+  ForEachLine(text, [&](const std::string& line) {
+    char key[256] = {0};
+    unsigned long long tmp = 0;
+    // Per-queue lines ("[0]: rx_discards: 0") do not parse and are skipped.
+    if (sscanf(line.c_str(), "%255[^:]: %llu", key, &tmp) == 2) { stats[Trim(key)] = (uint64_t)tmp; }
+  });
+
   for (const auto& d : selected) {
     if (d.source != COUNTER_SRC_ETHTOOL) { continue; }
     if (d.is_prefix) {
-      prefixes.push_back(d.name);
-    } else {
-      exact.insert(d.name);
+      for (const auto& kv : stats) {
+        if (PrefixMatches(LookupKey(d), kv.first)) { out[kv.first] = kv.second; }
+      }
+      continue;
     }
+    auto it = stats.find(LookupKey(d));
+    if (it == stats.end() && !d.fallback_name.empty()) { it = stats.find(d.fallback_name); }
+    if (it != stats.end()) { out[d.name] = it->second; }
   }
-  if (exact.empty() && prefixes.empty()) { return; }
+}
+
+static void CollectEthtoolCounters(const std::string& nic,
+                                   const std::vector<CounterDescriptor>& selected,
+                                   std::map<std::string, uint64_t>& out) {
+  bool wanted = false;
+  for (const auto& d : selected) { wanted |= (d.source == COUNTER_SRC_ETHTOOL); }
+  if (!wanted || nic.empty()) { return; }
 
   char command[512] = {0};
   snprintf(command, sizeof(command), "ethtool -S %s 2>/dev/null", nic.c_str());
 
   FILE* fp = popen(command, "r");
   if (!fp) { return; }
+  std::string text;
+  char buf[4096];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) { text.append(buf, n); }
+  pclose(fp);
+  NetCounterParseEthtool(text, selected, out);
+}
 
-  char line[256] = {0};
-  while (fgets(line, sizeof(line), fp)) {
-    char key[256] = {0};
-    unsigned long long tmp = 0;
-    if (sscanf(line, "%255[^:]: %llu", key, &tmp) == 2) {
-      uint64_t value = (uint64_t)tmp;
-      char* start = key;
-      while (*start == ' ' || *start == '\t') { start++; }
-      std::string k(start);
-      if (exact.count(k)) {
-        out[k] = value;
-        continue;
-      }
-      for (const auto& pfx : prefixes) {
-        if (k.compare(0, pfx.size(), pfx) == 0) {
-          out[k] = value;
-          break;
-        }
-      }
+// Per counter: key under the port dir, then the device dir, then the fallback
+// in the same order.
+static void ReadIbHwCounters(const std::string& base_port, const std::string& base_dev,
+                             const std::vector<CounterDescriptor>& selected,
+                             std::map<std::string, uint64_t>& out) {
+  for (const auto& d : selected) {
+    if (d.source != COUNTER_SRC_IB_HW) { continue; }
+    FILE* fp = fopen((base_port + LookupKey(d)).c_str(), "r");
+    if (!fp) { fp = fopen((base_dev + LookupKey(d)).c_str(), "r"); }
+    if (!fp && !d.fallback_name.empty()) {
+      fp = fopen((base_port + d.fallback_name).c_str(), "r");
+      if (!fp) { fp = fopen((base_dev + d.fallback_name).c_str(), "r"); }
+    }
+    if (fp) {
+      unsigned long long tmp = 0;
+      if (fscanf(fp, "%llu", &tmp) == 1) { out[d.name] = (uint64_t)tmp; }
+      fclose(fp);
     }
   }
-  pclose(fp);
 }
 
 static void CollectIbHwCounters(const std::string& ib_device,
@@ -397,75 +542,60 @@ static void CollectIbHwCounters(const std::string& ib_device,
   std::string ib_base;
   int ib_port;
   ParseIbDevice(ib_device, ib_base, ib_port);
-  char port_str[16];
-  snprintf(port_str, sizeof(port_str), "%d", ib_port);
-  std::string base_port =
-      "/sys/class/infiniband/" + ib_base + "/ports/" + port_str + "/hw_counters/";
-  std::string base_dev =
-      "/sys/class/infiniband/" + ib_base + "/hw_counters/";
+  std::string base = "/sys/class/infiniband/" + ib_base;
+  ReadIbHwCounters(base + "/ports/" + std::to_string(ib_port) + "/hw_counters/", base + "/hw_counters/",
+                   selected, out);
+}
 
+void NetCounterParseDebugfs(const std::string& text, const std::set<std::string>& wanted,
+                            std::map<std::string, uint64_t>& out) {
+  ForEachLine(text, [&](const std::string& line) {
+    unsigned long long tmp = 0;
+    char key[256] = {0};
+    if (sscanf(line.c_str(), " %255[^:=] %*[:=] %llu", key, &tmp) == 2 ||
+        sscanf(line.c_str(), " %255s %llu", key, &tmp) == 2) {
+      std::string k = Trim(key);
+      if (wanted.count(k)) { out[k] = (uint64_t)tmp; }
+    }
+  });
+}
+
+// Flagged counters not read from their own source.
+static std::set<std::string> DebugfsWanted(const std::vector<CounterDescriptor>& selected,
+                                           const std::map<std::string, uint64_t>& out) {
+  std::set<std::string> wanted;
   for (const auto& d : selected) {
-    if (d.source != COUNTER_SRC_IB_HW) continue;
-    std::string path = base_port + d.name;
-    FILE* fp = fopen(path.c_str(), "r");
-    if (!fp) fp = fopen((base_dev + d.name).c_str(), "r");
-    // If primary name not found, try fallback
-    if (!fp && !d.fallback_name.empty()) {
-      fp = fopen((base_port + d.fallback_name).c_str(), "r");
-      if (!fp) fp = fopen((base_dev + d.fallback_name).c_str(), "r");
-    }
-    if (fp) {
-      unsigned long long tmp = 0;
-      if (fscanf(fp, "%llu", &tmp) == 1) out[d.name] = (uint64_t)tmp;
-      fclose(fp);
-    }
+    bool debugfs = d.debugfs || d.source == COUNTER_SRC_DEBUGFS;
+    if (debugfs && !d.is_prefix && out.count(d.name) == 0) { wanted.insert(d.name); }
   }
+  return wanted;
 }
 
 static void CollectDebugCounters(const std::string& ib_device,
                                  const std::vector<CounterDescriptor>& selected,
-                                 std::map<std::string, uint64_t>& out) {
-  if (ib_device.empty()) return;
-
-  std::set<std::string> wanted;
-  for (const auto& d : selected) {
-    if (d.source == COUNTER_SRC_DEBUGFS) {
-      wanted.insert(d.name);
-    }
-  }
+                                 NetworkCounterSnapshot& snap) {
+  if (ib_device.empty()) { return; }
+  std::set<std::string> wanted = DebugfsWanted(selected, snap.counters);
   if (wanted.empty()) { return; }
 
   std::string ib_base;
   int port;
   ParseIbDevice(ib_device, ib_base, port);
   (void)port;
-  std::string info_path =
-      "/sys/kernel/debug/bnxt_re/" + ib_base + "/info";
+  std::string info_path = "/sys/kernel/debug/bnxt_re/" + ib_base + "/info";
   FILE* fp = fopen(info_path.c_str(), "r");
   if (!fp) { return; }
-
-  char line[512] = {0};
-  while (fgets(line, sizeof(line), fp)) {
-    for (const auto& name : wanted) {
-      if (strstr(line, name.c_str())) {
-        unsigned long long tmp = 0;
-        char key[256] = {0};
-        if (sscanf(line, " %255[^:=] %*[:=] %llu", key, &tmp) == 2 ||
-            sscanf(line, " %255s %llu", key, &tmp) == 2) {
-          uint64_t value = (uint64_t)tmp;
-          char* start = key;
-          while (*start == ' ' || *start == '\t') { start++; }
-          char* end = start + strlen(start) - 1;
-          while (end > start && (*end == ' ' || *end == '\t')) { *end-- = '\0'; }
-          if (wanted.count(std::string(start))) {
-            out[std::string(start)] = value;
-          }
-        }
-        break;
-      }
-    }
-  }
+  std::string text;
+  char buf[4096];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) { text.append(buf, n); }
   fclose(fp);
+  std::map<std::string, uint64_t> found;
+  NetCounterParseDebugfs(text, wanted, found);
+  for (const auto& kv : found) {
+    snap.counters[kv.first] = kv.second;
+    snap.debugfs_counters.insert(kv.first);
+  }
 }
 
 // =====================================================================
@@ -496,7 +626,7 @@ NetworkCounterSnapshot NetCounterCollectSnapshot(
 
   CollectEthtoolCounters(nic, selected, snap.counters);
   CollectIbHwCounters(ib_dev, selected, snap.counters);
-  CollectDebugCounters(ib_dev, selected, snap.counters);
+  CollectDebugCounters(ib_dev, selected, snap);
 
   return snap;
 }
@@ -512,30 +642,42 @@ NetworkCounterSnapshot NetCounterCollectSnapshot(
 // Delta computation
 // =====================================================================
 
-uint64_t NetCounterComputeDelta(
+// after - before. A decrease (a wrap or a counter reset) is unknown: false.
+static bool CounterDelta(uint64_t after, uint64_t before, uint64_t* delta) {
+  if (after < before) { return false; }
+  *delta = after - before;
+  return true;
+}
+
+bool NetCounterComputeDelta(
     const NetworkCounterSnapshot& before,
     const NetworkCounterSnapshot& after,
-    const CounterDescriptor& desc) {
-  uint64_t delta = 0;
+    const CounterDescriptor& desc,
+    uint64_t* delta) {
+  bool found = false;
+  *delta = 0;
   if (desc.is_prefix) {
     for (const auto& entry : after.counters) {
-      if (entry.first.compare(0, desc.name.size(), desc.name) == 0) {
-        uint64_t a = entry.second;
-        uint64_t b = 0;
-        auto it = before.counters.find(entry.first);
-        if (it != before.counters.end()) { b = it->second; }
-        delta += (a - b);
+      if (!PrefixMatches(LookupKey(desc), entry.first)) { continue; }
+      auto it = before.counters.find(entry.first);
+      if (it == before.counters.end()) { continue; }
+      uint64_t d = 0;
+      if (!CounterDelta(entry.second, it->second, &d)) {
+        *delta = 0;
+        return false;
       }
+      *delta += d;
+      found = true;
     }
   } else {
-    uint64_t a = 0, b = 0;
-    auto it = before.counters.find(desc.name);
-    if (it != before.counters.end()) { b = it->second; }
-    it = after.counters.find(desc.name);
-    if (it != after.counters.end()) { a = it->second; }
-    delta = a - b;
+    auto b = before.counters.find(desc.name);
+    auto a = after.counters.find(desc.name);
+    bool sameSource = before.debugfs_counters.count(desc.name) == after.debugfs_counters.count(desc.name);
+    if (b != before.counters.end() && a != after.counters.end() && sameSource) {
+      found = CounterDelta(a->second, b->second, delta);
+    }
   }
-  return delta;
+  return found;
 }
 
 // =====================================================================
@@ -573,6 +715,9 @@ void NetCounterPrintTable(
   std::vector<std::vector<uint64_t>> deltas(
       num_nics, std::vector<uint64_t>(num_counters, 0));
 
+  std::vector<std::vector<bool>> valid(
+      num_nics, std::vector<bool>(num_counters, false));
+
   std::vector<std::vector<double>> rates(
       num_nics, std::vector<double>(num_counters, 0.0));
 
@@ -581,7 +726,7 @@ void NetCounterPrintTable(
   for (size_t n = 0; n < num_nics; n++) {
     dur_sec[n] = (after[n].timestamp_us - before[n].timestamp_us) / 1e6;
     for (size_t c = 0; c < num_counters; c++) {
-      deltas[n][c] = NetCounterComputeDelta(before[n], after[n], selected[c]);
+      valid[n][c] = NetCounterComputeDelta(before[n], after[n], selected[c], &deltas[n][c]);
       rates[n][c] = (dur_sec[n] > 0.0)
                         ? (double)deltas[n][c] / dur_sec[n]
                         : 0.0;
@@ -660,7 +805,11 @@ void NetCounterPrintTable(
   for (size_t n = 0; n < num_nics; n++) {
     printf("%-*s", nic_w, labels[n].c_str());
     for (size_t c = 0; c < num_counters; c++) {
-      printf("  %*llu  %*.2f", cnt_w[c], (unsigned long long)deltas[n][c], rt_w[c], rates[n][c]);
+      if (valid[n][c]) {
+        printf("  %*llu  %*.2f", cnt_w[c], (unsigned long long)deltas[n][c], rt_w[c], rates[n][c]);
+      } else {
+        printf("  %*s  %*s", cnt_w[c], "N/A", rt_w[c], "N/A");
+      }
     }
     printf("\n");
   }
