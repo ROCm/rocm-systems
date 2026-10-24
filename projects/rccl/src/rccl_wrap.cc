@@ -2724,8 +2724,12 @@ void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]) {
   if (maxNthreads[NCCL_PROTO_SIMPLE] == 0) rcclGetMaxNthreads(comm, maxNthreads);
   defaultBuffSizes[NCCL_PROTO_LL] =
     NCCL_LL_LINES_PER_THREAD * maxNthreads[NCCL_PROTO_LL] * NCCL_STEPS * sizeof(union ncclLLFifoLine);
-  defaultBuffSizes[NCCL_PROTO_LL128] =
-    rcclLL128ElemsPerThreadFromArch(comm->archName) * maxNthreads[NCCL_PROTO_LL128] * NCCL_STEPS * sizeof(uint64_t);
+  // gfx950 LL128 steps are 4x deeper so the per-step credit wait, barriers and release fence are amortized over
+  // more data; 16 lines per thread also makes a step a whole number of 4 KB slice rounds across the block's 4 warps.
+  // Every connection allocates this buffer, so it only grows when the comm can select LL128.
+  const int ll128StepScale = (IsArchMatch(comm->archName, "gfx950") && comm->topo->ll128Enabled) ? 4 : 1;
+  defaultBuffSizes[NCCL_PROTO_LL128] = ll128StepScale * rcclLL128ElemsPerThreadFromArch(comm->archName) *
+                                       maxNthreads[NCCL_PROTO_LL128] * NCCL_STEPS * sizeof(uint64_t);
   defaultBuffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); /* 4MiB */
 }
 
