@@ -13,6 +13,9 @@ add_library(
     dot/scalar_repair.cpp
     fp/fma.cpp
     fp/binary.cpp
+    fp/div_fixup.cpp
+    fp/div_fmas.cpp
+    fp/div_scale.cpp
     fp/fp64.cpp
     fp/frexp_exp.cpp
     fp/half_binary.cpp
