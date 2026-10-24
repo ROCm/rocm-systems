@@ -287,17 +287,18 @@ inline std::string& threadInfoMessageBuffer() {
   }
 
 #if HT_NVIDIA
-#define CTX_CREATE()                                                                               \
+#define CTX_CREATE_DEV(deviceId)                                                                   \
   hipCtx_t context;                                                                                \
-  initHipCtx(&context);
+  initHipCtx(&context, deviceId);
+#define CTX_CREATE() CTX_CREATE_DEV(0)
 #define CTX_DESTROY() HIPCHECK(hipCtxDestroy(context));
 #define ARRAY_DESTROY(array) HIPCHECK(hipArrayDestroy(array));
 #define HIP_TEX_REFERENCE hipTexRef
 #define HIP_ARRAY hipArray_t
-static void initHipCtx(hipCtx_t* pcontext) {
+static void initHipCtx(hipCtx_t* pcontext, int deviceId = 0) {
   HIPCHECK(hipInit(0));
   hipDevice_t device;
-  HIPCHECK(hipDeviceGet(&device, 0));
+  HIPCHECK(hipDeviceGet(&device, deviceId));
   HIPCHECK(hipCtxCreate(pcontext, 0, device));
 }
 
@@ -308,6 +309,7 @@ static void initHipCtx(hipCtx_t* pcontext) {
 #define HIP_TEST_DRIVER_INIT() HIP_CHECK(hipInit(0))
 #else
 #define CTX_CREATE()
+#define CTX_CREATE_DEV(deviceId)
 #define CTX_DESTROY()
 #define ARRAY_DESTROY(array) HIPCHECK(hipFreeArray(array));
 #define HIP_TEX_REFERENCE textureReference*
@@ -797,6 +799,81 @@ class BlockingContext {
   bool blocked_val() const { return blocked.load(); }
   hipStream_t stream_val() const { return stream; }
 };
+
+#if HT_AMD
+/**
+ * Enqueues a device-side wait on a stream: work queued after the gate does not start
+ * until the host releases it, and no host thread is parked meanwhile.
+ *
+ * Prefer this over BlockingContext when the gated window contains a HIP call.
+ * BlockingContext parks its hipStreamAddCallback callback on the runtime's async-signal
+ * thread. It can deadlock whenever the HIP call waits on the GPU.
+ */
+class StreamGate {
+ public:
+  explicit StreamGate(hipStream_t stream) : stream_(stream) {}
+
+  ~StreamGate() {
+    release();
+    if (signal_ != nullptr) {
+      static_cast<void>(hipFree(signal_));
+    }
+  }
+
+  StreamGate(const StreamGate&) = delete;
+  StreamGate& operator=(const StreamGate&) = delete;
+  StreamGate(StreamGate&&) = delete;
+  StreamGate& operator=(StreamGate&&) = delete;
+
+  hipError_t gate() {
+    if (signal_ != nullptr) {
+      return hipErrorInvalidValue;
+    }
+    uint64_t* signal = nullptr;
+    hipError_t status = hipExtMallocWithFlags(reinterpret_cast<void**>(&signal),
+                                              sizeof(uint64_t), hipMallocSignalMemory);
+    if (status != hipSuccess) {
+      return status;
+    }
+    __atomic_store_n(signal, kBlocked, __ATOMIC_RELEASE);
+
+    // Use hipStreamWaitValue64 so that __managed__ symbols stay uninitialized;
+    // gating with an ordinary kernel launch would initialize them all first. Some
+    // managed memory tests depend on this behavior
+    // (e.g. Unit_hipManagedKeyword_hipLaunchKernel_SyncBehavior) 
+    status = hipStreamWaitValue64(stream_, signal, kReleased, hipStreamWaitValueEq);
+
+    if (status != hipSuccess) {
+      static_cast<void>(hipFree(signal));
+      return status;
+    }
+    
+    signal_ = signal;
+    return hipSuccess;
+  }
+
+  void release() {
+    if (signal_ != nullptr) {
+      __atomic_store_n(signal_, kReleased, __ATOMIC_RELEASE);
+    }
+  }
+
+  bool is_blocked() const {
+    const hipError_t status = hipStreamQuery(stream_);
+    if (status != hipSuccess && status != hipErrorNotReady) {
+      WARN("hipStreamQuery failed while checking StreamGate");
+    }
+    return status == hipErrorNotReady;
+  }
+
+ private:
+  static constexpr uint64_t kBlocked = 0;
+  static constexpr uint64_t kReleased = 1;
+
+  hipStream_t stream_;
+  uint64_t* signal_ = nullptr;
+};
+#endif  // HT_AMD
 }  // namespace HipTest
 
 // Call at the start of tests that require image/texture support to indicate whether it
