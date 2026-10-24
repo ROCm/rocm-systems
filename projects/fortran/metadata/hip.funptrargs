@@ -1,0 +1,10 @@
+# <function> <argument-declared-"type(c_funptr), value"> ...   (see apply_arg_overrides)
+#
+# Kernels the headers declare `const void*`, so callers can pass c_funloc(...).
+# The launch entry points (hipLaunchKernel, ...) keep type(c_ptr) for compatibility.
+hipOccupancyMaxPotentialBlockSize f
+hipOccupancyMaxActiveBlocksPerMultiprocessor f
+hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags f
+hipOccupancyAvailableDynamicSMemPerBlock f
+hipOccupancyMaxActiveClusters f
+hipOccupancyMaxPotentialClusterSize f

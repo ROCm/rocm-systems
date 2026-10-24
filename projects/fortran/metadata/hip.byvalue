@@ -1,0 +1,7 @@
+# <function> <argument-forced-to-", value"> ...   (see apply_arg_overrides)
+#
+# `void** extra` of the launch entry points: by reference, a variable holding
+# c_null_ptr arrives as its own non-NULL address, so HIP sees both kernelParams
+# and extra set and returns hipErrorInvalidValue. kernelParams stays by reference.
+hipModuleLaunchKernel extra
+hipDrvLaunchKernelEx extra
