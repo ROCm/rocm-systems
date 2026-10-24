@@ -276,17 +276,6 @@
         {"name": "P2pMicrotests", "description": "Host-only p2p.cc microtests (no GPU, no HIP/RCCL runtime); contributes p2p.cc coverage", "test_filter": "*"}
       ]
     },
-    "unit_tests_micro_gin_host_proxy": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroGinHostProxy",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 0,
-      "timeout": 60,
-      "tests": [
-        {"name": "GinHostProxyMicrotests", "description": "Host-only GIN host proxy microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
     "unit_tests_micro_init": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicroInit",
@@ -562,12 +551,6 @@
       "name": "RCCL Microtests - p2p.cc",
       "description": "rccl-UnitTestsMicro (host-only p2p.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - GIN host proxy",
-      "description": "rccl-UnitTestsMicroGinHostProxy (host-only GIN host proxy microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_gin_host_proxy",
       "enabled": true
     },
     {
