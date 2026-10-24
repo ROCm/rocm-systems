@@ -11,8 +11,10 @@
 #include <hip/hip_common.h>
 #if __cplusplus
 #include <cstdlib>
+#include <cstdint>
 #else
 #include <stdlib.h>  // size_t
+#include <stdint.h>  // uint64_t, int8_t
 #endif
 #endif
 
@@ -491,6 +493,66 @@ typedef struct hipMemcpyAttributes {
   hipMemLocation dstLocHint;  ///< Location hint for destination operand.
   unsigned int flags;         ///< Additional Flags for copies. See hipMemcpyFlags.
 } hipMemcpyAttributes;
+
+/**
+ * One copy engine a kernel submits to, obtained with
+ * hipExtCopyEngineGetDeviceHandles and passed to a kernel by value. Valid until
+ * runtime teardown.
+ */
+typedef struct hipExtCopyEngineDeviceHandle {
+  uint64_t stateAddress;
+  uint32_t deviceAbiVersion;
+} hipExtCopyEngineDeviceHandle;
+
+typedef enum hipExtCopyEngineSignalOp {
+  hipExtCopyEngineSignalSet = 0,  ///< Store the value.
+  hipExtCopyEngineSignalAdd = 1,  ///< Add the value, wrapping.
+  hipExtCopyEngineSignalSub = 2,  ///< Subtract the value, wrapping.
+} hipExtCopyEngineSignalOp;
+
+/**
+ * Completion signal: once an operation's writes land, the copy engine applies op
+ * with value to the aligned 64-bit word at signalAddress, which the caller owns
+ * and initializes.
+ */
+typedef struct hipExtCopyEngineSignal {
+  uint64_t signalAddress;
+  uint64_t value;
+  uint32_t op;     ///< A hipExtCopyEngineSignalOp.
+  uint32_t flags;  ///< HIP_EXT_COPY_ENGINE_SIGNAL_* flags.
+} hipExtCopyEngineSignal;
+
+/**
+ * By default a signal lands only after its own operation and every earlier one on
+ * the handle's engine, so k add signals on a counter mean the first k operations
+ * are done. Signal flag UNORDERED lets a gfx125+ copy carry its signal in its own
+ * command, so later copies may overlap it: the signal then covers that copy
+ * alone, and a counter says how many such copies landed, not which. No effect
+ * before gfx125.
+ */
+#define HIP_EXT_COPY_ENGINE_SIGNAL_UNORDERED (1u << 0)
+
+/**
+ * Submit flag: never block and never park the engine. If the ring is full or
+ * the dependency is unmet, the submit returns hipErrorNotReady with nothing
+ * queued, and the caller retries later.
+ */
+#define HIP_EXT_COPY_ENGINE_SUBMIT_NONBLOCKING (1u << 0)
+
+typedef enum hipExtCopyEngineCompare {  ///< Unsigned.
+  hipExtCopyEngineCompareGreaterEqual = 0,
+  hipExtCopyEngineCompareLessEqual = 1,
+} hipExtCopyEngineCompare;
+
+/**
+ * A condition on a signal's word: a submit's dependency, or polled from a kernel.
+ */
+typedef struct hipExtCopyEngineCondition {
+  uint64_t signalAddress;
+  uint64_t value;
+  uint32_t compare;  ///< A hipExtCopyEngineCompare.
+} hipExtCopyEngineCondition;
+
 /**
  * Operand types for individual copies within a batch
  */
