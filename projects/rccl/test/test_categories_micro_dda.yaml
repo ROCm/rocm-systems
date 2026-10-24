@@ -9,6 +9,7 @@ test_categories:
       - "FabricGpuBarrier*"
       - "FabricInit*"
       - "HipVmmLedger*"
+      - "HostAllocLedger*"
     exclude_windows:
       - "*"
     labels:

@@ -532,7 +532,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `fabric/fabric_gpu_barrier.cu` (`FABRIC_GPU_BARRIER_CC_PATH`, from
     `fabric-gpu-barrier-test.cc`); suites `FabricGpuBarrier*`, `HipVmmLedger*`.
   - `fabric/fabric_init.cu` (`FABRIC_INIT_CC_PATH`, from `fabric-init-test.cc`);
-    suites `FabricInit*`.
+    suites `FabricInit*`, `HostAllocLedger*`.
 
 - **`rccl-UnitTestsMicroNetIbCastDataPath`** — the net_ib_cast data path in
   `src/transport/net_ib_cast/`: `p2p.cc` (`NET_IB_CAST_P2P_CC_PATH`, suites

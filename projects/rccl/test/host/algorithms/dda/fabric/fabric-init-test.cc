@@ -71,6 +71,24 @@ constexpr int kCuCount = 40;
 constexpr int64_t kScratchBytes = 64 * 1024;
 char kGfx1250[] = "gfx1250";
 
+TEST(HostAllocLedgerMicrotest, UntrackedCopyAndFree_AreRefusedAndCounted) {
+  HostAllocLedger ledger;
+  int src = 1;
+  int dst = 0;
+  int copyCalls = 0;
+  auto copy = ledger.GuardHostCopies([&](void*, const void*, size_t, hipMemcpyKind) {
+    ++copyCalls;
+    return hipSuccess;
+  });
+
+  EXPECT_EQ(copy(&dst, &src, sizeof(src), hipMemcpyHostToHost), hipErrorInvalidValue);
+  EXPECT_EQ(ledger.refusedCopies, 1);
+  EXPECT_EQ(copyCalls, 0);
+
+  ledger.Free(&dst);
+  EXPECT_EQ(ledger.badFrees, 1);
+}
+
 void ExpectNoFabricResources(const ncclComm& comm) {
   EXPECT_EQ(comm.ddaFabricMemHandler, nullptr);
   EXPECT_EQ(comm.ddaScratch, nullptr);
