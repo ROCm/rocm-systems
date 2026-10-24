@@ -1678,6 +1678,12 @@ graph:
   Unit_hipGraphSegmentOrdering_EmptyNodeCrossStreamCompletion:
     <<: *level_2
     tags: [exec]
+  Unit_hipGraphDualStreamCapture_LightBranchOnSideStream:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphDualStreamCapture_HeavyBranchOnSideStream:
+    <<: *level_2
+    tags: [exec]
   Unit_hipGraphKernelNodePriority_CaptureStreamPriorityCopied:
     <<: *level_default
     tags: [node]
