@@ -518,7 +518,8 @@ class IPCContext : public Context {
   template <typename T, ROCSHMEM_OP Op>
   __device__ void internal_ring_allreduce_wg(T *dst, const T *src,
                                           int nelems, IPCTeam *team_obj,
-					  int n_seg, int seg_size, int chunk_size);
+					  int n_seg, int seg_size, int chunk_size,
+					  size_t pSync_offset);
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ void internal_ring_allreduce_wave(T *dst, const T *src,
@@ -535,22 +536,22 @@ class IPCContext : public Context {
                                   size_t nelems, int pe);
 
   __device__ void internal_putmem_wg(void *dest, const void *source,
-                                    size_t nelems, int pe);
+                                     size_t nelems, int pe);
 
   __device__ void internal_getmem_wg(void *dest, const void *source,
-                                    size_t nelems, int pe);
+                                     size_t nelems, int pe);
 
   __device__ void internal_putmem_wave(void *dest, const void *source,
-                                      size_t nelems, int pe);
+                                       size_t nelems, int pe);
 
   __device__ void internal_getmem_wave(void *dest, const void *source,
-                                      size_t nelems, int pe);
+                                       size_t nelems, int pe);
 
   __device__ void internal_alltoallmem_wave(rocshmem_team_t team, void *dst,
                                             const void *src, int nelems);
 
   __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
-                                            const void *src, int nelems);
+                                          const void *src, int nelems);
 
   __device__ void alltoallmem_linear_thread_puts_wave(rocshmem_team_t team,
       void *dst, const void *src, int nelems);
