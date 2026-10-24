@@ -2791,6 +2791,12 @@ cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
 
   constexpr bool kImportVmmForInterprocess = true;
   FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
+  // Resolve owningAgent now that the handle is reachable, refresh every device view.
+  for (auto* device : vaddr_sub_obj->getContext().devices()) {
+    if (auto* devMem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(*device))) {
+      devMem->refreshOwningAgentFromPointerInfo();
+    }
+  }
   return CL_SUCCESS;
 }
 
