@@ -149,18 +149,56 @@ struct TestDevrWindows {
   ncclDevrWindowSorted sorted[2]{};
 };
 
+// Symmetric windows over [a, a + aSize) and [b, b + bSize), found by the real ncclDevrFindWindow.
+struct SymmetricTestWindows {
+  SymmetricTestWindows(ncclComm* comm, char* a, size_t aSize, char* b, size_t bSize) {
+    char* bases[2] = {a, b};
+    size_t sizes[2] = {aSize, bSize};
+    for (int i = 0; i < 2; i++) {
+      windows[i].userPtr = bases[i];
+      windows[i].size = sizes[i];
+      windows[i].winFlags = NCCL_WIN_COLL_SYMMETRIC;
+      sorted[i] = {reinterpret_cast<uintptr_t>(bases[i]), sizes[i], &windows[i]};
+    }
+    if (sorted[1].userAddr < sorted[0].userAddr) std::swap(sorted[0], sorted[1]);
+    comm->devrState.winSorted = sorted;
+    comm->devrState.winSortedCount = 2;
+  }
+
+  ncclDevrWindow windows[2]{};
+  ncclDevrWindowSorted sorted[2]{};
+};
+
 auto ForceParam(const char* name, int64_t value) {
   return [name = std::string(name), value](const char* env, int64_t defaultValue) {
     return std::strcmp(env, name.c_str()) == 0 ? value : defaultValue;
   };
 }
 
-auto SelectSymkTuning(ncclSymkKernelId id, int maxChannels) {
-  return [id, maxChannels](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
+// g_tuningCompute stub: picks id, and expects the symmetric query to be for func.
+auto SelectSymkTuning(ncclFunc_t func, ncclSymkKernelId id, int maxChannels) {
+  return [func, id, maxChannels](struct ncclTuningInput_t* in, struct ncclTuningResult_t* result) {
+    EXPECT_EQ(func, in->func);
     result->symKernelId = id;
     result->maxChannels = maxChannels;
     return ncclSuccess;
   };
+}
+
+// g_tuningCompute stub: picks id, and records each query's symAligned16B in *aligned and counts it in *calls.
+auto RecordAlignedTuning(ncclSymkKernelId id, int maxChannels, bool* aligned, int* calls = nullptr) {
+  return [id, maxChannels, aligned, calls](struct ncclTuningInput_t* in, struct ncclTuningResult_t* result) {
+    *aligned = in->symAligned16B;
+    if (calls != nullptr) ++*calls;
+    result->symKernelId = id;
+    result->maxChannels = maxChannels;
+    return ncclSuccess;
+  };
+}
+
+// g_symkKernelIdIsTma stub: only `id` is a TDM kernel, so asking about any other id reads as non-TDM.
+auto OnlyKernelIsTma(ncclSymkKernelId id) {
+  return [id](int kernelId) { return kernelId == (int)id; };
 }
 
 }  // namespace
@@ -445,6 +483,9 @@ TEST(WrapMicrotest, GetAlgoName_AddonValues_DistinctStrings) {
 
   ASSERT_EQ(ncclSuccess, rcclGetAlgoName(rcclAddonAlgos_t::RCCL_SYMMETRIC, &name));
   EXPECT_STREQ("SYM", name);
+
+  ASSERT_EQ(ncclSuccess, rcclGetAlgoName(rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, &name));
+  EXPECT_STREQ("SymTDM", name);
 
   ASSERT_EQ(ncclSuccess, rcclGetAlgoName(rcclAddonAlgos_t::RCCL_CE_2SHOT, &name));
   EXPECT_STREQ("CE2", name);
@@ -3870,7 +3911,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricEligibleChoosesSymmetric) {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST,
+                                                  /*maxChannels=*/6));
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         rcclCollDecision decision{};
@@ -3880,6 +3922,40 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricEligibleChoosesSymmetric) {
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
         EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
         EXPECT_EQ(6, decision.nMaxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A Tensor Data Mover pick is reported as SymTDM in query mode, while the live
+// decision stays RCCL_SYMMETRIC: enqueue's symkExtract gate and the dispatch
+// switches compare against that value.
+TEST(WrapMicrotestIsolated, SelectAllReduce_TdmKernelReportsSymmetricTdmOnlyInQuery) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_TdmKernelReportsSymmetricTdmOnlyInQuery",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST,
+                                                  /*maxChannels=*/64));
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(64, decision.nMaxChannels);
+
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/false,
+                                                    /*graphCapturingHint=*/false, &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, live.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -3914,7 +3990,8 @@ int SelectCeVsSymk(int ctaPolicy, size_t count, bool symkRequested, const rcclAr
   ScopedHook symkAvailable(g_symkAvailable,
                            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
   ScopedHook tuningCompute(g_tuningCompute,
-                           SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
+                           SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST,
+                                            /*maxChannels=*/6));
   ncclComm* comm = MakeCommWithArch(arch);
   comm->archThresholds = table;
   comm->symmetricSupport = 1;
@@ -4656,7 +4733,8 @@ void SelectForcedRegisteredSum(int64_t ceArRegMax, const rcclArchThresholds* tab
   ScopedHook symkAvailable(g_symkAvailable,
                            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
   ScopedHook tuningCompute(g_tuningCompute,
-                           SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
+                           SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST,
+                                            /*maxChannels=*/6));
   ncclComm* comm = MakeSelectComm();
   comm->symmetricSupport = 1;
   comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
@@ -6603,7 +6681,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_SymmetricReportedWhenQueryAndEligibl
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_AllGather_LL, /*maxChannels=*/4));
+                                 SelectSymkTuning(ncclFuncAllGather, ncclSymkKernelId_AllGather_LL, /*maxChannels=*/4));
         ScopedHook kernelIsLL(g_symkKernelIdIsLL, [](int) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 1;
@@ -7233,7 +7311,8 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricReportedWhenQueryAndEli
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_ReduceScatter_LL, /*maxChannels=*/7));
+                                 SelectSymkTuning(ncclFuncReduceScatter, ncclSymkKernelId_ReduceScatter_LL,
+                                                  /*maxChannels=*/7));
         ScopedHook kernelIsLL(g_symkKernelIdIsLL, [](int) { return true; });
         ncclComm* comm = MakeSelectComm(); // not DDA/Direct/Hierarchical eligible
         comm->symmetricSupport = 1;
@@ -7544,7 +7623,8 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllReduceDelegatesToSelectAllReduce)
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST,
+                                                  /*maxChannels=*/6));
         // Must have a real archName, not a zeroed comm: symEligible=true skips
         // rcclSelectAllReduce's CE-2-shot early return, so execution reaches its
         // unconditional IsArchMatch(comm->archName, "gfx1250") a few lines later --
@@ -7738,7 +7818,7 @@ TEST(WrapMicrotestIsolated, SymkQuery_KernelIdCountReturnsFalse) {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_Count, /*maxChannels=*/0));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_Count, /*maxChannels=*/0));
         ncclComm* comm = MakeZeroedComm();
         comm->symmetricSupport = 1;
         int algo, protocol, maxChannels;
@@ -7755,7 +7835,8 @@ TEST(WrapMicrotestIsolated, SymkQuery_SuccessWithLLKernelReportsLLProtocol) {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_ReduceScatter_LL, /*maxChannels=*/9));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_ReduceScatter_LL,
+                                                  /*maxChannels=*/9));
         ScopedHook kernelIsLL(g_symkKernelIdIsLL, [](int kernelId) {
           EXPECT_EQ((int)ncclSymkKernelId_ReduceScatter_LL, kernelId);
           return true;
@@ -7781,7 +7862,8 @@ TEST(WrapMicrotestIsolated, SymkQuery_SuccessWithNonLLKernelReportsSimpleProtoco
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/12));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST,
+                                                  /*maxChannels=*/12));
         // g_symkKernelIdIsLL left at its default (false).
         ncclComm* comm = MakeZeroedComm();
         comm->symmetricSupport = 1;
@@ -7790,6 +7872,242 @@ TEST(WrapMicrotestIsolated, SymkQuery_SuccessWithNonLLKernelReportsSimpleProtoco
             rcclSymkQuery(comm, ncclFuncAllReduce, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels));
         EXPECT_EQ(NCCL_PROTO_SIMPLE, protocol);
         EXPECT_EQ(12, maxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A Tensor Data Mover kernel pick reports RCCL_SYMMETRIC_TDM ("SymTDM") so -A 1
+// in rccl-tests can tell it apart from the vector symmetric kernels.
+TEST(WrapMicrotestIsolated, SymkQuery_TmaKernelReportsSymmetricTdm) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_TmaKernelReportsSymmetricTdm",
+      []() {
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclFuncReduceScatter, ncclSymkKernelId_ReduceScatter_TmaLD,
+                                                  /*maxChannels=*/64));
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_ReduceScatter_TmaLD));
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        int algo, protocol, maxChannels;
+        EXPECT_TRUE(
+            rcclSymkQuery(comm, ncclFuncReduceScatter, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, protocol);
+        EXPECT_EQ(64, maxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// rcclSymKGetInfo has no operands, so the query defaults symAligned16B to true.
+TEST(WrapMicrotestIsolated, SymkQuery_DefaultsToAligned16BWithoutOperands) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_DefaultsToAligned16BWithoutOperands",
+      []() {
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        bool aligned = false;
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 RecordAlignedTuning(ncclSymkKernelId_AllGather_TmaST, /*maxChannels=*/64, &aligned));
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        int algo, protocol, maxChannels;
+        EXPECT_TRUE(
+            rcclSymkQuery(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels));
+        EXPECT_TRUE(aligned);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The caller's alignment bit reaches the tuner, or the mask keeps the TDM kernels
+// that the live path would drop and the report disagrees with what runs.
+TEST(WrapMicrotestIsolated, SymkQuery_PassesCallerAligned16BToTuner) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_PassesCallerAligned16BToTuner",
+      []() {
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        bool aligned = true;
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 RecordAlignedTuning(ncclSymkKernelId_AllGather_ST, /*maxChannels=*/8, &aligned));
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        int algo, protocol, maxChannels;
+        EXPECT_TRUE(rcclSymkQuery(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels,
+                                  /*symAligned16B=*/false));
+        EXPECT_FALSE(aligned);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// In-place ReduceScatter whose per-rank slice is 24 B, on rank 2: the input and output
+// offsets differ by 48 B, which passes the plain modulo-16 check, but rank 1's differ by
+// 24 B, so only the in-place slice rule (which needs the real rank) keeps the ranks in
+// agreement. Out-of-place with the same slice stays aligned.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_InPlaceUnalignedSliceQueriesUnaligned) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_InPlaceUnalignedSliceQueriesUnaligned",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        int calls = 0;
+        bool aligned = false;
+        ScopedHook tuningCompute(g_tuningCompute, RecordAlignedTuning(ncclSymkKernelId_ReduceScatter_LD,
+                                                                      /*maxChannels=*/8, &aligned, &calls));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->nRanks = 4;
+        comm->rank = 2;
+        alignas(16) static char sendbuf[256];
+        alignas(16) static char otherbuf[256];
+        SymmetricTestWindows windows(comm, sendbuf, sizeof(sendbuf), otherbuf, sizeof(otherbuf));
+        constexpr size_t kRecvcount = 6;  // 24 B per rank in float32
+        rcclCollDecision decision{};
+
+        aligned = true;
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, sendbuf + 2 * 24, kRecvcount, ncclFloat32,
+                                                        ncclSum, /*query=*/true, &decision));
+        ASSERT_EQ(1, calls);
+        EXPECT_FALSE(aligned);
+
+        aligned = false;
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, otherbuf, kRecvcount, ncclFloat32, ncclSum,
+                                                        /*query=*/true, &decision));
+        ASSERT_EQ(2, calls);
+        EXPECT_TRUE(aligned);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The AllGather counterpart: in place, rank 2's input sits 48 B into the output, so the
+// plain modulo-16 check passes and only the in-place slice rule reports it unaligned.
+TEST(WrapMicrotestIsolated, SelectAllGather_InPlaceUnalignedSliceQueriesUnaligned) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_InPlaceUnalignedSliceQueriesUnaligned",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        int calls = 0;
+        bool aligned = false;
+        ScopedHook tuningCompute(g_tuningCompute, RecordAlignedTuning(ncclSymkKernelId_AllGather_ST,
+                                                                      /*maxChannels=*/8, &aligned, &calls));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->nRanks = 4;
+        comm->rank = 2;
+        alignas(16) static char recvbuf[256];
+        alignas(16) static char otherbuf[256];
+        SymmetricTestWindows windows(comm, recvbuf, sizeof(recvbuf), otherbuf, sizeof(otherbuf));
+        constexpr size_t kSendcount = 6;  // 24 B per rank in float32
+        rcclCollDecision decision{};
+
+        aligned = true;
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, recvbuf + 2 * 24, recvbuf, kSendcount, ncclFloat32,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        ASSERT_EQ(1, calls);
+        EXPECT_FALSE(aligned);
+
+        aligned = false;
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, otherbuf, recvbuf, kSendcount, ncclFloat32,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        ASSERT_EQ(2, calls);
+        EXPECT_TRUE(aligned);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// AllGather and ReduceScatter report a TDM pick as SymTDM in query mode, like AllReduce; live stays RCCL_SYMMETRIC.
+TEST(WrapMicrotestIsolated, SelectAllGather_TdmKernelReportsSymmetricTdmOnlyInQuery) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TdmKernelReportsSymmetricTdmOnlyInQuery",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclFuncAllGather, ncclSymkKernelId_AllGather_TmaST,
+                                                  /*maxChannels=*/64));
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->nRanks = 4;
+        alignas(16) static char sendbuf[256];
+        alignas(16) static char recvbuf[1024];
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, sendbuf, recvbuf, /*sendcount=*/8, ncclFloat32,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(64, decision.nMaxChannels);
+
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, sendbuf, recvbuf, /*sendcount=*/8, ncclFloat32,
+                                                    /*stream=*/nullptr, /*query=*/false,
+                                                    /*graphCapturingHint=*/false, &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, live.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectReduceScatter_TdmKernelReportsSymmetricTdmOnlyInQuery) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_TdmKernelReportsSymmetricTdmOnlyInQuery",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclFuncReduceScatter, ncclSymkKernelId_ReduceScatter_TmaLD,
+                                                  /*maxChannels=*/64));
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_ReduceScatter_TmaLD));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->nRanks = 4;
+        alignas(16) static char sendbuf[1024];
+        alignas(16) static char recvbuf[256];
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, recvbuf, /*recvcount=*/8, ncclFloat32, ncclSum,
+                                                        /*query=*/true, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(64, decision.nMaxChannels);
+
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, recvbuf, /*recvcount=*/8, ncclFloat32, ncclSum,
+                                                        /*query=*/false, &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, live.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// rcclSymKGetInfo (the -R 2 reporter) surfaces the same TDM tag as rcclGetCollImplInfo.
+TEST(WrapMicrotestIsolated, SymKGetInfo_TmaKernelReportsSymmetricTdm) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymKGetInfo_TmaKernelReportsSymmetricTdm",
+      []() {
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclFuncAllGather, ncclSymkKernelId_AllGather_TmaST,
+                                                  /*maxChannels=*/64));
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        int algo, protocol, maxChannels;
+        EXPECT_EQ(ncclSuccess,
+                  rcclSymKGetInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, algo);
+        EXPECT_EQ(64, maxChannels);
         DeleteCommWithArch(comm);
       });
 }
@@ -7830,7 +8148,8 @@ TEST(WrapMicrotestIsolated, SymKGetInfo_ReturnsSymkResultWithoutFallingThrough) 
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_AGxLL_R, /*maxChannels=*/15));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_AGxLL_R,
+                                                  /*maxChannels=*/15));
         ScopedHook kernelIsLL(g_symkKernelIdIsLL, [](int) { return true; });
         // If this wrongly gets called (fall-through bug), it would report 999 --
         // a value that never appears if rcclSymKGetInfo correctly short-circuits.

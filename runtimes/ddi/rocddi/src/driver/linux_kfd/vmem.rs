@@ -416,10 +416,35 @@ impl KfdVirtualMemory {
                 "virtual-memory physical extent exceeds host width",
             )
         })?;
+        if let MemoryKind::DeviceLocal {
+            coherent,
+            extended_coherent: true,
+            uncached: kind_uncached,
+            ..
+        } = kind
+            && (!coherent || kind_uncached || uncached)
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "extended local coherence requires a cached coherent mapping",
+            ));
+        }
         let native_kind = match kind {
             MemoryKind::System => uapi::GTT | uapi::COHERENT,
-            MemoryKind::DeviceLocal { coherent, .. } => {
-                uapi::VRAM | if coherent { uapi::COHERENT } else { 0 }
+            MemoryKind::DeviceLocal {
+                coherent,
+                extended_coherent,
+                uncached,
+                ..
+            } => {
+                uapi::VRAM
+                    | if coherent { uapi::COHERENT } else { 0 }
+                    | if extended_coherent {
+                        uapi::EXT_COHERENT
+                    } else {
+                        0
+                    }
+                    | if uncached { uapi::UNCACHED } else { 0 }
             }
             MemoryKind::OwnedHost { .. } => {
                 return Err(error(
@@ -871,6 +896,18 @@ pub(crate) struct KfdVirtualHostMapping {
 }
 
 impl KfdVirtualHostMapping {
+    pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
+        let Some(reservation) = &mut self.reservation else {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "virtual-memory host mapping is no longer live",
+            ));
+        };
+        reservation
+            .set_permissions(permissions.bits())
+            .map_err(|source| native_error("virtual-memory host protect", source))
+    }
+
     pub(super) fn create(
         memory: &KfdVirtualMemory,
         address_owner: &KfdVirtualAddress,
