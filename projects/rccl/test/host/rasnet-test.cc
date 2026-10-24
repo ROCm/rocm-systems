@@ -478,6 +478,7 @@ ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool) {
 }
 
 const char* ncclSocketToString(const union ncclSocketAddress* addr, char* buf, size_t bufLen, const int) {
+  if (buf == nullptr || bufLen == 0) return buf;
   std::snprintf(buf, bufLen, "port-%u", addr ? ntohs(addr->sin.sin_port) : 0);
   return buf;
 }

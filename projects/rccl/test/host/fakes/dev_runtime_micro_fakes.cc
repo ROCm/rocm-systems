@@ -329,12 +329,14 @@ std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_C
                            ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int,
                            bool, int)>
     g_devrGinRegister = DefaultGinRegister;
+std::vector<int> g_devrGinRegisterDmabufFds;
 
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* addr, size_t size,
                              void* hostWins[NCCL_GIN_MAX_CONNECTIONS],
                              ncclGinWindow_t devWins[NCCL_GIN_MAX_CONNECTIONS],
                              uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS], int winFlags,
-                             bool multiSegment, int memType) {
+                             bool multiSegment, int memType, int dmabufFd) {
+  g_devrGinRegisterDmabufFds.push_back(dmabufFd);
   return g_devrGinRegister(comm, addr, size, hostWins, devWins, ginWinGenerations, winFlags, multiSegment, memType);
 }
 
@@ -370,6 +372,9 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* addr, size_t size
                                   void* hostWins[NCCL_GIN_MAX_CONNECTIONS]) {
   return g_devrRmaProxyRegister(comm, addr, size, hostWins);
 }
+
+// Identity only: rcclDevrRmaRegistersMultiSegment compares the comm's RMA backend against it.
+ncclRma_t ncclRmaIbProxy{};
 
 static ncclResult_t DefaultRmaProxyDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) {
   return ncclSuccess;
@@ -554,6 +559,7 @@ void ResetDevRuntimeMicroFakes() {
     if (fd) *fd = open("/dev/null", O_RDONLY);
     return ncclSuccess;
   };
+  g_devrGinRegisterDmabufFds.clear();
   g_devrBootstrapIntraNodeBarrier               = DefaultIntraNodeBarrier;
   g_devrBootstrapIntraNodeAllGather             = DefaultIntraNodeAllGather;
   g_devrBootstrapAllGather                      = DefaultAllGather;

@@ -1895,9 +1895,6 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowChunkedFallback)
  */
 TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
 {
-    // The GIN IB backend registers the window as one DMA-BUF MR, and a HIP
-    // DMA-BUF export covers only the first physical segment (EINVAL).
-    GTEST_SKIP() << "Requires per-segment GIN DMA-BUF registration";
     const int nodeCount = MPITestConstants::detectNodeCount();
     if (!validateTestPrerequisites(/*min_processes=*/2)) {
         GTEST_SKIP() << "Requires 2+ ranks";
@@ -1914,6 +1911,7 @@ TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
     ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
     ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
     ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+    ASSERT_TRUE(isMultiSegmentRegisterEnabled()) << "NCCL_MULTI_SEGMENT_REGISTER must be set to 1";
 
     int dev = 0;
     ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));

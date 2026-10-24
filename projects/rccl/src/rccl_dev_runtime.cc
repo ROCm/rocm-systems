@@ -9,7 +9,19 @@
 #include "alloc.h"
 #include "bootstrap.h"
 #include "comm.h"
+#if defined(NCCL_OS_WINDOWS)
+#include "gin/gin_host_win_stub.h"
+#else
+#include "gin/gin_host.h"
+#endif
+#include "rma.h" // RCCL: multi-segment RMA registration and the owner-fd table.
 #include "rocmwrap.h"
+#include "transport.h"
+#include "transport/net_ib/rma_multiseg.h"
+
+#include <mutex>
+#include <unistd.h>
+#include <vector>
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags) {
@@ -119,3 +131,57 @@ ncclResult_t rcclDevrGinSegmentRegType(bool globalHasSysmemSegment, int maxGloba
   return ncclSuccess;
 }
 #endif
+
+bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm, int minGlobalNumSegments, int maxGlobalNumSegments) {
+  // RCCL: only RMA backends that register one MR per physical segment can take a multi-segment window,
+  // and the IB proxy needs the same count on every rank within its MR table.
+  return ncclParamMultiSegmentRegister() && comm->rmaState.rmaProxyState.ncclRma == &ncclRmaIbProxy &&
+         minGlobalNumSegments == maxGlobalNumSegments && maxGlobalNumSegments <= NCCL_RMA_MAX_SEGMENTS;
+}
+
+bool rcclDevrGinRegistersMultiSegment(struct ncclComm* comm, int minGlobalNumSegments, int maxGlobalNumSegments) {
+  if (!rcclDevrRmaRegistersMultiSegment(comm, minGlobalNumSegments, maxGlobalNumSegments)) return false;
+  // RCCL: the GIN proxy registers through that RMA backend; other GIN backends take the window as one MR.
+  struct ncclGinState* ginState = &comm->sharedRes->ginState;
+  for (int b = 0; b < ginState->numActiveBackends; b++) {
+    if (!ginState->backends[b].closed && ginState->backends[b].ginType != NCCL_GIN_TYPE_PROXY) return false;
+  }
+  return true;
+}
+
+namespace { // RCCL: owner DMA-BUF fds for imported host segments, found by VA at registration.
+struct rcclHostSegmentFd {
+  uintptr_t base;
+  size_t size;
+  int fd;
+};
+std::mutex rcclHostSegmentFdsMutex;
+std::vector<rcclHostSegmentFd> rcclHostSegmentFds;
+} // namespace
+
+void rcclHostSegmentFdRegister(void* base, size_t size, int fd) {
+  std::lock_guard<std::mutex> lock(rcclHostSegmentFdsMutex);
+  rcclHostSegmentFds.push_back({(uintptr_t)base, size, fd});
+}
+
+void rcclHostSegmentFdDeregister(int fd) {
+  std::lock_guard<std::mutex> lock(rcclHostSegmentFdsMutex);
+  for (size_t i = 0; i < rcclHostSegmentFds.size(); i++) {
+    if (rcclHostSegmentFds[i].fd == fd) {
+      rcclHostSegmentFds.erase(rcclHostSegmentFds.begin() + i);
+      return;
+    }
+  }
+}
+
+// RCCL: registration dups the owner's fd so the publisher can close its own.
+int rcclHostSegmentFdLookup(uintptr_t addr, size_t len, uint64_t* offset) {
+  std::lock_guard<std::mutex> lock(rcclHostSegmentFdsMutex);
+  for (const rcclHostSegmentFd& e : rcclHostSegmentFds) {
+    if (addr >= e.base && addr + len <= e.base + e.size) {
+      *offset = addr - e.base;
+      return dup(e.fd);
+    }
+  }
+  return -1;
+}
