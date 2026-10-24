@@ -197,6 +197,13 @@ public:
            address_space_->try_copy_contiguous(address, bytes.data(), bytes.size(), vmid_, false);
   }
 
+  [[nodiscard]] bool try_read_instruction(VmMemoryDomain domain, uint64_t address,
+                                          std::span<std::byte> bytes) override {
+    return domain == VmMemoryDomain::Compatibility &&
+           address_space_->try_read_instruction(
+               address, {reinterpret_cast<uint8_t *>(bytes.data()), bytes.size()}, vmid_);
+  }
+
   [[nodiscard]] bool try_write_contiguous(VmMemoryDomain domain, uint64_t address,
                                           std::span<const std::byte> bytes) override {
     return domain == VmMemoryDomain::Compatibility &&

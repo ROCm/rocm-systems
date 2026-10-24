@@ -774,6 +774,50 @@ public:
 
   uint32_t fetch32(uint64_t addr, uint32_t vmid = 0) const { return read32(addr, vmid); }
 
+  /// Read diagnostic instruction bytes without publishing a GPU fault. As with
+  /// execution fetches, mapped memory takes precedence over client or sparse
+  /// backing; a refused mapped/client read must not return sparse bytes instead.
+  bool try_read_instruction(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid) const {
+    constexpr size_t kMaxBytes = 256;
+    if (dst.empty() || dst.size() > kMaxBytes || dst.size() > PAGE_SIZE - (addr & PAGE_MASK) ||
+        !range_within_address_space(addr, dst.size()))
+      return false;
+    std::array<uint8_t, kMaxBytes> staging;
+    bool mapped = false;
+    bool copied =
+        with_page_mapping(addr, vmid, [&](const LegacyPageTableEntry *pte, IdentityPage page) {
+          mapped = true;
+          if (!pte)
+            return page.read(addr & PAGE_MASK, staging.data(), dst.size());
+          bool complete = true;
+          const size_t mapped_bytes = for_each_mapped_span(
+              *pte, addr & PAGE_MASK, dst.size(),
+              [&](size_t offset, uint8_t *host, size_t size, const LegacyHostExtent &) {
+                for_each_page_chunk(
+                    reinterpret_cast<uintptr_t>(host), size,
+                    [&](uint64_t ea, size_t host_offset, size_t chunk) {
+                      IdentityPage host_page(reinterpret_cast<uint8_t *>(ea & ~PAGE_MASK));
+                      complete &= host_page.read(ea & PAGE_MASK,
+                                                 staging.data() + offset + host_offset, chunk);
+                    });
+              });
+          return complete && mapped_bytes == dst.size();
+        });
+    if (!copied) {
+      if (mapped || has_page_mapping(addr, vmid))
+        return false;
+      if (vmid > 0 && has_client_backing(vmid)) {
+        copied = read_client_memory(addr, staging.data(), dst.size(), vmid);
+      } else if (backing_->has_page(addr)) {
+        backing_->read_block(addr, std::span(staging).first(dst.size()));
+        copied = true;
+      }
+    }
+    if (copied)
+      std::memcpy(dst.data(), staging.data(), dst.size());
+    return copied;
+  }
+
   bool is_fetchable(uint64_t addr, uint32_t vmid = 0) const {
     if (is_mapped(addr, vmid) || backing_->has_page(addr))
       return true;

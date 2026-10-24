@@ -178,6 +178,47 @@ AddressSpaceHandle register_step_process(LegacyGpuVmAdapter &adapter, KfdProcess
                                          .fault_reporter = reporter});
 }
 
+TEST(GpuVmTranslation, DiagnosticInstructionsHandleHostBoundariesWithoutPublishingFaults) {
+  GpuMemory memory("memory");
+  GpuVm vm;
+  KfdProcess process(7);
+  LegacyGpuVmAdapter adapter(vm, &memory);
+  RecordingFaultReporter reporter;
+  HostPage host(2 * kLegacyPageSize);
+  ASSERT_NE(host.data(), nullptr);
+  const uint32_t instruction = 0xbf800007; // s_nop 7
+  std::memcpy(host.data() + kLegacyPageSize - 2, &instruction, sizeof(instruction));
+  constexpr uint64_t pc = 0x1000;
+  process.page_table_[pc / kLegacyPageSize] =
+      LegacyPageTableEntry(host.data() + kLegacyPageSize - 2, Mtype::RW, 4, 0);
+  const auto handle = register_step_process(adapter, process, &reporter);
+  auto access = vm.snapshot_pinned(handle);
+  ASSERT_TRUE(access);
+  uint32_t fetched = 0;
+  auto bytes = std::as_writable_bytes(std::span(&fetched, 1));
+  ASSERT_EQ(access->read(pc, bytes, VmAccessKind::Execute), VmAccessOutcome::Complete);
+  ASSERT_EQ(fetched, instruction);
+  fetched = 0;
+  ASSERT_TRUE(access->try_read_instruction(pc, bytes));
+  EXPECT_EQ(fetched, instruction);
+
+  memory.write32(pc, 0xbf800009);
+  ASSERT_EQ(mprotect(host.data(), 2 * kLegacyPageSize, PROT_NONE), 0);
+  const LegacyAddressSpace::FaultScope faults;
+  fetched = 0xdeadbeef;
+  EXPECT_FALSE(access->try_read_instruction(pc, bytes));
+  EXPECT_EQ(fetched, 0xdeadbeefu);
+  EXPECT_FALSE(access->try_read_instruction(pc + 4, bytes));
+  EXPECT_EQ(fetched, 0xdeadbeefu);
+
+  ASSERT_TRUE(adapter.set_client_pid(handle, getpid()));
+  memory.write32(0x2000, instruction);
+  EXPECT_FALSE(access->try_read_instruction(0x2000, bytes));
+  EXPECT_EQ(fetched, 0xdeadbeefu);
+  EXPECT_FALSE(faults.observed());
+  EXPECT_TRUE(reporter.addresses.empty());
+}
+
 TEST(GpuVmTranslation, DefaultStepsPreserveCustomTransportProgressAndFaultOrigin) {
   class Translator final : public AddressSpaceTranslator {
   public:

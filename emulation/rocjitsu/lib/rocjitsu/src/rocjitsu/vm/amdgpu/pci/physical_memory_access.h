@@ -29,6 +29,10 @@ public:
 
   amdgpu::VmAccessOutcome read(amdgpu::VmMemoryDomain domain, uint64_t address,
                                std::span<std::byte> bytes) override;
+  bool try_read_instruction(amdgpu::VmMemoryDomain domain, uint64_t address,
+                            std::span<std::byte> bytes) override {
+    return read(domain, address, bytes) == amdgpu::VmAccessOutcome::Complete;
+  }
   amdgpu::VmAccessOutcome write(amdgpu::VmMemoryDomain domain, uint64_t address,
                                 std::span<const std::byte> bytes) override;
   amdgpu::AtomicLoadResult atomic_load(amdgpu::VmMemoryDomain domain, uint64_t address,

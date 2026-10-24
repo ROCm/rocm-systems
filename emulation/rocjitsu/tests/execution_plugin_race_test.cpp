@@ -7,6 +7,8 @@
 #include "execution_plugin_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
@@ -207,6 +209,24 @@ TEST_F(FormattedLoadRaceTest, PartialWaitRetiresOneLoadWithAllItsDestinations) {
   wait(0);
   EXPECT_FALSE(probe(12, 0xf, false));
   EXPECT_FALSE(probe(13, 0xf, false));
+}
+
+TEST_F(FormattedLoadRaceTest, RecordingPcsDoesNotDisassemble) {
+  class ObservableInstruction final : public Instruction {
+  public:
+    ObservableInstruction() : Instruction("s_nop", nullptr) {}
+    std::string disassemble() const override {
+      was_disassembled = true;
+      return Instruction::disassemble();
+    }
+    mutable bool was_disassembled = false;
+  } instruction;
+  for (uint64_t pc : {0x540024b100ULL, 0x100002a100ULL})
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(pc, instruction, *wave);
+  ASSERT_EQ(plugin_state->trace.size(), 2u);
+  EXPECT_EQ(plugin_state->trace[0], 0x540024b100ULL);
+  EXPECT_EQ(plugin_state->trace[1], 0x100002a100ULL);
+  EXPECT_FALSE(instruction.was_disassembled);
 }
 
 TEST_F(FormattedLoadRaceTest, RejectsWholeDestinationRangeWhenItExceedsTheWaveAllocation) {
@@ -2078,6 +2098,37 @@ TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
 
 // -- Race trace tests --------------------------------------------------------
 
+TEST(RaceDetectorPluginOutputTest, ExecutedInstructionsHaveExactPcsIncludingExpiredTrace) {
+  for (unsigned padding : {1u, 270u}) {
+    SCOPED_TRACE(padding);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1));
+    PluginSinkConfig sink_config;
+    auto &sink = sink_config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+    const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 264, .vdst = 9});
+    std::vector<uint32_t> code{S_NOP, load[0], load[1]};
+    code.insert(code.end(), padding, S_NOP);
+    code.push_back(read[0]);
+    code.push_back(S_ENDPGM);
+    f.run_kernel(code.data(), code.size());
+
+    const auto &report = sink.str();
+    EXPECT_NE(report.find("  ==>  0x1044  ds_read_b32 v8, v0"), std::string::npos) << report;
+    EXPECT_NE(report.find(std::format("  ==>  0x{:x}  v_mov_b32_e32 v9, v8", 0x104c + 4 * padding)),
+              std::string::npos)
+        << report;
+    EXPECT_EQ(report.find("before trace window") != std::string::npos, padding > 256);
+    EXPECT_EQ(report.find("0x1040"), std::string::npos);
+    EXPECT_NE(report.find("; <-- wave 0 lane 0"), std::string::npos);
+  }
+}
+
 TEST(FindConflictTest, UsesRecordedConflictingEvent) {
   RaceDetector detector(/*nWaves=*/
                         1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
@@ -2143,7 +2194,7 @@ TEST(FormatTraceTest, WaveLaneAnnotations) {
   };
   plugins::race_detector::MarkedPc conflict{0x100, 3, -1};
   plugins::race_detector::MarkedPc read{0x10c, 0, 5};
-  auto result = formatTrace(trace, disasm, conflict, read);
+  auto result = formatTrace(trace, [&](uint64_t pc) { return disasm.at(pc); }, conflict, read);
   EXPECT_NE(result.find("; <-- wave 3"), std::string::npos);
   EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
 }
@@ -2159,7 +2210,7 @@ TEST(FormatTraceTest, NoLineBeforeFirstMarker) {
   };
   plugins::race_detector::MarkedPc conflict{0x108, 2, -1};
   plugins::race_detector::MarkedPc read{0x110, 1, 3};
-  auto result = formatTrace(trace, disasm, conflict, read);
+  auto result = formatTrace(trace, [&](uint64_t pc) { return disasm.at(pc); }, conflict, read);
   EXPECT_EQ(result.substr(0, 5), "  ==>");
   EXPECT_EQ(result.find("0x100"), std::string::npos);
   EXPECT_EQ(result.find("0x104"), std::string::npos);
@@ -2175,7 +2226,7 @@ TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
   };
   plugins::race_detector::MarkedPc conflict{0x100, 3, -1};
   plugins::race_detector::MarkedPc read{0x208, 0, 5};
-  auto result = formatTrace(trace, disasm, conflict, read);
+  auto result = formatTrace(trace, [&](uint64_t pc) { return disasm.at(pc); }, conflict, read);
   EXPECT_NE(result.find("before trace window"), std::string::npos);
   EXPECT_NE(result.find("buffer_load_dwordx4"), std::string::npos);
   EXPECT_NE(result.find("; <-- wave 3"), std::string::npos);
@@ -2183,39 +2234,158 @@ TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
   EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
 }
 
-TEST(DisasmCacheTest, HandlesNonMonotonicPcOrder) {
-  plugins::race_detector::DisasmCache cache;
-  Instruction high_instruction("s_nop 0", nullptr);
-  Instruction low_instruction("s_endpgm", nullptr);
-  cache.record(0x540024b100, high_instruction);
-  cache.record(0x100002a100, low_instruction);
-
-  auto disasm = cache.to_map();
-  EXPECT_EQ(disasm.at(0x540024b100), "s_nop 0");
-  EXPECT_EQ(disasm.at(0x100002a100), "s_endpgm");
+TEST(FormatTraceTest, ResolvesOnlyPrintedInstructions) {
+  RingBuffer<uint64_t, 256> trace;
+  for (uint64_t pc = 0x100; pc <= 0x300; pc += 4)
+    trace.push(pc);
+  std::vector<uint64_t> requested;
+  auto resolve = [&](uint64_t pc) {
+    requested.push_back(pc);
+    return "s_nop 0";
+  };
+  const auto report = formatTrace(trace, resolve, MarkedPc{0x108, 0, -1}, {0x300, 0, 0});
+  ASSERT_EQ(requested.size(), 32u);
+  EXPECT_EQ(requested.front(), 0x108u);
+  EXPECT_EQ(requested.back(), 0x300u);
+  EXPECT_NE(report.find("instructions elided"), std::string::npos);
 }
 
-TEST(DisasmCacheTest, DisassemblesOnlyFirstInstructionAtPc) {
-  class ObservableInstruction final : public Instruction {
-  public:
-    ObservableInstruction() : Instruction("s_count", nullptr) {}
-    bool was_disassembled() const { return !disassembly_.empty(); }
+class DiagnosticCodeMapping : public AddressSpaceTranslator {
+public:
+  DiagnosticCodeMapping(uint64_t physical, size_t size = 4, bool executable = true)
+      : physical_(physical), size_(size), executable_(executable) {}
+
+  VmTranslationResult translate(uint64_t address, size_t size, VmAccessKind access) const override {
+    ADD_FAILURE() << "Diagnostic lookup must use the non-mutating probe";
+    return probe_translation(address, size, access);
+  }
+
+  VmTranslationResult probe_translation(uint64_t address, size_t,
+                                        VmAccessKind access) const override {
+    if (address < 0x1000 || address - 0x1000 >= size_ || access != VmAccessKind::Execute ||
+        !executable_)
+      return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    return {.outcome = VmAccessOutcome::Complete,
+            .translation = {.domain = VmMemoryDomain::Local,
+                            .address = physical_ + address - 0x1000,
+                            .contiguous_bytes = size_ - (address - 0x1000),
+                            .permissions = {.executable = true}}};
+  }
+
+private:
+  uint64_t physical_;
+  size_t size_;
+  bool executable_;
+};
+
+TEST(RaceDisassemblyTest, UsesPinnedAddressSpaceAndHandlesMissingInstructionWords) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(2));
+  auto *cu = f.cu();
+  auto *a = cu->dispatch_wf(0, 0x1000, 104, 256);
+  auto *b = cu->dispatch_wf(1, 0x1000, 104, 256);
+  ASSERT_NE(a, nullptr);
+  ASSERT_NE(b, nullptr);
+  f.mem->write32(0x8000, S_NOP | 7);
+  f.mem->write32(0x9000, S_NOP | 9);
+  f.mem->write32(0xa000, cdna4::build_ds(cdna4::kDsReadB32Ds)[0]);
+  GpuVm vm;
+  cu->set_gpu_vm(&vm);
+  auto memory = std::make_shared<GpuMemoryPhysicalAccess>(*f.mem);
+  unsigned faults = 0;
+  auto reporter = [&](uint64_t, VmAccessKind) { ++faults; };
+  auto first = vm.register_address_space(1, std::make_shared<DiagnosticCodeMapping>(0x8000), memory,
+                                         reporter);
+  auto second = vm.register_address_space(2, std::make_shared<DiagnosticCodeMapping>(0x9000),
+                                          memory, reporter);
+  a->set_address_space(first);
+  b->set_address_space(second);
+  auto pinned = vm.snapshot_pinned(first);
+  ASSERT_TRUE(pinned);
+  a->set_vm_access(std::make_shared<GpuVmAccess>(*pinned));
+
+  EXPECT_EQ(cu->disassemble_instruction(*a, 0x1000), "s_nop 7");
+  EXPECT_EQ(cu->disassemble_instruction(*b, 0x1000), "s_nop 9");
+  ASSERT_TRUE(
+      vm.replace_translated(first, std::make_shared<DiagnosticCodeMapping>(0x9000), memory));
+  EXPECT_EQ(cu->disassemble_instruction(*a, 0x1000), "s_nop 7");
+  a->set_vm_access(nullptr);
+  EXPECT_EQ(cu->disassemble_instruction(*a, 0x1000), "s_nop 9");
+  EXPECT_EQ(cu->disassemble_instruction(*a, 0x1004), "<disassembly unavailable>");
+  EXPECT_EQ(cu->disassemble_instruction(*a, 0x1001), "<disassembly unavailable>");
+  ASSERT_TRUE(
+      vm.replace_translated(first, std::make_shared<DiagnosticCodeMapping>(0xa000), memory));
+  EXPECT_EQ(cu->disassemble_instruction(*a, 0x1000), "<disassembly unavailable>");
+  ASSERT_TRUE(
+      vm.replace_translated(first, std::make_shared<DiagnosticCodeMapping>(0xa000, 8), memory));
+  EXPECT_EQ(cu->disassemble_instruction(*a, 0x1000), "ds_read_b32 v0, v0");
+  ASSERT_TRUE(vm.replace_translated(
+      first, std::make_shared<DiagnosticCodeMapping>(0x8000, 4, false), memory));
+  EXPECT_EQ(cu->disassemble_instruction(*a, 0x1000), "<disassembly unavailable>");
+  a->set_vm_access(std::make_shared<GpuVmAccess>(*pinned));
+  ASSERT_TRUE(vm.invalidate(first));
+  EXPECT_EQ(cu->disassemble_instruction(*a, 0x1000), "<disassembly unavailable>");
+  EXPECT_EQ(faults, 0u);
+  cu->set_gpu_vm(nullptr);
+}
+
+TEST(RaceDisassemblyTest, ConcurrentCusResolveDistantNonmonotonicPcs) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna4", 64, 104, 256, 4));
+  constexpr uint64_t high = 0x540024b100, low = 0x100002a100;
+  f.mem->write32(high, S_NOP | 7);
+  f.mem->write32(low, S_NOP | 9);
+  std::vector<std::thread> workers;
+  for (unsigned i = 0; i < 4; ++i) {
+    auto *cu = f.cu(i);
+    auto *wave = cu->dispatch_wf(0, high, 104, 256);
+    ASSERT_NE(wave, nullptr);
+    workers.emplace_back([cu, wave] {
+      for (unsigned repeat = 0; repeat < 100; ++repeat) {
+        EXPECT_EQ(cu->disassemble_instruction(*wave, high), "s_nop 7");
+        EXPECT_EQ(cu->disassemble_instruction(*wave, low), "s_nop 9");
+      }
+    });
+  }
+  for (auto &worker : workers)
+    worker.join();
+}
+
+TEST(RaceDisassemblyTest, LegacySparseAndClientCodeMatchesInstructionFetch) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1));
+  LegacyPageTable page_table;
+  util::DistributedSharedMutex page_table_mutex;
+  GpuVm vm;
+  LegacyGpuVmAdapter adapter(vm, f.mem);
+  const auto handle = adapter.register_address_space(7, &page_table, &page_table_mutex);
+  auto access = vm.snapshot_pinned(handle);
+  ASSERT_TRUE(access);
+  auto *wave = f.cu()->dispatch_wf(0, 0x1000, 104, 256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_vm_access(std::make_shared<GpuVmAccess>(*access));
+
+  auto check = [&](uint64_t pc) {
+    uint32_t fetched = 0;
+    ASSERT_EQ(
+        access->read(pc, std::as_writable_bytes(std::span(&fetched, 1)), VmAccessKind::Execute),
+        VmAccessOutcome::Complete);
+    ASSERT_EQ(fetched, S_NOP | 7);
+    EXPECT_EQ(wave->disassemble_instruction(pc), "s_nop 7");
   };
+  f.mem->write32(0x1000, S_NOP | 7);
+  check(0x1000);
 
-  plugins::race_detector::DisasmCache cache;
-  ObservableInstruction first;
-  ObservableInstruction duplicate;
+  alignas(4096) const std::array<uint32_t, 4> code{S_NOP | 7, S_ENDPGM, S_ENDPGM, S_ENDPGM};
+  const uint64_t pc = reinterpret_cast<uintptr_t>(code.data());
+  ASSERT_TRUE(adapter.set_client_pid(handle, getpid()));
+  check(pc);
 
-  // DisasmCache is keyed by the absolute instruction PC. The value itself is
-  // arbitrary here; using the same synthetic PC proves that a newly decoded
-  // instruction at an already-cached address is not disassembled again.
-  constexpr uint64_t synthetic_pc = 0x100;
-  cache.record(synthetic_pc, first);
-  cache.record(synthetic_pc, duplicate);
-
-  EXPECT_TRUE(first.was_disassembled());
-  EXPECT_FALSE(duplicate.was_disassembled());
-  EXPECT_EQ(cache.to_map().at(synthetic_pc), "s_count");
+  util::UniqueHandle mem_fd(open("/proc/self/mem", O_RDONLY | O_CLOEXEC));
+  ASSERT_GE(mem_fd.get(), 0);
+  ASSERT_TRUE(adapter.set_client_pid(handle, 0));
+  ASSERT_TRUE(adapter.set_client_mem_fd(handle, mem_fd.get()));
+  check(pc);
 }
 
 TEST(RaceDetectorPluginOutputTest, DispatchLineUsesQuestionMarksForUnresolvedKernel) {

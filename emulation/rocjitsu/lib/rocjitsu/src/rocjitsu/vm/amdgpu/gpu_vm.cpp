@@ -387,6 +387,21 @@ bool GpuVmAccess::try_read_contiguous(uint64_t address, std::span<std::byte> byt
              translation.translation.domain, translation.translation.address, bytes);
 }
 
+bool GpuVmAccess::try_read_instruction(uint64_t address, std::span<std::byte> bytes) const {
+  if (!access_state_ || bytes.empty() ||
+      bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address)
+    return false;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid || !access_state_->translator || !access_state_->physical_memory)
+    return false;
+  const auto translation =
+      access_state_->translator->probe_translation(address, bytes.size(), VmAccessKind::Execute);
+  return translation && translation.translation.permissions.executable &&
+         translation.translation.contiguous_bytes >= bytes.size() &&
+         access_state_->physical_memory->try_read_instruction(
+             translation.translation.domain, translation.translation.address, bytes);
+}
+
 bool GpuVmAccess::try_write_contiguous(uint64_t address, std::span<const std::byte> bytes) const {
   if (!access_state_)
     return false;

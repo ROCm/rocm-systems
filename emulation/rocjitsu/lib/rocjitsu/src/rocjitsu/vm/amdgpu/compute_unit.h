@@ -1192,6 +1192,11 @@ public:
   /// @returns Const pointer to the ISA decoder.
   const Decoder *decoder() const { return decoder_.get(); }
 
+  /// Resolve a diagnostic PC using this CU's target and the wave's retained address space.
+  /// Call on the CU execution thread; returned text owns no decoder or code-memory references.
+  /// Unavailable or invalid code produces an explicit placeholder without a GPU fault.
+  std::string disassemble_instruction(const Wavefront &wave, uint64_t pc) const;
+
   /// @brief Replace the concrete decoder in scheduler-level tests.
   /// @details Some concrete targets intentionally remain unavailable to full
   /// simulator configuration while individual instructions acquire execution

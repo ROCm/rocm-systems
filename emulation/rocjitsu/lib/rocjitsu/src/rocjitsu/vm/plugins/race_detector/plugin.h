@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -49,42 +50,11 @@ MarkedPc findConflict(const RaceViolation &, RaceDetector &);
 
 /// Format a trace with ==> markers and wave/lane annotations.
 std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
-                        const std::unordered_map<uint64_t, std::string> &disasm,
+                        const std::function<std::string(uint64_t)> &disassemble,
                         std::optional<MarkedPc> conflict, MarkedPc read);
-
-/// PC-to-disassembly cache, shared across all wavefronts in a dispatch.
-///
-/// Records disassembly on first encounter of each PC. An alternative would
-/// be lazy decode at race-report time (code bytes are in GPU memory), but
-/// this approach avoids needing access to the CU's decoder from the plugin.
-///
-/// Shared per-dispatch because all wavefronts execute the same kernel code.
-/// Per-wavefront caches caused cache thrashing under round-robin scheduling.
-///
-/// Keyed by absolute PC. This avoids assuming that a dispatch executes a single
-/// compact, monotonic text range; helper/trampoline code can be far away from
-/// the first PC observed for the dispatch.
-struct DisasmCache {
-  void record(uint64_t pc, const Instruction &inst) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (entries_.contains(pc))
-      return;
-    entries_.emplace(pc, inst.disassemble());
-  }
-
-  std::unordered_map<uint64_t, std::string> to_map() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return entries_;
-  }
-
-private:
-  mutable std::mutex mutex_;
-  std::unordered_map<uint64_t, std::string> entries_;
-};
 
 struct RaceWavefrontState : WavefrontState {
   RingBuffer<uint64_t, 256> trace;
-  std::shared_ptr<DisasmCache> disasm;
   WaveRaceState *race_state = nullptr;
 };
 
@@ -151,7 +121,6 @@ private:
 
   std::mutex dispatch_mutex_;
   std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
-  std::map<uint32_t, std::shared_ptr<DisasmCache>> dispatch_disasm_;
 
   std::mutex report_mutex_;
   std::set<std::pair<uint32_t, uint64_t>> observed_races_;

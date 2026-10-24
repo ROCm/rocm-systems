@@ -242,6 +242,11 @@ public:
     (void)bytes;
     return false;
   }
+  /// Optional fault-free copy for diagnostic instruction lookup. Refusal leaves bytes unchanged.
+  [[nodiscard]] virtual bool try_read_instruction(VmMemoryDomain domain, uint64_t address,
+                                                  std::span<std::byte> bytes) {
+    return try_read_contiguous(domain, address, bytes);
+  }
   [[nodiscard]] virtual bool try_write_contiguous(VmMemoryDomain domain, uint64_t address,
                                                   std::span<const std::byte> bytes) {
     (void)domain;
@@ -678,6 +683,9 @@ public:
   /// report a guest fault; the caller must issue its original smaller accesses.
   /// A successful copy is not atomic with respect to concurrent data accesses.
   [[nodiscard]] bool try_read_contiguous(uint64_t address, std::span<std::byte> bytes) const;
+  /// Read one contiguous executable span for diagnostics without delivering a GPU fault.
+  /// Backings without a fault-free copy capability decline the request.
+  [[nodiscard]] bool try_read_instruction(uint64_t address, std::span<std::byte> bytes) const;
   /// Optional fault-free read from private UC RAM, with no allocation or callbacks.
   /// Refusal leaves the destination unchanged; issue original accesses afterward.
   [[nodiscard]] bool try_read_uncached_ram(uint64_t address, std::span<std::byte> bytes) const;

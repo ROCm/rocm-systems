@@ -152,6 +152,36 @@ template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::C
   }
 }
 
+std::string ComputeUnitCore::disassemble_instruction(const Wavefront &wave, uint64_t pc) const {
+  assert(&wave.raw_cu() == this);
+  if (pc % sizeof(uint32_t) != 0)
+    return "<disassembly unavailable>";
+  auto access = wave.snapshot_vm_access();
+  const bool translated = wave.vm_access() || wave.address_space() || wave.process_id() != 0;
+  std::vector<uint32_t> words(decoder_->max_instruction_words());
+  size_t count = 0;
+  for (; count < words.size(); ++count) {
+    if (count > (UINT64_MAX - pc) / sizeof(uint32_t))
+      break;
+    const uint64_t address = pc + count * sizeof(uint32_t);
+    if (translated) {
+      if (!access || !access->try_read_instruction(
+                         address, std::as_writable_bytes(std::span(&words[count], 1))))
+        break;
+    } else {
+      if (!memory_ || !memory_->has_page(address))
+        break;
+      words[count] = memory_->fetch32(address);
+    }
+  }
+  if (count == 0)
+    return "<disassembly unavailable>";
+  // A short instruction can end at a mapping boundary. Bounded decoding rejects
+  // only encodings whose own words are missing, not unavailable lookahead.
+  auto decoded = decoder_->decode_window(std::span(words).first(count), pc);
+  return decoded.succeeded() ? decoded.value()->disassemble() : "<disassembly unavailable>";
+}
+
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size, uint32_t vgpr_storage_lane_count,
                                  uint32_t vgpr_allocation_block_size)
