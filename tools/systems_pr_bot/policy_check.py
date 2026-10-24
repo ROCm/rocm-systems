@@ -16,7 +16,8 @@ import re
 import sys
 import time
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -35,6 +36,16 @@ SKIP_TAG = "@skip-pr-bot"
 # submodules). See the Python style guide:
 # https://github.com/ROCm/TheRock/blob/main/docs/development/style_guides/python_style_guide.md#dont-make-assumptions-about-the-current-working-directory
 THIS_SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+class _WorkflowLoader(yaml.SafeLoader):
+    """Keep Actions' `on` key as text, while retaining safe YAML merge support."""
+
+
+_WorkflowLoader.yaml_implicit_resolvers = {
+    key: [(tag, regex) for tag, regex in resolvers if tag != "tag:yaml.org,2002:bool"]
+    for key, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
 
 
 def _env_flag(name: str, default: bool = True) -> bool:
@@ -261,14 +272,163 @@ def iter_pr_files(
 
 def get_check_runs(owner: str, repo: str, sha: str, token: str) -> List[Dict[str, Any]]:
     """Return the list of check-runs associated with a commit SHA."""
-    data = gh_get(
-        f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}/check-runs?per_page=100",
-        token,
-    )
-    if not isinstance(data, dict):
-        raise RuntimeError("Unexpected check-runs payload")
-    runs = data.get("check_runs", [])
-    return runs if isinstance(runs, list) else []
+    runs: List[Dict[str, Any]] = []
+    page = 1
+    while True:
+        data = gh_get(
+            f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}/check-runs"
+            f"?per_page=100&page={page}",
+            token,
+        )
+        if not isinstance(data, dict) or not isinstance(data.get("check_runs"), list):
+            raise RuntimeError("Unexpected check-runs payload")
+        batch = data["check_runs"]
+        runs.extend(batch)
+        if len(batch) < 100:
+            return runs
+        page += 1
+
+
+def _workflow_glob_matches(value: str, pattern: str) -> bool:
+    """Match the segment globs used by our workflow branch/path filters."""
+    parts = pattern.split("/")
+    # Do not infer non-applicability for unsupported Actions glob syntax.
+    if any(
+        char in pattern for char in ("+", "?", "[", "]", "\\", "{", "}", "(", ")", "!")
+    ) or any("**" in part and part != "**" for part in parts):
+        raise ValueError(f"Unsupported workflow glob: {pattern}")
+    values = value.split("/")
+
+    @lru_cache(maxsize=None)
+    def match(i: int, j: int) -> bool:
+        if j == len(parts):
+            return i == len(values)
+        if parts[j] == "**":
+            return match(i, j + 1) or (i < len(values) and match(i + 1, j))
+        return (
+            i < len(values)
+            and fnmatch.fnmatchcase(values[i], parts[j])
+            and match(i + 1, j + 1)
+        )
+
+    return match(0, 0)
+
+
+def _matches_workflow_patterns(value: str, patterns: Any) -> bool:
+    if not isinstance(patterns, list) or not patterns:
+        raise ValueError("Expected a non-empty workflow filter list")
+    if not all(isinstance(pattern, str) and pattern for pattern in patterns) or all(
+        pattern.startswith("!") for pattern in patterns
+    ):
+        raise ValueError("Expected string filters with at least one positive pattern")
+    matched = False
+    for pattern in patterns:
+        if not isinstance(pattern, str):
+            raise ValueError("Expected a string workflow filter")
+        negative = pattern.startswith("!")
+        if _workflow_glob_matches(value, pattern[1:] if negative else pattern):
+            matched = not negative
+    return matched
+
+
+def _pr_trigger_matches(trigger: Any, paths: List[str], base_ref: str) -> bool:
+    if trigger is None or trigger == "":
+        return True
+    if not isinstance(trigger, dict):
+        raise ValueError("Unsupported pull request trigger")
+    if "branches" in trigger and "branches-ignore" in trigger:
+        raise ValueError("Conflicting branch filters")
+    if "paths" in trigger and "paths-ignore" in trigger:
+        raise ValueError("Conflicting path filters")
+    if "branches" in trigger or "branches-ignore" in trigger:
+        if not base_ref:
+            raise ValueError("Missing PR base ref")
+        if "branches" in trigger and not _matches_workflow_patterns(
+            base_ref, trigger["branches"]
+        ):
+            return False
+        if "branches-ignore" in trigger and _matches_workflow_patterns(
+            base_ref, trigger["branches-ignore"]
+        ):
+            return False
+    if "paths" in trigger:
+        return any(_matches_workflow_patterns(path, trigger["paths"]) for path in paths)
+    if "paths-ignore" in trigger:
+        return any(
+            not _matches_workflow_patterns(path, trigger["paths-ignore"])
+            for path in paths
+        )
+    return True
+
+
+def required_checks_for_pr(
+    required: List[str],
+    pr_files: List[Dict[str, Any]],
+    base_ref: str,
+    observed_checks: Iterable[str] = (),
+    workflows_dir: Optional[Path] = None,
+) -> List[str]:
+    """Scope checks using producer workflows from the trusted base checkout.
+
+    Skip a missing check only when every known producer excludes this PR.
+    Unknown producers/filters and already observed checks remain required.
+    Never read workflow definitions from the untrusted PR head.
+    """
+    directory = workflows_dir or THIS_SCRIPT_DIR.parents[1] / ".github" / "workflows"
+    paths = [
+        f[key]
+        for f in pr_files
+        for key in ("filename", "previous_filename")
+        if isinstance(f.get(key), str)
+    ]
+    producers: Dict[str, List[bool]] = {name: [] for name in required}
+    observed = set(observed_checks)
+    for workflow in sorted(directory.glob("*.y*ml")):
+        try:
+            data = yaml.load(
+                workflow.read_text(encoding="utf-8"), Loader=_WorkflowLoader
+            )
+            if not isinstance(data, dict) or not isinstance(data.get("jobs"), dict):
+                raise ValueError("Unsupported workflow definition")
+            names = {
+                job.get("name", job_id)
+                for job_id, job in data["jobs"].items()
+                if isinstance(job, dict) and isinstance(job.get("name", job_id), str)
+            }
+            relevant = names.intersection(required)
+            if not relevant:
+                continue
+            events = data.get("on")
+            if isinstance(events, str):
+                events = {events: None}
+            elif isinstance(events, list):
+                events = {event: None for event in events}
+            if not isinstance(events, dict):
+                raise ValueError("Unsupported workflow events")
+            if "workflow_call" in events or "workflow_run" in events:
+                raise ValueError("Indirect workflow trigger")
+            if not any(
+                event in events for event in ("pull_request", "pull_request_target")
+            ):
+                raise ValueError("No direct PR trigger")
+            applies = any(
+                _pr_trigger_matches(events[event], paths, base_ref)
+                for event in ("pull_request", "pull_request_target")
+                if event in events
+            )
+            for name in relevant:
+                producers[name].append(applies)
+        except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
+            # Insufficient evidence to skip any configured check.
+            print(
+                f"ℹ️  Keeping required checks: cannot determine scope of {workflow.name}: {exc}"
+            )
+            return list(required)
+    return [
+        name
+        for name in required
+        if name in observed or not producers[name] or any(producers[name])
+    ]
 
 
 def ensure_pr_not_draft(policy: Policy, is_draft: bool, errors: List[str]) -> None:
@@ -602,6 +762,7 @@ def build_policy_table_comment(
     appended. `ready` switches the heading to "Ready for Review"; `note` adds an
     optional banner (used for the bump-PR special case).
     """
+
     def _format_details(details: List[str]) -> str:
         """Join a check's detail parts into one table-cell-safe string.
 
@@ -682,7 +843,9 @@ def build_policy_table_comment(
     else:
         footer = "\n\n> 🎉 All policy checks passed!"
 
-    faq_url = "https://github.com/ROCm/rocm-systems/blob/develop/docs/SYSTEMS_PR_BOT_FAQ.md"
+    faq_url = (
+        "https://github.com/ROCm/rocm-systems/blob/develop/docs/SYSTEMS_PR_BOT_FAQ.md"
+    )
 
     faq_link = (
         "\n\n📖 **Need help?** See the "
@@ -999,6 +1162,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     pr_files = list(iter_pr_files(owner, repo, pr_number, token))  # type: ignore[arg-type]
+
+    initial_runs = get_check_runs(owner=owner, repo=repo, sha=sha, token=token)
+    applicable_checks = required_checks_for_pr(
+        policy.required_checks,
+        pr_files,
+        str((pr.get("base") or {}).get("ref") or ""),
+        observed_checks=[run.get("name", "") for run in initial_runs],
+    )
+    for name in policy.required_checks:
+        if name not in applicable_checks:
+            print(
+                f"ℹ️  {name}: no trusted producer workflow matches this PR's paths/base."
+            )
+    policy = replace(policy, required_checks=applicable_checks)
 
     results: List[CheckResult] = []
 

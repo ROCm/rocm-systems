@@ -8,10 +8,10 @@ on:
     # `pre-commit run --all-files` locally to catch issues outside this
     # scope. We should incrementally add more paths here as projects
     # adopt pre-commit.
-    # This job is named `pre-commit`, which is the one entry in
-    # `checks.required_check_runs` in tools/systems_pr_bot/policy.yml, so a
-    # path that is missing here leaves therock-pr-bot waiting out its timeout
-    # on a check run that is never created.
+    # This job is named `pre-commit`, which is listed in
+    # `checks.required_check_runs` in tools/systems_pr_bot/policy.yml.
+    # The bot derives applicability from these filters in its trusted base checkout.
+    # A PR outside every producer's scope does not wait for a missing check.
     paths:
       - "emulation/mirage/**"
       - "emulation/rocjitsu/**"
