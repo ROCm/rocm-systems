@@ -8,6 +8,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/host_access_guard.h"
+#include "rocjitsu/kmd/linux/host_futex.h"
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
@@ -15,9 +16,9 @@
 #include "rocjitsu/vm/amdgpu/memory_transaction.h"
 #include "simdojo/components/sparse_memory.h"
 #include "simdojo/sim/component.h"
+#include "util/conditional_wake_spinlock.h"
 #include "util/distributed_shared_mutex.h"
 #include "util/log.h"
-#include "util/spinlock.h"
 #include "util/unique_handle.h"
 
 #include <algorithm>
@@ -1678,12 +1679,20 @@ private:
   static_assert((kBackingAtomicLockStripes & (kBackingAtomicLockStripes - 1)) == 0,
                 "atomic lock stripe count must be a power of two");
 
-  // Ordinary copies hold these briefly. Spinlock waiters can also park when
-  // an owner takes a guarded host fault or allocates sparse backing.
+  // Ordinary copies hold these briefly. Waiters can also park when an owner
+  // takes a guarded host fault or allocates sparse backing. They park on the
+  // stripe word itself rather than in the library's shared waiter buckets,
+  // and release skips the wake syscall when its parked-waiter hint is zero.
+  // A racing registration can miss that wake; bounded timed retries are
+  // required for progress. Notification-only protocols elsewhere cannot
+  // replace their ordering with this best-effort hint without timed retries.
+  using BackingStripeLock = util::ConditionalWakeSpinlock<HostFutexParking<>>;
+  static_assert(sizeof(BackingStripeLock) == 2 * sizeof(uint32_t));
   static auto &backing_atomic_mutexes() {
     struct alignas(64) Stripe {
-      util::Spinlock mutex;
+      BackingStripeLock mutex;
     };
+    static_assert(sizeof(Stripe) == 64);
     static std::array<Stripe, kBackingAtomicLockStripes> mutexes;
     return mutexes;
   }
@@ -1695,11 +1704,11 @@ private:
     return key & (kBackingAtomicLockStripes - 1);
   }
 
-  static util::Spinlock &backing_atomic_mutex_at(size_t index) {
+  static BackingStripeLock &backing_atomic_mutex_at(size_t index) {
     return backing_atomic_mutexes()[index].mutex;
   }
 
-  static util::Spinlock &backing_atomic_mutex(uintptr_t key) {
+  static BackingStripeLock &backing_atomic_mutex(uintptr_t key) {
     return backing_atomic_mutex_at(backing_atomic_mutex_index(key));
   }
 
@@ -1719,7 +1728,7 @@ private:
       if (last < first)
         std::swap(first, last);
       std::lock_guard first_lock(backing_atomic_mutex_at(first));
-      std::unique_lock<util::Spinlock> last_lock;
+      std::unique_lock<BackingStripeLock> last_lock;
       if (last != first)
         last_lock = std::unique_lock(backing_atomic_mutex_at(last));
       const auto copy = [&] {
@@ -1739,8 +1748,8 @@ private:
   template <bool Guarded>
   RJ_NOINLINE bool copy_backing_bulk(uint64_t address, uint8_t *host, void *local, size_t size,
                                      bool into_memory) const {
-    std::unique_lock<util::Spinlock> first_lock;
-    std::unique_lock<util::Spinlock> last_lock;
+    std::unique_lock<BackingStripeLock> first_lock;
+    std::unique_lock<BackingStripeLock> last_lock;
     const auto copy = [&] {
       size_t copied = 0;
       while (copied < size) {
@@ -2016,7 +2025,7 @@ private:
       }
     }
     std::ranges::sort(lock_indices);
-    std::array<std::unique_lock<util::Spinlock>, sizeof(uint64_t)> locks;
+    std::array<std::unique_lock<BackingStripeLock>, sizeof(uint64_t)> locks;
     size_t lock_count = 0;
     while (lock_count < lock_indices.size() &&
            lock_indices[lock_count] != kBackingAtomicLockStripes) {
