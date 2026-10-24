@@ -33,6 +33,12 @@ namespace counters
 unsigned long
 get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_version);
 
+// Returns the KFD profiler interface version reported by the running kernel (via the
+// KFD_IOC_PROFILER_VERSION op), or 0 if that op is not available (e.g. no /dev/kfd, or a
+// kernel predating the profiler ioctl entirely).
+uint32_t
+kfd_profiler_version();
+
 bool
 counter_collection_has_device_lock();
 
@@ -46,7 +52,7 @@ bool
 ptl_control_supported();
 
 bool
-use_device_lock_at_start();
+lock_at_configure_time();
 
 rocprofiler_status_t
 counter_collection_ptl_disable(const rocprofiler_agent_t* agent);
