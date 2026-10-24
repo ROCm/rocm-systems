@@ -3,10 +3,10 @@
 
 //! Loader ABI and executable ownership regression tests.
 
-use super::code_object::*;
-use super::executable::state::*;
-use super::executable::symbol::*;
+use super::executable::state::loaded_symbol_agent;
 use super::*;
+use crate::api::loader::code_object::*;
+use crate::api::loader::executable::{state::*, symbol::*};
 use crate::api::loader::reader::*;
 
 #[test]
