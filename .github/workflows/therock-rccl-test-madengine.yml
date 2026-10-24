@@ -20,6 +20,24 @@ on:
       nodes:
         type: string
         default: '2'
+      job_timeout_minutes:
+        # Budget for the WHOLE JOB, not just the workload step: GitHub caps a
+        # job at 360 minutes unless the job says otherwise, so a step-level
+        # number above that is cut short at the job limit.
+        #
+        # The script is given 60 minutes less -- ~30 for the setup ahead of it
+        # (conda, TheRock deps, artifact fetch) and ~30 after, so it can write
+        # its report and append to the datastore before the job is killed. A
+        # job GitHub kills reports nothing and reads as an infrastructure
+        # fault.
+        #
+        # The script's share covers the SLURM time_limit PLUS queueing, because
+        # the allocation is taken inside it. 390 leaves the 2-node workloads
+        # (4 h limit) 90 minutes of queue slack; a longer time_limit must raise
+        # this by the same amount, or the job dies while still queued and
+        # reports that neither phase ran.
+        type: string
+        default: '390'
       notify_email:
         type: string
         default: ''
@@ -44,11 +62,16 @@ on:
         options:
           - llama-3.1-70b-training
           - gpt-oss-120b-training
+          - llama-3.1-405b-maxtext
         default: 'llama-3.1-70b-training'
       nodes:
         description: 'Number of SLURM nodes to allocate'
         type: string
         default: '2'
+      job_timeout_minutes:
+        description: 'Budget for the whole job; the script gets 60 min less'
+        type: string
+        default: '390'
       notify_email:
         description: 'Email address to send test summary report'
         type: string
@@ -65,6 +88,11 @@ jobs:
   test_madengine:
     name: 'Test MADEngine ${{ inputs.workload }} (${{ inputs.nodes }}N)'
     runs-on: ${{ inputs.test_runs_on }}
+    # Without this GitHub applies its 360-minute default and kills the job
+    # before a longer workload step can finish. This is the only timeout the
+    # workload step needs: a step-level one could only disagree with it, so
+    # the step below carries none and inherits this.
+    timeout-minutes: ${{ fromJSON(inputs.job_timeout_minutes) }}
     defaults:
       run:
         shell: bash
@@ -86,8 +114,16 @@ jobs:
       # ruby's per-job private /tmp is invisible to the Docker daemon, so a -v
       # bind mount of the workspace lands empty; /var/tmp is visible.
       SLURM_TMPDIR: "/var/tmp"
-      # ~/.cache/pip is on a small NFS home quota.
-      PIP_NO_CACHE_DIR: '1'
+      # pip, conda and every XDG-compliant tool cache under $HOME by default.
+      # The runner account's home is a 100 GB NFS allotment shared with
+      # everything else it runs, and nothing here prunes those caches, so they
+      # only ever grow -- across runs, workloads and branches alike. Put them
+      # under WORK_DIR instead, which the cleanup step below deletes.
+      # pip reads XDG_CACHE_HOME; conda does not, and keeps its own under
+      # ~/.conda. The literal is repeated because entries in this block cannot
+      # reference each other.
+      XDG_CACHE_HOME: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache"
+      CONDA_PKGS_DIRS: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache/conda-pkgs"
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -107,6 +143,21 @@ jobs:
             echo "Unsupported arch for MADEngine: ${{ inputs.amdgpu_families }}"
             exit 1
           fi
+
+      # The runner account's home is a separate, much smaller allotment than
+      # /apps, and exhausting it fails the conda step below with a bare
+      # "[Errno 122] Disk quota exceeded" that names no path -- which reads as
+      # a full filesystem and sends you to df on the wrong mount. Report both
+      # mounts and the biggest entries in home up front, so the log says which
+      # one ran out and what is holding it.
+      - name: Report runner storage
+        run: |
+          echo "== home =="
+          df -h "${HOME}" || true
+          echo "== /apps =="
+          df -h /apps || true
+          echo "== largest entries in ${HOME} =="
+          du -shx "${HOME}"/* "${HOME}"/.[!.]* 2>/dev/null | sort -h | tail -25 || true
 
       # Conda-forge Python under WORK_DIR: the compute nodes (another distro, older
       # glibc) run madengine from it via PATH, where setup-python's build won't start.
@@ -179,29 +230,67 @@ jobs:
 
       # Both A/B phases in one allocation, plus its queue wait.
       - name: Run MADEngine workload
-        timeout-minutes: 360
         env:
           NCCL_DEBUG: WARN
           MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
+          JOB_TIMEOUT_MINUTES: ${{ inputs.job_timeout_minutes }}
+          # Same reason as JOB_TIMEOUT_MINUTES below. The webhook also has a
+          # second one: Actions echoes the expanded run block into the log,
+          # and this value arrives as an input, not a secret, so nothing
+          # masks it there.
+          NOTIFY_EMAIL: ${{ inputs.notify_email }}
+          TEAMS_WEBHOOK: ${{ inputs.teams_webhook }}
+          WORKLOAD: ${{ inputs.workload }}
+          NODES: ${{ inputs.nodes }}
         run: |
           export PYTHONPATH="rocm-systems/projects/rccl/ci/scripts:${PYTHONPATH}"
 
-          NOTIFY_ARGS=""
-          if [ -n "${{ inputs.notify_email }}" ]; then
-            NOTIFY_ARGS="$NOTIFY_ARGS --notify-email ${{ inputs.notify_email }}"
+          # An array, so a value carrying a space stays one argument instead
+          # of splitting into two the parser then rejects.
+          NOTIFY_ARGS=()
+          if [ -n "${NOTIFY_EMAIL}" ]; then
+            NOTIFY_ARGS+=(--notify-email "${NOTIFY_EMAIL}")
           fi
-          if [ -n "${{ inputs.teams_webhook }}" ]; then
-            NOTIFY_ARGS="$NOTIFY_ARGS --teams-webhook ${{ inputs.teams_webhook }}"
+          if [ -n "${TEAMS_WEBHOOK}" ]; then
+            NOTIFY_ARGS+=(--teams-webhook "${TEAMS_WEBHOOK}")
           fi
+
+          # Every input this step uses is read from the environment and
+          # validated, NOT interpolated into the script. A dispatch input
+          # pasted straight into a run block is executed as shell, and this
+          # step holds MAD_SECRETS_HFTOKEN. The job-level fromJSON() is no
+          # defence: it parses the leading JSON value, so "450 $(...)"
+          # satisfies the timeout and still reaches bash here as code.
+          #
+          # Arithmetic stays in bash: workflow expressions have no arithmetic
+          # operators, and a subtraction there is a parse error that rejects
+          # the whole file at dispatch. The run block is scanned for
+          # expressions including its comment lines, so do not write an empty
+          # one above either.
+          case "${JOB_TIMEOUT_MINUTES}" in
+            ''|*[!0-9]*)
+              echo "::error::job_timeout_minutes must be a plain integer, got '${JOB_TIMEOUT_MINUTES}'"
+              exit 1 ;;
+          esac
+          # 60 of those minutes are reserved for the setup ahead of the script
+          # and its reporting afterwards. At or below that the script is handed
+          # zero or less and reports "Allocation timed out" the moment salloc
+          # returns -- after the allocation has already been granted.
+          if [ "${JOB_TIMEOUT_MINUTES}" -le 60 ]; then
+            echo "::error::job_timeout_minutes must be greater than the 60 reserved minutes, got '${JOB_TIMEOUT_MINUTES}'"
+            exit 1
+          fi
+          SCRIPT_TIMEOUT=$(( JOB_TIMEOUT_MINUTES - 60 ))
 
           python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
             --artifact-dir "${OUTPUT_ARTIFACTS_DIR}" \
-            --workload "${{ inputs.workload }}" \
+            --workload "${WORKLOAD}" \
             --cluster "${CLUSTER}" \
-            --nodes "${{ inputs.nodes }}" \
+            --nodes "${NODES}" \
+            --timeout-minutes "${SCRIPT_TIMEOUT}" \
             --results-dir "${RESULTS_DIR}" \
             --work-dir "${WORK_DIR}" \
-            $NOTIFY_ARGS
+            "${NOTIFY_ARGS[@]}"
 
       - name: Upload results
         if: always()
@@ -222,14 +311,36 @@ jobs:
             ${{ env.WORK_DIR }}/ab/*/slurm_output/*.err
           retention-days: 30
 
+      # What a rerun by hand needs once the cleanup below has deleted WORK_DIR:
+      # the overlay's build context with the CI RCCL, the model scripts, and
+      # manifests with paths relative to the bundle. See its REPRO.md.
+      - name: Upload repro bundle
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: madengine-repro-${{ inputs.workload }}-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}
+          path: ${{ env.WORK_DIR }}/repro
+          # The kpack GPU kernels sit in overlay_ctx/rccl_libs/.kpack, and
+          # upload-artifact drops dot-paths unless told otherwise.
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Cleanup work directory
         if: always()
         run: |
-          # `ab` holds the per-node logs, the only part that grows with the run;
-          # the upload step above has already kept them as an artifact.
+          # `ab` too, and it is the one that actually accumulates. The upload
+          # step above already keeps everything worth keeping out of it -- the
+          # perf files, the manifests and the per-node slurm_output -- as an
+          # artifact with 30-day retention, and it runs first. What stayed
+          # behind on NFS was the same data a second time, forever, and the
+          # runner account is quota-bound on /apps.
           rm -rf "${WORK_DIR}/madengine" "${WORK_DIR}/MAD" "${WORK_DIR}/conda" \
                  "${WORK_DIR}/env" "${WORK_DIR}/overlay_ctx" \
-                 "${WORK_DIR}/docker_builds" "${WORK_DIR}/ab"
+                 "${WORK_DIR}/docker_builds" "${WORK_DIR}/ab" "${WORK_DIR}/repro" \
+                 "${WORK_DIR}/cache"
+          echo "Remaining in ${WORK_DIR}:"
+          du -sh "${WORK_DIR}" 2>/dev/null || true
 
           # Remove per-run tags and bases left by earlier versions of this job on
           # the shared Docker disk; no -f, so images a container still uses stay.
