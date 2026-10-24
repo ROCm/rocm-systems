@@ -405,6 +405,7 @@ if(BUILD_TESTS)
       device/DdaVecElementAddTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
+      device/TestTdmReduceCopy.cpp
       device/TestAsyncCopy.cpp
       device/TestLdsTransfer.cpp
       device/GinDeviceTests.cpp
@@ -472,6 +473,11 @@ if(BUILD_TESTS)
     # include/ header names are generic enough to shadow src/ for other TUs.
     set_source_files_properties(device/RcclEpTests.cpp PROPERTIES
       INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../src/algorithms/rccl_ep)
+
+    # device/TestTdmReduceCopy.cpp drives reduceCopy through common_kernel.h, whose common.h
+    # includes the generated device_table.h.
+    set_source_files_properties(device/TestTdmReduceCopy.cpp PROPERTIES
+      INCLUDE_DIRECTORIES ${PROJECT_BINARY_DIR}/hipify/gensrc)
 
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)
