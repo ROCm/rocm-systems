@@ -202,7 +202,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 541 · build snapshot" aria-label="Stars: 541">541</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 542 · build snapshot" aria-label="Stars: 542">542</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 465 · build snapshot" aria-label="Forks: 465">465</li>
       </ul>
     </div>
@@ -255,7 +255,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 541 · build snapshot" aria-label="Stars: 541">541</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 542 · build snapshot" aria-label="Stars: 542">542</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 465 · build snapshot" aria-label="Forks: 465">465</li>
       </ul>
     </div>
@@ -1768,13 +1768,13 @@ consistency over cleverness.</p>
 </code></pre></div>
 <h2 id="namespaces">Namespaces<a class="headerlink" href="#namespaces" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Use one namespace per module/library, named after that library (matching its
-  <code>lib/&lt;name&gt;/</code> directory). For example, <code>rocjitsu</code>, <code>simdojo</code>, and <code>util</code> each
-  live in their own top-level namespace.</li>
-<li>Do not scatter code across ad-hoc namespaces. Nest a sub-namespace only when
-  genuinely needed : for example, for arch/ISA specificity (<code>rocjitsu::amdgpu</code>).</li>
+<li>Use the existing namespace for the owning module/library, named after that
+  library (matching its <code>lib/&lt;name&gt;/</code> directory). For example, <code>rocjitsu</code>,
+  <code>simdojo</code>, and <code>util</code> each live in their own top-level namespace.</li>
+<li>Do not introduce new namespaces. Reuse the existing namespace hierarchy,
+  including established sub-namespaces such as <code>rocjitsu::amdgpu</code>.</li>
 </ul>
-<div class="highlight"><pre><span></span><code><span class="c1">// Each library gets its own top-level namespace, named after its lib/&lt;name&gt;/ dir:</span>
+<div class="highlight"><pre><span></span><code><span class="c1">// Reuse the owning library's existing top-level namespace:</span>
 <span class="c1">//   lib/rocjitsu/ -&gt; namespace rocjitsu</span>
 <span class="c1">//   lib/simdojo/  -&gt; namespace simdojo</span>
 <span class="c1">//   lib/util/     -&gt; namespace util</span>
@@ -1784,7 +1784,7 @@ consistency over cleverness.</p>
 
 <span class="p">}</span><span class="w"> </span><span class="c1">// namespace simdojo</span>
 
-<span class="c1">// Nest a sub-namespace only when justified, e.g. arch/ISA specificity:</span>
+<span class="c1">// Reuse existing sub-namespaces for architecture-specific code:</span>
 <span class="k">namespace</span><span class="w"> </span><span class="nn">rocjitsu</span><span class="o">::</span><span class="nn">amdgpu</span><span class="w"> </span><span class="p">{</span>
 
 <span class="c1">// gfx-specific code lives here</span>
