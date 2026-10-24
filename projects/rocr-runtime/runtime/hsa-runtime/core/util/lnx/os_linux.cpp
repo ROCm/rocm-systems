@@ -69,7 +69,15 @@
 #include <cpuid.h>
 #endif
 
-#ifdef __GLIBC__
+// On most glibc ports, DT_STRTAB (and other DT_* pointers) observed via
+// dl_iterate_phdr()'s dl_phdr_info are already relocated to an absolute
+// runtime address by ld.so before the program starts, so no further
+// adjustment by the load bias (dlpi_addr) is needed. This does NOT hold on
+// riscv64: ld-linux-riscv64.so leaves DT_STRTAB link-time-relative, so it
+// must still be added to dlpi_addr like on non-glibc (e.g. musl) libcs --
+// verified empirically: reading via (ptr) alone segfaults immediately on
+// riscv64 glibc, while (base)+(ptr) yields valid ELF string table content.
+#if defined(__GLIBC__) && !defined(__riscv)
 #define ABS_ADDR(base, ptr) (ptr)
 #else
 #define ABS_ADDR(base, ptr) ((base) + (ptr))
@@ -815,7 +823,7 @@ bool UnmapMemory(void* va, size_t size) { return ::munmap(va, size) == 0; }
 bool MapMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) {
   if (fd < 0)  return false;
 
-  void* mapped_ptr = ::mmap(va, size, MemProtToOsProt(perms), 
+  void* mapped_ptr = ::mmap(va, size, MemProtToOsProt(perms),
                             MAP_SHARED | MAP_FIXED, fd, cpu_addr);
   if (mapped_ptr != va)
       return false;
