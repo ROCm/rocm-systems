@@ -1236,6 +1236,37 @@ inline uint8_t f32_to_fp4_e2m1_rne(float val) {
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 1) | mant);
 }
 
+/// Convert BF16 divided by an E8M0 power-of-two scale directly to FP4 E2M1.
+/// The caller handles the invalid scale exponent 255. Normal BF16 values have
+/// only seven fraction bits, so power-of-two scaling cannot round across an
+/// FP4 midpoint when converted through F32. Compare the adjusted BF16 encoding
+/// against those midpoints instead of dividing and rounding through F32.
+inline uint8_t bf16_to_fp4_e2m1_scaled_rne(uint16_t value, uint8_t scale_exp) {
+  const uint32_t sign = (value >> 12) & 8u;
+  const uint32_t magnitude = value & 0x7fffu;
+  if (magnitude >= 0x7f80u)
+    return magnitude == 0x7f80u ? static_cast<uint8_t>(sign | 7u) : 0u;
+  if (magnitude == 0)
+    return static_cast<uint8_t>(sign);
+
+  if (magnitude < 0x80u) {
+    // Preserve the legacy floating conversion for this optimization, including
+    // host DAZ behavior. This compatibility fallback does not define the guest
+    // denormal policy; that requires separate architectural qualification.
+    const double scale = std::ldexp(1.0, static_cast<int>(scale_exp) - 127);
+    const float scaled = static_cast<float>(static_cast<double>(bf16_to_f32(value)) / scale);
+    return f32_to_fp4_e2m1_rne(scaled);
+  }
+  const int32_t scaled =
+      static_cast<int32_t>(magnitude) + (127 - static_cast<int32_t>(scale_exp)) * 128;
+  // Adjacent FP4 encodings alternate their tie direction under nearest-even.
+  // The BF16 midpoints are 0.25, 0.75, 1.25, 1.75, 2.5, 3.5, and 5.0.
+  const uint32_t code = (scaled > 0x3e80) + (scaled >= 0x3f40) + (scaled > 0x3fa0) +
+                        (scaled >= 0x3fe0) + (scaled > 0x4020) + (scaled >= 0x4060) +
+                        (scaled > 0x40a0);
+  return static_cast<uint8_t>(sign | code);
+}
+
 inline uint8_t f32_to_fp4_e2m1_sr(float val, uint32_t seed) {
   if (std::isnan(val))
     return 0;
