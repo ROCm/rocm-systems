@@ -1,10 +1,39 @@
 # CI ownership
-/.azuredevops/                                                        @ROCm/external-ci
 /.github/                                                             @ROCm/rocm-systems-reviewers
+
+# Team-specific CI ownership
+/.github/workflows/*docs*.yml                                         @ROCm/rocm-documentation
+/.github/docs-config.json                                             @ROCm/rocm-documentation
+/.github/workflows/hip-*.yml                                          @ROCm/hip-reviewers
+/.github/workflows/hrr-*.yml                                          @ROCm/hrr-reviewers
 /.github/workflows/amdsmi-*.yml                                       @ROCm/smi-reviewers
+/.github/workflows/cuid-*.yml                                         @gabrpham @dmitrii-galantsev
 /.github/workflows/hipfile-*.yml                                      @ROCm/hipfile-reviewers
+/.github/workflows/lstt-*.yml                                         @ROCm/lstt
+/.github/workflows/media-libs-ci.yml                                  @ROCm/cv-ml-team
+/.github/workflows/profiler-hub-*.yml                                 @ROCm/rocm-profiler-hub
+/.github/workflows/rdc-*.yml                                          @ROCm/rdc-reviewers
 /.github/workflows/rocjitsu-*.yml                                     @ROCm/rocjitsu-core-team
+/.github/workflows/rocprof-trace-decoder-*.yml                        @ROCm/rocm-devtools-team
+/.github/workflows/rocprofiler-compute-*.yml                          @ROCm/rocprof-compute-reviewer
+/.github/workflows/rocprofiler-sdk-*.yml                              @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners
+/.github/workflows/rocprofiler-register-*.yml                         @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners
+/.github/workflows/aqlprofile-*.yml                                   @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners
+/.github/workflows/rocr-runtime-*.yml                                 @ROCm/rocr-maintainers
+/.github/workflows/rocprofiler-systems-*.yml                          @ROCm/rocprof-sys
+/.github/workflows/*therock*.yml                                      @ROCm/therock-infra-write @ROCm/rocm-systems-reviewers
 /.github/**/*rccl*                                                    @ROCm/rccl-ci
+/.github/workflows/therock-rccl-*.yml                                 @ROCm/therock-infra-write @ROCm/rccl-ci
+
+# Individual contributors
+/.github/workflows/systems-pr-bot.yml                                 @samathew121 @amd-shiraz
+/.github/workflows/issue-import.yml                                   @jayhawk-commits @ammallya
+/.github/workflows/import_pr_list.yml                                 @jayhawk-commits @ammallya
+/.github/workflows/pr-import.yml                                      @jayhawk-commits @ammallya
+/.github/workflows/pr-merge-sync-patches-manual.yml                   @ROCm/rocm-systems-reviewers @jayhawk-commits
+/.github/workflows/pr-merge-sync-patches.yml                          @ROCm/rocm-systems-reviewers @jayhawk-commits
+/.github/workflows/pr-org-label.yml                                   @ROCm/rocm-systems-reviewers @jayhawk-commits
+/.github/workflows/update-subtrees.yml                                @ROCm/rocm-systems-reviewers @jayhawk-commits
 
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers
@@ -21,7 +50,7 @@
 /projects/rccl-tests/                                                 @ROCm/rccl-reviewers @ROCm/rccl-leads
 /projects/rdc/                                                        @ROCm/rdc-reviewers
 /projects/rocm-core/                                                  @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
-/projects/rocm-core/rdhc/                                             @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru @solaiys
+/projects/rocm-core/rdhc/                                             @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
 /projects/rocm-smi-lib/                                               @ROCm/smi-reviewers
 /projects/rocminfo/                                                   @dayatsin-amd @shwetagkhatri
 /projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer
