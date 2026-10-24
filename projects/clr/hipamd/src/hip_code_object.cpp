@@ -31,7 +31,7 @@ hipError_t DynCO::loadCodeObject(const char* fname, const void* image, bool init
   // Number of devices = 1 in dynamic code object
   fb_info_ = new FatBinaryInfo(fname, image);
   std::vector<hip::Device*> devices = {g_devices[device_id_]};
-  IHIP_RETURN_ONFAIL(fb_info_->ExtractFatBinaryUsingCOMGR(devices, image_storage));
+  IHIP_RETURN_ONFAIL(fb_info_->ExtractFatBinaryUsingCOMGR(devices, image_storage, true));
 
   // No Lazy loading for DynCO
   IHIP_RETURN_ONFAIL(fb_info_->BuildProgram(device_id_));
