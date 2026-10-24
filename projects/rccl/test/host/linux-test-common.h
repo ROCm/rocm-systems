@@ -16,6 +16,7 @@
 #include <net/if.h>
 #include <sys/socket.h>
 
+#include <cerrno>
 #include <cstring>
 #include <deque>
 #include <map>
@@ -35,6 +36,14 @@ inline int IntOpt(int fd, int level, int name) {
   socklen_t len = sizeof(v);
   ::getsockopt(fd, level, name, &v, &len);
   return v;
+}
+
+// A hook that fails like a syscall: sets errno and returns -1.
+inline auto FailWith(int err) {
+  return [err](auto...) {
+    errno = err;
+    return -1;
+  };
 }
 
 // What production logged, from any thread, as "WARN|INFO|ATTN <message>\n" lines.

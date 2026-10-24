@@ -245,10 +245,7 @@ TEST_F(SocketMicrotest, Listen_PortInUseIsASystemError) {
 }
 
 TEST_F(SocketMicrotest, Listen_SyscallFailuresAreSystemErrors) {
-  auto fail = [](auto...) {
-    errno = EACCES;
-    return -1;
-  };
+  auto fail = FailWith(EACCES);
   // A fixed port takes the setsockopt path. Init sets socket options too, so each hook goes in after it.
   ncclSocket sock[4];
   auto init = [&](int i, uint16_t port) {
@@ -500,10 +497,7 @@ TEST_F(SocketIfMicrotest, IfnameAndFamilyComeFromTheEnvironment) {
 }
 
 TEST_F(SocketIfMicrotest, EnumerationFailuresPropagate) {
-  ScopedHook getifaddrsHook(g_getifaddrs, [](ifaddrs**) {
-    errno = ENOMEM;
-    return -1;
-  });
+  ScopedHook getifaddrsHook(g_getifaddrs, FailWith(ENOMEM));
   char names[MAX_IFS * MAX_IF_NAME_SIZE];
   ncclSocketAddress addrs[MAX_IFS];
   int n = -1;
@@ -708,10 +702,7 @@ TEST_F(SocketMicrotest, Connect_AsyncStopsInWhicheverConnectStateItReached) {
   params_.Set("SOCKET_RETRY_CNT", 5);
   Listen();
   for (int err : {EINPROGRESS, ECONNREFUSED}) {
-    ScopedHook connectHook(g_connect, [err](int, const sockaddr*, socklen_t) {
-      errno = err;
-      return -1;
-    });
+    ScopedHook connectHook(g_connect, FailWith(err));
     ScopedHook pollHook(g_poll, [](pollfd*, nfds_t, int) { return 0; });  // still connecting
     ncclSocketClose(&client_);
     ASSERT_EQ(Connect(kMagic, ncclSocketTypeBootstrap, /*asyncFlag=*/1), ncclSuccess);
@@ -857,10 +848,7 @@ TEST_F(SocketMicrotest, Ready_BadHandshakeGoesBackToAccepting) {
 TEST_F(SocketMicrotest, Accept_SetFlagsFailurePropagates) {
   Listen();
   RawClient(Hello(kMagic, ncclSocketTypeBootstrap));
-  ScopedHook setsockoptHook(g_setsockopt, [](int, int, int, const void*, socklen_t) {
-    errno = ENOMEM;
-    return -1;
-  });
+  ScopedHook setsockoptHook(g_setsockopt, FailWith(ENOMEM));
   EXPECT_EQ(ncclSocketAccept(&server_, &listen_), ncclSystemError);
 }
 

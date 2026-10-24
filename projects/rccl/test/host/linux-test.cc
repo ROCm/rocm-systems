@@ -289,10 +289,7 @@ TEST_F(LinuxInitMicrotest, Initialize_KeepsAStackThatIsAlready8MB) {
 
 TEST_F(LinuxInitMicrotest, Initialize_GetrlimitFailureIsASystemError) {
   SetDefaultStack(1 << 20);
-  ScopedHook getrlimitHook(g_getrlimit, [](int, rlimit*) {
-    errno = EPERM;
-    return -1;
-  });
+  ScopedHook getrlimitHook(g_getrlimit, FailWith(EPERM));
   EXPECT_EQ(ncclOsInitialize(), ncclSystemError);
 }
 
@@ -314,15 +311,9 @@ TEST_F(LinuxInitMicrotest, SetFilesLimit_RaisesTheSoftLimitToTheHardLimit) {
 }
 
 TEST_F(LinuxInitMicrotest, SetFilesLimit_SyscallFailuresAreSystemErrors) {
-  ScopedHook setrlimitHook(g_setrlimit, [](int, const rlimit*) {
-    errno = EPERM;
-    return -1;
-  });
+  ScopedHook setrlimitHook(g_setrlimit, FailWith(EPERM));
   EXPECT_EQ(ncclOsSetFilesLimit(), ncclSystemError);
-  ScopedHook getrlimitHook(g_getrlimit, [](int, rlimit*) {
-    errno = EPERM;
-    return -1;
-  });
+  ScopedHook getrlimitHook(g_getrlimit, FailWith(EPERM));
   EXPECT_EQ(ncclOsSetFilesLimit(), ncclSystemError);
   EXPECT_EQ(setrlimitHook.calls, 1);  // stopped at getrlimit
 }
@@ -443,10 +434,7 @@ TEST_F(LinuxSocketMicrotest, TryAccept_RetriesPendingNetworkErrorsUpToTheRetryCo
   params_.Set("SOCKET_RETRY_CNT", 3);
   for (int err : {ENETDOWN, EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH, EOPNOTSUPP, ENETUNREACH, EINTR}) {
     SCOPED_TRACE(err);
-    ScopedHook acceptHook(g_accept, [err](int, sockaddr*, socklen_t*) {
-      errno = err;
-      return -1;
-    });
+    ScopedHook acceptHook(g_accept, FailWith(err));
     ncclSocket sock = Sock(NCCL_INVALID_SOCKET);
     sock.state = ncclSocketStateAccepting;
     EXPECT_EQ(ncclOsSocketTryAccept(&sock), ncclSuccess);
@@ -459,10 +447,7 @@ TEST_F(LinuxSocketMicrotest, TryAccept_RetriesPendingNetworkErrorsUpToTheRetryCo
 
 TEST_F(LinuxSocketMicrotest, TryAccept_WouldBlockIsNotRetried) {
   for (int err : {EAGAIN, EWOULDBLOCK}) {
-    ScopedHook acceptHook(g_accept, [err](int, sockaddr*, socklen_t*) {
-      errno = err;
-      return -1;
-    });
+    ScopedHook acceptHook(g_accept, FailWith(err));
     ncclSocket sock = Sock(NCCL_INVALID_SOCKET);
     EXPECT_EQ(ncclOsSocketTryAccept(&sock), ncclSuccess);
     EXPECT_EQ(sock.errorRetries, 0);
@@ -667,10 +652,7 @@ TEST_F(LinuxSocketMicrotest, StartConnect_TransientErrnosAreRetried) {
   sockaddr_in addr = ClosedPort();
   for (int err : {EINTR, EWOULDBLOCK, EAGAIN, ETIMEDOUT, EHOSTUNREACH, ECONNREFUSED}) {
     SCOPED_TRACE(err);
-    ScopedHook connectHook(g_connect, [err](int, const sockaddr*, socklen_t) {
-      errno = err;
-      return -1;
-    });
+    ScopedHook connectHook(g_connect, FailWith(err));
     ncclSocket sock = Sock(Track(::socket(AF_INET, SOCK_STREAM, 0)), &addr);
     ASSERT_EQ(ncclOsSocketStartConnect(&sock), ncclSuccess);
     EXPECT_EQ(sock.state, ncclSocketStateConnecting);
@@ -699,10 +681,7 @@ TEST_F(LinuxSocketMicrotest, StartConnect_OtherErrorsFail) {
 }
 
 TEST_F(LinuxSocketMicrotest, StartConnect_PropagatesAResetFailure) {
-  ScopedHook connectHook(g_connect, [](int, const sockaddr*, socklen_t) {
-    errno = ECONNREFUSED;
-    return -1;
-  });
+  ScopedHook connectHook(g_connect, FailWith(ECONNREFUSED));
   ncclSocket sock = Sock(Track(::socket(AF_INET, SOCK_STREAM, 0)));
   sock.addr.sa.sa_family = AF_UNSPEC;  // the replacement socket cannot be created
   EXPECT_EQ(ncclOsSocketStartConnect(&sock), ncclSystemError);
@@ -727,10 +706,7 @@ TEST_F(LinuxSocketMicrotest, PollConnect_NotReadyYetIsSuccess) {
 
 TEST_F(LinuxSocketMicrotest, PollConnect_PollFailureIsASystemError) {
   ncclSocket sock = Sock(3);
-  ScopedHook pollHook(g_poll, [](pollfd*, nfds_t, int) {
-    errno = ENOMEM;
-    return -1;
-  });
+  ScopedHook pollHook(g_poll, FailWith(ENOMEM));
   EXPECT_EQ(ncclOsSocketPollConnect(&sock), ncclSystemError);
 }
 
@@ -747,10 +723,7 @@ TEST_F(LinuxSocketMicrotest, PollConnect_ChecksThePendingSocketError) {
   ASSERT_EQ(ncclOsSocketPollConnect(&sock), ncclSuccess);
   EXPECT_EQ(sock.state, ncclSocketStateConnecting);
 
-  ScopedHook failingHook(g_getsockopt, [](int, int, int, void*, socklen_t*) {
-    errno = EBADF;
-    return -1;
-  });
+  ScopedHook failingHook(g_getsockopt, FailWith(EBADF));
   EXPECT_EQ(ncclOsSocketPollConnect(&sock), ncclSystemError);
 }
 
@@ -985,10 +958,7 @@ TEST_F(LinuxIfMicrotest, FindInterfaces_ClearsTheStoredAddress) {
 }
 
 TEST_F(LinuxIfMicrotest, FindInterfaces_GetifaddrsFailureIsASystemError) {
-  ScopedHook getifaddrsHook(g_getifaddrs, [](ifaddrs**) {
-    errno = ENOMEM;
-    return -1;
-  });
+  ScopedHook getifaddrsHook(g_getifaddrs, FailWith(ENOMEM));
   int found = -1;
   EXPECT_EQ(ncclOsFindInterfaces(nullptr, names_, addrs_, -1, MAX_IF_NAME_SIZE, MAX_IFS, &found), ncclSystemError);
   EXPECT_EQ(found, 0);
@@ -1205,10 +1175,7 @@ TEST_F(LinuxSyncMicrotest, Affinity_FailuresAreSystemErrors) {
   ncclAffinity none;
   CPU_ZERO(&none);
   EXPECT_EQ(ncclOsSetAffinity(none), ncclSystemError);  // EINVAL
-  ScopedHook schedGetaffinityHook(g_schedGetaffinity, [](pid_t, size_t, cpu_set_t*) {
-    errno = EFAULT;
-    return -1;
-  });
+  ScopedHook schedGetaffinityHook(g_schedGetaffinity, FailWith(EFAULT));
   EXPECT_EQ(ncclOsGetAffinity(&none), ncclSystemError);
 }
 
@@ -1585,10 +1552,7 @@ TEST_F(LinuxShmMicrotest, InterruptedMkstempAndFallocateAreRetried) {
 }
 
 TEST_F(LinuxShmMicrotest, MkstempFailure) {
-  ScopedHook mkstempHook(g_mkstemp, [](char*) {
-    errno = EACCES;
-    return -1;
-  });
+  ScopedHook mkstempHook(g_mkstemp, FailWith(EACCES));
   char path[PATH_MAX] = "";
   void* ptr = nullptr;
   ncclShmHandleInternal* h = nullptr;
@@ -1599,10 +1563,7 @@ TEST_F(LinuxShmMicrotest, MkstempFailure) {
 // Close only unlinks once a refcount is mapped, so a failure after creation leaves the file.
 // Pins AICOMRCCL-2974; a fix flips this pin.
 TEST_F(LinuxShmMicrotest, ShmOpen_KnownBug_FallocateFailureLeavesTheCreatedFile) {
-  ScopedHook fallocateHook(g_fallocate, [](int, int, off_t, off_t) {
-    errno = ENOSPC;
-    return -1;
-  });
+  ScopedHook fallocateHook(g_fallocate, FailWith(ENOSPC));
   std::string p = dir_ + "/seg";
   char path[PATH_MAX];
   std::strcpy(path, p.c_str());
@@ -1638,10 +1599,7 @@ TEST_F(LinuxShmMicrotest, LastAttachUnlinkFailureIsOnlyLogged) {
   void* ptr = nullptr;
   ncclShmHandleInternal* h = nullptr;
   ASSERT_EQ(Open(path, 64, 1, &ptr, &h), ncclSuccess);
-  ScopedHook unlinkHook(g_unlink, [](const char*) {
-    errno = EBUSY;
-    return -1;
-  });
+  ScopedHook unlinkHook(g_unlink, FailWith(EBUSY));
   void* peer = nullptr;
   ncclShmHandleInternal* hp = nullptr;
   EXPECT_EQ(Open(path, 64, 0, &peer, &hp), ncclSuccess);

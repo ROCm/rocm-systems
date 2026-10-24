@@ -89,10 +89,7 @@ TEST_F(LinuxSocketPairMicrotest, Close_ReportsTheFirstFailure) {
 }
 
 TEST_F(LinuxSocketPairMicrotest, Create_PipeFailureIsASystemError) {
-  ScopedHook pipeHook(g_pipe, [](int*) {
-    errno = EMFILE;
-    return -1;
-  });
+  ScopedHook pipeHook(g_pipe, FailWith(EMFILE));
   EXPECT_EQ(ncclOsSocketPairCreate(pair_), ncclSystemError);
   EXPECT_EQ(pair_[0], NCCL_SOCKET_PAIR_INVALID);
 }

@@ -238,10 +238,7 @@ TEST_F(LinuxIpcsocketMicrotest, RecvMsg_RetriesTransientErrorsAndFailsOnOthers) 
   EXPECT_EQ(failures, 3);
   EXPECT_STREQ(got, "x");
 
-  ScopedHook failingHook(g_recvmsg, [](int, msghdr*, int) -> ssize_t {
-    errno = ENOTSOCK;
-    return -1;
-  });
+  ScopedHook failingHook(g_recvmsg, FailWith(ENOTSOCK));
   EXPECT_EQ(ncclIpcSocketRecvMsg(&a_, got, sizeof(got), nullptr), ncclSystemError);
 }
 
@@ -276,10 +273,7 @@ TEST_F(LinuxIpcsocketMicrotest, SendMsg_RetriesTransientErrorsUntilAborted) {
   EXPECT_STREQ(got, "y");
 
   abortFlag = 1;
-  ScopedHook wouldBlockHook(g_sendmsg, [](int, const msghdr*, int) -> ssize_t {
-    errno = EWOULDBLOCK;
-    return -1;
-  });
+  ScopedHook wouldBlockHook(g_sendmsg, FailWith(EWOULDBLOCK));
   EXPECT_EQ(ncclIpcSocketSendMsg(&a_, hdr, sizeof(hdr), -1, 1, hash_), ncclInternalError);
 }
 
