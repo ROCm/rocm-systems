@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <fmt/format.h>
 #include <functional>
 #include <map>
@@ -191,6 +192,33 @@ struct gpu_perf_counter_name_entry
     std::string   track_name;     ///< Perfetto track name, e.g. "GPU [0] SQ_WAVES (S)"
 };
 
+/**
+ * @brief One series of a PMC schema: the names and unit every output uses for one value.
+ */
+struct pmc_series
+{
+    /// category enum id (category_enum_id<...>::value)
+    std::size_t perfetto_category = 0;
+    std::string perfetto_track;  ///< e.g. "NIC [0] RX RDMA BYTES (S)"
+    std::string pmc_name;        ///< rocpd pmc_info name (registered with add_pmc_info)
+    std::string rocpd_track;     ///< e.g. "ainic_rx_rdma_ucast_bytes"
+    std::string units;
+};
+
+/**
+ * @brief Ordered series of one (collector, device), registered once at config time.
+ *
+ * A pmc_values_sample carries only values, in this order; processors take every name, the
+ * unit and the agent from here.
+ */
+struct pmc_schema
+{
+    agent_type              type             = agent_type::gpu;
+    std::size_t             agent_type_index = 0;  ///< agent::device_type_index
+    std::string             event_category;  ///< rocpd event category, e.g. "amd_smi_nic"
+    std::vector<pmc_series> series;
+};
+
 }  // namespace info
 
 struct metadata_registry
@@ -245,6 +273,17 @@ struct metadata_registry
     std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
     find_gpu_perf_counter_by_id(std::uint32_t device_id, std::uint64_t counter_id) const;
 
+    /** @brief Registers a PMC schema. @return the id that pmc_values_sample carries. */
+    std::uint32_t add_pmc_schema(info::pmc_schema schema);
+
+    /**
+     * @brief The schema with id @p schema_id, or nullptr if there is none.
+     *
+     * Schemas are never moved or removed, so the pointer stays valid for the registry's
+     * lifetime.
+     */
+    const info::pmc_schema* find_pmc_schema(std::uint32_t schema_id) const;
+
 private:
     common::synchronized<info::process, state::thread> m_process;
     common::synchronized<
@@ -272,6 +311,8 @@ private:
     // O(1) lookup index: device_id -> counter_id -> index into the vector above
     std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>>
         m_gpu_perf_counter_index{};
+    // PMC schemas by id; a deque keeps references stable while schemas are added
+    common::synchronized<std::deque<info::pmc_schema>, state::thread> m_pmc_schemas;
 };
 
 }  // namespace rocprofsys::trace_cache

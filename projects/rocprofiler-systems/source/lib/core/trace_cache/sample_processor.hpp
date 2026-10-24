@@ -83,11 +83,8 @@ struct sample_processor_t
             case type_identifier_t::pmc_event_with_sample:
                 handle_sample(static_cast<const pmc_event_with_sample&>(sample));
                 break;
-            case type_identifier_t::gpu_pmc_sample:
-                handle_sample(static_cast<const gpu_pmc_sample&>(sample));
-                break;
-            case type_identifier_t::ainic_pmc_sample:
-                handle_sample(static_cast<const ainic_pmc_sample&>(sample));
+            case type_identifier_t::pmc_values_sample:
+                handle_sample(static_cast<const pmc_values_sample&>(sample));
                 break;
             case type_identifier_t::cpu_pmc_sample:
                 handle_sample(static_cast<const cpu_pmc_sample&>(sample));

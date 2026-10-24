@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace rocprofsys::trace_cache
 {
@@ -624,6 +625,30 @@ metadata_registry::set_gpu_perf_counter_counter_names(
         index.emplace(entries[i].counter_id, i);
     }
     m_gpu_perf_counter_counter_names[device_id] = std::move(entries);
+}
+
+std::uint32_t
+metadata_registry::add_pmc_schema(info::pmc_schema schema)
+{
+    std::uint32_t schema_id = 0;
+    m_pmc_schemas.wlock([&schema_id, &schema](auto& schemas) {
+        schema_id = static_cast<std::uint32_t>(schemas.size());
+        schemas.push_back(std::move(schema));
+    });
+    return schema_id;
+}
+
+const info::pmc_schema*
+metadata_registry::find_pmc_schema(std::uint32_t schema_id) const
+{
+    const info::pmc_schema* found = nullptr;
+    m_pmc_schemas.rlock([&found, schema_id](const auto& schemas) {
+        if(schema_id < schemas.size())
+        {
+            found = &schemas[schema_id];
+        }
+    });
+    return found;
 }
 
 std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
