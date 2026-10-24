@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 627 | 627 | 0 |
-| **total** | **627** | **627** | **0** |
+| `contract` | 628 | 628 | 0 |
+| **total** | **628** | **628** | **0** |
 
 ## Tier: `contract`
 
@@ -151,15 +151,16 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Device_HipGetDeviceProperties_WarpSize_IsPositive` | hipGetDeviceProperties | reported warp size is positive |
 | `Contract_Device_HipGetDevice_CurrentOrdinal_IsWithinDeviceCount` | hipGetDevice | the current device ordinal is in range [0, device_count) |
 
-### `device_config` (6 cases)
+### `device_config` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_DeviceConfig_HipDeviceGetCacheConfig_Default_ReturnsEnumValue` | hipDeviceGetCacheConfig | the queried cache preference is one of the documented hipFuncCache_t enumerators |
-| `Contract_DeviceConfig_HipDeviceGetLimit_Default_ReportsStackAndHeapAndRejectsInvalid` | hipDeviceGetLimit | stack and heap limits resolve or report unsupported, and an out-of-range limit is not accepted |
+| `Contract_DeviceConfig_HipDeviceGetLimit_Default_ReportsStackAndHeapAndRejectsInvalid` | hipDeviceGetLimit | stack, heap, and persisting L2 limits resolve or report unsupported, and an out-of-range limit is not accepted |
 | `Contract_DeviceConfig_HipDeviceGetSharedMemConfig_Default_ReturnsEnumValue` | hipDeviceGetSharedMemConfig | when supported, reports one of the documented hipSharedMemConfig enumerators |
 | `Contract_DeviceConfig_HipDeviceSetCacheConfig_Default_IsAcceptedOrUnsupported` | hipDeviceSetCacheConfig | setting the cache preference either succeeds or reports NotSupported |
 | `Contract_DeviceConfig_HipDeviceSetLimit_Default_RoundTripsOrIsUnsupported` | hipDeviceSetLimit | setting the heap limit back to its current value succeeds or reports unsupported |
+| `Contract_DeviceConfig_HipDeviceSetLimit_PersistingL2_RoundTripsAndRejectsOverMax` | hipDeviceSetLimit | persisting L2 cache set/get round-trips, and exceeding the max is rejected |
 | `Contract_DeviceConfig_HipGetDeviceFlags_AndStreamPriorityRange_AreConsistent` | hipGetDeviceFlags | the schedule subfield is a documented mode and greatest stream priority <= least |
 
 ### `device_identity` (9 cases)
