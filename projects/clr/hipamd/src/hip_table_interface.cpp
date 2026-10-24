@@ -11,6 +11,7 @@
 #include "hip_internal.hpp"
 #include "utils/flags.hpp"
 #include "utils/debug.hpp"
+#include "trace/hip_trace_etw.hpp"
 #include <exception>
 #include <tuple>
 
@@ -472,7 +473,7 @@ HIP_PUBLIC_API hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config)
 }
 HIP_PUBLIC_API hipError_t hipDeviceSynchronize(void) {
   TRY;
-  return hip::GetHipDispatchTable()->hipDeviceSynchronize_fn();
+  return HIP_TRACE_API(hipDeviceSynchronize, hip::GetHipDispatchTable()->hipDeviceSynchronize_fn());
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipDeviceTotalMem(size_t* bytes, hipDevice_t device) {
@@ -527,37 +528,41 @@ HIP_PUBLIC_API hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes,
 }
 HIP_PUBLIC_API hipError_t hipEventCreate(hipEvent_t* event) {
   TRY;
-  return hip::GetHipDispatchTable()->hipEventCreate_fn(event);
+  return HIP_TRACE_API(hipEventCreate, hip::GetHipDispatchTable()->hipEventCreate_fn(event));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
   TRY;
-  return hip::GetHipDispatchTable()->hipEventCreateWithFlags_fn(event, flags);
+  return HIP_TRACE_API(hipEventCreateWithFlags,
+                       hip::GetHipDispatchTable()->hipEventCreateWithFlags_fn(event, flags));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipEventDestroy(hipEvent_t event) {
   TRY;
-  return hip::GetHipDispatchTable()->hipEventDestroy_fn(event);
+  return HIP_TRACE_API(hipEventDestroy, hip::GetHipDispatchTable()->hipEventDestroy_fn(event));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipEventElapsedTime(float* ms, hipEvent_t start, hipEvent_t stop) {
   TRY;
-  return hip::GetHipDispatchTable()->hipEventElapsedTime_fn(ms, start, stop);
+  return HIP_TRACE_API(hipEventElapsedTime,
+                       hip::GetHipDispatchTable()->hipEventElapsedTime_fn(ms, start, stop));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipEventQuery(hipEvent_t event) {
   TRY;
-  return hip::GetHipDispatchTable()->hipEventQuery_fn(event);
+  return HIP_TRACE_API(hipEventQuery, hip::GetHipDispatchTable()->hipEventQuery_fn(event));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipEventRecord_fn(event, stream);
+  return HIP_TRACE_API(hipEventRecord,
+                       hip::GetHipDispatchTable()->hipEventRecord_fn(event, stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipEventSynchronize(hipEvent_t event) {
   TRY;
-  return hip::GetHipDispatchTable()->hipEventSynchronize_fn(event);
+  return HIP_TRACE_API(hipEventSynchronize,
+                       hip::GetHipDispatchTable()->hipEventSynchronize_fn(event));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t* linktype,
@@ -572,9 +577,10 @@ HIP_PUBLIC_API hipError_t hipExtLaunchKernel(const void* function_address, dim3 
                                          hipStream_t stream, hipEvent_t startEvent,
                                          hipEvent_t stopEvent, int flags) {
   TRY;
-  return hip::GetHipDispatchTable()->hipExtLaunchKernel_fn(function_address, numBlocks, dimBlocks,
-                                                           args, sharedMemBytes, stream, startEvent,
-                                                           stopEvent, flags);
+  return HIP_TRACE_API(hipExtLaunchKernel,
+                       hip::GetHipDispatchTable()->hipExtLaunchKernel_fn(
+                           function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream,
+                           startEvent, stopEvent, flags));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipExtLaunchMultiKernelMultiDevice(hipLaunchParams* launchParamsList, int numDevices,
@@ -609,7 +615,7 @@ HIP_PUBLIC_API hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExt
 }
 HIP_PUBLIC_API hipError_t hipFree(void* ptr) {
   TRY;
-  return hip::GetHipDispatchTable()->hipFree_fn(ptr);
+  return HIP_TRACE_API(hipFree, hip::GetHipDispatchTable()->hipFree_fn(ptr));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipFreeArray(hipArray_t array) {
@@ -619,7 +625,7 @@ HIP_PUBLIC_API hipError_t hipFreeArray(hipArray_t array) {
 }
 HIP_PUBLIC_API hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipFreeAsync_fn(dev_ptr, stream);
+  return HIP_TRACE_API(hipFreeAsync, hip::GetHipDispatchTable()->hipFreeAsync_fn(dev_ptr, stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipFreeHost(void* ptr) {
@@ -671,12 +677,12 @@ HIP_PUBLIC_API hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc, hipArray
 }
 HIP_PUBLIC_API hipError_t hipGetDevice(int* deviceId) {
   TRY;
-  return hip::GetHipDispatchTable()->hipGetDevice_fn(deviceId);
+  return HIP_TRACE_API(hipGetDevice, hip::GetHipDispatchTable()->hipGetDevice_fn(deviceId));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipGetDeviceCount(int* count) {
   TRY;
-  return hip::GetHipDispatchTable()->hipGetDeviceCount_fn(count);
+  return HIP_TRACE_API(hipGetDeviceCount, hip::GetHipDispatchTable()->hipGetDeviceCount_fn(count));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipGetDeviceFlags(unsigned int* flags) {
@@ -1110,7 +1116,8 @@ HIP_PUBLIC_API hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
 }
 HIP_PUBLIC_API hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphLaunch_fn(graphExec, stream);
+  return HIP_TRACE_API(hipGraphLaunch,
+                       hip::GetHipDispatchTable()->hipGraphLaunch_fn(graphExec, stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipGraphMemAllocNodeGetParams(hipGraphNode_t node, hipMemAllocNodeParams* pNodeParams) {
@@ -1271,7 +1278,7 @@ HIP_PUBLIC_API hipError_t hipHostAlloc(void** ptr, size_t size, unsigned int fla
 }
 HIP_PUBLIC_API hipError_t hipHostFree(void* ptr) {
   TRY;
-  return hip::GetHipDispatchTable()->hipHostFree_fn(ptr);
+  return HIP_TRACE_API(hipHostFree, hip::GetHipDispatchTable()->hipHostFree_fn(ptr));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipHostGetDevicePointer(void** devPtr, void* hstPtr, unsigned int flags) {
@@ -1286,7 +1293,8 @@ HIP_PUBLIC_API hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr)
 }
 HIP_PUBLIC_API hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags) {
   TRY;
-  return hip::GetHipDispatchTable()->hipHostMalloc_fn(ptr, size, flags);
+  return HIP_TRACE_API(hipHostMalloc,
+                       hip::GetHipDispatchTable()->hipHostMalloc_fn(ptr, size, flags));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) {
@@ -1373,8 +1381,9 @@ HIP_PUBLIC_API hipError_t hipLaunchCooperativeKernel(const void* f, dim3 gridDim
                                       void** kernelParams, unsigned int sharedMemBytes,
                                       hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipLaunchCooperativeKernel_fn(
-      f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream);
+  return HIP_TRACE_API(hipLaunchCooperativeKernel,
+                       hip::GetHipDispatchTable()->hipLaunchCooperativeKernel_fn(
+                           f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsList, int numDevices,
@@ -1392,13 +1401,14 @@ HIP_PUBLIC_API hipError_t hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn, 
 HIP_PUBLIC_API hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks, dim3 dimBlocks,
                                       void** args, size_t sharedMemBytes, hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipLaunchKernel_fn(function_address, numBlocks, dimBlocks,
-                                                        args, sharedMemBytes, stream);
+  return HIP_TRACE_API(hipLaunchKernel,
+                       hip::GetHipDispatchTable()->hipLaunchKernel_fn(
+                           function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMalloc(void** ptr, size_t size) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMalloc_fn(ptr, size);
+  return HIP_TRACE_API(hipMalloc, hip::GetHipDispatchTable()->hipMalloc_fn(ptr, size));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent) {
@@ -1420,7 +1430,8 @@ HIP_PUBLIC_API hipError_t hipMallocArray(hipArray_t* array, const hipChannelForm
 }
 HIP_PUBLIC_API hipError_t hipMallocAsync(void** dev_ptr, size_t size, hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMallocAsync_fn(dev_ptr, size, stream);
+  return HIP_TRACE_API(hipMallocAsync,
+                       hip::GetHipDispatchTable()->hipMallocAsync_fn(dev_ptr, size, stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMallocFromPoolAsync(void** dev_ptr, size_t size, hipMemPool_t mem_pool,
@@ -1434,7 +1445,8 @@ HIP_PUBLIC_API hipError_t hipMallocHost(void** ptr, size_t size) {
 }
 HIP_PUBLIC_API hipError_t hipMallocManaged(void** dev_ptr, size_t size, unsigned int flags) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMallocManaged_fn(dev_ptr, size, flags);
+  return HIP_TRACE_API(hipMallocManaged,
+                       hip::GetHipDispatchTable()->hipMallocManaged_fn(dev_ptr, size, flags));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,
@@ -1705,20 +1717,23 @@ HIP_PUBLIC_API hipError_t hipMemUnmap(void* ptr, size_t size) {
 }
 HIP_PUBLIC_API hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemcpy_fn(dst, src, sizeBytes, kind);
+  return HIP_TRACE_API(hipMemcpy,
+                       hip::GetHipDispatchTable()->hipMemcpy_fn(dst, src, sizeBytes, kind));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
                        size_t height, hipMemcpyKind kind) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemcpy2D_fn(dst, dpitch, src, spitch, width, height, kind);
+  return HIP_TRACE_API(hipMemcpy2D, hip::GetHipDispatchTable()->hipMemcpy2D_fn(
+                                        dst, dpitch, src, spitch, width, height, kind));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
                             size_t height, hipMemcpyKind kind, hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemcpy2DAsync_fn(dst, dpitch, src, spitch, width, height,
-                                                         kind, stream);
+  return HIP_TRACE_API(hipMemcpy2DAsync,
+                       hip::GetHipDispatchTable()->hipMemcpy2DAsync_fn(
+                           dst, dpitch, src, spitch, width, height, kind, stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemcpy2DFromArray(void* dst, size_t dpitch, hipArray_const_t src, size_t wOffset,
@@ -1764,7 +1779,8 @@ HIP_PUBLIC_API hipError_t hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hip
 HIP_PUBLIC_API hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
                           hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemcpyAsync_fn(dst, src, sizeBytes, kind, stream);
+  return HIP_TRACE_API(hipMemcpyAsync, hip::GetHipDispatchTable()->hipMemcpyAsync_fn(
+                                           dst, src, sizeBytes, kind, stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemcpyAtoH(void* dst, hipArray_t srcArray, size_t srcOffset, size_t count) {
@@ -1774,23 +1790,27 @@ HIP_PUBLIC_API hipError_t hipMemcpyAtoH(void* dst, hipArray_t srcArray, size_t s
 }
 HIP_PUBLIC_API hipError_t hipMemcpyDtoD(hipDeviceptr_t dst, hipDeviceptr_t src, size_t sizeBytes) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemcpyDtoD_fn(dst, src, sizeBytes);
+  return HIP_TRACE_API(hipMemcpyDtoD,
+                       hip::GetHipDispatchTable()->hipMemcpyDtoD_fn(dst, src, sizeBytes));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dst, hipDeviceptr_t src, size_t sizeBytes,
                               hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemcpyDtoDAsync_fn(dst, src, sizeBytes, stream);
+  return HIP_TRACE_API(hipMemcpyDtoDAsync, hip::GetHipDispatchTable()->hipMemcpyDtoDAsync_fn(
+                                               dst, src, sizeBytes, stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemcpyDtoH(void* dst, hipDeviceptr_t src, size_t sizeBytes) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemcpyDtoH_fn(dst, src, sizeBytes);
+  return HIP_TRACE_API(hipMemcpyDtoH,
+                       hip::GetHipDispatchTable()->hipMemcpyDtoH_fn(dst, src, sizeBytes));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemcpyDtoHAsync(void* dst, hipDeviceptr_t src, size_t sizeBytes, hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemcpyDtoHAsync_fn(dst, src, sizeBytes, stream);
+  return HIP_TRACE_API(hipMemcpyDtoHAsync, hip::GetHipDispatchTable()->hipMemcpyDtoHAsync_fn(
+                                               dst, src, sizeBytes, stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemcpyFromArray(void* dst, hipArray_const_t srcArray, size_t wOffset, size_t hOffset,
@@ -1820,13 +1840,15 @@ HIP_PUBLIC_API hipError_t hipMemcpyHtoA(hipArray_t dstArray, size_t dstOffset, c
 }
 HIP_PUBLIC_API hipError_t hipMemcpyHtoD(hipDeviceptr_t dst, const void* src, size_t sizeBytes) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemcpyHtoD_fn(dst, src, sizeBytes);
+  return HIP_TRACE_API(hipMemcpyHtoD,
+                       hip::GetHipDispatchTable()->hipMemcpyHtoD_fn(dst, src, sizeBytes));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t dst, const void* src, size_t sizeBytes,
                               hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemcpyHtoDAsync_fn(dst, src, sizeBytes, stream);
+  return HIP_TRACE_API(hipMemcpyHtoDAsync, hip::GetHipDispatchTable()->hipMemcpyHtoDAsync_fn(
+                                               dst, src, sizeBytes, stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemcpyParam2D(const hip_Memcpy2D* pCopy) {
@@ -1880,7 +1902,7 @@ HIP_PUBLIC_API hipError_t hipMemcpyWithStream(void* dst, const void* src, size_t
 }
 HIP_PUBLIC_API hipError_t hipMemset(void* dst, int value, size_t sizeBytes) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemset_fn(dst, value, sizeBytes);
+  return HIP_TRACE_API(hipMemset, hip::GetHipDispatchTable()->hipMemset_fn(dst, value, sizeBytes));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemset2D(void* dst, size_t pitch, int value, size_t width, size_t height) {
@@ -1907,7 +1929,8 @@ HIP_PUBLIC_API hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int valu
 }
 HIP_PUBLIC_API hipError_t hipMemsetAsync(void* dst, int value, size_t sizeBytes, hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemsetAsync_fn(dst, value, sizeBytes, stream);
+  return HIP_TRACE_API(
+      hipMemsetAsync, hip::GetHipDispatchTable()->hipMemsetAsync_fn(dst, value, sizeBytes, stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemsetD16(hipDeviceptr_t dest, unsigned short value, size_t count) {
@@ -1923,7 +1946,8 @@ HIP_PUBLIC_API hipError_t hipMemsetD16Async(hipDeviceptr_t dest, unsigned short 
 }
 HIP_PUBLIC_API hipError_t hipMemsetD32(hipDeviceptr_t dest, int value, size_t count) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemsetD32_fn(dest, value, count);
+  return HIP_TRACE_API(hipMemsetD32,
+                       hip::GetHipDispatchTable()->hipMemsetD32_fn(dest, value, count));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count, hipStream_t stream) {
@@ -1933,7 +1957,7 @@ HIP_PUBLIC_API hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_
 }
 HIP_PUBLIC_API hipError_t hipMemsetD8(hipDeviceptr_t dest, unsigned char value, size_t count) {
   TRY;
-  return hip::GetHipDispatchTable()->hipMemsetD8_fn(dest, value, count);
+  return HIP_TRACE_API(hipMemsetD8, hip::GetHipDispatchTable()->hipMemsetD8_fn(dest, value, count));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemsetD8Async(hipDeviceptr_t dest, unsigned char value, size_t count,
@@ -1964,7 +1988,8 @@ HIP_PUBLIC_API hipError_t hipMipmappedArrayGetLevel(hipArray_t* pLevelArray, hip
 }
 HIP_PUBLIC_API hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, const char* kname) {
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleGetFunction_fn(function, module, kname);
+  return HIP_TRACE_API(hipModuleGetFunction, hip::GetHipDispatchTable()->hipModuleGetFunction_fn(
+                                                 function, module, kname));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
@@ -2008,9 +2033,10 @@ HIP_PUBLIC_API hipError_t hipModuleLaunchKernel(hipFunction_t f, unsigned int gr
                                  unsigned int sharedMemBytes, hipStream_t stream,
                                  void** kernelParams, void** extra) {
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleLaunchKernel_fn(
-      f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, stream,
-      kernelParams, extra);
+  return HIP_TRACE_API(hipModuleLaunchKernel,
+                       hip::GetHipDispatchTable()->hipModuleLaunchKernel_fn(
+                           f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
+                           sharedMemBytes, stream, kernelParams, extra));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void* fatbin) {
@@ -2020,12 +2046,13 @@ HIP_PUBLIC_API hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void
 }
 HIP_PUBLIC_API hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleLoad_fn(module, fname);
+  return HIP_TRACE_API(hipModuleLoad, hip::GetHipDispatchTable()->hipModuleLoad_fn(module, fname));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipModuleLoadData(hipModule_t* module, const void* image) {
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleLoadData_fn(module, image);
+  return HIP_TRACE_API(hipModuleLoadData,
+                       hip::GetHipDispatchTable()->hipModuleLoadData_fn(module, image));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image, unsigned int numOptions,
@@ -2105,7 +2132,7 @@ HIP_PUBLIC_API hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(
 }
 HIP_PUBLIC_API hipError_t hipModuleUnload(hipModule_t module) {
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleUnload_fn(module);
+  return HIP_TRACE_API(hipModuleUnload, hip::GetHipDispatchTable()->hipModuleUnload_fn(module));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f,
@@ -2191,7 +2218,7 @@ HIP_PUBLIC_API hipError_t hipRuntimeGetVersion(int* runtimeVersion) {
 }
 HIP_PUBLIC_API hipError_t hipSetDevice(int deviceId) {
   TRY;
-  return hip::GetHipDispatchTable()->hipSetDevice_fn(deviceId);
+  return HIP_TRACE_API(hipSetDevice, hip::GetHipDispatchTable()->hipSetDevice_fn(deviceId));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipSetDeviceFlags(unsigned flags) {
@@ -2236,22 +2263,25 @@ HIP_PUBLIC_API hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t s
 }
 HIP_PUBLIC_API hipError_t hipStreamCreate(hipStream_t* stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipStreamCreate_fn(stream);
+  return HIP_TRACE_API(hipStreamCreate, hip::GetHipDispatchTable()->hipStreamCreate_fn(stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags) {
   TRY;
-  return hip::GetHipDispatchTable()->hipStreamCreateWithFlags_fn(stream, flags);
+  return HIP_TRACE_API(hipStreamCreateWithFlags,
+                       hip::GetHipDispatchTable()->hipStreamCreateWithFlags_fn(stream, flags));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, int priority) {
   TRY;
-  return hip::GetHipDispatchTable()->hipStreamCreateWithPriority_fn(stream, flags, priority);
+  return HIP_TRACE_API(
+      hipStreamCreateWithPriority,
+      hip::GetHipDispatchTable()->hipStreamCreateWithPriority_fn(stream, flags, priority));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipStreamDestroy(hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipStreamDestroy_fn(stream);
+  return HIP_TRACE_API(hipStreamDestroy, hip::GetHipDispatchTable()->hipStreamDestroy_fn(stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
@@ -2301,12 +2331,13 @@ HIP_PUBLIC_API hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCapt
 }
 HIP_PUBLIC_API hipError_t hipStreamQuery(hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipStreamQuery_fn(stream);
+  return HIP_TRACE_API(hipStreamQuery, hip::GetHipDispatchTable()->hipStreamQuery_fn(stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipStreamSynchronize(hipStream_t stream) {
   TRY;
-  return hip::GetHipDispatchTable()->hipStreamSynchronize_fn(stream);
+  return HIP_TRACE_API(hipStreamSynchronize,
+                       hip::GetHipDispatchTable()->hipStreamSynchronize_fn(stream));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t* dependencies,
@@ -2318,7 +2349,8 @@ HIP_PUBLIC_API hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream,
 }
 HIP_PUBLIC_API hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int flags) {
   TRY;
-  return hip::GetHipDispatchTable()->hipStreamWaitEvent_fn(stream, event, flags);
+  return HIP_TRACE_API(hipStreamWaitEvent,
+                       hip::GetHipDispatchTable()->hipStreamWaitEvent_fn(stream, event, flags));
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipStreamWaitValue32(hipStream_t stream, void* ptr, uint32_t value, unsigned int flags,
