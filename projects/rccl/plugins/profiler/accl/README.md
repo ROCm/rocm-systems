@@ -72,10 +72,13 @@ The last line of every file is a summary, written on every clean finalize:
              "dropped_proxy_ops": 0, "dropped_proxy_steps": 0,
              "overflow_proxy_ops": 0, "stale_proxy_steps": 0,
              "outstanding_proxy_ops": 0, "outstanding_proxy_steps": 0,
-             "write_error": false, "coll_pool_size": 256,
-             "proxy_op_pool_size": 1024, "proxy_step_pool_size": 4096,
+             "write_error": false, "coll_pool_size": 4096,
+             "proxy_op_pool_size": 65536, "proxy_step_pool_size": 65536,
              "max_proxy_ops_per_coll": 256, "complete": true}}
 ```
+
+The `*_pool_size` fields are capacities. Each pool starts small and grows on
+demand up to that size, so deep enqueue queues do not drop data.
 
 - `dropped_collectives` — never got a pool slot because the pool was full.
 - `leaked_collectives` — got a slot but never completed, because RCCL's teardown
@@ -155,6 +158,112 @@ The report classifies bottlenecks per message size (evaluated in this order):
 - **ENQUEUE-DELAY** — enqueue-to-first-kernel delay dominates (>40%)
 - **GPU-COMPUTE** — kernel time dominates (>50% of wall time)
 - **mixed** — no single component dominates
+
+## Network counters and the fabric report
+
+The question this answers: **is a slow collective the fabric's fault, or the
+host's?** It joins the accl records with RCCL's network telemetry
+(`RCCL_TELEMETRY_ENABLE=1`, IB-CAST transport only).
+
+### What the plugin adds to each record
+
+- `header.host`, `header.pid`, `header.comm_hash`: to match the record with its
+  process's telemetry file.
+- `host_ts`: `enqueue_us`, `exec_start_us`, `exec_end_us` on `CLOCK_MONOTONIC`,
+  the same clock as the telemetry `hw_samples`. `exec_*` spans the first kernel
+  or proxy activity to the last.
+- `net` (only when telemetry is on and the collective went through the proxy):
+  per-NIC RCCL software counters over the collective's network window, from the
+  first proxy step that moves data (a send posted, or received data landing) to
+  the last proxy op stop. Not from the first proxy op start: RCCL posts the ops
+  of every queued collective at once, so in rccl-tests those starts all bunch
+  up before any data moves: `tx_bytes`, `rx_bytes`,
+  `wqe_sent`, `recv_wqe`, `wqe_rcvd`, `wqe_completed`, `cq_errors` and
+  `completion_hist` (WQE completion latency, bucket width
+  `RCCL_TELEMETRY_HISTOGRAM_INTERVAL_NS`). These are read with
+  `rcclTelemetrySwCapture()`, which only loads in-memory counters.
+
+The counters are per NIC per process, not per collective. A window is clean
+only when one collective at a time uses the NIC: one GPU per process, one
+communicator active. With `-g 8` in one process, or overlapping communicators,
+the windows overlap and share traffic; the report marks such rows `B/coll*`.
+Set `ACCL_PROFILER_NET=0` to skip the snapshots.
+
+Only collectives are recorded. AlltoAll and other send/recv-based operations
+reach the profiler as P2P events, which this plugin does not subscribe to, so
+`alltoall_perf` produces no records.
+
+### Running
+
+```bash
+export NCCL_PROFILER_PLUGIN=/path/to/librccl-profiler-accl.so
+export ACCL_PROFILER_OUTPUT_DIR=/shared/run1
+export RCCL_TELEMETRY_ENABLE=1
+export RCCL_TELEMETRY_OUTPUT_DIR=/shared/run1     # shared storage: every node's files in one place
+export RCCL_TELEMETRY_SAMPLE_MS=10                # NIC counter time series
+export NCCL_NET=IB-CAST
+mpirun ... all_reduce_perf -b 1M -e 256M -f 2 -g 1 -n 50 -w 5
+
+python3 accl_fabric_report.py report --accl /shared/run1 --telemetry /shared/run1
+python3 accl_fabric_report.py trace  --accl /shared/run1 --telemetry /shared/run1 -o run1.json
+```
+
+### What the report computes
+
+For every rank and every (collective, message size), the time those
+collectives were running is merged into spans (back-to-back iterations become
+one span), and each NIC counter is integrated over those spans by
+interpolating between telemetry samples. Measuring a whole size point at once,
+rather than one collective, keeps the result meaningful even when the sample
+interval is longer than a single collective.
+
+| Column | Meaning |
+|---|---|
+| `rxP%` | PFC pause time **received** (the switch paused our transmit) as a share of wall time. Evidence against the **fabric**. |
+| `txP%` | PFC pause time **sent** (our NIC paused the switch because this host could not take data in fast enough). Evidence against the **host**. |
+| `ecn%`, `cnp/s` | ECN-marked share of received packets, and CNPs sent plus received per second. |
+| `NICtx GB/s` | NIC-level RoCE transmit rate during the spans. |
+| `B/coll` | RCCL bytes sent per collective on that NIC (exact, from `net`). |
+| `cmpl p50/p99` | WQE completion latency percentiles, upper bucket edges. |
+
+Verdicts, checked in this order:
+
+| Verdict | Rule |
+|---|---|
+| `FABRIC+HOST` | both `rxP%` and `txP%` at or above `--threshold-pct` (default 5) |
+| `FABRIC` | `rxP%` at or above the threshold |
+| `HOST-RX` | `txP%` at or above the threshold |
+| `CONGESTION-MARKS` | ECN marks at or above `--threshold-ecn-pct` (default 1%) of packets, or CNPs at or above `--threshold-cnps` (default 100/s) |
+| `NOT-FABRIC (...)` | fabric counters clean; accl's own classification in brackets |
+| `NO-PFC-DATA (...)` | the NIC exposed no PFC pause time |
+| `NO-DATA` | no telemetry for that process |
+
+Some NIC firmware never moves its pause-time counters (Thor2 on MI355X nodes
+reports 0 us however many pause frames arrive). When the pause-time counters
+stay flat for the whole job but pause frames were counted, the report says so,
+switches the two columns to `rxPF/s` / `txPF/s` (pause frames per second of
+wall time) and uses `--threshold-fps` (default 100) instead of
+`--threshold-pct`. Frames say *that* the link was paused and how often, not for
+how long, so this threshold is a heuristic.
+
+PFC works per priority, and only the priority RCCL's traffic uses matters. By
+default the report uses the priority with the most pause time on the NICs the
+job drove; pass `--pfc-prio N` when you know it.
+
+A row marked `[low confidence]` ran for less than five sample intervals (or
+outside the sampled range), so its share is mostly interpolation. Lower
+`RCCL_TELEMETRY_SAMPLE_MS` or run more iterations.
+
+The trace has one process per rank with its collectives as slices, and
+counter tracks per NIC: PFC pause %, NIC GB/s, RCCL GB/s and ECN/CNP per ms.
+`CLOCK_MONOTONIC` has a different origin on every host, so each host is
+shifted to start at 0, and lining hosts up is approximate.
+
+Before trusting short collectives, check how fresh the NIC's counters are with
+`tools/net-counter-probe`: some drivers refresh some counters only about once
+a second.
+
+`python3 test_accl_fabric_report.py` runs the report's tests on synthetic data.
 
 ## Requirements
 

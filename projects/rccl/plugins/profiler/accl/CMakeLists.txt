@@ -30,7 +30,7 @@ target_compile_features(rccl-profiler-accl PRIVATE cxx_std_14)
 
 target_compile_options(rccl-profiler-accl PRIVATE -Wall -Wextra)
 
-target_link_libraries(rccl-profiler-accl PRIVATE pthread)
+target_link_libraries(rccl-profiler-accl PRIVATE pthread ${CMAKE_DL_LIBS})
 
 set_target_properties(rccl-profiler-accl PROPERTIES
     OUTPUT_NAME "rccl-profiler-accl"

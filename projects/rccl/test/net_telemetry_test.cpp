@@ -52,6 +52,9 @@
  *       -I ../src/include net_telemetry_test.cpp ../src/transport/net_telemetry.cc \
  *       -o /tmp/net_telemetry_test_asan && /tmp/net_telemetry_test_asan
  *
+ * The Thor2 counter table is checked against a fake sysfs tree. That test
+ * flushes, which is one-shot, so it runs last.
+ *
  * The allocator never frees its blocks, so LeakSanitizer reporting them at exit
  * under ASan is expected and is not a defect.
  */
@@ -66,6 +69,13 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include <climits>
+#include <string>
+#include <fstream>
+#include <sstream>
+#include <unistd.h>
+#include <filesystem>
+#include <sys/stat.h>
 
 extern int rcclTelemetryEnabled;
 extern RcclTelemetryConfig rcclTelemetryCfg;
@@ -923,6 +933,249 @@ static void testConcurrent(void) {
   resetState();
 }
 
+/* ---- ethtool key matching ------------------------------------------- */
+
+/* The primary key wins even when the NIC lists its fallback first. */
+static void testEthtoolFallbackOrder(void) {
+  std::printf("testEthtoolFallbackOrder\n");
+  const size_t stride = 32;
+  const char* order[] = {"rx_pause_frames", "rx_pfc_frames", "rx_pfc_frames_x", "only_fallback"};
+  const unsigned n = 4;
+  char names[4 * 32];
+  std::memset(names, 0, sizeof(names));
+  for (unsigned i = 0; i < n; i++) std::strncpy(names + i * stride, order[i], stride);
+  const uint64_t values[] = {11, 22, 33, 44};
+
+  int64_t pfc = -1, onlyFb = -1, missing = -1;
+  const char* keys[] = {"rx_pfc_frames", "rx_pause_frames", "absent_primary", "only_fallback", "rx_pfc"};
+  int64_t* targets[] = {&pfc, &pfc, &onlyFb, &onlyFb, &missing};
+  RcclEthtoolWantedEx w[5];
+  for (int i = 0; i < 5; i++) {
+    std::snprintf(w[i].key, sizeof(w[i].key), "%s", keys[i]);
+    w[i].target = targets[i];
+  }
+  rcclTelemetryEthtoolResolve(names, stride, values, n, w, 5);
+  CHECK_EQ(pfc, 22);
+  CHECK_EQ(onlyFb, 44);
+  CHECK_EQ(missing, -1);
+
+  /* A name filling its slot has no NUL. */
+  char full[32];
+  std::memset(full, 'a', sizeof(full));
+  int64_t got = -1;
+  RcclEthtoolWantedEx f;
+  std::memset(f.key, 'a', 32);
+  f.key[32] = '\0';
+  f.target = &got;
+  const uint64_t v = 7;
+  rcclTelemetryEthtoolResolve(full, sizeof(full), &v, 1, &f, 1);
+  CHECK_EQ(got, 7);
+}
+
+/* ---- HW counter delta ------------------------------------------------ */
+
+static void testCounterDelta(void) {
+  std::printf("testCounterDelta\n");
+  CHECK_EQ(rcclTelemetryCounterDelta(150, 100), 50);
+  CHECK_EQ(rcclTelemetryCounterDelta(-1, 100), -1);
+  CHECK_EQ(rcclTelemetryCounterDelta(100, -1), -1);
+  /* bnxt_re rx_bytes wrapped at 2^48 mid-run; the wire saw 60767380542 bytes. */
+  CHECK_EQ(rcclTelemetryCounterDelta(10669293278LL, 281424878623392LL), 60767380542LL);
+  /* Went down from above 2^48: not a 48-bit wrap, so unknown. */
+  CHECK_EQ(rcclTelemetryCounterDelta(5, ((int64_t)1 << 48) + 10), -1);
+}
+
+/* ---- One slot per shared QP ----------------------------------------- */
+
+/* A QP-sharing secondary maps qps[q] to shared QP q % primaryNqps. */
+static void testSetupQpsSharedKeys(void) {
+  std::printf("testSetupQpsSharedKeys\n");
+  resetState();
+  int fake[4];
+  const void* keys[8];
+  int roles[8];
+  RcclQpStats* handles[8];
+  for (int q = 0; q < 8; q++) {
+    keys[q] = &fake[q % 4];
+    roles[q] = q % 2;
+  }
+  CHECK_EQ(rcclTelemetrySetupQps(0, 3, keys, roles, 8, handles), 4);
+  RcclChannelStats* ch = rcclTelemetryChannel(0, 3);
+  CHECK(ch != NULL);
+  CHECK_EQ(ch->num_qps, 4);
+  CHECK_EQ(ch->num_data_qp, 2);
+  CHECK_EQ(ch->num_cts_qp, 2);
+  for (int q = 0; q < 8; q++) {
+    CHECK(handles[q] != NULL);
+    CHECK(handles[q] == handles[q % 4]);
+    CHECK(handles[q] == rcclTelemetryQp(ch, q % 4));
+  }
+  CHECK_EQ(rcclTelemetrySetupQps(0, 4, keys, roles, 0, handles), 0);
+  resetState();
+}
+
+/* ---- Thor2 counter table against a fake sysfs ----------------------- */
+
+static void writeFile(const std::string& path, const std::string& body) {
+  std::ofstream(path) << body << "\n";
+}
+
+static long long jsonInt(const std::string& json, const std::string& key) {
+  size_t at = json.find("\"" + key + "\": ");
+  if (at == std::string::npos) return LLONG_MIN;
+  return std::atoll(json.c_str() + at + key.size() + 4);
+}
+
+struct FakeCtr { const char* key; int base; int fin; };
+
+/* A bnxt_re device under the fake sysfs root, with base values written. */
+static std::string makeFakeBnxt(const std::string& r, const char* name, const std::vector<FakeCtr>& ctrs) {
+  const std::string dev = r + "/class/infiniband/" + name;
+  const std::string hwc = dev + "/ports/1/hw_counters/";
+  for (const std::string& d : {dev, dev + "/device", dev + "/device/net", dev + "/device/net/telfake0",
+                               dev + "/ports", dev + "/ports/1", hwc})
+    CHECK_EQ(mkdir(d.c_str(), 0755), 0);
+  CHECK_EQ(symlink((r + "/bnxt_en").c_str(), (dev + "/device/driver").c_str()), 0);
+  for (const FakeCtr& c : ctrs) writeFile(hwc + c.key, std::to_string(c.base));
+  return hwc;
+}
+
+/* JSON text of one device, from its roce_device to the next device. */
+static std::string jsonDevice(const std::string& json, const std::string& dev) {
+  size_t at = json.find("\"roce_device\": \"" + dev + "\"");
+  if (at == std::string::npos) return "";
+  return json.substr(at, json.find("\"roce_device\"", at + 1) - at);
+}
+
+/* hw_samples column local_ack_timeout_err (alternate to_retransmits) on a
+ * thor2 device without that counter, and ecn_marked_pkts (no alternate). */
+static void testSampledColRetry(void) {
+  std::printf("testSampledColRetry\n");
+  resetState();
+  const char* tmp = std::getenv("TMPDIR");
+  std::string tmpl = std::string(tmp && tmp[0] ? tmp : "/tmp") + "/rccl_tel_sample_XXXXXX";
+  std::vector<char> root(tmpl.begin(), tmpl.end());
+  root.push_back('\0');
+  CHECK(mkdtemp(root.data()) != NULL);
+  const std::string r(root.data());
+  for (const std::string& d : {r + "/class", r + "/class/infiniband", r + "/bnxt_en"})
+    CHECK_EQ(mkdir(d.c_str(), 0755), 0);
+  const std::string hwc = makeFakeBnxt(r, "bnxt_re0", {{"to_retransmits", 7, 7}, {"rx_ecn_marked_pkts", 3, 3}});
+  rcclTelemetrySysRoot = root.data();
+  CHECK_EQ(rcclTelemetryRegisterDevice(0, "bnxt_re0", "IB-CAST"), 0);
+
+  const int kLocalAck = 7, kEcn = 0; /* positions in rcclTelSampled */
+  RcclTelSampledCol col;
+  rcclTelemetrySampledColInit(0, kLocalAck, &col);
+  CHECK(col.nameIdx >= 0 && col.altIdx >= 0);
+  for (int t = 1; t <= RCCL_TEL_SAMPLE_PRIMARY_TRIES; t++) {
+    CHECK_EQ(rcclTelemetrySampledColRead(0, &col), 7);
+    CHECK_EQ(col.locked, t < RCCL_TEL_SAMPLE_PRIMARY_TRIES ? -2 : col.altIdx);
+  }
+
+  rcclTelemetrySampledColInit(0, kLocalAck, &col);
+  CHECK_EQ(rcclTelemetrySampledColRead(0, &col), 7);
+  writeFile(hwc + "local_ack_timeout_err", "4");
+  CHECK_EQ(rcclTelemetrySampledColRead(0, &col), 4);
+  CHECK_EQ(col.locked, col.nameIdx);
+
+  rcclTelemetrySampledColInit(0, kEcn, &col);
+  CHECK(col.altIdx < 0);
+  CHECK_EQ(col.locked, col.nameIdx);
+  CHECK_EQ(rcclTelemetrySampledColRead(0, &col), 3);
+
+  rcclTelemetrySysRoot = "/sys";
+  std::filesystem::remove_all(r);
+  resetState();
+}
+
+/* bnxt_re0 has the current names (plus two old ones, which must lose);
+ * bnxt_re1 has only the old names, which must be read as fallbacks. */
+static void testThor2SysfsNames(void) {
+  std::printf("testThor2SysfsNames\n");
+  resetState();
+  const char* tmp = std::getenv("TMPDIR");
+  std::string tmpl = std::string(tmp && tmp[0] ? tmp : "/tmp") + "/rccl_tel_sysfs_XXXXXX";
+  std::vector<char> root(tmpl.begin(), tmpl.end());
+  root.push_back('\0');
+  CHECK(mkdtemp(root.data()) != NULL);
+  const std::string r(root.data());
+  for (const std::string& d : {r + "/class", r + "/class/infiniband", r + "/bnxt_en", r + "/out"})
+    CHECK_EQ(mkdir(d.c_str(), 0755), 0);
+
+  const std::vector<FakeCtr> cur = {
+    {"tx_cnp_pkts", 100, 107},      {"rx_cnp_pkts", 50, 53},       {"rx_out_of_buffer", 9, 11},
+    {"rx_roce_errors", 1, 2},       {"rx_roce_discards", 4, 8},    {"tx_roce_errors", 0, 5},
+    {"tx_roce_discards", 3, 3},     {"res_mem_err", 2, 6},         {"rx_ecn_marked_pkts", 10, 30},
+    {"to_retransmits", 0, 1},       {"oos_drop_count", 5, 5},      {"tx_bytes", 1000, 5000},
+    {"rx_bytes", 2000, 2600},       {"tx_pkts", 10, 40},           {"rx_pkts", 20, 25},
+    {"res_mem_error", 100, 200},    {"rx_errors", 100, 300},
+  };
+  const std::vector<FakeCtr> old = {
+    {"np_cnp_sent", 0, 11},         {"rp_cnp_handled", 0, 12},     {"out_of_buffer", 0, 13},
+    {"rx_errors", 0, 14},           {"res_mem_error", 0, 15},
+  };
+  const std::string hwc0 = makeFakeBnxt(r, "bnxt_re0", cur);
+  const std::string hwc1 = makeFakeBnxt(r, "bnxt_re1", old);
+
+  rcclTelemetrySysRoot = root.data();
+  std::snprintf(rcclTelemetryCfg.output_dir, sizeof(rcclTelemetryCfg.output_dir), "%s/out", root.data());
+  rcclTelemetryCfg.hw_counter_list[0] = '\0';
+  CHECK_EQ(rcclTelemetryRegisterDevice(0, "bnxt_re0", "IB-CAST"), 0);
+  CHECK_EQ(rcclTelemetryRegisterDevice(1, "bnxt_re1", "IB-CAST"), 1);
+  CHECK(std::strcmp(rcclTelemetryDevs[0].eth_device, "telfake0") == 0);
+  int numSlots = 0;
+  CHECK_EQ(rcclTelemetrySetupChannel(0, 0, 1, &numSlots), 0); /* takes the baseline */
+  CHECK_EQ(rcclTelemetrySetupChannel(1, 0, 1, &numSlots), 0);
+  rcclTelemetryBytes(0, 1, 4096);
+  rcclTelemetryBytes(1, 1, 4096);
+
+  for (const FakeCtr& c : cur) writeFile(hwc0 + c.key, std::to_string(c.fin));
+  for (const FakeCtr& c : old) writeFile(hwc1 + c.key, std::to_string(c.fin));
+  CHECK_EQ(rcclTelemetryFlush(), 0);
+
+  char host[HOST_NAME_MAX + 1];
+  gethostname(host, sizeof(host));
+  std::ifstream in(r + "/out/rccl_telemetry_" + host + "_" + std::to_string(getuid()) + "_" +
+                   std::to_string(getpid()) + ".json");
+  std::stringstream ss;
+  ss << in.rdbuf();
+  const std::string json = ss.str();
+  CHECK(!json.empty());
+  CHECK(json.find("\"transport\": \"IB-CAST\"") != std::string::npos);
+  CHECK(json.find("\"hw_type\": \"thor2\"") != std::string::npos);
+
+  const std::string d0 = jsonDevice(json, "bnxt_re0");
+  CHECK_EQ(jsonInt(d0, "cnp_sent"), 7);
+  CHECK_EQ(jsonInt(d0, "cnp_handled"), 3);
+  CHECK_EQ(jsonInt(d0, "out_of_buffer"), 2);
+  CHECK_EQ(jsonInt(d0, "ecn_marked_pkts"), 20);
+  CHECK_EQ(jsonInt(d0, "rx_errors"), 1);      /* rx_roce_errors, not rx_errors */
+  CHECK_EQ(jsonInt(d0, "rx_discards"), 4);
+  CHECK_EQ(jsonInt(d0, "tx_errors"), 5);
+  CHECK_EQ(jsonInt(d0, "tx_discards"), 0);
+  CHECK_EQ(jsonInt(d0, "res_mem_error"), 4);  /* res_mem_err, not res_mem_error */
+  CHECK_EQ(jsonInt(d0, "to_retransmits"), 1);
+  CHECK_EQ(jsonInt(d0, "oos_drop_count"), 0);
+  CHECK_EQ(jsonInt(d0, "delta_tx_bytes"), 4000);
+  CHECK_EQ(jsonInt(d0, "delta_rx_packets"), 5);
+  CHECK_EQ(jsonInt(d0, "cnp_ignored"), -1);
+  CHECK_EQ(jsonInt(d0, "rx_roce_error_pkts"), -1);
+  CHECK_EQ(jsonInt(d0, "rx_roce_discard_pkts"), -1);
+  CHECK_EQ(jsonInt(d0, "local_ack_timeout_err"), -1);
+  /* No such interface, so ethtool counters stay N/A. */
+  CHECK_EQ(jsonInt(d0, "pfc_rx_pause_frames"), -1);
+
+  const std::string d1 = jsonDevice(json, "bnxt_re1");
+  CHECK_EQ(jsonInt(d1, "cnp_sent"), 11);
+  CHECK_EQ(jsonInt(d1, "cnp_handled"), 12);
+  CHECK_EQ(jsonInt(d1, "out_of_buffer"), 13);
+  CHECK_EQ(jsonInt(d1, "rx_errors"), 14);
+  CHECK_EQ(jsonInt(d1, "res_mem_error"), 15);
+  rcclTelemetrySysRoot = "/sys";
+  std::filesystem::remove_all(r);
+}
+
 int main(void) {
   std::printf("net_telemetry unit tests\n");
   testBlockIndex();
@@ -942,6 +1195,11 @@ int main(void) {
   testSamplingCounters();
   testSamplingDefaultIsIdentity();
   testConcurrent();
+  testEthtoolFallbackOrder();
+  testCounterDelta();
+  testSetupQpsSharedKeys();
+  testSampledColRetry();
+  testThor2SysfsNames(); /* flushes: keep last */
 
   if (g_failures == 0) {
     std::printf("ALL PASSED\n");
