@@ -59,7 +59,7 @@ public:
     };
 
     /// @brief Canonical shared backing retained for the process lifetime.
-    int doorbell_memfd = -1;
+    int doorbell_backing_fd = -1;
     /// @brief Every client doorbell view still owned by the mapping layer.
     std::vector<DoorbellView> doorbell_views;
     /// @brief Stable driver-side alias used exclusively by the command processor.
@@ -106,7 +106,7 @@ public:
     void *host_ptr = nullptr;
     uint32_t flags = 0;
     uint64_t handle = 0;
-    int memfd = -1;
+    int backing_fd = -1;
     // Public dma-buf access mode retained across IPC import and re-export.
     int export_access_mode = -1;
     uint32_t gpu_id = 0;

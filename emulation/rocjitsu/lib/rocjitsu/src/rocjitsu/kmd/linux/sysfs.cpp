@@ -6,7 +6,10 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "util/log.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "uapi/linux/kfd_sysfs.h"
@@ -16,6 +19,8 @@ RJ_DIAGNOSTIC_POP
 #include <charconv>
 #include <csignal>
 #include <cstdlib>
+#include <cstring>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -145,8 +150,22 @@ Sysfs &Sysfs::operator=(Sysfs &&other) noexcept {
 }
 
 void Sysfs::write_file(const std::string &path, const std::string &content) {
-  std::ofstream f(path);
-  f << content;
+  // Called while the backend is being constructed: bypass the interposer,
+  // whose synthetic DRM open path would recursively initialize this backend.
+  const auto &libc = libc_passthrough();
+  constexpr int flags = O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC;
+  const int fd = libc.openat ? libc.openat(AT_FDCWD, path.c_str(), flags, 0666)
+                             : ::open(path.c_str(), flags, 0666);
+  if (fd < 0) {
+    util::Logger::warn("Cannot create topology file '", path, "': ", std::strerror(errno));
+    return;
+  }
+  if (populate_backing_file(fd, content.data(), content.size()) != 0)
+    util::Logger::warn("Cannot populate topology file '", path, "': ", std::strerror(errno));
+  if (libc.close)
+    libc.close(fd);
+  else
+    ::close(fd);
 }
 
 void Sysfs::make_dir(const std::string &path) { fs::create_directories(path); }

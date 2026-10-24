@@ -7,6 +7,12 @@ include(rj_find_rocm_library)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(
+        NAME MemoryKeeper.ScrubbedEnvironmentStartup
+        COMMAND
+            ${CMAKE_COMMAND} "-DKEEPER=$<TARGET_FILE:rocjitsu_memory>" -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_memory_keeper_startup.cmake
+    )
+    add_test(
         NAME cmake.hip_toolchain_failure
         COMMAND
             ${CMAKE_COMMAND} "-DRJ_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
@@ -480,6 +486,7 @@ add_executable(
     mtype_flags_test.cpp
     sysfs_test.cpp
     kfd_ioctl_test.cpp
+    memory_backing_test.cpp
     waitcnt_counter_test.cpp
     wait_hazard_test.cpp
     memory_wait_scoreboard_test.cpp
@@ -1980,7 +1987,14 @@ foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700 gfx950_mi355x_kmd_2gpu)
 endforeach()
 
 function(rj_add_interposer_test_suite _suite)
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG" "ENVIRONMENT")
+    cmake_parse_arguments(
+        PARSE_ARGV
+        1
+        ARG
+        ""
+        "CONFIG;SUFFIX"
+        "ENVIRONMENT;PREFIX"
+    )
     set(_config "${RJ_CDNA4_KMD_CONFIG}")
     set(_suffix "")
     if(ARG_CONFIG)
@@ -1988,12 +2002,13 @@ function(rj_add_interposer_test_suite _suite)
         get_filename_component(_suffix "${_config}" NAME_WE)
         set(_suffix ".${_suffix}")
     endif()
+    string(APPEND _suffix "${ARG_SUFFIX}")
     get_filename_component(_config_name "${_config}" NAME)
     foreach(_case IN LISTS ARG_UNPARSED_ARGUMENTS)
         rj_add_test(
             NAME "${_suite}.${_case}${_suffix}"
             COMMAND
-                ${RJ_CLI}
+                ${ARG_PREFIX} ${RJ_CLI}
                 --config
                 ${_config}
                 --
@@ -2003,7 +2018,7 @@ function(rj_add_interposer_test_suite _suite)
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
             INSTALL_COMMAND
-                "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                ${ARG_PREFIX} "\${RJ_INSTALLED_BINDIR}/rocjitsu"
                 "--config"
                 "\${RJ_INSTALLED_CONFIG_DIR}/${_config_name}"
                 "--"
@@ -2012,6 +2027,14 @@ function(rj_add_interposer_test_suite _suite)
             INSTALL_ENVIRONMENT ${ARG_ENVIRONMENT}
         )
     endforeach()
+    if(_suite MATCHES "^Interposer(Gem|Drm)Test$" AND NOT ARG_SUFFIX)
+        rj_add_interposer_test_suite(
+            ${_suite} ${ARG_UNPARSED_ARGUMENTS}
+            CONFIG "${_config}" SUFFIX ".token"
+            ENVIRONMENT ${ARG_ENVIRONMENT} "RJ_TEST_FORCE_TOKEN_BACKING=1"
+            PREFIX ${ARG_PREFIX}
+        )
+    endif()
 endfunction()
 
 set(_rj_interposer_dup_tests
@@ -2136,10 +2159,34 @@ set(_rj_interposer_pm4_tests
     PrivateDescriptorsSurviveDup3Replacement
 )
 foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700)
+    foreach(_backing IN ITEMS native token)
+        set(_backing_env)
+        set(_backing_suffix)
+        if(_backing STREQUAL "token")
+            set(_backing_env "RJ_TEST_FORCE_TOKEN_BACKING=1")
+            set(_backing_suffix SUFFIX ".token")
+        endif()
+        rj_add_interposer_test_suite(
+            InterposerPm4Test ${_rj_interposer_pm4_tests}
+            CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
+            ${_backing_suffix} ENVIRONMENT ${_backing_env}
+        )
+    endforeach()
+    foreach(_mode IN ITEMS native fallback)
+        set(_limit_command)
+        if(_mode STREQUAL "fallback")
+            set(_limit_command prlimit --fsize=4096:4096)
+        endif()
+        rj_add_interposer_test_suite(
+            InterposerPm4FileLimitTest
+            CompletionSurvivesClosedHandleAndFileLimit
+            CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
+            SUFFIX ".${_mode}" PREFIX ${_limit_command}
+        )
+    endforeach()
     rj_add_interposer_test_suite(
-        InterposerPm4Test
+        InterposerPm4FileLimitTest LargeFenceOnlyBufferNeedsOnePage
         CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
-        ${_rj_interposer_pm4_tests}
     )
 endforeach()
 
@@ -2179,6 +2226,7 @@ rj_add_interposer_test_suite(
 
 rj_add_interposer_test_suite(
     InterposerGemTest
+    LowAddressMappingHonorsMap32Bit
     SparseReservationsPreserveRangesAndFileOwnership
     GemNamespaceIsPrivateButSharedByDuplicates
     IndependentDrmFilesRejectOverlappingMappings
@@ -4366,4 +4414,14 @@ else()
     endif()
     list(JOIN _rocgdb_missing ", " _rocgdb_missing)
     message(STATUS "rocgdb debug smoke test disabled (need ${_rocgdb_missing})")
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    rj_add_test(
+        NAME KfdIoctlTest.token
+        COMMAND $<TARGET_FILE:rocjitsu_tests> --gtest_filter=KfdIoctlTest.*
+        ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
+        INSTALL_COMMAND bin/rocjitsu_tests --gtest_filter=KfdIoctlTest.*
+        INSTALL_ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
+    )
 endif()

@@ -86,6 +86,7 @@ nav:
       - ISA diagnostics: isa-diagnostics.md
   - Developer guide:
       - Architecture: architecture.md
+      - KFD and GEM backing: memory-backing.md
       - Arithmetic library: arith-design.md
       - Code style: style.md
       - Simulation engine: simdojo.md
