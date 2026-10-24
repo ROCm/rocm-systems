@@ -16,6 +16,18 @@
 #include <cstring>
 #include <sched.h>
 
+#include "fail_loud.h"
+#include "signature-drift.h"
+
+static ncclResult_t DefaultSocketClose(struct ncclSocket*, bool) {
+  FailLoudUnfaked("os_fakes", "ncclSocketClose");
+}
+std::function<ncclResult_t(struct ncclSocket*, bool)> g_ncclSocketClose = DefaultSocketClose;
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketClose, ncclSocketClose);
+#undef ASSERT_HOOK_MATCHES_PROD
+
+ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) { return g_ncclSocketClose(sock, wait); }
+
 void* ncclOsAlignedAlloc(size_t alignment, size_t size) {
   void* p = nullptr;
   if (posix_memalign(&p, alignment, size) != 0) return nullptr;
@@ -132,7 +144,12 @@ ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int, char* affinityStr, size_t m
   return ncclSuccess;
 }
 
+static char* DefaultNcclOsRealpath(const char*, char*) { return nullptr; }
+std::function<char*(const char*, char*)> g_ncclOsRealpath = DefaultNcclOsRealpath;
+char* ncclOsRealpath(const char* path, char* resolvedPath) { return g_ncclOsRealpath(path, resolvedPath); }
+
 void ResetOsFakes() {
+  g_ncclSocketClose = DefaultSocketClose;
   g_ncclOsCpuCountValue = 0;
   g_ncclOsCpuCountCalls = 0;
   g_ncclOsCpuCountMasks.clear();
@@ -147,4 +164,5 @@ void ResetOsFakes() {
   g_pciComputePartition = kDefaultComputePartition;
   g_pciComputePartitionCalls = 0;
   g_lastPciComputePartitionBusId.clear();
+  g_ncclOsRealpath = DefaultNcclOsRealpath;
 }

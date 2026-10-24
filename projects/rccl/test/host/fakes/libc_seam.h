@@ -72,6 +72,7 @@ void micro_free(void*);
 int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)));
 int micro_gethostname(char*, size_t);
 int micro_access(const char*, int);
+int micro_open(const char*, int, ...);
 }  // extern "C"
 
 #define write micro_write
@@ -100,3 +101,4 @@ int micro_access(const char*, int);
 #define fprintf micro_fprintf
 #define gethostname micro_gethostname
 #define access micro_access
+#define open micro_open

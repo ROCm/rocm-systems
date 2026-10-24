@@ -222,7 +222,7 @@ int g_currentDevice = 0;
 static hipError_t DefaultHipGetDevice(int* dev)
 {
     if (dev) {
-        *dev = g_currentDevice;
+        *dev = __atomic_load_n(&g_currentDevice, __ATOMIC_RELAXED);
     }
     return hipSuccess;
 }
@@ -230,7 +230,8 @@ std::function<hipError_t(int*)> g_hipGetDevice = DefaultHipGetDevice;
 
 static hipError_t DefaultHipSetDevice(int dev)
 {
-    g_currentDevice = dev;
+    // group.cc's async jobs set the device from several threads at once.
+    __atomic_store_n(&g_currentDevice, dev, __ATOMIC_RELAXED);
     return hipSuccess;
 }
 std::function<hipError_t(int)> g_hipSetDevice = DefaultHipSetDevice;
