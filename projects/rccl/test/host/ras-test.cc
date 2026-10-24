@@ -41,6 +41,7 @@ int RasTestPoll(struct pollfd*, nfds_t, int);
 int RasTestClose(int);
 int RasTestAtexit(void (*)(void));
 uint64_t RasTestClockNano();
+void RasTestDiagnosticsGpuInit();
 
 // Redirect the process-wide APIs used by ras.cc before including that file,
 // then restore their real names immediately afterward. Every header that uses
@@ -50,6 +51,7 @@ uint64_t RasTestClockNano();
 #define atexit RasTestAtexit
 #define clockNano RasTestClockNano
 #define rasDiagnosticsContextInit RasTestDiagnosticsContextInit
+#define rasDiagnosticsGpuInit RasTestDiagnosticsGpuInit
 
 namespace {
 
@@ -83,6 +85,7 @@ const char* ncclSocketToString(const union ncclSocketAddress*, char* buf, size_t
 #undef clockNano
 #undef poll
 #undef rasDiagnosticsContextInit
+#undef rasDiagnosticsGpuInit
 
 namespace {
 
@@ -107,6 +110,7 @@ rasRankInit* g_localAddRanksLast = nullptr;
 int g_localAddRanksLastCount = 0;
 ncclResult_t g_localAddRanksResult = ncclSuccess;
 int g_cleanupCalls[4] = {};
+int g_diagnosticsLoadCalls = 0;
 ncclResult_t g_localRunDiagResult = ncclSuccess;
 int g_localRunDiagCalls = 0;
 int g_profilerMask = -1;
@@ -268,6 +272,39 @@ TEST_F(RasMicrotest, CommInitColdSuccessStartsThreadAndPublishesAddress) {
   EXPECT_EQ(1, g_pollCalls);
   EXPECT_EQ(0, rasInitRefCount);
   EXPECT_FALSE(rasInitialized);
+  EXPECT_EQ(0, g_diagnosticsLoadCalls);
+}
+
+TEST_F(RasMicrotest, CommInitColdSuccessLoadsDiagnosticsWhenEnabled) {
+  g_loadParam = [](const char* name, int64_t defaultValue) {
+    return std::strcmp(name, "RUN_RAS_DIAGNOSTICS") == 0 ? int64_t{1} : defaultValue;
+  };
+  SetPairNotification(RAS_TERMINATE);
+  g_poll = [](pollfd* fds, nfds_t, int) {
+    while (!g_initComplete.load(std::memory_order_acquire)) std::this_thread::yield();
+    fds[0].revents = POLLIN;
+    return 1;
+  };
+
+  auto comm = std::make_unique<ncclComm>();
+  rasRankInit rank{};
+  rank.addr.sin.sin_family = AF_INET;
+  ncclResult_t result = ncclRasCommInit(comm.get(), &rank);
+  g_initComplete.store(true, std::memory_order_release);
+  ASSERT_EQ(ncclSuccess, result);
+  ASSERT_TRUE(rasThread.joinable());
+  rasThread.join();
+  EXPECT_EQ(1, g_diagnosticsLoadCalls);
+}
+
+TEST_F(RasMicrotest, CommInitAlreadyInitializedDoesNotReloadDiagnostics) {
+  g_loadParam = [](const char* name, int64_t defaultValue) {
+    return std::strcmp(name, "RUN_RAS_DIAGNOSTICS") == 0 ? int64_t{1} : defaultValue;
+  };
+  rasInitialized = true;
+  auto comm = std::make_unique<ncclComm>();
+  ASSERT_EQ(ncclSuccess, ncclRasCommInit(comm.get(), nullptr));
+  EXPECT_EQ(0, g_diagnosticsLoadCalls);
 }
 
 TEST_F(RasMicrotest, CommFiniUninitializedIsNoOp) {
@@ -476,6 +513,7 @@ void ResetWholeFileSeams() {
   g_localAddRanksLastCount = 0;
   g_localAddRanksResult = ncclSuccess;
   std::memset(g_cleanupCalls, 0, sizeof(g_cleanupCalls));
+  g_diagnosticsLoadCalls = 0;
   g_localRunDiagResult = ncclSuccess;
   g_localRunDiagCalls = 0;
   g_profilerMask = -1;
@@ -617,6 +655,7 @@ void rasClientSupportTerminate() { ++g_cleanupCalls[0]; }
 void rasNetTerminate() { ++g_cleanupCalls[1]; }
 void rasCollectivesTerminate() { ++g_cleanupCalls[2]; }
 void rasPeersTerminate() { ++g_cleanupCalls[3]; }
+void RasTestDiagnosticsGpuInit() { ++g_diagnosticsLoadCalls; }
 ncclResult_t rasLocalHandleRunDiag(const struct rasDiagnosticsContext* ctx) {
   ++g_localRunDiagCalls;
   if (ctx) g_lastRunDiagContext = *ctx;
