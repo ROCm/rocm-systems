@@ -25,11 +25,17 @@ Pre-built configurations ship in the `configs/` directory:
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs (multi-GPU daemon mode) |
+| `gfx1250_mi455x_4gpu_scaleup.json` | Functional four-GPU fixture with explicit local fabric routes; peer discovery remains off |
+| `gfx1250_mi455x_kmd_4node_2gpu_if.json` | Four-node, two-GPU-per-node mixed P2P/NET fixture; see the [same-host RCCL gate](https://rocm.github.io/rocm-systems/rocjitsu/same-host-pod-rccl-gate/#run-this-gate) |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
 
-Standalone configs (without `_kmd` in the name) are intended for caller-driven simulation where you step or run the VM directly. KMD configs initialize the emulated kernel driver so that an unmodified HIP or HSA application can issue ioctls through the LD_PRELOAD interposer.
+The `_kmd` suffix identifies presets intended for KFD or daemon use. Select
+the VM mode explicitly: default mode is for caller-driven simulation, while
+local or daemon mode initializes the emulated driver for HIP or HSA ioctls.
+The explicit four-GPU scale-up schematic also supports local or daemon mode
+despite having no `_kmd` suffix.
 
 The gfx1250 standalone profile also supplies the compute-only PCI function used
 by the VFIO-user server. Follow
