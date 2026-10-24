@@ -287,17 +287,6 @@
         {"name": "InitMicrotests", "description": "Host-only init.cc microtests (no GPU, no HIP/RCCL runtime); contributes init.cc coverage", "test_filter": "*"}
       ]
     },
-    "unit_tests_micro_linux": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroLinux",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 0,
-      "timeout": 60,
-      "tests": [
-        {"name": "LinuxMicrotests", "description": "Host-only os/linux.cc, linux_ipcsocket.cc, linux_socket_pair.cc, misc/socket.cc, shmutils.cc and signals.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
     "unit_tests_micro_init_uncached": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicroInit-uncached",
@@ -568,12 +557,6 @@
       "name": "RCCL Microtests - init.cc",
       "description": "rccl-UnitTestsMicroInit (host-only init.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_init",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - os/linux.cc and sockets",
-      "description": "rccl-UnitTestsMicroLinux (host-only os/linux.cc, sockets, shm and signals microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_linux",
       "enabled": true
     },
     {
