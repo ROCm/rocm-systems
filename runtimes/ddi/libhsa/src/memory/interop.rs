@@ -10,6 +10,7 @@ use super::*;
     unsafe(export_name = "__hsa_impl_hsa_amd_ipc_memory_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Exports a tracked allocation as an IPC memory handle.
 pub unsafe extern "C" fn hsa_amd_ipc_memory_create(
     pointer: *mut c_void,
     size: usize,
@@ -29,7 +30,7 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_create(
         let Some(memory) = runtime.memory_state.allocations.values().find(|memory| {
             memory.description.agent_base == pointer as usize
                 && memory.description.size == size
-                && memory.description.owner.handle != CPU_AGENT
+                && !runtime.is_cpu_agent(memory.description.owner)
         }) else {
             return INVALID_ARGUMENT;
         };
@@ -49,6 +50,7 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_create(
     unsafe(export_name = "__hsa_impl_hsa_amd_ipc_memory_attach")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Attaches shared memory from an exported IPC handle.
 pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
     handle: *const HsaAmdIpcMemory,
     size: usize,
@@ -180,6 +182,7 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
     unsafe(export_name = "__hsa_impl_hsa_amd_ipc_memory_detach")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Detaches an imported IPC memory mapping.
 pub extern "C" fn hsa_amd_ipc_memory_detach(mapped_pointer: *mut c_void) -> Status {
     boundary(|| {
         if mapped_pointer.is_null() {
@@ -199,7 +202,7 @@ pub extern "C" fn hsa_amd_ipc_memory_detach(mapped_pointer: *mut c_void) -> Stat
             .ipc_allocations
             .get(&key)
             .map_or(key, |memory| memory.description.agent_base);
-        if copy_borrowed(runtime, base) {
+        if runtime.memory_state.copy_borrowed(base) {
             return OUT_OF_RESOURCES;
         }
         let Some(mut memory) = runtime.memory_state.ipc_allocations.remove(&key) else {
@@ -219,6 +222,7 @@ pub extern "C" fn hsa_amd_ipc_memory_detach(mapped_pointer: *mut c_void) -> Stat
     unsafe(export_name = "__hsa_impl_hsa_amd_external_semaphore_handle_open")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Imports an external semaphore handle for HSA queue use.
 pub unsafe extern "C" fn hsa_amd_external_semaphore_handle_open(
     agent: HsaAgent,
     descriptor: *const HsaAmdExternalSemaphoreHandleDescriptor,
@@ -247,6 +251,7 @@ pub unsafe extern "C" fn hsa_amd_external_semaphore_handle_open(
     unsafe(export_name = "__hsa_impl_hsa_amd_external_semaphore_handle_close")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases an imported external semaphore handle.
 pub extern "C" fn hsa_amd_external_semaphore_handle_close(
     _semaphore: HsaAmdExternalSemaphore,
 ) -> Status {
@@ -262,6 +267,7 @@ pub extern "C" fn hsa_amd_external_semaphore_handle_close(
     })
 }
 
+/// Writes an AIS transfer result into the caller’s output record.
 unsafe fn publish_ais_result(
     result: linux_interop::AisFileResult,
     size_copied: *mut u64,
@@ -280,6 +286,7 @@ unsafe fn publish_ais_result(
     if result.status == 0 { SUCCESS } else { ERROR }
 }
 
+/// Transfers data between an HSA allocation and an AIS file handle.
 pub(super) unsafe fn ais_transfer(
     descriptor: i32,
     host: usize,
@@ -311,6 +318,7 @@ pub(super) unsafe fn ais_transfer(
     unsafe { publish_ais_result(result, size_copied, operation_status) }
 }
 
+/// Reads or writes a file descriptor for an AIS transfer.
 unsafe fn ais_file_io(
     handle: HsaAmdAisFileHandle,
     device_pointer: *mut c_void,
@@ -339,7 +347,7 @@ unsafe fn ais_file_io(
     let Some(description) = pointer_description(runtime, device_pointer as usize) else {
         return ERROR;
     };
-    if description.owner.handle == CPU_AGENT {
+    if runtime.is_cpu_agent(description.owner) {
         return ERROR;
     }
     let address = device_pointer as usize;
@@ -414,6 +422,7 @@ unsafe fn ais_file_io(
     unsafe(export_name = "__hsa_impl_hsa_amd_ais_file_write")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes memory contents to an AIS file handle.
 pub unsafe extern "C" fn hsa_amd_ais_file_write(
     handle: HsaAmdAisFileHandle,
     device_pointer: *mut c_void,
@@ -443,6 +452,7 @@ pub unsafe extern "C" fn hsa_amd_ais_file_write(
     unsafe(export_name = "__hsa_impl_hsa_amd_ais_file_read")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Reads an AIS file handle into HSA-visible memory.
 pub unsafe extern "C" fn hsa_amd_ais_file_read(
     handle: HsaAmdAisFileHandle,
     device_pointer: *mut c_void,
@@ -467,6 +477,7 @@ pub unsafe extern "C" fn hsa_amd_ais_file_read(
     })
 }
 
+/// Exports an allocation as a portable DMA-BUF descriptor.
 unsafe fn portable_export_dmabuf(
     pointer: *const c_void,
     size: usize,
@@ -498,7 +509,7 @@ unsafe fn portable_export_dmabuf(
     else {
         return INVALID_ALLOCATION;
     };
-    if memory.description.owner.handle == CPU_AGENT {
+    if runtime.is_cpu_agent(memory.description.owner) {
         return INVALID_AGENT;
     }
     let Some(index) = runtime.gpu_index(memory.description.owner) else {
@@ -534,6 +545,7 @@ unsafe fn portable_export_dmabuf(
     unsafe(export_name = "__hsa_impl_hsa_amd_portable_export_dmabuf")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Exports an allocation as a portable DMA-BUF descriptor.
 pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf(
     pointer: *const c_void,
     size: usize,
@@ -551,6 +563,7 @@ pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf(
     unsafe(export_name = "__hsa_impl_hsa_amd_portable_export_dmabuf_v2")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Exports an allocation as a DMA-BUF with version-two options.
 pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf_v2(
     pointer: *const c_void,
     size: usize,
@@ -569,6 +582,7 @@ pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf_v2(
     unsafe(export_name = "__hsa_impl_hsa_amd_portable_close_dmabuf")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Closes an exported portable DMA-BUF descriptor.
 pub extern "C" fn hsa_amd_portable_close_dmabuf(descriptor: i32) -> Status {
     boundary(|| {
         // SAFETY: The ABI transfers responsibility for closing this descriptor.
@@ -580,6 +594,7 @@ pub extern "C" fn hsa_amd_portable_close_dmabuf(descriptor: i32) -> Status {
     })
 }
 
+/// Finds a registered host range covering the requested bytes.
 pub(super) fn registered_range(
     host: usize,
     size: usize,
@@ -605,7 +620,7 @@ unsafe fn memory_lock_to_pool(
     size: usize,
     agents: *const HsaAgent,
     num_agents: i32,
-    pool: HsaMemoryPool,
+    pool: Option<HsaMemoryPool>,
     flags: u32,
     agent_ptr: *mut *mut c_void,
 ) -> Status {
@@ -617,6 +632,12 @@ unsafe fn memory_lock_to_pool(
         Ok(runtime) => runtime,
         Err(status) => return status,
     };
+    let pool = pool.unwrap_or_else(|| {
+        runtime.cpus.iter().position(|cpu| !cpu.apu).map_or_else(
+            || HsaState::cpu_pool(0, CpuPoolKind::Fine),
+            |index| HsaState::cpu_pool(index, CpuPoolKind::Coarse),
+        )
+    });
     if host_ptr.is_null() || size == 0 || agent_ptr.is_null() {
         return INVALID_ARGUMENT;
     }
@@ -626,12 +647,17 @@ unsafe fn memory_lock_to_pool(
     {
         return INVALID_ARGUMENT;
     }
-    if !cpu_pool(pool) {
+    if runtime.decode_cpu_pool(pool).is_none() {
         return INVALID_MEMORY_POOL;
     }
     let global_flags = match pool_global_flags(runtime, pool) {
         Some(flags) => flags,
         None => return INVALID_MEMORY_POOL,
+    };
+    let owner = pool_owner(runtime, pool).ok_or(INVALID_MEMORY_POOL);
+    let owner = match owner {
+        Ok(owner) => owner,
+        Err(status) => return status,
     };
     if runtime.full_profile {
         // SAFETY: The caller supplied writable pointer storage.
@@ -652,7 +678,7 @@ unsafe fn memory_lock_to_pool(
         // SAFETY: The ABI requires num_agents readable handles when agents is non-null.
         let requested = unsafe { std::slice::from_raw_parts(agents, count) };
         for agent in requested {
-            if agent.handle == CPU_AGENT {
+            if runtime.is_cpu_agent(*agent) {
                 continue;
             }
             let Some(index) = runtime.gpu_index(*agent) else {
@@ -726,6 +752,7 @@ unsafe fn memory_lock_to_pool(
             host_base,
             device_base,
             size,
+            owner,
             effective_global_flags(global_flags, flags & ALLOC_UNCACHED != 0, false),
             accessible,
         ));
@@ -739,6 +766,7 @@ unsafe fn memory_lock_to_pool(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_lock")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Pins host memory and makes it accessible to HSA agents.
 pub unsafe extern "C" fn hsa_amd_memory_lock(
     host_ptr: *mut c_void,
     size: usize,
@@ -749,19 +777,7 @@ pub unsafe extern "C" fn hsa_amd_memory_lock(
     boundary(|| {
         // SAFETY: The HSA C caller provides live input and output storage and
         // retains the host page cover through unlock or uncertain teardown.
-        unsafe {
-            memory_lock_to_pool(
-                host_ptr,
-                size,
-                agents,
-                num_agents,
-                HsaMemoryPool {
-                    handle: CPU_POOL_COARSE,
-                },
-                0,
-                agent_ptr,
-            )
-        }
+        unsafe { memory_lock_to_pool(host_ptr, size, agents, num_agents, None, 0, agent_ptr) }
     })
 }
 
@@ -770,6 +786,7 @@ pub unsafe extern "C" fn hsa_amd_memory_lock(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_lock_to_pool")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Pins host memory using a selected memory pool.
 pub unsafe extern "C" fn hsa_amd_memory_lock_to_pool(
     host_ptr: *mut c_void,
     size: usize,
@@ -782,7 +799,17 @@ pub unsafe extern "C" fn hsa_amd_memory_lock_to_pool(
     boundary(|| {
         // SAFETY: The HSA C caller provides live input and output storage and
         // retains the host page cover through unlock or uncertain teardown.
-        unsafe { memory_lock_to_pool(host_ptr, size, agents, num_agents, pool, flags, agent_ptr) }
+        unsafe {
+            memory_lock_to_pool(
+                host_ptr,
+                size,
+                agents,
+                num_agents,
+                Some(pool),
+                flags,
+                agent_ptr,
+            )
+        }
     })
 }
 
@@ -791,6 +818,7 @@ pub unsafe extern "C" fn hsa_amd_memory_lock_to_pool(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_unlock")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Unpins a previously locked host memory range.
 pub unsafe extern "C" fn hsa_amd_memory_unlock(host_ptr: *mut c_void) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -815,8 +843,7 @@ pub unsafe extern "C" fn hsa_amd_memory_unlock(host_ptr: *mut c_void) -> Status 
         else {
             return INVALID_ARGUMENT;
         };
-        if copy_borrowed(
-            runtime,
+        if runtime.memory_state.copy_borrowed(
             runtime.memory_state.locked_allocations[index]
                 .description
                 .agent_base,
@@ -838,6 +865,7 @@ pub unsafe extern "C" fn hsa_amd_memory_unlock(host_ptr: *mut c_void) -> Status 
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Maps an external graphics buffer into HSA-visible memory.
 unsafe fn interop_map_buffer(
     num_agents: u32,
     agents: *mut HsaAgent,
@@ -961,6 +989,7 @@ unsafe fn interop_map_buffer(
     unsafe(export_name = "__hsa_impl_hsa_amd_interop_map_buffer")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Maps an external graphics buffer for HSA access.
 pub unsafe extern "C" fn hsa_amd_interop_map_buffer(
     num_agents: u32,
     agents: *mut HsaAgent,
@@ -994,6 +1023,7 @@ pub unsafe extern "C" fn hsa_amd_interop_map_buffer(
     unsafe(export_name = "__hsa_impl_hsa_amd_interop_map_buffer_with_size")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Maps an external graphics buffer with an explicit size.
 pub unsafe extern "C" fn hsa_amd_interop_map_buffer_with_size(
     num_agents: u32,
     agents: *mut HsaAgent,
@@ -1028,6 +1058,7 @@ pub unsafe extern "C" fn hsa_amd_interop_map_buffer_with_size(
     unsafe(export_name = "__hsa_impl_hsa_amd_interop_unmap_buffer")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Unmaps a graphics buffer imported through interop.
 pub extern "C" fn hsa_amd_interop_unmap_buffer(pointer: *mut c_void) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -1047,7 +1078,7 @@ pub extern "C" fn hsa_amd_interop_unmap_buffer(pointer: *mut c_void) -> Status {
             .interop_allocations
             .get(&key)
             .map_or(key, |memory| memory.description.agent_base);
-        if copy_borrowed(runtime, base) {
+        if runtime.memory_state.copy_borrowed(base) {
             return OUT_OF_RESOURCES;
         }
         if let Some(mut memory) = runtime.memory_state.interop_allocations.remove(&key) {
