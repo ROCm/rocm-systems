@@ -143,6 +143,8 @@ test_categories:
       - "Win*"
       # test/common/ProcessIsolatedTestRunner.cpp
       - "ProcessIsolatedRunnerMicrotest.*"
+      # test/host/host_test_dispatch.cc (rccl-UnitTestsMicroHostDispatch)
+      - "HostDispatch*"
     exclude_windows:
       - "*"
     labels:
