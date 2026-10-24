@@ -26,6 +26,7 @@
 #include "att_no_intercept.hpp"
 #include "config.hpp"
 #include "execution_profile.hpp"
+#include "finalization_gate.hpp"
 #include "graph_stack.hpp"
 #include "helper.hpp"
 #include "kernel_iteration_filter.hpp"
@@ -218,12 +219,12 @@ is_handled_signal(int signum)
 
 struct signal_worker_state
 {
-    int                   eventfd       = -1;   // handler -> worker wakeup fd
-    std::atomic<uint32_t> finalize_done = {};   // worker sets when flush done (futex word)
-    std::atomic<uint32_t> handling      = {0};  // 1 once our handler owns the path
-    std::atomic_flag      finalized     = ATOMIC_FLAG_INIT;  // runs finalize_rocprofv3 once
-    int                   signo         = {0};               // signal handled (0 == normal exit)
-    std::thread           thread        = {};                // the finalization worker
+    int                     eventfd       = -1;   // handler -> worker wakeup fd
+    std::atomic<uint32_t>   finalize_done = {};   // worker sets when flush done (futex word)
+    std::atomic<uint32_t>   handling      = {0};  // 1 once our handler owns the path
+    tool::finalization_gate finalization  = {};   // runs finalization once; others wait
+    int                     signo         = {0};  // signal handled (0 == normal exit)
+    std::thread             thread        = {};   // the finalization worker
 
     ~signal_worker_state() { join(); }
 
@@ -2481,20 +2482,26 @@ wait_peer_finished(const pid_t& pid, const pid_t& ppid)
 void
 finalize_rocprofv3(std::string_view context)
 {
-    auto& sw = get_signal_worker();
-    if(sw.finalized.test_and_set(std::memory_order_acq_rel))
+    using status_t = tool::finalization_gate::status;
+
+    // A caller waits for a finalization another thread started without a time limit, as it would
+    // for its own: a supervisor that will not wait that long kills the process anyway.
+    auto& sw     = get_signal_worker();
+    auto  status = sw.finalization.run_or_wait([context]() {
+        ROCP_INFO << "invoked: finalize_rocprofv3";
+        if(client_finalizer && client_identifier)
+        {
+            ROCP_INFO << "finalizing rocprofv3: caller='" << context << "'...";
+            client_finalizer(*client_identifier);
+            client_finalizer  = nullptr;
+            client_identifier = nullptr;
+        }
+    });
+
+    if(status != status_t::ran)
     {
         ROCP_INFO << "finalize_rocprofv3('" << context << "') ignored: already finalized";
         return;
-    }
-
-    ROCP_INFO << "invoked: finalize_rocprofv3";
-    if(client_finalizer && client_identifier)
-    {
-        ROCP_INFO << "finalizing rocprofv3: caller='" << context << "'...";
-        client_finalizer(*client_identifier);
-        client_finalizer  = nullptr;
-        client_identifier = nullptr;
     }
 
     // Join the worker thread (from atexit / rocprofv3_main; a call from the worker itself no-ops).
@@ -3750,6 +3757,51 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     // set_process_id should set process_start_ns unless it cannot read from /proc/<pid>/stat
     if(tool_metadata->process_start_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
+
+    // A fork() child without exec keeps this process's tool state. Give it its own identity so
+    // its output is not attributed to the parent and sibling children do not derive the same
+    // rocpd UUID from the parent's pid and start time. Also drop the records it inherits, which
+    // the parent already reports.
+    //
+    // Plain-fork child output is best-effort and requires traced API and marker producers to be
+    // quiescent at the fork boundary. The prepare handler drains records already buffered but
+    // does not stop another application thread from producing an SDK record before the kernel
+    // forks. Child attribution for records racing that boundary is unspecified. Applications
+    // requiring deterministic child profiling should use fork+exec/spawn or quiesce tracing
+    // activity before a plain fork.
+    static std::once_flag fork_handlers_once;
+    std::call_once(fork_handlers_once, []() {
+        const int status = pthread_atfork(
+            []() {
+                // Move records currently held by rocprofiler-sdk into the file buffers so a
+                // quiescent child does not deliver copies as its own records.
+                if(client_identifier)
+                {
+                    for(auto itr : get_buffers().as_array())
+                    {
+                        if(itr.handle == 0) continue;
+                        auto status = rocprofiler_flush_buffer(itr);
+                        ROCP_FATAL_IF(status != ROCPROFILER_STATUS_SUCCESS)
+                            << "failed to flush buffer " << itr.handle
+                            << " before fork: " << rocprofiler_get_status_string(status);
+                    }
+                }
+                tool::prepare_fork_file_buffers();
+            },
+            []() { tool::parent_fork_file_buffers(); },
+            []() {
+                common::reset_tid_after_fork();
+                if(tool_metadata)
+                {
+                    tool_metadata->process_id        = getpid();
+                    tool_metadata->parent_process_id = getppid();
+                    rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
+                }
+                tool::child_fork_file_buffers();
+            });
+        ROCP_FATAL_IF(status != 0)
+            << "failed to register rocprofv3 fork handlers: " << strerror(status);
+    });
 
     return 0;
 }
