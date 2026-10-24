@@ -39,6 +39,9 @@ import signal
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -80,6 +83,14 @@ OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 # The maxtext family needs a second image: its A/B baseline cannot be the stock
 # registry tag, which carries no Primus. See stage_maxtext_baseline().
 MAXTEXT_BASELINE_DOCKERFILE = "Dockerfile.maxtext-baseline"
+# Likewise for sglang-disagg, whose baseline is MAD's Dockerfile.
+SGLANG_BASELINE_DOCKERFILE = "Dockerfile.sglang-baseline"
+SGLANG_MAD_DOCKERFILE = "docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile"
+# Families whose baseline is built here rather than pulled as the stock tag.
+LOCAL_BASELINE_DOCKERFILES = {
+    "maxtext": MAXTEXT_BASELINE_DOCKERFILE,
+    "sglang-disagg": SGLANG_BASELINE_DOCKERFILE,
+}
 
 # Must not predate ROCm/madengine#213: the A/B runs madengine inside salloc.
 MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
@@ -274,6 +285,121 @@ WORKLOAD_CONFIGS = {
             "--ulimit memlock=-1 --ulimit nofile=1048576 "
             "-v /sys:/sys:ro -v /run/udev:/run/udev:ro",
     },
+    # The first inference workload: DeepSeek-R1 served disaggregated, two
+    # prefill and two decode nodes, KV cache moved by nixl. MoE all-to-all is
+    # left to RCCL (MOE_A2A_BACKEND=none) rather than MoRI, so expert traffic
+    # is what the candidate library carries.
+    #
+    # Both A/B images are MAD's sglang Dockerfile; see
+    # stage_sglang_baseline().
+    "deepseek-r1-sglang-disagg": {
+        "type": "inference",
+        "family": "sglang-disagg",
+        # madengine names each result row <this>_2p2d_isl<I>_osl<O>_con<C>.
+        "model_repo": "sglang-disagg-deepseek-r1",
+        # A ROCm SDK (TheRock) base, not a rocm7xx one: the candidate librccl
+        # is kpack-split, and a pre-kpack HIP runtime segfaults on it in
+        # ncclInitKernelsForDevice. No newer than sglang 0.5.18: 0.5.19 split
+        # --cuda-graph-bs into -decode/-prefill, and argparse rejects the
+        # plain flag MAD's models.yaml passes as ambiguous.
+        "base_image": "rocm/sgl-dev:v0.5.18-rocm10-mi35x-20260904",
+        "gpu_target": "gfx950",
+        "metric_key": "output_token_throughput_tok_s",
+        "metric_unit": "output tok/s of the whole 2P+2D deployment",
+        "multiple_results": "perf_sglang-disagg-DeepSeek-R1.csv",
+        # The sweep points that are scored, in place of precisions; the rest of
+        # the sweep is run and ignored. Only the highest concurrency: the lower
+        # ones are latency-bound and say little about the collectives.
+        "precisions": ["isl1024_osl1024_con64", "isl8192_osl1024_con64"],
+        "tags": ["pyt", "sglang", "disagg", "inference", "deepseek-r1"],
+        "model_args": "--model-name DeepSeek-R1 --model-path /models/DeepSeek-R1-0528 "
+            "--run-mori 1 --dp-mode 1 --xp 2 --yd 2 --gpus-per-node 8 "
+            "--kv-transfer-backend nixl",
+        "disagg": {"prefill_nodes": 2, "decode_nodes": 2},
+        "env_vars": {
+            "MODEL_NAME": "DeepSeek-R1",
+            "MODEL_PATH": "/models/DeepSeek-R1-0528",
+            "RUN_MORI": "1",
+            "DP_MODE": "1",
+            "MOE_A2A_BACKEND": "none",
+            "xP": "2",
+            "yD": "2",
+            "GPUS_PER_NODE": "8",
+            "KV_TRANSFER_BACKEND": "nixl",
+            # INFO for the same reason as the MaxText entry: at WARN only a
+            # communicator's rank 0 prints the version banner, and a server
+            # spanning two nodes has it on one of them.
+            "NCCL_DEBUG": "INFO",
+            "NCCL_DEBUG_SUBSYS": "INIT,NET",
+            # Thor2 settings the sglang stack runs with, over the cluster's.
+            "NCCL_IB_QPS_PER_CONNECTION": "1",
+            "NCCL_IB_USE_INLINE": "0",
+            "NCCL_IB_MERGE_NICS": "0",
+            "NCCL_IB_SPLIT_DATA_ON_QPS": "0",
+            "NCCL_IB_ADAPTIVE_ROUTING": "0",
+            "NCCL_GDR_FLUSH_DISABLE": "1",
+            "NCCL_DMABUF_ENABLE": "0",
+            "NCCL_IB_ROCE_VERSION_NUM": "2",
+            "IB_DEVICES": "bnxt_re0,bnxt_re1,bnxt_re2,bnxt_re3,"
+                "bnxt_re4,bnxt_re5,bnxt_re6,bnxt_re7",
+            "MORI_RDMA_DEVICES": "bnxt_re0,bnxt_re1,bnxt_re2,bnxt_re3,"
+                "bnxt_re4,bnxt_re5,bnxt_re6,bnxt_re7",
+            "MORI_SOCKET_IFNAME": "fenic0",
+            "MORI_IB_GID_INDEX": "3",
+            "MORI_JIT_CACHE_DIR": "/tmp/mori_jit",
+            "MORI_SHMEM_HEAP_SIZE": "17179869184",
+            "RDMAV_DRIVERS": "bnxt_re",
+            "IBV_DRIVERS": "bnxt_re",
+            "GPU_MAX_HW_QUEUES": "2",
+            "HSA_ENABLE_SDMA": "0",
+            "HSA_FORCE_FINE_GRAIN_PCIE": "1",
+            # The common OMP/TORCH_NCCL settings reach only the deployment
+            # env, not the container, and without OMP_NUM_THREADS each of the
+            # eight server processes per node sizes its pool to every core.
+            "OMP_NUM_THREADS": "8",
+            "TORCH_NCCL_HIGH_PRIORITY": "1",
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+            # Part of meta64 has less VRAM per GPU, and sglang refuses a TP
+            # group spanning both kinds ("The memory capacity is unbalanced").
+            # Off, it warns and sizes the KV pool by the smaller GPU; both A/B
+            # phases share the nodes, so the ratio is unaffected.
+            "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK": "0",
+            # A hang otherwise holds four nodes for two hours before failing.
+            "BARRIER_TIMEOUT_S": "1800",
+            "IP_SYNC_TIMEOUT": "1800",
+            "SMOKE": "0",
+            # A point is only 2 x concurrency requests, and one pass at
+            # isl1024 con64 moved 6.8% between two A/A phases on the same
+            # nodes. The parser keeps each point's best iteration, so three
+            # passes of just the gated points cost about what the full sweep
+            # did.
+            "BENCHMARK_ITR": "3",
+            "BENCHMARK_COMBINATIONS": "1024/1024 8192/1024",
+            "BENCHMARK_CONCURRENCY_LEVELS": "64",
+            "BENCHMARK_PRECHECK": "0",
+            "BENCHMARK_FAIL_FAST": "1",
+        },
+        # The image builds its own rdma-core 63 for Thor2; the host's 61
+        # mounted over it would put nixl and MoRI on a stack never run here.
+        "mount_host_ib_libs": False,
+        "required_nodes": 4,
+        "slurm_partition": "meta64",
+        "gpus_per_node": 8,
+        # One phase took 31 min by hand with the image cached; each phase here
+        # also builds, saves and loads it.
+        "time_limit": "03:00:00",
+        "docker_mounts": {
+            "/dev/infiniband": "/dev/infiniband",
+            "/sys/class/infiniband": "/sys/class/infiniband",
+        },
+        # --init: the launcher polls its servers with `kill -0`, which succeeds
+        # on a zombie, and without a reaping PID 1 every node exits 1 after a
+        # complete sweep.
+        "docker_run_options": "--init --privileged --group-add render --shm-size 64G "
+            "--device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 "
+            "--ulimit nofile=1048576:1048576 "
+            "-v /sys:/sys:ro -v /run/udev:/run/udev:ro -e SLURM_JOB_ID",
+    },
 }
 
 CLUSTER_CONFIGS = {
@@ -294,6 +420,8 @@ CLUSTER_CONFIGS = {
             "NCCL_DEBUG": "WARN",
         },
         "results_base": "/apps/rccl-ci/madengine/perf",
+        # Mounted read-only at /models for the inference workloads.
+        "models_dir": "/apps/data/models",
     },
 }
 
@@ -421,6 +549,9 @@ def install_madengine(work_dir: Path, family: str = "megatron") -> Path:
     if family == "maxtext":
         scripts_src = mad_dir / "scripts" / "jax-maxtext"
         scripts_name = "jax-maxtext"
+    elif family == "sglang-disagg":
+        scripts_src = mad_dir / "scripts" / "sglang_disagg"
+        scripts_name = "sglang_disagg"
     else:
         scripts_src = mad_dir / "scripts" / "primus_megatron-lm"
         if not scripts_src.is_dir():
@@ -433,18 +564,28 @@ def install_madengine(work_dir: Path, family: str = "megatron") -> Path:
         subprocess.run(["cp", "-r", str(scripts_src), str(scripts_dst)], check=True)
         log.info("Copied MAD %s scripts to %s", scripts_name, scripts_dst)
     elif not scripts_src.is_dir():
-        # Fatal for maxtext: the manifest points `scripts` at run.sh, and a
-        # missing one surfaces as a container-side "no such file" on every
-        # node instead of here. The megatron path keeps its historical warning.
+        # Fatal for maxtext and sglang: the manifest points `scripts` at
+        # run.sh, and a missing one surfaces as a container-side "no such
+        # file" on every node instead of here. The megatron path keeps its
+        # historical warning.
         if family == "maxtext":
             raise RuntimeError(
                 f"MAD jax-maxtext scripts not found at {scripts_src} -- "
                 f"MAD pin {MAD_REF[:12]} predates ROCm/MAD#228"
             )
+        if family == "sglang-disagg":
+            raise RuntimeError(
+                f"MAD sglang_disagg scripts not found at {scripts_src} -- "
+                f"MAD pin {MAD_REF[:12]} does not carry them"
+            )
         log.error("MAD primus scripts not found — expected at %s", scripts_src)
 
     if family == "maxtext":
         fetch_primus(mad_dir)
+    if family == "sglang-disagg" and not (mad_dir / SGLANG_MAD_DOCKERFILE).is_file():
+        raise RuntimeError(
+            f"MAD pin {MAD_REF[:12]} has no {SGLANG_MAD_DOCKERFILE}"
+        )
 
     result = subprocess.run(
         ["madengine", "--version"],
@@ -610,11 +751,27 @@ def squash_log_spam(run_dir: Path) -> int:
     return saved
 
 
+def rccl_banner_logs(work_dir: Path) -> list[Path]:
+    """One log per node of a phase, the one its RCCL version banner lands in.
+
+    madengine's per-node logs, unless the phase has sglang server logs: that
+    launcher sends the servers' output, and with it the banner, to /run_logs
+    (one prefill or decode log per node) instead.
+    """
+    log_dir = work_dir / "slurm_output"
+    if not log_dir.is_dir():
+        return []
+    server_logs = sorted(
+        p for p in log_dir.glob("run_logs/*/*_NODE*.log")
+        if p.name.startswith(("prefill_", "decode_"))
+    )
+    return server_logs or sorted(log_dir.glob("*node_*.out"))
+
+
 def runtime_rccl_versions(work_dir: Path) -> list[str]:
     """Distinct ``RCCL version :`` banners across one phase's node logs."""
-    log_dir = work_dir / "slurm_output"
     versions: list[str] = []
-    for log_file in sorted(log_dir.glob("*node_*.out")) if log_dir.is_dir() else []:
+    for log_file in rccl_banner_logs(work_dir):
         for v in re.findall(r"RCCL version\s*:\s*(\S+)", log_file.read_text(errors="replace")):
             if v not in versions:
                 versions.append(v)
@@ -629,8 +786,8 @@ def verify_rccl_replacement(
 ) -> tuple[bool, str]:
     """Verify that every node used the CI-built RCCL, not its bundled copy.
 
-    Requires a ``*_node_<i>.out`` log from each of the *nodes* nodes; a library
-    that reached only some of them fails.
+    Requires a banner log (rccl_banner_logs) from each of the *nodes* nodes;
+    a library that reached only some of them fails.
 
     Returns (ok, message).  Generic across frameworks — any RCCL-based
     application prints the version string during init.
@@ -638,14 +795,13 @@ def verify_rccl_replacement(
     if not expected.get("version"):
         return True, "No RCCL version to verify"
 
-    log_dir = work_dir / "slurm_output"
-    node_logs = sorted(log_dir.glob("*node_*.out")) if log_dir.is_dir() else []
+    node_logs = rccl_banner_logs(work_dir)
     if not node_logs:
         return False, "No node logs found — cannot verify RCCL"
     logged = {
         int(m.group(1))
         for log_file in node_logs
-        if (m := re.search(r"_node_(\d+)\.out$", log_file.name))
+        if (m := re.search(r"_(?:node_|NODE)(\d+)\.(?:out|log)$", log_file.name))
     }
     missing = sorted(set(range(nodes)) - logged)
     if missing:
@@ -787,6 +943,14 @@ def _librccl_swap_snippet(bridge: str = "", kpack: bool = False) -> str:
       matters for the same reason in reverse: that destination resolves through
       the loader's search path, and leaving ours behind would silently change
       where its dependencies come from.
+
+      The tag is kept too: patchelf writes DT_RUNPATH unless told otherwise,
+      and DT_RPATH, which the SDK wheels' librccl carries, outranks
+      LD_LIBRARY_PATH while DT_RUNPATH does not. In the rocm10 sgl-dev image,
+      LD_LIBRARY_PATH names _rocm_sdk_devel/lib, which holds its own copy of
+      libamd_smi.so.27. As a RUNPATH the swapped library loads that copy next
+      to the _rocm_sdk_core one amdsmi uses. The two interpose on each other,
+      amdsmi then reports no GPUs, and so does torch.cuda.device_count().
     * **The gate compares unresolved sonames by LIBRARY, not by exact name**,
       per target, before and after. Counts alone are not enough -- dropping one
       missing soname while introducing another leaves the count unchanged. An
@@ -852,9 +1016,10 @@ RUN set -e; \\
     while read -r t; do \\
       [ "$(readlink -f "$t")" = "$canon_src" ] && continue; \\
       rp="$(patchelf --print-rpath "$t" 2>/dev/null || true)"; \\
-      echo "  overwrite: $t (rpath: ${{rp:-none}})"; \\
+      if readelf -d "$t" 2>/dev/null | grep -qF '(RPATH)'; then tag=--force-rpath; else tag=; fi; \\
+      echo "  overwrite: $t (rpath: ${{rp:-none}}${{tag:+, kept as DT_RPATH}})"; \\
       cp -fL --remove-destination "$SRC" "$t"; \\
-      if [ -n "$rp" ]; then patchelf --set-rpath "$rp" "$t" || \\
+      if [ -n "$rp" ]; then patchelf $tag --set-rpath "$rp" "$t" || \\
         {{ echo "GATE FAIL: could not restore RUNPATH on $t"; exit 1; }}; \\
       else patchelf --remove-rpath "$t" || \\
         {{ echo "GATE FAIL: could not clear RUNPATH on $t"; exit 1; }}; fi; \\
@@ -955,53 +1120,83 @@ def _stage_primus_context(ctx_dir: Path, primus_dir: Path) -> None:
         raise RuntimeError(f"failed to stage Primus from {primus_dir}")
 
 
+# What `docker pull` accepts, so the digest is the one a pull by tag would
+# record in RepoDigests: the index for a multi-arch tag, else the manifest.
+_MANIFEST_MEDIA_TYPES = ", ".join((
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+))
+
+
+def registry_digest(image: str, timeout: int = 60) -> str:
+    """*image* pinned by digest as its registry serves it now, or "" on failure.
+
+    Asks the registry for the manifest digest and downloads no layer: the
+    runner host's disk is shared by every runner on it and has no room for a
+    base image (the sgl-dev one is 27 GB compressed), and nothing there would
+    use it.
+    """
+    if "@sha256:" in image:
+        return image
+    name, _, tag = image.rpartition(":")
+    if not name or "/" in tag:
+        name, tag = image, "latest"
+    first, _, rest = name.partition("/")
+    if rest and ("." in first or ":" in first or first == "localhost"):
+        host, path = first, rest
+    else:
+        host, path = "registry-1.docker.io", name if rest else f"library/{name}"
+    url = f"https://{host}/v2/{path}/manifests/{tag}"
+    headers = {"Accept": _MANIFEST_MEDIA_TYPES}
+    try:
+        try:
+            req = urllib.request.Request(url, headers=headers, method="HEAD")
+            resp = urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            challenge = exc.headers.get("WWW-Authenticate", "")
+            if exc.code != 401 or not challenge.startswith("Bearer "):
+                raise
+            params = dict(re.findall(r'(\w+)="([^"]*)"', challenge))
+            realm = params.pop("realm")
+            params.setdefault("scope", f"repository:{path}:pull")
+            token_url = f"{realm}?{urllib.parse.urlencode(params)}"
+            with urllib.request.urlopen(token_url, timeout=timeout) as tok:
+                body = json.load(tok)
+            headers["Authorization"] = (
+                f"Bearer {body.get('token') or body.get('access_token')}"
+            )
+            req = urllib.request.Request(url, headers=headers, method="HEAD")
+            resp = urllib.request.urlopen(req, timeout=timeout)
+        with resp:
+            digest = resp.headers.get("Docker-Content-Digest", "")
+    except (OSError, ValueError, KeyError) as exc:
+        log.warning("Could not get the registry digest of %s: %s", image, exc)
+        return ""
+    return f"{name}@{digest}" if digest.startswith("sha256:") else ""
+
+
 def resolve_base_digest(base_image: str) -> str:
-    """Return *base_image* pinned by digest, without pulling it.
+    """*base_image* pinned by digest, for both A/B Dockerfiles.
 
     Both A/B images must come from the same base, and a tag cannot promise
-    that: the baseline and the candidate are separate `docker build`
-    invocations, and `rocm/jax-training:maxtext-v26.6` is mutable. Adding
-    `--pull` to both would only narrow the window, not close it -- a push
-    between the two builds still splits the pair. A digest is immutable, so
+    that: each phase builds its own image on the compute nodes, and
+    `rocm/jax-training:maxtext-v26.6` is mutable. A digest is immutable, so
     resolving it once and writing it into both Dockerfiles closes it.
 
-    The query goes to the registry, not to a local copy: this host builds no
-    images and has no use for a multi-GB base, and every runner on it shares
-    one Docker disk. The nodes do the pulling, once each, as part of their
-    own build.
-
-    Falls back to the tag when the digest cannot be resolved -- a locally
-    built base has nothing remote to pin to, and an unreachable registry is
-    not worth failing the run over this far ahead of the allocation.
+    Falls back to the tag when the registry cannot tell.
     """
-    repo = base_image.split("@", 1)[0].rsplit(":", 1)[0]
-    probes = (
-        ["docker", "buildx", "imagetools", "inspect",
-         "--format", "{{.Manifest.Digest}}", base_image],
-        # Already-pulled bases still resolve, so a host that happens to carry
-        # one does not depend on the registry being reachable.
-        ["docker", "image", "inspect",
-         "--format", "{{index .RepoDigests 0}}", base_image],
-    )
-    for probe in probes:
-        try:
-            result = subprocess.run(probe, capture_output=True, text=True, timeout=120)
-        except (OSError, subprocess.SubprocessError) as exc:
-            log.debug("%s failed: %s", probe[1], exc)
-            continue
-        out = result.stdout.strip()
-        if result.returncode != 0 or "sha256:" not in out:
-            continue
-        digest = out if "@sha256:" in out else f"{repo}@{out}"
-        log.info("Base pinned for both A/B images: %s", digest)
-        return digest
-
-    log.warning(
-        "Could not resolve a digest for %s; both A/B images will use the tag. "
-        "They are built minutes apart, so a push in between would split the pair.",
-        base_image,
-    )
-    return base_image
+    digest = registry_digest(base_image)
+    if not digest:
+        log.warning(
+            "No digest for %s; both A/B images will use the tag, so a push "
+            "between the two phases' builds would split the pair.",
+            base_image,
+        )
+        return base_image
+    log.info("Base pinned for both A/B images: %s", digest)
+    return digest
 
 
 def base_identity(from_ref: str) -> str:
@@ -1028,11 +1223,6 @@ def stage_maxtext_baseline(
 ) -> str:
     """Stage the A/B baseline for the MaxText family: Primus, stock RCCL.
 
-    Writes the Dockerfile and its build context under ``overlay_ctx`` and
-    returns the tag, exactly as stage_rccl_overlay() does for the candidate.
-    Nothing is built here: the baseline manifest advertises this Dockerfile,
-    so node 0 of the allocation builds it and the others load it.
-
     The Megatron workloads use the stock registry image as their baseline, but
     that cannot work here: ``rocm/jax-training:maxtext-*`` ships MaxText and no
     Primus, so ``scripts/jax-maxtext/run.sh`` would not find ``primus-cli`` and
@@ -1042,6 +1232,9 @@ def stage_maxtext_baseline(
     That makes the pair *tighter* than the Megatron A/B rather than looser: the
     two images differ by the librccl swap alone, which is exactly the variable
     the ratio is supposed to isolate.
+
+    Only the Dockerfile and its context are written here; node 0 of the
+    allocation builds the image and the other nodes load it.
     """
     ctx_dir = work_dir / OVERLAY_CTX
     ctx_dir.mkdir(exist_ok=True)
@@ -1050,13 +1243,60 @@ def stage_maxtext_baseline(
     dockerfile = ctx_dir / MAXTEXT_BASELINE_DOCKERFILE
     dockerfile.write_text(f"FROM {from_ref}\n\n{MAXTEXT_PRIMUS_PAYLOAD}")
 
-    # Tagged per A/B run, with the same token the candidate carries: the nodes
-    # rebuild on a tag they cannot find, and a tag shared with an earlier run
-    # would let one of them skip that build and pair a fresh candidate with a
-    # stale baseline -- breaking the one invariant this pair exists to hold,
-    # that the two differ by the RCCL swap alone.
+    # A per-run tag, with the same token the candidate uses: a node holding an
+    # image under a reused tag would skip the build and could pair a fresh
+    # candidate with a stale baseline, breaking the one invariant this pair
+    # exists to hold -- that the two differ by the RCCL swap alone.
     tag = f"{base_image}-primus-{PRIMUS_REF}-{run_token}-{base_identity(from_ref)}"
-    log.info("MaxText baseline staged for the nodes to build: %s", tag)
+    log.info("MaxText baseline (Primus, stock RCCL), built on the nodes: %s", tag)
+    return tag
+
+
+# MAD's Dockerfile ends with `dpkg -r --force-all` on the distro rdma-core,
+# which leaves apt unusable, so the swap's patchelf has to come from pip.
+# Pinned to the version the MaxText swap gets from apt: the 0.19.1 the
+# rocm10 sgl-dev venv ships refuses to set a RUNPATH on the kpack-split
+# librccl ("section content is not naturally aligned").
+SGLANG_SWAP_TOOLS = "RUN pip install --no-cache-dir patchelf==0.18.0.0\n"
+
+
+def sglang_recipe(mad_dir: Path, from_ref: str) -> str:
+    """MAD's sglang Dockerfile on *from_ref*, plus what the RCCL swap needs.
+
+    The base becomes a literal FROM rather than the ARG default, so no build
+    argument can move it off the digest both A/B images were pinned to.
+    """
+    text = (mad_dir / SGLANG_MAD_DOCKERFILE).read_text()
+    pinned, count = re.subn(
+        r"(?m)^FROM \$\{?BASE_DOCKER\}?\s*$", f"FROM {from_ref}", text
+    )
+    if count != 1:
+        raise RuntimeError(
+            f"{SGLANG_MAD_DOCKERFILE} at MAD {MAD_REF[:12]} has {count} "
+            f"`FROM $BASE_DOCKER` lines, expected 1"
+        )
+    return f"{pinned}\n{SGLANG_SWAP_TOOLS}"
+
+
+def stage_sglang_baseline(
+    base_image: str,
+    work_dir: Path,
+    run_token: str,
+    from_ref: str,
+) -> str:
+    """Stage the A/B baseline for sglang-disagg: MAD's image, stock RCCL.
+
+    The base alone is not what MAD runs: its Dockerfile adds rdma-core 63,
+    without which queue-pair creation fails on Thor2. Built on the nodes and
+    tagged like the MaxText baseline, for the same reasons.
+    """
+    ctx_dir = work_dir / OVERLAY_CTX
+    ctx_dir.mkdir(exist_ok=True)
+    dockerfile = ctx_dir / SGLANG_BASELINE_DOCKERFILE
+    dockerfile.write_text(sglang_recipe(work_dir / "MAD", from_ref))
+
+    tag = f"{base_image}-mad-{MAD_REF[:8]}-{run_token}-{base_identity(from_ref)}"
+    log.info("sglang baseline (MAD recipe, stock RCCL), built on the nodes: %s", tag)
     return tag
 
 
@@ -1080,7 +1320,7 @@ def stage_rccl_overlay(
     """
     rccl_commit = get_rccl_commit(rccl_lib)
     tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}"
-    if family == "maxtext" and from_ref:
+    if family in ("maxtext", "sglang-disagg") and from_ref:
         # Same identity the baseline carries, for the same reason: the run id
         # alone survives a re-run, so without this the candidate could hit the
         # previous attempt's image and skip its build while the baseline was
@@ -1153,6 +1393,18 @@ def stage_rccl_overlay(
         # ratio would then be measuring more than RCCL.
         dockerfile.write_text(
             f"FROM {from_ref or base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}\n"
+            f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\nENV NCCL_DEBUG=WARN\n"
+        )
+    elif family == "sglang-disagg":
+        # The baseline's recipe plus the swap, as for MaxText: the sgl-dev
+        # base does not have the Primus image's layout, so the targets are
+        # discovered rather than assumed.
+        swap = _librccl_swap_snippet(
+            bridge=_soname_bridge_discovered(rccl_needed),
+            kpack=has_kpack_files,
+        )
+        dockerfile.write_text(
+            f"{sglang_recipe(work_dir / 'MAD', from_ref or base_image)}\n"
             f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\nENV NCCL_DEBUG=WARN\n"
         )
     elif uses_kpack:
@@ -1252,6 +1504,8 @@ def generate_manifest(
     family = workload_config.get("family", "megatron")
     if family == "maxtext":
         scripts_dir = work_dir / "scripts" / "jax-maxtext"
+    elif family == "sglang-disagg":
+        scripts_dir = work_dir / "scripts" / "sglang_disagg"
     else:
         scripts_dir = work_dir / "scripts" / "primus_megatron-lm"
         if not scripts_dir.is_dir():
@@ -1265,6 +1519,8 @@ def generate_manifest(
         extra_args = workload_config.get("model_args_extra", "")
         if extra_args:
             model_args += f" {extra_args}"
+    elif family == "sglang-disagg":
+        model_args = workload_config["model_args"]
     else:
         model_args = f"--model_repo {model_repo}"
 
@@ -1291,7 +1547,9 @@ def generate_manifest(
     # /usr/lib64/libibverbs/ so the providers must appear there.
     # The library itself replaces the container's copy so the linker
     # picks it up from the standard search path.
-    if cluster_config.get("mount_host_ib_libs"):
+    if cluster_config.get("mount_host_ib_libs") and workload_config.get(
+        "mount_host_ib_libs", True
+    ):
         docker_run_opts += (
             " -v /usr/lib64/libibverbs.so.1"
             ":/usr/lib/x86_64-linux-gnu/libibverbs.so.1:ro"
@@ -1299,6 +1557,20 @@ def generate_manifest(
             " -v /usr/lib64/libibumad.so.3"
             ":/usr/lib/x86_64-linux-gnu/libibumad.so.3:ro"
         )
+
+    if family == "sglang-disagg":
+        # The launcher writes its server logs, and the RCCL banner the
+        # candidate is verified by, to /run_logs/$SLURM_JOB_ID. Both phases
+        # share one job id, so each gets its own directory. It must be shared
+        # storage and world-writable: Docker runs as root, which a
+        # root-squashed NFS maps to nobody.
+        run_logs = (run_dir or work_dir) / "slurm_output" / "run_logs"
+        run_logs.mkdir(parents=True, exist_ok=True)
+        run_logs.chmod(0o777)
+        docker_run_opts += f" -v {run_logs}:/run_logs"
+        # Read-only: run.sh downloads the weights into MODEL_PATH when they
+        # look incomplete, and that must fail rather than fill shared storage.
+        docker_run_opts += f" -v {cluster_config['models_dir']}:/models:ro"
 
     # When --skip-overlay-build is used the base image still has its
     # bundled RCCL.  Bind-mount the CI-built librccl.so (and kpack
@@ -1309,9 +1581,9 @@ def generate_manifest(
         # do not exist, and `docker run -v` CREATES a missing source as an empty
         # root-owned directory rather than refusing -- so the run would look
         # healthy while measuring the image's own RCCL. Refuse instead.
-        if family == "maxtext":
+        if family in ("maxtext", "sglang-disagg"):
             raise RuntimeError(
-                "--skip-overlay-build is not supported for the maxtext family: "
+                f"--skip-overlay-build is not supported for the {family} family: "
                 "the bind-mount targets are Primus-image paths absent from "
                 + workload_config["base_image"] + ", and Docker would silently "
                 "mount empty directories over nothing. Build the overlay."
@@ -1417,7 +1689,7 @@ def generate_manifest(
             "target": "slurm",
             "slurm": slurm_config,
             "distributed": {
-                "launcher": "primus",
+                "launcher": "sglang-disagg" if family == "sglang-disagg" else "primus",
                 "backend": "nccl",
                 "port": 29500,
                 "nnodes": nodes,
@@ -1435,6 +1707,11 @@ def generate_manifest(
                         }
                     }
                     if family == "maxtext"
+                    else {}
+                ),
+                **(
+                    {"sglang_disagg": workload_config["disagg"]}
+                    if family == "sglang-disagg"
                     else {}
                 ),
             },
@@ -1492,21 +1769,6 @@ REPRO_MANIFESTS = {
 THEROCK_ARTIFACT_BUCKET = "therock-ci-artifacts-external"
 
 
-def local_repo_digest(image: str) -> str:
-    """*image* pinned by digest as the local daemon knows it, or "" if it cannot tell.
-
-    Never pulls: this only records what the head node built from.
-    """
-    if "@sha256:" in image:
-        return image
-    result = subprocess.run(
-        ["docker", "image", "inspect", "--format", "{{index .RepoDigests 0}}", image],
-        capture_output=True, text=True,
-    )
-    digest = result.stdout.strip()
-    return digest if result.returncode == 0 and "@sha256:" in digest else ""
-
-
 def repro_manifest(manifest: dict, work_dir: Path) -> dict:
     """*manifest* with its build paths made relative to the bundle root.
 
@@ -1531,6 +1793,14 @@ def repro_manifest(manifest: dict, work_dir: Path) -> dict:
         model = out.get("built_models", {}).get(key)
         if model is not None:
             model["dockercontext"] = OVERLAY_CTX
+    # The CI phase directory is gone by then; a rerun salloc's from its copy.
+    for model in out.get("built_models", {}).values():
+        if "additional_docker_run_options" in model:
+            model["additional_docker_run_options"] = re.sub(
+                r"-v \S+/slurm_output/run_logs:/run_logs",
+                "-v ${SLURM_SUBMIT_DIR}/slurm_output/run_logs:/run_logs",
+                model["additional_docker_run_options"],
+            )
     return out
 
 
@@ -1640,10 +1910,14 @@ the refs, image digests and cluster settings. The run's own numbers are in the
 
 - The baseline phase is `manifest.baseline.repro.json`. Run it from a second copy
   of this directory: each phase writes `perf.csv` and `slurm_output/` to its cwd.
+- An sglang-disagg run also needs `mkdir -m 0777 -p slurm_output/run_logs` in
+  each copy before `salloc`, and the weights under `/models` as the manifest
+  mounts them.
 - To shorten a Megatron run, add `"PRIMUS_TRAIN_ITERS": "15"` to both
   `context.docker_env_vars` and `deployment_config.env_vars`.
-- `BASE_DIGEST` is the base the CI head node built from. The nodes build from
-  `BASE_IMAGE` by tag; if the base has moved since, the image differs.
+- `BASE_DIGEST` is what `BASE_IMAGE` pointed to when CI ran. MaxText and
+  sglang-disagg images build from that digest; Megatron ones from `BASE_IMAGE`
+  by tag, so if the base has moved since, the image differs.
 """
 
 
@@ -1695,6 +1969,38 @@ def write_repro_bundle(
     log.info("Repro bundle written to: %s", bundle)
     return bundle
 
+
+# The sglang launcher reaches every node at the address DNS gives its name and
+# binds its barrier to the node's own one, so a stale record leaves rank 0
+# waiting out BARRIER_TIMEOUT_S for a node that is up and never answers.
+PREFLIGHT_DNS = """\
+#!/bin/bash
+h=$(hostname -s)
+ip=$(getent ahostsv4 "$h" | awk 'NR==1 {print $1}')
+if [ -n "$ip" ] && hostname -I | tr ' ' '\\n' | grep -qxF "$ip"; then
+    echo "  ok   $h -> $ip"
+else
+    echo "  BAD  $h -> ${ip:-unresolved}, not an address of this node"
+    exit 1
+fi
+"""
+
+# sglang's nixl backend registers every KV-cache buffer with every RDMA NIC,
+# and each bnxt_re registration needs physically contiguous host memory (an
+# order-9 allocation). On a node whose RAM is nearly all page cache those fail
+# -- "bnxt_re3: Failed to register user MR - rc = -12" in dmesg -- and the
+# server that hits one dies at startup with NIXL_ERR_BACKEND. The nodes are
+# held exclusively, so drop the clean page cache and compact before each phase.
+# Best effort: without passwordless sudo the phase runs as before.
+RELEASE_HOST_MEMORY = """\
+#!/bin/bash
+if sudo -n sh -c 'sync; echo 1 > /proc/sys/vm/drop_caches; echo 1 > /proc/sys/vm/compact_memory'; then
+    echo "  ok   $(hostname -s) free=$(free -g | awk '/^Mem:/ {print $4}')G"
+else
+    echo "  skip $(hostname -s): no passwordless sudo"
+fi
+exit 0
+"""
 
 # Run on every node after both phases. Container output is root-owned, so the
 # workspace is removed from inside a local image (never pulled); $1 is kept.
@@ -1787,10 +2093,30 @@ def run_ab_in_one_allocation(
         "  exit 3",
         "}",
     ]
-    for phase, run_dir in phases:
+    if workload_config.get("family") == "sglang-disagg":
+        dns_check = work_dir / "ab" / "preflight_dns.sh"
+        dns_check.parent.mkdir(parents=True, exist_ok=True)
+        dns_check.write_text(PREFLIGHT_DNS)
         script_lines += [
-            "",
-            f'echo "===== phase: {phase} ====="',
+            'echo "===== preflight: every node resolves to an address it owns ====="',
+            'srun --ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1 '
+            f"--overlap bash {shlex.quote(str(dns_check))} || {{",
+            '  echo "::error::At least one allocated node resolves to an address '
+            'it does not have (see BAD above); the sglang barrier would wait for '
+            'it until timeout. Exclude it via MADENGINE_SLURM_EXCLUDE."',
+            "  exit 3",
+            "}",
+        ]
+        release_memory = work_dir / "ab" / "release_host_memory.sh"
+        release_memory.write_text(RELEASE_HOST_MEMORY)
+    for phase, run_dir in phases:
+        script_lines += ["", f'echo "===== phase: {phase} ====="']
+        if workload_config.get("family") == "sglang-disagg":
+            script_lines.append(
+                'srun --ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1 '
+                f"--overlap bash {shlex.quote(str(release_memory))}"
+            )
+        script_lines += [
             f"cd {shlex.quote(str(run_dir))} || exit 1",
             "madengine run -m manifest.json -o perf.csv --live-output --verbose",
             "echo $? > " + shlex.quote(str(run_dir / "exit_code")),
@@ -1826,6 +2152,15 @@ def run_ab_in_one_allocation(
     qos = cluster_config.get("slurm_qos", "")
     if qos:
         cmd += ["--qos", qos]
+    # Set from a repository variable by the workflow: the nodes to avoid are
+    # the cluster's business and their names do not belong in this file.
+    exclude = os.environ.get("MADENGINE_SLURM_EXCLUDE", "").strip()
+    if exclude:
+        if not re.fullmatch(r"[A-Za-z0-9_.,\[\]-]+", exclude):
+            raise RuntimeError(
+                f"MADENGINE_SLURM_EXCLUDE is not a SLURM hostlist: {exclude!r}"
+            )
+        cmd += ["--exclude", exclude]
     cmd += ["bash", str(script_path)]
 
     log.info("Running: %s", " ".join(cmd))
@@ -1997,6 +2332,24 @@ def parse_live_log_metrics(work_dir: Path) -> list[dict]:
     return runs
 
 
+_SWEEP_POINT_RE = re.compile(r"_(isl\d+_osl\d+_con\d+)$")
+
+
+def _row_precision(row: dict) -> str:
+    """The key a result row is paired on: its precision, or its sweep point.
+
+    An inference sweep has no precision; its rows are named
+    ``<model>_<xPyD>_isl<I>_osl<O>_con<C>``, and the point is what the two
+    phases have in common.
+    """
+    precision = (row.get("training_precision")
+                 or row.get("multi_results", {}).get("precision", ""))
+    if precision:
+        return precision
+    point = _SWEEP_POINT_RE.search(row.get("model", ""))
+    return point.group(1) if point else ""
+
+
 def _usable_metric(val: float) -> bool:
     """Whether a throughput can be scored; NaN would pass any threshold."""
     return math.isfinite(val) and val > 0
@@ -2007,8 +2360,12 @@ def collect_phase_results(
     metric_key: str,
     extra_aliases: set[str] | None = None,
     extra_tflops_aliases: set[str] | None = None,
+    only: list[str] | None = None,
 ) -> list[dict]:
-    """Per-precision metrics for one phase: structured output, else the live log."""
+    """Per-precision metrics for one phase: structured output, else the live log.
+
+    *only* keeps the rows of those precisions (sweep points) and drops the rest.
+    """
     perf_results = parse_perf_results(run_dir)
     results: list[dict] = []
 
@@ -2030,8 +2387,9 @@ def collect_phase_results(
             if row.get("metric") not in accepted_metrics:
                 continue
             perf_val = row.get("performance", "")
-            precision = (row.get("training_precision")
-                         or row.get("multi_results", {}).get("precision", ""))
+            precision = _row_precision(row)
+            if only is not None and precision not in only:
+                continue
             row_status = row.get("status", "")
             if not perf_val:
                 continue
@@ -2063,8 +2421,7 @@ def collect_phase_results(
         for row in perf_results:
             if row.get("metric") not in accepted_tflops:
                 continue
-            prec = (row.get("training_precision")
-                    or row.get("multi_results", {}).get("precision", ""))
+            prec = _row_precision(row)
             try:
                 tflops_by_precision[prec] = float(row["performance"])
             except (KeyError, ValueError, TypeError):
@@ -2226,6 +2583,7 @@ def generate_summary_report(
     nodelist: str = "",
     job_id: str = "",
     phase_rccl: dict[str, str] | None = None,
+    unit: str = "tok/s/GPU",
 ) -> str:
     """Generate a plain-text summary report."""
     status = "PASSED" if exit_code == 0 else "FAILED"
@@ -2246,7 +2604,7 @@ def generate_summary_report(
         "Both numbers below were measured on those same nodes, back to back,",
         "inside one allocation. Baseline is the stock image; candidate is the",
         "same image with the CI-built RCCL laid over it. Throughput in",
-        "tok/s/GPU.",
+        f"{unit}.",
         "",
     ]
 
@@ -2396,7 +2754,7 @@ def main() -> None:
     # Resolved once and written into both A/B Dockerfiles, so the pair cannot
     # straddle a push to the mutable base tag between the two builds.
     base_ref = ""
-    if family == "maxtext" and not args.skip_overlay_build:
+    if family in ("maxtext", "sglang-disagg") and not args.skip_overlay_build:
         base_ref = resolve_base_digest(workload_config["base_image"])
 
     # Step 3: Stage the candidate image (or use pre-built). Images are built on
@@ -2431,6 +2789,13 @@ def main() -> None:
             from_ref=base_ref or workload_config["base_image"],
         )
         baseline_pull_only = False
+    elif family == "sglang-disagg":
+        baseline_image = stage_sglang_baseline(
+            workload_config["base_image"], work_dir,
+            run_token=rccl_commit,
+            from_ref=base_ref or workload_config["base_image"],
+        )
+        baseline_pull_only = False
     else:
         baseline_image = workload_config["base_image"]
         baseline_pull_only = True
@@ -2456,14 +2821,14 @@ def main() -> None:
             ),
             run_dir=run_dir,
             pull_only=pull_only,
-            # A maxtext baseline is a locally built image, so its manifest is
-            # on the build-capable path and must advertise ITS OWN dockerfile.
-            # Left at the default it would hand a node the candidate recipe
-            # and have it rebuild the swapped image under the baseline tag --
-            # an A/B comparing the CI RCCL against itself.
+            # A maxtext baseline is built on the nodes, so its manifest must
+            # advertise ITS OWN dockerfile. Left at the default it would hand
+            # a node the candidate recipe and have it build the swapped image
+            # under the baseline tag -- an A/B comparing the CI RCCL against
+            # itself.
             dockerfile_name=(
-                MAXTEXT_BASELINE_DOCKERFILE
-                if family == "maxtext" and phase == BASELINE
+                LOCAL_BASELINE_DOCKERFILES.get(family, OVERLAY_DOCKERFILE)
+                if phase == BASELINE
                 else OVERLAY_DOCKERFILE
             ),
         )
@@ -2479,7 +2844,7 @@ def main() -> None:
             work_dir, phase_dirs, args.workload, workload_config, cluster_config,
             args.nodes, rccl_fingerprint,
             images={BASELINE: baseline_image, CANDIDATE: overlay_image},
-            base_digest=base_ref or local_repo_digest(workload_config["base_image"]),
+            base_digest=base_ref or registry_digest(workload_config["base_image"]),
         )
     except Exception:
         log.exception("Could not write the repro bundle; continuing without it")
@@ -2532,6 +2897,9 @@ def main() -> None:
             run_dir, metric_key,
             extra_aliases=workload_config.get("metric_aliases"),
             extra_tflops_aliases=workload_config.get("tflops_aliases"),
+            # A sweep reports many points; only the configured ones are scored.
+            only=(workload_config["precisions"]
+                  if workload_config["type"] == "inference" else None),
         )
 
         # Matrix legs share GITHUB_RUN_ID, so the workload keeps them apart.
@@ -2633,7 +3001,10 @@ def main() -> None:
                     extra=phase_extra,
                     precision=c["precision"],
                     tflops=row.get("tflops_avg"),
-                    tokens_per_sec=row.get("metric_value"),
+                    # Per GPU for training only; inference scores the whole
+                    # deployment, and metric_value already carries that.
+                    tokens_per_sec=(row.get("metric_value")
+                                    if workload_config["type"] == "training" else None),
                 )
     else:
         append_result(
@@ -2658,6 +3029,7 @@ def main() -> None:
             phase: ", ".join(runtime_rccl_versions(run_dir))
             for phase, run_dir in phases
         },
+        unit=workload_config.get("metric_unit", "tok/s/GPU"),
     )
     log.info("\n%s", report)
     write_github_summary(report)

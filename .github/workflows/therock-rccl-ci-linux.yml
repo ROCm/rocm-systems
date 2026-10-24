@@ -316,6 +316,11 @@ jobs:
           - workload: llama-3.1-405b-maxtext
             nodes: '4'
             job_timeout_minutes: '450'
+          # 4 nodes: two prefill, two decode. 330 is its 3 h time_limit plus
+          # the same 90 minutes.
+          - workload: deepseek-r1-sglang-disagg
+            nodes: '4'
+            job_timeout_minutes: '330'
     uses: ./.github/workflows/therock-rccl-test-madengine.yml
     secrets: inherit
     with:
