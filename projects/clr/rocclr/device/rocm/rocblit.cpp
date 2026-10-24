@@ -1191,8 +1191,13 @@ void DmaBlitManager::releaseBuffer(BufferState& buffer) const {
 bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDst, size_t size,
                                            bool hostToDev, amd::CopyMetadata& copyMetadata,
                                            bool enablePin) const {
-  // Do not skip wait here for D2H. Resolving dependent signals for SDMA engine is slow
-  gpu().releaseGpuMemoryFence(hostToDev || !dev().settings().blocking_blit_);
+  // D2H: wait when blocking_blit_ is set — resolving dependent signals for SDMA is slow.
+  // H2D: the staging path's CPU memcpy races with pending host callbacks (e.g.
+  // hipLaunchHostFunc writing to hostSrc).  The pinned/SDMA path is ordered by signal
+  // dependencies and does not need a CPU wait, so the fence is deferred to the staging
+  // path below.
+  const bool skip_wait = hostToDev || !dev().settings().blocking_blit_;
+  gpu().releaseGpuMemoryFence(skip_wait);
   // If Pinning is enabled, Pin host Memory for copy size > MinSizeForPinnedTransfer
   // For 16KB < size <= MinSizeForPinnedTransfer Use staging buffer without pinning
   bool status = true;
@@ -1220,6 +1225,11 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
     }
     if (hostToDev) {                          // H2D Path
       if (outBuffer.pinnedMem_ == nullptr) {  // Copy to Staging Buffer
+        // Wait for prior GPU work before the CPU reads hostSrc — a host-function
+        // callback (e.g. hipLaunchHostFunc) may still be writing to it.
+        if (firstTx) {
+          gpu().releaseGpuMemoryFence(false);
+        }
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "memcpy stg buf=%p, host src=%p, size=%zu",
                 stagingBuffer, hostSrc + copyOffset, copysize);
         memcpy(stagingBuffer, hostSrc + copyOffset, copysize);
@@ -2426,6 +2436,9 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
       amd::Coord3D srcOrigin(0, 0, 0);
       size_t copySize = 0;
       size_t stagedCopyOffset = 0;
+
+      // Wait for prior GPU work (e.g. hipLaunchHostFunc callback) before the CPU reads srcAddr.
+      gpu().releaseGpuMemoryFence(false);
 
       while (totalSize > 0) {
         BufferState outBuffer = {0};
