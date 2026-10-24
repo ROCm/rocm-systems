@@ -463,6 +463,19 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `fabric-mem-handler-test.cc`); suites `FabricMemHandler*`.
   - `fabric/fabric_gpu_barrier.cu` (`FABRIC_GPU_BARRIER_CC_PATH`, from
     `fabric-gpu-barrier-test.cc`); suites `FabricGpuBarrier*`.
+- **`rccl-UnitTestsMicroTransport`** — `src/transport/`, one binary for units
+  sharing the socket, network-plugin and GDRCopy seams; tests mirror the source
+  tree under `test/host/transport/`. See
+  `test_categories_micro_transport.yaml`.
+  - `rma_socket.cc` (`RMA_SOCKET_CC_PATH`, from `rma-socket-test.cc`);
+    suites `RmaSocketMicrotest.*`.
+  - `rma_socket_mem.cc` (`RMA_SOCKET_MEM_CC_PATH`, from
+    `rma-socket-mem-test.cc`); suites `RmaSocketMemMicrotest.*`.
+  - `rma_socket_progress_recver.cc` (`RMA_SOCKET_PROGRESS_RECVER_CC_PATH`, from
+    `rma-socket-progress-recver-test.cc`); suites
+    `RmaSocketProgressRecverMicrotest.*`.
+  - `rma_socket_setup.cc` (`RMA_SOCKET_SETUP_CC_PATH`, from
+    `rma-socket-setup-test.cc`); suites `RmaSocketSetupMicrotest.*`.
 
 Everything below (seams, fakes, coverage) applies to all of them; the concrete examples
 use `p2p.cc`.
@@ -608,6 +621,7 @@ symbol.
 | `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
 | `src/misc/api_trace.cc` (`NCCL_API` dispatch) | `fakes/api_trace_fakes.cc` |
 | `src/misc/ibvwrap.cc` (PD / MR registration wrappers) | `fakes/ibvwrap_fakes.cc` |
+| file-static RMA helpers in `src/include/gdrwrap.h` | `fakes/gdrwrap_fakes.{h,cc}` via `fakes/gdrwrap_seam.h` / `fakes/gdrwrap_seam_undef.h` |
 | ibverbs provider dv libraries (`libionic.so`, `libmlx5.so`) | `fakes/dv_provider_fake.cc` |
 | `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |
 | `src/misc/param.cc` + `getenv` interposition | `fakes/env_fakes.cc` |
@@ -628,10 +642,13 @@ symbol.
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/net_ib/connect.cc` params (`ncclParamIbQpsPerConn`) | `fakes/transport_net_ib_fakes.cc` |
+| `src/transport/net_socket.cc` (targets that do not compile the real file) | `fakes/transport_net_socket_fakes.{h,cc}` |
+| `src/transport/net_socket/common.cc` (targets that do not compile the real file) | `fakes/transport_net_socket_common_fakes.{h,cc}` |
 | generated `sym_kernels_host.cc` (targets that do not compile it) | `fakes/sym_kernels_index_fakes.cc` |
 | rocSHMEM host API | `fakes/rocshmem_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
-| `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
+| selected entry points from `src/{transport,proxy}.cc`, `src/transport/{generic,coll_net,net,nvls}.cc`, `src/{graph/paths,tuning/tuning,plugin/net}.cc` (targets that do not compile the real files) | `fakes/transport_stubs.cc` |
+| `src/misc/socket.cc`, plus `ncclSocketClose` from `src/os/linux.cc` | `fakes/socket_fakes.{h,cc}` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
 | libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`) | `fakes/libc_fakes.cc` |
 | reusable RAS poll-entry, message, and diagnostics-context seams | `fakes/ras_fakes.cc` |
@@ -975,6 +992,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDda`,
+`rccl-UnitTestsMicroTransport`,
 `rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
 `rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
@@ -1037,6 +1055,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroProfiler           # src/plugin/profiler.cc + profiler_v1..v7.cc
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
 ./build/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests
+./build/rccl-UnitTestsMicroTransport          # src/transport/ tests
 ./build/rccl-HostUnitTests
 ./build/rccl-UnitTestsMicroRoctxNvml          # misc/roctx.cc + misc/nvmlwrap_stub.cc tests
 ./build/rccl-UnitTestsMicroRoctxNvml-roctx    # same, ROCTX_ENABLE arm
