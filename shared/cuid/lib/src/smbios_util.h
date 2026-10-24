@@ -13,11 +13,6 @@ class SmbiosUtil {
   static amdcuid_status_t get_system_uuid(uint8_t* uuid);
   static amdcuid_status_t get_uuid_from_smbios_table(uint8_t* uuid);
   static amdcuid_status_t get_system_serial(std::string& serial);
-  static amdcuid_status_t get_board_info(std::string& vendor, std::string& name,
-                                         std::string& version);
-  static amdcuid_status_t get_bios_info(std::string& vendor, std::string& version,
-                                        std::string& date);
-  static amdcuid_status_t get_product_info(std::string& name, std::string& family);
 
  private:
   static constexpr const char* DMI_PATH = "/sys/class/dmi/id/";

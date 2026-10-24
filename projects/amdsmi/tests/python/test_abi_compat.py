@@ -295,6 +295,21 @@ class AbiCompatTest(_LibOverrideEnvMixin, unittest.TestCase):
         with self.assertRaises(AttributeError):
             getattr(sentinel, "definitely_not_an_amdsmi_function")
 
+    def test_every_exported_name_is_defined(self):
+        # `from amdsmi.amdsmi_wrapper import *` raises AttributeError on the
+        # first __all__ entry the module does not define.
+        orig = ctypes.CDLL
+
+        def _fail(path, mode=0):
+            raise OSError("no such file: %s" % path)
+
+        ctypes.CDLL = _fail
+        try:
+            w = _import_fresh_wrapper()
+        finally:
+            ctypes.CDLL = orig
+        self.assertEqual([name for name in w.__all__ if not hasattr(w, name)], [])
+
 
 WRAPPER_SRC = PY_INTERFACE / "amdsmi_wrapper.py"
 DISABLE_SYSTEM_FALLBACK_TOOL = REPO_ROOT / "tools" / "disable_system_fallback.py"

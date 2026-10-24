@@ -1598,9 +1598,9 @@ amdsmi_status_t fill_cuid_info(const amdcuid_id_t& handle, amdsmi_cuid_info_t* i
   // The handle is the derived CUID.
   copy_cuid_string(handle, info->derived, sizeof(info->derived));
 
-  // The primary is CAP_SYS_ADMIN-gated at the source because its payload embeds
-  // the raw serial number. An unprivileged caller gets an empty string and a
-  // successful call: the derived CUID is what it is supposed to be reading.
+  // A temporary CUID has no primary, for any caller; a permanent one is
+  // root-only because its payload embeds the raw serial number. Either way
+  // the caller gets an empty primary and a successful call.
   amdcuid_id_t primary = {};
   uint32_t length = sizeof(primary);
   const amdcuid_status_t primary_status =
@@ -1620,7 +1620,7 @@ amdsmi_status_t fill_cuid_info(const amdcuid_id_t& handle, amdsmi_cuid_info_t* i
   }
 
   // The auxiliary flag has no "unknown" encoding, so keeping the zero on a
-  // failed query would present an unestablished value as canonical. Fail with
+  // failed query would present an unestablished value as permanent. Fail with
   // the reason instead: an absent primary can say so with an empty string,
   // this cannot.
   bool temporary = false;
@@ -1632,7 +1632,7 @@ amdsmi_status_t fill_cuid_info(const amdcuid_id_t& handle, amdsmi_cuid_info_t* i
     return cuid_status_to_amdsmi(auxiliary_status);
   }
 
-  // A canonical CUID was keyed from its primary or published beside it, so a
+  // A permanent CUID was keyed from its primary or published beside it, so a
   // caller allowed to read the primary and not getting it has hit a fault. A
   // temporary CUID may have no primary behind it at all.
   if (primary_status != AMDCUID_STATUS_SUCCESS &&

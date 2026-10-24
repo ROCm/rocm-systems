@@ -11,6 +11,7 @@
 
 #include <cstring>
 #include <fstream>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <utility>
@@ -19,6 +20,7 @@
 #include "src/cuid_device.h"
 #include "src/cuid_device_manager.h"
 #include "src/cuid_nic.h"
+#include "src/cuid_npu.h"
 #include "src/cuid_util.h"
 #include "src/hmac.h"
 #include "test_common.h"
@@ -168,32 +170,41 @@ TEST(cuidtstUnprivileged, NicUnitIdIsItsPciFunction) {
   }
 }
 
+namespace {
+
+void MakeFunction(const std::string& root, const std::string& bdf, const char* pci_class,
+                  std::initializer_list<const char*> interfaces = {}) {
+  const std::string fn = root + "/pci/" + bdf;
+  ASSERT_EQ(mkdir(fn.c_str(), 0700), 0);
+  std::ofstream(fn + "/vendor") << "0x1022\n";
+  std::ofstream(fn + "/device") << "0x1450\n";
+  std::ofstream(fn + "/revision") << "0x00\n";
+  std::ofstream(fn + "/class") << pci_class << "\n";
+  if (interfaces.size() == 0) return;
+  ASSERT_EQ(mkdir((fn + "/net").c_str(), 0700), 0);
+  for (const char* iface : interfaces) {
+    ASSERT_EQ(mkdir((fn + "/net/" + iface).c_str(), 0700), 0);
+    const std::string net = root + "/net/" + iface;
+    ASSERT_EQ(mkdir(net.c_str(), 0700), 0);
+    ASSERT_EQ(symlink(fn.c_str(), (net + "/device").c_str()), 0);
+  }
+}
+
+}  // namespace
+
 // Interfaces that share a PCI function, such as switchdev representors, are
-// one component: one per BDF, or the index sees one CUID twice and refuses the
-// whole inventory. The interface kept is the first by name.
+// one component. Its device path is its first interface by name.
 TEST(cuidtstUnprivileged, NicDiscoveryKeepsOneInterfacePerFunction) {
   const ScopedTempDir dir("cuid_net_");
   ASSERT_FALSE(dir.path().empty());
   const std::string& root = dir.path();
   ASSERT_EQ(mkdir((root + "/net").c_str(), 0700), 0);
   ASSERT_EQ(mkdir((root + "/pci").c_str(), 0700), 0);
-  for (const char* bdf : {"fffe:fe:1f.0", "fffe:fe:1f.1"}) {
-    const std::string fn = root + "/pci/" + bdf;
-    ASSERT_EQ(mkdir(fn.c_str(), 0700), 0);
-    std::ofstream(fn + "/vendor") << "0x1022\n";
-    std::ofstream(fn + "/device") << "0x1450\n";
-    std::ofstream(fn + "/revision") << "0x00\n";
-  }
-  for (const auto& iface :
-       {std::make_pair("rep0", "fffe:fe:1f.0"), std::make_pair("eth0", "fffe:fe:1f.0"),
-        std::make_pair("eth1", "fffe:fe:1f.1")}) {
-    const std::string net = root + "/net/" + iface.first;
-    ASSERT_EQ(mkdir(net.c_str(), 0700), 0);
-    ASSERT_EQ(symlink((root + "/pci/" + iface.second).c_str(), (net + "/device").c_str()), 0);
-  }
+  MakeFunction(root, "fffe:fe:1f.0", "0x020000", {"rep0", "eth0"});
+  MakeFunction(root, "fffe:fe:1f.1", "0x020000", {"eth1"});
 
   std::vector<DevicePtr> nics;
-  ASSERT_EQ(CuidNic::discover(root + "/net", nics), AMDCUID_STATUS_SUCCESS);
+  ASSERT_EQ(CuidNic::discover(root + "/pci", root + "/net", nics), AMDCUID_STATUS_SUCCESS);
   ASSERT_EQ(nics.size(), 2u);
   std::string bdf, path;
   ASSERT_EQ(nics[0]->get_bdf(bdf), AMDCUID_STATUS_SUCCESS);
@@ -204,29 +215,48 @@ TEST(cuidtstUnprivileged, NicDiscoveryKeepsOneInterfacePerFunction) {
   EXPECT_EQ(bdf, "fffe:fe:1f.1");
 }
 
-// An interface is excluded for having no PCI function, not for its name: lo is
-// skipped, a physical lom1 is not.
-TEST(cuidtstUnprivileged, NicDiscoveryKeepsInterfacesNamedLikeLoopback) {
+// A NIC is found by its PCI class, so one with no interface in the caller's
+// network namespace (another container, vfio, DPDK) is still a component, at
+// its PCI path.
+TEST(cuidtstUnprivileged, NicDiscoveryNeedsNoInterface) {
   const ScopedTempDir dir("cuid_net_");
   ASSERT_FALSE(dir.path().empty());
   const std::string& root = dir.path();
-  const std::string fn = root + "/pci/fffe:fe:1f.0";
   ASSERT_EQ(mkdir((root + "/net").c_str(), 0700), 0);
   ASSERT_EQ(mkdir((root + "/pci").c_str(), 0700), 0);
-  ASSERT_EQ(mkdir(fn.c_str(), 0700), 0);
-  std::ofstream(fn + "/vendor") << "0x1022\n";
-  std::ofstream(fn + "/device") << "0x1450\n";
-  std::ofstream(fn + "/revision") << "0x00\n";
-  ASSERT_EQ(mkdir((root + "/net/lo").c_str(), 0700), 0);
-  ASSERT_EQ(mkdir((root + "/net/lom1").c_str(), 0700), 0);
-  ASSERT_EQ(symlink(fn.c_str(), (root + "/net/lom1/device").c_str()), 0);
+  MakeFunction(root, "fffe:fe:1f.0", "0x020000");
 
   std::vector<DevicePtr> nics;
-  ASSERT_EQ(CuidNic::discover(root + "/net", nics), AMDCUID_STATUS_SUCCESS);
+  ASSERT_EQ(CuidNic::discover(root + "/pci", root + "/net", nics), AMDCUID_STATUS_SUCCESS);
   ASSERT_EQ(nics.size(), 1u);
-  std::string path;
+  std::string bdf, path;
+  ASSERT_EQ(nics[0]->get_bdf(bdf), AMDCUID_STATUS_SUCCESS);
   ASSERT_EQ(nics[0]->get_device_path(path), AMDCUID_STATUS_SUCCESS);
-  EXPECT_EQ(path, root + "/net/lom1");
+  EXPECT_EQ(bdf, "fffe:fe:1f.0");
+  EXPECT_EQ(path, root + "/pci/fffe:fe:1f.0");
+}
+
+// Only a network or 802.11 controller is a NIC; a Bluetooth function is not.
+TEST(cuidtstUnprivileged, NicDiscoveryIgnoresOtherPciClasses) {
+  const ScopedTempDir dir("cuid_net_");
+  ASSERT_FALSE(dir.path().empty());
+  const std::string& root = dir.path();
+  ASSERT_EQ(mkdir((root + "/net").c_str(), 0700), 0);
+  ASSERT_EQ(mkdir((root + "/pci").c_str(), 0700), 0);
+  MakeFunction(root, "fffe:fe:1f.0", "0x020000");
+  MakeFunction(root, "fffe:fe:1f.1", "0x030000");
+  MakeFunction(root, "fffe:fe:1f.2", "0x0d8000");
+  MakeFunction(root, "fffe:fe:1f.3", "0x0d1100");
+
+  std::vector<DevicePtr> nics;
+  ASSERT_EQ(CuidNic::discover(root + "/pci", root + "/net", nics), AMDCUID_STATUS_SUCCESS);
+  std::vector<std::string> bdfs;
+  for (const auto& nic : nics) {
+    std::string bdf;
+    ASSERT_EQ(nic->get_bdf(bdf), AMDCUID_STATUS_SUCCESS);
+    bdfs.push_back(bdf);
+  }
+  EXPECT_EQ(bdfs, (std::vector<std::string>{"fffe:fe:1f.0", "fffe:fe:1f.2"}));
 }
 
 // A lookup by an interface discovery did not keep answers with the function's
@@ -235,20 +265,11 @@ TEST(cuidtstUnprivileged, NicLookupBySiblingInterfaceFindsTheFunction) {
   const ScopedTempDir dir("cuid_net_");
   ASSERT_FALSE(dir.path().empty());
   const std::string& root = dir.path();
-  const std::string fn = root + "/pci/fffe:fe:1f.0";
   ASSERT_EQ(mkdir((root + "/net").c_str(), 0700), 0);
   ASSERT_EQ(mkdir((root + "/pci").c_str(), 0700), 0);
-  ASSERT_EQ(mkdir(fn.c_str(), 0700), 0);
-  std::ofstream(fn + "/vendor") << "0x1022\n";
-  std::ofstream(fn + "/device") << "0x1450\n";
-  std::ofstream(fn + "/revision") << "0x00\n";
-  for (const char* iface : {"cuidtst0", "cuidtst1"}) {
-    const std::string net = root + "/net/" + iface;
-    ASSERT_EQ(mkdir(net.c_str(), 0700), 0);
-    ASSERT_EQ(symlink(fn.c_str(), (net + "/device").c_str()), 0);
-  }
+  MakeFunction(root, "fffe:fe:1f.0", "0x020000", {"cuidtst0", "cuidtst1"});
   std::vector<DevicePtr> nics;
-  ASSERT_EQ(CuidNic::discover(root + "/net", nics), AMDCUID_STATUS_SUCCESS);
+  ASSERT_EQ(CuidNic::discover(root + "/pci", root + "/net", nics), AMDCUID_STATUS_SUCCESS);
   ASSERT_EQ(nics.size(), 1u);
   amdcuid_derived_id derived{};
   const amdcuid_status_t status = nics[0]->get_derived_cuid(derived, nullptr);
@@ -344,6 +365,7 @@ class SerialDevice : public CuidDevice {
     return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
   }
   amdcuid_status_t get_temporary_input(CuidUtilities::AuxiliaryInput& input) const override {
+    if (input_status != AMDCUID_STATUS_SUCCESS) return input_status;
     input = {};
     input.format = CuidUtilities::kAuxFormatPcie;
     input.routing_id = static_cast<uint32_t>(serial);
@@ -365,12 +387,41 @@ class SerialDevice : public CuidDevice {
     return AMDCUID_STATUS_SUCCESS;
   }
   uint64_t serial;
+  amdcuid_status_t input_status = AMDCUID_STATUS_SUCCESS;
 
  private:
   std::string bdf_;
 };
 
 }  // namespace
+
+// A component whose input turns malformed after discovery is left out of the
+// refreshed inventory; every other component is still listed.
+TEST(cuidtstUnprivileged, AMalformedComponentLeavesTheOthersListed) {
+  const auto a = std::make_shared<SerialDevice>("fffe:fd:00.0", 0x1111);
+  const auto b = std::make_shared<SerialDevice>("fffe:fd:01.0", 0x2222);
+  amdcuid_derived_id da{}, db{};
+  const amdcuid_status_t status = a->get_derived_cuid(da, nullptr);
+  if (status == AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND)
+    GTEST_SKIP() << "no machine-id, so no temporary CUID";
+  ASSERT_EQ(status, AMDCUID_STATUS_SUCCESS);
+  ASSERT_EQ(b->get_derived_cuid(db, nullptr), AMDCUID_STATUS_SUCCESS);
+
+  CuidDeviceManager& mgr = CuidDeviceManager::instance();
+  mgr.shutdown();
+  ASSERT_EQ(mgr.index_handle(a, da.UUIDv8_representation), AMDCUID_STATUS_SUCCESS);
+  ASSERT_EQ(mgr.index_handle(b, db.UUIDv8_representation), AMDCUID_STATUS_SUCCESS);
+  for (const amdcuid_status_t failure :
+       {AMDCUID_STATUS_INVALID_FORMAT, AMDCUID_STATUS_PCI_ERROR, AMDCUID_STATUS_FILE_ERROR}) {
+    b->input_status = failure;
+    const amdcuid_status_t rebuilt = mgr.build_cuid_index();
+    const auto handles = mgr.get_all_handles();
+    EXPECT_EQ(rebuilt, AMDCUID_STATUS_SUCCESS) << failure;
+    ASSERT_EQ(handles.size(), 1u) << failure;
+    EXPECT_TRUE(SameId(handles[0], da.UUIDv8_representation)) << failure;
+  }
+  mgr.shutdown();
+}
 
 // Two components whose CUIDs coincide are identified by neither. Both are left
 // out and every other component is still listed; a lookup of either is refused.
@@ -428,4 +479,38 @@ TEST(cuidtstUnprivileged, AnInventoryOfOnlyCollidingComponentsIsEmpty) {
   EXPECT_EQ(rebuilt, AMDCUID_STATUS_SUCCESS);
   EXPECT_TRUE(handles.empty());
   EXPECT_EQ(lookup, AMDCUID_STATUS_INVALID_FORMAT);
+}
+
+// An NPU is an AMD signal-processing or accelerator function bound to amdxdna.
+// The same class on another driver (the Sensor Fusion Hub) or vendor is not,
+// and a lookup by the function's own sysfs directory keeps its BDF.
+TEST(cuidtstUnprivileged, NpuNeedsAmdxdna) {
+  const ScopedTempDir dir("cuid_npu_");
+  ASSERT_FALSE(dir.path().empty());
+  const std::string& root = dir.path();
+  ASSERT_EQ(mkdir((root + "/drivers").c_str(), 0700), 0);
+  for (const char* driver : {"amdxdna", "amd_sfh"})
+    ASSERT_EQ(mkdir((root + "/drivers/" + driver).c_str(), 0700), 0);
+  struct Case {
+    const char* bdf;
+    const char* vendor;
+    const char* driver;
+    amdcuid_status_t want;
+  };
+  for (const Case& c : {Case{"fffe:fe:1f.0", "0x1022", "amdxdna", AMDCUID_STATUS_SUCCESS},
+                        Case{"fffe:fe:1f.1", "0x1022", "amd_sfh", AMDCUID_STATUS_UNSUPPORTED},
+                        Case{"fffe:fe:1f.2", "0x1022", nullptr, AMDCUID_STATUS_UNSUPPORTED},
+                        Case{"fffe:fe:1f.3", "0x1002", "amdxdna", AMDCUID_STATUS_UNSUPPORTED}}) {
+    const std::string fn = root + "/" + c.bdf;
+    ASSERT_EQ(mkdir(fn.c_str(), 0700), 0);
+    std::ofstream(fn + "/vendor") << c.vendor << "\n";
+    std::ofstream(fn + "/device") << "0x1502\n";
+    std::ofstream(fn + "/revision") << "0x00\n";
+    std::ofstream(fn + "/class") << "0x118000\n";
+    if (c.driver)
+      ASSERT_EQ(symlink((root + "/drivers/" + c.driver).c_str(), (fn + "/driver").c_str()), 0);
+    amdcuid_npu_info info{};
+    EXPECT_EQ(CuidNpu::discover_single(&info, fn), c.want) << c.bdf;
+    if (c.want == AMDCUID_STATUS_SUCCESS) EXPECT_EQ(info.bdf, c.bdf);
+  }
 }

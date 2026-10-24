@@ -17,7 +17,7 @@ To build CUID from source, the following dependencies are required:
 
 - CMake v3.20 or later
 - G++ v7.0 or later (C++17)
-- For Microsoft Windows: `Bcrypt <https://www.npmjs.com/package/bcrypt?activeTab=code>`_ (Windows Native crypto library)
+- Linux. This release does not build on Windows.
 
 Building and installing CUID library
 =====================================
@@ -31,9 +31,9 @@ To build and install the CUID library from source, follow these steps:
     git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
     cd rocm-systems
     git sparse-checkout init --cone
-    git sparse-checkout set shared/cuid
+    git sparse-checkout set shared/cuid shared/sha256
     git checkout develop
-    cd rocm-systems/shared/cuid
+    cd shared/cuid
 
 2. Build and install the project using CMake:
 

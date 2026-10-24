@@ -2857,8 +2857,8 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
     """
     Retrieves a GPU's Component Unified ID together with its provenance.
 
-    Built from several queries, so not atomic under a concurrent rekey or
-    topology change.
+    Built from several queries, so not atomic under a concurrent topology
+    change.
 
     Parameters:
         processor_handle (amdsmi_processor_handle_t): The processor handle.
@@ -2866,17 +2866,20 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
     Returns:
         Dict[str, Any]: with keys
 
-            primary (str): the canonical CUID, or "" when the caller lacks the
-                privilege to read it. The primary payload embeds the raw serial
-                number, so it is CAP_SYS_ADMIN-gated at the source; an empty
-                value is not an error.
-            derived (str): the derived CUID. This is the value to record.
-            component_type (str): the on-wire Component Type by name (PLATFORM,
+            primary (str): the primary CUID. Always "" in this release: every
+                CUID is temporary, and a temporary CUID has no primary. An
+                empty value is not an error.
+            derived (str): the component's CUID: its DerivedID when it has a
+                permanent CUID, otherwise its temporary CUID (always, in this
+                release). It names the component without disclosing its serial.
+            component_type (str): the component's type, reported beside the
+                CUID rather than decoded from it, by name (PLATFORM,
                 CPU, GPU, NIC, NPU, STORAGE, MEMORY, GENPCIE, GENC, RACKTRAY,
                 RACK, OTHER), or UNKNOWN.
             source (str): which stage of the staged lookup answered: DRIVER,
                 LIBRARY or UNKNOWN.
-            auxiliary (bool): True for a temporary CUID, built from the
+            auxiliary (bool): True for a temporary CUID (amd-smi shows it as
+                `temporary`), built from the
                 machine ID and world-readable device information. Such a value
                 changes when the machine ID changes and is not unique across
                 nodes.

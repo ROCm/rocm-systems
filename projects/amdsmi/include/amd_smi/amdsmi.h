@@ -3584,8 +3584,8 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
  *
  *  @ingroup tagProcDiscovery
  *
- *  The derived CUID that ::amdsmi_get_gpu_cuid_info reports, without its
- *  provenance.
+ *  The CUID that ::amdsmi_get_gpu_cuid_info reports in `derived`, without
+ *  its provenance.
  *
  *  @platform{gpu_bm_linux}
  *
@@ -3606,14 +3606,10 @@ amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_han
 /**
  *  @brief Source that answered a CUID lookup.
  *
- *  The staged lookup tries the driver, then its own computation. Only a
- *  driver-sourced value is authoritative, because only the driver reads the
- *  privileged identity.
- *
- *  libamdcuid records the answering stage through AMDCUID_QUERY_SOURCE, so
- *  amd-smi reports DRIVER or LIBRARY, and UNKNOWN only when that query fails.
- *  Treat ::AMDSMI_CUID_SOURCE_UNKNOWN as "not known to be driver-published"
- *  rather than as "locally computed".
+ *  In this release the library computes every CUID, so the source is
+ *  ::AMDSMI_CUID_SOURCE_LIBRARY, or ::AMDSMI_CUID_SOURCE_UNKNOWN when the
+ *  query fails. Whether a CUID is permanent is told by `auxiliary`, not by
+ *  the source.
  */
 typedef enum {
   AMDSMI_CUID_SOURCE_UNKNOWN = 0,  //!< Source could not be determined
@@ -3624,12 +3620,12 @@ typedef enum {
 /**
  *  @brief CUID Component Type, on the specification's on-wire values.
  *
- *  These are the values that appear in payload bits 118:121, so they can be
- *  compared directly against a decoded CUID with no translation step. All
- *  assigned values are named, so that a CUID from a component amd-smi does not
- *  manage still arrives as a named value; 0xb through 0xe are reserved by the
- *  specification and have no enumerator, so the assigned range is not
- *  contiguous.
+ *  The values are the specification's Component Type codes. The type is
+ *  metadata reported beside the CUID: only a constructed PrimaryID carries it
+ *  in its payload (bits 118:121), and a temporary CUID or a DerivedID cannot
+ *  be decoded to find it. All assigned values are named, so that a CUID from a component amd-smi
+ * does not manage still arrives as a named value; 0xb through 0xe are reserved by the specification
+ * and have no enumerator, so the assigned range is not contiguous.
  *
  *  ::AMDSMI_CUID_COMPONENT_UNKNOWN is outside the range a 4-bit field can hold,
  *  so the sentinel can never be mistaken for a Component Type. The values match
@@ -3661,23 +3657,27 @@ typedef enum {
  *  device rescan.
  */
 typedef struct {
-  //! Canonical CUID as a UUIDv8 string. Empty when the caller lacks the
-  //! privilege to read it: the primary payload embeds the raw serial number, so
-  //! it is CAP_SYS_ADMIN-gated at the source. Also empty when the derived CUID
-  //! is temporary and the component has no primary. An empty primary is not an
-  //! error; the derived CUID below is still populated.
+  //! Primary CUID as a UUIDv8 string. Always empty in this release: every
+  //! CUID is temporary, and a temporary CUID has no primary. Reserved for
+  //! permanent CUIDs, whose primary payload embeds the raw serial number and
+  //! is readable only by root. An empty primary is not an error;
+  //! `derived` below is still populated.
   char primary[AMDSMI_GPU_CUID_SIZE];
-  //! Derived CUID as a UUIDv8 string. Names the component without
-  //! disclosing its serial, and is the value to record.
+  //! The component's CUID as a UUIDv8 string: its DerivedID when it has a
+  //! permanent CUID, otherwise its temporary CUID (always, in this release).
+  //! Names the component without disclosing its serial.
   char derived[AMDSMI_GPU_CUID_SIZE];
-  //! Component Type field of the payload.
+  //! Component Type of the component, reported beside the CUID; not decoded
+  //! from it.
   amdsmi_cuid_component_type_t component_type;
-  //! Which stage of the staged lookup answered.
+  //! Which stage of the staged lookup answered. Always
+  //! ::AMDSMI_CUID_SOURCE_LIBRARY in this release.
   amdsmi_cuid_source_t source;
-  //! Non-zero for a temporary CUID, payload bit 117: the identity was built
+  //! Non-zero for a temporary CUID, payload bit 117; always 1 in this
+  //! release. amd-smi reports it as `temporary`. The identity was built
   //! from the machine ID and world-readable device information, so it changes
   //! when the machine ID changes and is not unique across nodes. Do not
-  //! record it in the same column as a canonical CUID. Meaningful only
+  //! record it in the same column as a permanent CUID. Meaningful only
   //! on ::AMDSMI_STATUS_SUCCESS: there is no encoding for "undetermined", so a
   //! call that cannot establish this flag fails rather than reporting zero.
   uint8_t auxiliary;
@@ -3701,11 +3701,7 @@ typedef struct {
  *  reports that partition's own CUID, never the whole GPU's; a partition
  *  whose UnitID cannot be determined gets ::AMDSMI_STATUS_NOT_SUPPORTED.
  *
- *  On failure @p info comes back cleared, never partly filled: a caller that
- *  may not read the auxiliary flag gets ::AMDSMI_STATUS_NO_PERM rather than a
- *  zero it cannot distinguish from a determined "not auxiliary". A caller
- *  privileged to read the primary CUID of a derived CUID that is not temporary
- *  gets the failure that kept it from doing so, not an empty primary.
+ *  On failure @p info comes back cleared, never partly filled.
  *
  *  @platform{gpu_bm_linux}
  *
@@ -3715,11 +3711,8 @@ typedef struct {
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support, when
- *          no CUID exists for this device, for a partition the driver
- *          publishes, or for a partition other than partition 0 whose driver
- *          publishes nothing,
- *          ::AMDSMI_STATUS_NO_PERM when this caller may not read
- *          a field the snapshot must report, non-zero on other failures
+ *          no CUID exists for this device, or for a partition whose UnitID
+ *          cannot be determined, non-zero on other failures
  */
 amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handle,
                                          amdsmi_cuid_info_t* info);
