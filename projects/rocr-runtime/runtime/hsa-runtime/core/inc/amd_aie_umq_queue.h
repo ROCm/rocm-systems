@@ -1,47 +1,13 @@
-////////////////////////////////////////////////////////////////////////////////
-//
-// The University of Illinois/NCSA
-// Open Source License (NCSA)
-//
-// Copyright (c) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
-//
-// Developed by:
-//
-//                 AMD Research and AMD HSA Software Development
-//
-//                 Advanced Micro Devices, Inc.
-//
-//                 www.amd.com
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to
-// deal with the Software without restriction, including without limitation
-// the rights to use, copy, modify, merge, publish, distribute, sublicense,
-// and/or sell copies of the Software, and to permit persons to whom the
-// Software is furnished to do so, subject to the following conditions:
-//
-//  - Redistributions of source code must retain the above copyright notice,
-//    this list of conditions and the following disclaimers.
-//  - Redistributions in binary form must reproduce the above copyright
-//    notice, this list of conditions and the following disclaimers in
-//    the documentation and/or other materials provided with the distribution.
-//  - Neither the names of Advanced Micro Devices, Inc,
-//    nor the names of its contributors may be used to endorse or promote
-//    products derived from this Software without specific prior written
-//    permission.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-// THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
-// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
-// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-// DEALINGS WITH THE SOFTWARE.
-//
-////////////////////////////////////////////////////////////////////////////////
+/*
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-#ifndef HSA_RUNTIME_CORE_INC_AMD_HW_AQL_AIE_COMMAND_PROCESSOR_H_
-#define HSA_RUNTIME_CORE_INC_AMD_HW_AQL_AIE_COMMAND_PROCESSOR_H_
+#ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_UMQ_QUEUE_H_
+#define HSA_RUNTIME_CORE_INC_AMD_AIE_UMQ_QUEUE_H_
+
+#include <atomic>
 
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/exceptions.h"
@@ -52,10 +18,10 @@
 namespace rocr {
 namespace AMD {
 
-/// @brief Encapsulates HW AIE AQL Command Processor functionality. It
-/// provides the interface for things such as doorbells, queue read and
-/// write pointers, and a buffer.
-class AieAqlQueue : public core::Queue,
+/// @brief Encapsulates HW AIE4 user-mode queue (UMQ) functionality: a ring buffer BO shared with
+/// the device and a doorbell, as opposed to @ref AieKmqQueue's kernel-mode (per-batch ioctl)
+/// submission used on aie2/aie2p.
+class AieUmqQueue : public core::Queue,
                     private core::LocalSignal,
                     core::DoorbellSignal {
  public:
@@ -67,9 +33,9 @@ class AieAqlQueue : public core::Queue,
     return queue->IsType(&rtti_id());
   }
 
-  AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
+  AieUmqQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
               uint32_t node_id, core::HsaEventCallback callback, void* err_data, uint64_t flags);
-  ~AieAqlQueue();
+  ~AieUmqQueue();
 
   hsa_status_t Inactivate() override;
   hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) override;
@@ -110,20 +76,29 @@ class AieAqlQueue : public core::Queue,
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
  private:
-  /// @brief Called when the doorbell is rung to submit all queued packets.
-  void SubmitPackets();
-
   static __forceinline int& rtti_id() {
     static int rtti_id_ = 0;
     return rtti_id_;
   }
 
+  /// @brief Hands the ready range of packets to XdnaDriver::SubmitUmqPackets and settles the read
+  /// index against however many it completed, mirroring AieKmqQueue::SubmitPackets: submission is
+  /// synchronous to the caller either way, the driver call owns everything device-specific, and a
+  /// failure suspends the queue and reports it through the per-queue error callback.
+  void SubmitPackets();
+
   /// @brief Queue size in bytes.
   uint32_t queue_size_bytes_ = 0;
-  /// @brief Base of the queue's ring buffer storage.
+  /// @brief Base of the queue's ring buffer storage. Handed to the device directly as the
+  /// hardware context's umq_bo. Opens with a header of XdnaDriver::UmqHeaderBytes() (CERT's own
+  /// read/write indices, filled in by XdnaDriver::CreateUserModeQueue), followed immediately by
+  /// the packet ring the application writes into and CERT reads out of in place.
   void* ring_buf_ = nullptr;
-  /// @brief Kernel Mode Queue (KMQ) metadata associated with this queue.
-  void* kmq_metadata_ = nullptr;
+  /// @brief User Mode Queue (UMQ) metadata associated with this queue.
+  void* umq_metadata_ = nullptr;
+  /// @brief Mapped hardware doorbell. Ringing it is the entire submission path: there is no
+  /// per-batch driver call, the same as a GPU hardware queue.
+  volatile uint32_t* doorbell_ = nullptr;
   /// @brief Indicates if queue is active.
   std::atomic<bool> active_ = false;
   /// @brief Set when the queue is suspended after an error; no further packets are submitted.
@@ -138,4 +113,4 @@ class AieAqlQueue : public core::Queue,
 } // namespace AMD
 } // namespace rocr
 
-#endif  // HSA_RUNTIME_CORE_INC_AMD_HW_AQL_AIE_COMMAND_PROCESSOR_H_
+#endif  // header guard

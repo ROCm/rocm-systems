@@ -30,32 +30,66 @@ namespace aie_elf {
 
 /// @brief One place in the control code that takes an address.
 struct PatchSite {
-  /// @brief Byte offset into the control code.
+  /// @brief Index into Kernel::pages naming which page's buffer @c offset is relative to.
+  uint32_t page = 0;
+  /// @brief True if @c offset is into that page's ctrldata buffer; false for its ctrltext one.
+  bool in_ctrldata = false;
+  /// @brief Byte offset into the named buffer.
   uint32_t offset = 0;
   /// @brief Added to the address before it is written.
   uint32_t addend = 0;
+};
+
+/// @brief One place a PDI's device address is stored. PDI sites are aie2p-only today and always
+/// land in a page's ctrltext buffer (aie2p has no ctrldata).
+struct PdiPatchSite {
+  /// @brief Index into Kernel::pages naming which page's ctrltext buffer @c offset is relative to.
+  uint32_t page = 0;
+  /// @brief Byte offset into that page's ctrltext buffer.
+  uint32_t offset = 0;
 };
 
 /// @brief A PDI the control code loads, and where its device address goes.
 struct Pdi {
   /// @brief PDI bytes.
   std::vector<uint8_t> bytes;
-  /// @brief Byte offsets in the control code taking this PDI's device address; never empty.
-  /// Parse() rejects a site at offset 0.
-  std::vector<uint32_t> patch_offsets;
+  /// @brief Sites taking this PDI's device address; never empty. Parse() rejects a site at
+  /// offset 0.
+  std::vector<PdiPatchSite> patch_sites;
+};
+
+/// @brief One page of a kernel's control code: a chunk of instructions (ctrltext) and, for an
+/// aie4 full ELF, the buffer descriptors it addresses (ctrldata). aie2p has exactly one page and
+/// no ctrldata: its argument and PDI patch sites all live in ctrltext. aie4 bundles several pages
+/// per kernel, each potentially with its own argument patch sites in ctrldata. A page is
+/// identified by the suffix aiecc gave its ctrltext/ctrldata section names, "<col>.<page>[.<id>]"
+/// (e.g. ".ctrltext.0.2.0" and ".ctrldata.0.2.0" share the page).
+struct Page {
+  /// @brief Size of an aie4 page. Each page's ctrltext and ctrldata are padded out to it, as
+  /// aiebu's elf_reader_gen2plus lays them out; the firmware addresses pages by that position.
+  static constexpr uint32_t kAie4Size = 8192;
+
+  /// @brief Page number: the <page> of the section names' suffix on aie4, where it places the page
+  /// at number * kAie4Size in the kernel's control code; always 0 on aie2p.
+  uint32_t number = 0;
+  /// @brief Control-code bytes.
+  std::vector<uint8_t> ctrltext;
+  /// @brief Buffer-descriptor bytes the page's ctrltext addresses; empty if the page has none
+  /// (aie2p, always).
+  std::vector<uint8_t> ctrldata;
 };
 
 /// @brief A parsed full-ELF kernel: the bytes to load and where addresses go.
 struct Kernel {
   /// @brief "<kernel>:<instance>", e.g. "main:sequence".
   std::string name;
-  /// @brief The PDIs the control code loads; empty if it loads none. A control code may load
-  /// several PDIs, or one more than once (MLIR-AIR's loads an empty PDI before and after the
-  /// design runs). Each distinct PDI appears once: sites naming byte-identical PDIs share an
-  /// entry, so it is placed in device memory once.
+  /// @brief The PDIs the control code loads; always empty on aie4, whose model has no separate
+  /// PDI construct. A control code may load several PDIs, or one more than once (MLIR-AIR's loads
+  /// an empty PDI before and after the design runs). Each distinct PDI appears once: sites naming
+  /// byte-identical PDIs share an entry, so it is placed in device memory once.
   std::vector<Pdi> pdis;
-  /// @brief Control-code bytes.
-  std::vector<uint8_t> ctrl_code;
+  /// @brief The kernel's control-code pages, in increasing page number. Never empty.
+  std::vector<Page> pages;
   /// @brief Patch sites per argument index. Entries may be empty for unused arguments.
   std::vector<std::vector<PatchSite>> arg_sites;
 
@@ -79,14 +113,6 @@ struct Kernel {
 /// `arch` has no full-ELF format, or `image` uses a feature this reader does not implement.
 hsa_status_t Parse(const void* image, size_t size, std::string_view arch,
                    std::map<std::string, Kernel>* out, std::string* error);
-
-/// @brief Folds a buffer address into a shim DMA buffer descriptor, the scheme the NPU firmware
-/// defines. This *adds* to the descriptor already in place, so it must only ever be applied to a
-/// pristine copy of the control code.
-///
-/// @param [in,out] site Pointer to the three-dword patch site inside the control code.
-/// @param [in] addr Device address to fold in.
-void PatchShimDma48(uint32_t* site, uint64_t addr);
 
 }  // namespace aie_elf
 }  // namespace AMD

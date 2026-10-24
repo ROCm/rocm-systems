@@ -894,6 +894,11 @@ void AieLoadedCodeObjectImpl::Destroy() {
     owner->context()->SegmentFree(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, b.first, b.second);
   }
   device_buffers.clear();
+  auto* aie_agent = static_cast<AMD::AieAgent*>(core::Agent::Convert(agent));
+  for (void* buf : system_buffers) {
+    aie_agent->system_deallocator()(buf);
+  }
+  system_buffers.clear();
   descriptors.clear();
 }
 
@@ -1838,6 +1843,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       // then erased, so a second hsaco entry resolving to the same ELF kernel fails the lookup
       // above instead of silently getting an empty control code.
       AMD::aie_elf::Kernel& kernel = kernel_it->second;
+      const bool is_aie4 = aie_code->GetArchSectionName() == "aie4";
 
       // The ELF is authoritative on the kernarg layout. A hsaco carrying a nonzero size that
       // disagrees with the ELF is a converter bug the loader can't reconcile; a zero size just
@@ -1857,9 +1863,10 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       }
       desc->kernarg_size = elf_kernarg_size;
 
-      // A kernel that loads no PDI leaves the array unconfigured; nothing downstream can dispatch
-      // it.
-      if (kernel.pdis.empty()) {
+      // A kernel that loads no PDI leaves the array unconfigured and nothing downstream can
+      // dispatch it -- except on aie4, whose full ELF carries no .pdi section at all, so this
+      // check does not apply there.
+      if (kernel.pdis.empty() && !is_aie4) {
         log_warning_n(10, "AIE: kernel '%s' has no PDI patch site in its control code.\n",
                       kernel_name.c_str());
         return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
@@ -1893,17 +1900,85 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
           return HSA_STATUS_ERROR_INVALID_ALLOCATION;
         }
         // A site is the low dword then the high dword, which on a little-endian host is the
-        // address's own byte order.
+        // address's own byte order. PDI sites always land in a page's ctrltext buffer (see
+        // aie_elf::PdiPatchSite).
         const uint64_t pdi_dev_addr = reinterpret_cast<uint64_t>(info.agentBaseAddress);
-        for (const uint32_t offset : pdi.patch_offsets) {
-          std::memcpy(kernel.ctrl_code.data() + offset, &pdi_dev_addr, sizeof(pdi_dev_addr));
+        for (const AMD::aie_elf::PdiPatchSite& site : pdi.patch_sites) {
+          std::memcpy(kernel.pages[site.page].ctrltext.data() + site.offset, &pdi_dev_addr,
+                      sizeof(pdi_dev_addr));
         }
+      }
+
+      // Lay the pages out as aiebu's elf_reader_gen2plus does: page N at N * Page::kAie4Size,
+      // its ctrltext immediately followed by its ctrldata (matching the offsets aie_elf::Parse()
+      // gave that page's argument sites), padded out to the next page. The firmware addresses
+      // pages by that position. This becomes the pristine template a per-dispatch copy is patched
+      // from -- CERT does not patch argument addresses into the control code itself (confirmed on
+      // real hardware: leaving the ELF's placeholder offsets unpatched faults the IOMMU on tiny
+      // near-zero addresses), so the host still has to, exactly as aie2p does for its own
+      // (single-page) control code.
+      if (!is_aie4) {
+        // KMQ's dispatch-time patch (BuildFullElfCommand) only ever handles a single ctrltext
+        // buffer: aie_elf::Parse() guarantees this shape for every arch but aie4 (confirmed here,
+        // once, rather than on every dispatch -- the shape can't change between the two, since an
+        // arch's agent always dispatches through the same queue type, KMQ or UMQ).
+        if (kernel.pages.size() != 1 || !kernel.pages[0].ctrldata.empty()) {
+          log_warning_n(10,
+                        "AIE: kernel '%s' has a control-code shape this dispatch path "
+                        "does not support.\n",
+                        kernel_name.c_str());
+          return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+        }
+      }
+
+      if (is_aie4) {
+        std::vector<uint8_t> ctrl_code;
+        // Page index -> (ctrltext base, ctrldata base) in ctrl_code, for rebasing arg_sites below.
+        std::vector<std::pair<uint32_t, uint32_t>> page_bases(kernel.pages.size());
+        constexpr size_t kPageSize = AMD::aie_elf::Page::kAie4Size;
+        for (size_t p = 0; p < kernel.pages.size(); ++p) {
+          const AMD::aie_elf::Page& page = kernel.pages[p];
+          // Pages come in increasing number, so each starts at or after the end of the last.
+          if (page.ctrltext.size() + page.ctrldata.size() > kPageSize) {
+            log_warning_n(10, "AIE: kernel '%s' has a control-code page larger than %zu bytes.\n",
+                          kernel_name.c_str(), kPageSize);
+            return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+          }
+          ctrl_code.resize(static_cast<size_t>(page.number) * kPageSize, 0);
+          page_bases[p].first = static_cast<uint32_t>(ctrl_code.size());
+          ctrl_code.insert(ctrl_code.end(), page.ctrltext.begin(), page.ctrltext.end());
+          page_bases[p].second = static_cast<uint32_t>(ctrl_code.size());
+          ctrl_code.insert(ctrl_code.end(), page.ctrldata.begin(), page.ctrldata.end());
+          ctrl_code.resize((static_cast<size_t>(page.number) + 1) * kPageSize, 0);
+        }
+        // Every site now indexes this one combined buffer, so the page/in_ctrldata split that
+        // distinguished a page's two buffers no longer means anything; collapse it away so the
+        // dispatch path only ever has to deal with one flat, pre-patched-per-dispatch buffer, the
+        // same shape aie2p's already does.
+        for (auto& sites : kernel.arg_sites) {
+          for (AMD::aie_elf::PatchSite& site : sites) {
+            const auto& bases = page_bases.at(site.page);
+            site.offset += site.in_ctrldata ? bases.second : bases.first;
+            site.page = 0;
+            site.in_ctrldata = false;
+          }
+        }
+        // aie4 has no device heap, so there is no CODE_AGENT segment region to place_blob() into
+        // (unlike aie2p's insts/PDI blobs above); allocate through the agent's system allocator
+        // instead, the same one the UMQ ring itself uses.
+        void* ctrl_buf = aie_agent->system_allocator()(ctrl_code.size(), kAieBlobAlignment,
+                                                       core::MemoryRegion::AllocateNoFlags);
+        if (ctrl_buf == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+        loaded_obj->system_buffers.push_back(ctrl_buf);
+        std::memcpy(ctrl_buf, ctrl_code.data(), ctrl_code.size());
+        desc->static_ctrl_code_dev_addr = reinterpret_cast<uint64_t>(ctrl_buf);
+        desc->static_ctrl_code_size = ctrl_code.size();
       }
 
       // The control code is only ever a memcpy source for a per-dispatch buffer, so it stays in
       // ordinary host memory rather than a device segment. Moved, not copied: the parsed kernel
       // is looked up once and is dead after this.
-      desc->ctrl_code = std::move(kernel.ctrl_code);
+      desc->pages = std::move(kernel.pages);
       desc->arg_sites = std::move(kernel.arg_sites);
       it->second.erase(kernel_it);
     }
