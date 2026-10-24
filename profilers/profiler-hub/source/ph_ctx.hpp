@@ -65,6 +65,13 @@ struct ph_ctx
         return m_catalog;
     }
 
+    [[nodiscard]] uint32_t read_table_events(
+        const profiler_hub::resolved_event_query& query,
+        uint32_t                                  event_type,
+        uint64_t                                  after_id,
+        ph_table_event*                           rows,
+        uint32_t                                  capacity);
+
     [[nodiscard]] ph_schema_version_t get_schema_version();
     [[nodiscard]] ph_track_list_t     get_track_list();
     [[nodiscard]] ph_node_t           get_node();

@@ -17,6 +17,7 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/storage_impl.cpp
     ${CMAKE_CURRENT_LIST_DIR}/file_probe.cpp
     ${CMAKE_CURRENT_LIST_DIR}/event_query.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/table_events.cpp
     ${CMAKE_CURRENT_LIST_DIR}/event_query.hpp
     ${CMAKE_CURRENT_LIST_DIR}/ph_ctx.cpp
     ${CMAKE_CURRENT_LIST_DIR}/ph_ctx.hpp

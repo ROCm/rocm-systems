@@ -589,6 +589,7 @@ ph_future_free(ph_future_t future)
 
 extern "C" struct ph_event_query
 {
+    ph_ctx*                            ctx;
     profiler_hub::resolved_event_query query;
 };
 
@@ -597,8 +598,9 @@ namespace
 bool
 known_event_type(uint32_t type)
 {
-    return type == PH_EVENT_TYPE_REGION || type == PH_EVENT_TYPE_KERNEL_DISPATCH ||
-           type == PH_EVENT_TYPE_MEMORY_COPY || type == PH_EVENT_TYPE_MEMORY_ALLOCATE;
+    return type == PH_EVENT_TYPE_REGION || type == PH_EVENT_TYPE_REGION_SAMPLE ||
+           type == PH_EVENT_TYPE_KERNEL_DISPATCH || type == PH_EVENT_TYPE_MEMORY_COPY ||
+           type == PH_EVENT_TYPE_MEMORY_ALLOCATE;
 }
 
 std::optional<uint64_t>
@@ -691,6 +693,7 @@ ph_event_query_create(ph_ctx_t ctx, const ph_event_filter_t* filter, ph_event_qu
         }
 
         auto resolved = std::make_unique<ph_event_query>();
+        resolved->ctx = ctx;
         if(const auto copied = copy_event_filter(*filter, resolved->query);
            copied != PH_RESULT_SUCCESS)
         {
@@ -715,4 +718,95 @@ ph_event_query_free(ph_event_query_t query)
     }
     delete query;
     return PH_RESULT_SUCCESS;
+}
+
+ph_result_t
+ph_event_query_read(ph_event_query_t  query,
+                    uint32_t          event_type,
+                    uint64_t          after_id,
+                    ph_table_event_t* rows,
+                    uint32_t          capacity,
+                    uint32_t*         count,
+                    ph_future_t       future)
+{
+    if(count != nullptr)
+    {
+        *count = 0;
+    }
+    if(query == nullptr || query->ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    const bool known = event_type == PH_EVENT_TYPE_REGION ||
+                       event_type == PH_EVENT_TYPE_REGION_SAMPLE ||
+                       event_type == PH_EVENT_TYPE_KERNEL_DISPATCH ||
+                       event_type == PH_EVENT_TYPE_MEMORY_COPY ||
+                       event_type == PH_EVENT_TYPE_MEMORY_ALLOCATE;
+    if(rows == nullptr || count == nullptr || capacity == 0 || !known)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([query, event_type, after_id, rows, capacity, count, future]() {
+        if(future != nullptr && future->stop_token().stop_requested())
+        {
+            return PH_RESULT_CANCELLED;
+        }
+        *count = query->ctx->read_table_events(
+            query->query, event_type, after_id, rows, capacity);
+        if(future != nullptr && future->stop_token().stop_requested())
+        {
+            return PH_RESULT_CANCELLED;
+        }
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
+ph_lookup_text(ph_ctx_t ctx, uint64_t id, uint32_t kind, const char** text)
+{
+    if(text != nullptr)
+    {
+        *text = nullptr;
+    }
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(text == nullptr ||
+       (kind != PH_TEXT_KIND_STRING && kind != PH_TEXT_KIND_KERNEL_SYMBOL))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([ctx, id, kind, text]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
+        if(ctx->catalog() == nullptr)
+        {
+            return PH_RESULT_INVALID_CONTEXT;
+        }
+        const auto& catalog = *ctx->catalog();
+        if(kind == PH_TEXT_KIND_STRING)
+        {
+            const auto it = catalog.strings_by_id.find(static_cast<size_t>(id));
+            if(it == catalog.strings_by_id.end())
+            {
+                return PH_RESULT_INVALID_ARGUMENT;
+            }
+            *text = it->second.c_str();
+            return PH_RESULT_SUCCESS;
+        }
+
+        const auto it = catalog.kernel_symbols_by_id.find(static_cast<size_t>(id));
+        if(it == catalog.kernel_symbols_by_id.end() || !it->second)
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
+        const auto& symbol = *it->second;
+        *text = symbol.display_name.empty() ? symbol.name.c_str() : symbol.display_name.c_str();
+        return PH_RESULT_SUCCESS;
+    });
 }

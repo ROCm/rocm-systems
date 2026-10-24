@@ -244,4 +244,14 @@ reader_t::get_event_counts(const reader_types::time_window_t& window) const
     return m_impl->get_event_counts(window);
 }
 
+uint32_t
+reader_t::read_table_events(const resolved_event_query& query,
+                            uint32_t                    event_type,
+                            uint64_t                    after_id,
+                            ph_table_event*             rows,
+                            uint32_t                    capacity)
+{
+    return m_impl->read_table_events(query, event_type, after_id, rows, capacity);
+}
+
 }  // namespace profiler_hub

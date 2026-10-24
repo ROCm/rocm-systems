@@ -479,6 +479,49 @@ extern "C"
      */
     ph_result_t ph_event_query_free(ph_event_query_t query);
 
+    /**
+     * @brief Reads the next page of table rows for one event type.
+     * @param query Query from ph_event_query_create().
+     * @param event_type ph_event_type_t value. A type the query does not list
+     *        yields a successful empty page.
+     * @param after_id Return rows whose id is greater than this. Pass 0 to
+     *        start. Pass the last returned id to continue.
+     * @param rows Caller-owned buffer. Filled with complete values; nothing
+     *        in a row points at profiler-hub memory.
+     * @param capacity Number of entries @p rows can hold. Must be non-zero.
+     * @param count Out parameter. Set to the number of rows written. A count
+     *        smaller than @p capacity means there are no further rows.
+     * @param future Optional cancellation source. This synchronous call does
+     *        not attach or complete it; it only observes cancellation while
+     *        reading the page.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
+     *         pointer is null, @p capacity is 0, or @p event_type is unknown,
+     *         PH_RESULT_INVALID_CONTEXT if the query has no trace,
+     *         PH_RESULT_CANCELLED if @p future was cancelled.
+     */
+    ph_result_t ph_event_query_read(ph_event_query_t  query,
+                                    uint32_t          event_type,
+                                    uint64_t          after_id,
+                                    ph_table_event_t* rows,
+                                    uint32_t          capacity,
+                                    uint32_t*         count,
+                                    ph_future_t       future);
+
+    /**
+     * @brief Looks up text the trace catalog already loaded.
+     * @param kind PH_TEXT_KIND_STRING or PH_TEXT_KIND_KERNEL_SYMBOL.
+     * @param text Out parameter. Points at catalog memory owned by @p ctx.
+     *        Valid until @p ctx is freed.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
+     *         pointer is null, @p kind is unknown, or @p id is not in the
+     *         catalog, PH_RESULT_INVALID_CONTEXT if @p ctx is null or the
+     *         trace is not loaded.
+     */
+    ph_result_t ph_lookup_text(ph_ctx_t     ctx,
+                               uint64_t     id,
+                               uint32_t     kind,
+                               const char** text);
+
 #ifdef __cplusplus
 }
 #endif

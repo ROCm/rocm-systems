@@ -15,8 +15,11 @@
 #include <optional>
 #include <unordered_map>
 
+struct ph_table_event;
+
 namespace profiler_hub
 {
+struct resolved_event_query;
 
 struct reader_t::impl
 {
@@ -105,6 +108,12 @@ struct reader_t::impl
     [[nodiscard]] reader_types::time_window_t  get_data_time_range();
     [[nodiscard]] reader_types::event_counts_t get_event_counts(
         const reader_types::time_window_t& window);
+
+    [[nodiscard]] uint32_t read_table_events(const resolved_event_query& query,
+                                             uint32_t                    event_type,
+                                             uint64_t                    after_id,
+                                             ph_table_event*             rows,
+                                             uint32_t                    capacity);
 
 private:
     // Resolve event metadata from event-specific table by db_id and type.

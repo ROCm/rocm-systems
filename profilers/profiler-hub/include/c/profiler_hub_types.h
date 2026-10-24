@@ -382,6 +382,8 @@ extern "C"
         PH_EVENT_TYPE_KERNEL_DISPATCH, /**< Kernel dispatch on a device queue. */
         PH_EVENT_TYPE_MEMORY_COPY,     /**< Memory copy. */
         PH_EVENT_TYPE_MEMORY_ALLOCATE, /**< Memory allocation. */
+        /** Sampled host code region. Used only by ph_event_query_read(). */
+        PH_EVENT_TYPE_REGION_SAMPLE,
     } ph_event_type_t;
 
     /** @brief A single duration event (region/kernel dispatch/memory
@@ -460,6 +462,54 @@ extern "C"
         ph_optional_uint64_t thread_id;
         ph_string_filter_t   string_filter;
     } ph_event_filter_t;
+
+    /** @brief One table row copied into caller-owned memory.
+     *         Ids are trace row ids, not Optiq string indexes. name_id,
+     *         category_id, and kernel_id are 0 when the column is absent.
+     *         pid and tid are OS ids. process_id is rocpd_info_process.id.
+     *         thread_id is rocpd_info_thread.id. agent_id is the destination
+     *         agent for a memory copy. mem_type and level are empty when the
+     *         row is not a memory allocation. */
+    typedef struct ph_table_event
+    {
+        uint64_t id;
+        uint64_t start;
+        uint64_t end;
+        uint64_t name_id;
+        uint64_t category_id;
+        uint64_t kernel_id;
+        uint64_t nid;
+        uint64_t process_id;
+        uint64_t thread_id;
+        uint64_t pid;
+        uint64_t tid;
+        uint64_t agent_id;
+        uint64_t src_agent_id;
+        uint64_t queue_id;
+        uint64_t stream_id;
+        uint64_t grid_size_x;
+        uint64_t grid_size_y;
+        uint64_t grid_size_z;
+        uint64_t workgroup_size_x;
+        uint64_t workgroup_size_y;
+        uint64_t workgroup_size_z;
+        uint64_t group_segment_size;
+        uint64_t private_segment_size;
+        uint64_t static_group_segment_size;
+        uint64_t static_private_segment_size;
+        uint64_t size;
+        uint64_t address;
+        uint64_t src_address;
+        char     mem_type[64];
+        char     level[64];
+    } ph_table_event_t;
+
+    /** @brief Which catalog ph_lookup_text reads. */
+    typedef enum
+    {
+        PH_TEXT_KIND_STRING        = 0, /**< rocpd string table. */
+        PH_TEXT_KIND_KERNEL_SYMBOL = 1, /**< Kernel symbol display name. */
+    } ph_text_kind_t;
 
     /** @brief Code-object address range for one call-stack frame.
      *         Strings are owned by the producing ph_ctx_t. is_valid is 0 when

@@ -883,6 +883,20 @@ ph_ctx::get_memory_alloc_details(uint64_t event_id)
     return view;
 }
 
+uint32_t
+ph_ctx::read_table_events(const profiler_hub::resolved_event_query& query,
+                          uint32_t                                  event_type,
+                          uint64_t                                  after_id,
+                          ph_table_event*                           rows,
+                          uint32_t                                  capacity)
+{
+    return m_connection_pool.with_connection(
+        [&](profiler_hub::common::connection& connection) {
+            return connection.reader().read_table_events(
+                query, event_type, after_id, rows, capacity);
+        });
+}
+
 ph_sample_list_t
 ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
 {
