@@ -271,10 +271,20 @@ class Os : AllStatic {
   //! POSIX: SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE
   //! Windows: ACCESS_VIOLATION, STACK_OVERFLOW, ILLEGAL_INSTRUCTION, INT_DIVIDE_BY_ZERO
   //! Callback is invoked before re-raising for default handling (core dump)
+  //! POSIX: each caller's callback is kept and all of them run, then the handler
+  //! installed before CLR's; the handler stays installed after a signal
+  //! A callback runs inside a signal handler, so it must be async-signal-safe.
+  //! It must also be reentrant and thread-safe: it runs again after a fault the
+  //! earlier handler recovers from, and threads that fault together run it at
+  //! the same time. It runs on the alternate signal stack when the earlier
+  //! handler asked for one, so it must use little stack.
+  //! Windows: one callback, which a later call replaces
   static bool installExceptionHandlers(CrashCallback callback = nullptr);
 
   //! Uninstall crash handlers
-  static void uninstallExceptionHandlers();
+  //! POSIX: removes only `callback`, and restores the earlier handlers once no
+  //! callback remains. Windows: removes the handler and its callback
+  static void uninstallExceptionHandlers(CrashCallback callback);
 
   //! Return the current process id
   static int getProcessId();
