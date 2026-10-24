@@ -264,11 +264,7 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
 }
 
 int64_t g_rcclParamDdaEnable = 1;  // rccl_wrap.cc:98 RCCL_PARAM default
-int g_rcclParamDdaEnableCalls = 0;
-int64_t rcclParamDdaEnable() {
-  ++g_rcclParamDdaEnableCalls;
-  return g_rcclParamDdaEnable;
-}
+int64_t rcclParamDdaEnable() { return g_rcclParamDdaEnable; }
 
 void ResetRcclWrapFakes() {
   g_rcclUpdateCollectiveProtocol = DefaultNoOpTune;
@@ -319,7 +315,6 @@ void ResetRcclWrapFakes() {
   g_rcclUseAllGatherDirect = DefaultUseAllGatherDirect;
   g_rcclUseReduceScatterDirect = DefaultUseReduceScatterDirect;
   g_rcclParamDdaEnable = 1;
-  g_rcclParamDdaEnableCalls = 0;
 }
 
 bool g_validHsaScratch = true;

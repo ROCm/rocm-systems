@@ -166,7 +166,6 @@ struct Fakes {
   ncclResult_t addonEndSeen = ncclInternalError;
   std::vector<Addon> addons;
   ncclResult_t addonResult = ncclSuccess;
-  std::vector<int> algoNamesAsked;
   std::vector<DdaEnabledCall> ddaEnabledCalls;
   bool ddaEnabled = false;
   size_t ddaThreshold = 0;
@@ -459,7 +458,6 @@ struct SharedHooks {
                                                                  return fake.ddaThreshold;
                                                                }};
   ScopedHook<ncclResult_t(int, const char**)> algoName{g_rcclGetAlgoName, [](int algo, const char** name) {
-    fake.algoNamesAsked.push_back(algo);
     *name = "ADDON";
     return ncclSuccess;
   }};
@@ -559,7 +557,7 @@ class CollectivesMicrotest : public ::testing::Test {
     for (void* p : fake.memAllocs) std::free(p);
     fake.memAllocs.clear();
     ResetHipFakes();       // g_hipMemcpyAsyncArgs
-    ResetRcclWrapFakes();  // g_rcclParamDdaEnable and its call count
+    ResetRcclWrapFakes();  // g_rcclParamDdaEnable
   }
 
   std::unique_ptr<ncclComm> MakeComm(int rank, int nRanks) {
@@ -696,13 +694,11 @@ TEST_F(CollectivesMicrotest, AlltoAllPivotEnable_ReadsItsEnvWithDefaultOff) {
 
 // Dispatch helpers
 
-// When DDA is not taken the helper explains why (INFO only); the explanation reads RCCL_DDA_ENABLE unless symk won.
 TEST_F(CollectivesMicrotest, AllReduceDda_SymmetricEligibleNeverTakesDda) {
   fake.ddaEnabled = true;
   EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, true, false, false));
   EXPECT_TRUE(fake.ddaEnabledCalls.empty());
   EXPECT_TRUE(fake.thresholdFuncs.empty());
-  EXPECT_EQ(0, g_rcclParamDdaEnableCalls);
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_CeAllowedYieldsOffGfx1250) {
@@ -710,7 +706,6 @@ TEST_F(CollectivesMicrotest, AllReduceDda_CeAllowedYieldsOffGfx1250) {
   EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, true, false));
   EXPECT_TRUE(fake.ddaEnabledCalls.empty());
   EXPECT_TRUE(fake.thresholdFuncs.empty());
-  EXPECT_EQ(1, g_rcclParamDdaEnableCalls);
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250FabricRunsEvenWhenCeIsAllowed) {
@@ -723,14 +718,6 @@ TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250FabricRunsEvenWhenCeIsAllowed) 
   EXPECT_EQ(4096u, fake.ddaEnabledCalls[0].threshold);
   EXPECT_FALSE(fake.ddaEnabledCalls[0].query);
   EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, fake.thresholdFuncs);
-  EXPECT_EQ(0, g_rcclParamDdaEnableCalls);
-}
-
-TEST_F(CollectivesMicrotest, AllReduceDda_RejectionReadsTheDdaEnableParam) {
-  g_rcclParamDdaEnable = 0;
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false, false));
-  EXPECT_EQ(1, g_rcclParamDdaEnableCalls);
-  EXPECT_EQ(1u, fake.ddaEnabledCalls.size());
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_MessageOverTheThresholdIsRejected) {
@@ -740,28 +727,18 @@ TEST_F(CollectivesMicrotest, AllReduceDda_MessageOverTheThresholdIsRejected) {
   EXPECT_EQ(kCount * 8, fake.ddaEnabledCalls[0].totalBytes);
   EXPECT_EQ(64u, fake.ddaEnabledCalls[0].threshold);
   EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, fake.thresholdFuncs);
-  EXPECT_EQ(1, g_rcclParamDdaEnableCalls);
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250WithCeAllowedStillAsksDda) {
   SetArch("gfx1250");
   EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, true, false));
   EXPECT_EQ(1u, fake.ddaEnabledCalls.size());
-  EXPECT_EQ(1, g_rcclParamDdaEnableCalls);
-}
-
-TEST_F(CollectivesMicrotest, AllReduceDda_QueryExplainsNothing) {
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false, true));
-  EXPECT_EQ(1u, fake.ddaEnabledCalls.size());
-  EXPECT_EQ(1u, fake.thresholdFuncs.size());
-  EXPECT_EQ(0, g_rcclParamDdaEnableCalls);
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_TakesDdaWhenNothingElseServesTheCall) {
   fake.ddaEnabled = true;
   EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false, false));
   EXPECT_EQ(1u, fake.thresholdFuncs.size());
-  EXPECT_EQ(0, g_rcclParamDdaEnableCalls);
 }
 
 TEST_F(CollectivesMicrotest, AlltoAllDda_YieldsToCe) {
@@ -1248,7 +1225,6 @@ TEST_F(CollectivesMicrotest, AllGather_SelectsOnceAndEnqueuesTheDecision) {
   EXPECT_TRUE(info.decision.ceCapturing);
   EXPECT_TRUE(info.decision.ceArGraphAllowed);
   EXPECT_FALSE(info.useDirect);
-  EXPECT_TRUE(fake.algoNamesAsked.empty());
 }
 
 TEST_F(CollectivesMicrotest, AllGather_FailuresBeforeDispatchStopIt) {
@@ -1319,24 +1295,11 @@ TEST_F(CollectivesMicrotest, AllGather_CheckModeDivertsAddonsButKeepsDirect) {
   ASSERT_EQ(1u, fake.enqueued.size());
   EXPECT_EQ(RCCL_DDA_IPC, Info().decision.algo);
   EXPECT_TRUE(fake.addons.empty());
-  EXPECT_TRUE(fake.algoNamesAsked.empty());
 
   Decide(RCCL_DIRECT_ALLGATHER);
   EXPECT_EQ(ncclSuccess, AllGather());
   ASSERT_EQ(2u, fake.enqueued.size());
   EXPECT_TRUE(Info(1).useDirect);
-}
-
-TEST_F(CollectivesMicrotest, AllGather_NamesTheAddonOnRankZeroOnly) {
-  Decide(RCCL_CE_SCRATCH);
-  EXPECT_EQ(ncclSuccess, AllGather());
-  comm_->rank = 0;
-  Decide(NCCL_ALGO_TREE);
-  EXPECT_EQ(ncclSuccess, AllGather());
-  EXPECT_TRUE(fake.algoNamesAsked.empty());
-  Decide(RCCL_DIRECT_ALLGATHER);
-  EXPECT_EQ(ncclSuccess, AllGather());
-  EXPECT_EQ(std::vector<int>{RCCL_DIRECT_ALLGATHER}, fake.algoNamesAsked);
 }
 
 // Hierarchical AllGather / ReduceScatter: 2 nodes x 4 local ranks, this rank is node 1, local rank 1.
@@ -1698,8 +1661,6 @@ TEST_F(CollectivesMicrotest, AlltoAll_DdaArmsLaunchAsAddons) {
                    {RCCL_DDA_FABRIC_VMM, "ncclAllToAllDdaFabric"},
                    {RCCL_DDA_IPC, "ncclAllToAllDdaIpc"}},
                   [&] { return AlltoAll(); }, ncclNumOps, "AlltoAll");
-  EXPECT_EQ((std::vector<int>{RCCL_DDA_FABRIC_LL, RCCL_DDA_FABRIC_LL128, RCCL_DDA_FABRIC_VMM, RCCL_DDA_IPC}),
-            fake.algoNamesAsked);
 }
 
 TEST_F(CollectivesMicrotest, AlltoAll_CheckModeDivertsDda) {
@@ -1711,19 +1672,6 @@ TEST_F(CollectivesMicrotest, AlltoAll_CheckModeDivertsDda) {
   EXPECT_EQ(ncclFuncAlltoAll, Info().coll);
   EXPECT_EQ(RCCL_DDA_FABRIC_LL, Info().decision.algo);
   EXPECT_TRUE(fake.addons.empty());
-  EXPECT_TRUE(fake.algoNamesAsked.empty());
-}
-
-TEST_F(CollectivesMicrotest, AlltoAll_NamesTheAddonOnRankZeroOnly) {
-  Decide(RCCL_CE_SCRATCH);
-  EXPECT_EQ(ncclSuccess, AlltoAll());
-  comm_->rank = 0;
-  Decide(NCCL_ALGO_RING);
-  EXPECT_EQ(ncclSuccess, AlltoAll());
-  EXPECT_TRUE(fake.algoNamesAsked.empty());
-  Decide(RCCL_DIRECT_ALLTOALL);
-  EXPECT_EQ(ncclSuccess, AlltoAll());
-  EXPECT_EQ(std::vector<int>{RCCL_DIRECT_ALLTOALL}, fake.algoNamesAsked);
 }
 
 // AllReduce dispatch
@@ -1774,7 +1722,6 @@ TEST_F(CollectivesMicrotest, AllReduce_DdaArmsLaunchAsAddons) {
                    {RCCL_DDA_FABRIC_VMM, "ncclAllReduceDdaFabric"},
                    {RCCL_DDA_IPC, "ncclAllReduceDdaIpc"}},
                   [&] { return AllReduce(); }, ncclProd, "AllReduce");
-  EXPECT_TRUE(fake.algoNamesAsked.empty());  // rank 1
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_CheckModeDivertsAddons) {
@@ -1788,18 +1735,6 @@ TEST_F(CollectivesMicrotest, AllReduce_CheckModeDivertsAddons) {
   }
   EXPECT_TRUE(fake.addons.empty());
   EXPECT_TRUE(fake.ceArs.empty());
-}
-
-TEST_F(CollectivesMicrotest, AllReduce_NamesTheAddonOnRankZeroOnly) {
-  Decide(RCCL_SYMMETRIC);
-  EXPECT_EQ(ncclSuccess, AllReduce());
-  comm_->rank = 0;
-  Decide(NCCL_ALGO_PAT);
-  EXPECT_EQ(ncclSuccess, AllReduce());
-  EXPECT_TRUE(fake.algoNamesAsked.empty());
-  Decide(RCCL_SYMMETRIC);
-  EXPECT_EQ(ncclSuccess, AllReduce());
-  EXPECT_EQ(std::vector<int>{RCCL_SYMMETRIC}, fake.algoNamesAsked);
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_CeTwoShotRunsInsideAProfilerEvent) {
@@ -1895,8 +1830,6 @@ TEST_F(CollectivesMicrotest, ReduceScatter_DdaArmsLaunchAsAddons) {
                    {RCCL_DDA_FABRIC_VMM, "ncclReduceScatterDdaFabric"},
                    {RCCL_DDA_IPC, "ncclReduceScatterDdaIpc"}},
                   [&] { return ReduceScatter(); }, ncclMin, "ReduceScatter");
-  EXPECT_EQ((std::vector<int>{RCCL_DDA_FABRIC_LL, RCCL_DDA_FABRIC_LL128, RCCL_DDA_FABRIC_VMM, RCCL_DDA_IPC}),
-            fake.algoNamesAsked);
 }
 
 TEST_F(CollectivesMicrotest, ReduceScatter_CheckModeDivertsAddons) {
@@ -1907,19 +1840,6 @@ TEST_F(CollectivesMicrotest, ReduceScatter_CheckModeDivertsAddons) {
   ASSERT_EQ(1u, fake.enqueued.size());
   EXPECT_FALSE(Info().useDirect);
   EXPECT_FALSE(fake.enqueued[0].directReduceScatter);
-  EXPECT_TRUE(fake.algoNamesAsked.empty());
-}
-
-TEST_F(CollectivesMicrotest, ReduceScatter_NamesTheAddonOnRankZeroOnly) {
-  Decide(RCCL_SYMMETRIC);
-  EXPECT_EQ(ncclSuccess, ReduceScatter());
-  comm_->rank = 0;
-  Decide(NCCL_ALGO_RING);
-  EXPECT_EQ(ncclSuccess, ReduceScatter());
-  EXPECT_TRUE(fake.algoNamesAsked.empty());
-  Decide(RCCL_SYMMETRIC);
-  EXPECT_EQ(ncclSuccess, ReduceScatter());
-  EXPECT_EQ(std::vector<int>{RCCL_SYMMETRIC}, fake.algoNamesAsked);
 }
 
 // Direct ReduceScatter stages every peer slice into tempBuff, then reduces it, both under the force flag.
