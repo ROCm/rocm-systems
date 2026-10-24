@@ -12,6 +12,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/dda_targets.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "algorithms/dda/fabric/fabric_mem_handler.h"
 #include "bootstrap.h"
@@ -33,7 +34,7 @@ using nccl_dda_detail::DdaFabricMaxBlocksOverride;
 RCCL_PARAM(DdaFabricBufferSizeForScratch, "DDA_FABRIC_BUFFER_SIZE", -1);
 
 bool ncclDdaUseFabricPath(ncclComm* comm) {
-  if (comm == nullptr) {
+  if (comm == nullptr || !ncclDdaCompiledForArch(comm->archName)) {
     return false;
   }
   return comm->MNNVL == 1 && IsArchMatch(comm->archName, "gfx1250");
