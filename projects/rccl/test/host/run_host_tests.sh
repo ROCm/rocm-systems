@@ -165,6 +165,7 @@ do_host_tests() {
     # so one compile cannot cover both. See test/host/CMakeLists.txt.
     "rccl-UnitTestsMicroInit-faultinj:$SCRIPT_DIR/host_tests_micro_init_faultinj.xml"
     "rccl-UnitTestsMicroEnqueue:$SCRIPT_DIR/host_tests_micro_enqueue.xml"
+    "rccl-UnitTestsMicroGinHostProxy:$SCRIPT_DIR/host_tests_micro_gin_host_proxy.xml"
     # ENABLE_DEVICE_LINKER defaults ON, so this variant is the arm that ships;
     # enqueue.cc gates rcclShmemDynamicSize on RCCL_DEVICE_LINKER at the
     # preprocessor, so one compile cannot cover both. See test/host/CMakeLists.txt.

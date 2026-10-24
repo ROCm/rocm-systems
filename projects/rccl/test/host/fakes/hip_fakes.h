@@ -176,6 +176,13 @@ extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/, 
 // hipSuccess -- the allocation seams hand out std::malloc'd host memory, so a
 // buffer production zeroes is genuinely zero when a test reads it back.
 extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/)> g_hipMemset;
+// The DMA-BUF export, where CMake's hipMemGetHandleForAddressRange probe found it (rocmwrap.h's
+// NCCL_CUMEM_DMABUF_EXPORT_PROBE). The default fails with hipErrorInvalidValue.
+#if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
+extern std::function<hipError_t(void* /*handle*/, hipDeviceptr_t /*ptr*/, size_t /*size*/,
+                                hipMemRangeHandleType /*type*/, unsigned long long /*flags*/)>
+    g_hipMemGetHandleForAddressRange;
+#endif
 
 extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/)> g_hipStreamCreateWithFlags;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;
