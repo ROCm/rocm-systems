@@ -665,7 +665,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   deviceProps.multiProcessorCount = info.maxComputeUnits_;
   deviceProps.l2CacheSize = info.l2CacheSize_;
   deviceProps.maxThreadsPerMultiProcessor = info.maxThreadsPerCU_;
-  deviceProps.maxBlocksPerMultiProcessor = static_cast<int>(info.maxThreadsPerCU_ / info.wavefrontWidth_);
+  deviceProps.maxBlocksPerMultiProcessor = static_cast<int>(info.maxWavesPerCU_);
   deviceProps.computeMode = 0;
   deviceProps.clockInstructionRate = info.timeStampFrequency_;
   deviceProps.arch.hasGlobalInt32Atomics = 1;

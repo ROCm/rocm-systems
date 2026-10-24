@@ -43,8 +43,8 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   }
 
   // Find wave occupancy per CU => simd_per_cu * GPR usage
-  // Limited by SPI 32 per CU, hence 8 per SIMD
-  const size_t MaxWavesPerSimd = (device.isa().versionMajor() <= 9) ? 8 : 16;
+  const uint32_t simdPerCU = device.info().simdPerCU_;
+  const size_t MaxWavesPerSimd = device.info().maxWavesPerCU_ / simdPerCU;
   const size_t wavefrontSize = wrkGrpInfo->wavefrontSize_;
   const bool adjust_for_wave64 = device.isa().versionMajor() >= 10 && wavefrontSize == 64;
   const uint32_t VgprGranularity = adjust_for_wave64
@@ -82,13 +82,6 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     // bestBlockSize, giving a divide by zero when bestBlocksPerCU is computed.
     return hipErrorUnknown;
   }
-
-  // The table contains SIMD per CU, not per WGP, so when WGP mode is set
-  // on kernel metadata, multiply the number of SIMDs by 2, to account for
-  // 2CUs in 1 WGP.
-  const uint32_t simdPerCU = wrkGrpInfo->isWGPMode_
-      ? device.isa().simdPerCU() * 2
-      : device.isa().simdPerCU();
 
   const size_t alu_occupancy = simdPerCU * std::min(MaxWavesPerSimd, GprWaves);
   const int alu_limited_threads = static_cast<int>(alu_occupancy * wavefrontSize);
