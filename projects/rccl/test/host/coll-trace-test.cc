@@ -376,13 +376,12 @@ TEST_F(CollTraceMicrotest, Event_DefaultsToACommEventAndMoves) {
 TEST_F(CollTraceMicrotest, Trace_WorkerRunsOnTheCommDeviceUntilDestroyed) {
   comm_->cudaDev = 3;
   auto trace = std::make_unique<CollTrace>(comm_.get());
-  ASSERT_TRUE(WaitUntil([] { return DebugLogged(NCCL_LOG_INFO, "worker thread STARTED"); }));
 
+  Enqueue(trace.get(), 2.0f);
   trace.reset();
 
   EXPECT_EQ(g_setDevices, std::vector<int>{3});
-  EXPECT_TRUE(DebugLogged(NCCL_LOG_INFO, "COLLTRACE: commHash 2748 rank 0 - worker thread TERMINATE"));
-  EXPECT_TRUE(DebugLogged(NCCL_LOG_INFO, "COLLTRACE: commHash 2748 rank 0 - Destroy COMPLETE"));
+  EXPECT_EQ(g_queries, 2);
 }
 
 TEST_F(CollTraceMicrotest, Trace_WorkerExitsWhenTheDeviceCannotBeSet) {
