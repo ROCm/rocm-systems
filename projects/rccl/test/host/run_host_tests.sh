@@ -169,6 +169,7 @@ do_host_tests() {
     # enqueue.cc gates rcclShmemDynamicSize on RCCL_DEVICE_LINKER at the
     # preprocessor, so one compile cannot cover both. See test/host/CMakeLists.txt.
     "rccl-UnitTestsMicroEnqueue-devlinker:$SCRIPT_DIR/host_tests_micro_enqueue_devlinker.xml"
+    "rccl-UnitTestsMicroLinux:$SCRIPT_DIR/host_tests_micro_linux.xml"
     "rccl-UnitTestsMicroSymKernels:$SCRIPT_DIR/host_tests_micro_symkernels.xml"
     "rccl-UnitTestsMicroTaskPrep:$SCRIPT_DIR/host_tests_micro_taskprep.xml"
     "rccl-UnitTestsMicroNcclDevice:$SCRIPT_DIR/host_tests_micro_nccl_device.xml"

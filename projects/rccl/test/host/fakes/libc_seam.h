@@ -36,8 +36,16 @@
 
 // The headers that declare the names renamed below, so this file satisfies its own ordering rule and a unit following
 // the recipe above cannot get it wrong by forgetting one. Include guards make the includer's own copies free.
+#include <dirent.h>
+#include <dlfcn.h>
+#include <ifaddrs.h>
 #include <netdb.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <sched.h>
+#include <signal.h>
+#include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -72,6 +80,29 @@ void micro_free(void*);
 int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)));
 int micro_gethostname(char*, size_t);
 int micro_access(const char*, int);
+int micro_poll(struct pollfd*, nfds_t, int);
+int micro_getsockopt(int, int, int, void*, socklen_t*);
+int micro_getsockname(int, struct sockaddr*, socklen_t*);
+int micro_shutdown(int, int);
+ssize_t micro_recvmsg(int, struct msghdr*, int);
+ssize_t micro_sendmsg(int, const struct msghdr*, int);
+int micro_pipe(int*);
+int micro_getifaddrs(struct ifaddrs**);
+void micro_freeifaddrs(struct ifaddrs*);
+int micro_getrlimit(int, struct rlimit*);
+int micro_setrlimit(int, const struct rlimit*);
+int micro_sched_getaffinity(pid_t, size_t, cpu_set_t*);
+void* micro_dlopen(const char*, int);
+char* micro_dlerror(void);
+char* micro_realpath(const char*, char*);
+FILE* micro_fopen(const char*, const char*);
+DIR* micro_opendir(const char*);
+int micro_mkstemp(char*);
+int micro_fallocate(int, int, off_t, off_t);
+void* micro_mmap(void*, size_t, int, int, int, off_t);
+int micro_munmap(void*, size_t);
+int micro_unlink(const char*);
+sighandler_t micro_signal(int, sighandler_t);
 }  // extern "C"
 
 #define write micro_write
@@ -100,3 +131,26 @@ int micro_access(const char*, int);
 #define fprintf micro_fprintf
 #define gethostname micro_gethostname
 #define access micro_access
+#define poll micro_poll
+#define getsockopt micro_getsockopt
+#define getsockname micro_getsockname
+#define shutdown micro_shutdown
+#define recvmsg micro_recvmsg
+#define sendmsg micro_sendmsg
+#define pipe micro_pipe
+#define getifaddrs micro_getifaddrs
+#define freeifaddrs micro_freeifaddrs
+#define getrlimit micro_getrlimit
+#define setrlimit micro_setrlimit
+#define sched_getaffinity micro_sched_getaffinity
+#define dlopen micro_dlopen
+#define dlerror micro_dlerror
+#define realpath micro_realpath
+#define fopen micro_fopen
+#define opendir micro_opendir
+#define mkstemp micro_mkstemp
+#define fallocate micro_fallocate
+#define mmap micro_mmap
+#define munmap micro_munmap
+#define unlink micro_unlink
+#define signal micro_signal
