@@ -1,5 +1,6 @@
 """
-This dictionary is used to map specific file directory changes to the corresponding build flag and tests
+This dictionary is used to map specific file directory changes to the corresponding build flag and tests.
+A subtree maps to one project, or to a list of projects when a change to it needs several.
 """
 
 subtree_to_project_map = {
@@ -8,6 +9,8 @@ subtree_to_project_map = {
     "projects/amdsmi": "amdsmi",  # amdsmi changes run amdsmi + its downstream dependents
     "projects/aqlprofile": "profiler",
     "projects/clr": "runtimes",
+    # HIP and ROCTx Fortran bindings: built against the HIP runtime and rocprofiler-sdk.
+    "projects/fortran": ["runtimes", "profiler"],
     "projects/hrr": "hrr",
     # amd-smi compiles shared/cuid in-tree when no installed amdcuid is found.
     "shared/cuid": "amdsmi",
