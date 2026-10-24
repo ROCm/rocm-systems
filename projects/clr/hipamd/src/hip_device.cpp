@@ -640,7 +640,10 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();
+  static_assert(sizeof(deviceProps.name) > sizeof(info.boardName_),
+                "hipDeviceProp_t::name must hold boardName_ and a terminator");
   ::strncpy(deviceProps.name, info.boardName_, sizeof(info.boardName_));
+  deviceProps.name[sizeof(info.boardName_)] = '\0';
   memcpy(deviceProps.uuid.bytes, info.uuid_, sizeof(info.uuid_));
   deviceProps.totalGlobalMem = info.globalMemSize_;
   const size_t ldsPerMultiprocessor = static_cast<size_t>(info.localMemSizePerCU_) *
