@@ -55,6 +55,8 @@ protected:
     set(124, 4, type);
     set(128, 13, 17);
     set(gfx9 ? 160 : 144, 13, view ? 3 : 0);
+    if (gfx12)
+      set(157, 1, 1); // Adjacent GFX12 field is not part of BASE_ARRAY.
     if (uav)
       set(gfx12 ? 164 : 160, 1, 1);
     return r;
@@ -63,10 +65,10 @@ protected:
 
 TEST_P(ImageResourceTest, DimensionsLayersMipViewsAndOutOfRangeLod) {
   // Expected values match descriptor-only HIP probes on gfx1100 and gfx1201.
-  for (uint32_t type = amdgpu::kGfx9Image1d; type <= amdgpu::kGfx9Image2dMsaaArray; ++type) {
+  for (uint32_t type = amdgpu::kImage1d; type <= amdgpu::kImage2dMsaaArray; ++type) {
     for (bool view : {false, true}) {
       const auto r = descriptor(type, view);
-      const bool msaa = type >= amdgpu::kGfx9Image2dMsaa;
+      const bool msaa = type >= amdgpu::kImage2dMsaa;
       const uint32_t base = msaa ? 0 : view ? 2 : 0;
       const uint32_t levels = msaa ? 1 : view ? 3 : 7;
       for (uint32_t lod : {0u, 1u, 2u, 6u, 7u, 31u, 0xffffffffu}) {
@@ -74,14 +76,14 @@ TEST_P(ImageResourceTest, DimensionsLayersMipViewsAndOutOfRangeLod) {
         std::array<uint32_t, 4> expected{0, 0, 0, levels};
         if (lod < levels) {
           expected[0] = std::max(1u, 128u >> (base + lod));
-          if (type != amdgpu::kGfx9Image1d && type != amdgpu::kGfx9Image1dArray)
+          if (type != amdgpu::kImage1d && type != amdgpu::kImage1dArray)
             expected[1] = std::max(1u, 64u >> (base + lod));
-          if (type == amdgpu::kGfx9Image3d)
+          if (type == amdgpu::kImage3d)
             expected[2] = std::max(1u, 18u >> (base + lod));
-          if (type == amdgpu::kGfx9ImageCube || type == amdgpu::kGfx9Image2dArray ||
-              type == amdgpu::kGfx9Image2dMsaaArray)
+          if (type == amdgpu::kImageCube || type == amdgpu::kImage2dArray ||
+              type == amdgpu::kImage2dMsaaArray)
             expected[2] = view ? 15 : 18;
-          if (type == amdgpu::kGfx9Image1dArray)
+          if (type == amdgpu::kImage1dArray)
             expected[1] = view ? 15 : 18;
         }
         EXPECT_EQ(amdgpu::image_resource_info(r, GetParam(), lod), expected);
@@ -90,9 +92,8 @@ TEST_P(ImageResourceTest, DimensionsLayersMipViewsAndOutOfRangeLod) {
   }
   EXPECT_EQ(amdgpu::image_resource_info({}, GetParam(), 0), (std::array<uint32_t, 4>{}));
   if (!arch_is_cdna_4_or_lower(GetParam())) {
-    EXPECT_EQ(
-        amdgpu::image_resource_info(descriptor(amdgpu::kGfx9Image3d, true, true), GetParam(), 1),
-        (std::array<uint32_t, 4>{16, 8, 15, 3}));
+    EXPECT_EQ(amdgpu::image_resource_info(descriptor(amdgpu::kImage3d, true, true), GetParam(), 1),
+              (std::array<uint32_t, 4>{16, 8, 15, 3}));
   }
 }
 
@@ -110,7 +111,7 @@ TEST_P(ImageResourceTest, DecodedQueryCompactsMaskAndPreservesInactiveLanesWithA
   ASSERT_NE(wf, nullptr);
   const uint32_t last = wf->wf_size() - 1;
   wf->set_exec(1 | (uint64_t{1} << last));
-  auto r = descriptor(amdgpu::kGfx9Image2dArray, true);
+  auto r = descriptor(amdgpu::kImage2dArray, true);
   for (uint32_t i = 0; i < r.size(); ++i)
     cu->write_sgpr(wf->sgpr_alloc().base + 4 + i, r[i]);
   const auto vb = wf->vgpr_alloc().base;
