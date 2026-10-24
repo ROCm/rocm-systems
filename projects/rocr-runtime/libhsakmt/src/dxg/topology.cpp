@@ -854,8 +854,14 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
   dxg_topology->num_sysfs_nodes = dxg_topology->numa_node_count_ + num_adapters;
   dxg_runtime->HeapInit();
   props.NumNodes = dxg_topology->num_sysfs_nodes;
-  // Update default GPU node to account CPU nodes
-  dxg_runtime->default_node = dxg_topology->numa_node_count_;
+  // Convert the requested GPU index to a node id.
+  uint32_t idx = dxg_runtime->visible_gpu_index;
+  if (idx >= num_adapters) {
+    pr_err("ROCR_VISIBLE_DEVICES selects GPU %u but only %u adapter(s) present; using 0\n",
+           idx, num_adapters);
+    idx = 0;
+  }
+  dxg_runtime->default_node = dxg_topology->numa_node_count_ + idx;
 
   return HSAKMT_STATUS_SUCCESS;
 }
