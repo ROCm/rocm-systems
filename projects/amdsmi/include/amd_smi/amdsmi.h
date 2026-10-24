@@ -8341,6 +8341,9 @@ amdsmi_status_t amdsmi_get_power_cap_info(amdsmi_processor_handle processor_hand
  *  @param[out] info Reference to the PCIe information
  *  returned by the library. Must be allocated by user.
  *
+ *  @note A GPU that reaches its CPU over xGMI has no PCIe host link, so pcie_static.max_pcie_width,
+ *  max_pcie_speed and pcie_interface_version are set to the maximum value of their type.
+ *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
