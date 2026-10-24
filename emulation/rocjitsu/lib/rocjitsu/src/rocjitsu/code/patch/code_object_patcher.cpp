@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/amdhsa_metadata.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
@@ -1500,6 +1501,23 @@ bool CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
 
   std::memcpy(image_.data() + file_offset, descriptor.data(), descriptor.size());
   return true;
+}
+
+bool CodeObjectPatcher::patch_kernel_resources(const KernelDescriptorInfo &kernel,
+                                               const amdhsa::kernel_descriptor_t &descriptor,
+                                               std::optional<uint32_t> sgprs,
+                                               std::optional<uint32_t> vgprs, std::string *error) {
+  if (!image_contains_range(image_.size(), kernel.descriptor_file_offset, sizeof(descriptor))) {
+    if (error != nullptr)
+      *error = "kernel resource descriptor lies outside the image";
+    return false;
+  }
+  const amdhsa::kernel_descriptor_t updated = descriptor;
+  if (amdhsa::update_resource_metadata(image_, kernel, updated.kernarg_size, sgprs, vgprs, error)
+          .failed())
+    return false;
+  return patch_kernel_descriptor(kernel.descriptor_file_offset,
+                                 {reinterpret_cast<const uint8_t *>(&updated), sizeof(updated)});
 }
 
 bool CodeObjectPatcher::set_private_segment_fixed_size(uint64_t descriptor_file_offset,

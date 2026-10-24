@@ -58,6 +58,26 @@ struct SpecialStateSlot {
   uint8_t width = 1;      ///< Register lanes: 2 for EXEC/VCC, 1 for M0.
 };
 
+/// @brief One ordered copy in the parallel assignment of guest VGPR arguments.
+struct ProbeArgumentMove {
+  uint16_t destination = 0;
+  uint16_t source = 0;
+  constexpr bool operator==(const ProbeArgumentMove &) const = default;
+};
+
+/// @brief Framework-owned scalar snapshot of a VGPR's lane zero at kernel entry.
+struct EntryVgprCapture {
+  uint16_t vgpr = 0;
+  uint16_t sgpr = 0;
+};
+
+/// @brief Preserve an ordinary guest register in an additional allocated register.
+struct RegisterSave {
+  RegClass cls = RegClass::VGPR;
+  uint16_t source = 0;
+  uint16_t destination = 0;
+};
+
 /// @brief Builder-facing description of one trampoline.
 ///
 /// Coordinates are .text-relative byte offsets. The orchestrator fills this
@@ -75,6 +95,10 @@ struct TrampolinePlan {
   std::vector<InlineAsmItem> before_items;
   std::vector<InlineAsmItem> after_items;
   bool emit_original = true;
+  /// A dispatch-only callback returns to an untouched original entry; it has
+  /// no anchor splice and imposes no relocation-size constraint on that entry.
+  bool patch_anchor = true;
+  bool returns_to_kernel = true;
 
   //----------------------------------------------------------------------------
   // Probe-call resources (filled by plan_probe_call(); left at defaults for the
@@ -93,6 +117,7 @@ struct TrampolinePlan {
   /// conservative cross-ISA allocatable bound (no kernel-specific limit); the
   /// orchestrator narrows it to the patched kernel's actual count.
   uint32_t kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS;
+  uint32_t kernel_vgpr_count = 256;
 
   /// Argument dwords to materialize into the ABI's argument VGPRs before the
   /// call, in order from arg_vgpr_base. Mostly an emit-time input rather than a
@@ -106,6 +131,8 @@ struct TrampolinePlan {
   /// to be restorable from somewhere. An EXEC-sourced argument then reads that
   /// same temp rather than `exec`, which the widen has already overwritten.
   std::vector<ProbeArgValue> probe_args;
+  std::vector<ProbeArgumentMove> argument_moves;
+  std::optional<uint16_t> argument_copy_temp;
 
   /// Base of the framework's persistent entry-storage SGPR pair: the two
   /// registers the kernel-entry prologue loaded the DBI payload pointer into.
@@ -114,6 +141,8 @@ struct TrampolinePlan {
   /// site, so the envelope's own temp selection avoids it either way. Unset when
   /// the kernel has no prologue, which makes a LogBufferPtr* argument fail closed.
   std::optional<uint16_t> entry_storage_base;
+  std::vector<EntryVgprCapture> entry_vgpr_captures;
+  std::vector<RegisterSave> register_saves;
 
   /// Run the probe body under EXEC = -1 instead of the anchor mask. The envelope
   /// opens a full-mask window for the spill stores and argument writes either
@@ -167,6 +196,7 @@ struct TrampolinePlan {
 struct TrampolineBytes {
   std::vector<uint8_t> patched_anchor_bytes; // original_size bytes.
   std::vector<uint32_t> trampoline_words;
+  uint32_t original_byte_offset = 0;
 };
 
 class TrampolineBuilder {
