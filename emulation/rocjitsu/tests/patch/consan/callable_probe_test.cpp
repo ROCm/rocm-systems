@@ -22,8 +22,8 @@ struct CallableProbeCase {
 class ConSanCallableProbe : public ::testing::TestWithParam<CallableProbeCase> {};
 
 TEST_P(ConSanCallableProbe, CompiledBodiesAreSelfContainedAndUseOnlyTheirArguments) {
-  const auto mode = GetParam();
-  const auto image = lds_probe_image(mode.target, mode.wave);
+  const CallableProbeCase mode = GetParam();
+  const std::span<const uint8_t> image = lds_probe_image(mode.target, mode.wave);
   ASSERT_FALSE(image.empty());
   AmdGpuCodeObject object(image.data(), image.size());
   ASSERT_TRUE(object.is_valid());
@@ -32,16 +32,16 @@ TEST_P(ConSanCallableProbe, CompiledBodiesAreSelfContainedAndUseOnlyTheirArgumen
                                         {"rj_consan_exit", uint8_t{4}}}) {
     SCOPED_TRACE(name);
     std::string error;
-    const auto symbol = resolve_probe_symbol(object, name, &error);
+    const std::optional<ResolvedProbeSymbol> symbol = resolve_probe_symbol(object, name, &error);
     ASSERT_TRUE(symbol) << error;
-    const auto body =
+    const std::optional<ProbeCallable> body =
         build_probe_callable(object, *symbol, target_profile(mode.target)->arch, arguments, &error);
     ASSERT_TRUE(body) << error;
-    const auto live = analyze_probe_live_ins(object, *symbol, body->arch, body->abi, &error,
-                                             ProbeEntryState::ZeroVgprBanks);
+    const std::optional<RegisterSet> live = analyze_probe_live_ins(
+        object, *symbol, body->arch, body->abi, &error, ProbeEntryState::ZeroVgprBanks);
     ASSERT_TRUE(live) << error;
     EXPECT_TRUE(live->none());
-    const auto clobbers = build_probe_clobber_summary(*body, &error);
+    const std::optional<ProbeClobberSummary> clobbers = build_probe_clobber_summary(*body, &error);
     ASSERT_TRUE(clobbers) << error;
     EXPECT_FALSE(clobbers->uses_private_segment);
     EXPECT_FALSE(clobbers->touches_flat_scratch);

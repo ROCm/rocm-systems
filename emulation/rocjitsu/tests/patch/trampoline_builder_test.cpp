@@ -1321,10 +1321,10 @@ TEST(TrampolineBuilderPlan, RegisterCopiesPreserveALiveReturnLinkWithoutScratch)
   live.expand({RegClass::VGPR, 0, 1});
   std::string error;
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, live, {}, &error)) << error;
-  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);
+  const std::optional<TrampolineBytes> bytes = TrampolineBuilder::emit_probe_call(plan, &error);
   ASSERT_TRUE(bytes) << error;
   const std::vector<uint32_t> &words = bytes->trampoline_words;
-  const auto call =
+  const std::vector<uint32_t>::const_iterator call =
       std::ranges::find(words, build_s_swappc_b64(30, plan.target_pair_base, plan.arch));
   ASSERT_NE(call, words.end());
   for (const RegisterSave &save : plan.register_saves) {
@@ -1355,7 +1355,7 @@ TEST(TrampolineBuilderPlan, RegisterCopiesRejectOverlapsAndUnavailableDestinatio
       {{RegClass::SGPR, 0, 30}},
       {{RegClass::SGPR, 0, 4}},
       {{RegClass::SGPR, 0, 5}}};
-  for (const auto &saves : invalid) {
+  for (const std::vector<RegisterSave> &saves : invalid) {
     TrampolinePlan plan = make_probe_plan();
     plan.register_saves = saves;
     std::string error;
@@ -1366,7 +1366,8 @@ TEST(TrampolineBuilderPlan, RegisterCopiesRejectOverlapsAndUnavailableDestinatio
   TrampolinePlan plan = make_probe_plan();
   plan.probe_args = {probe_arg_imm(17)};
   plan.register_saves = {{RegClass::VGPR, 1, 0}};
-  const auto argument_abi = derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, 1);
+  const std::optional<ProbeAbi> argument_abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, 1);
   std::string error;
   EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, *argument_abi, {}, {}, &error));
 }
@@ -1375,7 +1376,8 @@ TEST(TrampolineBuilderEmit, RejectsABackupTamperedToOverlapTheArgumentBlock) {
   TrampolinePlan plan = make_probe_plan();
   plan.probe_args = {probe_arg_imm(17)};
   plan.register_saves = {{RegClass::VGPR, 1, 16}};
-  const auto argument_abi = derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, 1);
+  const std::optional<ProbeAbi> argument_abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, 1);
   std::string error;
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, *argument_abi, {}, {}, &error)) << error;
   plan.register_saves.front().destination = 0;
@@ -1386,19 +1388,20 @@ TEST(TrampolineBuilderEmit, RejectsABackupTamperedToOverlapTheArgumentBlock) {
 TEST(TrampolineBuilderEmit, Rdna4OrdersScalarStateAcrossTheCallAndGuestResume) {
   const TrampolinePlan plan = make_probe_plan(ROCJITSU_CODE_ARCH_RDNA4, true);
   std::string error;
-  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);
+  const std::optional<TrampolineBytes> bytes = TrampolineBuilder::emit_probe_call(plan, &error);
   ASSERT_TRUE(bytes) << error;
   const std::vector<uint32_t> &words = bytes->trampoline_words;
   const uint32_t wait = build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc);
   const size_t loads = build_wait_all_loads_complete(plan.arch).size();
   ASSERT_GT(words.size(), loads);
   EXPECT_EQ(words[loads], wait);
-  const auto call =
+  const std::vector<uint32_t>::const_iterator call =
       std::ranges::find(words, build_s_swappc_b64(30, plan.target_pair_base, plan.arch));
   ASSERT_NE(call, words.end());
   ASSERT_LT(call + loads + 1, words.end());
   EXPECT_EQ(*(call + loads + 1), wait);
-  const auto original = std::ranges::find(words, plan.original_words.front());
+  const std::vector<uint32_t>::const_iterator original =
+      std::ranges::find(words, plan.original_words.front());
   ASSERT_NE(original, words.end());
   ASSERT_NE(original, words.begin());
   EXPECT_EQ(*(original - 1), wait);

@@ -13,7 +13,7 @@ namespace {
 TEST(ConSanRowLayout, SiteReservationsIncludeEveryAddressGroupAndTheRowHeader) {
   InputError error;
   for (size_t sites : {size_t{0}, size_t{1}, size_t{2}, size_t{ContractLimits{}.sites}}) {
-    const auto stride = lds_race_row_stride(sites, error);
+    const FailureOr<uint32_t> stride = lds_race_row_stride(sites, error);
     ASSERT_TRUE(stride.succeeded()) << error.message;
     EXPECT_EQ(stride.value(), kRowHeaderBytes + sites * kAddressGroupsPerSite * kAccessRecordBytes);
   }

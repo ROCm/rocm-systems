@@ -107,7 +107,7 @@ protected:
       image = artifact.value().image;
       result.manifest = artifact.value().manifest;
     } else if (mode != Bootstrap::None) {
-      const auto plan = test::bootstrap_plan(input);
+      const std::optional<DbiEntryProloguePlan> plan = test::bootstrap_plan(input);
       ASSERT_TRUE(plan);
       result.context_sgpr = plan->storage.persistent_base;
       AmdGpuCodeObject object(image.data(), image.size());

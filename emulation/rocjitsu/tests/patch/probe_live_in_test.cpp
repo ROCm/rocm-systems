@@ -376,13 +376,13 @@ TEST(ProbeLiveInTest, Cdna5ProvenZeroBanksResolveGuestArgumentRegisters) {
   const std::vector<uint8_t> image = make_elf(body, EF_AMDGPU_MACH_AMDGCN_GFX1250);
   const AmdGpuCodeObject object(image.data(), image.size());
   std::string error;
-  const auto live =
+  const std::optional<RegisterSet> live =
       analyze_probe_live_ins(object, whole_body_symbol(body), kArch,
                              *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, 1),
                              &error, ProbeEntryState::ZeroVgprBanks);
   ASSERT_TRUE(live) << error;
   EXPECT_TRUE(live->none()) << format_register_set(*live);
-  const auto missing_argument =
+  const std::optional<RegisterSet> missing_argument =
       analyze_probe_live_ins(object, whole_body_symbol(body), kArch,
                              *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
                              &error, ProbeEntryState::ZeroVgprBanks);

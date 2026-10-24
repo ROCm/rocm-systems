@@ -155,7 +155,8 @@ parse_kernarg_extension_metadata(std::span<const uint8_t> bytes) {
       header.string_bytes > bytes.size() - strings_offset) {
     return std::nullopt;
   }
-  const auto strings = bytes.subspan(static_cast<size_t>(strings_offset), header.string_bytes);
+  const std::span<const uint8_t> strings =
+      bytes.subspan(static_cast<size_t>(strings_offset), header.string_bytes);
 
   std::vector<KernargExtensionMetadata> extensions;
   extensions.reserve(header.extension_count);
