@@ -5,7 +5,6 @@
  */
 
 #include <hip_test_common.hh>
-#include <hip_test_features.hh>
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
@@ -35,9 +34,10 @@ HIP_TEST_CASE(Unit_unsafeAtomicAdd) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
-  std::string gfxName(props.gcnArchName);
+  int fineGrainSupport = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&fineGrainSupport, hipDeviceAttributeFineGrainSupport, device));
 
-  if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
+  if (fineGrainSupport) {
     hiprtcProgram prog;
     hiprtcCreateProgram(&prog,        // prog
                         kernel,       // buffer
