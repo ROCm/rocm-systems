@@ -54,7 +54,7 @@ for (const width of [1440, 390]) test(`keyboard slots expose truthful gaps and p
   await expect(status).toBeVisible();
   await expect(status).toContainText('qa-keyboard-3');
   await expect(status).toHaveAttribute('data-visible', 'true');
-  const tooltipVisible = () => readChart(chart, (instance) => [...instance.getDom().querySelectorAll('.performance-trend-tooltip')]
+  const tooltipVisible = () => readChart(chart, (instance) => [...instance.getDom().querySelectorAll('.dashboard-chart-tooltip')]
     .some((element) => getComputedStyle(element).display !== 'none' && getComputedStyle(element).visibility !== 'hidden'
       && getComputedStyle(element).opacity !== '0'));
   await expect.poll(tooltipVisible).toBe(true);

@@ -59,7 +59,7 @@ are no external catalog resources.
 
 ```text
 Fetch index.json → fetch indexed runs → strict JSON parsing
-  → adapt corpus schema 1 and derive first-occurrence benchmark-set lookup
+  → adapt corpus schema 1 and derive first-occurrence configuration membership
   → existing selectors → UI
 ```
 

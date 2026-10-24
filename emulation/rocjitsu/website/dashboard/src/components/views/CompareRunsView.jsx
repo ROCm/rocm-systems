@@ -31,7 +31,7 @@ import {
   formatPercent,
   shortSha,
 } from '../../utils/formatters';
-import { classifyDurationChange, DURATION_CHANGE_BAND_PERCENT } from '../../utils/performance';
+import { classifyDurationChange } from '../../utils/performance';
 import CommitComparison from '../shared/CommitComparison';
 
 function TestAvailability({ test, run, benchmark }) {
@@ -100,7 +100,7 @@ export default function CompareRunsView({
   const publishedRuns = data.allRuns ?? [];
   const candidate = publishedRuns.find((run) => run.runId === selectedCandidateId) ?? null;
   const baseline = publishedRuns.find((run) => run.runId === selectedBaselineId) ?? null;
-  const viewModel = selectRunComparison(candidate, baseline, filters, DURATION_CHANGE_BAND_PERCENT);
+  const viewModel = selectRunComparison(candidate, baseline, filters);
   const hasRuns = Boolean(candidate && baseline);
   const runOptions = publishedRuns.slice().sort((a, b) => compareRunExecution(b, a));
   const chartItems = viewModel.comparable.filter((item) => Number.isFinite(item.delta));
@@ -122,7 +122,7 @@ export default function CompareRunsView({
     },
   };
 
-  const stateFor = (delta) => classifyDurationChange(delta, DURATION_CHANGE_BAND_PERCENT);
+  const stateFor = (delta) => classifyDurationChange(delta, viewModel.tolerance);
   const colorFor = (delta) => {
     const state = stateFor(delta);
     if (state === 'slower') return theme.palette.error.main;
@@ -272,10 +272,10 @@ export default function CompareRunsView({
           </>
         )}
       >
-        <ComparisonMetrics model={viewModel} candidate={candidate} baseline={baseline} tolerance={DURATION_CHANGE_BAND_PERCENT} />
+        <ComparisonMetrics model={viewModel} candidate={candidate} baseline={baseline} />
         <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.75, mt: 1.25 }}>
           <Chip size="small" color="success" variant="outlined" label={`${hasRuns ? viewModel.counts.faster : '—'} faster`} />
-          <Chip size="small" variant="outlined" label={`${hasRuns ? viewModel.counts.neutral : '—'} within ±${DURATION_CHANGE_BAND_PERCENT}%`} />
+          <Chip size="small" variant="outlined" label={`${hasRuns ? viewModel.counts.neutral : '—'} within ±${viewModel.tolerance}%`} />
           <Chip size="small" color="error" variant="outlined" label={`${hasRuns ? viewModel.counts.slower : '—'} slower`} />
           {viewModel.counts.unavailable > 0 && <Chip size="small" variant="outlined" label={`${viewModel.counts.unavailable} percentage unavailable`} />}
         </Stack>
@@ -303,7 +303,7 @@ export default function CompareRunsView({
                     <TableCell sx={{ overflowWrap: 'anywhere', maxWidth: 320 }}>{item.candidateTest.name} · {item.candidateTest.target} · {item.candidateTest.mode}</TableCell>
                     <TableCell>{formatDuration(item.baselineTest.durationSeconds)}</TableCell>
                     <TableCell>{formatDuration(item.candidateTest.durationSeconds)}</TableCell>
-                    <TableCell sx={{ color: colorFor(item.delta), whiteSpace: 'nowrap' }}>{formatPercent(item.delta)} · {Number.isFinite(item.delta) ? stateFor(item.delta) === 'neutral' ? `within ±${DURATION_CHANGE_BAND_PERCENT}%` : stateFor(item.delta) : 'percentage unavailable'}</TableCell>
+                    <TableCell sx={{ color: colorFor(item.delta), whiteSpace: 'nowrap' }}>{formatPercent(item.delta)} · {Number.isFinite(item.delta) ? stateFor(item.delta) === 'neutral' ? `within ±${viewModel.tolerance}%` : stateFor(item.delta) : 'percentage unavailable'}</TableCell>
                   </TableRow>
                 ))}</TableBody>
               </Table>

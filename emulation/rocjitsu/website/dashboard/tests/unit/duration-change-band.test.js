@@ -40,6 +40,17 @@ test.each([
   expect(classifyDurationChange(value, tolerance)).toBe(state);
 });
 
+test('selector tolerance travels with the model into metric defaults', () => {
+  const model = selectRunComparison(run(104), run(100), filters, 5);
+  expect(model.tolerance).toBe(5);
+  expect(model.counts.neutral).toBe(1);
+  const html = renderToStaticMarkup(createElement(ComparisonMetrics, { model }));
+  expect(html).toContain('data-testid="comparison-metric-aggregate-change" data-tone="neutral"');
+  expect(html).toContain('Within ±5% noise tolerance');
+  const overridden = renderToStaticMarkup(createElement(ComparisonMetrics, { model, tolerance: 0 }));
+  expect(overridden).toContain('data-testid="comparison-metric-aggregate-change" data-tone="error"');
+});
+
 const filters = { targets: ['gfx950'], modes: ['default'], suites: ['Triton'] };
 const run = (durationSeconds) => ({ tests: [{ testId: 'case-a', logicalTestId: 'a', target: 'gfx950', mode: 'default', suite: 'Triton', status: 'completed', durationSeconds }] });
 

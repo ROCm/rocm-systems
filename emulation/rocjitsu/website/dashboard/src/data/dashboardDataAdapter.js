@@ -108,18 +108,25 @@ export function adaptPublishedDashboardData({ index, runs, runErrors = [], siteC
     if (index.runFiles[position] !== `runs/${directory}/${publication.id}.json`) throw new Error(`Run ${publication.id} filename must match its ID and branch directory`);
     if (!text(run.execution_summary?.benchmark_suite) || !Array.isArray(run.benchmark_results)) throw new Error('Run requires benchmark suite and benchmark_results array');
     const suite = run.execution_summary.benchmark_suite;
-    if (!catalogs.has(suite)) {
-      const tests = new Map();
-      const configurations = {};
-      for (const row of run.benchmark_results) {
-        if (!tests.has(row.id)) tests.set(row.id, { id: row.id, suite: row.suite, name: row.name, operation: row.operation, problem: row.problem });
-        const key = `${row.target}/${row.thread_policy}`;
-        if (!Object.hasOwn(configurations, key)) Object.defineProperty(configurations, key, { value: [], enumerable: true });
-        configurations[key].push(row.id);
+    if (!catalogs.has(suite)) catalogs.set(suite, { id: suite, tests: [], configurations: {} });
+    const catalog = catalogs.get(suite);
+    const configurations = new Map();
+    for (const row of run.benchmark_results) {
+      const key = `${row.target}/${row.thread_policy}`;
+      if (Object.hasOwn(catalog.configurations, key)) continue;
+      if (!configurations.has(key)) configurations.set(key, []);
+      configurations.get(key).push(row);
+    }
+    const knownTests = new Set(catalog.tests.map(({ id }) => id));
+    for (const [key, rows] of configurations) {
+      Object.defineProperty(catalog.configurations, key, { value: rows.map(({ id }) => id), enumerable: true });
+      for (const row of rows) {
+        if (knownTests.has(row.id)) continue;
+        const definition = { id: row.id, suite: row.suite, name: row.name, operation: row.operation, problem: row.problem };
+        knownTests.add(row.id);
+        catalog.tests.push(definition);
+        definitions.set(definition.id, definition);
       }
-      const catalog = { id: suite, tests: [...tests.values()], configurations };
-      catalogs.set(suite, catalog);
-      for (const definition of catalog.tests) definitions.set(definition.id, definition);
     }
     return normalizeRun(run);
   });

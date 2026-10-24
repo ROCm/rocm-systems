@@ -79,7 +79,7 @@ export function selectRunComparison(candidate, baseline, filters, tolerance = DU
   for (const { delta } of comparable) counts[classifyDurationChange(delta, tolerance)] += 1;
   return { comparable: comparable.sort((a, b) => (Number.isFinite(b.delta) ? Math.abs(b.delta) : -1) - (Number.isFinite(a.delta) ? Math.abs(a.delta) : -1)),
     notComparable: comparisons.filter(({ comparable }) => !comparable), baselineDuration, candidateDuration,
-    aggregateDelta: percentage(candidateDuration, baselineDuration), counts };
+    aggregateDelta: percentage(candidateDuration, baselineDuration), counts, tolerance };
 }
 
 export function selectBenchmarkSeries(data, filters, logicalTestId) {

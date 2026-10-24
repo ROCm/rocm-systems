@@ -2,6 +2,25 @@ import { expect, test } from 'vitest';
 import raw from '../fixtures/fictional-producer-run.json' with { type: 'json' };
 import { loadDashboardDataFiles } from '../../src/data/dashboardData.js';
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
+import { selectOverviewProjection } from '../../src/data/overviewProjection.js';
+import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
+import { fixtureRunPath } from '../fixtures/runPath.js';
+
+test.each([false, true])('later configurations retain their cohort regardless of index reversal %s', (reverse) => {
+  const source = createMaintainedPublication();
+  source.runs = source.runs.slice(0, 2);
+  source.runs[0].benchmark_results = source.runs[0].benchmark_results.filter((row) => row.thread_policy !== 'default');
+  if (reverse) source.runs.reverse();
+  source.index.runFiles = source.runs.map(fixtureRunPath);
+  const before = structuredClone(source);
+  const { data, sourceData } = adaptPublishedDashboardData(source);
+  expect(data.catalogs['fictional-old'].configurations['gfx1250/default']).toEqual(['a', 'b', 'c']);
+  const projection = selectOverviewProjection(data, { targets: ['gfx1250'], modes: ['default'], suites: ['Triton', 'Llama'] }, { catalogId: 'fictional-old' });
+  expect(projection.rows[0].cohortIds).toEqual(['a', 'b', 'c']);
+  expect(projection.attempts.map(({ points }) => points[0].durationSeconds)).toEqual([null, 104.4]);
+  expect(sourceData.runs).toBe(source.runs);
+  expect(source).toEqual(before);
+});
 
 function publication() {
   const run = structuredClone(raw);
@@ -50,7 +69,7 @@ test('dataset derives one first-occurrence lookup and preserves complete source 
   const second = structuredClone(first);
   second.publication.id = 'fictional-second';
   second.benchmark_results = [second.benchmark_results[0]];
-  // Later definitions must not be read, rebuilt or compared for the same suite.
+  // Later definitions must not be read, rebuilt or compared for a known configuration.
   Object.defineProperty(second.benchmark_results[0], 'problem', { get() { throw new Error('lookup rebuilt'); }, enumerable: false });
   source.runs.push(second);
   source.index.runFiles.push('runs/default-branch/fictional-second.json');
