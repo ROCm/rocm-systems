@@ -43,7 +43,7 @@ jobs:
       gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
     steps:
     - name: Checkout resolve-ci-config action
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
         set-safe-directory: true
@@ -61,7 +61,7 @@ jobs:
       TODAY: ${{ steps.metadata.outputs.TODAY }}
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         sparse-checkout: |
           projects/amdsmi
@@ -151,7 +151,7 @@ jobs:
         ldconfig
 
     - name: Cache .ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cache/ccache
         key: ${{ runner.os }}-rdc-ccache-${{ github.ref_name }}-${{ env.TODAY }}
@@ -200,7 +200,7 @@ jobs:
         make -C build -j $(nproc) install
 
     - name: Upload RDC packages
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: rdc-packages
         path: |
@@ -220,7 +220,7 @@ jobs:
     container: rocm/dev-ubuntu-22.04:7.2
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         sparse-checkout: projects/rdc
 
@@ -234,7 +234,7 @@ jobs:
         pip3 install pytest prometheus_client
 
     - name: Download RDC packages
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: rdc-packages
         path: /opt/
@@ -299,7 +299,7 @@ jobs:
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: rdc-test-results
         path: projects/rdc/build/test-results-*.xml
@@ -319,7 +319,7 @@ jobs:
       options: --device=/dev/kfd --device=/dev/dri --group-add video
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         sparse-checkout: projects/rdc
 
@@ -333,7 +333,7 @@ jobs:
         pip3 install pytest prometheus_client
 
     - name: Download RDC packages
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: rdc-packages
         path: /opt/
@@ -372,7 +372,7 @@ jobs:
 
     - name: Upload GPU test results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: rdc-test-results-gpu
         path: projects/rdc/build/test-results-*.xml
