@@ -15,9 +15,9 @@ tests are skipped otherwise.
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 
+import pytest
 from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.gpu]

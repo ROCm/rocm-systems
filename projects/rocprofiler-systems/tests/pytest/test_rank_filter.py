@@ -16,9 +16,11 @@ Each test runs `mpi-example` under `mpiexec -n 3` and asserts both:
 """
 
 from __future__ import annotations
+
 import re
-import pytest
 from pathlib import Path
+
+import pytest
 from conftest import RocprofsysTest, check_use_rocpd
 
 pytestmark = [pytest.mark.mpi, pytest.mark.rank_filter]
@@ -318,8 +320,10 @@ class TestRankFilter(RocprofsysTest):
             result,
             "sys_run",
             sys_run_pass_regex=[
-                r"--rank-filter-id requires one of the options: "
-                r"\[--rank-filter-logs, --rank-filter-output\]"
+                (
+                    r"--rank-filter-id requires one of the options: "
+                    r"\[--rank-filter-logs, --rank-filter-output\]"
+                )
             ],
         )
         assert (
