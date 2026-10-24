@@ -46,11 +46,13 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
   result.execution_conditions = capture.header.execution_conditions;
   result.target = capture.header.manifest.target;
   result.wave_size = capture.header.manifest.wave_size;
+  result.scope = capture.header.manifest.scope;
   result.coverage_complete = !capture.executions.empty();
   for (const CapturedExecution &execution : capture.executions) {
     LdsRaceExecutionResult analyzed =
         analyze_lds_race_execution(capture.header.manifest, execution, options.examples);
     result.cross_wave_pairs += analyzed.cross_wave_pairs;
+    result.ordering_unresolved_pairs += analyzed.ordering_unresolved_pairs;
     result.collision_groups += analyzed.collision_groups;
     result.coverage_complete &= analyzed.coverage_complete;
     result.executions.push_back(std::move(analyzed));

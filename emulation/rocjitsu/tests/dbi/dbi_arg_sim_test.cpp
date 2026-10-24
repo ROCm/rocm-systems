@@ -292,5 +292,56 @@ TEST(DbiFixtureSetupTest, MalformedConfigRecordsFatalFailure) {
       "Failed to parse JSON config:");
 }
 
+TEST(DbiAfterInstSim, ProbeObservesTheResultAndPreservesLiveGuestDefinitions) {
+  for (const ArgSimArch arch : {kCdna3ArgArch, kCdna4ArgArch, kRdna4ArgArch}) {
+    SCOPED_TRACE(arch.sim_arch);
+    for (const auto kind : {InstrumentationKind::BeforeInst, InstrumentationKind::AfterInst}) {
+      const util::FailureOr<uint32_t> guest_move = build_v_mov_b32_src(2, 257, arch.arch);
+      ASSERT_TRUE(guest_move.succeeded());
+      const std::vector<uint8_t> target = test::with_descriptor_metadata(
+          test::make_amdgpu_kernel_elf({test::make_mov_vgpr_inline(1, 3),
+                                        test::make_mov_vgpr_inline(0, 7), kMovV1V0,
+                                        guest_move.value(), build_s_endpgm(arch.arch)},
+                                       64, 3, arch.e_flags),
+          arch.arch);
+      const auto probe = test::make_amdgpu_probe_elf(
+          "after_result",
+          {kMovV3V0, test::make_mov_vgpr_inline(1, 11), build_s_setpc_b64(30, arch.arch)},
+          arch.e_flags);
+      const AmdGpuCodeObject object(target.data(), target.size());
+      const AmdGpuCodeObject body(probe.data(), probe.size());
+      Instrumentor instrumentor(object, arch.arch);
+      InstrumentationPoint point;
+      point.kind = kind;
+      point.anchor_offset = 8;
+      point.probe_obj = &body;
+      point.probe_symbol = "after_result";
+      point.probe_args = {probe_arg_vgpr(1)};
+      instrumentor.add_point(point);
+      const auto result = instrumentor.patch();
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      ASSERT_EQ(result.sites.size(), 1u);
+      const auto &site = result.sites.front();
+      if (kind == InstrumentationKind::AfterInst)
+        EXPECT_EQ(site.instrumentation_offset, site.guest_offset + 4);
+      else
+        EXPECT_EQ(site.guest_offset, site.instrumentation_offset + site.instrumentation_size);
+      const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      test::DbiSim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize(arch.sim_arch, arch.wave_size));
+      const auto values =
+          sim.run_and_read_vgprs(test::section_words(patched, ".text"),
+                                 test::patched_private_segment_size(patched), {3, 2});
+      ASSERT_EQ(values.size(), 2u);
+      ASSERT_EQ(values[0].size(), arch.wave_size);
+      ASSERT_EQ(values[1].size(), arch.wave_size);
+      for (uint32_t lane = 0; lane < arch.wave_size; ++lane) {
+        EXPECT_EQ(values[0][lane], kind == InstrumentationKind::AfterInst ? 7u : 3u);
+        EXPECT_EQ(values[1][lane], 7u);
+      }
+    }
+  }
+}
+
 } // namespace
 } // namespace rocjitsu

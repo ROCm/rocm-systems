@@ -30,7 +30,7 @@
 /// failure aborts the whole patch.
 /// Future work: predicate-based anchor selection (Instrumentor walks blocks
 /// itself), per-site failure tolerance,
-/// AfterInst / BlockEntry / BlockExit kinds.
+/// BlockEntry / BlockExit kinds.
 /// As that lands the per-stage types will thicken
 /// (e.g. ResolvedInstrumentationSite probably gains an ordered list of bodies)
 /// and a layout/negotiation stage will appear between planning and splicing.
@@ -72,8 +72,9 @@ class LivenessAnalysis;
 /// Internal enum mirroring the future public `rj_code_instrument_kind_t`.
 /// BeforeInst relocates an ordinary instruction. KernelEntry runs once through
 /// the descriptor's dispatch-only stub; KernelExit runs before s_endpgm. Both
-/// boundary kinds require a callable probe. AfterInst, BlockEntry, and BlockExit
-/// remain reserved and are rejected.
+/// boundary kinds require a callable probe. AfterInst calls a probe after a
+/// relocated instruction, observing its resulting state; bank-changing anchors
+/// are rejected. BlockEntry and BlockExit remain reserved.
 enum class InstrumentationKind {
   BeforeInst,
   AfterInst,
@@ -172,6 +173,8 @@ struct InstrumentationPatch {
 /// @brief Production attribution from an original anchor to its emitted bytes.
 /// @details Offsets are relative to .text. KernelEntry has no relocated guest
 /// instruction, so guest_size is zero and guest_offset names its return branch.
+/// AfterInst maps the relocated guest before its instrumentation range; ordinary
+/// BeforeInst maps it after that range. Probe bodies are shared separately.
 struct InstrumentedSite {
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
   uint64_t original_offset = 0;

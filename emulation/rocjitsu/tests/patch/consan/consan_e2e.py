@@ -115,6 +115,28 @@ class AnalysisDriver(Driver):
                 for participant in (finding['first'], finding['second']):
                     site = raw['sites'][participant['site']]
                     assert participant['original_offset'] == site['original_offset']
+            if case.startswith('barrier'):
+                assert analyzed['ordered_pairs'] == (
+                    2 if case == 'barrier_multiple' else 1
+                )
+                assert analyzed['ordering_unresolved_pairs'] == 0
+                assert analyzed['required_barrier_waves'] == len(observed['rows'])
+                assert analyzed['completed_barrier_waves'] == len(observed['rows'])
+                certificate = analyzed['ordered_examples'][0]
+                assert certificate['ordering'] == 'ordered'
+                assert certificate['first']['wave'] == 0
+                assert certificate['second']['wave'] == 1
+                mask = (1 << 31) if case == 'barrier_high' else 1
+                assert (
+                    certificate['first']['mask']
+                    == certificate['second']['mask']
+                    == mask
+                )
+                assert (
+                    certificate['first']['offset']
+                    == certificate['second']['offset']
+                    == 0
+                )
             if case == 'collision':
                 finding = analyzed['collision_examples'][0]
                 assert finding['first']['mask'] == 3 and finding['lane_pairs'] == 1
@@ -129,6 +151,7 @@ class AnalysisDriver(Driver):
         for execution in result['executions']:
             execution['cross_wave_examples'] = []
             execution['collision_examples'] = []
+            execution['ordered_examples'] = []
         assert (
             result == hidden
         ), 'example limit changed full semantic counts or coverage'

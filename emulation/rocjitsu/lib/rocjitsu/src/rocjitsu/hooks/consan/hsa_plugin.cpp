@@ -226,16 +226,18 @@ public:
     if (status == HSA_STATUS_SUCCESS)
       status = core_.hsa_executable_symbol_get_info_fn(
           resolved_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &private_bytes);
-    const FailureOr<LaunchLayout> layout =
-        plan_launch(*module->facts, {{1, 1, 1}, {1, 1, 1}}, group, private_bytes);
+    // Freeze validates resources before any dispatch geometry is available.
+    const std::optional<rocjitsu::KernargExtensionLayout> wrapper =
+        rocjitsu::make_kernarg_extension_layout(module->facts->entry.original_kernarg_bytes,
+                                                kContextPointerPayloads);
     std::lock_guard lock(mutex_);
     // Symbol queries run outside the lock. Finish or executable destruction may
     // have revoked this admission before the binding and workers are installed.
     if (closed_ || module_ != module)
       return reject_locked("freeze admission ended during HSA symbol queries");
-    if (status != HSA_STATUS_SUCCESS || layout.failed() || kernel_object == 0 ||
-        kernarg != layout.value().wrapper_bytes ||
-        group != module->facts->entry.prepared_group_bytes)
+    if (status != HSA_STATUS_SUCCESS || !wrapper || kernel_object == 0 ||
+        kernarg != wrapper->wrapper_size || group != module->facts->entry.prepared_group_bytes ||
+        private_bytes != module->facts->entry.prepared_private_bytes)
       return reject_locked("loaded HSA symbol/resources do not match prepared facts");
     module->symbol = resolved_symbol;
     module->kernel_object = kernel_object;

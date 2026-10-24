@@ -170,8 +170,9 @@ observations for two checks:
 
 ### Analysis and admission
 
-Preparation accepts a limited instruction/access subset without relevant guest
-synchronization; unsupported forms, barriers, and atomics are rejected. Exact
+Preparation accepts a limited instruction/access subset with no synchronization,
+or multiple qualified full-workgroup barriers on **gfx1250 wave32**. Other barrier
+forms and atomics are rejected. Exact
 conditions are defined by [compiler qualification](../lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp)
 and [runtime admission](../lib/rocjitsu/src/rocjitsu/hooks/consan/hsa_plugin.cpp).
 
@@ -179,8 +180,65 @@ The input code object must contain exactly one kernel, matching the requested
 entry. Selecting an entry does not exclude sibling kernels from this requirement;
 provide a code object containing only the selected kernel.
 
+The barrier profile requires at least two waves in one complete 1D workgroup
+and a closed forward CFG. The original `s_wait_dscnt 0` must immediately precede
+`s_barrier_signal -1`; the matching `s_barrier_wait -1` must be in the same
+basic block. Admitted arithmetic may separate signal and wait; memory operations
+may not. Each group block must dominate every exit. Repeated occurrences, dynamic IDs,
+partial/cluster barriers, loops, and paths bypassing the group are unsupported.
+These rules are established from original instructions; probe waits provide no
+guest synchronization evidence.
+
+Each unchanged guest completing wait advances a persistent per-wave phase. Access
+records retain the current phase separately from their dynamic access sequence.
+A bounded explicit journal records each completed group, occurrence, required
+wave count, phase and access-relative sequence. Scalar completion is recorded
+even at guest EXEC=0. Every required wave, including waves without retained
+accesses, must supply matching completion evidence. Numeric phase differences
+alone never establish ordering. A complete witness must bracket both endpoints.
+Every retained access is checked against its wave's completion boundaries before
+conflict enumeration, including disjoint and Read/Read observations. Contradictory
+phase/sequence evidence records an integrity issue and incomplete coverage even
+when no conflicting pair exists. An endpoint that contradicts any retained valid
+boundary cannot supply ordering facts from another boundary: its cross-wave
+candidates remain Incomplete. The reader cannot tell which of the endpoint's
+phase, sequence, or boundary is corrupt, so it does not select a consistent subset
+to certify that endpoint. Other consistent endpoints, including those in the same
+wave, may still use independently complete witnesses. An exact-mask store
+collision uses the independently validated range and mask without relying on the
+endpoint's barrier position. Missing evidence differs from this contradiction:
+unrelated loss does not revoke a valid endpoint's complete witness. Only rows with
+consistent retained evidence contribute to the completed-barrier-wave count.
+
+The no-synchronization profile statically rules out synchronization. Two valid
+conflicting endpoints in the same workgroup therefore remain confirmed even if
+an unrelated wave's row is missing, malformed, or has an invalid final phase.
+That row still causes an integrity issue and incomplete coverage. Rows with
+invalid identity, status, or sequence are rejected; contradictory endpoint
+phases remain Incomplete.
+This independence does not apply to barrier profiles: every required participant
+must supply the witnesses needed to classify the pair, even without LDS accesses.
+
+The analyzer keeps `ordered_pairs`, confirmed `cross_wave_pairs`, and
+`ordering_unresolved_pairs` separate, with separate example arrays. Missing or
+contradictory required evidence retains an unresolved candidate and incomplete
+coverage. It contributes neither to confirmed totals nor the default findings
+exit status. An independent exact-mask store collision remains a finding.
+Incomplete coverage alone does not change the default CLI exit status: callers
+that require complete evidence must also check `coverage_complete` in the JSON.
+Zero confirmed findings with gaps does not mean complete-clean. An independently
+complete journal witness can order a pair despite unrelated lost evidence.
+
+Barrier facts are saved with original/prepared signal/wait positions and the
+after-wait probe mapping. The producer compatibility token and options identity
+cover these meanings, and incompatible artifacts/captures reject explicitly.
+The journal reserves sixteen 32-byte records per wave separately from access
+reservations. Compiled HIP probes store sequence and phase in each report row.
+The shared callable DBI planner owns register preservation and allocation; sizing
+and descriptor checks apply before preparation.
+
 Recording is bounded and does not provide a full execution history. Broader
-access forms, synchronization analysis, and application integration require
+access forms, synchronization forms, and application integration require
 extensions.
 
 ## How to use

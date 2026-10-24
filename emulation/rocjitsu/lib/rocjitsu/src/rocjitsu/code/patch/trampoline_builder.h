@@ -95,6 +95,8 @@ struct TrampolinePlan {
   std::vector<InlineAsmItem> before_items;
   std::vector<InlineAsmItem> after_items;
   bool emit_original = true;
+  /// Execute the relocated anchor before the callable envelope.
+  bool probe_after_original = false;
   /// A dispatch-only callback returns to an untouched original entry; it has
   /// no anchor splice and imposes no relocation-size constraint on that entry.
   bool patch_anchor = true;
@@ -257,7 +259,7 @@ public:
   ///
   /// @param plan                Trampoline plan whose resource fields are filled.
   /// @param abi                 Probe ABI; supplies the link pair.
-  /// @param live_at_anchor      Registers live immediately before the anchor.
+  /// @param live_at_anchor      Registers live at the selected observation point.
   /// @param probe_body_clobbers Ordinary registers the copied probe body writes.
   [[nodiscard]] static bool plan_probe_call(TrampolinePlan &plan, const ProbeAbi &abi,
                                             const RegisterSet &live_at_anchor,

@@ -461,8 +461,8 @@ struct ObservedAccess {
 
 std::vector<ObservedAccess> published_accesses(const RunResult &result, bool exhausted = false) {
   std::vector<ObservedAccess> accesses;
-  const uint32_t stride =
-      kRowHeaderBytes + result.manifest.sites.size() * kAddressGroupsPerSite * kAccessRecordBytes;
+  const uint32_t stride = static_cast<uint32_t>(
+      report_row_bytes(result.manifest.sites.size(), !result.manifest.barriers.empty()));
   for (uint32_t wave = 0; wave < result.waves.size(); ++wave) {
     const size_t row = kReportHeaderBytes + wave * stride;
     EXPECT_EQ(wire::read_u64(result.report, row + wire::kRowSerial), 41u);
@@ -610,6 +610,30 @@ TEST_P(ConSanHipSim, CompiledHipRaceDisjointAndReadReadExecuteTheirNativeSites) 
       ASSERT_FALSE(HasFatalFailure());
       expect_guest_state(before, after);
       EXPECT_EQ(after.full_output, (std::vector<uint32_t>{7, 8}));
+    }
+  }
+}
+
+TEST_F(ConSanBootstrapSim, Gfx1250BarrierPreservesOutputAndGuestStateAtEmptyExecAndHighLanes) {
+  for (const char *fixture : {"native-15", "native-16", "native-20", "native-21", "native-24"}) {
+    for (const uint32_t threads : {64u, 65u}) {
+      SCOPED_TRACE(fixture);
+      SCOPED_TRACE(threads);
+      RunResult before, after;
+      run(fixture, Bootstrap::None, before, {"gfx1250", 32}, threads, true);
+      ASSERT_FALSE(HasFatalFailure());
+      run(fixture, Bootstrap::Instrumented, after, {"gfx1250", 32}, threads, true);
+      ASSERT_FALSE(HasFatalFailure());
+      EXPECT_EQ(before.output[0], 7u);
+      EXPECT_EQ(after.output[0], 7u);
+      expect_guest_state(before, after);
+      const std::vector<ObservedAccess> records = published_accesses(after);
+      ASSERT_EQ(records.size(), std::string_view(fixture) == "native-24" ? 3u : 2u);
+      EXPECT_EQ(records[0].wave, 0u);
+      EXPECT_EQ(records[1].wave, 1u);
+      const uint64_t mask = std::string_view(fixture) == "native-20" ? uint64_t{1} << 31 : 1;
+      EXPECT_EQ(records[0].mask, mask);
+      EXPECT_EQ(records[1].mask, mask);
     }
   }
 }

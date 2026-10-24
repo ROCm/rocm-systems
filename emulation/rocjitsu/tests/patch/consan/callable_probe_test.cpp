@@ -29,7 +29,8 @@ TEST_P(ConSanCallableProbe, CompiledBodiesAreSelfContainedAndUseOnlyTheirArgumen
   ASSERT_TRUE(object.is_valid());
   for (const auto &[name, arguments] : {std::pair{"rj_consan_entry", uint8_t{4}},
                                         {"rj_consan_access", uint8_t{9}},
-                                        {"rj_consan_exit", uint8_t{4}}}) {
+                                        {"rj_consan_exit", uint8_t{4}},
+                                        {"rj_consan_barrier", uint8_t{6}}}) {
     SCOPED_TRACE(name);
     std::string error;
     const std::optional<ResolvedProbeSymbol> symbol = resolve_probe_symbol(object, name, &error);

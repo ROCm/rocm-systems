@@ -19,6 +19,15 @@ TEST(ConSanRowLayout, SiteReservationsIncludeEveryAddressGroupAndTheRowHeader) {
   }
 }
 
+TEST(ConSanRowLayout, BarrierJournalIsSeparateFromEveryAccessReservation) {
+  InputError error;
+  for (size_t sites : {size_t{1}, size_t{2}, size_t{ContractLimits{}.sites}}) {
+    const auto stride = lds_race_row_stride(sites, error, true);
+    ASSERT_TRUE(stride.succeeded()) << error.message;
+    EXPECT_EQ(stride.value(), kRowHeaderBytes + sites * 4 * 64 + 16 * 32);
+  }
+}
+
 TEST(ConSanRowLayout, OversizedSiteCountsFailBeforeMultiplicationOrNarrowing) {
   for (const size_t sites :
        {size_t{ContractLimits{}.sites} + 1, std::numeric_limits<size_t>::max()}) {

@@ -219,6 +219,21 @@ TEST(Validator, RejectsNonBeforeInstKind) {
   }
 }
 
+TEST(Validator, AfterInstRejectsBankChangingAnchorsAndRequiresACallableProbe) {
+  constexpr uint32_t raw = 0xDEADBEEF;
+  const auto text = dummy_text();
+  for (const char *name : {"s_set_vgpr_msb", "s_setreg_b32", "s_setreg_imm32_b32"}) {
+    TestInstruction anchor(name, 4, 0, std::nullopt, &raw);
+    InstrumentationPoint point;
+    point.kind = InstrumentationKind::AfterInst;
+    point.probe_obj = reinterpret_cast<const AmdGpuCodeObject *>(0x1);
+    point.probe_symbol = "after";
+    std::string error;
+    EXPECT_FALSE(validate_anchor(anchor, 0, text, point, ROCJITSU_CODE_ARCH_CDNA5, &error));
+    EXPECT_NE(error.find("bank selection"), std::string::npos);
+  }
+}
+
 TEST(Validator, RejectsProbeObjWithoutSymbol) {
   static constexpr uint32_t kRaw = 0xDEADBEEFu;
   TestInstruction anchor("v_add_f32_e32", 4, 0, std::nullopt, &kRaw);

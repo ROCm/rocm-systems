@@ -9,6 +9,8 @@ namespace rocjitsu::consan {
 
 inline constexpr uint32_t kMaxIntegrityIssueExamples = 128;
 
+enum class LdsRaceOrdering { Unordered, Ordered, Incomplete };
+
 enum class LdsRaceFindingKind { CrossWave, InstructionCollision };
 
 struct LdsRaceParticipant {
@@ -20,6 +22,7 @@ struct LdsRaceParticipant {
   uint32_t width = 0;
   uint64_t original_offset = 0;
   AccessKind access = AccessKind::Read;
+  uint32_t phase = 0;
   bool operator==(const LdsRaceParticipant &) const = default;
 };
 
@@ -29,6 +32,7 @@ struct LdsRaceFinding {
   // Collision participants are the lanes in first.mask; second is unused.
   LdsRaceParticipant second;
   uint64_t lane_pairs = 0;
+  LdsRaceOrdering ordering = LdsRaceOrdering::Unordered;
   bool operator==(const LdsRaceFinding &) const = default;
 };
 
@@ -46,8 +50,13 @@ struct LdsRaceExecutionResult {
   uint64_t rejected_records = 0;
   // Loss counts exhausted instruction occurrences, not missing lane records.
   uint64_t lost_occurrences = 0;
-  // Conflicting address-group record pairs across waves, then their lane-pair
-  // multiplicity. Read/read pairs do not contribute to either count.
+  // Qualified candidate pairs excluded by a complete workgroup certificate.
+  uint64_t ordered_pairs = 0;
+  uint64_t ordering_unresolved_pairs = 0;
+  uint32_t required_barrier_waves = 0;
+  uint32_t completed_barrier_waves = 0;
+  // Confirmed unordered address-group pairs, then lane pairs.
+  // Read/read pairs contribute to neither count.
   uint64_t cross_wave_pairs = 0;
   uint64_t cross_wave_lane_pairs = 0;
   // Each write observation with multiple lanes sharing its address contributes
@@ -56,13 +65,15 @@ struct LdsRaceExecutionResult {
   uint64_t collision_lane_pairs = 0;
   bool coverage_complete = true;
   // Unordered applies only to independently valid observations in the admitted
-  // no-synchronization scope. Gaps never establish ordering for missing data.
+  // scope. Gaps never establish ordering for missing data.
   bool ordering_uncertain = false;
   uint64_t integrity_events = 0;
   // Retain at most kMaxIntegrityIssueExamples; integrity_events remains complete.
   std::vector<LdsRaceIntegrityIssue> issues;
   std::vector<LdsRaceFinding> cross_wave_examples;
   std::vector<LdsRaceFinding> collision_examples;
+  std::vector<LdsRaceFinding> ordered_examples;
+  std::vector<LdsRaceFinding> unresolved_examples;
   bool operator==(const LdsRaceExecutionResult &) const = default;
 };
 
@@ -73,8 +84,10 @@ struct LdsRaceResult {
   uint32_t execution_conditions = 0;
   uint32_t target = 0;
   uint32_t wave_size = 0;
+  ScopeKind scope = ScopeKind::NativeLdsNoSynchronization;
   // Totals over executions, using the same record-pair/group units as above.
   uint64_t cross_wave_pairs = 0;
+  uint64_t ordering_unresolved_pairs = 0;
   uint64_t collision_groups = 0;
   bool coverage_complete = false;
   std::vector<LdsRaceExecutionResult> executions;

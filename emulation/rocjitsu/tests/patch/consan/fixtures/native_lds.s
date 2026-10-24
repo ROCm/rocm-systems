@@ -158,7 +158,7 @@ CONSAN_KERNEL:
   DS_STORE v1, v2
   GLOBAL_STORE v5, v2, s[6:7]
 #else
-#if CONSAN_CASE == 14
+#if CONSAN_CASE == 14 || CONSAN_CASE == 20
   v_cmp_eq_u32 MASK_VCC, (CONSAN_WAVE_SIZE-1), v0
 #else
   v_cmp_eq_u32 MASK_VCC, 0, v0
@@ -174,10 +174,49 @@ CONSAN_KERNEL:
   DS_STORE v1, v2
 #endif
   MASK_MOVE MASK_EXEC, MASK_SAVE
-#if CONSAN_CASE == 7
+#if CONSAN_CASE >= 15 && CONSAN_CASE <= 24
+#if CONSAN_CASE == 19
+  s_cmp_eq_u32 s4, 7
+  s_cbranch_scc1 .Lskip_barrier
+#endif
+#if CONSAN_CASE == 16
+  // Scalar barriers still execute when the guest EXEC is empty.
+  MASK_MOVE MASK_EXEC, 0
+#endif
+#if CONSAN_CASE != 18
+  s_wait_dscnt 0
+#endif
+#if CONSAN_CASE == 23
+  s_barrier_signal m0
+#else
+  s_barrier_signal -1
+#endif
+#if CONSAN_CASE == 21
+  v_add_nc_u32 v2, 0, v2
+  s_cmp_eq_u32 s4, 7
+#elif CONSAN_CASE == 22
+  DS_LOAD v3, v1
+#endif
+#if CONSAN_CASE == 17
+  s_barrier_wait 0
+#else
+  s_barrier_wait -1
+#endif
+#if CONSAN_CASE == 24
+  v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_LOAD v3, v1
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+  s_wait_dscnt 0
+  s_barrier_signal -1
+  s_barrier_wait -1
+#endif
+.Lskip_barrier:
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+#elif CONSAN_CASE == 7
   s_barrier
 #endif
-#if CONSAN_CASE == 14
+#if CONSAN_CASE == 14 || CONSAN_CASE == 20
   v_cmp_eq_u32 MASK_VCC, (2*CONSAN_WAVE_SIZE-1), v0
 #else
   v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0

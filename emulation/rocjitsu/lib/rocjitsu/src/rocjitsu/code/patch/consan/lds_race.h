@@ -35,7 +35,12 @@ struct NativeLdsAccess {
                                                    rj_code_arch_t arch, uint32_t allocated_vgprs,
                                                    std::vector<NativeLdsAccess> &accesses,
                                                    InputError &error);
-[[nodiscard]] FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error);
+[[nodiscard]] FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error,
+                                                      bool barriers = false);
+
+[[nodiscard]] Result qualify_lds_race_barrier(InputProgram &program,
+                                              std::span<BasicBlock *const> blocks,
+                                              InputError &error);
 
 /// @brief Check decoded LDS multiplicity and original bytes independently of emission.
 [[nodiscard]] Result validate_lds_race_accesses(const InputProgram &program,

@@ -350,10 +350,10 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
     fail("InstrumentationPoint::filter_flags must be 0 temporarily");
     return std::nullopt;
   }
-  // TODO: support AfterInst / BlockEntry / BlockExit.
-  if (pt.kind != InstrumentationKind::BeforeInst && pt.kind != InstrumentationKind::KernelEntry &&
-      pt.kind != InstrumentationKind::KernelExit) {
-    fail("InstrumentationPoint::kind must be BeforeInst, KernelEntry, or KernelExit");
+  // TODO: support BlockEntry / BlockExit.
+  if (pt.kind != InstrumentationKind::BeforeInst && pt.kind != InstrumentationKind::AfterInst &&
+      pt.kind != InstrumentationKind::KernelEntry && pt.kind != InstrumentationKind::KernelExit) {
+    fail("InstrumentationPoint::kind must be BeforeInst, AfterInst, KernelEntry, or KernelExit");
     return std::nullopt;
   }
   // A probe call needs both halves of the request: the object to resolve the
@@ -375,7 +375,15 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
     return std::nullopt;
   }
 
-  if (pt.kind == InstrumentationKind::BeforeInst) {
+  // The bank analysis proves the state before the anchor. A bank-changing
+  // anchor would invalidate that proof before an AfterInst callback runs.
+  if (pt.kind == InstrumentationKind::AfterInst &&
+      (pt.probe_obj == nullptr || anchor.mnemonic().starts_with("s_setreg") ||
+       anchor.mnemonic() == "s_set_vgpr_msb")) {
+    fail("AfterInst requires a callable probe and an anchor preserving VGPR bank selection");
+    return std::nullopt;
+  }
+  if (pt.kind == InstrumentationKind::BeforeInst || pt.kind == InstrumentationKind::AfterInst) {
     if (!is_relocatable_anchor(anchor, anchor_offset, text_bytes, arch, error_out))
       return std::nullopt;
   } else {
@@ -1589,6 +1597,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         continue;
       }
       RegisterSet live = *maybe_live.value() | probe_argument_registers(site.probe_args);
+      // Including original definitions conservatively covers live-after state:
+      // the callback must observe and preserve the relocated instruction's result.
+      if (site.kind == InstrumentationKind::AfterInst)
+        live |= InstDefUse(*anchor, *resolved.wave_size).defs;
       if (options_.register_growth &&
           options_.preservation == GuestStatePreservation::DeclaredRegisters) {
         for (uint16_t reg = 0; reg < options_.register_growth->sgprs; ++reg)
@@ -1600,6 +1612,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Set the probe's offset
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);
       plan.probe_target_offset = probe.output_text_offset;
+      plan.probe_after_original = site.kind == InstrumentationKind::AfterInst;
       if (site.kind == InstrumentationKind::KernelEntry) {
         plan.emit_original = false;
         plan.patch_anchor = false;
@@ -1905,14 +1918,21 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       patch.link_pair_base = a.link_pair_base;
       patch.target_pair_base = a.target_pair_base;
     }
-    result.sites.push_back({.kind = a.site->kind,
-                            .original_offset = a.site->anchor_offset,
-                            .guest_offset = a.trampoline_offset + a.bytes.original_byte_offset,
-                            .guest_size = a.site->kind == InstrumentationKind::KernelEntry
-                                              ? 0u
-                                              : a.site->original_size,
-                            .instrumentation_offset = a.trampoline_offset,
-                            .instrumentation_size = a.bytes.original_byte_offset});
+    // AfterInst layout: [relocated anchor][call envelope][4-byte resume branch].
+    // Attribute only the envelope, excluding both the anchor and resume branch.
+    result.sites.push_back(
+        {.kind = a.site->kind,
+         .original_offset = a.site->anchor_offset,
+         .guest_offset = a.trampoline_offset + a.bytes.original_byte_offset,
+         .guest_size =
+             a.site->kind == InstrumentationKind::KernelEntry ? 0u : a.site->original_size,
+         .instrumentation_offset =
+             a.trampoline_offset +
+             (a.site->kind == InstrumentationKind::AfterInst ? a.site->original_size : 0),
+         .instrumentation_size = a.site->kind == InstrumentationKind::AfterInst
+                                     ? static_cast<uint32_t>(a.bytes.trampoline_words.size() * 4) -
+                                           a.site->original_size - 4
+                                     : a.bytes.original_byte_offset});
     result.patches.push_back(std::move(patch));
   }
   return result;

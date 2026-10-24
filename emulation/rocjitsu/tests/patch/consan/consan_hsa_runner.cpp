@@ -95,7 +95,8 @@ hsa_amd_memory_pool_t fine_pool(hsa_agent_t cpu) {
 
 int run(int argc, char **argv) {
   if (argc < 5) {
-    std::cerr << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES defined|observe [--baseline] "
+    std::cerr << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES defined|synchronized|observe "
+                 "[--baseline] "
                  "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
                  "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
                  "[--separate-barrier] [--amd-signals]\n";
@@ -107,7 +108,8 @@ int run(int argc, char **argv) {
   if (parsed.ec != std::errc{} || *parsed.ptr != '\0' || launches == 0 || launches > 16)
     return 3;
   const bool defined = std::string_view(argv[4]) == "defined";
-  if (!defined && std::string_view(argv[4]) != "observe")
+  const bool synchronized = std::string_view(argv[4]) == "synchronized";
+  if (!defined && !synchronized && std::string_view(argv[4]) != "observe")
     return 3;
   std::string_view target = "gfx1100";
   uint32_t threads = 64, wave_size = 32;
@@ -200,6 +202,7 @@ int run(int argc, char **argv) {
   void *arguments = nullptr, *output = nullptr;
   int result = 0;
   uint32_t completed = 0;
+  int64_t dispatch_wall_ns = 0, drain_wall_ns = 0;
   int profiling_status = 0;
   std::vector<uint32_t> last_output(std::max(wave_count, 2u));
   const auto require = [&](hsa_status_t status, const char *operation) {
@@ -316,6 +319,9 @@ int run(int argc, char **argv) {
               : barrier_type | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
                     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     }
+    // Host wall time includes simulator/driver work and completion forwarding;
+    // it is not a profiling timestamp from the GPU.
+    const auto dispatch_started = std::chrono::steady_clock::now();
     // Keep the second header invalid for the separate-callback control.
     __atomic_store_n(reinterpret_cast<uint16_t *>(packet), header, __ATOMIC_RELEASE);
     hsa_signal_store_screlease(queue->doorbell_signal,
@@ -358,6 +364,9 @@ int run(int argc, char **argv) {
       result = 21;
       break;
     }
+    dispatch_wall_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - dispatch_started)
+                            .count();
     ++completed;
     std::memcpy(last_output.data(), output, output_bytes);
     std::cout << "launch=" << index + 1 << " input=" << input << " output=" << last_output[0] << ','
@@ -367,8 +376,19 @@ int run(int argc, char **argv) {
         if (last_output[wave] != input + wave)
           result = 23;
     }
-    if (drain && drain() != 0)
-      result = 22;
+    if (synchronized) {
+      for (size_t word = 0; word < last_output.size(); ++word)
+        if (last_output[word] != (word == 0 ? input : 0))
+          result = 23;
+    }
+    if (drain) {
+      const auto drain_started = std::chrono::steady_clock::now();
+      if (drain() != 0)
+        result = 22;
+      drain_wall_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::steady_clock::now() - drain_started)
+                           .count();
+    }
     if (!reuse_signal) {
       if (!require(hsa_signal_destroy(signal), "completed signal destroy") && result == 0)
         result = 22;
@@ -377,7 +397,11 @@ int run(int argc, char **argv) {
   }
   // This explicit finish is before signal/queue/executable teardown and HSA
   // shutdown, so GPU and capture last users are still inside HSA's lifetime.
+  const auto finish_started = std::chrono::steady_clock::now();
   const int finish_status = finish ? finish() : 0;
+  const int64_t finish_wall_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     std::chrono::steady_clock::now() - finish_started)
+                                     .count();
   if (finish_status != 0 && result == 0)
     result = 22;
   const rj_consan_statistics stats = statistics ? statistics() : rj_consan_statistics{};
@@ -403,7 +427,8 @@ int run(int argc, char **argv) {
   if (plugin)
     ::dlclose(plugin);
   std::cout << "{\"app_status\":" << result << ",\"finish_status\":" << finish_status
-            << ",\"completed\":" << completed;
+            << ",\"completed\":" << completed << ",\"dispatch_wall_ns\":" << dispatch_wall_ns
+            << ",\"drain_wall_ns\":" << drain_wall_ns << ",\"finish_wall_ns\":" << finish_wall_ns;
   if (barrier_type)
     std::cout << ",\"barrier_completion\":" << barrier_completion;
   if (statistics)

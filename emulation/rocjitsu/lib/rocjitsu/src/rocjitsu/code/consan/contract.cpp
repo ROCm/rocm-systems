@@ -21,6 +21,7 @@ namespace {
 constexpr std::array<uint8_t, 8> kFactsMagic = {'R', 'J', 'C', 'S', 'F', 'A', 'C', 'T'};
 constexpr size_t kEnvelopeBytes = 8 + 16 + 8 + 32;
 constexpr size_t kSiteWireBytes = 68;
+constexpr size_t kBarrierWireBytes = 56;
 // Manifest prefix (144), entry fields including the name length (76), and site
 // count (4). Name bytes and per-site records are accounted for separately.
 constexpr size_t kFixedPayloadBytes = 144 + 76 + 4;
@@ -193,18 +194,20 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
   clear_error(error);
   if (manifest.original.bytes > limits.image_bytes ||
       manifest.prepared.bytes > limits.image_bytes || manifest.sites.size() > limits.sites ||
-      manifest.entry.name.size() > limits.string_bytes)
+      manifest.entry.name.size() > limits.string_bytes || manifest.barriers.size() > kSyncCapacity)
     return reject(error, ContractErrorCode::ResourceLimit, "image, site or name budget exceeded");
 
   const uint64_t encoded_bytes = kEnvelopeBytes + kFixedPayloadBytes + manifest.entry.name.size() +
-                                 uint64_t{manifest.sites.size()} * kSiteWireBytes;
+                                 uint64_t{manifest.sites.size()} * kSiteWireBytes +
+                                 (4 + manifest.barriers.size() * kBarrierWireBytes);
   if (encoded_bytes > limits.metadata_bytes)
     return reject(error, ContractErrorCode::ResourceLimit, "static facts exceed metadata budget");
 
   const TargetProfile *target = target_profile(manifest.target);
   if (manifest.original.bytes == 0 || manifest.prepared.bytes == 0 || target == nullptr ||
       !supports_wave(*target, manifest.wave_size) || manifest.code_object_abi != 5 ||
-      manifest.scope != ScopeKind::NativeLdsNoSynchronization ||
+      (manifest.scope != ScopeKind::NativeLdsNoSynchronization &&
+       manifest.scope != ScopeKind::NativeLdsWorkgroupBarrier) ||
       manifest.options != mvp_options_digest())
     return reject(error, ContractErrorCode::InvalidFacts,
                   "empty image or unsupported target, ABI, scope or options");
@@ -233,6 +236,38 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
       manifest.sites.empty())
     return reject(error, ContractErrorCode::InvalidFacts,
                   "entry mapping or text extent is missing");
+
+  if ((manifest.scope == ScopeKind::NativeLdsWorkgroupBarrier) != !manifest.barriers.empty())
+    return reject(error, ContractErrorCode::InvalidFacts, "barrier scope and facts disagree");
+  uint64_t previous_barrier_end = 0;
+  for (const BarrierFacts &barrier : manifest.barriers) {
+    if (barrier.original_drain < previous_barrier_end || manifest.target != 1250 ||
+        manifest.wave_size != 32 || barrier.identity != UINT32_MAX ||
+        !util::is_range_in_bounds(barrier.original_drain, 12, manifest.original_text_bytes) ||
+        barrier.original_drain % 4 != 0 || barrier.original_signal != barrier.original_drain + 4 ||
+        barrier.original_wait < barrier.original_signal + 4 || barrier.original_wait % 4 != 0 ||
+        !util::is_range_in_bounds(barrier.original_wait, 4, manifest.original_text_bytes) ||
+        !util::is_range_in_bounds(barrier.prepared_signal, 4, manifest.prepared_text_bytes) ||
+        barrier.prepared_signal % 4 != 0 || barrier.prepared_wait % 4 != 0 ||
+        barrier.prepared_signal == barrier.prepared_wait ||
+        !util::is_range_in_bounds(barrier.prepared_wait, 4, manifest.prepared_text_bytes) ||
+        barrier.completion_probe != barrier.prepared_wait + 4 || barrier.probe_size == 0 ||
+        barrier.probe_size % 4 != 0 ||
+        !util::is_range_in_bounds(barrier.completion_probe, barrier.probe_size,
+                                  manifest.prepared_text_bytes))
+      return reject(error, ContractErrorCode::InvalidFacts,
+                    "invalid fixed barrier qualification or mapping");
+    previous_barrier_end = barrier.original_wait + 4;
+    for (const SiteFacts &site : manifest.sites)
+      if ((site.original_offset + site.original_size > barrier.original_drain &&
+           site.original_offset < barrier.original_wait + 4) ||
+          (site.prepared_guest_offset + site.prepared_guest_size > barrier.prepared_signal &&
+           site.prepared_guest_offset < barrier.prepared_signal + 4) ||
+          (site.prepared_guest_offset + site.prepared_guest_size > barrier.prepared_wait &&
+           site.prepared_guest_offset < barrier.completion_probe + barrier.probe_size))
+        return reject(error, ContractErrorCode::InvalidFacts,
+                      "access overlaps barrier group or probe");
+  }
 
   uint64_t previous_original_end = 0;
   std::vector<std::pair<uint64_t, uint64_t>> guest_ranges;
@@ -299,6 +334,17 @@ FailureOr<std::vector<uint8_t>> encode_manifest(const Manifest &manifest, Contra
   payload.u32(static_cast<uint32_t>(manifest.sites.size()));
   for (const SiteFacts &site : manifest.sites)
     encode_site(payload, site);
+  payload.u32(static_cast<uint32_t>(manifest.barriers.size()));
+  for (const BarrierFacts &barrier : manifest.barriers) {
+    payload.u64(barrier.original_drain);
+    payload.u64(barrier.original_signal);
+    payload.u64(barrier.original_wait);
+    payload.u64(barrier.prepared_signal);
+    payload.u64(barrier.prepared_wait);
+    payload.u64(barrier.completion_probe);
+    payload.u32(barrier.probe_size);
+    payload.u32(barrier.identity);
+  }
   const std::vector<uint8_t> contents = payload.take();
 
   Encoder envelope;
@@ -343,12 +389,25 @@ FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes, ContractErro
   manifest.scope = static_cast<ScopeKind>(scope);
   if (count > limits.sites)
     return reject(error, ContractErrorCode::ResourceLimit, "site count exceeds budget");
-  if (uint64_t{count} * kSiteWireBytes != decoder.remaining())
+  if (uint64_t{count} * kSiteWireBytes + 4 > decoder.remaining())
     return reject(error, ContractErrorCode::InvalidEncoding, "site count disagrees with extent");
   manifest.sites.resize(count);
   for (SiteFacts &site : manifest.sites) {
     if (!decode_site(decoder, site))
       return reject(error, ContractErrorCode::InvalidEncoding, "truncated site facts");
+  }
+  uint32_t groups = 0;
+  if (!decoder.u32(groups) || groups > kSyncCapacity ||
+      uint64_t{groups} * kBarrierWireBytes != decoder.remaining())
+    return reject(error, ContractErrorCode::InvalidEncoding, "barrier count disagrees with extent");
+  for (uint32_t group = 0; group < groups; ++group) {
+    BarrierFacts barrier;
+    if (!decoder.u64(barrier.original_drain) || !decoder.u64(barrier.original_signal) ||
+        !decoder.u64(barrier.original_wait) || !decoder.u64(barrier.prepared_signal) ||
+        !decoder.u64(barrier.prepared_wait) || !decoder.u64(barrier.completion_probe) ||
+        !decoder.u32(barrier.probe_size) || !decoder.u32(barrier.identity))
+      return reject(error, ContractErrorCode::InvalidEncoding, "truncated barrier facts");
+    manifest.barriers.push_back(barrier);
   }
   if (validate_manifest(manifest, error, limits).failed())
     return Result::failure();
@@ -366,9 +425,11 @@ FailureOr<LaunchLayout> plan_launch(const Manifest &manifest, const LaunchDimens
     return reject(error, ContractErrorCode::UnsupportedLaunch,
                   "native LDS capture requires one bounded 1D workgroup and no private segment");
 
-  const uint64_t row_stride = kRowHeaderBytes + uint64_t{manifest.sites.size()} *
-                                                    kAddressGroupsPerSite * kAccessRecordBytes;
+  const uint64_t row_stride = report_row_bytes(manifest.sites.size(), !manifest.barriers.empty());
   const uint32_t waves = (dimensions.workgroup[0] + manifest.wave_size - 1) / manifest.wave_size;
+  if (!manifest.barriers.empty() && waves < 2)
+    return reject(error, ContractErrorCode::UnsupportedLaunch,
+                  "barrier profile requires at least two waves");
   const uint64_t report_bytes = kReportHeaderBytes + waves * row_stride;
   const std::optional<KernargExtensionLayout> kernarg =
       make_kernarg_extension_layout(manifest.entry.original_kernarg_bytes, kContextPointerPayloads);

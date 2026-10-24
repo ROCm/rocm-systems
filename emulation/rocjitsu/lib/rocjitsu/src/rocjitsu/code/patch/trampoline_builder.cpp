@@ -932,9 +932,9 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   if (full_mask_exec && !plan.force_full_exec)
     env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch), exec_temp, plan.arch));
 
-  // SCC save (prologue): capture SCC into the temp without disturbing it. The
-  // matching restore is emitted after the call but still before the relocated
-  // original.
+  // Capture SCC at the selected observation point before the call-address adds
+  // overwrite it. For AfterInst this includes the relocated anchor's effects;
+  // restore that same value after the callback.
   if (plan.preserve_scc)
     env.push_back(build_s_cselect_b32(plan.scc_temp, scalar_positive_inline_u32(1),
                                       scalar_positive_inline_u32(0), plan.arch));
@@ -952,8 +952,11 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // before either scalar add reads it, independently of boundary waits.
   if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
     env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe).value());
-  const uint64_t va_after_getpc =
-      plan.trampoline_offset + static_cast<uint64_t>(getpc_index + 1) * sizeof(uint32_t);
+  // getpc_index is relative to the envelope. AfterInst prepends the relocated
+  // anchor, whose four or eight bytes must also contribute to the runtime PC.
+  const uint64_t va_after_getpc = plan.trampoline_offset +
+                                  (plan.probe_after_original ? plan.original_size : 0) +
+                                  static_cast<uint64_t>(getpc_index + 1) * sizeof(uint32_t);
   const uint64_t delta = static_cast<uint64_t>(static_cast<int64_t>(plan.probe_target_offset) -
                                                static_cast<int64_t>(va_after_getpc));
   env.push_back(build_s_add_u32(target_lo, target_lo, kLiteralConstant, plan.arch));
@@ -969,14 +972,14 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // materialized target. The probe returns here via s_setpc_b64 of the same pair.
   env.push_back(build_s_swappc_b64(link, target_lo, plan.arch));
 
-  // Drain the probe's in-flight loads immediately on return, before any restoration
-  // (SCC/EXEC, spill fills, special-state) or the relocated host code -- a probe may
-  // return with an unwaited load still targeting a register we are about to restore
-  // or that the host reads. Mirrors the boundary drain at the envelope top.
+  // Drain the probe's in-flight loads before restoration or resuming the guest:
+  // a probe may return with an unwaited load targeting a register we restore or
+  // the guest reads next. For AfterInst the anchor has already executed.
+  // Mirrors the boundary drain at the envelope top.
   env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
 
-  // SCC restore (epilogue): set SCC from the saved temp before the relocated
-  // original runs.
+  // Restore the observed SCC before resuming guest execution, whether the
+  // relocated anchor precedes or follows this envelope.
   if (plan.preserve_scc)
     env.push_back(build_s_cmp_lg_u32(plan.scc_temp, scalar_positive_inline_u32(0), plan.arch));
 
@@ -1052,8 +1055,10 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // Hand the synthesized envelope to build() for layout and branch math so the
   // SOPP range checks are shared with the inline path.
   TrampolinePlan emit_plan = plan;
-  emit_plan.before_items.assign(1, InlineAsmItem{std::move(env)});
+  emit_plan.before_items.clear();
   emit_plan.after_items.clear();
+  auto &items = plan.probe_after_original ? emit_plan.after_items : emit_plan.before_items;
+  items.push_back(InlineAsmItem{std::move(env)});
   return build(emit_plan, error_out);
 }
 
