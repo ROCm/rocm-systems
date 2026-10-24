@@ -191,6 +191,16 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amdsmi_get_gpu_fabric_info()` reports an over-length accelerator list as absent instead of truncating it**.  
   - `vpod_active_accelerators` and `local_accelerators` previously kept as many IDs as the array holds and dropped the rest. Neither field carries a count that covers the drop, so a truncated list was indistinguishable from a complete one. A list longer than the array now leaves the field at its sentinel with the corresponding `vpod_mask` / `ppod_mask` bit clear.
 
+- **Repeated `amd-smi` device options never narrow the selection; each device is selected once**.  
+  - Applies to `--gpu`, `--cpu`, `--core`, `--nic`, and `--switch`, in first-selected order. `--vf` and single-value settings still use their last value.
+
+  | Command | Before | Now |
+  | --- | --- | --- |
+  | `amd-smi reset --gpureset -g all -g 0` | Resets GPU 0 | Resets every GPU |
+  | `amd-smi list -g 0 0` | Lists GPU 0 twice | Lists GPU 0 once |
+  | `amd-smi list -g 2 -g all` | All GPUs, device order | All GPUs, GPU 2 first |
+  | `amd-smi set -g 0 -M NPS1 -g 1 -M NPS2` | Sets GPU 1 to NPS2 | Sets GPUs 0 and 1 to NPS2 |
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
@@ -202,6 +212,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
+
+- **Repeating a device option in an `amd-smi` command now selects every listed device**.  
+  - Previously only the last `--gpu`, `--cpu`, `--core`, `--nic`, or `--switch` option took effect, so `-g 0 -g 1` selected only GPU 1. It now selects the same devices as `-g 0 1`.
 
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
