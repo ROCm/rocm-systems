@@ -265,50 +265,6 @@
         {"name": "GdrPeerMem", "description": "net_ib peer-memory client sysfs detection (mock memory_peers tree)", "test_filter": "GdrPeerMem.*"}
       ]
     },
-    "unit_tests_micro_debug": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroDebug",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 0,
-      "timeout": 60,
-      "tests": [
-        {"name": "DebugMicrotests", "description": "Host-only debug.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_api_trace": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroApiTrace",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 0,
-      "timeout": 60,
-      "tests": [
-        {"name": "ApiTraceMicrotests", "description": "Host-only misc/api_trace.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_recorder": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroRecorder",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 0,
-      "timeout": 60,
-      "tests": [
-        {"name": "RecorderMicrotests", "description": "Host-only misc/recorder.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_coll_trace": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroCollTrace",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 0,
-      "timeout": 60,
-      "tests": [
-        {"name": "CollTraceMicrotests", "description": "Host-only misc/latency_profiler microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
     "unit_tests_micro": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicro",
@@ -589,30 +545,6 @@
       "name": "RCCL Unit Tests - GDR Peer-Memory Detection",
       "description": "rccl-UnitTestsGdr (net_ib memory_peers sysfs scan, CPU-only)",
       "config": "unit_tests_gdr",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - debug.cc",
-      "description": "rccl-UnitTestsMicroDebug (host-only debug.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_debug",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - misc/api_trace.cc",
-      "description": "rccl-UnitTestsMicroApiTrace (host-only misc/api_trace.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_api_trace",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - misc/recorder.cc",
-      "description": "rccl-UnitTestsMicroRecorder (host-only misc/recorder.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_recorder",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - misc/latency_profiler",
-      "description": "rccl-UnitTestsMicroCollTrace (host-only misc/latency_profiler microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_coll_trace",
       "enabled": true
     },
     {
