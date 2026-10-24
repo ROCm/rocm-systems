@@ -198,7 +198,7 @@ pub(super) fn parse_and_load(
         let gpu_index = runtime
             .gpus
             .iter()
-            .position(|gpu| object.validate_target(Target::from(&gpu.info)).is_ok())
+            .position(|gpu| object.validate_target(Target::from(&gpu.info())).is_ok())
             .ok_or(INCOMPATIBLE_ARGUMENTS)?;
         (gpu_index, MemoryKind::System, LOADER_OBJECT_KIND_PROGRAM)
     } else {
@@ -257,10 +257,10 @@ pub(crate) fn code_object_isa(
 ) -> Result<HsaIsa, Status> {
     let (target, variant) = object.target().map_err(map_loader_error)?;
     for (index, gpu) in runtime.gpus.iter().enumerate() {
-        let Some(name) = isa_name(&gpu.info, gpu.xnack_enabled, variant) else {
+        let Some(name) = isa_name(&gpu.info(), gpu.xnack_enabled, variant) else {
             continue;
         };
-        let mut active = Target::from(&gpu.info);
+        let mut active = Target::from(&gpu.info());
         active.xnack_enabled = Some(gpu.xnack_enabled);
         if name
             .strip_prefix("amdgcn-amd-amdhsa--")

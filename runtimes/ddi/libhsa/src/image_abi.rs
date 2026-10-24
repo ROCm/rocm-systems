@@ -97,7 +97,7 @@ impl From<HsaExtImageDescriptorV2> for HsaExtImageDescriptor {
 /// Validates a GPU agent and returns its GFX12 runtime index.
 fn gfx12_index(runtime: &HsaState, agent: HsaAgent) -> Result<usize, Status> {
     let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
-    let info = runtime.gpus[index].info;
+    let info = runtime.gpus[index].info();
     if !image_gfx12::supported_gpu(&info) {
         return Err(NOT_SUPPORTED);
     }
@@ -182,7 +182,7 @@ fn native_mip_layout(
         (
             format,
             surface,
-            runtime.gpus[index].info,
+            runtime.gpus[index].info(),
             runtime.gpus[index].device.clone(),
             generation,
             token,
@@ -754,7 +754,7 @@ pub(crate) unsafe fn create_sampler(
     let Some(index) = runtime.gpu_index(agent) else {
         return INVALID_AGENT;
     };
-    let info = runtime.gpus[index].info;
+    let info = runtime.gpus[index].info();
     if !matches!(
         (info.gfx_major, info.gfx_minor, info.gfx_stepping),
         (12, 0, 0 | 1)

@@ -689,7 +689,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
             Some(VirtualMemoryPlacement::Device(id)) => runtime
                 .gpus
                 .iter()
-                .position(|gpu| gpu.info.native_gpu_id == id)
+                .position(|gpu| gpu.info().native_gpu_id == id)
                 .map_or(HsaMemoryPool { handle: 0 }, |index| {
                     HsaState::gpu_pool(index, GpuPoolKind::Coarse)
                 }),
@@ -833,7 +833,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_vmem_info(
                         let Some(index) = runtime
                             .gpus
                             .iter()
-                            .position(|gpu| gpu.info.native_gpu_id == id)
+                            .position(|gpu| gpu.info().native_gpu_id == id)
                         else {
                             return INVALID_ALLOCATION;
                         };
@@ -887,7 +887,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_fabric_handle(
         let Some((index, _)) = runtime.decode_gpu_pool(handle.pool) else {
             return INVALID_ARGUMENT;
         };
-        if !runtime.gpus[index].info.fabric_handles_supported {
+        if !runtime.gpus[index].info().fabric_handles_supported {
             return NOT_SUPPORTED;
         }
         let Some(memory) = handle.owned_memory() else {
