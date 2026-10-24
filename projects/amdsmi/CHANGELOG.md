@@ -200,6 +200,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed Go bindings build, linking and GPU monitoring**.
+  - Restored builds and linking without CPU-management support, prevented crashes in GPU queries and discovery, and enabled shutdown of GPU-only sessions. Systems with more than 24 GPUs retain the first 24 and report the limit.
+
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
 
