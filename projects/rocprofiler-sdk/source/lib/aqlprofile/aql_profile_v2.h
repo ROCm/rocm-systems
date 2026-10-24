@@ -389,11 +389,26 @@ typedef enum
     AQLPROFILE_INFO_BLOCK_COUNTERS = 4,       // get_info returns number of block counter
     AQLPROFILE_INFO_BLOCK_ID       = 5,       // get_info returns block id, instances
                                               // by name string using _id_query_t
-    AQLPROFILE_INFO_ENABLE_CMD = 6,           // get_info returns size/pointer for
-                                              // counters enable command buffer
-    AQLPROFILE_INFO_DISABLE_CMD = 7,          // get_info returns size/pointer for
-                                              // counters disable command buffer
+    AQLPROFILE_INFO_ENABLE_CMD = 6,           // get_info returns size/packet for counters
+                                              // enable command buffer using _control_packet_t
+    AQLPROFILE_INFO_DISABLE_CMD = 7,          // get_info returns size/packet for counters
+                                              // disable command buffer using _control_packet_t
 } aqlprofile_pmc_info_type_t;
+
+/**
+ * @brief Value of aqlprofile_get_pmc_info() for AQLPROFILE_INFO_ENABLE_CMD and
+ * AQLPROFILE_INFO_DISABLE_CMD. Only the agent of the profile is used.
+ * When command_buffer is NULL, command_buffer_size is set to the required size. Otherwise
+ * command_buffer_size must be at least that size, the commands are written to command_buffer,
+ * which must be host-accessible and readable by the agent, and packet is populated to
+ * execute them.
+ */
+typedef struct
+{
+    void*                        command_buffer;      /**< Buffer for the commands, or NULL */
+    uint32_t                     command_buffer_size; /**< Size in bytes of command_buffer */
+    hsa_ext_amd_aql_pm4_packet_t packet;              /**< Packet executing command_buffer */
+} aqlprofile_pmc_control_packet_t;
 
 hsa_status_t
 aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
