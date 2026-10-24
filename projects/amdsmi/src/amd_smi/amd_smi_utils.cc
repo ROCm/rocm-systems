@@ -177,7 +177,7 @@ amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice* device,
   SMIGPUDEVICE_MUTEX(device->get_mutex())
   DIR* dh;
   struct dirent* contents;
-  std::string device_path = "/sys/class/drm/" + device->get_gpu_path();
+  std::string device_path = smi_amdgpu_sysfs_drm_root() + device->get_gpu_path();
   std::string directory_path = device_path + "/device/hwmon/";
 
   if (!isAMDGPU(device_path)) {
@@ -413,7 +413,7 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
                                       int* max_freq, int* min_freq, int* num_dpm,
                                       int* sleep_state_freq) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+  std::string fullpath = smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + "/device";
 
   std::string smclk_min_max_fullpath = "";
 
@@ -530,8 +530,8 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, 
   std::string line;
   std::vector<std::string> badPagesVec;
 
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/gpu_vram_bad_pages");
+  std::string fullpath = smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() +
+                         std::string("/device/ras/gpu_vram_bad_pages");
   std::ifstream fs(fullpath.c_str());
 
   if (fs.fail()) {
@@ -629,13 +629,14 @@ amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device
   SMIGPUDEVICE_MUTEX(device->get_mutex())
   char str[10];
 
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/umc_err_count");
+  std::string fullpath = smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() +
+                         std::string("/device/ras/umc_err_count");
   std::ifstream f(fullpath.c_str());
 
   if (f.fail()) {
     // fall back to aca file
-    fullpath = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/aca_umc");
+    fullpath =
+        smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + std::string("/device/ras/aca_umc");
     f.open(fullpath.c_str());
     if (f.fail()) {
       return AMDSMI_STATUS_NOT_SUPPORTED;
@@ -814,7 +815,7 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
 
   SMIGPUDEVICE_MUTEX(device->get_mutex())
   std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/pp_features");
+      smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + std::string("/device/pp_features");
   std::ifstream fs(fullpath.c_str());
 
   if (fs.fail()) {
@@ -1408,8 +1409,8 @@ amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* 
   }
 
   uint32_t drm_render = device->get_drm_render_minor();
-  std::string sysfs_path =
-      "/sys/class/drm/renderD" + std::to_string(drm_render) + "/device/" + pp_dpm_file;
+  std::string sysfs_path = smi_amdgpu_sysfs_drm_root() + "renderD" + std::to_string(drm_render) +
+                           "/device/" + pp_dpm_file;
 
   std::ifstream file(sysfs_path);
   if (!file.good()) {
