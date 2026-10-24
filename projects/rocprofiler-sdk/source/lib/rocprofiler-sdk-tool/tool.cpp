@@ -1107,7 +1107,8 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             if(tool::get_config().pc_sampling_host_trap ||
                tool::get_config().pc_sampling_stochastic)
             {
-                CHECK_NOTNULL(tool_metadata)->add_decoder(obj_data);
+                CHECK_NOTNULL(tool_metadata)
+                    ->add_decoder(obj_data, tool::get_config().rocpd_output);
             }
 
             if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&
@@ -4171,7 +4172,9 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                           hip_graph_output.get_generator(),
                           rocshmem_output.get_generator(),
                           hipfile_output.get_generator(),
-                          hip_event_output.get_generator());
+                          hip_event_output.get_generator(),
+                          pc_sampling_host_trap_output.get_generator(),
+                          pc_sampling_stochastic_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&

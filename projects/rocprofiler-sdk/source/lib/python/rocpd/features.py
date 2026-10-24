@@ -68,6 +68,10 @@ FEATURE_SCHEMA_VERSIONS: Dict[str, FeatureVersionRange] = {
         min_version=libpyrocpd.schema_version(3, 0, 5),
         max_version=None,
     ),
+    "pc_sampling": FeatureVersionRange(
+        min_version=libpyrocpd.schema_version(3, 0, 6),
+        max_version=None,
+    ),
 }
 
 

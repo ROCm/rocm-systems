@@ -375,6 +375,13 @@ rocpd2csv - CSV export tool
     # Apply time window filtering (export middle 70% of execution)
     rocpd2csv -i large_profile.db --start 15% --end 85%
 
+    # Keep the input read-only while disassembling PC samples
+    rocpd2csv -i pc_profile.db --no-cache-disassembly
+
+``rocpd2csv`` accepts the same ISA decode options as ``rocpd convert``
+(``--no-cache-disassembly`` and ``--codeobj-path-prefix-map``). See
+:ref:`rocpd-pc-sampling`.
+
 **Common output files:**
 
 - ``out_hip_api_trace.csv``: HIP API call trace data.
@@ -382,6 +389,10 @@ rocpd2csv - CSV export tool
 - ``out_kernel_trace.csv``: GPU kernel execution information.
 
 - ``out_counter_collection.csv``: Hardware performance counter data.
+
+- ``out_pc_sampling_host_trap_trace.csv`` and ``out_pc_sampling_stochastic_trace.csv``:
+  PC samples, one row per sample. The leading ``Guid`` column identifies the
+  recording, because local IDs such as ``Dispatch_Id`` repeat across merged recordings.
 
 rocpd2otf2 - OTF2 export tool
 ++++++++++++++++++++++++++++++
@@ -1848,3 +1859,610 @@ You can use the following methods to access the data in the rocpd database:
       rocpd convert -i results.db --f pftrace
 
   2. Open in Perfetto UI to see the visual timeline.
+
+.. _rocpd-pc-sampling:
+
+PC sampling data (schema 3.0.6)
+---------------------------------
+
+PC sampling support was introduced in schema version **3.0.6**. When
+``rocprofv3`` is run with ``--pc-sampling-beta-enabled`` and
+``--output-format rocpd``, the following tables are populated.
+Schema 3.0.5 remains frozen under ``versions/3.0.5``; the top-level SQL files
+describe 3.0.6. Older schema snapshots are not changed by PC-sampling support.
+
+rocpd_gpu_pc_sample
+++++++++++++++++++++
+
+One row per collected PC sample. Key columns:
+
+.. list-table::
+  :header-rows: 1
+  :widths: 25 15 60
+
+  * - Column
+    - Type
+    - Description
+  * - ``event_id``
+    - INTEGER
+    - Foreign key into ``rocpd_event``. The corresponding event's ``parent_id``
+      points to the dispatch event.
+  * - ``timestamp``
+    - BIGINT
+    - Sample timestamp in nanoseconds.
+  * - ``dispatch_id``
+    - INTEGER
+    - Dispatch ID of the kernel being sampled.
+  * - ``correlation_id``
+    - INTEGER
+    - User-assigned external correlation ID, matching the linked
+      ``rocpd_event.correlation_id``. The internal ID is stored in the linked
+      event's ``stack_id``.
+  * - ``exec_mask``
+    - TEXT
+    - Bitmask of active SIMD lanes at sample time. Stored as a decimal string so
+      the full 64-bit mask is preserved without integer overflow. SQLite integers
+      are signed 64-bit values, with maximum 2^63 - 1 (9223372036854775807),
+      whereas a valid 64-lane mask can reach 2^64 - 1 (18446744073709551615).
+      No mask needs to exceed 2^64 - 1 for TEXT storage to be necessary. Because the
+      column is TEXT, ``<``, ``>``, ``ORDER BY``, ``MIN``, and ``MAX`` compare
+      masks as text (``'255' > '1000'``). For exact equality, use a quoted decimal
+      string, such as ``exec_mask = '18446744073709551615'``, or bind a string
+      parameter. Numeric literals above 2^63 - 1 are interpreted as REAL and
+      may not match the stored text. ``CAST(exec_mask AS INTEGER)`` orders masks below 2^63
+      numerically but clamps larger masks, including a full 64-lane mask, to
+      9223372036854775807.
+  * - ``code_object_id``
+    - INTEGER
+    - Identifies the loaded code object containing the sampled instruction.
+      Zero denotes an unknown object. This column deliberately has no foreign-key
+      constraint so samples are retained when code-object metadata is unavailable.
+  * - ``code_object_offset``
+    - BIGINT
+    - Byte offset within the code object (the program counter value).
+  * - ``agent_id``
+    - INTEGER
+    - GPU agent from the parent dispatch, falling back to recorded code-object
+      metadata when dispatch context is unavailable. NULL when neither is known.
+  * - ``tid``
+    - INTEGER
+    - CPU thread that launched the parent kernel dispatch. NULL when dispatch
+      context is unavailable.
+  * - ``wave_issued``
+    - INTEGER
+    - Whether the wave issued an instruction (1 = yes, 0 = no). Stochastic only; NULL for host-trap.
+  * - ``inst_type``
+    - INTEGER
+    - Instruction type if ``wave_issued = 1``. Stochastic only; NULL for host-trap.
+  * - ``stall_reason``
+    - INTEGER
+    - Stall reason if ``wave_issued = 0``. Stochastic only; NULL for host-trap.
+  * - ``wave_count``
+    - INTEGER
+    - Total active waves on the compute unit at sample time. Stochastic only; NULL for host-trap.
+
+``INTEGER`` and ``BIGINT`` have the same integer affinity in SQLite; ``BIGINT``
+does not provide unsigned storage. Metadata IDs consistently use ``INTEGER``;
+timestamps and code-object offsets retain the existing ``BIGINT`` declaration.
+
+rocpd_blob_event, rocpd_info_blob_schema, rocpd_info_blob_field
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+Each PC sample also has a companion row in ``rocpd_blob_event`` containing a
+packed binary blob of architecture-specific hardware state. Both rows contain
+the same ``event_id`` and independently reference ``rocpd_event.id``; there is
+no ``blob_event_id`` column. Join the rows on both ``guid`` and ``event_id``.
+The blob layout is
+self-describing through two metadata tables:
+
+- ``rocpd_info_blob_schema``: Describes the overall layout (name
+  ``pc_sample_extdata_hosttrap`` for host-trap, or ``pc_sample_extdata_stochastic``
+  with an optional ``_gfx12`` or ``_gfx1250`` suffix for stochastic sampling,
+  followed by ``_no_memory_counters`` when those samples carry no memory counters;
+  total byte size, byte order ``little``, alignment ``1``).
+- ``rocpd_info_blob_field``: One row per field with name, byte offset, size, and
+  data type. Consumers can decode the binary without hard-coding struct offsets.
+
+Schema names are internal diagnostic labels, not a versioned architecture or
+capability API. Consumers must discover fields from ``rocpd_info_blob_field``
+using ``(guid, schema_id)`` instead of inferring memory-counter presence or field
+lists from a name, suffix, or GPU architecture. Layouts with and without memory
+counters can coexist for the same architecture, according to each sample's
+validity flag.
+
+The blob contains HW ID fields (``hw_id_chiplet``, ``hw_id_wave_id``,
+``hw_id_simd_id``, ``hw_id_pipe_id``, ``hw_id_cu_or_wgp_id``,
+``hw_id_shader_array_id``, ``hw_id_shader_engine_id``, ``hw_id_workgroup_id``,
+``hw_id_vm_id``, ``hw_id_queue_id``, ``hw_id_microengine_id``) and workgroup
+coordinates (``workgroup_id_x/y/z``, ``wave_in_group``). For stochastic sampling,
+arbiter-state fields (``arb_state_issue_*`` and ``arb_state_stall_*``) are also
+present. Each boolean is currently stored as a one-byte ``uint8_t`` containing
+0 or 1, not a packed bit. Bit packing would require additional bit-offset/width
+metadata and decoder support and is not part of this layout.
+
+The architecture is recovered from the parent dispatch or, without kernel
+tracing, from the sample's code-object agent. If neither identifies an agent,
+the writer uses the architecture only when all enumerated GPUs agree. An
+ambiguous architecture uses an ``_unknown_arch`` layout containing only shared
+fields; it is not silently classified as GFX9.
+
+Joined view
++++++++++++
+
+The persistent ``pc_samples`` view joins raw PC samples to their event, blob,
+agent index, and code-object URI using recording-qualified keys. Its left joins
+retain samples without dispatch or code-object metadata. It does not unpack
+blob bytes or decode instructions; use the decoded view below for those fields.
+
+Decoded view
++++++++++++++
+
+The ``rocpd`` post-processing tools provide a ``rocpd_gpu_pc_sample_decoded``
+temporary view that automatically unpacks the binary blob fields alongside all
+columns from ``rocpd_gpu_pc_sample``. The view is created when a
+``RocpdImportData`` connection is opened: ``setup_blob_views`` reads
+``rocpd_info_blob_schema`` and, for each registered blob schema (keyed by its
+``(guid, schema_id)``), builds a generic decoded view over the schema's
+``source_table`` (``rocpd_gpu_pc_sample`` here), which ``setup_isa_decode_views``
+then enriches with the instruction and enum-name columns. The packed blob bytes
+are only unpacked when the decoded view is queried. Reading
+``rocpd_gpu_pc_sample`` directly (for example, through ``sqlite3``) does not
+unpack them, but ``rocpd query`` rewrites references to ``rocpd_gpu_pc_sample``
+to the decoded view (see below). The intermediate
+``rocpd_gpu_pc_sample_blob_decoded`` temporary view contains the base sample
+columns and unpacked blob fields, without instruction or enum-name enrichment.
+If the PC-sampling layer cannot be set up,
+``rocpd`` prints a warning, does not create ``rocpd_gpu_pc_sample_decoded``, and
+skips the PC-sampling CSV files; the blob fields remain available through
+``rocpd_gpu_pc_sample_blob_decoded``.
+
+The decoded view exposes every column from ``rocpd_gpu_pc_sample`` plus one
+additional column per blob field, including ``hw_id_chiplet``,
+``hw_id_wave_id``, ``hw_id_simd_id``, ``hw_id_pipe_id``,
+``hw_id_cu_or_wgp_id``, ``hw_id_shader_array_id``,
+``hw_id_shader_engine_id``, ``hw_id_workgroup_id``, ``hw_id_vm_id``,
+``hw_id_queue_id``, ``hw_id_microengine_id``, ``wave_in_group``,
+``workgroup_id_x``, ``workgroup_id_y``, ``workgroup_id_z``,
+and the architecture's ``arb_state_issue_*`` and ``arb_state_stall_*``
+fields. GFX9 includes ``dual_issue_valu`` and the ``*_matrix``, ``*_flat``, and
+``*_misc`` arbiters. GFX12 and GFX1250 omit those GFX9-only fields and instead
+include the ``*_lds_direct`` and ``*_brmsg`` arbiter variants and,
+when supplied by the sample, the ``memory_counter_load``, ``memory_counter_store``,
+``memory_counter_bvh``, ``memory_counter_sample``, ``memory_counter_ds``, and
+``memory_counter_km`` fields. GFX1250 additionally exposes
+``sampling_lock_error``, ``memory_counter_async``, ``memory_counter_tensor``, and
+``memory_counter_xnack``. Architecture-specific or unavailable memory-counter fields
+are NULL for rows whose blob schema does not contain them. The view additionally
+exposes the disassembled ``instruction`` and
+``instruction_comment`` text for the sampled program counter and the
+human-readable ``inst_type_name`` and ``stall_reason_name`` columns.
+An empty instruction comment is exposed as ``NULL``, whether the instruction
+is decoded lazily or read from stored disassembly.
+
+Instruction disassembly
++++++++++++++++++++++++++
+
+By default, instruction text is decoded lazily during post-processing. Each
+time the ``rocpd_gpu_pc_sample_decoded`` view is queried, ``rocpd``
+disassembles the sampled program counters on demand from the referenced code
+objects and returns the instruction text in the query result.
+
+.. important::
+
+  Disassembly caching is enabled by default (``cache_disassembly=True``) in
+  the Python API and the ``rocpd`` post-processing tools. This applies to
+  **existing PC-sampling databases** as well as new captures, with no
+  feature-flag gate. A query or conversion that decodes previously unstored
+  instructions can therefore modify its input database at normal Python
+  interpreter shutdown, even when the command is used only for analysis.
+  This is independent of ``--complete-isa-decode``, which persists instruction
+  text during collection.
+
+  Write-back is best-effort: it requires an existing
+  ``rocpd_disassembly_data`` table and a successful decode from code-object
+  bytes that match a recorded content hash. Caching does not create missing
+  tables or migrate older input schemas. Simply opening a database or reading
+  already-stored instruction text does not add cache rows.
+
+Pass ``--no-cache-disassembly`` to ``rocpd convert``, ``rocpd query``,
+``rocpd summary``, ``rocpd2csv``, or ``python -m rocpd.query`` (or
+``cache_disassembly=False`` to the ``RocpdImportData`` API) to keep the input
+database read-only, in which case the decoded text is cached only in memory for
+the lifetime of the process and the ``.db`` file is left unchanged.
+
+A code object on disk can change after profiling, for example when the
+application is rebuilt or ``--codeobj-path-prefix-map`` points at a different
+file. When ``rocprofv3`` decodes a code object during PC sampling with ROCpd
+output enabled, it records a
+hash of the code object's bytes in the ``content_hash`` field of
+``rocpd_info_code_object.extdata``. Before decoding lazily, ``rocpd`` compares the
+bytes it reads against that hash and reports ``Decode unavailable`` for a
+mismatch rather than returning instructions from a different binary. Code
+objects without a recorded hash are still decoded, but their instructions are
+never written back. The internal ``capture_content_hash`` gate skips hashing
+for CSV/JSON-only PC-sampling captures; it does not skip reading the bytes
+needed for decoding.
+
+Passing ``--complete-isa-decode`` to ``rocprofv3`` instead persists
+the disassembly at collection time into the ``rocpd_disassembly_data`` table
+(deduplicated per ``code_object_id`` and ``code_object_offset``). Only the
+sampled program counters that were successfully resolved to an instruction
+during collection are stored. A program counter is absent from the table when
+it could not be disassembled at collection time, for example because the
+referenced code object was no longer loaded when the disassembly pass ran, or
+the address did not map to a decodable instruction. When the table is present,
+the decoded view reads the stored text for the program counters it contains and
+falls back to on-demand decoding (the default lazy behavior described above)
+only for those absent program counters. Because the fallback decodes from the
+same code objects, a query still returns instruction text for those program
+counters as long as the code objects remain accessible.
+
+By default (unless ``--no-cache-disassembly`` or ``cache_disassembly=False`` is
+passed), the ``rocpd`` post-processing tools persist instructions that are
+decoded *lazily* from code objects that match their recorded hash. Program counters
+that are disassembled on demand while
+a query is served (for example by ``rocpd query`` or ``rocpd convert``) are
+written into the same ``rocpd_disassembly_data`` table when the process exits,
+so a later open reads the stored text instead of decoding again. Unlike
+``--complete-isa-decode`` (which runs at collection time), this persists only
+the program counters that were actually decoded during post-processing, and
+only those that resolved to an instruction.
+
+.. note::
+
+   Disassembly write-back is on by default and best-effort:
+
+   - It writes to the database(s) that were opened unless disabled with
+     ``--no-cache-disassembly`` (or ``cache_disassembly=False`` via the API),
+     which keeps the input read-only. When several inputs are merged
+     automatically, the merged copy is the database that was opened.
+   - Rows are written at process exit and routed to each recording's table by
+     ``guid``, including every recording of a merged database, so the cache
+     benefits the *next* open rather than the current run.
+   - Only program counters that a query actually decodes are cached: the query
+     must project the ``instruction`` or ``instruction_comment`` columns, the
+     program counter must not already be stored, it must decode successfully,
+     and its code object must match its recorded content hash. Memory-resident
+     code objects that cannot be decoded (see the note below) are therefore not
+     cached.
+   - It is skipped silently when the database cannot be written (a read-only
+     file or filesystem, lock contention, a database deleted or replaced after
+     it was opened, or a pre-3.0.6 database without the
+     ``rocpd_disassembly_data`` table); the database is left untouched.
+   - Writes are de-duplicated per ``guid``, ``code_object_id``, and
+     ``code_object_offset``, so the cache never changes query results.
+
+By default the cache is populated whenever a command decodes program counters
+that are not already stored. For example:
+
+.. code-block:: bash
+
+   # A query that projects the instruction/comment columns of the decoded view.
+   rocpd query -i results.db --query "
+     SELECT dispatch_id, instruction, instruction_comment
+     FROM rocpd_gpu_pc_sample_decoded LIMIT 100"
+
+   # A query written against rocpd_gpu_pc_sample is rewritten to the decoded
+   # view automatically (update_query_for_blob_views), so it decodes -- and
+   # caches -- the projected program counters too.
+   rocpd query -i results.db --query "
+     SELECT instruction FROM rocpd_gpu_pc_sample LIMIT 100"
+
+   # CSV conversion: the PC sampling CSV writers select instruction and
+   # instruction_comment, so a convert run caches every decoded sample.
+   rocpd convert -i results.db -f csv
+
+Any direct ``SELECT`` of the ``instruction`` or ``instruction_comment`` columns
+of ``rocpd_gpu_pc_sample_decoded`` has the same effect. In every case the
+decoded program counters are written to ``rocpd_disassembly_data`` when the
+process exits, so the *next* time the database is opened the stored text is
+served through the decoded view instead of being disassembled again. Reading the
+stored text is unaffected by ``--no-cache-disassembly`` -- that flag only
+controls whether *new* decodes are persisted:
+
+.. code-block:: bash
+
+   # First run: decodes lazily and, at exit, persists the disassembly.
+   rocpd convert -i results.db -f csv
+
+   # Later runs: the decoded view serves the stored text (no re-decoding);
+   # --no-cache-disassembly does not affect reading already-stored text.
+   rocpd query -i results.db --query "
+     SELECT instruction FROM rocpd_gpu_pc_sample_decoded LIMIT 100"
+
+.. warning::
+
+   Persisting disassembly grows the input database by roughly one row per
+   distinct sampled program counter that is decoded. This is bounded (only
+   sampled program counters, not whole code objects) but non-zero; pass
+   ``--no-cache-disassembly`` (or ``cache_disassembly=False`` via the API) to
+   keep the input read-only if you do not want the instruction text written
+   back.
+
+.. note::
+
+  Lazy decoding requires accessible code-object bytes through a local
+  ``file://`` URI. Both ``storage_type = FILE`` and ``storage_type = MEMORY``
+  objects can be decoded when such a URI resolves to matching bytes; MEMORY
+  objects must also match the recorded ``memory_size``. PC sampling does not
+  snapshot purely memory-resident objects to disk. Objects available only
+  through a ``memory://`` URI therefore cannot be decoded after the profiled
+  process exits, and the view reports ``Decode unavailable``. To retain their
+  disassembly, pass ``--complete-isa-decode`` at collection time; it decodes
+  the live bytes in-process and persists the text into the database.
+
+Moving a recording to another machine
+++++++++++++++++++++++++++++++++++++++
+
+The database stores code-object metadata (URI, load information, and optional
+content hash), not complete code-object binaries. ROCpd capture and database
+merge/package operations do not automatically bundle the referenced binaries.
+Copying the whole ``.rocprofv3`` directory is therefore not a guarantee that all
+code objects are present: a ``file://`` URI can point to the application's
+executable or a shared library elsewhere, including a byte range within that
+file.
+
+For lazy decoding on another machine, copy the database and the exact binary
+files referenced by its sampled code objects. Keep any URI offset/size fragment
+valid, and pass ``--codeobj-path-prefix-map`` to map the recorded directory
+prefixes to their new locations. The decoder still checks the captured content
+hash; a rebuilt library is not an equivalent replacement. The referenced objects
+can be listed without decoding instructions:
+
+.. code-block:: sql
+
+   SELECT DISTINCT C.guid, C.id, C.storage_type, C.uri
+   FROM rocpd_info_code_object C
+   JOIN rocpd_gpu_pc_sample S
+     ON S.guid = C.guid AND S.code_object_id = C.id
+   WHERE C.id != 0;
+
+Instructions already persisted by ``--complete-isa-decode`` or a verified lazy
+decode remain readable from the copied database without the original binaries.
+This covers only successfully decoded sampled PCs, not the whole code object.
+Pure ``memory://`` objects have no file to copy in the current implementation;
+preserving their loaded bytes requires a separate capture-time snapshot feature.
+``storage_type = MEMORY`` alone does not imply this limitation: an object can
+still have a usable ``file://`` URI.
+
+Querying PC sampling data
+++++++++++++++++++++++++++
+
+.. note::
+
+   A *recording* is the profiling data captured by a single ``rocprofv3`` run
+   (one profiled process). Each run writes its own ``.db`` file and stamps every
+   row it produces with a unique ``guid`` (a UUID generated once per process),
+   so within one database all rows share the same ``guid``. Merging or packaging
+   databases (for example, from multiple MPI ranks, GPUs, or repeated runs)
+   combines rows from several recordings, and each retains its original ``guid``.
+   The ``guid`` is therefore what distinguishes one recording from another after
+   the data has been combined.
+
+   ``dispatch_id`` is unique only within a single recording (``guid``). When
+   querying a database merged from multiple recordings, add a ``guid`` predicate
+   to any join on ``dispatch_id`` (for example ``... AND KD.guid = S.guid``) so
+   that samples are not associated with dispatches from a different recording.
+
+Each PC sample event's ``parent_id`` in ``rocpd_event`` points to the dispatch
+event for the kernel being sampled when ``--kernel-trace`` is active.
+Its ``parent_stack_id`` records that dispatch event's internal ``stack_id``.
+Both parent fields are ``NULL`` when the dispatch context was not captured:
+
+.. code-block:: bash
+
+  rocpd query -i results.db --query "SELECT dispatch_id, arb_state_issue_valu FROM rocpd_gpu_pc_sample_decoded LIMIT 10"
+
+**Verify parent-dispatch linkage:**
+
+.. code-block:: bash
+
+  rocpd query -i profile.db --query "
+  SELECT
+    COUNT(*) AS total_samples,
+    SUM(CASE WHEN E.parent_id IS NOT NULL THEN 1 ELSE 0 END) AS linked_samples
+  FROM rocpd_gpu_pc_sample S
+  JOIN rocpd_event E ON E.id = S.event_id AND E.guid = S.guid"
+
+**VALU issue rate per kernel**:
+
+.. code-block:: bash
+
+  rocpd query -i profile.db --query "
+  WITH per_kernel AS (
+    SELECT
+      KD.guid,
+      KD.kernel_id,
+      SUM(CASE WHEN S.arb_state_issue_valu = 1 THEN 1 ELSE 0 END) AS issued_valu_samples,
+      COUNT(*) AS total_samples
+    FROM rocpd_gpu_pc_sample_decoded S
+    INNER JOIN rocpd_kernel_dispatch KD ON KD.dispatch_id = S.dispatch_id
+      AND KD.guid = S.guid
+    GROUP BY KD.guid, KD.kernel_id
+  )
+  SELECT
+    PK.kernel_id,
+    KS.display_name,
+    PK.issued_valu_samples,
+    PK.total_samples,
+    (100.0 * PK.issued_valu_samples) / NULLIF(PK.total_samples, 0) AS issued_valu_pct
+  FROM per_kernel PK
+  LEFT JOIN rocpd_info_kernel_symbol KS ON KS.id = PK.kernel_id
+    AND KS.guid = PK.guid
+  ORDER BY PK.issued_valu_samples DESC
+  LIMIT 20"
+
+**Dispatches with highest execution stall back-pressure**:
+
+.. code-block:: bash
+
+  rocpd query -i profile.db --query "
+  SELECT
+    S.guid,
+    S.dispatch_id,
+    COUNT(*) AS samples,
+    SUM(CASE WHEN
+          S.arb_state_stall_valu=1 OR S.arb_state_stall_matrix=1 OR
+          S.arb_state_stall_lds=1 OR
+          S.arb_state_stall_scalar=1 OR S.arb_state_stall_vmem_tex=1 OR
+          S.arb_state_stall_flat=1 OR S.arb_state_stall_exp=1 OR
+          S.arb_state_stall_misc=1
+        THEN 1 ELSE 0 END) AS stall_samples,
+    (100.0 * SUM(CASE WHEN
+          S.arb_state_stall_valu=1 OR S.arb_state_stall_matrix=1 OR
+          S.arb_state_stall_lds=1 OR
+          S.arb_state_stall_scalar=1 OR S.arb_state_stall_vmem_tex=1 OR
+          S.arb_state_stall_flat=1 OR S.arb_state_stall_exp=1 OR
+          S.arb_state_stall_misc=1
+        THEN 1 ELSE 0 END)) / NULLIF(COUNT(*), 0) AS stall_pct
+  FROM rocpd_gpu_pc_sample_decoded S
+  GROUP BY S.guid, S.dispatch_id
+  ORDER BY stall_samples DESC, samples DESC
+  LIMIT 20"
+
+**Kernels with highest stall ratio**:
+
+This counts a sample as stalled when *every* execution pipeline failed to make
+forward progress in the sampled cycle, that is ``arb_state_issue_PIPE = 0 OR
+arb_state_stall_PIPE = 1`` for all pipes (SIMD latency). It is therefore broader
+than the back-pressure query above, which counts only samples where a pipeline
+backpressured an issued instruction (``arb_state_stall_PIPE = 1``).
+
+.. code-block:: bash
+
+  rocpd query -i profile.db --query "
+  WITH per_kernel AS (
+    SELECT
+      KD.guid,
+      KD.kernel_id,
+      COUNT(*) AS samples,
+      SUM(CASE WHEN
+            (S.arb_state_issue_valu=0       OR S.arb_state_stall_valu=1) AND
+            (S.arb_state_issue_matrix=0     OR S.arb_state_stall_matrix=1) AND
+            (S.arb_state_issue_lds=0        OR S.arb_state_stall_lds=1) AND
+            (S.arb_state_issue_scalar=0     OR S.arb_state_stall_scalar=1) AND
+            (S.arb_state_issue_vmem_tex=0   OR S.arb_state_stall_vmem_tex=1) AND
+            (S.arb_state_issue_flat=0       OR S.arb_state_stall_flat=1) AND
+            (S.arb_state_issue_exp=0        OR S.arb_state_stall_exp=1) AND
+            (S.arb_state_issue_misc=0       OR S.arb_state_stall_misc=1)
+          THEN 1 ELSE 0 END) AS stall_samples
+    FROM rocpd_gpu_pc_sample_decoded S
+    INNER JOIN rocpd_kernel_dispatch KD ON KD.dispatch_id = S.dispatch_id
+      AND KD.guid = S.guid
+    GROUP BY KD.guid, KD.kernel_id
+  )
+  SELECT
+    PK.kernel_id, KS.display_name, PK.samples, PK.stall_samples,
+    (100.0 * PK.stall_samples) / NULLIF(PK.samples, 0) AS stall_pct
+  FROM per_kernel PK
+  LEFT JOIN rocpd_info_kernel_symbol KS ON KS.id = PK.kernel_id
+    AND KS.guid = PK.guid
+  ORDER BY stall_pct DESC, PK.samples DESC
+  LIMIT 20"
+
+**Top sampled instruction offsets per kernel:**
+
+.. code-block:: bash
+
+  rocpd query -i profile.db --query "
+  SELECT
+    KD.guid, KD.kernel_id, KS.display_name, S.code_object_offset,
+    COUNT(*) AS samples_at_offset
+  FROM rocpd_gpu_pc_sample_decoded S
+  INNER JOIN rocpd_kernel_dispatch KD ON KD.dispatch_id = S.dispatch_id
+    AND KD.guid = S.guid
+  LEFT JOIN rocpd_info_kernel_symbol KS ON KS.id = KD.kernel_id
+    AND KS.guid = KD.guid
+  GROUP BY KD.guid, KD.kernel_id, KS.display_name, S.code_object_offset
+  ORDER BY samples_at_offset DESC
+  LIMIT 50"
+
+**Instruction histogram per kernel**:
+
+.. code-block:: bash
+
+  rocpd query -i profile.db --query "
+  WITH per_instruction AS (
+    SELECT KD.guid, KD.kernel_id, S.code_object_offset, COUNT(*) AS instruction_samples
+    FROM rocpd_gpu_pc_sample_decoded S
+    INNER JOIN rocpd_kernel_dispatch KD ON KD.dispatch_id = S.dispatch_id
+      AND KD.guid = S.guid
+    GROUP BY KD.guid, KD.kernel_id, S.code_object_offset
+  ),
+  histogram AS (
+    SELECT
+      guid,
+      kernel_id,
+      CASE
+        WHEN instruction_samples < 10   THEN '1-9'
+        WHEN instruction_samples < 100  THEN '10-99'
+        WHEN instruction_samples < 1000 THEN '100-999'
+        ELSE '1000+'
+      END AS sample_bucket,
+      COUNT(*) AS instruction_count
+    FROM per_instruction
+    GROUP BY guid, kernel_id, sample_bucket
+  )
+  SELECT H.kernel_id, KS.display_name, H.sample_bucket, H.instruction_count
+  FROM histogram H
+  LEFT JOIN rocpd_info_kernel_symbol KS ON KS.id = H.kernel_id
+    AND KS.guid = H.guid
+  ORDER BY H.kernel_id, H.sample_bucket"
+
+**Internal pipeline latency hole detection**:
+
+.. code-block:: bash
+
+  rocpd query -i profile.db --query "
+  WITH sk AS (
+    SELECT KD.guid, KD.kernel_id, S.code_object_id, S.code_object_offset,
+           S.stall_reason_name,
+           S.dual_issue_valu,
+           S.arb_state_issue_valu, S.arb_state_stall_valu,
+           S.arb_state_issue_matrix, S.arb_state_stall_matrix,
+           S.arb_state_issue_lds, S.arb_state_stall_lds,
+           S.arb_state_issue_scalar, S.arb_state_stall_scalar,
+           S.arb_state_issue_vmem_tex, S.arb_state_stall_vmem_tex,
+           S.arb_state_issue_flat, S.arb_state_stall_flat,
+           S.arb_state_issue_exp, S.arb_state_stall_exp,
+           S.arb_state_issue_misc, S.arb_state_stall_misc
+    FROM rocpd_gpu_pc_sample_decoded S
+    INNER JOIN rocpd_kernel_dispatch KD ON KD.dispatch_id = S.dispatch_id
+      AND KD.guid = S.guid
+  ),
+  per_pc AS (
+    SELECT guid, kernel_id, code_object_id, code_object_offset,
+           COUNT(*) AS samples,
+           SUM(CASE WHEN stall_reason_name =
+                         'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_INTERNAL_INSTRUCTION'
+                    THEN 1 ELSE 0 END) AS internal_instruction_samples,
+           SUM(CASE WHEN dual_issue_valu=1 OR
+                         arb_state_issue_valu=1 OR arb_state_issue_matrix=1 OR
+                         arb_state_issue_lds=1 OR
+                         arb_state_issue_scalar=1 OR arb_state_issue_vmem_tex=1 OR
+                         arb_state_issue_flat=1 OR arb_state_issue_exp=1 OR
+                         arb_state_issue_misc=1
+                    THEN 1 ELSE 0 END) AS any_pipeline_issue_samples,
+           SUM(CASE WHEN
+                         (arb_state_issue_valu=1       AND arb_state_stall_valu=0) OR
+                         (arb_state_issue_matrix=1     AND arb_state_stall_matrix=0) OR
+                         (arb_state_issue_lds=1        AND arb_state_stall_lds=0) OR
+                         (arb_state_issue_scalar=1     AND arb_state_stall_scalar=0) OR
+                         (arb_state_issue_vmem_tex=1   AND arb_state_stall_vmem_tex=0) OR
+                         (arb_state_issue_flat=1       AND arb_state_stall_flat=0) OR
+                         (arb_state_issue_exp=1        AND arb_state_stall_exp=0) OR
+                         (arb_state_issue_misc=1       AND arb_state_stall_misc=0)
+                    THEN 1 ELSE 0 END) AS useful_issue_samples
+    FROM sk
+    GROUP BY guid, kernel_id, code_object_id, code_object_offset
+  )
+  SELECT guid, kernel_id, code_object_id, code_object_offset, samples,
+         internal_instruction_samples, any_pipeline_issue_samples, useful_issue_samples,
+         CASE WHEN internal_instruction_samples>0 AND useful_issue_samples=0 THEN 1 ELSE 0 END
+           AS internal_latency_hole
+  FROM per_pc
+  WHERE internal_instruction_samples>0
+  ORDER BY internal_latency_hole DESC, any_pipeline_issue_samples DESC, samples DESC"
+
+For information about enabling PC sampling in ``rocprofv3``, see
+:ref:`using-pc-sampling` and :ref:`pc-sampling-rocpd-output`.
