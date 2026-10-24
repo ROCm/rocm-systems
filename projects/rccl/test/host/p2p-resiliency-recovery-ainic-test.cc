@@ -19,12 +19,6 @@
 
 #include P2P_RESILIENCY_RECOVERY_AINIC_CC_PATH
 
-// Used only while connect_cast.h has no IbCastFlushQpSendDepth(base): flush QPs then get NET_IB_MAX_REQUESTS.
-template <typename Base>
-static int IbCastFlushQpSendDepth(const Base*) {
-  return NET_IB_MAX_REQUESTS;
-}
-
 namespace {
 
 class P2pResiliencyRecoveryAinicMicrotest : public ::testing::Test {
@@ -123,7 +117,7 @@ TEST_F(P2pResiliencyRecoveryAinicMicrotest, RestoreAinic_Receiver_AlsoRecreatesT
   ASSERT_EQ(creates_.size(), 2u);
   const ncclIbQpCreateAttr& attr = creates_[1];
   EXPECT_EQ(attr.maxRecvWorkRequest, 0u);
-  EXPECT_EQ(attr.maxSendWorkRequest, (uint32_t)IbCastFlushQpSendDepth(base));
+  EXPECT_EQ(attr.maxSendWorkRequest, (uint32_t)NET_IB_MAX_REQUESTS);
   EXPECT_EQ(attr.isP2p, 0);
   EXPECT_EQ(attr.channelId, 9);
   EXPECT_EQ(attr.qpSharingGroupIdx, -1);

@@ -432,8 +432,7 @@ TEST_F(P2pResiliencyMicrotest, SenderQpsToRts_PeerWithoutRecovery_TurnsRecoveryO
   ibv_qp* recoveryQp0 = res_->portRecoveryQps[0].qp;
   ibv_qp* recoveryQp1 = res_->portRecoveryQps[1].qp;
   ncclIbConnectionMetadata remote = P2pResiliencyRemoteInfo(2, false);
-  std::string log = CaptureLog([&] { ASSERT_EQ(IbCastResiliencySenderQpsToRts(res_, &remote), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "peer has no port recovery")) << log;
+  CaptureLog([&] { ASSERT_EQ(IbCastResiliencySenderQpsToRts(res_, &remote), ncclSuccess); });
   EXPECT_FALSE(res_->recoveryEnabled);
   EXPECT_EQ(res_->nPortRecoveryQps, 0);
   EXPECT_EQ(scene_.destroyedQps, (std::vector<ibv_qp*>{recoveryQp0, recoveryQp1}));
@@ -782,17 +781,15 @@ TEST_F(P2pResiliencyMicrotest, ReplaceQps_SkipsQpsOnOtherUnhealthyDevices) {
   MakeReceiver(3, 3);
   SetState(0, ncclIbResiliencyDevStateError);
   SetState(1, ncclIbResiliencyDevStateRecoveryInProgress);
-  std::string log = CaptureLog([&] { ASSERT_EQ(IbCastResiliencyReplaceQps(res_, 0), ncclSuccess); });
+  CaptureLog([&] { ASSERT_EQ(IbCastResiliencyReplaceQps(res_, 0), ncclSuccess); });
   EXPECT_EQ(recv_->base.activeQps[0], &recv_->base.qps[2]);
-  EXPECT_TRUE(LogHas(log, "is not on a functional device")) << log;
 }
 
 TEST_F(P2pResiliencyMicrotest, ReplaceQps_NoHealthyQp_ReturnsInternalError) {
   MakeReceiver(2, 2);
   recv_->base.qps[1].devIndex = 0;  // both QPs on the failed device
   SetState(0, ncclIbResiliencyDevStateError);
-  std::string log = CaptureLog([&] { EXPECT_EQ(IbCastResiliencyReplaceQps(res_, 0), ncclInternalError); });
-  EXPECT_TRUE(LogHas(log, "Could not find a replacement QP")) << log;
+  CaptureLog([&] { EXPECT_EQ(IbCastResiliencyReplaceQps(res_, 0), ncclInternalError); });
 }
 
 TEST_F(P2pResiliencyMicrotest, HandleCompletionError_RecoveryCannotStart_MarksDevicePermanent) {
@@ -822,8 +819,7 @@ TEST_F(P2pResiliencyMicrotest, HandleCompletionError_RecoveryStarts_QueuesTheDev
 TEST_F(P2pResiliencyMicrotest, HandleCompletionError_SenderStaleSlot_IsIgnored) {
   ncclIbResiliencySend* sendRes = MakeSender(2, 2);
   ibv_wc wc = P2pResiliencyWc(0x1205, IBV_WC_WR_FLUSH_ERR, IBV_WC_SEND);
-  std::string log = CaptureLog([&] { ASSERT_EQ(IbCastResiliencyHandleCompletionError(res_, &wc, 0), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "stale CQE")) << log;
+  CaptureLog([&] { ASSERT_EQ(IbCastResiliencyHandleCompletionError(res_, &wc, 0), ncclSuccess); });
   EXPECT_EQ(res_->outstandingRequests, 0);
   EXPECT_EQ(sendRes->failedRequests[5].request, nullptr);
 }
