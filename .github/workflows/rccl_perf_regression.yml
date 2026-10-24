@@ -31,7 +31,7 @@ name: RCCL Perf Regression Gate
 
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, rccl-develop]
     paths:
       - 'projects/rccl/**'
       - '.github/workflows/rccl_perf_regression.yml'

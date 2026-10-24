@@ -1,7 +1,7 @@
 name: RCCL host unit tests
 
 # Builds and runs RCCL's CPU-only host unit-test binary (rccl-HostUnitTests, added
-# in PR #9320) on every PR to develop touching projects/rccl/**. No GPU or network
+# in PR #9320) on every PR to develop or rccl-develop touching projects/rccl/**. No GPU or network
 # hardware is required: the binary is compiled with `hipcc --offload-host-only` and
 # links no HIP/ROCm runtime. The workflow's own path is in the trigger so it
 # self-runs on the PR that introduces it. JIRA ID: AICOMRCCL-1711
@@ -13,6 +13,7 @@ on:
   pull_request:
     branches:
       - develop
+      - rccl-develop
     paths:
       - 'projects/rccl/**'
       - '.github/workflows/rccl-host-unit-tests.yml'
