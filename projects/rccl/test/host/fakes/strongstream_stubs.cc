@@ -58,6 +58,9 @@ ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph, struct ncc
                                                 bool, hipStream_t*) {
   FailLoudUnfaked("strongstream_stubs", "ncclStrongStreamAcquiredWorkStream");
 }
+ncclResult_t ncclStreamAdvanceToStream(hipStream_t, hipStream_t) {
+  FailLoudUnfaked("strongstream_stubs", "ncclStreamAdvanceToStream");
+}
 // Benign teardown: commFree reaches this on a happy-path destroy.
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream*) { return ncclSuccess; }
 

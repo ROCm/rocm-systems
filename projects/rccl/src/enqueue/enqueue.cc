@@ -2898,7 +2898,12 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
         // So we could do this:
         //   CUDACHECK(cudaStreamWaitEvent(deviceStream, finishedEvent, 0));
         // But instead we do:
-        NCCLCHECK(ncclStreamAdvanceToEvent(planner->capturingGraph, deviceStream, finishedEvent));
+        if (capturing && planner->numStreams == 1) {
+          // launchStream has captured nothing since finishedEvent, so its frontier is the event's.
+          NCCLCHECK(ncclStreamAdvanceToStream(deviceStream, launchStream));
+        } else {
+          NCCLCHECK(ncclStreamAdvanceToEvent(planner->capturingGraph, deviceStream, finishedEvent));
+        }
       }
 
       // Each userStream[i] waits on userStream[0]
