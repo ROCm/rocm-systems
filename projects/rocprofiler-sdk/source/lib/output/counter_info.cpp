@@ -50,13 +50,14 @@ tool_counter_record_t::read() const
     return _tmp_file.read<tool_counter_value_t>(*record.fpos);
 }
 
-void
+bool
 tool_counter_record_t::write(const tool_counter_record_t::container_type& _data)
 {
-    if(_data.empty()) return;
+    if(_data.empty()) return false;
 
     auto& _tmp_file = CHECK_NOTNULL(get_tmp_file_buffer<tool_counter_value_t>(counter_value))->file;
     record.fpos     = _tmp_file.write<tool_counter_value_t>(_data.data(), _data.size());
+    return record.fpos.has_value();
 }
 
 tool_spm_counter_record_t::container_type
@@ -69,14 +70,15 @@ tool_spm_counter_record_t::read() const
     return _tmp_file.read<tool_spm_counter_value_t>(*record.fpos);
 }
 
-void
+bool
 tool_spm_counter_record_t::write(const tool_spm_counter_record_t::container_type& _data)
 {
-    if(_data.empty()) return;
+    if(_data.empty()) return false;
 
     auto& _tmp_file =
         CHECK_NOTNULL(get_tmp_file_buffer<tool_spm_counter_value_t>(spm_counter_value))->file;
     record.fpos = _tmp_file.write<tool_spm_counter_value_t>(_data.data(), _data.size());
+    return record.fpos.has_value();
 }
 }  // namespace tool
 }  // namespace rocprofiler
