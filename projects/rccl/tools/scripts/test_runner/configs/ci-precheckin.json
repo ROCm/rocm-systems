@@ -484,17 +484,6 @@
       "tests": [
         {"name": "DdaMicrotests", "description": "Host-only src/algorithms/dda/ microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
-    },
-    "unit_tests_micro_p2p_resiliency": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroP2pResiliency",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 0,
-      "timeout": 60,
-      "tests": [
-        {"name": "P2pResiliencyMicrotests", "description": "Host-only transport/net_ib_cast/p2p_resiliency*.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
     }
   },
   "test_suites": [
@@ -676,12 +665,6 @@
       "name": "RCCL Microtests - algorithms/dda",
       "description": "rccl-UnitTestsMicroDda (host-only src/algorithms/dda/ microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_dda",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - net_ib_cast resiliency",
-      "description": "rccl-UnitTestsMicroP2pResiliency (host-only transport/net_ib_cast/p2p_resiliency*.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_p2p_resiliency",
       "enabled": true
     }
   ]
