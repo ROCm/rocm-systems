@@ -28,6 +28,12 @@ int main(void) {
   FIELD("HsaQueue.size", hsa_queue_t, size);
   FIELD("HsaQueue.reserved", hsa_queue_t, reserved1);
   FIELD("HsaQueue.id", hsa_queue_t, id);
+  TYPE("HsaKernelDispatchPacket", hsa_kernel_dispatch_packet_t);
+  FIELD("HsaKernelDispatchPacket.header", hsa_kernel_dispatch_packet_t, header);
+  FIELD("HsaKernelDispatchPacket.setup", hsa_kernel_dispatch_packet_t, setup);
+  FIELD("HsaKernelDispatchPacket.private_segment_size", hsa_kernel_dispatch_packet_t, private_segment_size);
+  FIELD("HsaKernelDispatchPacket.kernarg_address", hsa_kernel_dispatch_packet_t, kernarg_address);
+  FIELD("HsaKernelDispatchPacket.completion_signal", hsa_kernel_dispatch_packet_t, completion_signal);
   TYPE("HsaExtControlDirectives", hsa_ext_control_directives_t);
   FIELD("HsaExtControlDirectives.control_directives_mask",
         hsa_ext_control_directives_t, control_directives_mask);

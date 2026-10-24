@@ -19,6 +19,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use rocddi::device::Device;
+use rocddi::device::gpu::queue::AqlControlRegion;
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 
 use crate::callback_arg::CallbackArg;
@@ -33,10 +34,6 @@ const CONTROL_BYTES: u64 = 4096;
 // amd_queue_v2_t: 256-byte queue prefix and 128 per-XCC 16-byte index pairs.
 /// Control ABI size in bytes.
 const CONTROL_ABI_BYTES: usize = 2304;
-/// Byte offset of the native queue read index.
-const READ_INDEX_OFFSET: usize = 128;
-/// Byte offset of the native queue write index.
-const WRITE_INDEX_OFFSET: usize = 56;
 /// Byte offset of the intercept queue doorbell signal.
 const SIGNAL_OFFSET: usize = 3072;
 /// Bits containing the AQL packet type.
@@ -58,10 +55,25 @@ type InterceptHandler = unsafe extern "C" fn(*const c_void, u64, u64, *mut c_voi
 /// C callback notified of intercept queue creation.
 pub(crate) type QueueNotifier = unsafe extern "C" fn(*const HsaQueue, HsaAgent, *mut c_void);
 
+/// Opaque payload following the packet publication header.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PacketPayload {
+    /// Vendor format discriminator when the packet is a vendor marker.
+    format: u8,
+    /// Remaining packet bytes, copied without interpreting their format.
+    rest: [u8; PACKET_BYTES - std::mem::size_of::<u16>() - 1],
+}
+
 /// One aligned AQL packet copied between the proxy and lower queue.
 #[repr(C, align(64))]
 #[derive(Clone, Copy)]
-struct Packet([u8; PACKET_BYTES]);
+struct Packet {
+    /// Packet type and fence scopes, published after the payload.
+    header: u16,
+    /// Opaque body, except for the private vendor marker format.
+    payload: PacketPayload,
+}
 
 /// Vendor packet that invokes a tool callback on the forwarding worker.
 #[repr(C)]
@@ -79,12 +91,13 @@ struct InterceptMarker {
 }
 
 const _: () = assert!(std::mem::size_of::<InterceptMarker>() == PACKET_BYTES);
+const _: () = assert!(std::mem::size_of::<Packet>() == PACKET_BYTES);
 
 impl Packet {
     /// Checks the packet type and format for an intercept marker.
     fn is_marker(&self) -> bool {
-        u16::from_le_bytes([self.0[0], self.0[1]]) & PACKET_TYPE_MASK == PACKET_TYPE_VENDOR
-            && self.0[2] == INTERCEPT_MARKER_FORMAT
+        self.header & PACKET_TYPE_MASK == PACKET_TYPE_VENDOR
+            && self.payload.format == INTERCEPT_MARKER_FORMAT
     }
 }
 
@@ -280,11 +293,11 @@ impl InterceptQueue {
             (*(public as *mut HsaQueue)).doorbell_signal = HsaSignal {
                 handle: (public + SIGNAL_OFFSET) as u64,
             };
-            ((public + READ_INDEX_OFFSET) as *mut AtomicU64)
+            (AqlControlRegion::read_index_address_at(public) as *mut AtomicU64)
                 .as_ref()
                 .ok_or(ERROR)?
                 .store(0, Ordering::Relaxed);
-            ((public + WRITE_INDEX_OFFSET) as *mut AtomicU64)
+            (AqlControlRegion::write_index_address_at(public) as *mut AtomicU64)
                 .as_ref()
                 .ok_or(ERROR)?
                 .store(0, Ordering::Relaxed);
@@ -410,8 +423,8 @@ impl InterceptQueue {
             }
             // SAFETY: The public control allocation retains both aligned
             // indices. The signal slot is retained by the same allocation.
-            let write = unsafe { &*((self.public + WRITE_INDEX_OFFSET) as *const AtomicU64) }
-                .load(Ordering::Acquire);
+            let write_address = unsafe { AqlControlRegion::write_index_address_at(self.public) };
+            let write = unsafe { &*(write_address as *const AtomicU64) }.load(Ordering::Acquire);
             let doorbell = unsafe { &*(self.signal_address as *const AmdSignal) }
                 .value
                 .load(Ordering::Acquire);
@@ -475,7 +488,8 @@ impl InterceptQueue {
                 .store(PACKET_TYPE_INVALID, Ordering::Release);
             state.next_packet += 1;
             // SAFETY: The control allocation retains this aligned read index.
-            unsafe { &*((self.public + READ_INDEX_OFFSET) as *const AtomicU64) }
+            let read_address = unsafe { AqlControlRegion::read_index_address_at(self.public) };
+            unsafe { &*(read_address as *const AtomicU64) }
                 .store(state.next_packet, Ordering::Release);
         }
         Ok(())
@@ -492,8 +506,10 @@ impl InterceptQueue {
             // SAFETY: The lower hardware queue is retained until this worker
             // has stopped. Its public control and ring remain mapped.
             let lower = unsafe { &*(self.lower as *const HsaQueue) };
-            let write_index = unsafe { &*((self.lower + WRITE_INDEX_OFFSET) as *const AtomicU64) };
-            let read_index = unsafe { &*((self.lower + READ_INDEX_OFFSET) as *const AtomicU64) };
+            let write_address = unsafe { AqlControlRegion::write_index_address_at(self.lower) };
+            let read_address = unsafe { AqlControlRegion::read_index_address_at(self.lower) };
+            let write_index = unsafe { &*(write_address as *const AtomicU64) };
+            let read_index = unsafe { &*(read_address as *const AtomicU64) };
             let write = write_index.load(Ordering::Acquire);
             let Some(packet) = state.pending.get(markers).copied() else {
                 for _ in 0..markers {
@@ -526,18 +542,17 @@ impl InterceptQueue {
             }
             let slot = (write & u64::from(self.size - 1)) as usize;
             let address = lower.base_address as usize + slot * PACKET_BYTES;
+            let destination = address as *mut Packet;
             // SAFETY: This worker reserved one native ring slot. Publish the
             // body before its header, then ring the retained MMIO doorbell.
             unsafe {
                 ptr::copy_nonoverlapping(
-                    packet.0.as_ptr().add(2),
-                    (address + 2) as *mut u8,
-                    PACKET_BYTES - 2,
+                    ptr::addr_of!(packet.payload).cast::<u8>(),
+                    ptr::addr_of_mut!((*destination).payload).cast::<u8>(),
+                    std::mem::size_of::<PacketPayload>(),
                 );
-                (&*(address as *const AtomicU16)).store(
-                    u16::from_le_bytes([packet.0[0], packet.0[1]]),
-                    Ordering::Release,
-                );
+                (&*ptr::addr_of_mut!((*destination).header).cast::<AtomicU16>())
+                    .store(packet.header, Ordering::Release);
                 crate::signal::hsa_signal_store_screlease(
                     lower.doorbell_signal,
                     i64::from_ne_bytes(write.to_ne_bytes()),
