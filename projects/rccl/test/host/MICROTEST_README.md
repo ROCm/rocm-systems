@@ -466,7 +466,21 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroTransport`** — `src/transport/`, one binary for units
   sharing the socket, network-plugin and GDRCopy seams; tests mirror the source
   tree under `test/host/transport/`. See
-  `test_categories_micro_transport.yaml`.
+  `test_categories_micro_transport.yaml`. The target defines
+  `ENABLE_FAULT_INJECTION` in both build modes so `net_ib_gid_inspect.cc` is
+  present consistently.
+  - `net_ib/common.cc` and host helpers in `net_ib/common.h`
+    (`NET_IB_COMMON_CC_PATH`, from `net_ib/common-test.cc`); suites
+    `NetIbCommonMicrotest.*`.
+  - `net_ib/init.cc` (`NET_IB_INIT_CC_PATH`, from `net_ib/init-test.cc`);
+    suites `NetIbInitMicrotest.*`.
+  - `net_ib/reg.cc` (`NET_IB_REG_CC_PATH`, from `net_ib/reg-test.cc`);
+    suites `NetIbRegMicrotest.*`.
+  - `net_ib/gdr.cc` (`NET_IB_GDR_CC_PATH`, from `net_ib/gdr-test.cc`);
+    suites `NetIbGdrMicrotest.*`.
+  - `net_ib/net_ib_gid_inspect.cc` (`NET_IB_GID_INSPECT_CC_PATH`, from
+    `net_ib/net-ib-gid-inspect-test.cc`); suites
+    `NetIbGidInspectMicrotest.*`.
   - `rma_socket.cc` (`RMA_SOCKET_CC_PATH`, from `rma-socket-test.cc`);
     suites `RmaSocketMicrotest.*`.
   - `rma_socket_mem.cc` (`RMA_SOCKET_MEM_CC_PATH`, from
@@ -620,10 +634,13 @@ symbol.
 | `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc`; `ncclMemTrack*` / `ncclMemUntrack*` in `fakes/nccl_fakes.cc` |
 | `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
 | `src/misc/api_trace.cc` (`NCCL_API` dispatch) | `fakes/api_trace_fakes.cc` |
-| `src/misc/ibvwrap.cc` (PD / MR registration wrappers) | `fakes/ibvwrap_fakes.cc` |
+| `src/misc/gdr_peermem.cc` | `fakes/gdr_peermem_fakes.{h,cc}` |
+| `src/misc/gdr_probe.cc` (targets that do not compile the real probe) | `fakes/gdr_probe_fakes.{h,cc}` |
+| `src/misc/ibvwrap.cc` | `fakes/ibvwrap_fakes.{h,cc}` |
 | file-static RMA helpers in `src/include/gdrwrap.h` | `fakes/gdrwrap_fakes.{h,cc}` via `fakes/gdrwrap_seam.h` / `fakes/gdrwrap_seam_undef.h` |
 | ibverbs provider dv libraries (`libionic.so`, `libmlx5.so`) | `fakes/dv_provider_fake.cc` |
 | `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |
+| `src/misc/mlx5dvwrap.cc` | `fakes/mlx5dvwrap_fakes.{h,cc}` |
 | `src/misc/param.cc` + `getenv` interposition | `fakes/env_fakes.cc` |
 | `src/misc/rocmwrap.cc` | `fakes/rocmwrap_fakes.cc` |
 | `src/misc/strongstream.cc` | `fakes/strongstream_stubs.cc` |
@@ -641,7 +658,10 @@ symbol.
 | `src/rma/*.cc` | `fakes/rma_fakes.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
-| `src/transport/net_ib/connect.cc` params (`ncclParamIbQpsPerConn`) | `fakes/transport_net_ib_fakes.cc` |
+| `src/transport/net_ib/connect.cc` | `fakes/transport_net_ib_fakes.{h,cc}` |
+| `src/transport/net_ib/p2p.cc` | `fakes/transport_net_ib_p2p_fakes.{h,cc}` |
+| `src/transport/net_ib/p2p_resiliency.cc` | `fakes/transport_net_ib_resiliency_fakes.{h,cc}` |
+| `src/transport/net_ib/p2p_resiliency_recovery.cc` | `fakes/transport_net_ib_recovery_fakes.{h,cc}` |
 | `src/transport/net_socket.cc` (targets that do not compile the real file) | `fakes/transport_net_socket_fakes.{h,cc}` |
 | `src/transport/net_socket/common.cc` (targets that do not compile the real file) | `fakes/transport_net_socket_common_fakes.{h,cc}` |
 | generated `sym_kernels_host.cc` (targets that do not compile it) | `fakes/sym_kernels_index_fakes.cc` |

@@ -39,6 +39,7 @@ extern std::function<ncclResult_t(struct ncclSocket*, bool)> g_ncclSocketClose;
 // ncclInit() NCCLCHECKs this before its own call_once, so it is the one per-call way to fail ncclInit().
 extern ncclResult_t g_ncclOsTopoGetStrFromSysResult;
 extern int g_ncclOsTopoGetStrFromSysCalls;
+extern std::function<ncclResult_t(const char*, const char*, char*, int)> g_ncclOsTopoGetStrFromSys;
 
 // fillInfo's MLOPart PCI-function fallback (init.cc:1092) probes sysfs for the class of its own BDF.
 // The default is an accelerator class, i.e. what sysfs reports for a real GPU's own BDF; a test that
