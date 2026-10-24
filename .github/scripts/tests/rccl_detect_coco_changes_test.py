@@ -38,6 +38,7 @@ class CocoPathsTest(unittest.TestCase):
             ".github/actions/rccl-resolve-coco-run/action.yml",
             ".github/actions/rccl-checkout-coco-harness/action.yml",
             ".github/scripts/rccl_detect_coco_changes.py",
+            ".github/scripts/rccl_change_sets.py",
             ".github/scripts/ci_utils.py",
         ]:
             with self.subTest(path=path):
@@ -69,6 +70,48 @@ class CocoPathsTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(detect.coco_paths([path]), [])
 
+    def test_host_only_test_paths_are_excluded_on_develop(self):
+        for path in [
+            "projects/rccl/test/host/CMakeLists.txt",
+            "projects/rccl/test/host/run_host_tests.sh",
+            "projects/rccl/test/host/fakes/os_fakes.cc",
+            "projects/rccl/test/host/transport/rma-socket-test.cc",
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(detect.coco_paths([path], "develop"), [])
+
+    def test_host_only_test_paths_match_off_develop(self):
+        # rccl-host-unit-tests.yml does not run there, so coco is the only check.
+        path = "projects/rccl/test/host/net-test.cc"
+        for branch in ["", "main", "rccl-develop", "rocprofiler-compute-develop"]:
+            with self.subTest(branch=branch):
+                self.assertEqual(detect.coco_paths([path], branch), [path])
+
+    def test_host_test_lookalikes_still_match(self):
+        for path in [
+            "projects/rccl/test",
+            "projects/rccl/test/host",
+            "projects/rccl/test/CMakeLists.txt",
+            "projects/rccl/test/common/TestBed.cpp",
+            "projects/rccl/test/hostile.cc",
+            "projects/rccl/test/hostfoo/x.cc",
+            "projects/rccl/src/test/host/x.cc",
+            "projects/rccl-tests/test/host/x.cc",
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(detect.coco_paths([path], "develop"), [path])
+
+    def test_coco_paths_alongside_host_tests_still_match(self):
+        host = "projects/rccl/test/host/net-test.cc"
+        for path in [
+            "projects/rccl/src/init.cc",
+            "projects/rccl/test/CMakeLists.txt",
+            "projects/rccl-tests/src/all_reduce.cu",
+            ".github/workflows/rccl-coco-pr.yml",
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(detect.coco_paths([host, path], "develop"), [path])
+
     def test_code_alongside_docs_still_matches(self):
         self.assertEqual(
             detect.coco_paths(["projects/rccl/README.md", "projects/rccl/src/init.cc"]),
@@ -88,6 +131,11 @@ class TouchesCocoTest(unittest.TestCase):
     def test_matched(self):
         self.assertTrue(detect.touches_coco(["projects/rccl/src/init.cc"]))
 
+    def test_move_into_host_tests_still_matches(self):
+        # get_modified_paths(no_renames=True) reports both sides of the move.
+        moved = ["projects/rccl/src/x.cc", "projects/rccl/test/host/x.cc"]
+        self.assertTrue(detect.touches_coco(moved, "develop"))
+
     def test_unmatched(self):
         self.assertFalse(detect.touches_coco(["docs/index.md", "projects/hip/x.cc"]))
 
@@ -95,7 +143,7 @@ class TouchesCocoTest(unittest.TestCase):
 class MainTest(unittest.TestCase):
     """The GITHUB_OUTPUT string is what the workflow actually consumes."""
 
-    def _run_main(self, changed_files):
+    def _run_main(self, changed_files, *extra_args):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "github_output"
             output.touch()
@@ -104,8 +152,8 @@ class MainTest(unittest.TestCase):
             ) as diff, mock.patch.dict(
                 os.environ, {"GITHUB_OUTPUT": os.fspath(output)}
             ):
-                self.assertEqual(detect.main(["--base-ref", "HEAD^"]), 0)
-            diff.assert_called_once_with("HEAD^")
+                self.assertEqual(detect.main(["--base-ref", "HEAD^", *extra_args]), 0)
+            diff.assert_called_once_with("HEAD^", no_renames=True)
             return output.read_text()
 
     def test_emits_false_for_an_untouched_pr(self):
@@ -113,6 +161,27 @@ class MainTest(unittest.TestCase):
 
     def test_emits_true_for_a_touched_pr(self):
         self.assertEqual(self._run_main(["projects/rccl/src/init.cc"]), "rccl=true\n")
+
+    def test_emits_false_for_a_host_test_only_pr_to_develop(self):
+        changed = [
+            "projects/rccl/test/host/net-test.cc",
+            "projects/rccl/test/host/fakes/os_fakes.cc",
+        ]
+        self.assertEqual(
+            self._run_main(changed, "--base-branch", "develop"), "rccl=false\n"
+        )
+
+    def test_emits_true_for_a_host_test_only_pr_elsewhere(self):
+        changed = ["projects/rccl/test/host/net-test.cc"]
+        for args in [(), ("--base-branch", "main")]:
+            with self.subTest(args=args):
+                self.assertEqual(self._run_main(changed, *args), "rccl=true\n")
+
+    def test_emits_true_for_host_tests_plus_rccl_code(self):
+        changed = ["projects/rccl/test/host/net-test.cc", "projects/rccl/src/net.cc"]
+        self.assertEqual(
+            self._run_main(changed, "--base-branch", "develop"), "rccl=true\n"
+        )
 
 
 if __name__ == "__main__":
