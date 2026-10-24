@@ -430,7 +430,7 @@ ncclResult_t ncclGetUniqueId_impl(ncclUniqueId* out) {
   memset(out, 0, sizeof(*out));
   // copy to avoid alignment mismatch
   memcpy(out, &handle, sizeof(handle));
-  Recorder::instance().record(rrGetUniqueId, -1, -1, out);
+  (void)Recorder::instance().record(rrGetUniqueId, -1, -1, out);
   TRACE_CALL("ncclGetUniqueId(0x%llx)", (unsigned long long)getHash(out->internal, NCCL_UNIQUE_ID_BYTES));
   return ncclSuccess;
 }
@@ -1242,7 +1242,7 @@ fail:
 #endif
 static void showVersion() {
   // Retrieve Hostname info
-  char hostBuf[HOST_NAME_MAX];
+  char hostBuf[HOST_NAME_MAX + 1] = {};
   std::string hostInfo = (gethostname(hostBuf, sizeof(hostBuf) - 1) == 0) ? hostBuf : "Unknown";
 
   // Retrieve librccl path
@@ -3224,10 +3224,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   // Check if using host uncached mem correctly
-  NCCLCHECK(checkHostUncacheMemSetting(comm));
+  NCCLCHECKGOTO(checkHostUncacheMemSetting(comm), res, fail);
 
   // RCCL: determine and set unroll factor for comm
-  NCCLCHECK(commSetUnrollFactor(comm));
+  NCCLCHECKGOTO(commSetUnrollFactor(comm), res, fail);
 
 #ifdef ENABLE_ROCSHMEM
   if (!job->parent && rcclParamRocshmemEnabled()) {
@@ -3240,7 +3240,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
       ret = rocshmem::rocshmem_get_uniqueid(&rocshmemUniqueId);
       if (ret != rocshmem::ROCSHMEM_SUCCESS) {
         ERROR("Error in rocshmem_get_uniqueid, Rocshmem cannot be initialized.");
-        return ncclSystemError;
+        res = ncclSystemError;
+        goto fail;
       }
     }
 
@@ -3250,13 +3251,15 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     ret = rocshmem::rocshmem_set_attr_uniqueid_args(job->myrank, job->nranks, &rocshmemUniqueId, &rocshmemAttr);
     if (ret != rocshmem::ROCSHMEM_SUCCESS) {
       ERROR("Error in rocshmem_set_attr_uniqueid_args, Rocshmem cannot be initialized.");
-      return ncclSystemError;
+      res = ncclSystemError;
+      goto fail;
     }
 
     ret = rocshmem::rocshmem_init_attr(rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID, &rocshmemAttr);
     if (ret != rocshmem::ROCSHMEM_SUCCESS) {
       ERROR("Error in rocshmem_init_attr, Rocshmem cannot be initialized.");
-      return ncclSystemError;
+      res = ncclSystemError;
+      goto fail;
     }
 
     const char* inputStr = std::getenv("ROCSHMEM_HEAP_SIZE");
@@ -3291,13 +3294,13 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
                                           &(comm->team_reduce_world_dup));
 
     ncclCommToRshmemTeam[comm] = comm->team_reduce_world_dup;
-    CUDACHECK(hipDeviceSynchronize());
+    CUDACHECKGOTO(hipDeviceSynchronize(), res, fail);
   }
 #endif
 
   // Allocate Temp Buffer for Direct Reduce Scatter
   if (IsArchMatch(archName, "gfx950")) {
-    NCCLCHECK(ncclCudaMalloc(&(comm->tempBuff), TEMP_BUFF_SIZE, comm->memManager));
+    NCCLCHECKGOTO(ncclCudaMalloc(&(comm->tempBuff), TEMP_BUFF_SIZE, comm->memManager), res, fail);
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
@@ -4831,6 +4834,20 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
                   res, exit);
   }
   NCCLCHECKGOTO(ncclCommEnsureReady(comm), res, exit);
+  if (isShrink) {
+    if (excludeRanksList[0] < 0 || excludeRanksList[excludeRanksCount - 1] >= comm->nRanks) {
+      WARN("%s: excludeRanksList entries must be in [0, %d)", caller, comm->nRanks);
+      res = ncclInvalidArgument;
+      goto exit;
+    }
+    for (int i = 1; i < excludeRanksCount; i++) {
+      if (excludeRanksList[i] == excludeRanksList[i - 1]) {
+        WARN("%s: excludeRanksList contains rank %d more than once", caller, excludeRanksList[i]);
+        res = ncclInvalidArgument;
+        goto exit;
+      }
+    }
+  }
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), res, exit);
 
   /* *newcomm should be NCCL_COMM_NULL until comm split fully complete. */
@@ -4907,7 +4924,8 @@ exit:
   // for loggin only, not ready for replaying
   // TODO: further integrate overloaded record header
   // !recording at sink
-  Recorder::instance().record(rrCommSplit, color, key, (ncclUniqueId*)comm, config, *newcomm);
+  Recorder::instance().record(rrCommSplit, color, key, (ncclUniqueId*)comm, config,
+                              newcomm ? *newcomm : NCCL_COMM_NULL);
   (void)cudaSetDevice(oldDev);
   return res;
 fail:
