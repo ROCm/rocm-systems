@@ -158,6 +158,11 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct 
 // Arch-table channel cap for Ring Simple ReduceScatter
 // (rcclArchThresholds::rsRingSimpleCapped*). NCCL_MIN/MAX_NCHANNELS turn it off.
 void rcclUpdateCollectiveChannels(struct ncclComm* comm, size_t nBytes, const struct ncclTaskColl* info, int& nc);
+// gfx950 multi-node all_reduce/reduce_scatter choices measured with RCCL_IB_GDR_FLUSH_FLAG=1; a no-op
+// unless every rank of the comm uses the flag (comm->ibGdrFlushFlag). Call after
+// rcclUpdateCollectiveProtocol, whose choice it overrides.
+void rcclUpdateRemoteFlushAlgoProto(struct ncclComm* comm, size_t nBytes, struct ncclTaskColl* info,
+                                    float (*table)[NCCL_NUM_PROTOCOLS]);
 void rcclUpdateThreadThreshold(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info,
                                int& threadThreshold);
 void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info);

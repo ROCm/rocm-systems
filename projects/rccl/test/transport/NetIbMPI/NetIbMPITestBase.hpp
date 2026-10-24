@@ -305,12 +305,16 @@ protected:
     int numDevices_;
     std::vector<int> deviceIds_;
     void* initCtx_;
+    // Applied to every per-thread context InitNetIbCtx creates, as communicator
+    // init would after AllGather1.
+    std::function<void(void*)> threadCtxInit_;
 
     void SetUp() override {
         MPITestBase::SetUp();
         net_ = GetPlugin();
         numDevices_ = 0;
         initCtx_ = nullptr;
+        threadCtxInit_ = nullptr;
     }
 
     void TearDown() override {
@@ -2505,7 +2509,9 @@ protected:
     ncclResult_t InitNetIbCtx(void** ctxOut) {
         ncclNetCommConfig_t commConfig = {};
         commConfig.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
-        return net_->init(ctxOut, 0, &commConfig, nullptr, nullptr);
+        ncclResult_t res = net_->init(ctxOut, 0, &commConfig, nullptr, nullptr);
+        if (res == ncclSuccess && *ctxOut && threadCtxInit_) threadCtxInit_(*ctxOut);
+        return res;
     }
 
     ncclResult_t CreateListenCommCtx(void* ctx, int dev, ncclNetHandle_t* handle, void** listenComm) {

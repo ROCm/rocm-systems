@@ -225,6 +225,7 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_INIT_SOURCE_FILES
     init-test.cc
     fakes/init_fakes.cc
+    fakes/transport_net_ib_fakes.cc      # src/transport/net_ib (GDR flush flag seams)
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc

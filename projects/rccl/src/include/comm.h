@@ -647,8 +647,11 @@ struct ncclPeerInfo {
   bool gpuCftCountedSupport;
   uint32_t gitVersionHash;
   // [RCCL] The rcclTuningPartition this rank asks for (RCCL_TUNING_PARTITION_MODE). The comm
-  // uses DPX only when every rank asks for it. Append later fields after this one.
+  // uses DPX only when every rank asks for it.
   int tuningPartition;
+  // [RCCL] This rank can use RCCL_IB_GDR_FLUSH_FLAG; the comm uses it only when every rank can.
+  // Append later fields after this one.
+  bool ibGdrFlushFlag;
 };
 
 typedef enum ncclGroupTaskType {
@@ -862,6 +865,8 @@ struct ncclComm {
   // Per-arch DDA/CE dispatch thresholds -- populated at comm init from rcclGetArchThresholds().
   // NULL on architectures without a dedicated threshold table (falls back to env-var params).
   const struct rcclArchThresholds* archThresholds;
+  // Every rank can use RCCL_IB_GDR_FLUSH_FLAG, so net receives use it and tuning may assume it.
+  bool ibGdrFlushFlag;
 
   /* This attribute can indicate the states of communicators and return code of
    * asynchronous NCCL operations. */

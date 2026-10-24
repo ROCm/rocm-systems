@@ -270,6 +270,8 @@ test_categories:
       - "ShmMPITest.*"
       - "NetIbMPITest.*"
       - "GdrFlushTest.*"
+      # Only the flag-off case runs here; the flag-on cases skip without RCCL_IB_GDR_FLUSH_FLAG=1.
+      - "GdrFlushFlagTest.*"
       - "ImplicitLaunchOrderMPITest.*"
       - "UBR_AllReduce.*"
       - "UBR_AllGather.*"
@@ -298,6 +300,49 @@ test_categories:
       - "mpi"
     env_variables:
       - "NCCL_DEBUG=INFO"
+  standard_env_gdr_flush_flag:
+    description: "Remote GDR flush flag. RCCL_PARAM caches RCCL_IB_GDR_FLUSH_FLAG for the process lifetime, so it is set before launch. GdrFlushFlagTest and GdrFlushTest need exactly 2 ranks, and GdrFlushFlagProtoSwitchMPITest needs 2 or more nodes; each skips otherwise. Cluster jobs run this via test_runner suite net_ib_gdr_flush_flag (2 ranks on 2 nodes)."
+    test_patterns:
+      - "GdrFlushFlagTest.*"
+      - "GdrFlushTest.*"
+      - "GdrFlushFlagProtoSwitchMPITest.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_IB_GDR_FLUSH_FLAG=1"
+  standard_env_gdr_flush_flag_4qps:
+    description: "Remote GDR flush flag over 4 QPs per connection: requests rotate over the QPs and each flag tracks its own QP. Cluster jobs run this via test_runner suite net_ib_gdr_flush_flag_4qps (2 ranks on 2 nodes)."
+    test_patterns:
+      - "GdrFlushFlagTest.*"
+      - "GdrFlushFlagProtoSwitchMPITest.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_IB_GDR_FLUSH_FLAG=1"
+      - "NCCL_IB_QPS_PER_CONNECTION=4"
+  standard_env_gdr_flush_flag_4qps_split:
+    description: "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1: every request spans all 4 QPs, and the GPU waits on all 4 flags. Cluster jobs run this via test_runner suite net_ib_gdr_flush_flag_4qps_split (2 ranks on 2 nodes)."
+    test_patterns:
+      - "GdrFlushFlagTest.*"
+      - "GdrFlushFlagProtoSwitchMPITest.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_IB_GDR_FLUSH_FLAG=1"
+      - "NCCL_IB_QPS_PER_CONNECTION=4"
+      - "NCCL_IB_SPLIT_DATA_ON_QPS=1"
+  standard_env_netib_inline:
+    description: "InfiniBand CTS writes posted inline, including multi-receive irecv. NCCL_IB_USE_INLINE is cached for the process lifetime, so it is set before launch."
+    test_patterns:
+      - "NetIbMPITest.InlineSendBoundary"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_IB_USE_INLINE=1"
   # DDA fp8, one category per fabric tier. RCCL_PARAM caches the DDA thresholds for the process lifetime,
   # so each tier's settings are set before launch and each fixture runs in its own process.
   standard_env_dda_fp8_ll:
@@ -530,6 +575,10 @@ execution_settings:
     quick_env_profiler_kernelch_net: 1200
     quick_env_profiler_kernelch_sym: 1200
     standard: 1200
+    standard_env_gdr_flush_flag: 1200
+    standard_env_gdr_flush_flag_4qps: 1200
+    standard_env_gdr_flush_flag_4qps_split: 1200
+    standard_env_netib_inline: 1200
     standard_env_dda_fp8_ll: 1200
     standard_env_dda_fp8_ll_twoshot: 1200
     standard_env_dda_fp8_ll128: 1200
