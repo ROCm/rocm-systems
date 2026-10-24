@@ -5,21 +5,17 @@ from __future__ import annotations
 
 import sys
 import unittest
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / "python"), str(ROOT / "scripts")]
+sys.path.insert(0, str(ROOT / "python"))
 
 from att_tool import build_argparser
 from rocprof_trace_decoder.att import AttTrace, _correct_marker_timestamps, generate_att_outputs
 from rocprof_trace_decoder.code_index import CodeIndex
 from rocprof_trace_decoder.records import Occupancy, Pc, ShaderData, ShaderDataFlags, TraceRecords
-from sqtt_data import FuncMap, ShaderRecord, WaveSpan, find_wave_span_at, preprocess_records
-from sqtt_flamegraph import build_stacks, render_flamegraph_svg
-from sqtt_perfetto import emit_wave_events
 
 
 def _shaderdata(time: int, value: int, flags: int = 0, simd: int = 2) -> ShaderData:
@@ -354,51 +350,6 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
         parser = build_argparser()
         self.assertTrue(parser.parse_args(["trace.att"]).decode_markers)
         self.assertFalse(parser.parse_args(["--no-decode-markers", "trace.att"]).decode_markers)
-
-
-class MarkerPipelineTest(unittest.TestCase):
-    def test_late_records_recover_after_an_orphan_and_render(self):
-        funcmap = FuncMap(markers={1: ("outer", "function"), 2: ("inner", "function")})
-        spans = [WaveSpan(100, 130, 1), WaveSpan(300, 360, 2)]
-        wave_spans = {(0, 1, 2, 3): spans}
-        dispatches = {"1": "kernel"}
-        records = [
-            ShaderRecord(160, 1, 1, 2, 3, 0),  # orphan exit after retirement
-            ShaderRecord(191, 6, 1, 2, 3, 0),  # enter outer
-            ShaderRecord(207, 10, 1, 2, 3, 0), # enter inner
-            ShaderRecord(223, 1, 1, 2, 3, 0),  # exit inner
-            ShaderRecord(239, 1, 1, 2, 3, 0),  # exit outer
-        ]
-
-        self.assertIs(find_wave_span_at(spans, 99), spans[0])
-        self.assertIs(find_wave_span_at(spans, 299), spans[0])
-        self.assertIs(find_wave_span_at(spans, 300), spans[1])
-
-        markers, addresses = preprocess_records(records, funcmap)
-        self.assertFalse(addresses)
-        folded = build_stacks(markers, {7: funcmap}, dispatches, wave_spans, {"kernel": 7})
-        self.assertEqual(
-            folded,
-            {
-                "code_object_7;kernel;outer": (32, 2),
-                "code_object_7;kernel;outer;inner": (16, 1),
-            },
-        )
-        ET.fromstring(render_flamegraph_svg(folded))
-
-        events, unmatched = emit_wave_events(
-            markers,
-            (0, 1, 2, 3, 0),
-            dispatches,
-            {"kernel": 7},
-            {7: funcmap},
-            funcmap,
-            wave_spans,
-            1.0,
-        )
-        self.assertEqual(unmatched, 1)
-        self.assertEqual([event["ph"] for event in events], ["B", "B", "E", "E"])
-
 
 if __name__ == "__main__":
     unittest.main()

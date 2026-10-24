@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 from typing import Any
 
 __all__ = [
@@ -15,6 +15,10 @@ __all__ = [
     "EventType",
     "InstCategory",
     "Instruction",
+    "Marker",
+    "MarkerFlags",
+    "MarkerKind",
+    "MarkerMetadata",
     "Occupancy",
     "OtherSimdInstruction",
     "Pc",
@@ -45,7 +49,8 @@ class DecoderInfo(IntEnum):
     DATA_LOST = 1
     STITCH_INCOMPLETE = 2
     WAVE_INCOMPLETE = 3
-    LAST = 4
+    MARKER_INCOMPLETE = 4
+    LAST = 5
 
 
 class WaveStateType(IntEnum):
@@ -118,6 +123,23 @@ class ShaderDataFlags(IntEnum):
     PRIV = 1
 
 
+class MarkerKind(IntEnum):
+    UNKNOWN = 0
+    FUNCTION = 1
+    USER_SCOPE = 2
+    POINT = 3
+    LAST = 4
+
+
+class MarkerFlags(IntFlag):
+    NONE = 0
+    EXIT_PREVIOUS = 0x1
+    ENTER = 0x2
+    NEW_WAVE = 0x4
+    INCOMPLETE = 0x8
+    LAST = 0x8
+
+
 class RecordType(IntEnum):
     GFXIP = 0
     OCCUPANCY = 1
@@ -130,7 +152,8 @@ class RecordType(IntEnum):
     RT_FREQUENCY = 8
     INST_OTHER_SIMD = 9
     DISPATCH = 10
-    LAST = 11
+    MARKER = 11
+    LAST = 12
 
 
 @dataclass(frozen=True, order=True)
@@ -216,6 +239,54 @@ class ShaderData:
     reserved: int
 
 
+@dataclass(frozen=True)
+class MarkerMetadata:
+    """Immutable marker declaration, shared by records from the same parse."""
+
+    size: int
+    code_object_id: int
+    name: str | None
+    source_location: str | None
+    marker_id: int
+    marker_kind: MarkerKind | int
+    payload_count: int
+    wave_size: int
+    reserved: bytes
+
+
+@dataclass
+class Marker:
+    """One logical marker and its owned Python payload words."""
+
+    size: int
+    shaderdata: ShaderData
+    kernel_entry: Pc
+    metadata: MarkerMetadata
+    payload: list[int]
+    marker_flags: MarkerFlags
+    payload_count: int
+
+    @property
+    def code_object_id(self) -> int:
+        return self.metadata.code_object_id
+
+    @property
+    def name(self) -> str | None:
+        return self.metadata.name
+
+    @property
+    def source_location(self) -> str | None:
+        return self.metadata.source_location
+
+    @property
+    def marker_id(self) -> int:
+        return self.metadata.marker_id
+
+    @property
+    def marker_kind(self) -> MarkerKind | int:
+        return self.metadata.marker_kind
+
+
 @dataclass
 class OtherSimdInstruction:
     size: int
@@ -277,4 +348,5 @@ class TraceRecords:
     realtime_frequency: int | None = None
     other_simd: list[OtherSimdInstruction] = field(default_factory=list)
     dispatches: list[Dispatch] = field(default_factory=list)
+    markers: list[Marker] = field(default_factory=list)
     batches: list[tuple[RecordType, list[Any] | int]] = field(default_factory=list)

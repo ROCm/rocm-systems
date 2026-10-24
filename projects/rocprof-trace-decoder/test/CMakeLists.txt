@@ -10,7 +10,9 @@ project(
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_BUILD_TYPE RelWithDebInfo)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo)
+endif()
 
 option(UNIT_TESTS "Build unit tests" ON)
 option(BUILD_INTEGRATION_TESTS "Build integration tests" ON)
@@ -106,6 +108,7 @@ if(BUILD_INTEGRATION_TESTS)
     set(ATT_TOOL_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/att_tool_test.py)
     set(HIDDEN_LATENCY_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/hidden_latency_test.py)
     set(HIDDEN_LATENCY_CSV_PY ${CMAKE_CURRENT_SOURCE_DIR}/hidden_latency_csv_test.py)
+    set(MARKER_SAMPLES_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/marker_samples_test.py)
 
     set(LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder${CMAKE_SHARED_LIBRARY_SUFFIX})
     set(SANITIZED_LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder-sanitized${CMAKE_SHARED_LIBRARY_SUFFIX})
@@ -149,6 +152,10 @@ if(BUILD_INTEGRATION_TESTS)
     add_test(NAME hidden-latency-unit COMMAND ${Python3_EXECUTABLE} ${HIDDEN_LATENCY_TEST_PY})
     set_tests_properties(hidden-latency-unit PROPERTIES TIMEOUT 30 LABELS "integration-tests" ENVIRONMENT
                                                         "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+
+    add_test(NAME marker-api-samples COMMAND ${Python3_EXECUTABLE} ${MARKER_SAMPLES_TEST_PY})
+    set_tests_properties(marker-api-samples PROPERTIES TIMEOUT 30 LABELS "integration-tests" ENVIRONMENT
+                                                       "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
 
     if(DEFINED ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR)
         configure_file(python_api_install_test.cmake.in python_api_install_test.cmake @ONLY)

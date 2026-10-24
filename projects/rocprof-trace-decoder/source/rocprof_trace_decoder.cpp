@@ -24,7 +24,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -37,9 +39,7 @@
 #include "stitch/stitch.hpp"
 #include "trace_parser.hpp"
 
-#ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
-#    include "rocprof_trace_decoder/cxx/code_printing.hpp"
-#endif
+#include "rocprof_trace_decoder/cxx/code_printing.hpp"
 
 static_assert(
     sizeof(((rocprofiler_thread_trace_decoder_event_payload_t*) nullptr)->cluster_barrier) == 8,
@@ -56,6 +56,11 @@ static_assert(
     sizeof(rocprofiler_thread_trace_decoder_dispatch_t) == 80,
     "Unexpected rocprofiler_thread_trace_decoder_dispatch_t size"
 );
+static_assert(
+    sizeof(rocprofiler_thread_trace_decoder_marker_t) == 72,
+    "Unexpected rocprofiler_thread_trace_decoder_marker_t size"
+);
+static_assert(sizeof(rocprofiler_thread_trace_decoder_marker_metadata_t) == 48);
 
 #define RADT(x) ROCPROFILER_THREAD_TRACE_DECODER_RECORD_##x
 
@@ -66,8 +71,17 @@ static_assert(
 class CodeService : public ICodeServicer
 {
 public:
+    using FuncmapResolver =
+        const rocprof_trace_decoder::codeobj::Funcmap* (*) (uint64_t code_object_id, void* userdata);
+
     CodeService() = delete;
-    CodeService(rocprof_trace_decoder_isa_callback_t isa_str, void* _userdata) : isa_cb(isa_str), userdata(_userdata)
+    CodeService(
+        rocprof_trace_decoder_isa_callback_t isa_str,
+        void* _userdata,
+        FuncmapResolver _funcmap_resolver = nullptr,
+        void* _funcmap_userdata = nullptr
+    ) :
+    isa_cb(isa_str), userdata(_userdata), funcmap_resolver(_funcmap_resolver), funcmap_userdata(_funcmap_userdata)
     {
         memory_copy.resize(64);
     };
@@ -101,9 +115,16 @@ public:
         return isa;
     };
 
+    const rocprof_trace_decoder::codeobj::Funcmap* GetFuncmap(uint64_t code_object_id) override
+    {
+        return funcmap_resolver ? funcmap_resolver(code_object_id, funcmap_userdata) : nullptr;
+    }
+
 private:
     rocprof_trace_decoder_isa_callback_t const isa_cb;
     void* const userdata;
+    FuncmapResolver funcmap_resolver;
+    void* funcmap_userdata;
     std::string memory_copy;
 };
 
@@ -111,11 +132,23 @@ private:
 // Internal parse implementation
 // ============================================================================
 
+// Experimental: this heuristic assumes a common clock phase within a SIMD and
+// does not account for per-wave clocks or idle-clock drift. It runs only when
+// ROCPROF_TRACE_DECODER_MARKER_CLOCK_CORRECTION is exactly "1".
+static const bool MARKER_CLOCK_CORRECTION = []()
+{
+    const char* value = std::getenv("ROCPROF_TRACE_DECODER_MARKER_CLOCK_CORRECTION");
+    return value && std::strcmp(value, "1") == 0;
+}();
+
 static rocprofiler_thread_trace_decoder_status_t parse_data_impl(
     rocprof_trace_decoder_se_data_callback_t se_data_callback,
     rocprof_trace_decoder_trace_callback_t trace_callback,
     rocprof_trace_decoder_isa_callback_t isa_callback,
-    void* cbdata
+    void* cbdata,
+    const RecordFilter& record_filter,
+    CodeService::FuncmapResolver funcmap_resolver = nullptr,
+    void* funcmap_userdata = nullptr
 )
 {
     uint8_t* buffer = nullptr;
@@ -124,17 +157,31 @@ static rocprofiler_thread_trace_decoder_status_t parse_data_impl(
 
     std::once_flag rt_freq_flag{};
 
-    auto EmitWarning = [&](rocprofiler_thread_trace_decoder_info_t info)
-    { trace_callback(RADT(INFO), (void*) &info, 1, cbdata); };
-
-    auto _isa = std::make_shared<CodeService>(isa_callback, cbdata);
-    Stitcher stitcher{_isa, trace_callback, cbdata};
+    auto _isa = std::make_shared<CodeService>(isa_callback, cbdata, funcmap_resolver, funcmap_userdata);
+    Stitcher stitcher{_isa, trace_callback, cbdata, record_filter};
+    auto EmitWarning = [&](rocprofiler_thread_trace_decoder_info_t info) { stitcher.records().emit(RADT(INFO), info); };
 
     while (remaining && buffer_size && buffer)
     {
         CppReturnInfo ret{};
 
+        if (MARKER_CLOCK_CORRECTION && record_filter.isEnabled(RADT(MARKER)))
+        {
+            RecordFilter filter;
+            filter.clear();
+            filter.set(RADT(MARKER), 0);
+            Stitcher calibration{_isa, nullptr, nullptr, filter};
+            calibration.beginMarkerCalibration();
+            CppReturnInfo ignored{};
+            if (!AnalyseBinary_internal(ignored, buffer, buffer_size, -1, calibration))
+                return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA;
+            calibration.endMarkerCalibration();
+            stitcher.copyMarkerCalibration(calibration);
+        }
+
         auto parser = AnalyseBinary_internal(ret, buffer, buffer_size, -1, stitcher);
+        if (stitcher.records().status() != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+            return stitcher.records().status();
         if (!parser) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA;
 
         if (ret.bPacketLost) EmitWarning(ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST);
@@ -142,11 +189,15 @@ static rocprofiler_thread_trace_decoder_status_t parse_data_impl(
         auto& perf = ret.perfevents;
 
         if (ret.realtime_frequency != 0)
-            std::call_once(rt_freq_flag, trace_callback, RADT(RT_FREQUENCY), &ret.realtime_frequency, 1, cbdata);
+            std::call_once(
+                rt_freq_flag, [&]() { stitcher.records().emit(RADT(RT_FREQUENCY), ret.realtime_frequency); }
+            );
 
-        if (!perf.empty()) trace_callback(RADT(PERFEVENT), (void*) perf.data(), perf.size(), cbdata);
+        if (!perf.empty()) stitcher.records().emit(RADT(PERFEVENT), perf.data(), perf.size());
         perf.clear();
 
+        if (stitcher.records().status() != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+            return stitcher.records().status();
         remaining = se_data_callback(&buffer, &buffer_size, cbdata);
     }
 
@@ -161,13 +212,28 @@ namespace
 {
 std::atomic<uint64_t> g_handle_counter{1};
 
-// The "comgr_isa_callback" name is historical — this callback is the bridge
-// from the wave-trace parser to whichever disassembly backend is compiled in
-// (amd_comgr, LLVM-C, or none). It just calls into DecoderInstance::table
-// which delegates to DisassemblyInstance::ReadInstruction; the backend choice
-// is opaque from here. The COMGR_DISABLED gate now means "no disasm backend
-// at all" — when LLVM is selected, this is enabled.
-#ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
+// Funcmap metadata is available with every backend, including builds without
+// disassembly and handles using a custom ISA callback.
+const rocprof_trace_decoder::codeobj::Funcmap* handle_funcmap_callback(uint64_t code_object_id, void* userdata)
+{
+    if (!userdata) return nullptr;
+    const auto& hd = *static_cast<ReadLock<HandleData>*>(userdata);
+    if (!hd.valid()) return nullptr;
+
+    auto decoder = hd->decoder_read();
+    if (!decoder.valid()) return nullptr;
+    try
+    {
+        return &decoder->getFuncmap(code_object_id);
+    }
+    catch (...)
+    {
+        return nullptr;
+    }
+}
+
+#if ROCPROF_TRACE_DECODER_HAS_DISASM
+// Historical name: the selected backend can be either amd_comgr or LLVM-C.
 rocprofiler_thread_trace_decoder_status_t comgr_isa_callback(
     char* isa_instruction,
     uint64_t* isa_memory_size,
@@ -266,6 +332,7 @@ rocprofiler_thread_trace_decoder_status_t parse_isa_adapter(
 )
 {
     auto* ctx = static_cast<parse_ctx_t*>(userdata);
+    if (!ctx->isa_cb) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
     return ctx->isa_cb(instruction, memory_size, size, address, ctx->isa_ud);
 }
 
@@ -282,8 +349,8 @@ rocprof_trace_decoder_create_handle(rocprof_trace_decoder_handle_t* handle)
 {
     if (!handle) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    // HandleData's constructor initializes `instance` (the AddressTable) when
-    // a disasm backend is compiled in; nothing to do here.
+    // The address table also owns code-object metadata in builds without a
+    // disassembly backend.
     auto hd = std::make_shared<HandleData>();
 
     handle->handle = g_handle_counter.fetch_add(1);
@@ -332,7 +399,52 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
-// COMGR-dependent functions
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_record_filter(
+    rocprof_trace_decoder_handle_t handle, const rocprofiler_thread_trace_decoder_record_filter_t* filter
+)
+{
+    auto hd = HandleData::get_write_handle(handle);
+    if (!hd.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if (!filter)
+    {
+        hd->record_filter.reset();
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+    }
+    if (filter->size < sizeof(*filter) ||
+        filter->record_count > static_cast<uint64_t>(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST) ||
+        (filter->record_count != 0 && !filter->records))
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    RecordFilter next{};
+    next.clear();
+    const auto* request_bytes = reinterpret_cast<const uint8_t*>(filter->records);
+    for (uint64_t i = 0; i < filter->record_count; ++i)
+    {
+        rocprofiler_thread_trace_decoder_record_request_t request{};
+        // Read the size first: a truncated request may only contain this field.
+        // Each entry supplies its own stride so older libraries can accept a
+        // caller's larger request structures without misreading the next entry.
+        std::memcpy(&request.size, request_bytes, sizeof(request.size));
+        if (request.size < sizeof(request) ||
+            request.size > static_cast<uint64_t>(std::numeric_limits<ptrdiff_t>::max()) ||
+            request.size > std::numeric_limits<uintptr_t>::max() - reinterpret_cast<uintptr_t>(request_bytes))
+            return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+        std::memcpy(&request, request_bytes, sizeof(request));
+        if (!RecordFilter::valid(request.type)) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+        if (next.isEnabled(request.type)) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+        constexpr uint32_t supported = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_IMMEDIATE;
+        if ((request.flags & ~supported) != 0 ||
+            ((request.flags & supported) != 0 && !RecordFilter::supportsImmediate(request.type)))
+            return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+        next.set(request.type, request.flags);
+        if (i + 1 < filter->record_count) request_bytes += request.size;
+    }
+
+    hd->record_filter = next;
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+}
 
 // V1 API: stateless 4-arg parse, no handle management
 ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse_data(
@@ -350,7 +462,8 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     // std::exception() on malformed input (e.g. gfx9token.h wave-id checks).
     try
     {
-        return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata);
+        RecordFilter record_filter{};
+        return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata, record_filter);
     }
     catch (...)
     {
@@ -359,8 +472,6 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 }
 
 // V2 API: handle-based with built-in code object management
-
-#ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
 
 ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_codeobj_load(
     rocprof_trace_decoder_handle_t handle,
@@ -373,6 +484,10 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 {
     auto hd = HandleData::get_write_handle(handle);
     if (!hd.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if (!data || data_size == 0 || data_size > static_cast<uint64_t>(std::numeric_limits<ptrdiff_t>::max()) ||
+        load_size == 0 || load_addr > std::numeric_limits<uint64_t>::max() - load_size)
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
     auto decoder = hd->decoder();
     if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -434,8 +549,13 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
         }
         else
         {
+#if ROCPROF_TRACE_DECODER_HAS_DISASM
             ctx.isa_cb = comgr_isa_callback;
             ctx.isa_ud = &hd;
+#else
+            if (hd->record_filter.isEnabled(RADT(WAVE)))
+                return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+#endif
         }
 
         if (hd->se_data_cb)
@@ -454,77 +574,21 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     try
     {
-        return parse_data_impl(se_adapter, parse_trace_adapter, parse_isa_adapter, &ctx);
+        return parse_data_impl(
+            se_adapter,
+            parse_trace_adapter,
+            parse_isa_adapter,
+            &ctx,
+            hd->record_filter,
+            handle_funcmap_callback,
+            &hd
+        );
     }
     catch (...)
     {
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA;
     }
 }
-
-#else // ROCPROF_TRACE_DECODER_COMGR_DISABLED
-
-ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
-rocprof_trace_decoder_codeobj_load(rocprof_trace_decoder_handle_t, uint64_t, uint64_t, uint64_t, const void*, uint64_t)
-{
-    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
-}
-
-ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
-rocprof_trace_decoder_codeobj_unload(rocprof_trace_decoder_handle_t, uint64_t)
-{
-    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
-}
-
-ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse(
-    rocprof_trace_decoder_handle_t handle,
-    const void* data,
-    uint64_t data_size,
-    rocprof_trace_decoder_trace_callback_t trace_callback,
-    void* userdata
-)
-{
-    auto hd = HandleData::get_read_handle(handle);
-    if (!hd.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    if (!trace_callback) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    parse_ctx_t ctx{};
-    ctx.trace_cb = trace_callback;
-    ctx.trace_ud = userdata;
-
-    auto se_adapter = parse_se_adapter;
-    {
-        if (!hd->isa_cb) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
-
-        ctx.isa_cb = hd->isa_cb;
-        ctx.isa_ud = hd->isa_userdata;
-
-        if (hd->se_data_cb)
-        {
-            ctx.se_data_cb = hd->se_data_cb;
-            ctx.se_data_ud = hd->se_data_userdata;
-            se_adapter = se_data_cb_adapter;
-        }
-    }
-
-    if (se_adapter == parse_se_adapter)
-    {
-        ctx.data = static_cast<const uint8_t*>(data);
-        ctx.size = data_size;
-    }
-
-    try
-    {
-        return parse_data_impl(se_adapter, parse_trace_adapter, parse_isa_adapter, &ctx);
-    }
-    catch (...)
-    {
-        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA;
-    }
-}
-
-#endif // ROCPROF_TRACE_DECODER_COMGR_DISABLED
 
 ROCPROF_TRACE_DECODER_API const char* rocprof_trace_decoder_get_info_string(rocprofiler_thread_trace_decoder_info_t info
 )
@@ -539,6 +603,8 @@ ROCPROF_TRACE_DECODER_API const char* rocprof_trace_decoder_get_info_string(rocp
         {ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST,         datalost   },
         {ROCPROFILER_THREAD_TRACE_DECODER_INFO_STITCH_INCOMPLETE, stitch     },
         {ROCPROFILER_THREAD_TRACE_DECODER_INFO_WAVE_INCOMPLETE,   incomplete },
+        {ROCPROFILER_THREAD_TRACE_DECODER_INFO_MARKER_INCOMPLETE,
+         "Marker data is incomplete or could not be attributed."             },
         {ROCPROFILER_THREAD_TRACE_DECODER_INFO_LAST,              "INFO_LAST"},
     };
 
