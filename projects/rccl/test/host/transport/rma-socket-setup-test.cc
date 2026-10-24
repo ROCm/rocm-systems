@@ -273,7 +273,7 @@ TEST_F(RmaSocketSetupMicrotest, Connect_InvalidAcceptedRankReturnsErrorAndCleans
   EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, 0, &listen, &opaque), ncclInternalError);
   EXPECT_EQ(opaque, nullptr);
   EXPECT_EQ(handshake.move.calls, 0);
-  EXPECT_GE(handshake.close.calls, 3);
+  EXPECT_EQ(handshake.close.calls, 3);
 }
 
 TEST_F(RmaSocketSetupMicrotest, Connect_DuplicateAcceptedRankReturnsErrorAndCleansPartialState) {
