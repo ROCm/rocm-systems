@@ -204,6 +204,12 @@ foreach(
     rj_arith_add_test(${target} register/${family}_test.cpp)
 endforeach()
 
+# Graphics families retain their independent interpolation and selection references.
+foreach(family IN ITEMS cube interp mullit)
+    set(target "rj_arith_graphics_${family}_test")
+    rj_arith_add_test(${target} graphics/${family}_test.cpp)
+endforeach()
+
 # Math families share unary layouts, with independent loose and exact references.
 foreach(
     family
