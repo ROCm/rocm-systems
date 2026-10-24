@@ -1707,11 +1707,11 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyMulticastCommand(
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (dsts.empty() || size == 0)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  // The multicast packet's num_of_destination is a 10-bit field encoded as
-  // (count - 1), so at most 1024 destinations fit; reject more to avoid
-  // truncating the field and corrupting the packet.
-  constexpr size_t kMaxMulticastDsts = 1u << 10;  // 1024
-  if (dsts.size() > kMaxMulticastDsts)
+  // Reject more destinations than the packet's num_of_destination field can
+  // encode; see BlitSdmaBase::kMaxMulticastDsts. Callers route a larger
+  // broadcast to fan-out rather than reaching here, so this is a packet-shape
+  // guard rather than a limit the API surfaces.
+  if (dsts.size() > BlitSdmaBase::kMaxMulticastDsts)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   const uint32_t num_dsts = static_cast<uint32_t>(dsts.size());
