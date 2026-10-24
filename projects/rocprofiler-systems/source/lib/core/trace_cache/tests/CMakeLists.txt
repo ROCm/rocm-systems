@@ -18,6 +18,7 @@ set(trace_cache_tests_sources
     test_storage_parser.cpp
     test_type_registry.cpp
     test_unified_memory_processor.cpp
+    test_wall_clock.cpp
 )
 
 add_library(trace-cache-tests OBJECT ${trace_cache_tests_sources})

@@ -1131,8 +1131,6 @@ struct gmock_buffer_storage
                  std::uint32_t device_id, std::uint8_t device_type,
                  std::string pmc_info_name, double value));
     MOCK_METHOD(bool, get_use_timemory, ());
-    MOCK_METHOD(void, write_timemory_bundle,
-                (std::string_view name, std::uint64_t tid, std::uint64_t elapsed_ns));
     // NOLINTNEXTLINE(readability-function-size)
     MOCK_METHOD(void, store_region_sample,
                 (std::uint64_t thread_id, std::string region_name,
@@ -1700,25 +1698,7 @@ struct externals
         return s_storage;
     }
 
-    static std::string_view get_kernel_symbol_name(std::uint64_t /*kernel_id*/)
-    {
-        return {};
-    }
-
-    static constexpr std::uint64_t k_unknown_tid = 0xABCDABCD;
-
-    static std::optional<std::uint64_t> get_thread_info_sequent_tid(std::uint64_t tid)
-    {
-        return tid == k_unknown_tid ? std::nullopt : std::optional<std::uint64_t>{ 0 };
-    }
-
     static bool get_use_timemory() { return g_buffer_storage_mock->get_use_timemory(); }
-
-    static void write_timemory_bundle(std::string_view name, std::uint64_t tid,
-                                      std::uint64_t elapsed_ns)
-    {
-        g_buffer_storage_mock->write_timemory_bundle(name, tid, elapsed_ns);
-    }
 };
 
 // Every SdkBackend member on_tracing_api_enter/exit
