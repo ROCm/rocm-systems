@@ -19,6 +19,18 @@ RaceDetector::RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workg
   }
 }
 
+void RaceDetector::reset(Dim3d newWorkgroupId, std::function<void(RaceViolation)> newRaceHandler) {
+  ldsWriteEvents.clear();
+  ldsReadEvents.clear();
+  byteWriteCounts.clear();
+  byteReadCounts.clear();
+  events_.clear();
+  workgroupId = newWorkgroupId;
+  raceHandler = std::move(newRaceHandler);
+  for (auto &wrs : waveRaceStates)
+    wrs.reset();
+}
+
 WaveRaceState &RaceDetector::getWaveRaceState(int waveIndex) {
   assert(waveIndex >= 0 && waveIndex < static_cast<int>(waveRaceStates.size()));
   return waveRaceStates[waveIndex];

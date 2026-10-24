@@ -40,6 +40,9 @@ WaveRaceState::WaveRaceState(int vgprCount, int sgprCount, WaveId waveId, RaceDe
                              CounterCapacities counterCapacities)
     : counterCapacities(counterCapacities), waveId(waveId), detector(detector) {
   vgprMemoryEvents.resize(vgprCount);
+  dirtyVgprs.resize(vgprCount);
+  dirtySgprs.resize(sgprCount);
+  dirtyTtmps.resize(REGISTER_SET_MAX_TTMPS);
   sgprMemoryEvents.resize(sgprCount);
   sgprEventCount.resize(sgprCount, 0);
   ttmpMemoryEvents.resize(REGISTER_SET_MAX_TTMPS);
@@ -47,6 +50,24 @@ WaveRaceState::WaveRaceState(int vgprCount, int sgprCount, WaveId waveId, RaceDe
   for (auto &counts : regEventCount) {
     counts.resize(vgprCount, 0);
   }
+}
+
+void WaveRaceState::reset() {
+  dirtyVgprs.drain([this](uint32_t reg) {
+    vgprMemoryEvents[reg].clear();
+    for (auto &counts : regEventCount)
+      counts[reg] = 0;
+  });
+  dirtySgprs.drain([this](uint32_t reg) {
+    sgprMemoryEvents[reg].clear();
+    sgprEventCount[reg] = 0;
+  });
+  dirtyTtmps.drain([this](uint32_t reg) {
+    ttmpMemoryEvents[reg].clear();
+    ttmpEventCount[reg] = 0;
+  });
+  waveMemoryEvents.clear();
+  barrierPendingEvents.clear();
 }
 
 void WaveRaceState::dispatch(const PendingWaitCount &wait_count) {
@@ -147,11 +168,14 @@ void WaveRaceState::registerEventWithIntervals(
     if (toSgpr) {
       sgprMemoryEvents[reg].push_back(eventId);
       sgprEventCount[reg]++;
+      dirtySgprs.mark(reg);
     } else if (toTtmp) {
       ttmpMemoryEvents[reg].push_back(eventId);
       ttmpEventCount[reg]++;
+      dirtyTtmps.mark(reg);
     } else {
       vgprMemoryEvents[reg].push_back(eventId);
+      dirtyVgprs.mark(reg);
     }
   }
   waveMemoryEvents.push_back(eventId);

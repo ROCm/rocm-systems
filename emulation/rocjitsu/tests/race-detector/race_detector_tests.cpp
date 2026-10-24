@@ -28,6 +28,7 @@
 #include <array>
 #include <gtest/gtest.h>
 #include <limits>
+#include <vector>
 
 using namespace rocjitsu::plugins::race_detector;
 namespace amdgpu = rocjitsu::amdgpu;
@@ -67,6 +68,112 @@ TEST(RaceDetectorDefaults, CoversEveryMemoryEventType) {
   EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_SGPR), MemoryOrderClass::UNORDERED);
   EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_TTMP), MemoryOrderClass::UNORDERED);
   EXPECT_EQ(defaultMemoryOrder(MemoryEventType::SCALAR_TO_GLOBAL), MemoryOrderClass::UNORDERED);
+}
+
+// ---- Detector reuse ----
+
+TEST(RaceDetector, ResetBehavesLikeAFreshDetector) {
+  // The plugin recycles the detector of a finished workgroup for the next one.
+  // Whatever the previous workgroup left pending, whether register events or LDS
+  // history, must not be visible afterwards, and reports must go to the new handler.
+  std::vector<RaceViolation> first;
+  std::vector<RaceViolation> second;
+  RaceDetector detector(/*nWaves=*/
+                        2, /*vgprCount=*/8, /*sgprCount=*/8, Dim3d(0),
+                        [&first](RaceViolation v) { first.push_back(v); },
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+                        /*ldsSizeBytes=*/65536);
+  WaveRaceState &wave0 = detector.getWaveRaceState(0);
+
+  // Leave a global load into v1 and an LDS write at byte 100 outstanding.
+  const auto leavePendingState = [&] {
+    wave0.registerEvent(/*pc=*/0, MemoryEventType::GLOBAL_TO_VGPR, {1}, /*execMask=*/1, 0xF,
+                        amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM);
+    const std::array<uint32_t, 64> ldsAddresses{100};
+    wave0.registerLdsEvent(/*pc=*/4, MemoryEventType::VGPR_TO_LDS, {}, /*execMask=*/1,
+                           /*waveSize=*/64, ldsAddresses, /*bytesPerLane=*/4, 0xF,
+                           amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::LDS);
+  };
+  leavePendingState();
+  wave0.checkVgprRead(/*reg=*/1, /*lane=*/0, 0xF);
+  detector.validateRead(/*addr=*/100, WaveId{1}, /*lane=*/0, /*nBytes=*/4);
+  ASSERT_EQ(first.size(), 2u);
+
+  detector.reset(Dim3d(3), [&second](RaceViolation v) { second.push_back(v); });
+  EXPECT_EQ(detector.events().totalAllocated(), 0);
+  EXPECT_TRUE(detector.getLdsWriteEvents().empty());
+  wave0.checkVgprRead(/*reg=*/1, /*lane=*/0, 0xF);
+  detector.validateRead(/*addr=*/100, WaveId{1}, /*lane=*/0, /*nBytes=*/4);
+  EXPECT_TRUE(second.empty());
+
+  // The recycled detector still detects the same hazards, tagged with the new
+  // workgroup, and the old handler stays silent.
+  leavePendingState();
+  wave0.checkVgprRead(/*reg=*/1, /*lane=*/0, 0xF);
+  detector.validateRead(/*addr=*/100, WaveId{1}, /*lane=*/0, /*nBytes=*/4);
+  ASSERT_EQ(second.size(), 2u);
+  EXPECT_EQ(second[0].workgroupId.x, 3);
+  EXPECT_EQ(first.size(), 2u);
+}
+
+TEST(RaceDetector, ResetClearsEveryRegisterClassAndCompletedLdsHistory) {
+  std::vector<RaceViolation> reports;
+  RaceDetector detector(
+      2, 130, 128, Dim3d(0), [&](RaceViolation v) { reports.push_back(v); },
+      counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4), 65536);
+  auto &wave0 = detector.getWaveRaceState(0);
+  auto &wave1 = detector.getWaveRaceState(1);
+  PendingWaitCount vm_wait;
+  vm_wait.add(amdgpu::WaitCounterType::VMCNT, 0);
+  for (int i = 0; i < EventRegistry::kTrimAttemptInterval; ++i) {
+    wave0.registerEvent(i * 4, MemoryEventType::GLOBAL_TO_VGPR, {0}, 1);
+    wave0.dispatch(vm_wait);
+  }
+  ASSERT_GT(detector.events().trimmedCount(), 0);
+
+  for (int cycle = 1; cycle <= 3; ++cycle) {
+    wave0.registerEvent(0x100, MemoryEventType::GLOBAL_TO_VGPR, {63, 64, 129}, 1);
+    wave0.registerEvent(0x104, MemoryEventType::GLOBAL_TO_SGPR, {63, 64, 127}, 1);
+    wave0.registerEvent(0x108, MemoryEventType::GLOBAL_TO_TTMP, {0, 15}, 1);
+    const std::array<uint32_t, 64> read_addresses{100};
+    const std::array<uint32_t, 64> write_addresses{200};
+    wave1.registerLdsEvent(0x10c, MemoryEventType::LDS_TO_VGPR, {64}, 1, 64, read_addresses, 4);
+    wave1.registerLdsEvent(0x110, MemoryEventType::VGPR_TO_LDS, {}, 1, 64, write_addresses, 4);
+    PendingWaitCount lds_wait;
+    lds_wait.add(amdgpu::WaitCounterType::LGKMCNT, 0);
+    wave1.dispatch(lds_wait);
+    ASSERT_FALSE(wave1.getBarrierPendingEvents().empty());
+
+    detector.reset(Dim3d(cycle), [&](RaceViolation v) { reports.push_back(v); });
+    reports.clear();
+    EXPECT_EQ(detector.events().totalAllocated(), 0);
+    EXPECT_EQ(detector.events().trimmedCount(), 0);
+    EXPECT_TRUE(detector.getLdsReadEvents().empty());
+    EXPECT_TRUE(detector.getLdsWriteEvents().empty());
+    for (auto *wave : {&wave0, &wave1}) {
+      EXPECT_TRUE(wave->getWaveMemoryEvents().empty());
+      EXPECT_TRUE(wave->getBarrierPendingEvents().empty());
+      for (int reg : {0, 63, 64, 129}) {
+        wave->checkVgprRead(reg, 0, 0xF);
+        EXPECT_TRUE(wave->getVgprMemoryEvents(reg).empty());
+        for (int type = 0; type < static_cast<int>(MemoryEventType::N); ++type)
+          EXPECT_EQ(wave->getRegEventCount(static_cast<MemoryEventType>(type), reg), 0);
+      }
+      for (uint16_t reg : {63, 64, 127})
+        wave->checkScalarRead({rocjitsu::RegClass::SGPR, reg, 1});
+      for (uint16_t reg : {0, 15})
+        wave->checkScalarRead({rocjitsu::RegClass::TTMP, reg, 1});
+      wave->flushBarrierPendingEvents();
+    }
+    detector.validateWrite(100, WaveId{0}, 0, 4);
+    detector.validateRead(200, WaveId{0}, 0, 4);
+    EXPECT_TRUE(reports.empty());
+
+    wave0.registerEvent(0x114, MemoryEventType::GLOBAL_TO_TTMP, {15}, 1);
+    wave0.checkScalarRead({rocjitsu::RegClass::TTMP, 15, 1});
+    ASSERT_EQ(reports.size(), 1u);
+    EXPECT_EQ(reports.front().workgroupId.x, cycle);
+  }
 }
 
 // ---- VGPR races (vmcnt) ----

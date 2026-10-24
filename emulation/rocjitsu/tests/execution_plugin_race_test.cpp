@@ -26,6 +26,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 
+#include <barrier>
+
 namespace {
 
 using namespace rocjitsu;
@@ -207,6 +209,46 @@ TEST_F(FormattedLoadRaceTest, PartialWaitRetiresOneLoadWithAllItsDestinations) {
   wait(0);
   EXPECT_FALSE(probe(12, 0xf, false));
   EXPECT_FALSE(probe(13, 0xf, false));
+}
+
+TEST_F(FormattedLoadRaceTest, CompletedDispatchReleasesDisassemblyAfterWaveReuse) {
+  Instruction instruction("s_nop 0", nullptr);
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(0x100, instruction, *wave);
+  std::weak_ptr<DisasmCache> previous = plugin_state->disasm;
+  fixture.plugin_group_->onAmdgpuWorkgroupCompleted(1, 0);
+  fixture.plugin_group_->onAmdgpuDispatchExecutionEnd(1);
+
+  // A halted wave retains its state until reuse. The dispatch must release its
+  // own reference so the cache can disappear when that last wave moves on.
+  EXPECT_FALSE(previous.expired());
+  std::array<Wavefront *, 1> waves{wave};
+  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(2, 0, 256, 128, waves);
+  EXPECT_TRUE(previous.expired());
+  EXPECT_EQ(plugin_state->trace.size(), 0u);
+  EXPECT_TRUE(plugin_state->disasm->to_map().empty());
+  fixture.plugin_group_->onAmdgpuWorkgroupCompleted(2, 0);
+  fixture.plugin_group_->onAmdgpuDispatchExecutionEnd(2);
+}
+
+TEST_F(FormattedLoadRaceTest, RedispatchReplacesStateFromAnotherPlugin) {
+  struct OtherPluginState : WavefrontState {
+    // An invalid reuse stays within this allocation, so the type assertion can
+    // report the failure without corrupting neighboring objects.
+    std::array<std::byte, sizeof(RaceWavefrontState)> storage{};
+  };
+  fixture.plugin_group_->onAmdgpuWorkgroupCompleted(1, 0);
+  wave->set_plugin_state(0, std::make_unique<OtherPluginState>());
+  auto replacement = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(replacement->add(std::make_unique<RaceDetectorPlugin>()));
+  fixture.soc->set_plugin_group(replacement);
+  std::array<Wavefront *, 1> waves{wave};
+  replacement->onAmdgpuWorkgroupDispatched(2, 0, 256, 128, waves);
+  auto *state = dynamic_cast<RaceWavefrontState *>(wave->plugin_state(0));
+  ASSERT_NE(state, nullptr);
+  EXPECT_EQ(state->trace.size(), 0u);
+  EXPECT_NE(state->race_state, nullptr);
+  replacement->onAmdgpuWorkgroupCompleted(2, 0);
+  replacement->onAmdgpuDispatchExecutionEnd(2);
 }
 
 TEST_F(FormattedLoadRaceTest, RejectsWholeDestinationRangeWhenItExceedsTheWaveAllocation) {
@@ -2216,6 +2258,40 @@ TEST(DisasmCacheTest, DisassemblesOnlyFirstInstructionAtPc) {
   EXPECT_TRUE(first.was_disassembled());
   EXPECT_FALSE(duplicate.was_disassembled());
   EXPECT_EQ(cache.to_map().at(synthetic_pc), "s_count");
+}
+
+TEST(DisasmCacheTest, ConcurrentRecordsAndSnapshotsPreserveCollidingPcs) {
+  std::vector<uint64_t> pcs;
+  // More colliding PCs than the bounded probe window exercise the locked
+  // fallback as well as publication to the atomic lookup table.
+  for (uint64_t pc = 0; pcs.size() < 12; pc += 4)
+    if ((((pc >> 2) * 0x9E3779B97F4A7C15ULL) >> 50) == 0)
+      pcs.push_back(pc);
+  for (uint64_t pc = 0x10000000; pc < 0x10001000; pc += 4)
+    pcs.push_back(pc);
+
+  DisasmCache cache;
+  constexpr size_t threads = 6;
+  std::barrier ready(static_cast<std::ptrdiff_t>(threads + 1));
+  std::vector<std::thread> workers;
+  for (size_t t = 0; t < threads; ++t) {
+    workers.emplace_back([&, t] {
+      Instruction instruction("s_nop 0", nullptr);
+      ready.arrive_and_wait();
+      for (size_t i = 0; i < 4 * pcs.size(); ++i)
+        cache.record(pcs[(i + t) % pcs.size()], instruction);
+    });
+  }
+  ready.arrive_and_wait();
+  for (int i = 0; i < 8; ++i)
+    for (const auto &[pc, disasm] : cache.to_map())
+      EXPECT_EQ(disasm, "s_nop 0");
+  for (auto &worker : workers)
+    worker.join();
+  const auto disasm = cache.to_map();
+  ASSERT_EQ(disasm.size(), pcs.size());
+  for (uint64_t pc : pcs)
+    EXPECT_EQ(disasm.at(pc), "s_nop 0");
 }
 
 TEST(RaceDetectorPluginOutputTest, DispatchLineUsesQuestionMarksForUnresolvedKernel) {
