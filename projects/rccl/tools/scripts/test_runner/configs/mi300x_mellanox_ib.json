@@ -5158,6 +5158,11 @@
           "name": "Symk_AllGatherStoreData",
           "description": "Forced AllGather_ST with position-dependent data across its byte, 4-byte and 16-byte tiers and in-place",
           "test_filter": "SymmetricKernelCorruptionTest.AllGatherST_PositionDependentData"
+        },
+        {
+          "name": "Symk_GroupedAllGatherVaryingSizes",
+          "description": "Four AllGathers of different sizes fused in one group, exercising the work-range split; skips without cuMem",
+          "test_filter": "SymmetricKernelCorruptionTest.GroupedAllGather_VaryingSizes"
         }
       ]
     }
