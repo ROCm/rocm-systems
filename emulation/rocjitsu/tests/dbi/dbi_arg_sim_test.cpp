@@ -215,16 +215,16 @@ class DbiGuestArgumentSim : public ::testing::TestWithParam<ArgSimArch> {};
 
 TEST_P(DbiGuestArgumentSim, OverlappingArgumentsCaptureGuestValuesBeforeOverwritingThem) {
   const ArgSimArch &target = GetParam();
-  const auto image = test::make_amdgpu_kernel_elf(
+  const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
       {test::make_mov_vgpr_inline(0, 7), test::make_mov_vgpr_inline(1, 13),
        build_v_mov_b32_src(2, 256, target.arch), build_s_endpgm(target.arch)},
       /*private_bytes=*/64, /*granulated_sgpr_count=*/3, target.e_flags,
       /*granulated_vgpr_count=*/3, /*accum_offset=*/1);
-  const auto body = test::make_amdgpu_probe_elf("guest_arguments",
-                                                {build_v_mov_b32_src(3, 256, target.arch),
-                                                 build_v_mov_b32_src(4, 257, target.arch),
-                                                 build_s_setpc_b64(30, target.arch)},
-                                                target.e_flags);
+  const std::vector<uint8_t> body = test::make_amdgpu_probe_elf(
+      "guest_arguments",
+      {build_v_mov_b32_src(3, 256, target.arch), build_v_mov_b32_src(4, 257, target.arch),
+       build_s_setpc_b64(30, target.arch)},
+      target.e_flags);
   AmdGpuCodeObject object(image.data(), image.size());
   AmdGpuCodeObject probe(body.data(), body.size());
   Instrumentor instrumentor(object, target.arch);
@@ -234,14 +234,15 @@ TEST_P(DbiGuestArgumentSim, OverlappingArgumentsCaptureGuestValuesBeforeOverwrit
   point.probe_symbol = "guest_arguments";
   point.probe_args = {probe_arg_vgpr(1), probe_arg_vgpr(0), probe_arg_imm(99)};
   instrumentor.add_point(point);
-  const auto result = instrumentor.patch();
+  const InstrumentedCodeObject result = instrumentor.patch();
   ASSERT_TRUE(result.errors.empty()) << result.errors.front();
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
-  const auto text = test::section_words(patched, ".text");
+  const std::vector<uint32_t> text = test::section_words(patched, ".text");
   const uint32_t scratch = test::patched_private_segment_size(patched);
   test::DbiSim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize(target.sim_arch, target.wave_size));
-  const auto registers = sim.run_and_read_vgprs(text, scratch, {3, 4, 0, 1, 2});
+  const std::vector<std::vector<uint32_t>> registers =
+      sim.run_and_read_vgprs(text, scratch, {3, 4, 0, 1, 2});
   const std::array<uint32_t, 5> expected{13, 7, 7, 13, 7};
   for (size_t index = 0; index < expected.size(); ++index) {
     ASSERT_EQ(registers[index].size(), target.wave_size);
@@ -250,14 +251,14 @@ TEST_P(DbiGuestArgumentSim, OverlappingArgumentsCaptureGuestValuesBeforeOverwrit
           << "register " << index << " lane " << lane;
   }
   // Removing the cycle's source capture must corrupt the observed argument.
-  auto broken = text;
+  std::vector<uint32_t> broken = text;
   const uint32_t capture = build_v_mov_b32_src(3, 257, target.arch);
-  const auto found = std::find(broken.begin(), broken.end(), capture);
+  const std::vector<uint32_t>::iterator found = std::find(broken.begin(), broken.end(), capture);
   ASSERT_NE(found, broken.end());
   *found = build_s_nop(0, target.arch);
   test::DbiSim control;
   ASSERT_NO_FATAL_FAILURE(control.initialize(target.sim_arch, target.wave_size));
-  const auto observed = control.run_and_read_vgpr(broken, scratch, 3);
+  const std::vector<uint32_t> observed = control.run_and_read_vgpr(broken, scratch, 3);
   ASSERT_EQ(observed.size(), target.wave_size);
   EXPECT_NE(observed.front(), 13u);
 }

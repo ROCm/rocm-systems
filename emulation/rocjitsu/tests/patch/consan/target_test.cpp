@@ -22,42 +22,47 @@ namespace {
 class ConSanTargetStatic : public ::testing::TestWithParam<test::TargetMode> {};
 
 TEST_P(ConSanTargetStatic, CallableArtifactsPreserveStaticSitesAndPrivateFrameAdmission) {
-  const auto mode = GetParam();
+  const test::TargetMode mode = GetParam();
   const TargetProfile &target = *target_profile(mode.target);
   for (const std::string_view fixture :
        {"race", "disjoint", "read_read", "collision", "single_lane", "alias", "immediate",
         "four_ranges", "exhausted", "empty", "branched", "native-14"}) {
     SCOPED_TRACE(fixture);
-    const auto original = test::read_fixture(test::target_fixture_path(mode, fixture));
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path(mode, fixture));
     ASSERT_FALSE(original.empty());
     InputError error;
-    const auto called = prepare(original, target, "lds_producer_consumer", error);
+    const FailureOr<PreparedArtifact> called =
+        prepare(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(called.succeeded()) << error.message;
-    const auto input = build_input_program(original, target, "lds_producer_consumer", error);
+    const FailureOr<InputProgram> input =
+        build_input_program(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(input.succeeded());
-    const auto &sites = called.value().manifest.sites;
+    const std::vector<SiteFacts> &sites = called.value().manifest.sites;
     ASSERT_EQ(sites.size(), input.value().accesses.size());
     for (size_t index = 0; index < sites.size(); ++index) {
-      const auto &access = input.value().accesses[index];
+      const NativeLdsAccess &access = input.value().accesses[index];
       EXPECT_EQ(sites[index].id, access.site);
       EXPECT_EQ(sites[index].original_offset, access.original_offset);
       EXPECT_EQ(sites[index].access, access.kind);
       EXPECT_EQ(sites[index].first_slot, access.site * kAddressGroupsPerSite);
     }
     AmdGpuCodeObject image(called.value().image.data(), called.value().image.size());
-    const auto *text = image.text_sections().front();
-    const auto kernels =
+    const Section *text = image.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
         scan_kernel_descriptors(called.value().image, text->sectionOffset(), text->size());
     ASSERT_EQ(kernels.size(), 1u);
     std::vector<uint32_t> words(text->size() / sizeof(uint32_t));
     std::memcpy(words.data(), text->data(), text->size());
-    auto decoder = target.public_id == ROCJITSU_CODE_TARGET_INVALID
-                       ? Decoder::create(target.arch)
-                       : Decoder::create(default_isa_target_registry(), target.public_id);
+    std::unique_ptr<Decoder> decoder =
+        target.public_id == ROCJITSU_CODE_TARGET_INVALID
+            ? Decoder::create(target.arch)
+            : Decoder::create(default_isa_target_registry(), target.public_id);
     ASSERT_TRUE(decoder);
     size_t calls = 0;
     for (size_t cursor = 0; cursor < words.size();) {
-      auto instruction = decoder->decode_window(std::span(words).subspan(cursor), cursor * 4);
+      FailureOr<std::unique_ptr<Instruction>> instruction =
+          decoder->decode_window(std::span(words).subspan(cursor), cursor * 4);
       ASSERT_TRUE(instruction.succeeded());
       calls += (instruction.value()->flags() & INDIRECT_CALL) != 0;
       cursor += instruction.value()->size() / sizeof(uint32_t);
@@ -66,7 +71,7 @@ TEST_P(ConSanTargetStatic, CallableArtifactsPreserveStaticSitesAndPrivateFrameAd
     EXPECT_EQ(kernels.front().descriptor.private_segment_fixed_size, 0u);
     EXPECT_EQ(kernels.front().descriptor.group_segment_fixed_size,
               input.value().kernel.descriptor.group_segment_fixed_size);
-    auto corrupted = called.value();
+    PreparedArtifact corrupted = called.value();
     corrupted.image[text->sectionOffset() + sites.front().probe_offset] ^= 1;
     corrupted.manifest.prepared.sha256 = digest(corrupted.image);
     EXPECT_TRUE(validate_prepared(original, corrupted, error).failed());
@@ -85,7 +90,7 @@ TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiVal
     const FailureOr<InputProgram> input =
         build_input_program(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(input.succeeded()) << error.message;
-    const auto text =
+    const std::span<const uint8_t> text =
         std::span(original).subspan(input.value().text_file_offset, input.value().text_bytes);
     if (original_text.empty())
       original_text.assign(text.begin(), text.end());
@@ -183,11 +188,12 @@ TEST_P(ConSanTargetStatic, PreparedCdnaDescriptorMustAllocateItsDeclaredOrdinary
 }
 
 TEST_P(ConSanTargetStatic, UnreachableEntryOrDenseSitesFailBeforeArtifactPublication) {
-  const auto mode = GetParam();
-  const auto &target = *target_profile(mode.target);
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
   for (const auto fixture : {"native-distant-entry", "native-dense-sites"}) {
     SCOPED_TRACE(fixture);
-    const auto original = test::read_fixture(test::target_fixture_path(mode, fixture));
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path(mode, fixture));
     ASSERT_FALSE(original.empty());
     InputError error;
     ASSERT_TRUE(build_input_program(original, target, "lds_producer_consumer", error).succeeded())

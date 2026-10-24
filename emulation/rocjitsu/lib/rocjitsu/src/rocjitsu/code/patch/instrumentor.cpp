@@ -807,7 +807,7 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
     patch.words = planned->prologue.words;
     const uint32_t bound = kernel_vgpr_bounds(arch_, kernel.descriptor).ordinary_bound;
     std::vector<uint16_t> sources;
-    for (const auto &point : points_)
+    for (const InstrumentationPoint &point : points_)
       for (const ProbeArgValue &arg : point.probe_args)
         if (arg.source == ProbeArgSource::EntryVgprLane0 &&
             std::ranges::find(sources, arg.register_index) == sources.end())
@@ -933,7 +933,7 @@ bool Instrumentor::ensure_liveness_built(std::string *error_out) {
     options.arch = arch_;
     options.text = {reinterpret_cast<const uint8_t *>(text->data()), text->size()};
   }
-  for (const auto &block : blocks_) {
+  for (const std::unique_ptr<BasicBlock> &block : blocks_) {
     scope.push_back(block.get());
     if (kernels_.size() == 1 && block->start_offset() == kernels_.front().entry_text_offset)
       options.entry_block = block.get();
@@ -983,7 +983,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     }
     if (kernels_.size() == 1) {
       bool has_call = false;
-      for (const auto &block : blocks_) {
+      for (const std::unique_ptr<BasicBlock> &block : blocks_) {
         for (const Instruction &instruction : block->instructions())
           has_call |= (instruction.flags() & INDIRECT_CALL) != 0;
       }
@@ -1329,7 +1329,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     result.resources = {.sgprs = options_.register_growth->sgprs,
                         .vgprs = options_.register_growth->vgprs};
     RegisterSet guest_registers;
-    for (const auto &block : blocks_)
+    for (const std::unique_ptr<BasicBlock> &block : blocks_)
       for (const Instruction &instruction : block->instructions()) {
         const InstDefUse effects(instruction, liveness.gfx1250_vgpr_msb(),
                                  UnknownVgprDefPolicy::ExpandAll);
@@ -1379,7 +1379,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   std::optional<uint16_t> entry_storage_base;
   const bool has_entry_callback = std::ranges::any_of(
       sites, [](const auto &site) { return site.kind == InstrumentationKind::KernelEntry; });
-  for (const auto &site : sites) {
+  for (const ResolvedInstrumentationSite &site : sites) {
     if (site.kind == InstrumentationKind::KernelEntry &&
         (kernels.size() != 1 || site.anchor_offset != kernels.front().entry_text_offset)) {
       result.errors.emplace_back("KernelEntry must name the sole kernel's descriptor entry");
@@ -1721,7 +1721,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     if (a.site->kind == InstrumentationKind::KernelEntry) {
       const uint64_t branch_pc =
           entry_patch->stub_offset + (entry_patch->words.size() - 1) * sizeof(uint32_t);
-      const auto target = compute_sopp_branch_simm16(branch_pc, a.trampoline_offset);
+      const std::optional<int16_t> target =
+          compute_sopp_branch_simm16(branch_pc, a.trampoline_offset);
       if (!target) {
         result.errors.emplace_back("kernel-entry callback is outside the stub's branch range");
         return result;

@@ -89,7 +89,7 @@ bool plan_argument_moves(std::span<const ProbeArgValue> args, const ProbeAbi &ab
     }
     const uint16_t source = pending.front().source;
     moves.push_back({*temp, source});
-    for (auto &move : pending)
+    for (ProbeArgumentMove &move : pending)
       if (move.source == source)
         move.source = *temp;
   }

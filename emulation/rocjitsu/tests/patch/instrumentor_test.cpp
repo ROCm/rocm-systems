@@ -4256,7 +4256,7 @@ TEST(InstrumentorKernelBoundary, EntryAndAccessAtTheSameAnchorRunInDispatchOrder
   ASSERT_EQ(result.sites.size(), 3u);
   const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   const std::vector<uint32_t> words = section_words(patched, ".text");
-  const auto entry = patched_entry_text_offset(patched);
+  const std::optional<uint64_t> entry = patched_entry_text_offset(patched);
   ASSERT_TRUE(entry);
   const auto target_of = [&](uint64_t offset) {
     return offset + 4 + int64_t{static_cast<int16_t>(words.at(offset / 4))} * 4;
@@ -4325,7 +4325,7 @@ TEST(InstrumentorKernelBoundary, EntryDoesNotRelocateOrOverwriteATwelveByteInstr
   EXPECT_TRUE(
       std::equal(kGfx12GlobalStoreV0V1S2.begin(), kGfx12GlobalStoreV0V1S2.end(), words.begin()));
   const uint64_t branch_pc = result.sites.front().guest_offset;
-  const auto branch = compute_sopp_branch_simm16(branch_pc, 0);
+  const std::optional<int16_t> branch = compute_sopp_branch_simm16(branch_pc, 0);
   ASSERT_TRUE(branch);
   EXPECT_EQ(words.at(branch_pc / 4), build_s_branch(*branch, ROCJITSU_CODE_ARCH_RDNA4));
 }
@@ -4434,7 +4434,8 @@ TEST(InstrumentorProbePatch, Gfx1250RequiresProvenZeroBanksAndBankPreservingProb
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   for (const uint16_t bank : {0, 1}) {
     for (const bool probe_changes_bank : {false, true}) {
-      const auto select_bank = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = bank});
+      const std::array<uint32_t, 1> select_bank =
+          cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = bank});
       const std::vector<uint8_t> image =
           make_amdgpu_kernel_elf({select_bank[0], build_s_nop(0, kArch), build_s_endpgm(kArch)}, 0,
                                  3, EF_AMDGPU_MACH_AMDGCN_GFX1250);

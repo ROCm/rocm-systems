@@ -202,7 +202,7 @@ Result validate_prepared(std::span<const uint8_t> original, const PreparedArtifa
   if (blocks.failed())
     return reject(error, "final executable CFG cannot be decoded");
   std::vector<BasicBlock *> scope;
-  for (const auto &block : blocks.value())
+  for (const std::unique_ptr<BasicBlock> &block : blocks.value())
     scope.push_back(block.get());
   const std::span<const uint8_t> prepared_text =
       std::span(artifact.image).subspan(text.sectionOffset(), text.size());

@@ -112,25 +112,27 @@ TEST_F(ConSanPrepare, EntryPrologueOffsetsMustMatchTheRuntimeWrapper) {
   const std::optional<KernargExtensionLayout> kernarg = make_kernarg_extension_layout(
       input.value().kernel.descriptor.kernarg_size, kContextPointerPayloads);
   ASSERT_TRUE(kernarg.has_value());
-  const auto artifact =
+  const FailureOr<PreparedArtifact> artifact =
       prepare(original_, *target_profile("gfx1100"), "lds_producer_consumer", error_);
   ASSERT_TRUE(artifact.succeeded()) << error_.message;
   AmdGpuCodeObject object(artifact.value().image.data(), artifact.value().image.size());
   bool found = false;
-  for (const auto &section : object.all_sections()) {
+  for (const std::unique_ptr<Section> &section : object.all_sections()) {
     if (section->name() != kKernargExtensionMetadataSectionName)
       continue;
-    const auto records = parse_kernarg_extension_metadata(
-        {reinterpret_cast<const uint8_t *>(section->data()), section->size()});
+    const std::optional<std::vector<KernargExtensionMetadata>> records =
+        parse_kernarg_extension_metadata(
+            {reinterpret_cast<const uint8_t *>(section->data()), section->size()});
     ASSERT_TRUE(records);
     ASSERT_EQ(records->size(), 1u);
-    const auto &record = records->front();
+    const KernargExtensionMetadata &record = records->front();
     EXPECT_EQ(record.kernel_name, "lds_producer_consumer");
     EXPECT_EQ(record.original_kernarg_size, kernarg->original_kernarg_size);
     ASSERT_EQ(record.payloads.size(), 1u);
     const std::array payloads{KernargExtensionPayloadLayout{record.payloads.front().size,
                                                             record.payloads.front().alignment}};
-    const auto declared = make_kernarg_extension_layout(record.original_kernarg_size, payloads);
+    const std::optional<KernargExtensionLayout> declared =
+        make_kernarg_extension_layout(record.original_kernarg_size, payloads);
     ASSERT_TRUE(declared);
     EXPECT_EQ(declared->wrapper_size, kernarg->wrapper_size);
     EXPECT_EQ(declared->payload_offsets, kernarg->payload_offsets);

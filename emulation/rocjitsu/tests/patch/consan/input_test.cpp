@@ -222,7 +222,7 @@ TEST_F(ConSanInputFixture, BarrierAndWideAccessCannotBecomeNoSyncFacts) {
 TEST_F(ConSanInputFixture, GenericContextBootstrapUsesOwnedRegistersAndWrapperOffsets) {
   const FailureOr<InputProgram> program = inspect(image_);
   ASSERT_TRUE(program.succeeded()) << error_.message;
-  const auto planned = test::bootstrap_plan(program.value());
+  const std::optional<DbiEntryProloguePlan> planned = test::bootstrap_plan(program.value());
   ASSERT_TRUE(planned);
   const DbiEntryProloguePlan &plan = *planned;
   EXPECT_GE(plan.storage.persistent_base, 16u);
