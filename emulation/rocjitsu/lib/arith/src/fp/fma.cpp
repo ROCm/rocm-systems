@@ -6,6 +6,7 @@
 
 #include "common/alu.h"
 #include "common/internal.h"
+#include "common/simd.h"
 #include "fp/fma_scalar.h"
 #include "register/dpp.h"
 #include "rj_arith/rj_arith.h"
@@ -22,6 +23,12 @@ template <bool Rdna3>
                                 uint32_t *const *d, const uint32_t *const *a,
                                 const uint32_t *const *b, const uint32_t *const *c) {
 
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3 &&
+      rocjitsu::arith::fma_exact_x86_64_v3(flags, exec_mask, mode, d[0], a[0], b[0], c[0], Rdna3)) {
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
   uint32_t result[32];
   for (int lane = 0; lane < 32; ++lane) {
     result[lane] = rocjitsu::arith::fma_instruction_value(a[0][lane], b[0][lane], c[0][lane], flags,
@@ -50,6 +57,15 @@ int fma(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
   if (rocjitsu::arith::is_exact(flags)) {
     return fma_exact<Rdna3>(flags, exec_mask, instruction_flags, d, a, b, c);
   }
+
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3) {
+
+    rocjitsu::arith::fma_x86_64_v3(flags, exec_mask, instruction_flags, d[0], a[0], b[0], c[0]);
+
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 
   uint32_t result[32];
   for (int lane = 0; lane < 32; ++lane) {
@@ -97,7 +113,7 @@ int fma_with_dpp(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *co
   }
   if (mode >> 32) {
     return rocjitsu::arith::execute_dpp(
-        exec_mask, mode, a, [&](uint32_t selected, const uint32_t *const *source) {
+        flags, exec_mask, mode, a, [&](uint32_t selected, const uint32_t *const *source) {
           return fma_with_dpp<Rdna3>(flags, selected, uint32_t(mode), d, source, b, c, known);
         });
   }
