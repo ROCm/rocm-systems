@@ -2227,8 +2227,6 @@ class NetProxyConnectMicrotest : public NetAllocMicrotestBase {
     proxyState_.p2pChunkSize = 1 << 10;
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) proxyState_.buffSizes[p] = kSizes[p];
     rcclPrimaryNicInfo = {rcclIBNicTypeDefault, 0, 0};
-    g_exportedFds.clear();
-    g_nextExportFd = 200;
   }
 
   void TearDown() override {
@@ -3835,8 +3833,6 @@ class NetProxyRegBufferMicrotest : public NetMicrotestBase {
     recvRes_.netRecvComm = &net_.recvComm;
     sendConn_.transportResources = &sendRes_;
     recvConn_.transportResources = &recvRes_;
-    g_exportedFds.clear();
-    g_nextExportFd = 200;
   }
 
   void TearDown() override {

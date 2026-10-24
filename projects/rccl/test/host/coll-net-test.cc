@@ -1283,8 +1283,6 @@ class CollNetProxyConnectMicrotest : public CollNetMicrotestBase {
     auto* info = reinterpret_cast<collNetSendConnectInfo*>(connectInfos_ + kRank);
     info->reqFifo = reqFifo_;
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) info->mhandles[p] = reinterpret_cast<void*>(0x100 + p);
-    g_exportedFds.clear();
-    g_nextExportFd = 200;
   }
 
   void TearDown() override {
@@ -1292,9 +1290,6 @@ class CollNetProxyConnectMicrotest : public CollNetMicrotestBase {
     if (shared_) {
       free(shared_->resources);
       free(shared_);
-    }
-    for (int fd : g_exportedFds) {
-      if (FdOpen(fd)) close(fd);
     }
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
     exports_.CloseOpen();
