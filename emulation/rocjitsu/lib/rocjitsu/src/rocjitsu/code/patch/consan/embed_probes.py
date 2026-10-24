@@ -20,9 +20,9 @@ def main():
     ]
     images = []
     for specification in args.images:
-        target, wave, filename = specification.split(':', 2)
-        target, wave = int(target), int(wave)
-        name = f'image_{target}_{wave}'
+        target, wave_size, filename = specification.split(':', 2)
+        target, wave_size = int(target), int(wave_size)
+        name = f'image_{target}_{wave_size}'
         content = Path(filename).read_bytes()
         lines.append(f'constexpr uint8_t {name}[] = {{')
         for offset in range(0, len(content), 16):
@@ -30,13 +30,15 @@ def main():
                 ','.join(str(byte) for byte in content[offset : offset + 16]) + ','
             )
         lines.append('};')
-        images.append((target, wave, name))
+        images.append((target, wave_size, name))
     lines += [
         '}',
-        'std::span<const uint8_t> lds_probe_image(uint32_t target, uint32_t wave) {',
+        'std::span<const uint8_t> lds_probe_image(uint32_t target, uint32_t wave_size) {',
     ]
-    for target, wave, name in images:
-        lines.append(f'if (target == {target} && wave == {wave}) return {name};')
+    for target, wave_size, name in images:
+        lines.append(
+            f'if (target == {target} && wave_size == {wave_size}) return {name};'
+        )
     lines += ['return {};', '}', '}']
     args.output.write_text('\n'.join(lines) + '\n')
 
