@@ -448,9 +448,9 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
 const BlockLiveness &LivenessAnalysis::block_liveness(const BasicBlock &block) const {
   ensure_analyzed();
   auto it = block_index_.find(&block);
-  if (it == block_index_.end())
-    throw std::out_of_range("block_liveness: block was not part of this analysis");
-  return liveness_.at(it->second);
+  assert(it != block_index_.end() && "block_liveness: block was not part of this analysis");
+  // analyze() indexes the constructor's blocks into the equally sized liveness_ vector.
+  return liveness_[it->second];
 }
 
 bool LivenessAnalysis::has_live_before(const Instruction &inst) const {
