@@ -59,6 +59,9 @@ the original creators. A NULL or empty API selector uses JSON `local_node`;
 without either selector, the manifest must contain exactly one node. Only
 the selected node's GPUs become local devices; links are descriptive until
 the corresponding modeled transport admits an operation.
+`system.coherence_domains` is also descriptive membership. Changing it does
+not grant peer access or alter runtime cache maintenance, which is assembled
+per SoC from the modeled routes.
 
 `num_threads` and `cpu_dispatch_threads` control different layers.
 `num_threads` partitions whole XCD subtrees across Simdojo engine threads. A

@@ -71,6 +71,17 @@ public:
       cu->set_apertures(shared_base, shared_limit, private_base, private_limit);
   }
 
+  void set_vmid_apertures(uint32_t vmid, uint64_t shared_base, uint64_t shared_limit,
+                          uint64_t private_base, uint64_t private_limit) {
+    for (auto *cu : cus_)
+      cu->set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit);
+  }
+
+  void clear_vmid_apertures() {
+    for (auto *cu : cus_)
+      cu->clear_vmid_apertures();
+  }
+
   /// @brief Enqueue a workgroup from an ACE pipe.
   void enqueue_wg(uint32_t pipe_id, uint32_t global_wg_id, DispatchEntry *entry) {
     if (entry->wgp_mode)
@@ -117,7 +128,7 @@ public:
         wf->set_lds(placement->lds);
         wf->set_dispatch_id(wg.entry->dispatch_id);
         wf->set_address_space(wg.entry->address_space);
-        wf->set_process_id(wg.entry->process_id);
+        wf->set_process_id(wg.entry->process_id, wg.entry->process_identity_kind);
         wf->set_queue_id(wg.entry->queue_id);
         wf->set_exec(initial_exec_mask_for_wave(*wg.entry, wg.global_wg_id, w, wf->wf_size()));
         init_wf(cu, wf, *wg.entry, wg.global_wg_id, w);

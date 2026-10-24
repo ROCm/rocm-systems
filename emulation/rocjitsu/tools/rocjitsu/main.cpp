@@ -64,7 +64,7 @@ namespace {
 constexpr int kDaemonReadyTimeoutMs = 30'000;
 
 int run_daemon_server(const char *config_path, const std::string &socket_path = {},
-                      int ready_fd = -1) {
+                      int ready_fd = -1, bool trace_fabric_effects = false) {
   sigset_t daemon_signals;
   sigemptyset(&daemon_signals);
   sigaddset(&daemon_signals, SIGINT);
@@ -91,7 +91,13 @@ int run_daemon_server(const char *config_path, const std::string &socket_path = 
     sigprocmask(SIG_SETMASK, &previous_signals, nullptr);
     return 1;
   }
-  if (rj_daemon_start(json.c_str(), resolved_socket_path.c_str(), &daemon) !=
+  const rj_daemon_options_t options{
+      .struct_size = sizeof(rj_daemon_options_t),
+      .flags =
+          trace_fabric_effects ? static_cast<uint32_t>(RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS) : 0u,
+      .fabric_trace_capacity = 0,
+  };
+  if (rj_daemon_start_with_options(json.c_str(), resolved_socket_path.c_str(), &options, &daemon) !=
       ROCJITSU_STATUS_SUCCESS) {
     std::cerr << std::format("rocjitsu: failed to start daemon from {} at {}\n", config_path,
                              resolved_socket_path);
@@ -182,7 +188,10 @@ std::string find_runtime_lib(std::string_view lib_name) {
   return {};
 }
 
-std::string find_interposer_lib() { return find_runtime_lib("librocjitsu.so"); }
+#ifndef RJ_INTERPOSER_LIB_NAME
+#define RJ_INTERPOSER_LIB_NAME "librocjitsu.so"
+#endif
+std::string find_interposer_lib() { return find_runtime_lib(RJ_INTERPOSER_LIB_NAME); }
 
 std::string find_hooks_lib() { return find_runtime_lib("librocjitsu_hooks.so"); }
 
@@ -417,6 +426,9 @@ void print_usage() {
          "                    means -object\n"
          "                    memory-backend-memfd,id=mem,size=<N>,share=on together\n"
          "                    with -machine memory-backend=mem.\n"
+         "  --fabric-effect-trace\n"
+         "                    Capture bounded directed GPU fabric effects in\n"
+         "                    daemon or VFIO server mode.\n"
          "  --thread-budget-table\n"
          "                    Print engine / dispatch allocations without running a VM\n"
          "  --check-vfio-user Report whether this binary includes VFIO-user support\n"
@@ -437,6 +449,7 @@ int main(int argc, char *argv[]) {
   int vfio_ready_fd = -1;
   bool daemon_mode = false;
   bool attach_mode = false;
+  bool fabric_effect_trace = false;
   int separator_idx = -1;
 
   for (int i = 1; i < argc; ++i) {
@@ -505,6 +518,8 @@ int main(int argc, char *argv[]) {
       }
     } else if (arg == "--daemon") {
       daemon_mode = true;
+    } else if (arg == "--fabric-effect-trace") {
+      fabric_effect_trace = true;
     } else if (arg == "--attach") {
       attach_mode = true;
     } else if (arg == "--check-vfio-user") {
@@ -530,6 +545,11 @@ int main(int argc, char *argv[]) {
   }
 
   overrides.local_node = local_node;
+
+  if (fabric_effect_trace && (attach_mode || (!daemon_mode && vfio_sockets.empty()))) {
+    std::cerr << "rocjitsu: --fabric-effect-trace requires daemon or VFIO server mode\n";
+    return 1;
+  }
 
   if (!config_path) {
     std::cerr << "rocjitsu: --config is required\n";
@@ -657,7 +677,8 @@ int main(int argc, char *argv[]) {
     if (!write_config_for_this_launch())
       return 1;
 #if defined(RJ_ENABLE_VFIO_USER)
-    const int status = rocjitsu::run_vfio_server(abs_config, vfio_sockets, vfio_ready_fd);
+    const int status =
+        rocjitsu::run_vfio_server(abs_config, vfio_sockets, vfio_ready_fd, fabric_effect_trace);
     cleanup_runtime_files(my_pid);
     return status;
 #else
@@ -750,7 +771,7 @@ int main(int argc, char *argv[]) {
   bool has_app = (separator_idx >= 0 && separator_idx + 1 < argc);
 
   if (daemon_mode && !has_app)
-    return run_daemon_server(abs_config.c_str());
+    return run_daemon_server(abs_config.c_str(), {}, -1, fabric_effect_trace);
 
   if (!has_app) {
     std::cerr << "rocjitsu: no application specified after --\n";
@@ -762,7 +783,7 @@ int main(int argc, char *argv[]) {
 
   auto lib_path = find_interposer_lib();
   if (lib_path.empty()) {
-    std::cerr << "rocjitsu: could not find librocjitsu.so\n";
+    std::cerr << "rocjitsu: could not find " << RJ_INTERPOSER_LIB_NAME << '\n';
     return 1;
   }
 
@@ -836,7 +857,7 @@ int main(int argc, char *argv[]) {
     if (daemon_pid == 0) {
       close(ready_pipe[0]);
       prctl(PR_SET_PDEATHSIG, SIGTERM);
-      return run_daemon_server(abs_config.c_str(), socket_path, ready_pipe[1]);
+      return run_daemon_server(abs_config.c_str(), socket_path, ready_pipe[1], fabric_effect_trace);
     }
 
     close(ready_pipe[1]);

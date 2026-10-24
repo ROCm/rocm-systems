@@ -169,11 +169,11 @@ public:
     std::size_t destination_count = 0;
     std::size_t destination_index = 0;
     std::size_t io_progress = 0;
+    VmTransferToken transfer_token;
     std::size_t chunk_size = 0;
     std::array<std::byte, kTransferBytes> scratch{};
     std::vector<std::byte> payload;
     std::vector<std::byte> indirect;
-    std::optional<SdmaCacheLease> cache_lease;
     bool wait_enabled = false;
     bool signal_enabled = false;
     bool signal_decrement = false;
@@ -221,7 +221,23 @@ public:
 class SdmaPacketProcessor::Impl {
 public:
   explicit Impl(SdmaPacketDialect dialect, SdmaPacketCallbacks callbacks)
-      : dialect_(dialect), callbacks_(std::move(callbacks)) {}
+      : dialect_(dialect), callbacks_(std::move(callbacks)) {
+    if (callbacks_.acquire_cache_maintenance) {
+      data_maintenance_ = [this] {
+        return callbacks_.acquire_cache_maintenance(SdmaCacheOperation::WritebackInvalidate);
+      };
+    }
+    if (callbacks_.admit_memory_ingress) {
+      data_ingress_ = [this](uint64_t address, std::size_t size, VmAccessKind access) {
+        return admit_memory_ingress(address, size, access);
+      };
+    }
+    if (callbacks_.admit_private_uc_gtt_copy_source) {
+      copy_source_ = [this](uint64_t address, std::size_t size) {
+        return callbacks_.admit_private_uc_gtt_copy_source(*access_, address, size);
+      };
+    }
+  }
 
   using State = SdmaPacketContinuation::Impl;
   using Kind = State::Kind;
@@ -571,11 +587,18 @@ private:
     return SdmaPacketExecutionOutcome::Complete;
   }
 
-  SdmaPacketExecutionOutcome cache_before_write(Operation &operation) {
-    if (!operation.cache_lease && callbacks_.acquire_cache_maintenance)
-      operation.cache_lease.emplace(
-          callbacks_.acquire_cache_maintenance(SdmaCacheOperation::WritebackInvalidate));
-    return SdmaPacketExecutionOutcome::Complete;
+  MemoryIngressAdmission admit_memory_ingress(uint64_t address, std::size_t size,
+                                              VmAccessKind access) const {
+    if (!callbacks_.admit_memory_ingress)
+      return {};
+    const std::array spans{MemoryIngressSpan{address, size, access}};
+    return callbacks_.admit_memory_ingress(*access_, spans);
+  }
+
+  SdmaCacheLease acquire_write_cache_maintenance() const {
+    return callbacks_.acquire_cache_maintenance
+               ? callbacks_.acquire_cache_maintenance(SdmaCacheOperation::WritebackInvalidate)
+               : SdmaCacheLease{};
   }
 
   SdmaPacketExecutionOutcome atomic_fetch_add(Operation &operation, uint64_t address,
@@ -712,6 +735,10 @@ private:
   SdmaPacketExecutionOutcome execute_copy(Operation &operation) {
     if (operation.phase == 0) {
       if (operation.wait_enabled && operation.address > 0x1000) {
+        MemoryIngressAdmission admitted =
+            admit_memory_ingress(operation.address, sizeof(uint64_t), VmAccessKind::Read);
+        if (admitted.outcome != VmAccessOutcome::Complete)
+          return map_outcome(admitted.outcome);
         const VmAccessOutcome outcome =
             access_->read(operation.address, std::span(operation.scratch).first(sizeof(uint64_t)),
                           operation.io_progress);
@@ -727,6 +754,10 @@ private:
     }
     if (operation.phase == 1) {
       if (operation.signal_decrement) {
+        MemoryIngressAdmission admitted =
+            admit_memory_ingress(operation.signal_address, sizeof(uint64_t), VmAccessKind::Read);
+        if (admitted.outcome != VmAccessOutcome::Complete)
+          return map_outcome(admitted.outcome);
         const VmAccessOutcome outcome = access_->read(
             operation.signal_address, std::span(operation.scratch).first(sizeof(uint64_t)),
             operation.io_progress);
@@ -740,8 +771,6 @@ private:
       operation.retire_on_fault = true;
       operation.phase = 3;
     }
-    if (operation.phase == 3)
-      cache_before_write(operation);
     while (operation.phase == 3 && operation.completed < operation.count) {
       if (operation.chunk_size == 0) {
         uint64_t room = operation.count - operation.completed;
@@ -758,9 +787,11 @@ private:
                                    operation.rect_rows, operation.completed);
       };
       if (operation.destination_index == 0) {
-        const VmAccessOutcome read = access_->read(
-            address_at(operation.source, operation.src_pitch, operation.src_slice),
-            std::span(operation.scratch).first(operation.chunk_size), operation.io_progress);
+        const VmAccessOutcome read =
+            access_->read(address_at(operation.source, operation.src_pitch, operation.src_slice),
+                          std::span(operation.scratch).first(operation.chunk_size),
+                          operation.io_progress, operation.transfer_token, VmAccessKind::Read, true,
+                          data_maintenance_, data_ingress_, copy_source_);
         if (read != VmAccessOutcome::Complete)
           return map_outcome(read);
         operation.io_progress = 0;
@@ -773,7 +804,8 @@ private:
                 : operation.destinations[operation.destination_index - 1] + operation.completed;
         const VmAccessOutcome write = access_->write(
             destination, std::span<const std::byte>(operation.scratch).first(operation.chunk_size),
-            operation.io_progress);
+            operation.io_progress, operation.transfer_token, true, data_maintenance_,
+            data_ingress_);
         if (operation.io_progress != 0)
           state_->operation_committed = true;
         if (write != VmAccessOutcome::Complete)
@@ -788,7 +820,11 @@ private:
     }
     operation.phase = 4;
     if (operation.signal_decrement) {
-      cache_before_write(operation);
+      MemoryIngressAdmission admitted =
+          admit_memory_ingress(operation.signal_address, sizeof(uint64_t), VmAccessKind::Atomic);
+      if (admitted.outcome != VmAccessOutcome::Complete)
+        return map_outcome(admitted.outcome);
+      [[maybe_unused]] SdmaCacheLease cache_lease = acquire_write_cache_maintenance();
       const SdmaPacketExecutionOutcome outcome = atomic_fetch_add(
           operation, operation.signal_address, uint64_t{0} - operation.signal_data);
       if (outcome != SdmaPacketExecutionOutcome::Complete)
@@ -798,7 +834,6 @@ private:
   }
 
   SdmaPacketExecutionOutcome execute_fill(Operation &operation) {
-    cache_before_write(operation);
     while (operation.completed < operation.count) {
       if (operation.chunk_size == 0) {
         operation.chunk_size = static_cast<std::size_t>(
@@ -812,10 +847,10 @@ private:
                   : pattern[0];
         }
       }
-      const VmAccessOutcome outcome =
-          access_->write(operation.address + operation.completed,
-                         std::span<const std::byte>(operation.scratch).first(operation.chunk_size),
-                         operation.io_progress);
+      const VmAccessOutcome outcome = access_->write(
+          operation.address + operation.completed,
+          std::span<const std::byte>(operation.scratch).first(operation.chunk_size),
+          operation.io_progress, operation.transfer_token, true, data_maintenance_, data_ingress_);
       if (operation.io_progress != 0)
         state_->operation_committed = true;
       if (outcome != VmAccessOutcome::Complete)
@@ -829,9 +864,9 @@ private:
   }
 
   SdmaPacketExecutionOutcome execute_write(Operation &operation) {
-    cache_before_write(operation);
     const VmAccessOutcome outcome =
-        access_->write(operation.address, operation.payload, operation.io_progress);
+        access_->write(operation.address, operation.payload, operation.io_progress,
+                       operation.transfer_token, true, data_maintenance_, data_ingress_);
     if (operation.io_progress != 0)
       state_->operation_committed = true;
     if (outcome != VmAccessOutcome::Complete)
@@ -847,6 +882,10 @@ private:
       return SdmaPacketExecutionOutcome::Complete;
     const uint64_t signal_base = operation.address - sizeof(uint64_t);
     if (operation.completes_signal && operation.phase == 0) {
+      MemoryIngressAdmission admitted =
+          admit_memory_ingress(signal_base + 16, sizeof(uint64_t), VmAccessKind::Read);
+      if (admitted.outcome != VmAccessOutcome::Complete)
+        return map_outcome(admitted.outcome);
       VmAccessOutcome outcome =
           access_->read(signal_base + 16, operation.mailbox_bytes, operation.mailbox_read_progress);
       if (outcome != VmAccessOutcome::Complete)
@@ -855,6 +894,10 @@ private:
       operation.phase = 1;
     }
     if (operation.completes_signal && operation.phase == 1) {
+      MemoryIngressAdmission admitted =
+          admit_memory_ingress(signal_base + 24, sizeof(uint32_t), VmAccessKind::Read);
+      if (admitted.outcome != VmAccessOutcome::Complete)
+        return map_outcome(admitted.outcome);
       VmAccessOutcome outcome =
           access_->read(signal_base + 24, operation.event_bytes, operation.event_read_progress);
       if (outcome != VmAccessOutcome::Complete)
@@ -865,7 +908,11 @@ private:
     if (!operation.completes_signal)
       operation.phase = 2;
     if (operation.phase == 2) {
-      cache_before_write(operation);
+      MemoryIngressAdmission admitted =
+          admit_memory_ingress(operation.address, sizeof(uint64_t), VmAccessKind::Atomic);
+      if (admitted.outcome != VmAccessOutcome::Complete)
+        return map_outcome(admitted.outcome);
+      [[maybe_unused]] SdmaCacheLease cache_lease = acquire_write_cache_maintenance();
       const SdmaPacketExecutionOutcome outcome =
           atomic_fetch_add(operation, operation.address, operation.value);
       if (outcome != SdmaPacketExecutionOutcome::Complete)
@@ -873,7 +920,11 @@ private:
       operation.phase = 3;
     }
     if (operation.completes_signal && operation.phase == 3 && operation.mailbox != 0) {
-      cache_before_write(operation);
+      MemoryIngressAdmission admitted =
+          admit_memory_ingress(operation.mailbox, sizeof(uint64_t), VmAccessKind::Write);
+      if (admitted.outcome != VmAccessOutcome::Complete)
+        return map_outcome(admitted.outcome);
+      [[maybe_unused]] SdmaCacheLease cache_lease = acquire_write_cache_maintenance();
       const VmAccessOutcome outcome =
           access_->atomic_store(operation.mailbox, sizeof(uint64_t), operation.event_id);
       if (outcome != VmAccessOutcome::Complete)
@@ -899,7 +950,11 @@ private:
     case Kind::Copy:
       return execute_copy(operation);
     case Kind::Fence: {
-      cache_before_write(operation);
+      MemoryIngressAdmission admitted = admit_memory_ingress(
+          operation.address, static_cast<std::size_t>(operation.count), VmAccessKind::Write);
+      if (admitted.outcome != VmAccessOutcome::Complete)
+        return map_outcome(admitted.outcome);
+      [[maybe_unused]] SdmaCacheLease cache_lease = acquire_write_cache_maintenance();
       std::memcpy(operation.scratch.data(), &operation.value,
                   static_cast<std::size_t>(operation.count));
       const VmAccessOutcome outcome = access_->write(
@@ -922,6 +977,10 @@ private:
     case Kind::Poll: {
       uint64_t value = 0;
       if (operation.value32 != 0) {
+        MemoryIngressAdmission admitted = admit_memory_ingress(
+            operation.address, static_cast<std::size_t>(operation.count), VmAccessKind::Read);
+        if (admitted.outcome != VmAccessOutcome::Complete)
+          return map_outcome(admitted.outcome);
         const AtomicLoadResult loaded = access_->atomic_load(operation.address, operation.count);
         if (loaded.outcome != VmAccessOutcome::Complete)
           return map_outcome(loaded.outcome);
@@ -947,7 +1006,11 @@ private:
     case Kind::Timestamp: {
       if (operation.address <= 0x1000)
         return SdmaPacketExecutionOutcome::Complete;
-      cache_before_write(operation);
+      MemoryIngressAdmission admitted =
+          admit_memory_ingress(operation.address, sizeof(uint64_t), VmAccessKind::Write);
+      if (admitted.outcome != VmAccessOutcome::Complete)
+        return map_outcome(admitted.outcome);
+      [[maybe_unused]] SdmaCacheLease cache_lease = acquire_write_cache_maintenance();
       if (!operation.timestamp_captured) {
         operation.value = callbacks_.timestamp ? callbacks_.timestamp() : 0;
         operation.timestamp_captured = true;
@@ -984,6 +1047,10 @@ private:
     case Kind::Indirect: {
       if (state_->frames.size() > kMaxIndirectDepth)
         return SdmaPacketExecutionOutcome::Malformed;
+      MemoryIngressAdmission admitted =
+          admit_memory_ingress(operation.address, operation.indirect.size(), VmAccessKind::Read);
+      if (admitted.outcome != VmAccessOutcome::Complete)
+        return map_outcome(admitted.outcome);
       const VmAccessOutcome outcome =
           access_->read(operation.address, operation.indirect, operation.io_progress);
       if (outcome != VmAccessOutcome::Complete)
@@ -997,6 +1064,10 @@ private:
       return SdmaPacketExecutionOutcome::Complete;
     }
     case Kind::Conditional: {
+      MemoryIngressAdmission admitted =
+          admit_memory_ingress(operation.address, sizeof(uint32_t), VmAccessKind::Read);
+      if (admitted.outcome != VmAccessOutcome::Complete)
+        return map_outcome(admitted.outcome);
       const VmAccessOutcome outcome =
           access_->read(operation.address, std::span(operation.scratch).first(sizeof(uint32_t)),
                         operation.io_progress);
@@ -1054,9 +1125,20 @@ private:
       Operation *operation = &*state_->operation;
       const std::size_t dwords = operation->dwords;
       const Kind kind = operation->kind;
-      const SdmaPacketExecutionOutcome outcome = execute(*operation, frame);
+      SdmaPacketExecutionOutcome outcome;
+      try {
+        outcome = execute(*operation, frame);
+      } catch (const CacheMaintenanceUnavailable &) {
+        // Tokenized writes update io_progress after each committed physical
+        // span. A later maintenance refusal can unwind before execute() gets
+        // to copy that progress into the packet-level committed flag.
+        if (operation->io_progress != 0 &&
+            (kind == Kind::Write || kind == Kind::Fill ||
+             (kind == Kind::Copy && operation->destination_index != 0)))
+          state_->operation_committed = true;
+        return result(SdmaPacketExecutionOutcome::Unavailable);
+      }
       if (outcome == SdmaPacketExecutionOutcome::Unavailable) {
-        operation->cache_lease.reset();
         return result(outcome);
       }
       if (outcome != SdmaPacketExecutionOutcome::Complete)
@@ -1071,6 +1153,9 @@ private:
 
   SdmaPacketDialect dialect_;
   SdmaPacketCallbacks callbacks_;
+  VmTransferMaintenance data_maintenance_;
+  VmTransferIngress data_ingress_;
+  VmPrivateUcGttCopySource copy_source_;
   State *state_ = nullptr;
   const GpuVmAccess *access_ = nullptr;
 };

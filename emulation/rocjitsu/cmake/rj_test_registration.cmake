@@ -137,6 +137,7 @@ if(RJ_INSTALL_TESTS)
     install(
         FILES
             "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
+            "${PROJECT_SOURCE_DIR}/cmake/rj_run_exact_gtest.cmake"
             "${PROJECT_SOURCE_DIR}/cmake/rj_run_gtest_shard.cmake"
         DESTINATION ${RJ_INSTALL_TEST_DIR}
     )

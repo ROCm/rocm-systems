@@ -775,10 +775,12 @@ TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAc
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   constexpr uint64_t kSharedBase = 0x1000'0000;
-  cu->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
   auto *wave = cu->dispatch_wf_at(/*wf_id=*/1, /*wg_id=*/7, /*pc=*/0x300,
                                   /*num_sgprs=*/104, /*num_vgprs=*/256);
   ASSERT_NE(wave, nullptr);
+  // Distinct shader VMID banks may give each wave its own aperture; the CU's
+  // legacy default intentionally remains zero throughout this route.
+  wave->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
   wave->set_dispatch_id(31);
   wave->set_exec(0b1111);
   wave->set_lds_base(0x400);

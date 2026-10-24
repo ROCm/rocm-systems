@@ -18,8 +18,10 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -34,8 +36,16 @@ public:
 
   /// @brief Connect to @p socket_path and negotiate a protocol version.
   /// @param[in] socket_path Filesystem path of the server's AF_UNIX socket.
+  /// @param[in] max_version_reply_bytes Maximum total VERSION reply size, or zero for no limit.
   /// @retval true The server accepted the connection and the version handshake.
-  [[nodiscard]] bool connect(const std::string &socket_path);
+  [[nodiscard]] bool connect(const std::string &socket_path,
+                             std::size_t max_version_reply_bytes = 0);
+  [[nodiscard]] bool last_reply_was_error() const noexcept { return last_reply_was_error_; }
+
+  /// @brief Bound a pending protocol request on this connected test socket.
+  /// @details Set before launching a request on another thread. The socket's
+  /// send and receive calls return failure if the server does not make progress.
+  [[nodiscard]] bool set_io_timeout(std::chrono::seconds timeout);
 
   /// @brief Read the number of regions and interrupts the device advertises.
   /// @param[out] region_count Regions reported.
@@ -86,12 +96,16 @@ public:
   ///               away from the device, so a true return does not mean the
   ///               device can reach it.
   /// @param[in] fd_offset Offset into @p fd of the window base.
-  [[nodiscard]] bool dma_map(uint64_t iova, uint64_t size, int fd, uint64_t fd_offset);
+  /// @param[in] padding_bytes Extra zeroed ordinary-map payload bytes.
+  [[nodiscard]] bool dma_map(uint64_t iova, uint64_t size, int fd, uint64_t fd_offset,
+                             uint32_t padding_bytes = 0, bool writable = true);
 
   /// @brief Withdraw a previously shared window.
   /// @param[in] iova Guest-physical base address of the window.
   /// @param[in] size Window length in bytes.
   [[nodiscard]] bool dma_unmap(uint64_t iova, uint64_t size);
+
+  [[nodiscard]] bool device_reset();
 
 private:
   [[nodiscard]] bool send(uint16_t command, std::span<const std::byte> payload, int fd);
@@ -106,6 +120,7 @@ private:
 
   int socket_ = -1;
   uint16_t next_message_id_ = 1;
+  bool last_reply_was_error_ = false;
 };
 
 } // namespace rocjitsu::test

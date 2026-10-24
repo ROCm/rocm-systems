@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "async_vm_test_support.h"
 #include "rocjitsu/vm/amdgpu/sdma_ring_consumer.h"
 
 #include <gtest/gtest.h>
@@ -218,6 +219,37 @@ TEST(SdmaRingConsumerTest, InitialCursorOverridesMemoryAndAbsentCursorUsesAtomic
   EXPECT_EQ(loaded.service(12), SdmaRingStatus::Idle);
   EXPECT_EQ(loaded.cursor(), 12u);
   EXPECT_EQ(fixture.memory->atomic_load_attempts(RingConsumerFixture::kReadPointer), 1u);
+}
+
+TEST(SdmaRingConsumerTest, ClosedIngressBlocksRingFetchAndCursorPublicationWithoutReplay) {
+  RingConsumerFixture fixture;
+  fixture.memory->store<uint32_t>(RingConsumerFixture::kRing, 0); // NOP.
+  bool ring_open = false;
+  bool cursor_write_open = false;
+  SdmaPacketCallbacks callbacks;
+  callbacks.admit_memory_ingress = [&](const GpuVmAccess &,
+                                       std::span<const MemoryIngressSpan> spans) {
+    EXPECT_EQ(spans.size(), 1u);
+    const MemoryIngressSpan &span = spans.front();
+    if ((span.address == RingConsumerFixture::kRing && !ring_open) ||
+        (span.address == RingConsumerFixture::kReadPointer && span.access == VmAccessKind::Write &&
+         !cursor_write_open))
+      return MemoryIngressAdmission{.outcome = VmAccessOutcome::Unavailable, .permit = {}};
+    return MemoryIngressAdmission{};
+  };
+  SdmaRingConsumer consumer = fixture.make_consumer(0, 64, std::move(callbacks));
+
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Blocked);
+  EXPECT_EQ(fixture.memory->read_attempts(RingConsumerFixture::kRing), 0u);
+  EXPECT_EQ(consumer.cursor(), 0u);
+  ring_open = true;
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Blocked);
+  EXPECT_EQ(fixture.memory->read_attempts(RingConsumerFixture::kRing), 1u);
+  EXPECT_EQ(fixture.memory->load<uint64_t>(RingConsumerFixture::kReadPointer), 0u);
+  cursor_write_open = true;
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Idle);
+  EXPECT_EQ(fixture.memory->read_attempts(RingConsumerFixture::kRing), 1u);
+  EXPECT_EQ(fixture.memory->load<uint64_t>(RingConsumerFixture::kReadPointer), 4u);
 }
 
 TEST(SdmaRingConsumerTest, FetchesAcrossRingWrapWithoutReplayingCompletedSegment) {
@@ -534,6 +566,75 @@ TEST(SdmaRingConsumerTest, ReconfigureIsIdleOnlyAndResetDiscardsRetryAndTerminal
   consumer.reset();
   EXPECT_FALSE(consumer.terminal());
   EXPECT_FALSE(consumer.in_flight());
+}
+
+TEST(SdmaRingConsumerTest, DeferredRingFetchResumesWithoutRefetchOrWorkerWait) {
+  test::AsyncVmHarness sim;
+  auto memory = std::make_shared<test::AsyncVmMemory>(*sim.owner, 0x400, 0x100, 0x104);
+  GpuVm vm;
+  const AddressSpaceHandle handle = vm.register_translated(7, memory, memory);
+  const std::array<std::byte, 4> nop{};
+  memory->store(0x100, nop);
+  SdmaRingConsumer consumer(vm,
+                            {.address_space = handle,
+                             .ring_base = 0x100,
+                             .ring_bytes = 64,
+                             .read_pointer_address = 0x80,
+                             .initial_cursor = 0},
+                            SdmaPacketDialect::Legacy);
+
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Blocked);
+  EXPECT_EQ(consumer.cursor(), 0u);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  (void)sim.engine.step();
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Idle);
+  EXPECT_EQ(consumer.cursor(), 4u);
+  EXPECT_EQ(memory->backing->read_effects, 1u);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_FALSE(consumer.in_flight());
+}
+
+TEST(SdmaRingConsumerTest, ResetCancelsDeferredRingFetchWithoutLateRead) {
+  test::AsyncVmHarness sim;
+  auto memory = std::make_shared<test::AsyncVmMemory>(*sim.owner, 0x400, 0x100, 0x104);
+  GpuVm vm;
+  const AddressSpaceHandle handle = vm.register_translated(7, memory, memory);
+  const std::array<std::byte, 4> nop{};
+  memory->store(0x100, nop);
+  SdmaRingConsumer consumer(vm,
+                            {.address_space = handle,
+                             .ring_base = 0x100,
+                             .ring_bytes = 64,
+                             .read_pointer_address = 0x80,
+                             .initial_cursor = 0},
+                            SdmaPacketDialect::Legacy);
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Blocked);
+  consumer.reset();
+  EXPECT_FALSE(consumer.in_flight());
+  (void)sim.engine.step();
+  EXPECT_EQ(memory->backing->read_effects, 0u);
+  EXPECT_GE(memory->backing->cancellations, 1u);
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 2u);
+}
+
+TEST(SdmaRingConsumerTest, DeferredControlPointerIsRejectedWithoutPosting) {
+  test::AsyncVmHarness sim;
+  auto memory = std::make_shared<test::AsyncVmMemory>(*sim.owner, 0x400, 0x80, 0x88);
+  GpuVm vm;
+  const AddressSpaceHandle handle = vm.register_translated(7, memory, memory);
+  SdmaRingConsumer consumer(vm,
+                            {.address_space = handle,
+                             .ring_base = 0x100,
+                             .ring_bytes = 64,
+                             .read_pointer_address = 0x80,
+                             .initial_cursor = std::nullopt},
+                            SdmaPacketDialect::Legacy);
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Malformed);
+  EXPECT_EQ(memory->backing->posts, 0u);
+  EXPECT_EQ(memory->backing->read_effects, 0u);
 }
 
 } // namespace

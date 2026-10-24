@@ -31,13 +31,34 @@ enum class LegacyHostExtentOwner : uint8_t {
   Application,
 };
 
+/// @brief Which device interface owns the GPU VA covered by an extent.
+/// @details This is independent of who owns the host storage. In particular,
+/// both a KFD allocation and a GEM BO may use application-owned host pages.
+enum class LegacyGpuVaOwnerKind : uint8_t { Kfd, Gem };
+
+struct LegacyGpuVaOwner {
+  LegacyGpuVaOwnerKind kind = LegacyGpuVaOwnerKind::Kfd;
+  /// Optional allocation or BO identity for ownership-preserving teardown.
+  uint64_t identity = 0;
+
+  bool operator==(const LegacyGpuVaOwner &) const = default;
+};
+
 /// @brief One host-backed interval within a GPU page.
 class LegacyHostExtent {
 public:
+  LegacyHostExtent() = default;
+  LegacyHostExtent(uint8_t *host, std::size_t backed_bytes, std::size_t page_offset,
+                   LegacyHostExtentOwner storage_owner = LegacyHostExtentOwner::Application,
+                   LegacyGpuVaOwner gpu_va_owner = {})
+      : host_ptr(host), host_backed_bytes(backed_bytes), gpu_page_offset(page_offset),
+        owner(storage_owner), va_owner(gpu_va_owner) {}
+
   uint8_t *host_ptr = nullptr;
   std::size_t host_backed_bytes = 0;
   std::size_t gpu_page_offset = 0;
   LegacyHostExtentOwner owner = LegacyHostExtentOwner::Application;
+  LegacyGpuVaOwner va_owner;
 
   bool operator==(const LegacyHostExtent &) const = default;
 };
@@ -47,12 +68,15 @@ class LegacyPageTableEntry {
 public:
   LegacyPageTableEntry() = default;
   LegacyPageTableEntry(uint8_t *host_ptr, Mtype page_mtype,
-                       LegacyHostExtentOwner owner = LegacyHostExtentOwner::Application)
-      : mtype(page_mtype), host_extents{{host_ptr, kLegacyPageSize, 0, owner}} {}
+                       LegacyHostExtentOwner owner = LegacyHostExtentOwner::Application,
+                       LegacyGpuVaOwner va_owner = {})
+      : mtype(page_mtype), host_extents{{host_ptr, kLegacyPageSize, 0, owner, va_owner}} {}
   LegacyPageTableEntry(uint8_t *host_ptr, Mtype page_mtype, std::size_t host_backed_bytes,
                        std::size_t gpu_page_offset,
-                       LegacyHostExtentOwner owner = LegacyHostExtentOwner::Application)
-      : mtype(page_mtype), host_extents{{host_ptr, host_backed_bytes, gpu_page_offset, owner}} {}
+                       LegacyHostExtentOwner owner = LegacyHostExtentOwner::Application,
+                       LegacyGpuVaOwner va_owner = {})
+      : mtype(page_mtype),
+        host_extents{{host_ptr, host_backed_bytes, gpu_page_offset, owner, va_owner}} {}
 
   Mtype mtype = Mtype::RW;
   std::vector<LegacyHostExtent> host_extents;

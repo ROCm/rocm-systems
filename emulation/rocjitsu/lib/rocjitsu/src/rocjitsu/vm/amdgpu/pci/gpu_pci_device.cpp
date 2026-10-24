@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/pci/graphics_block_model.h"
 #include "rocjitsu/vm/amdgpu/pci/interrupt_block_model.h"
 #include "rocjitsu/vm/amdgpu/pci/ip_discovery.h"
@@ -10,6 +11,7 @@
 #include "rocjitsu/vm/amdgpu/pci/memory_hub_block_model.h"
 #include "rocjitsu/vm/amdgpu/pci/mes_block_model.h"
 #include "rocjitsu/vm/amdgpu/pci/mmio_registers.h"
+#include "rocjitsu/vm/amdgpu/pci/nbif_hdp_block_model.h"
 #include "rocjitsu/vm/amdgpu/pci/sdma_block_model.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_binding_factory.h"
 #include "rocjitsu/vm/soc.h"
@@ -29,6 +31,7 @@
 #include <cstring>
 #include <format>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -58,27 +61,6 @@ constexpr uint32_t kIndirectMemorySelect = 0x80000000;
 
 /// @brief Address bit at which the high index register begins.
 constexpr unsigned kIndirectHighShift = 31;
-
-/// @brief Where an HDP flush is issued, per NBIF version.
-///
-/// @details The hole is not a register of any block but an address the bus
-/// reserves, and which address that is depends on the bus.
-/// `nbio_v7_11_set_reg_remap` points a gfx1250-class driver at this one; another
-/// NBIF version has its own remap function and its own answer, so this is keyed
-/// rather than applied to whatever bus the published table happens to describe.
-struct HdpFlushHole {
-  uint16_t major;       ///< NBIF major version.
-  uint16_t minor;       ///< NBIF minor version.
-  uint16_t revision;    ///< NBIF revision.
-  uint64_t byte_offset; ///< Byte offset into the register BAR.
-};
-
-constexpr HdpFlushHole kHdpFlushHoles[] = {
-    {.major = 7, .minor = 11, .revision = 0, .byte_offset = 0x44000},
-    {.major = 7, .minor = 11, .revision = 1, .byte_offset = 0x44000},
-    {.major = 7, .minor = 11, .revision = 2, .byte_offset = 0x44000},
-    {.major = 7, .minor = 11, .revision = 3, .byte_offset = 0x44000},
-};
 
 /// @brief A block the device knows how to model, and what to do without it.
 ///
@@ -132,6 +114,12 @@ const BlockModelBinding kBlockModels[] = {
        return MemoryHubBlockModel::create(block, std::move(registers));
      },
      true},
+    {IpHardwareId::Nbif,
+     [](const IpBlock &block, const IpDiscoverySpec &,
+        IpRegisterWindow registers) -> std::unique_ptr<IpBlockModel> {
+       return NbifHdpBlockModel::create(block, std::move(registers));
+     },
+     false},
     {IpHardwareId::OssSys,
      [](const IpBlock &block, const IpDiscoverySpec &,
         IpRegisterWindow registers) -> std::unique_ptr<IpBlockModel> {
@@ -161,7 +149,11 @@ constexpr uint8_t kGraphicsInterruptClient = 0x14;
 constexpr uint8_t kCpEndOfPipeSource = 181;
 constexpr uint8_t kSdmaInterruptClient = 0x0a;
 constexpr uint8_t kSdmaTrapSource = 49;
+constexpr uint8_t kUtcl2InterruptClient = 0x1b;
+constexpr uint8_t kUtcl2VmFaultSource = 0;
 constexpr uint8_t kFirstComputeVmid = 1;
+// The selected GFX12.1 guest reserves lower VMIDs and admits KFD faults from 3.
+constexpr uint8_t kFirstGfx121KfdVmid = 3;
 constexpr uint8_t kFirstXccInterruptNode = 2;
 
 } // namespace
@@ -256,9 +248,12 @@ GpuPciDevice::GpuPciDevice(std::string name, const GpuPciDeviceSpec &spec, BarAc
         [this](const amdgpu::SdmaQueueContext &context) {
           return make_sdma_progress_observer(context);
         });
-    interrupt_subscription_ =
-        amdgpu::InterruptSubscription([this](uint32_t process_id, uint32_t event_id) {
+    interrupt_subscription_ = amdgpu::InterruptSubscription(
+        [this](uint32_t process_id, uint32_t event_id) {
           enqueue_cp_interrupt(process_id, event_id);
+        },
+        [this](uint32_t process_id, uint64_t address, amdgpu::VmAccessKind access) {
+          enqueue_vm_fault_interrupt(process_id, address, access);
         });
   }
 
@@ -290,6 +285,12 @@ GpuPciDevice::GpuPciDevice(std::string name, const GpuPciDeviceSpec &spec, BarAc
     util::Logger::warn(std::format(
         "{}: the device-global VMID-0 address space could not be initialized", this->name()));
     return;
+  }
+  if (soc_ != nullptr) {
+    // A PCI peer read must use the current backing and grant. A CU reused
+    // after another frontend may still have a peer-cache shortcut installed.
+    soc_->for_each_cu(
+        [](amdgpu::ComputeUnitCore *cu) { cu->set_peer_cache_read_handlers({}, {}); });
   }
   usable_ = true;
 }
@@ -361,6 +362,8 @@ bool GpuPciDevice::shutdown_frontend() {
   if (frontend_shutdown_)
     return frontend_shutdown_complete_;
 
+  // Doorbell closure may wait for admitted frontend work; PT effects must
+  // stop entering before that drain begins.
   close_doorbell_admission_for_reset();
   // Refuse and drain transport work before detaching any queue, translation,
   // interrupt route, or backing storage it may still be using.
@@ -376,8 +379,11 @@ bool GpuPciDevice::shutdown_frontend() {
   // Sever those routes while the core is known to be alive; the topology may
   // destroy that core before it later destroys this sibling PCI component.
   for (const OwnedBlockModel &owned : models_) {
-    if (auto *hub = dynamic_cast<MemoryHubBlockModel *>(owned.model_.get()); hub != nullptr)
+    if (auto *hub = dynamic_cast<MemoryHubBlockModel *>(owned.model_.get()); hub != nullptr) {
       hub->attach_soc(nullptr);
+    }
+    if (auto *hdp = dynamic_cast<NbifHdpBlockModel *>(owned.model_.get()); hdp != nullptr)
+      hdp->attach_soc(nullptr);
   }
   if (mes_ != nullptr) {
     if (!mes_->detach_engine())
@@ -390,6 +396,7 @@ bool GpuPciDevice::shutdown_frontend() {
   interrupts_ = nullptr;
   mes_ = nullptr;
   sdma_ = nullptr;
+  hdp_ = nullptr;
   soc_ = nullptr;
   frontend_shutdown_complete_ = queues_released && gart_cleared;
   frontend_shutdown_ = true;
@@ -404,6 +411,7 @@ std::vector<simdojo::BarSpec> GpuPciDevice::bars() const {
   vram.prefetch = true;
   vram.is_64bit = true;
   vram.backing_fd = vram_.has_value() ? vram_->fd() : -1;
+  vram.backing_id = vram_.has_value() ? vram_->backing_id() : 0;
   if (vram.backing_fd >= 0) {
     vram.mmap_areas.push_back({.offset = 0, .length = spec_.vram_aperture_bytes});
   }
@@ -440,6 +448,7 @@ std::vector<simdojo::BarSpec> GpuPciDevice::bars() const {
 }
 
 void GpuPciDevice::reset_registers() {
+  const std::lock_guard command_lock(register_command_mutex_);
   // The registers the driver reads before it can locate the IP discovery table.
   // Reporting no memory, or all-ones, makes it give up before it starts.
   registers_.define(byte_offset_of(MmioRegister::RccConfigMemsize), vram_megabytes_);
@@ -463,29 +472,6 @@ void GpuPciDevice::reset_registers() {
   // pre-discovery aperture and is named, so leaving it undefined would report it
   // as a register this device does not model when in fact it has an answer.
   registers_.define(byte_offset_of(MmioRegister::IpDiscoveryVersion), kIpDiscoveryVersion);
-
-  // Accepting the flush is the whole model; the driver orders it with a read of
-  // a different register and never reads this one back. Which address the flush
-  // is issued at follows the bus, so it comes from the NBIF version the table
-  // declares; a bus with no known hole simply has none answered, and the driver
-  // for it would be reaching somewhere this device has not modelled.
-  if (const IpBlock *nbif = blocks_.find(IpHardwareId::Nbif, kModelledInstance); nbif != nullptr) {
-    bool holed = false;
-    for (const HdpFlushHole &hole : kHdpFlushHoles) {
-      if (hole.major == nbif->major && hole.minor == nbif->minor &&
-          hole.revision == nbif->revision) {
-        registers_.define(hole.byte_offset, 0);
-        holed = true;
-        break;
-      }
-    }
-    if (!holed) {
-      util::Logger::warn(std::format(
-          "{}: no HDP flush hole is known for NBIF {}.{}.{}, so a flush issued through the bus "
-          "remap will not be answered",
-          name(), nbif->major, nbif->minor, nbif->revision));
-    }
-  }
 
   // Every block this device models, back to its power-on values.
   //
@@ -539,7 +525,7 @@ void GpuPciDevice::build_block_models() {
     // rather than refused -- the model's own reset reports that, and reports it
     // per register.
     for (const RegisterClaim &claim : model->claims()) {
-      const std::optional<uint64_t> at = window.resolve(claim.segment_index, claim.first_dword);
+      const std::optional<uint64_t> at = model->resolve_claim(claim);
       if (at.has_value()) {
         claimed.push_back(
             {.owner = model->what(), .first_dword = dword_index_of(*at), .count = claim.count});
@@ -555,8 +541,16 @@ void GpuPciDevice::build_block_models() {
       interrupts_ = interrupts;
     }
     if (auto *mes = dynamic_cast<MesBlockModel *>(model.get()); mes != nullptr) {
-      if (soc_ != nullptr && !mes->attach_engine(soc_->mes_engine(), sdma_queue_binding_factory_,
-                                                 interrupt_subscription_.sink())) {
+      if (soc_ != nullptr &&
+          !mes->attach_engine(soc_->mes_engine(), sdma_queue_binding_factory_,
+                              interrupt_subscription_.sink(),
+                              [fault_sink = interrupt_subscription_.sink()] {
+                                return amdgpu::InterruptSubscription(
+                                    {}, [fault_sink](uint32_t process_id, uint64_t address,
+                                                     amdgpu::VmAccessKind access) {
+                                      fault_sink.report_vm_fault(process_id, address, access);
+                                    });
+                              })) {
         util::Logger::warn(std::format("{}: cannot attach the MES core engine", name()));
         models_complete_ = false;
       }
@@ -564,6 +558,10 @@ void GpuPciDevice::build_block_models() {
     }
     if (auto *hub = dynamic_cast<MemoryHubBlockModel *>(model.get()); hub != nullptr) {
       hub->attach_soc(soc_);
+    }
+    if (auto *hdp = dynamic_cast<NbifHdpBlockModel *>(model.get()); hdp != nullptr) {
+      hdp->attach_soc(soc_);
+      hdp_ = hdp;
     }
     if (auto *sdma = dynamic_cast<SdmaBlockModel *>(model.get()); sdma != nullptr) {
       sdma->attach_soc(soc_);
@@ -696,6 +694,32 @@ void GpuPciDevice::enqueue_cp_interrupt(uint32_t process_id, uint32_t event_id) 
                           InterruptRequestKind::Completion);
 }
 
+void GpuPciDevice::enqueue_vm_fault_interrupt(uint32_t process_id, uint64_t address,
+                                              amdgpu::VmAccessKind access) {
+  if (process_id == 0 || process_id > std::numeric_limits<uint16_t>::max()) {
+    util::Logger::warn(
+        std::format("{}: cannot deliver a VM fault for PASID {}", name(), process_id));
+    return;
+  }
+  // GFX12.1 KFD accepts the UTCL2 no-retry fault source for a compute VMID.
+  // The VM access result does not distinguish a missing page from a permission
+  // failure, so leave the ring's fault-reason bits clear rather than claiming
+  // either cause. KFD still signals a device-memory-violation event.
+  (void)access;
+  const bool queued = enqueue_interrupt({.client_id = kUtcl2InterruptClient,
+                                         .source_id = kUtcl2VmFaultSource,
+                                         .vmid = kFirstGfx121KfdVmid,
+                                         .pasid = static_cast<uint16_t>(process_id),
+                                         .node_id = kFirstXccInterruptNode,
+                                         .data = {static_cast<uint32_t>(address >> 12),
+                                                  static_cast<uint32_t>((address >> 44) & 0xf)}},
+                                        InterruptRequestKind::VmFault);
+  util::Logger::cp([&](auto &os) {
+    os << std::format("{}: VM_FAULT_INTERRUPT queued={} pasid={} va={:#x}", name(), queued,
+                      process_id, address);
+  });
+}
+
 void GpuPciDevice::drain_interrupts() {
   std::deque<InterruptRequest> requests;
   {
@@ -720,6 +744,16 @@ void GpuPciDevice::drain_interrupts() {
         util::Logger::warn(std::format("{}: could not deliver CP event {} for PASID {}", name(),
                                        request.entry.data[0], request.entry.pasid));
       }
+    } else if (request.kind == InterruptRequestKind::VmFault) {
+      util::Logger::cp([&](auto &os) {
+        os << std::format("{}: VM_FAULT_INTERRUPT delivered={} pasid={} page={:#x}", name(),
+                          delivered, request.entry.pasid,
+                          uint64_t{request.entry.data[0]} |
+                              (uint64_t{request.entry.data[1] & 0xf} << 32));
+      });
+      if (!delivered)
+        util::Logger::warn(std::format("{}: could not deliver VM fault for PASID {}", name(),
+                                       request.entry.pasid));
     } else if (delivered) {
       util::Logger::warn(interrupt_ring().raises_messages
                              ? "vfu: delivered an interrupt on request"
@@ -853,6 +887,11 @@ void GpuPciDevice::set_sdma_pci_effect_admitted_hook_for_test(std::function<void
 
 void GpuPciDevice::deliver_cp_interrupt_for_test(uint32_t process_id, uint32_t event_id) {
   interrupt_subscription_.sink().deliver(process_id, event_id);
+}
+
+void GpuPciDevice::report_vm_fault_for_test(uint32_t process_id, uint64_t address,
+                                            amdgpu::VmAccessKind access) {
+  enqueue_vm_fault_interrupt(process_id, address, access);
 }
 
 std::thread::id GpuPciDevice::last_cp_interrupt_thread_for_test() {
@@ -998,6 +1037,7 @@ uint64_t GpuPciDevice::indirect_address() const {
 }
 
 int64_t GpuPciDevice::access_registers(std::span<std::byte> buf, uint64_t offset, bool write) {
+  const std::lock_guard command_lock(register_command_mutex_);
   // Registers are 32 bits wide and naturally aligned; anything else is a driver
   // bug or a transport bug, and answering it would hide which. A device that
   // refused its own configuration has no aperture at all, and holds() says so.
@@ -1027,7 +1067,8 @@ int64_t GpuPciDevice::access_registers(std::span<std::byte> buf, uint64_t offset
     uint32_t value = 0;
     if (write) {
       std::memcpy(&value, buf.data(), sizeof(value));
-      (void)vram_->write(indirect_address(), value);
+      if (vram_->write(indirect_address(), value) && soc_ != nullptr)
+        soc_->cache_coherence()->publish_local_backing_write(indirect_address(), sizeof(value));
     } else {
       (void)vram_->read(indirect_address(), value);
       std::memcpy(buf.data(), &value, sizeof(value));
@@ -1044,13 +1085,14 @@ int64_t GpuPciDevice::access_registers(std::span<std::byte> buf, uint64_t offset
     if (modelled && !registers_.read_only(offset)) {
       uint32_t value = 0;
       std::memcpy(&value, buf.data(), sizeof(value));
-      (void)registers_.store(offset, value);
+      const bool stored = registers_.store(offset, value);
       // The blocks learn what the driver said from the registers themselves,
       // after the write has landed. Told where rather than what, because a model
       // that was handed the value would be deciding what a field means twice --
       // once here and once when it reads the register back.
-      for (const OwnedBlockModel &owned : models_) {
-        owned.model_->observe_register_write(offset, *this);
+      if (stored) {
+        for (const OwnedBlockModel &owned : models_)
+          owned.model_->observe_register_write(offset, *this);
       }
     }
     return 4;
@@ -1112,9 +1154,8 @@ int64_t GpuPciDevice::bar_access(int bar, std::span<std::byte> buf, uint64_t off
       return -1;
     }
     if (write) {
-      return vram_->write_all(std::span<const std::byte>(buf), offset)
-                 ? static_cast<int64_t>(buf.size())
-                 : -1;
+      return write_vram(offset, std::span<const std::byte>(buf)) ? static_cast<int64_t>(buf.size())
+                                                                 : -1;
     }
     return vram_->read_all(buf, offset) ? static_cast<int64_t>(buf.size()) : -1;
   default:
@@ -1377,6 +1418,9 @@ void GpuPciDevice::drain_doorbell_inbox_for_test() {
   else
     drain_doorbell_retry_inbox(0, true);
 
+  // Shutdown may begin once the admitted doorbell observer returns. Keep the
+  // frontend attached while this test-only owner drain inspects SDMA state.
+  const std::lock_guard reset_lock(doorbell_reset_mutex_);
   if (soc_ == nullptr || soc_->sdma_queue_scheduler().active_queues() == 0)
     return;
 
@@ -1444,7 +1488,11 @@ bool GpuPciDevice::read_vram(uint64_t offset, std::span<std::byte> bytes) {
 }
 
 bool GpuPciDevice::write_vram(uint64_t offset, std::span<const std::byte> bytes) {
-  return vram_.has_value() && vram_->write_all(bytes, offset);
+  if (!vram_.has_value() || !vram_->write_all(bytes, offset))
+    return false;
+  if (soc_ != nullptr)
+    soc_->cache_coherence()->publish_local_backing_write(offset, bytes.size());
+  return true;
 }
 
 amdgpu::AtomicLoadResult GpuPciDevice::atomic_load_vram(uint64_t offset, uint32_t width) {
@@ -1460,8 +1508,11 @@ amdgpu::VmAccessOutcome GpuPciDevice::atomic_store_vram(uint64_t offset, uint32_
                                                         uint64_t value) {
   if (!vram_.has_value())
     return amdgpu::VmAccessOutcome::Unavailable;
-  return vram_->atomic_store(offset, width, value) ? amdgpu::VmAccessOutcome::Complete
-                                                   : amdgpu::VmAccessOutcome::Faulted;
+  if (!vram_->atomic_store(offset, width, value))
+    return amdgpu::VmAccessOutcome::Faulted;
+  if (soc_ != nullptr)
+    soc_->cache_coherence()->publish_local_backing_write(offset, width);
+  return amdgpu::VmAccessOutcome::Complete;
 }
 
 amdgpu::AtomicCompareExchangeResult GpuPciDevice::compare_exchange_vram(uint64_t offset,
@@ -1474,12 +1525,15 @@ amdgpu::AtomicCompareExchangeResult GpuPciDevice::compare_exchange_vram(uint64_t
       vram_->compare_exchange(offset, width, expected, desired);
   if (!result.has_value())
     return {.outcome = amdgpu::VmAccessOutcome::Faulted};
+  if (result->exchanged && soc_ != nullptr)
+    soc_->cache_coherence()->publish_local_backing_write(offset, width);
   return {.outcome = amdgpu::VmAccessOutcome::Complete,
           .observed = result->observed,
           .exchanged = result->exchanged};
 }
 
 bool GpuPciDevice::read_register(uint64_t byte_offset, uint32_t &value) {
+  const std::lock_guard command_lock(register_command_mutex_);
   if (!registers_.holds(byte_offset)) {
     return false;
   }
@@ -1488,6 +1542,7 @@ bool GpuPciDevice::read_register(uint64_t byte_offset, uint32_t &value) {
 }
 
 bool GpuPciDevice::write_register(uint64_t byte_offset, uint32_t value) {
+  const std::lock_guard command_lock(register_command_mutex_);
   if (!registers_.holds(byte_offset)) {
     return false;
   }
@@ -1498,6 +1553,15 @@ bool GpuPciDevice::write_register(uint64_t byte_offset, uint32_t value) {
       owned.model_->observe_register_write(byte_offset, *this);
     }
   }
+  return true;
+}
+
+bool GpuPciDevice::program_shader_apertures(uint32_t vmid, uint64_t shared_base,
+                                            uint64_t shared_limit, uint64_t private_base,
+                                            uint64_t private_limit) {
+  if (soc_ == nullptr)
+    return false;
+  soc_->set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit);
   return true;
 }
 
@@ -1516,6 +1580,7 @@ void GpuPciDevice::reset(simdojo::ResetKind kind) {
       // the replacement frontend's coherent GART configuration.
       if (!soc_->gpu_vm().clear_gart_binding())
         throw std::runtime_error("VMID-0 GART binding could not be cleared");
+      soc_->clear_vmid_apertures();
     }
     // Everything a client could have changed goes back to power-on state. Video
     // memory is not cleared here: a mapping already handed out cannot be taken
@@ -1530,7 +1595,8 @@ void GpuPciDevice::reset(simdojo::ResetKind kind) {
     // in memory the security processor reserves and the driver cannot write; here
     // it is ordinary video memory, reachable through MM_DATA, so a guest that
     // scribbles over it once would otherwise make every later bind fail.
-    if (!publish_discovery_table()) {
+    const bool discovery_restored = publish_discovery_table();
+    if (!discovery_restored) {
       util::Logger::warn(std::format("{}: the discovery table could not be restored, so a driver "
                                      "binding after this reset will refuse the device",
                                      name()));

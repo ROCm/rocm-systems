@@ -328,11 +328,18 @@ TEST_F(GpuQueueRegistryTest, GracefulClosePreservesBusyAndFaultedBindingsForForc
   EXPECT_TRUE(busy.found);
   EXPECT_EQ(busy.status, QueueCloseStatus::Busy);
   EXPECT_TRUE(registry_.contains(handle));
+  const QueueCloseResult preempt_busy = registry_.unregister_queue(handle, QueueCloseMode::Preempt);
+  EXPECT_EQ(preempt_busy.status, QueueCloseStatus::Busy);
+  EXPECT_TRUE(registry_.contains(handle));
 
   control->prepare_status = QueuePrepareCloseStatus::Faulted;
   const QueueCloseResult faulted = registry_.unregister_queue(handle);
   EXPECT_TRUE(faulted.found);
   EXPECT_EQ(faulted.status, QueueCloseStatus::Faulted);
+  EXPECT_TRUE(registry_.contains(handle));
+  const QueueCloseResult preempt_faulted =
+      registry_.unregister_queue(handle, QueueCloseMode::Preempt);
+  EXPECT_EQ(preempt_faulted.status, QueueCloseStatus::Faulted);
   EXPECT_TRUE(registry_.contains(handle));
 
   EXPECT_TRUE(registry_.unregister_queue(handle, QueueCloseMode::ForceCancel));

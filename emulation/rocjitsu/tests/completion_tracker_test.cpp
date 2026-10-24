@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -14,9 +16,11 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <type_traits>
 #include <unordered_map>
@@ -30,7 +34,7 @@ using namespace rocjitsu::amdgpu;
 
 class CompletionRetryMemory final : public AddressSpaceTranslator, public PhysicalMemoryAccess {
 public:
-  enum class Operation { Read, AtomicStore, CompareExchange };
+  enum class Operation { Read, Write, AtomicStore, CompareExchange };
 
   VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
     if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
@@ -57,6 +61,8 @@ public:
 
   VmAccessOutcome write(VmMemoryDomain, uint64_t address,
                         std::span<const std::byte> bytes) override {
+    if (fail_once(Operation::Write, address))
+      return failure_outcome_;
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
     std::ranges::copy(bytes, bytes_.begin() + static_cast<ptrdiff_t>(address));
@@ -185,6 +191,14 @@ public:
     entry.dispatch_id = 7;
     entry.queue_id = kQueueId;
     entry.address_space = address_space;
+    const std::optional<GpuVmAccess> access = vm.snapshot_pinned(address_space);
+    EXPECT_TRUE(access);
+    if (access)
+      entry.execution_access = std::make_shared<GpuVmAccess>(*access);
+    if (access)
+      entry.execution_translation_epoch = access->info().translation_epoch;
+    if (access)
+      entry.execution_cache_write_sequence = access->cache_write_sequence();
     entry.interrupt_sink = subscription.sink();
     entry.process_id = kProcessId;
     entry.total_wgs = 1;
@@ -289,6 +303,32 @@ TEST(CompletionTrackerTest, RetryKeepsTheAddressSpaceSnapshotThatStartedPublicat
   EXPECT_EQ(replacement->successful_stores(CompletionFixture::kMailbox), 0u);
 }
 
+TEST(CompletionTrackerTest, CommittedSignalFinishesMailboxOnOriginalRootAfterReplacement) {
+  CompletionFixture fixture;
+  fixture.memory->fail_next(CompletionRetryMemory::Operation::AtomicStore,
+                            CompletionFixture::kMailbox);
+
+  const CompletionDrainResult first = fixture.tracker.drain_completions(fixture.queues);
+  ASSERT_TRUE(first.retry_pending);
+  ASSERT_FALSE(first.terminal_fault);
+  EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 1u);
+  EXPECT_EQ(fixture.memory->successful_stores(CompletionFixture::kMailbox), 0u);
+
+  auto replacement = std::make_shared<CompletionRetryMemory>();
+  replacement->store(CompletionFixture::kSignal + CompletionFixture::kValueOffset, uint64_t{1});
+  ASSERT_TRUE(fixture.vm.replace_translated(fixture.address_space, replacement, replacement));
+
+  const CompletionDrainResult second = fixture.tracker.drain_completions(fixture.queues);
+  EXPECT_FALSE(second.retry_pending);
+  EXPECT_FALSE(second.terminal_fault);
+  EXPECT_TRUE(fixture.queues.front().entries.empty());
+  EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 1u);
+  EXPECT_EQ(fixture.memory->successful_stores(CompletionFixture::kMailbox), 1u);
+  EXPECT_EQ(replacement->successful_stores(CompletionFixture::kMailbox), 0u);
+  EXPECT_EQ(fixture.interrupts, 1u);
+  EXPECT_EQ(fixture.retired, 1u);
+}
+
 TEST(CompletionTrackerTest, RevokedPublicationSnapshotBecomesTerminal) {
   CompletionFixture fixture;
   fixture.memory->fail_next(CompletionRetryMemory::Operation::CompareExchange,
@@ -305,6 +345,397 @@ TEST(CompletionTrackerTest, RevokedPublicationSnapshotBecomesTerminal) {
   EXPECT_EQ(second.terminal_fault->outcome, VmAccessOutcome::Revoked);
   ASSERT_EQ(fixture.queues.front().entries.size(), 1u);
   EXPECT_TRUE(fixture.queues.front().entries.front().terminal_faulted);
+  EXPECT_EQ(fixture.retired, 0u);
+}
+
+TEST(CompletionTrackerTest, RefusedSecondL2KeepsGridUnpublishedUntilRetry) {
+  constexpr uint64_t kFirstLine = 0x800;
+  constexpr uint64_t kSecondLine = 0x900;
+  constexpr uint32_t kDirtyOffset = 16;
+  CompletionFixture fixture;
+  GpuMemory backing("completion_backing");
+  L2Cache first("first_l2");
+  L2Cache second("second_l2");
+  for (L2Cache *cache : {&first, &second}) {
+    cache->set_backing_memory(&backing);
+    cache->set_gpu_vm(&fixture.vm);
+    fixture.l2_caches.push_back(cache);
+  }
+  std::array<uint8_t, L2Cache::LINE_SIZE> first_data{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> second_data{};
+  first_data.fill(0x4a);
+  second_data.fill(0xb7);
+  ASSERT_EQ(first.writeback_line(kFirstLine, first_data.data(), kDirtyOffset, 4, Mtype::RW,
+                                 CompletionFixture::kProcessId),
+            VmAccessOutcome::Complete);
+  ASSERT_EQ(second.writeback_line(kSecondLine, second_data.data(), kDirtyOffset, 4, Mtype::RW,
+                                  CompletionFixture::kProcessId),
+            VmAccessOutcome::Complete);
+  ASSERT_TRUE(fixture.vm.protect_controlled_cache_backing(fixture.address_space, kSecondLine,
+                                                          L2Cache::LINE_SIZE));
+
+  const CompletionDrainResult first_drain = fixture.tracker.drain_completions(fixture.queues);
+  EXPECT_TRUE(first_drain.retry_pending);
+  EXPECT_FALSE(first_drain.terminal_fault);
+  ASSERT_EQ(fixture.queues.front().entries.size(), 1u);
+  EXPECT_FALSE(fixture.queues.front().entries.front().grid_share_published);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kFirstLine + kDirtyOffset), 0x4a4a4a4au);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kSecondLine + kDirtyOffset), 0u);
+  EXPECT_EQ(
+      fixture.memory->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      1u);
+  EXPECT_EQ(fixture.retired, 0u);
+
+  fixture.vm.retire_controlled_cache_backing(fixture.address_space, kSecondLine,
+                                             L2Cache::LINE_SIZE);
+  const CompletionDrainResult second_drain = fixture.tracker.drain_completions(fixture.queues);
+  EXPECT_FALSE(second_drain.retry_pending);
+  EXPECT_FALSE(second_drain.terminal_fault);
+  EXPECT_TRUE(fixture.queues.front().entries.empty());
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kSecondLine + kDirtyOffset), 0xb7b7b7b7u);
+  EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 1u);
+  EXPECT_EQ(fixture.retired, 1u);
+}
+
+TEST(CompletionTrackerTest, RootReplacementBeforeFlushCannotPublishOldDispatch) {
+  constexpr uint64_t kDirtyLine = 0x800;
+  CompletionFixture fixture;
+  GpuMemory backing("completion_backing");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&backing);
+  l2.set_gpu_vm(&fixture.vm);
+  fixture.l2_caches.push_back(&l2);
+  std::array<uint8_t, L2Cache::LINE_SIZE> data{};
+  data.fill(0x69);
+  ASSERT_EQ(
+      l2.writeback_line(kDirtyLine, data.data(), 16, 4, Mtype::RW, CompletionFixture::kProcessId),
+      VmAccessOutcome::Complete);
+
+  auto replacement = std::make_shared<CompletionRetryMemory>();
+  replacement->store(CompletionFixture::kSignal + CompletionFixture::kValueOffset, uint64_t{1});
+  ASSERT_TRUE(fixture.vm.replace_translated(fixture.address_space, replacement, replacement));
+  const CompletionDrainResult result = fixture.tracker.drain_completions(fixture.queues);
+  ASSERT_TRUE(result.terminal_fault);
+  EXPECT_EQ(result.terminal_fault->outcome, VmAccessOutcome::Revoked);
+  EXPECT_FALSE(fixture.queues.front().entries.front().grid_share_published);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDirtyLine + 16), 0u);
+  EXPECT_EQ(replacement->load<uint32_t>(kDirtyLine + 16), 0u);
+  EXPECT_EQ(
+      fixture.memory->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      1u);
+  EXPECT_EQ(fixture.retired, 0u);
+}
+
+TEST(CompletionTrackerTest, InvalidationAfterExecutionCannotPublishOldDirtyLine) {
+  constexpr uint64_t kDirtyLine = 0x800;
+  constexpr uint32_t kDirtyOffset = 16;
+  CompletionFixture fixture;
+  fixture.queues.front().entries.front().execution_effect_possible =
+      std::make_shared<std::atomic_bool>(false);
+  GpuMemory backing("completion_backing");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&backing);
+  l2.set_gpu_vm(&fixture.vm);
+  fixture.l2_caches.push_back(&l2);
+  std::array<uint8_t, L2Cache::LINE_SIZE> data{};
+  data.fill(0x6b);
+  ASSERT_EQ(l2.writeback_line(kDirtyLine, data.data(), kDirtyOffset, 4, Mtype::RW,
+                              CompletionFixture::kProcessId),
+            VmAccessOutcome::Complete);
+  ASSERT_GT(fixture.queues.front().entries.front().execution_access->cache_write_sequence(),
+            fixture.queues.front().entries.front().execution_cache_write_sequence);
+
+  ASSERT_TRUE(fixture.vm.invalidate(fixture.address_space));
+  const CompletionDrainResult result = fixture.tracker.drain_completions(fixture.queues);
+  ASSERT_TRUE(result.terminal_fault);
+  EXPECT_EQ(result.terminal_fault->outcome, VmAccessOutcome::Revoked);
+  ASSERT_EQ(fixture.queues.front().entries.size(), 1u);
+  EXPECT_FALSE(fixture.queues.front().entries.front().grid_share_published);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDirtyLine + kDirtyOffset), 0u);
+  EXPECT_EQ(
+      fixture.memory->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      1u);
+  EXPECT_EQ(fixture.retired, 0u);
+}
+
+TEST(CompletionTrackerTest, InvalidationWithoutOldEffectsRecapturesForCompletion) {
+  CompletionFixture fixture;
+  fixture.queues.front().entries.front().execution_effect_possible =
+      std::make_shared<std::atomic_bool>(false);
+  ASSERT_EQ(fixture.queues.front().entries.front().execution_access->cache_write_sequence(),
+            fixture.queues.front().entries.front().execution_cache_write_sequence);
+  ASSERT_TRUE(fixture.vm.invalidate(fixture.address_space));
+
+  const CompletionDrainResult result = fixture.tracker.drain_completions(fixture.queues);
+  EXPECT_FALSE(result.retry_pending);
+  EXPECT_FALSE(result.terminal_fault);
+  EXPECT_TRUE(fixture.queues.front().entries.empty());
+  EXPECT_EQ(
+      fixture.memory->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      0u);
+  EXPECT_EQ(fixture.retired, 1u);
+}
+
+TEST(CompletionTrackerTest, InvalidationRecapturesAfterEarlierCompletedWrite) {
+  constexpr uint64_t kDirtyLine = 0x800;
+  CompletionFixture fixture;
+  GpuMemory backing("completion_backing");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&backing);
+  l2.set_gpu_vm(&fixture.vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> data{};
+  data.fill(0x49);
+  ASSERT_EQ(
+      l2.writeback_line(kDirtyLine, data.data(), 16, 4, Mtype::RW, CompletionFixture::kProcessId),
+      VmAccessOutcome::Complete);
+  const auto earlier = fixture.vm.snapshot(fixture.address_space);
+  ASSERT_TRUE(earlier);
+  ASSERT_EQ(l2.flush_for_completion(*earlier), VmAccessOutcome::Complete);
+  ASSERT_EQ(fixture.memory->load<uint32_t>(kDirtyLine + 16), 0x49494949u);
+
+  // Model a later packet admitted after the preceding write was published.
+  const auto later = fixture.vm.snapshot_pinned(fixture.address_space);
+  ASSERT_TRUE(later);
+  auto &entry = fixture.queues.front().entries.front();
+  entry.execution_access = std::make_shared<GpuVmAccess>(*later);
+  entry.execution_translation_epoch = later->info().translation_epoch;
+  entry.execution_cache_write_sequence = later->cache_write_sequence();
+  entry.execution_effect_possible = std::make_shared<std::atomic_bool>(false);
+  ASSERT_NE(entry.execution_cache_write_sequence, 0u);
+  ASSERT_TRUE(fixture.vm.invalidate(fixture.address_space));
+
+  const CompletionDrainResult result = fixture.tracker.drain_completions(fixture.queues);
+  EXPECT_FALSE(result.retry_pending);
+  EXPECT_FALSE(result.terminal_fault);
+  EXPECT_TRUE(fixture.queues.front().entries.empty());
+  EXPECT_EQ(
+      fixture.memory->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      0u);
+}
+
+TEST(CompletionTrackerTest, InvalidationThenRootReplacementCannotRedirectCompletion) {
+  CompletionFixture fixture;
+  fixture.queues.front().entries.front().execution_effect_possible =
+      std::make_shared<std::atomic_bool>(false);
+  ASSERT_TRUE(fixture.vm.invalidate(fixture.address_space));
+  auto replacement = std::make_shared<CompletionRetryMemory>();
+  replacement->store(CompletionFixture::kSignal + CompletionFixture::kValueOffset, uint64_t{1});
+  ASSERT_TRUE(fixture.vm.replace_translated(fixture.address_space, replacement, replacement));
+
+  const CompletionDrainResult result = fixture.tracker.drain_completions(fixture.queues);
+  ASSERT_TRUE(result.terminal_fault);
+  EXPECT_EQ(result.terminal_fault->outcome, VmAccessOutcome::Revoked);
+  EXPECT_FALSE(fixture.queues.front().entries.front().grid_share_published);
+  EXPECT_EQ(
+      fixture.memory->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      1u);
+  EXPECT_EQ(
+      replacement->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      1u);
+}
+
+TEST(CompletionTrackerTest, OldGenerationInstructionEffectPreventsRecapture) {
+  CompletionFixture fixture;
+  fixture.queues.front().entries.front().execution_effect_possible =
+      std::make_shared<std::atomic_bool>(true);
+  ASSERT_TRUE(fixture.vm.invalidate(fixture.address_space));
+
+  const CompletionDrainResult result = fixture.tracker.drain_completions(fixture.queues);
+  ASSERT_TRUE(result.terminal_fault);
+  EXPECT_EQ(result.terminal_fault->outcome, VmAccessOutcome::Revoked);
+  EXPECT_FALSE(fixture.queues.front().entries.front().grid_share_published);
+  EXPECT_EQ(
+      fixture.memory->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      1u);
+  EXPECT_EQ(fixture.retired, 0u);
+}
+
+TEST(CompletionTrackerTest, BarrierOnCurrentRootStillFlushesL2BeforeSignal) {
+  constexpr uint64_t kDirtyLine = 0x800;
+  constexpr uint32_t kDirtyOffset = 16;
+  CompletionFixture fixture;
+  auto &entry = fixture.queues.front().entries.front();
+  entry.kind = DispatchPacketKind::NonKernel;
+  entry.no_fence_aql_barrier = true;
+  entry.total_wgs = 0;
+  entry.completed_wgs = 0;
+  GpuMemory backing("completion_backing");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&backing);
+  l2.set_gpu_vm(&fixture.vm);
+  fixture.l2_caches.push_back(&l2);
+  std::array<uint8_t, L2Cache::LINE_SIZE> data{};
+  data.fill(0x5a);
+  ASSERT_EQ(l2.writeback_line(kDirtyLine, data.data(), kDirtyOffset, 4, Mtype::RW,
+                              CompletionFixture::kProcessId),
+            VmAccessOutcome::Complete);
+  fixture.memory->fail_next(CompletionRetryMemory::Operation::Write, kDirtyLine + kDirtyOffset);
+
+  const CompletionDrainResult first = fixture.tracker.drain_completions(fixture.queues);
+  EXPECT_TRUE(first.retry_pending);
+  EXPECT_FALSE(first.terminal_fault);
+  ASSERT_EQ(fixture.queues.front().entries.size(), 1u);
+  EXPECT_FALSE(fixture.queues.front().entries.front().grid_share_published);
+  EXPECT_EQ(
+      fixture.memory->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      1u);
+
+  const CompletionDrainResult second = fixture.tracker.drain_completions(fixture.queues);
+  EXPECT_FALSE(second.retry_pending);
+  EXPECT_FALSE(second.terminal_fault);
+  EXPECT_TRUE(fixture.queues.front().entries.empty());
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDirtyLine + kDirtyOffset), 0x5a5a5a5au);
+  EXPECT_EQ(
+      fixture.memory->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      0u);
+}
+
+TEST(CompletionTrackerTest, NoFenceBarrierFinishesOnPinnedRootAfterReplacement) {
+  CompletionFixture fixture;
+  auto &entry = fixture.queues.front().entries.front();
+  entry.kind = DispatchPacketKind::NonKernel;
+  entry.no_fence_aql_barrier = true;
+  entry.total_wgs = 0;
+  entry.completed_wgs = 0;
+
+  auto replacement = std::make_shared<CompletionRetryMemory>();
+  replacement->store(CompletionFixture::kSignal + CompletionFixture::kValueOffset, uint64_t{1});
+  ASSERT_TRUE(fixture.vm.replace_translated(fixture.address_space, replacement, replacement));
+
+  const CompletionDrainResult result = fixture.tracker.drain_completions(fixture.queues);
+  EXPECT_FALSE(result.retry_pending);
+  EXPECT_FALSE(result.terminal_fault);
+  EXPECT_TRUE(fixture.queues.front().entries.empty());
+  EXPECT_EQ(
+      fixture.memory->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      0u);
+  EXPECT_EQ(
+      replacement->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      1u);
+  EXPECT_EQ(fixture.retired, 1u);
+}
+
+TEST(CompletionTrackerTest, ScopedBarrierCannotBypassStaleRootFlush) {
+  CompletionFixture fixture;
+  auto &entry = fixture.queues.front().entries.front();
+  entry.kind = DispatchPacketKind::NonKernel;
+  entry.total_wgs = 0;
+  entry.completed_wgs = 0;
+
+  auto replacement = std::make_shared<CompletionRetryMemory>();
+  replacement->store(CompletionFixture::kSignal + CompletionFixture::kValueOffset, uint64_t{1});
+  ASSERT_TRUE(fixture.vm.replace_translated(fixture.address_space, replacement, replacement));
+
+  const CompletionDrainResult result = fixture.tracker.drain_completions(fixture.queues);
+  ASSERT_TRUE(result.terminal_fault);
+  EXPECT_EQ(result.terminal_fault->outcome, VmAccessOutcome::Revoked);
+  EXPECT_FALSE(fixture.queues.front().entries.front().grid_share_published);
+  EXPECT_EQ(
+      fixture.memory->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      1u);
+  EXPECT_EQ(
+      replacement->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      1u);
+}
+
+TEST(CompletionTrackerTest, LegacyVmidZeroBindingFlushesItsCacheBeforeRetirement) {
+  constexpr uint64_t kDirtyLine = 0x800;
+  constexpr uint32_t kDirtyOffset = 16;
+  GpuVm vm;
+  auto memory = std::make_shared<CompletionRetryMemory>();
+  const AddressSpaceHandle address_space =
+      vm.register_address_space(0, memory, memory, {}, /*legacy_cache_compatible=*/true);
+  ASSERT_TRUE(address_space);
+  const std::optional<GpuVmAccess> access = vm.snapshot_pinned(address_space);
+  ASSERT_TRUE(access);
+  GpuMemory backing("completion_backing");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&backing);
+  l2.set_gpu_vm(&vm);
+  std::vector<ComputeUnitCore *> cus;
+  std::vector<L2Cache *> l2_caches{&l2};
+  CompletionTracker tracker(vm, cus, l2_caches);
+  std::array<uint8_t, L2Cache::LINE_SIZE> data{};
+  data.fill(0x7c);
+  ASSERT_EQ(l2.writeback_line(kDirtyLine, data.data(), kDirtyOffset, 4, Mtype::RW, 0),
+            VmAccessOutcome::Complete);
+
+  ComputeQueueRecord queue{};
+  queue.fanout_replica = true;
+  DispatchEntry entry{};
+  entry.dispatch_id = 7;
+  entry.address_space = address_space;
+  entry.execution_access = std::make_shared<GpuVmAccess>(*access);
+  entry.execution_translation_epoch = access->info().translation_epoch;
+  entry.process_id = CompletionFixture::kProcessId;
+  entry.total_wgs = entry.completed_wgs = 1;
+  entry.kind = DispatchPacketKind::Kernel;
+  queue.push_entry(std::move(entry));
+  std::vector<ComputeQueueRecord> queues;
+  queues.push_back(std::move(queue));
+
+  const CompletionDrainResult result = tracker.drain_completions(queues);
+  EXPECT_FALSE(result.retry_pending);
+  EXPECT_FALSE(result.terminal_fault);
+  EXPECT_TRUE(queues.front().entries.empty());
+  EXPECT_EQ(backing.read32(kDirtyLine + kDirtyOffset), 0x7c7c7c7cu);
+}
+
+TEST(CompletionTrackerTest, VmidZeroMismatchRequiresLegacyCacheCompatibility) {
+  GpuVm vm;
+  auto memory = std::make_shared<CompletionRetryMemory>();
+  const AddressSpaceHandle address_space = vm.register_address_space(0, memory, memory);
+  ASSERT_TRUE(address_space);
+  const std::optional<GpuVmAccess> access = vm.snapshot_pinned(address_space);
+  ASSERT_TRUE(access);
+  std::vector<ComputeUnitCore *> cus;
+  std::vector<L2Cache *> l2_caches;
+  CompletionTracker tracker(vm, cus, l2_caches);
+  ComputeQueueRecord queue{};
+  queue.fanout_replica = true;
+  DispatchEntry entry{};
+  entry.dispatch_id = 7;
+  entry.address_space = address_space;
+  entry.execution_access = std::make_shared<GpuVmAccess>(*access);
+  entry.execution_translation_epoch = access->info().translation_epoch;
+  entry.process_id = CompletionFixture::kProcessId;
+  entry.total_wgs = entry.completed_wgs = 1;
+  entry.kind = DispatchPacketKind::Kernel;
+  queue.push_entry(std::move(entry));
+  std::vector<ComputeQueueRecord> queues;
+  queues.push_back(std::move(queue));
+
+  const CompletionDrainResult result = tracker.drain_completions(queues);
+  ASSERT_TRUE(result.terminal_fault);
+  EXPECT_EQ(result.terminal_fault->outcome, VmAccessOutcome::Revoked);
+  EXPECT_FALSE(queues.front().entries.front().grid_share_published);
+}
+
+TEST(CompletionTrackerTest, TerminalL2WritebackKeepsCompletionUnpublished) {
+  constexpr uint64_t kDirtyLine = 0x800;
+  constexpr uint32_t kDirtyOffset = 16;
+  CompletionFixture fixture;
+  GpuMemory backing("completion_backing");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&backing);
+  l2.set_gpu_vm(&fixture.vm);
+  fixture.l2_caches.push_back(&l2);
+  std::array<uint8_t, L2Cache::LINE_SIZE> data{};
+  data.fill(0x69);
+  ASSERT_EQ(l2.writeback_line(kDirtyLine, data.data(), kDirtyOffset, 4, Mtype::RW,
+                              CompletionFixture::kProcessId),
+            VmAccessOutcome::Complete);
+  fixture.memory->fail_next(CompletionRetryMemory::Operation::Write, kDirtyLine + kDirtyOffset,
+                            VmAccessOutcome::Faulted);
+
+  const CompletionDrainResult result = fixture.tracker.drain_completions(fixture.queues);
+  ASSERT_TRUE(result.terminal_fault);
+  EXPECT_EQ(result.terminal_fault->outcome, VmAccessOutcome::Faulted);
+  EXPECT_FALSE(fixture.queues.front().entries.front().grid_share_published);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDirtyLine + kDirtyOffset), 0u);
+  EXPECT_EQ(
+      fixture.memory->load<uint64_t>(CompletionFixture::kSignal + CompletionFixture::kValueOffset),
+      1u);
   EXPECT_EQ(fixture.retired, 0u);
 }
 

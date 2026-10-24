@@ -10,10 +10,12 @@
 #include "simdojo/sim/message.h"
 
 #include <array>
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,6 +24,7 @@ namespace rocjitsu {
 namespace amdgpu {
 
 class GpuMemory;
+class PreparedCanonicalWriteback;
 class MemorySideCacheTestAccess;
 class WriterPreferredAccessGateTestAccess;
 
@@ -95,16 +98,68 @@ public:
   /// @details Ordinary MSC traffic continues through its requester port; this
   /// pointer exists only for a quiesced maintenance operation.
   void set_legacy_maintenance_vm(GpuVm *gpu_vm) { legacy_maintenance_vm_ = gpu_vm; }
-  /// @brief Set the VM service used to validate speculative line fills.
+  /// @brief Set the VM service used to identify nonzero-VMID cache lines and
+  /// validate speculative fills. Without a VM service, those requests bypass
+  /// the cache so dirty data cannot be published through a reused numeric VMID.
   void set_gpu_vm(GpuVm *gpu_vm) { gpu_vm_ = gpu_vm; }
 
   VmAccessOutcome read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t vmid = 0);
   VmAccessOutcome write(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid = 0);
+
+  /// Probe only resident, byte-valid data under the supplied raw grant key.
+  /// The span must be nonempty and contained in one MSC line. False is a miss;
+  /// this method performs no VM admission or backing request.
+  [[nodiscard]] bool try_read_peer_cached(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid,
+                                          uint64_t admission_generation, uint64_t cache_identity);
+
+  /// Optionally fill one MSC line fragment from a canonical peer read.
+  /// The caller must hold exact ingress, current-VM, and canonical-line
+  /// freshness authority through this call. The span must be nonempty and
+  /// contained in one line. A dirty-line refusal leaves tags and replacement
+  /// order unchanged. This method never publishes a dirty victim or sends
+  /// backing traffic.
+  [[nodiscard]] bool try_fill_peer_cached(uint64_t addr, std::span<const uint8_t> src,
+                                          uint32_t vmid, uint64_t admission_generation,
+                                          uint64_t cache_identity);
   VmAccessOutcome atomic_modify(uint64_t addr, uint32_t size,
                                 const simdojo::MemoryAtomicMutation &mutation, uint32_t vmid = 0);
 
   /// @brief Flush all dirty lines to the backing store and invalidate.
   VmAccessOutcome flush_all();
+
+  /// @brief Prepare a byte range for an external write in one VMID.
+  /// @details Before the external write commits, publish dirty resident lines
+  /// overlapping the range in full, then invalidate every overlapping line.
+  /// Unrelated lines and VMIDs remain resident. On transient admission or
+  /// backing failure, retain the dirty line and return the failure for retry.
+  /// If VM admission is absent or stale, discard the line without writing
+  /// through a revoked grant. Earlier lines in a failed range may already be
+  /// invalidated. A zero size changes nothing. Ranges past UINT64_MAX stop at
+  /// the last addressable line; large ranges scan bounded cache storage. The
+  /// external-write owner must exclude alias refills before this pre-write
+  /// flush until invalidate_range_after_external_write() completes and the
+  /// post-effect invalidation is acknowledged.
+  VmAccessOutcome flush_range(uint64_t addr, uint32_t size, uint32_t vmid);
+
+  /// @brief Publish whole dirty canonical lines through a prepared grant.
+  /// @details A dirty line must fit entirely in one retained backing view with
+  /// matching VM identity and a nonzero grant generation. The caller holds the
+  /// prepared ingress permit until this method releases the access gate. Failed
+  /// writes and refused VM effects retain the line for retry.
+  VmAccessOutcome flush_range(uint64_t addr, uint32_t size, uint32_t vmid,
+                              const PreparedCanonicalWriteback &prepared);
+
+  /// @brief Discard resident lines after an external write has committed.
+  /// @details Drops dirty and clean lines overlapping the range in @p vmid
+  /// without publishing their contents. The external-write owner must exclude
+  /// alias refills from before the pre-write flush through this post-effect
+  /// drop and its acknowledgment. Call without a DeviceCacheMaintenanceLease:
+  /// that lease already owns the MSC access gate. Unrelated lines and VMIDs
+  /// remain resident. A zero size changes nothing, and ranges past UINT64_MAX
+  /// stop at the last addressable line. Large ranges scan bounded cache
+  /// storage. This operation takes only the MSC access gate; it does not
+  /// acquire a maintenance lease, enter an effect, or access backing/VM.
+  void invalidate_range_after_external_write(uint64_t addr, uint32_t size, uint32_t vmid);
 
   void initialize() override {
     for (const std::unique_ptr<simdojo::Port> &port : ports()) {
@@ -164,14 +219,30 @@ public:
 private:
   friend class DeviceCacheCoherence;
   friend class MemorySideCacheTestAccess;
+  friend class KfdPreparedProviderTestAccess;
 
   [[nodiscard]] VmAccessOutcome cache_partial_bytes(uint64_t addr, const uint8_t *src,
-                                                    uint32_t size, uint32_t vmid);
+                                                    uint32_t size, uint32_t vmid,
+                                                    uint64_t admission_generation,
+                                                    const GpuVmAccess *access);
   [[nodiscard]] VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid,
-                                            bool fetch_on_miss = true);
-  [[nodiscard]] bool can_fetch_line(uint64_t addr, uint32_t vmid) const;
+                                            uint64_t admission_generation,
+                                            const GpuVmAccess *access, bool fetch_on_miss = true);
+  [[nodiscard]] bool guarded_dirty_allocation_victim(uint64_t replacement_addr) const;
+  [[nodiscard]] VmAccessAdmission admit_access(uint64_t addr, uint32_t size, uint32_t vmid,
+                                               VmAccessKind access, bool report_fault = true) const;
   [[nodiscard]] VmAccessOutcome flush_dirty_locked();
   [[nodiscard]] VmAccessOutcome flush_dirty_to_legacy_backing_locked();
+  /// @brief Mark a dirty resident before publishing its tag to another cache operation.
+  void mark_line_dirty(simdojo::CacheTag &tag);
+  [[nodiscard]] VmAccessOutcome publish_dirty_line(uint64_t line_addr, const simdojo::CacheTag &tag,
+                                                   uint8_t *data, bool legacy_maintenance = false);
+  /// @brief Visit overlapping resident lines while the MSC access gate is held exclusively.
+  /// @details The visitor returns false to skip all later visitor calls.
+  template <typename Visitor>
+  void visit_resident_lines_in_range(uint64_t addr, uint32_t size, uint32_t vmid,
+                                     Visitor &&visitor);
+  GpuVm *cache_vm() const { return gpu_vm_ != nullptr ? gpu_vm_ : legacy_maintenance_vm_; }
   bool has_legacy_maintenance_backing() const {
     return legacy_maintenance_memory_ != nullptr && legacy_maintenance_vm_ != nullptr;
   }
@@ -193,6 +264,11 @@ private:
   mutable std::array<std::mutex, STRIPE_COUNT> stripes_;
   WriterPreferredAccessGate access_gate_;
   CacheStore cache_;
+  // Shared-gate accesses on distinct stripes may create dirty lines concurrently.
+  // Full maintenance only reads or clears this hint with the gate held exclusively.
+  std::atomic<bool> may_have_dirty_lines_{false};
+  uint64_t full_dirty_scans_ = 0;
+  uint64_t skipped_clean_scans_ = 0;
   std::shared_ptr<DeviceCacheCoherence> coherence_;
   GpuMemory *legacy_maintenance_memory_ = nullptr;
   GpuVm *legacy_maintenance_vm_ = nullptr;
