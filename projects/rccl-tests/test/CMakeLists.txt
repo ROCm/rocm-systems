@@ -38,3 +38,14 @@ set_target_properties(rccl-tests-GinSdmaDevtimeHostUnit PROPERTIES
 add_test(NAME rccl-tests-GinSdmaDevtimeHostUnit
          COMMAND rccl-tests-GinSdmaDevtimeHostUnit)
 set_tests_properties(rccl-tests-GinSdmaDevtimeHostUnit PROPERTIES LABELS "unit")
+
+add_executable(rccl-tests-MpichConfigHostUnit mpich_config_test.cpp)
+target_include_directories(rccl-tests-MpichConfigHostUnit PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_link_libraries(rccl-tests-MpichConfigHostUnit PRIVATE
+  ${_RCCL_TESTS_GTEST_LIB} ${_RCCL_TESTS_GTEST_MAIN})
+set_target_properties(rccl-tests-MpichConfigHostUnit PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+add_test(NAME rccl-tests-MpichConfigHostUnit
+         COMMAND rccl-tests-MpichConfigHostUnit)
+set_tests_properties(rccl-tests-MpichConfigHostUnit PROPERTIES LABELS "unit")

@@ -15,7 +15,7 @@ $ make HIP_HOME=/path/to/hip NCCL_HOME=/path/to/rccl
 RCCL Tests rely on MPI to work on multiple processes, hence multiple nodes.
 
 > [!TIP]
-> To compile RCCL tests with MPI support, you need to set `MPI=1` and set `MPI_HOME` to the path where MPI is installed.
+> To compile RCCL tests with MPI support, you need to set `MPI=1` and set `MPI_HOME` to the path where MPI is installed. That MPI must be built without GPU support (Open MPI without `--with-rocm`/`--with-cuda`, MPICH without `--with-hip`/`--with-cuda`; Open MPI 4.x also needs a UCX built without ROCm or CUDA). A GPU-aware MPI makes the tests abort. `--allow_gpu_aware_mpi` warns and continues instead.
 
 ```shell
 $ make MPI=1 MPI_HOME=/path/to/mpi HIP_HOME=/path/to/hip NCCL_HOME=/path/to/rccl
