@@ -14,7 +14,9 @@ env:
 jobs:
   ubuntu-noble-sanitizers:
     name: Sanitizer / ${{ matrix.sanitizer-type }}
-    runs-on: ubuntu-latest
+    # Pinned: GCC 13's TSan runtime aborts with "unexpected memory mapping" on
+    # the ubuntu-26.04 runner kernel (ubuntu-latest since ~2026-10-20).
+    runs-on: ubuntu-24.04
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-24.04
     strategy:
