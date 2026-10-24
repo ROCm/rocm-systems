@@ -78,6 +78,12 @@ ring_buffer::init(size_t _size)
 
     m_init = true;
 
+    // A zero-length request would round to a zero-size mmap() below, which fails with EINVAL.
+    // This is reachable from record_header_buffer::allocate(num_bytes) when a record domain
+    // produced no entries (num_bytes == 0). Allocate a minimum of one page instead so the
+    // mapping is valid. Note that after init() the buffer always has a non-zero capacity.
+    if(_size == 0) _size = units::get_page_size();
+
     // Round up to multiple of page size.
     _size += units::get_page_size() - ((_size % units::get_page_size() > 0)
                                            ? (_size % units::get_page_size())
