@@ -52,6 +52,15 @@ std::function<void(void*, void const*)> g_ncclDevCommCopyLsaData = DefaultNcclDe
 
 // The externals the #included devcomm .cc files link against.
 extern "C" ncclTeam_t ncclTeamLsa(ncclComm_t comm) { return g_ncclTeamLsa(comm); }
+
+// A rail team of one rank, as on a single node.
+extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) {
+  ncclTeam_t t{};
+  t.nRanks = 1;
+  t.rank = 0;
+  t.stride = 1;
+  return t;
+}
 // No wrapper definition here: dev_runtime.cc supplies the real
 // ncclDevCommCopyLsaData in this binary. The hook above survives because
 // devcomm-test.cc macro-shims its own call sites onto it.
