@@ -131,4 +131,16 @@ kernarg_segment_ptr_sgpr(const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 /// @brief KERNARG_PRELOAD_SPEC_OFFSET: first preloaded kernarg dword index.
 [[nodiscard]] uint32_t kernarg_preload_offset(const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
+/// @brief Distance past the descriptor entry at which kernarg-preload-compatible
+///        firmware enters a preloading kernel, where
+///        uses_kernarg_preload_firmware_skip() holds.
+inline constexpr uint64_t kKernargPreloadSkipBytes = 256;
+
+/// @brief Whether firmware may enter a kernel of @p arch that preloads kernel
+///        arguments kKernargPreloadSkipBytes past its descriptor entry.
+///
+/// @details Old firmware enters at the descriptor entry, where the compiler
+/// places a compatibility prologue that loads the preloaded arguments itself.
+[[nodiscard]] bool uses_kernarg_preload_firmware_skip(rj_code_arch_t arch);
+
 } // namespace rocjitsu

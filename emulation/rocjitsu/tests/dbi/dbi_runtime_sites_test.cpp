@@ -96,9 +96,11 @@ std::vector<uint32_t> text_words(const AmdGpuCodeObject &object) {
   return words;
 }
 
-// The Instrumentor refused the object, with an error naming @p reason.
-void expect_refused(const DbiInstrumentation &result, std::string_view reason) {
-  EXPECT_EQ(result.decision, DbiLoadDecision::PatchFailed);
+// The Instrumentor refused the object as @p decision, with an error naming
+// @p reason.
+void expect_refused(const DbiInstrumentation &result, DbiLoadDecision decision,
+                    std::string_view reason) {
+  EXPECT_EQ(result.decision, decision);
   EXPECT_TRUE(result.elf_bytes.empty());
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find(reason), std::string::npos) << result.errors.front();
@@ -161,7 +163,7 @@ TEST(DbiRuntimeSites, LeavesObjectUnpatchedWhenProbeTargetDiffers) {
   for (const DbiInstrumentation &result :
        {instrument(kernel(gfx1201, three_block_text(gfx1201)), probe(kGfx1200)),
         instrument(kernel(kGfx950, three_block_text(kGfx950)), probe(kGfx1200))}) {
-    expect_refused(result, "concrete target");
+    expect_refused(result, DbiLoadDecision::PatchFailed, "concrete target");
   }
 }
 
@@ -187,7 +189,7 @@ TEST(DbiRuntimeSites, LeavesWave32KernelUnpatched) {
       instrument(kernel(kGfx1200, three_block_text(kGfx1200), /*granulated_sgpr_count=*/3,
                         /*entry_text_offset=*/0, /*wave32=*/true),
                  probe(kGfx1200));
-  expect_refused(result, "wave32");
+  expect_refused(result, DbiLoadDecision::UnsupportedKernel, "wave32");
 }
 
 TEST(DbiRuntimeSites, LeavesKernelThatMakesACallUnpatched) {
@@ -199,14 +201,14 @@ TEST(DbiRuntimeSites, LeavesKernelThatMakesACallUnpatched) {
                                       kMovV2Zero, build_s_endpgm(arch), kMovV3V2,
                                       build_s_setpc_b64(/*s[30:31]=*/30, arch)};
   const DbiInstrumentation result = instrument(kernel(kGfx950, text), probe(kGfx950));
-  expect_refused(result, "makes a call");
+  expect_refused(result, DbiLoadDecision::UnsupportedKernel, "makes a call");
 }
 
 TEST(DbiRuntimeSites, LeavesKernelWithAnUnresolvedJumpUnpatched) {
   const rj_code_arch_t arch = kGfx950.arch;
   const std::vector<uint32_t> text = {kMovV2Zero, build_s_setpc_b64(/*s[4:5]=*/4, arch)};
   const DbiInstrumentation result = instrument(kernel(kGfx950, text), probe(kGfx950));
-  expect_refused(result, "unresolved successor");
+  expect_refused(result, DbiLoadDecision::UnsupportedKernel, "unresolved successor");
 }
 
 TEST(DbiRuntimeSites, LeavesKernelThatBranchesOutOfTextUnpatched) {
@@ -214,7 +216,7 @@ TEST(DbiRuntimeSites, LeavesKernelThatBranchesOutOfTextUnpatched) {
   const std::vector<uint32_t> text = {kMovV2Zero, build_s_branch(/*offset_dwords=*/0x7fff, arch),
                                       build_s_endpgm(arch)};
   const DbiInstrumentation result = instrument(kernel(kGfx950, text), probe(kGfx950));
-  expect_refused(result, "unresolved successor");
+  expect_refused(result, DbiLoadDecision::UnsupportedKernel, "unresolved successor");
 }
 
 TEST(DbiRuntimeSites, LeavesDeadCodeAlone) {
@@ -298,11 +300,7 @@ TEST(DbiRuntimeSites, ReportsInstrumentorRefusal) {
   // 16 SGPRs: the probe's link pair s[30:31] is outside the allocation.
   const DbiInstrumentation result = instrument(
       kernel(kGfx950, three_block_text(kGfx950), /*granulated_sgpr_count=*/1), probe(kGfx950));
-  EXPECT_EQ(result.decision, DbiLoadDecision::PatchFailed);
-  ASSERT_FALSE(result.errors.empty());
-  EXPECT_NE(result.errors.front().find("return-link pair"), std::string::npos)
-      << result.errors.front();
-  EXPECT_TRUE(result.elf_bytes.empty());
+  expect_refused(result, DbiLoadDecision::PatchFailed, "return-link pair");
 }
 
 TEST(DbiRuntimeSites, ReportsAKernelThatDoesNotDecode) {
@@ -310,7 +308,7 @@ TEST(DbiRuntimeSites, ReportsAKernelThatDoesNotDecode) {
   // entry, so the kernel's blocks cannot be built.
   const DbiInstrumentation result = instrument(
       kernel(kGfx1200, {kMovV2Zero, 0u, build_s_endpgm(kGfx1200.arch)}), probe(kGfx1200));
-  expect_refused(result, "Invalid instruction opcode");
+  expect_refused(result, DbiLoadDecision::PatchFailed, "Invalid instruction opcode");
 }
 
 TEST(DbiRuntimeSites, NamesEveryDecision) {

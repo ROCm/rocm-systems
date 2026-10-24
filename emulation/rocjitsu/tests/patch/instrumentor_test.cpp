@@ -1230,19 +1230,24 @@ TEST(InstrumentorPatch, FailedFirstCallStillBurnsSingleAttemptBudget) {
       << second.errors.front();
 }
 
-// On CDNA3/CDNA4, firmware that supports kernarg preload can enter the kernel
-// past its descriptor entry, which is not decoded from, so patch() refuses a
-// preloading kernel. patch_with_debug_summaries() still patches it.
-TEST(InstrumentorPatch, RefusesAKernelThatPreloadsKernelArguments) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
-  std::vector<uint8_t> image =
-      make_gfx950_kernel_elf({0xBF800000u, 0xBF800000u, build_s_endpgm(arch)}, /*private_bytes=*/0);
+// @p image with its one kernel preloading a kernarg dword.
+std::vector<uint8_t> with_kernarg_preload(std::vector<uint8_t> image) {
   const std::vector<KernelDescriptorInfo> kernels =
       scan_object_kernel_descriptors(AmdGpuCodeObject(image.data(), image.size()));
-  ASSERT_EQ(kernels.size(), 1u);
+  EXPECT_EQ(kernels.size(), 1u);
   amdhsa::kernel_descriptor_t desc = kernels.front().descriptor;
   RJ_AMDHSA_BITS_SET(desc.kernarg_preload, amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
   std::memcpy(image.data() + kernels.front().descriptor_file_offset, &desc, sizeof(desc));
+  return image;
+}
+
+// On CDNA4, firmware that supports kernarg preload can enter the kernel past
+// its descriptor entry, which is not decoded from, so patch() refuses a
+// preloading kernel. patch_with_debug_summaries() still patches it.
+TEST(InstrumentorPatch, RefusesAKernelThatPreloadsKernelArguments) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::vector<uint8_t> image = with_kernarg_preload(make_gfx950_kernel_elf(
+      {0xBF800000u, 0xBF800000u, build_s_endpgm(arch)}, /*private_bytes=*/0));
   AmdGpuCodeObject obj(image.data(), image.size());
 
   Instrumentor refusing(obj, arch);
@@ -1252,10 +1257,27 @@ TEST(InstrumentorPatch, RefusesAKernelThatPreloadsKernelArguments) {
   ASSERT_FALSE(refused.errors.empty());
   EXPECT_NE(refused.errors.front().find("preloads 1 kernarg dwords"), std::string::npos)
       << refused.errors.front();
+  EXPECT_TRUE(refused.kernel_unsupported);
 
   Instrumentor debugging(obj, arch);
   debugging.add_point_by_offset(4);
   const InstrumentedCodeObjectDebug patched = debugging.patch_with_debug_summaries();
+  EXPECT_TRUE(patched.errors.empty()) << patched.errors.front();
+  EXPECT_FALSE(patched.elf_bytes.empty());
+}
+
+// gfx1250 preloads kernargs in hardware and is entered only at its descriptor
+// entry, so patch() patches a preloading kernel.
+TEST(InstrumentorPatch, PatchesAPreloadingKernelWithOneEntry) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5;
+  const std::vector<uint8_t> image = with_kernarg_preload(
+      make_amdgpu_kernel_elf({0xBF800000u, 0xBF800000u, build_s_endpgm(arch)}, /*private_bytes=*/0,
+                             /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1250));
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  Instrumentor instrumentor(obj, arch);
+  instrumentor.add_point_by_offset(4);
+  const InstrumentedCodeObject patched = instrumentor.patch();
   EXPECT_TRUE(patched.errors.empty()) << patched.errors.front();
   EXPECT_FALSE(patched.elf_bytes.empty());
 }
@@ -3795,6 +3817,7 @@ TEST(InstrumentorProbePatch, ProbeClobberingLinkPairFailsClosed) {
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("return-link pair"), std::string::npos)
       << "error was: " << result.errors.front();
+  EXPECT_FALSE(result.kernel_unsupported);
 }
 
 // A probe reading v31 without defining it wants workitem_id_x, which only the
@@ -3921,13 +3944,14 @@ TEST(InstrumentorProbePatch, RefusesKernelsLivenessCannotFollow) {
     ASSERT_FALSE(refused.errors.empty());
     EXPECT_NE(refused.errors.front().find(test_case.reason), std::string::npos)
         << refused.errors.front();
+    EXPECT_TRUE(refused.kernel_unsupported);
 
-    Instrumentor refusing_nop(obj, test_case.arch);
-    refusing_nop.add_point_by_offset(test_case.anchor_offset);
-    const InstrumentedCodeObject refused_nop = refusing_nop.patch();
-    ASSERT_FALSE(refused_nop.errors.empty());
-    EXPECT_NE(refused_nop.errors.front().find(test_case.reason), std::string::npos)
-        << refused_nop.errors.front();
+    // The inline nop takes no registers, so liveness does not decide it.
+    Instrumentor patching_nop(obj, test_case.arch);
+    patching_nop.add_point_by_offset(test_case.anchor_offset);
+    const InstrumentedCodeObject patched_nop = patching_nop.patch();
+    EXPECT_TRUE(patched_nop.errors.empty()) << patched_nop.errors.front();
+    EXPECT_FALSE(patched_nop.elf_bytes.empty());
 
     Instrumentor debugging(obj, test_case.arch);
     debugging.add_point(pt);

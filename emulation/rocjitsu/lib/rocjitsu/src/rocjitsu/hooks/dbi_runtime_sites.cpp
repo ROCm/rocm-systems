@@ -4,7 +4,6 @@
 #include "rocjitsu/hooks/dbi_runtime_sites.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
-#include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -42,6 +41,8 @@ const char *dbi_load_decision_name(DbiLoadDecision decision) {
     return "not-single-kernel";
   case DbiLoadDecision::NoSites:
     return "no-sites";
+  case DbiLoadDecision::UnsupportedKernel:
+    return "unsupported-kernel";
   case DbiLoadDecision::PatchFailed:
     return "patch-failed";
   case DbiLoadDecision::Count:
@@ -100,7 +101,8 @@ DbiInstrumentation instrument_each_block(std::span<const uint8_t> elf, const Dbi
 
   InstrumentedCodeObject patched = instrumentor.patch();
   if (!patched.errors.empty()) {
-    out.decision = DbiLoadDecision::PatchFailed;
+    out.decision = patched.kernel_unsupported ? DbiLoadDecision::UnsupportedKernel
+                                              : DbiLoadDecision::PatchFailed;
     out.errors = std::move(patched.errors);
     return out;
   }
