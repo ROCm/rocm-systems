@@ -2204,47 +2204,6 @@ TEST_F(NetConnectMicrotest, RecvFree_ReleasesMap) {
 // Proxy-side send connect (sendProxyConnect)
 // ---------------------------------------------------------------------------
 
-// Each export gets a higher fd number than any before it, so a stale fd can't match by reuse.
-std::vector<int> g_exportedFds;
-int g_nextExportFd = 200;
-hsa_status_t FakeExportDmaBuf(const void*, size_t, int* fd, uint64_t* offset) {
-  int devNull = open("/dev/null", O_RDONLY);
-  *fd = fcntl(devNull, F_DUPFD, g_nextExportFd++);
-  close(devNull);
-  *offset = 0x40;
-  g_exportedFds.push_back(*fd);
-  return HSA_STATUS_SUCCESS;
-}
-
-#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
-// Builds with the cuMem DMA-BUF export: each export hands back a fresh fd, recorded here.
-struct CuMemExport {
-  void* ptr;
-  size_t size;
-  unsigned long long flags;
-  int fd;
-};
-struct CuMemExportRecorder : std::vector<CuMemExport> {
-  hipError_t result = hipSuccess;
-  void Install() {
-    g_hipMemGetHandleForAddressRange = [this](void* handle, hipDeviceptr_t ptr, size_t size, hipMemRangeHandleType,
-                                              unsigned long long flags) {
-      if (result != hipSuccess) return result;
-      int fd = open("/dev/null", O_RDONLY);
-      *static_cast<int*>(handle) = fd;
-      push_back({ptr, size, flags, fd});
-      return hipSuccess;
-    };
-  }
-  // Closes what the code under test left open, e.g. a bank fd no free released.
-  void CloseOpen() {
-    for (const auto& e : *this) {
-      if (fcntl(e.fd, F_GETFD) != -1) close(e.fd);
-    }
-  }
-};
-#endif
-
 // Shared by the send and recv proxy-connect suites; Res is that side's resources type.
 template <typename Res>
 class NetProxyConnectMicrotest : public NetAllocMicrotestBase {
@@ -2268,8 +2227,6 @@ class NetProxyConnectMicrotest : public NetAllocMicrotestBase {
     proxyState_.p2pChunkSize = 1 << 10;
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) proxyState_.buffSizes[p] = kSizes[p];
     rcclPrimaryNicInfo = {rcclIBNicTypeDefault, 0, 0};
-    g_exportedFds.clear();
-    g_nextExportFd = 200;
   }
 
   void TearDown() override {
@@ -3876,8 +3833,6 @@ class NetProxyRegBufferMicrotest : public NetMicrotestBase {
     recvRes_.netRecvComm = &net_.recvComm;
     sendConn_.transportResources = &sendRes_;
     recvConn_.transportResources = &recvRes_;
-    g_exportedFds.clear();
-    g_nextExportFd = 200;
   }
 
   void TearDown() override {

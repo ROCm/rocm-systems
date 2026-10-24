@@ -16,11 +16,25 @@
 
 #include "nccl.h"
 
+struct ncclChannel;
 struct ncclComm;
+struct ncclConnect;
 struct ncclTopoGraph;
 
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoGraph*, int, bool*)>
     g_ncclTransportP2pSetup;
+
+// src/transport.cc, and ncclTransportInitRankMap from src/transport/generic.cc. Fail-loud by default,
+// except ncclTransportInitRankMap, which succeeds.
+extern std::function<ncclResult_t(struct ncclComm*, int /*channelId*/, int /*nrecv*/, int* /*peerRecv*/,
+                                  int /*nsend*/, int* /*peerSend*/, int /*connIndex*/)>
+    g_ncclTransportP2pConnect;
+extern std::function<ncclResult_t(struct ncclComm*, int /*nHeads*/, const int* /*heads*/)> g_ncclTransportInitRankMap;
+extern std::function<bool(struct ncclComm*, struct ncclTopoGraph*, struct ncclChannel*, int /*masterRank*/,
+                          int /*masterPeer*/, int /*collNetGraphChannelId*/, int /*type*/, struct ncclConnect*)>
+    g_ncclTransportCollNetSetup;
+extern std::function<ncclResult_t(struct ncclComm*, int /*collNetSetupFail*/)> g_ncclTransportCollNetCheck;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclTransportCollNetFree;
 
 // rcclUseAinic (src/transport/net.cc:343) queries whether an AINIC is present.
 // A host-only binary has no device, so `false` is the honest answer rather than
