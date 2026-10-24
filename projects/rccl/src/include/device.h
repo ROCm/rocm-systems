@@ -785,6 +785,9 @@ __device__ __forceinline__ int ncclChannelMaskNthChannelId(struct channelMasks c
   return -1;
 }
 
+#define RCCL_DEV_FLAG_PROFILER 0x1 // profiler plugin loaded
+#define RCCL_DEV_FLAG_PROGRESS 0x2 // comm->deviceCountersBlock is allocated iff device progress counters are enabled
+
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;
 #ifdef ENABLE_WARP_SPEED
@@ -792,6 +795,7 @@ struct alignas(16) ncclDevKernelArgs {
 #endif
   struct channelMasks channelMask;
   enum ncclDevWorkStorageType workStorageType;
+  uint8_t devFlags; // RCCL_DEV_FLAG_* bits; uses the padding before workMask, so sizeof is unchanged
   uint32_t workMask;
   void* workBuf;
   // A channel's first batch is at `blockIdx.x`. Use `nextJump` to follow rest of list.
