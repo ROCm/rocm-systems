@@ -151,6 +151,14 @@ protected:
         MPI_Allreduce(MPI_IN_PLACE, &v, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
         return v != 0;
     }
+
+    // RCCL_IB_GDR_FLUSH_FLAG=1 only asks for the flag; init turns it off for the
+    // whole comm unless every rank has a supported GPU and none of adaptive
+    // routing, OOO RQ, ID-based matching or port failover. Collective.
+    std::string CommFlagSkipReason(ncclComm_t comm) {
+        if (AllOk(comm->ibGdrFlushFlag != 0)) return std::string();
+        return "the communicator did not enable the GDR flush flag";
+    }
 };
 
 // All-to-all ncclSend/ncclRecv where every peer's size flips between the
@@ -162,6 +170,8 @@ TEST_F(GdrFlushFlagProtoSwitchMPITest, P2pAllToAll_Ll128SimpleSwitch_BackToBack)
     if (!why.empty()) GTEST_SKIP() << why;
     ASSERT_EQ(ncclSuccess, createTestCommunicator());
     ncclComm_t comm = getActiveCommunicator();
+    const std::string commWhy = CommFlagSkipReason(comm);
+    if (!commWhy.empty()) GTEST_SKIP() << commWhy;
     hipStream_t stream = getActiveStream();
     const int rank = MPIEnvironment::world_rank;
     const int nRanks = MPIEnvironment::world_size;
@@ -282,6 +292,8 @@ TEST_F(GdrFlushFlagProtoSwitchMPITest, Collectives_LatencyToFlaggedSimpleSwitch_
     if (!why.empty()) GTEST_SKIP() << why;
     ASSERT_EQ(ncclSuccess, createTestCommunicator());
     ncclComm_t comm = getActiveCommunicator();
+    const std::string commWhy = CommFlagSkipReason(comm);
+    if (!commWhy.empty()) GTEST_SKIP() << commWhy;
     hipStream_t stream = getActiveStream();
     const int rank = MPIEnvironment::world_rank;
     const int nRanks = MPIEnvironment::world_size;

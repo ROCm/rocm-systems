@@ -297,7 +297,8 @@
       "timeout": 1200,
       "description": "Shared env for remote GDR flush flag suites. Carries no tests: extends merges test lists, so children would inherit them.",
       "env_variables": {
-        "RCCL_IB_GDR_FLUSH_FLAG": "1"
+        "RCCL_IB_GDR_FLUSH_FLAG": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "0"
       }
     },
     "net_ib_gdr_flush_flag": {
@@ -5303,21 +5304,21 @@
     },
     {
       "name": "GDR Flush Flag - Default QPs (2-Node, 2-Rank)",
-      "description": "Remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1) over 2 ranks on 2 nodes",
+      "description": "Remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1) over 2 ranks on 2 nodes. Disabled: gfx1250 cannot use the flag, so every case would skip.",
       "config": "net_ib_gdr_flush_flag",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "GDR Flush Flag - 4 QPs (2-Node, 2-Rank)",
-      "description": "Remote GDR flush flag over 4 QPs per connection",
+      "description": "Remote GDR flush flag over 4 QPs per connection. Disabled: gfx1250 cannot use the flag, so every case would skip.",
       "config": "net_ib_gdr_flush_flag_4qps",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "GDR Flush Flag - 4 QPs split (2-Node, 2-Rank)",
-      "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1",
+      "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1. Disabled: gfx1250 cannot use the flag, so every case would skip.",
       "config": "net_ib_gdr_flush_flag_4qps_split",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "GDR Flush - cuMem AllGather (Multi-Node)",

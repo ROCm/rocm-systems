@@ -124,7 +124,8 @@
       "timeout": 1200,
       "description": "Shared env for remote GDR flush flag suites. Carries no tests: extends merges test lists, so children would inherit them.",
       "env_variables": {
-        "RCCL_IB_GDR_FLUSH_FLAG": "1"
+        "RCCL_IB_GDR_FLUSH_FLAG": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "0"
       }
     },
     "net_ib_gdr_flush_flag": {
