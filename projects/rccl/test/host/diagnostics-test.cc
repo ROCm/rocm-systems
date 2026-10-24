@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -148,6 +149,11 @@ void RecordLine(const char* line, void* ctx) {
   static_cast<std::vector<std::string>*>(ctx)->push_back(line);
 }
 
+// The real wrapper runs sed, timeout and stdbuf, which minimal images may not ship.
+bool HaveWrapperTools() {
+  return std::system("command -v env sed timeout stdbuf sleep cat >/dev/null 2>&1") == 0;
+}
+
 class DiagnosticsMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -185,6 +191,10 @@ class DiagnosticsMicrotest : public ::testing::Test {
       EXPECT_STREQ(mode, "r");
       commands_.push_back(command);
       FILE* stream = std::tmpfile();
+      if (stream == nullptr) {
+        ADD_FAILURE() << "tmpfile: " << std::strerror(errno);
+        return stream;
+      }
       std::fwrite(output.data(), 1, output.size(), stream);
       std::rewind(stream);
       return stream;
@@ -397,6 +407,7 @@ TEST_F(DiagnosticsMicrotest, ChildRun_ReturnsExitCodeOnlyForNormalExit) {
 
 // The only tests that spawn: the shell wrapper itself is what is under test.
 TEST_F(DiagnosticsMicrotest, ChildRun_RealChildLosesMpiEnvAndStdinAndMergesStderr) {
+  if (!HaveWrapperTools()) GTEST_SKIP() << "needs sed and coreutils (timeout, stdbuf) on PATH";
   // Under mpirun these may already be set; put them back afterwards.
   const std::vector<std::pair<const char*, const char*>> vars = {{"OMPI_COMM_WORLD_RANK", "3"},
                                                                  {"PMI_RANK", "3"},
@@ -428,6 +439,7 @@ TEST_F(DiagnosticsMicrotest, ChildRun_RealChildLosesMpiEnvAndStdinAndMergesStder
 }
 
 TEST_F(DiagnosticsMicrotest, ChildRun_RealTimeoutKillsAHungChild) {
+  if (!HaveWrapperTools()) GTEST_SKIP() << "needs sed and coreutils (timeout, stdbuf) on PATH";
   char output[16];
   EXPECT_EQ(DiagnosticsChildRun("sleep 30", 1, output, sizeof(output), nullptr), 124);
   EXPECT_STREQ(output, "");

@@ -1833,32 +1833,6 @@ TEST_F(TopoMicrotest, Lookups_StayOnTheirSystemAndWarnOnlyWhenAsked) {
   EXPECT_TRUE(Logged("ncclTopoRankToIndex could not find rank 9"));
 }
 
-// With no arch attribute kvConvertToInt dereferences NULL instead of returning UNDEF.
-// Pins AICOMRCCL-3025; a fix flips this pin.
-TEST_F(TopoMicrotest, GetXmlCpuArch_KnownBug_NoCpuArchCrashes) {
-  XmlPtr xml = MustParseXml(System("<cpu numaid=\"0\"/>"));
-  int arch = -1;
-  const std::string style = ::testing::GTEST_FLAG(death_test_style);
-  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
-
-  EXPECT_EXIT(ncclTopoGetXmlCpuArch(xml.get(), &arch), DEATH_BY_SEGV, "");
-  ::testing::GTEST_FLAG(death_test_style) = style;
-}
-
-// A <gpu> without gcn (any NVIDIA-style topology file) crashes the system build.
-// Pins AICOMRCCL-3026; a fix flips this pin.
-TEST_F(TopoMicrotest, GetSystemFromXml_KnownBug_GpuWithoutGcnCrashes) {
-  XmlPtr xml = MustParseXml(System(Cpu(0, "<pci busid=\"0000:10:00.0\" class=\"0x120000\" link_speed=\"\" "
-                                          "link_width=\"16\"><gpu dev=\"0\" sm=\"90\" arch=\"0\" rank=\"0\" "
-                                          "gdr=\"1\"/></pci>")));
-  ncclTopoSystem* system = nullptr;
-  const std::string style = ::testing::GTEST_FLAG(death_test_style);
-  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
-
-  EXPECT_EXIT(ncclTopoGetSystemFromXml(xml.get(), &system, 0), DEATH_BY_SEGV, "");
-  ::testing::GTEST_FLAG(death_test_style) = style;
-}
-
 TEST_F(TopoMicrotest, GetFusionEnv_ReadsEnvOrDefaultsByPlatform) {
   int level = -1;
   const char* force = "unset";

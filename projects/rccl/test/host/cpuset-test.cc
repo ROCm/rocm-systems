@@ -119,7 +119,10 @@ TEST_F(CpusetMicrotest, CpusetToRangeStr_StopsWhenTheBufferIsFull) {
 // With len 0, len - 1 wraps and the second range is written past the empty buffer; a fix flips this pin.
 TEST_F(CpusetMicrotest, CpusetToRangeStr_KnownBug_ZeroLengthWritesPastTheBuffer) {
   Set({0, 2});
-  ncclCpusetToRangeStr(&set_, buf_, 0);
+  // Hidden from _FORTIFY_SOURCE, which would abort on the wrapped size; the writes themselves stay inside buf_.
+  char* out = buf_;
+  asm volatile("" : "+r"(out));
+  ncclCpusetToRangeStr(&set_, out, 0);
   EXPECT_EQ(kGuard, buf_[0]);
   EXPECT_EQ(',', buf_[1]);
 }

@@ -371,6 +371,7 @@
       "num_nodes": 1,
       "num_gpus": 1,
       "timeout": 60,
+      "skip_if_missing": true,
       "tests": [
         {"name": "SymKernelsMicrotests", "description": "Host-only sym_kernels.cc/sym_kernels_host.cc microtests (no GPU, no HIP/RCCL runtime); contributes sym_kernels coverage", "test_filter": "*"}
       ]
@@ -384,6 +385,94 @@
       "timeout": 60,
       "tests": [
         {"name": "ProfilerMicrotests", "description": "Host-only profiler plugin microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_ce": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroCe",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 0,
+      "timeout": 60,
+      "tests": [
+        {"name": "CeMicrotests", "description": "Host-only ce_coll.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_client_support": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroClientSupport",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 0,
+      "timeout": 60,
+      "tests": [
+        {"name": "ClientSupportMicrotests", "description": "Host-only ras/client_support.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_connect": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroConnect",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 0,
+      "timeout": 60,
+      "tests": [
+        {"name": "ConnectMicrotests", "description": "Host-only graph/connect.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_diagnostics": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroDiagnostics",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 0,
+      "timeout": 60,
+      "tests": [
+        {"name": "DiagnosticsMicrotests", "description": "Host-only diagnostics.cc and diagnostics/{p2p,ib_write_bw}.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_graph": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroGraph",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 0,
+      "timeout": 60,
+      "tests": [
+        {"name": "GraphMicrotests", "description": "Host-only graph/{xml,topo,paths,search}.cc topology GPU id microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_rma_proxy": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroRmaProxy",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 0,
+      "timeout": 60,
+      "tests": [
+        {"name": "RmaProxyMicrotests", "description": "Host-only rma/rma_proxy.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_taskprep": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroTaskPrep",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 0,
+      "timeout": 60,
+      "tests": [
+        {"name": "TaskPrepMicrotests", "description": "Host-only enqueue/task_prep and enqueue/task_sched microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_warp_speed": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroWarpSpeed",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 0,
+      "timeout": 60,
+      "tests": [
+        {"name": "WarpSpeedMicrotests", "description": "Host-only scheduler/{allgatherv,symmetric}_sched.cc microtests under ENABLE_WARP_SPEED (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
     },
     "unit_tests_micro_gin_host": {
@@ -611,6 +700,54 @@
       "name": "RCCL Microtests - profiler plugin",
       "description": "rccl-UnitTestsMicroProfiler (host-only profiler plugin microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_profiler",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - ce_coll.cc",
+      "description": "rccl-UnitTestsMicroCe (host-only ce_coll.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_ce",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - ras/client_support.cc",
+      "description": "rccl-UnitTestsMicroClientSupport (host-only ras/client_support.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_client_support",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - graph/connect.cc",
+      "description": "rccl-UnitTestsMicroConnect (host-only graph/connect.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_connect",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - diagnostics",
+      "description": "rccl-UnitTestsMicroDiagnostics (host-only diagnostics.cc and diagnostics/{p2p,ib_write_bw}.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_diagnostics",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - graph topology GPU id",
+      "description": "rccl-UnitTestsMicroGraph (host-only graph/{xml,topo,paths,search}.cc topology GPU id microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_graph",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - rma/rma_proxy.cc",
+      "description": "rccl-UnitTestsMicroRmaProxy (host-only rma/rma_proxy.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_rma_proxy",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - enqueue/task_prep",
+      "description": "rccl-UnitTestsMicroTaskPrep (host-only enqueue/task_prep and enqueue/task_sched microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_taskprep",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - scheduler (WarpSpeed)",
+      "description": "rccl-UnitTestsMicroWarpSpeed (host-only scheduler/{allgatherv,symmetric}_sched.cc microtests under ENABLE_WARP_SPEED, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_warp_speed",
       "enabled": true
     },
     {

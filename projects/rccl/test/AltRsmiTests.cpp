@@ -99,11 +99,10 @@ static int GetNumDevices() {
 } // namespace AltRsmiTestUtils
 
 // Test paths for creating mock KFD filesystem
-// Use std::filesystem::temp_directory_path() for portability
+// Use std::filesystem::temp_directory_path() for portability; PID-scoped so concurrent runs don't share it.
 static const std::string kTestKFDBasePath =
-    std::filesystem::temp_directory_path().string() + "/test_kfd_arsmi";
-static const std::string kTestKFDPath =
-    std::filesystem::temp_directory_path().string() + "/test_kfd_arsmi/topology/nodes";
+    std::filesystem::temp_directory_path().string() + "/test_kfd_arsmi_" + std::to_string(getpid());
+static const std::string kTestKFDPath = kTestKFDBasePath + "/topology/nodes";
 
 // PID-scoped DRM sandbox path — avoids collisions with parallel CI runs.
 // BDF correspondence: location_id=23552 (0x5C00), domain=0
@@ -484,10 +483,8 @@ TEST(AltRsmiTest, ARSMIInitCalledTwiceIsShortCircuited) {
       const int secondInit = ARSMI_init();
       const int getRc = ARSMI_get_num_devices(&num_devices);
 
-      // Drop the extra node before asserting. kTestKFDPath is shared, not
-      // PID-scoped, and a failed ASSERT returns without reaching
-      // cleanupTestEnvironment -- leaving a third node behind would make every
-      // later test that expects 2 devices fail for an unrelated reason.
+      // Drop the extra node before asserting: a failed ASSERT returns without
+      // reaching cleanupTestEnvironment, which would leave it behind.
       removeDirectoryImpl(std::string(kTestKFDPath) + "/2");
 
       ASSERT_EQ(secondInit, 0);

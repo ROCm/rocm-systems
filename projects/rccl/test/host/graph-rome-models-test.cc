@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <csignal>
+#include <cstring>
 #include <memory>
 #include <set>
 #include <string>
@@ -32,7 +33,18 @@ using namespace topo_scene;
 namespace {
 
 constexpr int kModels = sizeof(romeTopoModels) / sizeof(romeTopoModels[0]);
-constexpr int kSixteenNicModel = 41;  // rome_model_84
+
+// A model's table index, found by content so a reordered romeTopoModels[] cannot retarget a test.
+int Idx(const rcclRomeModel& model) {
+  int found = -1;
+  for (int i = 0; i < kModels; i++) {
+    if (std::memcmp(&romeTopoModels[i], &model, sizeof(model)) != 0) continue;
+    EXPECT_EQ(-1, found) << "romeTopoModels holds the model twice";
+    found = i;
+  }
+  if (found == -1) ADD_FAILURE() << "model not in romeTopoModels";
+  return std::max(found, 0);
+}
 
 #if defined(__GLIBC_PREREQ)
 #if __GLIBC_PREREQ(2, 33)
@@ -188,31 +200,31 @@ TEST_F(GraphRomeModelsMicrotest, Rome4P2H_TreesUseTreeBaseOrFallBackToTheRings) 
 }
 
 TEST_F(GraphRomeModelsMicrotest, Rome4P2H_OtherPatternsAndBigSystemsAreSkipped) {
-  UseModel(romeTopoModels[8]);
+  UseModel(rome_model_24);
   GraphPtr nvls = NewGraph(3, NCCL_TOPO_PATTERN_NVLS);
   ASSERT_EQ(ncclSuccess, parseRome4P2H(system_.get(), nvls.get(), nullptr));
   EXPECT_EQ(0, nvls->nChannels);
 
-  UseModel(romeTopoModels[24]);  // 16 GPUs
+  UseModel(rome_model_56);  // 16 GPUs
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
   ASSERT_EQ(ncclSuccess, parseRome4P2H(system_.get(), ring.get(), nullptr));
   EXPECT_EQ(0, ring->nChannels);
 }
 
 TEST_F(GraphRomeModelsMicrotest, Rome4P2H_NeedsRomeUnlessTheModelSkipsTheCpuCheck) {
-  UseModel(romeTopoModels[8], -1, kAmdCpu);
+  UseModel(rome_model_24, -1, kAmdCpu);
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
   ASSERT_EQ(ncclSuccess, parseRome4P2H(system_.get(), ring.get(), nullptr));
   EXPECT_EQ(0, ring->nChannels);
   EXPECT_TRUE(system_->type & RCCL_TOPO_4P2H_ROME);  // XGMI-linked, so still flagged as Rome 4P2H
 
-  UseModel(romeTopoModels[44], -1, kAmdCpu);  // noCpuCheck=1
+  UseModel(rome_model_88, -1, kAmdCpu);  // noCpuCheck=1
   ASSERT_EQ(ncclSuccess, parseRome4P2H(system_.get(), ring.get(), nullptr));
   EXPECT_GT(ring->nChannels, 0);
 }
 
 TEST_F(GraphRomeModelsMicrotest, Rome4P2H_UserRingRemapReplacesTheModelRings) {
-  UseModel(romeTopoModels[8]);
+  UseModel(rome_model_24);
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
 
   ASSERT_EQ(ncclSuccess, parseRome4P2H(system_.get(), ring.get(), "0 1 2 3 4 5 6 7"));
@@ -221,7 +233,7 @@ TEST_F(GraphRomeModelsMicrotest, Rome4P2H_UserRingRemapReplacesTheModelRings) {
 }
 
 TEST_F(GraphRomeModelsMicrotest, Rome4P2H_OddHostCountsUseTheTailRingsOnTheLastTwoHosts) {
-  const rcclRomeModel& m = romeTopoModels[44];  // rome_model_88 has ringTail1/ringTail2
+  const rcclRomeModel& m = rome_model_88;  // has ringTail1/ringTail2
   for (int hostIdx : {0, 1, 2}) {
     UseModel(m);
     system_->nHosts = 3;
@@ -238,7 +250,7 @@ TEST_F(GraphRomeModelsMicrotest, Rome4P2H_OddHostCountsUseTheTailRingsOnTheLastT
     for (int c = 0; c < ring->nChannels; c++) EXPECT_EQ(Channel(expected.get(), c), Channel(ring.get(), c)) << hostIdx;
   }
 
-  UseModel(romeTopoModels[8]);  // no tails
+  UseModel(rome_model_24);  // no tails
   system_->nHosts = 3;
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
   ASSERT_EQ(ncclSuccess, parseRome4P2H(system_.get(), ring.get(), nullptr));
@@ -246,7 +258,7 @@ TEST_F(GraphRomeModelsMicrotest, Rome4P2H_OddHostCountsUseTheTailRingsOnTheLastT
 }
 
 TEST_F(GraphRomeModelsMicrotest, Rome4P2H_EvenHostCountsAlternateTheRingDirection) {
-  UseModel(romeTopoModels[8]);
+  UseModel(rome_model_24);
   system_->nHosts = 2;
   GraphPtr forward = NewGraph(0, NCCL_TOPO_PATTERN_RING);
   ASSERT_EQ(ncclSuccess, parseRome4P2H(system_.get(), forward.get(), nullptr));
@@ -262,11 +274,11 @@ TEST_F(GraphRomeModelsMicrotest, Rome4P2H_EvenHostCountsAlternateTheRingDirectio
 }
 
 TEST_F(GraphRomeModelsMicrotest, Rome4P2H_NetOverridePairsGpusSharingASwitch) {
-  const rcclRomeModel& m = romeTopoModels[43];  // rome_model_87: netOverride=1
+  const rcclRomeModel& m = rome_model_87;  // netOverride=1
   UseModel(m);
   GraphPtr tree = NewGraph(1, NCCL_TOPO_PATTERN_BALANCED_TREE);
   ASSERT_EQ(ncclSuccess, parseRome4P2H(system_.get(), tree.get(), nullptr));
-  ASSERT_EQ(43, system_->romeTopoModelIdx);
+  ASSERT_EQ(Idx(m), system_->romeTopoModelIdx);
 
   int pxb = 0;
   for (int g = 0; g < 8; g++) {
@@ -286,7 +298,7 @@ TEST_F(GraphRomeModelsMicrotest, Rome4P2H_NetOverridePairsGpusSharingASwitch) {
 }
 
 TEST_F(GraphRomeModelsMicrotest, Rome4P2H_NicsMustMatchTheModelGdrLevels) {
-  UseModel(romeTopoModels[43]);
+  UseModel(rome_model_87);
   for (int g = 0; g < 8; g++) {
     for (int n = 0; n < 4; n++) system_->nodes[GPU].nodes[g].paths[NET][n].type = PATH_SYS;
   }
@@ -298,11 +310,11 @@ TEST_F(GraphRomeModelsMicrotest, Rome4P2H_NicsMustMatchTheModelGdrLevels) {
 }
 
 TEST_F(GraphRomeModelsMicrotest, Rome4P2H_TwoNicsPerGpuMatchGreedily) {
-  const rcclRomeModel& m = romeTopoModels[41];  // rome_model_84: 16 NICs on 8 GPUs
+  const rcclRomeModel& m = rome_model_84;  // 16 NICs on 8 GPUs
   UseModel(m);
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
   ASSERT_EQ(ncclSuccess, parseRome4P2H(system_.get(), ring.get(), nullptr));
-  EXPECT_EQ(41, system_->romeTopoModelIdx);
+  EXPECT_EQ(Idx(m), system_->romeTopoModelIdx);
 
   UseModel(m);
   system_->nodes[GPU].nodes[0].paths[NET][0].type = PATH_DIS;
@@ -312,11 +324,12 @@ TEST_F(GraphRomeModelsMicrotest, Rome4P2H_TwoNicsPerGpuMatchGreedily) {
 }
 
 TEST_F(GraphRomeModelsMicrotest, A2a8P_MatchesEightFullyConnectedGpusOnTwoSockets) {
+  const int sixteenNics = Idx(rome_model_84);
   int matched = 0;
   for (int i = 0; i < kModels; i++) {
     const rcclRomeModel& m = romeTopoModels[i];
     if (m.nGpus != 8 || m.nCpus != 2 || !checkAlltoallWidth(const_cast<rcclRomeModel*>(&m))) continue;
-    if (i == kSixteenNicModel) continue;  // see A2a8P_KnownBug_SixteenNicsSearchEveryNicOrdering
+    if (i == sixteenNics) continue;  // see A2a8P_KnownBug_SixteenNicsSearchEveryNicOrdering
     for (int pattern : {NCCL_TOPO_PATTERN_RING, NCCL_TOPO_PATTERN_BALANCED_TREE}) {
       UseModel(m, -1, kAmdCpu);
       GraphPtr graph = NewGraph(pattern == NCCL_TOPO_PATTERN_RING ? 0 : 1, pattern);
@@ -334,7 +347,7 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_MatchesEightFullyConnectedGpusOnTwoSocket
 // permuteNetIds starts at NIC 2 and checks only complete orderings, so 16 NICs walk ~15! of them.
 // Pins AICOMRCCL-3028; a fix flips this pin.
 TEST_F(GraphRomeModelsMicrotest, A2a8P_KnownBug_SixteenNicsSearchEveryNicOrdering) {
-  UseModel(romeTopoModels[kSixteenNicModel]);
+  UseModel(rome_model_84);
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
   const std::string style = ::testing::GTEST_FLAG(death_test_style);
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
@@ -342,15 +355,15 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_KnownBug_SixteenNicsSearchEveryNicOrderin
   EXPECT_EXIT(
       {
         alarm(2);
-  ::testing::GTEST_FLAG(death_test_style) = style;
         (void)parseA2a8P(system_.get(), ring.get(), nullptr);
         _exit(0);
       },
       ::testing::KilledBySignal(SIGALRM), "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
 }
 
 TEST_F(GraphRomeModelsMicrotest, A2a8P_RailTreesUnlessDisabled) {
-  const rcclRomeModel& m = romeTopoModels[40];  // rome_model_81 has treeRail
+  const rcclRomeModel& m = rome_model_81;  // has treeRail
   UseModel(m, -1, kAmdCpu);
   GraphPtr tree = NewGraph(1, NCCL_TOPO_PATTERN_BALANCED_TREE);
   ASSERT_EQ(ncclSuccess, parseA2a8P(system_.get(), tree.get(), nullptr));
@@ -365,7 +378,7 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_RailTreesUnlessDisabled) {
 }
 
 TEST_F(GraphRomeModelsMicrotest, A2a8P_OddHostsUseTheTails) {
-  const rcclRomeModel& m = romeTopoModels[40];
+  const rcclRomeModel& m = rome_model_81;
   for (int hostIdx : {0, 1, 2}) {
     UseModel(m, -1, kAmdCpu);
     system_->nHosts = 3;
@@ -376,7 +389,7 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_OddHostsUseTheTails) {
 
     EXPECT_GT(ring->nChannels, 0) << hostIdx;
   }
-  UseModel(romeTopoModels[38], -1, kAmdCpu);  // no tails
+  UseModel(rome_model_79, -1, kAmdCpu);  // no tails
   system_->nHosts = 3;
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
   ASSERT_EQ(ncclSuccess, parseA2a8P(system_.get(), ring.get(), "0 1 2 3 4 5 6 7"));
@@ -396,7 +409,7 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_SkipsOtherShapes) {
 // The GPU permutation table is not freed when no model matches. Pins AICOMRCCL-3029; a fix flips this pin.
 TEST_F(GraphRomeModelsMicrotest, A2a8P_KnownBug_NoMatchLeaksThePermutationTable) {
   if (kAsan) GTEST_SKIP() << "the leak would fail LeakSanitizer";
-  UseModel(romeTopoModels[44], -1, kAmdCpu);
+  UseModel(rome_model_88, -1, kAmdCpu);
   system_->nodes[DEV].nodes[0].links[0].bw /= 2;  // no model has a narrower link
   ASSERT_EQ(ncclSuccess, ncclTopoComputePaths(system_.get(), nullptr));
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
@@ -410,12 +423,12 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_KnownBug_NoMatchLeaksThePermutationTable)
 }
 
 TEST_F(GraphRomeModelsMicrotest, A2a8P_EvenHostCountsAlternateTheRingDirection) {
-  UseModel(romeTopoModels[40], -1, kAmdCpu);
+  UseModel(rome_model_81, -1, kAmdCpu);
   system_->nHosts = 2;
   GraphPtr forward = NewGraph(0, NCCL_TOPO_PATTERN_RING);
   ASSERT_EQ(ncclSuccess, parseA2a8P(system_.get(), forward.get(), nullptr));
 
-  UseModel(romeTopoModels[40], -1, kAmdCpu);
+  UseModel(rome_model_81, -1, kAmdCpu);
   system_->nHosts = 2;
   system_->hostIdx = 1;
   GraphPtr reverse = NewGraph(0, NCCL_TOPO_PATTERN_RING);
@@ -427,7 +440,7 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_EvenHostCountsAlternateTheRingDirection) 
 }
 
 TEST_F(GraphRomeModelsMicrotest, A2a8P_TreeBaseIsUsedWhenThereAreNoRailTrees) {
-  rcclRomeModel& m = romeTopoModels[40];
+  rcclRomeModel& m = romeTopoModels[Idx(rome_model_81)];  // the matcher reads the table entry
   const char* saved = m.treeBase;
   m.treeBase = "(0(1))";
   UseModel(m, -1, kAmdCpu);
@@ -443,7 +456,7 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_TreeBaseIsUsedWhenThereAreNoRailTrees) {
 }
 
 TEST_F(GraphRomeModelsMicrotest, A2a8P_PixAndPxbNicsAreInterchangeable) {
-  UseModel(romeTopoModels[40], -1, kAmdCpu);
+  UseModel(rome_model_81, -1, kAmdCpu);
   for (int g = 0; g < 8; g++) {
     for (int n = 0; n < 8; n++) {
       ncclTopoLinkList& path = system_->nodes[GPU].nodes[g].paths[NET][n];
@@ -454,11 +467,11 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_PixAndPxbNicsAreInterchangeable) {
 
   ASSERT_EQ(ncclSuccess, parseA2a8P(system_.get(), ring.get(), nullptr));
 
-  EXPECT_EQ(40, system_->romeTopoModelIdx);
+  EXPECT_EQ(Idx(rome_model_81), system_->romeTopoModelIdx);
 }
 
 TEST_F(GraphRomeModelsMicrotest, P1H16P_MatchesSixteenGpuModels) {
-  for (int i : {24, 26}) {
+  for (int i : {Idx(rome_model_56), Idx(rome_model_59)}) {
     UseModel(romeTopoModels[i]);
     GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
 
@@ -475,7 +488,7 @@ TEST_F(GraphRomeModelsMicrotest, P1H16P_MatchesSixteenGpuModels) {
 // Pins AICOMRCCL-3029; a fix flips this pin.
 TEST_F(GraphRomeModelsMicrotest, P1H16P_KnownBug_NoMatchLeaksThePermutationTable) {
   if (kAsan) GTEST_SKIP() << "the leak would fail LeakSanitizer";
-  rcclRomeModel rewired = romeTopoModels[24];
+  rcclRomeModel rewired = rome_model_56;
   auto link = [&](int a, int b, int v) { rewired.connMatrix[a * 16 + b] = rewired.connMatrix[b * 16 + a] = v; };
   link(0, 1, 0), link(8, 9, 0), link(0, 8, 1), link(1, 9, 1);  // same link counts, different shape
   UseModel(rewired);
@@ -491,18 +504,18 @@ TEST_F(GraphRomeModelsMicrotest, P1H16P_KnownBug_NoMatchLeaksThePermutationTable
 }
 
 TEST_F(GraphRomeModelsMicrotest, P1H16P_NeedsRomeAndSixteenGpus) {
-  UseModel(romeTopoModels[24], -1, kAmdCpu);
+  UseModel(rome_model_56, -1, kAmdCpu);
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
   ASSERT_EQ(ncclSuccess, parse1H16P(system_.get(), ring.get()));
   EXPECT_EQ(0, ring->nChannels);
 
-  UseModel(romeTopoModels[8]);
+  UseModel(rome_model_24);
   ASSERT_EQ(ncclSuccess, parse1H16P(system_.get(), ring.get()));
   EXPECT_EQ(0, ring->nChannels);
 }
 
 TEST_F(GraphRomeModelsMicrotest, P4H4P_MatchesFourHivesWithANicPerGpu) {
-  UseModel(romeTopoModels[32]);  // rome_model_68
+  UseModel(rome_model_68);
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
 
   ASSERT_EQ(ncclSuccess, parse4H4P(system_.get(), ring.get()));
@@ -514,25 +527,25 @@ TEST_F(GraphRomeModelsMicrotest, P4H4P_MatchesFourHivesWithANicPerGpu) {
 
 TEST_F(GraphRomeModelsMicrotest, P4H4P_RejectsOtherShapes) {
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
-  UseModel(romeTopoModels[32], -1, kAmdCpu);
+  UseModel(rome_model_68, -1, kAmdCpu);
   ASSERT_EQ(ncclSuccess, parse4H4P(system_.get(), ring.get()));
   EXPECT_EQ(0, ring->nChannels);
 
-  rcclRomeModel noNics = romeTopoModels[32];
+  rcclRomeModel noNics = rome_model_68;
   noNics.nNics = 0;
   UseModel(noNics);  // the same four hives, but no NICs
   ASSERT_EQ(ncclSuccess, parse4H4P(system_.get(), ring.get()));
   EXPECT_EQ(0, ring->nChannels);
   EXPECT_FALSE(Logged("Found matching Rome model 4P4H"));
 
-  UseModel(romeTopoModels[32]);
+  UseModel(rome_model_68);
   for (int g = 0; g < 16; g++) system_->nodes[GPU].nodes[g].paths[NET][0].type = PATH_PHB;  // NIC 0 has no PIX GPU
   ASSERT_EQ(ncclSuccess, parse4H4P(system_.get(), ring.get()));
   EXPECT_EQ(0, ring->nChannels);
 }
 
 TEST_F(GraphRomeModelsMicrotest, FindGpuHives_NeedsFullHives) {
-  rcclRomeModel m = romeTopoModels[32];
+  rcclRomeModel m = rome_model_68;
   std::vector<int> hives(16, -1);
   int nHives[4] = {0, 0, 0, 0};
   ASSERT_EQ(ncclSuccess, find_gpu_hives(hives.data(), nHives, &m));
@@ -573,7 +586,7 @@ TEST_F(GraphRomeModelsMicrotest, GioTopos_MatchesTwoHivesOfEight) {
 
 TEST_F(GraphRomeModelsMicrotest, GioTopos_SkipsOtherShapes) {
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
-  UseModel(romeTopoModels[24]);  // 16 GPUs, but hives of 4
+  UseModel(rome_model_56);  // 16 GPUs, but hives of 4
   ASSERT_EQ(ncclSuccess, parseGIOTopos(system_.get(), ring.get()));
   EXPECT_EQ(0, ring->nChannels);
 
@@ -654,7 +667,7 @@ TEST_F(GraphRomeModelsMicrotest, ChordalRing_SkipsOtherShapes) {
 }
 
 TEST_F(GraphRomeModelsMicrotest, ParseRomeSystem_DumpsTheModelWhenAsked) {
-  UseModel(romeTopoModels[43]);
+  UseModel(rome_model_87);
   TempFile file;
   RcclUnitTesting::ScopedEnv dumpFile("RCCL_DUMP_ROME_MODEL_FILE", file.path());
   rcclRomeModel topo;
@@ -740,22 +753,18 @@ TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_StopsAtTooManyNics) {
   EXPECT_EQ(0, ring_->nChannels);
 }
 
-// The count is checked after gpus[gpu] is written, so one GPU too many lands past the array.
-// Pins AICOMRCCL-3030; a fix flips this pin.
-TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_KnownBug_OneGpuPastTheLimitIsWrittenBeforeTheStop) {
-  if (kAsan) GTEST_SKIP() << "the out-of-bounds stack write would fail AddressSanitizer";
-  std::string many;
-  for (int g = 0; g <= NCCL_TOPO_MAX_NODES; g++) many += std::to_string(g % 4) + " ";
-  const std::string style = ::testing::GTEST_FLAG(death_test_style);
-  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+// A channel of exactly NCCL_TOPO_MAX_NODES GPUs is dropped for its size without ending the parse. One GPU more is
+// written past gpus[] before the stop (AICOMRCCL-3030), which only undefined behaviour would show, so it is not pinned.
+TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_ChannelAtTheGpuLimitDoesNotStopTheParse) {
+  std::string rings;
+  for (int g = 0; g < NCCL_TOPO_MAX_NODES; g++) rings += std::to_string(g % 4) + " ";
+  rings.back() = '|';
+  rings += "0 1 2 3";
 
-  EXPECT_EXIT(
-      {
-        ncclResult_t ret = parseGraph(many.c_str(), system_.get(), ring_.get(), nullptr, nullptr, 0);
-  ::testing::GTEST_FLAG(death_test_style) = style;
-        _exit(ret == ncclSuccess && ring_->nChannels == 0 ? 0 : 1);
-      },
-      ::testing::ExitedWithCode(0), "");
+  ASSERT_EQ(ncclSuccess, parseGraph(rings.c_str(), system_.get(), ring_.get(), nullptr, nullptr, 0));
+
+  ASSERT_EQ(1, ring_->nChannels);
+  EXPECT_EQ(std::vector<int>({0, 1, 2, 3}), Channel(ring_.get(), 0));
 }
 
 TEST_F(GraphRomeModelsMicrotest, ParseOptions_SetsTheKnownKeys) {
@@ -816,7 +825,7 @@ TEST_F(GraphRomeModelsMicrotest, SetPresetIdx_RejectsAConflictingModel) {
 }
 
 TEST_F(GraphRomeModelsMicrotest, CheckAlltoallWidth_ZeroUnlessEveryPairHasTheSameWidth) {
-  rcclRomeModel m = romeTopoModels[44];
+  rcclRomeModel m = rome_model_88;
   EXPECT_EQ(1, checkAlltoallWidth(&m));
   m.connMatrix[1] = 2;
   EXPECT_EQ(0, checkAlltoallWidth(&m));
