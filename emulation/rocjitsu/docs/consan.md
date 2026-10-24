@@ -86,6 +86,13 @@ artifact directory contains:
   observation site's read/write kind and width.
 - `ready`: a marker published after the artifact files close successfully.
 
+The preparation tool embeds probe bodies compiled at build time for each
+supported target/wave mode and lowers calls through the shared DBI framework.
+Register counts and kernarg size in the prepared descriptor and AMDHSA note
+are updated together by the shared code-object editor. Missing fields or integer
+encodings too narrow for the requested sizes reject preparation before artifact
+publication. ConSan keeps its own target, argument, and launch admission checks.
+
 ### Execution and capture
 
 The plugin matches the application's original object to the artifact and loads
@@ -200,7 +207,9 @@ conflicting accesses.
 Follow [building.md](building.md) for general prerequisites and build setup.
 Use a configured build from this checkout, with its ROCm SDK environment active.
 This simulator example requires Linux, HSA headers/runtime, and the AMD
-assembler/linker for the original assembly fixture. The phase components are:
+assembler/linker for the original assembly fixture. Preparation additionally
+requires `amdclang++` and `clang-offload-bundler` to build its callable probes.
+The phase components are:
 
 - **Offline preparation:** `rj_consan_prepare`, enabled by
   `RJ_BUILD_CONSAN_COMPILER=ON`.
@@ -356,10 +365,12 @@ even within the input size and instruction budgets; preparation rejects these
 inputs before publishing an artifact. Streaming transport, arbitrary placement,
 and general MODE save/restore remain outside the current implementation.
 
-The ConSan compiler requires the ROCm device compiler and offload bundler even
-when tests are disabled, because its callable probe catalogue is built for all
-supported target/wave modes. The runtime and analyzer remain independent of the
-device compiler.
+Enabling `RJ_BUILD_CONSAN_COMPILER` requires ROCm's `amdclang++` and
+`clang-offload-bundler`, including when `BUILD_TESTING=OFF`: CMake compiles the
+HIP probe functions and embeds a standalone code object for each supported
+target/wave mode. A missing tool is a configuration error. These are build-time
+dependencies of preparation; the runtime and analyzer neither build that
+catalogue nor require the device compiler.
 
 A new analysis primarily extends **compiler facts/probes and offline diagnosis**
 together. Define its question, scope, required evidence, and behavior under loss:
