@@ -963,6 +963,43 @@ testResult_t completeColl(struct threadArgs* args) {
   return testSuccess;
 }
 
+// Line the ranks up before a timer starts. Dissemination barrier: in round k
+// each rank sends to rank+2^k and receives from rank-2^k; after log2(n) rounds
+// every rank has heard from all others, and all finish on the same last round.
+// MPI_Barrier over TCP releases ranks unevenly, which inflates small sizes.
+// Buffers: args->barrierBuffs (send, receive), set up in run().
+static testResult_t disseminate(struct threadArgs* args) {
+  const int nRanks = args->nProcs * args->nThreads * args->nGpus;
+  for (int step = 1; step < nRanks; step <<= 1) {
+    NCCLCHECK(ncclGroupStart());
+    for (int i = 0; i < args->nGpus; i++) {
+#ifndef NCCL_MAJOR
+      CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
+      const int rank = (args->proc * args->nThreads + args->thread) * args->nGpus + i;
+      NCCLCHECK(ncclSend(args->barrierBuffs[i], 1, ncclInt32, (rank + step) % nRanks,
+                         args->comms[i], args->streams[i]));
+      NCCLCHECK(ncclRecv(args->barrierBuffs[i] + 1, 1, ncclInt32, (rank - step + nRanks) % nRanks,
+                         args->comms[i], args->streams[i]));
+    }
+    NCCLCHECK(ncclGroupEnd());
+  }
+  TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
+  return testSuccess;
+}
+
+static testResult_t collBarrier(struct threadArgs* args) {
+  // RCCL sets up point-to-point connections on first use, and that set-up
+  // finishes at very different times on different ranks. Pay it once, untimed,
+  // so no measured barrier includes it.
+  thread_local bool connected = false;
+  if (!connected) {
+    TESTCHECK(disseminate(args));
+    connected = true;
+  }
+  return disseminate(args);
+}
+
 static int getEventCount(int eventIters) {
   return blocking_coll == 3 ? eventIters*2 : eventIters + 1;
 }
@@ -1034,7 +1071,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     TESTCHECK(completeColl(args));
   }
 
-  Barrier(args);
+  // Each rank starts its clock right after this, so line the ranks up with a
+  // collective rather than MPI_Barrier (see collBarrier).
+  TESTCHECK(collBarrier(args));
 
   // Device-time-only mode (--device_timing=2): for collectives that provide a
   // device-timing hook, skip the host/graph timed loop entirely and report the
@@ -1130,8 +1169,8 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 #endif
       CUDACHECK(cudaGraphInstantiate(graphExec.data()+i, graphs[i], NULL, NULL, 0));
     }
-    // Resync CPU, restart timing, launch cuda graph
-    Barrier(args);
+    // Resync ranks (with a collective, see collBarrier), restart timing, launch cuda graph
+    TESTCHECK(collBarrier(args));
     tim.reset();
     for (int l=0; l<cudaGraphLaunches; l++) {
       for (int i=0; i<args->nGpus; i++) {
@@ -2541,6 +2580,7 @@ testResult_t run() {
   std::vector<void*> recvbuffs(nGpus*nThreads);
   std::vector<void*> bias(nGpus*nThreads);
   std::vector<void*> expected(nGpus*nThreads);
+  std::vector<int*> barrierBuffs(nGpus*nThreads, nullptr);
   size_t sendBytes, recvBytes;
 
   ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes, (size_t)ncclProcs*nGpus*nThreads);
@@ -2556,6 +2596,9 @@ testResult_t run() {
     else {
       CUDACHECK(cudaStreamCreateWithFlags(streams.data()+i, cudaStreamNonBlocking));
     }
+    // collBarrier's send/receive operands; their values are never used.
+    CUDACHECK(cudaMalloc((void**)&barrierBuffs[i], 2 * sizeof(int)));
+    CUDACHECK(cudaMemset(barrierBuffs[i], 0, 2 * sizeof(int)));
     int archMajor, archMinor;
     CUDACHECK(cudaDeviceGetAttribute(&archMajor, cudaDevAttrComputeCapabilityMajor, gpus[i]));
     CUDACHECK(cudaDeviceGetAttribute(&archMinor, cudaDevAttrComputeCapabilityMinor, gpus[i]));
@@ -2757,6 +2800,7 @@ testResult_t run() {
     threads[t].args.recvbuffs = recvbuffs.data()+t*nGpus;
     threads[t].args.bias = bias.data()+t*nGpus;
     threads[t].args.expected = expected.data()+t*nGpus;
+    threads[t].args.barrierBuffs = barrierBuffs.data()+t*nGpus;
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
     threads[t].args.devComms = devComms.data()+t*nGpus;
 #endif
@@ -2829,6 +2873,10 @@ testResult_t run() {
     TESTCHECK(destroyTestComms(comms, nGpus*nThreads));
     TESTCHECK(freeTestDeviceBuffers(sendbuffs.data(), recvbuffs.data(), bias.data(), expected.data(),
                                     nGpus*nThreads));
+  }
+  for (int i = 0; i < nGpus*nThreads; i++) {
+    CUDACHECK(cudaSetDevice(gpus[i]));
+    CUDACHECK(cudaFree(barrierBuffs[i]));
   }
   free(comms);
   envstr = getenv("NCCL_TESTS_MIN_BW");
