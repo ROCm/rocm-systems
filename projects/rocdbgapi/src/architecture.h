@@ -103,8 +103,16 @@ private:
              handle_object_set_t<register_class_t>>
     m_handle_object_sets{};
 
+public:
+  /* Max. VGPR register number in wave32 mode.  */
+  const amdgpu_regnum_t max_vgpr_32;
+
+  /* Max. VGPR register number in wave64 mode.  */
+  const amdgpu_regnum_t max_vgpr_64;
+
 protected:
-  architecture_t (elf_amdgpu_machine_t e_machine, std::string target_triple);
+  architecture_t (elf_amdgpu_machine_t e_machine, std::string target_triple,
+                  amdgpu_regnum_t max_vgpr32, amdgpu_regnum_t max_vgpr64);
 
 public:
   /* Return the map of all instantiated architectures  */

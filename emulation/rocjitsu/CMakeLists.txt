@@ -393,6 +393,7 @@ target_link_libraries(
         rocjitsu_analysis
         rocjitsu_code
         rocjitsu_code_object
+        rocjitsu_executable
         rocjitsu_isa
         rocjitsu_isa_registry
         simdojo
@@ -437,6 +438,9 @@ add_dependencies(rocjitsu_shared flatbuffers_schemas)
 add_subdirectory(tools)
 add_subdirectory(tools/rj-ip-discovery)
 add_subdirectory(fuzz/decode)
+add_subdirectory(fuzz/code_object)
+add_subdirectory(fuzz/execution)
+add_subdirectory(fuzz/multiplexer)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(tools/rocjitsu)
