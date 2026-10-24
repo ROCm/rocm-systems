@@ -162,6 +162,8 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
 // like the params dev_runtime.cc owns, so a test can drive the NCCL_WIN_ENABLE=0
 // opt-out in ncclCommWindowRegister_impl.
 int64_t ncclParamWinEnable() { return g_loadParam("WIN_ENABLE", 1); }
+// Emitted by rocmwrap.cc; read by the host VMM GIN fail-closed check.
+int64_t ncclParamDmaBufEnable() { return g_loadParam("DMABUF_ENABLE", 1); }
 
 // ---------------------------------------------------------------------------
 // Proxy.
@@ -419,6 +421,18 @@ std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos =
 
 ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory* mem) { return g_devrBuildGinSegmentInfos(mem); }
 
+// Real body lives in dev_runtime_segments.cc. dev-runtime-test.cc compiles that
+// file as RealDevrCheckRegistrationSupport so this seam stays injectable; the
+// fixture points the hook at the real body.
+static ncclResult_t DefaultCheckRegistrationSupport(void*, size_t, struct ncclComm*, bool, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, size_t, struct ncclComm*, bool, int)> g_devrCheckRegistrationSupport =
+    DefaultCheckRegistrationSupport;
+
+ncclResult_t ncclDevrCheckRegistrationSupport(void* userPtr, size_t userSize, struct ncclComm* comm,
+                                              bool hasSysmemSegment, int winFlags) {
+  return g_devrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment, winFlags);
+}
+
 // ---------------------------------------------------------------------------
 // Team accessors (host variants).
 // ---------------------------------------------------------------------------
@@ -570,6 +584,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_devrVerifySegmentLayouts                = DefaultVerifySegmentLayouts;
   g_devrBuildGinSegmentInfos                = DefaultBuildGinSegmentInfos;
+  g_devrCheckRegistrationSupport            = DefaultCheckRegistrationSupport;
 
   // Not a hook either, but 12 tests assign it directly to steer the
   // POSIX-FD-vs-shareable-handle split in symMemory{Export,ImportAndMap}
