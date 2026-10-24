@@ -58,8 +58,10 @@ void LibcPassthrough::resolve() {
   realpath_chk_fn = util::lookup_symbol<decltype(realpath_chk_fn)>(handle, "__realpath_chk");
   fork = util::lookup_symbol<decltype(fork)>(handle, "fork");
   clock_gettime = util::lookup_symbol<decltype(clock_gettime)>(handle, "clock_gettime");
+  // rocjitsu does not interpose mutex operations. Match std::mutex's global
+  // binding so a preloaded TSan runtime observes both acquisition and release.
   pthread_mutex_lock =
-      util::lookup_symbol<decltype(pthread_mutex_lock)>(handle, "pthread_mutex_lock");
+      util::lookup_symbol<decltype(pthread_mutex_lock)>(RTLD_DEFAULT, "pthread_mutex_lock");
   sem_init = util::lookup_symbol<decltype(sem_init)>(handle, "sem_init");
   sem_destroy = util::lookup_symbol<decltype(sem_destroy)>(handle, "sem_destroy");
   sem_post = util::lookup_symbol<decltype(sem_post)>(handle, "sem_post");

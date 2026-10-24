@@ -728,8 +728,21 @@ set(_rj_idle_wakeup_cases
     AsyncCausalityTest.StaleWakeDoesNotHideConcurrentPublication
     AsyncCausalityTest.QuiescentPublicationsToEveryPartitionMakeProgress
 )
+set(_rj_syncobj_signal_exit_cases
+    ThreadExitDuringInitializationCleansUp
+    ThreadExitBeforeSemaphoreSleepUnregistersWaiter
+    ThreadExitBeforeFallbackSleepUnregistersWaiter
+    ThreadExitDuringContendedRegistrationUnwinds
+)
+set(_rj_signal_exit_env)
+if(RJ_ENABLE_TSAN)
+    # Model Wine's deliberate pthread_exit from a signal handler. Forced unwind
+    # allocates and frees memory, so disable only these tests' signal-safety
+    # diagnostic; retain TSan's race and mutex checks.
+    set(_rj_signal_exit_env "TSAN_OPTIONS=report_signal_unsafe=0")
+endif()
 # Exclude exactly the cases registered below, so future cases still participate
-# in normal discovery until they receive an explicit timeout registration.
+# in normal discovery until they receive an explicit registration.
 set(_rj_gtest_exclusions
     "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff:*EffectiveConfigTest.ReadsSelectedNodeLaunchConfigHandoff"
 )
@@ -742,12 +755,18 @@ foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
         ":L2MaintenanceMutexTest.${_l2_mutex_case}"
     )
 endforeach()
+foreach(_signal_exit_case IN LISTS _rj_syncobj_signal_exit_cases)
+    string(
+        APPEND _rj_gtest_exclusions
+        ":SyncobjNotificationTest.${_signal_exit_case}"
+    )
+endforeach()
 
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
 # ./rocjitsu_tests --gtest_filter='*Benchmark*'). The idle-wakeup, request-exit,
-# SharedPool handoff, concurrent-close, and L2 mutex tests are registered separately so
-# CTest can bound a deadlocked child process, including helper destruction.
+# SharedPool handoff, concurrent-close, L2 mutex, and signal-exit tests are registered
+# separately for their timeout or environment, including helper destruction.
 rj_add_gtest_tests(rocjitsu_tests TEST_FILTER "${_rj_gtest_exclusions}")
 if(RJ_INSTALL_TESTS)
     file(
@@ -755,6 +774,21 @@ if(RJ_INSTALL_TESTS)
         "include(\"rocjitsu_tests.cmake\")\n"
     )
 endif()
+
+foreach(_signal_exit_case IN LISTS _rj_syncobj_signal_exit_cases)
+    rj_add_test(
+        NAME "SyncobjNotificationTest.${_signal_exit_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=SyncobjNotificationTest.${_signal_exit_case}"
+        TIMEOUT 30
+        ENVIRONMENT ${_rj_signal_exit_env}
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=SyncobjNotificationTest.${_signal_exit_case}"
+        INSTALL_ENVIRONMENT ${_rj_signal_exit_env}
+    )
+endforeach()
 
 # Bound worker joins in the idle notification and CPU-use regressions.
 # Register explicitly so build-tree and installed tests have the same timeout.
@@ -2216,13 +2250,6 @@ rj_add_interposer_test_suite(
     InterposerSyncobjTest
     ${_rj_interposer_syncobj_tests}
 )
-set(_rj_signal_exit_env)
-if(RJ_ENABLE_TSAN)
-    # Model Wine's deliberate pthread_exit from a signal handler. Forced unwind
-    # allocates and frees memory, so disable only this test's signal-safety
-    # diagnostic; retain TSan's race and mutex checks.
-    set(_rj_signal_exit_env "TSAN_OPTIONS=report_signal_unsafe=0")
-endif()
 rj_add_interposer_test_suite(
     InterposerSyncobjTest
     TimelineWaitAllowsThreadExitFromSignal

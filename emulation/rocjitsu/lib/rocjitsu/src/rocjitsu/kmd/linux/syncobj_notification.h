@@ -33,41 +33,51 @@ public:
       return -1;
     if (waiter.register_waiter() != 0)
       return -1;
-    if (generation_.load(std::memory_order_acquire) != expected)
-      return 0;
+    const int result = [&] {
+      if (generation_.load(std::memory_order_acquire) != expected)
+        return 0;
 
-    if (libc_passthrough().sem_clockwait) {
-      // Even an unbounded wait uses the timed API: unlike sem_wait, its wait
-      // is interruptible with SA_RESTART, matching the other DRM wait paths.
-      const timespec unlimited{std::numeric_limits<time_t>::max(), 0};
-      return libc_passthrough().sem_clockwait(waiter.semaphore(), CLOCK_MONOTONIC,
-                                              deadline ? deadline : &unlimited);
-    }
-
-    // Older libc versions lack sem_clockwait. Bounded descriptor-free polling
-    // retains monotonic deadlines and EINTR without depending on wall-clock
-    // adjustments or raising the minimum libc version for ordinary simulation.
-    while (generation_.load(std::memory_order_acquire) == expected) {
-      timespec delay{0, 1'000'000};
-      if (deadline) {
-        timespec now{};
-        if (libc_passthrough().clock_gettime(CLOCK_MONOTONIC, &now) != 0)
-          return -1;
-        const time_t seconds = deadline->tv_sec - now.tv_sec;
-        const long nanoseconds = deadline->tv_nsec - now.tv_nsec;
-        if (seconds < 0 || (seconds == 0 && nanoseconds <= 0)) {
-          errno = ETIMEDOUT;
-          return -1;
-        }
-        if (seconds == 0)
-          delay.tv_nsec = std::min(delay.tv_nsec, nanoseconds);
-        else if (seconds == 1 && nanoseconds < 0)
-          delay.tv_nsec = std::min(delay.tv_nsec, 1'000'000'000 + nanoseconds);
+      if (libc_passthrough().sem_clockwait) {
+        // Even an unbounded wait uses the timed API: unlike sem_wait, its wait
+        // is interruptible with SA_RESTART, matching the other DRM wait paths.
+        const timespec unlimited{std::numeric_limits<time_t>::max(), 0};
+        return libc_passthrough().sem_clockwait(waiter.semaphore(), CLOCK_MONOTONIC,
+                                                deadline ? deadline : &unlimited);
       }
-      if (::ppoll(nullptr, 0, &delay, nullptr) < 0)
-        return -1;
-    }
-    return 0;
+
+      // Older libc versions lack sem_clockwait. Bounded descriptor-free polling
+      // retains monotonic deadlines and EINTR without depending on wall-clock
+      // adjustments or raising the minimum libc version for ordinary simulation.
+      while (generation_.load(std::memory_order_acquire) == expected) {
+        timespec delay{0, 1'000'000};
+        if (deadline) {
+          timespec now{};
+          if (libc_passthrough().clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+            return -1;
+          const time_t seconds = deadline->tv_sec - now.tv_sec;
+          const long nanoseconds = deadline->tv_nsec - now.tv_nsec;
+          if (seconds < 0 || (seconds == 0 && nanoseconds <= 0)) {
+            errno = ETIMEDOUT;
+            return -1;
+          }
+          if (seconds == 0)
+            delay.tv_nsec = std::min(delay.tv_nsec, nanoseconds);
+          else if (seconds == 1 && nanoseconds < 0)
+            delay.tv_nsec = std::min(delay.tv_nsec, 1'000'000'000 + nanoseconds);
+        }
+        if (::ppoll(nullptr, 0, &delay, nullptr) < 0)
+          return -1;
+      }
+      return 0;
+    }();
+    const int saved_errno = errno;
+    // A runtime may deliver a deferred signal while reacquiring the mutex.
+    // Keep normal unlinking outside noexcept destruction so forced unwinding
+    // can still invoke the destructor's cleanup backstop.
+    if (waiter.unregister_waiter() != 0)
+      return -1;
+    errno = saved_errno;
+    return result;
   }
 
   void notify_all() {
@@ -110,6 +120,17 @@ private:
       std::lock_guard lock(owner_.mutex_, std::adopt_lock);
       owner_.waiters_.push_front(*this);
       registered_ = true;
+      return 0;
+    }
+    int unregister_waiter() {
+      const int result = libc_passthrough().pthread_mutex_lock(owner_.mutex_.native_handle());
+      if (result != 0) {
+        errno = result;
+        return -1;
+      }
+      std::lock_guard lock(owner_.mutex_, std::adopt_lock);
+      owner_.waiters_.erase(util::IntrusiveList<Waiter>::Iterator(*this));
+      registered_ = false;
       return 0;
     }
     sem_t *semaphore() { return &semaphore_; }
