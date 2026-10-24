@@ -15,7 +15,6 @@
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/bit.h"
-#include "util/except.h"
 
 #include <algorithm>
 #include <array>
@@ -43,7 +42,9 @@ bool has_smem_offset(uint32_t soffset) { return soffset != OPR_SMEM_OFFSET_NULL;
 std::optional<uint32_t> read_sreg_m0_operand(amdgpu::Wavefront &wf, uint32_t operand) {
   if (operand <= amdgpu::kModernM0Selector)
     return amdgpu::try_read_scalar_selector(wf, operand);
-  throw util::UnimplementedInst("unsupported gfx1250 scalar memory offset operand");
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  return std::nullopt;
 }
 
 std::optional<uint64_t> read_sreg64_operand(amdgpu::Wavefront &wf, uint32_t operand) {
