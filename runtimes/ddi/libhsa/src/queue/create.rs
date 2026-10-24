@@ -13,7 +13,7 @@ static COOPERATIVE_CREATE_GATE: Mutex<()> = Mutex::new(());
 /// callback and its data must remain valid until native queue teardown and
 /// completion of the final event callback.
 #[allow(clippy::too_many_arguments)]
-pub(super) unsafe fn create_hardware_queue(
+pub(crate) unsafe fn create_hardware_queue(
     expected_generation: Option<u64>,
     agent: HsaAgent,
     size: u32,
@@ -435,7 +435,7 @@ fn validated_sdma_engine(info: QueueTransport, size: u32) -> Option<u32> {
 /// # Safety
 /// `queue` addresses writable output storage. The caller serializes native
 /// queue publication and destruction with all producers.
-pub(super) unsafe fn create_sdma_queue(
+pub(crate) unsafe fn create_sdma_queue(
     expected_generation: Option<u64>,
     agent: HsaAgent,
     size_bytes: u32,

@@ -85,7 +85,7 @@ pub(super) struct ImportedIpcSignal {
 
 impl SignalState {
     /// Creates IPC signal and records its ownership.
-    pub(super) fn create_ipc_signal(
+    pub(crate) fn create_ipc_signal(
         &mut self,
         gpus: &[crate::runtime::Gpu],
         host_page_size: usize,
@@ -130,7 +130,7 @@ impl SignalState {
     }
 
     /// Attaches an exported IPC signal to native shared storage.
-    pub(super) unsafe fn attach_ipc_signal(
+    pub(crate) unsafe fn attach_ipc_signal(
         &mut self,
         session: &rocddi::session::Session,
         gpus: &[crate::runtime::Gpu],
@@ -199,7 +199,7 @@ impl SignalState {
         })
     }
     /// Encodes an owned IPC signal as an attachable native handle.
-    pub(super) fn export_ipc_signal(&self, signal: HsaSignal) -> Result<[u32; 8], Status> {
+    pub(crate) fn export_ipc_signal(&self, signal: HsaSignal) -> Result<[u32; 8], Status> {
         let address = signal.handle as usize;
         if !self.owns_signal(signal) {
             return Err(INVALID_ARGUMENT);
