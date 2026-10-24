@@ -89,7 +89,7 @@ ncclResult_t IbCastRegMrDmaBufInternal(void* comm, void* data, size_t size, int 
   int registered = 0;
   *mhandle = NULL;
   NCCLCHECK(ncclCalloc(&mhandleWrapper, 1));
-  mhandleWrapper->nSegments = 1;
+  mhandleWrapper->nSegments = 1; // RCCL: a real fd stays one MR.
   for (int i = 0; i < base->vProps.ndevs; i++) {
     // Each ncclIbNetCommDevBase is at different offset in send and recv netComms
     struct ncclIbNetCommDevBase* devComm = IbCastGetNetCommDevBase(base, i);
@@ -230,6 +230,7 @@ ncclResult_t IbCastDeregMr(void* comm, void* mhandle) {
 
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandle;
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  // RCCL: one MR per segment, not mrs[] alone.
   if (mhandleWrapper->nSegments > 1) return rcclIbCastDeregMrMultiSeg(comm, mhandle);
   for (int i = 0; i < base->vProps.ndevs; i++) {
     // Each ncclIbNetCommDevBase is at different offset in send and recv netComms

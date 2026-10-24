@@ -14,12 +14,14 @@
 #include <string.h>
 #include "nccl.h"
 
+#include "multiseg.h"
+
 // RCCL: cap on physical segments per GIN/RMA symmetric buffer. HIP dma-buf export
 // describes only the first physical segment, so registration allocates one MR
 // per segment up to this limit.
-#ifndef NCCL_RMA_MAX_SEGMENTS
-#define NCCL_RMA_MAX_SEGMENTS 16
-#endif
+#define NCCL_RMA_MAX_SEGMENTS NCCL_IB_MAX_SEGMENTS
+static_assert(NCCL_RMA_MAX_SEGMENTS == NCCL_IB_MAX_SEGMENTS,
+              "RMA and classic IB segment caps must stay aligned");
 
 // RCCL: 32 WRs cover aligned 4/8-GPU 8 GiB windows; 16x8 GiB needs 48. Fail closed past 64.
 #define NCCL_RMA_MAX_DATA_WRS (4 * NCCL_RMA_MAX_SEGMENTS)
@@ -27,6 +29,11 @@
 #define NCCL_RMA_MAX_FLUSH_WRS NCCL_RMA_MAX_SEGMENTS
 // RCCL: multi-segment sender QP depth, NCCL_IB_MAX_SEND_WRS, spelled without common.h; connect.cc asserts they match.
 #define NCCL_RMA_SEND_QP_WRS (2 * 256 + 8 * (8 * 2 * NCCL_RMA_MAX_SEGMENTS + 1))
+// Equals NET_IB_MAX_REQUESTS (NCCL_NET_MAX_REQUESTS * NCCL_NET_IB_MAX_RECVS).
+// common_cast.h static_asserts the production macros against this.
+#define NCCL_RMA_MAX_INFLIGHT_REQUESTS 256
+#define NCCL_RMA_MAX_SEND_QP_WRS (2 * NCCL_RMA_MAX_INFLIGHT_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS - 2)
+#define NCCL_RMA_MAX_FLUSH_QP_WRS (NCCL_RMA_MAX_INFLIGHT_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS - 1)
 
 static inline size_t ncclRmaSegmentSliceBytes(size_t remaining, size_t localRemaining, size_t remoteRemaining) {
   size_t chunk = remaining;
@@ -55,7 +62,10 @@ static inline int ncclRmaCountPairedDataWrs(size_t size, int maxWr) {
   return n;
 }
 
+// Map offset to the covering [segOff[s], segOff[s+1]) bucket. Offsets at or
+// past the terminal size clamp to the last segment.
 static inline int ncclRmaSegIndexOf(const size_t* segOff, int nSeg, uint64_t off) {
+  if (nSeg < 1 || segOff == NULL) return 0;
   for (int s = 0; s < nSeg; s++) {
     if (off < segOff[s + 1]) return s;
   }
@@ -134,7 +144,6 @@ static inline void ncclRmaWrCreditsRecord(struct ncclRmaWrCredits* c, uint64_t i
   c->trackedWrs += nWrs - *wrs;
   *wrs = (uint8_t)nWrs;
 }
-
 // RCCL: true when ibv_post_send accepted a prefix that did not include the signaled last WR.
 static inline int ncclRmaPrefixPostLostSignaledTail(int posted, int nWr) {
   return posted > 0 && posted < nWr;
@@ -165,6 +174,13 @@ static inline const size_t* ncclRmaPeerSegOff(const size_t* rankSegOff, const si
   return rankSegOff + (size_t)rank * (NCCL_RMA_MAX_SEGMENTS + 1);
 }
 
+static inline int ncclRmaOffsetRangeOk(int nSegments, const size_t* segOff, uint64_t off, size_t size) {
+  if (nSegments < 1 || segOff == NULL) return 0;
+  uint64_t bytes = segOff[nSegments];
+  return off <= bytes && (uint64_t)size <= bytes - off;
+}
+
+
 // RCCL: count WRs the HCA accepted when ibv_post_send fails at badWr. Walk a
 // next-linked chain of nWr entries. badWr == NULL counts the whole chain.
 static inline int ncclRmaPostedWrCount(const void* wr, int nWr, const void* badWr, size_t nextOffset) {
@@ -192,7 +208,7 @@ static inline ncclResult_t ncclRmaPostedRequestStatus(ncclResult_t postRet, int 
 
 // RCCL: keep-or-free after ibv_post_send. posted==0 and error: free the slot.
 // Otherwise keep *request so Test() drains; mark FAILED if the signaled tail
-// was lost. gin.cc applies the IB side effects from these flags.
+// was lost. Each backend applies the IB side effects from these flags.
 static inline ncclResult_t ncclRmaCompletePostedRequest(ncclResult_t postRet, int posted, int nWr, int* keepRequest,
                                                         int* markFailed) {
   if (keepRequest) *keepRequest = 0;
@@ -244,5 +260,23 @@ static inline int rcclRmaMrSegmentCount(const void* mhandle) {
 }
 
 int rcclRmaIbProxyMrSegmentCount(void* mhandle);
+
+// Registration stores MRs/rkeys in recvComm device-slot order. Posts use a
+// peer QP whose remDevIdx/devIndex may name a different physical HCA.
+// Translate physical ibDevN to that registration slot. Unused slots are -1.
+static inline int ncclRmaDevSlotOf(const int* ibDevNs, int rank, int ibDevN, int maxDevsPerNic) {
+  if (ibDevNs == NULL || ibDevN < 0 || rank < 0 || maxDevsPerNic < 1) return -1;
+  const int* slots = ibDevNs + (size_t)rank * (size_t)maxDevsPerNic;
+  for (int d = 0; d < maxDevsPerNic; d++) {
+    if (slots[d] == ibDevN) return d;
+  }
+  return -1;
+}
+
+// Data WRs look up the remote QP's physical device. Flush RDMA_READs look up
+// the local QP's physical device in the same remote handle.
+static inline int ncclRmaRkeyIbDevN(int localIbDevN, int remoteIbDevN, int flushMode) {
+  return flushMode ? localIbDevN : remoteIbDevN;
+}
 
 #endif

@@ -35,6 +35,7 @@ ncclResult_t IbCastGetRequest(struct ncclIbNetCommBase* base, struct ncclIbReque
       r->sock = NULL;
       memset(r->devBases, 0, sizeof(r->devBases));
       memset(r->events, 0, sizeof(r->events));
+      r->rmaNwrs = 0;
       r->tel_post_ts = 0;
       *req = r;
       return ncclSuccess;
@@ -740,7 +741,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   uint64_t nowNs = 0;
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
-  if (rcclIbCastMultiSendNeedsSegmented(comm, slot, nreqs))
+  if (rcclIbCastMultiSendNeedsSegmented(comm, slot, nreqs)) // RCCL: split a send that spans several segments.
     return IbCastMultiSendSegmented(comm, slot, nqps, startQpIndex, wrrSched, useWriteOp);
 
   TRACE(NCCL_NET, "NET/IB: %s: Posting a send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d)", __func__, reqs[0],
@@ -1071,6 +1072,7 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     for (int r = 1; r < nreqs; r++)
       while (ctsFifoIdx(slots, r) != idx);
     std::atomic_thread_fence(std::memory_order_seq_cst); // order the nreqsPtr load against tag/rkey/addr loads below
+    // RCCL: wait until the side-table idx matches this CTS.
     NCCLCHECK(rcclIbCastIsendWaitSideTable(comm, slot, nreqs, (uint64_t)idx));
   }
 
@@ -1313,6 +1315,7 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
 
   struct ibv_sge sgeSide;
   struct ibv_send_wr wrSide;
+  // RCCL: unsignaled side-table WR chained ahead of the CTS WR.
   struct ibv_send_wr* firstWr = rcclIbCastPostFifoSideWr(comm, slot, n, ctsQp, &wr, &wrSide, &sgeSide);
 
   TRACE(NCCL_NET,
@@ -1471,7 +1474,7 @@ err:
 ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void** mhandles, void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   int last = -1;
-  if (rcclIbCastIflushNeedsMultiSeg(n, sizes, mhandles))
+  if (rcclIbCastIflushNeedsMultiSeg(n, sizes, mhandles)) // RCCL: fence every segment the receive touched.
     return rcclIbCastIflushMultiSeg(recvComm, n, data, sizes, mhandles, request);
   for (int i = 0; i < n; i++)
     if (sizes[i]) last = i;
