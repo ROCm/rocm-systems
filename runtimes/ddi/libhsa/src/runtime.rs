@@ -63,7 +63,9 @@ use events::{hardware_exception_event, memory_fault_event, notify_system_event};
 mod lifecycle;
 #[cfg(test)]
 use clock::best_clock_sample;
-pub(crate) use clock::{clock_counters, translate_gpu_interval, translate_gpu_tick};
+pub(crate) use clock::{
+    clock_counters, enable_high_precision_timestamps, translate_gpu_interval, translate_gpu_tick,
+};
 mod logging;
 #[cfg(test)]
 pub(crate) use lifecycle::{HsaLifecycle, LIFECYCLE};

@@ -5,6 +5,7 @@
 
 pub(crate) mod agent;
 pub(crate) mod amd;
+pub(crate) mod finalizer;
 pub(crate) mod isa;
 pub(crate) mod lifecycle;
 mod output;

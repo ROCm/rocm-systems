@@ -5,6 +5,15 @@
 
 use super::*;
 
+/// Native index selected by one HSA queue operation.
+#[derive(Clone, Copy)]
+enum QueueIndex {
+    /// Device-maintained consumer index.
+    Read,
+    /// Producer-maintained reservation index.
+    Write,
+}
+
 /// Applies one atomic index operation without exporting a queue reference.
 ///
 /// # Safety
@@ -13,7 +22,7 @@ use super::*;
 #[inline]
 unsafe fn with_queue_index<R>(
     queue: *const HsaQueue,
-    offset: usize,
+    index: QueueIndex,
     operation: impl for<'a> FnOnce(&'a AtomicU64) -> R,
 ) -> Option<R> {
     if queue.is_null() {
@@ -29,7 +38,11 @@ unsafe fn with_queue_index<R>(
                 .cast::<CountedQueuePublic>())
             .hardware_queue
         };
-        hardware.checked_add(offset)?
+        // SAFETY: The counted handle retains this validated hardware control.
+        match index {
+            QueueIndex::Read => unsafe { AqlControlRegion::read_index_address_at(hardware) },
+            QueueIndex::Write => unsafe { AqlControlRegion::write_index_address_at(hardware) },
+        }
     } else if queue as usize & SDMA_QUEUE_HANDLE_BIT != 0 {
         // SAFETY: A live SDMA header begins 128 bytes into its private
         // control. The private words borrow rocddi's aligned index mappings.
@@ -39,16 +52,21 @@ unsafe fn with_queue_index<R>(
                 .sub(SDMA_QUEUE_HANDLE_BIT)
                 .cast::<SdmaQueueControl>()
         };
-        match offset {
-            READ_INDEX_OFFSET => control.read_index_host_address,
-            WRITE_INDEX_OFFSET => control.write_index_host_address,
-            _ => return None,
+        match index {
+            QueueIndex::Read => control.read_index_host_address,
+            QueueIndex::Write => control.write_index_host_address,
         }
     } else {
-        (queue as usize).checked_add(offset)?
+        // SAFETY: The public AQL or soft handle retains its complete control.
+        match index {
+            QueueIndex::Read => unsafe { AqlControlRegion::read_index_address_at(queue as usize) },
+            QueueIndex::Write => unsafe {
+                AqlControlRegion::write_index_address_at(queue as usize)
+            },
+        }
     };
     // SAFETY: The caller retains a live queue handle. AQL and soft controls
-    // contain indices at the ABI offsets; counted and SDMA handles resolve to
+    // expose named indices; counted and SDMA handles resolve to
     // the native index mapping retained by their queue owner.
     let index = unsafe { &*(address as *const AtomicU64) };
     Some(operation(index))
@@ -63,7 +81,7 @@ unsafe fn with_queue_index<R>(
 pub unsafe extern "C" fn hsa_queue_load_read_index_relaxed(queue: *const HsaQueue) -> u64 {
     // SAFETY: The caller owns a live queue while accessing its index.
     unsafe {
-        with_queue_index(queue, READ_INDEX_OFFSET, |index| {
+        with_queue_index(queue, QueueIndex::Read, |index| {
             index.load(Ordering::Relaxed)
         })
     }
@@ -79,7 +97,7 @@ pub unsafe extern "C" fn hsa_queue_load_read_index_relaxed(queue: *const HsaQueu
 pub unsafe extern "C" fn hsa_queue_load_read_index_scacquire(queue: *const HsaQueue) -> u64 {
     // SAFETY: The caller owns a live queue while accessing its index.
     unsafe {
-        with_queue_index(queue, READ_INDEX_OFFSET, |index| {
+        with_queue_index(queue, QueueIndex::Read, |index| {
             index.load(Ordering::Acquire)
         })
     }
@@ -107,7 +125,7 @@ pub unsafe extern "C" fn hsa_queue_load_read_index_acquire(queue: *const HsaQueu
 pub unsafe extern "C" fn hsa_queue_load_write_index_relaxed(queue: *const HsaQueue) -> u64 {
     // SAFETY: The caller owns a live queue while accessing its index.
     unsafe {
-        with_queue_index(queue, WRITE_INDEX_OFFSET, |index| {
+        with_queue_index(queue, QueueIndex::Write, |index| {
             index.load(Ordering::Relaxed)
         })
     }
@@ -123,7 +141,7 @@ pub unsafe extern "C" fn hsa_queue_load_write_index_relaxed(queue: *const HsaQue
 pub unsafe extern "C" fn hsa_queue_load_write_index_scacquire(queue: *const HsaQueue) -> u64 {
     // SAFETY: The caller owns a live queue while accessing its index.
     unsafe {
-        with_queue_index(queue, WRITE_INDEX_OFFSET, |index| {
+        with_queue_index(queue, QueueIndex::Write, |index| {
             index.load(Ordering::Acquire)
         })
     }
@@ -143,9 +161,9 @@ pub unsafe extern "C" fn hsa_queue_load_write_index_acquire(queue: *const HsaQue
 }
 
 /// Stores a queue index with the selected atomic ordering.
-unsafe fn queue_store(queue: *const HsaQueue, offset: usize, value: u64, order: Ordering) {
+unsafe fn queue_store(queue: *const HsaQueue, index: QueueIndex, value: u64, order: Ordering) {
     // SAFETY: The caller owns a live queue while accessing its index.
-    let _ = unsafe { with_queue_index(queue, offset, |index| index.store(value, order)) };
+    let _ = unsafe { with_queue_index(queue, index, |word| word.store(value, order)) };
 }
 
 /// Compares and exchanges a queue index with the selected ordering.
@@ -158,7 +176,7 @@ unsafe fn queue_compare_exchange(
 ) -> u64 {
     // SAFETY: The caller owns a live queue while reserving packet slots.
     unsafe {
-        with_queue_index(queue, WRITE_INDEX_OFFSET, |index| {
+        with_queue_index(queue, QueueIndex::Write, |index| {
             index
                 .compare_exchange(expected, value, success, failure)
                 .unwrap_or_else(|observed| observed)
@@ -171,7 +189,7 @@ unsafe fn queue_compare_exchange(
 unsafe fn queue_add(queue: *const HsaQueue, value: u64, order: Ordering) -> u64 {
     // SAFETY: The caller owns a live queue while reserving packet slots.
     unsafe {
-        with_queue_index(queue, WRITE_INDEX_OFFSET, |index| {
+        with_queue_index(queue, QueueIndex::Write, |index| {
             index.fetch_add(value, order)
         })
     }
@@ -180,13 +198,13 @@ unsafe fn queue_add(queue: *const HsaQueue, value: u64, order: Ordering) -> u64 
 
 /// Generates the queue store entry ABI entry points.
 macro_rules! queue_store_entry {
-    ($name:ident, $offset:expr, $order:expr) => {
+    ($name:ident, $index:expr, $order:expr) => {
         #[doc = concat!("Stores a queue index through `", stringify!($name), "`.")]
         #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
         #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(queue: *const HsaQueue, value: u64) {
             // SAFETY: The public entry point preserves the HSA queue contract.
-            unsafe { queue_store(queue, $offset, value, $order) };
+            unsafe { queue_store(queue, $index, value, $order) };
         }
     };
 }
@@ -219,17 +237,17 @@ macro_rules! queue_add_entry {
 
 queue_store_entry!(
     hsa_queue_store_write_index_relaxed,
-    WRITE_INDEX_OFFSET,
+    QueueIndex::Write,
     Ordering::Relaxed
 );
 queue_store_entry!(
     hsa_queue_store_write_index_screlease,
-    WRITE_INDEX_OFFSET,
+    QueueIndex::Write,
     Ordering::Release
 );
 queue_store_entry!(
     hsa_queue_store_write_index_release,
-    WRITE_INDEX_OFFSET,
+    QueueIndex::Write,
     Ordering::Release
 );
 
@@ -279,16 +297,16 @@ queue_add_entry!(hsa_queue_add_write_index_release, Ordering::Release);
 
 queue_store_entry!(
     hsa_queue_store_read_index_relaxed,
-    READ_INDEX_OFFSET,
+    QueueIndex::Read,
     Ordering::Relaxed
 );
 queue_store_entry!(
     hsa_queue_store_read_index_screlease,
-    READ_INDEX_OFFSET,
+    QueueIndex::Read,
     Ordering::Release
 );
 queue_store_entry!(
     hsa_queue_store_read_index_release,
-    READ_INDEX_OFFSET,
+    QueueIndex::Read,
     Ordering::Release
 );

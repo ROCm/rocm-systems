@@ -17,6 +17,27 @@ use crate::{image_gfx12, runtime};
 
 /// Minor version of the HSA runtime ABI reported to clients.
 pub(crate) const HSA_RUNTIME_VERSION_MINOR: u16 = 21;
+
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_enable_high_precision_timestamps")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Enables high precision timestamp sampling for profiling.
+pub extern "C" fn hsa_amd_enable_high_precision_timestamps() -> Status {
+    boundary(|| {
+        let guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        if guard.as_ref().is_none() {
+            return NOT_INITIALIZED;
+        }
+        runtime::enable_high_precision_timestamps();
+        SUCCESS
+    })
+}
+
 /// # Safety
 /// Any non-null `value` must address aligned, writable storage for the type
 /// selected by `attribute`.

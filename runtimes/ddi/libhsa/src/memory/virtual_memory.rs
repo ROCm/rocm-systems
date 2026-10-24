@@ -1072,7 +1072,7 @@ unsafe fn fill_vmem_handle_info(
     // SAFETY: Each field is written only when the caller's layout contains it.
     unsafe {
         info.cast::<usize>().write(returned_size);
-        if returned_size >= std::mem::offset_of!(HsaAmdVmemHandleInfo, agent) {
+        if returned_size >= size_of::<HsaAmdVmemHandleInfoPrefix>() {
             std::ptr::addr_of_mut!((*info).alloc_size).write(size);
         }
         if returned_size >= size_of::<HsaAmdVmemHandleInfo>() {

@@ -10,10 +10,10 @@
 //! header that borrows their native byte-index pointers. Soft queues implement
 //! only the host-visible index semantics that do not require a native GPU queue.
 //!
-//! Atomic accessors use ABI-defined offsets for AQL and soft queues and native
-//! index mappings for SDMA. Destruction first prevents new observation, then
-//! stops workers, then releases native resources; partial failure keeps enough
-//! state for a safe retry.
+//! Atomic accessors project typed AQL control fields for hardware and soft
+//! queues, and use native index mappings for SDMA. Destruction first prevents
+//! new observation, then stops workers and releases native resources. Partial
+//! failure keeps enough state for a safe retry.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
@@ -25,9 +25,9 @@ use std::time::Duration;
 
 use rocddi::device::Device;
 use rocddi::device::gpu::queue::{
-    MAX_PRIVATE_SEGMENT_BYTES, QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority,
-    QueueProducerMode, QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, RetainedQueue,
-    SdmaEngineSelection, plan_scratch,
+    AqlControlRegion, MAX_PRIVATE_SEGMENT_BYTES, QueueAccessWidth, QueueErrorEvent,
+    QueueParameters, QueuePriority, QueueProducerMode, QueueRequest, QueueRingMemory, QueueScratch,
+    QueueTransport, RetainedQueue, SdmaEngineSelection, plan_scratch,
 };
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 use rocddi::topology::GpuInfo;
@@ -50,20 +50,12 @@ use event::{queue_error_status, update_scratch_owner};
 #[cfg(test)]
 use index::*;
 
-/// Byte offset of the native queue write index.
-const WRITE_INDEX_OFFSET: usize = 56;
-/// Byte offset of the native queue read index.
-const READ_INDEX_OFFSET: usize = 128;
-/// Byte offset of the native queue properties word.
-const QUEUE_PROPERTIES_OFFSET: usize = 180;
-/// AQL packet size in bytes.
-const AQL_PACKET_BYTES: usize = 64;
+/// AQL packet size in bytes, checked against the public C header by ABI tests.
+const AQL_PACKET_BYTES: usize = std::mem::size_of::<HsaKernelDispatchPacket>();
 /// AQL packet type for a kernel dispatch.
 const AQL_PACKET_TYPE_KERNEL_DISPATCH: u16 = 2;
 /// Bits containing the AQL packet type.
 const AQL_PACKET_TYPE_MASK: u16 = 0xff;
-/// Byte offset of a dispatch packet’s private-segment size.
-const AQL_PRIVATE_SEGMENT_SIZE_OFFSET: usize = 24;
 /// GPU page size in bytes.
 const GPU_PAGE_BYTES: u64 = 4096;
 
@@ -162,9 +154,10 @@ impl QueueEventSignal {
 
     /// Returns a clone of the event used for queue errors.
     fn error_event(&self) -> QueueErrorEvent {
-        self.shared_event
-            .event
-            .queue_error_event((self.error_address + std::mem::offset_of!(AmdSignal, value)) as u64)
+        // SAFETY: This owner retains the complete device-visible signal.
+        let value =
+            unsafe { std::ptr::addr_of!((*(self.error_address as *const AmdSignal)).value) as u64 };
+        self.shared_event.event.queue_error_event(value)
     }
 
     /// Reads the signal indicating that queue submission has stopped.
@@ -613,7 +606,10 @@ fn allocate_scratch(
 fn dispatch_private_segment(queue: &Queue) -> Option<(u32, u64)> {
     let info = queue.native.info();
     let packet_count = info.ring_size_bytes / AQL_PACKET_BYTES as u64;
-    if packet_count == 0 || !packet_count.is_power_of_two() {
+    if packet_count == 0
+        || !packet_count.is_power_of_two()
+        || info.ring_host_address % std::mem::align_of::<HsaKernelDispatchPacket>() != 0
+    {
         return None;
     }
     if info.read_index_host_address % std::mem::align_of::<AtomicU64>() != 0
@@ -633,18 +629,20 @@ fn dispatch_private_segment(queue: &Queue) -> Option<(u32, u64)> {
         .min(packet_count);
     for offset in 0..pending {
         let slot = (read + offset) & (packet_count - 1);
-        let byte_offset = usize::try_from(slot).ok()?.checked_mul(AQL_PACKET_BYTES)?;
-        let packet = info.ring_host_address.checked_add(byte_offset)?;
+        let slot = usize::try_from(slot).ok()?;
+        let byte_offset = slot.checked_mul(AQL_PACKET_BYTES)?;
+        let packet_address = info.ring_host_address.checked_add(byte_offset)?;
+        let packet = packet_address as *const HsaKernelDispatchPacket;
         // SAFETY: Queue transport retains the aligned packet ring. An acquire
         // load of the published header makes the packet body visible.
-        let header = unsafe { &*(packet as *const AtomicU16) }.load(Ordering::Acquire);
+        let header = unsafe { &*std::ptr::addr_of!((*packet).header).cast::<AtomicU16>() }
+            .load(Ordering::Acquire);
         if header & AQL_PACKET_TYPE_MASK != AQL_PACKET_TYPE_KERNEL_DISPATCH {
             continue;
         }
-        // SAFETY: The stopped queue retains this complete 64-byte dispatch
-        // packet and the private-segment field is naturally aligned.
-        let private =
-            unsafe { ((packet + AQL_PRIVATE_SEGMENT_SIZE_OFFSET) as *const u32).read_volatile() };
+        // SAFETY: The stopped queue retains this complete dispatch packet;
+        // its named field is aligned and published before the header.
+        let private = unsafe { std::ptr::addr_of!((*packet).private_segment_size).read_volatile() };
         if private != 0 {
             return Some((private, read + offset));
         }
@@ -918,10 +916,9 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
             // SAFETY: The native AQL control mapping is live and its properties
             // word is aligned through the complete counted queue lifetime.
             unsafe {
-                (*(hardware_queue as *mut u8)
-                    .add(QUEUE_PROPERTIES_OFFSET)
-                    .cast::<AtomicU32>())
-                .fetch_or(AMD_QUEUE_PROPERTIES_ENABLE_PROFILING, Ordering::Release);
+                let address = AqlControlRegion::properties_address_at(hardware_queue);
+                (&*(address as *const AtomicU32))
+                    .fetch_or(AMD_QUEUE_PROPERTIES_ENABLE_PROFILING, Ordering::Release);
             }
         }
         let Some(entry) = runtime
@@ -1822,10 +1819,8 @@ pub unsafe extern "C" fn hsa_amd_profiling_set_profiler_enabled(
         let queue = hardware_queue_key(runtime, queue).unwrap_or(queue as usize);
         // SAFETY: Queue validation proves the public control mapping is live.
         let properties = unsafe {
-            &*(queue as *mut HsaQueue)
-                .cast::<u8>()
-                .add(QUEUE_PROPERTIES_OFFSET)
-                .cast::<AtomicU32>()
+            let address = AqlControlRegion::properties_address_at(queue);
+            &*(address as *const AtomicU32)
         };
         if enable == 0 {
             properties.fetch_and(!AMD_QUEUE_PROPERTIES_ENABLE_PROFILING, Ordering::Release);
