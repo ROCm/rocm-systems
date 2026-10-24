@@ -279,8 +279,8 @@ fail_lsaRankList:
 static ncclResult_t symTeamDestroyAll(struct ncclComm* comm); // Further down
 static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem); // Further down
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm,
-                                           struct ncclWindow_vidmem* winDev); // Further down
+static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm, struct ncclWindow_vidmem* winDev,
+                                           bool forceCleanup = false); // Further down
 #endif
 
 static bool symHasCountedCftMemory(struct ncclDevrState* devr) {
@@ -316,9 +316,9 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
     while (devr->winSortedCount > 0) {
       int before = devr->winSortedCount;
       struct ncclDevrWindow* win = devr->winSorted[0].win;
-      NCCLCHECKIGNORE(windowDeregisterNonSym(comm, win->vidmem), ret);
-      // windowDeregisterNonSym only removes the entry on success; drop it on
-      // failure too so abort-time finalize always makes progress.
+      NCCLCHECKIGNORE(windowDeregisterNonSym(comm, win->vidmem, /*forceCleanup=*/true), ret);
+      // forceCleanup drops the entry on nearly every failure path; this guard
+      // covers the two early exits (shadow decode, stale handle) that return first.
       if (devr->winSortedCount >= before) {
         listRemove(devr->winSorted, &devr->winSortedCount, 0);
       }
@@ -1176,11 +1176,23 @@ static ncclResult_t symWindowInitGin(struct ncclDevrState* devr, struct ncclDevr
 static ncclResult_t symWindowCreate(struct ncclComm* comm, struct ncclDevrMemory* mem, size_t memOffset, void* userPtr,
                                     size_t userSize, int winFlags, void* localReg, struct ncclWindow_vidmem** outWinDev,
                                     struct ncclDevrWindow** outWin, cudaStream_t stream) {
+  ncclResult_t ret = ncclSuccess;
   uintptr_t userAddr = reinterpret_cast<uintptr_t>(userPtr);
   struct ncclDevrState* devr = &comm->devrState;
-  struct ncclDevrWindow* win;
+  struct ncclDevrWindow* win = nullptr;
+  struct ncclWindow_vidmem* winDev = nullptr;
+  struct ncclWindow_vidmem* winDevHost = nullptr;
+  struct ncclDevCommWindowTable* unpublishedTable = nullptr;
+  struct ncclDevCommWindowTable* tableDev = nullptr;
+
+  if (outWinDev) *outWinDev = nullptr;
+  if (outWin) *outWin = nullptr;
 
   win = (struct ncclDevrWindow*)malloc(sizeof(struct ncclDevrWindow));
+  if (win == nullptr) {
+    ret = ncclSystemError;
+    goto fail;
+  }
   memset(win, 0, sizeof(*win));
   win->memory = mem;
   win->size = userSize;
@@ -1195,9 +1207,7 @@ static ncclResult_t symWindowCreate(struct ncclComm* comm, struct ncclDevrMemory
     win->userPtr = userPtr;
   }
 
-  struct ncclWindow_vidmem* winDev;
-  struct ncclWindow_vidmem* winDevHost;
-  NCCLCHECK(ncclShadowPoolAlloc(&devr->shadows, &winDev, &winDevHost, stream));
+  NCCLCHECKGOTO(ncclShadowPoolAlloc(&devr->shadows, &winDev, &winDevHost, stream), ret, fail);
   win->vidmem = winDev;
   winDevHost->lsaFlatBase = (char*)devr->lsaFlatBase + win->bigOffset;
   winDevHost->mcOffset4K = win->bigOffset >> 12;
@@ -1210,29 +1220,36 @@ static ncclResult_t symWindowCreate(struct ncclComm* comm, struct ncclDevrMemory
   winDevHost->ginOffset4K = memOffset >> 12;
   winDevHost->ucLeIdBase = winFlags & NCCL_WIN_CFT_COUNTED ? devr->le[1].baseId : devr->le[0].baseId;
   if (devr->ginEnabled) {
-    NCCLCHECK(symWindowInitGin(devr, mem, winDevHost, stream));
+    NCCLCHECKGOTO(symWindowInitGin(devr, mem, winDevHost, stream), ret, fail);
   }
-  CUDACHECK(cudaMemcpyAsync(winDev, winDevHost, sizeof(struct ncclWindow_vidmem), cudaMemcpyHostToDevice, stream));
+  CUDACHECKGOTO(cudaMemcpyAsync(winDev, winDevHost, sizeof(struct ncclWindow_vidmem), cudaMemcpyHostToDevice, stream),
+                ret, fail);
 
-  NCCLCHECK(symWindowTableInitOnce(comm, stream)); // ensure devr->windowTable exists
-  struct ncclDevCommWindowTable* tableDev = devr->windowTable;
+  NCCLCHECKGOTO(symWindowTableInitOnce(comm, stream), ret, fail); // ensure devr->windowTable exists
+  tableDev = devr->windowTable;
   while (true) {
     struct ncclDevCommWindowTable* tableHost;
-    NCCLCHECK(ncclShadowPoolToHost(&devr->shadows, tableDev, &tableHost));
+    NCCLCHECKGOTO(ncclShadowPoolToHost(&devr->shadows, tableDev, &tableHost), ret, fail);
     int i = 0;
     while (i < 32 && tableHost->entries[i].window != nullptr) i += 1;
     if (i < 32) {
-      tableHost->entries[i].base = userAddr;
-      tableHost->entries[i].size = userSize;
-      tableHost->entries[i].window = winDev;
-      CUDACHECK(cudaMemcpyAsync(&tableDev->entries[i], &tableHost->entries[i], sizeof(tableHost->entries[i]),
-                                cudaMemcpyHostToDevice, stream));
+      struct ncclDevCommWindowTable::Entry entry;
+      entry.base = userAddr;
+      entry.size = userSize;
+      entry.window = winDev;
+      CUDACHECKGOTO(cudaMemcpyAsync(&tableDev->entries[i], &entry, sizeof(entry), cudaMemcpyHostToDevice, stream), ret,
+                    fail);
+      tableHost->entries[i] = entry;
       break;
     }
     if (tableHost->next == nullptr) {
-      NCCLCHECK(ncclShadowPoolAlloc<ncclDevCommWindowTable>(&devr->shadows, &tableHost->next, nullptr, stream));
-      CUDACHECK(cudaMemcpyAsync(&tableDev->next, &tableHost->next, sizeof(tableHost->next), cudaMemcpyHostToDevice,
-                                stream));
+      NCCLCHECKGOTO(ncclShadowPoolAlloc<ncclDevCommWindowTable>(&devr->shadows, &unpublishedTable, nullptr, stream),
+                    ret, fail);
+      CUDACHECKGOTO(cudaMemcpyAsync(&tableDev->next, &unpublishedTable, sizeof(unpublishedTable),
+                                    cudaMemcpyHostToDevice, stream),
+                    ret, fail);
+      tableHost->next = unpublishedTable;
+      unpublishedTable = nullptr;
     }
     tableDev = tableHost->next;
   }
@@ -1249,6 +1266,17 @@ static ncclResult_t symWindowCreate(struct ncclComm* comm, struct ncclDevrMemory
   if (outWinDev) *outWinDev = winDev;
   if (outWin) *outWin = win;
   return ncclSuccess;
+
+fail:
+  if (unpublishedTable != nullptr) {
+    NCCLCHECKIGNORE(ncclShadowPoolFree(&devr->shadows, unpublishedTable, stream), ret);
+  }
+  if (winDevHost != nullptr && winDevHost->ginMultiSegmentWins != nullptr) {
+    NCCLCHECKIGNORE(ncclShadowPoolFree(&devr->shadows, winDevHost->ginMultiSegmentWins, stream), ret);
+  }
+  if (winDev != nullptr) NCCLCHECKIGNORE(ncclShadowPoolFree(&devr->shadows, winDev, stream), ret);
+  free(win);
+  return ret;
 }
 
 static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vidmem* winDev, cudaStream_t stream) {
@@ -1669,7 +1697,7 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
 
   if (winFlags & NCCL_WIN_COLL_SYMMETRIC) {
     // Defer symmetric kernel init until at least one window with that flag exists.
-    NCCLCHECKGOTO(ncclSymkInitOnce(comm), ret, fail);
+    NCCLCHECKGOTO(ncclSymkInitOnce(comm), ret, fail_locReg);
   }
 
   // Get underlying cumem base address and number of mapped physical segments that userPtr spans
@@ -1685,20 +1713,20 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
            "registration",
            userPtr, userSize);
       ret = ncclInvalidArgument;
-      goto fail_locReg;
+      goto fail_locReg_memHandle;
     }
 #if CUDART_VERSION >= 12080
     else if (comm->MNNVL && ncclDevrWinRegEnabled(winFlags, ncclDevrRegisterLsa)) {
       int multiNodeLsaSupported = 0;
       CUCHECKGOTO(cuDeviceGetAttribute(&multiNodeLsaSupported, CU_DEVICE_ATTRIBUTE_HOST_NUMA_MULTINODE_IPC_SUPPORTED,
                                        comm->cudaDev),
-                  ret, fail_locReg);
+                  ret, fail_locReg_memHandle);
       if (!multiNodeLsaSupported) {
         WARN("VA represented by {userPtr = %p, size = %zu} contains CPU-backed physical segments, but the LSA team "
              "does not support multi-node IPC on CPU-backed buffers. Please retry by setting NCCL_MNNVL_ENABLE=0",
              userPtr, userSize);
         ret = ncclInvalidArgument;
-        goto fail_locReg;
+        goto fail_locReg_memHandle;
       }
     }
 #endif
@@ -1708,25 +1736,26 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
   if (memOffset % NCCL_WIN_REQUIRED_ALIGNMENT != 0) {
     WARN("Window address must be suitably aligned.");
     ret = ncclInvalidArgument;
-    goto fail;
+    goto fail_locReg_memHandle;
   }
 
   // Retain all handles and validate segment location types
   for (int segment = 0; segment < numSegments; segment++) {
     size_t baseSendSize;
-    CUCHECK(cuMemGetAddressRange(nullptr, &baseSendSize,
-                                 reinterpret_cast<CUdeviceptr>(reinterpret_cast<char*>(memAddr) + offset)));
+    CUCHECKGOTO(cuMemGetAddressRange(nullptr, &baseSendSize,
+                                     reinterpret_cast<CUdeviceptr>(reinterpret_cast<char*>(memAddr) + offset)),
+                ret, fail_locReg_memHandle);
     CUCHECKGOTO(cuMemRetainAllocationHandle(&memHandles[segment], (void*)(reinterpret_cast<char*>(memAddr) + offset)),
-                ret, fail_locReg);
+                ret, fail_locReg_memHandle);
     CUmemAllocationProp prop;
-    CUCHECKGOTO(cuMemGetAllocationPropertiesFromHandle(&prop, memHandles[segment]), ret, fail_locReg);
+    CUCHECKGOTO(cuMemGetAllocationPropertiesFromHandle(&prop, memHandles[segment]), ret, fail_locReg_memHandle);
     if (!ncclSymIsHostSegment(prop.location.type) && prop.location.type != CU_MEM_LOCATION_TYPE_DEVICE) {
       WARN(
         "Segment %d has unsupported location type %d. Symmetric memory currently only supports "
         "host (CU_MEM_LOCATION_TYPE_HOST_NUMA, or CU_MEM_LOCATION_TYPE_HOST on AMD) and CU_MEM_LOCATION_TYPE_DEVICE.",
         segment, (int)prop.location.type);
       ret = ncclInvalidArgument;
-      goto fail_locReg;
+      goto fail_locReg_memHandle;
     }
     offset += baseSendSize;
   }
@@ -2461,10 +2490,11 @@ fail:
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 // RCCL: deregister mirror of windowRegisterNonSym
-static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm, struct ncclWindow_vidmem* winDev) {
+static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm, struct ncclWindow_vidmem* winDev, bool forceCleanup) {
   ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
   cudaStream_t stream = nullptr;
+  cudaError_t streamErr = cudaSuccess;
   struct ncclDevrWindow* win = nullptr;
   int winIdx = -1;
 
@@ -2492,7 +2522,11 @@ static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm, struct ncclWin
   // Undo stage 2: inter-node proxy MR. rmaHostWins[0] is a reliable witness
   // because ncclRmaProxyRegister fills NCCL_GIN_MAX_CONNECTIONS handles.
   if (win->rmaHostWins[0] != nullptr) {
-    NCCLCHECKGOTO(ncclRmaProxyDeregister(comm, win->rmaHostWins), ret, fail);
+    ncclResult_t cleanupRet = ncclRmaProxyDeregister(comm, win->rmaHostWins);
+    if (cleanupRet != ncclSuccess) {
+      if (ret == ncclSuccess) ret = cleanupRet;
+      if (!forceCleanup) goto fail;
+    }
   }
 
   // Undo stage 1: intra-node IPC peer mappings.
@@ -2505,16 +2539,34 @@ static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm, struct ncclWin
   win->ipcPeerIsCuMem = nullptr;
 
   // Undo stage 3: shadow pool entry.
-  CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
-  NCCLCHECKGOTO(ncclShadowPoolFree(&devr->shadows, winDev, stream), ret, fail_stream);
-  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
-  CUDACHECKIGNORE(cudaStreamDestroy(stream));
-  stream = nullptr;
+  streamErr = cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
+  if (streamErr != cudaSuccess) {
+    if (ret == ncclSuccess) ret = rcclCudaErrorHandler(streamErr);
+    if (!forceCleanup) goto fail;
+  }
+  {
+    ncclResult_t cleanupRet = ncclShadowPoolFree(&devr->shadows, winDev, stream);
+    if (cleanupRet != ncclSuccess) {
+      if (ret == ncclSuccess) ret = cleanupRet;
+      if (!forceCleanup) goto fail_stream;
+    }
+  }
+  if (stream != nullptr) {
+    CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+    CUDACHECKIGNORE(cudaStreamDestroy(stream));
+    stream = nullptr;
+  }
 
-  NCCLCHECKGOTO(ncclCommDeregister(comm, win->localRegHandle), ret, fail);
+  {
+    ncclResult_t cleanupRet = ncclCommDeregister(comm, win->localRegHandle);
+    if (cleanupRet != ncclSuccess) {
+      if (ret == ncclSuccess) ret = cleanupRet;
+      if (!forceCleanup) goto fail;
+    }
+  }
   listRemove(devr->winSorted, &devr->winSortedCount, winIdx);
   free(win);
-  return ncclSuccess;
+  return ret;
 
 fail_stream:
   if (stream != nullptr) {

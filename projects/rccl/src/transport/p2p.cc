@@ -1305,6 +1305,8 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
                comm->rank, userbuff, buffSize, (void*)regRecord->begAddr, totalMappedSize, numSegments, peerRank,
                rmtRegAddr, (uintptr_t)userbuff - regRecord->begAddr);
         }
+        free(ipcInfo);
+        ipcInfo = nullptr;
       }
     }
 
@@ -1459,6 +1461,8 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
                                      void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
   struct p2pIpcExpInfo* ipcExpInfo = (struct p2pIpcExpInfo*)reqBuff;
   void* regAddr = NULL;
+  // Offset already added to regAddr; fail: subtracts it to recover the mapping base.
+  uintptr_t regAddrOffset = 0;
   ncclResult_t ret = ncclSuccess;
   if (reqSize % sizeof(struct p2pIpcExpInfo) != 0) {
     WARN("Invalid P2P IPC register request size %d, expected multiple of %zu", reqSize, sizeof(struct p2pIpcExpInfo));
@@ -1471,6 +1475,8 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
   int numSegments = reqSize / sizeof(struct p2pIpcExpInfo);
   bool* mapped = nullptr;
   bool* imported = nullptr;
+  struct proxyMemHandle* memHandle = nullptr;
+  struct ncclIpcImpInfo* ipcInfo = nullptr;
 #if ROCM_VERSION >= 70000
   CUmemGenericAllocationHandle* segmentHandles = nullptr;
 #endif
@@ -1496,7 +1502,8 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
     // legacy import
     CUDACHECKGOTO(cudaIpcOpenMemHandle(&regAddr, ipcExpInfo->ipcDesc.devIpc, cudaIpcMemLazyEnablePeerAccess), ret,
                   fail);
-    regAddr = (void*)((uintptr_t)regAddr + ipcExpInfo->offset);
+    regAddrOffset = ipcExpInfo->offset;
+    regAddr = (void*)((uintptr_t)regAddr + regAddrOffset);
   } else {
 #if ROCM_VERSION >= 70000
     CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)&regAddr, totalSize, /* alignment */ 0, /* addr */ 0, /* flags */ 0),
@@ -1512,6 +1519,8 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
           CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment],
                                                      (void*)(uintptr_t)ipcExpInfo[segment].impFd, ncclCuMemHandleType),
                       ret, fail);
+          // Must be set before the fd close below can jump to fail:, which releases only imported handles.
+          imported[segment] = true;
           SYSCHECKGOTO(ncclIpcFdClose(ipcExpInfo[segment].impFd), "close", ret, fail);
         } else {
           CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment],
@@ -1532,7 +1541,8 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
     accessDesc.location.id = proxyState->cudaDev;
     accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
     CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)regAddr, totalSize, &accessDesc, 1), ret, fail);
-    regAddr = (void*)((uintptr_t)regAddr + ipcExpInfo[0].offset);
+    regAddrOffset = ipcExpInfo[0].offset;
+    regAddr = (void*)((uintptr_t)regAddr + regAddrOffset);
 #endif
   }
   INFO(
@@ -1543,10 +1553,8 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
 
 exit:
   if (regAddr) {
-    struct proxyMemHandle* memHandle = NULL;
-    struct ncclIpcImpInfo* ipcInfo = NULL;
-    NCCLCHECK(ncclCalloc(&memHandle, 1));
-    NCCLCHECK(ncclCalloc(&ipcInfo, 1));
+    NCCLCHECKGOTO(ncclCalloc(&memHandle, 1), ret, fail);
+    NCCLCHECKGOTO(ncclCalloc(&ipcInfo, 1), ret, fail);
     ipcInfo->rmtRegAddr = regAddr;
     ipcInfo->offset = ipcExpInfo[0].offset;
     ipcInfo->legacyIpcCap = ipcExpInfo->legacyIpcCap;
@@ -1563,7 +1571,10 @@ exit:
 #endif
   return ret;
 fail:
-  if (!ipcExpInfo->legacyIpcCap) {
+  regAddr = regAddr ? (void*)((uintptr_t)regAddr - regAddrOffset) : NULL;
+  if (ipcExpInfo->legacyIpcCap) {
+    if (regAddr) CUDACHECKIGNORE(cudaIpcCloseMemHandle(regAddr));
+  } else {
 #if ROCM_VERSION >= 70000
     size_t offset = 0;
     for (int segment = 0; segment < numSegments; segment++) {
@@ -1579,6 +1590,10 @@ fail:
     if (regAddr) CUCHECKIGNORE(cuMemAddressFree((CUdeviceptr)regAddr, totalSize));
 #endif
   }
+  free(ipcInfo);
+  free(memHandle);
+  ipcInfo = nullptr;
+  memHandle = nullptr;
   regAddr = NULL;
   goto exit;
 }
