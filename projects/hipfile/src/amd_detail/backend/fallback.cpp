@@ -75,6 +75,56 @@ private:
 
 } // namespace
 
+BounceStream::BounceStream(int _device_id, hipStream_t _stream) : device_id{_device_id}, stream{_stream}
+{
+}
+
+BounceStream::~BounceStream()
+{
+    try {
+        DeviceGuard device_guard{device_id};
+        Context<Hip>::get()->hipStreamDestroy(stream);
+    }
+    catch (...) {
+        Context<Sys>::get()->syslog(LOG_CRIT, "Unable to destroy fallback bounce stream");
+    }
+}
+
+BounceStreamPool::~BounceStreamPool()
+{
+    clear();
+}
+
+void
+BounceStreamPool::clear()
+{
+    std::lock_guard<std::mutex> lock(mtx);
+    stream_rings.clear();
+}
+
+std::shared_ptr<BounceStream>
+BounceStreamPool::getStream(int device_id)
+{
+    std::lock_guard<std::mutex> lock(mtx);
+
+    DeviceGuard device_guard{device_id};
+
+    auto [it, inserted] = stream_rings.try_emplace(device_id, StreamRing{});
+
+    auto &ring = it->second;
+
+    if (inserted || ring.streams.empty()) {
+        ring.streams.assign(Context<Configuration>::get()->deviceStreamPoolSize(), nullptr);
+    }
+    auto &slot   = ring.streams[ring.current];
+    ring.current = (ring.current + 1) % ring.streams.size();
+    if (!slot) {
+        slot = std::make_shared<BounceStream>(
+            device_id, Context<Hip>::get()->hipStreamCreateWithFlags(hipStreamNonBlocking));
+    }
+    return slot;
+}
+
 int
 Fallback::score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &buffer, size_t size,
                 hoff_t file_offset, hoff_t buffer_offset) const
@@ -124,6 +174,8 @@ Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
                                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     auto deleter = [&](void *addr) { Context<Sys>::get()->munmap(addr, chunk_size); };
     unique_ptr<void, decltype(deleter)> bounce_buffer{ptr, deleter};
+    auto                                stream_holder = bounce_stream_pool.getStream(buffer->getGpuId());
+    hipStream_t                         stream        = stream_holder->stream;
 
     ssize_t total_io_bytes = 0;
     do {
@@ -139,14 +191,16 @@ Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
                     io_bytes =
                         Context<Sys>::get()->pread(file->bufferedFd(), bounce_buffer.get(), count, offset);
                     if (io_bytes > 0) {
-                        Context<Hip>::get()->hipMemcpy(device_buffer_position, bounce_buffer.get(),
-                                                       static_cast<size_t>(io_bytes), hipMemcpyHostToDevice);
+                        Context<Hip>::get()->hipMemcpyWithStream(device_buffer_position, bounce_buffer.get(),
+                                                                 static_cast<size_t>(io_bytes),
+                                                                 hipMemcpyHostToDevice, stream);
+                        Context<Hip>::get()->hipStreamSynchronize(stream);
                     }
                     break;
                 case IoType::Write:
-                    Context<Hip>::get()->hipMemcpy(bounce_buffer.get(), device_buffer_position, count,
-                                                   hipMemcpyDeviceToHost);
-                    Context<Hip>::get()->hipStreamSynchronize(nullptr);
+                    Context<Hip>::get()->hipMemcpyWithStream(bounce_buffer.get(), device_buffer_position,
+                                                             count, hipMemcpyDeviceToHost, stream);
+                    Context<Hip>::get()->hipStreamSynchronize(stream);
                     io_bytes =
                         Context<Sys>::get()->pwrite(file->bufferedFd(), bounce_buffer.get(), count, offset);
                     Context<Sys>::get()->fdatasync(file->bufferedFd());
@@ -280,6 +334,12 @@ Fallback::enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_p
         }
         throw;
     }
+}
+
+void
+Fallback::driver_state_teardown()
+{
+    bounce_stream_pool.clear();
 }
 
 extern "C" {

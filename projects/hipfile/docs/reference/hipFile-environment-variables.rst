@@ -36,3 +36,6 @@ The following environment variables affect the hipFile runtime.
    * - ``HIPFILE_ASYNC_BUFFER_SIZE``
      - | Controls the size of the host bounce buffer allocated for asynchronous fallback I/O.
        | Default size is 16 MiB. Setting to 0 will use the default size.
+   * - ``HIPFILE_DEVICE_STREAM_POOL_SIZE``
+     - | Controls the size of the device stream pool.
+       | Default size is 32 streams. Setting to 0 will use the default size.
