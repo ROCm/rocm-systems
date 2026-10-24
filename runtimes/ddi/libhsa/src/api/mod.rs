@@ -9,6 +9,7 @@ pub(crate) mod finalizer;
 pub(crate) mod isa;
 pub(crate) mod lifecycle;
 pub(crate) mod loader;
+pub(crate) mod memory;
 mod output;
 pub(crate) mod pc_sampling;
 pub(crate) mod queue;

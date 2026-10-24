@@ -3,9 +3,7 @@
 
 //! Memory, SVM, interop, and virtual-memory regression tests.
 
-use super::allocation::*;
 use super::interop::*;
-use super::virtual_memory::*;
 use super::*;
 
 #[test]
