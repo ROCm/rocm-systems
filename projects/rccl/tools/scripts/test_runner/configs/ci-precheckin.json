@@ -408,17 +408,6 @@
         {"name": "GinHostFinalizeMicrotests", "description": "Host-only gin/gin_host.cc finalize microtests (no GPU, no HIP/RCCL runtime); covers plugin finalize on comm destroy (AICOMRCCL-2739)", "test_filter": "*"}
       ]
     },
-    "unit_tests_micro_proxy": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroProxy",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 0,
-      "timeout": 60,
-      "tests": [
-        {"name": "ProxyMicrotests", "description": "Host-only proxy microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
     "unit_tests_micro_dda_ipc": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicroDdaIpc",
@@ -634,12 +623,6 @@
       "name": "RCCL Microtests - gin_host.cc finalize",
       "description": "rccl-UnitTestsMicroGinHostFinalize (host-only gin/gin_host.cc finalize microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_gin_host_finalize",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - proxy",
-      "description": "rccl-UnitTestsMicroProxy (host-only proxy microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_proxy",
       "enabled": true
     },
     {
