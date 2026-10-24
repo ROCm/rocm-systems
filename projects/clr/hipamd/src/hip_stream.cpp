@@ -565,7 +565,6 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
   }
   getStreamPerThread(stream);
   CHECK_STREAM_DETACHED(stream);
-  hip::Stream* waitStream = hip::getStream(stream);
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
   auto eventStreamHandle = reinterpret_cast<hipStream_t>(e->GetCaptureStream());
   // The stream associated with the device might have been destroyed.
@@ -575,6 +574,17 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
   }
 
   hip::Stream* eventStream = reinterpret_cast<hip::Stream*>(eventStreamHandle);
+
+  // The legacy stream can never record into a graph. This is decided before
+  // hip::getStream resolves the handle, because resolving the null stream synchronises it
+  // against every active blocking stream on the device.
+  if ((stream == nullptr || stream == hipStreamLegacy) && eventStream != nullptr &&
+      eventStream->IsEventCaptured(event)) {
+    eventStream->InvalidateCapture();
+    return hipErrorStreamCaptureImplicit;
+  }
+
+  hip::Stream* waitStream = hip::getStream(stream);
 
   // External-event wait: add a graph node and return immediately.
   if (flags == hipEventWaitExternal) {
