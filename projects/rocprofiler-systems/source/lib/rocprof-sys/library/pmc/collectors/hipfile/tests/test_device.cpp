@@ -78,6 +78,9 @@ constexpr double        k_nine_kilobyte_bandwidth = 9'000.0;
 constexpr double        k_four_kilobyte_bandwidth = 4'000.0;
 constexpr double        k_five_kilobyte_bandwidth = 5000.0;
 
+// GTest fixtures stay abstract because Test::TestBody is pure virtual. PMC
+// tests keep the CamelCase *Test name used with TEST_F.
+// NOLINTNEXTLINE(readability-identifier-naming)
 class HipFileDeviceTest : public ::testing::Test
 {
 protected:
@@ -85,7 +88,7 @@ protected:
     {
         m_backend       = std::make_shared<mock_backend>();
         m_device        = std::make_shared<device_t>(m_backend, 0);
-        m_enabled.value = ALL_HIPFILE_METRICS;
+        m_enabled.value = k_all_hipfile_metrics;
     }
 
     [[nodiscard]] metrics sample(std::uint64_t timestamp)
@@ -116,16 +119,16 @@ TEST_F(HipFileDeviceTest, index_and_name_track_the_profiler_device_index)
 
 TEST_F(HipFileDeviceTest, is_supported_bounds_the_hipfile_slot_not_the_profiler_index)
 {
-    const device_t high_profiler_index{ m_backend, 0, MAX_GPUS + 4 };
+    const device_t high_profiler_index{ m_backend, 0, k_max_gpus + 4 };
     EXPECT_TRUE(high_profiler_index.is_supported());
 
-    const device_t slot_past_capacity{ m_backend, MAX_GPUS, 0 };
+    const device_t slot_past_capacity{ m_backend, k_max_gpus, 0 };
     EXPECT_FALSE(slot_past_capacity.is_supported());
 }
 
 TEST_F(HipFileDeviceTest, all_metrics_supported_for_valid_ordinal)
 {
-    EXPECT_EQ(m_device->get_supported_metrics().value, ALL_HIPFILE_METRICS);
+    EXPECT_EQ(m_device->get_supported_metrics().value, k_all_hipfile_metrics);
 }
 
 TEST_F(HipFileDeviceTest, metrics_are_read_from_the_hipfile_slot_not_the_profiler_index)
@@ -141,7 +144,7 @@ TEST_F(HipFileDeviceTest, metrics_are_read_from_the_hipfile_slot_not_the_profile
 TEST_F(HipFileDeviceTest, ordinal_beyond_snapshot_supports_nothing)
 {
     // Guards the read that would otherwise run off the end of per_gpu.
-    device_t out_of_range{ m_backend, MAX_GPUS };
+    device_t out_of_range{ m_backend, k_max_gpus };
 
     EXPECT_FALSE(out_of_range.is_supported());
     EXPECT_EQ(out_of_range.get_supported_metrics().value, 0U);

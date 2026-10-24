@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <ratio>
 #include <string>
 #include <utility>
 
@@ -70,12 +71,15 @@ public:
     [[nodiscard]] const std::string& get_name() const noexcept { return m_name; }
 
     /// @brief Whether this HIP ordinal addresses a real slot in the hipFile snapshot.
-    [[nodiscard]] bool is_supported() const noexcept { return m_hipfile_slot < MAX_GPUS; }
+    [[nodiscard]] bool is_supported() const noexcept
+    {
+        return m_hipfile_slot < k_max_gpus;
+    }
 
     [[nodiscard]] enabled_metrics get_supported_metrics() const noexcept
     {
         enabled_metrics supported;
-        supported.value = is_supported() ? ALL_HIPFILE_METRICS : 0U;
+        supported.value = is_supported() ? k_all_hipfile_metrics : 0U;
         return supported;
     }
 
