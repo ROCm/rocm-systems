@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <span>
 #include <string>
@@ -541,6 +542,26 @@ TEST_F(cacheable_test, parse_value_empty_byte_array)
     EXPECT_TRUE(parsed_value.empty());
     EXPECT_EQ(data_pos, buffer.data() + sizeof(size_t));
 }
+TEST_F(cacheable_test, parse_value_vector_skips_a_trailing_partial_element)
+{
+    // The byte count is one whole uint32_t plus one stray byte. Only whole elements are
+    // read; the cursor still moves past the whole count.
+    constexpr std::uint64_t k_byte_count = sizeof(std::uint32_t) + 1;
+    constexpr std::uint32_t k_whole      = 0xDEADBEEF;
+
+    std::memcpy(buffer.data(), &k_byte_count, sizeof(k_byte_count));
+    std::memcpy(buffer.data() + sizeof(k_byte_count), &k_whole, sizeof(k_whole));
+    buffer[sizeof(k_byte_count) + sizeof(k_whole)] = 0xAA;
+
+    std::uint8_t*              data_pos = buffer.data();
+    std::vector<std::uint32_t> parsed;
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed);
+
+    ASSERT_EQ(parsed.size(), 1U);
+    EXPECT_EQ(parsed.front(), k_whole);
+    EXPECT_EQ(data_pos, buffer.data() + sizeof(k_byte_count) + k_byte_count);
+}
+
 TEST_F(cacheable_test, parse_multiple_values)
 {
     const int           int_val    = 42;

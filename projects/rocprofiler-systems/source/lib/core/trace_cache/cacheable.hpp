@@ -97,7 +97,10 @@ store_value(const Type& value, std::uint8_t* buffer, size_t& position)
         const size_t data_size  = value.size();
         const size_t entry_size = sizeof(size_t) + data_size + sizeof(char);
         std::memcpy(dest, &data_size, sizeof(size_t));
-        std::memcpy(dest + sizeof(size_t), value.data(), data_size);
+        if(data_size != 0)
+        {
+            std::memcpy(dest + sizeof(size_t), value.data(), data_size);
+        }
         dest[entry_size - sizeof(char)] = '\0';
         position += entry_size;
     }
@@ -110,7 +113,10 @@ store_value(const Type& value, std::uint8_t* buffer, size_t& position)
         const size_t header_size = sizeof(size_t);
         const size_t data_size   = total_size - header_size;
         std::memcpy(dest, &data_size, sizeof(size_t));
-        std::memcpy(dest + sizeof(size_t), value.data(), data_size);
+        if(data_size != 0)
+        {
+            std::memcpy(dest + sizeof(size_t), value.data(), data_size);
+        }
         position += total_size;
     }
     else if constexpr(type_traits::is_optional_v<DecayedType>)
@@ -155,10 +161,12 @@ parse_value(std::uint8_t*& data_pos, Type& arg)
         size_t total_size = 0;
         std::memcpy(&total_size, data_pos, sizeof(size_t));
         data_pos += sizeof(size_t);
-        arg.resize(total_size / sizeof(item_type));
-        if(total_size != 0)
+        // Only whole elements are read; a stray tail is skipped, never copied.
+        const size_t item_count = total_size / sizeof(item_type);
+        arg.resize(item_count);
+        if(item_count != 0)
         {
-            std::memcpy(arg.data(), data_pos, total_size);
+            std::memcpy(arg.data(), data_pos, item_count * sizeof(item_type));
         }
         data_pos += total_size;
     }
