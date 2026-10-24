@@ -357,6 +357,16 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         // One node, but the LSA team is narrower than the comm.
         {"SplitLsaTeamRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, baseEnv, "", 2},
         {"SplitLsaTeamSixRanksRejected_Isolated", 6, 1, true, NCCL_CTA_POLICY_ZERO, 4098, ncclSum, ncclFloat32, false, baseEnv, "", 3},
+        // Min-bound env-override: RCCL_CE_AR_2SHOT_MIN_BYTES=1024.
+        // 252 * sizeof(float) = 1008 bytes < 1024 -- rejected.
+        // 256 * sizeof(float) = 1024 bytes == min  -- accepted.
+        // Both counts are divisible by nRanks=4.
+        {"MinBoundRejects_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 252, ncclSum, ncclFloat32, false,
+            {{"RCCL_CE_ALLREDUCE", "1"}, {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
+             {"RCCL_CE_AR_2SHOT_MIN_BYTES", "1024"}}},
+        {"AtMinBoundPasses_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 256, ncclSum, ncclFloat32, true,
+            {{"RCCL_CE_ALLREDUCE", "1"}, {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
+             {"RCCL_CE_AR_2SHOT_MIN_BYTES", "1024"}}},
     };
 
     for(const auto& tc : cases)
@@ -538,17 +548,17 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_MessageTooLargeDeclinesCe_Isola
 }
 
 // ---------------------------------------------------------------------------
-// rcclCeAr2ShotMax(comm) / ncclCeInit staging-buffer growth.
+// rcclCeNonRegMax(comm) / ncclCeInit staging-buffer growth.
 //
 // ncclCeInit (ce_coll.cc:111-114) grows ceArMaxBytes past
-// NCCL_CE_AR_TMPBUF_DEFAULT_BYTES when rcclCeAr2ShotMax returns a larger
+// NCCL_CE_AR_TMPBUF_DEFAULT_BYTES when rcclCeNonRegMax returns a larger
 // value.  Two sources can produce that:
 //   (a) table->ceNonRegMax[ncclFuncAllReduce] > default, read via archThresholds
 //   (b) RCCL_CE_AR_2SHOT_MAX_BYTES env var (rcclParamCeArMaxMsgBytes() >= 0)
 //
 // The tests below verify that the chunk-layout functions
 // (ncclCeAllReduceSlotChunkBytes, ncclCeAllReduceChooseChunkBytes) remain
-// correct when ceArMaxBytes is grown, and that rcclCeAr2ShotMax resolves each
+// correct when ceArMaxBytes is grown, and that rcclCeNonRegMax resolves each
 // source correctly.
 
 static rcclArchThresholds MakeTableWithArMax(size_t arMax)
@@ -558,8 +568,8 @@ static rcclArchThresholds MakeTableWithArMax(size_t arMax)
     return t;
 }
 
-// Table path: ceNonRegMax[AR] = 512 MiB -> rcclCeAr2ShotMax must return 512 MiB.
-TEST(RcclCeAr2ShotMax, TablePathReturnsGrownValue)
+// Table path: ceNonRegMax[AR] = 512 MiB -> rcclCeNonRegMax must return 512 MiB.
+TEST(RcclCeNonRegMax, TablePathReturnsGrownValue)
 {
     constexpr size_t kGrownMax = 512ull * 1024 * 1024;
     rcclArchThresholds tbl = MakeTableWithArMax(kGrownMax);
@@ -567,27 +577,27 @@ TEST(RcclCeAr2ShotMax, TablePathReturnsGrownValue)
     CeAllReduceMockComm mock;
     mock.comm.archThresholds = &tbl;
 
-    EXPECT_EQ(rcclCeAr2ShotMax(mock.get()), kGrownMax);
+    EXPECT_EQ(rcclCeNonRegMax(mock.get(), ncclFuncAllReduce), kGrownMax);
 }
 
 // Table path at the default value: no spurious growth.
-TEST(RcclCeAr2ShotMax, TablePathAtDefaultNoGrowth)
+TEST(RcclCeNonRegMax, TablePathAtDefaultNoGrowth)
 {
     rcclArchThresholds tbl = MakeTableWithArMax(NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
 
     CeAllReduceMockComm mock;
     mock.comm.archThresholds = &tbl;
 
-    EXPECT_EQ(rcclCeAr2ShotMax(mock.get()), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
+    EXPECT_EQ(rcclCeNonRegMax(mock.get(), ncclFuncAllReduce), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
 }
 
 // Null table: falls back to NCCL_CE_AR_TMPBUF_DEFAULT_BYTES.
-TEST(RcclCeAr2ShotMax, NullTableFallsBackToDefault)
+TEST(RcclCeNonRegMax, NullTableFallsBackToDefault)
 {
     CeAllReduceMockComm mock;
     mock.comm.archThresholds = nullptr;
 
-    EXPECT_EQ(rcclCeAr2ShotMax(mock.get()), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
+    EXPECT_EQ(rcclCeNonRegMax(mock.get(), ncclFuncAllReduce), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
 }
 
 // Slot-stride invariants must hold when ceArMaxBytes is grown to 512 MiB.

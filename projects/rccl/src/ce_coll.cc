@@ -195,9 +195,14 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   static int64_t paramMax     = rcclParamCeArMaxMsgBytes();
   static int64_t paramStaging = rcclParamCeArStagingBytes();
   static constexpr size_t kCeArMaxDefault = 256ULL * 1024 * 1024;
+  // A table entry of 0 means "disabled by default" not "zero bytes"; fall back to
+  // kCeArMaxDefault (256 MiB, the staging buffer size) so ZERO CU policy can use CE
+  // 2-shot on arches that have ceNonRegMax[AR]=0 as a placeholder.
   comm->ceColl.ceArMaxBytes     = (paramMax >= 0) ? (size_t)paramMax
-      : (comm->archThresholds != nullptr ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : kCeArMaxDefault);
+      : (comm->archThresholds != nullptr && comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] != 0
+         ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : kCeArMaxDefault);
   comm->ceColl.ceArStagingBytes = (paramStaging >= 0) ? (size_t)paramStaging : (size_t)NCCL_CE_AR_STAGING_BYTES;
+
   int i = 0;
   int targetStreams = 0;
   uint32_t graphSyncValue = GRAPH_SYNC_VALUE;
@@ -3257,7 +3262,7 @@ ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
   size_t ceARTmpBufSize = 0;
 
   if (comm->ceColl.ceARTmpBuf != nullptr) return ncclSuccess;
-  if (!rcclParamCeAllReduce()) return ncclSuccess;
+  if (!rcclCeAllReduceEnabled(comm)) return ncclSuccess;
 
   ceARTmpBufSize = ncclCeAllReduceStagingBufBytes(comm->nRanks, comm->ceColl.ceArStagingBytes);
   NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail);

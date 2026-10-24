@@ -57,6 +57,18 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_SYM_TMA_ENABLE` now defaults to `1`, matching NCCL 2.31.2, so on gfx1250 (MI450) the Tensor Data Mover symmetric kernels (`AllGather_TmaST`, `AllReduce_RSxTmaLD_AGxTmaST`, `ReduceScatter_TmaLD`) are offered to the symmetric cost model whenever an application uses symmetric registered memory. The cost model selects them only where their deep loop engages, and launches them at the widest allowed block count. They require 16-byte aligned buffers and a build with gfx1250 in `GPU_TARGETS` and a ROCm SDK that ships the TDM descriptor header. For in-place AllGather and ReduceScatter the per-rank slice must also be a multiple of 16 bytes, so that every rank selects the same kernel. Other architectures are unaffected. Set `NCCL_SYM_TMA_ENABLE=0` to restore the previous behavior.
 * rccl-tests `-A 1` (and `rcclGetCollImplInfo` / `rcclSymKGetInfo`) now report a symmetric collective that selects a Tensor Data Mover kernel as `SymTDM` instead of `SYM`. The symmetric reporting query also accounts for buffer alignment, so it no longer omits the TDM kernels that the live dispatch would pick.
 * The AMD Pensando 'ionic' RDMA provider for the rocSHMEM GDA GIN backend (`NCCL_GIN_TYPE=6`) now properly enforces the required support for creation of 'collapsed' single-entry completion queues. If network driver and firmware support for this feature is unavailable, an initialization failure will occur rather than a silent fallback to plain completion queues.
+* Registered-window CE AllReduce is now eligible without requiring ``NCCL_CTA_POLICY=2``
+  (``CTA_POLICY_ZERO``); it is gated only by the per-arch table window and ``RCCL_CE_ALLREDUCE``.
+  ``RCCL_FORCE_CE_ALLREDUCE`` now applies exclusively to the non-registered (2-shot/staged) CE
+  AllReduce path.
+* `RCCL_FORCE_SYMMETRIC` (default `0`): when set to a non-zero value, biases the `ncclAllReduce`
+  backend selector to prefer the symmetric kernel path over all other candidates. The selector
+  still requires the operand buffers to be registered symmetric windows; if the symmetric
+  path is ineligible the selector falls back normally.
+* `RCCL_FORCE_DDA` (default `0`): when set to a non-zero value, biases the `ncclAllReduce`
+  backend selector to prefer DDA (Direct Data Access) paths over all other candidates,
+  including symmetric and Copy Engine. If no DDA path is eligible for the given message
+  size and communicator the selector falls back normally.
 
 ### Removed
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.

@@ -1077,7 +1077,18 @@ TEST_F(CeMPI_AllReduce, LargeMessage)
     runAllReduce(kMinRanks4, largeCount, ncclSum, "CeMPI_AllReduce/LargeMessage");
 }
 
-// CE-MPI-AR-06: Multi-chunk pipeline (chunksPerShard >= 2); under CTAPolicy=ZERO registered CE takes a 512 MiB Sum at any size.
+// CE-MPI-AR-06: Multi-chunk pipeline (chunksPerShard >= 2).
+//
+// ncclCeAllReduce() pipelines only when a shard does not fit one staging slot,
+// i.e. once the message passes RCCL_CE_AR_2SHOT_MAX_BYTES. That cap does not gate
+// this path: it only sets ceAllReduceFits in taskAppend(), which gates the
+// unregistered "force" branch. With symmetric windows registered — as allocSymBuf
+// does here — ceAvailable alone selects CE, at any size.
+//
+// This exercises the persistent reduce kernel's double-buffered slot recycling,
+// the cross-rank signal doorbells and the Phase 3 drain loop, none of which run
+// on the single-shot path. At a non-power-of-two rank count it additionally hits
+// the partial tail chunk and the slotChunkBytes rounding from ce75b9a1.
 TEST_F(CeMPI_AllReduce, PipelinedMultiChunk)
 {
     const size_t pipelinedCount = kPipelinedTotalBytes / sizeof(float);

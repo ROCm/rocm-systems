@@ -95,6 +95,7 @@ typedef enum {
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
+
 // Tag written by rcclSelect* into ncclTaskColl::symkExtract so the extractor
 // (ncclMakeSymmetricTaskList) knows whether the selector already vetoed symk.
 enum rcclSymkExtract : int8_t {
@@ -248,7 +249,7 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm);
 // Pass the bias buffer as acc (nullptr when the caller is plain AllReduce).
 // Does NOT check ceARTmpBuf initialization; the caller is responsible.
 bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc);
-size_t rcclCeAr2ShotMax(const struct ncclComm* comm);
+size_t rcclCeNonRegMax(const struct ncclComm* comm, ncclFunc_t func);
 size_t rcclCeAr2ShotMin(const struct ncclComm* comm);
 // Updates the CE AllReduce graph latch from this call's capture state.
 // Invoke once per collective (any type) at each CE AR decision point.
@@ -281,7 +282,6 @@ RCCL_PARAM_DECLARE(SymKMaxBytes);       // -1 = use arch table; overrides symMax
 RCCL_PARAM_DECLARE(CeArMinMsgBytes);     // -1 = use arch table; AR CE non-reg lower bound
 RCCL_PARAM_DECLARE(CeCollMinBytes);      // -1 = use arch table; non-AR CE non-reg lower bound
 RCCL_PARAM_DECLARE(SymKMinBytes);        // -1 = use arch table; overrides symMinR2 for all collectives
-
 // True when NCCL_ALGO is set by the user. Used to skip CE/DDA/Symmetric in
 // both the selector (rccl_wrap.cc) and taskAppend (enqueue.cc).
 bool rcclNcclAlgoEnvIsSet();
@@ -292,7 +292,7 @@ bool rcclNcclAlgoEnvIsSet();
 // gfx1250 may still take fabric DDA when CE is eligible. DDA must also be enabled for this
 // arch/size. Host-side and GPU-free so the dispatch decision can be unit tested.
 bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t datatype,
-                                    bool symEligible, bool ceAllReduceAllowed, bool query);
+                                    bool symEligible, bool query);
 // Decides whether ncclAlltoAll_impl takes the DDA early-return. AlltoAll has no
 // symmetric kernel, so unlike AllGather it cannot gate DDA on !symEligible.
 // `ceAlltoAllAllowed` is single-node CE (ncclCeAvailable); hier CE does not yield DDA.

@@ -4728,7 +4728,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           // Unregistered 2-shot: table/env cap of 0 disables it; otherwise the
           // message must fit the 2-shot window and the allocated buffer.
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          const size_t twoShotMax = rcclCeAr2ShotMax(comm);
+          const size_t twoShotMax = rcclCeNonRegMax(comm, ncclFuncAllReduce);
           const size_t twoShotMin = rcclCeAr2ShotMin(comm);
           if (!rcclWindowFits(totalBytes, twoShotMin, twoShotMax) || totalBytes > comm->ceColl.ceArMaxBytes ||
               !rcclForceCeAllReduceEnabled(comm) || !comm->symmetricSupport || comm->nNodes > 1 ||
@@ -4763,8 +4763,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         // AllReduce's backend was already chosen once by rcclSelectAllReduce();
         // honor it here instead of recomputing CE eligibility. rcclSelectAllReduce
         // step 5 reproduces both of develop's CE-append conditions exactly -- registered
-        // windows (ceAvailable && ((CTAPolicy & ZERO) || force)) and forced CE on
-        // unregistered buffers (ceAllReduceFits), each with !hasSysmemSegment -- so
+        // windows (ceAvailable && ceRegEnabled, preferred under ZERO policy or when
+        // ceRegBeatsSymk) and forced CE on unregistered buffers (ceStagedUnregistered),
+        // each with !hasSysmemSegment -- so
         // decision.algo == RCCL_CE_REGISTERED <=> the CE branches below would fire.
         if (info->decision.algo == RCCL_CE_REGISTERED) {
           INFO(NCCL_INIT, "Taking CE collective path for AllReduce");
