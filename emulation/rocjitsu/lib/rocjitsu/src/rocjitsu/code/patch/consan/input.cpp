@@ -97,6 +97,7 @@ Result validate_entry_abi(const kd::kernel_descriptor_t &descriptor, const Targe
 Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                              InputProgram &program, RegisterSet &used, const InputLimits &limits,
                              InputError &error) {
+  size_t instruction_count = 0;
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
     if (block->has_implicit_terminator() ||
         block->successor_issue() != BasicBlock::SuccessorIssue::None ||
@@ -106,7 +107,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
     if (qualify_lds_race_block(*block, error).failed())
       return Result::failure();
     for (const Instruction &instruction : block->instructions()) {
-      if (program.instructions.size() >= limits.instructions)
+      if (instruction_count++ >= limits.instructions)
         return reject(error, InputErrorCode::ResourceLimit, "instruction analysis budget exceeded");
       const uint64_t offset = instruction.src_loc();
       if ((instruction.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0)
@@ -119,36 +120,29 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       const InstDefUse effects(instruction);
       used |= effects.uses;
       used |= effects.defs;
-      OriginalInstruction original{.offset = offset,
-                                   .words = {},
-                                   .branch_target = std::nullopt,
-                                   .terminates = (instruction.flags() & PROGRAM_TERMINATOR) != 0};
-      original.words.assign(instruction.raw_encoding(),
-                            instruction.raw_encoding() + instruction.size() / sizeof(uint32_t));
       const std::optional<int64_t> branch = instruction.branch_offset_bytes();
       if (branch) {
         const int64_t destination = static_cast<int64_t>(offset) + instruction.size() + *branch;
         if (destination < 0 || static_cast<uint64_t>(destination) >= program.text_bytes)
           return reject(error, InputErrorCode::UnsupportedFlow, "branch leaves original text",
                         offset);
-        original.branch_target = static_cast<uint64_t>(destination);
       }
-      program.instructions.push_back(std::move(original));
+      if ((instruction.flags() & PROGRAM_TERMINATOR) != 0)
+        program.exit_offsets.push_back(offset);
     }
   }
   if (program.accesses.empty())
     return reject(error, InputErrorCode::UnsupportedAccess,
                   "selected entry has no native LDS sites");
-  std::ranges::sort(program.instructions, {}, &OriginalInstruction::offset);
+  std::ranges::sort(program.exit_offsets);
   std::ranges::sort(program.accesses, {}, &NativeLdsAccess::original_offset);
   for (size_t index = 0; index < program.accesses.size(); ++index)
     program.accesses[index].site = static_cast<uint32_t>(index);
   return Result::success();
 }
 
-Result plan_context_bootstrap(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                              const RegisterSet &used, uint32_t declared_vgprs,
-                              InputProgram &program, InputError &error) {
+Result validate_original_registers(const RegisterSet &used, uint32_t declared_vgprs,
+                                   const InputProgram &program, InputError &error) {
   bool invalid_register = false;
   used.for_each_ordinary([&](RegisterRef reg) {
     if ((reg.cls == RegClass::SGPR && reg.index >= program.original_sgprs) ||
@@ -158,17 +152,6 @@ Result plan_context_bootstrap(const std::vector<std::unique_ptr<BasicBlock>> &bl
   if (invalid_register)
     return reject(error, InputErrorCode::UnsupportedEntry,
                   "original operands exceed declared registers");
-  std::vector<BasicBlock *> scope;
-  for (const std::unique_ptr<BasicBlock> &block : blocks)
-    scope.push_back(block.get());
-  RegisterSet reserved;
-  reserved.expand({RegClass::SGPR, 0, static_cast<uint8_t>(program.original_sgprs)});
-  std::string setup_error;
-  const std::optional<DbiEntryProloguePlan> setup = plan_dbi_entry_prologue(
-      scope, program.kernel.descriptor, program.target->arch, 106, reserved, &setup_error);
-  if (!setup)
-    return reject(error, InputErrorCode::ResourceLimit, "unsafe context bootstrap: " + setup_error);
-  program.entry_plan = *setup;
   return Result::success();
 }
 
@@ -279,7 +262,7 @@ FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
     return reject(error, InputErrorCode::DecodeFailure, "invalid original CFG: " + decode_message);
   RegisterSet used;
   if (collect_original_code(blocks.value(), program, used, limits, error).failed() ||
-      plan_context_bootstrap(blocks.value(), used, metadata.value().vgprs, program, error).failed())
+      validate_original_registers(used, metadata.value().vgprs, program, error).failed())
     return Result::failure();
   program.identity = {.sha256 = digest(image), .bytes = image.size()};
   program.image.assign(image.begin(), image.end());

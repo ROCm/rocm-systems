@@ -20,6 +20,9 @@
 #ifndef CONSAN_LEGACY
 #define CONSAN_LEGACY 0
 #endif
+#ifndef CONSAN_LDS_ACCESS_PAIRS
+#define CONSAN_LDS_ACCESS_PAIRS 1
+#endif
 #ifndef CONSAN_GFX12
 #define CONSAN_GFX12 0
 #endif
@@ -88,6 +91,11 @@
 .type CONSAN_KERNEL,@function
 .p2align 8
 CONSAN_KERNEL:
+#ifdef CONSAN_PREFIX_NOPS
+  .rept CONSAN_PREFIX_NOPS
+  s_nop 0
+  .endr
+#endif
   LOAD32 s4, s[0:1], 0
   LOAD64 s[6:7], s[0:1], 8
   consan_wait_all
@@ -125,6 +133,9 @@ CONSAN_KERNEL:
   v_and_b32 v4, (CONSAN_WAVE_SIZE-1), v0
   v_cmp_eq_u32 MASK_VCC, 0, v4
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  // Unroll accesses to exercise branch reach with dense instrumentation.
+  // Each pair contributes two distinct static LDS sites.
+  .rept CONSAN_LDS_ACCESS_PAIRS
   DS_STORE v1, v2
   consan_wait_all
 #if CONSAN_CASE == 6
@@ -136,6 +147,7 @@ CONSAN_KERNEL:
   consan_wait_all
   GLOBAL_STORE v5, v3, s[6:7]
 #endif
+  .endr
 #elif CONSAN_CASE == 4 || CONSAN_CASE == 5
 #if CONSAN_CASE == 4
   v_cmp_gt_u32 MASK_VCC, 2, v0

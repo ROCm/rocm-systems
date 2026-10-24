@@ -5,7 +5,8 @@ add_executable(
     consan_input_test
     input_test.cpp
     prepare_test.cpp
-    invariants_test.cpp
+    row_layout_test.cpp
+    callable_probe_test.cpp
 )
 target_link_libraries(
     consan_input_test
@@ -97,6 +98,14 @@ endif()
 # Preserve the explicit target/wave suffix across CMake versions. Older GoogleTest
 # discovery otherwise appends GetParam comments to custom parameter names.
 rj_add_gtest_tests(consan_input_test NO_PRETTY_VALUES)
+
+add_test(
+    NAME ConSanConfigure.EnvironmentOnlySdk
+    COMMAND
+        ${Python3_EXECUTABLE} -B
+        ${PROJECT_SOURCE_DIR}/tests/code/consan/test_configure.py --build
+        ${PROJECT_BINARY_DIR} --rocm ${ROCM_PATH}
+)
 
 set(RJ_CONSAN_TEST_ARTIFACT_ROOT
     "${PROJECT_BINARY_DIR}/Testing/ConSan"

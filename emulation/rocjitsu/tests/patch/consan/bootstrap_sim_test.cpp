@@ -99,7 +99,6 @@ protected:
     const InputProgram &input = analyzed.value();
     result.original_sgprs = input.original_sgprs;
     result.original_vgprs = input.original_vgprs;
-    result.context_sgpr = input.entry_plan.storage.persistent_base;
     std::vector<uint8_t> image = original;
     if (mode == Bootstrap::Instrumented) {
       const FailureOr<PreparedArtifact> artifact =
@@ -108,6 +107,9 @@ protected:
       image = artifact.value().image;
       result.manifest = artifact.value().manifest;
     } else if (mode != Bootstrap::None) {
+      const auto plan = test::bootstrap_plan(input);
+      ASSERT_TRUE(plan);
+      result.context_sgpr = plan->storage.persistent_base;
       AmdGpuCodeObject object(image.data(), image.size());
       CodeObjectPatcher patcher(object);
       std::vector<uint8_t> text(patcher.text_bytes().begin(), patcher.text_bytes().end());
@@ -116,7 +118,7 @@ protected:
           padding_for_residue(text.size(), input.kernel.entry_text_offset, kKernelEntryAlignment),
           arch);
       const uint64_t bootstrap_offset = text.size();
-      std::vector<uint32_t> words = input.entry_plan.prologue.words;
+      std::vector<uint32_t> words = plan->prologue.words;
       if (mode == Bootstrap::OmitPayloadLoad) {
         words[0] = build_s_nop(0, arch);
         words[1] = build_s_nop(0, arch);
@@ -619,6 +621,5 @@ INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanTargetSim, ::testing::ValuesIn(tes
                          target_name);
 INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanHipSim,
                          ::testing::ValuesIn(std::span(test::kTargetModes).first(6)), target_name);
-
 } // namespace
 } // namespace rocjitsu::consan

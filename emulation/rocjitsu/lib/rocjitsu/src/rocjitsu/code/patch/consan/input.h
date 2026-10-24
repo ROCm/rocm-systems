@@ -7,7 +7,6 @@
 #include "rocjitsu/code/consan/target.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/consan/lds_race.h"
-#include "rocjitsu/code/patch/entry_prologue.h"
 
 #include <optional>
 #include <span>
@@ -42,18 +41,9 @@ struct InputLimits {
   uint32_t instructions = 65536;
 };
 
-/// @brief Original bytes and direct control flow, independent of decoder lifetime.
-struct OriginalInstruction {
-  uint64_t offset = 0;
-  std::vector<uint32_t> words;
-  std::optional<uint64_t> branch_target;
-  bool terminates = false;
-};
-
 /// @brief Compiler-owned original-program analysis, not a prepared artifact.
-/// @details No prepared mappings are fabricated at this stage. The entry plan
-/// proves only the generic bootstrap's register ownership and encoded loads;
-/// lowering must reserve and validate its additional state separately.
+/// @details No prepared mappings or register reservations are fabricated here.
+/// The shared instrumentor plans placement and preservation during lowering.
 struct InputProgram {
   std::vector<uint8_t> image;
   ImageIdentity identity;
@@ -66,8 +56,7 @@ struct InputProgram {
   uint32_t maximum_workgroup_size = 0;
   uint32_t original_sgprs = 0;
   uint32_t original_vgprs = 0;
-  DbiEntryProloguePlan entry_plan;
-  std::vector<OriginalInstruction> instructions;
+  std::vector<uint64_t> exit_offsets;
   std::vector<NativeLdsAccess> accesses;
 };
 

@@ -21,13 +21,90 @@ namespace rocjitsu {
 
 namespace {
 
+bool validate_register_saves(const TrampolinePlan &plan, const RegisterSet &live,
+                             const RegisterSet &probe_clobbers, RegisterSet &destinations,
+                             std::string *error) {
+  RegisterSet sources;
+  for (const RegisterSave &save : plan.register_saves) {
+    if (save.cls != RegClass::SGPR && save.cls != RegClass::VGPR) {
+      report(error, "register preservation requires an ordinary SGPR or VGPR");
+      return false;
+    }
+    const uint32_t bound = save.cls == RegClass::SGPR
+                               ? ordinary_sgpr_bound(plan.arch, plan.kernel_sgpr_count)
+                               : std::min(plan.kernel_vgpr_count, 256u);
+    const RegisterRef destination{save.cls, save.destination, 1};
+    if (save.source >= bound || save.destination >= bound || save.source == save.destination ||
+        destinations.intersects(destination) || live.intersects(destination) ||
+        probe_clobbers.intersects(destination)) {
+      report(error, "register preservation destination is unavailable or outside the allocation");
+      return false;
+    }
+    destinations.expand(destination);
+    sources.expand(RegisterRef{save.cls, save.source, 1});
+  }
+  if (sources.intersects(destinations)) {
+    report(error, "register preservation destinations overlap source registers");
+    return false;
+  }
+  return true;
+}
+
+bool plan_argument_moves(std::span<const ProbeArgValue> args, const ProbeAbi &abi,
+                         uint32_t vgpr_bound, const RegisterSet &live,
+                         std::vector<ProbeArgumentMove> &moves, std::optional<uint16_t> &temp,
+                         std::string *error) {
+  vgpr_bound = std::min(vgpr_bound, 256u);
+  std::vector<ProbeArgumentMove> pending;
+  RegisterSet unavailable = live | arg_registers(abi) | probe_argument_registers(args);
+  for (size_t index = 0; index < args.size(); ++index) {
+    const ProbeArgValue &arg = args[index];
+    if (arg.source != ProbeArgSource::AnchorVgpr)
+      continue;
+    const uint16_t destination = abi.arg_vgpr_base + index;
+    if (arg.register_index >= vgpr_bound || destination >= vgpr_bound) {
+      report(error, "guest VGPR argument exceeds the kernel's ordinary VGPR allocation");
+      return false;
+    }
+    if (destination != arg.register_index)
+      pending.push_back({destination, arg.register_index});
+  }
+  while (!pending.empty()) {
+    const std::vector<ProbeArgumentMove>::iterator ready =
+        std::find_if(pending.begin(), pending.end(), [&](const auto &move) {
+          return std::none_of(pending.begin(), pending.end(),
+                              [&](const auto &other) { return other.source == move.destination; });
+        });
+    if (ready != pending.end()) {
+      moves.push_back(*ready);
+      pending.erase(ready);
+      continue;
+    }
+    if (!temp)
+      temp = find_free_run(unavailable, RegClass::VGPR, 1, 0, 1, vgpr_bound);
+    if (!temp || *temp >= vgpr_bound ||
+        unavailable.intersects(RegisterRef{RegClass::VGPR, *temp, 1})) {
+      report(error, "guest VGPR argument copy cycle has no dead temporary VGPR");
+      return false;
+    }
+    const uint16_t source = pending.front().source;
+    moves.push_back({*temp, source});
+    for (auto &move : pending)
+      if (move.source == source)
+        move.source = *temp;
+  }
+  return true;
+}
+
 [[nodiscard]] bool check_size_and_words(const TrampolinePlan &plan, std::string *err) {
   if (plan.arch == ROCJITSU_CODE_ARCH_INVALID) {
     report(err, "trampoline plan: arch was not set");
     return false;
   }
-  if (plan.original_size != 4 && plan.original_size != 8) {
-    report(err, "trampoline plan: original_size must be 4 or 8");
+  if (plan.original_size == 0 || plan.original_size % 4 != 0 ||
+      ((plan.emit_original || plan.patch_anchor) && plan.original_size != 4 &&
+       plan.original_size != 8)) {
+    report(err, "trampoline plan: original_size must be 4 or 8 when patching or relocating");
     return false;
   }
   const size_t expected_words = plan.original_size / sizeof(uint32_t);
@@ -171,8 +248,10 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
     return std::nullopt;
 
   // Forward branch: from the anchor to the trampoline.
-  const auto fwd = compute_sopp_branch_simm16(plan.anchor_offset, plan.trampoline_offset);
-  if (!fwd) {
+  const auto fwd = plan.patch_anchor
+                       ? compute_sopp_branch_simm16(plan.anchor_offset, plan.trampoline_offset)
+                       : std::optional<int16_t>{};
+  if (plan.patch_anchor && !fwd) {
     report(error_out, "relocation trampoline forward branch exceeds s_branch simm16");
     return std::nullopt;
   }
@@ -184,6 +263,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   std::vector<uint32_t> body;
   for (const InlineAsmItem &item : plan.before_items)
     body.insert(body.end(), item.words.begin(), item.words.end());
+  const uint32_t original_offset = body.size() * sizeof(uint32_t);
   if (plan.emit_original)
     body.insert(body.end(), plan.original_words.begin(), plan.original_words.end());
   for (const InlineAsmItem &item : plan.after_items)
@@ -191,19 +271,23 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
 
   const uint64_t return_branch_pc = plan.trampoline_offset + body.size() * sizeof(uint32_t);
   const auto ret = compute_sopp_branch_simm16(return_branch_pc, plan.return_target);
-  if (!ret) {
+  if (plan.returns_to_kernel && !ret) {
     report(error_out, "relocation trampoline return branch exceeds s_branch simm16");
     return std::nullopt;
   }
 
   TrampolineBytes out;
-  out.patched_anchor_bytes.reserve(plan.original_size);
-  append_word(out.patched_anchor_bytes, build_s_branch(*fwd, plan.arch));
-  if (plan.original_size == 8)
-    append_word(out.patched_anchor_bytes, build_s_nop(0, plan.arch));
+  if (plan.patch_anchor) {
+    out.patched_anchor_bytes.reserve(plan.original_size);
+    append_word(out.patched_anchor_bytes, build_s_branch(*fwd, plan.arch));
+    if (plan.original_size == 8)
+      append_word(out.patched_anchor_bytes, build_s_nop(0, plan.arch));
+  }
 
   out.trampoline_words = std::move(body);
-  out.trampoline_words.push_back(build_s_branch(*ret, plan.arch));
+  out.original_byte_offset = original_offset;
+  if (plan.returns_to_kernel)
+    out.trampoline_words.push_back(build_s_branch(*ret, plan.arch));
   return out;
 }
 
@@ -241,10 +325,23 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     }
   }
   const RegisterSet arg_regs = arg_registers(abi);
+  const RegisterSet observed = probe_argument_registers(plan.probe_args);
+  RegisterSet call_clobbers = probe_body_clobbers | arg_regs;
+  call_clobbers.expand(probe_link_pair(abi));
+  RegisterSet save_destinations;
+  if (!validate_register_saves(plan, live_at_anchor | observed, call_clobbers, save_destinations,
+                               error_out))
+    return false;
+  std::vector<ProbeArgumentMove> argument_moves;
+  std::optional<uint16_t> argument_copy_temp;
+  if (!plan_argument_moves(plan.probe_args, abi, plan.kernel_vgpr_count,
+                           live_at_anchor | save_destinations, argument_moves, argument_copy_temp,
+                           error_out))
+    return false;
 
   // Target/scc/special-state selection stays within the kernel's ordinary SGPRs,
-  // so a temp never lands past the patched kernel's actual .sgpr_count (a wider
-  // kernel is not synthesized) or in a CDNA kernel's special-register tail. The
+  // so a temp never lands past the planned .sgpr_count or in a CDNA kernel's
+  // special-register tail. The
   // orchestrator sets plan.kernel_sgpr_count; it defaults to the conservative
   // cross-ISA allocatable limit.
   const uint32_t sgpr_bound = ordinary_sgpr_bound(plan.arch, plan.kernel_sgpr_count);
@@ -264,6 +361,27 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
       return false;
     }
     entry_storage.expand(RegisterRef{RegClass::SGPR, *plan.entry_storage_base, 2});
+    RegisterSet captured_vgprs;
+    for (const EntryVgprCapture &capture : plan.entry_vgpr_captures) {
+      if (capture.sgpr < *plan.entry_storage_base + 2 ||
+          capture.sgpr >= *plan.entry_storage_base + 4 || capture.sgpr >= sgpr_bound ||
+          capture.vgpr >= std::min(plan.kernel_vgpr_count, 256u) ||
+          entry_storage.intersects({RegClass::SGPR, capture.sgpr, 1}) ||
+          captured_vgprs.intersects({RegClass::VGPR, capture.vgpr, 1})) {
+        report(error_out, "entry VGPR capture is outside the framework-owned register run");
+        return false;
+      }
+      entry_storage.expand(RegisterRef{RegClass::SGPR, capture.sgpr, 1});
+      captured_vgprs.expand(RegisterRef{RegClass::VGPR, capture.vgpr, 1});
+    }
+    for (const ProbeArgValue &arg : plan.probe_args)
+      if (arg.source == ProbeArgSource::EntryVgprLane0 &&
+          std::ranges::none_of(plan.entry_vgpr_captures, [&](const auto &capture) {
+            return capture.vgpr == arg.register_index;
+          })) {
+        report(error_out, "entry VGPR argument has no framework-owned entry capture");
+        return false;
+      }
     // Excluding the pair from the envelope's temps is not enough on its own: the
     // probe body runs with the pair still holding the pointer, and a body that
     // writes it destroys the value for every site after this one. Nothing saves
@@ -283,9 +401,11 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     return false;
   }
 
-  // Reject if either lane of the link pair is live at the anchor; saving a live
-  // link pair is deferred.
-  if (live_at_anchor.intersects(probe_link_pair(abi))) {
+  // A live fixed link pair needs an explicit register backup before the call.
+  RegisterSet saved_sources;
+  for (const RegisterSave &save : plan.register_saves)
+    saved_sources.expand(RegisterRef{save.cls, save.source, 1});
+  if ((live_at_anchor - saved_sources).intersects(probe_link_pair(abi))) {
     report(error_out, ("probe-call resource planning: return-link pair s[" +
                        std::to_string(kLinkPairBase) + ":" + std::to_string(kLinkPairBase + 1) +
                        "] is live at the anchor; cannot yet save a live link pair")
@@ -299,7 +419,11 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // Target-address pair: dead, even-aligned, and not the link pair. It is
   // read by s_swappc before the probe body runs, so it may overlap
   // probe_body_clobbers.
-  const RegisterSet target_unavail = live_at_anchor | link_pair | entry_storage;
+  if (entry_storage.intersects(save_destinations)) {
+    report(error_out, "register preservation overlaps the framework's entry storage");
+    return false;
+  }
+  const RegisterSet target_unavail = live_at_anchor | link_pair | entry_storage | save_destinations;
   const std::optional<uint16_t> target_pair = find_free_sgpr_pair(target_unavail, sgpr_bound);
   if (!target_pair) {
     report(error_out, "probe-call resource planning: no dead SGPR pair available for the probe "
@@ -356,7 +480,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // so unlike the SGPR temps they can be live and need spilling. Spilling forces
   // EXEC=-1 around the store/load, so EXEC must be saved even if the probe never
   // touches it.
-  const bool will_spill = live_at_anchor.intersects(probe_body_clobbers | arg_regs);
+  const bool will_spill = (live_at_anchor | observed).intersects(probe_body_clobbers | arg_regs);
 
   // The full-mask window the spill stores/loads run under. Argument writes join
   // it: a v_mov_b32 under the anchor mask leaves the argument undefined in the
@@ -368,7 +492,8 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   //
   // A full-exec site opens the window for its own sake: the probe runs inside it
   // rather than under the anchor mask.
-  const bool needs_full_mask = will_spill || !plan.probe_args.empty() || plan.force_full_exec;
+  const bool needs_full_mask = will_spill || !plan.register_saves.empty() ||
+                               !plan.probe_args.empty() || plan.force_full_exec;
 
   // EXEC/VCC/M0 operand codes are resolved per-arch, but only when actually
   // reserving that register -- so a plan with no special-state saves (and no
@@ -394,6 +519,8 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // field names, a register source does not.
   for (const ProbeArgValue &arg : plan.probe_args) {
     switch (arg.source) {
+    case ProbeArgSource::AnchorVgpr:
+      break; // Parallel copies are counted together, including cycle breaks.
     case ProbeArgSource::Immediate:
       before_words += 2;
       break;
@@ -401,10 +528,13 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     case ProbeArgSource::AnchorExecHi:
     case ProbeArgSource::LogBufferPtrLo:
     case ProbeArgSource::LogBufferPtrHi:
+    case ProbeArgSource::EntryVgprLane0:
       before_words += 1;
       break;
     }
   }
+  before_words += argument_moves.size();
+  before_words += 2 * plan.register_saves.size();
   if (plan.preserve_scc)
     before_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
   // Each special-state register adds one s_mov save + one s_mov restore.
@@ -432,8 +562,12 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     plan.scc_temp = *scc_temp;
   plan.special_state_saves = std::move(special_saves);
   plan.before_word_count = before_words;
+  plan.argument_moves = std::move(argument_moves);
+  plan.argument_copy_temp = argument_copy_temp;
 
-  plan.builder_clobbers = link_pair | target_pair_set | arg_regs;
+  plan.builder_clobbers = link_pair | target_pair_set | arg_regs | save_destinations;
+  if (argument_copy_temp)
+    plan.builder_clobbers.expand(RegisterRef{RegClass::VGPR, *argument_copy_temp, 1});
   if (scc_temp)
     plan.builder_clobbers.expand(RegisterRef{RegClass::SGPR, *scc_temp, 1});
   for (const SpecialStateSlot &s : plan.special_state_saves)
@@ -464,7 +598,9 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // likewise return with an outstanding load that would escape the call boundary.
   // Emitted at the very top of the envelope (before any special-state/target/link
   // write) and again immediately after the call returns (before any restoration).
-  const std::vector<uint32_t> boundary_drain = build_wait_all_loads_complete(plan.arch);
+  std::vector<uint32_t> boundary_drain = build_wait_all_loads_complete(plan.arch);
+  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
+    boundary_drain.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc));
 
   std::vector<uint32_t> env;
   env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
@@ -476,7 +612,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // special_state_saves membership.
   const bool full_mask_exec = !plan.vgpr_spills.empty() || !plan.sgpr_spills.empty() ||
                               !plan.acc_spills.empty() || !plan.probe_args.empty() ||
-                              plan.force_full_exec;
+                              !plan.register_saves.empty() || plan.force_full_exec;
 
   // SGPR pair holding the saved anchor EXEC (populated by the save loop below).
   // Reused to restore the anchor mask before the call; always present when the
@@ -522,6 +658,48 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   // Spill saves: store each live+clobbered register before the call.
   env.insert(env.end(), spill.prologue.begin(), spill.prologue.end());
+  if (plan.probe_args.size() > kMaxProbeArgVgprs) {
+    report(error_out, "probe-call emission: argument block does not fit the call ABI");
+    return std::nullopt;
+  }
+  const std::optional<ProbeAbi> argument_abi = derive_probe_abi(
+      ProbeCallingConvention::AmdGpuFuncReturnS30S31, static_cast<uint8_t>(plan.probe_args.size()));
+  if (!argument_abi) {
+    report(error_out, "probe-call emission: argument block does not fit the call ABI");
+    return std::nullopt;
+  }
+  RegisterSet unavailable_backups = arg_registers(*argument_abi);
+  unavailable_backups.expand(probe_link_pair(*argument_abi));
+  unavailable_backups.expand({RegClass::SGPR, target_lo, 2});
+  if (plan.preserve_scc)
+    unavailable_backups.expand({RegClass::SGPR, plan.scc_temp, 1});
+  for (const SpecialStateSlot &save : plan.special_state_saves)
+    unavailable_backups.expand({RegClass::SGPR, save.temp_base, save.width});
+  if (plan.entry_storage_base)
+    unavailable_backups.expand({RegClass::SGPR, *plan.entry_storage_base, 2});
+  for (const EntryVgprCapture &capture : plan.entry_vgpr_captures)
+    unavailable_backups.expand({RegClass::SGPR, capture.sgpr, 1});
+  RegisterSet register_save_destinations;
+  if (!validate_register_saves(plan, {}, unavailable_backups, register_save_destinations,
+                               error_out))
+    return std::nullopt;
+  for (const RegisterSave &save : plan.register_saves)
+    env.push_back(save.cls == RegClass::SGPR
+                      ? build_s_mov_b32(save.destination, save.source, plan.arch)
+                      : build_v_mov_b32_src(save.destination, 256 + save.source, plan.arch));
+
+  // Capture guest operands before constants or scalar-sourced arguments can
+  // overwrite them. The order implements a parallel assignment, including cycles.
+  std::vector<ProbeArgumentMove> expected_moves;
+  std::optional<uint16_t> copy_temp = plan.argument_copy_temp;
+  if (!plan_argument_moves(plan.probe_args, *argument_abi, plan.kernel_vgpr_count,
+                           register_save_destinations, expected_moves, copy_temp, error_out) ||
+      expected_moves != plan.argument_moves) {
+    report(error_out, "probe-call emission: guest VGPR argument copy plan is inconsistent");
+    return std::nullopt;
+  }
+  for (const ProbeArgumentMove &move : plan.argument_moves)
+    env.push_back(build_v_mov_b32_src(move.destination, 256 + move.source, plan.arch));
 
   // Argument materialization: consecutive VGPRs from the ABI's base, in order.
   //
@@ -551,6 +729,19 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     // that on its own: any argument at all opens the full-mask window, which
     // reserves the temp, and the guard above fails closed if it is somehow absent.
     switch (arg.source) {
+    case ProbeArgSource::EntryVgprLane0: {
+      const std::vector<EntryVgprCapture>::const_iterator captured =
+          std::ranges::find_if(plan.entry_vgpr_captures,
+                               [&](const auto &value) { return value.vgpr == arg.register_index; });
+      if (captured == plan.entry_vgpr_captures.end()) {
+        report(error_out, "probe-call emission: missing entry VGPR capture");
+        return std::nullopt;
+      }
+      env.push_back(build_v_mov_b32_src(vdst, captured->sgpr, plan.arch));
+      break;
+    }
+    case ProbeArgSource::AnchorVgpr:
+      break; // Already captured by the parallel assignment above.
     case ProbeArgSource::Immediate: {
       const auto words = build_v_mov_b32_imm(vdst, arg.immediate, plan.arch);
       env.insert(env.end(), words.begin(), words.end());
@@ -631,6 +822,10 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   // Spill fills: reload each saved register after the call and wait for the loads.
   env.insert(env.end(), spill.epilogue.begin(), spill.epilogue.end());
+  for (const RegisterSave &save : plan.register_saves)
+    env.push_back(save.cls == RegClass::SGPR
+                      ? build_s_mov_b32(save.source, save.destination, plan.arch)
+                      : build_v_mov_b32_src(save.source, 256 + save.destination, plan.arch));
 
   // Special-state restores: copy each temp back into its register. After the spill
   // loads so EXEC is restored to its anchor mask only once the full-mask loads are
@@ -664,6 +859,9 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   const size_t wait_state_pad_words = owed_wait_states > 0 ? 1 : 0;
   if (owed_wait_states > 0)
     env.push_back(build_s_nop(static_cast<uint16_t>(owed_wait_states - 1), plan.arch));
+  const size_t restore_drain_words = plan.arch == ROCJITSU_CODE_ARCH_RDNA4 ? 1 : 0;
+  if (restore_drain_words)
+    env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc));
 
   // Plan/emit drift guard: the planner committed to this many envelope words and
   // the orchestrator sized the layout around it. A mismatch means the two
@@ -671,7 +869,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // envelope; the spill bracket, the two boundary drains and the wait-state pad
   // are accounted separately since their sizes are arch- and site-specific.
   if (env.size() != plan.before_word_count + spill.prologue.size() + spill.epilogue.size() +
-                        2 * boundary_drain.size() + wait_state_pad_words) {
+                        2 * boundary_drain.size() + wait_state_pad_words + restore_drain_words) {
     report(error_out, "emit_probe_call: synthesized envelope word count does not match the planned "
                       "before_word_count");
     return std::nullopt;
@@ -682,7 +880,6 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   TrampolinePlan emit_plan = plan;
   emit_plan.before_items.assign(1, InlineAsmItem{std::move(env)});
   emit_plan.after_items.clear();
-  emit_plan.emit_original = true;
   return build(emit_plan, error_out);
 }
 

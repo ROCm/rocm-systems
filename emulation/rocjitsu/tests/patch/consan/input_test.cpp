@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/code/patch/consan/input.h"
+#include "target_fixture.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -88,13 +88,17 @@ protected:
 
   void expect_value_operand(const InputProgram &program, const NativeLdsAccess &access,
                             uint16_t expected) {
-    const std::vector<OriginalInstruction>::const_iterator original = std::ranges::find(
-        program.instructions, access.original_offset, &OriginalInstruction::offset);
-    ASSERT_NE(original, program.instructions.end());
     std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
     ASSERT_NE(decoder, nullptr);
-    const DecodeResult decoded = decoder->decode_window(original->words);
+    std::array<uint32_t, 2> words{};
+    ASSERT_LE(program.text_file_offset + access.original_offset + sizeof(words),
+              program.image.size());
+    std::memcpy(words.data(),
+                program.image.data() + program.text_file_offset + access.original_offset,
+                sizeof(words));
+    const DecodeResult decoded = decoder->decode_window(words);
     ASSERT_TRUE(decoded.succeeded());
+    ASSERT_EQ(decoded.value()->size(), 8u);
     const Operand *operand = access.kind == AccessKind::Read ? decoded.value()->dst_operand(0)
                                                              : decoded.value()->src_operand(1);
     const std::optional<RegisterRef> reg = operand->decoded_vgpr();
@@ -177,13 +181,7 @@ TEST_F(ConSanInputFixture, CompanionSitesDoNotDependOnFixtureNamesOrInstructionO
     ASSERT_TRUE(program.succeeded()) << name << ": " << error_.message;
     ASSERT_EQ(program.value().accesses.size(), 2u) << name;
     for (const NativeLdsAccess &access : program.value().accesses) {
-      const std::vector<OriginalInstruction>::const_iterator found =
-          std::find_if(program.value().instructions.begin(), program.value().instructions.end(),
-                       [&](const OriginalInstruction &instruction) {
-                         return instruction.offset == access.original_offset;
-                       });
-      ASSERT_NE(found, program.value().instructions.end());
-      EXPECT_EQ(found->words.size(), 2u);
+      EXPECT_LE(access.original_offset + 8, program.value().text_bytes);
     }
     if (name == "read_read") {
       EXPECT_EQ(program.value().accesses[0].kind, AccessKind::Read);
@@ -224,7 +222,9 @@ TEST_F(ConSanInputFixture, BarrierAndWideAccessCannotBecomeNoSyncFacts) {
 TEST_F(ConSanInputFixture, GenericContextBootstrapUsesOwnedRegistersAndWrapperOffsets) {
   const FailureOr<InputProgram> program = inspect(image_);
   ASSERT_TRUE(program.succeeded()) << error_.message;
-  const DbiEntryProloguePlan &plan = program.value().entry_plan;
+  const auto planned = test::bootstrap_plan(program.value());
+  ASSERT_TRUE(planned);
+  const DbiEntryProloguePlan &plan = *planned;
   EXPECT_GE(plan.storage.persistent_base, 16u);
   EXPECT_EQ(plan.storage.entry_temp_base, plan.storage.persistent_base + 2);
   EXPECT_EQ(plan.prologue.payload_byte_offset, 24u);
