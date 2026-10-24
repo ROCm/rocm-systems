@@ -81,7 +81,7 @@ pub(crate) unsafe fn create_hardware_queue(
             return INVALID_AGENT;
         };
         if cooperative {
-            if runtime.gpus[index].info.gws_count == 0 {
+            if runtime.gpus[index].info().gws_count == 0 {
                 return INVALID_QUEUE_CREATION;
             }
             if runtime
@@ -148,7 +148,7 @@ pub(crate) unsafe fn create_hardware_queue(
             generation,
             id,
             device: runtime.gpus[index].device.clone(),
-            gpu: runtime.gpus[index].info,
+            gpu: runtime.gpus[index].info(),
             event,
             host_page_size: runtime.host_page_size,
             stop: runtime.stop_workers.clone(),

@@ -96,7 +96,7 @@ pub(crate) fn replace_vmem_access(
             let Some(gpu_index) = runtime
                 .gpus
                 .iter()
-                .position(|gpu| gpu.info.fabric_handles_supported)
+                .position(|gpu| gpu.info().fabric_handles_supported)
                 .or_else(|| (!runtime.gpus.is_empty()).then_some(0))
             else {
                 return NOT_SUPPORTED;
@@ -106,7 +106,7 @@ pub(crate) fn replace_vmem_access(
                 return INVALID_ALLOCATION;
             };
             if matches!(&handle.backing, VmemBacking::Fabric { .. })
-                && !gpu.info.fabric_handles_supported
+                && !gpu.info().fabric_handles_supported
             {
                 return NOT_SUPPORTED;
             }
@@ -182,7 +182,8 @@ pub(crate) fn replace_vmem_access(
     let Some(handle) = runtime.memory_state.vmem_handles.get_mut(&mapping.handle) else {
         return INVALID_ALLOCATION;
     };
-    if matches!(&handle.backing, VmemBacking::Fabric { .. }) && !gpu.info.fabric_handles_supported {
+    if matches!(&handle.backing, VmemBacking::Fabric { .. }) && !gpu.info().fabric_handles_supported
+    {
         return NOT_SUPPORTED;
     }
     let memory = match handle.memory_for_access(gpu_index, &gpu.device) {

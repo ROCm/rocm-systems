@@ -183,24 +183,16 @@ pub(super) fn cpu_cache_sizes(caches: &[Cache], agent: HsaAgent) -> [u32; 4] {
     sizes
 }
 
-/// Activated GPU and the immutable compatibility facts derived at startup.
+/// Activated GPU and its HSA-specific compatibility state.
 pub(crate) struct Gpu {
     /// Passive endpoint used for identity and topology queries.
     pub(crate) endpoint: Endpoint,
-    /// Cached hardware facts from passive discovery.
-    pub(crate) info: GpuInfo,
     /// Process-wide recoverable page-fault mode observed at activation.
     pub(crate) xnack_enabled: bool,
     /// Activated native device and its driver resources.
     pub(crate) device: Device,
     /// HSA-visible short target name.
     pub(crate) name: Box<str>,
-    /// HSA-visible product name.
-    pub(crate) product_name: Box<str>,
-    /// ASIC family used by image layout and target checks.
-    pub(crate) asic_family_id: u32,
-    /// GPU timestamp ticks per second.
-    pub(crate) timestamp_frequency_hz: u64,
     /// Host addresses of native HDP flush controls, when available.
     pub(crate) hdp_flush: [usize; 2],
     /// Retains the MMIO allocation supplying those controls.
@@ -214,6 +206,36 @@ pub(crate) struct Gpu {
     pub(crate) pc_sampling_supported: bool,
     /// Current native persisting L2 reservation shared across HSA views.
     pub(crate) persisting_l2_cache_size: Arc<Mutex<usize>>,
+}
+
+impl Gpu {
+    /// Reads immutable GPU facts from the populated native endpoint.
+    #[allow(
+        clippy::expect_used,
+        reason = "Gpu is constructed only after confirming an activated GPU endpoint"
+    )]
+    pub(crate) fn info(&self) -> GpuInfo {
+        *self.endpoint.gpu().expect("activated HSA GPU endpoint")
+    }
+
+    /// Returns the HSA display name, including the public fallback.
+    pub(crate) fn product_name(&self) -> &str {
+        self.endpoint
+            .product_name
+            .as_deref()
+            .unwrap_or("AMD Radeon Graphics")
+    }
+
+    /// Selects the populated DRM family when it is available.
+    pub(crate) fn asic_family_id(&self) -> u32 {
+        let info = self.info();
+        info.drm_asic_family_id.unwrap_or(info.asic_family_id)
+    }
+
+    /// Returns the optional native timestamp frequency as an HSA value.
+    pub(crate) fn timestamp_frequency_hz(&self) -> u64 {
+        self.info().counter_frequency_hz.unwrap_or(0)
+    }
 }
 
 /// Stable HSA cache object associated with one CPU or GPU agent.
