@@ -9,12 +9,14 @@ extern "C" {
 #endif
 
 #include <linux/ethtool.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #define SMI_NIC_MAX_STRING_LENGTH 256
 #define SMI_NIC_MAX_DEVICES 64
-#define SMI_NIC_MAX_STATISTICS 64
+#define SMI_NIC_MAX_STATISTICS 256
+#define SMI_NIC_MAX_FW_VERSIONS 64
 #define SMI_NIC_MAX_PORTS 32
 #define SMI_NIC_MAX_RDMA_DEV 32
 
@@ -29,6 +31,25 @@ typedef enum {
   SMI_NIC_STATUS_NO_DATA = 7,          /**< Requested data not found */
   SMI_NIC_STATUS_DRIVER_NOT_LOADED = 8 /**< Required driver not loaded */
 } smi_nic_status_t;
+
+/**
+ * @brief How a NIC connects to another device
+ */
+typedef enum {
+  SMI_NIC_LINK_TYPE_UNKNOWN, /**< The link could not be determined */
+  SMI_NIC_LINK_TYPE_PCIE,    /**< Same PCIe switch */
+  SMI_NIC_LINK_TYPE_NUMA,    /**< Same NUMA node, different PCIe switch */
+  SMI_NIC_LINK_TYPE_XNUMA    /**< Different NUMA nodes */
+} smi_nic_link_type_t;
+
+/**
+ * @brief NIC vendor
+ */
+typedef enum {
+  SMI_NIC_VENDOR_UNKNOWN, /**< Unknown NIC vendor */
+  SMI_NIC_VENDOR_AMD,     /**< AMD NIC vendor */
+  SMI_NIC_VENDOR_BROADCOM /**< Broadcom NIC vendor */
+} smi_nic_vendor_t;
 
 /**
  * @struct smi_nic_discovery_t
@@ -46,6 +67,7 @@ typedef struct {
   uint32_t count;
   struct {
     char bdf[SMI_NIC_MAX_STRING_LENGTH]; /**< PCI BDF */
+    smi_nic_vendor_t vendor;             /**< NIC vendor */
   } devices[SMI_NIC_MAX_DEVICES];
 } smi_nic_discovery_t;
 
@@ -89,6 +111,36 @@ typedef struct {
   char name[SMI_NIC_MAX_STRING_LENGTH];
   char version[SMI_NIC_MAX_STRING_LENGTH];
 } smi_nic_driver_info_t;
+
+/**
+ * @brief Which firmware version class an entry belongs to
+ */
+typedef enum {
+  SMI_NIC_FW_VERSION_TYPE_FIXED,   /**< Fixed (hardware) firmware version */
+  SMI_NIC_FW_VERSION_TYPE_RUNNING, /**< Currently running firmware version */
+  SMI_NIC_FW_VERSION_TYPE_STORED   /**< Stored (pending) firmware version */
+} smi_nic_fw_version_type_t;
+
+/**
+ * @struct smi_nic_fw_version_t
+ * @brief One firmware version entry
+ */
+typedef struct {
+  smi_nic_fw_version_type_t type;
+  char name[SMI_NIC_MAX_STRING_LENGTH];
+  char version[SMI_NIC_MAX_STRING_LENGTH];
+} smi_nic_fw_version_t;
+
+/**
+ * @struct smi_nic_fw_info_t
+ * @brief Firmware versions of a NIC
+ *
+ * @var smi_nic_fw_info_t::count Number of valid entries in versions
+ */
+typedef struct {
+  uint32_t count;
+  smi_nic_fw_version_t versions[SMI_NIC_MAX_FW_VERSIONS];
+} smi_nic_fw_info_t;
 
 /**
  * @struct smi_nic_asic_info_t
@@ -213,6 +265,8 @@ typedef struct {
  * can be used concurrently from different threads.
  *
  * @param[out] ctx Pointer to store the created context handle
+ * @param[in] is_ainic_only If true, discover only AMD NICs (AINIC cards and UALoE
+ *            endpoints); if false, discover all supported NICs.
  *
  * @return ::SMI_NIC_STATUS_SUCCESS if context created successfully
  * @return ::SMI_NIC_STATUS_WRONG_PARAM if ctx is NULL
@@ -222,7 +276,7 @@ typedef struct {
  * @note The context must be destroyed with smi_nic_destroy_context()
  *
  */
-smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx);
+smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx, bool is_ainic_only);
 
 /**
  * @brief Destroy a NIC context and free its resources
@@ -254,6 +308,32 @@ smi_nic_status_t smi_nic_destroy_context(smi_nic_ctx_t ctx);
 smi_nic_status_t smi_discover_nics(smi_nic_ctx_t ctx, smi_nic_discovery_t* discovery);
 
 /**
+ * @brief Report whether a vendor's main NIC driver is loaded.
+ *
+ * Checks the vendor's driver directory only, so it works before any context exists.
+ *
+ * @param vendor The NIC vendor to check.
+ * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS if the driver is loaded,
+ * ::SMI_NIC_STATUS_DRIVER_NOT_LOADED if not, ::SMI_NIC_STATUS_WRONG_PARAM for an unknown vendor.
+ */
+smi_nic_status_t smi_nic_driver_loaded(smi_nic_vendor_t vendor);
+
+/**
+ * @brief Get the link type between a NIC and another device (a GPU or a NIC).
+ *
+ * The link is a property of the PCI topology, so it needs no loaded driver and a NIC without ports
+ * answers too. A device outside sysfs or an unreadable NUMA node gives ::SMI_NIC_LINK_TYPE_UNKNOWN.
+ *
+ * @param ctx Context returned by ::smi_nic_create_context.
+ * @param device_src Packed BDF of the NIC, in the ::amdsmi_bdf_t as_uint encoding.
+ * @param device_dst Packed BDF of the other device, in the same encoding.
+ * @param type Filled on success; unmodified otherwise.
+ * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
+ */
+smi_nic_status_t smi_topo_get_nic_link_type(smi_nic_ctx_t ctx, uint64_t device_src,
+                                            uint64_t device_dst, smi_nic_link_type_t* type);
+
+/**
  * @brief Retrieve NIC driver information.
  *
  * @param ctx Context handle
@@ -263,6 +343,16 @@ smi_nic_status_t smi_discover_nics(smi_nic_ctx_t ctx, smi_nic_discovery_t* disco
  */
 smi_nic_status_t smi_get_nic_driver_info(smi_nic_ctx_t ctx, uint64_t device,
                                          smi_nic_driver_info_t* info);
+
+/**
+ * @brief Retrieve the firmware versions of a NIC.
+ *
+ * @param ctx Context returned by ::smi_nic_create_context.
+ * @param device Packed BDF, in the ::amdsmi_bdf_t as_uint encoding.
+ * @param info Filled on success; unmodified otherwise.
+ * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
+ */
+smi_nic_status_t smi_get_nic_fw_info(smi_nic_ctx_t ctx, uint64_t device, smi_nic_fw_info_t* info);
 
 /**
  * @brief Retrieve NIC ASIC information.
@@ -415,7 +505,7 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_list(smi_nic_ctx_t ctx, uint64
                                                        smi_nic_stat_info_t* stats);
 
 #ifdef __cplusplus
-}
+}  // extern "C"
 #endif
 
 #endif  // __SMI_NIC_INTERFACE_H__

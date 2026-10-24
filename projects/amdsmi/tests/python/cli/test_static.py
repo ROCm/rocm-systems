@@ -39,7 +39,8 @@ class TestStatic(TestCliBase):
                 self.assertIn(key, gpu["asic"])
         json_values = {key: [gpu["asic"][key] for gpu in gpus] for key in keys}
 
-        cmd = "amd-smi static --asic --csv"
+        # --gpu all: an unscoped CSV run appends a separate NIC table on hosts with a NIC.
+        cmd = "amd-smi static --asic --gpu all --csv"
         (rc, data, std_err) = self.util.RunCmdSync(cmd)
         self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
         # vendor_name carries a comma on some backends, so honour the quoting.

@@ -29,12 +29,19 @@ class AMDSmiAINICDevice : public AMDSmiProcessor {
     amdsmi_nic_fw_entry_t versions;
     amdsmi_nic_port_info_t port;
     amdsmi_nic_rdma_devices_info_t rdma_dev;
+    uint8_t type;         //!< SmiNicKind value
+    uint32_t capability;  //!< amdsmi_nic_capability_bits_t bitmask
   };
 
   explicit AMDSmiAINICDevice(const AINICInfo& ai_nic_info)
       : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_NIC), ai_nic_info_(ai_nic_info) {}
   ~AMDSmiAINICDevice() = default;
   amdsmi_status_t amd_query_nic_info(AINICInfo& info) const;
+
+  // Single-field reads that avoid copying the whole AINICInfo, which is over 600 KB.
+  uint8_t nic_type() const { return ai_nic_info_.type; }
+  uint32_t capability() const { return ai_nic_info_.capability; }
+  uint64_t bdf() const { return ai_nic_info_.bus.bdf.as_uint; }
 
  private:
   AINICInfo ai_nic_info_;
