@@ -7936,6 +7936,10 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
  *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
  *  the new memory partition setting.
  *
+ *  Requesting the current mode cancels a different mode requested since the driver was
+ *  loaded, if the driver supports it (current amdgpu releases don't); otherwise the next
+ *  driver reload still applies it.
+ *
  *  @param[in] processor_handle Device which to query
  *
  *  @param[in] memory_partition using enum ::amdsmi_memory_partition_type_t,
@@ -7989,6 +7993,10 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
  *
  *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
  *  the new memory partition setting.
+ *
+ *  Requesting the current mode cancels a different mode requested since the driver was
+ *  loaded, if the driver supports it (current amdgpu releases don't); otherwise the next
+ *  driver reload still applies it.
  *
  *  @param[in] processor_handle A processor handle
  *
