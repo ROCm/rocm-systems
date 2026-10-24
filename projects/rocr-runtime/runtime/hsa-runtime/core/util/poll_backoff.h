@@ -23,7 +23,7 @@ namespace rocr {
 namespace core {
 
 // Floor (microseconds) for the polling-fallback nap.
-inline constexpr int kPollNapFloorUs = 20;
+inline constexpr unsigned int kPollNapFloorUs = 20;
 
 // Ceiling (microseconds) for the polling-fallback nap. Only used when the
 // runtime has no interrupt-backed signal events at all
@@ -33,16 +33,35 @@ inline constexpr int kPollNapFloorUs = 20;
 // back off at all: a single EopEvent-less signal can force the shared
 // async-events thread into polling, and napping would delay the unrelated
 // interrupt-backed handlers batched onto that same thread.
-inline constexpr int kPollNapCeilingUs = 2000;
+inline constexpr unsigned int kPollNapCeilingUs = 2000;
 
 // Given the current nap duration, return the next one: double it, capped at
 // ceiling_us. Saturating at the ceiling is a fixed point, so repeated calls
 // converge to and stay at ceiling_us. The multiply is only evaluated when
 // current_us <= ceiling_us/2, so current_us*2 <= ceiling_us and can never
-// overflow even for a ceiling_us up to INT_MAX.
-constexpr int NextPollNapUs(int current_us, int ceiling_us = kPollNapCeilingUs) {
+// overflow even for a ceiling_us up to UINT_MAX.
+constexpr unsigned int NextPollNapUs(unsigned int current_us,
+                                     unsigned int ceiling_us = kPollNapCeilingUs) {
   return (current_us > ceiling_us / 2) ? ceiling_us
                                        : std::min(current_us * 2, ceiling_us);
+}
+
+// Hot-spin window (microseconds) a poll that cannot sleep in the kernel spins
+// before it starts napping. A BusyWaitSignal wait (default_signal.cpp) has no
+// interrupt event at all, so it spins this long -- long enough that a GPU
+// completion which lands promptly keeps full latency -- and then falls back to
+// NextPollNapUs() napping so a wait that drags on for seconds (e.g. a host<->
+// device copy stalled under memory pressure) costs almost no CPU.
+inline constexpr unsigned int kHotPollUs = 200;
+
+// HSA_WAIT_STATE_ACTIVE widens the window: the caller asked to trade CPU for
+// reduced latency. It does not remove the nap fallback -- clr's WaitForSignal()
+// re-arms the wait every 4s with the active hint, so "active" is not a licence
+// to spin a core unbounded.
+inline constexpr unsigned int kHotPollActiveUs = 10000;
+
+constexpr unsigned int HotPollUs(bool active_hint) {
+  return active_hint ? kHotPollActiveUs : kHotPollUs;
 }
 
 }  // namespace core
