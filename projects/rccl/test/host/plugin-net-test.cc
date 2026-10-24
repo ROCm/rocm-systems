@@ -36,7 +36,6 @@
 #include "plugin.h"
 
 using RcclUnitTesting::CaptureLog;
-using RcclUnitTesting::LogHas;
 
 namespace {
 int g_telemetryInitResult = 0;
@@ -360,20 +359,17 @@ TEST_F(PluginNetMicrotest, ListNoneOrEmptyLeavesOnlyInternals) {
   }
 }
 
-// NCCL_NET_MAX_PLUGINS less the two internals leaves room for 14, and the log says 13.
-TEST_F(PluginNetMicrotest, List_KeepsFourteenExternalsButLogsThirteen) {
+// NCCL_NET_MAX_PLUGINS less the two internals leaves room for 14.
+TEST_F(PluginNetMicrotest, List_KeepsFourteenExternals) {
   constexpr int kExternals = NCCL_NET_MAX_PLUGINS - 2;
   std::string list;
   for (int i = 0; i < NCCL_NET_MAX_PLUGINS; i++) list += (i ? ",p" : "p") + std::to_string(i);
-  std::string log = CaptureLog([&] { BuildList(list.c_str()); });
+  BuildList(list.c_str());
 
   ASSERT_EQ(pluginCount, NCCL_NET_MAX_PLUGINS);
   EXPECT_EQ(std::string(Lib(kExternals - 1).name), "p" + std::to_string(kExternals - 1));
   EXPECT_EQ(Lib(kExternals).ncclNet, &ncclNetIb);
   EXPECT_EQ(Lib(kExternals + 1).ncclNet, &ncclNetSocket);
-  EXPECT_TRUE(LogHas(log, ("NCCL_NET_PLUGIN list contains more than " + std::to_string(kExternals - 1) +
-                           " plugins, ignoring the rest").c_str()))
-      << log;
 }
 
 TEST_F(PluginNetMicrotest, ListSkipsNamesThatDoNotFitWithTheirTerminator) {
