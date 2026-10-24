@@ -19,7 +19,7 @@ import shlex
 import stat
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 SocketIdentity = tuple[int, int]
@@ -194,13 +194,13 @@ def build_qemu_arguments(
     qemu: Path,
     kernel: Path,
     initramfs: Path,
-    socket_path: Path,
+    socket_paths: Sequence[Path],
     accelerator: str,
     memory: str,
     append: str,
 ) -> list[str]:
     cpu = "host,+hypervisor" if accelerator == "kvm" else "qemu64,+hypervisor"
-    return [
+    arguments = [
         str(qemu),
         "-accel",
         accelerator,
@@ -218,26 +218,44 @@ def build_qemu_arguments(
         str(initramfs),
         "-append",
         append,
-        "-device",
-        json.dumps(
-            {
-                "driver": "vfio-user-pci",
-                "rombar": 0,
-                "socket": {"type": "unix", "path": str(socket_path)},
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        ),
-        "-nodefaults",
-        "-no-user-config",
-        "-display",
-        "none",
-        "-monitor",
-        "none",
-        "-serial",
-        "stdio",
-        "-no-reboot",
     ]
+    for ordinal, socket_path in enumerate(socket_paths):
+        device: dict[str, Any] = {
+            "driver": "vfio-user-pci",
+            "rombar": 0,
+            "socket": {"type": "unix", "path": str(socket_path)},
+        }
+        if len(socket_paths) > 1:
+            # Keep low slots and the Q35 chipset's upper slots available.
+            if ordinal + 4 >= 0x1C:
+                raise GuestRunError("too many VFIO-user devices for Q35 PCI slots")
+            device.update(
+                {
+                    "bus": "pcie.0",
+                    "addr": f"0x{ordinal + 4:x}",
+                    "id": f"rocjitsu-gpu-{ordinal}",
+                }
+            )
+        arguments.extend(
+            [
+                "-device",
+                json.dumps(device, separators=(",", ":"), sort_keys=True),
+            ]
+        )
+    arguments.extend(
+        [
+            "-nodefaults",
+            "-no-user-config",
+            "-display",
+            "none",
+            "-monitor",
+            "none",
+            "-serial",
+            "stdio",
+            "-no-reboot",
+        ]
+    )
+    return arguments
 
 
 def start_vfio_server(
@@ -266,12 +284,12 @@ def start_vfio_server(
 
 
 def wait_for_server_ready(
-    path: Path,
+    paths: Sequence[Path],
     process: subprocess.Popen[Any],
     ready_fd: int,
     timeout: float = DEFAULT_STARTUP_TIMEOUT_SECONDS,
-) -> SocketIdentity:
-    """Wait until rocjitsu reports that its listening socket is ready."""
+) -> dict[Path, SocketIdentity]:
+    """Wait for rocjitsu's single readiness signal and inspect every socket."""
 
     with selectors.DefaultSelector() as selector:
         selector.register(ready_fd, selectors.EVENT_READ)
@@ -293,17 +311,54 @@ def wait_for_server_ready(
             f"socket was ready{detail}"
         )
 
-    try:
-        socket_stat = path.lstat()
-    except FileNotFoundError as error:
-        raise GuestRunError(
-            f"rocjitsu reported readiness without creating {path}"
-        ) from error
-    except OSError as error:
-        raise GuestRunError(f"cannot inspect vfio-user socket: {error}") from error
-    if not stat.S_ISSOCK(socket_stat.st_mode):
-        raise GuestRunError(f"vfio-user socket path is not a socket: {path}")
-    return socket_stat.st_dev, socket_stat.st_ino
+    identities: dict[Path, SocketIdentity] = {}
+    for path in paths:
+        try:
+            socket_stat = path.lstat()
+        except FileNotFoundError as error:
+            raise GuestRunError(
+                f"rocjitsu reported readiness without creating {path}"
+            ) from error
+        except OSError as error:
+            raise GuestRunError(f"cannot inspect vfio-user socket: {error}") from error
+        if not stat.S_ISSOCK(socket_stat.st_mode):
+            raise GuestRunError(f"vfio-user socket path is not a socket: {path}")
+        identities[path] = socket_stat.st_dev, socket_stat.st_ino
+    return identities
+
+
+def validate_socket_paths(output: Path, requested: Sequence[Path]) -> list[Path]:
+    """Require distinct, absent socket files directly in the private output."""
+
+    paths: list[Path] = []
+    lexical_paths: set[Path] = set()
+    resolved_paths: set[Path] = set()
+    for requested_path in requested:
+        if ".." in requested_path.parts:
+            raise GuestRunError(
+                "vfio-user socket must be directly inside the run output "
+                f"directory: {requested_path}"
+            )
+        lexical_path = Path(os.path.abspath(requested_path))
+        path = requested_path.resolve()
+        if path.parent != output:
+            raise GuestRunError(
+                "vfio-user socket must be directly inside the run output directory"
+            )
+        if lexical_path in lexical_paths or path in resolved_paths:
+            raise GuestRunError(f"duplicate vfio-user socket path: {requested_path}")
+        if len(os.fsencode(path)) >= 108:
+            raise GuestRunError(f"vfio-user socket path is too long: {path}")
+        try:
+            lexical_path.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise GuestRunError(f"vfio-user socket path already exists: {lexical_path}")
+        lexical_paths.add(lexical_path)
+        resolved_paths.add(path)
+        paths.append(path)
+    return paths
 
 
 def remove_owned_socket(path: Path, identity: SocketIdentity | None) -> None:
@@ -342,7 +397,9 @@ def stop_after_failure(process: subprocess.Popen[Any]) -> None:
 
 
 def finish_server(
-    process: subprocess.Popen[Any], shutdown_grace: float | None = None
+    process: subprocess.Popen[Any],
+    shutdown_grace: float | None = None,
+    stop_requested: bool = False,
 ) -> None:
     """Stop rocjitsu, force-killing it if cooperative shutdown stalls."""
 
@@ -350,10 +407,11 @@ def finish_server(
     if status is None:
         if shutdown_grace is None:
             shutdown_grace = SERVER_SHUTDOWN_GRACE_SECONDS
-        try:
-            process.send_signal(signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        if not stop_requested:
+            try:
+                process.send_signal(signal.SIGTERM)
+            except ProcessLookupError:
+                pass
         try:
             status = process.wait(timeout=shutdown_grace)
         except subprocess.TimeoutExpired as error:
@@ -452,7 +510,14 @@ def parse_arguments(arguments: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--rocjitsu", required=True, type=Path)
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--socket", type=Path)
+    parser.add_argument(
+        "--socket",
+        type=Path,
+        action="append",
+        default=[],
+        help="VFIO-user socket for one local GPU; repeat in GPU ordinal order",
+    )
+    parser.add_argument("--node", help="local node ID in a system manifest")
     parser.add_argument("--accel", choices=("auto", "kvm", "tcg"), default="auto")
     parser.add_argument("--memory", default="4G")
     parser.add_argument("--append", default="console=ttyS0 panic=-1")
@@ -486,19 +551,9 @@ def main(arguments: list[str] | None = None) -> int:
         if output.exists():
             raise GuestRunError(f"run output directory already exists: {output}")
 
-        socket_path = (args.socket or output / "vfio-user.sock").resolve()
-        if socket_path.parent != output:
-            raise GuestRunError(
-                "vfio-user socket must be directly inside the run output directory"
-            )
-        if len(str(socket_path).encode("utf-8")) >= 108:
-            raise GuestRunError(f"vfio-user socket path is too long: {socket_path}")
-        try:
-            socket_path.lstat()
-        except FileNotFoundError:
-            pass
-        else:
-            raise GuestRunError(f"vfio-user socket path already exists: {socket_path}")
+        socket_paths = validate_socket_paths(
+            output, args.socket or [output / "vfio-user.sock"]
+        )
 
         accelerator = select_accelerator(
             args.accel, available_accelerators(qemu, args.probe_timeout)
@@ -509,7 +564,7 @@ def main(arguments: list[str] | None = None) -> int:
             qemu,
             kernel,
             initramfs,
-            socket_path,
+            socket_paths,
             accelerator,
             args.memory,
             args.append,
@@ -518,9 +573,11 @@ def main(arguments: list[str] | None = None) -> int:
             str(rocjitsu),
             "--config",
             str(config),
-            "--vfio-socket",
-            str(socket_path),
         ]
+        if args.node is not None:
+            server_arguments.extend(["--node", args.node])
+        for socket_path in socket_paths:
+            server_arguments.extend(["--vfio-socket", str(socket_path)])
         if args.dry_run:
             print(shlex.join(server_arguments))
             print(shlex.join(qemu_arguments))
@@ -535,7 +592,8 @@ def main(arguments: list[str] | None = None) -> int:
             run_error: GuestRunError | OSError | subprocess.SubprocessError | None = (
                 None
             )
-            socket_identity: SocketIdentity | None = None
+            socket_identities: dict[Path, SocketIdentity] = {}
+            server_stop_requested = False
             try:
                 with block_termination_signals() as child_signal_mask:
                     with server_log_path.open("wb") as server_log:
@@ -543,8 +601,8 @@ def main(arguments: list[str] | None = None) -> int:
                             server_arguments, server_log, child_signal_mask
                         )
                 try:
-                    socket_identity = wait_for_server_ready(
-                        socket_path, server, ready_fd, args.startup_timeout
+                    socket_identities = wait_for_server_ready(
+                        socket_paths, server, ready_fd, args.startup_timeout
                     )
                 finally:
                     with block_termination_signals():
@@ -554,6 +612,16 @@ def main(arguments: list[str] | None = None) -> int:
                     guest_returncode = run_qemu(qemu_arguments, server, guest_log)
                 if guest_returncode != 0:
                     raise GuestRunError(f"QEMU exited with status {guest_returncode}")
+                # QEMU can close its PCI sockets before process exit. Tell the
+                # node its guest is done as soon as that exit is observed;
+                # reading a large guest log must not consume the group's
+                # disconnect grace period before shutdown is requested.
+                if server.poll() is None:
+                    try:
+                        server.send_signal(signal.SIGTERM)
+                        server_stop_requested = True
+                    except ProcessLookupError:
+                        pass
                 check_guest_log(guest_log_path, args.expect_log, args.reject_log)
             except (GuestRunError, OSError, subprocess.SubprocessError) as error:
                 run_error = error
@@ -577,7 +645,9 @@ def main(arguments: list[str] | None = None) -> int:
                                     )
                         if server is not None:
                             try:
-                                finish_server(server)
+                                finish_server(
+                                    server, stop_requested=server_stop_requested
+                                )
                             except (
                                 GuestRunError,
                                 OSError,
@@ -589,22 +659,21 @@ def main(arguments: list[str] | None = None) -> int:
                                     run_error = GuestRunError(
                                         f"{run_error}; cleanup also failed: {error}"
                                     )
-                            try:
-                                if (
-                                    socket_identity is None
-                                    and server.poll() is not None
-                                ):
-                                    socket_identity = socket_identity_if_present(
-                                        socket_path
-                                    )
-                                remove_owned_socket(socket_path, socket_identity)
-                            except OSError as error:
-                                if run_error is None:
-                                    run_error = error
-                                else:
-                                    run_error = GuestRunError(
-                                        f"{run_error}; socket cleanup also failed: {error}"
-                                    )
+                            for socket_path in socket_paths:
+                                try:
+                                    identity = socket_identities.get(socket_path)
+                                    if identity is None and server.poll() is not None:
+                                        identity = socket_identity_if_present(
+                                            socket_path
+                                        )
+                                    remove_owned_socket(socket_path, identity)
+                                except OSError as error:
+                                    if run_error is None:
+                                        run_error = error
+                                    else:
+                                        run_error = GuestRunError(
+                                            f"{run_error}; socket cleanup also failed: {error}"
+                                        )
                 except GuestRunError as error:
                     # Restoring the signal mask delivers any termination signal
                     # deferred by the cleanup block. Preserve an earlier guest
