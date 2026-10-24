@@ -103,6 +103,31 @@ class IPCTest : public TestBase {
   // @Brief: Collect and print verbose messages to enable debugging
   void PrintVerboseMesg(void);
 
+  // @Brief: Wait for the child to drive |sig| to satisfy |cond| vs |target|,
+  // giving up if the child dies or the deadline expires. |phase| names the wait
+  // in the failure message; |observed| gets the last signal value seen. Returns
+  // false, after recording a gtest failure, on giving up.
+  bool WaitForChildSignal(hsa_signal_t sig, hsa_signal_condition_t cond,
+                          hsa_signal_value_t target, const char* phase,
+                          hsa_signal_value_t* observed);
+
+  // @Brief: Child-side counterpart; gives up if the parent fails or dies, so
+  // the child cannot survive as an orphan
+  bool WaitForParentSignal(hsa_signal_t sig, hsa_signal_condition_t cond,
+                           hsa_signal_value_t target, const char* phase,
+                           hsa_signal_value_t* observed);
+
+  // @Brief: Non-blocking test for child termination; caches the wait status
+  bool ChildHasExited(int* status);
+
+  // @Brief: Reap the child within a bounded wait, failing unless it exited
+  // cleanly
+  void ReapChildOrFail(void);
+
+  // @Brief: Kill the child if still running, then reap it. Safe to call more
+  // than once and when no child was forked
+  void TerminateChild(void);
+
   // @Brief: Values used to initialize framebuffer that is shared
   uint32_t first_val_ = 0x01;
   uint32_t second_val_ = 0x02;
@@ -110,15 +135,27 @@ class IPCTest : public TestBase {
   uint32_t fourth_val_ = 0x04;
   uint32_t fifth_val_ = 0x05;
 
-  int child_;
-  Shared* shared_;
-  bool parentProcess_;
-  size_t gpu_mem_granule;
+  // Initialized here because Close() cleans up against these even when SetUp()
+  // bailed out before the fork
+  int child_ = 0;
+  Shared* shared_ = nullptr;
+  bool parentProcess_ = true;
+  size_t gpu_mem_granule = 0;
+
+  // Parent pid recorded by the child, which compares it against getppid() to
+  // notice that the parent has gone away
+  pid_t parent_pid_ = 0;
+
+  // Cached waitpid() result, so the child is reaped once and its exit status
+  // survives for the final check
+  bool child_reaped_ = false;
+  int child_wait_status_ = 0;
 
   // Supports user triggered failure
   int32_t usr_fail_val_ = 0xFFFFFFFF;
 
-  // Specifies timeout period for parent/child processes
+  // Bounds one hsa_signal_wait_acquire() call, not a loop around it; see
+  // kPeerWaitTimeoutMs in ipc.cc for the deadline on the whole handshake
   int32_t timeout_ = 0x20000;
 };
 
