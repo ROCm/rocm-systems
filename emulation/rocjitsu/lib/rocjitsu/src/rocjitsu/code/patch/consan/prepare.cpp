@@ -64,20 +64,6 @@ Result finish_manifest(const InputProgram &program, PreparedArtifact &artifact, 
   return Result::success();
 }
 
-bool update_resource_metadata(std::span<uint8_t> image, const KernelDescriptorInfo &kernel,
-                              const InstrumentationResources &required, std::string *error) {
-  const FailureOr<MetadataResources> metadata = inspect_metadata(image, kernel, error);
-  if (metadata.failed())
-    return false;
-  MetadataResources resources = metadata.value();
-  resources.kernarg_bytes = required.kernarg_bytes;
-  if (required.sgprs)
-    resources.sgprs = required.sgprs;
-  if (required.vgprs)
-    resources.vgprs = required.vgprs;
-  return update_metadata(image, kernel, resources, error).succeeded();
-}
-
 FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error) {
   const FailureOr<uint32_t> stride = lds_race_row_stride(program.accesses.size(), error);
   if (stride.failed())
@@ -91,8 +77,7 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
   const InstrumentationOptions options{
       .kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper,
       .preservation = GuestStatePreservation::DeclaredRegisters,
-      .register_growth = OriginalRegisterCounts{program.original_sgprs, program.original_vgprs},
-      .update_resource_metadata = update_resource_metadata};
+      .register_growth = OriginalRegisterCounts{program.original_sgprs, program.original_vgprs}};
   Instrumentor instrumentor(object, program.target->arch, options);
   const std::vector<ProbeArgValue> context_args{
       {ProbeArgSource::LogBufferPtrLo},

@@ -124,6 +124,7 @@ target_link_libraries(
         Threads::Threads
         rocjitsu_kernel_descriptor_scan
         rocjitsu_kernarg_extension
+        rocjitsu_amdhsa_metadata
 )
 set_target_properties(
     rocjitsu_dbt_internal
@@ -172,6 +173,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             rocjitsu_cdna5_model_registry
             rocjitsu_kernel_descriptor_scan
             rocjitsu_kernarg_extension
+            rocjitsu_amdhsa_metadata
             simdojo_headers
             util
             Threads::Threads
