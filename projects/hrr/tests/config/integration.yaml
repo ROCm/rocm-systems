@@ -148,6 +148,8 @@ cases:
   Unit_HRR_FailedMemcpy3D_Direct: {}
   Unit_HRR_FailedShimCallsNotRecorded: {}
   Unit_HRR_FailedShimCalls_Direct: {}
+  Unit_HRR_FatBinGlobalCopy: {}
+  Unit_HRR_FatBinGlobalCopy_Direct: {}
   Unit_HRR_FatBinHeaderChecks: {}
   Unit_HRR_FatBinHeader_Direct: {}
   Unit_HRR_FirstMallocRoundtrip: {}

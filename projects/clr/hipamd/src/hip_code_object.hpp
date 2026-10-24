@@ -195,8 +195,9 @@ class StatCO : public CodeObject {
   // Resize device-specific data structures for all registered functions and variables
   void ResizeForDevices(size_t device_count);
 
-  // Iterate all registered fat binary data pointers — for HRR capture post-registration sweep.
-  void ForEachFatBinaryBlob(void (*cb)(const void*)) const;
+  // Iterate all registered fat binaries as (data pointer, FatBinaryInfo, null until HIP
+  // digests it) — for HRR capture post-registration sweep.
+  void ForEachFatBinary(void (*cb)(const void*, FatBinaryInfo*)) const;
 
   // Iterate all registered __device__ globals as (host shadow address, symbol
   // name, size, device address) — the same post-registration sweep for HRR,

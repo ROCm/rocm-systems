@@ -1607,6 +1607,7 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
     uint64_t blob_hash_hi = a->blob_hash_hi;
 
     if (!blob_hash_lo && !blob_hash_hi) return hipSuccess;  // no blob — skip
+    // No blob: the hash names a code object, which run_pass() pre-loads.
     if (!a->blob_size) return hipSuccess;
 
     std::string hex = hrr::hash_hex(blob_hash_lo, blob_hash_hi);

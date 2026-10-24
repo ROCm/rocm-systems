@@ -197,7 +197,7 @@ typedef struct {
 typedef struct {
     hrr_event_header hdr;
     uint64_t ret;
-    uint64_t blob_hash_lo;  /* FNV-1a-128 lo of fat binary */
+    uint64_t blob_hash_lo;  /* FNV-1a-128 lo of fat binary, or of its code object if blob_size is 0 */
     uint64_t blob_hash_hi;  /* FNV-1a-128 hi */
     uint64_t blob_size;  /* fat binary byte count */
 } hrr_args___hipRegisterFatBinary;

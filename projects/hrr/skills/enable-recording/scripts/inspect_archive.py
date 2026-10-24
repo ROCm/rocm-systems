@@ -82,7 +82,10 @@ BUNDLE_MAGIC = b"__CLANG_OFFLOAD_BUNDLE__"
 COMPRESSED_BUNDLE_MAGIC = b"CCOB"
 # `blobs/` holds buffer contents as well as fat binaries, so the fat binaries
 # are the blobs a `__hipRegisterFatBinary` record names: its hrr_api_id_t, and
-# where the record keeps the hash after the event header and `uint64 ret`.
+# where the record keeps the hash after the event header and `uint64 ret`, then
+# the blob size. A record with a size names a whole bundle under `blobs/`; one
+# with a size of 0 names the code object HIP loaded, under `code_objects/`, and
+# no blob.
 # The id is per archive format version (hrr_api_args.h): v8 put two compiler
 # APIs ahead of it, v9 one more, and v10 left it where it was. A v7 archive may
 # hold either numbering, so that and any other version leaves the fat binaries
@@ -283,10 +286,11 @@ def _fat_binary_blobs(pid_dir: Path) -> list[Path] | None:
                 event_type, length = struct.unpack_from("<H24xI", record)
                 if length < EVENT_HEADER_BYTES or length > min(size - pos, MAX_RECORD_BYTES):
                     break
-                if event_type == register_fat_binary and length >= FAT_BINARY_HASH_OFFSET + 16:
-                    record += handle.read(FAT_BINARY_HASH_OFFSET + 16 - EVENT_HEADER_BYTES)
-                    lo, hi = struct.unpack_from("<QQ", record, FAT_BINARY_HASH_OFFSET)
-                    hashes.add(f"{lo:016x}{hi:016x}")  # hash_hex() in the capture writer
+                if event_type == register_fat_binary and length >= FAT_BINARY_HASH_OFFSET + 24:
+                    record += handle.read(FAT_BINARY_HASH_OFFSET + 24 - EVENT_HEADER_BYTES)
+                    lo, hi, blob_size = struct.unpack_from("<QQQ", record, FAT_BINARY_HASH_OFFSET)
+                    if blob_size:  # 0: a code object, scanned under code_objects/
+                        hashes.add(f"{lo:016x}{hi:016x}")  # hash_hex() in the capture writer
                 pos += length
                 handle.seek(pos)
     except OSError:

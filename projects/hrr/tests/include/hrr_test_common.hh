@@ -305,9 +305,10 @@ inline void hrr_run_playback(const fs::path& cap_path,
 //   must produce at least a few events (malloc, memcpy, kernel, free) — a value
 //   of 5 is a conservative floor that would catch a totally empty capture.
 //   Use a higher value for workloads known to emit many events (StressApis, etc.).
-// require_d2h: if true (default), asserts that playback validated at least one
-//   D2H blob.  Pass false for workloads that conditionally skip D2H (e.g. the
-//   texture workload on devices without image support).
+// require_d2h: if true (default), asserts that the archive holds a blob and
+//   that playback validated at least one D2H blob.  Pass false for workloads
+//   that conditionally skip D2H (e.g. the texture workload on devices without
+//   image support), whose archive may hold no blob at all.
 // ---------------------------------------------------------------------------
 inline void hrr_run_roundtrip(const std::string& direct_case,
                               const fs::path& cap_path,
@@ -327,7 +328,7 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
   int bc = 0;
   for ([[maybe_unused]] const auto& _ :
        fs::recursive_directory_iterator(archive_path / "blobs")) ++bc;
-  INFO("Blob count: " << bc); REQUIRE(bc >= 1);
+  INFO("Blob count: " << bc); if (require_d2h) REQUIRE(bc >= 1);
 
   // Load the archive and assert a minimum event count.  This catches generator
   // bugs that silently produce empty or near-empty archives while still writing

@@ -31,7 +31,6 @@
 
 #include "hip_capture.h"
 #include "hip_capture_metadata.h"
-#include "hip_capture_scrub.h"
 #include "hip_capture_writer.h"
 
 // hrr_api_args.h — for hrr_args_* struct types and hrr_api_id_t enum
@@ -48,6 +47,7 @@
 #include "platform/kernel.hpp"     // amd::KernelSignature
 #include "opencl/amdocl/cl_kernel.h"  // T_POINTER enum
 #include "os/os.hpp"               // amd::Os::installExceptionHandlers()
+#include "elf/elf.hpp"             // amd::Elf::getElfSize()
 
 // Fat binary format structs (ClangOffloadBundleUncompressedHeader, etc.)
 #include "../hip_code_object.hpp"
@@ -56,6 +56,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <climits>
 #include <cstddef>
 #include <cstdio>
@@ -69,6 +70,16 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+
+#if defined(__linux__)
+#include <fcntl.h>     // pipe2()
+#include <unistd.h>
+#elif defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>   // VirtualQuery()
+#endif
 
 static std::once_flag g_hrr_atexit_once;
 
@@ -1115,18 +1126,18 @@ static std::mutex g_prog_hash_mu;
 static std::unordered_map<const amd::Program*, ProgramCodeObject> g_prog_hash;
 static std::atomic<bool> g_span_no_device_warned{false};
 
-// Fetch a program's device binary as (pointer, length) without dereferencing
-// the bytes (the call itself still goes through binary_'s inserting
-// operator[] — see above).
+// Fetch a program's device binary for device dev as (pointer, length) without
+// dereferencing the bytes (the call itself still goes through binary_'s
+// inserting operator[] — see above).
 // Caller must hold g_prog_hash_mu.
-// Returns false when there is no current device (or the index is out of
-// range): that is not "the program has no binary", so callers must not seed
-// g_prog_hash with a {0,0} / (nullptr,0) entry.
-static bool program_binary_span_locked(amd::Program* prog, const uint8_t*& data, size_t& size) {
+// Returns false when dev is not a device (no current device gives -1): that
+// is not "the program has no binary", so callers must not seed g_prog_hash
+// with a {0,0} / (nullptr,0) entry.
+static bool program_binary_span_locked(amd::Program* prog, int dev, const uint8_t*& data,
+                                       size_t& size) {
   data = nullptr;
   size = 0;
   if (!prog) return false;
-  const int dev = hip::ihipGetDevice();
   if (dev < 0 || static_cast<size_t>(dev) >= hip::g_devices.size()) {
     if (!g_span_no_device_warned.exchange(true)) {
       LogPrintfWarning("[HRR capture] program %p: no current HIP device "
@@ -1142,9 +1153,10 @@ static bool program_binary_span_locked(amd::Program* prog, const uint8_t*& data,
   return true;
 }
 
-static bool program_binary_span(amd::Program* prog, const uint8_t*& data, size_t& size) {
+static bool program_binary_span(amd::Program* prog, int dev, const uint8_t*& data,
+                                size_t& size) {
   std::lock_guard<std::mutex> lk(g_prog_hash_mu);
-  return program_binary_span_locked(prog, data, size);
+  return program_binary_span_locked(prog, dev, data, size);
 }
 
 static void remember_program_hash(const amd::Program* prog, const void* image, size_t size,
@@ -1158,6 +1170,70 @@ static void forget_program_hash(const amd::Program* prog) {
   if (!prog) return;
   std::lock_guard<std::mutex> lk(g_prog_hash_mu);
   g_prog_hash.erase(prog);
+}
+
+// How many of the n bytes at p can be read, found page by page without reading
+// them. On Linux, write() of a page's first byte into a pipe fails with EFAULT
+// where a plain read would fault, and no sandbox refuses write(); on Windows,
+// VirtualQuery says whether the pages are committed and readable. 0 when it
+// cannot tell, as on any other platform.
+static size_t readable_extent(const void* p, size_t n) {
+  const uintptr_t start = reinterpret_cast<uintptr_t>(p);
+  size_t ok = 0;
+#if defined(__linux__)
+  static const uintptr_t page = static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
+  int fds[2];
+  if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) != 0) return 0;
+  while (ok < n) {
+    char byte;
+    if (write(fds[1], reinterpret_cast<const void*>(start + ok), 1) != 1) {
+      if (errno != EFAULT) ok = 0;
+      break;
+    }
+    (void)!read(fds[0], &byte, 1);  // keep the pipe empty
+    ok = std::min(n, static_cast<size_t>(((start + ok) | (page - 1)) + 1 - start));
+  }
+  close(fds[0]);
+  close(fds[1]);
+#elif defined(_WIN32)
+  constexpr DWORD kReadable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
+                              PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+                              PAGE_EXECUTE_WRITECOPY;
+  while (ok < n) {
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!VirtualQuery(reinterpret_cast<const void*>(start + ok), &mbi, sizeof(mbi)) ||
+        mbi.State != MEM_COMMIT || !(mbi.Protect & kReadable) || (mbi.Protect & PAGE_GUARD))
+      break;
+    const uintptr_t end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+    ok = std::min(n, static_cast<size_t>(end - start));
+  }
+#else
+  (void)start;
+#endif
+  return ok;
+}
+
+// The extent of the ELF image at p, of at most n bytes, as its sections and
+// segments reach, or 0 if it is not well formed or any of that cannot be read.
+// Probes the header, then the header tables, then the extent they give, so a
+// declared size nothing bounds is never walked page by page.
+static uint64_t readable_elf_size(const uint8_t* p, size_t n) {
+  if (n < sizeof(Elf64_Ehdr) || readable_extent(p, sizeof(Elf64_Ehdr)) < sizeof(Elf64_Ehdr))
+    return 0;
+  Elf64_Ehdr eh;
+  std::memcpy(&eh, p, sizeof(eh));
+  uint64_t tables = sizeof(Elf64_Ehdr);
+  const uint64_t offs[2] = {eh.e_shoff, eh.e_phoff};
+  const uint64_t lens[2] = {uint64_t(eh.e_shnum) * eh.e_shentsize,
+                            uint64_t(eh.e_phnum) * eh.e_phentsize};
+  for (int i = 0; i < 2; ++i) {
+    if (!lens[i]) continue;
+    if (offs[i] > n || lens[i] > n - offs[i]) return 0;
+    tables = std::max<uint64_t>(tables, offs[i] + lens[i]);
+  }
+  if (readable_extent(p, tables) < tables) return 0;
+  const uint64_t size = amd::Elf::getElfSize(p, n);
+  return size && readable_extent(p, size) >= size ? size : 0;
 }
 
 // Hash an already-read device binary span, refusing anything that does not
@@ -1176,7 +1252,32 @@ static hrr_cap::Hash128 hash_program_image(const amd::Program* prog, const uint8
                      (const void*)prog, (unsigned long long)size, (const void*)data);
     return {0, 0};
   }
+  // The span's length is not a readable extent: a code object HIP took from a
+  // registered fat binary carries the size its bundle entry declares, and
+  // nothing bounds that, nor the ELF's own headers, which can declare the same
+  // size. So hash no further than its sections and segments reach, and refuse
+  // one whose headers reach past the memory that can be read.
+  if (amd::Elf::isElfMagic(reinterpret_cast<const char*>(data))) {
+    const uint64_t elf_size = readable_elf_size(data, size);
+    if (elf_size == 0) {
+      LogPrintfWarning("[HRR capture] program %p: ELF at %p is malformed or reaches past"
+                       " readable memory within its %llu bytes — not recording a code"
+                       " object for it",
+                       (const void*)prog, (const void*)data, (unsigned long long)size);
+      return {0, 0};
+    }
+    size = static_cast<size_t>(elf_size);
+  }
   return hrr_cap::writer::write_code_object(data, size);
+}
+
+// hash_program_image(), and seed the launch-path hash cache (g_prog_hash) with
+// the result for this span.
+static hrr_cap::Hash128 record_program_image(const amd::Program* prog, const uint8_t* image,
+                                             size_t size) {
+  const hrr_cap::Hash128 h = hash_program_image(prog, image, size);
+  remember_program_hash(prog, image, size, h);
+  return h;
 }
 
 // Helper: get the actual device binary from a successfully loaded hipModule_t.
@@ -1189,10 +1290,8 @@ static hrr_cap::Hash128 write_module_code_object(hipModule_t module) {
   if (!prog) return {0, 0};
   const uint8_t* image = nullptr;
   size_t size = 0;
-  if (!program_binary_span(prog, image, size)) return {0, 0};
-  hrr_cap::Hash128 h = hash_program_image(prog, image, size);
-  remember_program_hash(prog, image, size, h);
-  return h;
+  if (!program_binary_span(prog, hip::ihipGetDevice(), image, size)) return {0, 0};
+  return record_program_image(prog, image, size);
 }
 
 static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel) {
@@ -1207,7 +1306,7 @@ static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel) {
   // lookup in costs nothing since we hold the lock anyway.
   {
     std::lock_guard<std::mutex> lk(g_prog_hash_mu);
-    got_span = program_binary_span_locked(prog, image, size);
+    got_span = program_binary_span_locked(prog, hip::ihipGetDevice(), image, size);
     if (got_span) {
       auto it = g_prog_hash.find(prog);
       if (it != g_prog_hash.end() && it->second.image == image && it->second.size == size)
@@ -1217,9 +1316,7 @@ static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel) {
   if (!got_span) return {0, 0};
   // Miss. Hash outside the lock — write_code_object takes the writer's own
   // locks, and hashing the same image twice is harmless (content-addressed).
-  hrr_cap::Hash128 h = hash_program_image(prog, image, size);
-  remember_program_hash(prog, image, size, h);
-  return h;
+  return record_program_image(prog, image, size);
 }
 
 hipError_t capture_hipModuleLoadData(hipModule_t* module, const void* image) {
@@ -1599,121 +1696,57 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
 }
 
 // ---------------------------------------------------------------------------
-// Fat binary registration — record the binary blob
+// Fat binary registration — record the code object HIP took from it
 //
-// We capture the clang offload bundle blob so the replay can load it via
-// hipModuleLoadData, making all kernel names resolvable.
+// The bundle itself is not stored. HIP is handed a bare pointer and reads only
+// the header and the code object it picks for each GPU, with a size COMGR
+// gives it; a whole-bundle size could only come from the header, and nothing
+// bounds that. Replay resolves kernels and globals in the code objects the
+// archive holds, so the register event names the code object, not a blob.
 // ---------------------------------------------------------------------------
 
-// Byte size of a clang offload bundle, or 0 when the header is not one or fails
-// the checks HIP applies to it. HIP receives a registered fat binary as a bare
-// pointer, so it knows no image bound (image_bound in hip_fatbin.cpp) and these
-// checks are all that stands between the header and the read.
-static size_t compute_bundle_size(const void* blob) {
-  if (!blob) return 0;
-  const char* p = static_cast<const char*>(blob);
-
-  // Compressed format: magic "CCOB", header contains totalSize at byte 8.
-  if (std::memcmp(p, hip::symbols::kOffloadBundleCompressedMagicStr,
-                  hip::symbols::kOffloadBundleCompressedMagicStrSize - 1) == 0) {
-    constexpr size_t kHeaderSize =
-        offsetof(hip::symbols::ClangOffloadBundleCompressedHeader, compressedBinarydesc);
-    const auto* hdr = static_cast<const hip::symbols::ClangOffloadBundleCompressedHeader*>(blob);
-    if (hdr->totalSize < kHeaderSize) {
-      LogPrintfWarning(
-          "[HRR capture] Fat binary at %p not recorded: compressed bundle "
-          "totalSize %u is smaller than its %zu-byte header",
-          blob, static_cast<unsigned>(hdr->totalSize), kHeaderSize);
-      return 0;
-    }
-    return static_cast<size_t>(hdr->totalSize);
-  }
-
-  // Uncompressed format: magic "__CLANG_OFFLOAD_BUNDLE__" + numOfCodeObjects + entries.
-  if (std::memcmp(p, hip::symbols::kOffloadBundleUncompressedMagicStr,
-                  hip::symbols::kOffloadBundleUncompressedMagicStrSize - 1) != 0) {
-    return 0;  // Unknown format
-  }
-  const auto* hdr = static_cast<const hip::symbols::ClangOffloadBundleUncompressedHeader*>(blob);
-  uint64_t n = hdr->numOfCodeObjects;
-  if (n == 0) return 0;
-
-  // HIP hands COMGR only the first 4096 bytes, and COMGR reads the entry table from
-  // that slice and fails if a read runs off its end. __hipRegisterFatBinary passes
-  // no length, so this bound is also what keeps the walk below in range.
-  constexpr size_t kEntryTableLimit = 4096;
-  constexpr size_t kEntryHeaderSize = offsetof(hip::symbols::ClangOffloadBundleInfo, bundleEntryId);
-  size_t pos = offsetof(hip::symbols::ClangOffloadBundleUncompressedHeader, desc);
-  uint64_t end = 0;
-  for (uint64_t i = 0; i < n; i++) {
-    const auto* entry = reinterpret_cast<const hip::symbols::ClangOffloadBundleInfo*>(p + pos);
-    if (kEntryTableLimit - pos < kEntryHeaderSize ||
-        entry->bundleEntryIdSize > kEntryTableLimit - pos - kEntryHeaderSize) {
-      LogPrintfWarning(
-          "[HRR capture] Fat binary at %p not recorded: bundle entry %llu ends "
-          "past the first %zu bytes, where HIP looks for it",
-          blob, static_cast<unsigned long long>(i), kEntryTableLimit);
-      return 0;
-    }
-    pos += kEntryHeaderSize + static_cast<size_t>(entry->bundleEntryIdSize);
-    // HIP makes this check only for the code objects it picks for this host's GPUs.
-    // Every entry counts towards the end here, so capture checks them all.
-    const uint64_t entry_end = entry->offset + entry->size;
-    if (entry_end < entry->offset) {
-      LogPrintfWarning(
-          "[HRR capture] Fat binary at %p not recorded: bundle entry %llu has "
-          "an offset and size that overflow",
-          blob, static_cast<unsigned long long>(i));
-      return 0;
-    }
-    if (entry_end > end) end = entry_end;
-  }
-  static_assert(sizeof(size_t) >= sizeof(uint64_t), "a 64-bit bundle size must fit in size_t");
-  return static_cast<size_t>(end);
+// Record the code object HIP extracted from a digested fat binary for the
+// current device, or device 0 before one is current, the device the global
+// variable sweep resolves on. A fat binary HIP has not digested yet has
+// nothing loaded; a launch from it records its code object then.
+//
+// Returns the code object's hash, which the register event names. The size
+// HIP holds is the bundle entry's declared one, so only an ELF, whose headers
+// bound it (see hash_program_image), is recorded.
+static hrr_cap::Hash128 record_fat_binary_code_object(hip::FatBinaryInfo* fbi) {
+  if (!fbi) return {0, 0};
+  const int dev = std::max(hip::ihipGetDevice(), 0);
+  // GetProgram() aborts on a device it does not have.
+  if (static_cast<size_t>(dev) >= hip::g_devices.size()) return {0, 0};
+  amd::Program* prog = fbi->GetProgram(dev);
+  const uint8_t* image = nullptr;
+  size_t size = 0;
+  if (!program_binary_span(prog, dev, image, size) || !image || size < sizeof(Elf64_Ehdr) ||
+      !amd::Elf::isElfMagic(reinterpret_cast<const char*>(image)))
+    return {0, 0};
+  return record_program_image(prog, image, size);
 }
 
-// Stores a fat binary with the .comment and debug sections of its code
-// objects zeroed; the application's own copy is left alone.
-static hrr_cap::Hash128 write_fat_binary_blob(const void* blob, size_t blob_size) {
-  std::vector<uint8_t> scrubbed(static_cast<const uint8_t*>(blob),
-                                static_cast<const uint8_t*>(blob) + blob_size);
-  hrr_cap::scrub::scrub_code_object(scrubbed.data(), scrubbed.size());
-  return hrr_cap::writer::write_blob(scrubbed.data(), scrubbed.size());
+// The register event names the code object in its blob hash, with a blob
+// size of 0, which tells it from a fat binary blob.
+static void write_register_fat_binary_event(uint64_t ret, hrr_cap::Hash128 co) {
+  hrr_args___hipRegisterFatBinary a{};
+  a.ret = ret;
+  a.blob_hash_lo = co.lo;
+  a.blob_hash_hi = co.hi;
+  hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
 }
 
 void** capture___hipRegisterFatBinary(const void* data) {
   void** r = g_real_compiler_table.__hipRegisterFatBinary_fn(data);
   // Shim is only installed when capture is active — no hip_capture_enabled() check needed.
 
-  // data is a __CudaFatBinaryWrapper* { magic, version, binary, dummy }.
-  // Capture the fat binary blob (binary field) so replay can load it via hipModuleLoadData.
-  struct __HRRFatBinaryWrapper { uint32_t magic; uint32_t version; const void* binary; const void* dummy; };
-  const auto* wrapper = static_cast<const __HRRFatBinaryWrapper*>(data);
-  const void* blob = (wrapper && (wrapper->magic == 0x48495046u /*HIPF*/ ||
-                                   wrapper->magic == 0x4B504948u /*HIPK*/))
-                     ? wrapper->binary : nullptr;
   // PlatformState is initialized before this shim is installed, so HIP has already
-  // digested the bundle, and no handle means it could not load it on this host: a bad
-  // header or, more often, no code object for any GPU here. Then no launch from it can
-  // succeed and be recorded, so replay never needs the blob.
-  if (blob && !r) {
-    LogPrintfWarning(
-        "[HRR capture] Fat binary at %p not recorded: HIP did not register it "
-        "(no code object for any GPU here, or a bad header)",
-        blob);
-    blob = nullptr;
-  }
-  size_t blob_size = blob ? compute_bundle_size(blob) : 0;
-
-  hrr_args___hipRegisterFatBinary a{};
-  a.ret      = reinterpret_cast<uint64_t>(r);
-  a.blob_size = static_cast<uint64_t>(blob_size);
-  if (blob && blob_size > 0) {
-    auto h = write_fat_binary_blob(blob, blob_size);
-    a.blob_hash_lo = h.lo;
-    a.blob_hash_hi = h.hi;
-  }
-  hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
+  // digested the bundle and r, when set, is its FatBinaryInfo**.
+  const hrr_cap::Hash128 co =
+      r ? record_fat_binary_code_object(*reinterpret_cast<hip::FatBinaryInfo**>(r))
+        : hrr_cap::Hash128{0, 0};
+  write_register_fat_binary_event(reinterpret_cast<uint64_t>(r), co);
   return r;
 }
 
@@ -2897,23 +2930,13 @@ void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims) {
 // Init / Shutdown
 // ---------------------------------------------------------------------------
 
-// Record a single fat binary blob as a HRR_API_HIPREGISTERFATBINARY event.
-// blob_ptr is the fbwrapper->binary pointer (the actual clang offload bundle).
-// These were registered before HIP initialized and are not digested yet, so
-// unlike the live shim there is no HIP verdict to check, only the header, and a
-// bundle with no code object for this host is still recorded.
-static void record_fat_binary_blob(const void* blob_ptr) {
-  if (!blob_ptr) return;
-  size_t blob_size = compute_bundle_size(blob_ptr);
-  if (blob_size == 0) return;
-
-  hrr_args___hipRegisterFatBinary a{};
-  a.ret      = 0;  // handle not meaningful at init time
-  a.blob_size = static_cast<uint64_t>(blob_size);
-  auto h = write_fat_binary_blob(blob_ptr, blob_size);
-  a.blob_hash_lo = h.lo;
-  a.blob_hash_hi = h.hi;
-  hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
+// Record a fat binary registered before capture started as a
+// HRR_API_HIPREGISTERFATBINARY event, with the code object HIP has loaded from
+// it so far (fbi is null until HIP digests it).
+static void record_fat_binary(const void* data, hip::FatBinaryInfo* fbi) {
+  if (!data) return;
+  // ret 0: the handle is not meaningful at init time.
+  write_register_fat_binary_event(0, record_fat_binary_code_object(fbi));
 }
 
 // Record one registered __device__ global as a HRR_API_HIPREGISTERVAR event.
@@ -3044,14 +3067,13 @@ void hip_capture_init() {
     // the compiler dispatch table is fully populated.
     hip_capture_build_compiler_table();
 
-    // Retroactively record fat binaries that fired before our shims were live.
-    // __hipRegisterFatBinary fires at app static-init, before hip_capture_init().
-    hip::PlatformState::Instance().StatCO().ForEachFatBinaryBlob(record_fat_binary_blob);
-
-    // And the __device__ globals registered against them, for the same reason
-    // and in this order: the fat binaries have to be in the archive before the
-    // symbols that live inside them.
+    // Retroactively record the __device__ globals and fat binaries registered
+    // before our shims were live: both fire at app static-init, before
+    // hip_capture_init(). Globals first, because resolving one makes HIP load
+    // the code object holding it, which the fat binary sweep then records.
+    // Replay loads every code object before it replays any event.
     hip::PlatformState::Instance().StatCO().ForEachGlobalVar(record_registered_var);
+    hip::PlatformState::Instance().StatCO().ForEachFatBinary(record_fat_binary);
 
     std::call_once(g_hrr_atexit_once, [] { std::atexit(hip_capture_shutdown); });
 
@@ -3067,7 +3089,7 @@ void hip_capture_init() {
   #else
     // HRR capture is disabled
     // below to avoid -Wunused-function / -Wunused-variable
-    (void)&record_fat_binary_blob;
+    (void)&record_fat_binary;
     (void)&record_registered_var;
     (void)&hrr_install_clr_exception_handler;
     (void)&g_hrr_atexit_once;
