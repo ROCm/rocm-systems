@@ -113,6 +113,7 @@ hsaKmtMemoryGetCpuAddr;
 hsaKmtMemoryCpuMap;
 hsaKmtSetSigbusDelay;
 hsaKmtGetAmdGPUDeviceFd;
+hsaKmtDtifMemoryCopy;
 hsaKmtSetPersistingCacheSize;
 local: *;
 };

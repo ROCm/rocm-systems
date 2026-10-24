@@ -35,6 +35,7 @@
 #endif
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <shared_mutex>
 #include "impl/wddm/gpu_memory.h"
 #include "util/simple_heap.h"
 #include "util/os.h"
@@ -69,6 +70,35 @@ struct Allocation {
 static std::map<const void *, Allocation>* allocation_map_ = new std::map<const void *, Allocation>();
 static std::mutex* allocation_map_lock_ = new std::mutex();
 static rocr::SimpleHeap<BlockAllocator>* fragment_allocator_ = new rocr::SimpleHeap<BlockAllocator>();
+
+// GPU VA → CPU VA translation for DTIF fast copy.
+// Populated when userptr memory is mapped with GPU VA != CPU VA.
+static std::shared_mutex g_va_translation_mutex;
+static std::map<uint64_t, std::pair<uint64_t, uint64_t>> g_va_translations; // gpu_va -> {cpu_va, size}
+
+static void* TranslateGpuVa(void* gpu_va) {
+    uint64_t addr = reinterpret_cast<uint64_t>(gpu_va);
+    std::shared_lock<std::shared_mutex> lock(g_va_translation_mutex);
+    auto it = g_va_translations.upper_bound(addr);
+    if (it != g_va_translations.begin()) {
+        --it;
+        uint64_t base = it->first;
+        uint64_t va = it->second.first;
+        uint64_t size = it->second.second;
+        if (addr < base + size) {
+            return reinterpret_cast<void*>(va + (addr - base));
+        }
+    }
+    return gpu_va;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDtifMemoryCopy(
+    void* dst, const void* src, HSAuint64 size) {
+    void* real_dst = TranslateGpuVa(dst);
+    const void* real_src = TranslateGpuVa(const_cast<void*>(src));
+    memcpy(real_dst, real_src, size);
+    return HSAKMT_STATUS_SUCCESS;
+}
 
 // ================================================================================================
 static Allocation* FindAllocation(const void* ptr, size_t size) {
@@ -799,6 +829,20 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDeregisterMemory(void *MemoryAddress) {
       delete gpu_mem;
       return HSAKMT_STATUS_SUCCESS;
     }
+    if (it->second.userptr) {
+      if (gpu_mem->DecMappingCount() == 0) {
+        uint64_t gpu_addr = it->second.gpu_addr;
+        allocation_map_->erase((void*)gpu_addr);
+        allocation_map_->erase(it);
+        delete gpu_mem;
+        // Remove GPU VA → CPU VA translation
+        {
+          std::lock_guard<std::shared_mutex> va_lock(g_va_translation_mutex);
+          g_va_translations.erase(gpu_addr);
+        }
+      }
+      return HSAKMT_STATUS_SUCCESS;
+    }
   }
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -921,6 +965,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
                    MemorySizeInBytes);
   }
 
+  // Register GPU VA → CPU VA translation for DTIF fast copy
+  if (addr != reinterpret_cast<uint64_t>(aligned_ptr)) {
+    std::lock_guard<std::shared_mutex> va_lock(g_va_translation_mutex);
+    g_va_translations[addr] = {reinterpret_cast<uint64_t>(aligned_ptr), aligned_size};
+  }
+
   *AlternateVAGPU = addr + ((uintptr_t)MemoryAddress - (uintptr_t)aligned_ptr);
 
   return HSAKMT_STATUS_SUCCESS;
@@ -943,6 +993,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
   }
 
   wsl::thunk::GpuMemory *gpu_mem = nullptr;
+  uint64_t gpu_addr_to_remove = 0;
   {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
 
@@ -970,12 +1021,18 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
 
     if (it->second.userptr) {
       if (gpu_mem->DecMappingCount() == 0) {
+        gpu_addr_to_remove = it->second.gpu_addr;
         allocation_map_->erase((void*)it->second.gpu_addr);
         allocation_map_->erase(it);
         delete gpu_mem;
       }
-      return HSAKMT_STATUS_SUCCESS;
     }
+  }
+
+  // Remove GPU VA → CPU VA translation after last unmap
+  if (gpu_addr_to_remove) {
+    std::lock_guard<std::shared_mutex> va_lock(g_va_translation_mutex);
+    g_va_translations.erase(gpu_addr_to_remove);
   }
 
   return HSAKMT_STATUS_SUCCESS;

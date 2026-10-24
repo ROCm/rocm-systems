@@ -1577,9 +1577,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
 
 template <bool useGCR, bool scopeFields>
 hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyCommand(void* dst, const void* src, size_t size) {
-  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy()) {
+  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy() &&
+      HSAKMT_CALL(hsaKmtDtifMemoryCopy)) {
     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] src = %p, dst = %p, size = 0x%lx", src, dst, size);
-    memcpy(dst, src, size);
+    HSAKMT_CALL(hsaKmtDtifMemoryCopy)(dst, src, size);
     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] Fast copy success");
     return HSA_STATUS_SUCCESS;
   }
@@ -1606,9 +1607,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyCommand(void* dst, c
                                                        core::Signal& out_signal,
                                                        std::vector<core::Signal*>& gang_signals) {
 
-  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy() && dep_signals.empty()) {
+  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy() &&
+      HSAKMT_CALL(hsaKmtDtifMemoryCopy) && dep_signals.empty()) {
     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] src = %p, dst = %p, size = 0x%lx", src, dst, size);
-    memcpy(dst, src, size);
+    HSAKMT_CALL(hsaKmtDtifMemoryCopy)(dst, src, size);
     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] Fast copy success");
 
     hsa_signal_t signal = {(core::Signal::Convert(&out_signal)).handle};
