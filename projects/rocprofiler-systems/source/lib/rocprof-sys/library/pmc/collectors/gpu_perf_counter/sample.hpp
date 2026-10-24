@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -47,6 +48,16 @@ struct sample : trace_cache::cacheable_t
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter
+
+namespace rocprofsys::trace_cache::type_traits
+{
+
+// counter_value has no padding (see its static_assert), so its bytes are the format.
+template <>
+struct explicitly_raw<pmc::collectors::gpu_perf_counter::counter_value> : std::true_type
+{};
+
+}  // namespace rocprofsys::trace_cache::type_traits
 
 namespace rocprofsys::trace_cache
 {

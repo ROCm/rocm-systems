@@ -38,7 +38,7 @@ template <typename Record, std::size_t N>
 void
 expect_golden(const Record& record, const std::array<std::uint8_t, N>& expected)
 {
-    EXPECT_EQ(get_size(record), N);
+    ASSERT_EQ(get_size(record), N);
 
     std::array<std::uint8_t, N> buffer = {};
     serialize(buffer.data(), record);

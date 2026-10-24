@@ -13,7 +13,6 @@
 #include <cstring>
 #include <gtest/gtest.h>
 #include <optional>
-#include <span>
 #include <string_view>
 #include <vector>
 
@@ -29,10 +28,47 @@ enum class test_record_id : std::uint32_t
     string_test   = 2,
     vector_test   = 3,
     optional_test = 4,
-    span_test     = 5,
     derived_test  = 6,
     nested_test   = 8,
 };
+
+// A record counts as serializable only when it declares its own serialize(Archive&).
+struct base_with_serialize
+{
+    std::uint32_t first = 0;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(first);
+    }
+};
+
+struct derived_without_serialize : base_with_serialize
+{
+    std::uint32_t second = 0;
+};
+
+struct serialize_takes_archive_by_value
+{
+    std::uint32_t first = 0;
+
+    template <typename Archive>
+    void serialize(Archive archive)
+    {
+        archive(first);
+    }
+};
+
+static_assert(archive_serializable<base_with_serialize, binary_size_archive>);
+static_assert(archive_serializable<base_with_serialize, binary_write_archive>);
+static_assert(archive_serializable<base_with_serialize, binary_read_archive>);
+static_assert(!archive_serializable<derived_without_serialize, binary_size_archive>,
+              "an inherited serialize would skip the fields of the derived record");
+static_assert(
+    !archive_serializable<serialize_takes_archive_by_value, binary_size_archive>,
+    "a serialize that takes the archive by value loses the position");
+static_assert(!archive_serializable<std::uint32_t, binary_size_archive>);
 
 struct scalar_record
 {
@@ -85,19 +121,6 @@ struct optional_record
     void serialize(Archive& archive)
     {
         archive(value);
-    }
-};
-
-struct span_record
-{
-    static constexpr auto type_identifier = test_record_id::span_test;
-
-    std::span<const std::byte> bytes;
-
-    template <typename Archive>
-    void serialize(Archive& archive)
-    {
-        archive(bytes);
     }
 };
 
@@ -246,7 +269,7 @@ TEST(archive, optional_engaged_and_empty)
     const optional_record read_engaged = deserialize<optional_record>(read_buf);
 
     ASSERT_TRUE(read_engaged.value.has_value());
-    EXPECT_EQ(read_engaged.value.value(), 9876543210LL);
+    EXPECT_EQ(read_engaged.value, orig_engaged.value);
 
     buffer.fill(0);
     optional_record orig_empty;
@@ -261,36 +284,6 @@ TEST(archive, optional_engaged_and_empty)
     EXPECT_FALSE(read_empty.value.has_value());
 
     EXPECT_EQ(size_engaged, size_empty + sizeof(std::int64_t));
-}
-
-TEST(archive, byte_span_reads_back_as_view)
-{
-    std::array<std::uint8_t, k_buffer_size> buffer{};
-    std::array<double, 3>                   orig_array = { 1.1, 2.2, 3.3 };
-    const auto bytes_span = std::as_bytes(std::span(orig_array));
-
-    span_record orig;
-    orig.bytes = bytes_span;
-
-    const std::size_t size = get_size(orig);
-    serialize(buffer.data(), orig);
-
-    std::uint8_t*     read_buffer = buffer.data();
-    const span_record read        = deserialize<span_record>(read_buffer);
-
-    EXPECT_EQ(read.bytes.size(), 3 * sizeof(double));
-    EXPECT_GE(read.bytes.data(), reinterpret_cast<const std::byte*>(buffer.data()));
-    EXPECT_LT(read.bytes.data(),
-              reinterpret_cast<const std::byte*>(buffer.data() + buffer.size()));
-
-    for(std::size_t idx = 0; idx < 3; ++idx)
-    {
-        double value = 0.0;
-        std::memcpy(&value, read.bytes.data() + idx * sizeof(double), sizeof(double));
-        EXPECT_DOUBLE_EQ(value, orig_array[idx]);
-    }
-
-    EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size));
 }
 
 TEST(archive, derived_record_serializes_base_first)

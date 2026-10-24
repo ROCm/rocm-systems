@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <span>
 #include <type_traits>
 
 namespace rocprofsys::trace_cache
@@ -18,9 +17,15 @@ namespace rocprofsys::trace_cache
 static_assert(std::is_same_v<std::size_t, std::uint64_t>,
               "trace cache format assumes size_t is std::uint64_t");
 
+/**
+ * True when Type itself declares `void serialize(Archive&)`. A serialize inherited from a
+ * base class, or one that takes the archive by value, does not count: either would
+ * compile and silently skip the fields of the derived record or lose the position.
+ */
 template <typename Type, typename Archive>
 concept archive_serializable =
-    requires(Type& value, Archive& archive) { value.serialize(archive); };
+    std::is_same_v<decltype(&Type::template serialize<Archive>),
+                   void (Type::*)(Archive&)>;
 
 struct binary_size_archive
 {
@@ -79,7 +84,10 @@ private:
     }
 };
 
-/** string_view and span<const std::byte> fields are read as views into the buffer. */
+/**
+ * string_view fields are read as views into the buffer. Stored strings end with a '\0'
+ * that consumers rely on (for example rocpd_processor passes `.data()` as a C string).
+ */
 struct binary_read_archive
 {
     std::uint8_t* cursor = nullptr;
@@ -102,14 +110,6 @@ private:
             value.serialize(*this);
             cur = cursor;
         }
-        else if constexpr(std::is_same_v<Type, std::span<const std::byte>>)
-        {
-            std::size_t byte_count = 0;
-            std::memcpy(&byte_count, cur, sizeof(std::size_t));
-            cur += sizeof(std::size_t);
-            value = { reinterpret_cast<const std::byte*>(cur), byte_count };
-            cur += byte_count;
-        }
         else
         {
             utility::parse_value(cur, value);
@@ -119,14 +119,10 @@ private:
 
 template <typename T>
 concept archive_record =
-    std::is_default_constructible_v<T> &&
-    requires(T& record, binary_size_archive& sizer, binary_write_archive& writer,
-             binary_read_archive& reader) {
-        { T::type_identifier };
-        record.serialize(sizer);
-        record.serialize(writer);
-        record.serialize(reader);
-    };
+    std::is_default_constructible_v<T> && requires { T::type_identifier; } &&
+    archive_serializable<T, binary_size_archive> &&
+    archive_serializable<T, binary_write_archive> &&
+    archive_serializable<T, binary_read_archive>;
 
 // const_cast: the size and write archives only read through serialize().
 // flatten, not inline (inlining drops it): one fully inlined function per record type.
