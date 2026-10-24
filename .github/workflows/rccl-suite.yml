@@ -71,6 +71,12 @@ on:
         # caller gate builds while keeping tests non-gating. AICOMRCCL-1478.
         description: 'true if a build/infra step failed (not a test-only failure).'
         value: ${{ jobs.suite.outputs.build_failed }}
+      gating_status:
+        # From the gating-tests-{passed,failed} markers gin.sbatch writes for
+        # gin-tests.json gating_tests. not-run covers a build break, a SLURM job
+        # that never started, and a job timeout. AICOMRCCL-1478.
+        description: 'passed, failed, or not-run for the suite gating tests.'
+        value: ${{ jobs.suite.outputs.gating_status }}
   workflow_dispatch:
     inputs:
       suite:
@@ -148,6 +154,7 @@ jobs:
       id-token: write
     outputs:
       build_failed: ${{ steps.classify.outputs.build_failed }}
+      gating_status: ${{ steps.classify.outputs.gating_status }}
     defaults:
       run:
         shell: bash
@@ -393,6 +400,15 @@ jobs:
           else
             echo "build_failed=false" >> "${GITHUB_OUTPUT}"
           fi
+          logs_dir="${GITHUB_WORKSPACE}/${CI_SUBDIR}/.ci-out/${SUITE}-logs"
+          if [[ -f "${logs_dir}/gating-tests-failed" ]]; then
+            gating_status=failed
+          elif [[ -f "${logs_dir}/gating-tests-passed" ]]; then
+            gating_status=passed
+          else
+            gating_status=not-run
+          fi
+          echo "gating_status=${gating_status}" >> "${GITHUB_OUTPUT}"
 
       - name: Clean up per-job workspace
         if: always()
