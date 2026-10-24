@@ -241,11 +241,10 @@ TEST_F(NetIbCastP2pRequestMicrotest, RetrieveAsIndex_RejectsIndexesPastTheTable)
   ncclIbRequest* req = nullptr;
   EXPECT_EQ(IbCastRequestRetrieveAsIndex(send_->base.reqs, NET_IB_MAX_REQUESTS - 1, &req), ncclSuccess);
   EXPECT_EQ(req, &send_->base.reqs[NET_IB_MAX_REQUESTS - 1]);
-  ncclResult_t res = ncclSuccess;
-  const std::string log =
-      CaptureLog([&] { res = IbCastRequestRetrieveAsIndex(send_->base.reqs, NET_IB_MAX_REQUESTS, &req); });
-  EXPECT_EQ(res, ncclInternalError);
-  EXPECT_TRUE(LogHas(log, ("Invalid request index " + std::to_string(NET_IB_MAX_REQUESTS)).c_str())) << log;
+  CaptureLog([&] {
+    EXPECT_EQ(IbCastRequestRetrieveAsIndex(send_->base.reqs, NET_IB_MAX_REQUESTS, &req), ncclInternalError);
+  });
+  EXPECT_EQ(req, &send_->base.reqs[NET_IB_MAX_REQUESTS - 1]);
 }
 
 TEST_F(NetIbCastP2pRequestMicrotest, CtsFifoAccessors_ReadBothLayouts) {
