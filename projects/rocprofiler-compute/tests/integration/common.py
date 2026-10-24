@@ -333,6 +333,8 @@ def skip_unsupported_pc_sampling_soc(is_stochastic=False):
         "RDNA35_HALO",
         "RDNA35_POINT_2",
         "RDNA35_GORGON_POINT",
+        "GFX1170",
+        "GFX1171",
     }
     if is_stochastic:
         unsupported_socs.add("MI200")
@@ -828,6 +830,15 @@ def is_gfx115x_soc():
         "RDNA35_POINT_2",
         "RDNA35_GORGON_POINT",
     }
+
+
+def is_gfx117x_soc():
+    return gpu_soc()[1] in {"GFX1170", "GFX1171"}
+
+
+def is_rdna_apu_soc():
+    """gfx115x and gfx117x share the gfx11 panel layout."""
+    return is_gfx115x_soc() or is_gfx117x_soc()
 
 
 def is_gfx1250_soc():
