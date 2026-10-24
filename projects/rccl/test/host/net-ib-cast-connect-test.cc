@@ -1273,8 +1273,8 @@ TEST_F(NetIbCastConnectQpMicrotest, Create_IonicGdaOrUdmaFailureStillCreatesTheQ
   EXPECT_EQ(gda.calls, 1);
   EXPECT_TRUE(nccl_udma_mask_warned[0]);
   EXPECT_FALSE(nccl_udma_mask_warned[1]);
-  ASSERT_EQ(IbCastQpCreate(&qp, &a), ncclSuccess);
-  EXPECT_TRUE(nccl_udma_mask_warned[0]);
+  const std::string log = CaptureLog([&] { ASSERT_EQ(IbCastQpCreate(&qp, &a), ncclSuccess); });
+  EXPECT_FALSE(LogHas(log, "set_udma_mask failed")) << log;
 }
 
 class NetIbCastConnectUdmaMicrotest : public NetIbCastConnectQpMicrotest {
