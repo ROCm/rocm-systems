@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/cli.h"
+
 #include "decode_fuzz_core.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/test_encodings.h"
@@ -39,8 +41,9 @@ namespace {
 
 using Window = std::array<uint8_t, rocjitsu::decode_fuzz::kWindowSize>;
 
-void usage(std::ostream &out) {
-  out << "Usage:\n"
+void usage(std::ostream &out, const rocjitsu::cli::Command &command) {
+  out << rocjitsu::cli::format_help(command)
+      << "\nModes:\n"
          "  rj_decode_fuzz --afl [--target TARGET]\n"
          "  rj_decode_fuzz --input FILE --json [--target TARGET]\n"
          "  rj_decode_fuzz --emit-seeds DIRECTORY [--target TARGET]\n"
@@ -191,38 +194,51 @@ int run_afl(std::string_view target) {
 }
 
 int main(int argc, char **argv) {
-  bool afl = false;
-  bool json = false;
-  std::string input;
-  std::string seed_directory;
-  std::string target = "gfx1250";
-
-  for (int i = 1; i < argc; ++i) {
-    const std::string_view argument(argv[i]);
-    if (argument == "--afl") {
-      afl = true;
-    } else if (argument == "--json") {
-      json = true;
-    } else if (argument == "--input" && i + 1 < argc) {
-      input = argv[++i];
-    } else if (argument == "--emit-seeds" && i + 1 < argc) {
-      seed_directory = argv[++i];
-    } else if (argument == "--target" && i + 1 < argc) {
-      target = argv[++i];
-    } else if (argument == "--help") {
-      usage(std::cout);
-      return 0;
-    } else {
-      usage(std::cerr);
-      return 2;
-    }
+  using namespace rocjitsu::cli;
+  Command command{"rj_decode_fuzz"};
+  auto afl_flag = std::make_shared<BoolFlag>(
+      FlagInfo{"--afl", {}, "Run the AFL fuzzing loop", ValueMode::Switch});
+  auto json_flag = std::make_shared<BoolFlag>(
+      FlagInfo{"--json", {}, "Emit replay result as JSON", ValueMode::Switch});
+  auto input_flag =
+      std::make_shared<StringFlag>(FlagInfo{"--input", {}, "Replay one 16-byte input file"});
+  auto seeds_flag = std::make_shared<StringFlag>(
+      FlagInfo{"--emit-seeds", {}, "Write seeds to an empty directory"});
+  auto target_flag = std::make_shared<StringFlag>(
+      FlagInfo{"--target", {}, "Canonical AMDGPU target ID or registered alias"}, "gfx1250");
+  auto help =
+      std::make_shared<BoolFlag>(FlagInfo{"--help", {"-h"}, "Show help", ValueMode::Switch});
+  auto report = [](std::string_view message) { std::cerr << message << '\n'; };
+  DiagnosticEmitter diagnostic(report);
+  if (command
+          .add_flags("Decoder fuzzing", {afl_flag, json_flag, input_flag, seeds_flag, target_flag},
+                     diagnostic)
+          .failed() ||
+      command.add_flag(help, diagnostic).failed())
+    return 2;
+  std::vector<std::string_view> arguments(argv + 1, argv + argc);
+  auto parsed = parse(command, arguments, diagnostic);
+  if (parsed.failed())
+    return 2;
+  if (help->value()) {
+    usage(std::cout, command);
+    return 0;
   }
+  if (!parsed.value().positional.empty()) {
+    usage(std::cerr, command);
+    return 2;
+  }
+  const bool afl = afl_flag->value();
+  const bool json = json_flag->value();
+  const auto &input = input_flag->value();
+  const auto &seed_directory = seeds_flag->value();
+  const auto &target = target_flag->value();
 
   const int modes = static_cast<int>(afl) + static_cast<int>(!input.empty()) +
                     static_cast<int>(!seed_directory.empty());
   const bool replay = !input.empty();
   if (modes != 1 || json != replay) {
-    usage(std::cerr);
+    usage(std::cerr, command);
     return 2;
   }
 

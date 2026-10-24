@@ -12,7 +12,7 @@ rj_configure_target(rj_decode_fuzz_core PRIVATE_INCLUDES WARNINGS)
 add_executable(rj_decode_fuzz decode_fuzz_main.cpp)
 target_link_libraries(
     rj_decode_fuzz
-    PRIVATE rj_decode_fuzz_core rocjitsu_amdgpu_isa_model_registry
+    PRIVATE rj_decode_fuzz_core rocjitsu_amdgpu_isa_model_registry rocjitsu_cli
 )
 rj_configure_target(rj_decode_fuzz PRIVATE_INCLUDES WARNINGS)
 
