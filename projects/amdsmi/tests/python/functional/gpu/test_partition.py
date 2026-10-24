@@ -349,7 +349,7 @@ class TestGpuPartition(unittest.TestCase):
                 continue
 
             # Set the same mode again — must succeed.
-            msg = f"\t### amdsmi_set_gpu_memory_partition idempotent(gpu={i}, mode={current_partition}):"
+            msg = f"\t### amdsmi_set_gpu_memory_partition(gpu={i}, mode={current_partition}, idempotent):"
             try:
                 amdsmi.amdsmi_set_gpu_memory_partition(gpu, NPS_NAME_TO_TYPE[current_partition])
                 self.common.print(msg, "SUCCESS")
@@ -360,7 +360,7 @@ class TestGpuPartition(unittest.TestCase):
                 continue
 
             # Read back — value must be unchanged (no reload occurred).
-            msg = f"\t### amdsmi_get_gpu_memory_partition post-idempotent-set(gpu={i}):"
+            msg = f"\t### amdsmi_get_gpu_memory_partition(gpu={i}, post-idempotent-set):"
             try:
                 post_partition = amdsmi.amdsmi_get_gpu_memory_partition(gpu)
                 self.common.print(msg, post_partition)

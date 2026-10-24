@@ -12,7 +12,7 @@ entry point so nothing here touches real hardware or sysfs.
 import unittest
 from unittest import mock
 
-from common.common import amdsmi
+from common.common import amdsmi, log_api_call
 
 _BAD_HANDLE = None
 _GOOD_HANDLE = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
@@ -22,54 +22,114 @@ class TestFabricConfigSetterArgumentValidation(unittest.TestCase):
     """Every setter must reject the same shapes of bad input the same way."""
 
     def test_ppod_rejects_bad_processor_handle(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_gpu_fabric_ppod_config(_BAD_HANDLE, {"accelerator_id": 1})
+        log_api_call(
+            "\t### amdsmi_set_gpu_fabric_ppod_config():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_vpod_rejects_bad_processor_handle(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_gpu_fabric_vpod_config(_BAD_HANDLE, {"vpod_id": 1})
+        log_api_call(
+            "\t### amdsmi_set_gpu_fabric_vpod_config():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_station_rejects_bad_processor_handle(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_gpu_fabric_station_config(_BAD_HANDLE, {"station_flags": 1})
+        log_api_call(
+            "\t### amdsmi_set_gpu_fabric_station_config():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_ppod_rejects_non_dict_data(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_gpu_fabric_ppod_config(_GOOD_HANDLE, "not a dict")
+        log_api_call(
+            "\t### amdsmi_set_gpu_fabric_ppod_config():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_vpod_rejects_non_dict_data(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_gpu_fabric_vpod_config(_GOOD_HANDLE, ["not", "a", "dict"])
+        log_api_call(
+            "\t### amdsmi_set_gpu_fabric_vpod_config():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_station_rejects_non_dict_data(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_gpu_fabric_station_config(_GOOD_HANDLE, 5)
+        log_api_call(
+            "\t### amdsmi_set_gpu_fabric_station_config():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_ppod_rejects_non_bool_commit(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_gpu_fabric_ppod_config(_GOOD_HANDLE, {"accelerator_id": 1}, commit=1)
+        log_api_call(
+            "\t### amdsmi_set_gpu_fabric_ppod_config():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_vpod_rejects_non_bool_commit(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_gpu_fabric_vpod_config(_GOOD_HANDLE, {"vpod_id": 1}, commit="yes")
+        log_api_call(
+            "\t### amdsmi_set_gpu_fabric_vpod_config():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_station_rejects_non_bool_commit(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_gpu_fabric_station_config(
                 _GOOD_HANDLE, {"station_flags": 1}, commit=None
             )
+        log_api_call(
+            "\t### amdsmi_set_gpu_fabric_station_config():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_ppod_rejects_unknown_field_name(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_gpu_fabric_ppod_config(_GOOD_HANDLE, {"not_a_real_field": 1})
+        log_api_call(
+            "\t### amdsmi_set_gpu_fabric_ppod_config():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_vpod_rejects_unknown_field_name(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_gpu_fabric_vpod_config(_GOOD_HANDLE, {"num_stations": 1})
+        log_api_call(
+            "\t### amdsmi_set_gpu_fabric_vpod_config():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_station_rejects_unknown_field_name(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_gpu_fabric_station_config(_GOOD_HANDLE, {"vpod_id": 1})
+        log_api_call(
+            "\t### amdsmi_set_gpu_fabric_station_config():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
 
 class TestPopulateFabricConfigData(unittest.TestCase):
@@ -138,6 +198,7 @@ class TestFabricSetterCallSite(unittest.TestCase):
             amdsmi.amdsmi_set_gpu_fabric_ppod_config(
                 _GOOD_HANDLE, {"accelerator_id": 7}, commit=False
             )
+            log_api_call("\t### amdsmi_set_gpu_fabric_ppod_config():")
 
         self.assertEqual(captured["version"], amdsmi.amdsmi_wrapper.AMDSMI_FABRIC_PPOD_CONFIG_V1)
         self.assertEqual(captured["mask"], amdsmi.amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID)
@@ -155,6 +216,7 @@ class TestFabricSetterCallSite(unittest.TestCase):
 
         with mock.patch.object(amdsmi.amdsmi_wrapper, "amdsmi_set_gpu_fabric_vpod_config", _stub):
             amdsmi.amdsmi_set_gpu_fabric_vpod_config(_GOOD_HANDLE, {"vpod_id": 9})
+            log_api_call("\t### amdsmi_set_gpu_fabric_vpod_config():")
 
         self.assertEqual(captured["vpod_id"], 9)
         self.assertEqual(captured["mask"], amdsmi.amdsmi_wrapper.AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID)
@@ -172,6 +234,7 @@ class TestFabricSetterCallSite(unittest.TestCase):
             amdsmi.amdsmi_wrapper, "amdsmi_set_gpu_fabric_station_config", _stub
         ):
             amdsmi.amdsmi_set_gpu_fabric_station_config(_GOOD_HANDLE, {"num_stations": 3})
+            log_api_call("\t### amdsmi_set_gpu_fabric_station_config():")
 
         self.assertEqual(captured["num_stations"], 3)
         self.assertEqual(
@@ -184,5 +247,10 @@ class TestFabricSetterCallSite(unittest.TestCase):
             "amdsmi_set_gpu_fabric_ppod_config",
             lambda _h, _c: amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL,
         ):
-            with self.assertRaises(amdsmi.AmdSmiLibraryException):
+            with self.assertRaises(amdsmi.AmdSmiLibraryException) as raised:
                 amdsmi.amdsmi_set_gpu_fabric_ppod_config(_GOOD_HANDLE, {"accelerator_id": 1})
+            log_api_call(
+                "\t### amdsmi_set_gpu_fabric_ppod_config():",
+                raised.exception,
+                amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL,
+            )
