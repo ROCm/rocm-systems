@@ -42,19 +42,18 @@ def unified_memory_environment() -> dict[str, str]:
 class TestUnifiedMemory(RocprofsysTest):
     """Validate unified-memory reports generated from the HIP example."""
 
-    UM_DEFAULT_TEST_PASS_REGEX = ["9 tests completed"]
-
-    run_args = ["-s", "32", "-p", "256", "-i", "4"]
+    UM_DEFAULT_TEST_PASS_REGEX = ("9 tests completed",)
 
     @pytest.mark.timeout(120)
     @pytest.mark.parametrize("mode", ["sys_run"])
     def test_output(self, mode, unified_memory_environment):
         """Run unified-memory and validate text/JSON report generation."""
+        run_args = ["-s", "32", "-p", "256", "-i", "4"]
         result = self.run_test(
             mode,
             target="unified-memory",
             env=unified_memory_environment,
-            run_args=self.run_args,
+            run_args=run_args,
             check_target_arch=True,
         )
 

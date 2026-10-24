@@ -6,6 +6,9 @@ Tests for the trace time window example.
 """
 
 from __future__ import annotations
+
+from typing import ClassVar
+
 import pytest
 from conftest import RocprofsysTest
 
@@ -39,8 +42,24 @@ def time_window_env() -> dict[str, str]:
 )
 @pytest.mark.class_name("trace-time-window")
 class TestTraceTimeWindow(RocprofsysTest):
-    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--caller-include", "inner", "-i", "4096"]
-    RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "1", "--caller-include", "inner", "-i", "4096"]
+    BINARY_REWRITE_ARGS: ClassVar[list[str]] = [
+        "-e",
+        "-v",
+        "2",
+        "--caller-include",
+        "inner",
+        "-i",
+        "4096",
+    ]
+    RUNTIME_INSTRUMENT_ARGS: ClassVar[list[str]] = [
+        "-e",
+        "-v",
+        "1",
+        "--caller-include",
+        "inner",
+        "-i",
+        "4096",
+    ]
 
     def test(self, mode, time_window_env):
 
