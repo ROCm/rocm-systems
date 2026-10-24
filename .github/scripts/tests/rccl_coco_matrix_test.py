@@ -22,6 +22,7 @@ class ScheduledRunsTest(unittest.TestCase):
         jobs = {entry["job"] for entry in payload}
         self.assertIn("ruby64-rccl-unit-nightly", jobs)
         self.assertIn("oci-nixl-nightly", jobs)
+        self.assertIn("ruby64-rccl-ext-plugins-nightly", jobs)
         self.assertNotIn("ruby64-rccl-perf-weekly", jobs)
 
     def test_weekly_emits_only_weekly_jobs(self):
