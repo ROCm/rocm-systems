@@ -26,6 +26,7 @@ test_categories:
       - "ShmMPITest.*"
       - "NetTransportMPITest.*"
       - "NetIbMPITest.*"
+      - "NetIbMultiSegmentMPITest.*"
       - "InspectorPromP2pMPITest.*"
       - "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
       - "UBR_AllReduce.OutOfPlace_MultiNode"
@@ -60,6 +61,7 @@ test_categories:
       - "NCCL_LOCAL_REGISTER=1"
       - "NCCL_LEGACY_CUDA_REGISTER=1"
       - "NCCL_GRAPH_REGISTER=1"
+      - "NCCL_MULTI_SEGMENT_REGISTER=1"
   quick_env_ce_allreduce:
     description: "CE AllReduce MPI smoke under CE dispatch env (CTA_POLICY=2, CUMEM=1, RCCL_CE_ALLREDUCE=1)."
     test_patterns:
@@ -270,6 +272,7 @@ test_categories:
       - "ShmMPITest.*"
       - "NetIbMPITest.*"
       - "GdrFlushTest.*"
+      - "NetIbMultiSegmentMPITest.*"
       - "ImplicitLaunchOrderMPITest.*"
       - "UBR_AllReduce.*"
       - "UBR_AllGather.*"
@@ -298,6 +301,7 @@ test_categories:
       - "mpi"
     env_variables:
       - "NCCL_DEBUG=INFO"
+      - "NCCL_MULTI_SEGMENT_REGISTER=1"
   # DDA fp8, one category per fabric tier. RCCL_PARAM caches the DDA thresholds for the process lifetime,
   # so each tier's settings are set before launch and each fixture runs in its own process.
   standard_env_dda_fp8_ll:
@@ -357,6 +361,7 @@ test_categories:
       - "mpi"
     env_variables: &mpi_comprehensive_env
       - "NCCL_DEBUG=INFO"
+      - "NCCL_MULTI_SEGMENT_REGISTER=1"
       - "RCCL_MPI_LOG_ALL_RANKS=1"
       - "NCCL_LAUNCH_ORDER_IMPLICIT=1"
       # P2pMPITests / ShmMPITests: enable CE memcpy sub-paths (default off in transport NCCL_PARAM).

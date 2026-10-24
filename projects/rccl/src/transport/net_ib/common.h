@@ -33,6 +33,7 @@
 #include "ibvwrap.h"
 #include "mlx5/mlx5dvwrap.h"
 #include "wqe_lat_mon.h"
+#include "multiseg.h" // RCCL: classic segment caps, the side-table bit, and split helpers.
 
 #define MAXSUFFIXSIZE 16
 #define MAXNAMESIZE (64 + MAXSUFFIXSIZE)
@@ -217,6 +218,8 @@ struct ncclIbRequestCompletionRecord {
   bool completions[NCCL_IB_MAX_QPS];
 };
 
+struct ncclIbMrHandle; // RCCL: defined below with one MR per segment.
+
 struct ncclIbRequest {
   struct ncclIbNetCommBase* base;
   int type;
@@ -243,6 +246,7 @@ struct ncclIbRequest {
       int size;
       void* data;
       uint32_t lkeys[NCCL_IB_MAX_DEVS_PER_NIC];
+      struct ncclIbMrHandle* mh; // RCCL: segmented send reads per-segment lkeys from this handle.
       // Tracks whether data was transmitted on a QP for this request.
       bool sentData[NCCL_IB_MAX_QPS];
       // Per-device LB weights used for chunk computation.
@@ -288,6 +292,31 @@ struct alignas(64) ncclIbSendFifo {
   uint32_t tag;
   uint64_t idx;
 };
+// RCCL: a CTS slot stays one cache line so the side table can follow it.
+static_assert(sizeof(struct ncclIbSendFifo) == 64, "CTS slot is one cache line");
+
+// RCCL: receiver layout for nSegments>1. Same [slot][recv] indexing as CTS. idx must
+// equal the CTS slot's idx so a later single-segment reuse of the same CTS
+// index ignores a stale side slot.
+struct alignas(64) ncclIbSegLayout {
+  uint32_t nSegments;
+  uint32_t pad;
+  uint64_t segStart[NCCL_IB_MAX_SEGMENTS];
+  uint32_t segRkeys[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
+  uint64_t idx; // last store; sender waits on this as the slot arrival flag
+};
+
+// RCCL: byte sizes of the sender CTS FIFO and the side table that follows it in one block.
+#define NCCL_IB_CTS_FIFO_BYTES (sizeof(struct ncclIbSendFifo) * (size_t)NET_IB_MAX_REQUESTS * (size_t)NCCL_NET_IB_MAX_RECVS)
+#define NCCL_IB_SEG_LAYOUT_FIFO_BYTES (sizeof(struct ncclIbSegLayout) * (size_t)NET_IB_MAX_REQUESTS * (size_t)NCCL_NET_IB_MAX_RECVS)
+
+// RCCL: worst-case work requests posted for one multi-recv send on a single QP: each
+// request's chunk may be split at every local and remote segment boundary it
+// spans. Single-segment sends use exactly one WR per request.
+#define NCCL_IB_MAX_WRS_PER_SEND (NCCL_NET_IB_MAX_RECVS * 2 * NCCL_IB_MAX_SEGMENTS)
+// RCCL: 2*MAX request budget plus one worst-case segmented send per proxy step; only each
+// chain's tail is signaled, so the queue must hold every in-flight step, like the flush QP.
+#define NCCL_IB_MAX_SEND_WRS (2 * NET_IB_MAX_REQUESTS + NCCL_STEPS * (NCCL_IB_MAX_WRS_PER_SEND + 1))
 
 struct ncclIbQpInitAttr {
   ibv_qp_state state;
@@ -372,8 +401,13 @@ struct alignas(8) ncclIbSendCommDev {
 };
 
 // Wrapper to track an MR per-device, if needed
+// RCCL: multi-segment buffers add one MR per segment; mrs[] aliases segment 0.
 struct ncclIbMrHandle {
   ibv_mr* mrs[NCCL_IB_MAX_DEVS_PER_NIC];
+  int nSegments;                             // 1 = legacy single MR
+  uintptr_t segStart[NCCL_IB_MAX_SEGMENTS];  // VA start of each segment
+  size_t segLen[NCCL_IB_MAX_SEGMENTS];       // bytes per segment
+  ibv_mr* segMrs[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
 };
 
 // Forward declaration
@@ -527,16 +561,19 @@ static inline ncclResult_t ncclIbPostRecvWorkRequest(struct ibv_qp* qp, struct i
 
 struct ncclIbSendComm {
   struct ncclIbNetCommBase base;
-  // Start with CTS FIFO and ibv structs as they have alignment restrictions
-
   // CTS FIFO from which the sender reads the Clear-to-Send (CTS) messages that
   // are written by the receiver (The receiver side writes into it upon
   // issuing a (multi-)receive request). Each row in the 2D array corresponds
   // to a single CTS message but can describe multiple recv-requests issued
   // on the receiver side.
-  struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
-  struct ibv_sge sges[NCCL_NET_IB_MAX_RECVS];
-  struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 1];
+  // RCCL: page-aligned block. The side table is appended only when this rank advertises.
+  struct ncclIbSendFifo (*ctsFifo)[NCCL_NET_IB_MAX_RECVS];
+  struct ncclIbSegLayout (*segLayoutFifo)[NCCL_NET_IB_MAX_RECVS];
+  // RCCL: a multi-segment send may split one request's per-QP chunk into up to one WR
+  // per local+remote segment boundary crossing. Size the WR/SGE pools
+  // for the worst case; single-segment sends use exactly one WR per request.
+  alignas(32) struct ibv_sge sges[NCCL_IB_MAX_WRS_PER_SEND];
+  struct ibv_send_wr wrs[NCCL_IB_MAX_WRS_PER_SEND + 1];
   // Each dev correlates to a mergedIbDev
   struct ncclIbSendCommDev devs[NCCL_IB_MAX_DEVS_PER_NIC];
   // Array of pointers to store the send requests for faster access. The
@@ -550,6 +587,7 @@ struct ncclIbSendComm {
   struct ncclIbRemCompletionsRecords remCmplsRecords;
   int ar; // Use adaptive routing when all merged devices have it enabled
   uint64_t putSignalScratchpad;
+  uint32_t peerCaps; // RCCL: NCCL_IB_CAP_MULTISEG from the peer's devName trailer.
 
   struct {
     uint64_t posted;
@@ -565,8 +603,11 @@ struct ncclIbSendComm {
 // written out of order when IB Relaxed Ordering is enabled
 static_assert((sizeof(struct ncclIbNetCommBase) % 32) == 0,
               "ncclIbNetCommBase size must be 32-byte multiple to ensure ctsFifo is at proper offset");
-static_assert((offsetof(struct ncclIbSendComm, ctsFifo) % 32) == 0, "ncclIbSendComm ctsFifo must be 32-byte aligned");
 static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element size must be 32-byte multiples");
+static_assert((sizeof(struct ncclIbSegLayout) % 32) == 0, "ncclIbSegLayout element size must be 32-byte multiples");
+// RCCL: 16 segments × 8 devices, 64-byte aligned. The peer RDMA-writes this many bytes.
+static_assert(sizeof(struct ncclIbSegLayout) == 704, "side slot size is the RDMA write length");
+static_assert(NCCL_IB_CTS_FIFO_BYTES % 64 == 0, "CTS FIFO size must keep the following side table 64-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
 
@@ -598,6 +639,12 @@ struct ncclIbRemCtsFifo {
   uint32_t flags;
 };
 
+// RCCL: receiver shadow of the side table, written to the sender when the peer advertised the cap.
+struct alignas(64) ncclIbRemSegLayout {
+  struct ncclIbSegLayout elems[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  uint64_t addr;
+};
+
 struct alignas(16) ncclIbRecvCommDev {
   struct ncclIbNetCommDevBase base;
   struct ncclIbGpuFlush gpuFlush;
@@ -606,6 +653,7 @@ struct alignas(16) ncclIbRecvCommDev {
   // side to gather CTS messages (formatted by the receiver) and write them to
   // the sender's CTS FIFO.
   struct ibv_mr* ctsFifoMr;
+  struct ibv_mr* segLayoutFifoMr; // RCCL: MR for the side-table shadow the receiver RDMA-writes.
   // MR that is obtained after registering the completion records on the
   // receiver side. The RKey of this MR is provided to the sender side, to allow
   // the sender side to access receiver's completion records using RDMA
@@ -632,6 +680,10 @@ struct ncclIbRecvComm {
   // Structure to hold all the related structures regarding the CTS FIFO
   // structure.
   struct ncclIbRemCtsFifo remCtsFifo;
+  // RCCL: local source of the side-table write. Allocated only when the peer
+  // advertised NCCL_IB_CAP_MULTISEG.
+  struct ncclIbRemSegLayout* remSegLayout;
+  uint32_t peerCaps; // RCCL: NCCL_IB_CAP_MULTISEG from the peer's devName trailer.
   // Structure to hold all the completion records of all the outstanding
   // receive requests on the receiver side.
   struct ncclIbRequestCompletionRecord cmplsRecords[NET_IB_MAX_REQUESTS];
