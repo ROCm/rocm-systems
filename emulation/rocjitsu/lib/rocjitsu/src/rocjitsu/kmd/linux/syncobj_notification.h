@@ -21,8 +21,10 @@ namespace rocjitsu {
 /// @details Each sleeper owns a stack semaphore, so waking one cannot consume
 /// another's notification. Registration precedes the generation check to close
 /// the check/sleep race. No application descriptor is allocated or borrowed.
-/// Signal-driven thread exit can unwind libc setup/waits and blocked registration.
-/// It is not supported during list mutation, notification, or noexcept cleanup.
+/// Signal-driven thread exit can unwind libc setup/waits and blocked registration
+/// or normal unregistration before mutex acquisition. Delivery after acquisition
+/// (including the lock call's return path before guard adoption), during list
+/// mutation or notification, or during noexcept cleanup is not supported.
 class SyncobjNotification {
 public:
   uint32_t load(std::memory_order order) const { return generation_.load(order); }

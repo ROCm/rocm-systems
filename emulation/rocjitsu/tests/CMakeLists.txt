@@ -733,6 +733,8 @@ set(_rj_syncobj_signal_exit_cases
     ThreadExitBeforeSemaphoreSleepUnregistersWaiter
     ThreadExitBeforeFallbackSleepUnregistersWaiter
     ThreadExitDuringContendedRegistrationUnwinds
+    ThreadExitDuringContendedUnregistrationUnwinds
+    ThreadExitFromRealSemaphoreWaitUnwinds
 )
 set(_rj_signal_exit_env)
 if(RJ_ENABLE_TSAN)

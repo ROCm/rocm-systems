@@ -90,6 +90,119 @@ protected:
     notification.notify_all();
   }
 
+  void check_wait_thread_exit(bool contended_unregistration) {
+    if (!contended_unregistration && !saved_.sem_clockwait)
+      GTEST_SKIP() << "Requires the real sem_clockwait wrapper";
+
+    static std::atomic<bool> post_held{false}, release_post{false};
+    static std::atomic<bool> unregistration_entered{false}, signal_seen{false};
+    static std::atomic<unsigned> lock_calls{0};
+    static int (*forward_post)(sem_t *) = nullptr;
+    static int (*forward_lock)(pthread_mutex_t *) = nullptr;
+    post_held = false;
+    release_post = false;
+    unregistration_entered = false;
+    signal_seen = false;
+    lock_calls = 0;
+    forward_post = saved_.sem_post;
+    forward_lock = saved_.pthread_mutex_lock;
+    if (contended_unregistration) {
+      rocjitsu::libc_passthrough().pthread_mutex_lock = +[](pthread_mutex_t *mutex) {
+        if (lock_calls.fetch_add(1, std::memory_order_acq_rel) == 1)
+          unregistration_entered.store(true, std::memory_order_release);
+        return forward_lock(mutex);
+      };
+      rocjitsu::libc_passthrough().sem_post = +[](sem_t *semaphore) {
+        // Wake the waiter, but keep notify_all's mutex held until its
+        // unregistration has blocked and received the thread-exit signal.
+        const int result = forward_post(semaphore);
+        post_held.store(true, std::memory_order_release);
+        const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!release_post.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < limit)
+          std::this_thread::yield();
+        return result;
+      };
+    }
+    struct sigaction action {
+    }, old_action{};
+    action.sa_handler = +[](int) {
+      signal_seen.store(true, std::memory_order_release);
+      pthread_exit(nullptr);
+    };
+    sigemptyset(&action.sa_mask);
+    ASSERT_EQ(sigaction(SIGUSR1, &action, &old_action), 0);
+
+    const auto await_flag = [](const std::atomic<bool> &flag) {
+      const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+      while (!flag.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < limit)
+        std::this_thread::yield();
+      return flag.load(std::memory_order_acquire);
+    };
+    const auto await_sleep = [](const std::atomic<pid_t> &tid, bool allow_poll) {
+      const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+      while (std::chrono::steady_clock::now() < limit) {
+        const pid_t waiter_tid = tid.load(std::memory_order_acquire);
+        if (waiter_tid > 0) {
+          std::ifstream state("/proc/self/task/" + std::to_string(waiter_tid) + "/syscall");
+          long number = -1;
+          if ((state >> number) && (number == SYS_futex || (allow_poll && number == SYS_ppoll)))
+            return true;
+        }
+        std::this_thread::yield();
+      }
+      return false;
+    };
+
+    rocjitsu::SyncobjNotification notification;
+    const timespec deadline = deadline_after(std::chrono::seconds(5));
+    std::atomic<pid_t> tid{0};
+    bool unwound = false, returned = false;
+    std::thread waiter([&] {
+      class Cleanup {
+      public:
+        explicit Cleanup(bool &unwound) : unwound_(unwound) {}
+        ~Cleanup() { unwound_ = true; }
+
+      private:
+        bool &unwound_;
+      } cleanup(unwound);
+      tid.store(gettid(), std::memory_order_release);
+      // Leave sem_clockwait untouched: TSan can defer this real sleep's
+      // signal until the next intercepted call, unlike the ppoll hooks.
+      (void)notification.wait_until(0, &deadline);
+      returned = true;
+    });
+    const bool initially_asleep = await_sleep(tid, contended_unregistration);
+    bool held = false, entered = false;
+    bool blocked = initially_asleep;
+    std::thread notifier;
+    if (contended_unregistration) {
+      notifier = std::thread([&] { notification.notify_all(); });
+      held = await_flag(post_held);
+      entered = await_flag(unregistration_entered);
+      blocked = held && entered && await_sleep(tid, false);
+    }
+    const int signal_result = blocked ? pthread_kill(waiter.native_handle(), SIGUSR1) : -1;
+    const bool delivered = blocked && await_flag(signal_seen);
+    release_post.store(true, std::memory_order_release);
+    waiter.join();
+    if (notifier.joinable())
+      notifier.join();
+    EXPECT_EQ(sigaction(SIGUSR1, &old_action, nullptr), 0);
+    EXPECT_TRUE(initially_asleep);
+    if (contended_unregistration) {
+      EXPECT_TRUE(held);
+      EXPECT_TRUE(entered);
+    }
+    EXPECT_TRUE(blocked);
+    EXPECT_EQ(signal_result, 0);
+    EXPECT_TRUE(delivered);
+    EXPECT_TRUE(unwound);
+    EXPECT_FALSE(returned);
+    notification.notify_all();
+  }
+
   rocjitsu::LibcPassthrough saved_;
   static inline std::atomic<bool> setup_entered_{false};
 };
@@ -172,6 +285,14 @@ TEST_F(SyncobjNotificationTest, ThreadExitBeforeSemaphoreSleepUnregistersWaiter)
 
 TEST_F(SyncobjNotificationTest, ThreadExitBeforeFallbackSleepUnregistersWaiter) {
   check_setup_thread_exit(false, true);
+}
+
+TEST_F(SyncobjNotificationTest, ThreadExitDuringContendedUnregistrationUnwinds) {
+  check_wait_thread_exit(true);
+}
+
+TEST_F(SyncobjNotificationTest, ThreadExitFromRealSemaphoreWaitUnwinds) {
+  check_wait_thread_exit(false);
 }
 
 TEST_F(SyncobjNotificationTest, ThreadExitDuringContendedRegistrationUnwinds) {
