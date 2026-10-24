@@ -12,7 +12,7 @@ use crate::api_trace;
 use crate::ffi::{self, *};
 use crate::runtime::{boundary, lock, map_error};
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64", not(test))))]
-use crate::{image_abi, loader, pc_sampling};
+use crate::{image_abi, loader};
 use crate::{image_gfx12, runtime};
 
 /// Minor version of the HSA runtime ABI reported to clients.
@@ -436,7 +436,7 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
                 #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
                 let functions = api_trace::pc_sampling_extension_table();
                 #[cfg(not(all(target_os = "linux", target_arch = "x86_64", not(test))))]
-                let functions = pc_sampling::extension_table();
+                let functions = super::pc_sampling::extension_table();
                 #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
                 if functions.contains(&0) {
                     return ERROR;
