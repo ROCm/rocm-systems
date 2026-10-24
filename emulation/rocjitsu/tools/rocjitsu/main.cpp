@@ -4,10 +4,12 @@
 /// @file main.cpp
 /// @brief rocjitsu CLI — launcher for GPU simulation via LD_PRELOAD interposition.
 ///
-/// @details Supports three usage patterns:
+/// @details Supports these application and daemon launch patterns:
 ///   rocjitsu --config foo.json -- ./app           (local mode: in-process simulation)
 ///   rocjitsu --daemon --config foo.json -- ./app  (daemon mode: fork daemon + launch app)
 ///   rocjitsu --daemon --config foo.json           (daemon-only: run daemon server)
+///   rocjitsu --attach --config foo.json -- ./app  (attach to a running daemon)
+///   rocjitsu --preload-only -- ./app              (defer configuration to the application)
 ///
 /// Builds configured with ROCJITSU_ENABLE_VFIO additionally support
 ///   rocjitsu --config foo.json --vfio-socket <path> [--vfio-socket <path> ...]
@@ -382,17 +384,20 @@ dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
 void print_usage() {
   std::cerr
       << "Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]\n"
+         "       rocjitsu --preload-only -- <app> [args...]\n"
          "\n"
          "Modes:\n"
          "  rocjitsu --config foo.json -- ./app          Local mode (in-process simulation)\n"
          "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
          "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
          "  rocjitsu --attach --config foo.json -- ./app Attach to running daemon\n"
+         "  rocjitsu --preload-only -- ./app             Programmatic activation at startup\n"
          "  rocjitsu --config foo.json --vfio-socket <path> [--vfio-socket <path> ...]\n"
          "                                               Serve PCI devices to a VMM\n"
          "\n"
          "Options:\n"
-         "  --config <path>   Simulation config JSON (required)\n"
+         "  --config <path>\n"
+         "                    Simulation config JSON (required except with --preload-only)\n"
          "  --node <id>, --node=<id>\n"
          "                    Select one local node from a system manifest. Required\n"
          "                    for multi-node launches. Not available with --attach.\n"
@@ -436,6 +441,7 @@ int main(int argc, char *argv[]) {
   std::string local_node;
   int vfio_ready_fd = -1;
   bool daemon_mode = false;
+  bool preload_only = false;
   bool attach_mode = false;
   int separator_idx = -1;
 
@@ -445,7 +451,9 @@ int main(int argc, char *argv[]) {
       separator_idx = i;
       break;
     }
-    if (arg == "--config" && i + 1 < argc) {
+    if (arg == "--preload-only") {
+      preload_only = true;
+    } else if (arg == "--config" && i + 1 < argc) {
       config_path = argv[++i];
     } else if (arg == "--node" || arg.starts_with("--node=")) {
       const size_t equals = arg.find('=');
@@ -530,6 +538,29 @@ int main(int argc, char *argv[]) {
   }
 
   overrides.local_node = local_node;
+
+  if (preload_only) {
+    if (config_path || daemon_mode || attach_mode || !overrides.empty() || !vfio_sockets.empty() ||
+        vfio_ready_fd >= 0 || thread_budget_table || separator_idx < 0 ||
+        separator_idx + 1 >= argc) {
+      std::cerr
+          << "rocjitsu: --preload-only requires an application and no configuration options\n";
+      return 1;
+    }
+    auto lib_path = find_interposer_lib();
+    if (lib_path.empty()) {
+      std::cerr << "rocjitsu: could not find librocjitsu.so\n";
+      return 1;
+    }
+    rocjitsu::cli::LaunchEnvironment environment;
+    rocjitsu::cli::prepend_launch_preloads(environment, lib_path);
+    // Require explicit activation; never discover a stale default daemon/config.
+    environment.set(rocjitsu::kProgrammaticEnv, "1");
+    char **app_argv = &argv[separator_idx + 1];
+    rocjitsu::cli::execvp_with_environment(app_argv[0], app_argv, environment);
+    std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));
+    return 1;
+  }
 
   if (!config_path) {
     std::cerr << "rocjitsu: --config is required\n";
@@ -865,6 +896,7 @@ int main(int argc, char *argv[]) {
   }
 
   rocjitsu::cli::LaunchEnvironment launch_environment;
+  launch_environment.set(rocjitsu::kProgrammaticEnv, "0");
   rocjitsu::cli::prepend_launch_preloads(launch_environment, lib_path);
   if (dbt_guest_mode) {
     std::optional<std::string_view> child_rocr_visible = environment_value("ROCR_VISIBLE_DEVICES");

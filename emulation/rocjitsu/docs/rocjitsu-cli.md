@@ -3,10 +3,13 @@
 ## Overview
 
 The `rocjitsu` CLI is the primary entry point for running applications on
-the simulated GPU. It operates in four modes:
+the simulated GPU. It supports these modes:
 
 - **Local mode**: Sets `LD_PRELOAD` and `execve`s the target application.
   The simulator runs in-process via the interposer.
+- **Preload-only mode**: Preloads the interposer for a Python application,
+  which selects its simulation configuration with `rocjitsu.enable()` before
+  GPU discovery.
 - **Daemon mode**: Spawns a daemon child process that hosts the simulation
   engine, then `LD_PRELOAD` + `execve`s the target. Client processes
   communicate with the daemon via RPC over a Unix domain socket. GPU memory
@@ -48,13 +51,15 @@ receiving real GPU descriptors over a Unix socket.
 
 ```
 Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
+       rocjitsu --preload-only -- <app> [args...]
        rocjitsu --config <config.json> [--node <id>] --vfio-socket <path> [--vfio-socket <path> ...]
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--config <path>` | Path to simulation config JSON (required) |
+| `--config <path>` | Path to simulation config JSON (required except with `--preload-only`) |
 | `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. |
+| `--preload-only` | Preload the interposer for local simulation without a config. The application must call `rocjitsu.enable(config)` in Python before GPU discovery; the Python bootstrap `python -m rocjitsu` uses this mode. Cannot be combined with configuration options, `--daemon`, or `--attach`. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
 | `--attach` | Attach to a running daemon. The socket path is resolved as `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, falling back to `/tmp/rocjitsu-<uid>/daemon.sock`. |
 | `--vfio-socket <path>` | Serve a local GPU as a PCI function over VFIO-user. Repeat once per local GPU in ordinal order for a multi-GPU node. The number of sockets must match the selected node's local GPU count, and paths must be distinct. The VMM must share guest RAM through mmap-able file descriptors. |
@@ -68,6 +73,9 @@ Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
 ```bash
 # Local mode: in-process simulation
 rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./app
+
+# Python startup activation: app.py calls rocjitsu.enable(config)
+rocjitsu --preload-only -- python app.py
 
 # Daemon mode: fork daemon + launch app
 rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./app args...
@@ -88,8 +96,21 @@ rocjitsu --config tests/fixtures/fabric_node_projection.json --node tray7 \
   --vfio-socket /tmp/rocjitsu-vfio/gpu1.sock
 ```
 
+`--preload-only` and `enable()` create a local simulator in each interpreter.
+Daemon devices are configured when the daemon starts; `--attach` clients reuse
+that simulator. To use a daemon from Python, launch with `--daemon` or `--attach`
+and `--config` before `-- python app.py`, and omit `enable()` in the application.
+The Python `Session` API exposes the same modes through `mode="daemon"` and
+`mode="attach"`; it does not allocate or reconfigure devices in a running daemon.
+
 See [QEMU VFIO-user compute](qemu-vfio.md) for the supported guest contract and
 launcher.
+
+The preload-only example is equivalent to `python -m rocjitsu app.py`. In both
+cases, `app.py` imports `rocjitsu` and calls `rocjitsu.enable(config)` before
+GPU discovery or framework imports. The CLI preloads the interposer; the Python
+application chooses the config. Applications configured with `--config` already
+have simulation enabled and must not call `enable()`.
 
 ## Architecture
 
@@ -341,3 +362,22 @@ kernel 6.12.59+ and 6.15+.
 - **Windows**: Named pipe transport, KMD escape driver backend
 - **RDMA**: Rack-scale transport for distributed simulation
 - **Platform-independent commands**: Abstract command enum for cross-platform
+
+### Programmatic activation environment
+
+`--preload-only` sets `ROCJITSU_PROGRAMMATIC=1`. Interposed KFD/DRM device
+and discovery paths refuse access until the application activates a config.
+A discovery attempt prevents later activation because frameworks may cache the
+failed result. Ordinary configured launches set the variable to `0`.
+
+After successful activation, Python exports `ROCJITSU_INVOCATION_DIR` pointing
+to its private config handoff and sets `ROCJITSU_PROGRAMMATIC=2` for fresh exec
+children. The interpreter that calls `enable()` owns this handoff and must
+remain alive until those children finish their GPU work.
+
+The inherited mode (`2`) permits an identical `enable` call when multiprocessing
+re-imports a module in a spawn or forkserver child. The native parser compares
+the effective configs, including any CPU thread budget override; a different
+config is refused. Configured CLI launches (`0`) still reject activation.
+These environment values and the native entry point are private implementation
+details of the Python binding.
