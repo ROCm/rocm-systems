@@ -13,12 +13,6 @@
  * dev_runtime.cc.
  *************************************************************************/
 
-// The library defines this when hipMemLocationTypeHost exists. This TU includes
-// dev_runtime.cc, so the host-fd tests need the same gate.
-#ifndef RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED
-#define RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED
-#endif
-
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"      // the shared g_hip* seams this suite drives
 #include "fakes/nccl_fakes.h"     // g_ncclProxyClientGetFdBlocking
