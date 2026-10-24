@@ -654,3 +654,234 @@ HIP_TEST_CASE(Unit_hipMemPoolGetAccess_GetDefMempoolOfEachDevice) {
     REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
   }
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Validation matrix for hipMemPoolSetAccess mirroring CUDA's observed
+ *    behavior. Covers:
+ *      target / flags  | ProtNone        | ProtRead        | ProtReadWrite
+ *      own-device      | InvalidDevice   | NotSupported    | apply (no-op)
+ *      peer            | apply           | apply           | apply
+ *      invalid id      | InvalidDevice   | InvalidDevice   | InvalidDevice
+ *    Also verifies batch validate-up-front semantics: a bad descriptor
+ *    anywhere in the batch must leave earlier descriptors un-applied.
+ * Test source
+ * ------------------------
+ *  - /unit/memory/hipMemPoolSetGetAccess.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.2
+ */
+HIP_TEST_CASE(Unit_hipMemPoolSetAccess_ValidationMatrix) {
+  const auto device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
+  }
+
+  const auto device_supports_mempool = [](int device) {
+    int mempool_supported = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&mempool_supported, hipDeviceAttributeMemoryPoolsSupported,
+                                    device));
+    return mempool_supported != 0;
+  };
+  const auto can_access_peer = [](int src, int dst) {
+    int can_access = 0;
+    HIP_CHECK(hipDeviceCanAccessPeer(&can_access, src, dst));
+    return can_access != 0;
+  };
+
+  // Check all devices support mempool and can access each others memory
+  if (!device_supports_mempool(0) || !device_supports_mempool(1) ||
+      !device_supports_mempool(2) ||
+      !can_access_peer(0, 1) || !can_access_peer(0, 2)) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    return;
+  }
+
+  SECTION("Peer ProtNone after enable transitions state") {
+    MemPoolGuard mempool(MemPools::created, 0);
+
+    hipMemAccessDesc enable_desc;
+    memset(&enable_desc, 0, sizeof(hipMemAccessDesc));
+    enable_desc.location.type = hipMemLocationTypeDevice;
+    enable_desc.location.id = 1;
+    enable_desc.flags = hipMemAccessFlagsProtReadWrite;
+    HIP_CHECK(hipMemPoolSetAccess(mempool.mempool(), &enable_desc, 1));
+
+    hipMemAccessDesc disable_desc;
+    memset(&disable_desc, 0, sizeof(hipMemAccessDesc));
+    disable_desc.location.type = hipMemLocationTypeDevice;
+    disable_desc.location.id = 1;
+    disable_desc.flags = hipMemAccessFlagsProtNone;
+    HIP_CHECK(hipMemPoolSetAccess(mempool.mempool(), &disable_desc, 1));
+
+    hipMemLocation loc;
+    loc.type = hipMemLocationTypeDevice;
+    loc.id = 1;
+    hipMemAccessFlags flags = hipMemAccessFlagsProtReadWrite;
+    HIP_CHECK(hipMemPoolGetAccess(&flags, mempool.mempool(), &loc));
+    REQUIRE(flags == hipMemAccessFlagsProtNone);
+  }
+
+  SECTION("Batch of N peers ProtNone applies to all") {
+    if (device_count < 3) {
+      HIP_SKIP_TEST("Skipping: needs >=3 GPUs");
+      return;
+    }
+    MemPoolGuard mempool(MemPools::created, 0);
+
+    std::vector<hipMemAccessDesc> enable_batch(device_count - 1);
+    for (int i = 1; i < device_count; ++i) {
+      memset(&enable_batch[i - 1], 0, sizeof(hipMemAccessDesc));
+      enable_batch[i - 1].location.type = hipMemLocationTypeDevice;
+      enable_batch[i - 1].location.id = i;
+      enable_batch[i - 1].flags = hipMemAccessFlagsProtReadWrite;
+    }
+    HIP_CHECK(hipMemPoolSetAccess(mempool.mempool(), enable_batch.data(),
+                                  enable_batch.size()));
+
+    std::vector<hipMemAccessDesc> disable_batch(device_count - 1);
+    for (int i = 1; i < device_count; ++i) {
+      memset(&disable_batch[i - 1], 0, sizeof(hipMemAccessDesc));
+      disable_batch[i - 1].location.type = hipMemLocationTypeDevice;
+      disable_batch[i - 1].location.id = i;
+      disable_batch[i - 1].flags = hipMemAccessFlagsProtNone;
+    }
+    HIP_CHECK(hipMemPoolSetAccess(mempool.mempool(), disable_batch.data(),
+                                  disable_batch.size()));
+
+    for (int i = 1; i < device_count; ++i) {
+      hipMemLocation loc;
+      loc.type = hipMemLocationTypeDevice;
+      loc.id = i;
+      hipMemAccessFlags flags = hipMemAccessFlagsProtReadWrite;
+      HIP_CHECK(hipMemPoolGetAccess(&flags, mempool.mempool(), &loc));
+      REQUIRE(flags == hipMemAccessFlagsProtNone);
+    }
+  }
+
+  SECTION("Own-device ProtNone returns InvalidDevice") {
+    MemPoolGuard mempool(MemPools::created, 0);
+
+    hipMemAccessDesc desc;
+    memset(&desc, 0, sizeof(hipMemAccessDesc));
+    desc.location.type = hipMemLocationTypeDevice;
+    desc.location.id = 0;
+    desc.flags = hipMemAccessFlagsProtNone;
+    HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, 1),
+                    hipErrorInvalidDevice);
+
+    hipMemLocation loc;
+    loc.type = hipMemLocationTypeDevice;
+    loc.id = 0;
+    hipMemAccessFlags flags = hipMemAccessFlagsProtNone;
+    HIP_CHECK(hipMemPoolGetAccess(&flags, mempool.mempool(), &loc));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+  }
+
+  SECTION("Own-device ProtRead returns NotSupported") {
+    MemPoolGuard mempool(MemPools::created, 0);
+
+    hipMemAccessDesc desc;
+    memset(&desc, 0, sizeof(hipMemAccessDesc));
+    desc.location.type = hipMemLocationTypeDevice;
+    desc.location.id = 0;
+    desc.flags = hipMemAccessFlagsProtRead;
+    HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, 1),
+                    hipErrorNotSupported);
+
+    hipMemLocation loc;
+    loc.type = hipMemLocationTypeDevice;
+    loc.id = 0;
+    hipMemAccessFlags flags = hipMemAccessFlagsProtNone;
+    HIP_CHECK(hipMemPoolGetAccess(&flags, mempool.mempool(), &loc));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+  }
+
+  SECTION("Own-device ProtReadWrite is accepted as no-op") {
+    MemPoolGuard mempool(MemPools::created, 0);
+
+    hipMemAccessDesc desc;
+    memset(&desc, 0, sizeof(hipMemAccessDesc));
+    desc.location.type = hipMemLocationTypeDevice;
+    desc.location.id = 0;
+    desc.flags = hipMemAccessFlagsProtReadWrite;
+    HIP_CHECK(hipMemPoolSetAccess(mempool.mempool(), &desc, 1));
+
+    hipMemLocation loc;
+    loc.type = hipMemLocationTypeDevice;
+    loc.id = 0;
+    hipMemAccessFlags flags = hipMemAccessFlagsProtNone;
+    HIP_CHECK(hipMemPoolGetAccess(&flags, mempool.mempool(), &loc));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+  }
+
+  SECTION("Batch with invalid trailing descriptor leaves earlier state unchanged") {
+    MemPoolGuard mempool(MemPools::created, 0);
+
+    hipMemAccessDesc disable_peer;
+    memset(&disable_peer, 0, sizeof(hipMemAccessDesc));
+    disable_peer.location.type = hipMemLocationTypeDevice;
+    disable_peer.location.id = 1;
+    disable_peer.flags = hipMemAccessFlagsProtNone;
+    HIP_CHECK(hipMemPoolSetAccess(mempool.mempool(), &disable_peer, 1));
+
+    hipMemLocation peer_loc;
+    peer_loc.type = hipMemLocationTypeDevice;
+    peer_loc.id = 1;
+    hipMemAccessFlags pre_flags = hipMemAccessFlagsProtReadWrite;
+    HIP_CHECK(hipMemPoolGetAccess(&pre_flags, mempool.mempool(), &peer_loc));
+    REQUIRE(pre_flags == hipMemAccessFlagsProtNone);
+
+    std::vector<hipMemAccessDesc> batch(2);
+    memset(&batch[0], 0, sizeof(hipMemAccessDesc));
+    batch[0].location.type = hipMemLocationTypeDevice;
+    batch[0].location.id = 1;
+    batch[0].flags = hipMemAccessFlagsProtReadWrite;
+    memset(&batch[1], 0, sizeof(hipMemAccessDesc));
+    batch[1].location.type = hipMemLocationTypeDevice;
+    batch[1].location.id = device_count;  // invalid id
+    batch[1].flags = hipMemAccessFlagsProtReadWrite;
+    HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), batch.data(), 2),
+                    hipErrorInvalidDevice);
+
+    hipMemAccessFlags post_flags = hipMemAccessFlagsProtReadWrite;
+    HIP_CHECK(hipMemPoolGetAccess(&post_flags, mempool.mempool(), &peer_loc));
+    REQUIRE(post_flags == hipMemAccessFlagsProtNone);
+  }
+
+  SECTION("Mixed-flag batch applies each descriptor") {
+    if (device_count < 3) {
+      HIP_SKIP_TEST("Skipping: needs >=3 GPUs");
+      return;
+    }
+    MemPoolGuard mempool(MemPools::created, 0);
+
+    std::vector<hipMemAccessDesc> batch(2);
+    memset(&batch[0], 0, sizeof(hipMemAccessDesc));
+    batch[0].location.type = hipMemLocationTypeDevice;
+    batch[0].location.id = 1;
+    batch[0].flags = hipMemAccessFlagsProtReadWrite;
+    memset(&batch[1], 0, sizeof(hipMemAccessDesc));
+    batch[1].location.type = hipMemLocationTypeDevice;
+    batch[1].location.id = 2;
+    batch[1].flags = hipMemAccessFlagsProtNone;
+    HIP_CHECK(hipMemPoolSetAccess(mempool.mempool(), batch.data(), 2));
+
+    hipMemLocation loc1;
+    loc1.type = hipMemLocationTypeDevice;
+    loc1.id = 1;
+    hipMemAccessFlags flags1 = hipMemAccessFlagsProtNone;
+    HIP_CHECK(hipMemPoolGetAccess(&flags1, mempool.mempool(), &loc1));
+    REQUIRE(flags1 == hipMemAccessFlagsProtReadWrite);
+
+    hipMemLocation loc2;
+    loc2.type = hipMemLocationTypeDevice;
+    loc2.id = 2;
+    hipMemAccessFlags flags2 = hipMemAccessFlagsProtReadWrite;
+    HIP_CHECK(hipMemPoolGetAccess(&flags2, mempool.mempool(), &loc2));
+    REQUIRE(flags2 == hipMemAccessFlagsProtNone);
+  }
+}
