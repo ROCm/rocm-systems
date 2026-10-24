@@ -388,6 +388,7 @@ get_host_function_id()
 }
 
 using kernel_object_map_t        = std::unordered_map<uint64_t, uint64_t>;
+using kernel_name_map_t          = std::unordered_map<uint64_t, const std::string*>;
 using executable_array_t         = std::vector<hsa_executable_t>;
 using code_object_unload_array_t = std::vector<hsa::code_object_unload>;
 
@@ -423,6 +424,14 @@ get_kernel_object_map()
 {
     static auto*& _v =
         common::static_object<common::Synchronized<kernel_object_map_t>>::construct();
+    return _v;
+}
+
+// kernel id -> symbol name (an interned string), for the loaded kernels
+auto*
+get_kernel_name_map()
+{
+    static auto*& _v = common::static_object<common::Synchronized<kernel_name_map_t>>::construct();
     return _v;
 }
 
@@ -646,6 +655,17 @@ executable_iterate_agent_symbols_load_callback(hsa_executable_t        executabl
             },
             data.kernel_object,
             data.kernel_id);
+
+    if(symbol_v.name)
+    {
+        CHECK_NOTNULL(get_kernel_name_map())
+            ->wlock(
+                [](kernel_name_map_t& name_map, uint64_t _kern_id, const std::string* _name) {
+                    name_map[_kern_id] = _name;
+                },
+                data.kernel_id,
+                symbol_v.name);
+    }
 
     code_obj_v->symbols.emplace_back(std::make_unique<hsa::kernel_symbol>(std::move(symbol_v)));
 
@@ -1169,6 +1189,19 @@ executable_destroy_internal(hsa_executable_t executable)
         });
     }
 
+    if(get_kernel_name_map())
+    {
+        CHECK_NOTNULL(get_kernel_name_map())->wlock([_unloaded](kernel_name_map_t& data) {
+            for(const auto& uitr : _unloaded)
+            {
+                for(const auto& sitr : uitr.symbols)
+                {
+                    data.erase(sitr->rocp_data.kernel_id);
+                }
+            }
+        });
+    }
+
     if(get_code_objects())
     {
         CHECK_NOTNULL(get_code_objects())->wlock([executable](code_object_array_t& data) {
@@ -1476,6 +1509,18 @@ get_kernel_id(uint64_t kernel_object)
                 return (itr == object_map.end()) ? 0 : itr->second;
             },
             kernel_object);
+}
+
+const std::string*
+get_kernel_name(uint64_t kernel_id)
+{
+    return CHECK_NOTNULL(get_kernel_name_map())
+        ->rlock(
+            [](const kernel_name_map_t& name_map, uint64_t _kern_id) -> const std::string* {
+                auto itr = name_map.find(_kern_id);
+                return (itr == name_map.end()) ? nullptr : itr->second;
+            },
+            kernel_id);
 }
 
 void

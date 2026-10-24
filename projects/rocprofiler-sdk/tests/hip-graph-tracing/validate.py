@@ -303,6 +303,58 @@ def test_graph_dispatch_identity(input_data):
         ), f"launch {corr_id}: ordinals {[r[2] for r in rows]}"
 
 
+# HIP runtime calls that launch a kernel, and so can capture a kernel node
+LAUNCH_APIS = (
+    "hipLaunchKernel",
+    "hipExtLaunchKernel",
+    "hipModuleLaunchKernel",
+    "hipExtModuleLaunchKernel",
+    "hipHccModuleLaunchKernel",
+    "hipLaunchCooperativeKernel",
+    "hipLaunchKernelExC",
+)
+
+
+def test_graph_capture_correlation(input_data):
+    """a dispatch replayed from a captured graph carries the internal correlation id of the kernel
+    launch that captured its node: a traced launch call, the same id for a node on every launch of
+    its exec, a different one for each node, increasing in node order (the app captures each graph
+    from one stream); every other dispatch carries 0"""
+    sdk_data = input_data["rocprofiler-sdk-json-tool"]
+
+    launch_calls = set()
+    for records in (sdk_data["callback_records"], sdk_data["buffer_records"]):
+        ops = {get_operation(records, "HIP_RUNTIME_API", name) for name in LAUNCH_APIS}
+        ops.discard(None)
+        for itr in records["hip_api_traces"]:
+            if itr["operation"] in ops:
+                launch_calls.add(itr["correlation_id"]["internal"])
+    assert len(launch_calls) > 0, "no kernel launch records"
+
+    by_exec = {}
+    for itr in sdk_data["buffer_records"]["kernel_dispatch"]:
+        info = itr["dispatch_info"]
+        exec_id = info["graph_exec_id"]["handle"]
+        capture_id = info["capture_correlation_id"]
+        if exec_id == 0:
+            assert capture_id == 0, f"non-graph dispatch with a capture id: {itr}"
+            continue
+        assert (
+            capture_id in launch_calls
+        ), f"graph dispatch without its capturing launch: {itr}"
+        node_id = info["graph_node_id"]["handle"]
+        by_exec.setdefault(exec_id, {}).setdefault(node_id, set()).add(capture_id)
+
+    assert len(by_exec) > 0, "no graph dispatches"
+    for exec_id, nodes in by_exec.items():
+        for node_id, ids in nodes.items():
+            assert len(ids) == 1, f"exec {exec_id} node {node_id}: capture ids {ids}"
+        ordered = [min(nodes[node_id]) for node_id in sorted(nodes)]
+        assert ordered == sorted(
+            set(ordered)
+        ), f"exec {exec_id}: capture ids {ordered} not increasing in node order"
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)

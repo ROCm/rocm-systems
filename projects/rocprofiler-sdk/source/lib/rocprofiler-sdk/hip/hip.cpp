@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/utils.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
@@ -230,6 +231,11 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
     if(callback_contexts.empty() && buffered_contexts.empty() && extended_contexts.empty())
     {
         [[maybe_unused]] auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
+        // an untraced call claims the nodes it captured, unattributed, so no later call takes them
+        if constexpr(TableIdx == ROCPROFILER_HIP_TABLE_ID_Runtime)
+        {
+            if(graph::capture_active()) graph::on_capture_api_exit(0);
+        }
         if constexpr(!std::is_void<RetT>::value)
             return _ret;
         else
@@ -285,6 +291,12 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
     corr_id->sub_ref_count();
 
     auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
+
+    // a runtime call made while this thread captures a stream: the graph nodes it added are its
+    if constexpr(TableIdx == ROCPROFILER_HIP_TABLE_ID_Runtime)
+    {
+        if(graph::capture_active()) graph::on_capture_api_exit(internal_corr_id);
+    }
 
     // record the end timestamp as close to the function call as possible
     if(!buffered_contexts.empty() || !extended_contexts.empty())
