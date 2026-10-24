@@ -3,9 +3,13 @@
 
 """Tests for rccl_resolve_coco_run.py."""
 
+import contextlib
+import io
 import os
 import re
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -23,9 +27,7 @@ class CronConsistencyTest(unittest.TestCase):
         text = SCHEDULED_WORKFLOW.read_text(encoding="utf-8")
         crons = set(re.findall(r"^\s*-\s*cron:\s*'([^']+)'", text, re.MULTILINE))
         self.assertTrue(crons, f"no cron entries found in {SCHEDULED_WORKFLOW}")
-        self.assertEqual(
-            crons, {resolve.WEEKDAY_NIGHTLY_CRON, resolve.SATURDAY_CRON}
-        )
+        self.assertEqual(crons, {resolve.WEEKDAY_NIGHTLY_CRON, resolve.SATURDAY_CRON})
 
 
 class ScheduleToModeTest(unittest.TestCase):
@@ -111,3 +113,132 @@ class ResolveRunTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+HEAD = "a" * 40
+MERGE_BASE = "b" * 40
+
+
+def fake_github(merge_base=MERGE_BASE, base_ref="develop"):
+    """A GitHub REST stub serving one PR and its compare against the base branch."""
+    responses = {
+        "https://api.github.com/repos/ROCm/rocm-systems/pulls/42": {
+            "base": {"ref": base_ref}
+        },
+        f"https://api.github.com/repos/ROCm/rocm-systems/compare/{base_ref}...{HEAD}": {
+            "merge_base_commit": {"sha": merge_base}
+        },
+    }
+    return responses.__getitem__
+
+
+class BaselineShaArgsTest(unittest.TestCase):
+    def test_pr_args_pin_the_baseline_to_the_given_commit(self):
+        args = resolve.build_coco_args(
+            mode="pr", dry_run=False, baseline_sha=MERGE_BASE
+        )
+        self.assertIn(f"--baseline-sha {MERGE_BASE}", args)
+
+    def test_pr_args_without_a_commit_keep_the_configured_baseline(self):
+        self.assertNotIn(
+            "--baseline-sha", resolve.build_coco_args(mode="pr", dry_run=False)
+        )
+
+    def test_periodic_args_never_pin(self):
+        args = resolve.build_coco_args(
+            mode="nightly", dry_run=False, baseline_sha=MERGE_BASE
+        )
+        self.assertNotIn("--baseline-sha", args)
+
+
+class ResolveMergeBaseTest(unittest.TestCase):
+    def test_returns_the_merge_base_with_the_prs_base_branch(self):
+        """The baseline arm is built here, so a PR is measured only against code it contains."""
+        self.assertEqual(
+            resolve.resolve_merge_base(
+                pr_repo="ROCm/rocm-systems",
+                pr_number="42",
+                pr_sha=HEAD,
+                get=fake_github(),
+            ),
+            MERGE_BASE,
+        )
+
+    def test_uses_the_prs_own_base_branch(self):
+        self.assertEqual(
+            resolve.resolve_merge_base(
+                pr_repo="ROCm/rocm-systems",
+                pr_number="42",
+                pr_sha=HEAD,
+                get=fake_github(base_ref="rccl-develop"),
+            ),
+            MERGE_BASE,
+        )
+
+    def test_a_head_that_is_its_own_merge_base_is_refused(self):
+        """Both arms on one commit would compare the PR with itself and always pass."""
+        with self.assertRaises(ValueError):
+            resolve.resolve_merge_base(
+                pr_repo="ROCm/rocm-systems",
+                pr_number="42",
+                pr_sha=HEAD,
+                get=fake_github(merge_base=HEAD),
+            )
+
+    def test_a_malformed_merge_base_is_refused(self):
+        with self.assertRaises(ValueError):
+            resolve.resolve_merge_base(
+                pr_repo="ROCm/rocm-systems",
+                pr_number="42",
+                pr_sha=HEAD,
+                get=fake_github(merge_base="deadbeef"),
+            )
+
+
+class ResolveBaselineShaTest(unittest.TestCase):
+    def _harness(self, pr_command: str | None) -> Path:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        if pr_command is not None:
+            path = root / resolve.HARNESS_PR_COMMAND
+            path.parent.mkdir(parents=True)
+            path.write_text(pr_command, encoding="utf-8")
+        return root
+
+    def test_periodic_runs_keep_the_configured_baseline(self):
+        self.assertEqual(
+            resolve.resolve_baseline_sha(
+                pr_number="",
+                pr_sha="",
+                pr_repo="",
+                harness_dir=self._harness('"--baseline-sha"'),
+                get=fake_github(),
+            ),
+            "",
+        )
+
+    def test_a_pr_run_pins_to_the_merge_base_when_the_harness_can(self):
+        self.assertEqual(
+            resolve.resolve_baseline_sha(
+                pr_number="42",
+                pr_sha=HEAD,
+                pr_repo="ROCm/rocm-systems",
+                harness_dir=self._harness('@click.option(\n    "--baseline-sha",'),
+                get=fake_github(),
+            ),
+            MERGE_BASE,
+        )
+
+    def test_an_older_harness_is_not_passed_a_flag_it_would_reject(self):
+        """The harness ref (1.3.x) may predate --baseline-sha; passing it would fail every gate."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            sha = resolve.resolve_baseline_sha(
+                pr_number="42",
+                pr_sha=HEAD,
+                pr_repo="ROCm/rocm-systems",
+                harness_dir=self._harness('"--skip-baselines"'),
+                get=fake_github(),
+            )
+        self.assertEqual(sha, "")
+        self.assertIn("::warning::", out.getvalue())

@@ -84,6 +84,8 @@ runs:
         PR_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.pr_sha }}
         PR_REPO: ${{ github.event_name == 'pull_request' && github.repository || inputs.pr_repo }}
         EVENT_NAME: ${{ github.event_name }}
+        # Reads the PR's base branch and merge-base from the REST API.
+        GITHUB_TOKEN: ${{ github.token }}
         PERIODIC_MODE: ${{ inputs.periodic_mode }}
         SCHEDULE: ${{ inputs.schedule }}
       run: python3 "${GITHUB_WORKSPACE}/.github/scripts/rccl_resolve_coco_run.py"
