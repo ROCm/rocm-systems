@@ -229,16 +229,13 @@ TEST(kernel_replay_local_context, simulated_service_consumers)
     const rocprofiler_context_id_t spm{30};
     const rocprofiler_context_id_t pcs{40};
 
-    // Mirrors counters/spm dispatch_handlers: enabled = enabled && *ov.
+    // Mirrors the counters/SPM enter hooks and dispatch handlers: the hook resolves
+    // is_locally_enabled() and the handler ANDs it with the context's enabled flag.
     const auto dispatch_enabled = [](rocprofiler_context_id_t id, bool globally_on) {
-        bool enabled = globally_on;
-        if(auto ov = lc::local_context_override(id)) enabled = enabled && *ov;
-        return enabled;
+        return globally_on && lc::is_locally_enabled(id);
     };
-    const auto att_runs = [](rocprofiler_context_id_t id) {
-        if(auto ov = lc::local_context_override(id); ov && !*ov) return false;
-        return true;
-    };
+    // Mirrors the thread trace enter hook and pre_kernel_call: skip only when locally stopped.
+    const auto att_runs = [](rocprofiler_context_id_t id) { return lc::is_locally_enabled(id); };
     const auto pcs_runs = [](rocprofiler_context_id_t) {
         return true;  // agent-wide; does not consult the override
     };
@@ -280,9 +277,7 @@ TEST(kernel_replay_local_context, consumer_no_promotion_of_globally_stopped)
     const rocprofiler_context_id_t counters{11};
 
     const auto dispatch_enabled = [](rocprofiler_context_id_t id, bool globally_on) {
-        bool enabled = globally_on;
-        if(auto ov = lc::local_context_override(id)) enabled = enabled && *ov;
-        return enabled;
+        return globally_on && lc::is_locally_enabled(id);
     };
 
     fake_active_contexts             active{counters.handle};
@@ -296,4 +291,51 @@ TEST(kernel_replay_local_context, consumer_no_promotion_of_globally_stopped)
         << "local start must not promote a globally stopped context";
     EXPECT_TRUE(dispatch_enabled(counters, /*globally_on=*/true))
         << "local start must undo a prior local stop when globally on";
+}
+
+// is_locally_enabled() is what the dispatch hooks pass to the service handlers: true outside a
+// loop and for contexts the tool never toggled, false only while a pass has the context stopped.
+TEST(kernel_replay_local_context, is_locally_enabled_tracks_the_pass_decision)
+{
+    EXPECT_TRUE(lc::is_locally_enabled({4}));
+
+    {
+        fake_active_contexts             active{4, 8};
+        lc::scoped_local_context_control loop{active.array};
+        EXPECT_TRUE(lc::is_locally_enabled({4}));
+
+        lc::set_toggles_armed(true);
+        EXPECT_EQ(lc::replay_local_disable_context({4}), ROCPROFILER_STATUS_SUCCESS);
+        lc::set_toggles_armed(false);
+        EXPECT_FALSE(lc::is_locally_enabled({4}));
+        EXPECT_TRUE(lc::is_locally_enabled({8})) << "an untoggled context stays enabled";
+
+        lc::set_toggles_armed(true);
+        EXPECT_EQ(lc::replay_local_enable_context({4}), ROCPROFILER_STATUS_SUCCESS);
+        lc::set_toggles_armed(false);
+        EXPECT_TRUE(lc::is_locally_enabled({4}));
+
+        lc::set_toggles_armed(true);
+        EXPECT_EQ(lc::replay_local_disable_context({4}), ROCPROFILER_STATUS_SUCCESS);
+        lc::set_toggles_armed(false);
+        EXPECT_FALSE(lc::is_locally_enabled({4}));
+    }
+
+    EXPECT_TRUE(lc::is_locally_enabled({4})) << "a local stop must not outlive the replay loop";
+}
+
+// A rejected toggle records nothing, so it cannot make a context look locally stopped.
+TEST(kernel_replay_local_context, is_locally_enabled_ignores_rejected_toggles)
+{
+    fake_active_contexts             active{11};
+    lc::scoped_local_context_control loop{active.array};
+
+    lc::set_toggles_armed(true);
+    EXPECT_EQ(lc::replay_local_disable_context({12}), ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED);
+    lc::set_toggles_armed(false);
+    EXPECT_TRUE(lc::is_locally_enabled({12}));
+
+    EXPECT_EQ(lc::replay_local_disable_context({11}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR)
+        << "a toggle outside the arm window is rejected";
+    EXPECT_TRUE(lc::is_locally_enabled({11}));
 }
