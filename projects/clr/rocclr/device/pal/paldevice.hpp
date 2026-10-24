@@ -173,6 +173,7 @@ class NullDevice : public amd::Device {
 
   Pal::AsicRevision asicRevision_;  //!< ASIC revision
   const char* palName_;             //!< Device name
+  uint64_t apuBorrowLimit_ = 0;     //!< Host RAM an APU may use as device memory
 
   //! Fills OpenCL device info structure
   void fillDeviceInfo(const Pal::DeviceProperties& palProp,  //!< PAL device properties
@@ -692,6 +693,14 @@ class Device : public NullDevice {
 
   Pal::gpusize GetMaxFrameBuffer() const { return maxFrameBufferAllocation_; }
 
+  //! Moves device memory of an APU to host memory past the carve-out, within the borrow limit,
+  //! and reserves its size until ApuReleaseReservation. False if it fits in neither.
+  bool ApuPlaceDeviceMemory(Pal::gpusize size, Resource::MemoryType* memType,
+                            bool releaseCache = true) const;
+
+  //! Ends a reservation of ApuPlaceDeviceMemory, once the allocation is accounted or failed
+  void ApuReleaseReservation(Pal::gpusize size) const { apuReserved_ -= size; }
+
   Pal::gpusize TotalAlloc() const {
     Pal::gpusize local = allocedMem[Pal::GpuHeapLocal] - resourceCache().persistentCacheSize();
     Pal::gpusize invisible = allocedMem[Pal::GpuHeapInvisible] - resourceCache().lclCacheSize();
@@ -774,6 +783,8 @@ class Device : public NullDevice {
   Pal::GpuMemoryHeapProperties
       heaps_[Pal::GpuHeapCount];           //!< Information about heaps, returned from PAL
   Pal::gpusize maxFrameBufferAllocation_;  //!< To reserve some memory in frame buffer
+  Pal::gpusize apuCarveOutLimit_ = 0;      //!< Device memory an APU's carve-out holds
+  mutable std::atomic<Pal::gpusize> apuReserved_{0};      //!< APU device memory being allocated
   std::map<Pal::IQueue*, QueueRecycleInfo*> queue_pool_;  //!< Pool of PAL queues for recycling
   amd::Program* trap_handler_ = nullptr;  //!< Trap handler program for debugger setup
 };

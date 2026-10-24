@@ -361,7 +361,18 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   const uint64_t gartCredit = gartSize - std::min<uint64_t>(gartSize / 4, 4 * Gi);
 
   if (settings().apuSystem_) {
-    info_.globalMemSize_ += gartCredit;
+    // The carve-out is host DRAM too, so don't add the aperture on top of it. The OS lets a GPU
+    // share the part of host RAM the aperture is; that share of all DRAM, carve-out included, is
+    // what the GPU may hold, so borrow only what the carve-out doesn't cover.
+    const uint64_t hostRam = amd::Os::hostTotalPhysicalMemory();
+    apuBorrowLimit_ = gartCredit;
+    if (!PAL_APU_STACK_APERTURE && (hostRam > gartSize)) {
+      const uint64_t carveOutExcess =
+          static_cast<uint64_t>(static_cast<double>(localRAM) * (hostRam - gartSize) / hostRam);
+      apuBorrowLimit_ =
+          (gartSize > carveOutExcess) ? std::min(gartSize - carveOutExcess, gartCredit) : 0;
+    }
+    info_.globalMemSize_ += apuBorrowLimit_;
   }
 
   // Find the largest heap form FB memory
@@ -979,6 +990,8 @@ bool Device::create(Pal::IDevice* device) {
   } else {
     maxFrameBufferAllocation_ = std::max(maxInvisibleAllocation, maxVisibleAllocation);
   }
+  // An APU places device memory in either heap, so its carve-out holds both
+  apuCarveOutLimit_ = maxInvisibleAllocation + maxVisibleAllocation;
 
   if (!ValidateComgr()) {
     LogError("Code object manager initialization failed!");
@@ -1978,6 +1991,46 @@ bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pCont
     }
   }
   return true;
+}
+
+// Device memory past an APU's carve-out goes to host RAM, which the GPU shares with the OS:
+// running it out hangs the OS instead of failing allocations. So past the carve-out, borrow only up
+// to the borrow limit and fail the allocation otherwise.
+bool Device::ApuPlaceDeviceMemory(Pal::gpusize size, Resource::MemoryType* memType,
+                                  bool releaseCache) const {
+  // REMOTE_ALLOC, set for tiny carve-outs too, makes Resource::create place it in host RAM
+  const bool hostOnly = settings().remoteAlloc_ || (*memType == Resource::RemoteUSWC);
+  // Reserves the size until the allocation is accounted, so concurrent ones can't overcommit.
+  // The counters include cached allocations, which hold their memory too.
+  auto reserve = [&](bool host) {
+    const Pal::gpusize limit = host ? apuBorrowLimit_ : apuCarveOutLimit_;
+    Pal::gpusize reserved = apuReserved_.load();
+    do {
+      const Pal::gpusize used =
+          host ? allocedMem[Pal::GpuHeapGartUswc] + allocedMem[Pal::GpuHeapGartCacheable]
+               : allocedMem[Pal::GpuHeapLocal] + allocedMem[Pal::GpuHeapInvisible];
+      if (used + reserved + size > limit) {
+        return false;
+      }
+    } while (!apuReserved_.compare_exchange_weak(reserved, reserved + size));
+    return true;
+  };
+  if (!hostOnly && reserve(false)) {
+    return true;
+  }
+  // Release the cache before borrowing host RAM, as GpuMemoryReference::Create does when PAL fails
+  const bool cacheReleased = releaseCache && resourceCache().free();
+  if (!hostOnly && cacheReleased && reserve(false)) {
+    return true;
+  }
+  if (reserve(true)) {
+    if (!settings().remoteAlloc_) {
+      *memType = Resource::RemoteUSWC;
+    }
+    return true;
+  }
+  ClPrint(amd::LOG_WARNING, amd::LOG_MEM, "APU can't place %llu MB of device memory", size / Mi);
+  return false;
 }
 
 bool Device::globalFreeMemory(size_t* freeMemory) const {

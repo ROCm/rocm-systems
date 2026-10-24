@@ -2105,8 +2105,20 @@ void MemorySubAllocator::forceResident(GpuMemoryReference* mem_ref) {
 
 // ================================================================================================
 bool MemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
+  const Pal::gpusize chunkSize = device_->settings().subAllocationChunkSize_;
+  // An APU takes a chunk only where device memory may go. This runs under the cache lock, so the
+  // cache isn't released; past the carve-out the allocation gets its own memory instead.
+  const bool apuPlaced = amd::IS_HIP && device_->settings().apuSystem_;
+  Resource::MemoryType memType = Resource::Local;
+  if (apuPlaced && !device_->ApuPlaceDeviceMemory(chunkSize, &memType, false)) {
+    return false;
+  }
+  if (apuPlaced && (memType != Resource::Local)) {
+    device_->ApuReleaseReservation(chunkSize);
+    return false;
+  }
   Pal::GpuMemoryCreateInfo createInfo = {};
-  createInfo.size = device_->settings().subAllocationChunkSize_;
+  createInfo.size = chunkSize;
   createInfo.alignment = device_->properties().gpuMemoryProperties.fragmentSize;
   createInfo.vaRange = Pal::VaRange::Default;
   createInfo.priority = Pal::GpuMemPriority::Normal;
@@ -2121,6 +2133,9 @@ bool MemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
     createInfo.flags.interprocess = 1;
   }
   GpuMemoryReference* mem_ref = GpuMemoryReference::Create(*device_, createInfo);
+  if (apuPlaced) {
+    device_->ApuReleaseReservation(chunkSize);
+  }
   if (mem_ref != nullptr) {
     // Workaround: some chunk memory are not guaranteed to be resident during initial allocation.
     forceResident(mem_ref);
