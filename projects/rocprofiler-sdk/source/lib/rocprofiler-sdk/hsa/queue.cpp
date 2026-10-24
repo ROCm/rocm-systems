@@ -571,6 +571,7 @@ WriteInterceptor(const void* packets,
     if(graph_launch_active && no_real_consumers && !has_kernel_replay && !hip::event::is_active())
     {
         gls->dispatch_count += num_dispatch_packets;
+        gls->node_counter += num_dispatch_packets;  // keep later ordinals in enqueue order
         writer(packets, pkt_count);
         return;
     }
@@ -833,6 +834,9 @@ WriteInterceptor(const void* packets,
                graph_launch_state != nullptr)
                 ++graph_launch_state->dispatch_count;
 
+            // the dispatch's graph launch and its ordinal in it (zeros outside a graph launch)
+            auto graph_identity = ::rocprofiler::hip::graph::next_enqueue_identity();
+
             _packet_data.callback_record =
                 callback_record_t{sizeof(callback_record_t),
                                   rocprofiler_timestamp_t{0},
@@ -847,6 +851,8 @@ WriteInterceptor(const void* packets,
                                       .group_segment_size   = pkt_info.group_segment_size,
                                       .workgroup_size       = pkt_info.workgroup_size,
                                       .grid_size            = pkt_info.grid_size,
+                                      .graph_exec_id        = graph_identity.graph_exec_id,
+                                      .graph_node_id        = graph_identity.graph_node_id,
                                       .reserved_padding     = {0}}};
 
             {

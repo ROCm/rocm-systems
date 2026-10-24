@@ -399,6 +399,16 @@ current_launch_state()
     return g_launch_stack.empty() ? nullptr : &g_launch_stack.back();
 }
 
+enqueue_identity
+next_enqueue_identity()
+{
+    auto* state = current_launch_state();
+    if(state == nullptr) return enqueue_identity{};
+
+    return enqueue_identity{.graph_exec_id = {.handle = state->graph_exec_id},
+                            .graph_node_id = {.handle = state->node_counter++}};
+}
+
 uint64_t
 lookup_graph_exec_id(::hipGraphExec_t exec)
 {

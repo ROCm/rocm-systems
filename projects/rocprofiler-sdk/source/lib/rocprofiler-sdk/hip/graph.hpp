@@ -52,6 +52,20 @@ struct launch_state
 launch_state*
 current_launch_state();
 
+/// The graph identity of an operation a graph launch enqueues: its launch's graph_exec_id and the
+/// operation's ordinal within the launch. Both handles are 0 outside a graph launch.
+struct enqueue_identity
+{
+    rocprofiler_graph_exec_id_t graph_exec_id = {0};
+    rocprofiler_graph_node_id_t graph_node_id = {0};
+};
+
+/// Called once per kernel dispatch or memory copy as it is enqueued on this thread: the launch's
+/// graph_exec_id and the next ordinal (launch_state::node_counter), so kernel dispatches and memory
+/// copies share one numbering in enqueue order. Returns zeros outside a graph launch.
+enqueue_identity
+next_enqueue_identity();
+
 /// Internal table-wrapping installer (specialized in graph.cpp for the HIP dispatch table type).
 template <typename TableT>
 void
