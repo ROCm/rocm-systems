@@ -653,7 +653,7 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
             return INVALID_QUEUE;
         };
         let selected = if bit_count == 0 {
-            let compute_units = runtime.gpus[gpu_index].info.compute_unit_count;
+            let compute_units = runtime.gpus[gpu_index].info().compute_unit_count;
             full_cu_mask(compute_units)
         } else {
             // SAFETY: The ABI requires bit_count / 32 readable words. Own them
@@ -711,7 +711,7 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_get_mask(
             return INVALID_QUEUE;
         };
         let enabled = if record.cu_mask.is_empty() {
-            full_cu_mask(runtime.gpus[gpu_index].info.compute_unit_count)
+            full_cu_mask(runtime.gpus[gpu_index].info().compute_unit_count)
         } else {
             record.cu_mask.clone()
         };
