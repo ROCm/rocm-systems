@@ -50,7 +50,6 @@
 #include <cinttypes>
 #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -690,6 +689,19 @@ bool Device::create() {
                    pciDeviceId_);
     return false;
   }
+
+  //Launch descriptor format 4 fw supported version.
+  static constexpr uint32_t kMinUcodeForFormat4 = 352;
+  uint32_t ucodeVersion = 0;
+  const hsa_status_t ucodeStatus = Hsa::agent_get_info(
+      bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UCODE_VERSION), &ucodeVersion);
+
+  hsaSettings->ext_dispatch_packet_ld_ =
+      (ucodeStatus == HSA_STATUS_SUCCESS) && (ucodeVersion >= kMinUcodeForFormat4);
+
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT,
+          "Format4 check: ucodeStatus=%d, ucodeVersion=%u, kMinUcodeForFormat4=%u, ext_dispatch_packet_ld=%d",
+          ucodeStatus, ucodeVersion, kMinUcodeForFormat4, hsaSettings->ext_dispatch_packet_ld_);
 
   if (!ValidateComgr()) {
     LogPrintfError("Code object manager initialization failed for HSA device %s (PCI ID %x)",
@@ -4320,6 +4332,23 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
       // launch's slot only when the actual carrier is a kernel dispatch.
       ps->flags_.done_ = false;
       ps->dispatch_slot_ = ProfilingSignal::kNoDispatchSlot;
+      // Record the queue this patched dispatch signal runs on (resolved from the
+      // owning segment's stream at launch) so profiling attributes it to the
+      // right stream rather than the graph launch stream.
+      ps->queue_index_ = patch.queue_index;
+      uint16_t hdr;
+      memcpy(&hdr, patch.packet, sizeof(hdr));
+      uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
+      // A kernel dispatch could be a vendor-specific ext-kernel-dispatch
+      // packet, identified by amd_format (byte 2).  Classify it as a dispatch so
+      // the patched last-node completion signal contributes its GPU timing like
+      // every other graph kernel node.
+      const uint8_t amdFormat = patch.packet[2];
+      ps->flags_.isPacketDispatch_ =
+          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) ||
+          (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+           (amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
+            amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD));
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait).
       // Slot 0 also covers a barrier-value packet: its signal aliases dep_signal[0].
