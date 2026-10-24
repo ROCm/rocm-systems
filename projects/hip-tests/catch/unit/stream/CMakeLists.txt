@@ -40,6 +40,7 @@ if(HIP_PLATFORM MATCHES "amd")
                hipStreamSynchronize_spt.cc
                hipStreamBatchMemOp.cc
                hipStreamValueCapture.cc
+               hipStreamMemOpPublication.cc
                hipStreamPriorityAqlLog.cc
                # disabled on NVIDIA due to lack of hipStreamGetCaptureInfo_v2 in cuda 13.0+
                 hipStreamLegacy.cc

@@ -23,19 +23,23 @@ hipError_t ihipBatchMemOperation(hipStream_t stream, cl_command_type cmdType, un
   CHECK_STREAM_DETACHED(stream);
 
   // Validate operations in paramArray
+  bool hasWrites = false;
   for (unsigned int i = 0; i < count; i++) {
     // These operations are currently not supported
     if (paramArray[i].operation == hipStreamMemOpBarrier ||
         paramArray[i].operation == hipStreamMemOpFlushRemoteWrites) {
       return hipErrorInvalidValue;
     }
+    hasWrites |= paramArray[i].operation == hipStreamMemOpWriteValue32 ||
+                 paramArray[i].operation == hipStreamMemOpWriteValue64;
   }
 
   hip::Stream* hip_stream = hip::getStream(stream);
   amd::Command::EventWaitList waitList;
 
   amd::BatchMemoryOperationCommand* command = new amd::BatchMemoryOperationCommand(
-      *hip_stream, cmdType, count, flags, waitList, paramArray, sizeof(hipStreamBatchMemOpParams));
+      *hip_stream, cmdType, count, flags, waitList, paramArray, sizeof(hipStreamBatchMemOpParams),
+      hasWrites);
   command->enqueue();
   command->release();
   HIP_RETURN(hipSuccess);
