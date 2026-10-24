@@ -119,6 +119,10 @@ static ncclResult_t ProxyTestCalloc(const char* file, int line, const char* fn, 
   if (res == ncclSuccess) Track(*op);
   return res;
 }
+static size_t LeftoverCount() {
+  std::lock_guard<std::mutex> lock(g_leftoverMutex);
+  return g_leftovers.size();
+}
 static void FreeUnitLeftovers() {
   std::lock_guard<std::mutex> lock(g_leftoverMutex);
   for (void* p : g_leftovers) std::free(p);
@@ -1878,11 +1882,18 @@ TEST_F(ProxyCallMicrotest, Poll_OtherResponseAllocationOrRecvFailures) {
   g_mallocFailAt = 0;
   EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, this), ncclSystemError);
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Could not allocate proxy response buffer"));
-  theirs = Peer(1);
+}
+
+// The failed recv returns without freeing the response buffer it allocated. Pins a leak; a fix flips this pin.
+TEST_F(ProxyCallMicrotest, Poll_KnownBug_RecvFailureLeaksTheResponseBuffer) {
+  int theirs = Peer(1);
+  char other;
+  int value = 1, out;
   Reply(theirs, &other, ncclSuccess, &value, sizeof(value));
   g_sock.recvFailAt = 0;
   EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, this), ncclRemoteError);
-  FreeUnitLeftovers();  // the failed recv returns without freeing the buffer it allocated
+  EXPECT_EQ(LeftoverCount(), 1u);
+  FreeUnitLeftovers();
 }
 
 TEST_F(ProxyCallMicrotest, Poll_UnexpectedOpIdsFail) {
@@ -2498,7 +2509,23 @@ TEST_F(ProxyServiceLoopMicrotest, Service_ClosedOrFailingPeersAreDroppedWhileOth
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "Connection closed by localRank"));
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Failed to execute operation Setup"));
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "Force closing peer=0"));
-  FreeUnitLeftovers();  // force-closing a peer at stop does not drain its queued setup
+  FreeUnitLeftovers();  // the queued setup, see Service_KnownBug_StopLeaksAForceClosedPeersQueuedSetup
+}
+
+// Force-closing a peer at stop does not drain its queued setup. Pins a leak; a fix flips this pin.
+TEST_F(ProxyServiceLoopMicrotest, Service_KnownBug_StopLeaksAForceClosedPeersQueuedSetup) {
+  int pending = Connect();
+  int stopper = Connect();
+  Init(pending, {0, 1, 0, 0, 0}, &op1_);
+  g_tp.setupDoneAfter = 1000;
+  Request(pending, ncclProxyMsgSetup, 0, nullptr, 0, 0, &op2_);
+  ScopedHook onSetup(g_tp.onSetup, [&] {
+    if (g_tp.setups == 3) Put(stopper, (int)ncclProxyMsgStop);
+  });
+  ncclProxyService(&ps_);
+  EXPECT_EQ(Response<ncclProxyInitResp>(pending, &op1_).connId, 0);
+  EXPECT_EQ(LeftoverCount(), 1u);
+  FreeUnitLeftovers();
 }
 
 TEST_F(ProxyServiceLoopMicrotest, Service_ClosingAPeerDrainsAllItsPendingOps) {
