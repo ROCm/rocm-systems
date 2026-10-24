@@ -1673,12 +1673,13 @@ static size_t compute_bundle_size(const void* blob) {
 }
 
 // Stores a fat binary with the .comment and debug sections of its code
-// objects zeroed; the application's own copy is left alone.
+// objects zeroed; the application's own copy is left alone. Not held to
+// HIP_HRR_CAPTURE_MAX_BLOB_MB.
 static hrr_cap::Hash128 write_fat_binary_blob(const void* blob, size_t blob_size) {
   std::vector<uint8_t> scrubbed(static_cast<const uint8_t*>(blob),
                                 static_cast<const uint8_t*>(blob) + blob_size);
   hrr_cap::scrub::scrub_code_object(scrubbed.data(), scrubbed.size());
-  return hrr_cap::writer::write_blob(scrubbed.data(), scrubbed.size());
+  return hrr_cap::writer::write_fat_binary(scrubbed.data(), scrubbed.size());
 }
 
 void** capture___hipRegisterFatBinary(const void* data) {

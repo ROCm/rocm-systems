@@ -3644,11 +3644,18 @@ static void scan_h2d_payload(PlaybackContext& ctx, const void* blob, size_t n,
 
 // This mirrors the captured API exactly — hipMemcpyAsync on the default stream
 // (stream_rec==0, translated to nullptr) must still use the async variant.
-static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
+static hipError_t replay_memcpy_impl(PlaybackContext& ctx, const char* api,
                                      uint64_t dst_rec, uint64_t src_rec,
                                      uint64_t size, int32_t kind,
                                      bool is_async, hipStream_t stream,
                                      uint64_t hash_lo, uint64_t hash_hi) {
+    // Capture leaves out the contents of a copy over HIP_HRR_CAPTURE_MAX_BLOB_MB.
+    if (kind == hipMemcpyHostToDevice && size > 0 && !hash_lo && !hash_hi) {
+        fprintf(stderr, "[HRR] %s: host-to-device copy of %llu bytes was captured without "
+                        "its contents; refusing the call\n",
+                api, (unsigned long long)size);
+        return hipErrorNotFound;
+    }
     // Only the kinds that write device memory translate dst. A D2H dst is a
     // host buffer replay never uses (validation reads back into its own), and
     // translating it would report every pageable destination as unmapped.
@@ -3757,7 +3764,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
 hipError_t playback_hipMemcpy(PlaybackContext& ctx,
                               const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpy*>(pl);
-    return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes, a->kind,
+    return replay_memcpy_impl(ctx, "hipMemcpy", a->dst, a->src, a->sizeBytes, a->kind,
                               /*is_async=*/false, nullptr,
                               a->blob_hash_lo, a->blob_hash_hi);
 }
@@ -3765,7 +3772,7 @@ hipError_t playback_hipMemcpy(PlaybackContext& ctx,
 hipError_t playback_hipMemcpyAsync(PlaybackContext& ctx,
                                    const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpyAsync*>(pl);
-    return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes, a->kind,
+    return replay_memcpy_impl(ctx, "hipMemcpyAsync", a->dst, a->src, a->sizeBytes, a->kind,
                               /*is_async=*/true, ctx.translate_stream(a->stream),
                               a->blob_hash_lo, a->blob_hash_hi);
 }
@@ -3773,7 +3780,7 @@ hipError_t playback_hipMemcpyAsync(PlaybackContext& ctx,
 hipError_t playback_hipMemcpyHtoD(PlaybackContext& ctx,
                                   const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpyHtoD*>(pl);
-    return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes,
+    return replay_memcpy_impl(ctx, "hipMemcpyHtoD", a->dst, a->src, a->sizeBytes,
                               hipMemcpyHostToDevice,
                               /*is_async=*/false, nullptr,
                               a->blob_hash_lo, a->blob_hash_hi);
@@ -3782,7 +3789,7 @@ hipError_t playback_hipMemcpyHtoD(PlaybackContext& ctx,
 hipError_t playback_hipMemcpyHtoDAsync(PlaybackContext& ctx,
                                        const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpyHtoDAsync*>(pl);
-    return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes,
+    return replay_memcpy_impl(ctx, "hipMemcpyHtoDAsync", a->dst, a->src, a->sizeBytes,
                               hipMemcpyHostToDevice,
                               /*is_async=*/true, ctx.translate_stream(a->stream),
                               a->blob_hash_lo, a->blob_hash_hi);
@@ -3797,7 +3804,7 @@ hipError_t playback_hipMemcpyHtoDAsync(PlaybackContext& ctx,
 hipError_t playback_hipMemcpyWithStream(PlaybackContext& ctx,
                                         const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpyWithStream*>(pl);
-    return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes, a->kind,
+    return replay_memcpy_impl(ctx, "hipMemcpyWithStream", a->dst, a->src, a->sizeBytes, a->kind,
                               /*is_async=*/true, ctx.translate_stream(a->stream),
                               a->blob_hash_lo, a->blob_hash_hi);
 }

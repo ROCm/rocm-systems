@@ -27,6 +27,10 @@
  * Every code object capture stores, in a fat binary or under code_objects/,
  * has its .comment and .debug* sections zeroed: they hold the compiler build
  * and the build paths, and the GPU never loads them.
+ *
+ * A fat binary is stored whatever its size, HIP_HRR_CAPTURE_MAX_BLOB_MB
+ * notwithstanding: replay loads it to run its kernels and resolve its device
+ * globals.
  */
 
 #include "hrr_test_common.hh"
@@ -391,6 +395,81 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
   CHECK(out.find("past the first 4096 bytes") != std::string::npos);
   CHECK(out.find("an offset and size that overflow") != std::string::npos);
   CHECK(out.find("HIP did not register it") != std::string::npos);
+}
+
+// ===========================================================================
+// Fat binaries over HIP_HRR_CAPTURE_MAX_BLOB_MB are stored.
+// ===========================================================================
+namespace {
+// Takes a bundle past the 1 MiB blob limit its test sets.
+constexpr size_t kBundlePad = 2u << 20;
+constexpr char   kPreInitPaddedMarker[] = "HRR fatbin pre-init padded";
+
+// valid_bundle() with kBundlePad bytes in its host entry, which HIP never loads.
+std::vector<uint8_t> padded_bundle(const std::string& target_id,
+                                   const std::vector<uint8_t>& payload) {
+  const size_t pad_at = kPayloadOffset + payload.size();
+  auto b = uncompressed_bundle({{pad_at, kBundlePad, kHostId},
+                                {kPayloadOffset, payload.size(), target_id}},
+                               pad_at + kBundlePad);
+  std::memcpy(b.data() + kPayloadOffset, payload.data(), payload.size());
+  return b;
+}
+
+std::vector<uint8_t> preinit_padded() {
+  return padded_bundle(kForeignId, marker_payload(kPreInitPaddedMarker));
+}
+}  // namespace
+
+// Run with HIP_HRR_CAPTURE_MAX_BLOB_MB set to 1: one bundle over it for each
+// path that records fat binaries.
+TEST_CASE("Unit_HRR_FatBinOverBlobLimit_Direct", "[.][hrr-direct]") {
+  if (getenv("HIP_HRR_CAPTURE_MAX_BLOB_MB") == nullptr)
+    HRR_SKIP("started by Unit_HRR_FatBinOverBlobLimit");
+  REQUIRE(register_fat_binary(pin(preinit_padded())) != nullptr);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  hipDeviceProp_t prop{};
+  HRR_HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  const std::vector<uint8_t> co = compile_code_object();
+  REQUIRE(register_fat_binary(
+              pin(padded_bundle(std::string(kTargetPrefix) + prop.gcnArchName, co))) != nullptr);
+}
+
+HRR_TEST_CASE(Unit_HRR_FatBinOverBlobLimit) {
+  ScopedDir cap(hrr_temp_dir("hrr_fatbin_blob_limit"));
+  std::string out;
+  { hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true,
+                              /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("HIP_HRR_CAPTURE_MAX_BLOB_MB", "1");
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_FatBinOverBlobLimit_Direct\"");
+    out = proc.getOutput();
+    INFO("Capture exit: " << ret << "\n" << out);
+    REQUIRE(ret == 0); }
+  INFO("Capture output:\n" << out);
+  CHECK(out.find("HIP_HRR_CAPTURE_MAX_BLOB_MB") == std::string::npos);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(hrr_single_process_archive(cap.path).string(), arc));
+  CHECK(arc.complete);
+  size_t large = 0, pre_init = 0;
+  for (const auto& ev : arc.events) {
+    if (ev.header().event_type != HRR_API_HIPREGISTERFATBINARY) continue;
+    const auto* a =
+        reinterpret_cast<const hrr_args___hipRegisterFatBinary*>(ev.raw_payload.data());
+    if (a->blob_size <= (1u << 20)) continue;
+    ++large;
+    INFO("Fat binary of " << a->blob_size << " bytes, handle " << a->ret);
+    std::vector<uint8_t> blob;
+    REQUIRE((a->blob_hash_lo != 0 || a->blob_hash_hi != 0));
+    REQUIRE(hrr::read_blob(arc, a->blob_hash_lo, a->blob_hash_hi, blob));
+    CHECK(blob.size() == a->blob_size);
+    if (blob == preinit_padded()) ++pre_init;
+  }
+  // At least the one swept when HIP initialised and the one its shim saw.
+  CHECK(large >= 2);
+  CHECK(pre_init == 1);
 }
 
 // ===========================================================================
