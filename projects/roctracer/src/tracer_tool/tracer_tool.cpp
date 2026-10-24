@@ -27,7 +27,7 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
-#include <experimental/filesystem>
+#include <filesystem>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -56,7 +56,7 @@
 
 void initialize() __attribute__((constructor(101)));
 
-namespace fs = std::experimental::filesystem;
+namespace fs = std::filesystem;
 
 // Macro to check ROC-tracer calls status
 #define CHECK_ROCTRACER(call)                                                                      \

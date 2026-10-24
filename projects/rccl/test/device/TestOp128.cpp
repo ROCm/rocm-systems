@@ -363,10 +363,10 @@ __global__ void kernelPackRoundtripBits(const uint32_t* __restrict__ in,
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) return;
   float val;
-  std::memcpy(&val, &in[i], sizeof(float));
+  __builtin_memcpy(&val, &in[i], sizeof(float));
   auto pack = toPack(val);
   float result = fromPack<float>(pack);
-  std::memcpy(&out[i], &result, sizeof(float));
+  __builtin_memcpy(&out[i], &result, sizeof(float));
 }
 
 TEST_F(PackRoundtripTest, NaN_BitPatternPreserved) {
