@@ -179,6 +179,13 @@
         { "name": "Properties_NLsaTeams",     "description": "GIN properties: number of LSA teams",                   "test_filter": "GinMPIDeviceTests.Properties_NLsaTeams" },
         { "name": "MultiContext_Exclusive",   "description": "GIN multi-context exclusive contexts",                  "test_filter": "GinMPIDeviceTests.MultiContext_Exclusive" },
         { "name": "VASignal_Put",             "description": "GIN VA-signal put",                                     "test_filter": "GinMPIDeviceTests.VASignal_Put" },
+        { "name": "VASignal_NoPayload_IncAndAdd", "description": "GIN VA signal-only Inc and Add",                   "test_filter": "GinMPIDeviceTests.VASignal_NoPayload_IncAndAdd" },
+        { "name": "VASignal_ReadAndReset",    "description": "GIN VA signal read and reset",                          "test_filter": "GinMPIDeviceTests.VASignal_ReadAndReset" },
+        { "name": "VASignal_StrictOrderingFlag", "description": "GIN VA signal with STRICT_ORDERING",               "test_filter": "GinMPIDeviceTests.VASignal_StrictOrderingFlag" },
+        {
+          "name": "VASignal_Put_MultiContext", "description": "GIN VA-signal put across multiple contexts", "test_filter": "GinMPIDeviceTests.VASignal_Put_MultiContext",
+          "env_variables": { "NCCL_GIN_NCONTEXTS": "2" }
+        },
         {
           "name": "RailConnection_Create", "description": "GIN rail connection create; rail-only mode (NCCL_CROSS_NIC=0)", "test_filter": "GinMPIDeviceTests.RailConnection_Create",
           "env_variables": { "NCCL_CROSS_NIC": "0" }
