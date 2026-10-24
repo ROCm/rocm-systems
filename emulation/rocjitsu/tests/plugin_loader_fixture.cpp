@@ -31,6 +31,8 @@ public:
     trace("init");
     sink().write("boundary:init\n");
   }
+
+  void onShutdown() override { trace("shutdown"); }
 };
 
 __attribute__((destructor)) void on_unload() { trace("unload"); }
