@@ -188,7 +188,7 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
         let Some(index) = runtime.gpu_index(args.agent) else {
             return INVALID_AGENT;
         };
-        let info = runtime.gpus[index].info;
+        let info = runtime.gpus[index].info();
         if !session::supported_gpu(info) {
             return NOT_SUPPORTED;
         }

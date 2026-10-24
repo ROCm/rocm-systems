@@ -188,9 +188,10 @@ pub(crate) fn signal_batch_pool(
     let (index, kind) = runtime.decode_gpu_pool(pool)?;
     let gpu = &runtime.gpus[index];
     let extended = kind == GpuPoolKind::ExtendedFine
-        && gpu.info.gfx_major == 9
-        && matches!(gpu.info.gfx_minor, 4 | 5);
-    let coarse = kind == GpuPoolKind::Coarse && gpu.info.gfx_major == 12 && gpu.info.gfx_minor >= 5;
+        && gpu.info().gfx_major == 9
+        && matches!(gpu.info().gfx_minor, 4 | 5);
+    let coarse =
+        kind == GpuPoolKind::Coarse && gpu.info().gfx_major == 12 && gpu.info().gfx_minor >= 5;
     let host_atomic_link = runtime.route_from_nearest_cpu(index).is_some_and(|link| {
         link.kind == MemoryLinkType::Xgmi && link.coherent_support && link.atomic_support_64bit
     });
@@ -249,9 +250,9 @@ pub(crate) fn agent_pool_relationship(
     let owner_node = native_node(owner);
     let same_hive = match (requester_gpu, owner_gpu) {
         (Some(requester), Some(owner)) => {
-            runtime.gpus[requester].info.hive_id == runtime.gpus[owner].info.hive_id
+            runtime.gpus[requester].info().hive_id == runtime.gpus[owner].info().hive_id
         }
-        (None, Some(owner)) => runtime.gpus[owner].info.hive_id == 0,
+        (None, Some(owner)) => runtime.gpus[owner].info().hive_id == 0,
         _ => false,
     };
     let link = requester_node
@@ -339,7 +340,7 @@ pub(crate) fn agent_pools(
         let mut pools = gpu_agent_pools(
             index,
             gpu.fine_grain_pool,
-            !(gpu.info.gfx_major == 12 && gpu.info.gfx_minor == 0),
+            !(gpu.info().gfx_major == 12 && gpu.info().gfx_minor == 0),
         );
         pools.retain(|pool| runtime.decode_gpu_pool(*pool).is_some());
         Ok(pools)

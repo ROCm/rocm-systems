@@ -440,7 +440,7 @@ fn resolve_indirect_batch_entry(
         .or(runtime.gpu_index(source_agent))
         .or(runtime.gpu_index(destination_agent))
         .ok_or(INVALID_AGENT)?;
-    if runtime.gpus[index].info.gfx_minor != 5 {
+    if runtime.gpus[index].info().gfx_minor != 5 {
         return Err(NOT_SUPPORTED);
     }
     let gpu_agent = HsaAgent {
@@ -548,7 +548,7 @@ fn resolve_batch_copy_entries(
             else {
                 return Err(NOT_SUPPORTED);
             };
-            if runtime.gpus[index].info.gfx_minor != 5 {
+            if runtime.gpus[index].info().gfx_minor != 5 {
                 return Err(NOT_SUPPORTED);
             }
             let end_a = source.checked_add(size).ok_or(INVALID_ARGUMENT)?;
@@ -685,7 +685,7 @@ pub(crate) unsafe fn prepare_batch_copy(
         } = &mut route
         {
             if (op.wait.function != 0 || op.signal.operation != 0)
-                && (runtime.gpus[*index].info.gfx_minor != 5
+                && (runtime.gpus[*index].info().gfx_minor != 5
                     || entries.iter().any(|entry| {
                         !matches!(
                             entry,

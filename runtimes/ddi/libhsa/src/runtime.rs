@@ -416,8 +416,6 @@ impl HsaState {
                     u32::try_from(cache.size_bytes).unwrap_or(u32::MAX),
                 ));
             }
-            let asic_family_id = info.drm_asic_family_id.unwrap_or(info.asic_family_id);
-            let timestamp_frequency_hz = info.counter_frequency_hz.unwrap_or(0);
             if lifetime == DriverContextLifetime::Process {
                 // Activation may retain a primary VM even when it returns an
                 // error. A later generation must use a private context.
@@ -432,10 +430,6 @@ impl HsaState {
             } else {
                 false
             };
-            let product_name = endpoint
-                .product_name
-                .clone()
-                .unwrap_or_else(|| "AMD Radeon Graphics".to_owned());
             let mmio_remap = device.gpu().and_then(|gpu| gpu.map_mmio_remap()).ok();
             let hdp_flush = hdp_flush_pointers(
                 mmio_remap
@@ -450,13 +444,9 @@ impl HsaState {
                 }));
             pending.gpus.push(Gpu {
                 endpoint,
-                info,
                 xnack_enabled,
                 device,
                 name: name.into_boxed_str(),
-                product_name: product_name.into_boxed_str(),
-                asic_family_id,
-                timestamp_frequency_hz,
                 hdp_flush,
                 _mmio_remap: mmio_remap,
                 coherency_type: AMD_COHERENCY_TYPE_NONCOHERENT,
@@ -613,7 +603,7 @@ impl HsaState {
         let index = usize::try_from(offset / ISA_COUNT_PER_GPU).ok()?;
         let variant = offset % ISA_COUNT_PER_GPU;
         let gpu = self.gpus.get(index)?;
-        isa_name(&gpu.info, gpu.xnack_enabled, variant).map(|_| (index, variant))
+        isa_name(&gpu.info(), gpu.xnack_enabled, variant).map(|_| (index, variant))
     }
 
     /// Returns the GPU index associated with a valid ISA handle.
@@ -680,7 +670,7 @@ impl HsaState {
         // The allocation API cannot select a bank ordinal. For multiple
         // framebuffer reports use the driver's aggregate capacity instead.
         let bytes = if kind == GpuPoolKind::Group {
-            gpu.info.local_data_share_byte_length
+            gpu.info().local_data_share_byte_length
         } else {
             gpu.endpoint.local_memory_bytes
         };
@@ -722,7 +712,7 @@ impl HsaState {
         let exposed = match kind {
             GpuPoolKind::Fine => local && gpu.fine_grain_pool,
             GpuPoolKind::ExtendedFine => {
-                local && !(gpu.info.gfx_major == 12 && gpu.info.gfx_minor == 0)
+                local && !(gpu.info().gfx_major == 12 && gpu.info().gfx_minor == 0)
             }
             GpuPoolKind::Coarse | GpuPoolKind::Group => local,
         };
