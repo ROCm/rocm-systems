@@ -4346,12 +4346,27 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
            comm->rank, ret);
     }
 
-    NCCLCHECKGOTO(ncclCommPollEventCallbacks(comm, true), ret, fail);
-    NCCLCHECKGOTO(ncclCommPollCallbacks(comm, false), ret, fail);
-    // And keep polling until all graphs referencing us die.
-    while (comm->localPersistentRefs != 0) {
-      NCCLCHECKGOTO(ncclCommPollCallbacks(comm, /*waitSome=*/true), ret, fail);
+    int aborting = COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) != 0;
+    if (aborting) {
+      NCCLCHECKGOTO(ncclCommOrphanPersistentPlans(comm), ret, fail);
     }
+    ncclResult_t pollRet = ncclCommPollEventCallbacks(comm, true);
+    if (pollRet != ncclSuccess) {
+      if (ret == ncclSuccess) ret = pollRet;
+      if (!aborting) goto fail;
+    }
+    pollRet = ncclCommPollCallbacks(comm, false);
+    if (pollRet != ncclSuccess) {
+      if (ret == ncclSuccess) ret = pollRet;
+      if (!aborting) goto fail;
+    }
+    // And keep polling until all graphs referencing us die.
+    if (!aborting) {
+      while (comm->localPersistentRefs != 0) {
+        NCCLCHECKGOTO(ncclCommPollCallbacks(comm, /*waitSome=*/true), ret, fail);
+      }
+    }
+    if (comm->localPersistentRefs == 0) ncclCommDropPersistentPlanRefs(comm);
     while (!ncclIntruQueueEmpty(&comm->legacyRegCleanupQueue)) {
       struct ncclCommCallback* cb = ncclIntruQueueDequeue(&comm->legacyRegCleanupQueue);
       if (cb->fn(comm, cb) != ncclSuccess) {
@@ -4492,6 +4507,24 @@ fail:
   goto exit;
 }
 
+static void persistentPlanReaper(ncclComm_t comm) {
+  while (comm->localPersistentRefs != 0) {
+    ncclResult_t ret = ncclCommPollCallbacks(comm, /*waitSome=*/true);
+    if (ret != ncclSuccess) {
+      WARN("persistentPlanReaper: comm %p rank %d poll error %d", comm, comm->rank, ret);
+      return;
+    }
+  }
+  uint64_t commHash = comm->commHash;
+  int rank = comm->rank;
+  ncclCommDropPersistentPlanRefs(comm);
+  ncclResult_t ret = ncclSuccess;
+  NOWARN(ret = commCleanup(comm), NCCL_DESTROY);
+  if (ret != ncclSuccess) {
+    ATTN("cleanup comm 0x%" PRIx64 " rank %d failed in destroy/abort, error %d", commHash, rank, ret);
+  }
+}
+
 static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
   struct ncclCommFinalizeAsyncJob* job = (struct ncclCommFinalizeAsyncJob*)job_;
   ncclComm_t comm = job->comm;
@@ -4542,12 +4575,15 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
             lbd(curIntraComm, curRank);
           }
         } else if (curIntraComm->revokedFlag) {
-          /* commRevokeAsync already synced streams and stopped proxy;
-           * drain any remaining persistent graph refs and legacy IPC cleanup
-           * callbacks before commCleanup runs (mirrors commDestroySync). */
-          while (curIntraComm->localPersistentRefs != 0) {
-            if ((ret = ncclCommPollCallbacks(curIntraComm, /*waitSome=*/true)) != ncclSuccess) break;
+          if ((ret = ncclCommOrphanPersistentPlans(curIntraComm)) != ncclSuccess) {
+            WARN("commReclaim: reclaiming graph plans failed comm %p (rank = %d) error %d", curIntraComm, curRank,
+                 ret);
           }
+          if ((ret = ncclCommPollCallbacks(curIntraComm, /*waitSome=*/false)) != ncclSuccess) {
+            WARN("commReclaim: polling graph callbacks failed comm %p (rank = %d) error %d", curIntraComm, curRank,
+                 ret);
+          }
+          if (curIntraComm->localPersistentRefs == 0) ncclCommDropPersistentPlanRefs(curIntraComm);
           while (!ncclIntruQueueEmpty(&curIntraComm->legacyRegCleanupQueue)) {
             struct ncclCommCallback* cb = ncclIntruQueueDequeue(&curIntraComm->legacyRegCleanupQueue);
             if (cb->fn(curIntraComm, cb) != ncclSuccess) {
@@ -4570,9 +4606,19 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
         uint64_t commHash = curIntraComm->commHash;
         nextIntraComm = nextIntraComm->intraNext;
 
-        NOWARN(ret = commCleanup(curIntraComm), NCCL_DESTROY);
-        if (ret != ncclSuccess) {
-          ATTN("cleanup comm 0x%" PRIx64 " rank %d failed in destroy/abort, error %d", commHash, curRank, ret);
+        int deferCleanup = (COMPILER_ATOMIC_LOAD(curIntraComm->abortFlag, std::memory_order_acquire) != 0 ||
+                            curIntraComm->revokedFlag) &&
+                           curIntraComm->localPersistentRefs != 0;
+        if (deferCleanup) {
+          std::thread reaperThread;
+          STDTHREADCREATE_GOTO(reaperThread, persistentPlanReaper, ret, exit, curIntraComm);
+          reaperThread.detach();
+        } else {
+          ncclCommDropPersistentPlanRefs(curIntraComm);
+          NOWARN(ret = commCleanup(curIntraComm), NCCL_DESTROY);
+          if (ret != ncclSuccess) {
+            ATTN("cleanup comm 0x%" PRIx64 " rank %d failed in destroy/abort, error %d", commHash, curRank, ret);
+          }
         }
       }
     }

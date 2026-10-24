@@ -945,6 +945,7 @@ struct ncclComm {
   // internal lock: relies on the same single-writer-per-comm contract as the
   // rest of ncclComm (serialized via the group/enqueue API).
   int localPersistentRefs;
+  struct ncclPersistentPlanRef* persistentPlanRefs;
   struct P2pSchedulePair {
     int sendRank;
     int recvRank;
@@ -1154,6 +1155,43 @@ inline ncclResult_t ncclCommPollCallbacks(struct ncclComm* comm, bool waitSome) 
   }
   NCCLCHECK(result);
   return ncclSuccess;
+}
+
+enum ncclPersistentPlanRefState {
+  ncclPersistentPlanRefLive = 0,
+  ncclPersistentPlanRefReleased = 1,
+  ncclPersistentPlanRefOrphaned = 2,
+};
+
+struct ncclPersistentPlanRef {
+  struct ncclPersistentPlanRef* next;
+  struct ncclComm* comm;
+  struct ncclKernelPlan* planHead;
+  int state;
+  int refCount;
+};
+
+inline void ncclPersistentPlanRefDrop(struct ncclPersistentPlanRef* ref) {
+  if (ncclAtomicRefCountDecrement(&ref->refCount) == 0) free(ref);
+}
+
+inline ncclResult_t ncclCommOrphanPersistentPlans(struct ncclComm* comm) {
+  for (struct ncclPersistentPlanRef* ref = comm->persistentPlanRefs; ref != nullptr; ref = ref->next) {
+    int expected = ncclPersistentPlanRefLive;
+    COMPILER_ATOMIC_COMPARE_EXCHANGE(&ref->state, &expected, (int)ncclPersistentPlanRefOrphaned,
+                                     std::memory_order_acq_rel, std::memory_order_acquire);
+  }
+  return ncclSuccess;
+}
+
+inline void ncclCommDropPersistentPlanRefs(struct ncclComm* comm) {
+  struct ncclPersistentPlanRef* ref = comm->persistentPlanRefs;
+  comm->persistentPlanRefs = nullptr;
+  while (ref != nullptr) {
+    struct ncclPersistentPlanRef* next = ref->next;
+    ncclPersistentPlanRefDrop(ref);
+    ref = next;
+  }
 }
 
 inline ncclResult_t ncclCommPollEventCallbacks(struct ncclComm* comm, bool waitSome) {
