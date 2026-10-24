@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -156,6 +157,8 @@ public:
     MemoryWaitDiagnostics memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
     /// Opt in to gfx1250 replay-source overwrite diagnostics independently.
     MemoryWaitDiagnostics xcnt_diagnostics = MemoryWaitDiagnostics::Off;
+
+    ArithmeticPolicy arithmetic{};
 
     /// @brief Whether gfx1250 replay-source diagnostics are enabled.
     bool xcnt_checks_enabled() const {
@@ -686,6 +689,12 @@ public:
   /// @brief Return the CU configuration.
   /// @returns Const reference to the CU configuration.
   const Config &config() const { return config_; }
+  uint64_t arithmetic_flags() const { return arithmetic_.flags(); }
+  /// @brief Restore arithmetic configuration before resuming checkpoint execution.
+  void restore_arithmetic_policy(ArithmeticPolicy policy) {
+    config_.arithmetic = policy;
+    arithmetic_ = ArithmeticExecution(policy);
+  }
   /// @brief Lazily acquire and cache the VM helper pool.
   matrix_coexecution::SharedPool &async_pool();
 
@@ -1360,6 +1369,7 @@ protected:
   virtual std::unique_ptr<Wavefront> create_wavefront(uint32_t wf_id) = 0;
 
   Config config_;
+  ArithmeticExecution arithmetic_;
   matrix_coexecution::SharedPool *async_pool_ = nullptr;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;

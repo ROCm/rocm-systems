@@ -337,6 +337,70 @@ by shader engine, array, and WGP. Within an engine, array `a` and WGP `w` select
 CU child `a * num_cu_per_sh + w`, which reports `WGP_ID = w`. The KFD mask loop
 does not select direct-CU groups; their WGP IDs still follow CU child order.
 
+### CPU arithmetic policy
+
+Configuration and checkpoints currently store this policy. Instruction handlers
+continue to use their existing implementations until the rj-arith integration step.
+The execution behavior described below is the integration contract.
+
+The optional top-level `arithmetic` object selects one semantics mode for
+RDNA3/RDNA4 instructions executed through rj-arith:
+
+```json
+"arithmetic": {
+  "semantics": "compatibility"
+}
+```
+
+| `semantics` | rj-arith mode | Loose fallback | FP status reporting |
+|---|---:|---|---|
+| `loose` | 0 | Loose arithmetic | No |
+| `bit_exact_empirical_allow_loose` | 1 | Allowed | No |
+| `bit_exact_empirical_no_fp_status` | 2 | Forbidden | No |
+| `bit_exact_empirical` | 3 | Forbidden | Required |
+| `compatibility` (temporary default) | 7 | Per instruction | Per instruction |
+
+These names map directly to the corresponding `RJ_ARITH_SEMANTICS_*` constants.
+Modes 4–6 are reserved and unavailable. Strict requests fail through the
+instruction-execution error mechanism when exact arithmetic or required FP
+status is unavailable for that instruction or guest mode.
+
+A supplied top-level object overrides every CU's policy; an omitted `semantics`
+field uses mode 7. Without that object, CU topology `config` entries may set
+`arithmetic_semantics` individually. Unknown semantics names and removed per-CU
+controls are rejected, including invalid per-CU policies hidden by a top-level
+override. The general configuration parser ignores unknown object fields;
+`semantics` is the only supported field in the `arithmetic` object.
+
+The effective per-CU semantics is preserved in checkpoints. Checkpoints without
+an arithmetic policy use mode 7; old explicit policy names must be migrated.
+CPU capabilities are detected during initialization and cached in each CU,
+without synchronized initialization during instruction execution.
+
+Modes 0–3 are totally ordered: larger values impose stricter requirements.
+Temporary compatibility mode 7 is excluded from that ordering. Handlers forward
+it unchanged to rj-arith, whose entry points choose the mode closest to old rocjitsu
+behavior. Exact arithmetic with/without reporting becomes mode 3/2; loose becomes
+mode 0. Old loose arithmetic with reporting also becomes mode 0, so it remains
+executable but may lose FP status. This mode exists only for the rj-arith transition.
+See [rj-arith's design](arith-design.md#compatibility-mode)
+for the instruction-dependent policy and remaining gaps.
+Choose mode 3 to require faithful FP status for every executed instruction.
+Modes 0–2 leave FP status untouched; ordinary results such as comparison masks,
+SCC, EXEC and explicit register writes remain required in every mode. Matrix
+instructions have no FP status output.
+
+These controls cover RDNA3/RDNA4 scalar and vector arithmetic, comparisons,
+conversions, interpolation, dense and sparse WMMA, and register-only data movement.
+Other GPU architectures retain their existing implementations. Decoding, register
+addressing, memory operations, scheduling, HWREG access and trap delivery remain
+rocjitsu responsibilities.
+
+Guest rounding and denormal controls are passed to rj-arith without changing host CPU
+FP controls. rj-arith assumes the default host FP environment. `RJ_FORCE_SCALAR`
+selects rj-arith's baseline CPU path when each CU is constructed; it does not change
+semantics.
+
 ### Memory wait diagnostics
 
 Ordinary memory wait diagnostics are enabled by default; gfx1250 XCNT replay-source
