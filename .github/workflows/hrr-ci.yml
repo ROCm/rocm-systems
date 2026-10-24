@@ -1,0 +1,442 @@
+# HRR CI: generated-source checks, the HRR helper-script tests and the host
+# unit suite, plus the GPU capture/replay suite (hrr-gpu.yml) for changes that
+# touch capture or replay. projects/hrr/tests/scripts/hrr_ci_configure.py
+# decides what runs from projects/hrr/tests/config/ci.yaml; "HRR CI Summary"
+# reports every platform and GPU family in one table.
+
+name: HRR CI
+
+# labeled stays in the types so that adding ci:hrr-capture can still start a
+# run; hrr_ci_configure.py decides from the label itself
+# whether anything runs, and the summary job reports the verdict of the run
+# that actually tested the commit (see `pass_through_ok`). A label that
+# changes nothing therefore cannot mask a failing run on the same commit.
+#
+# The paths filters are the union of the paths.cpu, paths.capture and
+# paths.suite lists of projects/hrr/tests/config/ci.yaml, less paths.excluded,
+# so a pull request that touches no HRR path starts no run.
+# test_hrr_ci_configure.py fails when the two disagree.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - ".github/workflows/hrr-ci.yml"
+      - ".github/workflows/hrr-gpu.yml"
+      - "projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp"
+      - "projects/clr/hipamd/src/amdhip.def.in"
+      - "projects/clr/hipamd/src/hip_code_object.cpp"
+      - "projects/clr/hipamd/src/hip_code_object.hpp"
+      - "projects/clr/hipamd/src/hip_context.cpp"
+      - "projects/clr/hipamd/src/hrr/**"
+      - "projects/hip/include/hip/hip_runtime_api.h"
+      - "projects/hrr/**"
+      - "!projects/hrr/README.md"
+      - "!projects/hrr/skills/**"
+  push:
+    branches: [develop]
+    paths:
+      - ".github/workflows/hrr-ci.yml"
+      - ".github/workflows/hrr-gpu.yml"
+      - "projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp"
+      - "projects/clr/hipamd/src/amdhip.def.in"
+      - "projects/clr/hipamd/src/hip_code_object.cpp"
+      - "projects/clr/hipamd/src/hip_code_object.hpp"
+      - "projects/clr/hipamd/src/hip_context.cpp"
+      - "projects/clr/hipamd/src/hrr/**"
+      - "projects/hip/include/hip/hip_runtime_api.h"
+      - "projects/hrr/**"
+      - "!projects/hrr/README.md"
+      - "!projects/hrr/skills/**"
+  schedule:
+    # Nightly: capture-enabled build and the GPU suite on every HRR family.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      families:
+        description: "Comma-separated GPU families (TheRock keys, e.g. gfx94x,gfx110x). Empty: the families ci.yaml selects."
+        type: string
+        default: ""
+      backend:
+        description: "simulator runs rocJitsu on ubuntu-24.04. gpu runs the real runners."
+        type: choice
+        options: [simulator, gpu]
+        default: simulator
+      ignore_test_config:
+        description: "Run the cases the suite config skips"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Adding a label that cannot change what runs (label_matters() in
+# hrr_ci_configure.py makes the same test) gets a group of its own, so it does
+# not cancel the run in progress; configure then runs nothing for it.
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}${{
+    github.event.action == 'labeled'
+    && github.event.label.name != 'ci:hrr-capture'
+    && format('-label-{0}', github.event.label.name) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The unit suite only needs HIP headers and the hip CMake package; ci.yaml
+  # pins the version.
+  ROCM_INDEX_URL: "https://rocm.nightlies.amd.com/whl-multi-arch/"
+
+jobs:
+  configure:
+    name: Configure
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run_cpu: ${{ steps.decide.outputs.run_cpu }}
+      run_gpu: ${{ steps.decide.outputs.run_gpu }}
+      families: ${{ steps.decide.outputs.families }}
+      simulator_families: ${{ steps.decide.outputs.simulator_families }}
+      gpu_families: ${{ steps.decide.outputs.gpu_families }}
+      skipped_families: ${{ steps.decide.outputs.skipped_families }}
+      reason: ${{ steps.decide.outputs.reason }}
+      rocm_sdk_version: ${{ steps.decide.outputs.rocm_sdk_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            projects/hrr/tests/scripts/hrr_ci_configure.py
+            projects/hrr/tests/config/ci.yaml
+            projects/hrr/tests/config/integration.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout TheRock family matrix
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          repository: ROCm/TheRock
+          # Keep in sync with the TheRock ref in therock-multi-arch-ci.yml.
+          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
+          path: therock
+          sparse-checkout: build_tools/github_actions
+
+      # Current runner labels, as TheRock's setup_multi_arch.yml loads them.
+      - name: Checkout TheRock CI runner config
+        id: ci_config
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        continue-on-error: true
+        with:
+          persist-credentials: false
+          repository: ROCm/therock-ci-config
+          ref: main
+          path: ci-config
+
+      - name: Warn when runner config is unavailable
+        if: ${{ steps.ci_config.outcome == 'failure' }}
+        run: echo "::warning::could not check out ROCm/therock-ci-config; runner labels may be out of date"
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install --no-cache-dir PyYAML==6.0.2
+
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_CONFIG_PATH: ci-config
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          # Empty when the head repository was deleted, which counts as a fork.
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          FAMILIES: ${{ inputs.families }}
+          BACKEND: ${{ inputs.backend }}
+        run: >-
+          python projects/hrr/tests/scripts/hrr_ci_configure.py
+          --event "${EVENT}" --repo "${REPO}" --pr-number "${PR_NUMBER}"
+          --before "${BEFORE}" --after "${AFTER}" --labels "${LABELS}"
+          --action "${ACTION}" --label "${LABEL}" --head-repo "${HEAD_REPO}" --families "${FAMILIES}"
+          --backend "${BACKEND}"
+          --therock-dir therock
+
+  codegen:
+    name: Generated sources
+    needs: configure
+    if: ${{ needs.configure.outputs.run_cpu == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          # The API-ID check reads hrr_api_args.h at the base commit.
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            projects/hrr
+            projects/hip/include
+            projects/clr/hipamd/include
+            projects/clr/hipamd/src/hrr
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install --no-cache-dir PyYAML==6.0.2
+
+      - name: Check generated sources, API IDs and the API matrix
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python projects/hrr/tools/hrr_check_sources.py all --base-sha "${BASE_SHA}"
+
+  scripts:
+    name: HRR script tests
+    needs: configure
+    if: ${{ needs.configure.outputs.run_cpu == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          # Cone mode also checks out projects/clr/hipamd/src/amdhip.def.in,
+          # which gen_hrr_api_args.py reads on import. A test reads hrr-ci.yml.
+          # The generator-rule tests in tools/tests regenerate the handlers from
+          # the HIP headers. A configure test checks the rocJitsu config files exist.
+          sparse-checkout: |
+            projects/hrr
+            projects/hip/include
+            projects/clr/hipamd/include
+            projects/clr/hipamd/src/hrr
+            .github/workflows
+            emulation/rocjitsu/configs
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install test requirements
+        run: python -m pip install --no-cache-dir PyYAML==6.0.2 pytest==8.4.2
+
+      - name: Lint the suite configs
+        run: >-
+          python projects/hrr/tests/scripts/hrr_test_config.py lint
+          projects/hrr/tests/config/unit.yaml
+          projects/hrr/tests/config/handler.yaml
+          projects/hrr/tests/config/integration.yaml
+
+      - name: Run tests
+        run: python -m pytest projects/hrr/tests/scripts projects/hrr/tools/tests
+
+  unit:
+    name: Unit (${{ matrix.os }})
+    needs: configure
+    if: ${{ needs.configure.outputs.run_cpu == 'true' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            exe: hrr-unit-tests
+            linker_flags: ""
+          - os: windows-2022
+            exe: hrr-unit-tests.exe
+            # The MinGW runtime DLLs are not on PATH in later steps.
+            linker_flags: "-static"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            projects/hrr
+            projects/hip/include
+            projects/clr/hipamd/include
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the ROCm SDK
+        env:
+          ROCM_SDK_VERSION: ${{ needs.configure.outputs.rocm_sdk_version }}
+        run: |
+          python -m pip install --no-cache-dir PyYAML==6.0.2
+          python -m pip install --no-cache-dir --index-url "${ROCM_INDEX_URL}" "rocm[devel]==${ROCM_SDK_VERSION}"
+          rocm-sdk init
+          echo "ROCM_SDK=$(rocm-sdk path --root)" >> "${GITHUB_ENV}"
+          rocm-sdk path --bin >> "${GITHUB_PATH}"
+
+      # This tree's HIP headers come first: an API added here is not in the
+      # pinned SDK's headers yet. The SDK supplies the hip CMake package.
+      # On Windows, cygpath -m gives the drive-letter form a native cmake accepts.
+      - name: Configure
+        env:
+          LINKER_FLAGS: ${{ matrix.linker_flags }}
+        run: |
+          tree="$(cygpath -m "${PWD}" 2>/dev/null || echo "${PWD}")"
+          cmake -S projects/hrr -B build -GNinja -Wno-dev \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_PREFIX_PATH=${ROCM_SDK}" \
+            "-DROCM_PATH=${ROCM_SDK}" \
+            "-DHRR_HIP_INCLUDE_DIRS=${tree}/projects/hip/include;${tree}/projects/clr/hipamd/include" \
+            "-DCMAKE_EXE_LINKER_FLAGS=${LINKER_FLAGS}" \
+            -DHRR_BUILD_PLAYBACK=ON \
+            -DHRR_BUILD_TESTS=ON \
+            -DHRR_BUILD_INTEGRATION_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build -j
+
+      # A case compiled out by an #if leaves no failed or skipped result, so
+      # compare the compiled case list with the suite config first.
+      - name: Check the compiled case list
+        env:
+          EXE: ${{ matrix.exe }}
+        run: >-
+          python projects/hrr/tests/scripts/hrr_test_config.py check
+          --binary "build/tests/unit/${EXE}"
+          --config projects/hrr/tests/config/unit.yaml
+
+      - name: Run unit suite
+        env:
+          EXE: ${{ matrix.exe }}
+          OS: ${{ matrix.os }}
+          HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
+        run: >-
+          python projects/hrr/tests/scripts/run_catch2.py
+          --xml "unit-${OS}.xml"
+          --config projects/hrr/tests/config/unit.yaml
+          --arch none
+          -- "build/tests/unit/${EXE}"
+
+      # hrr-handler-tests is POSIX only (tests/unit/CMakeLists.txt), and an
+      # AddressSanitizer build that reaches no GPU. Its results land beside the
+      # unit results as an "Other" row in the summary.
+      - name: Check the compiled handler case list
+        if: ${{ runner.os == 'Linux' }}
+        run: >-
+          python projects/hrr/tests/scripts/hrr_test_config.py check
+          --binary build/tests/unit/hrr-handler-tests
+          --config projects/hrr/tests/config/handler.yaml
+
+      - name: Run handler suite
+        if: ${{ runner.os == 'Linux' }}
+        env:
+          OS: ${{ matrix.os }}
+          HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
+        run: >-
+          python projects/hrr/tests/scripts/run_catch2.py
+          --xml "handler-${OS}.xml"
+          --config projects/hrr/tests/config/handler.yaml
+          --arch none
+          -- build/tests/unit/hrr-handler-tests
+
+      - name: Upload results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: results-unit-${{ matrix.os }}
+          path: |
+            unit-${{ matrix.os }}.xml
+            handler-${{ matrix.os }}.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  gpu:
+    name: GPU
+    needs: configure
+    if: ${{ needs.configure.outputs.run_gpu == 'true' }}
+    uses: ./.github/workflows/hrr-gpu.yml
+    # Note: not using 'secrets: inherit' here; no secrets are needed.
+    with:
+      families: ${{ needs.configure.outputs.families }}
+      simulator_families: ${{ needs.configure.outputs.simulator_families }}
+      gpu_families: ${{ needs.configure.outputs.gpu_families }}
+      ignore_test_config: ${{ inputs.ignore_test_config || false }}
+
+  summary:
+    name: HRR CI Summary
+    needs: [configure, codegen, scripts, unit, gpu]
+    # Also when configure failed: then nothing else ran, and this job fails.
+    if: >-
+      ${{ always() && (needs.configure.result != 'success'
+      || needs.configure.outputs.run_cpu == 'true'
+      || needs.configure.outputs.run_gpu == 'true'
+      || (github.event_name == 'pull_request' && github.event.action == 'labeled')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            projects/hrr/tests/scripts/hrr_ci_report.py
+            projects/hrr/tests/scripts/summarize_junit.py
+          sparse-checkout-cone-mode: false
+
+      - name: Download results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: results-*
+          merge-multiple: true
+          path: results
+
+      - name: Download base build record
+        if: ${{ needs.configure.outputs.run_gpu == 'true' }}
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hrr-base-${{ github.run_id }}
+          path: base
+
+      - name: Summarize
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONFIGURE_RESULT: ${{ needs.configure.result }}
+          REASON: ${{ needs.configure.outputs.reason }}
+          RUN_GPU: ${{ needs.configure.outputs.run_gpu }}
+          FAMILIES: ${{ needs.configure.outputs.families }}
+          SKIPPED: ${{ needs.configure.outputs.skipped_families }}
+          # A labeled run that configured nothing has no HRR job of its own.
+          # GitHub keeps the most recent check run of a name on a commit, so
+          # its summary reports the run that tested this commit instead of
+          # skipping, which would let the label turn a failing HRR CI green.
+          PASS_THROUGH: >-
+            ${{ github.event_name == 'pull_request' && github.event.action == 'labeled'
+            && needs.configure.result == 'success'
+            && needs.configure.outputs.run_cpu == 'false'
+            && needs.configure.outputs.run_gpu == 'false' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: >-
+          python3 projects/hrr/tests/scripts/hrr_ci_report.py
+          --configure-result "${CONFIGURE_RESULT}"
+          --reason "${REASON}" --run-gpu "${RUN_GPU}" --families "${FAMILIES}"
+          --skipped-families "${SKIPPED}"
+          --results-dir results --base-json base/base.json
+          --needs-json "${NEEDS_JSON}"
+          --pass-through "${PASS_THROUGH}" --head-sha "${HEAD_SHA}"

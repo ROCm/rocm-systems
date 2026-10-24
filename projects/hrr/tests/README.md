@@ -10,7 +10,8 @@ are the same ones it uses.
 tests/
   unit/          C++ (Catch2). hrr-unit-tests: CPU only, no GPU, no capture runtime.
   integration/   C++ (Catch2). hrr-integration-tests: real capture, then replay, on a GPU.
-  config/        One YAML file per suite: every case, and where it runs.
+  config/        One YAML file per suite: every case, and where it runs. ci.yaml:
+                 which CI jobs run and on which GPU families.
   include/       Headers both suites include (hrr_test_common.hh, hrr_test_process.hh).
   scripts/       CI helpers that run a suite and report on it, plus the unittest
                  suites for those helpers and for ../tools. Not built.
@@ -139,13 +140,59 @@ PyYAML (used by the api-matrix tools), not ROCm:
 python3 -m unittest discover -s projects/hrr/tests/scripts -p 'test_*.py' -v
 ```
 
-They cover `run_catch2.py`, `summarize_junit.py`, and `hrr_test_config.py`, plus
-the tools in `../tools`: the HRR API ID compatibility check, the playback-handler default
-in the generator, and the [api-matrix](../tools/api-matrix/README.md) scripts.
+They cover `run_catch2.py`, `summarize_junit.py`, `hrr_test_config.py`, and the
+HRR CI scripts (`hrr_ci_configure.py`, `hrr_capture_build.py`, `hrr_ci_report.py`),
+plus the tools in `../tools`: the HRR API ID compatibility check, the
+generated-source checks (`hrr_check_sources.py`), the playback-handler default in
+the generator, and the [api-matrix](../tools/api-matrix/README.md) scripts.
+
+## Choosing what CI runs
+
+[`config/ci.yaml`](config/ci.yaml) is the policy the configure job of `hrr-ci.yml`
+applies (`scripts/hrr_ci_configure.py`):
+
+- `paths.cpu`: a change under one of these runs the generated-source, script and unit
+  jobs. `paths.capture` also runs the capture-enabled build and the GPU suite.
+  `paths.excluded` counts for neither. The `paths` filter of `hrr-ci.yml` is the same
+  lists, so a pull request that touches none of them starts no HRR CI run;
+  `test_hrr_ci_configure.py` fails when the filter and `ci.yaml` disagree.
+- `capture_label` (`ci:hrr-capture`) runs the GPU suite on a pull request that touches
+  an HRR path but no capture path. Adding it restarts the run; adding any other label,
+  including TheRock's `ci:gfx...` labels, leaves the run in progress alone.
+- `families`: the GPU families the suite runs on, as TheRock family keys, on the runner
+  TheRock's family matrix names. By default each runs on every event (`pull_request`,
+  `push`, `schedule`, `workflow_dispatch`). Per family, `enabled: false` leaves it to
+  explicit requests, `triggers` narrows the events, `runner` overrides the runner label
+  and `multi_gpu_triggers` names the events on which it takes TheRock's multi-GPU
+  runner instead of the single-GPU one. TheRock's multi-GPU pools are 8-GPU nodes, so
+  only gfx950 uses one, nightly; elsewhere the cases that need two devices skip and
+  show in the summary's Skip column. The `workflow_dispatch` input `families`
+  replaces the selection and can name a disabled family. Only gfx94x is enabled
+  today; the others are listed with `enabled: false`, so a real-GPU run includes
+  them only when that input names them. `ci:gfx...` labels are TheRock's and do
+  not select an HRR family.
+  `targets.arch` in `config/integration.yaml` stays wide on purpose: configure fails
+  unless it covers every family listed here, and a requested family needs its
+  architecture compiled into the binary.
+- `rocm_sdk_version`: the ROCm SDK the unit job installs.
+
+An unknown key, trigger or family fails the configure job, and so does a family whose
+GPU targets in TheRock's family matrix are not all in `targets.arch` of
+`config/integration.yaml`. To take load off the GPU
+pools, disable families or narrow their triggers here.
+
+TheRock never reads the HRR workflows or `projects/hrr/tests`, `tools` and `skills`,
+so `.github/skip-ci-config.toml` lists them: a pull request that changes only those
+skips TheRock CI. CLR compiles against `projects/hrr/include`. Any other change to
+`projects/hrr` builds every TheRock stage until the TheRock commit pinned by
+`.github/workflows/therock-multi-arch-ci.yml` includes
+[TheRock #8965](https://github.com/ROCm/TheRock/pull/8965), which adds
+`hrr-playback` to TheRock's `compiler-runtime` stage on Linux.
 
 ## Configuring where a case runs
 
-The build is one fat binary for every architecture in `HRR_ARCHS`. Nothing about a
+The build is one fat binary for every architecture in `targets.arch` of
+`config/integration.yaml`. Nothing about a
 GPU is decided at build time. CI decides at run time, from
 [`config/integration.yaml`](config/integration.yaml) (and
 [`config/unit.yaml`](config/unit.yaml) for the CPU suite).
@@ -179,8 +226,9 @@ skip:
 ```
 
 Direct workloads (`[hrr-direct]`, `[direct]`) are spawned by a driver and must not
-carry rules. `targets.arch` is the same list as `HRR_ARCHS` in
-`.github/workflows/hrr-ci.yml`; `hrr_test_config.py lint --workflow` checks that.
+carry rules. The GPU build compiles the integration binary for exactly the
+`targets.arch` of `config/integration.yaml`, so adding an architecture there is
+what builds it.
 
 CI compares each binary's registered cases against its YAML, in both directions,
 because a case behind an `#if` or a missing define disappears without any failure.

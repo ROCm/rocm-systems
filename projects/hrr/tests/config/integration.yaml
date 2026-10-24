@@ -3,6 +3,8 @@
 #
 # A skip rule matches when every key under "when" matches (a list is OR, a
 # missing key matches anything, and a value may be a glob such as gfx11*).
+# "emulator: true" matches only a run under a GPU emulator (run_catch2.py
+# --launcher), "emulator: false" only a run on a real device.
 # kind: disabled is a temporary regression and requires a public issue URL.
 # kind: unsupported is permanent and needs only a reason.
 #
@@ -15,7 +17,7 @@ binary: hrr-integration-tests
 select: "[hrr]~[direct]"
 targets:
   os: [linux, windows]
-  arch: [gfx90a, gfx942, gfx950, gfx1030, gfx1100, gfx1101, gfx1102, gfx1150, gfx1151, gfx1153, gfx1200, gfx1201, gfx1250]
+  arch: [gfx90a, gfx942, gfx950, gfx1030, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1153, gfx1200, gfx1201, gfx1250]
 cases:
   Unit_HRR_AllApisRoundtrip: {}
   Unit_HRR_AllApis_Direct: {}
@@ -39,10 +41,20 @@ cases:
   Unit_HRR_ApiMatrix_SptCoopLaunch_Direct: {}
   Unit_HRR_ApiMatrix_SptKernelLaunch_Direct: {}
   Unit_HRR_ApiMatrix_T0_Roundtrip: {}
-  Unit_HRR_ApiMatrix_T1_Roundtrip: {}
+  Unit_HRR_ApiMatrix_T1_Roundtrip:
+    skip:
+      - when: {emulator: true}
+        kind: disabled
+        reason: "hipIpcGetMemHandle fails under rocJitsu since the shared runtime API headers change (hsa_amd_ipc_memory_create returns HSA_STATUS_ERROR)"
+        issue: "https://github.com/ROCm/rocm-systems/issues/13803"
   Unit_HRR_ApiMatrix_T2_Roundtrip: {}
   Unit_HRR_ApiMatrix_T3_Roundtrip: {}
-  Unit_HRR_ApiMatrix_T4_Roundtrip: {}
+  Unit_HRR_ApiMatrix_T4_Roundtrip:
+    skip:
+      - when: {arch: ["gfx11*", "gfx120*"], emulator: true}
+        kind: disabled
+        reason: "hipMemcpyToArray and hipMemcpyFromArray copy no data under the RDNA3 and RDNA4 rocJitsu configs"
+        issue: "https://github.com/ROCm/rocm-systems/issues/13724"
   Unit_HRR_ApiMatrix_T5_Roundtrip: {}
   Unit_HRR_ApiMatrix_UC1Dense_Direct: {}
   Unit_HRR_BlankCaptureOutputCapturesNothing: {}
@@ -50,7 +62,12 @@ cases:
   Unit_HRR_CaptureActiveMarker: {}
   Unit_HRR_CaptureActiveMarker_Direct: {}
   Unit_HRR_CaptureArchiveIsPrivate: {}
-  Unit_HRR_CaptureCapabilities: {}
+  Unit_HRR_CaptureCapabilities:
+    skip:
+      - when: {emulator: true}
+        kind: disabled
+        reason: "hipIpcGetMemHandle fails under rocJitsu since the shared runtime API headers change (hsa_amd_ipc_memory_create returns HSA_STATUS_ERROR)"
+        issue: "https://github.com/ROCm/rocm-systems/issues/13803"
   Unit_HRR_CaptureCapabilitiesImport_Direct: {}
   Unit_HRR_CaptureCapabilities_Direct: {}
   Unit_HRR_CaptureClosesArchiveDirs: {}
@@ -123,7 +140,11 @@ cases:
   Unit_HRR_DiskSpace_StopsBeforeReserve_Direct: {}
   Unit_HRR_DispatchSwap_ChildKeepsInheritedPreload: {}
   Unit_HRR_DispatchSwap_Direct: {}
-  Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer: {}
+  Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer:
+    skip:
+      - when: {emulator: true}
+        kind: unsupported
+        reason: "The case replaces LD_PRELOAD in its child, which drops the rocJitsu interposer and leaves the child with no device"
   Unit_HRR_DispatchSwap_Preload_Direct: {}
   Unit_HRR_DispatchSwap_Unreplayable_Direct: {}
   Unit_HRR_DispatchSwap_WrapperOutlivesCapture: {}
@@ -143,7 +164,12 @@ cases:
   Unit_HRR_FailedBlobClose_Direct: {}
   Unit_HRR_FailedBlobClose_LeavesCaptureIncomplete: {}
   Unit_HRR_FailedBlobWrite_Direct: {}
-  Unit_HRR_FailedBlobWrite_LeavesCaptureIncomplete: {}
+  Unit_HRR_FailedBlobWrite_LeavesCaptureIncomplete:
+    skip:
+      - when: {arch: ["gfx94*", "gfx95*", "gfx125*"], emulator: true}
+        kind: disabled
+        reason: "Local-mode rocJitsu runs inside the process, and the case lowers RLIMIT_FSIZE, which also limits the simulator"
+        issue: "https://github.com/ROCm/rocm-systems/issues/13726"
   Unit_HRR_FailedMemcpy3DNotRecorded: {}
   Unit_HRR_FailedMemcpy3D_Direct: {}
   Unit_HRR_FailedShimCallsNotRecorded: {}
@@ -164,8 +190,18 @@ cases:
   Unit_HRR_ForkWhileRecording_Direct: {}
   Unit_HRR_ForkWhileWriterHoldsLock: {}
   Unit_HRR_ForkWhileWriterHoldsLock_Direct: {}
-  Unit_HRR_Fork_ChildArchiveCompleteAfterParentFailure: {}
-  Unit_HRR_Fork_ChildListsOnlyItsOwnUnreplayableApis: {}
+  Unit_HRR_Fork_ChildArchiveCompleteAfterParentFailure:
+    skip:
+      - when: {arch: ["gfx94*", "gfx95*", "gfx125*"], emulator: true}
+        kind: disabled
+        reason: "Local-mode rocJitsu runs inside the process, and the case lowers RLIMIT_FSIZE, which also limits the simulator"
+        issue: "https://github.com/ROCm/rocm-systems/issues/13726"
+  Unit_HRR_Fork_ChildListsOnlyItsOwnUnreplayableApis:
+    skip:
+      - when: {arch: ["gfx94*", "gfx95*", "gfx125*"], emulator: true}
+        kind: disabled
+        reason: "Local-mode rocJitsu runs inside the process, and the case lowers RLIMIT_FSIZE, which also limits the simulator"
+        issue: "https://github.com/ROCm/rocm-systems/issues/13726"
   Unit_HRR_Fork_Direct: {}
   Unit_HRR_ForkedChildRecordsAfterShutdown: {}
   Unit_HRR_ForkedChildRecordsAfterShutdown_Direct: {}
@@ -197,7 +233,12 @@ cases:
   Unit_HRR_MemPoolExtended_Direct: {}
   Unit_HRR_Memcpy3DSptRoundtrip: {}
   Unit_HRR_Memcpy3DSpt_Direct: {}
-  Unit_HRR_MemcpyExtraRoundtrip: {}
+  Unit_HRR_MemcpyExtraRoundtrip:
+    skip:
+      - when: {arch: ["gfx11*", "gfx120*"], emulator: true}
+        kind: disabled
+        reason: "hipMemcpyToArray and hipMemcpyFromArray copy no data under the RDNA3 and RDNA4 rocJitsu configs"
+        issue: "https://github.com/ROCm/rocm-systems/issues/13724"
   Unit_HRR_MemcpyExtra_Direct: {}
   Unit_HRR_MemcpyPeerRoundtrip: {}
   Unit_HRR_MemcpyPeer_Direct: {}
@@ -232,7 +273,12 @@ cases:
   Unit_HRR_OverflowingMemcpy3DNotRecorded: {}
   Unit_HRR_OverflowingMemcpy3D_Direct: {}
   Unit_HRR_PinnedHostBlobRefused: {}
-  Unit_HRR_PinnedHostFork: {}
+  Unit_HRR_PinnedHostFork:
+    skip:
+      - when: {arch: ["gfx95*"], emulator: true}
+        kind: disabled
+        reason: "The capture subprocess exited 42 under the two-GPU gfx950 rocJITsu configuration; the same case passed on the other rocJITsu families"
+        issue: "https://github.com/ROCm/rocm-systems/issues/14033"
   Unit_HRR_PinnedHostFork_Direct: {}
   Unit_HRR_PinnedHostFreedRoundtrip: {}
   Unit_HRR_PinnedHostFreed_Direct: {}
@@ -273,7 +319,11 @@ cases:
   Unit_HRR_ReplaceKernelBadSpec: {}
   Unit_HRR_ReplaceKernelMissingCO: {}
   Unit_HRR_ReplaceKernelRoundtrip: {}
-  Unit_HRR_SecureExecIgnoresCaptureOutput: {}
+  Unit_HRR_SecureExecIgnoresCaptureOutput:
+    skip:
+      - when: {emulator: true}
+        kind: unsupported
+        reason: "The loader ignores LD_PRELOAD in the set-group-ID copy, which drops the rocJitsu interposer and leaves the copy with no device"
   Unit_HRR_SecureExecProbe_Direct: {}
   Unit_HRR_ShutdownWhileChildOpensArchive: {}
   Unit_HRR_ShutdownWhileChildOpensArchive_Direct: {}
@@ -302,6 +352,11 @@ cases:
   Unit_HRR_VMMRoundtrip: {}
   Unit_HRR_VMM_Direct: {}
   Unit_HRR_VaPlacement_Direct: {}
-  Unit_HRR_VaPlacement_StoredPointer: {}
+  Unit_HRR_VaPlacement_StoredPointer:
+    skip:
+      - when: {arch: ["gfx95*", "gfx125*"], emulator: true}
+        kind: disabled
+        reason: "The multi-GPU rocJitsu configs reject overlapping GEM_VA ranges, so replay cannot place allocations at their capture addresses"
+        issue: "https://github.com/ROCm/rocm-systems/issues/13723"
   Unit_HRR_ZeroInitRead_Direct: {}
   Unit_HRR_ZeroInitRoundtrip: {}

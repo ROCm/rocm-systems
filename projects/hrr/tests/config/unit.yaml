@@ -3,6 +3,8 @@
 #
 # A skip rule matches when every key under "when" matches (a list is OR, a
 # missing key matches anything, and a value may be a glob such as gfx11*).
+# "emulator: true" matches only a run under a GPU emulator (run_catch2.py
+# --launcher), "emulator: false" only a run on a real device.
 # kind: disabled is a temporary regression and requires a public issue URL.
 # kind: unsupported is permanent and needs only a reason.
 #
@@ -15,7 +17,7 @@ binary: hrr-unit-tests
 select: "*"
 targets:
   os: [linux, windows]
-  arch: [gfx90a, gfx942, gfx950, gfx1030, gfx1100, gfx1101, gfx1102, gfx1150, gfx1151, gfx1153, gfx1200, gfx1201, gfx1250]
+  arch: [gfx90a, gfx942, gfx950, gfx1030, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1153, gfx1200, gfx1201, gfx1250]
 cases:
   Unit_HRR_AllocKind_FreeDispatch: {}
   Unit_HRR_Format_BadMagic: {}
@@ -26,6 +28,28 @@ cases:
   Unit_HRR_Format_SmallPayloadForType: {}
   Unit_HRR_Format_TruncatedEvent: {}
   Unit_HRR_Format_UnknownEventType: {}
+  Unit_HRR_Limits_ByteBudget: {}
+  Unit_HRR_Limits_ByteBudgetConcurrent: {}
+  Unit_HRR_Limits_ContiguousSequenceReplays: {}
+  Unit_HRR_Limits_DuplicateIsReportedImmediately: {}
+  Unit_HRR_Limits_DuplicateSequenceEndsReplay: {}
+  Unit_HRR_Limits_EventCap: {}
+  Unit_HRR_Limits_FatalFlagEndsWait: {}
+  Unit_HRR_Limits_FindDuplicateSeq: {}
+  Unit_HRR_Limits_FindSeqGap: {}
+  Unit_HRR_Limits_NoStallWhileACallIsInFlight: {}
+  Unit_HRR_Limits_ParseU64: {}
+  Unit_HRR_Limits_PlaybackContextHostBudget: {}
+  Unit_HRR_Limits_PlaybackRefusesTooManyEvents: {}
+  Unit_HRR_Limits_PlaybackRefusesTooManyThreads: {}
+  Unit_HRR_Limits_PlaybackRefusesWallSecondsAboveMaximum: {}
+  Unit_HRR_Limits_QueryRetryIsBounded: {}
+  Unit_HRR_Limits_ReadFileMissing: {}
+  Unit_HRR_Limits_ReadFileRefusesOversize: {}
+  Unit_HRR_Limits_ScopedCharge: {}
+  Unit_HRR_Limits_SequenceGapEndsReplay: {}
+  Unit_HRR_Limits_ThreadCap: {}
+  Unit_HRR_Limits_WallClockWatchdog: {}
   Unit_HRR_Playback_PlacementHeldRanges: {}
   Unit_HRR_Playback_PlacementPlan: {}
   Unit_HRR_Playback_ReplayedH2DDrainGraphGuard: {}
@@ -45,6 +69,94 @@ cases:
   Unit_HRR_Recovery_TornPayload: {}
   Unit_HRR_Recovery_TrailerCountMismatch: {}
   Unit_HRR_Recovery_TrailerOvercounts: {}
+  Unit_HRR_Repair_DropsSetuidAndSetgid:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_Repair_EventsLinkIsRefused:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_Repair_KeepsFilePermissions:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_Repair_LinkAtOldTempNameIsLeftAlone:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_Repair_LinkedPidDirectoryIsNotIndexed:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_Repair_ManifestLinkIsRefused:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_Repair_PidDirectoryLinkIsRefused:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_Repair_RecoversTornEventsWithoutLeftovers:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_Repair_RootManifestLinkIsRefusedBeforeFanOut:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_Repair_UserNamedLinkIsResolved:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_SafeFs_DotDotAfterLinkIsResolvedByTheKernel:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_SafeFs_FdOwnsItsDescriptor:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_SafeFs_OpenDirRefusesLinks:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_SafeFs_RandomHexAndErrnoText:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_SafeFs_TempFileModeAndName:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_SafeFs_TempIsExclusiveAndReplaceDoesNotFollow:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_SafeFs_UnlinkAtRemovesTheNameNotTheTarget:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_repair_test.cc is compiled out under _WIN32 (POSIX file-descriptor APIs)
+  Unit_HRR_Slots_BoundedCstr: {}
+  Unit_HRR_Slots_JitOptionArray: {}
+  Unit_HRR_Slots_JitOptionClassification: {}
   Unit_HRR_Scrub_RefusesOutOfBoundsTables: {}
   Unit_HRR_Scrub_SkipsUnterminatedName: {}
   Unit_HRR_Scrub_ZeroesAndRetypesBuildInfo: {}

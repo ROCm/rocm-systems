@@ -1,0 +1,151 @@
+# What HRR CI runs and where, read by
+# projects/hrr/tests/scripts/hrr_ci_configure.py (hrr-ci.yml's configure job).
+# Unknown keys, triggers or families are errors.
+version: 1
+
+# The ROCm SDK the host unit job installs. Pinned so a run does not depend on
+# the day's nightly.
+rocm_sdk_version: "10.1.0a20260822"
+
+# Path prefixes, relative to the repository root. A path ending in "/" matches
+# everything under it; any other path matches only itself.
+paths:
+  # A change under any of these runs the generated-source, script and unit jobs.
+  # Changes under emulation/rocjitsu, runtimes/api-headers and
+  # shared/machine-readable-isa are not path triggers; the nightly schedule and
+  # workflow_dispatch cover them.
+  cpu:
+    - projects/hrr/
+    - projects/clr/hipamd/src/hrr/
+    - projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp
+    - projects/clr/hipamd/src/amdhip.def.in
+    - projects/hip/include/hip/hip_runtime_api.h
+    - .github/workflows/hrr-ci.yml
+    - .github/workflows/hrr-gpu.yml
+  # A change under any of these also runs the capture-enabled build and the GPU
+  # suite. hip_runtime_api.h is deliberately absent: almost every HIP API change
+  # touches it, and the generated-source job already checks HRR against it.
+  # amdhip.def.in is absent for the same reason (cpu only).
+  capture:
+    - projects/clr/hipamd/src/hrr/
+    - projects/clr/hipamd/src/hip_context.cpp
+    - projects/clr/hipamd/src/hip_code_object.cpp
+    - projects/clr/hipamd/src/hip_code_object.hpp
+    - projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp
+    - projects/hrr/CMakeLists.txt
+    - projects/hrr/include/
+    - projects/hrr/playback/
+    - projects/hrr/tests/CMakeLists.txt
+    - projects/hrr/tests/include/
+    - projects/hrr/tests/integration/
+    - projects/hrr/tests/config/integration.yaml
+    - projects/hrr/tests/scripts/run_catch2.py
+    - projects/hrr/tests/scripts/hrr_test_config.py
+    - projects/hrr/tests/scripts/summarize_junit.py
+    - projects/hrr/tests/scripts/hrr_capture_build.py
+    - projects/hrr/tests/scripts/hrr_ci_configure.py
+    - projects/hrr/tests/scripts/hrr_ci_report.py
+    - .github/workflows/hrr-ci.yml
+    - .github/workflows/hrr-gpu.yml
+  # Runs the suite without changing the capture binary. The capture cache key
+  # does not include these paths.
+  suite:
+    - projects/hrr/tests/config/ci.yaml
+  # Ignored by both lists; hrr-skills.yml covers these.
+  excluded:
+    - projects/hrr/skills/
+    - projects/hrr/README.md
+
+# A pull request with this label runs the GPU suite even when it touches no
+# capture path. It must still touch a cpu, capture or suite path: hrr-ci.yml's
+# paths filter, which is those lists, starts no run otherwise.
+capture_label: ci:hrr-capture
+
+# simulator runs rocJitsu on ubuntu-24.04. gpu runs TheRock's real runners.
+# workflow_dispatch passes its backend input. Any other event uses default,
+# unless the event is listed under backend.gpu.triggers. No event is, so a
+# pull request, a push and the nightly schedule never queue on a real GPU
+# runner; a person asks for one with workflow_dispatch (backend gpu).
+backend:
+  default: simulator
+  gpu:
+    triggers: []
+
+# Default simulator jobs. These do not consult families.*.enabled. Each row is
+# a rocJitsu KMD config that exposes the family's GPU to HIP, and the whole
+# integration suite passes on it, less the cases integration.yaml skips with
+# "emulator: true" (each names its reason). Checked 2026-10-19 on a
+# two-GPU gfx950 config and the single-GPU configs of the others.
+#
+# Not listed: gfx103x, gfx1150 and gfx1153, which rocJitsu has no config for.
+# A workflow_dispatch families input that names one fails the configure job.
+simulator:
+  runner: ubuntu-24.04
+  default_families: [gfx90a, gfx94x, gfx950, gfx110x, gfx1151, gfx120x, gfx125x]
+  configs:
+    gfx94x: emulation/rocjitsu/configs/gfx942_cdna3_kmd.json
+    gfx950: emulation/rocjitsu/configs/gfx950_mi355x_kmd_2gpu.json
+    gfx90a: emulation/rocjitsu/configs/gfx90a_mi210_kmd.json
+    gfx110x: emulation/rocjitsu/configs/gfx1100_w7900.json
+    gfx1151: emulation/rocjitsu/configs/gfx1151.json
+    gfx120x: emulation/rocjitsu/configs/gfx1201_r9700.json
+    gfx125x: emulation/rocjitsu/configs/gfx1250_mi455x_kmd_4gpu.json
+
+# The GPU families the suite runs on, as TheRock family keys
+# (build_tools/github_actions/amdgpu_family_matrix.py). The integration binary
+# is built for targets.arch in integration.yaml; the configure job fails unless
+# that covers every GPU target TheRock lists for each family here.
+#
+# Per family, all optional:
+#   enabled    false: run only when the workflow_dispatch families input names
+#              it. Default true. ci:gfx labels belong to TheRock and are not
+#              read here.
+#   triggers   Events that run this family: pull_request, push, schedule,
+#              workflow_dispatch. Default all four.
+#   runner     Runner label to use instead of TheRock's.
+#   multi_gpu_triggers
+#              Events on which to take TheRock's multi-GPU runner instead of
+#              its single-GPU one. Default none. The cases that need two
+#              devices (the T3 tier) skip on a single GPU. TheRock's only
+#              multi-GPU pools are 8-GPU nodes, so name only events that must
+#              cover those cases.
+#
+# A family without a runner label is skipped. Every job queues on its own
+# runner pool and the summary waits for all of them, so to reduce GPU load or
+# take a pool out, set enabled: false or narrow triggers here.
+#
+# Real GPUs run only when a person starts workflow_dispatch with backend gpu.
+# Then only gfx94x is enabled; the other families stay listed and disabled, so
+# the families input can still request one. Delete an `enabled: false` line to
+# make that family eligible for the GPU backend; it does not add a simulator
+# job. Simulator membership is simulator.default_families.
+# targets.arch in integration.yaml stays wide on purpose: configure fails
+# unless it covers every family listed here, and a requested family needs its
+# architecture compiled into the binary.
+families:
+  gfx90a:
+    enabled: false
+  gfx94x: {}
+  # Off by default with the other non-gfx94x families. Nightly on an 8-GPU
+  # node, so once re-enabled the multi-device cases run once a day.
+  gfx950:
+    multi_gpu_triggers: [schedule]
+    enabled: false
+  gfx103x:
+    enabled: false
+  gfx110x:
+    enabled: false
+  gfx1150:
+    enabled: false
+  gfx1151:
+    enabled: false
+  gfx1153:
+    enabled: false
+  gfx120x:
+    enabled: false
+  # Off until understood: in two runs the MI455 runner picked the job up, but
+  # --arch auto found no GPU, so no case ran. TheRock also reserves this small
+  # pool for designated workflows. The workflow_dispatch families input still
+  # runs it.
+  gfx125x:
+    enabled: false
