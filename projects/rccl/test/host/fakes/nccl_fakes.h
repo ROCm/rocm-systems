@@ -20,6 +20,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "nccl.h"
 #include "strongstream.h"
@@ -28,6 +32,7 @@
 #include <hip/hip_runtime.h>
 
 struct ncclReg;
+struct shmIpcDesc;  // ncclShmIpcDesc_t
 
 // ncclStrongStreamAcquire: by default returns ncclSuccess with *stream=nullptr
 // (matching the stub's prior behaviour). Tests that need to exercise the
@@ -124,6 +129,18 @@ extern std::function<ncclResult_t(struct ncclMemManager*, void*, struct ncclMemU
 extern std::function<int64_t(const char* /*env*/, int64_t /*deftVal*/)>
     g_loadParam;
 
+// A g_loadParam that answers the listed env names and leaves the rest at their defaults.
+inline std::function<int64_t(const char*, int64_t)> ParamOverride(
+    std::initializer_list<std::pair<const char*, int64_t>> kv) {
+  std::vector<std::pair<std::string, int64_t>> table(kv.begin(), kv.end());
+  return [table](const char* env, int64_t deft) {
+    for (const auto& [name, value] : table) {
+      if (name == env) return value;
+    }
+    return deft;
+  };
+}
+
 // The two device ids and the isXGMI out-parameter; the topo system and the inter-GPU knobs are dropped.
 // maxInter is carried because init.cc:1834 passes an explicit 1 where graph.h:90 defaults to MAX_XGMI_INTER_GPUS.
 extern std::function<ncclResult_t(int /*dev1*/, int /*dev2*/, bool* /*isXGMI*/, int /*maxInter*/)>
@@ -164,6 +181,15 @@ extern std::function<ncclResult_t(size_t /*size*/, bool /*legacy*/,
                                   void* /*desc*/,
                                   void** /*hptr*/, void** /*dptr*/)>
     g_shmAllocateShareableBuffer;
+
+// ncclShmImportShareableBuffer / ncclShmIpcClose: a transport maps (and later
+// closes) a host buffer a proxy in another process created. Import fails by
+// default; close succeeds.
+extern std::function<ncclResult_t(struct ncclComm*, int /*proxyRank*/,
+                                  struct shmIpcDesc* /*desc*/, void** /*hptr*/,
+                                  void** /*dptr*/, struct shmIpcDesc* /*descOut*/)>
+    g_shmImportShareableBuffer;
+extern std::function<ncclResult_t(struct shmIpcDesc*)> g_shmIpcClose;
 
 // Restore every NCCL controllable seam in this header to its default.
 // Called by ResetP2pFakes(); exposed for tests that only touch NCCL hooks.

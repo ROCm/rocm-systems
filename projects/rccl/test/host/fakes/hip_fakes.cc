@@ -64,6 +64,9 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemset,                     hipMemset);
 #define RCCL_ASSERT_INTERCEPTOR_HOOK(name, params) ASSERT_HOOK_MATCHES_PROD(g_##name, name);
 RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(RCCL_ASSERT_INTERCEPTOR_HOOK)
 #undef RCCL_ASSERT_INTERCEPTOR_HOOK
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+ASSERT_HOOK_MATCHES_PROD(g_hipMemGetHandleForAddressRange, hipMemGetHandleForAddressRange);
+#endif
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -583,6 +586,16 @@ static hipError_t DefaultHipStreamBatchMemOp(hipStream_t, unsigned int,
 std::function<hipError_t(hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int)>
     g_hipStreamBatchMemOp = DefaultHipStreamBatchMemOp;
 
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+static hipError_t DefaultHipMemGetHandleForAddressRange(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType,
+                                                        unsigned long long)
+{
+    return hipErrorInvalidValue;
+}
+std::function<hipError_t(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)>
+    g_hipMemGetHandleForAddressRange = DefaultHipMemGetHandleForAddressRange;
+#endif
+
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 static hipError_t DefaultHipMemcpyBatchAsync(void**, void**, size_t*, size_t, hipMemcpyAttributes*, size_t*,
                                              size_t, size_t*, hipStream_t)
@@ -681,6 +694,9 @@ void ResetHipFakes()
     g_hipStreamBatchMemOp           = DefaultHipStreamBatchMemOp;
 #ifdef CE_BATCH_ASYNC_SUPPORTED
     g_hipMemcpyBatchAsync           = DefaultHipMemcpyBatchAsync;
+#endif
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+    g_hipMemGetHandleForAddressRange = DefaultHipMemGetHandleForAddressRange;
 #endif
     g_hipStreamWriteValue64         = DefaultHipStreamWriteValue64;
     g_hipStreamWaitValue64          = DefaultHipStreamWaitValue64;
@@ -986,6 +1002,14 @@ hipError_t hipStreamWriteValue32(hipStream_t, void*, std::uint32_t, unsigned int
 {
     FailLoudUnfaked("hip_fakes", "hipStreamWriteValue32");
 }
+
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, size_t size,
+                                          hipMemRangeHandleType handleType, unsigned long long flags)
+{
+    return g_hipMemGetHandleForAddressRange(handle, dptr, size, handleType, flags);
+}
+#endif
 
 // ce_coll.cc's batch path; in-RCCL builds inherit CE_BATCH_ASYNC_SUPPORTED, standalone ones compile the call out.
 #ifdef CE_BATCH_ASYNC_SUPPORTED
