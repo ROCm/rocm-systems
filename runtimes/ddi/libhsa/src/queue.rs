@@ -40,26 +40,42 @@ use crate::runtime::{
 };
 use crate::signal::{AmdSignal, AsyncCopyClock};
 
+mod create;
+mod event;
+use create::{create_hardware_queue, create_sdma_queue};
+mod index;
+use event::queue_event_worker;
+#[cfg(test)]
+use event::{queue_error_status, update_scratch_owner};
+#[cfg(test)]
+use index::*;
+
+/// Byte offset of the native queue write index.
 const WRITE_INDEX_OFFSET: usize = 56;
+/// Byte offset of the native queue read index.
 const READ_INDEX_OFFSET: usize = 128;
+/// Byte offset of the native queue properties word.
 const QUEUE_PROPERTIES_OFFSET: usize = 180;
+/// AQL packet size in bytes.
 const AQL_PACKET_BYTES: usize = 64;
+/// AQL packet type for a kernel dispatch.
 const AQL_PACKET_TYPE_KERNEL_DISPATCH: u16 = 2;
+/// Bits containing the AQL packet type.
 const AQL_PACKET_TYPE_MASK: u16 = 0xff;
+/// Byte offset of a dispatch packet’s private-segment size.
 const AQL_PRIVATE_SEGMENT_SIZE_OFFSET: usize = 24;
+/// GPU page size in bytes.
 const GPU_PAGE_BYTES: u64 = 4096;
 
 /// Serializes counted-pool decisions while native queue creation is unlocked.
 static COUNTED_CREATE_GATE: Mutex<()> = Mutex::new(());
-/// Preserves one cooperative queue per agent while its native creation runs.
-static COOPERATIVE_CREATE_GATE: Mutex<()> = Mutex::new(());
 
 /// Dedicated device-visible signals used to stop a queue and report errors.
 struct QueueEventSignal {
     /// GPU-visible backing for the inactive and error signals.
     _allocation: Allocation,
     /// Native event and mailbox shared by process queues.
-    shared_event: Arc<QueueSharedEvent>,
+    shared_event: Arc<QueueEventOwner>,
     /// CPU address of the queue inactive signal.
     inactive_address: usize,
     /// CPU address of the queue error signal.
@@ -67,7 +83,7 @@ struct QueueEventSignal {
 }
 
 /// Process-shared KFD event and mailbox backing queue event signals.
-pub(crate) struct QueueSharedEvent {
+pub(crate) struct QueueEventOwner {
     /// Native event owner retained through queue callback delivery.
     event: crate::platform::event::SignalEvent,
     /// Mailbox address written by device-visible signals.
@@ -77,15 +93,16 @@ pub(crate) struct QueueSharedEvent {
 }
 
 impl QueueEventSignal {
+    /// Finds or creates the shared queue error event for a native device.
     fn shared_event(
         runtime: &mut crate::runtime::HsaState,
-    ) -> Result<Arc<QueueSharedEvent>, Status> {
+    ) -> Result<Arc<QueueEventOwner>, Status> {
         let event = if let Some(event) = &runtime.queue_state.queue_event {
             event.clone()
         } else {
             let (event, mailbox, event_id) =
                 runtime.create_signal_event().ok_or(OUT_OF_RESOURCES)?;
-            let event = Arc::new(QueueSharedEvent {
+            let event = Arc::new(QueueEventOwner {
                 event,
                 mailbox,
                 event_id,
@@ -96,8 +113,9 @@ impl QueueEventSignal {
         Ok(event)
     }
 
+    /// Creates an error event and registers the queue with its worker.
     fn create(
-        event: Arc<QueueSharedEvent>,
+        event: Arc<QueueEventOwner>,
         device: &Device,
         host_page_size: usize,
     ) -> Result<Self, Status> {
@@ -137,16 +155,19 @@ impl QueueEventSignal {
         })
     }
 
+    /// Returns the native event handle published to the queue.
     fn handle(&self) -> u64 {
         self.inactive_address as u64
     }
 
+    /// Returns a clone of the event used for queue errors.
     fn error_event(&self) -> QueueErrorEvent {
         self.shared_event
             .event
             .queue_error_event((self.error_address + std::mem::offset_of!(AmdSignal, value)) as u64)
     }
 
+    /// Reads the signal indicating that queue submission has stopped.
     fn load_inactive(&self) -> SignalValue {
         // SAFETY: This owner retains the initialized signal allocation.
         unsafe { &*(self.inactive_address as *const AmdSignal) }
@@ -154,6 +175,7 @@ impl QueueEventSignal {
             .load(Ordering::Acquire)
     }
 
+    /// Reads the signal containing the latest native queue error.
     fn load_error(&self) -> SignalValue {
         // SAFETY: This owner retains the initialized signal allocation.
         unsafe { &*(self.error_address as *const AmdSignal) }
@@ -161,6 +183,7 @@ impl QueueEventSignal {
             .load(Ordering::Acquire)
     }
 
+    /// Releases the retained queue reference.
     fn release_queue(&self) {
         // SAFETY: This owner retains the initialized signal allocation.
         unsafe { &*(self.inactive_address as *const AmdSignal) }
@@ -168,6 +191,7 @@ impl QueueEventSignal {
             .store(0, Ordering::Release);
     }
 
+    /// Releases the retained error reference.
     fn release_error(&self) {
         // SAFETY: This owner retains the initialized signal allocation.
         unsafe { &*(self.error_address as *const AmdSignal) }
@@ -223,8 +247,11 @@ pub(crate) struct Queue {
 
 /// External GPU addresses retained by the native queue through retirement.
 pub(crate) struct QueueBacking {
+    /// Inactive signal owned by this queue backing.
     inactive_signal: Arc<QueueEventSignal>,
+    /// Optional scratch retained by this queue backing.
     scratch: Option<Allocation>,
+    /// Uncertain scratch owned by this queue backing.
     uncertain_scratch: Vec<Allocation>,
 }
 
@@ -253,6 +280,7 @@ enum ScratchEventVisibility {
     Published,
 }
 
+/// Stops queue event worker.
 fn stop_queue_event_worker(
     alive: &AtomicBool,
     worker: &mut Option<JoinHandle<()>>,
@@ -273,6 +301,7 @@ fn stop_queue_event_worker(
     Ok(())
 }
 
+/// Destroys native queue and releases its owned resources.
 fn destroy_native_queue(
     native: &mut rocddi::device::gpu::queue::Queue,
     teardown_started: &mut bool,
@@ -287,6 +316,7 @@ fn destroy_native_queue(
     unsafe { native.destroy_with_retained_transport(callback) }
 }
 
+/// Destroys runtime queue and releases its owned resources.
 pub(crate) fn destroy_runtime_queue(queue: &mut Queue) -> Result<(), rocddi::Error> {
     stop_queue_event_worker(&queue.event_alive, &mut queue.event_worker)?;
     let public = queue.public_handle as *const HsaQueue;
@@ -315,6 +345,7 @@ pub(crate) fn destroy_runtime_queue(queue: &mut Queue) -> Result<(), rocddi::Err
     }
 }
 
+/// Destroys runtime SDMA queue and releases its owned resources.
 pub(crate) fn destroy_runtime_sdma_queue(queue: &mut SdmaQueue) -> Result<(), rocddi::Error> {
     destroy_native_queue(&mut queue.native, &mut queue.teardown_started, &mut || {})
 }
@@ -323,7 +354,9 @@ pub(crate) fn destroy_runtime_sdma_queue(queue: &mut SdmaQueue) -> Result<(), ro
 // Put counted handles 64 bytes past that boundary so index operations can
 // identify them without consulting the registry. SDMA controls put the public
 // header 128 bytes into a 256-byte allocation for the same reason.
+/// Tag bit distinguishing counted queue handles.
 const COUNTED_QUEUE_HANDLE_BIT: usize = 64;
+/// Tag bit distinguishing SDMA queue handles.
 const SDMA_QUEUE_HANDLE_BIT: usize = 128;
 
 /// Stable storage for the public prefix copied from a shared hardware queue.
@@ -350,6 +383,7 @@ pub(crate) struct CountedQueue {
 }
 
 impl CountedQueue {
+    /// Wraps a borrowed counted hardware queue with its pool key.
     unsafe fn new(hardware_queue: usize, pool_key: (u64, u32)) -> Self {
         // SAFETY: The caller retains the native queue and its initialized
         // public header for the complete lifetime of this logical handle.
@@ -383,6 +417,7 @@ impl CountedQueue {
         }
     }
 
+    /// Returns the stable address of the public HSA queue record.
     fn public_pointer(&mut self) -> *mut HsaQueue {
         self.public.header.as_mut_ptr().cast()
     }
@@ -417,6 +452,7 @@ pub(crate) struct SoftQueue {
 struct SoftQueueControl([u64; 32]);
 
 impl SoftQueue {
+    /// Marks the public queue inactive before native destruction.
     fn inactivate(&mut self) {
         self.active = false;
     }
@@ -462,7 +498,7 @@ pub(crate) struct QueueState {
     /// Next public queue identity.
     next_queue_id: u64,
     /// Shared native event used for queue error notifications.
-    queue_event: Option<Arc<QueueSharedEvent>>,
+    queue_event: Option<Arc<QueueEventOwner>>,
     /// Public AQL queues keyed by queue pointer.
     pub(crate) queues: HashMap<usize, Queue>,
     /// Tool interception proxies keyed by public queue pointer.
@@ -488,6 +524,7 @@ pub(crate) struct QueueState {
 }
 
 impl QueueState {
+    /// Initializes empty queue registries and the next queue ID.
     pub(crate) fn new() -> Self {
         Self {
             next_queue_id: 0,
@@ -506,6 +543,7 @@ impl QueueState {
         }
     }
 
+    /// Allocates ID for runtime use.
     pub(crate) fn allocate_id(&mut self) -> Result<u64, Status> {
         let id = self.next_queue_id;
         self.next_queue_id = id.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
@@ -549,6 +587,7 @@ impl QueueState {
     }
 }
 
+/// Allocates scratch for runtime use.
 fn allocate_scratch(
     device: &Device,
     gpu: GpuInfo,
@@ -570,6 +609,7 @@ fn allocate_scratch(
     Ok((allocation, scratch))
 }
 
+/// Reads the dispatch private-segment requirement from a native queue.
 fn dispatch_private_segment(queue: &Queue) -> Option<(u32, u64)> {
     let info = queue.native.info();
     let packet_count = info.ring_size_bytes / AQL_PACKET_BYTES as u64;
@@ -612,272 +652,7 @@ fn dispatch_private_segment(queue: &Queue) -> Option<(u32, u64)> {
     None
 }
 
-/// Queue error callback detached from the registry lock before invocation.
-struct PendingCallback {
-    /// Application callback to invoke synchronously.
-    callback: unsafe extern "C" fn(Status, *mut HsaQueue, *mut c_void),
-    /// HSA status derived from native error details.
-    status: Status,
-    /// Public queue pointer passed to the callback.
-    queue: usize,
-    /// Caller-owned callback argument.
-    data: CallbackArg,
-}
-
-/// Result of processing one queue event before native rearming.
-struct QueueEventOutcome {
-    /// Callback to run after leaving the registry lock, if any.
-    callback: Option<PendingCallback>,
-    /// Whether the native event should be armed for another notification.
-    rearm: bool,
-}
-
-fn queue_error_status(error: u64) -> Status {
-    if error & 2 != 0 {
-        INCOMPATIBLE_ARGUMENTS
-    } else if error & 4 != 0 {
-        INVALID_ALLOCATION
-    } else if error & 8 != 0 {
-        INVALID_CODE_OBJECT
-    } else if error & 16 != 0 {
-        MEMORY_FAULT
-    } else if error & (32 | 256) != 0 {
-        INVALID_PACKET_FORMAT
-    } else if error & 64 != 0 {
-        INVALID_ARGUMENT
-    } else if error & 128 != 0 {
-        OUT_OF_REGISTERS
-    } else if error & 0x2000_0000 != 0 {
-        MEMORY_APERTURE_VIOLATION
-    } else if error & 0x4000_0000 != 0 {
-        ILLEGAL_INSTRUCTION
-    } else if error & 0x8000_0000 != 0 {
-        EXCEPTION
-    } else {
-        ERROR
-    }
-}
-
-fn pending_callback(
-    runtime: &crate::runtime::HsaState,
-    key: usize,
-    status: Status,
-) -> Option<PendingCallback> {
-    let queue = runtime.queue_state.queues.get(&key)?;
-    Some(PendingCallback {
-        callback: queue.callback?,
-        status,
-        queue: queue.public_handle,
-        data: queue.callback_data,
-    })
-}
-
-fn pending_error_callback(
-    runtime: &mut crate::runtime::HsaState,
-    key: usize,
-    status: Status,
-) -> Option<PendingCallback> {
-    if status == MEMORY_FAULT {
-        // Publish the affected queue so a running system event worker can
-        // attach the process fault's address and reason.
-        let details = runtime.vm_fault_details;
-        let queue = runtime.queue_state.queues.get_mut(&key)?;
-        queue.vm_faulted = true;
-        if let Some((_, address, reason)) = details.filter(|(agent, _, _)| *agent == queue.agent) {
-            queue.vm_fault_address = address;
-            queue.vm_fault_reason = reason;
-        }
-        if runtime.system_event_worker.is_some() {
-            VM_FAULT_CONDVAR.notify_all();
-            return None;
-        }
-        // Without a system event handler, the queue callback is the only
-        // fault notification available to the application.
-    }
-    pending_callback(runtime, key, status)
-}
-
-/// Publishes a new owner only after the control update completes. The
-/// candidate is retained before the control update, so failure or
-/// unwind cannot release backing that the command processor may have observed.
-fn update_scratch_owner<T>(
-    current: &mut Option<T>,
-    uncertain: &mut Vec<T>,
-    candidate: T,
-    update: impl FnOnce() -> Result<(), Status>,
-) -> Result<Option<T>, Status> {
-    uncertain.try_reserve(1).map_err(|_| OUT_OF_RESOURCES)?;
-    uncertain.push(candidate);
-    update()?;
-    Ok(std::mem::replace(current, uncertain.pop()))
-}
-
-fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOutcome> {
-    let mut guard = lock().ok()?;
-    let runtime = guard.as_mut()?;
-    if !runtime.queue_state.queues.contains_key(&key) {
-        return None;
-    }
-    let error = observed as u64;
-    if error & 0x401 == 0 {
-        return Some(QueueEventOutcome {
-            callback: pending_error_callback(runtime, key, queue_error_status(error)),
-            rearm: false,
-        });
-    }
-    let (device, gpu, public, private_segment_size, dispatch_id) = {
-        let queue = runtime.queue_state.queues.get(&key)?;
-        let index = runtime.gpu_index(queue.agent)?;
-        let Some((private_segment_size, dispatch_id)) = dispatch_private_segment(queue) else {
-            return Some(QueueEventOutcome {
-                callback: pending_callback(runtime, key, ERROR),
-                rearm: false,
-            });
-        };
-        (
-            runtime.gpus[index].device.clone(),
-            runtime.gpus[index].info,
-            queue.public_handle,
-            private_segment_size,
-            dispatch_id,
-        )
-    };
-    drop(guard);
-    let lanes_per_wave = if error & 0x400 != 0 { 32 } else { 64 };
-    crate::tool_events::alloc_start(public as *const HsaQueue, dispatch_id);
-    let allocated = allocate_scratch(&device, gpu, private_segment_size, lanes_per_wave);
-    let mut guard = if let Ok(guard) = lock() {
-        guard
-    } else {
-        crate::tool_events::alloc_end(public as *const HsaQueue, dispatch_id, 0, 0);
-        return None;
-    };
-    let Some(runtime) = guard.as_mut() else {
-        drop(guard);
-        crate::tool_events::alloc_end(public as *const HsaQueue, dispatch_id, 0, 0);
-        return None;
-    };
-    let Some(queue) = runtime.queue_state.queues.get_mut(&key) else {
-        drop(guard);
-        crate::tool_events::alloc_end(public as *const HsaQueue, dispatch_id, 0, 0);
-        return None;
-    };
-    let result = allocated.and_then(|(allocation, scratch)| {
-        // SAFETY: The backing stays paired with this queue, and the candidate
-        // is staged before its address can be written to native control state.
-        let (native, backing) = unsafe { queue.native.parts_mut() };
-        let old = update_scratch_owner(
-            &mut backing.scratch,
-            &mut backing.uncertain_scratch,
-            allocation,
-            || {
-                // SAFETY: The inactive signal reports a stopped queue. Both
-                // old and candidate allocations remain owned if the update
-                // fails or unwinds.
-                unsafe { native.set_scratch(scratch) }.map_err(map_error)
-            },
-        )?;
-        let old_visible = queue.scratch_event_visibility == ScratchEventVisibility::Published;
-        backing.inactive_signal.release_queue();
-        Ok((scratch, old, old_visible))
-    });
-    let (size, slots) = result.as_ref().map_or((0, 0), |(scratch, _, _)| {
-        (
-            scratch.byte_length as usize,
-            scratch.maximum_wave_count as usize,
-        )
-    });
-    let (outcome, old, old_visible) = match result {
-        Ok((_, old, old_visible)) => (
-            QueueEventOutcome {
-                callback: None,
-                rearm: true,
-            },
-            old,
-            old_visible,
-        ),
-        Err(status) => (
-            QueueEventOutcome {
-                callback: pending_callback(runtime, key, status),
-                rearm: false,
-            },
-            None,
-            false,
-        ),
-    };
-    drop(guard);
-    if let Some(old) = old {
-        if old_visible {
-            crate::tool_events::free_start(public as *const HsaQueue);
-            drop(old);
-            crate::tool_events::free_end(public as *const HsaQueue);
-        } else {
-            drop(old);
-        }
-    }
-    crate::tool_events::alloc_end(public as *const HsaQueue, dispatch_id, size, slots);
-    Some(outcome)
-}
-
-fn queue_event_worker(
-    stop: &AtomicBool,
-    alive: &AtomicBool,
-    signal: &QueueEventSignal,
-    key: usize,
-) {
-    let mut inactive_armed = true;
-    let mut error_armed = true;
-    while !stop.load(Ordering::Acquire) && alive.load(Ordering::Acquire) {
-        let error = signal.load_error();
-        let callback = if error != 0 && error_armed {
-            error_armed = false;
-            let mut guard = match lock() {
-                Ok(guard) => guard,
-                Err(_) => return,
-            };
-            let Some(runtime) = guard.as_mut() else {
-                return;
-            };
-            if !runtime.queue_state.queues.contains_key(&key) {
-                return;
-            }
-            let callback = pending_error_callback(runtime, key, queue_error_status(error as u64));
-            signal.release_error();
-            callback
-        } else {
-            if error == 0 {
-                error_armed = true;
-            }
-            let observed = signal.load_inactive();
-            if observed == 0 {
-                inactive_armed = true;
-                None
-            } else if inactive_armed {
-                inactive_armed = false;
-                handle_queue_event(key, observed).and_then(|outcome| {
-                    inactive_armed = outcome.rearm;
-                    outcome.callback
-                })
-            } else {
-                None
-            }
-        };
-        if let Some(callback) = callback {
-            let _scope = CallbackScope::enter();
-            // SAFETY: HSA requires callback and data to remain valid through
-            // queue destruction; the worker only invokes it for a live record.
-            unsafe {
-                (callback.callback)(
-                    callback.status,
-                    callback.queue as *mut HsaQueue,
-                    callback.data.as_ptr(),
-                )
-            };
-        }
-        thread::sleep(Duration::from_micros(20));
-    }
-}
-
+/// Finds the native queue key corresponding to a public queue pointer.
 fn hardware_queue_key(runtime: &crate::runtime::HsaState, queue: *const HsaQueue) -> Option<usize> {
     let key = queue as usize;
     if let Some(intercept) = runtime.queue_state.intercept_queues.get(&key) {
@@ -889,6 +664,7 @@ fn hardware_queue_key(runtime: &crate::runtime::HsaState, queue: *const HsaQueue
     )
 }
 
+/// Builds the pool key used to share counted hardware queues.
 fn counted_pool_key(
     runtime: &crate::runtime::HsaState,
     queue: *const HsaQueue,
@@ -906,6 +682,7 @@ fn counted_pool_key(
     )
 }
 
+/// Checks whether a public queue pointer is still registered.
 fn queue_known(runtime: &crate::runtime::HsaState, queue: *const HsaQueue) -> bool {
     !queue.is_null()
         && (hardware_queue_key(runtime, queue).is_some()
@@ -915,12 +692,14 @@ fn queue_known(runtime: &crate::runtime::HsaState, queue: *const HsaQueue) -> bo
                 .contains_key(&(queue as usize)))
 }
 
+/// Selects the least-used live hardware queue in a counted pool.
 fn least_used_counted_queue(pool: &[CountedHardwareQueue]) -> Option<usize> {
     pool.iter()
         .min_by_key(|entry| entry.use_count)
         .map(|entry| entry.queue)
 }
 
+/// Converts an HSA priority value to the native queue priority.
 fn queue_priority(priority: u32) -> Option<QueuePriority> {
     match priority {
         AMD_QUEUE_PRIORITY_LOW => Some(QueuePriority::Low),
@@ -930,574 +709,12 @@ fn queue_priority(priority: u32) -> Option<QueuePriority> {
     }
 }
 
-/// # Safety
-/// `queue` must point to writable output storage for the complete call. The
-/// callback and its data must remain valid until native queue teardown and
-/// completion of the final event callback.
-#[allow(clippy::too_many_arguments)]
-unsafe fn create_hardware_queue(
-    expected_generation: Option<u64>,
-    agent: HsaAgent,
-    size: u32,
-    queue_type: u32,
-    priority: QueuePriority,
-    callback: QueueErrorCallback,
-    data: CallbackArg,
-    private_segment_size: u32,
-    ring_memory: QueueRingMemory,
-    cu_mask: Option<Vec<u32>>,
-    queue: *mut *mut HsaQueue,
-    created_log: &mut Option<(u64, usize)>,
-) -> Status {
-    struct Prepared {
-        generation: u64,
-        id: u64,
-        device: Device,
-        gpu: GpuInfo,
-        event: Arc<QueueSharedEvent>,
-        host_page_size: usize,
-        stop: Arc<AtomicBool>,
-        tracker: Arc<crate::runtime::InFlightTracker>,
-        _token: crate::runtime::InFlightToken,
-    }
-
-    let cooperative = queue_type == QUEUE_TYPE_COOPERATIVE;
-    let _cooperative_gate = if cooperative {
-        match COOPERATIVE_CREATE_GATE.lock() {
-            Ok(guard) => Some(guard),
-            Err(_) => return ERROR,
-        }
-    } else {
-        None
-    };
-    let (size, callback, data, private_segment_size) = if cooperative {
-        (
-            16_384 / AQL_PACKET_BYTES as u32,
-            None,
-            // SAFETY: A null callback argument has no referent to retain.
-            unsafe { CallbackArg::new(std::ptr::null_mut()) },
-            0,
-        )
-    } else {
-        (size, callback, data, private_segment_size)
-    };
-    let Some(ring_size_bytes) = u64::from(size).checked_mul(AQL_PACKET_BYTES as u64) else {
-        return INVALID_QUEUE_CREATION;
-    };
-    let prepared = {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let Some(generation) = guard.active_generation() else {
-            return NOT_INITIALIZED;
-        };
-        if expected_generation.is_some_and(|expected| expected != generation) {
-            return INVALID_RUNTIME_STATE;
-        }
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        let Some(index) = runtime.gpu_index(agent) else {
-            return INVALID_AGENT;
-        };
-        if cooperative {
-            if runtime.gpus[index].info.gws_count == 0 {
-                return INVALID_QUEUE_CREATION;
-            }
-            if runtime
-                .queue_state
-                .cooperative_teardown
-                .contains(&agent.handle)
-            {
-                return OUT_OF_RESOURCES;
-            }
-            if let Some((public, record)) = runtime
-                .queue_state
-                .queues
-                .iter_mut()
-                .find(|(_, record)| record.agent == agent && record.cooperative_refs != 0)
-            {
-                if record.inactivated
-                    || record.teardown_started
-                    || !record.event_alive.load(Ordering::Acquire)
-                {
-                    return OUT_OF_RESOURCES;
-                }
-                if ring_memory != record.ring_memory {
-                    return INVALID_QUEUE_CREATION;
-                }
-                let Some(refs) = record.cooperative_refs.checked_add(1) else {
-                    return OUT_OF_RESOURCES;
-                };
-                if priority != QueuePriority::Normal {
-                    if let Err(error) = record.native.set_priority(priority) {
-                        return map_error(error);
-                    }
-                }
-                if let Some(mask) = cu_mask.as_ref() {
-                    if let Err(error) = record.native.set_cu_mask(mask) {
-                        return map_error(error);
-                    }
-                    record.cu_mask.clone_from(mask);
-                }
-                record.cooperative_refs = refs;
-                // SAFETY: The shared public queue remains in the registry.
-                unsafe { queue.write(*public as *mut HsaQueue) };
-                return SUCCESS;
-            }
-        }
-        let id = match runtime.queue_state.allocate_id() {
-            Ok(id) => id,
-            Err(status) => return status,
-        };
-        if private_segment_size != u32::MAX && private_segment_size > MAX_PRIVATE_SEGMENT_BYTES {
-            return OUT_OF_RESOURCES;
-        }
-        let event = match QueueEventSignal::shared_event(runtime) {
-            Ok(event) => event,
-            Err(status) => return status,
-        };
-        if runtime.queue_state.queues.try_reserve(1).is_err() {
-            return OUT_OF_RESOURCES;
-        }
-        let tracker = runtime.inflight.clone();
-        let Some(token) = tracker.enter() else {
-            return OUT_OF_RESOURCES;
-        };
-        Prepared {
-            generation,
-            id,
-            device: runtime.gpus[index].device.clone(),
-            gpu: runtime.gpus[index].info,
-            event,
-            host_page_size: runtime.host_page_size,
-            stop: runtime.stop_workers.clone(),
-            tracker,
-            _token: token,
-        }
-    };
-
-    let inactive_signal = match QueueEventSignal::create(
-        prepared.event.clone(),
-        &prepared.device,
-        prepared.host_page_size,
-    ) {
-        Ok(signal) => Arc::new(signal),
-        Err(status) => return status,
-    };
-    let (scratch_allocation, scratch) =
-        if private_segment_size == 0 || private_segment_size == u32::MAX {
-            (None, None)
-        } else {
-            match allocate_scratch(
-                &prepared.device,
-                prepared.gpu,
-                private_segment_size,
-                prepared.gpu.wavefront_size,
-            ) {
-                Ok((allocation, scratch)) => (Some(allocation), Some(scratch)),
-                Err(status) => return status,
-            }
-        };
-    let mut doorbell = Box::new(AmdSignal::doorbell(0, 0));
-    let event_alive = Arc::new(AtomicBool::new(true));
-    let worker_alive = event_alive.clone();
-    let worker_signal = inactive_signal.clone();
-    let saved_cu_mask = cu_mask.unwrap_or_default();
-    let mut creation_guard = UnpublishedQueueGuard::new(&prepared.tracker);
-    let native = match prepared.device.gpu().and_then(|gpu| {
-        // SAFETY: The owner tuple retains all external GPU addresses
-        // through native creation, including an ambiguous CREATE result.
-        unsafe {
-            gpu.create_queue_with_dependencies(
-                QueueRequest {
-                    ring_size_bytes,
-                    parameters: QueueParameters::Aql {
-                        producer_mode: if queue_type == QUEUE_TYPE_SINGLE {
-                            QueueProducerMode::Single
-                        } else {
-                            QueueProducerMode::Multiple
-                        },
-                        ring_memory,
-                        global_work_sync: cooperative,
-                        inactive_signal: Some(inactive_signal.handle()),
-                        error_event: Some(inactive_signal.error_event()),
-                        scratch,
-                    },
-                    priority,
-                    device_producer: false,
-                },
-                QueueBacking {
-                    inactive_signal,
-                    scratch: scratch_allocation,
-                    uncertain_scratch: Vec::new(),
-                },
-            )
-        }
-    }) {
-        Ok(created) => created,
-        Err(error) => {
-            if !matches!(error, rocddi::Error::QueueBackingMayBeLive { .. }) {
-                creation_guard.disarm();
-            }
-            return if cooperative && error.kind() == rocddi::ErrorKind::Busy {
-                OUT_OF_RESOURCES
-            } else if error.kind() == rocddi::ErrorKind::Unsupported {
-                INVALID_QUEUE_CREATION
-            } else {
-                map_error(error)
-            };
-        }
-    };
-    // The native owner retains its external backing if setup unwinds.
-    let mut pending = native;
-    if !saved_cu_mask.is_empty() {
-        if let Err(error) = pending.set_cu_mask(&saved_cu_mask) {
-            return abandon_unpublished_retained(pending, map_error(error), &mut creation_guard);
-        }
-    }
-    let info = pending.info();
-    if info.write_index_host_address < WRITE_INDEX_OFFSET
-        || info.read_index_host_address < READ_INDEX_OFFSET
-    {
-        return abandon_unpublished_retained(pending, ERROR, &mut creation_guard);
-    }
-    let public = info.write_index_host_address - WRITE_INDEX_OFFSET;
-    if info.read_index_host_address - READ_INDEX_OFFSET != public || public % 256 != 0 {
-        return abandon_unpublished_retained(pending, ERROR, &mut creation_guard);
-    }
-    *doorbell = AmdSignal::doorbell(info.doorbell_host_address, public);
-    let doorbell_handle = (&raw mut *doorbell) as usize as u64;
-    let mut guard = match lock() {
-        Ok(guard) => guard,
-        Err(status) => {
-            return abandon_unpublished_retained(pending, status, &mut creation_guard);
-        }
-    };
-    if guard.active_generation() != Some(prepared.generation) {
-        drop(guard);
-        return abandon_unpublished_retained(pending, INVALID_RUNTIME_STATE, &mut creation_guard);
-    }
-    let Some(runtime) = guard.as_mut() else {
-        drop(guard);
-        return abandon_unpublished_retained(pending, NOT_INITIALIZED, &mut creation_guard);
-    };
-    if runtime.queue_state.queues.try_reserve(1).is_err()
-        || runtime.queue_state.queues.contains_key(&public)
-    {
-        drop(guard);
-        return abandon_unpublished_retained(pending, OUT_OF_RESOURCES, &mut creation_guard);
-    }
-    // SAFETY: The public control pointer is unique in the registry, and
-    // rocddi retains this AQL control allocation until native teardown.
-    unsafe {
-        let header = public as *mut HsaQueue;
-        (*header).queue_type = queue_type;
-        (*header).features = QUEUE_FEATURE_KERNEL_DISPATCH;
-        (*header).base_address = info.ring_host_address as *mut c_void;
-        (*header).doorbell_signal = HsaSignal {
-            handle: doorbell_handle,
-        };
-        (*header).size = size;
-        (*header).reserved = 0;
-        (*header).id = prepared.id;
-    }
-    runtime.queue_state.queues.insert(
-        public,
-        Queue {
-            native: pending,
-            public_handle: public,
-            scratch_event_visibility: ScratchEventVisibility::Unpublished,
-            _doorbell: doorbell,
-            event_alive,
-            event_worker: None,
-            agent,
-            hardware_id: u32::try_from(prepared.id).unwrap_or(u32::MAX),
-            counted_pool_key: None,
-            cooperative_refs: u32::from(cooperative),
-            ring_memory,
-            inactivated: false,
-            cu_mask: saved_cu_mask,
-            callback,
-            callback_data: data,
-            vm_faulted: false,
-            vm_fault_address: 0,
-            vm_fault_reason: 0,
-            teardown_started: false,
-        },
-    );
-    runtime.queue_state.released_counted_queues.remove(&public);
-    let event_worker = thread::Builder::new()
-        .name("rocddi-queue-events".into())
-        .spawn(move || queue_event_worker(&prepared.stop, &worker_alive, &worker_signal, public));
-    let Ok(event_worker) = event_worker else {
-        let Some(mut record) = runtime.queue_state.queues.remove(&public) else {
-            prepared.tracker.quarantine();
-            return ERROR;
-        };
-        drop(guard);
-        if destroy_runtime_queue(&mut record).is_err() {
-            std::mem::forget(record);
-        } else {
-            creation_guard.disarm();
-        }
-        return OUT_OF_RESOURCES;
-    };
-    let Some(record) = runtime.queue_state.queues.get_mut(&public) else {
-        prepared.tracker.quarantine();
-        return ERROR;
-    };
-    record.event_worker = Some(event_worker);
-    record.scratch_event_visibility = ScratchEventVisibility::Published;
-    // SAFETY: The caller supplied writable output storage, and the registry
-    // now owns the complete queue and its event worker.
-    unsafe { queue.write(public as *mut HsaQueue) };
-    *created_log = Some((prepared.id, public));
-    creation_guard.disarm();
-    SUCCESS
-}
-
-/// Quarantines an HSA generation if native creation unwinds or leaves an
-/// unpublished queue whose cleanup cannot be proven complete.
-struct UnpublishedQueueGuard<'a> {
-    tracker: &'a crate::runtime::InFlightTracker,
-    armed: bool,
-}
-
-impl<'a> UnpublishedQueueGuard<'a> {
-    fn new(tracker: &'a crate::runtime::InFlightTracker) -> Self {
-        Self {
-            tracker,
-            armed: true,
-        }
-    }
-
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for UnpublishedQueueGuard<'_> {
-    fn drop(&mut self) {
-        if self.armed {
-            self.tracker.quarantine();
-        }
-    }
-}
-
-fn abandon_unpublished_tracked<D: 'static>(
-    native: rocddi::device::gpu::queue::Queue,
-    dependencies: D,
-    status: Status,
-    guard: &mut UnpublishedQueueGuard<'_>,
-) -> Status {
-    // SAFETY: No public producer has observed the queue. The dependencies
-    // retain every external GPU address until native teardown succeeds.
-    match unsafe { native.abandon_unpublished_with_dependencies(dependencies) } {
-        Ok(()) => {
-            guard.disarm();
-            status
-        }
-        Err(error) => map_error(error),
-    }
-}
-
-fn abandon_unpublished_retained(
-    native: RetainedQueue<QueueBacking>,
-    status: Status,
-    guard: &mut UnpublishedQueueGuard<'_>,
-) -> Status {
-    // SAFETY: No public producer has observed the queue. The native owner
-    // retains all external GPU addresses through uncertain teardown.
-    match unsafe { native.abandon_unpublished() } {
-        Ok(()) => {
-            guard.disarm();
-            status
-        }
-        Err(error) => map_error(error),
-    }
-}
-
-fn validated_sdma_engine(info: QueueTransport, size: u32) -> Option<u32> {
-    let engine_id = info.sdma_engine_id?;
-    (info.ring_size_bytes == u64::from(size)
-        && info.ring_host_address != 0
-        && info.index_unit_bytes == 1
-        && !info.read_index_wraps
-        && info.read_index_width == QueueAccessWidth::Bits64
-        && info.write_index_width == QueueAccessWidth::Bits64
-        && info.doorbell_width == QueueAccessWidth::Bits64
-        && info.read_index_host_address != 0
-        && info.read_index_host_address % std::mem::align_of::<AtomicU64>() == 0
-        && info.write_index_host_address != 0
-        && info.write_index_host_address % std::mem::align_of::<AtomicU64>() == 0
-        && info.read_index_host_address != info.write_index_host_address
-        && info.read_index_device_address != 0
-        && info.write_index_device_address != 0
-        && info.doorbell_host_address != 0
-        && info.doorbell_host_address % std::mem::align_of::<u64>() == 0
-        && info
-            .doorbell_device_address
-            .is_some_and(|address| address != 0))
-    .then_some(engine_id)
-}
-
-/// # Safety
-/// `queue` addresses writable output storage. The caller serializes native
-/// queue publication and destruction with all producers.
-unsafe fn create_sdma_queue(
-    expected_generation: Option<u64>,
-    agent: HsaAgent,
-    size_bytes: u32,
-    selection: SdmaEngineSelection,
-    ring_memory: QueueRingMemory,
-    queue: *mut *mut HsaQueue,
-    created_log: &mut Option<(u64, usize, u32)>,
-) -> Status {
-    let (generation, id, device, tracker, _token) = {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let Some(generation) = guard.active_generation() else {
-            return NOT_INITIALIZED;
-        };
-        if expected_generation.is_some_and(|expected| expected != generation) {
-            return INVALID_RUNTIME_STATE;
-        }
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        let Some(index) = runtime.gpu_index(agent) else {
-            return INVALID_AGENT;
-        };
-        let id = match runtime.queue_state.allocate_id() {
-            Ok(id) => id,
-            Err(status) => return status,
-        };
-        if runtime.queue_state.sdma_queues.try_reserve(1).is_err() {
-            return OUT_OF_RESOURCES;
-        }
-        let tracker = runtime.inflight.clone();
-        let Some(token) = tracker.enter() else {
-            return OUT_OF_RESOURCES;
-        };
-        (
-            generation,
-            id,
-            runtime.gpus[index].device.clone(),
-            tracker,
-            token,
-        )
-    };
-    let mut control = Box::new(SdmaQueueControl {
-        read_index_host_address: 0,
-        write_index_host_address: 0,
-        _padding: [0; SDMA_QUEUE_HANDLE_BIT - 2 * std::mem::size_of::<usize>()],
-        header: [0; std::mem::size_of::<HsaQueue>()],
-    });
-    let mut doorbell = Box::new(AmdSignal::doorbell(0, 0));
-    let mut creation_guard = UnpublishedQueueGuard::new(&tracker);
-    let native = match device.gpu().and_then(|gpu| {
-        // SAFETY: SDMA creation passes no external GPU addresses. The queue
-        // remains unpublished until its transport has been validated.
-        unsafe {
-            gpu.create_queue(QueueRequest {
-                ring_size_bytes: u64::from(size_bytes),
-                parameters: QueueParameters::SdmaByEngine {
-                    selection,
-                    ring_memory,
-                },
-                priority: QueuePriority::Normal,
-                device_producer: true,
-            })
-        }
-    }) {
-        Ok(native) => native,
-        Err(error) if error.kind() == rocddi::ErrorKind::Unsupported => {
-            creation_guard.disarm();
-            return INVALID_QUEUE_CREATION;
-        }
-        Err(error) => {
-            if !matches!(error, rocddi::Error::QueueBackingMayBeLive { .. }) {
-                creation_guard.disarm();
-            }
-            return map_error(error);
-        }
-    };
-    let info = native.info();
-    let Some(engine_id) = validated_sdma_engine(info, size_bytes) else {
-        return abandon_unpublished_tracked(
-            native,
-            (),
-            INVALID_QUEUE_CREATION,
-            &mut creation_guard,
-        );
-    };
-    let public = control.header.as_mut_ptr().cast::<HsaQueue>();
-    let public_key = public as usize;
-    control.read_index_host_address = info.read_index_host_address;
-    control.write_index_host_address = info.write_index_host_address;
-    *doorbell = AmdSignal::doorbell(info.doorbell_host_address, public_key);
-    // SAFETY: The public header has HsaQueue alignment and remains owned by
-    // the SDMA record until successful native queue destruction.
-    unsafe {
-        public.write(HsaQueue {
-            queue_type: QUEUE_TYPE_SINGLE,
-            features: 0,
-            base_address: info.ring_host_address as *mut c_void,
-            doorbell_signal: HsaSignal {
-                handle: (&raw mut *doorbell) as usize as u64,
-            },
-            size: size_bytes,
-            reserved: 0,
-            id,
-        });
-    }
-    let mut guard = match lock() {
-        Ok(guard) => guard,
-        Err(status) => return abandon_unpublished_tracked(native, (), status, &mut creation_guard),
-    };
-    if guard.active_generation() != Some(generation) {
-        drop(guard);
-        return abandon_unpublished_tracked(native, (), INVALID_RUNTIME_STATE, &mut creation_guard);
-    }
-    let Some(runtime) = guard.as_mut() else {
-        drop(guard);
-        return abandon_unpublished_tracked(native, (), NOT_INITIALIZED, &mut creation_guard);
-    };
-    if runtime.queue_state.sdma_queues.try_reserve(1).is_err()
-        || runtime.queue_state.sdma_queues.contains_key(&public_key)
-    {
-        drop(guard);
-        return abandon_unpublished_tracked(native, (), OUT_OF_RESOURCES, &mut creation_guard);
-    }
-    runtime.queue_state.sdma_queues.insert(
-        public_key,
-        SdmaQueue {
-            native,
-            _control: control,
-            _doorbell: doorbell,
-            agent,
-            hardware_id: u32::try_from(id).unwrap_or(u32::MAX),
-            teardown_started: false,
-        },
-    );
-    // SAFETY: The registry owns the queue before the caller sees this header.
-    unsafe { queue.write(public) };
-    *created_log = Some((id, public_key, engine_id));
-    creation_guard.disarm();
-    SUCCESS
-}
-
 #[cfg_attr(
     all(target_arch = "x86_64", not(test)),
     unsafe(export_name = "__hsa_impl_hsa_queue_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates a hardware-backed HSA queue.
 pub unsafe extern "C" fn hsa_queue_create(
     agent: HsaAgent,
     size: u32,
@@ -1545,8 +762,9 @@ pub unsafe extern "C" fn hsa_queue_create(
                     runtime.prepare_log(
                         AMD_LOG_FLAG_INFO,
                         format_args!(
-                            "created AQL queue id={id} agent=0x{:x} address=0x{public:x} packets={size}",
-                            agent.handle
+                            "created AQL queue id={id} agent=0x{:x} address=0x{public:x} packets={}",
+                            agent.handle,
+                            size.max(64)
                         ),
                     )
                 })
@@ -1564,6 +782,7 @@ pub unsafe extern "C" fn hsa_queue_create(
     unsafe(export_name = "__hsa_impl_hsa_amd_counted_queue_acquire")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Acquires a counted queue backed by a shared hardware queue.
 pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
     agent: HsaAgent,
     queue_type: u32,
@@ -1748,6 +967,7 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
     unsafe(export_name = "__hsa_impl_hsa_amd_counted_queue_release")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases the counted queue resource.
 pub unsafe extern "C" fn hsa_amd_counted_queue_release(queue: *mut HsaQueue) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -1792,6 +1012,7 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_release(queue: *mut HsaQueue) -> 
     unsafe(export_name = "__hsa_impl_hsa_soft_queue_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates a host-managed queue with direct index control.
 pub unsafe extern "C" fn hsa_soft_queue_create(
     region: HsaRegion,
     size: u32,
@@ -1822,11 +1043,7 @@ pub unsafe extern "C" fn hsa_soft_queue_create(
         let pool = HsaMemoryPool {
             handle: region.handle,
         };
-        if !matches!(
-            pool.handle,
-            CPU_POOL_FINE | CPU_POOL_EXTENDED | CPU_POOL_KERNARG | CPU_POOL_COARSE
-        ) && runtime.decode_gpu_pool(pool).is_none()
-        {
+        if runtime.decode_cpu_pool(pool).is_none() && runtime.decode_gpu_pool(pool).is_none() {
             return INVALID_REGION;
         }
         if !runtime.signal_state.owns_signal(doorbell_signal) {
@@ -1885,6 +1102,7 @@ pub unsafe extern "C" fn hsa_soft_queue_create(
     })
 }
 
+/// Builds a CU mask with all reported compute units enabled.
 fn full_cu_mask(compute_units: u32) -> Vec<u32> {
     let mut mask = vec![u32::MAX; compute_units.div_ceil(32) as usize];
     if let Some(last) = mask.last_mut() {
@@ -1898,15 +1116,25 @@ fn full_cu_mask(compute_units: u32) -> Vec<u32> {
 
 /// Initialized input prefix copied from an extensible queue descriptor.
 struct QueueCreateInput {
+    /// Version of the AMD queue creation descriptor.
     version: u16,
+    /// Queue ring and descriptor memory placement flags.
     flags: u16,
+    /// Queue engine requested by the caller.
     engine_type: u8,
+    /// Reserved storage retained for the native layout.
     reserved_header: [u8; 3],
+    /// Requested queue ring capacity in bytes.
     queue_size_bytes: u32,
+    /// Scheduling priority requested for the new queue.
     priority: u32,
+    /// Asynchronous error callback, if provided by the caller.
     callback: QueueErrorCallback,
+    /// Opaque argument passed to the error callback.
     callback_data: *mut c_void,
+    /// Traffic class passed to the native queue transport.
     traffic_class: u32,
+    /// Reserved storage retained for the native layout.
     reserved: [u8; 20],
 }
 
@@ -1963,6 +1191,7 @@ unsafe fn copy_queue_create_mask(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates an AMD queue from an engine-specific descriptor.
 pub unsafe extern "C" fn hsa_amd_queue_create(
     agent: HsaAgent,
     descriptors: *mut HsaAmdQueueCreateDesc,
@@ -2165,6 +1394,7 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_cu_set_mask")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Sets the compute-unit mask used by a queue.
 pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
     queue: *const HsaQueue,
     bit_count: u32,
@@ -2228,6 +1458,7 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_cu_get_mask")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Copies the queue compute-unit mask into caller storage.
 pub unsafe extern "C" fn hsa_amd_queue_cu_get_mask(
     queue: *const HsaQueue,
     bit_count: u32,
@@ -2278,6 +1509,7 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_get_mask(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_set_priority")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Changes a queue’s native scheduling priority.
 pub unsafe extern "C" fn hsa_amd_queue_set_priority(queue: *mut HsaQueue, priority: u32) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -2323,6 +1555,7 @@ pub unsafe extern "C" fn hsa_amd_queue_set_priority(queue: *mut HsaQueue, priori
     unsafe(export_name = "__hsa_impl_hsa_queue_inactivate")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Stops a queue from accepting further packet submissions.
 pub unsafe extern "C" fn hsa_queue_inactivate(queue: *mut HsaQueue) -> Status {
     boundary(|| {
         if queue.is_null() {
@@ -2398,6 +1631,7 @@ pub unsafe extern "C" fn hsa_queue_inactivate(queue: *mut HsaQueue) -> Status {
     unsafe(export_name = "__hsa_impl_hsa_queue_destroy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Stops a queue worker and retires its native queue.
 pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
     boundary(|| {
         #[allow(
@@ -2563,284 +1797,12 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
     })
 }
 
-/// Applies one atomic index operation without exporting a queue reference.
-///
-/// # Safety
-/// The public queue handle and its index mapping must remain live throughout
-/// `operation`; the caller must prevent concurrent destruction.
-#[inline]
-unsafe fn with_queue_index<R>(
-    queue: *const HsaQueue,
-    offset: usize,
-    operation: impl for<'a> FnOnce(&'a AtomicU64) -> R,
-) -> Option<R> {
-    if queue.is_null() {
-        return None;
-    }
-    let address = if queue as usize & COUNTED_QUEUE_HANDLE_BIT != 0 {
-        // SAFETY: A live counted handle points at CountedQueuePublic::header,
-        // whose preceding word holds the stable hardware queue address.
-        let hardware = unsafe {
-            (*queue
-                .cast::<u8>()
-                .sub(COUNTED_QUEUE_HANDLE_BIT)
-                .cast::<CountedQueuePublic>())
-            .hardware_queue
-        };
-        hardware.checked_add(offset)?
-    } else if queue as usize & SDMA_QUEUE_HANDLE_BIT != 0 {
-        // SAFETY: A live SDMA header begins 128 bytes into its private
-        // control. The private words borrow rocddi's aligned index mappings.
-        let control = unsafe {
-            &*queue
-                .cast::<u8>()
-                .sub(SDMA_QUEUE_HANDLE_BIT)
-                .cast::<SdmaQueueControl>()
-        };
-        match offset {
-            READ_INDEX_OFFSET => control.read_index_host_address,
-            WRITE_INDEX_OFFSET => control.write_index_host_address,
-            _ => return None,
-        }
-    } else {
-        (queue as usize).checked_add(offset)?
-    };
-    // SAFETY: The caller retains a live queue handle. AQL and soft controls
-    // contain indices at the ABI offsets; counted and SDMA handles resolve to
-    // the native index mapping retained by their queue owner.
-    let index = unsafe { &*(address as *const AtomicU64) };
-    Some(operation(index))
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_queue_load_read_index_relaxed")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub unsafe extern "C" fn hsa_queue_load_read_index_relaxed(queue: *const HsaQueue) -> u64 {
-    // SAFETY: The caller owns a live queue while accessing its index.
-    unsafe {
-        with_queue_index(queue, READ_INDEX_OFFSET, |index| {
-            index.load(Ordering::Relaxed)
-        })
-    }
-    .unwrap_or(0)
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_queue_load_read_index_scacquire")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub unsafe extern "C" fn hsa_queue_load_read_index_scacquire(queue: *const HsaQueue) -> u64 {
-    // SAFETY: The caller owns a live queue while accessing its index.
-    unsafe {
-        with_queue_index(queue, READ_INDEX_OFFSET, |index| {
-            index.load(Ordering::Acquire)
-        })
-    }
-    .unwrap_or(0)
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_queue_load_read_index_acquire")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub unsafe extern "C" fn hsa_queue_load_read_index_acquire(queue: *const HsaQueue) -> u64 {
-    // SAFETY: This deprecated entry point has the same contract as the
-    // sequentially-consistent acquire spelling.
-    unsafe { hsa_queue_load_read_index_scacquire(queue) }
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_queue_load_write_index_relaxed")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub unsafe extern "C" fn hsa_queue_load_write_index_relaxed(queue: *const HsaQueue) -> u64 {
-    // SAFETY: The caller owns a live queue while accessing its index.
-    unsafe {
-        with_queue_index(queue, WRITE_INDEX_OFFSET, |index| {
-            index.load(Ordering::Relaxed)
-        })
-    }
-    .unwrap_or(0)
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_queue_load_write_index_scacquire")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub unsafe extern "C" fn hsa_queue_load_write_index_scacquire(queue: *const HsaQueue) -> u64 {
-    // SAFETY: The caller owns a live queue while accessing its index.
-    unsafe {
-        with_queue_index(queue, WRITE_INDEX_OFFSET, |index| {
-            index.load(Ordering::Acquire)
-        })
-    }
-    .unwrap_or(0)
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_queue_load_write_index_acquire")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub unsafe extern "C" fn hsa_queue_load_write_index_acquire(queue: *const HsaQueue) -> u64 {
-    // SAFETY: This deprecated entry point has the same contract as the
-    // sequentially-consistent acquire spelling.
-    unsafe { hsa_queue_load_write_index_scacquire(queue) }
-}
-
-unsafe fn queue_store(queue: *const HsaQueue, offset: usize, value: u64, order: Ordering) {
-    // SAFETY: The caller owns a live queue while accessing its index.
-    let _ = unsafe { with_queue_index(queue, offset, |index| index.store(value, order)) };
-}
-
-unsafe fn queue_compare_exchange(
-    queue: *const HsaQueue,
-    expected: u64,
-    value: u64,
-    success: Ordering,
-    failure: Ordering,
-) -> u64 {
-    // SAFETY: The caller owns a live queue while reserving packet slots.
-    unsafe {
-        with_queue_index(queue, WRITE_INDEX_OFFSET, |index| {
-            index
-                .compare_exchange(expected, value, success, failure)
-                .unwrap_or_else(|observed| observed)
-        })
-    }
-    .unwrap_or(0)
-}
-
-unsafe fn queue_add(queue: *const HsaQueue, value: u64, order: Ordering) -> u64 {
-    // SAFETY: The caller owns a live queue while reserving packet slots.
-    unsafe {
-        with_queue_index(queue, WRITE_INDEX_OFFSET, |index| {
-            index.fetch_add(value, order)
-        })
-    }
-    .unwrap_or(0)
-}
-
-macro_rules! queue_store_entry {
-    ($name:ident, $offset:expr, $order:expr) => {
-        #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
-        #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-        pub unsafe extern "C" fn $name(queue: *const HsaQueue, value: u64) {
-            // SAFETY: The public entry point preserves the HSA queue contract.
-            unsafe { queue_store(queue, $offset, value, $order) };
-        }
-    };
-}
-
-macro_rules! queue_compare_exchange_entry {
-    ($name:ident, $success:expr, $failure:expr) => {
-        #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
-        #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-        pub unsafe extern "C" fn $name(queue: *const HsaQueue, expected: u64, value: u64) -> u64 {
-            // SAFETY: The public entry point preserves the HSA queue contract.
-            unsafe { queue_compare_exchange(queue, expected, value, $success, $failure) }
-        }
-    };
-}
-
-macro_rules! queue_add_entry {
-    ($name:ident, $order:expr) => {
-        #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
-        #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-        pub unsafe extern "C" fn $name(queue: *const HsaQueue, value: u64) -> u64 {
-            // SAFETY: The public entry point preserves the HSA queue contract.
-            unsafe { queue_add(queue, value, $order) }
-        }
-    };
-}
-
-queue_store_entry!(
-    hsa_queue_store_write_index_relaxed,
-    WRITE_INDEX_OFFSET,
-    Ordering::Relaxed
-);
-queue_store_entry!(
-    hsa_queue_store_write_index_screlease,
-    WRITE_INDEX_OFFSET,
-    Ordering::Release
-);
-queue_store_entry!(
-    hsa_queue_store_write_index_release,
-    WRITE_INDEX_OFFSET,
-    Ordering::Release
-);
-
-queue_compare_exchange_entry!(
-    hsa_queue_cas_write_index_scacq_screl,
-    Ordering::AcqRel,
-    Ordering::Acquire
-);
-queue_compare_exchange_entry!(
-    hsa_queue_cas_write_index_acq_rel,
-    Ordering::AcqRel,
-    Ordering::Acquire
-);
-queue_compare_exchange_entry!(
-    hsa_queue_cas_write_index_scacquire,
-    Ordering::Acquire,
-    Ordering::Acquire
-);
-queue_compare_exchange_entry!(
-    hsa_queue_cas_write_index_acquire,
-    Ordering::Acquire,
-    Ordering::Acquire
-);
-queue_compare_exchange_entry!(
-    hsa_queue_cas_write_index_relaxed,
-    Ordering::Relaxed,
-    Ordering::Relaxed
-);
-queue_compare_exchange_entry!(
-    hsa_queue_cas_write_index_screlease,
-    Ordering::Release,
-    Ordering::Relaxed
-);
-queue_compare_exchange_entry!(
-    hsa_queue_cas_write_index_release,
-    Ordering::Release,
-    Ordering::Relaxed
-);
-
-queue_add_entry!(hsa_queue_add_write_index_scacq_screl, Ordering::AcqRel);
-queue_add_entry!(hsa_queue_add_write_index_acq_rel, Ordering::AcqRel);
-queue_add_entry!(hsa_queue_add_write_index_scacquire, Ordering::Acquire);
-queue_add_entry!(hsa_queue_add_write_index_acquire, Ordering::Acquire);
-queue_add_entry!(hsa_queue_add_write_index_relaxed, Ordering::Relaxed);
-queue_add_entry!(hsa_queue_add_write_index_screlease, Ordering::Release);
-queue_add_entry!(hsa_queue_add_write_index_release, Ordering::Release);
-
-queue_store_entry!(
-    hsa_queue_store_read_index_relaxed,
-    READ_INDEX_OFFSET,
-    Ordering::Relaxed
-);
-queue_store_entry!(
-    hsa_queue_store_read_index_screlease,
-    READ_INDEX_OFFSET,
-    Ordering::Release
-);
-queue_store_entry!(
-    hsa_queue_store_read_index_release,
-    READ_INDEX_OFFSET,
-    Ordering::Release
-);
-
 #[cfg_attr(
     all(target_arch = "x86_64", not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_set_profiler_enabled")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Enables or disables dispatch profiling on a queue.
 pub unsafe extern "C" fn hsa_amd_profiling_set_profiler_enabled(
     queue: *mut HsaQueue,
     enable: i32,
@@ -2879,6 +1841,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_set_profiler_enabled(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_get_info")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes the requested queue property or native status.
 pub unsafe extern "C" fn hsa_amd_queue_get_info(
     queue: *mut HsaQueue,
     attribute: u32,
@@ -3001,6 +1964,7 @@ pub unsafe extern "C" fn hsa_amd_queue_get_info(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_signal_external_semaphore")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Enqueues a signal operation for an external semaphore.
 pub unsafe extern "C" fn hsa_amd_queue_signal_external_semaphore(
     queue: *mut HsaQueue,
     semaphore: HsaAmdExternalSemaphore,
@@ -3032,6 +1996,7 @@ pub unsafe extern "C" fn hsa_amd_queue_signal_external_semaphore(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_wait_external_semaphore")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Waits for queue external semaphore under the requested wait policy.
 pub unsafe extern "C" fn hsa_amd_queue_wait_external_semaphore(
     queue: *mut HsaQueue,
     semaphore: HsaAmdExternalSemaphore,
@@ -3063,6 +2028,7 @@ pub unsafe extern "C" fn hsa_amd_queue_wait_external_semaphore(
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_get_dispatch_time")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes the recorded start and end timestamps of a dispatch.
 pub unsafe extern "C" fn hsa_amd_profiling_get_dispatch_time(
     agent: HsaAgent,
     signal: HsaSignal,
@@ -3119,6 +2085,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_dispatch_time(
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_get_async_copy_time")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes timestamps recorded for an asynchronous copy.
 pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
     signal: HsaSignal,
     time: *mut ProfilingTime,
@@ -3149,12 +2116,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
             {
                 return ERROR;
             }
-            let Some(profile) = runtime
-                .signal_state
-                .async_signal_refs
-                .get(&(signal.handle as usize))
-                .and_then(|record| record.copy_profile)
-            else {
+            let Some(profile) = runtime.signal_state.copy_profile(signal) else {
                 return ERROR;
             };
             let device = match profile.clock {
@@ -3186,452 +2148,4 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::AtomicUsize;
-
-    struct DropCount(Arc<AtomicUsize>);
-
-    impl Drop for DropCount {
-        fn drop(&mut self) {
-            self.0.fetch_add(1, Ordering::Release);
-        }
-    }
-
-    #[test]
-    fn failed_scratch_update_retains_both_old_and_candidate_owners() {
-        let old_drops = Arc::new(AtomicUsize::new(0));
-        let new_drops = Arc::new(AtomicUsize::new(0));
-        let mut current = Some(DropCount(old_drops.clone()));
-        let mut uncertain = Vec::new();
-        assert!(matches!(
-            update_scratch_owner(
-                &mut current,
-                &mut uncertain,
-                DropCount(new_drops.clone()),
-                || Err(ERROR),
-            ),
-            Err(ERROR)
-        ));
-        assert_eq!(old_drops.load(Ordering::Acquire), 0);
-        assert_eq!(new_drops.load(Ordering::Acquire), 0);
-        assert_eq!(uncertain.len(), 1);
-        drop(current);
-        drop(uncertain);
-        assert_eq!(old_drops.load(Ordering::Acquire), 1);
-        assert_eq!(new_drops.load(Ordering::Acquire), 1);
-    }
-
-    #[test]
-    #[allow(clippy::panic)]
-    fn scratch_update_unwind_keeps_candidate_owned() {
-        let drops = Arc::new(AtomicUsize::new(0));
-        let mut current = None;
-        let mut uncertain = Vec::new();
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = update_scratch_owner(
-                &mut current,
-                &mut uncertain,
-                DropCount(drops.clone()),
-                || -> Result<(), Status> { panic!("injected scratch update unwind") },
-            );
-        }));
-        assert!(outcome.is_err());
-        assert_eq!(drops.load(Ordering::Acquire), 0);
-        assert_eq!(uncertain.len(), 1);
-        drop(uncertain);
-        assert_eq!(drops.load(Ordering::Acquire), 1);
-    }
-
-    #[test]
-    fn stopping_a_queue_joins_its_event_worker() {
-        let alive = Arc::new(AtomicBool::new(true));
-        let entered = Arc::new(AtomicBool::new(false));
-        let finished = Arc::new(AtomicBool::new(false));
-        let worker_alive = alive.clone();
-        let worker_entered = entered.clone();
-        let worker_finished = finished.clone();
-        let mut worker = Some(thread::spawn(move || {
-            worker_entered.store(true, Ordering::Release);
-            while worker_alive.load(Ordering::Acquire) {
-                thread::yield_now();
-            }
-            thread::sleep(Duration::from_millis(2));
-            worker_finished.store(true, Ordering::Release);
-        }));
-        let deadline = std::time::Instant::now() + Duration::from_millis(100);
-        while !entered.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
-            thread::yield_now();
-        }
-
-        assert!(stop_queue_event_worker(&alive, &mut worker).is_ok());
-
-        assert!(worker.is_none());
-        assert!(finished.load(Ordering::Acquire));
-    }
-
-    #[test]
-    #[allow(clippy::unwrap_used)]
-    fn queue_event_worker_keeps_its_join_handle_for_later_cleanup() {
-        let alive = Arc::new(AtomicBool::new(true));
-        let worker_slot = Arc::new(std::sync::Mutex::new(None));
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let worker_alive = alive.clone();
-        let worker_slot_clone = worker_slot.clone();
-        let worker = thread::spawn(move || {
-            let result = loop {
-                let mut slot = worker_slot_clone.lock().unwrap();
-                if slot.is_some() {
-                    break stop_queue_event_worker(&worker_alive, &mut slot);
-                }
-                drop(slot);
-                thread::yield_now();
-            };
-            sender.send(result.map_err(|error| error.kind())).unwrap();
-        });
-        *worker_slot.lock().unwrap() = Some(worker);
-        assert_eq!(
-            receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
-            Err(rocddi::ErrorKind::Busy)
-        );
-        assert!(!alive.load(Ordering::Acquire));
-        let worker = worker_slot.lock().unwrap().take().unwrap();
-        worker.join().unwrap();
-    }
-
-    #[test]
-    fn async_copy_profiling_entry_point_matches_the_public_abi() {
-        let _: unsafe extern "C" fn(HsaSignal, *mut ProfilingTime) -> Status =
-            hsa_amd_profiling_get_async_copy_time;
-    }
-
-    #[test]
-    fn external_semaphore_queue_entry_points_match_the_public_abi() {
-        let _: unsafe extern "C" fn(*mut HsaQueue, HsaAmdExternalSemaphore, u64) -> Status =
-            hsa_amd_queue_signal_external_semaphore;
-        let _: unsafe extern "C" fn(*mut HsaQueue, HsaAmdExternalSemaphore, u64) -> Status =
-            hsa_amd_queue_wait_external_semaphore;
-    }
-
-    #[test]
-    fn counted_queue_entry_points_match_the_public_abi() {
-        let _: unsafe extern "C" fn(
-            HsaAgent,
-            u32,
-            u32,
-            QueueErrorCallback,
-            *mut c_void,
-            u64,
-            *mut *mut HsaQueue,
-        ) -> Status = hsa_amd_counted_queue_acquire;
-        let _: unsafe extern "C" fn(*mut HsaQueue) -> Status = hsa_amd_counted_queue_release;
-    }
-
-    #[test]
-    fn counted_queue_pool_selects_the_first_least_used_hardware_queue() {
-        let pool = [
-            CountedHardwareQueue {
-                queue: 0x1000,
-                use_count: 3,
-            },
-            CountedHardwareQueue {
-                queue: 0x2000,
-                use_count: 1,
-            },
-            CountedHardwareQueue {
-                queue: 0x3000,
-                use_count: 1,
-            },
-        ];
-        assert_eq!(least_used_counted_queue(&pool), Some(0x2000));
-        assert_eq!(least_used_counted_queue(&[]), None);
-    }
-
-    #[test]
-    fn counted_queue_handles_are_unique_copies_of_the_hardware_header() {
-        let hardware = Box::new(HsaQueue {
-            queue_type: QUEUE_TYPE_MULTI,
-            features: QUEUE_FEATURE_KERNEL_DISPATCH,
-            base_address: 0x1234usize as *mut c_void,
-            doorbell_signal: HsaSignal { handle: 0x5678 },
-            size: 16_384,
-            reserved: 0,
-            id: 42,
-        });
-        let hardware_key = (&raw const *hardware) as usize;
-        // SAFETY: hardware remains live while both public headers are copied.
-        let mut first = unsafe { CountedQueue::new(hardware_key, (1, 2)) };
-        // SAFETY: hardware remains live while both public headers are copied.
-        let mut second = unsafe { CountedQueue::new(hardware_key, (1, 2)) };
-        let first = first.public_pointer();
-        let second = second.public_pointer();
-        assert_ne!(first, second);
-        assert_eq!(first as usize % 128, COUNTED_QUEUE_HANDLE_BIT);
-        assert_eq!(second as usize % 128, COUNTED_QUEUE_HANDLE_BIT);
-        // SAFETY: Both pointers refer to live CountedQueue-owned headers.
-        unsafe {
-            assert_eq!((*first).base_address, hardware.base_address);
-            assert_eq!(
-                (*first).doorbell_signal.handle,
-                hardware.doorbell_signal.handle
-            );
-            assert_eq!((*first).size, hardware.size);
-            assert_eq!((*first).id, hardware.id);
-            assert_eq!((*second).base_address, hardware.base_address);
-            assert_eq!(
-                (*second).doorbell_signal.handle,
-                hardware.doorbell_signal.handle
-            );
-            assert_eq!((*second).size, hardware.size);
-            assert_eq!((*second).id, hardware.id);
-        }
-    }
-
-    #[repr(C, align(256))]
-    struct PublicQueueStorage([u8; 256]);
-
-    #[test]
-    fn soft_queue_control_uses_the_direct_index_path() {
-        let mut control = Box::new(SoftQueueControl([0; 32]));
-        let public = control.0.as_mut_ptr().cast::<HsaQueue>();
-        assert_eq!(public as usize % 128, 0);
-        // SAFETY: The aligned control allocation retains the read index word.
-        unsafe {
-            public
-                .cast::<u8>()
-                .add(READ_INDEX_OFFSET)
-                .cast::<AtomicU64>()
-                .write(AtomicU64::new(31));
-            assert_eq!(hsa_queue_load_read_index_relaxed(public), 31);
-        }
-    }
-
-    #[test]
-    fn counted_queue_index_operations_reach_the_hardware_control() {
-        let mut hardware = PublicQueueStorage([0; 256]);
-        let hardware_queue = hardware.0.as_mut_ptr().cast::<HsaQueue>();
-        // SAFETY: The storage is aligned and retains the public header and
-        // both atomic index words throughout this test.
-        unsafe {
-            hardware_queue.write(HsaQueue {
-                queue_type: QUEUE_TYPE_MULTI,
-                features: QUEUE_FEATURE_KERNEL_DISPATCH,
-                base_address: std::ptr::null_mut(),
-                doorbell_signal: HsaSignal { handle: 0 },
-                size: 64,
-                reserved: 0,
-                id: 7,
-            });
-            let read = hardware
-                .0
-                .as_mut_ptr()
-                .add(READ_INDEX_OFFSET)
-                .cast::<AtomicU64>();
-            let write = hardware
-                .0
-                .as_mut_ptr()
-                .add(WRITE_INDEX_OFFSET)
-                .cast::<AtomicU64>();
-            read.write(AtomicU64::new(19));
-            write.write(AtomicU64::new(23));
-
-            let mut counted = CountedQueue::new(hardware_queue as usize, (1, 2));
-            let public = counted.public_pointer();
-            assert_eq!(hardware_queue as usize % 128, 0);
-            assert_eq!(public as usize % 128, COUNTED_QUEUE_HANDLE_BIT);
-            assert_eq!(public as usize % 64, 0);
-            assert_eq!(hsa_queue_load_read_index_relaxed(public), 19);
-            assert_eq!(hsa_queue_load_read_index_scacquire(public), 19);
-            assert_eq!(hsa_queue_add_write_index_relaxed(public, 2), 23);
-            assert_eq!((*write).load(Ordering::Relaxed), 25);
-            assert_eq!(hsa_queue_load_write_index_relaxed(public), 25);
-        }
-    }
-
-    #[test]
-    fn amd_queue_create_descriptor_matches_the_public_x86_64_abi() {
-        assert_eq!(std::mem::size_of::<HsaAmdComputeQueueParams>(), 32);
-        assert_eq!(std::mem::size_of::<HsaAmdSdmaQueueParams>(), 32);
-        assert_eq!(std::mem::size_of::<HsaAmdQueueEngineParams>(), 32);
-        assert_eq!(std::mem::size_of::<HsaAmdQueueCreateDesc>(), 96);
-        assert_eq!(std::mem::align_of::<HsaAmdQueueCreateDesc>(), 8);
-        assert_eq!(std::mem::offset_of!(HsaAmdQueueCreateDesc, version), 0);
-        assert_eq!(std::mem::offset_of!(HsaAmdQueueCreateDesc, flags), 2);
-        assert_eq!(std::mem::offset_of!(HsaAmdQueueCreateDesc, engine_type), 4);
-        assert_eq!(
-            std::mem::offset_of!(HsaAmdQueueCreateDesc, queue_size_bytes),
-            8
-        );
-        assert_eq!(std::mem::offset_of!(HsaAmdQueueCreateDesc, priority), 12);
-        assert_eq!(std::mem::offset_of!(HsaAmdQueueCreateDesc, callback), 16);
-        assert_eq!(
-            std::mem::offset_of!(HsaAmdQueueCreateDesc, callback_data),
-            24
-        );
-        assert_eq!(std::mem::offset_of!(HsaAmdQueueCreateDesc, queue), 32);
-        assert_eq!(std::mem::offset_of!(HsaAmdQueueCreateDesc, engine), 40);
-        assert_eq!(
-            std::mem::offset_of!(HsaAmdQueueCreateDesc, traffic_class),
-            72
-        );
-        assert_eq!(std::mem::offset_of!(HsaAmdQueueCreateDesc, reserved), 76);
-    }
-
-    #[test]
-    fn queue_create_input_does_not_read_the_uninitialized_output() {
-        let mut descriptor = std::mem::MaybeUninit::<HsaAmdQueueCreateDesc>::uninit();
-        let pointer = descriptor.as_mut_ptr();
-        // SAFETY: Every input field is initialized below. The reader only
-        // copies those fields, leaving the queue output untouched.
-        unsafe {
-            (&raw mut (*pointer).version).write(AMD_QUEUE_CREATE_DESC_VERSION);
-            (&raw mut (*pointer).flags).write(0);
-            (&raw mut (*pointer).engine_type).write(AMD_QUEUE_ENGINE_COMPUTE);
-            (&raw mut (*pointer).reserved_header).write([0; 3]);
-            (&raw mut (*pointer).queue_size_bytes).write(4096);
-            (&raw mut (*pointer).priority).write(AMD_QUEUE_PRIORITY_NORMAL);
-            (&raw mut (*pointer).callback).write(None);
-            (&raw mut (*pointer).callback_data).write(std::ptr::null_mut());
-            (&raw mut (*pointer).engine).write(HsaAmdQueueEngineParams {
-                compute: HsaAmdComputeQueueParams {
-                    cu_mask: std::ptr::null(),
-                    queue_type: QUEUE_TYPE_MULTI,
-                    private_segment_size: 0,
-                    cu_mask_count: 0,
-                    reserved: [0; 3],
-                },
-            });
-            (&raw mut (*pointer).traffic_class).write(0);
-            (&raw mut (*pointer).reserved).write([0; 20]);
-            let input = read_queue_create_input(pointer);
-            assert_eq!(input.version, AMD_QUEUE_CREATE_DESC_VERSION);
-            assert_eq!(input.queue_size_bytes, 4096);
-        }
-    }
-
-    #[test]
-    fn queue_create_copies_a_mask_inside_the_descriptor() -> Result<(), Status> {
-        let mut descriptor = HsaAmdQueueCreateDesc {
-            version: AMD_QUEUE_CREATE_DESC_VERSION,
-            flags: 0,
-            engine_type: AMD_QUEUE_ENGINE_COMPUTE,
-            reserved_header: [0; 3],
-            queue_size_bytes: 4096,
-            priority: AMD_QUEUE_PRIORITY_NORMAL,
-            callback: None,
-            callback_data: std::ptr::null_mut(),
-            queue: std::ptr::null_mut(),
-            engine: HsaAmdQueueEngineParams { reserved: [0; 32] },
-            traffic_class: 0,
-            reserved: [0; 20],
-        };
-        descriptor.engine = HsaAmdQueueEngineParams {
-            compute: HsaAmdComputeQueueParams {
-                cu_mask: &raw const descriptor.queue_size_bytes,
-                queue_type: QUEUE_TYPE_MULTI,
-                private_segment_size: 0,
-                cu_mask_count: 32,
-                reserved: [0; 3],
-            },
-        };
-        // SAFETY: The mask points to the initialized u32 field in this live
-        // descriptor. No mutable reference to the descriptor is active.
-        let copied = unsafe { copy_queue_create_mask(descriptor.engine.compute) }?;
-        // SAFETY: The output field is writable and separate from the owned mask.
-        unsafe { (&raw mut descriptor.queue).write(std::ptr::null_mut()) };
-        assert_eq!(copied, Some(vec![4096]));
-        Ok(())
-    }
-
-    #[test]
-    fn firmware_queue_errors_map_to_public_status_codes() {
-        assert_eq!(queue_error_status(2), INCOMPATIBLE_ARGUMENTS);
-        assert_eq!(queue_error_status(4), INVALID_ALLOCATION);
-        assert_eq!(queue_error_status(8), INVALID_CODE_OBJECT);
-        assert_eq!(queue_error_status(16), MEMORY_FAULT);
-        assert_eq!(queue_error_status(32), INVALID_PACKET_FORMAT);
-        assert_eq!(queue_error_status(64), INVALID_ARGUMENT);
-        assert_eq!(queue_error_status(128), OUT_OF_REGISTERS);
-        assert_eq!(queue_error_status(0x2000_0000), MEMORY_APERTURE_VIOLATION);
-        assert_eq!(queue_error_status(0x4000_0000), ILLEGAL_INSTRUCTION);
-        assert_eq!(queue_error_status(0x8000_0000), EXCEPTION);
-    }
-
-    #[test]
-    fn base_atomic_entry_points_preserve_queue_indices() {
-        let mut storage = PublicQueueStorage([0; 256]);
-        let queue = storage.0.as_mut_ptr().cast::<HsaQueue>();
-
-        // SAFETY: The aligned backing storage contains initialized atomic
-        // index fields at the public amd_queue_v2_t offsets used below.
-        unsafe {
-            storage
-                .0
-                .as_mut_ptr()
-                .add(WRITE_INDEX_OFFSET)
-                .cast::<AtomicU64>()
-                .write(AtomicU64::new(0));
-            storage
-                .0
-                .as_mut_ptr()
-                .add(READ_INDEX_OFFSET)
-                .cast::<AtomicU64>()
-                .write(AtomicU64::new(0));
-
-            hsa_queue_store_write_index_relaxed(queue, 4);
-            assert_eq!(hsa_queue_load_write_index_acquire(queue), 4);
-            assert_eq!(hsa_queue_add_write_index_relaxed(queue, 3), 4);
-            assert_eq!(hsa_queue_cas_write_index_scacquire(queue, 6, 9), 7);
-            assert_eq!(hsa_queue_load_write_index_relaxed(queue), 7);
-            assert_eq!(hsa_queue_cas_write_index_scacq_screl(queue, 7, 9), 7);
-            assert_eq!(hsa_queue_load_write_index_scacquire(queue), 9);
-
-            hsa_queue_store_write_index_release(queue, 11);
-            assert_eq!(hsa_queue_load_write_index_relaxed(queue), 11);
-            hsa_queue_store_read_index_screlease(queue, 5);
-            assert_eq!(hsa_queue_load_read_index_acquire(queue), 5);
-            hsa_queue_store_read_index_release(queue, 8);
-            assert_eq!(hsa_queue_load_read_index_relaxed(queue), 8);
-        }
-    }
-
-    #[test]
-    #[allow(clippy::unwrap_used)]
-    fn repeated_queue_index_access_does_not_wait_for_the_registry_mutex() {
-        use std::sync::mpsc;
-
-        let mut storage = PublicQueueStorage([0; 256]);
-        // SAFETY: This aligned storage contains a live atomic at the public
-        // write-index offset until the scoped worker exits.
-        unsafe {
-            storage
-                .0
-                .as_mut_ptr()
-                .add(WRITE_INDEX_OFFSET)
-                .cast::<AtomicU64>()
-                .write(AtomicU64::new(42));
-        }
-        let pointer = storage.0.as_ptr() as usize;
-        let (ready_tx, ready_rx) = mpsc::channel();
-        let (go_tx, go_rx) = mpsc::channel();
-        let (done_tx, done_rx) = mpsc::channel();
-        thread::scope(|scope| {
-            scope.spawn(move || {
-                // SAFETY: The scoped owner keeps the synthetic queue storage
-                // live for the read.
-                let queue = pointer as *const HsaQueue;
-                ready_tx.send(()).unwrap();
-                go_rx.recv().unwrap();
-                done_tx
-                    .send(unsafe { hsa_queue_load_write_index_relaxed(queue) })
-                    .unwrap();
-            });
-            ready_rx.recv().unwrap();
-            let guard = crate::runtime::LIFECYCLE.lock().unwrap();
-            go_tx.send(()).unwrap();
-            let value = done_rx.recv_timeout(Duration::from_millis(200));
-            drop(guard);
-            assert_eq!(value.unwrap(), 42);
-        });
-    }
-}
+mod tests;
