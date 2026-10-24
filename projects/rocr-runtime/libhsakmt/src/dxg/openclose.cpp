@@ -713,16 +713,6 @@ static HSAKMT_STATUS init_vars_from_env(void) {
     dxg_runtime->sdma_gpu_poll_ = (envvar[0] == '1' && envvar[1] == '\0');
   }
 
-  // Set default GPU node based on ROCR_VISIBLE_DEVICES. Extract the first numeric value
-  // from the environment variable and add 1 to convert to 1-indexed node ID.
-  if ((envvar = getenv("ROCR_VISIBLE_DEVICES")) != nullptr) {
-    std::string devices(envvar);
-    size_t first_num_pos = devices.find_first_of("0123456789");
-    if (first_num_pos != std::string::npos) {
-      dxg_runtime->default_node = std::stoi(devices.substr(first_num_pos));
-    }
-  }
-
   // Determine SVM (Shared Virtual Memory) API support. Enabled by default unless
   // HSA_USE_SVM is explicitly set to "0". Currently forced to false.
   envvar = getenv("HSA_USE_SVM");
