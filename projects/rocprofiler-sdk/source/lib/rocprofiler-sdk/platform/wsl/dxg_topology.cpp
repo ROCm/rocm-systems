@@ -28,14 +28,17 @@
 
 #include <fmt/core.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <dlfcn.h>
+#include <link.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofiler
@@ -46,14 +49,94 @@ namespace wsl
 {
 namespace
 {
+constexpr const char* kLibRocdxg = "librocdxg";
+
+std::vector<std::string>
+rocdxg_names()
+{
+    auto names = std::vector<std::string>{};
+    if(kLibRocdxgVersionedName[0] != '\0') names.emplace_back(kLibRocdxgVersionedName);
+    names.emplace_back(kLibRocdxgUnversionedName);
+    return names;
+}
+
+std::string
+active_hsa_runtime_dir()
+{
+    auto dir   = std::string{};
+    auto visit = [](dl_phdr_info* info, size_t, void* data) -> int {
+        const auto path  = std::string_view{info->dlpi_name != nullptr ? info->dlpi_name : ""};
+        const auto slash = path.find_last_of('/');
+        if(slash == std::string_view::npos) return 0;
+        if(path.substr(slash + 1).rfind("libhsa-runtime64.so", 0) != 0) return 0;
+        *static_cast<std::string*>(data) = std::string{path.substr(0, slash + 1)};
+        return 1;
+    };
+    ::dl_iterate_phdr(visit, &dir);
+    return dir;
+}
+
+// Bring librocdxg into the process the way the HSA runtime would, or find the
+// copy it already brought in.
+//
+// A copy that is already resident under either name is taken first, with
+// RTLD_NOLOAD, so a process can only ever hold the one the HSA runtime chose:
+// the versioned soname also matches a copy that was loaded from an explicit
+// path or under the unversioned name, as long as its DT_SONAME is versioned.
+// Only a cold process (rocprofv3-avail, tool initialization before hsa_init())
+// loads anything, and it walks ThunkLoader's own candidate order so the HSA
+// runtime later finds this object by soname instead of mapping another.
+void*
+open_rocdxg(const DxgLoaderOps& ops)
+{
+    const auto names = rocdxg_names();
+
+    for(const auto& name : names)
+    {
+        if(void* handle = ops.open(name.c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD))
+        {
+            ROCP_INFO << fmt::format("wsl topology: reusing resident {}", name);
+            return handle;
+        }
+    }
+
+    const auto hsa_dir  = ops.hsa_runtime_dir ? ops.hsa_runtime_dir() : std::string{};
+    auto       failures = std::vector<std::string>{};
+    for(const auto& name : names)
+    {
+        auto paths = std::vector<std::string>{name};
+        if(!hsa_dir.empty()) paths.emplace_back(hsa_dir + name);
+
+        for(const auto& path : paths)
+        {
+            if(void* handle = ops.open(path.c_str(), RTLD_NOW | RTLD_LOCAL))
+            {
+                ROCP_INFO << fmt::format("wsl topology: loaded {}", path);
+                return handle;
+            }
+            const char* error = ops.error();
+            failures.emplace_back(
+                fmt::format("{} ({})", path, error != nullptr ? error : "unknown error"));
+        }
+    }
+
+    ROCP_WARNING << fmt::format(
+        "wsl topology: could not load {}: tried {}{}. GPU agents cannot be enumerated without "
+        "the DXG thunk, which the HSA runtime also requires for GPU operation.",
+        kLibRocdxg,
+        fmt::join(failures, ", "),
+        hsa_dir.empty() ? "; no libhsa-runtime64 is mapped to search beside" : "");
+    return nullptr;
+}
+
 // RAII handle to librocdxg.
 //
 // The library is normally already resident: the HSA runtime loads it before
 // tools are loaded, so agent enumeration during a profiling run finds it with
 // RTLD_NOLOAD and just takes a reference on the existing object. Pre-HSA
-// consumers (rocprofv3-avail, tool initialization) are the first to touch it
-// and fall through to a real dlopen. Either way the handle is refcounted, so
-// the close below cannot pull the object out from under the HSA runtime.
+// consumers fall through to a real dlopen. Either way the handle is
+// refcounted, so the close below cannot pull the object out from under the
+// HSA runtime.
 struct RocdxgHandle
 {
     const DxgLoaderOps& ops;
@@ -63,19 +146,8 @@ struct RocdxgHandle
     explicit RocdxgHandle(const DxgLoaderOps& ops_v)
     : ops{ops_v}
     {
-        handle = ops.open(kLibRocdxgSoname, RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD);
-        if(!handle) handle = ops.open(kLibRocdxgSoname, RTLD_NOW | RTLD_LOCAL);
-        if(!handle)
-        {
-            ROCP_WARNING << fmt::format(
-                "wsl topology: dlopen({}) failed: {}. GPU agents cannot be enumerated without "
-                "the DXG thunk, which the HSA runtime also requires for GPU operation.",
-                kLibRocdxgSoname,
-                ops.error());
-            return;
-        }
-
-        thunk = resolve_dxg_thunk(handle, ops);
+        handle = open_rocdxg(ops);
+        if(handle) thunk = resolve_dxg_thunk(handle, ops);
     }
 
     ~RocdxgHandle()
@@ -83,7 +155,7 @@ struct RocdxgHandle
         if(handle) ops.close(handle);
     }
 
-    RocdxgHandle(const RocdxgHandle&) = delete;
+    RocdxgHandle(const RocdxgHandle&)            = delete;
     RocdxgHandle& operator=(const RocdxgHandle&) = delete;
 
     bool ready() const { return handle != nullptr && thunk.complete(); }
@@ -116,7 +188,7 @@ layout_agrees(const DxgThunk& dxg)
             "wsl topology: {} does not export DxgAbiCheck, so the record layout cannot be "
             "negotiated; proceeding on the assumption that it writes the {}-byte "
             "HsaNodeProperties this build reads",
-            kLibRocdxgSoname,
+            kLibRocdxg,
             sizeof(HsaNodeProperties));
         return true;
     }
@@ -136,7 +208,7 @@ layout_agrees(const DxgThunk& dxg)
             "here, and reading it anyway would attribute whatever the thunk wrote to the wrong "
             "fields. Build rocprofiler-sdk against the hsakmt headers shipped with the ROCr "
             "package that provides this thunk.",
-            kLibRocdxgSoname,
+            kLibRocdxg,
             sizeof(HsaNodeProperties),
             static_cast<int>(st));
         return false;
@@ -181,7 +253,8 @@ default_loader_ops()
         DxgLoaderOps{[](const char* soname, int flags) { return ::dlopen(soname, flags); },
                      [](void* handle, const char* name) { return ::dlsym(handle, name); },
                      [](void* handle) { return ::dlclose(handle); },
-                     []() { return static_cast<const char*>(::dlerror()); }};
+                     []() { return static_cast<const char*>(::dlerror()); },
+                     &active_hsa_runtime_dir};
     return ops;
 }
 
@@ -191,8 +264,7 @@ resolve_dxg_thunk(void* handle, const DxgLoaderOps& ops)
     auto resolve = [&handle, &ops](const char* name) {
         void* sym = ops.sym(handle, name);
         if(!sym)
-            ROCP_WARNING << fmt::format(
-                "wsl topology: {} does not export {}", kLibRocdxgSoname, name);
+            ROCP_WARNING << fmt::format("wsl topology: {} does not export {}", kLibRocdxg, name);
         return sym;
     };
 
