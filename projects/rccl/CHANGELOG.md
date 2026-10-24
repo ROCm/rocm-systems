@@ -78,6 +78,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed intermittent data corruption in multi-node collectives, seen as out-of-bounds values in 8-node AllToAll, on hosts that use GPU Direct RDMA through peermem. Since RCCL 2.30.4 the GDR flush scratchpad was registered only through dma-buf, so on peermem hosts the flush degraded to a single RDMA read of the receive buffer, which does not order earlier relaxed-ordering writes. The scratchpad is now also registered through peermem, restoring the strictly ordered RDMA write that precedes the flush read.
 * Fixed `ncclCommAbort` and `ncclCommRevoke` hanging when a DDA collective (IPC on gfx942/gfx950, fabric LL/LL128/VMM on gfx1250) was waiting on a peer that never joined. DDA kernels now observe the communicator abort flag while waiting. A parent communicator shrunk with `NCCL_SHRINK_ABORT` no longer uses DDA for later collectives.
 * Fixed Anvil SDMA (`NCCL_GIN_TYPE=7`) GIN contexts sharing signal cells across logical contexts on a connection, which let a consecutive `ncclGinAllContexts` barrier return early on a stale count. Each logical context now has its own signals.
+* Fixed GIN signal shadows being sized for the requested context count instead of the rounded-up `ginContextCount`, which let the last contexts write past the shadow region when the GIN connection count does not divide the requested context count.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.
