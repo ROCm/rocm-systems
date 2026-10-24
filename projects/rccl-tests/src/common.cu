@@ -7,6 +7,11 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+// dl_iterate_phdr is a GNU extension. This has to precede any system header.
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include "cuda_runtime.h"
 #include "rccl_float8.h"
 #include <hip/hip_bfloat16.h>
@@ -29,6 +34,7 @@
 #include "verifiable.h"
 #include "util.h"
 #include "gin_sdma_devtime_host.h"
+#include "mpich_config.h"
 
 #if defined(NCCL_OS_LINUX)
 extern char **environ;
@@ -1939,21 +1945,6 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
 testResult_t run(); // Main function
 
 #ifdef MPI_SUPPORT
-#ifdef MPICH
-// Looks for a configure option in MPICH's version string. A delimiter has to
-// follow the option so that "--with-ze" does not match "--with-zelda", and
-// "--with-hip" is not found inside "--without-hip".
-static bool mpichConfiguredWith(const std::string& version, const std::string& option) {
-  for (size_t pos = version.find(option); pos != std::string::npos;
-       pos = version.find(option, pos + 1)) {
-    const size_t end = pos + option.size();
-    if (end == version.size() || version[end] == '=' || isspace((unsigned char)version[end]))
-      return true;
-  }
-  return false;
-}
-#endif
-
 #if defined(OPEN_MPI) && defined(NCCL_OS_LINUX)
 // Open MPI does not register opal_built_with_rocm_support as an MCA parameter,
 // so there is no MPI_T route to it. Weak references resolve against both shared
@@ -1964,7 +1955,37 @@ static bool mpichConfiguredWith(const std::string& version, const std::string& o
 extern "C" {
 extern bool opal_built_with_rocm_support NCCL_WEAK;
 extern bool opal_built_with_cuda_support NCCL_WEAK;
+// UCX component objects, present when that transport was linked into this
+// process (including out of a static archive). Declared as char so this file
+// does not need UCX headers; only the address is consulted. A module UCX
+// later dlopens with RTLD_LOCAL does not satisfy these.
+extern char uct_rocm_copy_component NCCL_WEAK;
+extern char uct_rocm_ipc_component NCCL_WEAK;
+extern char uct_cuda_copy_component NCCL_WEAK;
+extern char uct_cuda_ipc_component NCCL_WEAK;
 }
+#endif
+
+// UCX dlopens libuct_rocm.so / libuct_cuda.so with RTLD_LOCAL, so neither a
+// weak symbol nor dlsym(RTLD_DEFAULT) can see them. dl_iterate_phdr walks every
+// loaded object, including those, and does not need /proc (this tree defines
+// NCCL_OS_LINUX for any non-Windows host, including FreeBSD).
+#if defined(OPEN_MPI) && defined(NCCL_OS_LINUX) && (defined(__linux__) || defined(__FreeBSD__))
+#include <link.h>
+extern "C" {
+static int rcclTestsUcxGpuPhdr(struct dl_phdr_info* info, size_t, void* data) {
+  int* found = static_cast<int*>(data);
+  const char* name = info->dlpi_name;
+  if (name == nullptr || name[0] == '\0')
+    return 0;
+  if (strstr(name, "libuct_rocm") != nullptr)
+    *found |= 1;
+  else if (strstr(name, "libuct_cuda") != nullptr)
+    *found |= 2;
+  return 0;
+}
+}
+#define RCCL_TESTS_HAVE_DL_ITERATE_PHDR 1
 #endif
 
 // Returns a description of why the MPI implementation is GPU-aware, or NULL if
@@ -2015,32 +2036,41 @@ static const char* detectGpuAwareMpi() {
       // Build from the reported length rather than trusting NUL termination.
       if (len < 0 || len > (int)sizeof(buf)) len = (int)sizeof(buf);
       const std::string version(buf, (size_t)len);
-      if (mpichConfiguredWith(version, "--with-hip"))
+      if (rccl_tests_mpi::mpichConfiguredWith(version, "--with-hip"))
         return "it is running against an MPICH configured --with-hip";
-      if (mpichConfiguredWith(version, "--with-cuda"))
+      if (rccl_tests_mpi::mpichConfiguredWith(version, "--with-cuda"))
         return "it is running against an MPICH configured --with-cuda";
-      if (mpichConfiguredWith(version, "--with-ze"))
+      if (rccl_tests_mpi::mpichConfiguredWith(version, "--with-ze"))
         return "it is running against an MPICH configured --with-ze";
     }
   }
 #endif
-#if defined(NCCL_OS_LINUX)
+#if defined(OPEN_MPI) && defined(NCCL_OS_LINUX)
   // Open MPI 4.x exposes no ROCm-awareness API whatsoever: it inherits GPU
-  // support from UCX and reports nothing about it. UCX only installs its GPU
-  // transport modules when built with ROCm or CUDA, so finding one mapped into
-  // this process stands in for the query that does not exist. Unlike the checks
-  // above this describes the run rather than the build, and so sees nothing if
-  // the job never selected the UCX transport.
+  // support from UCX and reports nothing about it. UCX only ships its GPU
+  // transport modules when built with ROCm or CUDA. MPICH has its own checks
+  // above; scanning UCX there would abort a non-GPU MPICH whose UCX happened
+  // to load a GPU module, and the fatal text would tell the user to drop
+  // --with-hip.
+  // A static archive linked into the process exports the component object.
+  // A shared module does not: UCX dlopens it RTLD_LOCAL, so the weak reference
+  // stays null and the link-map walk below is what sees libuct_rocm.so.
+  if (&uct_rocm_copy_component != NULL || &uct_rocm_ipc_component != NULL)
+    return "the UCX it is linked against has the ROCm transport compiled in";
+  if (&uct_cuda_copy_component != NULL || &uct_cuda_ipc_component != NULL)
+    return "the UCX it is linked against has the CUDA transport compiled in";
+#if defined(RCCL_TESTS_HAVE_DL_ITERATE_PHDR)
+  // Describes the run rather than the build, and sees nothing if the job
+  // never selected the UCX transport.
   {
-    std::ifstream maps("/proc/self/maps");
-    std::string line;
-    while (std::getline(maps, line)) {
-      if (line.find("libuct_rocm") != std::string::npos)
-        return "the UCX it is running against has the ROCm transport module built in";
-      if (line.find("libuct_cuda") != std::string::npos)
-        return "the UCX it is running against has the CUDA transport module built in";
-    }
+    int found = 0;
+    dl_iterate_phdr(rcclTestsUcxGpuPhdr, &found);
+    if (found & 1)
+      return "the UCX it is running against has the ROCm transport module loaded";
+    if (found & 2)
+      return "the UCX it is running against has the CUDA transport module loaded";
   }
+#endif
 #endif
   return NULL;
 }
@@ -2050,10 +2080,20 @@ static const char* detectGpuAwareMpi() {
 // MPI_Abort require.
 static void abortIfGpuAwareMpi() {
   const char* reason = detectGpuAwareMpi();
-  if (reason == NULL) return;
+  // The UCX module scan reads this process's own link map, so ranks can
+  // disagree when nodes are not identical. Agree before anyone returns, or
+  // the ranks that found a GPU module wait in the barrier below while the
+  // rest enter the test's collectives and the job hangs.
+  int local = reason != NULL ? 1 : 0;
+  int any = 0;
+  if (MPI_Allreduce(&local, &any, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD) != MPI_SUCCESS)
+    any = local;
+  if (!any) return;
 
   int rank = 0;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  if (reason == NULL)
+    reason = "a GPU-aware MPI was detected on another rank";
 
   if (allow_gpu_aware_mpi) {
     if (rank == 0)
@@ -2069,12 +2109,14 @@ static void abortIfGpuAwareMpi() {
             "[FATAL] rccl-tests requires a non-GPU-aware MPI, but %s.\n"
             "        Re-run with an MPI configured without GPU support (Open MPI: without\n"
             "        --with-rocm/--with-cuda, MPICH: without --with-hip/--with-cuda).\n"
+            "        Open MPI 4.x takes that support from UCX, which then has to be built\n"
+            "        without ROCm or CUDA too.\n"
             "        Turning GPU support off at launch time is not sufficient.\n"
             "        Pass --allow_gpu_aware_mpi to run anyway.\n",
             reason);
-  // Every rank detects this identically, so the barrier cannot deadlock. It
-  // keeps the other ranks from aborting, and taking the job down with them,
-  // before rank 0's message has made it out through the launcher.
+  // Every rank shares the verdict from the allreduce above. The barrier keeps
+  // the other ranks from aborting, and taking the job down with them, before
+  // rank 0's message has made it out through the launcher.
   MPI_Barrier(MPI_COMM_WORLD);
   MPI_Abort(MPI_COMM_WORLD, 1);
   // MPICH returns from MPI_Abort and keeps running until the launcher kills the
