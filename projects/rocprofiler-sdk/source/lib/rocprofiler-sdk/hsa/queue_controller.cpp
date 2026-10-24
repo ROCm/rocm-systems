@@ -499,6 +499,43 @@ QueueController::add_queue(hsa_queue_t*           id,
     }
 }
 
+bool
+QueueController::adopt_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
+{
+    CHECK(queue);
+    const auto agent_id = queue->get_agent().get_rocp_agent()->id;
+
+    bool _inserted = false;
+    _callback_cache.wlock([&](auto& callbacks) {
+        _queues.wlock([&](auto& map) {
+            // Checked under the same lock that inserts: a concurrent discovery of this
+            // queue on another thread must not replace a Queue a caller may already hold.
+            if(map.find(id) != map.end()) return;
+
+            map[id]   = std::move(queue);
+            _inserted = true;
+            for(const auto& [cbid, cb_data] : callbacks)
+            {
+                const auto& [agent, cb] = cb_data;
+                if(agent.id == default_agent.id || agent.id == agent_id)
+                {
+                    map[id]->register_callback(cbid, cb);
+                }
+            }
+        });
+    });
+
+    // A refused Queue is never registered, so its block_signal is released here rather
+    // than on queue destruction. Null on the inserted path, moved into the map.
+    if(!_inserted && queue && queue->block_signal.handle != 0 &&
+       get_core_table().hsa_signal_destroy_fn != nullptr)
+    {
+        get_core_table().hsa_signal_destroy_fn(queue->block_signal);
+    }
+
+    return _inserted;
+}
+
 void
 QueueController::destroy_queue(hsa_queue_t* id)
 {
@@ -907,6 +944,79 @@ get_queue_controller()
 {
     static auto*& controller = common::static_object<QueueController>::construct();
     return controller;
+}
+
+// Registers a Queue for one the application created before any dispatch-tracing context
+// existed, discovered on an application thread's first touch of its write index. Without
+// a registered Queue its packets execute uninstrumented and emit no records.
+bool
+queue_controller_adopt_existing_queue(const hsa_queue_t* queue)
+{
+    auto* qc = get_queue_controller();
+    if(qc == nullptr || queue == nullptr) return false;
+
+    // Already registered: created under interception, or adopted by an earlier first touch.
+    // Unsynchronized. Two threads reaching an undiscovered queue together both construct a
+    // Queue; adopt_queue admits one and disposes of the other.
+    if(qc->get_queue(*queue) != nullptr) return true;
+
+    // Counter collection, SPM and thread trace need setup a queue adopted mid-life never
+    // received. Adoption covers tracing only.
+    if(!context::get_registered_contexts([](const context::context* ctx) {
+            return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
+                    ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
+                    ctx->device_thread_trace);
+        }).empty())
+    {
+        ROCP_INFO << "[queue-intercept] not adopting pre-existing queue: an active "
+                     "profiling service requires queue setup that cannot be applied "
+                     "retroactively";
+        return false;
+    }
+
+    // The application's live queue, not a constant; const is only the discovery path's
+    // view of it, and registration is keyed on the mutable pointer.
+    auto* _queue = const_cast<hsa_queue_t*>(queue);
+
+    hsa_agent_t agent = {};
+    const auto& ext   = qc->get_ext_table();
+    if(ext.hsa_amd_queue_get_info_fn == nullptr ||
+       ext.hsa_amd_queue_get_info_fn(_queue, HSA_AMD_QUEUE_INFO_AGENT, &agent) !=
+           HSA_STATUS_SUCCESS)
+    {
+        ROCP_INFO << "[queue-intercept] could not resolve the agent of a pre-existing "
+                     "queue; it will not emit records";
+        return false;
+    }
+
+    for(const auto& [_, agent_info] : qc->get_supported_agents())
+    {
+        if(agent_info.get_hsa_agent().handle != agent.handle) continue;
+
+        // Packets are read through the write-index wrappers, so no packet interceptor is
+        // attached. Marked a non-participant: this ring is already in use.
+        auto _new_queue = std::make_unique<Queue>(
+            agent_info,
+            qc->get_core_table(),
+            qc->get_ext_table(),
+            _queue,
+            [](write_interceptor_t, void*) {},
+            /*profiling_participant=*/false);
+
+        // Not registered with the serializer, which keeps any async handler off its
+        // ready_signal, and holds no owner-registry entry or doorbell window, so no
+        // signal-less batch can be admitted against it. A refusal below means another
+        // thread registered this queue first; it is registered either way.
+        if(!qc->adopt_queue(_queue, std::move(_new_queue))) return true;
+
+        ROCP_INFO << "[queue-intercept] adopted pre-existing queue on HSA agent handle "
+                  << agent.handle;
+        return true;
+    }
+
+    ROCP_INFO << "[queue-intercept] no supported agent matches a pre-existing queue; it "
+                 "will not emit records";
+    return false;
 }
 
 bool
