@@ -88,10 +88,16 @@ foreach(_rocm_root IN LISTS CMAKE_PREFIX_PATH)
         endif()
     endforeach()
 endforeach()
-list(JOIN _test_ld_paths ":" _test_ld_path)
+# Store each folder relative to ROCM_PATH; the test expands it when it runs.
+set(_test_rel_ld_paths "")
+foreach(_dir IN LISTS _test_ld_paths)
+    file(RELATIVE_PATH _rel "$ENV{ROCM_PATH}" "${_dir}")
+    list(APPEND _test_rel_ld_paths "$ROCM_PATH/${_rel}")
+endforeach()
+list(JOIN _test_rel_ld_paths ":" _test_rel_ld_path)
 set_target_properties(
     ${target}
-    PROPERTIES ROCPROF_TEST_LD_LIBRARY_PATH "${_test_ld_path}"
+    PROPERTIES ROCPROF_TEST_LD_LIBRARY_PATH "${_test_rel_ld_path}"
 )
 
 if(INSTALL_TESTS)

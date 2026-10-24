@@ -222,19 +222,12 @@ else()
     set(WORKING_DIR_OPTION WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 endif()
 
+set(COVERAGE_DATA_PATH ".coverage")
 if(TEST_FROM_INSTALL)
-    # When testing from install, write coverage to install directory
-    set(COVERAGE_XML_PATH
-        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PACKAGE_NAME}/coverage.xml"
-    )
-    set(COVERAGE_DATA_PATH
-        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PACKAGE_NAME}/.coverage"
-    )
+    set(COVERAGE_XML_PATH "coverage.xml")
 else()
-    # When testing from build, write coverage XML to build directory
-    # and coverage data to source directory
+    # ctest_coverage reads coverage.xml from the build directory.
     set(COVERAGE_XML_PATH "${CMAKE_BINARY_DIR}/coverage.xml")
-    set(COVERAGE_DATA_PATH "${PROJECT_SOURCE_DIR}/.coverage")
 endif()
 
 # -------------------
@@ -873,10 +866,22 @@ add_test(
 
 if(TARGET test-torch-trace-collector)
     if(TEST_FROM_INSTALL)
-        set(_ttc_test_cmd tests/test-torch-trace-collector)
+        set(_ttc_test_bin tests/test-torch-trace-collector)
     else()
-        set(_ttc_test_cmd $<TARGET_FILE:test-torch-trace-collector>)
+        set(_ttc_test_bin $<TARGET_FILE:test-torch-trace-collector>)
     endif()
+    get_target_property(
+        _ttc_ld_path
+        test-torch-trace-collector
+        ROCPROF_TEST_LD_LIBRARY_PATH
+    )
+    # The library path holds $ROCM_PATH, so the shell expands it at run time.
+    set(_ttc_test_cmd
+        sh
+        -c
+        "LD_LIBRARY_PATH=\"${_ttc_ld_path}:$LD_LIBRARY_PATH\" exec \"$0\" \"$@\""
+        ${_ttc_test_bin}
+    )
     add_test(
         NAME test-torch-trace-collector
         COMMAND ${_ttc_test_cmd} --gtest_filter=-TorchTraceCollectorBeforeInstall.*
@@ -886,16 +891,6 @@ if(TARGET test-torch-trace-collector)
         COMMAND ${_ttc_test_cmd} --gtest_filter=TorchTraceCollectorBeforeInstall.*
     )
     sanitizer_runtime_env(_ttc_test_env)
-    # Installed tests inherit LD_LIBRARY_PATH; callers must include torch/lib
-    # and any required ROCm lib/host-math/lib directory.
-    if(NOT TEST_FROM_INSTALL)
-        get_target_property(
-            _ttc_ld_path
-            test-torch-trace-collector
-            ROCPROF_TEST_LD_LIBRARY_PATH
-        )
-        list(APPEND _ttc_test_env "LD_LIBRARY_PATH=${_ttc_ld_path}:$ENV{LD_LIBRARY_PATH}")
-    endif()
     set_tests_properties(
         test-torch-trace-collector
         test-torch-trace-collector-before-install
