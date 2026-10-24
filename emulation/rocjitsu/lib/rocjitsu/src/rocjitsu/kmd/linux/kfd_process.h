@@ -528,6 +528,10 @@ public:
   /// waiting for signals that SET_EVENT/RESET_EVENT (which DO run under this lock)
   /// must produce, so holding it would deadlock forward progress.
   std::mutex op_mutex_;
+  /// @brief Coordinate target context ioctls across runtime and debugger clients.
+  /// @details Their op_mutex_ instances differ in daemon mode. Taken before alloc_mutex_
+  /// and CU locks; engine callbacks never acquire this ioctl coordination lock.
+  std::mutex queue_context_mutex_;
   mutable std::mutex alloc_mutex_;
   /// @brief Serializes scratch-pool backing allocation for this process.
   /// @details Every XCD of a fanned-out dispatch independently finds the same
@@ -551,6 +555,9 @@ public:
 
   uint32_t next_queue_id_ = 1;
   std::vector<uint32_t> active_queue_ids_;
+  /// @brief SET_XNACK_MODE latch; changes require no queues and a supported target.
+  /// Precise fault PC is modelled; GPU-initiated SVM migration is not.
+  std::atomic<bool> xnack_enabled_{false};
   struct QueueDoorbellInfo {
     uint32_t gpu_ordinal;
     uint32_t doorbell_offset;
@@ -573,8 +580,15 @@ public:
     uint64_t read_pointer_address = 0;
     uint64_t ctx_save_restore_address = 0;
     uint32_t ctx_save_restore_area_size = 0;
+    /// CREATE_QUEUE control-stack boundary; zero selects the compact test layout.
+    uint32_t control_stack_capacity = 0;
     uint32_t ring_size = 0;
     uint32_t queue_type = 0;
+    uint32_t scheduling_percentage = 100;
+    /// A debugger-suspended queue has a valid image whose edits it still owns.
+    bool debugger_owns_cwsr = false;
+    /// Successful debugger suspension also stops queues with no resident waves.
+    bool debug_suspended = false;
     uint32_t gpu_id = 0;
     uint32_t xcc_id = 0;
     /// CREATE_QUEUE supplied an exception-status address; the interrupt event is optional.
@@ -749,8 +763,10 @@ public:
       prune_debug_notification_events();
     }
 
-    /// @brief Clear every debugger-session-owned exception field.
+    /// @brief Clear debugger-session-owned queue state.
     void clear_debugger_exception_state() {
+      debugger_owns_cwsr = false;
+      debug_suspended = false;
       exception_status &= runtime_exception_pending_status | runtime_exception_retained_status;
       runtime_exception_queried_status = 0;
       debug_notification_session_generation = 0;

@@ -33,15 +33,7 @@ public:
   QueueReconfigureStatus reconfigure(const QueueReconfigureRequest &request) override {
     if (format_ == QueuePacketFormat::Pm4)
       return command_processor_.update_pm4_queue_registration(registration_id_, request);
-    if (!valid_aql_packet_ring(request.ring_base_address, request.ring_size_bytes))
-      return QueueReconfigureStatus::Invalid;
-    if (!registration_id_ || !command_processor_.update_queue_registration(
-                                 registration_id_, request.ring_base_address,
-                                 request.ring_size_bytes, request.scheduling_percentage)) {
-      return QueueReconfigureStatus::Stale;
-    }
-    return request.scheduling_percentage == 0 ? QueueReconfigureStatus::Disabled
-                                              : QueueReconfigureStatus::Applied;
+    return command_processor_.reconfigure_queue_registration(registration_id_, request);
   }
 
   QueueSubmissionStatus submit_producer(uint64_t producer_cursor) override {
