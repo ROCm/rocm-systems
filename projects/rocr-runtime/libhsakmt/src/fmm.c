@@ -56,6 +56,10 @@
 #define MPOL_F_STATIC_NODES     (1 << 15)
 #endif
 
+#ifndef MPOL_F_RELATIVE_NODES
+#define MPOL_F_RELATIVE_NODES   (1 << 14)
+#endif
+
 #define NON_VALID_GPU_ID 0
 
 #define INIT_MANAGEABLE_APERTURE(base_value, limit_value) {	\
@@ -2885,6 +2889,22 @@ static void *fmm_allocate_host_cpu(HsaKFDContext *ctx, void *address, uint64_t M
 	return mem;
 }
 
+/* Returns true if the calling process set an explicit NUMA memory policy
+ * (e.g. via numactl -m / set_mempolicy). When it did, ROCr should not override
+ * it with a per-agent mbind; the process policy governs host placement.
+ */
+static bool process_has_explicit_mempolicy(void)
+{
+	int mode = MPOL_DEFAULT;
+
+	/* flags=0, addr=NULL => returns the calling thread's default policy. */
+	if (get_mempolicy(&mode, NULL, 0, NULL, 0) != 0)
+		return false;
+
+	mode &= ~(MPOL_F_STATIC_NODES | MPOL_F_RELATIVE_NODES);
+	return mode != MPOL_DEFAULT;
+}
+
 static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 			    uint64_t SizeInBytes, HsaMemFlags mflags)
 {
@@ -2903,6 +2923,15 @@ static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 		else
 			return 0;
 	}
+
+	/* Honor an explicit process memory policy (e.g. numactl -m): if the
+	 * application set one, leave placement to that policy instead of forcing
+	 * the per-agent node. HSA_FORCE_MBIND=1 restores the legacy per-agent
+	 * binding. Returning 0 lets the allocation proceed under the process
+	 * policy (also correct for NoSubstitute).
+	 */
+	if (!hsakmt_force_mbind && process_has_explicit_mempolicy())
+		return 0;
 
 	num_node = numa_max_node() + 1;
 
