@@ -297,5 +297,4 @@ rocprofiler_query_available_agents(rocprofiler_agent_version_t             versi
                                    void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
 
 /** @} */
-
 ROCPROFILER_EXTERN_C_FINI
