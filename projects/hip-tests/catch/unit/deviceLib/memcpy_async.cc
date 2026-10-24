@@ -345,6 +345,20 @@ __global__ void global_to_global_kernel(float* out, const float* in, size_t byte
   tb.sync();
 }
 
+// Copies into LDS at a byte offset and dumps the whole window, so bytes outside the copy that
+// were changed show up too.
+__global__ void byte_offset_kernel(unsigned char* out, const unsigned char* in, size_t dst_off,
+                                   size_t bytes, size_t window, unsigned char fill) {
+  namespace cg = cooperative_groups;
+  extern __shared__ unsigned char smem_b[];
+  auto tb = cg::this_thread_block();
+  for (size_t i = threadIdx.x; i < window; i += blockDim.x) smem_b[i] = fill;
+  tb.sync();
+  cg::memcpy_async(tb, smem_b + dst_off, in, bytes);
+  tb.sync();
+  for (size_t i = threadIdx.x; i < window; i += blockDim.x) out[i] = smem_b[i];
+}
+
 }  // namespace
 
 HIP_TEST_CASE(Unit_coop_memcpy_async_thread_block_tile_Basic) {
@@ -627,6 +641,45 @@ HIP_TEST_CASE(Unit_coop_memcpy_async_GlobalToGlobal) {
     for (size_t i = 0; i < elems; i++) {
       INFO("idx " << i);
       REQUIRE(out[i] == Catch::Approx(in[i]));
+    }
+  }
+}
+
+// Global->LDS copies whose LDS destination, global source and size are not dword aligned must
+// copy every byte and leave the bytes around the destination untouched.
+HIP_TEST_CASE(Unit_coop_memcpy_async_ByteOffsets) {
+  constexpr unsigned char kFill = 0xAA;
+  for (const unsigned int threads : {32u, 64u, 256u}) {
+    for (const size_t bytes :
+         {1u, 2u, 3u, 4u, 5u, 7u, 15u, 31u, 33u, 64u, 65u, 127u, 128u, 129u, 1000u}) {
+      for (size_t dst_off = 0; dst_off < 4; dst_off++) {
+        for (size_t src_off = 0; src_off < 4; src_off++) {
+          const size_t window = dst_off + bytes + 8;
+          unsigned char *d_in, *d_out;
+          HIP_CHECK(hipMalloc(&d_in, src_off + bytes));
+          HIP_CHECK(hipMalloc(&d_out, window));
+
+          std::vector<unsigned char> in(src_off + bytes), out(window);
+          for (size_t i = 0; i < in.size(); i++) in[i] = static_cast<unsigned char>(i * 7 + 1);
+          HIP_CHECK(hipMemcpy(d_in, in.data(), in.size(), hipMemcpyHostToDevice));
+
+          INFO("threads " << threads << " bytes " << bytes << " dst_off " << dst_off << " src_off "
+                          << src_off);
+          byte_offset_kernel<<<1, threads, window>>>(d_out, d_in + src_off, dst_off, bytes, window,
+                                                     kFill);
+          HIP_CHECK(hipGetLastError());
+          HIP_CHECK(hipMemcpy(out.data(), d_out, window, hipMemcpyDeviceToHost));
+          HIP_CHECK(hipFree(d_in));
+          HIP_CHECK(hipFree(d_out));
+
+          for (size_t i = 0; i < window; i++) {
+            const bool copied = i >= dst_off && i < dst_off + bytes;
+            const int expected = copied ? in[src_off + i - dst_off] : kFill;
+            INFO("LDS byte " << i);
+            REQUIRE(static_cast<int>(out[i]) == expected);
+          }
+        }
+      }
     }
   }
 }
