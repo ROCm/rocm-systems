@@ -316,7 +316,6 @@ TEST(CSRegisterHandlerTest, AgentInfoCounterAndRtFrequency)
 {
     CSRegisterHandler h;
     h.bIsROCMFormat = true;
-    h.userdata_state = ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_LAST;
     FakeRegToken tok{0, 0, 0xC342, 0};
 
     rocprof_trace_decoder_packet_header_t pkt{};
@@ -335,6 +334,31 @@ TEST(CSRegisterHandlerTest, AgentInfoCounterAndRtFrequency)
     tok.regdata = pkt.u32All;
     EXPECT_EQ(h.UpdateRegNoCS(tok).kind, CSRegisterHandler::RegUpdateEvent::NONE);
     EXPECT_EQ(h.realtime_frequency, 100u * 1000);
+}
+
+TEST(CSRegisterHandlerTest, CodeobjMarkersInterleavedAcrossQueues)
+{
+    // Each queue writes a marker header followed by its payload; writes from another
+    // queue in between must not be taken as this queue's payload.
+    CSRegisterHandler h;
+    h.bIsROCMFormat = true;
+    FakeRegToken q0{0, 0, 0xC342, 0};
+    FakeRegToken q1{1, 2, 0xC342, 0};
+
+    rocprof_trace_decoder_packet_header_t pkt{};
+    pkt.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_CODEOBJ;
+    pkt.type = ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ADDR_LO;
+    q0.regdata = pkt.u32All;
+    q1.regdata = pkt.u32All;
+    h.UpdateRegNoCS(q0);
+    h.UpdateRegNoCS(q1);
+    q0.regdata = 0x1000;
+    q1.regdata = 0x2000;
+    h.UpdateRegNoCS(q0);
+    h.UpdateRegNoCS(q1);
+
+    EXPECT_EQ(h.current_codeobj_addr.at_reg(q0), 0x1000u);
+    EXPECT_EQ(h.current_codeobj_addr.at_reg(q1), 0x2000u);
 }
 
 // Tests for AnalyseBinary dispatch
