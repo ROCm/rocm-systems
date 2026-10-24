@@ -36,12 +36,13 @@ namespace rocprofiler
 {
 namespace aql
 {
-hsa_ven_amd_aqlprofile_id_query_t
+aqlprofile_id_query_t
 get_query_info(rocprofiler_agent_id_t agent, const counters::Metric& metric)
 {
     const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent);
     if(!aql_agent)
-        return hsa_ven_amd_aqlprofile_id_query_t{.name = nullptr, .id = 0, .instance_count = 0};
+        return aqlprofile_id_query_t{
+            .name = nullptr, .id = 0, .instance_count = 0, .event_id_max = 0};
     // Constant / topology metrics (e.g. simd_count and the topology constants
     // created in counters/metrics.cpp / evaluate_ast.cpp) are not backed by a
     // hardware block, so their block name is empty. They are resolved from
@@ -49,10 +50,11 @@ get_query_info(rocprofiler_agent_id_t agent, const counters::Metric& metric)
     // aqlprofile_get_pmc_info dereferences a null and SIGABRTs. Skip the AQL
     // block-id query for any metric without a hardware block.
     if(metric.block().empty())
-        return hsa_ven_amd_aqlprofile_id_query_t{.name = nullptr, .id = 0, .instance_count = 0};
+        return aqlprofile_id_query_t{
+            .name = nullptr, .id = 0, .instance_count = 0, .event_id_max = 0};
     auto profile =
         aqlprofile_pmc_profile_t{.agent = *aql_agent, .events = nullptr, .event_count = 0};
-    auto query = hsa_ven_amd_aqlprofile_id_query_t{metric.block().c_str(), 0, 0};
+    auto query = aqlprofile_id_query_t{metric.block().c_str(), 0, 0, 0};
     if(aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_BLOCK_ID, &query) != HSA_STATUS_SUCCESS)
     {
         ROCP_DFATAL << fmt::format("AQL failed to query info for counter {}", metric);
