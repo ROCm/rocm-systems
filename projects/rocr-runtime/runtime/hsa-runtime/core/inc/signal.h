@@ -488,6 +488,8 @@ class Signal {
   /// @param wait_on_all Wait on all signals in the list to satisfy their
   /// conditions if true, else wait on any signal in the list to satisfy its
   /// condition.
+  /// @param wake_async_monitor Ask the async event monitor to rescan when this wait
+  /// may have taken its notification. False for the monitor's own waits.
   /// @return Return the index of the first signal in the list that satisfies
   /// its condition or -1 on a timeout. Note that if \p wait_on_all is true,
   /// then all signals in the list satisfy their conditions, thus the index will
@@ -497,7 +499,7 @@ class Signal {
                                const hsa_signal_value_t* values, uint64_t timeout,
                                hsa_wait_state_t wait_hint,
                                std::vector<hsa_signal_value_t>& satisfying_values,
-                               bool wait_on_all);
+                               bool wait_on_all, bool wake_async_monitor = true);
 
   /// @brief Dedicated funtion to wait on signals that are not of type HSA_EVENTTYPE_SIGNAL
   /// these events can only be received by calling the underlying driver (i.e via the hsaKmtWaitOnMultipleEvents_Ext
