@@ -178,6 +178,10 @@ release(uint, HIP_HIDDEN_FREE_MEM, 0,                                         \
         "0 = Disable")                                                        \
 release(size_t, GPU_FORCE_BLIT_COPY_SIZE, 16,                                 \
         "Use Blit until this size(in KB) for copies")                         \
+release(uint, GPU_BATCH_CHUNK, 0,                                             \
+        "hipMemcpyBatchAsync: split the input into progressively doubling "   \
+        "chunks (this base size, capped at 1024) parsed and submitted one "   \
+        "at a time. 0 = off")                                                 \
 release(uint, ROC_ACTIVE_WAIT_TIMEOUT, 0,                                     \
         "Forces active wait of GPU interrup for the timeout(us)")             \
 release(bool, ROC_ENABLE_LARGE_BAR, true,                                     \
