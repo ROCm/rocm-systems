@@ -19,36 +19,62 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use rocddi::device::Device;
+use rocddi::device::gpu::queue::AqlControlRegion;
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
-use crate::runtime::{CallbackScope, boundary, initialized_mut, lock, map_error};
+use crate::runtime::{CallbackScope, initialized_mut, lock, map_error};
 use crate::signal::AmdSignal;
 
+/// Packet size in bytes.
 const PACKET_BYTES: usize = 64;
+/// Control size in bytes.
 const CONTROL_BYTES: u64 = 4096;
 // amd_queue_v2_t: 256-byte queue prefix and 128 per-XCC 16-byte index pairs.
+/// Control ABI size in bytes.
 const CONTROL_ABI_BYTES: usize = 2304;
-const READ_INDEX_OFFSET: usize = 128;
-const WRITE_INDEX_OFFSET: usize = 56;
+/// Byte offset of the intercept queue doorbell signal.
 const SIGNAL_OFFSET: usize = 3072;
+/// Bits containing the AQL packet type.
 const PACKET_TYPE_MASK: u16 = 0xff;
+/// AQL packet type indicating an unpublished slot.
 const PACKET_TYPE_INVALID: u16 = 1;
+/// AQL packet type used for vendor marker packets.
 const PACKET_TYPE_VENDOR: u16 = 0;
+/// Vendor packet format identifying an intercept marker.
 const INTERCEPT_MARKER_FORMAT: u8 = 0xfe;
 
 const _: () = assert!(CONTROL_ABI_BYTES <= SIGNAL_OFFSET);
 const _: () = assert!(SIGNAL_OFFSET + std::mem::size_of::<AmdSignal>() <= CONTROL_BYTES as usize);
 
-type PacketWriter = unsafe extern "C" fn(*const c_void, u64);
-type InterceptHandler = unsafe extern "C" fn(*const c_void, u64, u64, *mut c_void, PacketWriter);
+/// C callback that writes intercepted AQL packets.
+pub(crate) type PacketWriter = unsafe extern "C" fn(*const c_void, u64);
+/// C callback signature for intercept handler.
+pub(crate) type InterceptHandler =
+    unsafe extern "C" fn(*const c_void, u64, u64, *mut c_void, PacketWriter);
+/// C callback notified of intercept queue creation.
 pub(crate) type QueueNotifier = unsafe extern "C" fn(*const HsaQueue, HsaAgent, *mut c_void);
+
+/// Opaque payload following the packet publication header.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PacketPayload {
+    /// Vendor format discriminator when the packet is a vendor marker.
+    format: u8,
+    /// Remaining packet bytes, copied without interpreting their format.
+    rest: [u8; PACKET_BYTES - std::mem::size_of::<u16>() - 1],
+}
 
 /// One aligned AQL packet copied between the proxy and lower queue.
 #[repr(C, align(64))]
 #[derive(Clone, Copy)]
-struct Packet([u8; PACKET_BYTES]);
+struct Packet {
+    /// Packet type and fence scopes, published after the payload.
+    header: u16,
+    /// Opaque body, except for the private vendor marker format.
+    payload: PacketPayload,
+}
 
 /// Vendor packet that invokes a tool callback on the forwarding worker.
 #[repr(C)]
@@ -66,11 +92,13 @@ struct InterceptMarker {
 }
 
 const _: () = assert!(std::mem::size_of::<InterceptMarker>() == PACKET_BYTES);
+const _: () = assert!(std::mem::size_of::<Packet>() == PACKET_BYTES);
 
 impl Packet {
+    /// Checks the packet type and format for an intercept marker.
     fn is_marker(&self) -> bool {
-        u16::from_le_bytes([self.0[0], self.0[1]]) & PACKET_TYPE_MASK == PACKET_TYPE_VENDOR
-            && self.0[2] == INTERCEPT_MARKER_FORMAT
+        self.header & PACKET_TYPE_MASK == PACKET_TYPE_VENDOR
+            && self.payload.format == INTERCEPT_MARKER_FORMAT
     }
 }
 
@@ -100,9 +128,11 @@ struct RewriteFrame {
 }
 
 thread_local! {
+    /// Active nested rewrite frame for this callback thread.
     static REWRITE_FRAME: Cell<*mut RewriteFrame> = const { Cell::new(ptr::null_mut()) };
 }
 
+/// Copies intercepted AQL packets into the caller-provided write callback.
 unsafe extern "C" fn packet_writer(packets: *const c_void, count: u64) {
     REWRITE_FRAME.with(|slot| {
         let frame = slot.get();
@@ -206,7 +236,8 @@ pub(crate) struct InterceptQueue {
 }
 
 impl InterceptQueue {
-    fn create(
+    /// Creates an intercept queue and its backing hardware queue.
+    pub(crate) fn create(
         device: &Device,
         lower: usize,
         size: u32,
@@ -263,11 +294,11 @@ impl InterceptQueue {
             (*(public as *mut HsaQueue)).doorbell_signal = HsaSignal {
                 handle: (public + SIGNAL_OFFSET) as u64,
             };
-            ((public + READ_INDEX_OFFSET) as *mut AtomicU64)
+            (AqlControlRegion::read_index_address_at(public) as *mut AtomicU64)
                 .as_ref()
                 .ok_or(ERROR)?
                 .store(0, Ordering::Relaxed);
-            ((public + WRITE_INDEX_OFFSET) as *mut AtomicU64)
+            (AqlControlRegion::write_index_address_at(public) as *mut AtomicU64)
                 .as_ref()
                 .ok_or(ERROR)?
                 .store(0, Ordering::Relaxed);
@@ -301,6 +332,7 @@ impl InterceptQueue {
         Ok(owner)
     }
 
+    /// Starts this session.
     pub(crate) fn start(self: &Arc<Self>) -> Result<(), Status> {
         let mut worker_slot = self.worker.lock().map_err(|_| ERROR)?;
         let owner = self.clone();
@@ -312,6 +344,7 @@ impl InterceptQueue {
         Ok(())
     }
 
+    /// Stops this session.
     pub(crate) fn stop(&self) -> Result<(), Status> {
         self.active.store(false, Ordering::Release);
         let mut worker = self.worker.lock().map_err(|_| ERROR)?;
@@ -327,6 +360,7 @@ impl InterceptQueue {
         Ok(())
     }
 
+    /// Registers an intercept callback to run before packet forwarding.
     pub(crate) fn register(&self, callback: InterceptHandler, data: CallbackArg) -> Status {
         if !self.active.load(Ordering::Acquire) {
             return INVALID_QUEUE;
@@ -344,6 +378,7 @@ impl InterceptQueue {
         SUCCESS
     }
 
+    /// Consumes pending packets and doorbell updates on the intercept worker.
     fn work(&self) {
         while self.active.load(Ordering::Acquire) {
             self.drain();
@@ -351,6 +386,7 @@ impl InterceptQueue {
         }
     }
 
+    /// Drains pending work.
     fn drain(&self) {
         if !self.active.load(Ordering::Acquire) {
             return;
@@ -374,6 +410,7 @@ impl InterceptQueue {
         }
     }
 
+    /// Drains locked.
     fn drain_locked(&self) -> Result<(), Status> {
         let mut state = match self.state.try_lock() {
             Ok(state) => state,
@@ -387,8 +424,8 @@ impl InterceptQueue {
             }
             // SAFETY: The public control allocation retains both aligned
             // indices. The signal slot is retained by the same allocation.
-            let write = unsafe { &*((self.public + WRITE_INDEX_OFFSET) as *const AtomicU64) }
-                .load(Ordering::Acquire);
+            let write_address = unsafe { AqlControlRegion::write_index_address_at(self.public) };
+            let write = unsafe { &*(write_address as *const AtomicU64) }.load(Ordering::Acquire);
             let doorbell = unsafe { &*(self.signal_address as *const AmdSignal) }
                 .value
                 .load(Ordering::Acquire);
@@ -452,12 +489,14 @@ impl InterceptQueue {
                 .store(PACKET_TYPE_INVALID, Ordering::Release);
             state.next_packet += 1;
             // SAFETY: The control allocation retains this aligned read index.
-            unsafe { &*((self.public + READ_INDEX_OFFSET) as *const AtomicU64) }
+            let read_address = unsafe { AqlControlRegion::read_index_address_at(self.public) };
+            unsafe { &*(read_address as *const AtomicU64) }
                 .store(state.next_packet, Ordering::Release);
         }
         Ok(())
     }
 
+    /// Forwards complete intercepted packets to the underlying queue.
     fn forward_pending(&self, state: &mut InterceptState) -> Result<(), Status> {
         while self.active.load(Ordering::Acquire) {
             let markers = state
@@ -468,8 +507,10 @@ impl InterceptQueue {
             // SAFETY: The lower hardware queue is retained until this worker
             // has stopped. Its public control and ring remain mapped.
             let lower = unsafe { &*(self.lower as *const HsaQueue) };
-            let write_index = unsafe { &*((self.lower + WRITE_INDEX_OFFSET) as *const AtomicU64) };
-            let read_index = unsafe { &*((self.lower + READ_INDEX_OFFSET) as *const AtomicU64) };
+            let write_address = unsafe { AqlControlRegion::write_index_address_at(self.lower) };
+            let read_address = unsafe { AqlControlRegion::read_index_address_at(self.lower) };
+            let write_index = unsafe { &*(write_address as *const AtomicU64) };
+            let read_index = unsafe { &*(read_address as *const AtomicU64) };
             let write = write_index.load(Ordering::Acquire);
             let Some(packet) = state.pending.get(markers).copied() else {
                 for _ in 0..markers {
@@ -502,19 +543,18 @@ impl InterceptQueue {
             }
             let slot = (write & u64::from(self.size - 1)) as usize;
             let address = lower.base_address as usize + slot * PACKET_BYTES;
+            let destination = address as *mut Packet;
             // SAFETY: This worker reserved one native ring slot. Publish the
             // body before its header, then ring the retained MMIO doorbell.
             unsafe {
                 ptr::copy_nonoverlapping(
-                    packet.0.as_ptr().add(2),
-                    (address + 2) as *mut u8,
-                    PACKET_BYTES - 2,
+                    ptr::addr_of!(packet.payload).cast::<u8>(),
+                    ptr::addr_of_mut!((*destination).payload).cast::<u8>(),
+                    std::mem::size_of::<PacketPayload>(),
                 );
-                (&*(address as *const AtomicU16)).store(
-                    u16::from_le_bytes([packet.0[0], packet.0[1]]),
-                    Ordering::Release,
-                );
-                crate::signal::hsa_signal_store_screlease(
+                (&*ptr::addr_of_mut!((*destination).header).cast::<AtomicU16>())
+                    .store(packet.header, Ordering::Release);
+                crate::api::signal::atomic::hsa_signal_store_screlease(
                     lower.doorbell_signal,
                     i64::from_ne_bytes(write.to_ne_bytes()),
                 );
@@ -524,6 +564,7 @@ impl InterceptQueue {
         Ok(())
     }
 
+    /// Invokes the matching intercept callback for a marker packet.
     fn invoke_marker(&self, packet: Packet, write: u64) {
         // SAFETY: The packet has the 64-byte public marker ABI and the lower
         // queue remains live until this worker stops.
@@ -593,165 +634,4 @@ pub(crate) fn destroy(owner: &InterceptQueue) -> Status {
         return status;
     }
     SUCCESS
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_amd_queue_intercept_create")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub unsafe extern "C" fn hsa_amd_queue_intercept_create(
-    agent: HsaAgent,
-    size: u32,
-    queue_type: u32,
-    callback: QueueErrorCallback,
-    data: *mut c_void,
-    private_segment_size: u32,
-    group_segment_size: u32,
-    queue: *mut *mut HsaQueue,
-) -> Status {
-    boundary(|| {
-        if queue.is_null()
-            || size < 4
-            || !size.is_power_of_two()
-            || !matches!(queue_type, QUEUE_TYPE_MULTI | QUEUE_TYPE_SINGLE)
-        {
-            return INVALID_ARGUMENT;
-        }
-        let mut lower = ptr::null_mut();
-        // SAFETY: The stack output is writable. The lower queue is unpublished
-        // until the proxy is ready, so it starts without a user callback.
-        let status = unsafe {
-            crate::queue::hsa_queue_create(
-                agent,
-                size,
-                queue_type,
-                None,
-                ptr::null_mut(),
-                private_segment_size,
-                group_segment_size,
-                &raw mut lower,
-            )
-        };
-        if status != SUCCESS {
-            return status;
-        }
-        let created = (|| -> Result<Arc<InterceptQueue>, Status> {
-            let mut guard = lock()?;
-            let runtime = initialized_mut(&mut guard)?;
-            let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
-            runtime
-                .queue_state
-                .intercept_queues
-                .try_reserve(1)
-                .map_err(|_| OUT_OF_RESOURCES)?;
-            // SAFETY: The C caller retains callback data until queue
-            // destruction and the last callback.
-            let owner = InterceptQueue::create(
-                &runtime.gpus[index].device,
-                lower as usize,
-                size,
-                callback,
-                unsafe { CallbackArg::new(data) },
-            )?;
-            if !runtime.queue_state.queues.contains_key(&(lower as usize)) {
-                return Err(ERROR);
-            }
-            owner.start()?;
-            let lower_record = runtime
-                .queue_state
-                .queues
-                .get_mut(&(lower as usize))
-                .ok_or(ERROR)?;
-            // SAFETY: The C caller retains callback data through the last
-            // queue callback and the proxy remains owned until teardown.
-            lower_record
-                .attach_intercept(owner.public, callback, unsafe { CallbackArg::new(data) });
-            runtime
-                .queue_state
-                .intercept_queues
-                .insert(owner.public, owner.clone());
-            Ok(owner)
-        })();
-        match created {
-            Ok(owner) => {
-                // SAFETY: The caller supplied writable output storage and the
-                // proxy control is retained until queue destruction.
-                unsafe { queue.write(owner.public as *mut HsaQueue) };
-                SUCCESS
-            }
-            Err(status) => {
-                // SAFETY: This call alone owns the unpublished lower queue.
-                // If shutdown already owns it, its runtime stop releases it.
-                let _ = unsafe { crate::queue::hsa_queue_destroy(lower) };
-                status
-            }
-        }
-    })
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_amd_queue_intercept_register")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub unsafe extern "C" fn hsa_amd_queue_intercept_register(
-    queue: *mut HsaQueue,
-    callback: Option<InterceptHandler>,
-    data: *mut c_void,
-) -> Status {
-    boundary(|| {
-        let Some(callback) = callback else {
-            return INVALID_ARGUMENT;
-        };
-        let guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match guard.as_ref() {
-            Some(runtime) => runtime,
-            None => return NOT_INITIALIZED,
-        };
-        let Some(owner) = runtime
-            .queue_state
-            .intercept_queues
-            .get(&(queue as usize))
-            .cloned()
-        else {
-            return INVALID_QUEUE;
-        };
-        drop(guard);
-        // SAFETY: The C caller retains callback data until interception and
-        // the final queue callback have completed.
-        owner.register(callback, unsafe { CallbackArg::new(data) })
-    })
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_amd_runtime_queue_create_register")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub unsafe extern "C" fn hsa_amd_runtime_queue_create_register(
-    callback: Option<QueueNotifier>,
-    data: *mut c_void,
-) -> Status {
-    boundary(|| {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        if runtime.queue_state.internal_queue_notifier.is_some() {
-            return ERROR;
-        }
-        // SAFETY: This is only retained and delivered for future hidden
-        // runtime queues. The caller owns its callback data lifetime.
-        runtime.queue_state.internal_queue_notifier =
-            callback.map(|callback| (callback, unsafe { CallbackArg::new(data) }));
-        SUCCESS
-    })
 }
