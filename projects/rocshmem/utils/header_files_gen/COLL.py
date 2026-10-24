@@ -48,6 +48,12 @@ def alltoall_api(T, TNAME):
         f"    const {T} *source, int nelems);\n\n"
     )
 
+def alltoall_non_ctx_api(T, TNAME):
+    return (
+        f"__device__ ATTR_NO_INLINE void rocshmem_{TNAME}_alltoall_wg(\n"
+        f"    rocshmem_team_t team, {T} *dest, const {T} *source, int nelems);\n\n"
+    )
+
 def generate_alltoall_api():
     expanded_code = """
 /**
@@ -69,6 +75,34 @@ def generate_alltoall_api():
     for type_, tname_ in types:
         expanded_code += alltoall_api(type_, tname_)
 
+    for type_, tname_ in types:
+        expanded_code += alltoall_non_ctx_api(type_, tname_)
+
+    expanded_code += """
+/**
+ * @name ROCSHMEM_ALLTOALLMEM_WG
+ * @brief Exchanges a fixed amount of contiguous data blocks between all pairs
+ * of PEs participating in the collective routine.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of data blocks transferred per pair of PEs.
+ *
+ * @return int; zero on success, non-zero otherwise
+ */
+__device__ void rocshmem_ctx_alltoallmem_wg(rocshmem_ctx_t ctx,
+    rocshmem_team_t team, void *dest, const void *source, int nelems);
+
+__device__ void rocshmem_alltoallmem_wg(
+    rocshmem_team_t team, void *dest, const void *source, int nelems);
+"""
+
     return expanded_code
 
 def alltoall_wave_api(T, TNAME):
@@ -76,6 +110,12 @@ def alltoall_wave_api(T, TNAME):
         f"__device__ ATTR_NO_INLINE int rocshmem_ctx_{TNAME}_alltoall_wave(\n"
         f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
         f"    const {T} *source, int nelems);\n\n"
+    )
+
+def alltoall_wave_non_ctx_api(T, TNAME):
+    return (
+        f"__device__ ATTR_NO_INLINE int rocshmem_{TNAME}_alltoall_wave(\n"
+        f"    rocshmem_team_t team, {T} *dest, const {T} *source, int nelems);\n\n"
     )
 
 def generate_alltoall_wave_api():
@@ -99,6 +139,34 @@ def generate_alltoall_wave_api():
     for type_, tname_ in types:
         expanded_code += alltoall_wave_api(type_, tname_)
 
+    for type_, tname_ in types:
+        expanded_code += alltoall_wave_non_ctx_api(type_, tname_)
+
+    expanded_code += """
+/**
+ * @name ROCSHMEM_ALLTOALLMEM_WAVE
+ * @brief Exchanges a fixed amount of contiguous data blocks between all pairs
+ * of PEs participating in the collective routine.
+ *
+ * This function must be called as a wave collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of data blocks transferred per pair of PEs.
+ *
+ * @return int; zero on success, non-zero otherwise
+ */
+__device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx,
+    rocshmem_team_t team, void *dest, const void *source, int nelems);
+
+__device__ int rocshmem_alltoallmem_wave(
+    rocshmem_team_t team, void *dest, const void *source, int nelems);
+"""
+
     return expanded_code
 
 
@@ -114,6 +182,13 @@ def broadcast_api(T, TNAME):
         f"__host__ void rocshmem_ctx_{TNAME}_broadcast(\n"
         f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
         f"    const {T} *source, int nelems, int pe_root);\n\n"
+    )
+
+def broadcast_wg_non_ctx_api(T, TNAME):
+    return (
+        f"__device__ ATTR_NO_INLINE void rocshmem_{TNAME}_broadcast_wg(\n"
+        f"    rocshmem_team_t team, {T} *dest, const {T} *source,\n"
+        f"    int nelems, int pe_root);\n\n"
     )
 
 
@@ -144,6 +219,9 @@ def generate_broadcast_api():
     for type_, tname_ in types:
         expanded_code += broadcast_api(type_, tname_)
 
+    for type_, tname_ in types:
+        expanded_code += broadcast_wg_non_ctx_api(type_, tname_)
+
     expanded_code += """
 
 /**
@@ -166,6 +244,9 @@ def generate_broadcast_api():
  * @return void
  */
 __device__ void rocshmem_ctx_broadcastmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              void *dest, const void *source, int nelement, int PE_root);
+
+__device__ void rocshmem_broadcastmem_wg(rocshmem_team_t team,
               void *dest, const void *source, int nelement, int PE_root);\n
 """
 
@@ -455,6 +536,12 @@ def broadcast_wave_api(T, TNAME):
         f"              {T} *dest, const {T} *source, int nelement, int PE_root);\n\n"
     )
 
+def broadcast_wave_non_ctx_api(T, TNAME):
+    return (
+        f"__device__ int rocshmem_{TNAME}_broadcast_wave(rocshmem_team_t team,\n"
+        f"              {T} *dest, const {T} *source, int nelement, int PE_root);\n\n"
+    )
+
 def generate_broadcast_wave_api():
     expanded_code = """
 /**
@@ -480,6 +567,9 @@ def generate_broadcast_wave_api():
     for type_, tname_ in types:
         expanded_code += broadcast_wave_api(type_, tname_)
 
+    for type_, tname_ in types:
+        expanded_code += broadcast_wave_non_ctx_api(type_, tname_)
+
     expanded_code += """
 /**
  * @name ROCSHMEM_CTX_BROADCASTMEM_WAVE
@@ -501,6 +591,9 @@ def generate_broadcast_wave_api():
  * @return int; zero when successful, non-zero otherwise
  */
 __device__ int rocshmem_ctx_broadcastmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              void *dest, const void *source, int nelement, int PE_root);
+
+__device__ int rocshmem_broadcastmem_wave(rocshmem_team_t team,
               void *dest, const void *source, int nelement, int PE_root);
 """
 
