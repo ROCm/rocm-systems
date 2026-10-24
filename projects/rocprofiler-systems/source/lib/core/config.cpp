@@ -3437,6 +3437,19 @@ reset_database_path_memo()
     s_db_path_memo.clear();
 }
 
+void
+refresh_output_format_settings()
+{
+    for(const auto* name : { env_vars::TRACE, env_vars::USE_ROCPD })
+    {
+        const auto value = rocprofsys::get_env<std::string>(name, "");
+        if(!value.empty())
+        {
+            set_setting_value(std::string{ name }, utility::string::to_bool(value));
+        }
+    }
+}
+
 std::string
 get_output_absolute_path(std::string_view basename, std::string_view extension,
                          std::string_view tag, std::string_view dir)
@@ -3644,13 +3657,11 @@ get_use_unified_memory_profiling()
     return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 
-bool&
+bool
 get_use_perfetto()
 {
     static auto const _trace_setting = get_config()->at(env_vars::TRACE);
-    auto const&       _trace = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
-    static bool       _v     = _trace;
-    return _v;
+    return static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
 }
 
 int
