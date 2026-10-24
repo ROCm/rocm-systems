@@ -1836,6 +1836,66 @@ template <uint32_t Ways> void check_lru_way_indices() {
     EXPECT_EQ(copied.victim(1), 0u);
   }
 }
+
+template <uint32_t LineSizeBits> void check_valid_byte_range_updates() {
+  using RangeCache = Cache<LineSizeBits, 1, 1>;
+  constexpr std::array<std::array<uint64_t, 2>, 6> initial_masks = {{
+      {0, 0},
+      {~uint64_t{0}, ~uint64_t{0}},
+      {0, ~uint64_t{0}},
+      {~uint64_t{0}, 0},
+      {0xA5A5A5A5A5A5A5A5, 0x5A5A5A5A5A5A5A5A},
+      {0x0123456789ABCDEF, 0xFEDCBA9876543210},
+  }};
+  for (const auto &initial : initial_masks) {
+    std::array<bool, 128> initial_bytes{};
+    for (uint32_t byte = 0; byte < initial_bytes.size(); ++byte)
+      initial_bytes[byte] = (initial[byte / 64] >> (byte % 64)) & 1;
+    for (uint32_t offset = 0; offset <= RangeCache::LINE_SIZE; ++offset) {
+      for (uint32_t size = 0; size <= RangeCache::LINE_SIZE - offset; ++size) {
+        CacheTag tag;
+        tag.valid_bytes = initial;
+        auto expected_bytes = initial_bytes;
+        bool expected_valid = true;
+        for (uint32_t byte = offset; byte < offset + size; ++byte) {
+          expected_valid &= expected_bytes[byte];
+          expected_bytes[byte] = true;
+        }
+        ASSERT_EQ(RangeCache::bytes_valid(tag, offset, size), expected_valid)
+            << "line=" << RangeCache::LINE_SIZE << " offset=" << offset << " size=" << size;
+        ASSERT_EQ(tag.valid_bytes, initial);
+        RangeCache::mark_valid_bytes(tag, offset, size);
+        // Inspect the full two-word mask, including bits beyond smaller line
+        // geometries: marking this range must leave those bits unchanged.
+        for (uint32_t byte = 0; byte < expected_bytes.size(); ++byte) {
+          const bool observed = (tag.valid_bytes[byte / 64] >> (byte % 64)) & 1;
+          ASSERT_EQ(observed, expected_bytes[byte])
+              << "line=" << RangeCache::LINE_SIZE << " offset=" << offset << " size=" << size
+              << " byte=" << byte;
+        }
+        ASSERT_TRUE(RangeCache::bytes_valid(tag, offset, size));
+      }
+    }
+  }
+}
+
+template <uint32_t LineSizeBits> void check_valid_byte_queries_with_one_missing_byte() {
+  using RangeCache = Cache<LineSizeBits, 1, 1>;
+  for (uint32_t missing = 0; missing < RangeCache::LINE_SIZE; ++missing) {
+    CacheTag tag;
+    tag.valid_bytes[missing / 64] &= ~(uint64_t{1} << (missing % 64));
+    const auto initial = tag.valid_bytes;
+    for (uint32_t offset = 0; offset <= RangeCache::LINE_SIZE; ++offset) {
+      for (uint32_t size = 0; size <= RangeCache::LINE_SIZE - offset; ++size) {
+        const bool expected_valid = missing < offset || missing >= offset + size;
+        ASSERT_EQ(RangeCache::bytes_valid(tag, offset, size), expected_valid)
+            << "line=" << RangeCache::LINE_SIZE << " offset=" << offset << " size=" << size
+            << " missing=" << missing;
+      }
+    }
+    ASSERT_EQ(tag.valid_bytes, initial);
+  }
+}
 } // namespace
 
 TEST(CacheLruTest, WayIndicesCoverByteBoundary) {
@@ -1911,6 +1971,28 @@ TEST(CacheStorageTest, PartialLineTracksValidBytes) {
   std::array<uint8_t, kBytes.size()> observed{};
   cache.read_line(kAddr, observed.data(), kOffset, observed.size(), /*vmid=*/7);
   EXPECT_EQ(observed, kBytes);
+}
+
+TEST(CacheStorageTest, ValidByteRangesMatchIndependentByteOracle) {
+  check_valid_byte_range_updates<0>();
+  check_valid_byte_range_updates<1>();
+  check_valid_byte_range_updates<2>();
+  check_valid_byte_range_updates<3>();
+  check_valid_byte_range_updates<4>();
+  check_valid_byte_range_updates<5>();
+  check_valid_byte_range_updates<6>();
+  check_valid_byte_range_updates<7>();
+}
+
+TEST(CacheStorageTest, ValidByteQueriesDetectEveryMissingByte) {
+  check_valid_byte_queries_with_one_missing_byte<0>();
+  check_valid_byte_queries_with_one_missing_byte<1>();
+  check_valid_byte_queries_with_one_missing_byte<2>();
+  check_valid_byte_queries_with_one_missing_byte<3>();
+  check_valid_byte_queries_with_one_missing_byte<4>();
+  check_valid_byte_queries_with_one_missing_byte<5>();
+  check_valid_byte_queries_with_one_missing_byte<6>();
+  check_valid_byte_queries_with_one_missing_byte<7>();
 }
 
 TEST(CacheMaintenanceTest, FullInvalidationClearsRetainedMetadataAfterRefill) {
