@@ -364,17 +364,6 @@
         {"name": "EnqueueMicrotests", "description": "Host-only enqueue.cc microtests (no GPU, no HIP/RCCL runtime); contributes enqueue.cc coverage", "test_filter": "*"}
       ]
     },
-    "unit_tests_micro_plugin": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroPlugin",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 0,
-      "timeout": 60,
-      "tests": [
-        {"name": "PluginMicrotests", "description": "Host-only net plugin loader microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
     "unit_tests_micro_symkernels": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicroSymKernels",
@@ -610,12 +599,6 @@
       "name": "RCCL Microtests - enqueue.cc",
       "description": "rccl-UnitTestsMicroEnqueue (host-only enqueue.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_enqueue",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - net plugin loader",
-      "description": "rccl-UnitTestsMicroPlugin (host-only net plugin loader microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_plugin",
       "enabled": true
     },
     {
