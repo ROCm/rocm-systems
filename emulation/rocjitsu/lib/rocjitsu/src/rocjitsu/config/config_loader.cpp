@@ -3,6 +3,7 @@
 
 #include "rocjitsu/config/config_loader.h"
 
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
 
 #include "rocjitsu/config/config_common.h"
@@ -1112,6 +1113,34 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
                      cu_overrides, build_mode);
   if (manifest && result.soc() == nullptr)
     throw std::invalid_argument("system topology root must be an SoC");
+  // The CWSR capacity uses the device's LDS limit, while wave admission uses
+  // each CU's configured limit. Reject a producer that could exceed its
+  // advertised save area (or the LDS field in the selected save record).
+  if (result.soc() && kmd::cwsr_layout_modelled(arch)) {
+    auto validate_lds = [&](const KfdDeviceConfig &device) -> const char * {
+      // Partial device identities do not publish a modelled CWSR area.
+      if (!device.present || !kmd::cwsr_capacity_eligible_device(device, arch))
+        return nullptr;
+      const uint64_t advertised_lds = uint64_t{device.lds_size_kb} * 1024;
+      if (advertised_lds > kmd::cwsr_max_encoded_lds_bytes(arch))
+        return "CWSR advertised LDS capacity exceeds the save record field";
+      bool cu_exceeds_advertised = false;
+      result.soc()->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+        for (const auto *cu : cp->compute_units())
+          if (uint64_t{cu->config().lds_size_kb} * 1024 > advertised_lds)
+            cu_exceeds_advertised = true;
+      });
+      return cu_exceeds_advertised ? "CWSR CU LDS capacity exceeds advertised device LDS capacity"
+                                   : nullptr;
+    };
+    if (manifest) {
+      for (const auto &device : result.devices)
+        if (const char *error = validate_lds(device))
+          return emit_error.emit() << error;
+    } else if (const char *error = validate_lds(result.device)) {
+      return emit_error.emit() << error;
+    }
+  }
   if (result.device.present)
     if (SoC *soc = result.soc())
       soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {

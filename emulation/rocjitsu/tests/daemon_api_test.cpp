@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include <iterator>
 #include <string>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -255,6 +256,49 @@ TEST(DaemonApi, LegacyOneGpuHandshakeKeepsRenderMinorCompatibility) {
   EXPECT_TRUE(client.handles_drm_render_minor(129));
   ASSERT_NE(client.gpu_info_for_render_minor(128), nullptr);
   EXPECT_EQ(client.gpu_info_for_render_minor(128)->drm_render_minor, 129u);
+  EXPECT_EQ(client.close(), 0);
+  close(kfd_fd);
+}
+
+TEST(DaemonApi, RemoteUserptrUsesCpuAddressIndependentOfGpuVa) {
+  TempDirectory directory;
+  const auto socket_path = directory.path() / "daemon.sock";
+  TestDaemon daemon(socket_path);
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+  const int connection = connect_to(socket_path);
+  ASSERT_GE(connection, 0);
+  RemoteDriver client(connection);
+  const int kfd_fd = client.open();
+  ASSERT_GE(kfd_fd, 0);
+  const auto *gpu = client.gpu_info_for_render_minor(128);
+  ASSERT_NE(gpu, nullptr);
+
+  constexpr size_t kPage = 4096;
+  void *cpu = ::mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(cpu, MAP_FAILED);
+  *static_cast<uint32_t *>(cpu) = 0x12345678;
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = 0x500000000ULL;
+  alloc.size = kPage;
+  alloc.gpu_id = gpu->gpu_id;
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  EXPECT_EQ(client.ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), -EINVAL);
+  alloc.mmap_offset = reinterpret_cast<uint64_t>(cpu);
+  ASSERT_NE(alloc.va_addr, alloc.mmap_offset);
+  ASSERT_EQ(client.ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+
+  void *view = client.mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                           static_cast<off_t>(alloc.mmap_offset));
+  ASSERT_NE(view, MAP_FAILED);
+  EXPECT_EQ(*static_cast<uint32_t *>(view), 0x12345678u);
+  *static_cast<uint32_t *>(cpu) = 0x87654321;
+  EXPECT_EQ(*static_cast<uint32_t *>(view), 0x87654321u);
+
+  kfd_ioctl_free_memory_of_gpu_args freed{};
+  freed.handle = alloc.handle;
+  EXPECT_EQ(client.ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), 0);
+  EXPECT_EQ(::munmap(view, kPage), 0);
+  EXPECT_EQ(::munmap(cpu, kPage), 0);
   EXPECT_EQ(client.close(), 0);
   close(kfd_fd);
 }
