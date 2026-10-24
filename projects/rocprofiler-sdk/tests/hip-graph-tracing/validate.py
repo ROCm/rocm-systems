@@ -34,6 +34,15 @@ def node_exists(name, data, min_len=1):
         assert len(data[name]) >= min_len
 
 
+def get_operation(record, kind_name, op_name):
+    for itr in record["names"]:
+        if kind_name == itr["kind"]:
+            for oidx, oname in enumerate(itr["operations"]):
+                if op_name == oname:
+                    return oidx
+    return None
+
+
 def test_data_structure(input_data):
     """verify minimum amount of expected data is present"""
     data = input_data
@@ -251,6 +260,99 @@ def test_kernel_dispatch_ids(input_data):
     assert len(bf_seq_ids) == num_dispatches
     assert len(bf_seq_ids_uniq) == num_dispatches
     assert len(cb_seq_ids_uniq) == num_dispatches
+
+
+def test_graph_dispatch_identity(input_data):
+    """rocprofiler_kernel_dispatch_info_t carries the graph launch of a dispatch: every dispatch a
+    hipGraphLaunch enqueued has that launch's nonzero graph_exec_id and ordinals 0..n-1 in dispatch
+    order; every other dispatch has zeros"""
+    sdk_data = input_data["rocprofiler-sdk-json-tool"]
+
+    launches = set()
+    for records in (sdk_data["callback_records"], sdk_data["buffer_records"]):
+        launch_op = get_operation(records, "HIP_RUNTIME_API", "hipGraphLaunch")
+        if launch_op is None:
+            continue
+        for itr in records["hip_api_traces"]:
+            if itr["operation"] == launch_op:
+                launches.add(itr["correlation_id"]["internal"])
+    assert len(launches) > 0, "no hipGraphLaunch records"
+
+    by_launch = {}
+    for itr in sdk_data["buffer_records"]["kernel_dispatch"]:
+        info = itr["dispatch_info"]
+        exec_id = info["graph_exec_id"]["handle"]
+        node_id = info["graph_node_id"]["handle"]
+        corr_id = itr["correlation_id"]["internal"]
+        if corr_id in launches:
+            assert exec_id > 0, f"graph dispatch without its graph_exec_id: {itr}"
+            by_launch.setdefault(corr_id, []).append(
+                (info["dispatch_id"], exec_id, node_id)
+            )
+        else:
+            assert (
+                exec_id == 0 and node_id == 0
+            ), f"non-graph dispatch with graph ids: {itr}"
+
+    assert len(by_launch) == len(launches)
+    for corr_id, rows in by_launch.items():
+        rows = sorted(rows)
+        assert len({r[1] for r in rows}) == 1, f"launch {corr_id}: several graph_exec_ids"
+        assert [r[2] for r in rows] == list(
+            range(len(rows))
+        ), f"launch {corr_id}: ordinals {[r[2] for r in rows]}"
+
+
+# HIP runtime calls that launch a kernel, and so can capture a kernel node
+LAUNCH_APIS = (
+    "hipLaunchKernel",
+    "hipExtLaunchKernel",
+    "hipModuleLaunchKernel",
+    "hipExtModuleLaunchKernel",
+    "hipHccModuleLaunchKernel",
+    "hipLaunchCooperativeKernel",
+    "hipLaunchKernelExC",
+)
+
+
+def test_graph_capture_correlation(input_data):
+    """a dispatch replayed from a captured graph carries the internal correlation id of the kernel
+    launch that captured its node: a traced launch call, the same id for a node on every launch of
+    its exec, a different one for each node, increasing in node order (the app captures each graph
+    from one stream); every other dispatch carries 0"""
+    sdk_data = input_data["rocprofiler-sdk-json-tool"]
+
+    launch_calls = set()
+    for records in (sdk_data["callback_records"], sdk_data["buffer_records"]):
+        ops = {get_operation(records, "HIP_RUNTIME_API", name) for name in LAUNCH_APIS}
+        ops.discard(None)
+        for itr in records["hip_api_traces"]:
+            if itr["operation"] in ops:
+                launch_calls.add(itr["correlation_id"]["internal"])
+    assert len(launch_calls) > 0, "no kernel launch records"
+
+    by_exec = {}
+    for itr in sdk_data["buffer_records"]["kernel_dispatch"]:
+        info = itr["dispatch_info"]
+        exec_id = info["graph_exec_id"]["handle"]
+        capture_id = info["capture_correlation_id"]
+        if exec_id == 0:
+            assert capture_id == 0, f"non-graph dispatch with a capture id: {itr}"
+            continue
+        assert (
+            capture_id in launch_calls
+        ), f"graph dispatch without its capturing launch: {itr}"
+        node_id = info["graph_node_id"]["handle"]
+        by_exec.setdefault(exec_id, {}).setdefault(node_id, set()).add(capture_id)
+
+    assert len(by_exec) > 0, "no graph dispatches"
+    for exec_id, nodes in by_exec.items():
+        for node_id, ids in nodes.items():
+            assert len(ids) == 1, f"exec {exec_id} node {node_id}: capture ids {ids}"
+        ordered = [min(nodes[node_id]) for node_id in sorted(nodes)]
+        assert ordered == sorted(
+            set(ordered)
+        ), f"exec {exec_id}: capture ids {ordered} not increasing in node order"
 
 
 if __name__ == "__main__":
