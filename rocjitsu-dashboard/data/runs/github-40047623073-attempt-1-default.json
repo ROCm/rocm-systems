@@ -1,0 +1,401 @@
+{
+  "comparisonId": "github-40047623073-attempt-1",
+  "environment": [
+    {
+      "key": "auxiliary.amd-torch-device-gfx1250",
+      "label": "Auxiliary Amd Torch Device Gfx1250",
+      "value": "2.14.0a0+rocm10.1.0a20260812"
+    },
+    {
+      "key": "auxiliary.amd-torch-device-gfx950",
+      "label": "Auxiliary Amd Torch Device Gfx950",
+      "value": "2.14.0a0+rocm10.1.0a20260812"
+    },
+    {
+      "key": "auxiliary.python",
+      "label": "Python",
+      "value": "3.12.15"
+    },
+    {
+      "key": "auxiliary.rocm-sdk-devel",
+      "label": "Auxiliary Rocm Sdk Devel",
+      "value": "10.1.0a20260812"
+    },
+    {
+      "key": "auxiliary.rocm-sdk-device-gfx1250",
+      "label": "Auxiliary Rocm Sdk Device Gfx1250",
+      "value": "10.1.0a20260812"
+    },
+    {
+      "key": "auxiliary.rocm-sdk-device-gfx950",
+      "label": "Auxiliary Rocm Sdk Device Gfx950",
+      "value": "10.1.0a20260812"
+    },
+    {
+      "key": "auxiliary.rocm-sdk-libraries",
+      "label": "Auxiliary Rocm Sdk Libraries",
+      "value": "10.1.0a20260812"
+    },
+    {
+      "key": "auxiliary.torch",
+      "label": "Auxiliary Torch",
+      "value": "2.14.0a0+rocm10.1.0a20260812"
+    },
+    {
+      "key": "auxiliary.triton",
+      "label": "Auxiliary Triton",
+      "value": "3.8.0+git675c5987.rocm10.1.0a20260812"
+    },
+    {
+      "key": "corpus.corpus_commit_sha",
+      "label": "Corpus commit",
+      "value": "b83ff7c47cedd7c0fac3b9c0d015b7322fbd53e7"
+    },
+    {
+      "key": "corpus.corpus_commit_timestamp",
+      "label": "Corpus commit timestamp",
+      "value": "2026-10-16T18:49:12Z"
+    },
+    {
+      "key": "execution.benchmark_suite",
+      "label": "Benchmark suite",
+      "value": "performance-v1"
+    },
+    {
+      "key": "execution.samples",
+      "label": "Samples",
+      "value": 1
+    },
+    {
+      "key": "execution.timeout_seconds",
+      "label": "Timeout (seconds)",
+      "value": 1200.0
+    },
+    {
+      "key": "execution.warmups",
+      "label": "Warmups",
+      "value": 0
+    },
+    {
+      "key": "machine.cpu",
+      "label": "CPU",
+      "value": "x86_64"
+    },
+    {
+      "key": "machine.hostname",
+      "label": "Hostname",
+      "value": "1025fc05096a"
+    },
+    {
+      "key": "machine.kernel",
+      "label": "Kernel",
+      "value": "7.0.0-38-generic"
+    },
+    {
+      "key": "machine.platform",
+      "label": "Platform",
+      "value": "Linux-7.0.0-38-generic-x86_64-with-glibc2.39"
+    },
+    {
+      "key": "rocjitsu.rocm_sdk_version",
+      "label": "ROCm SDK",
+      "value": "10.1.0a20260812"
+    },
+    {
+      "key": "tensile.commit_sha",
+      "label": "Tensile commit",
+      "value": "dd77374194a3ea1a7258cd54f87af6747b6362a5"
+    },
+    {
+      "key": "thread_policy",
+      "label": "Thread policy",
+      "value": "default"
+    },
+    {
+      "key": "workflow.commit_sha",
+      "label": "Workflow commit",
+      "value": "a55d4316d791ae930e9ec44080c3134a729d8e77"
+    }
+  ],
+  "execution": {
+    "completedAt": "2026-10-24T01:33:09.038910Z",
+    "machine": "shark10-ci",
+    "trigger": "auto"
+  },
+  "id": "github-40047623073-attempt-1-default",
+  "plugin": {
+    "id": "vanilla",
+    "name": "Vanilla"
+  },
+  "source": {
+    "branch": "develop",
+    "commit": "a55d4316d791ae930e9ec44080c3134a729d8e77",
+    "committedAt": "2026-10-24T00:58:44Z",
+    "message": "[rocjitsu] Keep transaction publication tests within one host page (#14198)"
+  },
+  "targets": [
+    {
+      "id": "gfx1250",
+      "results": [
+        {
+          "durationSeconds": 10.527289746,
+          "error": null,
+          "status": "completed",
+          "testId": "deepseek.act_quant_32768x8192",
+          "timing_results_s": [
+            10.527289746
+          ]
+        },
+        {
+          "durationSeconds": 3.821283828,
+          "error": null,
+          "status": "completed",
+          "testId": "deepseek.mlp_w1_m256",
+          "timing_results_s": [
+            3.821283828
+          ]
+        },
+        {
+          "durationSeconds": 43.358006573,
+          "error": null,
+          "status": "completed",
+          "testId": "deepseek.mlp_w1_m3072",
+          "timing_results_s": [
+            43.358006573
+          ]
+        },
+        {
+          "durationSeconds": 4.381660559,
+          "error": null,
+          "status": "completed",
+          "testId": "deepseek.mlp_w2_m256",
+          "timing_results_s": [
+            4.381660559
+          ]
+        },
+        {
+          "durationSeconds": 43.440524989,
+          "error": null,
+          "status": "completed",
+          "testId": "deepseek.mlp_w2_m3072",
+          "timing_results_s": [
+            43.440524989
+          ]
+        },
+        {
+          "durationSeconds": 1.004666915,
+          "error": null,
+          "status": "completed",
+          "testId": "deepseek.weight_dequant_32768x8192",
+          "timing_results_s": [
+            1.004666915
+          ]
+        },
+        {
+          "durationSeconds": 3.738206665,
+          "error": null,
+          "status": "completed",
+          "testId": "gpt_oss.causal_seq2560",
+          "timing_results_s": [
+            3.738206665
+          ]
+        },
+        {
+          "durationSeconds": 3.531087531,
+          "error": null,
+          "status": "completed",
+          "testId": "gpt_oss.window_batch4_seq3072",
+          "timing_results_s": [
+            3.531087531
+          ]
+        },
+        {
+          "durationSeconds": 5.181018195,
+          "error": null,
+          "status": "completed",
+          "testId": "tensile.bf16_subtile_4096x4096x4096",
+          "timing_results_s": [
+            5.181018195
+          ]
+        },
+        {
+          "durationSeconds": 6.117115687,
+          "error": null,
+          "status": "completed",
+          "testId": "tensile.mxfp4_streamk_4096x4096x4096",
+          "timing_results_s": [
+            6.117115687
+          ]
+        },
+        {
+          "durationSeconds": 3.638931715,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.grouped_4x2048",
+          "timing_results_s": [
+            3.638931715
+          ]
+        },
+        {
+          "durationSeconds": 9.628531191,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.grouped_4x3584",
+          "timing_results_s": [
+            9.628531191
+          ]
+        },
+        {
+          "durationSeconds": 4.159360224,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.layernorm_131072x2048",
+          "timing_results_s": [
+            4.159360224
+          ]
+        },
+        {
+          "durationSeconds": 2.927024713,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.persistent_1024x4096x4096",
+          "timing_results_s": [
+            2.927024713
+          ]
+        },
+        {
+          "durationSeconds": 14.888368883,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.persistent_8192x8192x4096",
+          "timing_results_s": [
+            14.888368883
+          ]
+        },
+        {
+          "durationSeconds": 4.418523202,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.softmax_131072x2048",
+          "timing_results_s": [
+            4.418523202
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gfx950",
+      "results": [
+        {
+          "durationSeconds": 35.61519899,
+          "error": null,
+          "status": "completed",
+          "testId": "deepseek.act_quant_32768x8192",
+          "timing_results_s": [
+            35.61519899
+          ]
+        },
+        {
+          "durationSeconds": 5.446196216,
+          "error": null,
+          "status": "completed",
+          "testId": "deepseek.mlp_w1_m64",
+          "timing_results_s": [
+            5.446196216
+          ]
+        },
+        {
+          "durationSeconds": 6.05297006,
+          "error": null,
+          "status": "completed",
+          "testId": "deepseek.mlp_w2_m64",
+          "timing_results_s": [
+            6.05297006
+          ]
+        },
+        {
+          "durationSeconds": 1.673708269,
+          "error": null,
+          "status": "completed",
+          "testId": "deepseek.weight_dequant_32768x8192",
+          "timing_results_s": [
+            1.673708269
+          ]
+        },
+        {
+          "durationSeconds": 6.62464642,
+          "error": null,
+          "status": "completed",
+          "testId": "gpt_oss.causal_seq2560",
+          "timing_results_s": [
+            6.62464642
+          ]
+        },
+        {
+          "durationSeconds": 6.620173832,
+          "error": null,
+          "status": "completed",
+          "testId": "gpt_oss.window_batch4_seq3072",
+          "timing_results_s": [
+            6.620173832
+          ]
+        },
+        {
+          "durationSeconds": 3.570979288,
+          "error": null,
+          "status": "completed",
+          "testId": "tensile.bf16_streamk_4096x4096x4096",
+          "timing_results_s": [
+            3.570979288
+          ]
+        },
+        {
+          "durationSeconds": 5.550327119,
+          "error": null,
+          "status": "completed",
+          "testId": "tensile.mxfp8_subtile_4096x4096x4096",
+          "timing_results_s": [
+            5.550327119
+          ]
+        },
+        {
+          "durationSeconds": 3.592367119,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.grouped_4x2048",
+          "timing_results_s": [
+            3.592367119
+          ]
+        },
+        {
+          "durationSeconds": 7.928451906,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.layernorm_131072x2048",
+          "timing_results_s": [
+            7.928451906
+          ]
+        },
+        {
+          "durationSeconds": 2.686295695,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.persistent_1024x4096x4096",
+          "timing_results_s": [
+            2.686295695
+          ]
+        },
+        {
+          "durationSeconds": 7.325913423,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.softmax_131072x2048",
+          "timing_results_s": [
+            7.325913423
+          ]
+        }
+      ]
+    }
+  ],
+  "testCatalog": "test-catalogs/default-852bbf2b9e7b555adc3d0de1ed070a1f806740f935b4e42d785a64cf34fb4f7b.json"
+}
