@@ -911,10 +911,24 @@ typedef struct rocprofiler_kernel_dispatch_info_t
     rocprofiler_dispatch_id_t dispatch_id;  ///< unique id for each dispatch
     uint32_t                  private_segment_size;
     uint32_t                  group_segment_size;
-    rocprofiler_dim3_t        workgroup_size;        ///< runtime workgroup size (grid * threads)
-    rocprofiler_dim3_t        grid_size;             ///< runtime grid size
-    uint8_t                   reserved_padding[56];  // reserved for extensions w/o ABI break
+    rocprofiler_dim3_t          workgroup_size;  ///< runtime workgroup size (grid * threads)
+    rocprofiler_dim3_t          grid_size;       ///< runtime grid size
+    rocprofiler_graph_exec_id_t graph_exec_id;   ///< HIP graph exec that launched it, or 0
+    rocprofiler_graph_node_id_t graph_node_id;   ///< ordinal within that graph launch
+    uint8_t                     reserved_padding[40];  // reserved for extensions w/o ABI break
 
+    /// @var graph_exec_id
+    /// @brief The ::rocprofiler_graph_exec_id_t of the hipGraphLaunch that enqueued this dispatch,
+    /// as in the ::ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH records; a handle of 0 when the dispatch
+    /// was not enqueued by a graph launch. Check that `size` covers this field before reading it.
+    ///
+    /// @var graph_node_id
+    /// @brief Zero-based ordinal of this dispatch among the kernel dispatches and memory copies
+    /// that its graph launch enqueued on the launching thread, in enqueue order (the numbering of
+    /// rocprofv3's `graph_node_id`). It identifies the same node across launches of one
+    /// ::rocprofiler_graph_exec_id_t under the conditions the rocprofv3 documentation gives for
+    /// HIP graph attribution. Meaningful only when graph_exec_id is nonzero.
+    ///
     /// @var group_segment_size
     /// @brief Runtime group memory segment size. Size of  group segment memory (static + runtime)
     /// required by the kernel (per work-group), in bytes. AKA: LDS size
