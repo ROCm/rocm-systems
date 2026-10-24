@@ -224,6 +224,22 @@ in the following table.
         | Values above ``3600000`` (one hour) are lowered to ``3600000``.
         | ``0`` or less disables telemetry.
 
+    * - | ``NCCL_RUN_RAS_DIAGNOSTICS``
+        | Runs the RAS diagnostics at every communicator initialization. RCCL
+          compares the ``NCCL_*`` environment and the driver version across
+          the ranks and prints a report with the ``NCCL DIAG`` prefix to the
+          ``stdout`` of the process that hosts rank 0. Requires
+          ``NCCL_RAS_ENABLE=1`` (default). See :ref:`using-rccl-ras-diagnostics`.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_DIAGNOSTICS_ECC_THRESHOLD``
+        | Number of corrected volatile ECC errors at or above which the RAS
+          diagnostics report a GPU. Has no effect when the ECC check reports
+          ``unavailable`` on AMD GPUs.
+      - | ``0``: Corrected errors are not reported (default).
+        | ``N`` > 0: Ranks with at least ``N`` corrected errors are reported.
+
 .. _check-mode:
 
 Validating collective arguments
