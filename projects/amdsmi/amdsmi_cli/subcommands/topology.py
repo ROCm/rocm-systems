@@ -4,6 +4,8 @@
 
 import logging
 
+from amdsmi_cli_exceptions import AmdSmiCommandNotSupportedException
+
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 
@@ -364,6 +366,17 @@ class TopologyCommands:
         return:
             Nothing
         """
+        # `topology` only reports GPU (and NIC) information; --cpu and --core are
+        # accepted by the shared device-argument group but are not serviced by
+        # this command.
+        if getattr(args, "cpu", None) or getattr(args, "core", None):
+            raise AmdSmiCommandNotSupportedException(
+                "topology",
+                self.helpers.get_output_format(),
+                message="topology reports GPU information. --cpu and --core are not "
+                "supported for this command.",
+            )
+
         # Set args.* to passed in arguments
         if gpu:
             args.gpu = gpu
