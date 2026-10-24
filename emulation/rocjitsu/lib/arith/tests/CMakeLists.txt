@@ -169,6 +169,25 @@ foreach(
     rj_arith_add_test(${target} integer/${family}_test.cpp)
 endforeach()
 
+# Conversion layouts share contract checks; family references remain independent.
+foreach(
+    family
+    IN
+    ITEMS
+        integer_pack
+        byte
+        float16
+        float32
+        float64
+        normalized
+        packed
+        fp8_widen
+        fp8_narrow
+)
+    set(target "rj_arith_conversion_${family}_test")
+    rj_arith_add_test(${target} conversion/${family}_test.cpp)
+endforeach()
+
 # Dot-product formats retain family-specific arithmetic and status expectations.
 foreach(family IN ITEMS integer fp8 half dot2)
     set(target "rj_arith_dot_${family}_test")
