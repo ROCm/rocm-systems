@@ -312,10 +312,21 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
 // Archive loader
 // ---------------------------------------------------------------------------
 
+static ArchiveCheck g_archive_check = nullptr;
+
+void set_archive_check(ArchiveCheck check) { g_archive_check = check; }
+
 bool load_archive(const std::string& path, Archive& archive) {
   std::string archive_dir;
   if (!resolve_archive_path(path, archive_dir))
     return false;
+  if (g_archive_check) {
+    std::string err;
+    if (!g_archive_check(archive_dir, &err)) {
+      fprintf(stderr, "[HRR] Refusing archive %s: %s\n", archive_dir.c_str(), err.c_str());
+      return false;
+    }
+  }
   archive.path = archive_dir;
 
   std::string events_path = archive_dir + "/events.bin";

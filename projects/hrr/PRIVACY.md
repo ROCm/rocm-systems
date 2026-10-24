@@ -109,3 +109,8 @@ capture must ask for consent before it starts.
 [AIRUNTIME-2878](https://amd-hub.atlassian.net/browse/AIRUNTIME-2878) keeps the crash-time
 flush without displacing the application's own crash handler. None of these changes what an
 archive contains.
+
+An archive can also be signed so that replay refuses one that was changed after capture
+([AIRUNTIME-2887](https://amd-hub.atlassian.net/browse/AIRUNTIME-2887),
+[AIRUNTIME-2885](https://amd-hub.atlassian.net/browse/AIRUNTIME-2885)). Signing proves who
+produced the files; it does not hide them. See DESIGN.md, "Archive signing".

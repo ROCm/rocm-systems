@@ -205,6 +205,13 @@ struct Archive {
 // ---------------------------------------------------------------------------
 
 // Load an archive from disk. Returns false on error.
+// Installed once by a caller that must not read an archive it has not checked
+// (hrr-playback with --trusted-key). load_archive() calls it with the resolved
+// pid-<pid>/ directory before it opens any file in it, and refuses the archive,
+// printing `*err`, when it returns false. Not installed: no check.
+using ArchiveCheck = bool (*)(const std::string& archive_dir, std::string* err);
+void set_archive_check(ArchiveCheck check);
+
 bool load_archive(const std::string& path, Archive& archive);
 
 // The pid in the name of a per-process archive directory, "pid-<decimal pid>",

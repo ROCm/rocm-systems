@@ -86,6 +86,9 @@
 #endif
 
 #include "hrr_safe_fs.h"
+#ifdef HRR_HAVE_ARCHIVE_SIGN
+#include "hrr_archive_sign.h"
+#endif
 
 namespace fs = std::filesystem;
 
@@ -1204,12 +1207,54 @@ static bool check_root_manifest_target(const fs::path& root, std::string* err) {
 #endif
 }
 
+#ifdef HRR_HAVE_ARCHIVE_SIGN
+// Keys given on the command line. The seed is read when --repair needs it, the
+// public key once, before any archive is opened.
+static std::string g_signing_key_path;
+static uint8_t g_trusted_key[hrr_sign::kPublicKeySize];
+
+// hrr::ArchiveCheck for --trusted-key: an archive without a signature is refused
+// too, since the user asked for one. See DESIGN.md, "Archive signing".
+static bool check_signature(const std::string& dir, std::string* err) {
+  return hrr_sign::verify_archive(dir, g_trusted_key, err) == hrr_sign::VerifyResult::kOk;
+}
+
+// After --repair rewrote events.bin and manifest.json the old signature, if any,
+// is stale. Sign the result with --signing-key, or drop the stale pair and say so.
+static bool resign_repaired(const fs::path& dir) {
+  std::string err;
+  if (!g_signing_key_path.empty()) {
+    uint8_t seed[hrr_sign::kSeedSize];
+    const bool signed_ok = hrr_sign::read_key_file(g_signing_key_path, true, seed, &err) &&
+                           hrr_sign::sign_archive(dir.string(), seed, &err);
+    hrr_sign::wipe(seed, sizeof(seed));  // on failure too
+    if (!signed_ok) {
+      fprintf(stderr, "[HRR] repair: not signed: %s\n", err.c_str());
+      return false;
+    }
+    printf("[HRR] Signed %s\n", dir.string().c_str());
+    return true;
+  }
+  std::error_code ec;
+  if (fs::remove(dir / hrr_sign::kSignatureName, ec)) {
+    fs::remove(dir / hrr_sign::kManifestName, ec);
+    fprintf(stderr, "[HRR] repair: removed the stale signature; pass --signing-key to sign\n");
+  }
+  return true;
+}
+#endif
+
 static int repair_archive(const hrr::Archive& archive) {
   const fs::path archive_dir(archive.path);
 
   if (archive.complete) {
     printf("[HRR] Archive already complete (%zu events); nothing to repair\n",
            archive.event_count);
+#ifdef HRR_HAVE_ARCHIVE_SIGN
+    // The way to sign a complete archive that was captured unsigned, or changed
+    // since (a region sidecar added): --repair --signing-key.
+    if (!g_signing_key_path.empty() && !resign_repaired(archive_dir)) return 1;
+#endif
     return 0;
   }
 
@@ -1276,6 +1321,9 @@ static int repair_archive(const hrr::Archive& archive) {
 
   printf("[HRR] Repaired archive: %zu events kept, clean trailer + manifest written\n",
          archive.events.size());
+#ifdef HRR_HAVE_ARCHIVE_SIGN
+  if (!resign_repaired(archive_dir)) return 1;
+#endif
   return 0;
 }
 
@@ -1451,6 +1499,12 @@ static void print_usage(const char* argv0) {
     "                        miscounting trailer) as a clean one and exit.\n"
     "                        Given an archive root, repairs every process capture\n"
     "                        under it and rebuilds the root index.\n"
+    "  --trusted-key FILE    Replay only an archive signed by the Ed25519 public key in FILE\n"
+    "                        (64 hex digits); refuse it, naming the file, if any file differs\n"
+    "                        or it is unsigned. Also HIP_HRR_TRUSTED_KEY. Required for an\n"
+    "                        archive from another machine.\n"
+    "  --signing-key FILE    With --repair: sign the repaired archive with the seed in FILE\n"
+    "  --gen-signing-key SEED PUB  Create a signing key pair and exit\n"
     "  --events              With --info: also print the full event log\n"
     "  --verbose             Print each event as it is processed\n"
     "  --skip-device-sync    Skip device/stream synchronize events\n"
@@ -1576,6 +1630,7 @@ int main(int argc, char** argv) {
   bool show_events   = false;
   bool do_repair     = false;
   bool no_regions    = false;
+  std::string trusted_key_path, signing_key_path;
   uint64_t max_threads   = hrr::kDefaultMaxThreads;
   uint64_t max_wall_secs = hrr::kDefaultMaxWallSecs;
   bool no_placement  = false;
@@ -1584,6 +1639,31 @@ int main(int argc, char** argv) {
     if      (!strcmp(argv[i], "--info"))              show_info              = true;
     else if (!strcmp(argv[i], "--repair"))            do_repair              = true;
     else if (!strcmp(argv[i], "--events"))            show_events            = true;
+    else if (!strcmp(argv[i], "--trusted-key") || !strcmp(argv[i], "--signing-key")) {
+      // A key option that silently does nothing would replay an unchecked archive.
+      if (i + 1 >= argc || argv[i + 1][0] == '\0') {
+        fprintf(stderr, "[HRR] %s needs a key file path\n", argv[i]);
+        return 1;
+      }
+      if (!strcmp(argv[i], "--trusted-key")) trusted_key_path = argv[i + 1];
+      else signing_key_path = argv[i + 1];
+      ++i;
+    }
+    else if (!strcmp(argv[i], "--gen-signing-key") && i + 2 < argc) {
+#ifdef HRR_HAVE_ARCHIVE_SIGN
+      std::string err;
+      if (!hrr_sign::generate_key_pair(argv[i + 1], argv[i + 2], &err)) {
+        fprintf(stderr, "[HRR] %s\n", err.c_str());
+        return 1;
+      }
+      printf("[HRR] Wrote %s (keep private) and %s (give to replaying sites)\n",
+             argv[i + 1], argv[i + 2]);
+      return 0;
+#else
+      fprintf(stderr, "[HRR] built without archive signing support\n");
+      return 1;
+#endif
+    }
     else if (!strcmp(argv[i], "--verbose"))           ctx.verbose            = true;
     else if (!strcmp(argv[i], "--skip-device-sync"))  ctx.skip_device_sync   = true;
     else if (!strcmp(argv[i], "--multi-thread"))      single_thread          = false;
@@ -1735,6 +1815,41 @@ int main(int argc, char** argv) {
     print_usage(argv[0]);
     return 1;
   }
+
+  if (trusted_key_path.empty())
+    if (const char* k = std::getenv("HIP_HRR_TRUSTED_KEY")) {
+      if (k[0] == '\0') {
+        fprintf(stderr, "[HRR] HIP_HRR_TRUSTED_KEY is set but empty\n");
+        return 1;
+      }
+      trusted_key_path = k;
+    }
+  if (do_repair && !trusted_key_path.empty()) {
+    fprintf(stderr, "[HRR] --repair rewrites the archive and does not check a signature; "
+                    "verify first with --info --trusted-key, then repair\n");
+    return 1;
+  }
+  if (!signing_key_path.empty() && !do_repair) {
+    fprintf(stderr, "[HRR] --signing-key is for --repair\n");
+    return 1;
+  }
+#ifdef HRR_HAVE_ARCHIVE_SIGN
+  g_signing_key_path = signing_key_path;
+  if (!trusted_key_path.empty()) {
+    std::string err;
+    if (!hrr_sign::read_key_file(trusted_key_path, false, g_trusted_key, &err)) {
+      fprintf(stderr, "[HRR] --trusted-key: %s\n", err.c_str());
+      return 1;
+    }
+    hrr::set_archive_check(check_signature);
+  }
+#else
+  if (!trusted_key_path.empty() || !signing_key_path.empty()) {
+    fprintf(stderr, "[HRR] built without archive signing support; refusing --trusted-key/"
+                    "--signing-key rather than ignoring it\n");
+    return 1;
+  }
+#endif
 
   // --info on an archive root prints the common process summary. Direct
   // pid-<pid> paths continue through load_archive for detailed event info.

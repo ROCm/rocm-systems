@@ -38,6 +38,37 @@ target_compile_definitions(hrr_reader PRIVATE
 )
 
 # ---------------------------------------------------------------------------
+# hrr_sign — archive signature check and re-signing (STATIC, CPU-only)
+#
+# The source is capture's (clr/hipamd/src/hrr), so both sides write and read the
+# same manifest format; it needs only shared/sha256 and the vendored Monocypher.
+# A checkout of projects/hrr without those directories builds without it, and
+# hrr-playback then refuses --trusted-key and --signing-key instead of ignoring
+# them.
+# ---------------------------------------------------------------------------
+set(HRR_CAPTURE_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../clr/hipamd/src/hrr)
+set(HRR_SHA256_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/sha256)
+if(EXISTS ${HRR_CAPTURE_SRC}/hrr_archive_sign.cpp AND EXISTS ${HRR_SHA256_SRC}/src/sha256.cc)
+  enable_language(C)
+  add_library(hrr_sign STATIC
+    ${HRR_CAPTURE_SRC}/hrr_archive_sign.cpp
+    ${HRR_CAPTURE_SRC}/third_party/monocypher/monocypher.c
+    ${HRR_CAPTURE_SRC}/third_party/monocypher/monocypher-ed25519.c
+    ${HRR_SHA256_SRC}/src/sha256.cc
+  )
+  add_library(hrr::sign ALIAS hrr_sign)
+  set_target_properties(hrr_sign PROPERTIES
+    CXX_STANDARD ${HRR_CXX_STANDARD}
+    CXX_STANDARD_REQUIRED ON
+    POSITION_INDEPENDENT_CODE ON)
+  target_include_directories(hrr_sign PUBLIC
+    ${HRR_CAPTURE_SRC}
+    ${HRR_CAPTURE_SRC}/third_party/monocypher
+    ${HRR_SHA256_SRC}/include)
+  target_compile_definitions(hrr_sign PUBLIC HRR_HAVE_ARCHIVE_SIGN=1)
+endif()
+
+# ---------------------------------------------------------------------------
 # hrr-playback — full replay tool (requires HIP)
 # ---------------------------------------------------------------------------
 if(HRR_BUILD_PLAYBACK)
@@ -63,6 +94,9 @@ if(HRR_BUILD_PLAYBACK)
     $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
   )
   target_link_libraries(hrr-playback PRIVATE hrr::reader hip::host Threads::Threads)
+  if(TARGET hrr_sign)
+    target_link_libraries(hrr-playback PRIVATE hrr::sign)
+  endif()
   # hrr_runtime_symbol: dlsym on POSIX, module enumeration on Windows.
   target_link_libraries(hrr-playback PRIVATE ${CMAKE_DL_LIBS} $<$<BOOL:${WIN32}>:psapi>)
 
