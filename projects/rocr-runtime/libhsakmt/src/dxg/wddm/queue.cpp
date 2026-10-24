@@ -224,6 +224,18 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
     if (!dxg_runtime->disable_wait_timeout_) {
       uint64_t current_rptr = queue->ring_rptr->load(std::memory_order_relaxed);
       uint64_t current_wptr = queue->ring_wptr->load(std::memory_order_relaxed);
+      uint64_t current_fence = queue->sync_addr ? LoadSyncValue(queue->sync_addr) : 0;
+
+      // Non-zero fence high dword = KMD poisoned it on GPU reset; report the fault now.
+      if ((current_fence >> 32) != 0) {
+        if (queue->thread_stop_.exchange(true)) return;
+        pr_err("GPU memory fault detected: monitored fence poisoned (0x%" PRIx64
+               ") rptr=%" PRIu64 " wptr=%" PRIu64 "\n",
+               current_fence, current_rptr, current_wptr);
+        queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+        return;
+      }
+
       if (current_rptr != last_rptr) {
         last_rptr = current_rptr;
         last_progress = std::chrono::steady_clock::now();
