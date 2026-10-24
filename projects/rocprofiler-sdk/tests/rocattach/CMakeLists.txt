@@ -287,6 +287,74 @@ rocprofiler_add_integration_execute_test(
     PASS_REGULAR_EXPRESSION "verified: grandchild pid [0-9]+ loaded the tool library"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+# A fork-only child created after attachment initialization does not inherit the parent's
+# listener. Tree attach should warn and skip that child while profiling the root and a
+# later listener-capable sibling.
+add_executable(rocattach-tree-listenerless-child-test)
+target_sources(rocattach-tree-listenerless-child-test
+               PRIVATE attach_tree_listenerless_child.cpp)
+target_link_libraries(
+    rocattach-tree-listenerless-child-test
+    PRIVATE rocprofiler-sdk::tests-build-flags
+            rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
+
+rocprofiler_add_integration_execute_test(
+    rocattach-tree-listenerless-child-test-execute
+    TARGET rocattach-tree-listenerless-child-test
+    ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>
+    TIMEOUT 45
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION
+        "Skipping descendant process [0-9]+ because it has no 'rocp-bg-attach' thread"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Test FAILED")
+
+# A tree root is the required attachment target, not a traversal-only launcher. Verify an
+# attachable descendant is not attempted when its root has no listener.
+add_executable(rocattach-attach-tree-root-required-test)
+target_sources(rocattach-attach-tree-root-required-test
+               PRIVATE test_attach_tree_root_required.cpp)
+target_link_libraries(
+    rocattach-attach-tree-root-required-test
+    PRIVATE rocprofiler-sdk::tests-build-flags
+            rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
+
+rocprofiler_add_integration_execute_test(
+    rocattach-attach-tree-root-required-test-execute
+    TARGET rocattach-attach-tree-root-required-test
+    ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>
+    TIMEOUT 45
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION
+        "Test PASSED: non-attachable root prevented descendant attachment"
+    FAIL_REGULAR_EXPRESSION "Test FAILED")
+
+# setup() inserts a session before ptrace injection completes. Verify a later failure
+# removes that session so detach reports no active entry and a retry performs fresh setup.
+add_executable(rocattach-setup-failure-rollback-test)
+target_sources(rocattach-setup-failure-rollback-test
+               PRIVATE test_setup_failure_rollback.cpp)
+target_link_libraries(
+    rocattach-setup-failure-rollback-test
+    PRIVATE rocprofiler-sdk::tests-build-flags
+            rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
+
+rocprofiler_add_integration_execute_test(
+    rocattach-setup-failure-rollback-test-execute
+    TARGET rocattach-setup-failure-rollback-test
+    TIMEOUT 15
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Test PASSED: failed setup rolled back its attachment session"
+    FAIL_REGULAR_EXPRESSION "Test FAILED")
+
 # Test that attach fails gracefully when target process lacks ROCP_TOOL_ATTACH=1. Verifies
 # that rocattach returns an error status without crashing the target.
 add_executable(rocattach-without-env-test)
