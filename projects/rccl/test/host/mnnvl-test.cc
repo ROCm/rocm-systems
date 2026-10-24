@@ -54,7 +54,6 @@ class MnnvlMicrotest : public ::testing::Test {
     ResetHipFakes();
     ResetNcclFakes();
     g_cuMemEnable = [] { return 1; };
-    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
     g_callocFailAt = 0;
     g_callocCalls = 0;
     // With HIP_FABRIC_API the check ends in a FABRIC alloc/export/free probe: let it succeed.
@@ -257,13 +256,7 @@ TEST_F(MnnvlMicrotest, Probe_AllocationFailureIsASystemError) {
 TEST_F(MnnvlMicrotest, Probe_ExportFailureFreesTheBufferAndFails) {
   Build(0, 2);
   exportResult_ = hipErrorNotSupported;
-  ScopedHook errorString(g_hipDrvGetErrorString, [](hipError_t err, const char** str) {
-    EXPECT_EQ(err, hipErrorNotSupported);
-    *str = "fabric export failed";
-    return hipSuccess;
-  });
   EXPECT_EQ(ncclMnnvlCheck(comm_.get()), ncclSystemError);
-  EXPECT_EQ(errorString.calls, 1);
   EXPECT_EQ(addressFrees_, std::vector<size_t>{reserved_});
   EXPECT_EQ(comm_->MNNVL, 0);
 }

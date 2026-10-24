@@ -618,4 +618,5 @@ void ResetNcclFakes()
     g_shmAllocateShareableBuffer   = DefaultShmAllocateShareableBuffer;
     g_commGraphRegister            = DefaultCommGraphRegister;
     g_commGraphDeregister          = DefaultCommGraphDeregister;
+    ncclCuMemHandleType            = hipMemHandleTypePosixFileDescriptor;
 }

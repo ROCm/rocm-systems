@@ -91,7 +91,6 @@ class AllocMicrotest : public ::testing::Test {
     rcclShutdownFlag().store(false);
     sideStream.clear();
     std::memset(allocTracker, 0, sizeof(allocTracker));
-    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
 
     g_hipGetDevice = [this](int* d) {
       *d = kDev;
@@ -235,6 +234,7 @@ class AllocMicrotest : public ::testing::Test {
     rcclShutdownFlag().store(false);
     sideStream.clear();
     ResetHipFakes();
+    ResetNcclFakes();  // the hooks below restore themselves after this
   }
 
   using Status = hipError_t;

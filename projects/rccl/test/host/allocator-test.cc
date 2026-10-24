@@ -74,7 +74,6 @@ class AllocatorMicrotest : public ::testing::Test {
     ResetHipFakes();
     ResetNcclFakes();
     ResetRocmWrapFakes();
-    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
     g_hashToZero = false;
     params_.clear();
     g_loadParam = [this](const char* env, int64_t deftVal) {
