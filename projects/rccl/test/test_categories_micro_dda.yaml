@@ -7,6 +7,8 @@ test_categories:
     test_patterns:
       - "FabricMemHandler*"
       - "FabricGpuBarrier*"
+      - "FabricInit*"
+      - "HipVmmLedger*"
     exclude_windows:
       - "*"
     labels:
