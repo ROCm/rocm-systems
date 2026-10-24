@@ -258,11 +258,13 @@ typedef struct {
 	/* specifies the alignment size as PAGE_SIZE * 2^alignment_order */
 	uint32_t alignment_order;
 
-	/* DEBUG/TEMPORARY: whether to perform the SVM host unregister. Off by
-	 * default, so deregistration stays the no-op it was until the path has
-	 * more mileage; HSA_SVM_HOST_UNREGISTER_DEBUG opts in. When it is on,
-	 * the NO_ACCESS revoke is queued on a worker thread instead of issued
-	 * on the deregistering thread.
+	/* Whether to perform the SVM host unregister. Decided once, while the
+	 * apertures are initialised: hsaKmtGetXNACKModeCtx() first, then
+	 * HSA_SVM_HOST_UNREGISTER_DEBUG if the user set it. Forced off when the
+	 * kernel's KFD ioctl version is older than 1.24, the first ABI that
+	 * unmaps an SVM range on NO_ACCESS. When it is on, the NO_ACCESS revoke
+	 * is queued on a worker thread instead of issued on the deregistering
+	 * thread.
 	 */
 	bool svm_host_unregister;
 } svm_t;
@@ -1715,7 +1717,7 @@ static void svm_revoke_sync_locked(struct hsa_kfd_fmm_context *fmm_ctx,
 	struct svm_revoke_work *prev, *w, *next;
 	bool wait;
 
-	if (!fmm_ctx->svm.svm_host_unregister)
+	if (!fmm_ctx->svm_revoke_head && !fmm_ctx->svm_revoke_inflight)
 		return;
 
 	do {
@@ -3800,6 +3802,20 @@ static bool init_mem_handle_aperture(struct hsa_kfd_fmm_context *fmm_ctx, HSAuin
 	return false;
 }
 
+/* First KFD ioctl ABI that unmaps an SVM range when NO_ACCESS is applied.
+ * Older kernels leave the GPU mapping in place.
+ */
+#define KFD_IOCTL_MINOR_SVM_NO_ACCESS 24
+
+static bool kfd_supports_svm_no_access(void)
+{
+	const HsaVersionInfo *v = &hsakmt_kfd_version_info;
+
+	return v->KernelInterfaceMajorVersion > 1 ||
+	       (v->KernelInterfaceMajorVersion == 1 &&
+		v->KernelInterfaceMinorVersion >= KFD_IOCTL_MINOR_SVM_NO_ACCESS);
+}
+
 HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 				unsigned int NumNodes)
 {
@@ -3815,6 +3831,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	unsigned int guardPages = 1;
 	uint64_t svm_base = 0, svm_limit = 0;
 	uint32_t svm_alignment = 0, mfma_high_precision_mode = 0;
+	HSAint32 xnack = 1;
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	/* If HSA_DISABLE_CACHE is set to a non-0 value, disable caching */
@@ -3852,16 +3869,36 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	if (!guardPagesStr || sscanf(guardPagesStr, "%u", &guardPages) != 1)
 		guardPages = 1;
 
-	/*
-	 * DEBUG/TEMPORARY: the SVM host unregister is off unless
-	 * HSA_SVM_HOST_UNREGISTER_DEBUG is set to a non-0 value. Left off,
-	 * deregistering an SVM-API host range stays the no-op it has always
-	 * been and register only sets the coherency flags. When it is on, the
-	 * NO_ACCESS revoke is queued on a worker thread.
+	/* XNACK is already bound. With retry faults on, a revoked range is
+	 * faulted back in, so the teardown is overhead. With XNACK off there is
+	 * no fault to recover from, so a grant that is never revoked stays
+	 * mapped for the life of the process. An unreadable mode is treated as
+	 * XNACK on, which leaves the path off. The debug variable, checked
+	 * after the query, overrides that. Kernels older than KFD ioctl 1.24
+	 * cannot unmap on NO_ACCESS, so the path stays off there; that is
+	 * silent unless the user set HSA_SVM_HOST_UNREGISTER_DEBUG.
 	 */
+	xnack = 1;
+	if (hsaKmtGetXNACKModeCtx(ctx, &xnack) != HSAKMT_STATUS_SUCCESS)
+		xnack = 1;
+
 	svmHostUnregisterStr = getenv("HSA_SVM_HOST_UNREGISTER_DEBUG");
-	fmm_ctx->svm.svm_host_unregister =
-		(svmHostUnregisterStr && strcmp(svmHostUnregisterStr, "0"));
+	if (!kfd_supports_svm_no_access()) {
+		fmm_ctx->svm.svm_host_unregister = false;
+		if (svmHostUnregisterStr)
+			pr_warn("HSA_SVM_HOST_UNREGISTER_DEBUG ignored: KFD ioctl %u.%u "
+				"is older than 1.%u\n",
+				hsakmt_kfd_version_info.KernelInterfaceMajorVersion,
+				hsakmt_kfd_version_info.KernelInterfaceMinorVersion,
+				KFD_IOCTL_MINOR_SVM_NO_ACCESS);
+	} else if (svmHostUnregisterStr) {
+		fmm_ctx->svm.svm_host_unregister = !!strcmp(svmHostUnregisterStr, "0");
+	} else {
+		fmm_ctx->svm.svm_host_unregister = !xnack;
+	}
+	pr_debug("SVM host unregister %s (XNACK %s)\n",
+		 fmm_ctx->svm.svm_host_unregister ? "on" : "off",
+		 xnack ? "on" : "off");
 
 	mfmaHighPrecisionModeStr = getenv("HSA_HIGH_PRECISION_MODE");
 	mfma_high_precision_mode = (mfmaHighPrecisionModeStr &&
