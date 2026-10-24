@@ -1150,7 +1150,32 @@ hsa_status_t KfdDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* read
 
 
 hsa_status_t KfdDriver::SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) {
+  // Gracefully degrade if symbol is absent (old libhsakmt).
+  if (HSAKMT_CALL(hsaKmtSetPersistingCacheSize) == nullptr)
+    return HSA_STATUS_ERROR;
   if (HSAKMT_CALL(hsaKmtSetPersistingCacheSize)(node_id, cache_size) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::GetPersistingCacheSize(uint32_t node_id, uint64_t* cache_size) const {
+  if (cache_size == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  // Gracefully degrade if symbol is absent (old libhsakmt).
+  if (HSAKMT_CALL(hsaKmtGetPersistingCacheSize) == nullptr)
+    return HSA_STATUS_ERROR;
+  if (HSAKMT_CALL(hsaKmtGetPersistingCacheSize)(node_id, cache_size) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::GetMaxPersistingCacheSize(uint32_t node_id, uint64_t* max_cache_size) const {
+  if (max_cache_size == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  // Gracefully degrade if symbol is absent (old libhsakmt).
+  if (HSAKMT_CALL(hsaKmtGetPersistingCacheSizeMax) == nullptr)
+    return HSA_STATUS_ERROR;
+  if (HSAKMT_CALL(hsaKmtGetPersistingCacheSizeMax)(node_id, max_cache_size) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }

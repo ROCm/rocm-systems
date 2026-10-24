@@ -2525,6 +2525,15 @@ hsa_status_t XdnaDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* rea
   (void)ready;
   return HSA_STATUS_ERROR;
 }
+hsa_status_t XdnaDriver::SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) {
+  return HSA_STATUS_ERROR;
+}
+hsa_status_t XdnaDriver::GetPersistingCacheSize(uint32_t node_id, uint64_t* cache_size) const {
+  return HSA_STATUS_ERROR;
+}
+hsa_status_t XdnaDriver::GetMaxPersistingCacheSize(uint32_t node_id, uint64_t* max_cache_size) const {
+  return HSA_STATUS_ERROR;
+}
 
 }  // namespace AMD
 }  // namespace rocr

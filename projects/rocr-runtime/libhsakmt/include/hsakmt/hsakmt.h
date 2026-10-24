@@ -1541,6 +1541,36 @@ hsaKmtSetPersistingCacheSize(
     HSAuint64 CacheSize
     );
 
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetPersistingCacheSizeCtx(
+    HsaKFDContext *ctx,
+    HSAuint32 Node,
+    HSAuint64 *CacheSize
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetPersistingCacheSize(
+    HSAuint32 Node,
+    HSAuint64 *CacheSize
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetPersistingCacheSizeMaxCtx(
+    HsaKFDContext *ctx,
+    HSAuint32 Node,
+    HSAuint64 *MaxCacheSize
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetPersistingCacheSizeMax(
+    HSAuint32 Node,
+    HSAuint64 *MaxCacheSize
+    );
+
 #ifdef __cplusplus
 }   //extern "C"
 #endif
