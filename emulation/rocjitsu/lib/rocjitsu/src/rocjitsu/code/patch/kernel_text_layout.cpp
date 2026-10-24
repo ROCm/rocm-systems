@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
@@ -21,7 +22,6 @@ namespace rocjitsu {
 
 namespace {
 
-constexpr uint64_t kKernargPreloadSkipBytes = 256;
 // SOPP reaches almost 128 KiB in either direction, and a branch-island chain
 // keeps each hop within a 64 KiB safety interval. Pools are placed before
 // control-flow windows grow. A dense interval of recovered indirect consumers

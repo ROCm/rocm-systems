@@ -18,6 +18,8 @@
 
 namespace rocjitsu {
 
+class CodeObject;
+
 /// @brief One AMDHSA kernel descriptor located in an ELF image.
 struct KernelDescriptorInfo {
   uint64_t descriptor_file_offset = 0; ///< File offset of the 64-byte descriptor (pre-growth).
@@ -35,6 +37,14 @@ struct KernelDescriptorInfo {
 [[nodiscard]] std::vector<KernelDescriptorInfo>
 scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
                         std::optional<size_t> text_section_index = std::nullopt);
+
+/// @brief Every descriptor of @p object: scan_kernel_descriptors() over each
+///        .text section, in section order.
+///
+/// @details Each entry_text_offset is relative to the .text section its entry
+/// lands in, so with more than one .text the offsets do not share an origin.
+[[nodiscard]] std::vector<KernelDescriptorInfo>
+scan_object_kernel_descriptors(const CodeObject &object);
 
 /// @brief SGPRs at the top of a CDNA kernel's allocation that hold special
 ///        registers rather than ordinary ones.
@@ -120,5 +130,17 @@ kernarg_segment_ptr_sgpr(const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
 /// @brief KERNARG_PRELOAD_SPEC_OFFSET: first preloaded kernarg dword index.
 [[nodiscard]] uint32_t kernarg_preload_offset(const rocjitsu::amdhsa::kernel_descriptor_t &desc);
+
+/// @brief Distance past the descriptor entry at which kernarg-preload-compatible
+///        firmware enters a preloading kernel, where
+///        uses_kernarg_preload_firmware_skip() holds.
+inline constexpr uint64_t kKernargPreloadSkipBytes = 256;
+
+/// @brief Whether firmware may enter a kernel of @p arch that preloads kernel
+///        arguments kKernargPreloadSkipBytes past its descriptor entry.
+///
+/// @details Old firmware enters at the descriptor entry, where the compiler
+/// places a compatibility prologue that loads the preloaded arguments itself.
+[[nodiscard]] bool uses_kernarg_preload_firmware_skip(rj_code_arch_t arch);
 
 } // namespace rocjitsu

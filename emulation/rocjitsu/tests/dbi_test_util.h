@@ -586,12 +586,17 @@ inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_
 
 // ELF exporting one STT_FUNC probe symbol whose body is `body_words`, in an
 // executable .text. Sections: [1]=.text, [2]=.strtab, [3]=.symtab, [4]=.shstrtab.
-// `e_flags` selects the target ISA (e.g. GFX950 / GFX1200).
+// `e_flags` selects the target ISA (e.g. GFX950 / GFX1200). `leading_words` go
+// in .text ahead of the body, outside the symbol.
 inline std::vector<uint8_t> make_amdgpu_probe_elf(std::string_view symbol,
                                                   const std::vector<uint32_t> &body_words,
-                                                  uint32_t e_flags) {
+                                                  uint32_t e_flags,
+                                                  const std::vector<uint32_t> &leading_words = {}) {
   const uint64_t text_offset = 0x100;
-  const uint64_t text_size = body_words.size() * sizeof(uint32_t);
+  std::vector<uint32_t> text_words = leading_words;
+  text_words.insert(text_words.end(), body_words.begin(), body_words.end());
+  const uint64_t body_size = body_words.size() * sizeof(uint32_t);
+  const uint64_t text_size = text_words.size() * sizeof(uint32_t);
 
   std::vector<uint8_t> shstrtab{'\0'};
   const uint32_t text_name = add_elf_name(shstrtab, ".text");
@@ -606,8 +611,8 @@ inline std::vector<uint8_t> make_amdgpu_probe_elf(std::string_view symbol,
   syms[1].st_name = sym_name;
   syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
   syms[1].st_shndx = 1; // .text
-  syms[1].st_value = 0;
-  syms[1].st_size = text_size;
+  syms[1].st_value = leading_words.size() * sizeof(uint32_t);
+  syms[1].st_size = body_size;
 
   const uint64_t strtab_offset = text_offset + text_size;
   const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
@@ -632,7 +637,7 @@ inline std::vector<uint8_t> make_amdgpu_probe_elf(std::string_view symbol,
   ehdr.e_shstrndx = 4;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
-  std::memcpy(image.data() + text_offset, body_words.data(), text_size);
+  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
   std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());

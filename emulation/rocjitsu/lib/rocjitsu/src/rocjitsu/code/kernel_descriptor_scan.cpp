@@ -4,11 +4,13 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/code_object.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <unordered_set>
@@ -190,6 +192,19 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
   return out;
 }
 
+std::vector<KernelDescriptorInfo> scan_object_kernel_descriptors(const CodeObject &object) {
+  const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(object.image_data()),
+                                       object.image_size());
+  std::vector<KernelDescriptorInfo> kernels;
+  for (const Section *text : object.text_sections()) {
+    std::vector<KernelDescriptorInfo> found =
+        scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+    kernels.insert(kernels.end(), std::make_move_iterator(found.begin()),
+                   std::make_move_iterator(found.end()));
+  }
+  return kernels;
+}
+
 uint8_t kernel_wavefront_size(rj_code_arch_t arch, const KD &desc) {
   // CDNA kernels are Wave64 in the code objects currently handled here.
   if (arch_is_cdna_4_or_lower(arch))
@@ -316,6 +331,15 @@ uint32_t kernarg_preload_length(const KD &desc) {
 
 uint32_t kernarg_preload_offset(const KD &desc) {
   return RJ_AMDHSA_BITS_GET(desc.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET);
+}
+
+bool uses_kernarg_preload_firmware_skip(rj_code_arch_t arch) {
+  // CDNA2/CDNA3/CDNA4 implement kernarg preloading through the legacy firmware
+  // compatibility window: old firmware enters at the descriptor entry and
+  // compatible firmware enters 256 bytes later. GFX1250 supports preloading in
+  // hardware but has one entry, exactly as specified by the descriptor.
+  return arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
 
 } // namespace rocjitsu

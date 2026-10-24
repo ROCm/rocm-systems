@@ -23,6 +23,7 @@ RJ_DIAGNOSTIC_POP
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
@@ -33,7 +34,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <memory>
-#include <span>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -66,8 +67,10 @@ constexpr DbiTargetParams kRdna4Params{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_T
 
 } // namespace
 
-// Shared fixture: loads the target's vector_add build, decodes .text, finds the
-// first two relocatable anchors, and patches them via Instrumentor. The
+// Shared fixture: loads the target's vector_add build, takes one anchor from
+// each of the kernel's first two reachable blocks that can anchor one
+// (kernel_blocks() and first_anchor()), so code laid out ahead of the kernel is
+// never chosen, and patches them via Instrumentor. The
 // concrete suites at the bottom of this file inherit it so CMake can register
 // one CTest entry per (target, gating policy) pair:
 //   - HsaDbiNopAsm<Target>Static.*   - no GPU needed, registered unconditionally
@@ -95,44 +98,33 @@ protected:
                                reinterpret_cast<const uint8_t *>(co->image_data()) +
                                    co->image_size());
 
-    // Decode .text and find the first v_add_f32-mnemonic anchor that the
-    // trampoline machinery considers relocatable. Decode-and-search so the
-    // test is stable across compiler revisions.
-    // TODO: instrument multiple instructions
-    auto decoder = Decoder::create(params_.arch);
-    ASSERT_NE(decoder, nullptr);
-    auto block_result = BasicBlock::build(*co, *decoder, params_.arch);
-    ASSERT_TRUE(block_result.succeeded());
-    auto blocks = std::move(block_result).value();
-
-    ASSERT_FALSE(co->text_sections().empty());
-    const auto *text = co->text_sections().front();
-    const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
-                                              text->size());
-
-    for (const auto &block : blocks) {
-      uint64_t cur = block->start_offset();
-      for (const Instruction &inst : block->instructions()) {
-        if (is_relocatable_anchor(inst, cur, text_bytes, params_.arch)) {
-          anchor_offsets_.push_back(cur); // Instrumentor will need offset
-          anchor_mnemonics_.push_back(std::string(inst.mnemonic()));
-          ++anchor_count_;
-        }
-        cur += static_cast<uint64_t>(inst.size());
-        if (anchor_count_ == 2)
-          break;
-      }
-      if (anchor_count_ == 2)
+    // Anchor at the first instruction of each of the kernel's first two blocks
+    // that can anchor one. Only the kernel's own blocks count: .text can also
+    // hold functions the kernel never reaches, laid out ahead of it.
+    const std::vector<KernelDescriptorInfo> kernels = scan_object_kernel_descriptors(*co);
+    ASSERT_EQ(kernels.size(), 1u) << params_.kernel_fixture << ".o should hold one kernel";
+    Instrumentor instrumentor(*co, params_.arch);
+    std::string error;
+    const std::optional<std::vector<const BasicBlock *>> blocks =
+        instrumentor.kernel_blocks(kernels.front().entry_text_offset, &error);
+    ASSERT_TRUE(blocks) << error;
+    for (const BasicBlock *block : *blocks) {
+      const std::optional<uint64_t> anchor = instrumentor.first_anchor(*block);
+      if (!anchor)
+        continue;
+      anchor_offsets_.push_back(*anchor);
+      instrumentor.add_point_by_offset(*anchor);
+      if (++anchor_count_ == 2)
         break;
     }
     ASSERT_NE(anchor_count_, 0u) << "No relocatable anchor in " << params_.kernel_fixture
                                  << ".o; did the compiler change the lowering?";
+    const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+    ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+    for (const ResolvedInstrumentationSite &site : validated.sites)
+      anchor_mnemonics_.push_back(site.mnemonic);
 
-    // Apply the inline-nop trampoline.
-    Instrumentor instrumentor(*co, params_.arch);
-    for (uint64_t anchor_idx = 0; anchor_idx < anchor_count_; ++anchor_idx) {
-      instrumentor.add_point_by_offset(anchor_offsets_[anchor_idx]);
-    }
+    // Apply the inline-nop trampoline. The queries above spend no patch attempt.
     auto result = instrumentor.patch_with_debug_summaries();
     ASSERT_TRUE(result.errors.empty())
         << "Instrumentor::patch failed: "

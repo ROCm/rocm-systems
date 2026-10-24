@@ -10,6 +10,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/kernel_scope.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/patch/error_report.h"
@@ -252,6 +253,72 @@ bool check_probe_link_pair(const ProbeClobberSummary &summary, const ProbeAbi &a
                  "] before returning; it would return through a corrupted PC";
   }
   return false;
+}
+
+// Liveness decides which registers a trampoline may take, and it cannot see
+// every register some kernels still need:
+// - it reads the SGPR destination of a wave32 compare or carry-out as the pair
+//   its encoding names, so the register after it can read dead;
+// - it follows successors() only, so a register read across a call or an
+//   unresolved edge reads dead;
+// - it sees the register an operand encodes, so one reached relative to M0 or
+//   through GPR index mode reads dead;
+// - it sees only the operands the decoder reports, which leaves out an RDNA4
+//   image instruction's address VGPRs.
+// Returns why @p blocks, decoded from @p text, hold such a kernel, or empty when
+// they do not.
+std::string liveness_refusal_reason(rj_code_arch_t arch, const CodeObject &obj,
+                                    const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                    std::span<const uint8_t> text) {
+  for (const KernelDescriptorInfo &kernel : scan_object_kernel_descriptors(obj)) {
+    if (kernel_wavefront_size(arch, kernel.descriptor) == 32)
+      return "the kernel at text offset " + std::to_string(kernel.entry_text_offset) +
+             " runs in wave32, and liveness reads a wave32 lane mask's SGPR destination as a "
+             "pair";
+  }
+  for (const auto &block : blocks) {
+    const std::string where = "the block at text offset " + std::to_string(block->start_offset());
+    if (!block->call_edges().empty())
+      return where + " makes a call, which liveness does not follow";
+    if (block->successor_issue() != BasicBlock::SuccessorIssue::None)
+      return where + " has an unresolved successor, which liveness does not follow";
+  }
+  std::vector<BasicBlock *> scope;
+  scope.reserve(blocks.size());
+  for (const auto &block : blocks)
+    scope.push_back(block.get());
+  if (accesses_sgprs_indirectly_via_movrel(scope))
+    return "the code accesses an SGPR relative to M0 (s_movrel*), which liveness does not model";
+  if (accesses_vgprs_indirectly(scope, text, arch))
+    return "the code accesses a VGPR relative to M0 or through GPR index mode, which liveness "
+           "does not model";
+  for (const auto &block : blocks) {
+    for (const Instruction &inst : block->instructions()) {
+      if (is_unmodeled_image_access(arch, inst.mnemonic()))
+        return "the code has an RDNA4 image instruction (" + std::string(inst.mnemonic()) +
+               "), whose address VGPRs the decoder does not report";
+    }
+  }
+  return {};
+}
+
+// Where uses_kernarg_preload_firmware_skip() holds, firmware that supports
+// kernarg preload enters a preloading kernel kKernargPreloadSkipBytes past its
+// descriptor entry, skipping a compatibility window. Only the descriptor entry
+// is decoded from, so a site in the window would not run there, and the code
+// past it may not be decoded at all. Handling that second entry is deferred, so
+// every such kernel is refused.
+std::string kernarg_preload_refusal_reason(rj_code_arch_t arch, const CodeObject &obj) {
+  if (!uses_kernarg_preload_firmware_skip(arch))
+    return {};
+  for (const KernelDescriptorInfo &kernel : scan_object_kernel_descriptors(obj)) {
+    if (const uint32_t preload = kernarg_preload_length(kernel.descriptor); preload != 0)
+      return "the kernel at text offset " + std::to_string(kernel.entry_text_offset) +
+             " preloads " + std::to_string(preload) +
+             " kernarg dwords, so firmware may enter it at an undecoded entry " +
+             std::to_string(kKernargPreloadSkipBytes) + " bytes past its descriptor entry";
+  }
+  return {};
 }
 
 } // namespace
@@ -824,16 +891,30 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     return false;
   }
   decoder_ = std::move(decoder);
+  std::vector<uint64_t> kernel_entries;
+  if (obj_.text_sections().size() == 1) {
+    for (const KernelDescriptorInfo &kernel : scan_object_kernel_descriptors(obj_))
+      kernel_entries.push_back(kernel.entry_text_offset);
+  }
+  // Decoding from the kernel entries leaves padding and unreferenced functions
+  // alone, which need not decode on the target: RDNA4 has no encoding for the
+  // zero words a linker pads .text with. Without a kernel there is no root, so
+  // the whole section is decoded.
   util::StringDiagnostic decode_error;
-  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter());
+  auto blocks = kernel_entries.empty()
+                    ? BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter())
+                    : BasicBlock::build_reachable(obj_, *decoder_, arch_, kernel_entries,
+                                                  decode_error.emitter());
   if (blocks.failed()) {
     report(error_out, decode_error.message().c_str());
     return false;
   }
   blocks_ = std::move(blocks).value();
-  // BasicBlock::build returns blocks in .text order. Keep clause state across
+  kernel_entries_ = std::move(kernel_entries);
+  // Both builders return blocks in .text order. Keep clause state across
   // block boundaries because a branch target may split the linear instruction
-  // stream in the middle of a clause.
+  // stream in the middle of a clause. Carrying it across undecoded bytes can
+  // only block more anchors.
   uint32_t clause_remaining = 0;
   for (const auto &block : blocks_) {
     uint64_t cur = block->start_offset();
@@ -852,32 +933,89 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   return true;
 }
 
+std::optional<std::span<const uint8_t>> Instrumentor::anchor_text(std::string *error_out) {
+  if (!ensure_blocks_built(error_out))
+    return std::nullopt;
+  if (obj_.text_sections().empty()) {
+    report(error_out, "code object has no .text section");
+    return std::nullopt;
+  }
+  // TODO: support multi-text code objects. Anchor offsets would need to identify
+  // which .text section they belong to.
+  if (obj_.text_sections().size() > 1) {
+    report(error_out, "code object has multiple .text sections; currently supports only one");
+    return std::nullopt;
+  }
+  const Section *text = obj_.text_sections().front();
+  return std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
+}
+
 const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offset) const {
   auto it = offset_to_inst_.find(anchor_offset);
   return it == offset_to_inst_.end() ? nullptr : it->second;
+}
+
+std::string Instrumentor::undecoded_anchor_error(uint64_t anchor_offset, uint64_t text_size) const {
+  const std::string message = "no decoded instruction starts at the requested anchor_offset = " +
+                              std::to_string(anchor_offset);
+  if (anchor_offset >= text_size)
+    return message + ": it is past the end of .text";
+  if (block_for_offset(build_block_offset_index(blocks_), anchor_offset) != nullptr)
+    return message + ": it is inside a decoded instruction";
+  if (!kernel_entries_.empty())
+    return message + ": it is not in code decoded from a kernel entry, which is all that is "
+                     "decoded";
+  return message;
+}
+
+std::optional<std::vector<const BasicBlock *>>
+Instrumentor::kernel_blocks(uint64_t entry_text_offset, std::string *error_out) {
+  if (!anchor_text(error_out))
+    return std::nullopt;
+  const BlockOffsetIndex block_index = build_block_offset_index(blocks_);
+  BasicBlock *entry_block = block_for_offset(block_index, entry_text_offset);
+  if (entry_block == nullptr || entry_block->start_offset() != entry_text_offset) {
+    report(
+        error_out,
+        ("no decoded block starts at kernel entry " + std::to_string(entry_text_offset)).c_str());
+    return std::nullopt;
+  }
+  KernelScopeSpec spec;
+  spec.kernel_entries.insert(kernel_entries_.begin(), kernel_entries_.end());
+  spec.own_entries.insert(entry_text_offset);
+  const std::vector<BasicBlock *> blocks = reachable_kernel_blocks(
+      blocks_, block_index, build_block_position_index(blocks_), *entry_block, spec);
+  return std::vector<const BasicBlock *>(blocks.begin(), blocks.end());
+}
+
+std::optional<uint64_t> Instrumentor::first_anchor(const BasicBlock &block) const {
+  const Section *text = obj_.text_sections().front();
+  const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
+                                            text->size());
+  // Walked through offset_to_inst_ because a const block's instruction list
+  // cannot be iterated.
+  for (uint64_t cur = block.start_offset(); cur < block.end_offset();) {
+    const Instruction *inst = find_instruction_at_offset(cur);
+    if (inst == nullptr || inst->size() <= 0)
+      break;
+    if (!clause_blocked_offsets_.contains(cur) &&
+        is_relocatable_anchor(*inst, cur, text_bytes, arch_))
+      return cur;
+    cur += static_cast<uint64_t>(inst->size());
+  }
+  return std::nullopt;
 }
 
 Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   ResolvedPoints out;
 
   std::string err;
-  if (!ensure_blocks_built(&err)) {
+  const std::optional<std::span<const uint8_t>> text = anchor_text(&err);
+  if (!text) {
     out.errors.push_back(std::move(err));
     return out;
   }
-  if (obj_.text_sections().empty()) {
-    out.errors.emplace_back("code object has no .text section");
-    return out;
-  }
-  // TODO: support multi-text code objects. Anchor offsets would need to identify
-  // which .text section they belong to.
-  if (obj_.text_sections().size() > 1) {
-    out.errors.emplace_back("code object has multiple .text sections; currently supports only one");
-    return out;
-  }
-  const Section *text = obj_.text_sections().front();
-  const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
-                                            text->size());
+  const std::span<const uint8_t> text_bytes = *text;
 
   const auto &registry = default_isa_target_registry();
   const IsaTargetDescriptor *arch_descriptor = registry.find(arch_);
@@ -954,10 +1092,14 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
              " arguments; the limit is " + std::to_string(kMaxProbeArgVgprs);
       return std::nullopt;
     }
+    // A probe with no concrete target takes its arch's default target, which
+    // only gfx1250 has. Otherwise it is refused: it would be decoded for the
+    // destination's arch whatever it was built for.
     const rj_code_target_id_t probe_target = effective_target(*pt.probe_obj);
-    if (destination_target != ROCJITSU_CODE_TARGET_INVALID &&
-        probe_target != ROCJITSU_CODE_TARGET_INVALID && destination_target != probe_target) {
-      perr = "probe concrete target does not match the destination code-object target";
+    if (destination_target != ROCJITSU_CODE_TARGET_INVALID && destination_target != probe_target) {
+      perr = probe_target == ROCJITSU_CODE_TARGET_INVALID
+                 ? "probe has no concrete target, and the destination code object has one"
+                 : "probe concrete target does not match the destination code-object target";
       return std::nullopt;
     }
     auto sym = resolve_probe_symbol(*pt.probe_obj, pt.probe_symbol, &perr);
@@ -995,8 +1137,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   for (const auto &pt : points_) {
     const Instruction *anchor = find_instruction_at_offset(pt.anchor_offset);
     if (anchor == nullptr) {
-      out.errors.emplace_back("no decoded instruction starts at the requested anchor_offset = " +
-                              std::to_string(pt.anchor_offset));
+      out.errors.push_back(undecoded_anchor_error(pt.anchor_offset, text_bytes.size()));
       continue;
     }
 
@@ -1075,6 +1216,33 @@ InstrumentedCodeObject Instrumentor::patch() {
                                "wrapper that no runtime builds yet; requested by " +
                                readers);
     return result;
+  }
+
+  // patch() refuses a code object kernarg_preload_refusal_reason() flags, and
+  // one liveness_refusal_reason() flags when a point calls a probe: only a
+  // probe call reads liveness, and the inline nop takes no registers.
+  // patch_with_debug_summaries() does not, for tests that patch such kernels
+  // on purpose. A failed decode, or a .text it cannot anchor in, is left for it
+  // to report.
+  if (!patched_) {
+    const std::optional<std::span<const uint8_t>> text = anchor_text(nullptr);
+    const bool calls_probe =
+        std::any_of(points_.begin(), points_.end(),
+                    [](const InstrumentationPoint &pt) { return !pt.probe_symbol.empty(); });
+    std::string refusal;
+    if (text) {
+      if (calls_probe)
+        refusal = liveness_refusal_reason(arch_, obj_, blocks_, *text);
+      if (refusal.empty())
+        refusal = kernarg_preload_refusal_reason(arch_, obj_);
+    }
+    if (!refusal.empty()) {
+      patched_ = true;
+      InstrumentedCodeObject result;
+      result.errors.push_back(std::move(refusal));
+      result.kernel_unsupported = true;
+      return result;
+    }
   }
 
   // Slice off the debug summaries; move the base subobject into the return.

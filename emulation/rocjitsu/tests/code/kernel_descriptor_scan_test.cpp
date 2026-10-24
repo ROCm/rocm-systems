@@ -90,6 +90,17 @@ TEST(KernelDescriptorScan, SingleKernelDecodesAllFields) {
   EXPECT_EQ(at_offset.private_segment_fixed_size, 256u);
 }
 
+// The object-wide scan keeps every descriptor.
+TEST(KernelDescriptorScan, ObjectScanFindsEveryKernel) {
+  const auto image = make_gfx950_two_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/0);
+  const AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  const std::vector<KernelDescriptorInfo> found = scan_object_kernel_descriptors(obj);
+  ASSERT_EQ(found.size(), 2u);
+  EXPECT_EQ(found[0].kernel_name, "test_kernel0");
+  EXPECT_EQ(found[1].kernel_name, "test_kernel1");
+}
+
 // A descriptor whose decoded entry lands outside .text is dropped. Rewrite the
 // fixture descriptor's entry so it points at the descriptor's own (.rodata)
 // address instead of .text, then confirm the walk excludes it.
@@ -378,6 +389,14 @@ TEST(KernargPreload, LengthAndOffsetDecodeIndependently) {
 // The dense system-SGPR block following the user block. DBT uses it as the range
 // to repair when it inserts a kernarg pointer; DBI as a floor for framework
 // storage. Distinct values per field so a dropped or double-counted term shows.
+TEST(KernargPreload, FirmwareEntersPastTheDescriptorEntryOnlyOnCdna2ThroughCdna4) {
+  EXPECT_TRUE(uses_kernarg_preload_firmware_skip(ROCJITSU_CODE_ARCH_CDNA2));
+  EXPECT_TRUE(uses_kernarg_preload_firmware_skip(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_TRUE(uses_kernarg_preload_firmware_skip(ROCJITSU_CODE_ARCH_CDNA4));
+  // GFX1250 preloads in hardware and has the one descriptor entry.
+  EXPECT_FALSE(uses_kernarg_preload_firmware_skip(ROCJITSU_CODE_ARCH_CDNA5));
+}
+
 TEST(KernelDescriptorScan, InitialSgprCountFoldsTheSystemBlockOntoTheUserBlock) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
 
