@@ -137,6 +137,21 @@ def test_graph_launch_exec_ids_match_kernel_dispatch_records(json_input_data):
     ), f"HIP_GRAPH ids {launch_ids} != graph-KERNEL_DISPATCH ids {kernel_ids}"
 
 
+def test_sdk_dispatch_info_matches_tool_graph_fields(json_input_data):
+    """The SDK's own graph identity of a dispatch (dispatch_info.graph_exec_id / graph_node_id)
+    must equal the tool's top-level graph_exec_id / graph_node_id on every KERNEL_DISPATCH record:
+    the SDK numbers a launch's dispatches as the tool does."""
+    for rec in _buffer_records(json_input_data)["kernel_dispatch"]:
+        info = rec["dispatch_info"]
+        assert int(info["graph_exec_id"]["handle"]) == int(
+            rec["graph_exec_id"]
+        ), f"SDK and tool graph_exec_id differ: {rec}"
+        if int(rec["graph_exec_id"]) != 0:
+            assert int(info["graph_node_id"]["handle"]) == int(
+                rec["graph_node_id"]
+            ), f"SDK and tool graph_node_id differ: {rec}"
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)
