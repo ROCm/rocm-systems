@@ -17,6 +17,7 @@
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/os_fakes.h"
 #include "fakes/socket_fakes.h"
 #include "fakes/transport_net_socket_common_fakes.h"
 #include "fakes/transport_net_socket_fakes.h"
@@ -36,6 +37,7 @@ class RmaSocketMicrotest : public ::testing::Test {
     ResetTransportNetSocketCommonFakes();
     ResetTransportNetSocketFakes();
     ResetSocketFakes();
+    ResetOsFakes();
     ResetHipFakes();
     ResetNcclFakes();
   }
