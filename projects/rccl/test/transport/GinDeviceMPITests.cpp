@@ -165,15 +165,6 @@ std::string proxyNthreadsSkipReason() {
   return "";
 }
 
-// rocSHMEM-GDA implements only INDEXED signals; VA signals are unsupported
-// (Put/PutValue address the signal via indexedSignal.signalId).
-std::string vaSignalTestSkipReason() {
-  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
-    return "VA signals not supported by rocSHMEM-GDA (NCCL_GIN_TYPE=" +
-           std::to_string(NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) + ")";
-  return "";
-}
-
 // BarrierFence_* exercises Anvil SDMA queue ordering and proxy per-context state.
 // rocSHMEM GDA (NCCL_GIN_TYPE=6) runs the rest of this file but skips these cases.
 std::string barrierFenceBackendSkipReason() {
@@ -5834,8 +5825,6 @@ __global__ void putVAMultiCtxConsumerKernel(
 void GinMPIDeviceTests::runVASignalPut(int nContexts) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
-  if (auto reason = vaSignalTestSkipReason(); !reason.empty())
-    GTEST_SKIP() << reason;
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
@@ -6076,8 +6065,6 @@ __global__ void indexedSignalResetOnlyKernel(
 TEST_F(GinMPIDeviceTests, VASignal_NoPayload_IncAndAdd) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
-  if (auto reason = vaSignalTestSkipReason(); !reason.empty())
-    GTEST_SKIP() << reason;
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
@@ -6190,8 +6177,6 @@ TEST_F(GinMPIDeviceTests, VASignal_NoPayload_IncAndAdd) {
 // readSignal / resetSignal for VA and indexed pool cells.
 TEST_F(GinMPIDeviceTests, VASignal_ReadAndReset) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
-    GTEST_SKIP() << reason;
-  if (auto reason = vaSignalTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
     GTEST_SKIP() << "Requires exactly 2 ranks";
@@ -6546,8 +6531,6 @@ TEST_F(GinMPIDeviceTests, Signal_WaitRead_Low32Bits) {
 // NCCL docs: VA signals should use NCCL_WIN_STRICT_ORDERING on the signal window.
 TEST_F(GinMPIDeviceTests, VASignal_StrictOrderingFlag) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
-    GTEST_SKIP() << reason;
-  if (auto reason = vaSignalTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
     GTEST_SKIP() << "Requires exactly 2 ranks";
