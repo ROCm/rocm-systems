@@ -51,6 +51,8 @@ FCOLLECT_WAVE_DEF_GEN(unsigned short, ushort)
 FCOLLECT_WAVE_DEF_GEN(unsigned int, uint)
 FCOLLECT_WAVE_DEF_GEN(unsigned long, ulong)
 FCOLLECT_WAVE_DEF_GEN(unsigned long long, ulonglong)
+FCOLLECT_WAVE_DEF_GEN(__half, half)
+FCOLLECT_WAVE_DEF_GEN(__hip_bfloat16, bfloat16)
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -194,7 +196,10 @@ void FcollectWaveTester<T1>::resetBuffers(size_t size) {
   for (int wave_id = 0; wave_id < total_waves; wave_id++) {
     for (int i = 0; i < num_elems; i++) {
       int idx = wave_id * num_elems + i;
-      if constexpr (std::is_floating_point<T1>::value) {
+      if constexpr (std::is_same<T1, __half>::value ||
+                    std::is_same<T1, __hip_bfloat16>::value) {
+        source_buf[idx] = static_cast<T1>(3.14f + my_pe + wave_id);
+      } else if constexpr (std::is_floating_point<T1>::value) {
         source_buf[idx] = static_cast<T1>(3.14 + my_pe + wave_id);
       } else {
         source_buf[idx] = static_cast<T1>('a' + my_pe + wave_id);
@@ -218,7 +223,10 @@ void FcollectWaveTester<T1>::verifyResults(size_t size) {
       for (int i = 0; i < num_elems; i++) {
         int idx = (wave_id * n_pes + pe) * num_elems + i;
         T1 expected;
-        if constexpr (std::is_floating_point<T1>::value) {
+        if constexpr (std::is_same<T1, __half>::value ||
+                      std::is_same<T1, __hip_bfloat16>::value) {
+          expected = static_cast<T1>(3.14f + pe + wave_id);
+        } else if constexpr (std::is_floating_point<T1>::value) {
           expected = static_cast<T1>(3.14 + pe + wave_id);
         } else {
           expected = static_cast<T1>('a' + pe + wave_id);
@@ -226,8 +234,14 @@ void FcollectWaveTester<T1>::verifyResults(size_t size) {
         if (dest_buf[idx] != expected) {
           std::cerr << "Data validation error at wave " << wave_id
                     << " pe " << pe << " idx " << i << std::endl;
-          std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
-                    << ", Expected " << expected << std::endl;
+          if constexpr (std::is_same<T1, __half>::value ||
+                        std::is_same<T1, __hip_bfloat16>::value) {
+            std::cerr << "PE " << my_pe << " Got " << static_cast<float>(dest_buf[idx])
+                      << ", Expected " << static_cast<float>(expected) << std::endl;
+          } else {
+            std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
+                      << ", Expected " << expected << std::endl;
+          }
           exit(-1);
         }
       }
