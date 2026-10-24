@@ -120,16 +120,9 @@ add_subdirectory(source)
 # Public API
 # ------------------------------------------------------------ #
 
-set(profiler-hub_public_headers
-    ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/storage.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/version.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/writer_types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/reader_types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/shared_types.hpp
-)
+add_subdirectory(include/cpp)
 
+file(REMOVE_RECURSE ${CMAKE_BINARY_DIR}/include/profiler-hub)
 foreach(HEADER_FILE ${profiler-hub_public_headers})
     file(
         RELATIVE_PATH
@@ -491,6 +484,7 @@ if(CLANG_TIDY_EXE)
         clang-tidy
         COMMAND
             ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
+            --extra-arg=-I${CMAKE_BINARY_DIR}/include
             --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy
             ${PROFILER_HUB_CLANG_TIDY_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -503,6 +497,7 @@ if(CLANG_TIDY_EXE)
         clang-tidy-fix
         COMMAND
             ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
+            --extra-arg=-I${CMAKE_BINARY_DIR}/include
             --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy --fix --fix-errors
             ${PROFILER_HUB_CLANG_TIDY_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

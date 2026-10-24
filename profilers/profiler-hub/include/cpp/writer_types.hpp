@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-#include <profiler-hub/shared_types.hpp>
+#include <profiler-hub/cpp/shared_types.hpp>
 
 namespace profiler_hub::writer_types
 {
