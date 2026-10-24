@@ -88,4 +88,11 @@ TEST(VersionGateTests, CeBatchAsyncWindow)
     EXPECT_FALSE(NCCL_CE_BATCH_ASYNC_VERSION_SUPPORTED(ROCM_VER_7_0_3_0));
 }
 
+// Kernel 6.8 is the cuMem performance recommendation, not a support gate (see rocmwrap-test.cc).
+static_assert(NCCL_CUMEM_PERF_KERNEL_VERSION == NCCL_KERNEL_VERSION_CODE(6, 8), "cuMem kernel perf floor drifted");
+static_assert(NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(6, 8)), "6.8 must be recommended");
+static_assert(NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(6, 9)), "6.9 must be recommended");
+static_assert(!NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(6, 7)), "6.7 must not be recommended");
+static_assert(!NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(5, 14)), "5.14 must not be recommended");
+
 }  // namespace RcclUnitTesting

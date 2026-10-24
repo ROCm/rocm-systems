@@ -44,8 +44,6 @@ CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DE
 
 static int ncclCuMemSupported = 0;
 
-#define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
-
 static int ncclGetKernelVersionCode() {
   struct utsname u;
   int major = 0, minor = 0;
@@ -54,7 +52,7 @@ static int ncclGetKernelVersionCode() {
   sscanf(u.release, "%d.%d", &major, &minor);
   INFO(NCCL_INIT, "Kernel version %d.%d", major, minor);
 
-  return KERNEL_VERSION_CODE(major, minor);
+  return NCCL_KERNEL_VERSION_CODE(major, minor);
 }
 
 // Runtime probe: run the cuMem VMM cycle + register.cc pointer queries once; some ROCm builds advertise cuMem but reject the ops at runtime. Returns 1 if all succeed, 0 otherwise; never fatal.
@@ -109,6 +107,18 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
 #endif
   }
 
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+  // Net transport exports every cuMem buffer as DMA-BUF; a host that cannot must keep cuMem off.
+  {
+    int dmaBufFd = -1;
+    if (CUPFN(cuMemGetHandleForAddressRange((void*)&dmaBufFd, ptr, granularity, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
+                                            0)) != hipSuccess ||
+        dmaBufFd < 0)
+      goto cleanup;
+    close(dmaBufFd);
+  }
+#endif
+
   ok = 1;
 
 cleanup:
@@ -142,10 +152,6 @@ static int ncclCuMemCapabilityCheck(int requireGfx1250ForAutoEnable) {
     }
   }
 
-  if (ncclGetKernelVersionCode() < KERNEL_VERSION_CODE(6, 8)) {
-    WARN("cuMem support requires Linux kernel >= 6.8");
-    supported = 0;
-  }
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
   {
     // Block scope prevents the goto in CUDACHECKGOTO from jumping over the bool initialization.
@@ -167,6 +173,14 @@ static int ncclCuMemCapabilityCheck(int requireGfx1250ForAutoEnable) {
 
   // Cheap gates passed — confirm the driver actually implements the VMM path at runtime.
   if (supported && !ncclCuMemFunctionalProbe(currentDev, cudaDev)) supported = 0;
+
+  // Kernel < 6.8 only costs performance. Log from the check that decides: auto-detect for -2, runtime for force-on.
+  if (supported) {
+    const int param = ncclParamCuMemEnable();
+    const bool decides = requireGfx1250ForAutoEnable ? param == -2 : param > 0;
+    if (decides && !NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(ncclGetKernelVersionCode()))
+      INFO(NCCL_INIT, "cuMem on Linux kernel < 6.8 may not be performant; kernel >= 6.8 is recommended");
+  }
 
   return supported;
 error:
@@ -197,9 +211,7 @@ int ncclCuMemEnable() {
   // NCCL_CUMEM_ENABLE=-2 means auto-detect CUMEM support
   int param = ncclParamCuMemEnable();
   if (param == 0) return 0;
-  // Force-on (param>0) still requires a usable VMM/dma-buf stack. Returning 1
-  // here on a kernel without DMA-BUF (e.g. 5.15) made P2P/CUMEM paths
-  // dereference uninitialized state and SIGSEGV.
+  // Force-on still needs the runtime check: without working VMM/DMA-BUF export (e.g. 5.15) cuMem paths SIGSEGV.
   if (param > 0) return ncclCuMemRuntimeSupported();
   return param == -2 && ncclCuMemSupported;
 #else

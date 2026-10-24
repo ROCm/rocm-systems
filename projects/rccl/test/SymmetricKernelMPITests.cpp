@@ -582,7 +582,7 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterLL_PositionDependentData)
     ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &symmetric, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
     if(!symmetric)
     {
-        GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem needs Linux >= 6.8)";
+        GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem/VMM unavailable)";
     }
 
     for(size_t recvCount : counts)
@@ -1021,7 +1021,7 @@ TEST_F(SymmetricKernelCorruptionTest, AllGatherST_PositionDependentData)
     ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &symmetric, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
     if(!symmetric)
     {
-        GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem needs Linux >= 6.8)";
+        GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem/VMM unavailable)";
     }
 
     bool first = true;
