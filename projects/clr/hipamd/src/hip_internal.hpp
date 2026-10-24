@@ -357,6 +357,10 @@ namespace hip {
     /// Returns (or lazily creates) the per-thread default stream for the current device.
     hipStream_t Get();
 
+    /// The per-thread default stream for the current device if this thread has
+    /// one, else nullptr. Never creates one.
+    hipStream_t Peek() const;
+
     /// Clears the per-thread stream for the current device (used by hipDeviceReset).
     void Clear();
 

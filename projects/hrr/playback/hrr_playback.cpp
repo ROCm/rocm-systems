@@ -719,9 +719,23 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   if (ctx.regions_enabled)
     ctx.regions.advance_to(ctx, static_cast<int64_t>(ev.header().timestamp_ns));
 
+  // translate_stream throws rather than hand HIP the null stream for a stream
+  // replay never created. That ends the replay even under --continue-on-error:
+  // every later call on the stream would fail the same way.
+  bool unmapped = false;
+  auto resolving_streams = [&](auto&& call) -> hipError_t {
+    try {
+      return call();
+    } catch (const hrr_unmapped_stream& e) {
+      unmapped = true;
+      return hrr_report_unmapped_stream(ctx, ev.header().thread_id, idx,
+                                        hrr::event_type_name(etype), e.rec);
+    }
+  };
+
   if (is_special(etype)) {
-    hipError_t r = handle_special(ctx, ev);
-    if (r != hipSuccess) {
+    hipError_t r = resolving_streams([&] { return handle_special(ctx, ev); });
+    if (r != hipSuccess && !unmapped) {
       ctx.fatal_error.store(true, std::memory_order_release);
       fprintf(stderr, "[HRR] Fatal: aborting replay after error in %s\n",
               hrr::event_type_name(etype));
@@ -752,7 +766,9 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   }
 
   hrr_unmapped_note = {};
-  hipError_t r = hrr_playback_dispatch[etype](ctx, ev.raw_payload.data());
+  hipError_t r = resolving_streams(
+      [&] { return hrr_playback_dispatch[etype](ctx, ev.raw_payload.data()); });
+  if (unmapped) return r;
 
   // A pointer argument the handler could not translate decides the event,
   // whatever the handler returned: see "Unmapped-pointer policy" in
@@ -1473,6 +1489,10 @@ static void print_usage(const char* argv0) {
     "                        less the further past the first error they are.\n"
     "                        Also downgrades an unloadable code object at pre-load\n"
     "                        from fatal to a warning.\n"
+    "  --lossy-streams       Run work recorded on a stream that replay never\n"
+    "                        created (hipExtStreamCreateWithCUMask, an elided\n"
+    "                        create) on the null stream instead of aborting.\n"
+    "                        Bytes may match; the replay is still not faithful.\n"
     "  --strict-unmapped     Abort at the first event with a pointer argument that\n"
     "                        resolves in no allocation this replay knows. By\n"
     "                        default that event's result is discarded, reported,\n"
@@ -1591,6 +1611,7 @@ int main(int argc, char** argv) {
     else if (!strcmp(argv[i], "--sync-after-launch")) ctx.sync_after_launch  = true;
     else if (!strcmp(argv[i], "--sync-after-event"))  ctx.sync_after_event   = true;
     else if (!strcmp(argv[i], "--continue-on-error")) ctx.continue_on_error  = true;
+    else if (!strcmp(argv[i], "--lossy-streams"))     ctx.lossy_streams      = true;
     else if (!strcmp(argv[i], "--strict-unmapped"))   ctx.strict_unmapped    = true;
     else if (!strcmp(argv[i], "--sync-watchdog-ms") && i + 1 < argc) {
       char* end = nullptr;

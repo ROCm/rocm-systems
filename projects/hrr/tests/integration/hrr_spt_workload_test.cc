@@ -77,12 +77,14 @@ __device__ int g_hrr_spt_symbol[256];
 //
 // Exercises hipMemcpy_spt, hipMemcpyAsync_spt, hipMemcpy2D_spt,
 // hipMemcpy2DAsync_spt, hipMemcpyToSymbol_spt and hipMemcpyToSymbolAsync_spt
-// through their ordinary names.  All six have no-op playback handlers, so they
-// run against a scratch buffer that is freed before the validated one is
-// written: routing the oracle through them would leave the replayed buffer at
-// its zero-init value and fail the D2H for a reason that has nothing to do with
-// whether the redirect took effect.  This is capture-path coverage, and
-// Unit_HRR_MemcpySptRoundtrip asserts each recorded id.
+// through their ordinary names, and hipMemcpyFromSymbolAsync_spt by name.  All
+// seven have no-op playback handlers.  The first six run against a scratch
+// buffer that is freed before the validated one is written: routing the oracle
+// through them would leave the replayed buffer at its zero-init value and fail
+// the D2H for a reason that has nothing to do with whether the redirect took
+// effect.  The seventh replays through the hipMemcpyAsync it makes, a D2H of
+// the symbol's zero initial value that replay validates.  This is capture-path
+// coverage, and Unit_HRR_MemcpySptRoundtrip asserts each recorded id.
 //
 // The oracle is hipMemcpyHtoD / hipMemcpyDtoH rather than the plain hipMemcpy
 // the later workloads use, because hipMemcpy has to stay redirected here to
@@ -129,6 +131,17 @@ TEST_CASE("Unit_HRR_MemcpySpt_Direct", "[.][hrr-direct]") {
 
   HRR_HIP_CHECK(hipMemcpy2DAsync(d_spt, PITCH, h_src, PITCH, PITCH, ROWS,
                              hipMemcpyHostToDevice, nullptr));
+  // hipMemcpyFromSymbolAsync_spt does its copy through hipMemcpyAsync on the
+  // per-thread stream object it resolved, which capture must record as
+  // hipStreamPerThread: replay never saw that object created. Read before the
+  // symbol is written below, so the copied bytes are the zero initial value
+  // replay also has, and the nested copy is a D2H replay validates.
+  int* h_sym = new int[N]();
+  HRR_HIP_CHECK(hipMemcpyFromSymbolAsync_spt(h_sym, HIP_SYMBOL(g_hrr_spt_symbol), SZ, 0,
+                                             hipMemcpyDeviceToHost, nullptr));
+  HRR_HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  for (int i = 0; i < N; ++i) REQUIRE(h_sym[i] == 0);
+  delete[] h_sym;
   HRR_HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_hrr_spt_symbol), h_src, SZ, 0,
                               hipMemcpyHostToDevice));
   HRR_HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(g_hrr_spt_symbol), h_src, SZ, 0,
@@ -221,11 +234,9 @@ TEST_CASE("Unit_HRR_MemsetSpt_Direct", "[.][hrr-direct]") {
   // stream and passes an explicitly created one straight through.
   //
   // Omitting the stream instead, and so taking the _spt prototype's
-  // hipStreamPerThread default, reaches the same stream but is deliberately not
-  // exercised here: it records the sentinel handle, and replay only resolves
-  // that because translate_stream returns nullptr for handles it cannot map.
-  // AIRUNTIME-2556 turns that fallback into an explicit failure, which would
-  // break this test as though the memset handlers had regressed.
+  // hipStreamPerThread default, reaches the same stream but records the
+  // sentinel handle, which translate_stream passes through as itself; the
+  // matrix workloads cover that form.
   HRR_HIP_CHECK(hipMemsetAsync(d_set_async, 0x42, SZ, nullptr));
   HRR_HIP_CHECK(hipMemset2D(d_set2d, PITCH, 0x44, PITCH, ROWS));
   HRR_HIP_CHECK(hipMemset2DAsync(d_set2d_async, PITCH, 0x4C, PITCH, ROWS, nullptr));

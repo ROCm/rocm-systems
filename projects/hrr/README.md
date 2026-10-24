@@ -112,6 +112,7 @@ On Linux the archive is readable only by the user who captured it (directories 0
 | `--sync-after-launch` | `hipDeviceSynchronize` after every kernel launch |
 | `--sync-after-event` | Sync after every event (slow; pinpoints faults/hangs) |
 | `--continue-on-error` | Report each HIP API error and keep replaying instead of aborting; for surveying which APIs fail, not for reproducing a fault |
+| `--lossy-streams` | Run work recorded on a stream the replay never created (one from `hipExtStreamCreateWithCUMask`, or one whose creating call is missing) on the null stream, as replay used to. By default such a call ends the replay, even under `--continue-on-error`, naming the event, the API and the recorded handle: the bytes can match while the work ran on the wrong stream |
 | `--strict-unmapped` | Abort at the first event with a pointer argument in no allocation replay knows; by default such an event's result is discarded, it is reported with its index, API and pointer, and the summary counts it on its `Unmapped` line |
 | `--sync-watchdog-ms N` | Abort if any device sync exceeds `N` ms (`0` = disabled) |
 | `--max-seq-waits N` | End the replay when an event's sequence number is still not reached after `N` waits with no progress and no HIP call in flight; a backstop, since a gap or duplicate in the recorded sequence is refused before the replay starts (default `5000000`, a few minutes) |

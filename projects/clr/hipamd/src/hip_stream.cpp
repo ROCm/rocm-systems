@@ -360,6 +360,12 @@ hipStream_t StreamPerThread::Get() {
 }
 
 // ================================================================================================
+hipStream_t StreamPerThread::Peek() const {
+  const size_t currDev = static_cast<size_t>(hip::getCurrentDevice()->deviceId());
+  return currDev < streams_.size() ? streams_[currDev] : nullptr;
+}
+
+// ================================================================================================
 void StreamPerThread::Clear() {
   if (!streams_.empty()) {
     streams_[getCurrentDevice()->deviceId()] = nullptr;

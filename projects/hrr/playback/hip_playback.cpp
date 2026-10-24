@@ -65,6 +65,19 @@
 // immediately unblock the next thread before doing timing/sync.
 thread_local uint64_t hrr_dispatch_seq = 0;
 
+hipError_t hrr_report_unmapped_stream(PlaybackContext& ctx, uint64_t tid, size_t idx,
+                                      const char* api, uint64_t rec) {
+    fprintf(stderr,
+            "[HRR] Fatal: T%llu Event %zu (%s, seq %llu): recorded stream 0x%llx has "
+            "no live stream. The call that created it was not replayed, and running "
+            "the work on the null stream instead would not reproduce the recording "
+            "(--lossy-streams allows that) — aborting replay\n",
+            (unsigned long long)tid, idx, api, (unsigned long long)hrr_dispatch_seq,
+            (unsigned long long)rec);
+    ctx.fatal_error.store(true, std::memory_order_release);
+    return hipErrorInvalidHandle;
+}
+
 void hrr_note_unreplayable(PlaybackContext& ctx, const char* api,
                            const char* reason) {
     {
@@ -3935,7 +3948,9 @@ hipError_t playback_hipStreamCreateWithPriority(PlaybackContext& ctx,
 hipError_t playback_hipStreamDestroy(PlaybackContext& ctx,
                                      const uint8_t* pl) {
     const auto* a  = reinterpret_cast<const hrr_args_hipStreamDestroy*>(pl);
-    hipStream_t stream = ctx.translate_stream(a->stream);
+    // A stream replay never created has nothing to destroy, and nothing to
+    // reproduce: what the work on it would have needed is reported there.
+    hipStream_t stream = ctx.find_stream(a->stream);
     hipError_t r = hipSuccess;
     if (stream) r = hipStreamDestroy(stream);
     ctx.remove_stream(a->stream);
@@ -3966,7 +3981,8 @@ hipError_t playback_hipStreamBeginCapture(PlaybackContext& ctx,
 
     hipStream_t stream = ctx.translate_stream(a->stream);
     if (!stream && a->stream != 0) {
-        // Stream handle not in map — create a temporary stream for graph capture
+        // Stream handle not in map, which only --lossy-streams lets through —
+        // create a temporary stream for graph capture
         fprintf(stderr, "[HRR] hipStreamBeginCapture: stream 0x%llx not found, "
                 "creating temp stream for graph capture\n",
                 (unsigned long long)a->stream);
@@ -4604,12 +4620,10 @@ hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
     return replay_memcpy3d(ctx, pl, /*spt=*/false);
 }
 
-// hipStreamPerThread is a token rather than a stream capture saw created, so
-// translate_stream would send it, and the null stream of an _spt call, to the
-// legacy null stream. Both mean this thread's default stream.
+// The null stream of an _spt call means this thread's default stream, as
+// hipStreamPerThread does, rather than the legacy null stream.
 static hipStream_t memcpy3d_async_stream(PlaybackContext& ctx, uint64_t rec, bool spt) {
-    if (rec == reinterpret_cast<uint64_t>(hipStreamPerThread) || (spt && rec == 0))
-        return hipStreamPerThread;
+    if (spt && rec == 0) return hipStreamPerThread;
     return ctx.translate_stream(rec);
 }
 

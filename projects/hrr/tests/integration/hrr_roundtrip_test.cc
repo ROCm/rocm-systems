@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -1167,8 +1168,27 @@ HRR_TEST_CASE(Unit_HRR_MemcpySptRoundtrip) {
                            HRR_API_HIPMEMCPY2DASYNC_SPT,
                            HRR_API_HIPMEMCPYTOSYMBOL_SPT,
                            HRR_API_HIPMEMCPYTOSYMBOLASYNC_SPT,
+                           HRR_API_HIPMEMCPYFROMSYMBOLASYNC_SPT,
+                           HRR_API_HIPMEMCPYASYNC,
                            HRR_API_HIPMEMCPYHTOD,
                            HRR_API_HIPMEMCPYDTOH});
+
+  // The hipMemcpyAsync that hipMemcpyFromSymbolAsync_spt makes runs on the
+  // per-thread stream object it resolved; capture records hipStreamPerThread
+  // in its place, never an address no recorded call created.
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  size_t spt_copies = 0;
+  for (const hrr::Event& e : arc.events) {
+    if (e.header().event_type != HRR_API_HIPMEMCPYASYNC) continue;
+    hrr_args_hipMemcpyAsync a{};
+    REQUIRE(e.raw_payload.size() >= sizeof(a));
+    std::memcpy(&a, e.raw_payload.data(), sizeof(a));
+    INFO("recorded hipMemcpyAsync stream 0x" << std::hex << a.stream);
+    CHECK(a.stream <= reinterpret_cast<uint64_t>(hipStreamPerThread));
+    if (a.stream == reinterpret_cast<uint64_t>(hipStreamPerThread)) ++spt_copies;
+  }
+  CHECK(spt_copies >= 1);
 }
 
 HRR_TEST_CASE(Unit_HRR_Memset3DSptRoundtrip) {
@@ -1488,6 +1508,83 @@ HRR_TEST_CASE(Unit_HRR_DeviceExtraRoundtrip) {
 HRR_TEST_CASE(Unit_HRR_StreamAdvanced2Roundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamadv2"};
   hrr_run_roundtrip("Unit_HRR_StreamAdvanced2_Direct", cap.path);
+}
+
+// Point the archive's hipStreamCreateWithFlags at another handle, and return
+// the one it recorded: the calls made on that stream then name a stream the
+// replay never created, as they do when the creating call is left out.
+static uint64_t hrr_redirect_stream_create(const fs::path& events_bin) {
+  std::fstream f(events_bin, std::ios::in | std::ios::out | std::ios::binary);
+  REQUIRE(f.good());
+  std::streamoff off = sizeof(hrr_file_header);
+  hrr_event_header hdr{};
+  while (f.seekg(off) && f.read(reinterpret_cast<char*>(&hdr), sizeof(hdr))) {
+    REQUIRE(hdr.payload_length >= sizeof(hdr));
+    if (hdr.event_type == HRR_API_HIPSTREAMCREATEWITHFLAGS) {
+      const std::streamoff at = off + offsetof(hrr_args_hipStreamCreateWithFlags, stream);
+      uint64_t recorded = 0;
+      f.seekg(at);
+      f.read(reinterpret_cast<char*>(&recorded), sizeof(recorded));
+      const uint64_t other = recorded ^ 0x100000;
+      f.seekp(at);
+      f.write(reinterpret_cast<const char*>(&other), sizeof(other));
+      REQUIRE(f.good());
+      return recorded;
+    }
+    off += hdr.payload_length;
+  }
+  return 0;
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_StreamElision_Direct, a memset on a created stream, and
+ *     replay it unchanged: exit 0.
+ *   - Rewrite the archive so the creating call maps another handle. The
+ *     replay must stop at the memset, naming the API and the recorded handle,
+ *     rather than run it on the null stream. Multi-threaded too, and at
+ *     once: the main thread's waits for a turn the stopped memset thread
+ *     never hands on end on the fatal flag, not on --max-seq-waits or the
+ *     test's deadline.
+ *   - With --lossy-streams the same archive replays with exit 0: its bytes
+ *     alone cannot tell a missing stream from a present one, which is why the
+ *     strict default refuses.
+ */
+HRR_TEST_CASE(Unit_HRR_ElidedStreamRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_elidedstream"};
+  hrr_capture_direct("Unit_HRR_StreamElision_Direct", cap.path);
+  const fs::path arc = hrr_single_process_archive(cap.path);
+
+  {
+    auto [rc, out] = hrr_playback_merged(arc);
+    INFO("Replay output:\n" << out);
+    REQUIRE(rc == 0);
+  }
+
+  const uint64_t recorded = hrr_redirect_stream_create(arc / "events.bin");
+  REQUIRE(recorded != 0);
+  char handle[32];
+  snprintf(handle, sizeof(handle), "0x%llx", (unsigned long long)recorded);
+
+  for (const char* mode : {"", "--multi-thread"}) {
+    auto [rc, out] = hrr_playback_watchdog(arc, 120, mode);
+    INFO("Replay " << mode << " output:\n" << out);
+    CHECK(rc != kHrrWatchdogKilled);
+    CHECK(rc != 0);
+    CHECK(rc < 128);
+    CHECK(out.find("(hipMemsetAsync, seq") != std::string::npos);
+    CHECK(out.find(std::string("recorded stream ") + handle + " has no live stream") !=
+          std::string::npos);
+    CHECK(out.find("--max-seq-waits") == std::string::npos);
+    if (*mode) CHECK(out.find("Mode    : multi-threaded") != std::string::npos);
+  }
+
+  {
+    auto [rc, out] = hrr_playback_merged(arc, "--lossy-streams");
+    INFO("Replay output:\n" << out);
+    CHECK(rc == 0);
+  }
 }
 
 HRR_TEST_CASE(Unit_HRR_ContextRoundtrip) {
