@@ -174,6 +174,9 @@ struct InstrumentedCodeObject {
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
   std::vector<std::string> warnings;
+  /// True when patch() refused the code object for a kernel property it does
+  /// not support, rather than failing to patch the queued points.
+  bool kernel_unsupported = false;
 };
 
 /// @brief Result of Instrumentor::patch_with_debug_summaries().
@@ -251,6 +254,10 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// the builder stays generic.
 /// Called by Instrumentor::patch() as a defense-check (make sure users/agents
 /// do not misinterpret current DBI support) and also directly by tests
+///
+/// patch() refuses a kernel liveness cannot follow only when a point calls a
+/// probe, because this nop takes no registers. Inline code that takes
+/// registers must extend that refusal to its points.
 ///
 /// TODO: delete this when DBI supports more plans
 [[nodiscard]] bool validate_inline_nop_plan(const TrampolinePlan &plan,
@@ -481,12 +488,14 @@ public:
   /// wave32 compare or carry-out as the pair its encoding names, so the register
   /// after it can count as dead in a wave32 kernel (#14022). And it sees the
   /// register an operand encodes, not the one an `s_movrel*` / `v_movrel*`
-  /// access or GPR index mode reaches. patch() refuses a code object with a
-  /// wave32 kernel, a call, an unresolved edge (code that runs off the end of
-  /// .text included), such a relative access, or an RDNA4 image instruction,
-  /// whose address VGPRs the decoder does not report. It also refuses a kernel that
-  /// preloads kernel arguments: on CDNA3/CDNA4, firmware can enter one 256 bytes
-  /// past its descriptor entry, and only the descriptor entry is decoded from.
+  /// access or GPR index mode reaches. When a point calls a probe, patch()
+  /// refuses a code object with a wave32 kernel, a call, an unresolved edge
+  /// (code that runs off the end of .text included), such a relative access,
+  /// or an RDNA4 image instruction, whose address VGPRs the decoder does not
+  /// report. It also refuses a kernel that preloads kernel arguments where
+  /// uses_kernarg_preload_firmware_skip() holds: firmware can enter one 256
+  /// bytes past its descriptor entry, and only the descriptor entry is decoded
+  /// from. These refusals set `kernel_unsupported`.
   ///
   /// Refuses any point whose probe reads a `LogBufferPtr*` argument: the entry
   /// prologue those need loads through a kernarg wrapper that no runtime builds

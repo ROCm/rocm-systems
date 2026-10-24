@@ -267,9 +267,9 @@ bool check_probe_link_pair(const ProbeClobberSummary &summary, const ProbeAbi &a
 //   image instruction's address VGPRs.
 // Returns why @p blocks, decoded from @p text, hold such a kernel, or empty when
 // they do not.
-std::string liveness_limit(rj_code_arch_t arch, const CodeObject &obj,
-                           const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                           std::span<const uint8_t> text) {
+std::string liveness_refusal_reason(rj_code_arch_t arch, const CodeObject &obj,
+                                    const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                    std::span<const uint8_t> text) {
   for (const KernelDescriptorInfo &kernel : scan_object_kernel_descriptors(obj)) {
     if (kernel_wavefront_size(arch, kernel.descriptor) == 32)
       return "the kernel at text offset " + std::to_string(kernel.entry_text_offset) +
@@ -302,17 +302,21 @@ std::string liveness_limit(rj_code_arch_t arch, const CodeObject &obj,
   return {};
 }
 
-// On CDNA3/CDNA4, firmware that supports kernarg preload enters a preloading
-// kernel 256 bytes past its descriptor entry, skipping a compatibility window.
-// Only the descriptor entry is decoded from, so a site in the window would not
-// run there, and the code past it may not be decoded at all. Handling that
-// second entry is deferred, so every preloading kernel is refused.
-std::string kernarg_preload_limit(const CodeObject &obj) {
+// Where uses_kernarg_preload_firmware_skip() holds, firmware that supports
+// kernarg preload enters a preloading kernel kKernargPreloadSkipBytes past its
+// descriptor entry, skipping a compatibility window. Only the descriptor entry
+// is decoded from, so a site in the window would not run there, and the code
+// past it may not be decoded at all. Handling that second entry is deferred, so
+// every such kernel is refused.
+std::string kernarg_preload_refusal_reason(rj_code_arch_t arch, const CodeObject &obj) {
+  if (!uses_kernarg_preload_firmware_skip(arch))
+    return {};
   for (const KernelDescriptorInfo &kernel : scan_object_kernel_descriptors(obj)) {
     if (const uint32_t preload = kernarg_preload_length(kernel.descriptor); preload != 0)
       return "the kernel at text offset " + std::to_string(kernel.entry_text_offset) +
              " preloads " + std::to_string(preload) +
-             " kernarg dwords, so firmware may enter it at an entry that is not decoded";
+             " kernarg dwords, so firmware may enter it at an undecoded entry " +
+             std::to_string(kKernargPreloadSkipBytes) + " bytes past its descriptor entry";
   }
   return {};
 }
@@ -1214,23 +1218,29 @@ InstrumentedCodeObject Instrumentor::patch() {
     return result;
   }
 
-  // patch() refuses a code object liveness_limit() or kernarg_preload_limit()
-  // flags.
+  // patch() refuses a code object kernarg_preload_refusal_reason() flags, and
+  // one liveness_refusal_reason() flags when a point calls a probe: only a
+  // probe call reads liveness, and the inline nop takes no registers.
   // patch_with_debug_summaries() does not, for tests that patch such kernels
   // on purpose. A failed decode, or a .text it cannot anchor in, is left for it
   // to report.
   if (!patched_) {
     const std::optional<std::span<const uint8_t>> text = anchor_text(nullptr);
+    const bool calls_probe =
+        std::any_of(points_.begin(), points_.end(),
+                    [](const InstrumentationPoint &pt) { return !pt.probe_symbol.empty(); });
     std::string refusal;
     if (text) {
-      refusal = liveness_limit(arch_, obj_, blocks_, *text);
+      if (calls_probe)
+        refusal = liveness_refusal_reason(arch_, obj_, blocks_, *text);
       if (refusal.empty())
-        refusal = kernarg_preload_limit(obj_);
+        refusal = kernarg_preload_refusal_reason(arch_, obj_);
     }
     if (!refusal.empty()) {
       patched_ = true;
       InstrumentedCodeObject result;
       result.errors.push_back(std::move(refusal));
+      result.kernel_unsupported = true;
       return result;
     }
   }
