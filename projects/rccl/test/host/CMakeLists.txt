@@ -589,6 +589,15 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroGinContext -- rounded-up ginContextCount (NVIDIA/nccl#2301).
+  # Own binary: gin_host.cc defines ncclGinDevCommSetup / ncclGetGinType /
+  # ncclGinQueryLastError, which fakes/dev_runtime_micro_fakes.cc also defines,
+  # and gin-host-test.cc defines the same link seams this TU stubs itself.
+  set(TEST_MICRO_GIN_CONTEXT_SOURCE_FILES
+    gin-context-count-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroProfiler -- src/plugin/profiler.cc and its profiler_v1..v7.cc adapters. Own binary: the
   # tests define the logging, env, plugin-open and dlsym seams the shared fakes also define.
   set(TEST_MICRO_PROFILER_SOURCE_FILES
@@ -1278,6 +1287,19 @@ rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
     ${_MICRO_MODE_DEFS}
     GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroGinContext -- reported ginContextCount after ROUNDUP
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroGinContext
+  SOURCES ${TEST_MICRO_GIN_CONTEXT_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/include/plugin
+    ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_context.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCrypt

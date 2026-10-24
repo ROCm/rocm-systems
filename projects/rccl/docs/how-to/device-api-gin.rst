@@ -93,9 +93,22 @@ version used to compile the application.
 
 GIN contexts and their signal, counter, and queue resources are allocated per
 device communicator. Two device communicators backed by the same host
-communicator therefore don't alias those resources. ``ginContextCount`` is a
-request; use the value returned in ``devComm.ginContextCount`` when assigning
-work to contexts.
+communicator therefore don't alias those resources. ``reqs.ginContextCount`` is
+a request. After ``ncclDevCommCreate`` returns, ``devComm.ginContextCount`` is
+the number of contexts actually allocated. Size context loops, per-context
+signal tables, and ``ncclGin`` context indexes from that returned value.
+
+RCCL rounds the request up to a multiple of the GIN connection count
+(``devComm.ginConnectionCount``). That count follows the local GIN NICs, or
+``NCCL_GIN_NCONNECTIONS`` when set, and is raised to ``NCCL_GIN_PROXY_NTHREADS``
+when the proxy thread count is larger. It is capped at 4. A request of 1
+context on 4 connections allocates 4 contexts; a request of 4 contexts on 3
+connections allocates 6. Each connection then owns
+``devComm.ginContextCount / devComm.ginConnectionCount`` contexts. The returned
+count can be larger than the request and is never smaller. Kernels that cycle
+with ``blockIdx.x % devComm.ginContextCount``, and barriers built with
+``ncclGinAllContexts``, cover every allocated context only when they use this
+returned count. This matches NCCL 2.31.2 (NVIDIA/nccl#2301).
 
 ``ginTrafficClass`` overrides the host communicator traffic class for this
 device communicator. The service level of the GIN connections comes from
