@@ -7,6 +7,7 @@ The only character devices are private instances of /dev/null. The executable
 shim supplies DRM device numbers and rejects execution against the host /sys.
 """
 
+import contextlib
 import ctypes
 import importlib.util
 import json
@@ -422,6 +423,33 @@ class GpuPaths(unittest.TestCase):
             finally:
                 self.write(path, original)
 
+    def test_unreadable_input_leaves_out_only_its_component(self):
+        """A GPU whose vendor file cannot be read is identified from the
+        configuration header, which the kernel shows every caller, so root and
+        other callers agree. Without that either, only that GPU is left out."""
+        device = self.devices["0000:03:00.0"]
+        before = {role: self.listing(nonroot=role)[0] for role in (False, True)}
+        self.assertTrue(any("renderD128" in path for path in before[False]), before)
+        header = bytearray(256)
+        header[0:2] = (0x1002).to_bytes(2, "little")
+        header[2:4] = (0x73A3).to_bytes(2, "little")
+        header[8] = 0x01
+        header[10:12] = (0x0300).to_bytes(2, "little")
+        (device / "config").write_bytes(bytes(header))
+        (device / "config").chmod(0o644)
+        (device / "vendor").unlink()
+        (device / "vendor").mkdir(mode=0o755)
+        for role in (False, True):
+            with self.subTest(nonroot=role, header=True):
+                self.assertEqual(self.listing(nonroot=role)[0], before[role])
+        (device / "config").unlink()
+        for role in (False, True):
+            with self.subTest(nonroot=role, header=False):
+                rows = self.listing(nonroot=role)[0]
+                self.assertEqual(
+                    rows, {p: r for p, r in before[role].items() if "renderD128" not in p}
+                )
+
     def test_whole_gpu_requires_readable_pci_identity(self):
         device = self.devices["0000:03:00.0"]
         (device / "config").unlink()
@@ -560,6 +588,43 @@ class GpuPaths(unittest.TestCase):
                 with self.subTest(state=state, nonroot=role):
                     self.run_probe("unnamed-vf", *forms, nonroot=role)
 
+    def repeated(self, names, nonroot):
+        statuses = {}
+        for line in self.run_probe("repeat", *names, nonroot=nonroot).splitlines():
+            name, status = line.split("\t")
+            statuses.setdefault(name, []).append(status)
+        return statuses
+
+    def hide_machine_id(self):
+        empty = ROOT / "empty-machine-id"
+        self.write(empty, "")
+        for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+            if os.path.exists(path):
+                mount(str(empty), path, flags=4096)
+                self.addCleanup(self.unmount, path)
+
+    def test_lookups_answer_the_same_every_time(self):
+        """A lookup's answer does not depend on what was asked before it: a
+        failed enumeration is not cached as an empty one (ROCM-33270, where a
+        GPU without sysfs answered HARDWARE_FINGERPRINT_NOT_FOUND once and
+        DEVICE_NOT_FOUND after)."""
+        absent = "bdf=0000:77:00.0"
+        names = [absent, "/sys/class/drm/renderD128", "bdf=0000:63:00.0"]
+        for role in (False, True):
+            with self.subTest(nonroot=role):
+                statuses = self.repeated(names, role)
+                for name in names:
+                    self.assertEqual(len(set(statuses[name])), 1, f"{name}: {statuses[name]}")
+                self.assertEqual(statuses[absent][0], "DEVICE_NOT_FOUND")
+                self.assertEqual(statuses[names[1]][0], "SUCCESS")
+        self.hide_machine_id()
+        for role in (False, True):
+            with self.subTest(nonroot=role, machine_id=False):
+                statuses = self.repeated(names, role)
+                for name in names:
+                    self.assertEqual(len(set(statuses[name])), 1, f"{name}: {statuses[name]}")
+                    self.assertNotEqual(statuses[name][0], "SUCCESS")
+
     def test_components_are_temporary(self):
         self.components()
         for role in (False, True):
@@ -629,6 +694,51 @@ class GpuPaths(unittest.TestCase):
 
     def test_stock_qpx_partitions_are_temporary_components(self):
         self.assertEqual(len(self.stock_scenario("qpx")), 6)
+
+    @contextlib.contextmanager
+    def hidden_kfd_node(self):
+        """A node outside the caller's device cgroup: KFD refuses its
+        properties, so they read back nothing."""
+        node = self.sys / "class/kfd/kfd/topology/nodes/99"
+        self.write(node / "properties", "")
+        try:
+            yield
+        finally:
+            shutil.rmtree(node)
+
+    def test_stock_partitions_survive_a_hidden_kfd_node_and_a_reset(self):
+        """DPX fixes n = 2, so a node hidden elsewhere does not matter, and
+        while amdgpu cannot report the mode (a reset) KFD alone still names
+        the partitions."""
+        self.stock("dpx")
+        mode = self.devices["0000:03:00.0"] / "current_compute_partition"
+        base = {role: self.listing(nonroot=role)[0] for role in (False, True)}
+        self.assertEqual(len(base[False]), 4)
+        with self.hidden_kfd_node():
+            for role in (False, True):
+                with self.subTest(nonroot=role, hidden=True):
+                    self.assertEqual(self.listing(nonroot=role)[0], base[role])
+        self.write(mode, "")
+        for role in (False, True):
+            with self.subTest(nonroot=role, reset=True):
+                self.assertEqual(self.listing(nonroot=role)[0], base[role])
+
+    def test_stock_cpx_with_a_hidden_kfd_node_keeps_the_whole_gpu(self):
+        """In CPX the count needs every node. With one hidden, the partitions
+        have no CUID, but the GPU as a whole is still listed and partition 0's
+        render node never names it."""
+        self.stock("cpx")
+        pci = "/sys/bus/pci/devices/0000:03:00.0"
+        for role in (False, True):
+            with self.subTest(nonroot=role):
+                base, _ = self.listing(nonroot=role)
+                with self.hidden_kfd_node():
+                    rows, found = self.listing(
+                        "bdf=0000:03:00.0", "/dev/dri/renderD128", nonroot=role
+                    )
+                self.assertEqual(rows, {path: base[path] for path in (pci, "/sys/class/drm/renderD129")})
+                self.assertEqual(found["bdf=0000:03:00.0"], base[pci][3])
+                self.assertNotEqual(found["/dev/dri/renderD128"], base[pci][3])
 
     def test_stock_spx_gpu_is_one_component(self):
         self.assertEqual(len(self.stock_scenario("spx")), 2)
