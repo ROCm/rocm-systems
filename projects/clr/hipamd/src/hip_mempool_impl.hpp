@@ -251,9 +251,12 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
                      .reserved = {}};
     }
     state_.interprocess_ = properties_.handleTypes != hipMemHandleTypeNone;
-    // Check if VM heap can be enabled
+    state_.managed_ = properties_.allocType == hipMemAllocationTypeManaged;
+    // Check if VM heap can be enabled.  Managed pools need fine-grain
+    // host-coherent memory that the VM heap cannot produce, so they are
+    // excluded (same as phys_mem and interprocess pools).
     if (DEBUG_HIP_MEM_POOL_VMHEAP && AMD_DIRECT_DISPATCH && HIP_MEM_POOL_USE_VM &&
-        !state_.phys_mem_ && !state_.interprocess_) {
+        !state_.phys_mem_ && !state_.interprocess_ && !state_.managed_) {
       state_.use_vm_heap_ = true;
       busy_heap_.EnableVmHeap();
       free_heap_.EnableVmHeap();
@@ -372,6 +375,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
       uint32_t graph_in_use_ : 1;  //!< Memory pool was used in a graph execution
       uint32_t phys_mem_ : 1;     //!< Mempool is used for graphs and will have physical allocations
       uint32_t use_vm_heap_ : 1;  //!< Use VM heap or direct allocations
+      uint32_t managed_ : 1;     //!< Pool produces fine-grain managed memory
     };
     uint32_t value_;
   } state_;
