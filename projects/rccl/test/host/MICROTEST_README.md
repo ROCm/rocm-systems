@@ -477,6 +477,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `net_ib/p2p.cc` and host helpers in `net_ib/p2p.h`
     (`NET_IB_P2P_CC_PATH`, from `net_ib/p2p-test.cc`); suites
     `NetIbP2pMicrotest.*`.
+  - `net_ib/p2p_resiliency.cc` (`NET_IB_P2P_RESILIENCY_CC_PATH`, from
+    `net_ib/p2p-resiliency-test.cc`); suites
+    `NetIbP2pResiliencyMicrotest.*`.
+  - `net_ib/p2p_resiliency_recovery.cc`
+    (`NET_IB_P2P_RESILIENCY_RECOVERY_CC_PATH`, from
+    `net_ib/p2p-resiliency-recovery-test.cc`); suites
+    `NetIbP2pResiliencyRecoveryMicrotest.*`.
   - `net_ib/init.cc` (`NET_IB_INIT_CC_PATH`, from `net_ib/init-test.cc`);
     suites `NetIbInitMicrotest.*`.
   - `net_ib/reg.cc` (`NET_IB_REG_CC_PATH`, from `net_ib/reg-test.cc`);
