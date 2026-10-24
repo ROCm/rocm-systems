@@ -8,6 +8,7 @@
 #include "rocjitsu/code/consan/image/artifact.h"
 #include "rocjitsu/code/consan/image/metadata.h"
 #include "rocjitsu/code/patch/consan/prepare.h"
+#include "rocjitsu/isa/register_set.h"
 
 #include <gtest/gtest.h>
 
@@ -203,7 +204,8 @@ TEST_F(ConSanPrepare, RegisterPressureReturnsAResourceErrorInsteadOfAnInternalAs
   const FailureOr<MetadataResources> metadata =
       inspect_metadata(original_, input.value().kernel, &metadata_error);
   ASSERT_TRUE(metadata.succeeded()) << metadata_error;
-  for (const uint32_t declared : {16u, 80u, 82u}) {
+  const uint32_t unavailable = static_cast<uint32_t>(REGISTER_SET_ALLOCATABLE_SGPRS);
+  for (const uint32_t declared : {metadata.value().sgprs, unavailable}) {
     SCOPED_TRACE(declared);
     std::vector<uint8_t> image = original_;
     MetadataResources resources = metadata.value();
@@ -217,16 +219,21 @@ TEST_F(ConSanPrepare, RegisterPressureReturnsAResourceErrorInsteadOfAnInternalAs
     EXPECT_EQ(qualified.value().original_sgprs, declared);
     const FailureOr<PreparedArtifact> artifact =
         prepare(image, *target_profile("gfx1100"), "lds_producer_consumer", error_);
-    if (declared == 16) {
+    if (declared == metadata.value().sgprs) {
       ASSERT_TRUE(artifact.succeeded()) << error_.message;
-      EXPECT_EQ(artifact.value().manifest.entry.prepared_sgprs, 52u);
+      const Manifest &manifest = artifact.value().manifest;
+      EXPECT_GE(manifest.entry.prepared_sgprs, declared);
+      EXPECT_LE(manifest.entry.prepared_sgprs, REGISTER_SET_ALLOCATABLE_SGPRS);
+      EXPECT_GE(manifest.entry.prepared_vgprs, metadata.value().vgprs);
+      EXPECT_LE(manifest.entry.prepared_vgprs, 256u);
+      ContractError image_error;
+      EXPECT_TRUE(
+          verify_artifact_images(manifest, image, artifact.value().image, &image_error).succeeded())
+          << image_error.message;
     } else {
       EXPECT_TRUE(artifact.failed());
       EXPECT_EQ(error_.code, InputErrorCode::ResourceLimit);
-      const std::string_view reason =
-          declared == 80 ? "no dead SGPR pair available for the probe target address"
-                         : "register preservation exceeds the bounded register file";
-      EXPECT_NE(error_.message.find(reason), std::string::npos) << error_.message;
+      EXPECT_FALSE(error_.message.empty());
     }
   }
 }

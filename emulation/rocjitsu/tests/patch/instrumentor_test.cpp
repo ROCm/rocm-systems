@@ -4373,6 +4373,31 @@ TEST(InstrumentorResources, FailedMetadataUpdatePublishesNoPartialImageOrSites) 
   EXPECT_EQ(image.front(), 0x7f);
 }
 
+TEST(InstrumentorResources, RegisterBackupsExhaustTheRegisterFileBeforeImagePublication) {
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf_with_two_nops();
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("return", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  InstrumentationOptions options;
+  options.preservation = GuestStatePreservation::DeclaredRegisters;
+  options.register_growth =
+      OriginalRegisterCounts{static_cast<uint32_t>(REGISTER_SET_ALLOCATABLE_SGPRS), 4};
+  options.update_resource_metadata = [](std::span<uint8_t>, const KernelDescriptorInfo &,
+                                        const InstrumentationResources &,
+                                        std::string *) { return true; };
+  Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
+  InstrumentationPoint point;
+  point.probe_obj = &probe;
+  point.probe_symbol = "return";
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("register preservation exceeds the bounded register file"),
+            std::string::npos);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.sites.empty());
+}
+
 TEST(InstrumentorResources, OddSgprCountsLeaveBothEntrySnapshotsOutsideRegisterBackups) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   for (const uint32_t original_sgprs : {34u, 35u}) {
