@@ -4,7 +4,7 @@
 # libhsa
 
 libhsa implements the HSA C ABI over [rocddi](../rocddi/README.md). It reports
-HSA runtime version 1.21 and AMD extension version 1.33. This early frontend
+HSA runtime version 1.21 and AMD extension version 1.36. This early frontend
 does not yet provide complete ROCr compatibility. The
 [HSA headers](../../api-headers/include/hsa/) define the public ABI; an
 exported entry point does not imply that every request is supported.
