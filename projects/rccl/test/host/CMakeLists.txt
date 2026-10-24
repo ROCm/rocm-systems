@@ -49,6 +49,31 @@ rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"
   "int64_t ncclParamIbQpsPerConn() { return g_loadParam(\"IB_QPS_PER_CONNECTION\", 1); }"
   "the IbQpsPerConn fake default")
+# The net_ib_cast connect / qp_sharing fakes repeat these params; both copies must agree.
+foreach(_param
+    "NCCL_PARAM(IbCastTimeout, \"IB_TIMEOUT\", 20)"
+    "NCCL_PARAM(IbCastRetryCnt, \"IB_RETRY_CNT\", 7)"
+    "NCCL_PARAM(IbCastPkey, \"IB_PKEY\", 0)"
+    "NCCL_PARAM(IbCastQpsPerConn, \"IB_QPS_PER_CONNECTION\", 2)"
+    "NCCL_PARAM(IbCastUseInline, \"IB_USE_INLINE\", 0)"
+    "NCCL_PARAM(IbCastGdrFlushDisable, \"GDR_FLUSH_DISABLE\", 1)"
+    "NCCL_PARAM(IbCastSl, \"IB_SL\", -1)"
+    "NCCL_PARAM(IbCastTc, \"IB_TC\", -1)"
+    "RCCL_PARAM(IbCastUDMAPolicy, \"IB_UDMA_POLICY\", 0)")
+  rccl_assert_source_line("${_rccl_src_root}/transport/net_ib_cast/connect.cc"
+    "${_param}" "fakes/net_ib_cast_connect_fakes.cc")
+  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_connect_fakes.cc"
+    "${_param}" "the connect.cc default")
+endforeach()
+foreach(_param
+    "RCCL_PARAM(IbCastQpSharingEnable, \"IB_QP_SHARING_ENABLE\", 0)"
+    "RCCL_PARAM(IbCastCommNGroups, \"IB_COMM_NGROUPS\", 4)"
+    "RCCL_PARAM(IbCastQpSharingValidatePool, \"IB_QP_SHARING_VALIDATE_POOL\", 0)")
+  rccl_assert_source_line("${_rccl_src_root}/transport/net_ib_cast/qp_sharing.cc"
+    "${_param}" "fakes/net_ib_cast_qp_sharing_fakes.cc")
+  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_qp_sharing_fakes.cc"
+    "${_param}" "the qp_sharing.cc default")
+endforeach()
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
@@ -711,6 +736,25 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     fakes/utils_fakes.cc                 # getBusId (alloc.h side stream)
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroP2pResiliency -- src/transport/net_ib_cast/p2p_resiliency*.cc. Own binary: the
+  # net_ib_cast fakes stand in for connect.cc, p2p.cc and common.cc, which other targets do not fake.
+  set(TEST_MICRO_P2P_RESILIENCY_SOURCE_FILES
+    p2p-resiliency-test.cc
+    p2p-resiliency-recovery-test.cc
+    p2p-resiliency-recovery-ainic-test.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/libc_fakes.cc                  # g_malloc / g_free for the recovery context
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_capability_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc
+    fakes/net_ib_cast_connect_fakes.cc
+    fakes/net_ib_cast_init_fakes.cc
+    fakes/net_ib_cast_p2p_fakes.cc
+    fakes/net_ib_cast_qp_sharing_fakes.cc
+    fakes/os_fakes.cc                    # ncclOsGetPageSize for ncclIbMalloc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -1765,6 +1809,23 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDda
     # hipify renames .cu to .cu.cpp
     FABRIC_GPU_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_gpu_barrier.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroP2pResiliency
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroP2pResiliency
+  SOURCES ${TEST_MICRO_P2P_RESILIENCY_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # The _tmp names: src/CMakeLists.txt lists net_ib/p2p_resiliency*.cc first, so
+    # add_file_unique() renames these. Re-check after any source-list reorder.
+    P2P_RESILIENCY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_tmp.cc"
+    P2P_RESILIENCY_RECOVERY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_tmp.cc"
+    P2P_RESILIENCY_RECOVERY_AINIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_p2p_resiliency.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.
