@@ -190,6 +190,13 @@ impl VirtualMemoryOperations for FakeDriver {
         Ok(Owned::new(Mapping { fail_once: true })?)
     }
 
+    fn set_virtual_host_mapping_permissions(
+        _mapping: &mut Mapping,
+        _permissions: DeviceAccess,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
     fn free_virtual_host_mapping(mapping: &mut Mapping) -> Result<(), Error> {
         if mapping.fail_once {
             mapping.fail_once = false;
