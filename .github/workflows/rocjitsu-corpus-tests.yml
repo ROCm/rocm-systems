@@ -339,6 +339,10 @@ jobs:
             # async-event bookkeeping, outside rocjitsu-owned code.
             "HsaTranslateTest\.TranslateAndDispatchVectorAdd"
             "HsaTranslateTest\.TranslateAndDispatchMfma16x16"
+            # Both HSA initialization cases use the same ROCr async-event
+            # handoff. Their assertions pass, but its uninstrumented atomics
+            # can produce a TSan allocation/reclamation report in GetAllEvents.
+            "^HsaTest\.(InitSucceeded|GpuAgentFound)$"
             # HIP test discovery and the daemon HIP clients initialize the
             # instrumented ROCr runtime, which can report a ConcurrentAsyncEvents
             # race during asynchronous-event teardown outside rocjitsu-owned code.
