@@ -61,6 +61,10 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
     qs.publication_retry_pending = false;
 
   for (auto &qs : queues) {
+    // Queue faults cancel all outstanding dispatches. Neither trailing barriers
+    // nor queue-idle publication may report that cancelled work as successful.
+    if (qs.faulted)
+      continue;
     const bool idle_generation_stale =
         qs.idle_publication.active() &&
         (!qs.entries.empty() || qs.idle_publication.activity_generation != qs.activity_generation);

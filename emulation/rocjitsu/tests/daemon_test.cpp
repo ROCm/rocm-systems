@@ -17,8 +17,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -57,6 +59,7 @@ struct TestPaths {
   std::string hip_vector_add_bin = RJ_HIP_VECTOR_ADD_BIN;
   std::string hip_memcpy_bin = RJ_HIP_MEMCPY_BIN;
   std::string hip_rccl_bin = RJ_HIP_RCCL_BIN;
+  std::string hip_instruction_failure_bin = RJ_HIP_INSTRUCTION_FAILURE_BIN;
   std::string daemon_logging_config = RJ_DAEMON_LOGGING_CONFIG;
   std::string interposer_dup_bin = RJ_INTERPOSER_DUP_BIN;
 };
@@ -103,6 +106,7 @@ TestPaths installed_paths(const std::filesystem::path &exe_dir) {
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_VECTOR_ADD_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_MEMCPY_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_RCCL_BIN).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_INSTRUCTION_FAILURE_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_LOGGING_CONFIG).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_INTERPOSER_DUP_BIN).string(),
   };
@@ -136,6 +140,12 @@ const char *hip_vector_add_bin() { return test_paths().hip_vector_add_bin.c_str(
 const char *hip_memcpy_bin() { return test_paths().hip_memcpy_bin.c_str(); }
 
 const char *hip_rccl_bin() { return test_paths().hip_rccl_bin.c_str(); }
+
+#ifdef RJ_HAS_INSTRUCTION_FAILURE_TEST
+const char *hip_instruction_failure_bin() {
+  return test_paths().hip_instruction_failure_bin.c_str();
+}
+#endif
 
 const char *daemon_logging_config() { return test_paths().daemon_logging_config.c_str(); }
 const char *interposer_dup_bin() { return test_paths().interposer_dup_bin.c_str(); }
@@ -222,11 +232,29 @@ protected:
 
   void TearDown() override {
     if (daemon_pid_ > 0) {
-      EXPECT_EQ(kill(daemon_pid_, SIGTERM), 0);
       int status = 0;
-      EXPECT_EQ(waitpid(daemon_pid_, &status, 0), daemon_pid_);
-      EXPECT_TRUE(WIFEXITED(status));
-      EXPECT_EQ(WEXITSTATUS(status), 0);
+      pid_t exited = 0;
+      if (expected_daemon_exit_ != EXIT_SUCCESS) {
+        // Fatal VM failures must stop the daemon without a teardown signal.
+        // SIGTERM sent after its signal-wait loop has ended can remain pending
+        // until the CLI restores its signal mask, replacing the failure exit.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        do {
+          exited = waitpid(daemon_pid_, &status, WNOHANG);
+          if (exited == daemon_pid_ || (exited < 0 && errno != EINTR))
+            break;
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        } while (std::chrono::steady_clock::now() < deadline);
+        EXPECT_EQ(exited, daemon_pid_) << "daemon did not exit after a fatal VM failure";
+      }
+      if (exited != daemon_pid_) {
+        EXPECT_EQ(kill(daemon_pid_, SIGTERM), 0);
+        EXPECT_EQ(waitpid(daemon_pid_, &status, 0), daemon_pid_);
+      }
+      EXPECT_TRUE(WIFEXITED(status)) << "daemon exit status=" << status;
+      if (WIFEXITED(status)) {
+        EXPECT_EQ(WEXITSTATUS(status), expected_daemon_exit_);
+      }
       EXPECT_FALSE(std::filesystem::exists(sock_path_));
       daemon_pid_ = -1;
     }
@@ -325,6 +353,7 @@ protected:
   }
 
   pid_t daemon_pid_ = -1;
+  int expected_daemon_exit_ = 0;
   std::string tmp_dir_;
   std::string runtime_dir_;
   std::string sock_path_;
@@ -337,6 +366,87 @@ TEST_F(DaemonTest, HipVectorAdd) {
   auto r = run_hip_test(hip_vector_add_bin(), "HipVectorAddTest.CorrectResult");
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
+
+#ifdef RJ_HAS_INSTRUCTION_FAILURE_TEST
+TEST_F(DaemonTest, HipUnsupportedInstructionExitsWithFailure) {
+  expected_daemon_exit_ = EXIT_FAILURE;
+  auto r = run_hip_test(hip_instruction_failure_bin(),
+                        "HipDaemonInstructionFailureTest.UnsupportedInstructionExitsWithFailure");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+
+TEST_F(DaemonTest, HipDecodeFailureExitsWithFailure) {
+  expected_daemon_exit_ = EXIT_FAILURE;
+  auto r = run_hip_test(hip_instruction_failure_bin(),
+                        "HipDaemonInstructionFailureTest.DecodeFailureExitsWithFailure");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+
+TEST_F(DaemonTest, HipFatalDecodeDisconnectsValidClient) {
+  const std::string ready_path = tmp_dir_ + "/valid-client-ready";
+  const std::string output_path = tmp_dir_ + "/valid-client.log";
+  const pid_t valid_client = fork();
+  ASSERT_GE(valid_client, 0);
+  if (valid_client == 0) {
+    // Kill the death-test child along with its launcher if the regression hangs.
+    if (setpgid(0, 0) != 0)
+      _exit(127);
+    const int output = open(output_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (output < 0 || dup2(output, STDOUT_FILENO) < 0 || dup2(output, STDERR_FILENO) < 0)
+      _exit(127);
+    close(output);
+    setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
+    setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
+    setenv("ROCJITSU_TEST_CLIENT_READY", ready_path.c_str(), 1);
+    const std::string preload = std::string(sanitizer_preload()) + preload_lib();
+    setenv("LD_PRELOAD", preload.c_str(), 1);
+    execl(hip_instruction_failure_bin(), hip_instruction_failure_bin(),
+          "--gtest_filter=HipDaemonInstructionFailureTest.ValidClientExitsWhenAnotherClientFails",
+          nullptr);
+    _exit(127);
+  }
+  class ClientGuard {
+  public:
+    explicit ClientGuard(pid_t pid) : pid_(pid) {}
+    ~ClientGuard() {
+      if (pid_ > 0) {
+        kill(-pid_, SIGKILL);
+        waitpid(pid_, nullptr, 0);
+      }
+    }
+    void reaped() { pid_ = -1; }
+
+  private:
+    pid_t pid_;
+  } guard(valid_client);
+  const auto ready_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (!std::filesystem::exists(ready_path) && std::chrono::steady_clock::now() < ready_deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  ASSERT_TRUE(std::filesystem::exists(ready_path)) << "valid client did not complete its kernel";
+
+  expected_daemon_exit_ = EXIT_FAILURE;
+  const ProcessResult faulting =
+      run_hip_test(hip_instruction_failure_bin(),
+                   "HipDaemonInstructionFailureTest.DecodeFailureExitsWithFailure");
+  EXPECT_EQ(faulting.exit_code, 0) << faulting.output;
+  int status = 0;
+  pid_t exited = 0;
+  const auto exit_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  do {
+    exited = waitpid(valid_client, &status, WNOHANG);
+    if (exited == valid_client || (exited < 0 && errno != EINTR))
+      break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  } while (std::chrono::steady_clock::now() < exit_deadline);
+  ASSERT_EQ(exited, valid_client) << "valid client did not exit after shared engine failure";
+  guard.reaped();
+  std::ifstream output_file(output_path);
+  const std::string output((std::istreambuf_iterator<char>(output_file)),
+                           std::istreambuf_iterator<char>());
+  ASSERT_TRUE(WIFEXITED(status)) << output;
+  EXPECT_EQ(WEXITSTATUS(status), 0) << output;
+}
+#endif
 
 TEST_F(DaemonTest, AttachExecFailurePreservesDaemonSocket) {
   const pid_t client = fork();

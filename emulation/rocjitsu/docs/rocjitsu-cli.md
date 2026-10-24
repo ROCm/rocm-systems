@@ -10,7 +10,11 @@ the simulated GPU. It operates in four modes:
 - **Daemon mode**: Spawns a daemon child process that hosts the simulation
   engine, then `LD_PRELOAD` + `execve`s the target. Client processes
   communicate with the daemon via RPC over a Unix domain socket. GPU memory
-  is shared using memfds passed via SCM_RIGHTS.
+  is shared using memfds passed via SCM_RIGHTS. After a successful KFD open,
+  losing this connection terminates the client process, even if its GPU work
+  has finished. An orderly daemon stop or restart also terminates attached
+  clients that are idle or doing only host work. The interposer calls
+  `_Exit(EXIT_FAILURE)`, which skips `atexit` handlers and stdio flushing.
 - **Attach mode**: Launches an application against an already-running daemon.
 - **VFIO-user mode**: Serves each configured local GPU as a PCI function to an
   external VMM through its own AF_UNIX socket. This mode is available only in
@@ -18,6 +22,30 @@ the simulated GPU. It operates in four modes:
 
 Daemon mode supports vLLM's multiprocessing spawn, torchrun, torch.distributed,
 and NCCL --- workloads where multiple processes share a single simulated GPU.
+
+### Fatal instruction failures
+
+In native KFD/AQL execution, an instruction that the simulator cannot decode or
+execute terminates the simulation engine with a failure result. The affected
+queue cancels its outstanding dispatches without publishing successful kernel
+or barrier completion. When available, the queue owner also receives an
+illegal-instruction exception for a decode failure or a queue-abort exception for an execution
+support failure. Runtime acceptance of that notification does not recover the
+simulator. A debugger-owned illegal-instruction stop is different: the debugger
+may repair the instruction and resume the wave without terminating the engine.
+
+The daemon hosts one shared simulation engine, not an isolated engine per
+client. A fatal instruction therefore shuts down the daemon and disconnects
+**every connected client**, including clients whose kernels are valid. Each
+interposer diagnoses the lost daemon connection and exits with failure; the
+faulting client's HIP queue-error callback may abort it first. Disconnect
+monitoring also interrupts clients waiting on shared-memory completion signals,
+which cannot complete successfully after engine shutdown.
+
+This policy prevents native clients from hanging or observing success after
+unsupported execution. Queue-error publication alone does not establish that
+the shared engine can safely continue. Recovering one client while preserving
+the others requires a separate queue/process recovery mechanism.
 
 ### The fork boundary
 

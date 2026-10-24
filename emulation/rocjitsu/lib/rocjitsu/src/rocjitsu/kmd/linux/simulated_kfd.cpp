@@ -1214,9 +1214,8 @@ void SimulatedKfd::init_command_processors_locked() {
         });
         cu->set_illegal_inst_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_illegal_instruction(wf); });
-        cu->set_execution_failure_handler([this](amdgpu::Wavefront &wf, bool retain_wave) {
-          return on_wave_execution_failure(wf, retain_wave);
-        });
+        cu->set_execution_failure_handler(
+            [this](amdgpu::Wavefront &wf) { return on_wave_execution_failure(wf); });
         cu->set_alu_exception_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_alu_exception(wf); });
         cu->set_memory_violation_handler(
@@ -4879,11 +4878,12 @@ bool SimulatedKfd::on_wave_illegal_instruction(amdgpu::Wavefront &wave) {
     if (!has_runtime_signal)
       return false;
     return defer_wave_exception_to_runtime(wave, kException,
-                                           /*suspend_while_pending=*/true,
+                                           /*suspend_while_pending=*/false,
                                            /*clear_debug_stop_on_success=*/false,
                                            /*runtime_already_reserved=*/false,
                                            /*runtime_failure_debuggable=*/false,
-                                           amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail);
+                                           amdgpu::QueueExceptionDeliveryPolicy::PublishAndCancel,
+                                           /*retain_wave=*/false);
   }
   constexpr uint32_t kTrapstsIllegalInst = 1u << 11;
   const auto saved = wave.debug_stop_state();
@@ -4895,15 +4895,17 @@ bool SimulatedKfd::on_wave_illegal_instruction(amdgpu::Wavefront &wave) {
                            /*retain_on_rejection=*/true, &runtime_failure_debuggable)) {
     wave.restore_debug_stop_state(saved);
     return defer_wave_exception_to_runtime(wave, kException,
-                                           /*suspend_while_pending=*/true,
+                                           /*suspend_while_pending=*/false,
                                            /*clear_debug_stop_on_success=*/false,
                                            /*runtime_already_reserved=*/true,
-                                           runtime_failure_debuggable);
+                                           runtime_failure_debuggable,
+                                           amdgpu::QueueExceptionDeliveryPolicy::PublishAndCancel,
+                                           /*retain_wave=*/false);
   }
   return true;
 }
 
-bool SimulatedKfd::on_wave_execution_failure(amdgpu::Wavefront &wave, bool retain_wave) {
+bool SimulatedKfd::on_wave_execution_failure(amdgpu::Wavefront &wave) {
   auto proc = find_process(wave.process_id());
   if (!proc)
     return false;
@@ -4919,15 +4921,13 @@ bool SimulatedKfd::on_wave_execution_failure(amdgpu::Wavefront &wave, bool retai
   // with a debugger attached, preserving TRAPSTS and the debugger stop state.
   // ROCr acknowledges only once per queue and may run an error callback or
   // core dump first. Successful publication transfers ownership without waiting.
-  return defer_wave_exception_to_runtime(
-      wave, KFD_EC_MASK(EC_QUEUE_WAVE_ABORT),
-      /*suspend_while_pending=*/retain_wave,
-      /*clear_debug_stop_on_success=*/false,
-      /*runtime_already_reserved=*/false,
-      /*runtime_failure_debuggable=*/false,
-      retain_wave ? amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail
-                  : amdgpu::QueueExceptionDeliveryPolicy::PublishAndCancel,
-      retain_wave);
+  return defer_wave_exception_to_runtime(wave, KFD_EC_MASK(EC_QUEUE_WAVE_ABORT),
+                                         /*suspend_while_pending=*/false,
+                                         /*clear_debug_stop_on_success=*/false,
+                                         /*runtime_already_reserved=*/false,
+                                         /*runtime_failure_debuggable=*/false,
+                                         amdgpu::QueueExceptionDeliveryPolicy::PublishAndCancel,
+                                         /*retain_wave=*/false);
 }
 
 bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t, bool) {

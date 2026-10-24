@@ -49,6 +49,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -315,6 +316,11 @@ public:
   /// and normal dispatch completion is suppressed.
   void notify_dispatch_vm_fault(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
                                 VmAccessOutcome outcome);
+
+  /// @brief Fault a dispatch's queue without publishing successful completion.
+  /// @details Called outside the CU wave-state lock. Cancels all outstanding
+  /// dispatches, including earlier admitted work, and every fan-out replica.
+  void notify_dispatch_failure(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id);
 
   void set_workgroup_id_offset(uint32_t offset) { workgroup_id_offset_ = offset; }
 
@@ -655,7 +661,10 @@ private:
   [[nodiscard]] DispatchWorkgroupResult dispatch_workgroups(DispatchEntry &entry);
   [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
                                      simdojo::Tick now);
+  void cancel_queue_dispatches(const ComputeQueueRecord &queue);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
+  void complete_failed_queue(ComputeQueueRecord &queue);
+  void drain_pending_queue_failures();
   void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
   util::Result dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
                             const std::array<uint32_t, 4> &dimensions,
@@ -705,7 +714,6 @@ private:
     uint32_t queue_id = 0;
     uint32_t process_id = 0;
     uint64_t dispatch_id = 0;
-    VmAccessOutcome outcome;
     std::function<void()> on_cancelled = {};
   };
   void accept_dispatch_fault(DispatchFaultNotification fault);
@@ -771,8 +779,8 @@ private:
   /// transient retry is recorded on only the affected ComputeQueueRecord so unrelated
   /// queues remain runnable.
   [[nodiscard]] bool drain_completions();
-  bool fault_dispatch_local(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
-                            VmAccessOutcome outcome);
+  bool fault_queue_local(uint32_t queue_id, uint32_t process_id,
+                         std::optional<uint32_t> failed_dispatch_id = std::nullopt);
   /// @brief Drop cluster LDS pins collected under cluster_placements_mutex_.
   /// @warning Must run with that lock released; it reaches the CUs' wave-state lock.
   void release_cluster_lds_pins(const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin);
@@ -901,6 +909,10 @@ private:
   std::atomic<uint64_t> dispatched_workgroups_{0};
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
   uint32_t dispatch_threads_ = 1;
+  /// Protected by hw_queue_mutex_. Faults cancel waves immediately, but cache
+  /// maintenance and submission callbacks wait until the pool rejoins.
+  bool dispatch_workers_active_ = false;
+  std::vector<uint64_t> pending_queue_failures_;
   CpuDispatchPool *shared_dispatch_pool_ = nullptr;
   std::unique_ptr<CpuDispatchPool> local_dispatch_pool_;
   std::vector<ComputeUnitCore *> active_cu_scratch_;
