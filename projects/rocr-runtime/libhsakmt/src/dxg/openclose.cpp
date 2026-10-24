@@ -713,6 +713,12 @@ static HSAKMT_STATUS init_vars_from_env(void) {
     dxg_runtime->sdma_gpu_poll_ = (envvar[0] == '1' && envvar[1] == '\0');
   }
 
+  // Report cooperative queues on gfx11+ if HSAKMT_DXG_COOP_QUEUE is "1". Needs a KMD that schedules
+  // HWQUEUEINFO::IsCooperativeQueue queues exclusively; defaults off.
+  if ((envvar = getenv("HSAKMT_DXG_COOP_QUEUE")) != nullptr) {
+    dxg_runtime->coop_queue_ = (envvar[0] == '1' && envvar[1] == '\0');
+  }
+
   // Set default GPU node based on ROCR_VISIBLE_DEVICES. Extract the first numeric value
   // from the environment variable and add 1 to convert to 1-indexed node ID.
   if ((envvar = getenv("ROCR_VISIBLE_DEVICES")) != nullptr) {

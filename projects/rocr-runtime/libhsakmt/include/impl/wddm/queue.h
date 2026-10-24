@@ -143,6 +143,7 @@ public:
 
   bool use_hws;
   Wkmi::SchedLevel prio;
+  bool cooperative_ = false;  //!< HW queue is created with the HWQUEUEINFO cooperative bit
 
   std::atomic<uint64_t>* ring_wptr = nullptr;
   std::atomic<uint64_t>* ring_rptr = nullptr;
@@ -201,6 +202,8 @@ public:
   }
 
   hsa_status_t Process(void);
+  //!< Recreates the HW queue so the KMD schedules it exclusively. Call before any dispatch.
+  hsa_status_t SetCooperative(void);
   uint64_t * GetDoorbellPtr() const { return doorbell_ptr_; }
   void RingDoorbell(uint64_t value);
   GpuMemory* GetAmdQueueMemory() const override { return amd_queue_memory_; }

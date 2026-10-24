@@ -1165,6 +1165,20 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
       reinterpret_cast<uintptr_t>(queue->ring_rptr), resource, &doorbell_loc,
       queue->cwsr_mem_handle_);
 
+  if (queue->cooperative_) {
+    // UMDKMDIF_CREATEHWQUEUE_PRIVATE_DATA (kdx_umd.h): HwQueueInfo is the dword at byte 16, and
+    // IsCooperativeQueue is its bit 25. WKMI has no parameter for it yet.
+    constexpr size_t kHwQueueInfoOffset = 16;
+    constexpr uint32_t kHwQueueInfoCooperative = 1u << 25;
+    assert(priv_size >= static_cast<int>(kHwQueueInfoOffset + sizeof(uint32_t)));
+    uint32_t hw_queue_info;
+    memcpy(&hw_queue_info, static_cast<char*>(priv_data) + kHwQueueInfoOffset,
+           sizeof(hw_queue_info));
+    hw_queue_info |= kHwQueueInfoCooperative;
+    memcpy(static_cast<char*>(priv_data) + kHwQueueInfoOffset, &hw_queue_info,
+           sizeof(hw_queue_info));
+  }
+
   D3DKMT_CREATEHWQUEUE createHwQueue = {0};
   createHwQueue.hHwContext = queue->context;
   createHwQueue.Flags.DisableGpuTimeout = Wkmi::ShouldDisableGpuTimeout(queue->queue_engine, &device_info_);
