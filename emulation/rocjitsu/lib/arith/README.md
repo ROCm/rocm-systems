@@ -15,6 +15,7 @@ Integer operations include arithmetic, packed halves, bit manipulation and carry
 Conversions cover integer, FP16/FP32/FP64, normalized and packed FP8 formats.
 Register operations provide movement, lane transfers and cross-lane routing.
 Graphics operations add cube-map selection, interpolation and lighting multiply.
+Scalar instructions include arithmetic, comparisons and explicit SCC/EXEC/state outputs.
 Family headers describe exact-result and FP-status support.
 FP status is available for gfx12 FP16 FMA under default guest rounding and denormals,
 and for gfx12 FP32 MUL under nearest-even rounding, preserved denormals, and no OMOD/CLAMP.
