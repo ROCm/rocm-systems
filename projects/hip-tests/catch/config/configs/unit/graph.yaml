@@ -1978,3 +1978,9 @@ graph:
   Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphNullStreamFence_UpdateLeavesNullStreamClean:
+    <<: *level_default
+    tags: [exec]
+  Unit_hipGraphNullStreamFence_UpdateKeepsPendingNullStreamFlush:
+    <<: *level_default
+    tags: [exec]
