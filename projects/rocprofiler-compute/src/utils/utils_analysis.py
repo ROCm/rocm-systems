@@ -5,10 +5,13 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:
+    from utils.metrics.pass_provenance import PassLayout
 
 from utils import csv_compression, schema
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
@@ -19,6 +22,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.metrics.pass_provenance import natural_pass_sort_key
 from utils.ml_api_trace_errors import (
     KernelSequenceLengthMismatchError,
     LauncherThreadNotFoundError,
@@ -1832,17 +1836,29 @@ def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) ->
 
 def process_rocpd_csv(
     df: pd.DataFrame,
+    pass_layout: Optional["PassLayout"] = None,
 ) -> tuple[pd.DataFrame, dict[tuple, int]]:
     """Merge counters across unique dispatches into one row each.
 
     The dict maps each groupby key to the new 1..N Dispatch_ID, in the
     same order as those ids are assigned.
+
+    When ``pass_layout`` is provided and the long frame has ``Pass_Key``,
+    duplicated counters keep a base column (first pass in natural order)
+    plus per-pass shadow columns ``{counter}@pass:{pass_key}``.
     """
     if df.empty:
         return df, {}
 
+    use_provenance = (
+        pass_layout is not None
+        and pass_layout.has_duplicates
+        and "Pass_Key" in df.columns
+    )
+
     data: list[dict[str, Any]] = []
     slot_to_id: dict[tuple, int] = {}
+    missing_dispatches: List[int] = []
 
     # Group by unique kernel and merge into a single row
     for group_key, group_df in df.groupby([
@@ -1866,10 +1882,24 @@ def process_rocpd_csv(
             "Start_Timestamp": group_df["Start_Timestamp"].iloc[0],
             "End_Timestamp": group_df["End_Timestamp"].iloc[0],
         }
-        # Each counter will become its own column
-        row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
+        if use_provenance:
+            row.update(
+                _merge_counters_with_pass_provenance(
+                    group_df, pass_layout, missing_dispatches
+                )
+            )
+        else:
+            # Each counter will become its own column (last write wins).
+            row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
         data.append(row)
         slot_to_id[group_key] = len(data)
+    if missing_dispatches:
+        console_warning(
+            "pass_provenance",
+            f"{len(missing_dispatches)} dispatch(es) are missing a duplicated "
+            "counter from a profiling pass; those cells are NaN and drop out "
+            "of sums.",
+        )
     df = pd.DataFrame(data)
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(1, len(df) + 1)
@@ -1951,6 +1981,44 @@ def assign_native_ids(counter_set: pd.DataFrame) -> pd.DataFrame:
         Kernel_ID=kernel_groups.ngroup(),
     )
     return numbered.loc[:, COUNTER_RESULTS_COLUMNS]
+
+
+def _merge_counters_with_pass_provenance(
+    group_df: pd.DataFrame,
+    pass_layout: "PassLayout",
+    missing_dispatches: List[int],
+) -> dict[str, Any]:
+    """Build base + shadow counter columns for one dispatch group.
+
+    A duplicated counter gets a column for every layout pass that collects it.
+    A dispatch missing that pass stores NaN so later dispatches still align.
+    """
+    merged: dict[str, Any] = {}
+    missing = 0
+    for counter_name, counter_rows in group_df.groupby("Counter_Name", sort=False):
+        values_by_pass: dict[str, Any] = {}
+        for pass_key, value in zip(
+            counter_rows["Pass_Key"], counter_rows["Counter_Value"]
+        ):
+            values_by_pass[str(pass_key)] = value
+        ordered_passes = sorted(values_by_pass, key=natural_pass_sort_key)
+        first_pass = ordered_passes[0]
+        name = str(counter_name)
+        merged[name] = values_by_pass[first_pass]
+        if name not in pass_layout.duplicated:
+            continue
+        for pass_key in pass_layout.pass_keys:
+            if name not in pass_layout.counters_by_pass.get(pass_key, frozenset()):
+                continue
+            column = pass_layout.qualified_column(name, pass_key)
+            if pass_key in values_by_pass:
+                merged[column] = values_by_pass[pass_key]
+            else:
+                merged[column] = np.nan
+                missing += 1
+    if missing:
+        missing_dispatches.append(missing)
+    return merged
 
 
 def get_matrix_ops_type(gpu_series: str) -> str:

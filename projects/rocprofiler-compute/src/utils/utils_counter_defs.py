@@ -8,7 +8,7 @@ Imported by both the main runtime code and lightweight tooling such as
 """
 
 import re
-from typing import Any
+from typing import Any, Collection, Dict, List, Optional, Set, Tuple
 
 from utils.logger import console_error
 
@@ -40,7 +40,7 @@ AMMOLITE_VAR_RE = re.compile(r"ammolite__([0-9A-Za-z_]+)")
 # SUM($denom) == N and Avg is the mean per dispatch.
 UNIT_COUNTER = "Dispatch_Unit"
 
-SUPPORTED_DENOM: dict[str, str] = {
+SUPPORTED_DENOM: Dict[str, str] = {
     "per_wave": "SQ_WAVES",
     "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
     "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
@@ -49,7 +49,7 @@ SUPPORTED_DENOM: dict[str, str] = {
 }
 
 
-def get_build_in_vars(gpu_series: str) -> dict[str, str]:
+def get_build_in_vars(gpu_series: str) -> Dict[str, str]:
     """Return the architecture-specific built-in variables for *gpu_series*.
 
     Args:
@@ -66,7 +66,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
             "(unknown GPU arch?)."
         )
 
-    build_in_vars: dict[str, dict[str, str]] = {
+    build_in_vars: Dict[str, Dict[str, str]] = {
         "cdna": {
             "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
             "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
@@ -112,7 +112,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
 # Block remapping: SQC and SP counters belong to the SQ IP block
 # ---------------------------------------------------------------------------
 
-BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
+BLOCK_REMAP: Dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
 
 
 # ---------------------------------------------------------------------------
@@ -120,13 +120,13 @@ BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
 # ---------------------------------------------------------------------------
 
 
-def metric_value_keys(table: dict[str, Any]) -> set[str]:
+def metric_value_keys(table: Dict[str, Any]) -> Set[str]:
     """Metric keys whose values are columns of a metric_table: the header's
     keys except metric and expr."""
     return set(table["header"]) - {"metric", "expr"}
 
 
-def metric_expressions(table: dict[str, Any], metric: dict[str, Any]) -> list[str]:
+def metric_expressions(table: Dict[str, Any], metric: Dict[str, Any]) -> List[str]:
     """Return the expressions of one metric of a metric_table.
 
     simple_box tables keep their one expression in expr; other tables use
@@ -143,7 +143,7 @@ def metric_expressions(table: dict[str, Any], metric: dict[str, Any]) -> list[st
     ]
 
 
-def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
+def parse_counters_text(text: str) -> Tuple[Set[str], Set[str]]:
     """Extract HW counter names and $variable names from formula text.
 
     Returns (hw_counters, variables) where variables are the names without
@@ -159,7 +159,7 @@ def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
 
 def extract_counters_and_variables(
     text: str, gpu_series: str, include_supported_denom: bool = True
-) -> tuple[set[str], set[str]]:
+) -> Tuple[Set[str], Set[str]]:
     """Return (hw_counters, builtin_vars) referenced by text, with transitive
     resolution. Recognizes both $var and ammolite__var forms.
 
@@ -178,10 +178,10 @@ def extract_counters_and_variables(
             variables.update(var_d)
 
     build_in_vars = get_build_in_vars(gpu_series)
-    builtin_vars: set[str] = set()
-    seen: set[str] = set()
+    builtin_vars: Set[str] = set()
+    seen: Set[str] = set()
     while variables - seen:
-        new_vars: set[str] = set()
+        new_vars: Set[str] = set()
         for var in variables - seen:
             seen.add(var)
             if var in build_in_vars:
@@ -204,3 +204,51 @@ def counter_to_block(counter: str) -> str:
     if block == "TX":
         return "TCP"
     return BLOCK_REMAP.get(block, block)
+
+
+_ACCUM_SUFFIX = "_ACCUM"
+
+
+def _pmc_bare_name(counter: str) -> str:
+    """Strip TCC channel suffix ``[N]`` if present."""
+    return counter.split("[", 1)[0]
+
+
+def accum_base_counter(counter: str) -> Optional[str]:
+    """Return the base PMC for a named ``*_ACCUM`` counter, else None."""
+    name = _pmc_bare_name(counter)
+    if not name.endswith(_ACCUM_SUFFIX):
+        return None
+    return name[: -len(_ACCUM_SUFFIX)]
+
+
+def pmc_slot_cost(counter: str, present: Optional[Collection[str]] = None) -> int:
+    """Perfmon register slots charged when adding ``counter`` to a bucket.
+
+    Named ``*_ACCUM`` counters are ``accumulate(BASE, HIGH_RES)`` metrics.
+    aqlprofile programs an extra register for HIGH_RES, so an ACCUM always
+    costs 2. A named BASE next to its ACCUM costs 1, so the pair costs 3 and
+    cannot fill an 8-deep SQ bucket with six other SQ counters. That headroom
+    is required on ROCm 10.1.0; packing BASE+ACCUM into a full SQ bucket
+    returns AQLProfile 4096. All other PMCs cost 1.
+
+    For an order-independent total over a finished set, use
+    ``pmc_bucket_slot_cost``. ``present`` is kept for call-site
+    compatibility; ACCUM cost no longer depends on it.
+    """
+    _ = present
+    name = _pmc_bare_name(counter)
+    if accum_base_counter(name) is not None:
+        return 2
+    return 1
+
+
+def pmc_bucket_slot_cost(counters: Collection[str]) -> int:
+    """Order-independent slot total for a set of PMC names in one block bucket.
+
+    Equivalent to ``len(names) +`` number of ``*_ACCUM`` names (each needs the
+    extra HIGH_RES register beyond the named PMC).
+    """
+    names = {_pmc_bare_name(c) for c in counters}
+    accum_extra = sum(1 for name in names if accum_base_counter(name) is not None)
+    return len(names) + accum_extra
