@@ -12,6 +12,19 @@
 #include "comm.h"
 #include "fail_loud.h"
 #include "info.h"
+#include "rccl_common.h"
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_rcclSelectAllReduce, rcclSelectAllReduce);
+ASSERT_HOOK_MATCHES_PROD(g_rcclSelectAllGather, rcclSelectAllGather);
+ASSERT_HOOK_MATCHES_PROD(g_rcclSelectReduceScatter, rcclSelectReduceScatter);
+ASSERT_HOOK_MATCHES_PROD(g_rcclSelectAlltoAll, rcclSelectAlltoAll);
+ASSERT_HOOK_MATCHES_PROD(g_rcclDdaEnabled, rcclDdaEnabled);
+ASSERT_HOOK_MATCHES_PROD(g_rcclDdaEntryThreshold, rcclDdaEntryThreshold);
+ASSERT_HOOK_MATCHES_PROD(g_rcclGetAlgoName, rcclGetAlgoName);
+ASSERT_HOOK_MATCHES_PROD(g_rcclUseAllGatherDirect, rcclUseAllGatherDirect);
+ASSERT_HOOK_MATCHES_PROD(g_rcclUseReduceScatterDirect, rcclUseReduceScatterDirect);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 // ===========================================================================
 // Controllable seams
@@ -162,6 +175,97 @@ int64_t rcclParamCeAllReduce() { return g_rcclParamCeAllReduce; }
 int64_t g_rcclParamCeArStagingBytes = -1;          // rccl_wrap.cc:70 RCCL_PARAM default
 int64_t rcclParamCeArStagingBytes() { return g_rcclParamCeArStagingBytes; }
 
+static ncclResult_t DefaultSelectAllReduce(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                           hipStream_t, bool, bool, struct rcclCollDecision*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclSelectAllReduce");
+}
+std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, hipStream_t,
+                           bool, bool, struct rcclCollDecision*)>
+    g_rcclSelectAllReduce = DefaultSelectAllReduce;
+ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                 ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream, bool query,
+                                 bool graphCapturingHint, struct rcclCollDecision* decision) {
+  return g_rcclSelectAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, query, graphCapturingHint,
+                               decision);
+}
+
+static ncclResult_t DefaultSelectAllGather(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t,
+                                           bool, bool, struct rcclCollDecision*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclSelectAllGather");
+}
+std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool, bool,
+                           struct rcclCollDecision*)>
+    g_rcclSelectAllGather = DefaultSelectAllGather;
+ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
+                                 ncclDataType_t datatype, hipStream_t stream, bool query, bool graphCapturingHint,
+                                 struct rcclCollDecision* decision) {
+  return g_rcclSelectAllGather(comm, sendbuff, recvbuff, sendcount, datatype, stream, query, graphCapturingHint,
+                               decision);
+}
+
+static ncclResult_t DefaultSelectReduceScatter(struct ncclComm*, const void*, void*, size_t, ncclDataType_t,
+                                               ncclRedOp_t, bool, struct rcclCollDecision*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclSelectReduceScatter");
+}
+std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, bool,
+                           struct rcclCollDecision*)>
+    g_rcclSelectReduceScatter = DefaultSelectReduceScatter;
+ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
+                                     ncclDataType_t datatype, ncclRedOp_t op, bool query,
+                                     struct rcclCollDecision* decision) {
+  return g_rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, query, decision);
+}
+
+static ncclResult_t DefaultSelectAlltoAll(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t,
+                                          bool, bool, struct rcclCollDecision*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclSelectAlltoAll");
+}
+std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool, bool,
+                           struct rcclCollDecision*)>
+    g_rcclSelectAlltoAll = DefaultSelectAlltoAll;
+ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                ncclDataType_t datatype, hipStream_t stream, bool query, bool graphCapturingHint,
+                                struct rcclCollDecision* decision) {
+  return g_rcclSelectAlltoAll(comm, sendbuff, recvbuff, count, datatype, stream, query, graphCapturingHint, decision);
+}
+
+static bool DefaultDdaEnabled(const struct ncclComm*, size_t, size_t, bool, const char*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclDdaEnabled");
+}
+std::function<bool(const struct ncclComm*, size_t, size_t, bool, const char*)> g_rcclDdaEnabled = DefaultDdaEnabled;
+bool rcclDdaEnabled(const struct ncclComm* comm, size_t totalBytes, size_t threshold, bool query, const char* prefix) {
+  return g_rcclDdaEnabled(comm, totalBytes, threshold, query, prefix);
+}
+
+static size_t DefaultDdaEntryThreshold(const struct ncclComm*, ncclFunc_t) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclDdaEntryThreshold");
+}
+std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaEntryThreshold = DefaultDdaEntryThreshold;
+size_t rcclDdaEntryThreshold(const struct ncclComm* comm, ncclFunc_t func) {
+  return g_rcclDdaEntryThreshold(comm, func);
+}
+
+static ncclResult_t DefaultGetAlgoName(int, const char**) { FailLoudUnfaked("rccl_wrap_fakes", "rcclGetAlgoName"); }
+std::function<ncclResult_t(int, const char**)> g_rcclGetAlgoName = DefaultGetAlgoName;
+ncclResult_t rcclGetAlgoName(int algo, const char** algoName) { return g_rcclGetAlgoName(algo, algoName); }
+
+static bool DefaultUseAllGatherDirect(struct ncclComm*, size_t&) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclUseAllGatherDirect");
+}
+std::function<bool(struct ncclComm*, size_t&)> g_rcclUseAllGatherDirect = DefaultUseAllGatherDirect;
+bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) { return g_rcclUseAllGatherDirect(comm, msgSize); }
+
+static bool DefaultUseReduceScatterDirect(struct ncclComm*, size_t&) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclUseReduceScatterDirect");
+}
+std::function<bool(struct ncclComm*, size_t&)> g_rcclUseReduceScatterDirect = DefaultUseReduceScatterDirect;
+bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
+  return g_rcclUseReduceScatterDirect(comm, msgSize);
+}
+
+int64_t g_rcclParamDdaEnable = 1;  // rccl_wrap.cc:98 RCCL_PARAM default
+int64_t rcclParamDdaEnable() { return g_rcclParamDdaEnable; }
+
 void ResetRcclWrapFakes() {
   g_rcclUpdateCollectiveProtocol = DefaultNoOpTune;
   g_rcclSetPipelining = DefaultNoOpTune;
@@ -201,6 +305,16 @@ void ResetRcclWrapFakes() {
   g_validHsaScratch = true;
   g_lastHsaScratchEnv = nullptr;
   g_firmwareVersion = 0;
+  g_rcclSelectAllReduce = DefaultSelectAllReduce;
+  g_rcclSelectAllGather = DefaultSelectAllGather;
+  g_rcclSelectReduceScatter = DefaultSelectReduceScatter;
+  g_rcclSelectAlltoAll = DefaultSelectAlltoAll;
+  g_rcclDdaEnabled = DefaultDdaEnabled;
+  g_rcclDdaEntryThreshold = DefaultDdaEntryThreshold;
+  g_rcclGetAlgoName = DefaultGetAlgoName;
+  g_rcclUseAllGatherDirect = DefaultUseAllGatherDirect;
+  g_rcclUseReduceScatterDirect = DefaultUseReduceScatterDirect;
+  g_rcclParamDdaEnable = 1;
 }
 
 bool g_validHsaScratch = true;
