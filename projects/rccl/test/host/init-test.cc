@@ -35,6 +35,7 @@
 #include "fakes/init_fakes.h"
 #include "fakes/amdsmi_fakes.h"                      // g_amdSmiFabricTelemetry{Acquire,Release}
 #include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize
+#include "fakes/rccl_wrap_fakes.h"                   // g_rcclScaleCollLl128BuffSize{Calls,Factor}
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
 
@@ -5587,6 +5588,73 @@ TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwnerWithLargerShared_KeepsIt
   EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
   EXPECT_EQ(1 << 15, s.comm()->p2pChunkSize);
   EXPECT_EQ(1 << 20, s.shared()->tpP2pChunkSize);
+}
+
+// --- computeBuffSizes: the collective LL128 scaling (rcclScaleCollLl128BuffSize) and its shared-parent override ---
+
+namespace {
+// The rcclScaleCollLl128BuffSize fake multiplies buffSizes[NCCL_PROTO_LL128] by this factor.
+struct ScopedLl128ScaleFake {
+  explicit ScopedLl128ScaleFake(int factor) {
+    g_rcclScaleCollLl128BuffSizeCalls = 0;
+    g_rcclScaleCollLl128BuffSizeFactor = factor;
+  }
+  ~ScopedLl128ScaleFake() {
+    g_rcclScaleCollLl128BuffSizeCalls = 0;
+    g_rcclScaleCollLl128BuffSizeFactor = 1;
+  }
+};
+}  // namespace
+
+TEST_F(InitMicrotest, ComputeBuffSizes_DefaultLl128_ScalesTheCollectiveBufferOnly) {
+  ScopedLl128ScaleFake scale(4);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(1, g_rcclScaleCollLl128BuffSizeCalls);
+  ASSERT_GT(s.comm()->p2pLl128BuffSize, 0);
+  EXPECT_EQ(4 * s.comm()->p2pLl128BuffSize, s.comm()->buffSizes[NCCL_PROTO_LL128])
+      << "send/recv must keep the unscaled size: it is read before the scaling";
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_UserLl128BuffSize_SkipsTheScaling) {
+  ScopedLl128ScaleFake scale(4);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  SetParams({{"LL128_BUFFSIZE", 1 << 20}});
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(0, g_rcclScaleCollLl128BuffSizeCalls) << "NCCL_LL128_BUFFSIZE turns the scaling off";
+  EXPECT_EQ(1 << 20, s.comm()->buffSizes[NCCL_PROTO_LL128]);
+  EXPECT_EQ(1 << 20, s.comm()->p2pLl128BuffSize);
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_SharingParent_ChildTakesTheParentLl128Sizes) {
+  // The child reuses the parent's proxy, which sized and strides its LL128 net buffers with the parent's sizes.
+  for (int childFactor : {1, 4}) {
+    for (int parentFactor : {1, 4}) {
+      ScopedLl128ScaleFake scale(childFactor);
+      auto parent = std::make_unique<ncclComm>();
+      parent->shareResources = true;
+      parent->p2pLl128BuffSize = 448 << 10;
+      parent->buffSizes[NCCL_PROTO_LL128] = parentFactor * (448 << 10);
+      BuffSizes_Scene s;
+      s.comm()->nNodes = 2;
+      EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm(), parent.get()));
+      EXPECT_EQ(parentFactor * (448 << 10), s.comm()->buffSizes[NCCL_PROTO_LL128])
+          << "parent x" << parentFactor << ", child x" << childFactor;
+      EXPECT_EQ(448 << 10, s.comm()->p2pLl128BuffSize) << "parent x" << parentFactor << ", child x" << childFactor;
+    }
+  }
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_NonSharingParent_ChildKeepsItsOwnLl128Sizes) {
+  ScopedLl128ScaleFake scale(4);
+  auto parent = std::make_unique<ncclComm>();
+  parent->shareResources = false;
+  parent->p2pLl128BuffSize = 1 << 10;
+  parent->buffSizes[NCCL_PROTO_LL128] = 1 << 10;
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm(), parent.get()));
+  ASSERT_GT(s.comm()->p2pLl128BuffSize, 1 << 10);
+  EXPECT_EQ(4 * s.comm()->p2pLl128BuffSize, s.comm()->buffSizes[NCCL_PROTO_LL128]);
 }
 
 // --- fillInfo: the AMD SMI UALoE/MNNVL fabric probe (init.cc:1200-1219) ---

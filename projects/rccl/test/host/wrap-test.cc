@@ -1491,6 +1491,27 @@ TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_FlagTuneAllReduce) {
       });
 }
 
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_FlagTuneUserChannelCountWins) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateRemoteFlushAlgoProto_FlagTuneUserChannelCountWins",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ScopedHook loadParam(g_loadParam, ForceFlagTune());
+        ncclComm* comm = MakeRemoteFlushTuneComm(2, 16);
+        const size_t nBytes = (size_t)2 * (64 << 20);
+        for (int64_t* param : {&g_paramMinNchannels, &g_paramMaxNchannels}) {
+          const int64_t saved = *param;
+          *param = 64;
+          EXPECT_EQ(0, RemoteFlushChannels(comm, nBytes)) << "NCCL_MIN/MAX_NCHANNELS keeps the user's count";
+          EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, nBytes)) << "the algorithm and protocol still apply";
+          *param = saved;
+        }
+        EXPECT_EQ(48, RemoteFlushChannels(comm, nBytes));
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_FlagTuneOffKeepsDefaultRule) {
   RUN_ISOLATED_TEST(
       "Wrap_UpdateRemoteFlushAlgoProto_FlagTuneOffKeepsDefaultRule",

@@ -3785,6 +3785,26 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_OverrideChannelsCanChangeTheChannelCoun
   EXPECT_EQ(3, task.nMaxChannels) << "the override's channel count must reach the task";
 }
 
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_RemoteFlushChannelsSetTheCountCappedByComm) {
+  // A positive rcclUpdateRemoteFlushAlgoProto return replaces the Ring/Tree channel count, capped at comm->nChannels.
+  for (int commChannels : {64, 32}) {
+    AlgoInfoComm cc;
+    cc.get()->nChannels = commChannels;
+    auto task = CostTask(ncclFuncAllReduce);
+    CostTable tbl;  // left empty: the RING/SIMPLE fallback is taken
+    g_rcclUpdateRemoteFlushAlgoProtoChannels = 48;
+    ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+    EXPECT_EQ(std::min(48, commChannels), task.nMaxChannels) << "comm->nChannels=" << commChannels;
+  }
+  AlgoInfoComm cc;
+  cc.get()->nChannels = 64;
+  auto task = CostTask(ncclFuncAllReduce);
+  CostTable tbl;
+  g_rcclUpdateRemoteFlushAlgoProtoChannels = 0;
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+  EXPECT_EQ(64, task.nMaxChannels) << "0 keeps RCCL's own count";
+}
+
 // The NCCL_MIN_NCHANNELS floor at :2652-2656. Left undriven, g_paramMinNchannels
 // defaults to 0 and the whole clamp degenerates: `nc > minNChannels` becomes
 // `nc > 0` and `std::max(minNChannels, X)` becomes `X`, so mutating both
@@ -4158,6 +4178,27 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1Mixed2KiB8KiB_OneLl128WorkIt
   auto* batch = sc.bp.tailBatch();
   ASSERT_NE(nullptr, batch);
   EXPECT_EQ(ncclDevFuncId_P2p(true), batch->funcId) << "ENABLE=1 in-window uses the LL128 kernel";
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_ScaledCollectiveLl128Buffer_P2pStepKeepsTheP2pSize) {
+  // With the 4x collective LL128 buffer, send/recv LL128 steps must still come from p2pLl128BuffSize: the net
+  // transport allocates send/recv LL128 buffers at that size.
+  SetParam("P2P_LL128_ENABLE", 1);
+  Gfx1250AddP2pScene sc;
+  ncclComm* c = sc.bp.c();
+  c->p2pLl128BuffSize = 1 << 20;
+  c->buffSizes[NCCL_PROTO_LL128] = 4 << 20;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/8192, /*recvBytes=*/8192));
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  ASSERT_EQ(1, work->sendProtoLL);
+  ASSERT_EQ(1, work->recvProtoLL);
+  auto dataChunk = [&](int buffSize) {
+    return u32fp8Decode(u32fp8Encode((uint32_t)(buffSize / NCCL_STEPS / c->ll128LineElems * c->ll128DataElems)));
+  };
+  ASSERT_NE(dataChunk(1 << 20), dataChunk(4 << 20));
+  EXPECT_EQ(dataChunk(1 << 20), u32fp8Decode(work->sendChunkSize_u32fp8));
+  EXPECT_EQ(dataChunk(1 << 20), u32fp8Decode(work->recvChunkSize_u32fp8));
 }
 
 TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Default2KiB_UsesLegacyLlKernel) {

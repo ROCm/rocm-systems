@@ -49,14 +49,21 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm*, size_t, struct ncclTaskColl
   g_rcclUpdateCollectiveAlgorithmBeforeProtocol = g_rcclUpdateCollectiveProtocolCalls == 0;
 }
 int g_rcclUpdateRemoteFlushAlgoProtoCalls = 0;
+extern int g_rcclUpdateRemoteFlushAlgoProtoChannels;
 bool g_rcclUpdateRemoteFlushAlgoProtoAfterProtocol = false;
 int rcclUpdateRemoteFlushAlgoProto(struct ncclComm*, size_t, struct ncclTaskColl*, float (*)[NCCL_NUM_PROTOCOLS]) {
   ++g_rcclUpdateRemoteFlushAlgoProtoCalls;
   // Production requires the remote flush rules to override the protocol hook's choice.
   g_rcclUpdateRemoteFlushAlgoProtoAfterProtocol = g_rcclUpdateCollectiveProtocolCalls > 0;
-  return 0;
+  return g_rcclUpdateRemoteFlushAlgoProtoChannels;
 }
-void rcclScaleCollLl128BuffSize(struct ncclComm*) {}
+int g_rcclUpdateRemoteFlushAlgoProtoChannels = 0;
+int g_rcclScaleCollLl128BuffSizeCalls = 0;
+int g_rcclScaleCollLl128BuffSizeFactor = 1;
+void rcclScaleCollLl128BuffSize(struct ncclComm* comm) {
+  ++g_rcclScaleCollLl128BuffSizeCalls;
+  comm->buffSizes[NCCL_PROTO_LL128] *= g_rcclScaleCollLl128BuffSizeFactor;
+}
 void rcclUpdateCollectiveChannels(struct ncclComm*, size_t, const struct ncclTaskColl*, int&) {
   ++g_rcclUpdateCollectiveChannelsCalls;
 }
@@ -188,6 +195,9 @@ void ResetRcclWrapFakes() {
   g_rcclUpdateCollectiveAlgorithmBeforeProtocol = false;
   g_rcclUpdateRemoteFlushAlgoProtoCalls = 0;
   g_rcclUpdateRemoteFlushAlgoProtoAfterProtocol = false;
+  g_rcclUpdateRemoteFlushAlgoProtoChannels = 0;
+  g_rcclScaleCollLl128BuffSizeCalls = 0;
+  g_rcclScaleCollLl128BuffSizeFactor = 1;
   g_rcclUpdateCollectiveChannelsCalls = 0;
   g_rcclSetPipeliningCalls = 0;
   g_rcclUpdateThreadThresholdCalls = 0;

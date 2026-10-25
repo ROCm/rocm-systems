@@ -826,6 +826,25 @@
         }
       ]
     },
+    "net_ib_gdr_flush_flag_tune": {
+      "extends": "rccl_tests_base",
+      "timeout": 1200,
+      "command_args": "-b 8 -e 1G -f 2 -g 1 -c 1",
+      "description": "RCCL_IB_GDR_FLUSH_FLAG_TUNE=1 on 2 nodes x 8 gfx950 GPUs, data checked: the 4x collective LL128 buffer next to the 1x send/recv LL128 buffer, and the tuned AllReduce/ReduceScatter choices and broadcast/reduce LL128 chunk.",
+      "env_variables": {
+        "RCCL_IB_GDR_FLUSH_FLAG": "1",
+        "RCCL_IB_GDR_FLUSH_FLAG_TUNE": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "0"
+      },
+      "tests": [
+        { "name": "GdrFlushFlagTune_sendrecv_LL128", "binary": "sendrecv_perf", "env_variables": { "NCCL_PROTO": "LL128" }, "description": "Send/recv LL128 on the 1x buffer while collectives use 4x." },
+        { "name": "GdrFlushFlagTune_allreduce_LL128", "binary": "all_reduce_perf", "env_variables": { "NCCL_PROTO": "LL128" }, "description": "AllReduce LL128 on the 4x buffer." },
+        { "name": "GdrFlushFlagTune_allreduce", "binary": "all_reduce_perf", "description": "AllReduce with the tuned algorithm, protocol and channel choices." },
+        { "name": "GdrFlushFlagTune_reduce_scatter", "binary": "reduce_scatter_perf", "description": "ReduceScatter with LL128 up to 7 MiB per rank." },
+        { "name": "GdrFlushFlagTune_broadcast", "binary": "broadcast_perf", "description": "Broadcast with the scaled-down Ring/LL128 pipeline chunk." },
+        { "name": "GdrFlushFlagTune_reduce", "binary": "reduce_perf", "description": "Reduce with the scaled-down Ring/LL128 pipeline chunk." }
+      ]
+    },
 
     "ionic_counters": {
       "extends": "rccl_tests_base",
@@ -885,6 +904,7 @@
     { "config": "net_ib_gdr_flush_flag", "enabled": true },
     { "config": "net_ib_gdr_flush_flag_4qps", "enabled": true },
     { "config": "net_ib_gdr_flush_flag_4qps_split", "enabled": true },
+    { "config": "net_ib_gdr_flush_flag_tune", "enabled": true },
 
     { "config": "ionic_counters",        "enabled": true }
   ]

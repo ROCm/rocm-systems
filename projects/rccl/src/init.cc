@@ -1593,7 +1593,7 @@ NCCL_PARAM(P2pNetChunkSize, "P2P_NET_CHUNKSIZE", (1 << 17)); /* 128 kB */
 NCCL_PARAM(P2pPciChunkSize, "P2P_PCI_CHUNKSIZE", (1 << 17)); /* 128 kB */
 NCCL_PARAM(P2pNvlChunkSize, "P2P_NVL_CHUNKSIZE", (1 << 19)); /* 512 kB */
 
-static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
+static ncclResult_t computeBuffSizes(struct ncclComm* comm, struct ncclComm* parent = nullptr) {
   int64_t envs[NCCL_NUM_PROTOCOLS] = {ncclParamLlBuffSize(), ncclParamLl128BuffSize(), ncclParamBuffSize()};
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   int defaults[NCCL_NUM_PROTOCOLS];
@@ -1608,6 +1608,11 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (envs[NCCL_PROTO_LL128] == -2) rcclScaleCollLl128BuffSize(comm);
 #endif
+  // A child sharing its parent's proxy must use the LL128 sizes that proxy sized and strides its net buffers with.
+  if (parent && parent->shareResources) {
+    comm->buffSizes[NCCL_PROTO_LL128] = parent->buffSizes[NCCL_PROTO_LL128];
+    comm->p2pLl128BuffSize = parent->p2pLl128BuffSize;
+  }
 
 #if ENABLE_TDM_SIMPLE
   // FIFO slot k sits at k*(buffSizes/NCCL_STEPS), so the step must be a RCCL_TDM_ALIGN
@@ -2680,7 +2685,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   line[4095] = '\0';
   INFO(NCCL_INIT, "Trees%s comm %p nRanks %02d busId %lx", line, comm, comm->nRanks, comm->busId);
 
-  NCCLCHECKGOTO(computeBuffSizes(comm), ret, fail);
+  NCCLCHECKGOTO(computeBuffSizes(comm, parent), ret, fail);
 
   // Compute nChannels per peer for p2p
   NCCLCHECKGOTO(ncclTopoComputeP2pChannels(comm), ret, fail);

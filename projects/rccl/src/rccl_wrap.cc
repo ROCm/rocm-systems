@@ -363,6 +363,9 @@ static size_t rcclRingLl128OneLoopPerNode(struct ncclComm* comm, int nChannels) 
   return chunk * nChannels * (comm->nRanks / comm->nNodes);
 }
 
+extern int64_t ncclParamMinNchannels();
+extern int64_t ncclParamMaxNchannels();
+
 // gfx950 multi-node choices with the remote GDR flush flag, 8 GPUs per node, all choices measured.
 //
 // reduce_scatter (2-8 nodes): from 6 MB per rank, Simple beats LL128 (by 15-30% at 8 MB per rank), so LL128
@@ -405,7 +408,9 @@ int rcclUpdateRemoteFlushAlgoProto(struct ncclComm* comm, size_t nBytes, struct 
   } else if (perNode >= (64 << 20)) {
     algorithm = NCCL_ALGO_RING;
     protocol = NCCL_PROTO_SIMPLE;
-    if (arTune && perNode < (128 << 20)) nChannels = kRemoteFlushArRingSimpleNchannels;
+    // A user channel count (NCCL_MIN/MAX_NCHANNELS) wins.
+    if (arTune && perNode < (128 << 20) && ncclParamMaxNchannels() <= 0 && ncclParamMinNchannels() <= 0)
+      nChannels = kRemoteFlushArRingSimpleNchannels;
   } else if (perNode < (arTune ? (12 << 20) : (16 << 20))) {
     return 0;
   } else if (arTune ? perNode <= rcclRingLl128OneLoopPerNode(comm, comm->nChannels)
@@ -440,8 +445,6 @@ ncclResult_t rcclGetAlgoProtoIndex(const char* envStr, const char* algoProtoStri
   return ncclInvalidUsage;
 }
 
-extern int64_t ncclParamMinNchannels();
-extern int64_t ncclParamMaxNchannels();
 extern int64_t rcclParamForceCe();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
