@@ -1281,8 +1281,10 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_MultiNodeUsesTunedLLRange) 
 // (comm->ibGdrFlushFlag), gfx950 on 2-8 nodes of 8 GPUs. all_reduce goes
 // Ring/LL128 from 16 MB per node, Tree/Simple from 32 MB per node and
 // Ring/Simple from 64 MB per node;
-// reduce_scatter LL128 switches to Simple above 6 MB per rank. Its
-// NCCL_ALGO/NCCL_PROTO check is cached in a static, so every test runs isolated.
+// reduce_scatter LL128 switches to Simple above 6 MB per rank.
+// RCCL_IB_GDR_FLUSH_FLAG_TUNE=1 adds the 4x collective LL128 buffer and moves
+// these switch points (see rccl_wrap.cc). Its NCCL_ALGO/NCCL_PROTO check is
+// cached in a static, so every test runs isolated.
 // ===========================================================================
 
 namespace {
@@ -1446,13 +1448,17 @@ int RemoteFlushChannels(ncclComm* comm, size_t nBytes) {
 }
 }  // namespace
 
-TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_ArAlgoTune) {
+namespace {
+auto ForceFlagTune() { return ForceParam("RCCL_IB_GDR_FLUSH_FLAG_TUNE", int64_t(1)); }
+}  // namespace
+
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_FlagTuneAllReduce) {
   RUN_ISOLATED_TEST(
-      "Wrap_UpdateRemoteFlushAlgoProto_ArAlgoTune",
+      "Wrap_UpdateRemoteFlushAlgoProto_FlagTuneAllReduce",
       []() {
         SetMicroEnvAbsent("NCCL_ALGO");
         SetMicroEnvAbsent("NCCL_PROTO");
-        ScopedHook loadParam(g_loadParam, ForceParam("RCCL_AR_ALGO_TUNE", int64_t(1)));
+        ScopedHook loadParam(g_loadParam, ForceFlagTune());
         for (int nNodes : {2, 4, 8}) {
           ncclComm* comm = MakeRemoteFlushTuneComm(nNodes, nNodes * 8);
           const size_t perNode = (size_t)nNodes << 20;  // 1 MB per node
@@ -1479,16 +1485,43 @@ TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_ArAlgoTune) {
           EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, (size_t)nNodes * (32 << 20))) << nNodes << " nodes";
           DeleteCommWithArch(comm);
         }
+        comm = MakeRemoteFlushTuneComm(2, 16, /*gdrFlushFlag=*/false);
+        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, (size_t)2 * (12 << 20))) << "flag off";
+        DeleteCommWithArch(comm);
       });
 }
 
-TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_ScaledLl128Buffer) {
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_FlagTuneOffKeepsDefaultRule) {
   RUN_ISOLATED_TEST(
-      "Wrap_UpdateRemoteFlushAlgoProto_ScaledLl128Buffer",
+      "Wrap_UpdateRemoteFlushAlgoProto_FlagTuneOffKeepsDefaultRule",
       []() {
         SetMicroEnvAbsent("NCCL_ALGO");
         SetMicroEnvAbsent("NCCL_PROTO");
-        ScopedHook loadParam(g_loadParam, ForceParam("RCCL_LL128_COLL_BUFF_SCALE", int64_t(4)));
+        ncclComm* comm = MakeRemoteFlushTuneComm(2, 16);
+        rcclScaleCollLl128BuffSize(comm);
+        EXPECT_EQ(kLl128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]) << "no scaled buffer";
+        const size_t perNode = (size_t)2 << 20;
+        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, 12 * perNode)) << "Ring/LL128 starts at 16 MB per node";
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 16 * perNode));
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 32 * perNode - 2)) << "fixed 32 MB limit, not one loop";
+        EXPECT_EQ(kTreeSimple, ApplyRemoteFlushRule(comm, 32 * perNode));
+        EXPECT_EQ(0, RemoteFlushChannels(comm, 64 * perNode)) << "no channel override";
+        EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, (size_t)16 * (6 << 20) + 16, ncclFuncReduceScatter, kRingLL128))
+            << "reduce_scatter keeps the 6 MiB limit";
+        DeleteCommWithArch(comm);
+        comm = MakeRemoteFlushTuneComm(16, 128);
+        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, (size_t)16 * (32 << 20))) << "16 nodes untouched";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_FlagTuneScalesLl128Buffer) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateRemoteFlushAlgoProto_FlagTuneScalesLl128Buffer",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ScopedHook loadParam(g_loadParam, ForceFlagTune());
         for (int nNodes : {2, 4, 8, 16}) {
           ncclComm* comm = MakeRemoteFlushTuneComm(nNodes, nNodes * 8);
           rcclScaleCollLl128BuffSize(comm);
@@ -1498,13 +1531,19 @@ TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_ScaledLl128Buffer) {
         }
         struct Case {
           const char* what;
+          const char* arch;
           int nNodes, nRanks;
           bool gdrFlushFlag, ll128Enabled;
         };
-        for (const Case& c : {Case{"flag off", 2, 16, false, true}, Case{"LL128 disabled", 2, 16, true, false},
-                              Case{"single node", 1, 8, true, true}, Case{"4 GPUs per node", 2, 8, true, true},
-                              Case{"9 nodes", 9, 72, true, true}}) {
-          ncclComm* comm = MakeRemoteFlushTuneComm(c.nNodes, c.nRanks, c.gdrFlushFlag);
+        for (const Case& c : {Case{"flag off", "gfx950", 2, 16, false, true},
+                              Case{"LL128 disabled", "gfx950", 2, 16, true, false},
+                              Case{"single node", "gfx950", 1, 8, true, true},
+                              Case{"4 GPUs per node", "gfx950", 2, 8, true, true},
+                              Case{"9 nodes", "gfx950", 9, 72, true, true},
+                              Case{"gfx942", "gfx942", 2, 16, true, true}}) {
+          ncclComm* comm = MakeRemoteFlushComm(c.arch, c.nNodes, c.nRanks, c.gdrFlushFlag);
+          comm->buffSizes[NCCL_PROTO_LL128] = kLl128BuffSize;
+          comm->p2pLl128BuffSize = kLl128BuffSize;
           comm->topo->ll128Enabled = c.ll128Enabled;
           rcclScaleCollLl128BuffSize(comm);
           EXPECT_EQ(kLl128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]) << c.what;
@@ -1514,22 +1553,21 @@ TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_ScaledLl128Buffer) {
         ncclComm* comm = MakeRemoteFlushTuneComm(2, 16);
         rcclScaleCollLl128BuffSize(comm);
         const size_t perNode = (size_t)2 << 20;
-        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, 16 * perNode - 2));
+        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, 12 * perNode - 2));
         EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 48 * perNode));
         EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 64 * perNode - 2));
         EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, 64 * perNode));
-        EXPECT_EQ(0, RemoteFlushChannels(comm, 64 * perNode)) << "48 channels need RCCL_AR_ALGO_TUNE";
+        EXPECT_EQ(48, RemoteFlushChannels(comm, 64 * perNode));
         DeleteCommWithArch(comm);
       });
 }
 
-TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_RsLl128Tune) {
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_ScaledBufferRaisesReduceScatterLimit) {
   RUN_ISOLATED_TEST(
-      "Wrap_UpdateRemoteFlushAlgoProto_RsLl128Tune",
+      "Wrap_UpdateRemoteFlushAlgoProto_ScaledBufferRaisesReduceScatterLimit",
       []() {
         SetMicroEnvAbsent("NCCL_ALGO");
         SetMicroEnvAbsent("NCCL_PROTO");
-        ScopedHook loadParam(g_loadParam, ForceParam("RCCL_RS_LL128_TUNE", int64_t(1)));
         const size_t k6M = (size_t)6 << 20, k7M = (size_t)7 << 20;
         ncclComm* comm = MakeRemoteFlushTuneComm(2, 16);
         EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, 16 * (k6M + 1), ncclFuncReduceScatter, kRingLL128))
@@ -1540,6 +1578,37 @@ TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_RsLl128Tune) {
         DeleteCommWithArch(comm);
       });
 }
+
+#if defined(ENABLE_LL128)
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_ScaledLl128BufferReduceScatterTo7MiB) {
+  // rcclUpdateCollectiveProtocol picks LL128 up to 7 MiB per rank once the collective LL128 buffer is scaled,
+  // on any node count (here 16, which rcclUpdateRemoteFlushAlgoProto leaves to it).
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_ScaledLl128BufferReduceScatterTo7MiB",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeRemoteFlushTuneComm(16, 128);
+        comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 0;
+        comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 0;
+        comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 0;
+        comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = 6 << 20;
+        auto protocolAt = [&](size_t perRank) {
+          ncclTaskColl info{};
+          info.func = ncclFuncReduceScatter;
+          info.algorithm = NCCL_ALGO_RING;
+          info.protocol = NCCL_PROTO_SIMPLE;
+          rcclUpdateCollectiveProtocol(comm, perRank * comm->nRanks, &info);
+          return info.protocol;
+        };
+        const size_t k7M = (size_t)7 << 20;
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, protocolAt(k7M)) << "default buffer: tuning model limit";
+        comm->buffSizes[NCCL_PROTO_LL128] = 4 * kLl128BuffSize;
+        EXPECT_EQ(NCCL_PROTO_LL128, protocolAt(k7M));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, protocolAt(k7M + 1));
+        DeleteCommWithArch(comm);
+      });
+}
+#endif  // ENABLE_LL128
 
 namespace {
 // Any value counts: presence alone is the gate.

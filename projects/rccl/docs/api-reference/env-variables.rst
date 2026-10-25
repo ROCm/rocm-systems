@@ -634,6 +634,27 @@ in the following table.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
 
+    * - | ``RCCL_IB_GDR_FLUSH_FLAG_TUNE``
+        | Turns on additional collective tuning for communicators that use
+          ``RCCL_IB_GDR_FLUSH_FLAG``, on gfx950 with 8 GPUs per node on 2 to 8
+          or 16 nodes. It has no effect on other communicators.
+        | The LL128 buffer of ring and tree connections grows to 4 times its
+          default size; send/recv connections keep the default.
+          ``NCCL_LL128_BUFFSIZE`` disables the larger buffer.
+        | ``ncclAllReduce`` selects Ring/LL128 from 12 MB per node for as long
+          as one ring loop can carry the data (about 98 MiB per node with the
+          larger buffer), Tree/Simple up to 64 MB per node, and Ring/Simple on
+          48 channels from 64 to 128 MB per node. On 16 nodes it selects
+          Tree/Simple from 8 to 64 MB per node.
+        | ``ncclReduceScatter`` keeps LL128 up to 7 MB per rank instead of 6 MB.
+        | Tree/LL128, and Ring/LL128 ``ncclBroadcast`` and ``ncclReduce`` below
+          about ``nRanks / 2`` chunks per channel, keep the default chunk size.
+        | The algorithm and protocol choices do not apply when ``NCCL_ALGO``
+          or ``NCCL_PROTO`` is set.
+        | Read once per process. All ranks must use the same value.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
     * - | ``NCCL_NCHANNELS_PER_NET_PEER``
         | Sets the number of channels used per network (remote) peer.
         | This overrides the value of the ``nChannelsPerNetPeer`` field in

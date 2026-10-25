@@ -1138,6 +1138,95 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_PipelineLadder_LargeBytesStayUnhalved)
   EXPECT_EQ(uint32_t((1 << 22) / NCCL_STEPS), r.chunkSize);
 }
 
+namespace {
+// gfx950 LL128 with the RCCL_IB_GDR_FLUSH_FLAG_TUNE x4 collective buffer: 8 nodes x 8 GPUs, a 448 KiB default
+// (send/recv) buffer, 8-word lines with 7 data words. The default chunk is 49 KiB, the x4 chunk 196 KiB, and
+// both are multiples of the fixture's 1792-byte LL128 grain.
+constexpr int kLl128DefaultBuff = 448 << 10;
+constexpr uint32_t kLl128DefaultChunk = (kLl128DefaultBuff / NCCL_STEPS / 8) * 7;
+constexpr uint32_t kLl128ScaledChunk = 4 * kLl128DefaultChunk;
+constexpr int kScaledChannels = 64;
+
+void MakeScaledLl128(ChunkComm& cc, int nRanks = 64, bool scaled = true) {
+  cc.comm.nNodes = nRanks / 8;
+  cc.comm.nRanks = nRanks;
+  cc.comm.ll128LineElems = 8;
+  cc.comm.ll128DataElems = 7;
+  cc.comm.buffSizes[NCCL_PROTO_LL128] = 4 * kLl128DefaultBuff;
+  cc.comm.p2pLl128BuffSize = scaled ? kLl128DefaultBuff : 4 * kLl128DefaultBuff;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128PipelineShrinksToDefaultChunk) {
+  // 16 MB on 64 channels is ~1 chunk per channel at 196 KiB, far under nRanks / 2 = 32, so the chunk halves to
+  // the default and stops there. Measured on 8 nodes: the x4 chunk ran 16 MB broadcast at 63% of the default.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  ASSERT_EQ(0u, kLl128ScaledChunk % rcclProtoGrainSize(NCCL_PROTO_LL128, cc.get()));
+  for (ncclFunc_t f : {ncclFuncBroadcast, ncclFuncReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    auto r = RunChunking(cc, t, kScaledChannels, size_t(16) << 20);
+    ASSERT_EQ(ncclSuccess, r.rc) << "func=" << int(f);
+    EXPECT_EQ(kLl128DefaultChunk, r.chunkSize) << "func=" << int(f);
+    EXPECT_EQ(kLl128DefaultChunk, RunChunking(cc, t, kScaledChannels, 1024).chunkSize)
+        << "func=" << int(f) << ": never below the default chunk";
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128PipelineKeepsLargeChunkForLargeMessages) {
+  // 1 GB carries 83 chunks of 196 KiB per channel, past nRanks / 2, so the x4 chunk stays (+6% measured);
+  // 256 MB carries 20, so one halving to 98 KiB brings it to 41.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  for (ncclFunc_t f : {ncclFuncBroadcast, ncclFuncReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(1) << 30).chunkSize) << "func=" << int(f);
+    EXPECT_EQ(kLl128ScaledChunk / 2, RunChunking(cc, t, kScaledChannels, size_t(256) << 20).chunkSize)
+        << "func=" << int(f);
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128PipelineThresholdScalesWithRanks) {
+  // The same 256 MB on 2 nodes (nRanks / 2 = 8) already has enough chunks for the x4 chunk.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc, /*nRanks=*/16);
+  auto t = MakeTask(ncclFuncBroadcast, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+  EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(256) << 20).chunkSize);
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128PipelineUnscaledBufferKeepsItsChunk) {
+  // A large LL128 buffer that send/recv shares (NCCL_LL128_BUFFSIZE) is not the scaled collective buffer, so the
+  // pipeline ladder leaves it alone, as before.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc, 64, /*scaled=*/false);
+  auto t = MakeTask(ncclFuncBroadcast, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+  EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(16) << 20).chunkSize);
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128RingCollectivesKeepTheLargeChunk) {
+  // Only the pipeline patterns shrink: Ring all_gather / reduce_scatter / all_reduce gain from the x4 chunk.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  for (ncclFunc_t f : {ncclFuncAllGather, ncclFuncReduceScatter, ncclFuncAllReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(16) << 20).chunkSize) << "func=" << int(f);
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128TreeKeepsTheDefaultChunk) {
+  // Tree/LL128 never uses the scaled chunk, even where its ladder would not halve (1 GB).
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  for (ncclFunc_t f : {ncclFuncAllReduce, ncclFuncBroadcast, ncclFuncReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+    EXPECT_EQ(kLl128DefaultChunk, RunChunking(cc, t, kScaledChannels, size_t(1) << 30).chunkSize) << "func=" << int(f);
+  }
+  MakeScaledLl128(cc, 64, /*scaled=*/false);
+  auto t = MakeTask(ncclFuncAllReduce, NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+  EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(1) << 30).chunkSize)
+      << "an unscaled buffer keeps its chunk";
+}
+
 TEST_F(EnqueueMicrotest, CalcCollChunking_CollnetChain_ClampsToTwoFiftySixK) {
   // :2960 chunkSize = min(256*1024, stepSize*chunkSteps). With a large buffer
   // the 256K clamp is what decides, so this pins the literal.

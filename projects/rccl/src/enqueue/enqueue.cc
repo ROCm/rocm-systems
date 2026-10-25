@@ -3512,6 +3512,15 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
     if ((nBytes < (16 * (concurrentOps * chunkSize))) && (chunkSize > 131072)) chunkSize = 131072;
     if ((nBytes < (4 * (concurrentOps * chunkSize))) && (chunkSize > 65536)) chunkSize = 65536;
     if ((nBytes < (1 * (concurrentOps * chunkSize))) && (chunkSize > 32768)) chunkSize = 32768;
+  } else if (info->algorithm == NCCL_ALGO_RING && info->protocol == NCCL_PROTO_LL128 &&
+             (pattern == ncclPatternPipelineFrom || pattern == ncclPatternPipelineTo) &&
+             comm->buffSizes[NCCL_PROTO_LL128] > comm->p2pLl128BuffSize) {
+    // Broadcast and reduce pass each chunk along the whole ring, so a scaled-up LL128 chunk only pays off once a
+    // channel carries at least nRanks / 2 chunks (gfx950, 2-8 nodes: -25 to -37% at 8-64 MB with the 4x chunk,
+    // +6% from 512 MB); below that the chunk shrinks back toward the default.
+    const int defaultChunkSize = (comm->p2pLl128BuffSize / NCCL_STEPS / comm->ll128LineElems) * comm->ll128DataElems;
+    while (nBytes / ((size_t)nChannels * chunkSize) < (size_t)comm->nRanks / 2 && chunkSize / 2 >= defaultChunkSize)
+      chunkSize /= 2;
   } else if (info->algorithm == NCCL_ALGO_TREE && info->protocol == NCCL_PROTO_LL128) {
     int nNodes = comm->nNodes;
     float ppn = comm->nRanks / (float)nNodes;
