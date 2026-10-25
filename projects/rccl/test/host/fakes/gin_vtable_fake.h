@@ -57,6 +57,7 @@ struct FakeGinVtable {
   // finalize() frees the ctx it is handed. Leave init null in the vtable when
   // initNullFn is set.
   int ndev = 0;
+  int netDeviceType = 0;  // reported by getProperties()
   void* lastCtx = nullptr;
   bool initNullFn = false;
   bool lastError = false;
@@ -109,7 +110,10 @@ struct FakeGinVtable {
   static ncclResult_t GetProperties(int /*dev*/, ncclNetProperties_t* props) {
     FakeGinVtable& self = current();
     ++self.getPropertiesCalls;
-    if (self.getPropertiesResult == ncclSuccess && props) std::memset(props, 0, sizeof(*props));
+    if (self.getPropertiesResult == ncclSuccess && props) {
+      std::memset(props, 0, sizeof(*props));
+      props->netDeviceType = static_cast<decltype(props->netDeviceType)>(self.netDeviceType);
+    }
     return self.getPropertiesResult;
   }
 

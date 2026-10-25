@@ -20,6 +20,7 @@
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
 #include "gin/gin_anvil_sdma_factory.h"
+#include "gin/gin_type_env.h"
 #include <hip/hip_runtime.h>
 #include <algorithm>
 #include <atomic>
@@ -192,8 +193,7 @@ int ncclGinAnvilPluginTestLiveInitCtxCount(void) {
 }
 
 static ncclResult_t ginAnvilInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
-  const char* gin_type = getenv("NCCL_GIN_TYPE");
-  if (gin_type && atoi(gin_type) != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return ncclInternalError;
+  if (!ncclGinTypeEnabled(NCCL_NET_DEVICE_GIN_ANVIL_SDMA, /*enabledByDefault=*/true)) return ncclInternalError;
   if (gin_anvil_sdma_probe() <= 0) return ncclInternalError;
   auto* ictx = new ginAnvilInitCtx{};
   ginAnvilLiveInitCtxs.fetch_add(1, std::memory_order_relaxed);

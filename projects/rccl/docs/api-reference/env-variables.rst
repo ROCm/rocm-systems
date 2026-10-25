@@ -687,8 +687,21 @@ in the following table.
         | ``3``: GDAKI
         | ``4``: GPI
         | ``5``: EFA GDA
-        | ``6``: rocSHMEM GDA (required for that backend to initialize)
+        | ``6``: rocSHMEM GDA (this value, or ``6`` in ``NCCL_GIN_TYPES``, is
+          required for that backend to initialize)
         | ``7``: Anvil SDMA (also accepts unset)
+
+    * - | ``NCCL_GIN_TYPES``
+        | Lists the GIN backend types that may be active together, so DevComms
+          on one communicator can use different backends. RCCL-specific.
+          Ignored when ``NCCL_GIN_TYPE`` is set.
+      - | Comma-separated list of ``NCCL_GIN_TYPE`` values, for example
+          ``6,7`` (rocSHMEM GDA and Anvil SDMA) or ``6,2`` (rocSHMEM GDA and
+          the proxy). Types not in the list are not registered.
+        | When Anvil SDMA and rocSHMEM GDA are both active, Anvil SDMA is the
+          default backend. A DevComm uses rocSHMEM GDA by requesting
+          ``NCCL_GIN_TYPE_ROCSHMEM_GDA`` in ``ncclDevCommRequirements::ginType``.
+        | Default: unset (every backend except rocSHMEM GDA may be active)
 
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
