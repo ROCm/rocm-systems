@@ -12,10 +12,11 @@ from utils.metrics.expression import (
     CodeTransformer,
     InvalidExpressionError,
     build_eval_string,
+    reject_counter_bearing_composite_extents,
     update_denominator_string,
     update_normal_unit_string,
 )
-from utils.utils_counter_defs import UNIT_COUNTER
+from utils.utils_counter_defs import UNIT_COUNTER, extract_counters_and_variables
 
 # =============================================================================
 # Tests for utils.metrics.expression
@@ -146,3 +147,36 @@ class TestExpression:
             result = build_eval_string('"".__class__')
         assert result == ""
         assert mock_warning.called
+
+
+class TestCompositeExtents:
+    """min, max, and peak on a composite parent must not name a counter."""
+
+    @pytest.mark.parametrize(
+        "extent",
+        [
+            "MAX(SQ_WAVES / $numActiveCUs)",
+            "MIN(TCP_TOTAL_CACHE_ACCESSES_sum / $denom)",
+            "$numActiveCUs * 64",
+        ],
+    )
+    def test_counter_bearing_extent_is_rejected(self, extent):
+        body = {"avg": "COLLECT_SUM(_collect.a, _collect.b)", "max": extent}
+        with pytest.raises(ValueError, match="must not reintroduce a PMC set"):
+            reject_counter_bearing_composite_extents("Hit Rate", body)
+
+    @pytest.mark.parametrize("extent", [None, "None", "", "100", "$max_sclk * 2"])
+    def test_counter_free_extent_is_allowed(self, extent):
+        body = {"avg": "COLLECT_SUM(_collect.a, _collect.b)", "peak": extent}
+        reject_counter_bearing_composite_extents("Hit Rate", body)
+
+    def test_extent_counters_match_the_allocator(self):
+        extent = "MAX(SQ_WAVES / $numActiveCUs)"
+        allocator_counters, _ = extract_counters_and_variables(
+            extent, "MI300", include_supported_denom=False
+        )
+        body = {"avg": "COLLECT_RATIO(_collect.a, _collect.b)", "min": extent}
+        with pytest.raises(ValueError) as raised:
+            reject_counter_bearing_composite_extents("AI L1", body, "MI300")
+        assert str(sorted(allocator_counters)) in str(raised.value)
+        assert {"SQ_WAVES", "SQ_BUSY_CU_CYCLES"} <= allocator_counters
