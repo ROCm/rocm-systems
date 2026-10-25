@@ -40,9 +40,9 @@
 #define NCCL_CUMEM_VERSION_SUPPORTED(v) \
   (NCCL_VER_GE(v, ROCM_VER_7_12_60540) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
 
-// cuMem HOST allocations: native only. NOT part of the 7.0.2.x backport (relies
-// on hipDeviceAttributeHostNumaId, which is absent there).
-#define NCCL_CUMEM_HOST_VERSION_SUPPORTED(v) NCCL_VER_GE(v, ROCM_VER_7_12_60540)
+// cuMem HOST allocations: native 7.12 OR the 7.0.2.x backport.
+#define NCCL_CUMEM_HOST_VERSION_SUPPORTED(v) \
+  (NCCL_VER_GE(v, ROCM_VER_7_12_60540) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
 
 // Back-compat alias for the few call sites that compare against the native
 // minimum directly.
@@ -69,6 +69,19 @@
 #define NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(probe, v) ((probe) && NCCL_CUMEM_VERSION_SUPPORTED(v))
 
 #define NCCL_CUMEM_DMABUF_EXPORT_GATE NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION)
+
+// CMake sets RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED when hipMemLocationTypeHost
+// compiles. Stock ROCm 7.0.2 has the backport's HIP_VERSION but no host location
+// types, so compile-time host VMM code needs the probe as well as the version.
+#if defined(RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED)
+#define NCCL_CUMEM_HOST_PROBE 1
+#else
+#define NCCL_CUMEM_HOST_PROBE 0
+#endif
+
+#define NCCL_CUMEM_HOST_GATE_FOR(probe, v) ((probe) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(v))
+
+#define NCCL_CUMEM_HOST_GATE NCCL_CUMEM_HOST_GATE_FOR(NCCL_CUMEM_HOST_PROBE, HIP_VERSION)
 
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).
