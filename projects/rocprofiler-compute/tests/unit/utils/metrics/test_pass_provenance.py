@@ -16,6 +16,7 @@ from utils.metrics.expression import build_eval_string, update_denominator_strin
 from utils.metrics.pass_layout import PassLayout
 from utils.metrics.pass_provenance import (
     METRIC_ROW_PASS_ATTR,
+    UNSET_EXPRESSION,
     bind_expression,
     bind_expression_dataframe,
     bind_metric_tables_to_passes,
@@ -730,7 +731,7 @@ def test_bind_leaves_metric_unset_when_unique_counters_span_passes() -> None:
     used = bind_expression_dataframe(expression_df, SPLIT_LAYOUT, "MI300")
 
     assert used == set()
-    assert expression_df.at[0, "value"] == "None"
+    assert expression_df.at[0, "value"] == UNSET_EXPRESSION
     assert expression_df.attrs[METRIC_ROW_PASS_ATTR] == {}
 
     metric_df = pd.DataFrame({"Avg": [UNIQUE_COUNTERS_EXPR]})
@@ -742,7 +743,7 @@ def test_bind_leaves_metric_unset_when_unique_counters_span_passes() -> None:
         frozenset({"Avg"}),
     )
     assert table_used == set()
-    assert metric_df.at[0, "Avg"] == "None"
+    assert metric_df.at[0, "Avg"] == UNSET_EXPRESSION
 
 
 def test_bind_leaves_metric_unset_when_duplicated_counter_spans_passes() -> None:
@@ -754,7 +755,7 @@ def test_bind_leaves_metric_unset_when_duplicated_counter_spans_passes() -> None
     used = bind_expression_dataframe(expression_df, SPLIT_LAYOUT, "MI300")
 
     assert used == set()
-    assert expression_df["value"].tolist() == ["None", "None"]
+    assert expression_df["value"].tolist() == [UNSET_EXPRESSION, "None"]
     assert expression_df.attrs[METRIC_ROW_PASS_ATTR] == {}
 
     metric_df = pd.DataFrame({"Avg": [DUPLICATED_COUNTER_EXPR], "Min": ["None"]})
@@ -766,7 +767,7 @@ def test_bind_leaves_metric_unset_when_duplicated_counter_spans_passes() -> None
         frozenset({"Avg", "Min"}),
     )
     assert table_used == set()
-    assert metric_df.loc[0].tolist() == ["None", "None"]
+    assert metric_df.loc[0].tolist() == [UNSET_EXPRESSION, "None"]
 
 
 def test_both_binders_choose_the_pass_in_one_helper(monkeypatch) -> None:
@@ -1111,7 +1112,7 @@ def test_bind_expression_dataframe_unsets_a_metric_that_spans_passes() -> None:
 
     bind_expression_dataframe(expression_df, layout, "MI300")
 
-    assert expression_df.at[0, "value"] == "None"
+    assert expression_df.at[0, "value"] == UNSET_EXPRESSION
 
 
 def test_pass_scoped_builtins_evaluate_per_xcd_first_in_pass_order() -> None:
