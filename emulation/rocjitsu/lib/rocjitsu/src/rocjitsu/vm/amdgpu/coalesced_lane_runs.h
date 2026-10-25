@@ -5,6 +5,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/vm/amdgpu/memory_transaction.h"
+#include "rocjitsu/vm/amdgpu/strided_lane_addresses.h"
 
 #include <algorithm>
 #include <array>
@@ -64,6 +65,15 @@ inline void scatter_lane_run(uint64_t address, uint64_t lane_mask, uint32_t size
 
 namespace detail {
 
+/// Address and originating physical lane used by the shared standard sort.
+struct CoalescedLaneAddress {
+  uint64_t address;
+  uint32_t index;
+};
+
+/// Share the standard address sort across callback instantiations and keep it out of line.
+RJ_NOINLINE void sort_lane_addresses(CoalescedLaneAddress *lanes, uint32_t count);
+
 /// Visit maximal runs of adjacent active lanes whose addresses are contiguous.
 template <typename F>
 bool for_each_lane_ordered_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
@@ -113,10 +123,7 @@ template <typename F>
 RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lane_mask,
                                              uint32_t wf_size, uint32_t stride,
                                              MemoryTransactionPolicy transactions, F &fn) {
-  struct Lane {
-    uint64_t address;
-    uint32_t index;
-  };
+  using Lane = CoalescedLaneAddress;
   std::array<Lane, 64> lanes;
   uint32_t count = 0;
   bool address_ordered = true;
@@ -126,8 +133,7 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
     lanes[count++] = {addrs[lane], lane};
   }
   if (!address_ordered)
-    std::ranges::sort(lanes.begin(), lanes.begin() + count,
-                      [](const Lane &a, const Lane &b) { return a.address < b.address; });
+    sort_lane_addresses(lanes.data(), count);
 
   // Preserve the existing lane order for overlapping operands. In particular,
   // sorting must not change which lane supplies the final byte of a store.
@@ -255,6 +261,19 @@ bool for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint
   assert(wf_size <= 64 && stride != 0);
   if (!lane_mask)
     return true;
+#if defined(__x86_64__) && (defined(__AVX512F__) || defined(__AVX2__))
+  // Keep the SIMD precheck on full Wave32 accesses. Other masks and Wave64
+  // retain the existing scan; extending the policy needs separate qualification.
+  if (wf_size == 32 && lane_mask == UINT32_MAX) {
+    if (detail::is_strided_lane_addresses(addrs, 32, stride)) {
+      return fn(CoalescedLaneRun{.address = addrs[0],
+                                 .lane_mask = lane_mask,
+                                 .first_lane = 0,
+                                 .size = 32 * stride,
+                                 .lane_ordered = true});
+    }
+  }
+#endif
   const uint32_t first = std::countr_zero(lane_mask);
   uint32_t last = first;
   uint64_t remaining = lane_mask & ~(uint64_t{1} << first);
