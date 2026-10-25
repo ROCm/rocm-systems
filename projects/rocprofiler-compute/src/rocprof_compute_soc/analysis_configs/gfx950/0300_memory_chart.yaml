@@ -63,7 +63,7 @@ Panel Config:
           value: ROUND(SUM(SQ_INSTS_LDS_ATOMIC) / SUM($denom), 0)
           unit: (Instructions + $normUnit)
         VL1 Hit:
-          value: COLLECT_SUM(_collect.vl1d_hit_non_rw, _collect.vl1d_hit_atom)
+          value: ROUND(COLLECT_SUM(_collect.vl1d_hit_non_rw, _collect.vl1d_hit_atom), 0)
           unit: Percent
         VL1 Coalesce:
           value: ROUND(100 * 64 * SUM(TA_TOTAL_WAVEFRONTS_sum) / (4 * SUM(TCP_TOTAL_ACCESSES_sum)), 0)
