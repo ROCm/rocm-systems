@@ -5201,6 +5201,21 @@
           "name": "DDA_Fabric_AllReduce_LL128_TwoShot",
           "description": "DDA fabric AllReduce LL128 two-shot tier with the LL and LL128 one-shot thresholds zeroed; own process",
           "test_filter": "DdaMPI_AllReduce.LL128TwoShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_BitIdentical",
+          "description": "Float and bf16 AllReduce at 256 KiB to 4 MiB returns bit-identical output on every rank under the default selection",
+          "test_filter": "DdaMPI_AllReduce.BitIdenticalAcrossRanksDefaultSelection"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL_OneShot_BitIdentical",
+          "description": "DDA fabric AllReduce LL one-shot tier folds in rank order, so every rank gets the same bits back",
+          "test_filter": "DdaMPI_AllReduce.LLOneShotBitIdenticalAcrossRanks"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL128_OneShot_BitIdentical",
+          "description": "DDA fabric AllReduce LL128 one-shot tier folds in rank order, so every rank gets the same bits back; own process",
+          "test_filter": "DdaMPI_AllReduce.LL128OneShotBitIdenticalAcrossRanks"
         }
       ]
     },
