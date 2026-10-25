@@ -670,4 +670,123 @@ INSTANTIATE_TEST_SUITE_P(LaunchPaths, CeAlltoAllvSyncMicrotest,
                                            LaunchPath::kLegacyNullStream, LaunchPath::kGraphCapture),
                          LaunchPathName);
 
+struct CeBatchShape {
+  const char* name;
+  bool chunking;
+  bool intraBatchSync;
+  size_t batches;  // hipMemcpyBatchAsync calls for the two copies CeBatchOpsMicrotest::Launch issues
+};
+
+// Both copies fit one intra-batch sync round; the 20 MiB one spans three 8 MiB chunks.
+constexpr CeBatchShape kCeBatchShapes[] = {
+    {"single batch", false, false, 1},
+    {"intra-batch sync", false, true, 1},
+    {"round-robin chunks", true, false, 3},
+};
+
+// Every copy of a batch launch shares attrs[0]. NCCL_CE_INTRA_GPU_MEMCPY_ENABLE (default 1) decides whether it asks
+// the runtime to overlap the copies with compute; 0 drops only that request and keeps the copies stream-ordered.
+class CeBatchOpsMicrotest : public ::testing::Test {
+ protected:
+  struct Batch {
+    size_t numAttrs;
+    size_t attrIdx;
+    bool streamOrdered;
+    bool prefersOverlap;
+  };
+
+  void SetUp() override {
+    ResetFakes();
+#ifndef CE_BATCH_ASYNC_SUPPORTED
+    GTEST_SKIP() << "hip_runtime_api.h has no hipMemcpyBatchAsync, so ce_coll.cc builds without the batch path";
+#else
+    ncclCudaDriverVersionCache = kBatchAsyncDriverVersion;
+    g_loadParam = [this](const char* env, int64_t deftVal) -> int64_t {
+      if (intraGpuMemcpyEnable_ >= 0 && std::strcmp(env, "CE_INTRA_GPU_MEMCPY_ENABLE") == 0) {
+        return intraGpuMemcpyEnable_;
+      }
+      return deftVal;
+    };
+    g_hipMemcpyBatchAsync = [this](void**, void**, size_t*, size_t, hipMemcpyAttributes* attrs, size_t* attrIdxs,
+                                   size_t numAttrs, size_t*, hipStream_t) {
+      batches_.push_back({numAttrs, attrIdxs[0], attrs[0].srcAccessOrder == hipMemcpySrcAccessOrderStream,
+                          (attrs[0].flags & hipMemcpyFlagPreferOverlapWithCompute) != 0});
+      return hipSuccess;
+    };
+#endif
+  }
+  void TearDown() override { ResetFakes(); }
+
+  static void ResetFakes() {
+    ResetHipFakes();
+    ResetNcclFakes();
+    ResetNcclStubs();
+  }
+
+  // Launches a self copy and a peer copy from one rank, outside graph capture, and returns each batch call's attrs.
+  std::vector<Batch> Launch(const CeBatchShape& shape) {
+    auto comm = std::make_unique<ncclComm>();
+    comm->nRanks = 2;
+    comm->planner.capturingGraph.graphId = ULLONG_MAX;
+    comm->ceColl.intraBatchSyncFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
+    ncclCeBatchOpsParams params = {};
+    if (ncclCeInitBatchOpsParams(&params, comm->nRanks) != ncclSuccess) {
+      ADD_FAILURE() << "ncclCeInitBatchOpsParams failed";
+      return {};
+    }
+    params.srcs[0] = reinterpret_cast<void*>(kSendBase);
+    params.dsts[0] = reinterpret_cast<void*>(kRecvBase);
+    params.sizes[0] = 20 * kMiB;
+    params.srcs[1] = reinterpret_cast<void*>(kSendBase + params.sizes[0]);
+    params.dsts[1] = reinterpret_cast<void*>(kPeerWindowBase + kPeerWindowStride);
+    params.sizes[1] = 4 * kMiB;
+    params.numOps = 2;
+    params.chunking = shape.chunking;
+    params.intraBatchSync = shape.intraBatchSync;
+    ncclCeCollArgs args = {};
+    args.func = ncclFuncAllGather;
+
+    batches_.clear();
+    EXPECT_EQ(ncclSuccess, ncclCeLaunchBatchOps(comm.get(), &params, reinterpret_cast<hipStream_t>(0x5717), &args));
+    ncclCeFreeBatchOpsParams(&params);
+    return batches_;
+  }
+
+  int64_t intraGpuMemcpyEnable_ = -1;  // -1 leaves the param at its default
+  std::vector<Batch> batches_;
+};
+
+TEST_F(CeBatchOpsMicrotest, IntraGpuMemcpyByDefault_EveryBatchPrefersOverlapWithCompute) {
+  for (const CeBatchShape& shape : kCeBatchShapes) {
+    SCOPED_TRACE(shape.name);
+
+    const std::vector<Batch> batches = Launch(shape);
+
+    ASSERT_EQ(shape.batches, batches.size());
+    for (const Batch& batch : batches) {
+      EXPECT_EQ(1u, batch.numAttrs);
+      EXPECT_EQ(0u, batch.attrIdx);
+      EXPECT_TRUE(batch.streamOrdered);
+      EXPECT_TRUE(batch.prefersOverlap);
+    }
+  }
+}
+
+TEST_F(CeBatchOpsMicrotest, IntraGpuMemcpyDisabled_NoBatchPrefersOverlapWithCompute) {
+  intraGpuMemcpyEnable_ = 0;
+  for (const CeBatchShape& shape : kCeBatchShapes) {
+    SCOPED_TRACE(shape.name);
+
+    const std::vector<Batch> batches = Launch(shape);
+
+    ASSERT_EQ(shape.batches, batches.size());
+    for (const Batch& batch : batches) {
+      EXPECT_EQ(1u, batch.numAttrs);
+      EXPECT_EQ(0u, batch.attrIdx);
+      EXPECT_TRUE(batch.streamOrdered);
+      EXPECT_FALSE(batch.prefersOverlap);
+    }
+  }
+}
+
 }  // namespace

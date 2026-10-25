@@ -237,9 +237,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros
   because `enqueue.cc` defines them itself. See
   `test_categories_micro_enqueue.yaml`.
-- **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suite
-  `CeCollMicrotest.*` and `LaunchPaths/CeAlltoAllvSyncMicrotest.*`, both in
-  `ce-coll-test.cc`. Its own binary because every other target links
+- **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suites
+  `CeCollMicrotest.*`, `LaunchPaths/CeAlltoAllvSyncMicrotest.*` and
+  `CeBatchOpsMicrotest.*`, all in `ce-coll-test.cc`. Its own binary because every other target links
   `fakes/ce_fakes.cc`, which fakes the symbols this file defines, and the
   `rccl-UnitTestsMicroInit` cleanup-order oracle needs the fake `ncclCeFinalize`
   in `fakes/nccl_stubs.cc`, which this target drops via
