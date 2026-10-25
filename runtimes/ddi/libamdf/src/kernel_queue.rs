@@ -10,19 +10,25 @@ use crate::generated::amdf::*;
 use crate::instance::{self, Device};
 use crate::memory;
 use crate::support::*;
-use rocddi::gpu::queue::{
+use rocddi::device::gpu::queue::{
     KernelQueue as NativeQueue, KernelQueueFormat, KernelQueueStatus as NativeStatus,
     KernelQueueWait,
 };
-use rocddi::host_storage::Owned;
+use rocddi::memory::storage::Owned;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
+/// Public kernel queue with its native submission and retirement state.
 struct KernelQueue {
+    /// Driver-mediated queue that owns accepted native submissions.
     native: NativeQueue,
+    /// Borrowed public device kept live by the queue registration count.
     device: *mut Device,
+    /// Immutable creation facts returned through the AMDF ABI.
     info: amdf_kernel_queue_info_t,
+    /// Highest submission ID published to callers.
     accepted: AtomicU64,
+    /// Prevents new work once public destruction begins.
     destroying: AtomicBool,
 }
 
@@ -89,31 +95,22 @@ pub(crate) unsafe extern "C" fn create(
             _ => return Err(UNSUPPORTED),
         };
         let instance = instance::device_instance(device);
-        let slot =
-            Owned::<KernelQueue>::try_new_uninit(instance.allocator).map_err(|_| EXHAUSTED)?;
+        let slot = instance.owner_slot::<KernelQueue>()?;
         register(&device.queues)?;
         let gpu = match device.native.gpu() {
             Ok(gpu) => gpu,
             Err(error) => {
                 unregister(&device.queues);
-                return Err(native(&error));
+                return Err(device.native_error_status(&error));
             }
         };
-        let mut native_queue = match gpu.create_kernel_queue(format) {
+        let native_queue = match gpu.create_kernel_queue(format) {
             Ok(queue) => queue,
             Err(error) => {
                 unregister(&device.queues);
-                return Err(native(&error));
+                return Err(device.native_error_status(&error));
             }
         };
-        if device.native.has_observed_loss() {
-            let failure = native_queue
-                .destroy()
-                .err()
-                .map_or(LOST, |error| native(&error));
-            unregister(&device.queues);
-            return Err(failure);
-        }
         let info = amdf_kernel_queue_info_t {
             device_id: device.id,
             reset_epoch: device.current_reset_epoch(),
@@ -281,6 +278,11 @@ pub(crate) unsafe extern "C" fn submit(
             descriptor.byte_offset,
             descriptor.byte_length,
         )?;
+        if queue.info.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
+            && command.device_address % 32 != 0
+        {
+            return Err(INVALID);
+        }
         // SAFETY: kernel_command validates current attachment and execute
         // permission. The AMDF submit contract requires the caller to keep
         // command storage and indirect dependencies live and unchanged until

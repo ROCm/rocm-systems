@@ -8,10 +8,24 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+- `rocsys` unified CLI entry point. `rocsys -- ./app` and `rocsys profile -- ./app`
+  produce a full trace profile. `rocsys rewrite` runs `rocprof-sys-instrument`
+  in binary-rewrite mode (`-o`). Other subcommands (`instrument`, `causal`,
+  `avail`, `python`, `attach`) forward to the existing tools. The
+  `rocprof-sys-*` binaries are unchanged.
 - AMD Infinity Storage I/O telemetry. Per-GPU I/O counters are sampled into
   the profiler output. Enable collection with `ROCPROFSYS_USE_HIPFILE` and select metrics with
   `ROCPROFSYS_HIPFILE_METRICS`. See
   [hipFile Infinity Storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
+- `--detach-after <seconds>` flag on `rocprof-sys-attach` for non-interactive use; the binary
+  sleeps for the given duration after attach instead of waiting for `ENTER` on stdin.
+- `rocprof-sys-attach` finds the tool library in the target's own ROCm installation when the
+  target cannot see this installation's library (for example, inside a container), so
+  `ROCPROF_ATTACH_TOOL_LIBRARY` is no longer needed there.
+- Agent skills for choosing a profiling preset, discovering configuration options, and
+  instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
+  bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
+  agent's personal skills folder.
 
 ### Resolved issues
 
@@ -21,6 +35,20 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   constants at debug optimization levels; DynInst was treating these block-form
   attributes as errors and dereferencing a null pointer in `parseSubrange()`.
   Fixed in [ROCm/dyninst#33](https://github.com/ROCm/dyninst/pull/33).
+- Fixed `rocprof-sys-attach` aborting the target process when attaching to a process
+  running in a different mount namespace (for example, a container). The tool library
+  path is now validated against the target's mount namespace before attaching, failing
+  cleanly with a diagnostic instead.
+
+### Removed
+
+- Legacy direct Perfetto tracing mode. Perfetto traces are now always generated from the
+  trace cache. `ROCPROFSYS_TRACE_LEGACY` and `--trace-legacy` / `-L` were removed (passing `-L` is
+  now an unknown-argument error); the `tracing.legacy` key was removed from JSON
+  configuration export.
+- Timemory component annotations (for example `thread_cpu_clock` and PAPI counter
+  values) are no longer attached to Perfetto slices. They will be available through the
+  timemory output formats.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 
@@ -155,6 +183,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Introduced the new `profiler-hub` writer backend for trace persistence, as a
   replacement for the existing SQLite3/rocpd backend.
+
+- Output Summary now renders a process tree distinguishing multiple processes
+  in a single run by size and role, replacing the old flat per-process
+  listing that repeated identical blocks for fork-heavy workloads.
 
 ### Removed
 

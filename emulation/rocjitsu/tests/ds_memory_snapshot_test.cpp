@@ -202,6 +202,35 @@ constexpr std::array kStoreTargets = {
                 rdna4::kDsStoreAddtidB32Vds},
 };
 
+TEST(DsMemorySnapshot, RejectsUnimplementedGdsWithoutPreparingPayload) {
+  SnapshotFixture fx(64, ROCJITSU_CODE_ARCH_CDNA4, 16);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_exec(1);
+  fx.cu->write_vgpr(fx.wf->vgpr_alloc().base, 0, 0);
+  fx.cu->write_vgpr(fx.wf->vgpr_alloc().base + 1, 0, 42);
+  fx.cu->set_plugin_group(fx.group);
+
+  cdna4::DsBuilderFields fields{.gds = 1, .addr = 0, .data0 = 1};
+  const auto words = cdna4::build_ds(cdna4::kDsWriteB32Ds, fields);
+  auto decoder = Decoder::create(fx.arch);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  // The CU translates legacy throws into failures, so also check the callback directly.
+  ASSERT_NO_THROW(inst->execute(*inst, fx.wf));
+  EXPECT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).failed());
+  EXPECT_EQ(fx.wf->instruction_execution_error(),
+            InstructionExecutionError::UnimplementedInstruction);
+  EXPECT_EQ(inst->data(), nullptr);
+  EXPECT_TRUE(fx.observer->reads.empty());
+
+  fields.gds = 0;
+  auto supported = fx.issue_encoded(cdna4::build_ds(cdna4::kDsWriteB32Ds, fields));
+  ASSERT_NE(supported, nullptr);
+  EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::None);
+  EXPECT_NE(supported->data(), nullptr);
+  fx.wf->halt();
+}
+
 TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
   constexpr std::array opcodes = {cdna4::kDsWriteB32Ds, cdna4::kDsWriteB64Ds, cdna4::kDsWriteB96Ds,
                                   cdna4::kDsWriteB128Ds};
@@ -270,6 +299,63 @@ TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
             }
             EXPECT_EQ(fx.observer->callbacks, expected_callbacks);
           }
+}
+
+TEST(DsMemorySnapshot, DualLoadsPreserveAddressesAndPerLaneObservations) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    const uint32_t wave = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
+    SnapshotFixture fx(wave, arch, 16);
+    ASSERT_NE(fx.wf, nullptr);
+    fx.seed();
+    const std::array<uint16_t, 4> opcodes =
+        arch == ROCJITSU_CODE_ARCH_CDNA4
+            ? std::array{cdna4::kDsRead2B32Ds, cdna4::kDsRead2st64B32Ds, cdna4::kDsRead2B64Ds,
+                         cdna4::kDsRead2st64B64Ds}
+            : std::array{cdna5::kDsLoad2addrB32Vds, cdna5::kDsLoad2addrStride64B32Vds,
+                         cdna5::kDsLoad2addrB64Vds, cdna5::kDsLoad2addrStride64B64Vds};
+    const uint64_t wave_mask = wave == 64 ? ~uint64_t{0} : 0xffffffffull;
+    for (bool observed : {false, true}) {
+      fx.cu->set_plugin_group(observed ? fx.group : nullptr);
+      for (uint32_t kind = 0; kind < opcodes.size(); ++kind)
+        for (uint8_t address : {uint8_t{3}, uint8_t{15}, uint8_t{16}})
+          for (uint64_t exec : {uint64_t{0}, uint64_t{0xa55aa55aa55aa55a} & wave_mask, wave_mask}) {
+            SCOPED_TRACE(testing::Message()
+                         << "arch=" << arch << " kind=" << kind << " address=" << unsigned(address)
+                         << " observed=" << observed << " exec=" << exec);
+            fx.wf->set_exec(exec);
+            fx.observer->callbacks.clear();
+            std::array<uint32_t, 2> words;
+            if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+              words = cdna4::build_ds(opcodes[kind],
+                                      {.offset0 = 1, .offset1 = 3, .addr = address, .vdst = 4});
+            else
+              words = cdna5::build_vds(opcodes[kind],
+                                       {.offset0 = 1, .offset1 = 3, .addr = address, .vdst = 4});
+            auto inst = fx.issue_encoded(words);
+            ASSERT_NE(inst, nullptr);
+            const auto *state = inst->data_as<VectorMemState>();
+            ASSERT_NE(state, nullptr);
+            EXPECT_EQ(state->lane_mask, exec);
+            EXPECT_EQ(state->exec_mask, exec);
+            const uint32_t scale = (kind < 2 ? 4u : 8u) * (kind % 2 ? 64u : 1u);
+            std::vector<ReadCallback> expected_callbacks;
+            for (uint32_t lane = 0; lane < wave; ++lane) {
+              const bool active = (exec >> lane) & 1;
+              const uint32_t base = address < 16 ? SnapshotFixture::word(address, lane) : 0;
+              EXPECT_EQ(state->per_lane_addr[lane], active ? base + scale + fx.wf->lds_base() : 0);
+              EXPECT_EQ(state->ds2_per_lane_addr[lane],
+                        active ? base + 3 * scale + fx.wf->lds_base() : 0);
+              // CDNA4 owns a full physical block including its accumulator
+              // bank; v16 is an unseeded zero register there. CDNA5's block
+              // ends at v15 in this fixture.
+              if (observed && active && (arch == ROCJITSU_CODE_ARCH_CDNA4 || address < 16))
+                expected_callbacks.emplace_back(address, uint64_t{1} << lane,
+                                                ExecutionPlugin::kFullByteMask);
+            }
+            EXPECT_EQ(fx.observer->callbacks, expected_callbacks);
+          }
+    }
+  }
 }
 
 TEST(DsMemorySnapshot, OutstandingLogicalZeroPayloadSurvivesLaterIssue) {

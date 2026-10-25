@@ -2,6 +2,32 @@
 
 rocDecode samples
 
+## Windows setup
+
+On Windows, every sample needs the following before you configure it with CMake and when you run it.
+
+* Set `ROCM_PATH` to the ROCm installation prefix and keep it set at run time; libva uses it to locate the
+  VA-API driver.
+* Add the rocDecode DLL directory to `PATH`:
+
+  ```bat
+  set ROCM_PATH=<path-to-TheRock-build>
+  set PATH=%ROCM_PATH%\bin;%PATH%
+  ```
+
+* Samples that use FFmpeg (all except `videoDecodeRaw`, `videoDecodePicFiles`, and `videoDecodeCaps`) also need the
+  FFmpeg DLL directory on `PATH` before configuring, because CMake locates FFmpeg by probing `PATH`. Keep it there
+  when running:
+
+  ```bat
+  set PATH=<path-to-ffmpeg>\bin;%PATH%
+  ```
+
+  If FFmpeg is installed somewhere CMake cannot discover, pass `-DFFMPEG_ROOT=<path-to-ffmpeg>` to the configure step.
+
+rocDecode loads the VA-API DLLs from `%ROCM_PATH%\lib\rocm_sysdeps\bin` itself, so that directory does not need to
+be on `PATH`.
+
 ## [Video decode](videoDecode)
 
 The video decode sample illustrates decoding a single packetized video stream using FFMPEG demuxer, video parser, and rocDecoder to get the individual decoded frames in YUV format. This sample can be configured with a device ID and optionally able to dump the output to a file. This sample uses the high-level RocVideoDecoder class which connects both the video parser and Rocdecoder. This process repeats in a loop until all frames have been decoded.
