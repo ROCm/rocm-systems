@@ -104,7 +104,8 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
   if (op != ncclSum) {
     return false;
   }
-  if (!rcclDdaDatatypeSupported(comm, datatype)) {
+  // The LL kernel also sums int32 and int8: vecElementAdd adds them as wrapping word ops.
+  if (!rcclDdaDatatypeSupported(comm, datatype) && datatype != ncclInt32 && datatype != ncclInt8) {
     return false;
   }
 
@@ -142,6 +143,10 @@ ncclResult_t ncclReduceScatterDdaFabricLL(const void* sendbuff, void* recvbuff, 
     return ncclReduceScatterDdaFabricLLTyped<dda::common::fp8e4m3>(sendbuff, recvbuff, recvcount, comm, stream);
   case ncclFloat8e5m2:
     return ncclReduceScatterDdaFabricLLTyped<dda::common::fp8e5m2>(sendbuff, recvbuff, recvcount, comm, stream);
+  case ncclInt32:
+    return ncclReduceScatterDdaFabricLLTyped<int32_t>(sendbuff, recvbuff, recvcount, comm, stream);
+  case ncclInt8:
+    return ncclReduceScatterDdaFabricLLTyped<int8_t>(sendbuff, recvbuff, recvcount, comm, stream);
   default:
     return ncclInvalidArgument;
   }

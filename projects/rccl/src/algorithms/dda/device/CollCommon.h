@@ -56,7 +56,8 @@ inline constexpr bool is_fp8_v = std::is_same<T, fp8e4m3>::value || std::is_same
 
 template <typename T>
 inline constexpr bool is_supported_type_v = (std::is_same<T, float>::value || std::is_same<T, half>::value ||
-                                             std::is_same<T, int8_t>::value || std::is_same<T, bf16>::value
+                                             std::is_same<T, int8_t>::value || std::is_same<T, bf16>::value ||
+                                             std::is_same<T, int32_t>::value
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
                                              || std::is_same<T, __hip_bfloat16>::value ||
                                              std::is_same<T, fp8e4m3>::value || std::is_same<T, fp8e5m2>::value
@@ -114,6 +115,11 @@ static inline __device__ uint32_t vecElementAdd(const uint32_t& a, const uint32_
     bf162 z = __hadd2(p, q);
     return (reinterpret_cast<uint32_t*>(&z))[0];
 #endif
+  } else if constexpr (std::is_same<T, int32_t>::value) {
+    return a + b;
+  } else if constexpr (std::is_same<T, int8_t>::value) {
+    // Four wrapping byte adds: low 7 bits add without crossing lanes, the top bit is a carry-less xor.
+    return ((a & 0x7f7f7f7fu) + (b & 0x7f7f7f7fu)) ^ ((a ^ b) & 0x80808080u);
   }
   return 0;
 }

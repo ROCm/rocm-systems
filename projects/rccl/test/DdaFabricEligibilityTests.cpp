@@ -1912,7 +1912,8 @@ TEST_F(DdaFabricLL128EligibilityTest, GatesAdmitFp8)
 }
 
 // The AllReduce LL128 gate evaluates the two-shot predicate once one-shot
-// declines, so this rejects the datatype in both.
+// declines, so this rejects the datatype in both. Float64 rather than int32:
+// the ReduceScatter LL tier also sums int32 and int8.
 TEST_F(DdaFabricEligibilityTest, GatesRejectUnsupportedDatatype)
 {
     expectDdaGates(
@@ -1921,7 +1922,7 @@ TEST_F(DdaFabricEligibilityTest, GatesRejectUnsupportedDatatype)
             {"AlltoAll LL", ddaGateIgnoringOp<ncclAllToAllDdaFabricLLEligible>, 4},
             {"ReduceScatter LL", ncclReduceScatterDdaFabricLLEligible, 4},
         },
-        {ncclInt32}, /*expected=*/false, mockComm_.get(), sendbuff_, recvbuff_);
+        {ncclFloat64}, /*expected=*/false, mockComm_.get(), sendbuff_, recvbuff_);
 }
 
 TEST_F(DdaFabricLL128EligibilityTest, GatesRejectUnsupportedDatatype)

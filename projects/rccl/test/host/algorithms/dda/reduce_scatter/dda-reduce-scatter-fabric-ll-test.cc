@@ -125,13 +125,17 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_RanksFromTwoTo144) {
 TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_OnlySum) {
   for (ncclRedOp_t op : {ncclProd, ncclMax, ncclMin, ncclAvg}) {
     EXPECT_FALSE(Eligible(4, ncclFloat32, op)) << "op " << op;
+    EXPECT_FALSE(Eligible(4, ncclInt32, op)) << "op " << op;
+    EXPECT_FALSE(Eligible(16, ncclInt8, op)) << "op " << op;
   }
 }
 
-TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_OnlyDatatypesTheDdaGateAdmits) {
+TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_DdaGateTypesPlusInt32AndInt8) {
   EXPECT_TRUE(Eligible(8, ncclFloat16));
   EXPECT_TRUE(Eligible(8, ncclBfloat16));
-  for (ncclDataType_t datatype : {ncclInt8, ncclUint8, ncclInt32, ncclUint32, ncclInt64, ncclUint64, ncclFloat64}) {
+  EXPECT_TRUE(Eligible(16, ncclInt8));
+  EXPECT_TRUE(Eligible(4, ncclInt32));
+  for (ncclDataType_t datatype : {ncclUint8, ncclUint32, ncclInt64, ncclUint64, ncclFloat64}) {
     EXPECT_FALSE(Eligible(16, datatype)) << "datatype " << datatype;
   }
   EXPECT_TRUE(Eligible(16, ncclFloat8e4m3));
@@ -140,6 +144,8 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_OnlyDatatypesTheDdaGateAdmits
   EXPECT_FALSE(Eligible(8, ncclFloat16));
   EXPECT_FALSE(Eligible(16, ncclFloat8e4m3));
   EXPECT_TRUE(Eligible(16, ncclFloat8e5m2));
+  EXPECT_TRUE(Eligible(4, ncclInt32));
+  EXPECT_TRUE(Eligible(16, ncclInt8));
 }
 
 TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_ShardBytesMultipleOf16UpTo1MiB) {
@@ -160,7 +166,7 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_ScratchMustHoldBothBanksOfFix
 }
 
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_UnsupportedDatatypeReturnsInvalidArgument) {
-  for (ncclDataType_t datatype : {ncclInt8, ncclInt32, ncclUint64, ncclFloat64}) {
+  for (ncclDataType_t datatype : {ncclUint8, ncclUint32, ncclUint64, ncclFloat64}) {
     EXPECT_EQ(Run(16, datatype), ncclInvalidArgument) << "datatype " << datatype;
   }
   EXPECT_TRUE(g_ddaLaunches.empty());
@@ -172,6 +178,8 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_EachDatatypeLaunchesItsOwnKerne
   ExpectLaunchOf<bf16>(RunOne(16, ncclBfloat16), 16);
   ExpectLaunchOf<dda::common::fp8e4m3>(RunOne(16, ncclFloat8e4m3), 16);
   ExpectLaunchOf<dda::common::fp8e5m2>(RunOne(16, ncclFloat8e5m2), 16);
+  ExpectLaunchOf<int32_t>(RunOne(16, ncclInt32), 16);
+  ExpectLaunchOf<int8_t>(RunOne(16, ncclInt8), 16);
 }
 
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_TakesTheStopEventOnTheStream) {
