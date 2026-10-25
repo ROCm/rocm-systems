@@ -46,6 +46,18 @@ ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType)
   return ncclSuccess;
 }
 
+bool ncclGinTypeActive(struct ncclComm* comm, ncclGinType_t ginType) {
+  if (comm == nullptr || comm->sharedRes == nullptr) return false;
+  if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL) return false;
+
+  struct ncclGinState* ginState = &comm->sharedRes->ginState;
+  if (ginState->finalized) return false;
+  for (int i = 0; i < ginState->numActiveBackends; i++) {
+    if (ginState->backends[i].ginType == ginType) return true;
+  }
+  return false;
+}
+
 static void ginProgressWriteLock(struct ncclGinState* ginState) {
   // This logic assumes just 1 writer. That's okay for this use case.
   ginState->writePending.store(true);
