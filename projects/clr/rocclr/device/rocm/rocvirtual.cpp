@@ -766,7 +766,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
         (ts->command().Callback() != nullptr || ts->command().GetBatchHead() != nullptr) &&
         !ts->command().CpuWaitRequested();
   }
-  bool use_irq = enqueHandler || (IS_WINDOWS && gpu_.ForceIrq());
+  bool use_irq = enqueHandler || gpu_.ForceIrq();
   // Check if the signal doesn't match the requested one.
   // Note: runtime needs the interrupts for the callbacks and the marker events, but it can reuse
   // the non-interrupt signals for the regular dispatches
@@ -1629,11 +1629,11 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
                            priority_);
     }
   }
-  // Optimization for native AQL path in Windows has problems with PM4 emulation,
-  // skipping the doorbell will not wake up the AQL worker thread
+  // Each doorbell is a WDDM submission, so native AQL on DXG may batch them. PM4 emulation must
+  // ring every time, since a skipped doorbell does not wake up the AQL worker thread
   uint32_t skip_limit = DEBUG_CLR_DOORBELL_SKIP;
   bool ring_for_non_profiler_signal = attach_signal && (packet->completion_signal.handle != 0);
-  bool ring_doorbell = IS_LINUX || dev().IsPm4Emulation() || blocking ||
+  bool ring_doorbell = !dev().IsDxgAql() || blocking ||
                        (skippedDispatches_ >= skip_limit) || ring_for_non_profiler_signal;
   if (ring_doorbell) {
     ringQueueDoorbell(index);
@@ -2535,14 +2535,12 @@ VirtualGPU::~VirtualGPU() {
   delete printfdbg_;
 
   if (nullptr != schedulerQueue_) {
-#if defined(_WIN32)
     // Stop the monitor thread before destroying the queue
     if (schedulerQueueThread_.joinable()) {
       schedulerQueueThreadRunning_.store(false, std::memory_order_release);
       scheduler_cv_.notify_one();
       schedulerQueueThread_.join();
     }
-#endif  // _WIN32
     Hsa::queue_destroy(schedulerQueue_);
     schedulerQueue_ = nullptr;
     schedulerDoorbell_ = nullptr;
@@ -4655,11 +4653,9 @@ bool VirtualGPU::createSchedulerParam() {
       }
     }
 
-#if defined(_WIN32)
-  if (!isSchedulerQueueThreadRunning()) {
-    std::call_once(scheduler_thread_init_, [this]() { startSchedulerQueueThread(); });
-  }
-#endif  // _WIN32
+    if (IsWddmAqlQueue() && !isSchedulerQueueThreadRunning()) {
+      std::call_once(scheduler_thread_init_, [this]() { startSchedulerQueueThread(); });
+    }
     return true;
   }
 
@@ -5423,7 +5419,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
   if (vcmd.CpuWaitRequested()) {
-    if (IS_WINDOWS) SetStateFlag(kForceIrq);
+    if (IsWddmAqlQueue()) SetStateFlag(kForceIrq);
     AcquireHwQueueIfNeeded();
     // Make sure the last signal covers all submitted work, but don't wait for it here. The wait
     // would hold the execution() lock and block all other threads, which submit to this queue.
@@ -5480,7 +5476,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
         }
       } else {
         // Submit a barrier with a cache flushes.
-        if (IS_WINDOWS) SetStateFlag(kForceIrq);
+        if (IsWddmAqlQueue()) SetStateFlag(kForceIrq);
         if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
           dispatchBarrierValuePacket(kBarrierVendorPacketHeader, true);
         } else {

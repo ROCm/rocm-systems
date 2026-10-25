@@ -3959,9 +3959,9 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
   }
   releaseArguments(parameters);
 
-#if defined(_WIN32)
-  gpu().addSchedulerEvent(sp->complete_signal);
-#endif  // _WIN32
+  if (gpu().IsWddmAqlQueue()) {
+    gpu().addSchedulerEvent(sp->complete_signal);
+  }
 
   // Wait for the scheduler to finish all operations
   gpu().WaitCompleteSignal(sp->complete_signal);
