@@ -153,6 +153,35 @@ typedef struct __attribute__((aligned(4))) {
   unsigned short y;
 } __hip_bfloat162_raw;
 
+// Integer-only, so rounding never depends on the toolchain's bf16 lowering.
+// Returns the 16-bit pattern: __bf16 must not cross call boundaries (Clang 18
+// miscompiles that at -O0 and under sanitizers).
+__BF16_HOST_DEVICE_STATIC__ unsigned short __bfloat16_from_integer(const bool negative,
+                                                                   unsigned long long magnitude) {
+  unsigned short bits = static_cast<unsigned short>(negative) << 15;
+  if (magnitude != 0) {
+    const int lz = __builtin_clzll(magnitude);
+    const unsigned long long fraction = (magnitude << lz) & 0x7fffffffffffffffULL;
+    // 0x007f... = half-1 of the 56 dropped bits; + kept LSB = ties to even.
+    const unsigned long long bias = 0x007fffffffffffffULL + ((fraction >> 56) & 1ULL);
+
+    // Exponent = (63 - lz) + 127; addition absorbs rounding carry.
+    bits |= static_cast<unsigned short>(((190 - lz) << 7) + ((fraction + bias) >> 56));
+  }
+  return bits;
+}
+
+__BF16_HOST_DEVICE_STATIC__ unsigned short __bfloat16_from_ll(long long val) {
+  const bool negative = val < 0;
+  const unsigned long long magnitude =
+      negative ? 0ULL - static_cast<unsigned long long>(val) : static_cast<unsigned long long>(val);
+  return __bfloat16_from_integer(negative, magnitude);
+}
+
+__BF16_HOST_DEVICE_STATIC__ unsigned short __bfloat16_from_ull(unsigned long long val) {
+  return __bfloat16_from_integer(false, val);
+}
+
 /**
  * \defgroup HIP_INTRINSIC_BFLOAT16_STRUCT
  * \ingroup HIP_INTRINSIC_BFLOAT16
@@ -169,25 +198,38 @@ struct __attribute__((aligned(2))) __hip_bfloat16 {
   };
 
  public:
-  // TODO: SWDEV-452411
-  // Need to add constructor of __hip_bfloat16 from
-  // unsigned long long
-  // long long
-  // long
-  // unsigned long
-  // Casting directly to double might lead to double rounding.
-
   /*! \brief create __hip_bfloat16 from an unsigned int */
-  __BF16_HOST_DEVICE__ __hip_bfloat16(unsigned int val) : __x_bf16(static_cast<__bf16>(val)) {}
+  __BF16_HOST_DEVICE__ __hip_bfloat16(unsigned int val)
+      : __x_bf16(__builtin_bit_cast(__bf16, __bfloat16_from_ull(val))) {}
 
   /*! \brief create __hip_bfloat16 from a int */
-  __BF16_HOST_DEVICE__ __hip_bfloat16(int val) : __x_bf16(static_cast<__bf16>(val)) {}
+  __BF16_HOST_DEVICE__ __hip_bfloat16(int val)
+      : __x_bf16(__builtin_bit_cast(__bf16, __bfloat16_from_ll(val))) {}
 
   /*! \brief create __hip_bfloat16 from an unsigned short */
-  __BF16_HOST_DEVICE__ __hip_bfloat16(unsigned short val) : __x_bf16(static_cast<__bf16>(val)) {}
+  __BF16_HOST_DEVICE__ __hip_bfloat16(unsigned short val)
+      : __x_bf16(__builtin_bit_cast(__bf16, __bfloat16_from_ull(val))) {}
 
   /*! \brief create __hip_bfloat16 from a short */
-  __BF16_HOST_DEVICE__ __hip_bfloat16(short val) : __x_bf16(static_cast<__bf16>(val)) {}
+  __BF16_HOST_DEVICE__ __hip_bfloat16(short val)
+      : __x_bf16(__builtin_bit_cast(__bf16, __bfloat16_from_ll(val))) {}
+
+  /*! \brief create __hip_bfloat16 from an unsigned long long */
+  __BF16_HOST_DEVICE__ __hip_bfloat16(unsigned long long val)
+      : __x_bf16(__builtin_bit_cast(__bf16, __bfloat16_from_ull(val))) {}
+
+  /*! \brief create __hip_bfloat16 from a long long */
+  __BF16_HOST_DEVICE__ __hip_bfloat16(long long val)
+      : __x_bf16(__builtin_bit_cast(__bf16, __bfloat16_from_ll(val))) {}
+
+  /*! \brief create __hip_bfloat16 from an unsigned long */
+  __BF16_HOST_DEVICE__ __hip_bfloat16(unsigned long val)
+      : __x_bf16(__builtin_bit_cast(__bf16,
+                                    __bfloat16_from_ull(static_cast<unsigned long long>(val)))) {}
+
+  /*! \brief create __hip_bfloat16 from a long */
+  __BF16_HOST_DEVICE__ __hip_bfloat16(long val)
+      : __x_bf16(__builtin_bit_cast(__bf16, __bfloat16_from_ll(static_cast<long long>(val)))) {}
 
   /*! \brief create __hip_bfloat16 from a double */
   __BF16_HOST_DEVICE__ __hip_bfloat16(const double val) : __x_bf16(static_cast<__bf16>(val)) {}
@@ -261,29 +303,27 @@ struct __attribute__((aligned(2))) __hip_bfloat16 {
 
   __BF16_HOST_DEVICE__ operator __bf16() const { return __x_bf16; }
 
-  // TODO: SWDEV-452411 add operator which converts unsigned long long and long long to bfloat
-
   /*! \brief assign value from an unsigned int */
   __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(unsigned int val) {
-    __x_bf16 = static_cast<__bf16>(val);
+    __x_bf16 = __builtin_bit_cast(__bf16, __bfloat16_from_ull(val));
     return *this;
   }
 
   /*! \brief assign value from a int */
   __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(int val) {
-    __x_bf16 = static_cast<__bf16>(val);
+    __x_bf16 = __builtin_bit_cast(__bf16, __bfloat16_from_ll(val));
     return *this;
   }
 
   /*! \brief assign value from an unsigned short */
   __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(unsigned short val) {
-    __x_bf16 = static_cast<__bf16>(val);
+    __x_bf16 = __builtin_bit_cast(__bf16, __bfloat16_from_ull(val));
     return *this;
   }
 
   /*! \brief assign value from a short int */
   __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(short val) {
-    __x_bf16 = static_cast<__bf16>(val);
+    __x_bf16 = __builtin_bit_cast(__bf16, __bfloat16_from_ll(val));
     return *this;
   }
 
@@ -296,6 +336,31 @@ struct __attribute__((aligned(2))) __hip_bfloat16 {
   /*! \brief assign value from a float */
   __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(const float f) {
     __x_bf16 = static_cast<__bf16>(f);
+    return *this;
+  }
+
+  /*! \brief assign value from an unsigned long long */
+  __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(unsigned long long val) {
+    __x_bf16 = __builtin_bit_cast(__bf16, __bfloat16_from_ull(val));
+    return *this;
+  }
+
+  /*! \brief assign value from a long long */
+  __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(long long val) {
+    __x_bf16 = __builtin_bit_cast(__bf16, __bfloat16_from_ll(val));
+    return *this;
+  }
+
+  /*! \brief assign value from an unsigned long */
+  __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(unsigned long val) {
+    __x_bf16 =
+        __builtin_bit_cast(__bf16, __bfloat16_from_ull(static_cast<unsigned long long>(val)));
+    return *this;
+  }
+
+  /*! \brief assign value from a long */
+  __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(long val) {
+    __x_bf16 = __builtin_bit_cast(__bf16, __bfloat16_from_ll(static_cast<long long>(val)));
     return *this;
   }
 
@@ -508,6 +573,51 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __double2bfloat16(const double a) {
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __int2bfloat16_rn(const int a) {
   __hip_bfloat16 ret{a};
+  return ret;
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_CONV
+ * \brief Convert a short integer to __hip_bfloat16
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __short2bfloat16_rn(const short int a) {
+  __hip_bfloat16 ret{a};
+  return ret;
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_CONV
+ * \brief Convert an unsigned short integer to __hip_bfloat16
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __ushort2bfloat16_rn(const unsigned short int a) {
+  __hip_bfloat16 ret{a};
+  return ret;
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_CONV
+ * \brief Convert long long to __hip_bfloat16
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __ll2bfloat16_rn(const long long a) {
+  __hip_bfloat16 ret{a};
+  return ret;
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_CONV
+ * \brief Convert unsigned long long to __hip_bfloat16
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __ull2bfloat16_rn(const unsigned long long a) {
+  __hip_bfloat16 ret{a};
+  return ret;
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_CONV
+ * \brief Convert unsigned int to __hip_bfloat16
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __uint2bfloat16_rn(const unsigned int a) {
+  __hip_bfloat16 ret{static_cast<unsigned long long>(a)};
   return ret;
 }
 
