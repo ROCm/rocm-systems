@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from .soc_base import OmniSoC_Base
 
 _MetricGroup = Tuple[Tuple[Any, ...], FrozenSet[str], str]
-# (stem_id, panel_id, metric_idx, metric_name, expressions)
+# (stem_id, panel_id, metric_idx, metric_name, expressions[, metric body])
 _YamlMetric = Tuple[Any, ...]
 
 
@@ -167,7 +167,7 @@ def iter_metric_groups(
             body,
         ) = _metric_record(item)
         if body is not None:
-            reject_counter_bearing_composite_extents(metric_name, body)
+            reject_counter_bearing_composite_extents(metric_name, body, gpu_series)
             if _composite_formula(body) is not None:
                 continue
         elif any(is_composite_avg_formula(line) for line in metric_text.splitlines()):
