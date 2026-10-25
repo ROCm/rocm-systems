@@ -406,8 +406,13 @@ protected:
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         MPI_Comm_size(MPI_COMM_WORLD, &nRanks);
 
+        // ASSERT_MPI_EQ is collective, so every rank asserts on rank 0's result.
         ncclUniqueId id;
-        if (rank == 0) ASSERT_MPI_EQ(ncclSuccess, ncclGetUniqueId(&id));
+        ncclResult_t idRes = ncclSuccess;
+        if (rank == 0) {
+            idRes = ncclGetUniqueId(&id);
+        }
+        ASSERT_MPI_EQ(ncclSuccess, idRes);
         MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
 
         // Non-blocking so the watchdog can abort while the main thread is only
