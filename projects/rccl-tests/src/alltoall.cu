@@ -17,6 +17,37 @@
 #pragma weak ncclAlltoAll
 #endif
 
+// Hierarchical alltoall (-D 5): one DevComm per GIN backend on the same communicator.
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,29,2) && defined(NCCL_OS_LINUX)
+#define ALLTOALL_HIER_GIN 1
+enum { hierSdmaDevComm = 0, hierNetDevComm = 1, hierDevCommCount = 2 };
+static_assert(hierDevCommCount <= testMaxDevComms, "raise testMaxDevComms");
+
+// CTAs [0, hierNetCtaCount) drive the network DevComm; the rest drive Anvil SDMA.
+__host__ __device__ inline int hierNetCtaCount(int nCtas) { return nCtas / 2; }
+
+// RCCL_TESTS_A2A_HIER_GROUP_SIZE=g splits the LSA team into groups of g consecutive
+// ranks and sends to LSA peers in another group over the network DevComm, so a
+// single node moves data on both backends. Unset or 0: all LSA peers use SDMA.
+static int hierGroupSize() {
+  static const int value = [] {
+    const char* s = getenv("RCCL_TESTS_A2A_HIER_GROUP_SIZE");
+    return s ? (int)strtol(s, nullptr, 0) : 0;
+  }();
+  return value;
+}
+
+// RCCL_TESTS_A2A_HIER_NET_GIN_TYPE: backend of the network DevComm
+// (default NCCL_GIN_TYPE_PROXY).
+static int hierNetGinType() {
+  static const int value = [] {
+    const char* s = getenv("RCCL_TESTS_A2A_HIER_NET_GIN_TYPE");
+    return s ? (int)strtol(s, nullptr, 0) : (int)NCCL_GIN_TYPE_PROXY;
+  }();
+  return value;
+}
+#endif
+
 void AlltoAllGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
   *paramcount = (count/nranks) & ~(16/eltSize - 1);
   *sendcount = nranks*(*paramcount);
@@ -149,6 +180,93 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
     default:
       return false;
   }
+}
+#endif
+
+#ifdef ALLTOALL_HIER_GIN
+// HierAlltoAllKernel: an Anvil SDMA DevComm for LSA peers and a network DevComm
+// (PROXY by default) for the rest, both on this communicator.
+testResult_t AlltoAllGetMultiDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, int* nReqs, ncclComm_t comm) {
+  if (deviceImpl != 5) return testNotImplemented;
+  if (!reqs || !nReqs || !comm) return testInternalError;
+
+  if (test_ncclVersion < NCCL_VERSION(2,29,2)) {
+    fprintf(stderr, "HierAlltoAllKernel requires NCCL 2.29.2 or later; running with %d.\n", test_ncclVersion);
+    return testInvalidUsage;
+  }
+  if (deviceCtaCount < 2) {
+    fprintf(stderr, "HierAlltoAllKernel requires at least 2 CTAs.\n");
+    return testInvalidUsage;
+  }
+  const int groupSize = hierGroupSize();
+  if (groupSize < 0) {
+    fprintf(stderr, "RCCL_TESTS_A2A_HIER_GROUP_SIZE must be >= 0 (got %d).\n", groupSize);
+    return testInvalidUsage;
+  }
+  const int netType = hierNetGinType();
+  if (netType <= (int)NCCL_GIN_TYPE_NONE || netType >= NCCL_GIN_MAX_TYPES || netType == (int)NCCL_GIN_TYPE_ANVIL_SDMA) {
+    fprintf(stderr, "RCCL_TESTS_A2A_HIER_NET_GIN_TYPE must name a GIN backend other than Anvil SDMA (%d); got %d.\n",
+            (int)NCCL_GIN_TYPE_ANVIL_SDMA, netType);
+    return testInvalidUsage;
+  }
+
+  ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+  if (ncclCommQueryProperties(comm, &props) != ncclSuccess) return testNcclError;
+  const bool sdmaActive = props.ginSupport[NCCL_GIN_TYPE_ANVIL_SDMA];
+  const bool netActive = props.ginSupport[netType];
+  if (!sdmaActive || !netActive) {
+    if (is_main_proc) {
+      printf("# SKIP: hierarchical alltoall (-D 5) needs GIN backends %d (Anvil SDMA) and %d active on this "
+             "communicator; backend %d is %s and backend %d is %s. NCCL_GIN_TYPE keeps only one backend "
+             "active, and Anvil SDMA may be disabled on multi-node communicators.\n",
+             (int)NCCL_GIN_TYPE_ANVIL_SDMA, netType,
+             (int)NCCL_GIN_TYPE_ANVIL_SDMA, sdmaActive ? "active" : "not active",
+             netType, netActive ? "active" : "not active");
+    }
+    *nReqs = 0;
+    return testSuccess;
+  }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+  TESTCHECK(testCheckGinBackendCompiled(NCCL_GIN_TYPE_ANVIL_SDMA));
+  TESTCHECK(testCheckGinBackendCompiled((ncclGinType_t)netType));
+#endif
+
+  const int netCtas = hierNetCtaCount(deviceCtaCount);
+  const int sdmaCtas = deviceCtaCount - netCtas;
+
+  ncclDevCommRequirements* sdma = &reqs[hierSdmaDevComm];
+  sdma->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  sdma->lsaBarrierCount = sdmaCtas;
+  sdma->ginSignalCount = sdmaCtas;
+
+  ncclDevCommRequirements* net = &reqs[hierNetDevComm];
+  net->ginType = (ncclGinType_t)netType;
+  net->barrierCount = netCtas;
+  net->ginSignalCount = netCtas;
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
+  sdma->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  net->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+#else
+  sdma->ginForceEnable = true;
+  net->ginForceEnable = true;
+#endif
+  *nReqs = hierDevCommCount;
+  return testSuccess;
+}
+
+// A library that ignores reqs.ginType would put both DevComms on its default
+// backend, and the run would still pass while exercising only one backend.
+static testResult_t hierCheckDevCommBackends(ncclDevComm const* devComms) {
+  const int want[hierDevCommCount] = { (int)NCCL_GIN_TYPE_ANVIL_SDMA, hierNetGinType() };
+  for (int k = 0; k < hierDevCommCount; k++) {
+    const int got = devComms[k].ginConnectionCount > 0 ? (int)devComms[k].ginNetDeviceTypes[0] : (int)NCCL_GIN_TYPE_NONE;
+    if (got != want[k]) {
+      fprintf(stderr, "HierAlltoAllKernel: DevComm %d requested GIN backend %d but uses %d.\n", k, want[k], got);
+      return testInternalError;
+    }
+  }
+  return testSuccess;
 }
 #endif
 
@@ -435,6 +553,82 @@ __global__ void HybridAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffse
 #endif
 #endif
 
+#ifdef ALLTOALL_HIER_GIN
+// Peers outside the LSA team use the network DevComm; with groupSize > 0, so do
+// LSA peers outside this rank's group. The relation is symmetric, so both ends of
+// a pair use the same DevComm and agree on how many puts each receiver counts.
+__device__ inline bool hierPeerUsesNet(int peer, int rank, int lsaBase, int lsaSize, int groupSize) {
+  if (peer < lsaBase || peer >= lsaBase + lsaSize) return true;
+  return groupSize > 0 && (peer - lsaBase) / groupSize != (rank - lsaBase) / groupSize;
+}
+
+// A put to peer r signals index r % groupCtas on r, so every receiver waits for
+// all nPeers puts on one index, from the CTA with that index.
+template <typename T>
+__device__ void hierPutWait(ncclGin& gin, ncclTeam world, bool net, int lsaBase, int lsaSize, int groupSize,
+                            ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
+                            size_t count, int groupCta, int groupCtas, int nPeers, uint64_t signalBase) {
+  const size_t size = count * sizeof(T);
+  int tid = threadIdx.x + groupCta * blockDim.x;
+  int nthreads = blockDim.x * groupCtas;
+  for (int r = tid; r < world.nRanks; r += nthreads) {
+    if (hierPeerUsesNet(r, world.rank, lsaBase, lsaSize, groupSize) != net) continue;
+    gin.put(world, r,
+        recvwin, recvoffset + world.rank * size,
+        sendwin, sendoffset + r * size,
+        size, TEST_GIN_WEAK_SIGNAL_INC((unsigned int)(r % groupCtas)));
+  }
+
+  const int signalIndex = world.rank % groupCtas;
+  if (groupCta == signalIndex && nPeers > 0)
+    gin.waitSignal(ncclCoopCta(), signalIndex, signalBase + nPeers);
+  gin.flush(ncclCoopCta());
+}
+
+// Hierarchical alltoall: CTAs [0, hierNetCtaCount) put to network peers on
+// netComm and synchronize with a world barrier; the remaining CTAs put to LSA
+// peers on sdmaComm (Anvil SDMA) and synchronize with an LSA barrier.
+template <typename T>
+__device__ void hierAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count,
+                                 struct ncclDevComm const& sdmaComm, struct ncclDevComm const& netComm, int groupSize) {
+  const int netCtas = hierNetCtaCount(gridDim.x);
+  const bool net = blockIdx.x < netCtas;
+  struct ncclDevComm const& devComm = net ? netComm : sdmaComm;
+  const int groupCta = net ? blockIdx.x : blockIdx.x - netCtas;
+  const int groupCtas = net ? netCtas : gridDim.x - netCtas;
+
+  ncclTeam world = ncclTeamWorld(devComm);
+  ncclTeam lsa = ncclTeamLsa(devComm);
+  const int lsaBase = world.rank - lsa.rank;
+  int lsaPeers = lsa.nRanks;  // includes this rank
+  if (groupSize > 0) lsaPeers = min(groupSize, lsa.nRanks - lsa.rank / groupSize * groupSize);
+  const int nPeers = net ? world.nRanks - lsaPeers : lsaPeers;
+
+  ncclGin gin { devComm, 0 };
+  const uint64_t signalBase = gin.readSignal(world.rank % groupCtas);
+
+  if (net) {
+    ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, (uint32_t)groupCta };
+    bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
+    hierPutWait<T>(gin, world, true, lsaBase, lsa.nRanks, groupSize, sendwin, sendoffset, recvwin, recvoffset,
+                   count, groupCta, groupCtas, nPeers, signalBase);
+    bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+  } else {
+    ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, (uint32_t)groupCta };
+    bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+    hierPutWait<T>(gin, world, false, lsaBase, lsa.nRanks, groupSize, sendwin, sendoffset, recvwin, recvoffset,
+                   count, groupCta, groupCtas, nPeers, signalBase);
+    bar.sync(ncclCoopCta(), cuda::memory_order_release);
+  }
+}
+
+template <typename T>
+__global__ void HierAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root,
+                                   struct ncclDevComm sdmaComm, struct ncclDevComm netComm, int groupSize) {
+  hierAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, sdmaComm, netComm, groupSize);
+}
+#endif
+
 testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
   if (deviceImpl == 0) {
     char* sptr = (char*)sendbuff + sendoffset;
@@ -481,6 +675,17 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
       case 4:
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(HybridAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
+#endif
+#ifdef ALLTOALL_HIER_GIN
+      case 5: {
+        auto kernel = SPECIALIZE_KERNEL(HierAlltoAllKernel, type, op);
+        if (kernel == nullptr) return testNotImplemented;
+        ncclDevComm* devComms = (ncclDevComm*)comm;
+        TESTCHECK(hierCheckDevCommBackends(devComms));
+        kernel<<<deviceCtaCount, 512, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff, recvoffset, count, root,
+                                                    devComms[hierSdmaDevComm], devComms[hierNetDevComm], hierGroupSize());
+        return testSuccess;
+      }
 #endif
       default:
         return testNotImplemented;
@@ -546,7 +751,7 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
-        ncclDevComm* devComm = args->devComms + i;
+        ncclDevComm* devComm = testDevComms(args, i);
         ncclWindow_t sendwin = (ncclWindow_t)args->sendRegHandles[i];
         ncclWindow_t recvwin = (ncclWindow_t)args->recvRegHandles[i];
         kernel<<<gridCtas, 512, 0, args->streams[i]>>>(
@@ -646,6 +851,9 @@ NCCL_WEAK struct testEngine ncclTestEngine = {
   /* .initCommConfig = */ nullptr,
 #endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) || (defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0))
-  /* .getDevCommRequirements = */ AlltoAllGetDevCommRequirements
+  /* .getDevCommRequirements = */ AlltoAllGetDevCommRequirements,
+#endif
+#ifdef ALLTOALL_HIER_GIN
+  /* .getMultiDevCommRequirements = */ AlltoAllGetMultiDevCommRequirements,
 #endif
 };
