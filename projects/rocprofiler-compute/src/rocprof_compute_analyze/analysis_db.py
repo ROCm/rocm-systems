@@ -82,6 +82,7 @@ from utils.metrics.noise_clamper import (
     to_noise_clamp,
 )
 from utils.metrics.pass_provenance import (
+    UNSET_EXPRESSION,
     PassLayout,
     bind_expression_dataframe,
     evaluate_pass_scoped_builtins,
@@ -1213,7 +1214,9 @@ class db_analysis(OmniAnalyze_Base):
             )
         return pd.Series(
             [
-                db_analysis.evaluate(
+                None
+                if row.value == UNSET_EXPRESSION
+                else db_analysis.evaluate(
                     f"{row.metric_id} - {row.value_name}",
                     row.value,
                     pmc_df,
