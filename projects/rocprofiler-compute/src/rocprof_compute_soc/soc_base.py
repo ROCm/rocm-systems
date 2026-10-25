@@ -37,6 +37,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.metrics.expression import composite_part_refs
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
 from utils.utils_common import (
@@ -351,9 +352,9 @@ class OmniSoC_Base:
                 f"panel id {panel_id}"
             )
             return
-        expressions.extend(
-            metric_expressions(panel_dict[panel_id], metric_dict[metric_id])
-        )
+        table = panel_dict[panel_id]
+        expressions.extend(metric_expressions(table, metric_dict[metric_id]))
+        expressions.extend(_composite_part_expressions(table, metric_dict[metric_id]))
 
     def _same_bucket_priority_metric_ids(self) -> tuple[str, ...]:
         """Metric ids whose PMCs get tier-0 priority in the greedy coalescing pass.
@@ -824,6 +825,36 @@ def _rebuild_tcc_channel_file_map(
             if is_tcc_channel_counter(ctr):
                 result[ctr.split("[")[0]] = bucket
     return result
+
+
+def _composite_part_expressions(
+    table: dict[str, Any], metric: dict[str, Any]
+) -> list[str]:
+    """Expressions of the rows a composite metric combines, plus its weights.
+
+    A composite parent names no PMC itself, so selecting it alone with
+    --block must also select the rows of its table that it combines.
+    """
+    rows = {name: body for name, body in (table["metric"] or {}).items() if body}
+    by_collectable_id = {
+        body["_collectable_id"]: body
+        for body in rows.values()
+        if isinstance(body, dict) and body.get("_collectable_id")
+    }
+    expressions: list[str] = []
+    for formula in metric_expressions(table, metric):
+        for ref in composite_part_refs(formula):
+            part = rows.get(ref) or by_collectable_id.get(ref.lstrip("_"))
+            if isinstance(part, dict):
+                expressions.extend(metric_expressions(table, part))
+    weights = metric.get("_weighted_avg")
+    if isinstance(weights, dict):
+        expressions.extend(
+            sub["weight_counter"]
+            for sub in weights.values()
+            if isinstance(sub, dict) and isinstance(sub.get("weight_counter"), str)
+        )
+    return expressions
 
 
 def _table_expressions(table: dict[str, Any]) -> list[str]:
