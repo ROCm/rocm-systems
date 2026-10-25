@@ -152,6 +152,15 @@ template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::C
   }
 }
 
+std::string ComputeUnitCore::disassemble_instruction(std::span<const uint32_t> encoding,
+                                                     uint64_t pc) const {
+  if (encoding.empty())
+    return "<disassembly unavailable>";
+  Instruction::ScopedHeapAllocation heap_allocation;
+  auto decoded = decoder_->decode_window(encoding, pc);
+  return decoded.succeeded() ? decoded.value()->disassemble() : "<disassembly unavailable>";
+}
+
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size, uint32_t vgpr_storage_lane_count,
                                  uint32_t vgpr_allocation_block_size)
