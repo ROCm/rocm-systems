@@ -5623,9 +5623,9 @@ void VirtualGPU::flush(amd::Command* list, bool wait) {
 
 // ================================================================================================
 void VirtualGPU::addPinnedMem(amd::Memory* mem) {
-  // Optimize pinning path for Linux only(KFD has special tracking for pinned memory) or OpenCL,
-  // since OpenCL always waits for completion on CPU
-  if ((command_ != nullptr) && (IS_LINUX || !amd::IS_HIP)) {
+  // Deferred release is only safe on KFD, whose userptr MMU notifier catches the app freeing and
+  // reusing the host range; WDDM keeps the old pages mapped. OpenCL always waits on CPU anyway.
+  if ((command_ != nullptr) && ((IS_LINUX && !dev().IsDxg()) || !amd::IS_HIP)) {
     command_->AddPinnedMemory(mem);
   } else {
     //! @note: ROCr backend doesn't have per resource busy tracking, hence runtime has to wait
