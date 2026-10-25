@@ -68,6 +68,8 @@ static ncclResult_t ncclGinAllReduceInitOnce(ncclComm* comm) {
   reqs.barrierCount = kGinAllReduceLsaCtas;
   reqs.ginSignalCount = kGinAllReduceLsaCtas;
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  // The kernels are compiled for SDMA only, so the default backend will not do.
+  reqs.ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
   NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &state->devComm, /*isInternal=*/true,
                                        /*deviceCodeVersion=*/NCCL_VERSION_CODE));
   state->initialized = true;
@@ -237,11 +239,9 @@ static bool ginAllReduceBaseEligible(ncclComm* comm, const void* sendbuff, void*
   if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL) return false;
   if (comm->nNodes != 1) return false;
   if (comm->nRanks > kGinAllReduceMaxRanks) return false;
-  if (comm->sharedRes == nullptr) return false;
-  ncclGinType_t ginType = NCCL_GIN_TYPE_NONE;
-  if (ncclGetGinType(comm, &ginType) != ncclSuccess) return false;
-  if (ginType != (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
-  // After cheaper ginType: ncclTeamLsa() can initialize the device runtime.
+  // The DevComm requests SDMA by type, so SDMA only has to be active, not the default.
+  if (!ncclGinTypeActive(comm, NCCL_GIN_TYPE_ANVIL_SDMA)) return false;
+  // After the cheaper backend check: ncclTeamLsa() can initialize the device runtime.
   if (ncclTeamLsa(comm).nRanks != comm->nRanks) return false;
   return true;
 }

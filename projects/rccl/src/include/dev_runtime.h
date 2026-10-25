@@ -69,7 +69,12 @@ struct ncclDevrNonSymExchangeEntry {
 };
 #endif
 
-struct ncclDevrWindowSorted;
+// winSorted[] entry, ordered by userAddr for ncclDevrFindWindow.
+struct ncclDevrWindowSorted {
+  uintptr_t userAddr;
+  size_t size;
+  struct ncclDevrWindow* win;
+};
 struct ncclDevrTeam;
 
 struct ncclDevrRegTask {

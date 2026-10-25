@@ -4,11 +4,14 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 
 #include "algorithms/gin/gin_alltoall.h"
 #include "comm.h"
+#include "dev_runtime.h"
 #include "gtest/gtest.h"
 
 namespace RcclUnitTesting
@@ -19,16 +22,21 @@ namespace RcclUnitTesting
 namespace
 {
 
-// Stand-in ncclComm that passes every ncclAllToAllGinSdmaEligible() gate up to the
-// window lookup, so each test below spoils one earlier field. bigSize must stay
-// non-zero or ncclTeamLsa() runs real device-runtime init here and crashes.
-// Purpose-built like DdaIpcMockComm: common/MockComm.hpp builds topology and
-// arch state that no eligibility gate reads.
+constexpr uintptr_t kSendAddr = 0x1000;
+constexpr uintptr_t kRecvAddr = 0x2000;
+
+// Stand-in ncclComm that passes every ncclAllToAllGinSdmaEligible() gate, so each
+// test below spoils one field and the verdict flips only because of it. bigSize
+// must stay non-zero or ncclTeamLsa() runs real device-runtime init here and
+// crashes. Purpose-built like DdaIpcMockComm: common/MockComm.hpp builds topology
+// and arch state that no eligibility gate reads.
 struct GinAlltoAllMockComm
 {
-    ncclComm            comm{};
-    ncclSharedResources sharedRes{};
-    char                bootstrapPlaceholder{0};
+    ncclComm             comm{};
+    ncclSharedResources  sharedRes{};
+    char                 bootstrapPlaceholder{0};
+    ncclDevrWindow       window{};
+    ncclDevrWindowSorted sorted{};
 
     GinAlltoAllMockComm()
     {
@@ -44,9 +52,22 @@ struct GinAlltoAllMockComm
         comm.devrState.lsaSize = comm.nRanks;
         comm.devrState.lsaSelf = comm.rank;
 
-        sharedRes.ginState.numActiveBackends   = 1;
-        sharedRes.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
-        comm.sharedRes                         = &sharedRes;
+        // One window spanning both buffers is enough for ncclDevrFindWindow.
+        window.userPtr                = reinterpret_cast<void*>(kSendAddr);
+        window.size                   = 2 * (kRecvAddr - kSendAddr);
+        sorted                        = {kSendAddr, window.size, &window};
+        comm.devrState.winSorted      = &sorted;
+        comm.devrState.winSortedCount = 1;
+
+        setBackends({NCCL_GIN_TYPE_ANVIL_SDMA});
+        comm.sharedRes = &sharedRes;
+    }
+
+    void setBackends(std::initializer_list<ncclGinType_t> types)
+    {
+        int n = 0;
+        for (ncclGinType_t type : types) sharedRes.ginState.backends[n++].ginType = type;
+        sharedRes.ginState.numActiveBackends = n;
     }
 
     ncclComm* get() { return &comm; }
@@ -58,24 +79,23 @@ bool envEquals(const char* name, const char* value)
     return env != nullptr && std::strcmp(env, value) == 0;
 }
 
+// The test_runner config reruns this binary with these params set to reject every size.
+bool paramRejectsAll()
+{
+    return envEquals("NCCL_GIN_A2A_ENABLE", "0") || std::getenv("NCCL_GIN_A2A_MIN_BYTES") != nullptr;
+}
+
 } // namespace
 
-// These tests document the gate list. They do not detect a deleted gate. The mock
-// registers no window, so every case below is rejected by the window lookup, which
-// runs after the gate it targets: delete the nNodes check and MultiNode still gets
-// false, and still passes. BuffersNotRegistered is the exception, because there the
-// window lookup is the gate under test, so removing it flips the verdict to true.
-//
-// The baseline cannot be true while ncclDevrWindowSorted is defined in
-// dev_runtime.cc rather than the header, so the mock cannot populate winSorted.
-// The 16 B alignment gate and the eligible case stay with the MPI tests in
-// transport/GinDeviceMPITests.cpp.
+// Baseline is eligible, so each case below fails if the gate it targets is deleted.
+// The 16 B alignment gate stays with the MPI tests in transport/GinDeviceMPITests.cpp,
+// since the size used here sits on the SDMA tier that skips it.
 class GinAlltoAllEligibilityTest : public ::testing::Test
 {
 protected:
     GinAlltoAllMockComm mockComm_;
-    void*               sendbuff_{reinterpret_cast<void*>(0x1000)};
-    void*               recvbuff_{reinterpret_cast<void*>(0x2000)};
+    void*               sendbuff_{reinterpret_cast<void*>(kSendAddr)};
+    void*               recvbuff_{reinterpret_cast<void*>(kRecvAddr)};
     // 8 MiB per peer of float32, i.e. the NCCL_GIN_A2A_SDMA_MIN_BYTES default, so
     // neither the minimum-size nor the 16 B alignment gate can be what rejects.
     static constexpr size_t kBytesPerPeer = 8ull * 1024 * 1024;
@@ -86,6 +106,12 @@ protected:
         return ncclAllToAllGinSdmaEligible(mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32);
     }
 };
+
+TEST_F(GinAlltoAllEligibilityTest, BaselineEligible)
+{
+    if (paramRejectsAll()) GTEST_SKIP() << "a pinned param rejects every size";
+    EXPECT_TRUE(eligible(kCount));
+}
 
 TEST_F(GinAlltoAllEligibilityTest, NullComm)
 {
@@ -143,33 +169,41 @@ TEST_F(GinAlltoAllEligibilityTest, LsaTeamSmallerThanComm)
     EXPECT_FALSE(eligible(kCount));
 }
 
-// The path runs on the comm's shared GIN backend, so a comm brought up on any
-// other backend must not be claimed.
-TEST_F(GinAlltoAllEligibilityTest, WrongGinBackend)
+// The kernel only runs on SDMA, so a comm with no SDMA backend must not be claimed.
+TEST_F(GinAlltoAllEligibilityTest, SdmaNotActive)
 {
-    mockComm_.sharedRes.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA;
+    mockComm_.setBackends({NCCL_GIN_TYPE_ROCSHMEM_GDA});
     EXPECT_FALSE(eligible(kCount));
 
-    mockComm_.sharedRes.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_PROXY;
+    mockComm_.setBackends({NCCL_GIN_TYPE_PROXY});
+    EXPECT_FALSE(eligible(kCount));
+
+    mockComm_.setBackends({NCCL_GIN_TYPE_ROCSHMEM_GDA, NCCL_GIN_TYPE_PROXY});
     EXPECT_FALSE(eligible(kCount));
 }
 
-// WrongGinBackend above cannot pin which backends[] slot the gate reads: the empty
-// window registry rejects every case anyway, so writing the wrong index would still
-// leave it passing. Assert the accessor directly against the fixture's default state.
-TEST_F(GinAlltoAllEligibilityTest, MockBackendSlotMatchesGinTypeAccessor)
+// The DevComm requests SDMA by type, so SDMA does not have to be the default.
+TEST_F(GinAlltoAllEligibilityTest, SdmaActiveButNotDefault)
 {
-    ncclGinType_t ginType = NCCL_GIN_TYPE_NONE;
-    ASSERT_EQ(ncclGetGinType(mockComm_.get(), &ginType), ncclSuccess);
-    EXPECT_EQ(ginType, (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA);
+    if (paramRejectsAll()) GTEST_SKIP() << "a pinned param rejects every size";
+    mockComm_.setBackends({NCCL_GIN_TYPE_PROXY, NCCL_GIN_TYPE_ANVIL_SDMA});
+    EXPECT_TRUE(eligible(kCount));
+
+    mockComm_.setBackends({NCCL_GIN_TYPE_ROCSHMEM_GDA, NCCL_GIN_TYPE_PROXY, NCCL_GIN_TYPE_ANVIL_SDMA});
+    EXPECT_TRUE(eligible(kCount));
 }
 
-// The kernel puts straight into symmetric windows, so unregistered buffers are
-// rejected. This is the mock's default state: every gate above passes, and the
-// empty window registry is the only reason the verdict is false.
+// A finalized backend list is kept only for plugin teardown and must not be selected.
+TEST_F(GinAlltoAllEligibilityTest, GinFinalized)
+{
+    mockComm_.sharedRes.ginState.finalized = true;
+    EXPECT_FALSE(eligible(kCount));
+}
+
+// The kernel puts straight into symmetric windows, so unregistered buffers are rejected.
 TEST_F(GinAlltoAllEligibilityTest, BuffersNotRegistered)
 {
-    ASSERT_EQ(mockComm_.comm.devrState.winSortedCount, 0);
+    mockComm_.comm.devrState.winSortedCount = 0;
     EXPECT_FALSE(eligible(kCount));
 }
 
