@@ -12,6 +12,8 @@
 #ifndef RCCL_TEST_HOST_RECORDER_FAKES_H_
 #define RCCL_TEST_HOST_RECORDER_FAKES_H_
 
+#include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -32,6 +34,21 @@ extern int g_recorderLastIdCall;  // rcclCall_t as int, so an includer needs no 
 extern ncclUniqueId* g_recorderLastId;
 extern int g_recorderLastRank;
 extern int g_recorderLastNranks;
+
+// What the collective and send/recv-based overloads were handed (type is rcclCall_t as int).
+struct RecorderCall {
+  int type;
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  int root;
+  const size_t* sendcounts;
+  const size_t* rdispls;
+};
+// Both overloads route here; the default returns g_recorderResult.
+extern std::function<ncclResult_t(const RecorderCall&)> g_recorderCall;
+// Every Recorder::skip argument, in call order.
+extern std::vector<bool> g_recorderSkips;
 
 void ResetRecorderFakes();
 

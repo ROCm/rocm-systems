@@ -15,6 +15,7 @@
 #include "sym_kernels.h"
 #include "tuning.h"
 
+#include "fail_loud.h"
 #include "signature-drift.h"
 
 #include "channel.h"            // rcclEffectiveP2pBatchEnable, rcclP2pTaskParts
@@ -32,6 +33,10 @@ ASSERT_HOOK_MATCHES_PROD(g_getCollNetSupport, ncclGetCollNetSupport);
 ASSERT_HOOK_MATCHES_PROD(g_getRegBuff, ncclGetRegBuff);
 ASSERT_HOOK_MATCHES_PROD(g_rcclEffectiveP2pBatchEnable, rcclEffectiveP2pBatchEnable);
 ASSERT_HOOK_MATCHES_PROD(g_rcclP2pTaskParts, rcclP2pTaskParts);
+ASSERT_HOOK_MATCHES_PROD(g_enqueueCheck, ncclEnqueueCheck);
+ASSERT_HOOK_MATCHES_PROD(g_rcclLogCollInfo, rcclLogCollInfo);
+ASSERT_HOOK_MATCHES_PROD(g_rcclAddonLaunchBegin, rcclAddonLaunchBegin);
+ASSERT_HOOK_MATCHES_PROD(g_rcclAddonLaunchEnd, rcclAddonLaunchEnd);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // Generous default: a deny-everything default would make even a single small task look over budget.
@@ -100,6 +105,22 @@ static ncclResult_t DefaultGetRegBuff(struct ncclComm*, struct ncclTaskColl*, in
 }
 std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getRegBuff = DefaultGetRegBuff;
 
+static ncclResult_t DefaultEnqueueCheck(struct ncclInfo*) { FailLoudUnfaked("enqueue_fakes", "ncclEnqueueCheck"); }
+std::function<ncclResult_t(struct ncclInfo*)> g_enqueueCheck = DefaultEnqueueCheck;
+static void DefaultLogCollInfo(const struct ncclInfo&) { FailLoudUnfaked("enqueue_fakes", "rcclLogCollInfo"); }
+std::function<void(const struct ncclInfo&)> g_rcclLogCollInfo = DefaultLogCollInfo;
+static ncclResult_t DefaultAddonLaunchBegin(struct ncclComm*, hipStream_t, struct rcclAddonLaunchState*) {
+  FailLoudUnfaked("enqueue_fakes", "rcclAddonLaunchBegin");
+}
+std::function<ncclResult_t(struct ncclComm*, hipStream_t, struct rcclAddonLaunchState*)> g_rcclAddonLaunchBegin =
+    DefaultAddonLaunchBegin;
+static ncclResult_t DefaultAddonLaunchEnd(struct ncclComm*, hipStream_t, const struct rcclAddonLaunchState&,
+                                          ncclResult_t) {
+  FailLoudUnfaked("enqueue_fakes", "rcclAddonLaunchEnd");
+}
+std::function<ncclResult_t(struct ncclComm*, hipStream_t, const struct rcclAddonLaunchState&, ncclResult_t)>
+    g_rcclAddonLaunchEnd = DefaultAddonLaunchEnd;
+
 void ResetEnqueueFakes() {
   g_testBudget = DefaultTestBudget;
   g_testBudgetCalls = 0;
@@ -111,6 +132,10 @@ void ResetEnqueueFakes() {
   g_getRegBuff = DefaultGetRegBuff;
   g_rcclEffectiveP2pBatchEnable = DefaultEffectiveP2pBatchEnable;
   g_rcclP2pTaskParts = DefaultP2pTaskParts;
+  g_enqueueCheck = DefaultEnqueueCheck;
+  g_rcclLogCollInfo = DefaultLogCollInfo;
+  g_rcclAddonLaunchBegin = DefaultAddonLaunchBegin;
+  g_rcclAddonLaunchEnd = DefaultAddonLaunchEnd;
 }
 
 int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
@@ -142,6 +167,16 @@ ncclResult_t ncclGetCollNetSupport(struct ncclComm* comm, struct ncclTaskColl* t
 }
 ncclResult_t ncclGetRegBuff(struct ncclComm* comm, struct ncclTaskColl* task, int* out) {
   return g_getRegBuff(comm, task, out);
+}
+
+ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) { return g_enqueueCheck(info); }
+void rcclLogCollInfo(const struct ncclInfo& info) { g_rcclLogCollInfo(info); }
+ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, hipStream_t stream, struct rcclAddonLaunchState* state) {
+  return g_rcclAddonLaunchBegin(comm, stream, state);
+}
+ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, hipStream_t stream, const struct rcclAddonLaunchState& state,
+                                ncclResult_t launchRes) {
+  return g_rcclAddonLaunchEnd(comm, stream, state, launchRes);
 }
 
 // src/tuning/tuning.cc's ncclTuningCompute is defined in tuning_fakes.cc.
