@@ -86,7 +86,7 @@ Panel Config:
           max: 128 * MAX(TCP_TOTAL_CACHE_ACCESSES_sum / (End_Timestamp - Start_Timestamp))
           unit: Gbps
         Cache Hit Rate:
-          avg: COLLECT_SUM(_collect.vl1d_chr_non_rw, _collect.vl1d_hit_atom)
+          avg: NOISE_CLAMP(COLLECT_SUM(_collect.vl1d_chr_non_rw, _collect.vl1d_hit_atom), 100)
           min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
           max: None
           unit: Percent
