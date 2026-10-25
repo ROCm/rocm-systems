@@ -450,7 +450,8 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
   // Anvil SDMA peers are local GPU device ids (gin_anvil_sdma_create). On more
   // than one node the same id is a different GPU, so leave SDMA out before
   // connect instead of letting it become backends[0] or fail the whole GIN
-  // bring-up (AICOMRCCL-3417). Single-node ordering is unchanged.
+  // bring-up (AICOMRCCL-3417). Single-node ordering is unchanged. A node is
+  // SDMA's reach: one host on MI300X, one MNNVL (UALoE) pod on gfx1250.
   for (int i = 0; i < initialNumActiveBackends; i++) {
     struct ncclGinBackendState* backend = &ginState->backends[i];
 #ifdef ENABLE_ROCSHMEM_GIN

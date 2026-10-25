@@ -7890,7 +7890,8 @@ TEST_F(GinProxyNthreadsSplitTests, SplitShare_SecondDevCommPut) {
 // not stay active: its factory addresses peers by local device id. PROXY is
 // the default, a symmetric window registers, a default DevComm and an explicit
 // PROXY DevComm each complete a cross-node put/signal, and an explicit Anvil
-// DevComm is rejected.
+// DevComm is rejected. Two gfx1250 hosts in one MNNVL (UALoE) pod are one
+// node (comm->nNodes == 1); SDMA stays valid there, so the case skips.
 TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodeUnsetType) {
   if (auto reason = mixedBackendTwoNodeSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
   if (auto reason = mpiCoordinatedSkipReason(
@@ -7903,6 +7904,9 @@ TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodeUnsetType) {
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
+  if (auto reason = mpiCoordinatedSkipReason(comm->nNodes < 2, "Both hosts are in one MNNVL (UALoE) pod");
+      !reason.empty())
+    GTEST_SKIP() << reason;
   ASSERT_MPI_EQ(2, comm->nNodes);
 
   ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
