@@ -13,7 +13,7 @@ does its parent.
 import math
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
 import pandas as pd
 
@@ -26,6 +26,7 @@ from utils.metrics.expression import (
     is_composite_avg_formula,
 )
 from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.metrics.noise_clamper import to_noise_clamp
 from utils.metrics.pass_provenance import resolve_weight_counter_column
 
 if TYPE_CHECKING:
@@ -38,6 +39,7 @@ COLLECT_SUM_SPECS_ATTR = "collect_sum_specs"
 COLLECT_RATIO_SPECS_ATTR = "collect_ratio_specs"
 WEIGHTED_AVG_ATTR = "weighted_avg_specs"
 WEIGHTED_AVG_SUBS_ATTR = "weighted_avg_subs"
+COMPOSITE_FINISH_ATTR = "composite_finish"
 METRIC_NAME_COLUMN = "Metric"
 
 
@@ -54,6 +56,7 @@ class CompositeDef:
     refs: List[str]
     weight_meta: Dict[str, Any] = field(default_factory=dict)
     metric_name: str = ""
+    finish: Optional[Tuple[str, float]] = None
 
 
 def _ref_base_name(ref: str) -> str:
@@ -230,8 +233,26 @@ def build_metric_eval_graph(df: pd.DataFrame) -> MetricEvalGraph:
                 )
             )
 
+    finish_by_id = df.attrs.get(COMPOSITE_FINISH_ATTR)
+    if isinstance(finish_by_id, dict):
+        for composite in graph.composites:
+            composite.finish = finish_by_id.get(composite.metric_id)
+
     df.attrs[METRIC_EVAL_GRAPH_ATTR] = graph
     return graph
+
+
+def _finish_composite_value(
+    value: Union[float, str],
+    finish: Optional[Tuple[str, float]],
+) -> Union[float, str]:
+    """Round or floor a finished parent value, after its pieces combine."""
+    if finish is None or not isinstance(value, (int, float)) or math.isnan(value):
+        return value
+    func, arg = finish
+    if func == "ROUND":
+        return float(round(value, int(arg)))
+    return float(to_noise_clamp(value, arg))
 
 
 def _eval_built_expr_on_frame(
@@ -592,7 +613,9 @@ def apply_composite_metrics(
                 )
             else:
                 continue
-            df.at[composite.metric_id, avg_col] = result
+            df.at[composite.metric_id, avg_col] = _finish_composite_value(
+                result, composite.finish
+            )
 
 
 def composite_parent_ids(df: pd.DataFrame) -> Set[str]:
