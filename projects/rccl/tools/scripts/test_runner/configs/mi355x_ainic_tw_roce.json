@@ -783,10 +783,11 @@
       "num_nodes": 2,
       "num_gpus": 1,
       "timeout": 1200,
-      "description": "Shared env for remote GDR flush flag suites. Carries no tests: extends merges test lists, so children would inherit them.",
+      "description": "Shared env for remote GDR flush flag suites. Carries no tests: extends merges test lists, so children would inherit them. NCCL_NET=IB: with RCCL_AINIC_ROCE=1 an unset NCCL_NET selects IB-CAST, which keeps the flag off.",
       "env_variables": {
         "RCCL_IB_GDR_FLUSH_FLAG": "1",
-        "NCCL_IB_ADAPTIVE_ROUTING": "0"
+        "NCCL_IB_ADAPTIVE_ROUTING": "0",
+        "NCCL_NET": "IB"
       }
     },
     "net_ib_gdr_flush_flag": {
@@ -834,7 +835,8 @@
       "env_variables": {
         "RCCL_IB_GDR_FLUSH_FLAG": "1",
         "RCCL_IB_GDR_FLUSH_FLAG_TUNE": "1",
-        "NCCL_IB_ADAPTIVE_ROUTING": "0"
+        "NCCL_IB_ADAPTIVE_ROUTING": "0",
+        "NCCL_NET": "IB"
       },
       "tests": [
         { "name": "GdrFlushFlagTune_sendrecv_LL128", "binary": "sendrecv_perf", "env_variables": { "NCCL_PROTO": "LL128" }, "description": "Send/recv LL128 on the 1x buffer while collectives use 4x." },
