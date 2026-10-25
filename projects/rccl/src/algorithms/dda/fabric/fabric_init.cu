@@ -195,6 +195,12 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   CUDACHECKGOTO(cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), res, fail);
   CUDACHECKGOTO(cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)), res, fail);
 
+  // cudaMemset on device memory is host-asynchronous on the null stream, which does not order
+  // against non-blocking user streams. Both zero fills must complete on every rank before any
+  // rank's first LL kernel reads its epoch cells or writes packets into a peer's scratch.
+  CUDACHECKGOTO(cudaStreamSynchronize(nullptr), res, fail);
+  NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, comm->rank, nRanks, 0xDDA0), res, fail);
+
   // Success: hand ownership of every resource to comm.
   comm->ddaFabricMemHandler = handler;
   comm->ddaScratch = scratch;
