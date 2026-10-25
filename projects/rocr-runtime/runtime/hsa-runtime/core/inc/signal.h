@@ -266,9 +266,20 @@ class SignalBatch {
   void AcquireSlot() { references_++; }
   void ReleaseSlot(SharedSignal* slot);
 
+  static __forceinline bool AnyHostShadowed() {
+    return num_shadowed_arenas_.load(std::memory_order_relaxed) != 0;
+  }
+
+  /// @brief Resolves @p handle from host memory when it names a slot of an arena the host
+  /// reaches across the bus, where reading the slot's id and core_signal would cost a bus round
+  /// trip each. Returns false when @p handle is in no such arena; otherwise sets @p member,
+  /// to nullptr when the member has been destroyed.
+  static bool FindShadowedMember(uint64_t handle, Signal** member);
+
  private:
-  SignalBatch(void* arena, bool host_access_via_hdp)
+  SignalBatch(void* arena, uint32_t count, bool host_access_via_hdp)
       : arena_(arena),
+        count_(count),
         host_access_via_hdp_(host_access_via_hdp),
         references_(1),
         destroyed_(false) {}
@@ -280,9 +291,19 @@ class SignalBatch {
 
   void DropReference();
 
+  void RegisterShadow();
+  void UnregisterShadow();
+
+  static std::atomic<uint32_t> num_shadowed_arenas_;
+
   Check<0x5B1A7C3E9D2F4861> id_;
   void* const arena_;
+  const uint32_t count_;
   const bool host_access_via_hdp_;
+
+  /// Host copy of each slot's core_signal, cleared when the member is destroyed. Only
+  /// allocated for arenas the host reaches across the bus.
+  std::unique_ptr<std::atomic<Signal*>[]> shadow_members_;
 
   /// One for the batch handle plus one per live member object.
   std::atomic<uint32_t> references_;
@@ -368,6 +389,12 @@ class Signal {
   /// this interface class object.
   static __forceinline Signal* Convert(hsa_signal_t signal) {
     if (signal.handle == 0) throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "");
+    Signal* member;
+    if (SignalBatch::AnyHostShadowed() && SignalBatch::FindShadowedMember(signal.handle, &member)) {
+      if (member == nullptr)
+        throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_SIGNAL, "Signal handle is invalid.");
+      return member;
+    }
     SharedSignal* shared = SharedSignal::Convert(signal);
     if (!shared->IsValid())
       throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_SIGNAL, "Signal handle is invalid.");
@@ -379,6 +406,15 @@ class Signal {
     } else {
       return shared->core_signal;
     }
+  }
+
+  /// @brief Non-throwing handle check for APIs that skip invalid signals.
+  static bool IsValidHandle(hsa_signal_t signal) {
+    if (signal.handle == 0) return false;
+    Signal* member;
+    if (SignalBatch::AnyHostShadowed() && SignalBatch::FindShadowedMember(signal.handle, &member))
+      return member != nullptr;
+    return SharedSignal::Convert(signal)->IsValid();
   }
 
   static Signal* DuplicateHandle(hsa_signal_t signal) {
