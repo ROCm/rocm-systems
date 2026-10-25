@@ -5172,6 +5172,38 @@
       "num_ranks": 8,
       "num_gpus": 8
     },
+    "dda_fabric_all_gather_ll128_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1"
+      },
+      "tests": [
+        {
+          "name": "DDA_Fabric_AllGather_LL128",
+          "description": "DDA fabric AllGather LL128 tier: smallest size, whole slices, one size per block-size band checked in the launch log, RCCL_DDA_FABRIC_MAXBLOCKS=8 so each warp walks many slices, in-place; four calls per size with fresh data, each checked to launch LL128",
+          "test_filter": "DdaMPI_AllGatherLL128.*"
+        }
+      ]
+    },
+    "dda_fabric_all_gather_ll128_2rank": {
+      "extends": "dda_fabric_all_gather_ll128_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "dda_fabric_all_gather_ll128_4rank": {
+      "extends": "dda_fabric_all_gather_ll128_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "dda_fabric_all_gather_ll128_8rank": {
+      "extends": "dda_fabric_all_gather_ll128_base",
+      "num_ranks": 8,
+      "num_gpus": 8
+    },
     "dda_fabric_allreduce_ll_base": {
       "extends": "default",
       "is_gtest": true,
@@ -6003,6 +6035,24 @@
       "name": "DDA Fabric ReduceScatter LL/LL128 - 8-Rank",
       "description": "DDA fabric ReduceScatter LL and LL128 tiers on 8 GPUs, unrolled NRANKS_CT=8 kernel. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_reduce_scatter_8rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric AllGather LL128 - 2-Rank",
+      "description": "DDA fabric AllGather LL128 tier on 2 GPUs, runtime-nRanks kernel (NRANKS_CT 0). Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_all_gather_ll128_2rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric AllGather LL128 - 4-Rank",
+      "description": "DDA fabric AllGather LL128 tier on 4 GPUs, unrolled NRANKS_CT=4 kernel. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_all_gather_ll128_4rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric AllGather LL128 - 8-Rank",
+      "description": "DDA fabric AllGather LL128 tier on 8 GPUs, unrolled NRANKS_CT=8 kernel. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_all_gather_ll128_8rank",
       "enabled": true
     },
     {

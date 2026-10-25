@@ -223,6 +223,7 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_PassesBuffersBytesEpochSlicesAnd
 
 // A warp per slice: 512 threads give 16 warps, so a column grows past one block at 17 slices.
 TEST_F(DdaAllGatherFabricLL128Microtest, Launch_BlocksPerPeerFollowSlicesCappedByShareOfMaxBlocks) {
+  params_["RCCL_DDA_LL128_AG_THREADS"] = 512;
   const std::pair<size_t, unsigned> cases[] = {
       {4, 1}, {16 * kSliceData / 4, 1}, {17 * kSliceData / 4, 2}, {100 * 16 * kSliceData / 4, 85}};
   for (const auto& [count, bpp] : cases) {
@@ -245,9 +246,10 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_MaxBlocksBelowPeerCountStillGive
   EXPECT_EQ(RunOne(1u << 20).grid.y, 2u);
 }
 
+// An unset or invalid override picks the size from the pushed bytes: 128 threads for this message.
 TEST_F(DdaAllGatherFabricLL128Microtest, Launch_ThreadsOverrideMustBeAWarpMultipleUpTo1024) {
-  const std::pair<int64_t, unsigned> cases[] = {{256, 256}, {32, 32}, {1024, 1024}, {16, 512},
-                                                {48, 512},  {1056, 512}, {0, 512}, {-32, 512}};
+  const std::pair<int64_t, unsigned> cases[] = {{256, 256}, {32, 32}, {1024, 1024}, {16, 128},
+                                                {48, 128},  {1056, 128}, {0, 128}, {-32, 128}};
   for (const auto& [env, threads] : cases) {
     params_["RCCL_DDA_LL128_AG_THREADS"] = env;
     EXPECT_EQ(RunOne(4).block.x, threads) << "DDA_LL128_AG_THREADS " << env;
@@ -258,7 +260,21 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_ThreadsOverrideMustBeAWarpMultip
   EXPECT_EQ(RunOne(8 * kSliceData / 4).grid.y, 1u);
 }
 
+// Without an override the block size follows the bytes each rank pushes, (nRanks - 1) x per-rank bytes:
+// 128 threads up to 4 MiB, 256 up to 16 MiB, 512 above.
+TEST_F(DdaAllGatherFabricLL128Microtest, Launch_ThreadsFollowPushedBytes) {
+  for (int nRanks : {5, 9}) {
+    comm().nRanks = nRanks;
+    const size_t small = (4u << 20) / (nRanks - 1) / 4, mid = (16u << 20) / (nRanks - 1) / 4;  // floats at each edge
+    const std::pair<size_t, unsigned> cases[] = {{4, 128}, {small, 128}, {small + 4, 256}, {mid, 256}, {mid + 4, 512}};
+    for (const auto& [count, threads] : cases) {
+      EXPECT_EQ(RunOne(count).block.x, threads) << "nRanks " << nRanks << ", per-rank bytes " << count * 4;
+    }
+  }
+}
+
 TEST_F(DdaAllGatherFabricLL128Microtest, Blocks_SizedOnBytesNotElements) {
+  params_["RCCL_DDA_LL128_AG_THREADS"] = 512;
   EXPECT_EQ(ncclAllGatherDdaFabricLL128Blocks(mock_.get(), 17 * kSliceData / 2, ncclFloat16), 6u);
   EXPECT_EQ(ncclAllGatherDdaFabricLL128Blocks(mock_.get(), 17 * kSliceData / 2, ncclFloat32), 9u);
 }

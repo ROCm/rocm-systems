@@ -1327,14 +1327,14 @@ constexpr size_t kKiB = 1024, kMiB = 1024 * 1024;
 rcclArchThresholds MakeRankScaledTable() {
   rcclArchThresholds t{};
   t.ddaLLMax[ncclFuncAllReduce] = 32 * kMiB;
-  t.ddaLLMax[ncclFuncAllGather] = 128 * kKiB;
+  t.ddaLLMax[ncclFuncAllGather] = 256 * kKiB;
   t.ddaLLMax[ncclFuncReduceScatter] = 1 * kMiB;
   t.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
   t.ddaLL128Max[ncclFuncAllGather] = 128 * kMiB;
   t.ddaLL128Max[ncclFuncReduceScatter] = 64 * kMiB;
   t.ddaVmmMax[ncclFuncAllReduce] = 16 * kMiB;
   t.ddaLLMaxPerRank[ncclFuncAllReduce] = 1 * kMiB;
-  t.ddaLLMaxPerRank[ncclFuncAllGather] = 16 * kKiB;
+  t.ddaLLMaxPerRank[ncclFuncAllGather] = 32 * kKiB;
   t.ddaLLMaxPerRank[ncclFuncReduceScatter] = 256 * kKiB;
   t.ddaLL128MaxPerRank[ncclFuncAllGather] = 16 * kMiB;
   t.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 2 * kMiB;
@@ -1351,7 +1351,7 @@ rcclArchThresholds MakeRankScaledTable() {
   t.arTreeLL128Unlimited = true;
   t.arTreeMaxPerRank = 1 * kMiB;
   t.arTreeLLMaxPerRank = 32 * kKiB;
-  t.agRingLL128MaxPerRank = 64 * kMiB;
+  t.agRingLL128MaxPerRank = 32 * kMiB;
   t.rsRingLL128MinPerRank = 512 * kKiB;
   t.rsRingLL128MaxPerRank = 8 * kMiB;
   t.rsRingLL128MaxPerRank1B = 32 * kMiB;
@@ -1521,16 +1521,16 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250TreeAllReduceLL128Ab
       });
 }
 
-// AllGather Ring keeps LL128 to 64 MiB per rank on 8+ rank single-node gfx1250 comms
+// AllGather Ring keeps LL128 to 32 MiB per rank on 8+ rank single-node gfx1250 comms
 // (model: 16 MiB); two-node and 4-rank comms keep the model.
-TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250AllGatherRingLL128To64MiBPerRank) {
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250AllGatherRingLL128To32MiBPerRank) {
   RUN_ISOLATED_TEST(
-      "Wrap_UpdateCollectiveProtocol_Gfx1250AllGatherRingLL128To64MiBPerRank",
+      "Wrap_UpdateCollectiveProtocol_Gfx1250AllGatherRingLL128To32MiBPerRank",
       []() {
         SetMicroEnvAbsent("NCCL_PROTO");
         ncclComm* comm = MakeGfx1250ProtocolComm(16);
-        EXPECT_EQ(NCCL_PROTO_LL128, RingProtocol(comm, ncclFuncAllGather, 64 * kMiB));
-        EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncAllGather, 64 * kMiB + 16));
+        EXPECT_EQ(NCCL_PROTO_LL128, RingProtocol(comm, ncclFuncAllGather, 32 * kMiB));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncAllGather, 32 * kMiB + 16));
         comm->nNodes = 2;
         EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncAllGather, 16 * kMiB + 16)) << "two nodes";
         comm->nNodes = 1;
@@ -5997,13 +5997,14 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
         comm->archThresholds = Gfx1250Table();
         comm->nRanks = 7;
         EXPECT_EQ(32 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
-        EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
+        EXPECT_EQ(256 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
         EXPECT_EQ(1 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(128 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather));
         EXPECT_EQ(64 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(0u, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 8;
         EXPECT_EQ(8 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
-        EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
+        EXPECT_EQ(256 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
         EXPECT_EQ(2 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(128 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather));
         EXPECT_EQ(16 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
@@ -6011,6 +6012,7 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
         comm->nRanks = 32;
+        EXPECT_EQ(1 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllGather)) << "32 x 32 KiB";
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather)) << "clipped";
         EXPECT_EQ(64 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         // The entry gate admits the widest tier, so it scales too.

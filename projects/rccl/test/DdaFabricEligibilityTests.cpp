@@ -472,9 +472,6 @@ size_t ddaLLAgPerRankCapBytes(int nRanks, size_t scratchBytes)
         16);
     return slotPkts * 8;
 }
-
-// DDA_LL_THRESHOLD default, on the whole gathered message.
-constexpr size_t kDdaLLThresholdBytes = 64u * 1024u;
 } // namespace
 
 TEST_F(DdaFabricEligibilityTest, AllGatherLL_EligibleFloat32)
@@ -556,29 +553,42 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL_UnalignedCount)
         mockComm_.get(), sendbuff_, recvbuff_, 2, ncclFloat32));
 }
 
+// The cap comes from the gfx1250 table the fixture's archName selects: 256 KiB total
+// below 8 ranks, nRanks x 32 KiB from 8.
 TEST_F(DdaFabricEligibilityTest, AllGatherLL_AtThresholdEligible)
 {
-    const size_t perRankBytes = kDdaLLThresholdBytes / (size_t)mockComm_.comm.nRanks;
-    EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(
-        mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
+    for (int nRanks : {4, 8})
+    {
+        mockComm_.comm.nRanks = nRanks;
+        const size_t totalCap = rcclDdaLLThreshold(mockComm_.get(), ncclFuncAllGather);
+        EXPECT_EQ(totalCap, 256u * 1024u) << nRanks;
+        const size_t perRankBytes = totalCap / (size_t)nRanks;
+        EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(
+            mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32)) << nRanks;
+    }
 }
 
 TEST_F(DdaFabricEligibilityTest, AllGatherLL_PastThresholdRejected)
 {
-    const size_t perRankBytes = kDdaLLThresholdBytes / (size_t)mockComm_.comm.nRanks + 16;
-    EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
-        mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
+    for (int nRanks : {4, 8})
+    {
+        mockComm_.comm.nRanks = nRanks;
+        const size_t totalCap = rcclDdaLLThreshold(mockComm_.get(), ncclFuncAllGather);
+        const size_t perRankBytes = totalCap / (size_t)nRanks + 16;
+        EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
+            mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32)) << nRanks;
+    }
 }
 
 // Scratch small enough that the slot, not the threshold, is the binding limit:
 // at 128 KiB and 8 ranks a slot holds 4 KiB of payload while the threshold still
-// allows 8 KiB. Exactly filling the slot is admitted.
+// allows 32 KiB. Exactly filling the slot is admitted.
 TEST_F(DdaFabricEligibilityTest, AllGatherLL_PerRankSlotExactlyFits)
 {
     mockComm_.comm.ddaScratchBytes = 128 * 1024;
     const size_t capBytes =
         ddaLLAgPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes);
-    ASSERT_LT(capBytes * (size_t)mockComm_.comm.nRanks, kDdaLLThresholdBytes);
+    ASSERT_LT(capBytes * (size_t)mockComm_.comm.nRanks, rcclDdaLLThreshold(mockComm_.get(), ncclFuncAllGather));
     EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, capBytes / sizeof(float), ncclFloat32));
 }
@@ -590,7 +600,8 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL_PerRankSlotOverflow)
     mockComm_.comm.ddaScratchBytes = 128 * 1024;
     const size_t capBytes =
         ddaLLAgPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes);
-    ASSERT_LT((capBytes + 16) * (size_t)mockComm_.comm.nRanks, kDdaLLThresholdBytes);
+    ASSERT_LT((capBytes + 16) * (size_t)mockComm_.comm.nRanks,
+              rcclDdaLLThreshold(mockComm_.get(), ncclFuncAllGather));
     EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, (capBytes + 16) / sizeof(float), ncclFloat32));
 }
@@ -757,9 +768,13 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL128_ScratchTooSmallForOneSlice)
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
 
+// Below 8 ranks the gfx1250 table caps the whole message at 128 MiB; the rank-scaled
+// caps from 8 ranks are covered by DdaFabricLL128EligibilityTest.
 TEST_F(DdaFabricEligibilityTest, AllGatherLL128_AtThresholdEligible)
 {
-    constexpr size_t totalCap = 64u * 1024u * 1024u;  // DDA_LL128_THRESHOLD default
+    mockComm_.comm.nRanks = 4;
+    const size_t totalCap = rcclDdaLL128Threshold(mockComm_.get(), ncclFuncAllGather);
+    EXPECT_EQ(totalCap, 128u * 1024u * 1024u);
     const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks;
     EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
@@ -767,7 +782,8 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL128_AtThresholdEligible)
 
 TEST_F(DdaFabricEligibilityTest, AllGatherLL128_PastThresholdRejected)
 {
-    constexpr size_t totalCap = 64u * 1024u * 1024u;
+    mockComm_.comm.nRanks = 4;
+    const size_t totalCap = rcclDdaLL128Threshold(mockComm_.get(), ncclFuncAllGather);
     const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks + 16;
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
@@ -1560,7 +1576,6 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PastThresholdRejected)
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
 }
-
 
 // ReduceScatter LL
 //
