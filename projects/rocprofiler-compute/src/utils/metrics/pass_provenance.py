@@ -544,7 +544,7 @@ def resolve_weight_counter_column(
     so analysis does not read the other replay. None means the pass is
     unknown and the composite must stay unset.
     """
-    if pass_layout is None or not pass_layout.pass_keys:
+    if pass_layout is None or not pass_layout.is_multi_pass:
         return weight_counter
     pass_key = bound_pass_for_metric(df, sub_metric_name)
     if pass_key is None:

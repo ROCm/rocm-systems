@@ -1019,6 +1019,19 @@ def test_weight_only_in_another_pass_is_not_the_bare_column() -> None:
     assert bound == "TCC_EA0_RDREQ_sum@pass:pmc_perf_1"
 
 
+def test_weight_counter_on_a_single_pass_layout_is_the_bare_column() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0",),
+        counters_by_pass={"pmc_perf_0": frozenset({"TCC_EA0_RDREQ_sum", "SQ_A"})},
+        duplicated=frozenset(),
+    )
+    frame = pd.DataFrame({"Metric": ["read_sub"]}, index=["1"])
+    bound = resolve_weight_counter_column(
+        "TCC_EA0_RDREQ_sum", "read_sub", frame, layout
+    )
+    assert bound == "TCC_EA0_RDREQ_sum"
+
+
 def test_bind_moves_timestamps_onto_the_pmc_chosen_pass() -> None:
     layout = PassLayout(
         pass_keys=("pmc_perf_0", "pmc_perf_1"),
