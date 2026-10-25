@@ -3592,6 +3592,11 @@
           "test_filter": "DdaMPI_AllReduce.StreamAlternationUngrouped"
         },
         {
+          "name": "DDA_BitIdenticalAcrossRanks_8Ranks",
+          "description": "Float and bf16 AllReduce at 256 KiB to 4 MiB returns bit-identical output on every rank; order-sensitive input catches a rank-dependent summation order",
+          "test_filter": "DdaMPI_AllReduce.BitIdenticalAcrossRanksDefaultSelection"
+        },
+        {
           "name": "DDA_CapturedForkJoin_8Ranks",
           "description": "A captured AllReduce keeps its done event inside the graph: a copy forked off comm->doneEvent and joined back adds exactly one node and one edge",
           "test_filter": "DdaMPI_AllReduce.CapturedForkJoinStaysInsideGraph"
@@ -4774,7 +4779,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
-          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv:GinMPIDeviceTests.Log_ReportsUsedBackend",
           "timeout": 600
         },
         {
@@ -4835,6 +4840,11 @@
             "NCCL_IB_QPS_PER_CONNECTION": "4",
             "RCCL_IB_QPS_PER_P2P": "2"
           }
+        },
+        {
+          "name": "GIN_Log_ReportsUsedBackend",
+          "description": "GIN logs the backend each DevComm uses (IB proxy, NCCL_GIN_TYPE=2)",
+          "test_filter": "GinMPIDeviceTests.Log_ReportsUsedBackend"
         }
       ]
     },
@@ -5158,6 +5168,11 @@
           "name": "Symk_AllGatherStoreData",
           "description": "Forced AllGather_ST with position-dependent data across its byte, 4-byte and 16-byte tiers and in-place",
           "test_filter": "SymmetricKernelCorruptionTest.AllGatherST_PositionDependentData"
+        },
+        {
+          "name": "Symk_GroupedAllGatherVaryingSizes",
+          "description": "Four AllGathers of different sizes fused in one group, exercising the work-range split; skips without cuMem",
+          "test_filter": "SymmetricKernelCorruptionTest.GroupedAllGather_VaryingSizes"
         }
       ]
     }

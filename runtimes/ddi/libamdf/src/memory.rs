@@ -1261,6 +1261,7 @@ pub(crate) unsafe extern "C" fn create(
                 memory::device::MemoryKind::DeviceLocal {
                     host_visible: visible,
                     coherent: false,
+                    extended_coherent: false,
                     uncached: false,
                     contiguous: false,
                 }

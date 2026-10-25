@@ -51,8 +51,19 @@ struct Kernel {
   std::string name;
   /// @brief The PDIs the control code loads; empty if it loads none. A control code may load
   /// several PDIs, or one more than once (MLIR-AIR's loads an empty PDI before and after the
-  /// design runs). Each distinct PDI appears once: sites naming byte-identical PDIs share an
-  /// entry, so it is placed in device memory once.
+  /// design runs). Entries are keyed by the ELF *section* a patch site names, not by byte
+  /// content: two sites naming the same section share one entry and one device placement, but
+  /// two different sections are placed separately even when their bytes are identical.
+  ///
+  /// This was not always true: an earlier version keyed on byte content instead, so two sections
+  /// with identical bytes (e.g. an empty PDI loaded both before and after the design) collapsed to
+  /// one placement at one device address. A kernel built that way dispatched correctly once and
+  /// incorrectly on every dispatch after. Nothing in this reader explains why -- it does not touch
+  /// the firmware or driver layer that actually loads a PDI at an address -- so this is recorded as
+  /// an observed fix, not a diagnosed root cause. Keying by section instead of content does not
+  /// conflict with anything the format document requires: it never asked for content-based merging
+  /// across distinct sections, only that sites naming the *same* section (by name, resolved once by
+  /// `find_pdi_section`) share a copy.
   std::vector<Pdi> pdis;
   /// @brief Control-code bytes.
   std::vector<uint8_t> ctrl_code;

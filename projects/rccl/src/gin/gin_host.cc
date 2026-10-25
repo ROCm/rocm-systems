@@ -430,16 +430,20 @@ end:
       if (ginStateDevComm->ginCtx[commIdx]) backend->ncclGin->destroyContext(ginStateDevComm->ginCtx[commIdx]);
     }
     free(ginStateDevComm);
-    devComm->backendIndex = 0;
-    devComm->ginConnectionCount = 0;
-    devComm->ginContextCount = 0;
-    devComm->ginConnectionStride = 0;
-    devComm->ginConnectionStride_rcp32 = 0;
-    devComm->ginContextStride = 0;
-    memset(devComm->ginNetDeviceTypes, 0, sizeof(devComm->ginNetDeviceTypes));
-    memset(devComm->ginHandles, 0, sizeof(devComm->ginHandles));
+    ncclGinDevCommClearFields(devComm);
   }
   return ret;
+}
+
+void ncclGinDevCommClearFields(struct ncclDevComm* devComm) {
+  devComm->backendIndex = 0;
+  devComm->ginConnectionCount = 0;
+  devComm->ginContextCount = 0;
+  devComm->ginConnectionStride = 0;
+  devComm->ginConnectionStride_rcp32 = 0;
+  devComm->ginContextStride = 0;
+  memset(devComm->ginNetDeviceTypes, 0, sizeof(devComm->ginNetDeviceTypes));
+  for (auto& handle : devComm->ginHandles) handle = nullptr;
 }
 
 ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
@@ -469,6 +473,10 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
     }
 
     if (ncclSuccess == ginDevCommSetupWithBackend(comm, reqs, devComm, deviceCodeVersion, candidate)) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      INFO(NCCL_INIT, "GIN: comm %p rank %d commId 0x%llx using backend %s type %d", comm, comm->rank,
+           (unsigned long long)comm->commHash, candidate->ncclGin->name, candidate->ginType);
+#endif
       return ncclSuccess;
     }
 

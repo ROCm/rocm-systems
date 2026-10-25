@@ -25,6 +25,10 @@ rccl_assert_source_line("${_rccl_src_root}/init.cc"
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
   "NCCL_PARAM(CGAClusterSize, \"CGA_CLUSTER_SIZE\", NCCL_CONFIG_UNDEF_INT)"
   "fakes/comm_fakes.cc: ncclParamCGAClusterSize()")
+rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc"
+  "RCCL_PARAM(DdaEnable, \"DDA_ENABLE\", 1)" "fakes/rccl_wrap_fakes.cc: rcclParamDdaEnable()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rccl_wrap_fakes.cc"
+  "int64_t g_rcclParamDdaEnable = 1" "the DdaEnable fake default")
 # Both arms of the ROCM_VERSION split at enqueue.cc:437-441; enqueue_fakes.cc mirrors both, so pin both.
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "NCCL_PARAM(GraphRegister, \"GRAPH_REGISTER\", 1)"
@@ -218,6 +222,49 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroCollectives -- src/collectives.cc. Own binary: fakes/collectives_fakes.cc, which
+  # most targets link, defines this file's string helpers.
+  set(TEST_MICRO_COLLECTIVES_SOURCE_FILES
+    collectives-test.cc
+    fakes/bootstrap_stubs.cc
+    fakes/ce_fakes.cc
+    fakes/collconfig_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/dda_fakes.cc
+    fakes/dev_runtime_fakes.cc
+    fakes/enqueue_fakes.cc
+    fakes/group_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/nccl_stubs.cc
+    fakes/rccl_wrap_fakes.cc
+    fakes/recorder_fakes.cc
+    fakes/strongstream_stubs.cc
+    fakes/sym_kernels_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroOnerank -- src/device/onerank.cu. Own binary: fakes/sched_stubs.cc fakes
+  # ncclLaunchOneRank.
+  set(TEST_MICRO_ONERANK_SOURCE_FILES
+    onerank-test.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroMgmtTaskEnq -- src/enqueue/mgmt_task_enq.cc. Own binary: it defines
+  # ncclMgmtTaskEnqueue, which fakes/nccl_stubs.cc drops here via RCCL_STUBS_OMIT_ncclMgmtTaskEnqueue.
+  set(TEST_MICRO_MGMT_TASK_ENQ_SOURCE_FILES
+    mgmt-task-enq-test.cc
+    fakes/group_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/nccl_stubs.cc
+    fakes/utils_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1235,6 +1282,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
     DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc"
     DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime_segments.cc"
+    RCCL_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_dev_runtime.cc"
     # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify keeps the name.
     GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/gin.cc"
     GDR_PROBE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/gdr_probe.cc"
@@ -1265,6 +1313,48 @@ target_link_options(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE
   -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fakes/dv_provider_fake_ionic_no_gda.map)
 set_property(TARGET rccl-micro-dv-provider-fake-ionic-no-gda APPEND PROPERTY
   LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/fakes/dv_provider_fake_ionic_no_gda.map")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroCollectives
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroCollectives
+  SOURCES ${TEST_MICRO_COLLECTIVES_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/collectives.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_collectives.yaml")
+# collectives.cc defines a kernel. An empty embedded device binary stands in for the device pass, so the
+# host-only object registers it without referencing a fatbin symbol nothing provides.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary" "")
+target_compile_options(rccl-UnitTestsMicroCollectives PRIVATE
+  "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroOnerank
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroOnerank
+  SOURCES ${TEST_MICRO_ONERANK_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # device/op128.h includes rccl_ptr.h unqualified
+    ${RCCL_HOST_HIPIFY_DIR}/src/device               # common_kernel.h includes "tdm/tdmCopy.h"
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ONERANK_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/device/onerank.cu.cpp"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_onerank.yaml")
+# onerank.cu defines kernels too; see rccl-UnitTestsMicroCollectives.
+target_compile_options(rccl-UnitTestsMicroOnerank PRIVATE
+  "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroMgmtTaskEnq
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroMgmtTaskEnq
+  SOURCES ${TEST_MICRO_MGMT_TASK_ENQ_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    MGMT_TASK_ENQ_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/mgmt_task_enq.cc"
+    RCCL_STUBS_OMIT_ncclMgmtTaskEnqueue  # mgmt_task_enq.cc defines it
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mgmt_task_enq.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity)

@@ -333,6 +333,71 @@ TEST(AieElfParse, ParsesTwoPdisInOneKernel) {
   EXPECT_EQ(k.pdis[1].patch_offsets, std::vector<std::uint32_t>{RelocationOffset(image, 2)});
 }
 
+TEST(AieElfParse, KeepsIdenticalPdiSectionsSeparate) {
+  // Two sites can name sections whose bytes happen to be equal (MLIR-AIR's control code loads the
+  // same empty PDI both before and after the design, as two separate sections). Each site's section
+  // must still get its own entry and so its own device placement: a kernel that shared one
+  // placement across two identical-content sections dispatched correctly once and incorrectly on
+  // every dispatch after.
+  //
+  // Same setup as ParsesTwoPdisInOneKernel, except the renamed section is also pointed at .pdi.1's
+  // own bytes (same offset and size), so its content is identical to .pdi.1's by construction
+  // rather than merely by the spare section's original content happening to differ.
+  auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+
+  const std::uint32_t alias_index = RenameSpareSection(image, ".pdi.2");
+  ASSERT_NE(alias_index, 0u) << "no spare section to rename";
+  const std::uint32_t pdi1_index = FindSection(image, ".pdi.1");
+  ASSERT_NE(pdi1_index, 0u);
+  Elf32_Shdr alias = SectionHeader(image, alias_index);
+  const Elf32_Shdr pdi1 = SectionHeader(image, pdi1_index);
+  alias.sh_offset = pdi1.sh_offset;
+  alias.sh_size = pdi1.sh_size;
+  SetSectionHeader(image, alias_index, alias);
+  ASSERT_EQ(SectionContents(image, ".pdi.2"), SectionContents(image, ".pdi.1"))
+      << "the alias must hold the same bytes, or this test proves nothing";
+
+  // Move and grow .dynstr so it can hold the new symbol name.
+  const std::uint32_t dynstr_index = FindSection(image, ".dynstr");
+  ASSERT_NE(dynstr_index, 0u);
+  Elf32_Shdr dynstr = SectionHeader(image, dynstr_index);
+  std::vector<std::uint8_t> strings(image.begin() + dynstr.sh_offset,
+                                    image.begin() + dynstr.sh_offset + dynstr.sh_size);
+  const std::uint32_t new_name_offset = static_cast<std::uint32_t>(strings.size());
+  strings.insert(strings.end(), std::begin(".pdi.2"), std::end(".pdi.2"));
+  dynstr.sh_offset = static_cast<Elf32_Off>(image.size());
+  dynstr.sh_size = static_cast<Elf32_Word>(strings.size());
+  image.insert(image.end(), strings.begin(), strings.end());
+  SetSectionHeader(image, dynstr_index, dynstr);
+
+  // Rename dynamic symbol 3 (the second kernel argument) to ".pdi.2". It already lives in the
+  // control-code section, which is what the reader requires of a patched symbol.
+  const std::uint32_t dynsym_index = FindSection(image, ".dynsym");
+  ASSERT_NE(dynsym_index, 0u);
+  const Elf32_Shdr dynsym = SectionHeader(image, dynsym_index);
+  ASSERT_GE(dynsym.sh_size, 4 * sizeof(Elf32_Sym));
+  std::memcpy(
+      image.data() + dynsym.sh_offset + 3 * sizeof(Elf32_Sym) + offsetof(Elf32_Sym, st_name),
+      &new_name_offset, sizeof(new_name_offset));
+
+  // Point the second argument relocation at it, as a PDI address.
+  ASSERT_TRUE(MutateRelocation(image, /*index=*/2, /*sym=*/3, kAddress64));
+
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+  const auto& k = kernels.begin()->second;
+  ASSERT_EQ(k.pdis.size(), 2u);
+  EXPECT_EQ(k.pdis[0].bytes, SectionContents(image, ".pdi.1"));
+  EXPECT_EQ(k.pdis[0].patch_offsets, std::vector<std::uint32_t>{RelocationOffset(image, 0)});
+  EXPECT_EQ(k.pdis[1].bytes, SectionContents(image, ".pdi.2"));
+  EXPECT_EQ(k.pdis[1].patch_offsets, std::vector<std::uint32_t>{RelocationOffset(image, 2)});
+  EXPECT_EQ(k.pdis[0].bytes, k.pdis[1].bytes);
+}
+
 TEST(AieElfParse, RejectsAmbiguousPdiName) {
   // PDI sections are not group members, so a relocation names its PDI by section name alone. A
   // name shared by sections with different contents has no right answer, so it is refused rather
