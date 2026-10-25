@@ -226,6 +226,13 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct 
   info->algorithm = NCCL_ALGO_TREE;
 }
 
+// The remote GDR flush flag tuning was measured on gfx950 with 8 GPUs per node only. comm->ibGdrFlushFlag is the
+// same on every rank, so every rank makes the same choice.
+static bool rcclRemoteFlushTuned(struct ncclComm* comm) {
+  return comm->ibGdrFlushFlag && comm->nRanks == comm->nNodes * 8 &&
+         IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+}
+
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info) {
   // Honor user input for protocol choice
   const bool userProtocolInput = rcclNcclProtoEnvIsSet();
@@ -302,10 +309,12 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
             }
           }
         }
-        // With the scaled collective LL128 buffer (rcclScaleCollLl128BuffSize), ReduceScatter Ring/LL128 beats
-        // Ring/Simple up to 7 MiB per rank on 2-16 nodes (+10% at 7 MiB); Ring/Simple wins from 8 MiB. With the
-        // default buffer Ring/LL128 needs a second loop there and loses.
-        if (info->func == ncclFuncReduceScatter && comm->buffSizes[NCCL_PROTO_LL128] > comm->p2pLl128BuffSize)
+        // With RCCL_IB_GDR_FLUSH_FLAG_TUNE=1 (the scaled collective LL128 buffer, rcclScaleCollLl128BuffSize),
+        // ReduceScatter on gfx950 with 8 GPUs per node uses Ring/LL128 up to 7 MiB per rank: it beats Ring/Simple
+        // there on 2-16 nodes (+10% at 7 MiB); Ring/Simple wins from 8 MiB. With the default buffer Ring/LL128 needs
+        // a second loop there and loses.
+        if (info->func == ncclFuncReduceScatter && comm->buffSizes[NCCL_PROTO_LL128] > comm->p2pLl128BuffSize &&
+            rcclRemoteFlushTuned(comm))
           ll128Max = std::max<uint64_t>(ll128Max, 7 << 20);
         if (sizePerRank <= ll128Max && sizePerRank > ll128Min) {
           info->protocol = NCCL_PROTO_LL128;
@@ -332,12 +341,6 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
 RCCL_PARAM(IbGdrFlushFlagTune, "IB_GDR_FLUSH_FLAG_TUNE", 0);
 static constexpr int kRemoteFlushLl128BuffScale = 4;
 static constexpr int kRemoteFlushArRingSimpleNchannels = 48;
-
-// comm->ibGdrFlushFlag is the same on every rank, so every rank sizes the LL128 buffer the same way.
-static bool rcclRemoteFlushTuned(struct ncclComm* comm) {
-  return comm->ibGdrFlushFlag && comm->nRanks == comm->nNodes * 8 &&
-         IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
-}
 
 static bool rcclRemoteFlushTuneNodes(struct ncclComm* comm) {
   return (comm->nNodes >= 2 && comm->nNodes <= 8) || comm->nNodes == 16;

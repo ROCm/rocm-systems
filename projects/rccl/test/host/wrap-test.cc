@@ -1668,6 +1668,36 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_ScaledLl128BufferReduceScat
         EXPECT_EQ(NCCL_PROTO_LL128, protocolAt(k7M));
         EXPECT_EQ(NCCL_PROTO_SIMPLE, protocolAt(k7M + 1));
         DeleteCommWithArch(comm);
+
+        // Only measured on gfx950 with 8 GPUs per node: a scaled buffer elsewhere (for example a child comm that
+        // took its parent's sizes) keeps the tuning model's limit.
+        struct Case {
+          const char* what;
+          const char* arch;
+          int nNodes, nRanks;
+          bool gdrFlushFlag;
+        };
+        for (const Case& c : {Case{"4 GPUs per node", "gfx950", 16, 64, true},
+                              Case{"flag off", "gfx950", 16, 128, false},
+                              Case{"gfx942", "gfx942", 16, 128, true}}) {
+          comm = MakeRemoteFlushTuneComm(c.nNodes, c.nRanks, c.gdrFlushFlag);
+          if (strcmp(c.arch, "gfx950") != 0) {
+            DeleteCommWithArch(comm);
+            comm = MakeRemoteFlushComm(c.arch, c.nNodes, c.nRanks, c.gdrFlushFlag);
+            comm->ll128LineElems = 8;
+            comm->ll128DataElems = 7;
+            comm->topo->ll128Enabled = true;
+          }
+          comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 0;
+          comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 0;
+          comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 0;
+          comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = 6 << 20;
+          comm->p2pLl128BuffSize = kLl128BuffSize;
+          comm->buffSizes[NCCL_PROTO_LL128] = 4 * kLl128BuffSize;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, protocolAt(k7M)) << c.what;
+          EXPECT_EQ(NCCL_PROTO_LL128, protocolAt(6 << 20)) << c.what << ": the tuning model's limit still applies";
+          DeleteCommWithArch(comm);
+        }
       });
 }
 #endif  // ENABLE_LL128
