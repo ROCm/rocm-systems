@@ -1770,6 +1770,12 @@ protected:
 inline Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
 inline const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
 
+template <GpuIsa Isa>
+std::string IsaWavefront<Isa>::disassemble_instruction(std::span<const uint32_t> encoding,
+                                                       uint64_t pc) const {
+  return this->cu_.disassemble_instruction(encoding, pc);
+}
+
 inline InstructionCache &InstructionComputeUnitView::instruction_cache() {
   return raw_cu().instruction_cache();
 }
