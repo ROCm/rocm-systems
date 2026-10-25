@@ -5380,14 +5380,6 @@
           }
         },
         {
-          "name": "UBR_MultiSegment_Symmetric_LsaGin",
-          "description": "Cross-node ReduceScatter over multi-segment windows (LSA + GIN)",
-          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin",
-          "env_variables": {
-            "NCCL_MULTI_SEGMENT_REGISTER": "1"
-          }
-        },
-        {
           "name": "UBR_MultiSegment_MultiSegmentRegisterOff_SliceSkipsNet",
           "description": "NCCL_MULTI_SEGMENT_REGISTER=0: a one-segment slice of an 8-segment registration skips NET and the AllReduce is correct",
           "test_filter": "UBR_MultiSegment.MultiSegmentRegisterOff_SliceSkipsNet",
@@ -5428,6 +5420,41 @@
           "test_filter": "UBR_MultiSegment.DeepEP_ElasticWindowRegistration",
           "env_variables": {
             "NCCL_SYM_REUSE_SYSMEM_HANDLES": "0"
+          }
+        }
+      ]
+    },
+    "ubr_multisegment_lsagin_rs_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 2,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_NET": "IB",
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
+        "RCCL_TEST_HYBRID_VMM_REQUIRE": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Symmetric_LsaGin",
+          "description": "Cross-node ReduceScatter over multi-segment windows (LSA + GIN)",
+          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "1"
           }
         }
       ]
@@ -5551,6 +5578,12 @@
       "description": "Eight-rank combined intra-node LSA and inter-node GIN coverage (4 ranks per node)",
       "config": "ubr_multisegment_lsagin_multinode",
       "enabled": true
+    },
+    {
+      "name": "Multi-Segment - LSA plus GIN ReduceScatter (Multi-Node, blocked)",
+      "description": "Cross-node ReduceScatter over multi-segment windows. Disabled until PR 12104 lands: the 1024-thread GIN ReduceScatter_RailA2A launch hangs on gfx950 with ROCm 7.0.2.x",
+      "config": "ubr_multisegment_lsagin_rs_multinode",
+      "enabled": false
     },
     {
       "name": "NET Transport - Ethernet (Multi-Node)",
