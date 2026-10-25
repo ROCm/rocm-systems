@@ -89,6 +89,9 @@ typedef enum {
   // Appended rather than grouped with the other Direct entries so existing
   // values stay stable.
   RCCL_DIRECT_ALLTOALL, // AlltoAll as per-peer Send/Recv (no collective kernel)
+  // Reporting only (rcclGetCollImplInfo / rcclSymKGetInfo): a symmetric dispatch that
+  // resolves to a Tensor Data Mover kernel. Live dispatch always tags RCCL_SYMMETRIC.
+  RCCL_SYMMETRIC_TDM,
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
@@ -471,6 +474,11 @@ inline int rcclAllocP2pNetLLBuffers(int cudaArch, int nNodes, int nRanks, int64_
   if (cudaArch == 1250 && enable > 0) return 1;
   return 0;
 }
+// Classifies a non-symmetric window and rejects host VMM across the LSA team (rccl_dev_runtime.cc).
+ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags);
+// GIN MR pointer type for a symmetric segment; host VMM needs DMA-BUF (rccl_dev_runtime.cc).
+ncclResult_t rcclDevrGinSegmentRegType(bool globalHasSysmemSegment, int maxGlobalNumSegments, int* ptrType,
+                                       bool* needDmabuf);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);
