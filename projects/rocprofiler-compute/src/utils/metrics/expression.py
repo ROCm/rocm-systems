@@ -10,7 +10,7 @@ import re
 
 from utils.logger import console_warning
 from utils.utils_common import SUPPORTED_FIELD
-from utils.utils_counter_defs import SUPPORTED_DENOM
+from utils.utils_counter_defs import SUPPORTED_DENOM, extract_counters_and_variables
 
 
 class InvalidExpressionError(ValueError):
@@ -156,14 +156,21 @@ def parse_collect_ratio_parts(formula: str) -> tuple[list[str], list[str]] | Non
     return nums, dens
 
 
+# The cdna built-ins name every PMC that any series' built-ins name, so an
+# extent checked without an arch is not let through by a missing built-in.
+_EXTENT_CHECK_GPU_SERIES = "MI300"
+
+
 def reject_counter_bearing_composite_extents(
     metric_name: str,
     body: dict,
+    gpu_series: str = _EXTENT_CHECK_GPU_SERIES,
 ) -> None:
     """Reject min/max/peak formulas that put PMCs back on a composite parent.
 
     A YAML null min, max, or peak is allowed. A counter-bearing extent is a
-    config error: do not strip it at runtime.
+    config error: do not strip it at runtime. Counters are read the way the
+    perfmon allocator reads them, including the PMCs behind a built-in.
     """
     if not isinstance(body, dict):
         return
@@ -179,11 +186,13 @@ def reject_counter_bearing_composite_extents(
         extent_text = extent.strip()
         if not extent_text or extent_text == "None":
             continue
-        _visited, counters = gen_counter_list(extent)
+        counters, _builtin_vars = extract_counters_and_variables(
+            extent_text, gpu_series, include_supported_denom=False
+        )
         if counters:
             raise ValueError(
                 f"Composite metric {metric_name!r} {extent_key} references "
-                f"counters {counters}; min, max, and peak on COLLECT_SUM, "
+                f"counters {sorted(counters)}; min, max, and peak on COLLECT_SUM, "
                 "COLLECT_RATIO, and WEIGHTED_AVG must not reintroduce a PMC set"
             )
 
@@ -396,77 +405,6 @@ def update_normal_unit_string(equation: str, normal_unit: str) -> str:
         rf"\g<PREFIX> {re.sub('_', ' ', normal_unit)}",
         str(equation),
     )
-
-
-def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
-    function_filter = {
-        "MIN": None,
-        "MAX": None,
-        "AVG": None,
-        "ROUND": None,
-        "TO_INT": None,
-        "GB": None,
-        "STD": None,
-        "GFLOP": None,
-        "GOP": None,
-        "OP": None,
-        "CU": None,
-        "NC": None,
-        "UC": None,
-        "CC": None,
-        "RW": None,
-        "GIOP": None,
-        "GFLOPs": None,
-        "CONCAT": None,
-        "MOD": None,
-    }
-
-    built_in_counter = [
-        "LDS_Per_Workgroup",
-        "Grid_Size",
-        "Workgroup_Size",
-        "Arch_VGPR",
-        "Accum_VGPR",
-        "SGPR",
-        "Scratch_Per_Workitem",
-        "Start_Timestamp",
-        "End_Timestamp",
-    ]
-
-    visited = False
-    counters: list[str] = []
-    if not isinstance(formula, str):
-        return visited, counters
-    if is_composite_avg_formula(formula):
-        return True, []
-    try:
-        tree = ast.parse(
-            formula
-            .replace("$normUnit", "SQ_WAVES")
-            .replace("$denom", "SQ_WAVES")
-            .replace(
-                "$numActiveCUs",
-                "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
-                "$GRBM_GUI_ACTIVE_PER_XCD})), 0) / $maxWavesPerCU) * 8) + "
-                "MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
-                "$GRBM_GUI_ACTIVE_PER_XCD)), 0), $maxWavesPerCU), 8)), $numCU))",
-            )
-            .replace("$", "")
-        )
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Name):
-                val = (
-                    str(node.id)[:-4] if str(node.id).endswith("_sum") else str(node.id)
-                )
-                if val.isupper() and val not in function_filter:
-                    counters.append(val)
-                    visited = True
-                if val in built_in_counter:
-                    visited = True
-    except Exception:
-        pass
-
-    return visited, counters
 
 
 def build_metric_value_string(
