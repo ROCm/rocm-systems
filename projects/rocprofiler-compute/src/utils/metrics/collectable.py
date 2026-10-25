@@ -595,5 +595,19 @@ def apply_composite_metrics(
             df.at[composite.metric_id, avg_col] = result
 
 
+def composite_parent_ids(df: pd.DataFrame) -> Set[str]:
+    """Metric ids of the WEIGHTED_AVG, COLLECT_SUM, and COLLECT_RATIO parents."""
+    parent_ids: Set[str] = set()
+    for attr in (
+        WEIGHTED_AVG_SUBS_ATTR,
+        COLLECT_SUM_SPECS_ATTR,
+        COLLECT_RATIO_SPECS_ATTR,
+    ):
+        specs = df.attrs.get(attr)
+        if isinstance(specs, dict):
+            parent_ids.update(str(metric_id) for metric_id in specs)
+    return parent_ids
+
+
 def collectable_row_names_from_graph(df: pd.DataFrame) -> Set[str]:
     return build_metric_eval_graph(df).collectable_row_names

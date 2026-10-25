@@ -8,7 +8,7 @@ import warnings
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
-from typing import Any, DefaultDict, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Any, DefaultDict, Dict, List, NamedTuple, Optional, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -75,12 +75,13 @@ from utils.metrics.aggregation import (
     to_std,
     to_sum,
 )
+from utils.metrics.collectable import composite_parent_ids
 from utils.metrics.common import EVAL_BUILTINS, ValuDualIssueDetector
 from utils.metrics.evaluation_pipeline import (
     evaluate_metric_composites,
     overlay_composite_expression_values,
 )
-from utils.metrics.expression import transform_expression
+from utils.metrics.expression import is_composite_avg_formula, transform_expression
 from utils.metrics.metric_evaluator import rows_for_expression
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
@@ -234,29 +235,68 @@ def _composite_number(value: object) -> Optional[float]:
     return float(value)
 
 
+def _roofline_metric_id(roofline_df: pd.DataFrame, metric_name: str) -> Optional[str]:
+    if "Metric" not in roofline_df.columns:
+        return None
+    metric_ids = roofline_df.index[roofline_df["Metric"] == metric_name]
+    if not len(metric_ids):
+        return None
+    return str(metric_ids[0])
+
+
 def _roofline_point_values(
     roofline_df: pd.DataFrame,
-    names: dict[str, str],
-    expressions: dict[str, object],
-    filled: dict[tuple[object, str], object],
+    names: Dict[str, str],
+    expressions: Dict[str, object],
+    filled: Dict[Tuple[object, str], object],
     pmc_df: pd.DataFrame,
-    sys_info: dict[str, Any],
-) -> dict[str, Any]:
-    """Roofline points from filled composite parents, else the stored expression."""
-    points: dict[str, Any] = {}
+    sys_info: Dict[str, Any],
+    pass_layout: Optional[PassLayout] = None,
+) -> Dict[str, Any]:
+    """Roofline points from filled composite parents, else one-pass expressions.
+
+    A composite parent that did not fill stays unset. Every other point is
+    read from the one pass that holds its counters, as CLI analyze reads it,
+    and stays unset when no single pass holds them.
+    """
+    points: Dict[str, Any] = {}
+    parent_ids = composite_parent_ids(roofline_df)
+    pending: List[Tuple[str, str, str]] = []
     for key, metric_name in names.items():
-        filled_value = None
-        if "Metric" in roofline_df.columns:
-            metric_ids = roofline_df.index[roofline_df["Metric"] == metric_name]
-            if len(metric_ids):
-                filled_value = _composite_number(filled.get((metric_ids[0], "Value")))
-        if filled_value is not None:
-            points[key] = filled_value
+        metric_id = _roofline_metric_id(roofline_df, metric_name)
+        if metric_id is not None and metric_id in parent_ids:
+            filled_value = _composite_number(filled.get((metric_id, "Value")))
+            if filled_value is not None:
+                points[key] = filled_value
             continue
         expr = expressions.get(metric_name, "")
-        if not isinstance(expr, str) or not expr:
+        if not isinstance(expr, str) or not expr or is_composite_avg_formula(expr):
             continue
-        points[key] = db_analysis.evaluate(metric_name, expr, pmc_df, sys_info)
+        pending.append((key, metric_id or metric_name, expr))
+    if not pending:
+        return points
+
+    expression_df = pd.DataFrame({
+        "metric_id": [metric_id for _key, metric_id, _expr in pending],
+        "value_name": ["Value"] * len(pending),
+        "value": [expr for _key, _metric_id, expr in pending],
+    })
+    used_passes: Set[str] = set()
+    if pass_layout is not None and pass_layout.is_multi_pass:
+        used_passes = bind_expression_dataframe(
+            expression_df,
+            pass_layout,
+            mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"]),
+        )
+    values = db_analysis.calc_dataframe_expressions(
+        pmc_df,
+        dict(sys_info),
+        expression_df,
+        pass_layout=pass_layout,
+        used_passes=used_passes,
+    )
+    for (key, _metric_id, _expr), value in zip(pending, values.tolist()):
+        points[key] = value
     return points
 
 
@@ -1759,6 +1799,12 @@ class db_analysis(OmniAnalyze_Base):
             pass_layout = getattr(self, "_pass_layout_per_workload", {}).get(
                 workload_path
             )
+            peaks_df = pd.DataFrame()
+            ceilings = self._roofline_ceilings_per_workload.get(workload_path, {})
+            if ceilings:
+                peaks_df = pd.DataFrame([ceilings])
+            roofline_tables = {402: roofline_data_df}
+            roofline_types = {402: "metric_table"}
 
             # Calculate kernel-level roofline data
             top_kernels = (
@@ -1773,7 +1819,17 @@ class db_analysis(OmniAnalyze_Base):
                 {
                     "kernel_name": kernel_name,
                     **_roofline_point_values(
+                        roofline_data_df,
+                        roofline_names,
                         roofline_data_expressions,
+                        evaluate_metric_composites(
+                            roofline_tables,
+                            roofline_types,
+                            pmc_df[pmc_df["Kernel_Name"] == kernel_name],
+                            pd.Series(sys_info),
+                            peaks_df,
+                            pass_layout,
+                        ),
                         pmc_df[pmc_df["Kernel_Name"] == kernel_name],
                         sys_info,
                         pass_layout,
