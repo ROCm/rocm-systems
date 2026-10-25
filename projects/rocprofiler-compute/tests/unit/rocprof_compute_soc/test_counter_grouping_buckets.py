@@ -86,9 +86,9 @@ def test_copied_counter_is_not_counted_as_split():
     ]
     assert all(counter_file is not None for counter_file in files)
     soc = _FormulaSoc([
-        ("1", 1, 0, "waves and grbm", "SQ_WAVES / GRBM_GUI_ACTIVE"),
-        ("1", 1, 1, "waves and ta", "SQ_WAVES / TA_BUSY"),
-        ("1", 1, 2, "grbm and ta", "GRBM_GUI_ACTIVE / TA_BUSY"),
+        ("1", 1, 0, "waves and grbm", ["SQ_WAVES / GRBM_GUI_ACTIVE"]),
+        ("1", 1, 1, "waves and ta", ["SQ_WAVES / TA_BUSY"]),
+        ("1", 1, 2, "grbm and ta", ["GRBM_GUI_ACTIVE / TA_BUSY"]),
     ])
     profile = {"SQ_WAVES", "GRBM_GUI_ACTIVE", "TA_BUSY"}
 
