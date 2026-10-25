@@ -53,7 +53,18 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
 
 // ================================================================================================
 // Out of line so that captureGraph_'s deleter is instantiated where hip::Graph is complete.
-Stream::~Stream() = default;
+Stream::~Stream() { device().ReleaseGlobalSignal(blocked_on_signal_.load()); }
+
+// ================================================================================================
+bool Stream::IsBlockedOn(void* signal) const {
+  return signal != nullptr && signal == blocked_on_signal_.load(std::memory_order_acquire);
+}
+
+// ================================================================================================
+void Stream::SetBlockedOn(void* signal) {
+  device().RetainGlobalSignal(signal);
+  device().ReleaseGlobalSignal(blocked_on_signal_.exchange(signal, std::memory_order_acq_rel));
+}
 
 // ================================================================================================
 void Stream::InvalidateCapture() {
