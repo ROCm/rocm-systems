@@ -317,12 +317,13 @@ __launch_bounds__(512)
     ncclBarrierSession<ncclCoopCta> ginBar{cta, ncclTeamTagWorld(), gin, blockIdx.x};
     ginBar.sync(cta, cuda::memory_order_acquire, ncclGinFenceLevel::None);
 
+    // Weak: one put per peer, each carrying its own signal, counted by the wait.
     for (int dst = static_cast<int>(threadIdx.x); dst < nRanks; dst += static_cast<int>(blockDim.x)) {
       gin.put(world, dst, recvWin, sliceRecvByteOff, recvWin, sliceRecvByteOff, chunkBytes,
-              ncclGin_SignalInc{signalIndex});
+              ncclGin_WeakSignalInc{signalIndex});
     }
     gin.waitSignal(cta, signalIndex, signalValue + static_cast<uint64_t>(nRanks));
-  
+
     gin.flush(cta);
 
     ginBar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::None);
