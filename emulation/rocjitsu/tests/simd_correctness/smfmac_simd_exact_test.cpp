@@ -56,8 +56,8 @@ struct SmfmacCase {
 #define C4(OP, NAME, A, B, D, AFMT, BFMT)                                                          \
   SmfmacCase { ROCJITSU_CODE_ARCH_CDNA4, cdna4::k##OP##Vop3pMfma, NAME, AFMT, BFMT, A, B, D }
 
-// Every generated, implemented F32 SMFMAC form. The I32 forms currently
-// report UnimplementedInstruction and are intentionally outside this suite.
+// Every generated F32 SMFMAC form. Integer execution has separate exact
+// dense-reference checks in instruction_execution_harness_test.cpp.
 constexpr std::array CDNA3_CASES{
     C3(VSmfmacF3216x16x32F16, "v_smfmac_f32_16x16x32_f16", 2, 4, 4, Fmt::F16, Fmt::F16),
     C3(VSmfmacF3232x32x16F16, "v_smfmac_f32_32x32x16_f16", 2, 4, 16, Fmt::F16, Fmt::F16),

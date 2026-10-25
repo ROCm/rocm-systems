@@ -89,6 +89,9 @@ typedef enum {
   // Appended rather than grouped with the other Direct entries so existing
   // values stay stable.
   RCCL_DIRECT_ALLTOALL, // AlltoAll as per-peer Send/Recv (no collective kernel)
+  // Reporting only (rcclGetCollImplInfo / rcclSymKGetInfo): a symmetric dispatch that
+  // resolves to a Tensor Data Mover kernel. Live dispatch always tags RCCL_SYMMETRIC.
+  RCCL_SYMMETRIC_TDM,
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
@@ -245,6 +248,8 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm);
 // Pass the bias buffer as acc (nullptr when the caller is plain AllReduce).
 // Does NOT check ceARTmpBuf initialization; the caller is responsible.
 bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc);
+size_t rcclCeAr2ShotMax(const struct ncclComm* comm);
+size_t rcclCeAr2ShotMin(const struct ncclComm* comm);
 // Updates the CE AllReduce graph latch from this call's capture state.
 // Invoke once per collective (any type) at each CE AR decision point.
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
@@ -266,15 +271,17 @@ bool rcclForceCeAllReduceEnabled(const struct ncclComm* comm);
 // RCCL_FORCE_CE=0 turns it off; otherwise NCCL_CTA_POLICY_ZERO forces it and
 // the arch table's forceCeScratch decides.
 bool rcclForceCeScratchEnabled(const struct ncclComm* comm);
+// Sets ceAllReduceFastPath on each queued CE task from its receive window; no bootstrap.
+void rcclSetCeAllReduceFastPath(struct ncclComm* comm);
 RCCL_PARAM_DECLARE(CeArMaxMsgBytes);     // -1 = use ceNonRegMax[AR] (2-shot) from arch table
 RCCL_PARAM_DECLARE(CeArRegMaxMsgBytes);  // -1 = use ceRegMax[AR] (registered) from arch table
 RCCL_PARAM_DECLARE(CeArStagingBytes);    // -1 = use NCCL_CE_AR_STAGING_BYTES; sizes ceARTmpBuf, not the cap
-// 2-shot AllReduce size cap: env RCCL_CE_AR_MAX_MSG_BYTES if set, else
-// ceNonRegMax[AR] from the arch table (0 = 2-shot disabled). A null table
-// (RCCL_IGNORE_ARCH_TABLE or unknown arch) restores the pre-table 256 MiB
-// window. Does not size ceARTmpBuf; that stays at
-// NCCL_CE_AR_TMPBUF_DEFAULT_BYTES unless this cap is larger.
-size_t rcclCeAr2ShotMax(const ncclComm* comm);
+RCCL_PARAM_DECLARE(CeCollMaxBytes);      // -1 = use arch table; overrides ceNonRegMax+ceRegMax for non-AR collectives
+RCCL_PARAM_DECLARE(SymKMaxBytes);       // -1 = use arch table; overrides symMaxR2+symMaxR2Graph for all collectives
+RCCL_PARAM_DECLARE(CeArMinMsgBytes);     // -1 = use arch table; AR CE non-reg lower bound
+RCCL_PARAM_DECLARE(CeCollMinBytes);      // -1 = use arch table; non-AR CE non-reg lower bound
+RCCL_PARAM_DECLARE(SymKMinBytes);        // -1 = use arch table; overrides symMinR2 for all collectives
+
 // True when NCCL_ALGO is set by the user. Used to skip CE/DDA/Symmetric in
 // both the selector (rccl_wrap.cc) and taskAppend (enqueue.cc).
 bool rcclNcclAlgoEnvIsSet();
@@ -386,6 +393,11 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm);
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
                     bool query = false, const char* prefix = nullptr);
 
+// Element types the DDA fabric kernels accept on this comm's arch: ncclSum for
+// the reducing collectives, a raw byte copy for AllGather and AlltoAll. fp8 is
+// gfx1250-only.
+bool rcclDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype);
+
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
 
@@ -462,6 +474,11 @@ inline int rcclAllocP2pNetLLBuffers(int cudaArch, int nNodes, int nRanks, int64_
   if (cudaArch == 1250 && enable > 0) return 1;
   return 0;
 }
+// Classifies a non-symmetric window and rejects host VMM across the LSA team (rccl_dev_runtime.cc).
+ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags);
+// GIN MR pointer type for a symmetric segment; host VMM needs DMA-BUF (rccl_dev_runtime.cc).
+ncclResult_t rcclDevrGinSegmentRegType(bool globalHasSysmemSegment, int maxGlobalNumSegments, int* ptrType,
+                                       bool* needDmabuf);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);

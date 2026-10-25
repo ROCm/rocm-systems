@@ -1,10 +1,12 @@
-# CTest categories for host-only DDA IPC lifecycle microtests.
+# rccl-UnitTestsMicroDdaIpc — shared/ctest schema.
+# Host-only micro-tests for src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu (no GPU, no librccl).
+# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
+
 test_categories:
   quick: &micro_dda_ipc_quick
-    description: "Smoke - host-only DDA IPC lifecycle tests."
+    description: "Smoke — host-only src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu micro-tests, sub-second."
     test_patterns:
-      - "DdaIpcLifecycleMicrotest.*"
-      - "DdaIpcMemHandlerMicrotest.*"
+      - "DdaAllReduceIpc*"
     exclude_windows:
       - "*"
     labels:

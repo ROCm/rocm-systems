@@ -109,6 +109,8 @@ extern hipError_t g_hipDeviceGetPCIBusIdResult;
 // device index (drives busIdToCudaDev's per-device resolution).
 extern std::function<hipError_t(char* /*pciBusId*/, int /*len*/, int /*device*/)>
     g_hipDeviceGetPCIBusId;
+// Backs hipDeviceGetByPCIBusId. The default fails, as for a BDF this process cannot see.
+extern std::function<hipError_t(int* /*device*/, const char* /*pciBusId*/)> g_hipDeviceGetByPCIBusId;
 extern hipError_t g_hipEventCreateResult;
 extern hipError_t g_hipMemPoolResult;
 extern hipError_t g_hipStreamCreateResult;
@@ -120,9 +122,11 @@ extern int g_hipMemoryPoolsSupported;     // hipDeviceAttributeMemoryPoolsSuppor
 // A call count alone cannot tell one device copy's operands from another's, so record them per call.
 extern int g_hipMemcpyAsyncCalls;
 struct HipMemcpyAsyncRecord {
-    void*       dst;
-    const void* src;
-    size_t      bytes;
+    void*         dst;
+    const void*   src;
+    size_t        bytes;
+    hipMemcpyKind kind;
+    hipStream_t   stream;
 };
 extern std::vector<HipMemcpyAsyncRecord> g_hipMemcpyAsyncArgs;
 
@@ -180,6 +184,15 @@ extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamDestroy;
 extern std::function<hipError_t(hipStreamCaptureMode* /*mode*/)> g_hipThreadExchangeStreamCaptureMode;
 extern std::function<hipError_t(void)> g_hipGetLastError;
+// hipExtLaunchKernel (what hipExtLaunchKernelGGL calls). The default aborts: an unhooked launch is a broken test.
+extern std::function<hipError_t(const void* /*function*/, dim3 /*grid*/, dim3 /*block*/, void** /*args*/,
+                                size_t /*sharedMemBytes*/, hipStream_t /*stream*/, hipEvent_t /*startEvent*/,
+                                hipEvent_t /*stopEvent*/, int /*flags*/)>
+    g_hipExtLaunchKernel;
+// The <<<>>> launch path. Same fail-loud default as g_hipExtLaunchKernel.
+extern std::function<hipError_t(const void* /*fn*/, dim3 /*grid*/, dim3 /*block*/, void** /*args*/,
+                                size_t /*shmem*/, hipStream_t /*stream*/)>
+    g_hipLaunchKernel;
 
 // Event-record seam. The default delegates to g_hipAsyncOpsResult so the CE
 // proxy-progress tests keep the existing behaviour, but exposing it as a hook

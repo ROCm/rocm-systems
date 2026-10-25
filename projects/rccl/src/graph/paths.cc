@@ -527,7 +527,10 @@ NCCL_PARAM(NetGdrMloPart, "NET_GDR_MLOPART", 1);
 // the no-GDR diversion below (addInterStep, which only rewrites GPU<->NET) never degrades. Reading
 // the partition's own entry instead would feed the decision back its own diverted path and let
 // partitions of one device disagree about GDR.
+// A PXN relay is the exception: addInterStep marks it on the partition's own GPU<->NET entry only, never
+// on the DEV, so report PATH_PXN from there or ncclTopoCheckGdr cannot switch to the relay GPU's distance.
 static int ncclTopoGdrDistance(struct ncclTopoNode* gpu, int n) {
+  if (gpu->paths[NET] != NULL && gpu->paths[NET][n].type == PATH_PXN) return PATH_PXN;
   if (gpu->gpu.mloPart != NCCL_TOPO_UNDEF && gpu->gpu.parent != NULL && gpu->gpu.parent->paths[NET] != NULL)
     return gpu->gpu.parent->paths[NET][n].type;
   return gpu->paths[NET][n].type;
@@ -1191,12 +1194,12 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
 
   // detect if all GPUs are connected by XGMI
   for (int i = 0; i < system->nodes[GPU].count && allXgmi; i++) {
-    int cudaDev1 = system->nodes[GPU].nodes[i].gpu.dev;
+    int dev1 = system->nodes[GPU].nodes[i].gpu.dev;
     for (int j = 0; j < system->nodes[GPU].count && allXgmi; j++) {
       if (i == j) continue;
-      int cudaDev2 = system->nodes[GPU].nodes[j].gpu.dev;
+      int dev2 = system->nodes[GPU].nodes[j].gpu.dev;
       bool isXGMI;
-      NCCLCHECKGOTO(ncclTopoGetLinkType(comm->topo, cudaDev1, cudaDev2, &isXGMI), ret, fail);
+      NCCLCHECKGOTO(ncclTopoGetLinkType(comm->topo, dev1, dev2, &isXGMI), ret, fail);
       allXgmi &= isXGMI;
     }
   }

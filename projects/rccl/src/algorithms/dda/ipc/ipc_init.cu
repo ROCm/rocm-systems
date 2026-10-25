@@ -169,7 +169,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   }
 
   const int nBlocksMax = ddaMaxNBlocksForScratch();
-  auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap);
+  auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap,
+                                                               dda::common::DdaKernelParams{comm->abortFlagDev});
   if (!barrierPair.first) {
     free(comm->ddaPeerPtrsHost);
     comm->ddaPeerPtrsHost = nullptr;

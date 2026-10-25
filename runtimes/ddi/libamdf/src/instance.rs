@@ -12,8 +12,10 @@ use crate::memory::Scope;
 use crate::platform;
 use crate::support::*;
 use rocddi::device::event::{DeviceEvent, DeviceEventSubscription, subscribe};
+use rocddi::device::gpu::event::linux::{SignalEventService, process_signal_event_available};
+use rocddi::host::cache::{CacheMaintenance, CachePolicy};
 use rocddi::memory::storage::TryPush;
-use rocddi::memory::storage::{Owned, Shared};
+use rocddi::memory::storage::{Allocator, Owned, OwnerVec, Shared, UninitOwned};
 use rocddi::{device as native_device, memory as native_memory, session, topology};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -27,26 +29,59 @@ const INITIAL_RESET_EPOCH: u64 = 1;
 /// `children` prevents destruction while endpoint handles remain public.
 /// Cached host facts stay valid until destruction succeeds.
 pub(crate) struct Instance {
+    /// Native session that discovers and activates devices.
     pub native: session::Session,
+    /// Callback policy for public frontend owner records.
+    pub host_allocator: Allocator,
     /// Guards host-only ABI work that does not enter a native driver.
     pub process_id: u32,
+    /// Number of public children that still borrow this instance.
     pub children: AtomicU64,
+    /// Prevents new children during destruction.
     pub closing: bool,
+    /// Source of public device IDs within this instance.
     pub ids: AtomicU64,
+    /// Head of the linked list of provider-owned host backings.
     pub host_backing_head: Mutex<usize>,
+    /// Native signal page service for the process KFD connection.
+    pub event_service: Mutex<SignalEventService>,
+    /// Whether this instance uses process-wide native resource lifetime.
+    pub process_lifetime: bool,
     /// One observer per activated endpoint, shared by its device handles.
-    event_observers: Mutex<Vec<ObserverRecord>>,
-    // Cached host facts keep profile queries independent of native calls.
+    event_observers: Mutex<OwnerVec<ObserverRecord>>,
+    /// Host page size cached for memory profile queries.
     pub host_page_size: u64,
-    pub host_cache_line: Option<u32>,
+    /// Qualified write-back recipe retained for mapping capability queries.
+    pub host_write_back_cache: Option<CacheMaintenance>,
+    /// Embedded host memory profile namespace.
     pub scope: Scope,
+}
+
+impl Instance {
+    /// Reserves frontend owner storage under this instance's callback policy.
+    pub(crate) fn owner_slot<T>(&self) -> Result<UninitOwned<T>, u64> {
+        let _scope = self.host_allocator.scope();
+        Owned::<T>::try_new_uninit().map_err(|_| EXHAUSTED)
+    }
+
+    /// Creates a shared frontend owner retaining the same callback policy.
+    fn shared<T>(&self, value: T) -> Result<Shared<T>, u64> {
+        let _scope = self.host_allocator.scope();
+        Shared::new(value).map_err(|_| EXHAUSTED)
+    }
 }
 
 /// Passive endpoint handle borrowing its instance and owning no device state.
 pub(crate) struct Endpoint {
+    /// Parent instance borrowed by this public endpoint handle.
     pub instance: *mut Instance,
+    /// Passive topology record used for activation and metadata queries.
     pub native: topology::Endpoint,
+    /// Host NUMA locality captured during passive open.
+    pub host_numa_node: u32,
+    /// Number of public devices that borrow this endpoint.
     pub children: AtomicU64,
+    /// Embedded endpoint memory profile namespace.
     pub scope: Scope,
 }
 
@@ -56,33 +91,49 @@ pub(crate) struct Endpoint {
 /// advances this handle's reset epoch on native exception notifications;
 /// operation errors also advance it when they observe terminal loss first.
 pub(crate) struct Device {
+    /// Parent endpoint borrowed by this public device handle.
     pub endpoint: *mut Endpoint,
+    /// Activated native device and its retained driver state.
     pub native: native_device::Device,
+    /// Public identity assigned at activation.
     pub id: amdf_device_id_t,
+    /// Number of public queues that borrow this device.
     pub queues: AtomicU64,
+    /// Public native events borrowing this device.
+    pub events: AtomicU64,
+    /// Generation shared with the endpoint's exception observer.
     pub reset_epoch: Shared<AtomicU64>,
+    /// Keeps exception polling alive while this handle is public.
     event_observer: Shared<EventObserver>,
 }
 
 /// Instance registry entry for one endpoint's shared exception observer.
 struct ObserverRecord {
+    /// Endpoint whose device handles receive these events.
     endpoint_id: [u8; 16],
+    /// Observer shared by those handles.
     observer: Shared<EventObserver>,
 }
 
 /// Polls one endpoint's native subscription and fans reset evidence out to
 /// every public device handle created from that endpoint.
 struct EventObserver {
+    /// Filters process-level native events for this endpoint.
     endpoint_id: [u8; 16],
+    /// Serialized reset generation and registered device epochs.
     state: Mutex<ObserverState>,
+    /// Requests the polling worker to exit.
     stop: AtomicBool,
+    /// Worker joined when the final device handle goes away.
     worker: Mutex<Option<JoinHandle<()>>>,
 }
 
 /// Reset generations and deduplication state serialized with handle registration.
 struct ObserverState {
+    /// Latest reset generation published by this observer.
     generation: u64,
-    epochs: Vec<Shared<AtomicU64>>,
+    /// Epoch cells for the currently registered public device handles.
+    epochs: OwnerVec<Shared<AtomicU64>>,
     /// A connection-wide terminal loss cannot become valid again.
     terminal_loss_observed: bool,
     /// A queue reported loss before its corresponding exception was polled.
@@ -90,10 +141,10 @@ struct ObserverState {
 }
 
 impl ObserverState {
-    fn new() -> Self {
+    fn new(allocator: Allocator) -> Self {
         Self {
             generation: INITIAL_RESET_EPOCH,
-            epochs: Vec::new(),
+            epochs: OwnerVec::with_allocator(allocator),
             terminal_loss_observed: false,
             operation_reset_pending: false,
         }
@@ -270,13 +321,12 @@ fn register_event_observer(
 
     observers.try_reserve(1).map_err(|_| EXHAUSTED)?;
     let subscription = subscribe(native).map_err(|error| crate::support::native(&error))?;
-    let observer = Shared::new(EventObserver {
+    let observer = instance.shared(EventObserver {
         endpoint_id,
-        state: Mutex::new(ObserverState::new()),
+        state: Mutex::new(ObserverState::new(instance.host_allocator)),
         stop: AtomicBool::new(false),
         worker: Mutex::new(None),
-    })
-    .map_err(|_| EXHAUSTED)?;
+    })?;
     observer.register_epoch(epoch)?;
     observers
         .try_push(ObserverRecord {
@@ -356,7 +406,7 @@ fn name(endpoint: &topology::Endpoint) -> [std::ffi::c_char; 128] {
 }
 
 fn summary(endpoint: &topology::Endpoint) -> amdf_endpoint_summary_t {
-    let engine_kind = match endpoint.kind() {
+    let engine_kind = match endpoint.kind {
         topology::EndpointKind::Gpu { .. } => AMDF_ENGINE_KIND_GPU,
         topology::EndpointKind::Npu => AMDF_ENGINE_KIND_XDNA,
         _ => AMDF_ENGINE_KIND_UNKNOWN,
@@ -482,6 +532,15 @@ pub(crate) fn family(
             0
         } else if pm4 {
             AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR
+                | if (gpu.gfx_major == 11 || gpu.gfx_major == 12)
+                    && gpu.xcc_count == 1
+                    && gpu.shader_engine_count_per_xcc != 0
+                    && gpu.maximum_scratch_wave_count_per_compute_unit != 0
+                {
+                    AMDF_GPU_PM4_FORMAT_FEATURE_DISPATCH_SCRATCH
+                } else {
+                    0
+                }
         } else {
             sdma_format_features(
                 gpu.gfx_major,
@@ -575,7 +634,20 @@ pub(crate) unsafe extern "C" fn create(
         if info.reserved != 0 || info.native_lifetime > AMDF_NATIVE_LIFETIME_INSTANCE {
             return Err(INVALID);
         }
-        let slot = Owned::<Instance>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+        if info.host_allocator.allocate.is_none() && info.host_allocator.resize.is_some() {
+            return Err(INVALID);
+        }
+        let host_allocator = Allocator::from_callbacks_with_resize(
+            info.host_allocator.user_data,
+            info.host_allocator.allocate,
+            info.host_allocator.resize,
+            info.host_allocator.free,
+        )
+        .map_err(|_| INVALID)?;
+        let slot = {
+            let _scope = host_allocator.scope();
+            Owned::<Instance>::try_new_uninit().map_err(|_| EXHAUSTED)?
+        };
         // The C ABI calls this native_lifetime; rocddi names the policy after
         // the driver context and its retained bindings.
         let lifetime = if info.native_lifetime == AMDF_NATIVE_LIFETIME_PROCESS {
@@ -586,17 +658,20 @@ pub(crate) unsafe extern "C" fn create(
         let native = session::Session::new(lifetime).map_err(|e| crate::support::native(&e))?;
         let host_page_size =
             native_memory::host::host_page_size().map_err(|e| crate::support::native(&e))?;
-        let host_cache_line = native_memory::host::host_cache_line_size().ok();
+        let host_write_back_cache = CacheMaintenance::qualify(CachePolicy::WriteBack).ok();
         let owner = slot.write(Instance {
             native,
+            host_allocator,
             process_id: std::process::id(),
             host_page_size,
-            host_cache_line,
+            host_write_back_cache,
             children: AtomicU64::new(0),
             closing: false,
             ids: AtomicU64::new(1),
             host_backing_head: Mutex::new(0),
-            event_observers: Mutex::new(Vec::new()),
+            event_service: Mutex::new(SignalEventService::new(lifetime)),
+            process_lifetime: info.native_lifetime == AMDF_NATIVE_LIFETIME_PROCESS,
+            event_observers: Mutex::new(OwnerVec::with_allocator(host_allocator)),
             scope: Scope {
                 instance: std::ptr::null_mut(),
                 endpoint: std::ptr::null_mut(),
@@ -624,6 +699,12 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_instance_t) -> u64 {
             // Native cleanup can make partial progress. Retain this handle on
             // failure for destruction only; no new child may borrow it then.
             instance.closing = true;
+            instance
+                .event_service
+                .lock()
+                .map_err(|_| INTERNAL)?
+                .release()
+                .map_err(|error| native(&error))?;
             instance.native.destroy().map_err(|e| native(&e))?;
             drop(Owned::from_raw(pointer.cast::<Instance>()));
             Ok(())
@@ -644,7 +725,7 @@ pub(crate) unsafe extern "C" fn enumerate(
         }
         output_pointer(count)?;
         output_array(summaries, capacity)?;
-        let mut staged = Vec::new();
+        let mut staged = OwnerVec::with_allocator(instance.host_allocator);
         staged
             .try_reserve_exact(capacity as usize)
             .map_err(|_| EXHAUSTED)?;
@@ -686,7 +767,7 @@ pub(crate) unsafe extern "C" fn open(
             }
             output_pointer(out)?;
             let id = *object(id)?;
-            let slot = Owned::<Endpoint>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+            let slot = instance.owner_slot::<Endpoint>()?;
             let native = instance
                 .native
                 .open_endpoint(native_id(id))
@@ -704,9 +785,11 @@ pub(crate) unsafe extern "C" fn open(
                     }
                 })?;
             register(&instance.children)?;
+            let host_numa_node = platform::host_numa_node(&native);
             let owner = slot.write(Endpoint {
                 instance: pointer.cast(),
                 native,
+                host_numa_node,
                 children: AtomicU64::new(0),
                 scope: Scope {
                     instance: pointer.cast(),
@@ -739,7 +822,16 @@ pub(crate) unsafe extern "C" fn endpoint_info(
 ) -> u64 {
     crate::support::boundary(|| unsafe {
         let endpoint = object(pointer.cast::<Endpoint>())?;
-        let out = output(out, AMDF_STRUCTURE_TYPE_ENDPOINT_INFO)?;
+        let out = output_with_next(out, AMDF_STRUCTURE_TYPE_ENDPOINT_INFO)?;
+        let locality = out.next().cast::<amdf_endpoint_host_locality_t>();
+        let locality = if locality.is_null() {
+            None
+        } else {
+            Some(output(
+                locality,
+                AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY,
+            )?)
+        };
         let p = endpoint.native.pci.unwrap_or_default();
         let summary = summary(&endpoint.native);
         out.publish(amdf_endpoint_info_t {
@@ -758,6 +850,12 @@ pub(crate) unsafe extern "C" fn endpoint_info(
             native_identity: platform::native_identity(&endpoint.native),
             ..Default::default()
         });
+        if let Some(locality) = locality {
+            locality.publish(amdf_endpoint_host_locality_t {
+                numa_node: endpoint.host_numa_node,
+                ..Default::default()
+            });
+        }
         Ok(())
     })
 }
@@ -825,9 +923,8 @@ pub(crate) unsafe extern "C" fn device_create(
         }
         supported_endpoint(endpoint)?;
         let instance = &*endpoint.instance;
-        let slot = Owned::<Device>::try_new_uninit().map_err(|_| EXHAUSTED)?;
-        let reset_epoch =
-            Shared::new(AtomicU64::new(INITIAL_RESET_EPOCH)).map_err(|_| EXHAUSTED)?;
+        let slot = instance.owner_slot::<Device>()?;
+        let reset_epoch = instance.shared(AtomicU64::new(INITIAL_RESET_EPOCH))?;
         let id = next_id(&instance.ids)?;
         register(&endpoint.children)?;
         let result = instance.native.activate(&endpoint.native);
@@ -857,6 +954,7 @@ pub(crate) unsafe extern "C" fn device_create(
                 words: [endpoint.instance as u64, id],
             },
             queues: AtomicU64::new(0),
+            events: AtomicU64::new(0),
             reset_epoch,
             event_observer,
         });
@@ -880,7 +978,15 @@ pub(crate) unsafe extern "C" fn device_info(
                 device_instance(device)
                     .native
                     .supports_host_registration(device.native.endpoint()),
-            ),
+            ) | if device_instance(device).process_lifetime {
+                if process_signal_event_available(&device.native).map_err(|_| INTERNAL)? {
+                    AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS
+                } else {
+                    0
+                }
+            } else {
+                0
+            },
             ..Default::default()
         });
         Ok(())
@@ -890,7 +996,8 @@ pub(crate) unsafe extern "C" fn device_info(
 pub(crate) unsafe extern "C" fn device_destroy(pointer: *mut amdf_device_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let device = exclusive(pointer.cast::<Device>())?;
-        if device.queues.load(Ordering::Acquire) != 0 {
+        if device.queues.load(Ordering::Acquire) != 0 || device.events.load(Ordering::Acquire) != 0
+        {
             return Err(BUSY);
         }
         unregister_event_observer(device)?;
@@ -909,7 +1016,7 @@ mod observer_tests {
     fn observer(endpoint_id: [u8; 16]) -> EventObserver {
         EventObserver {
             endpoint_id,
-            state: Mutex::new(ObserverState::new()),
+            state: Mutex::new(ObserverState::new(Allocator::system())),
             stop: AtomicBool::new(false),
             worker: Mutex::new(None),
         }

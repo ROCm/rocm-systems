@@ -157,20 +157,13 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
 // Group state machine.
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Param loader.
-// ---------------------------------------------------------------------------
-int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
-  if (cache) *cache = deftVal;
-  if (noCache) *noCache = 0;
-  return deftVal;
-}
-
 // Emitted by init.cc, which this binary does not link, so the redirected
 // NCCL_PARAM in dev_runtime.cc does not cover it. Routed through g_loadParam
 // like the params dev_runtime.cc owns, so a test can drive the NCCL_WIN_ENABLE=0
 // opt-out in ncclCommWindowRegister_impl.
 int64_t ncclParamWinEnable() { return g_loadParam("WIN_ENABLE", 1); }
+// Emitted by rocmwrap.cc; read by the host VMM GIN fail-closed check.
+int64_t ncclParamDmaBufEnable() { return g_loadParam("DMABUF_ENABLE", 1); }
 
 // ---------------------------------------------------------------------------
 // Proxy.
@@ -317,6 +310,7 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirement
   return ncclSuccess;
 }
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
+void ncclGinDevCommClearFields(struct ncclDevComm*) {}
 #ifdef ENABLE_ROCSHMEM_GIN
 // Only referenced from ncclDevrCommCreateInternal's SDMA signal-binding block,
 // which is itself behind ENABLE_ROCSHMEM_GIN. Copied from develop's
@@ -328,26 +322,34 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm*, void*, size
 // Seams: symMemoryRegisterGin NCCLCHECKs both, and its rollback path is only
 // observable through the deregister count.
 static ncclResult_t DefaultGinRegister(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
-                                       ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int) {
+                                       ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
+                                       uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int) {
   return ncclSuccess;
 }
 std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
-                           ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int)>
+                           ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int,
+                           bool, int)>
     g_devrGinRegister = DefaultGinRegister;
 
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* addr, size_t size,
                              void* hostWins[NCCL_GIN_MAX_CONNECTIONS],
-                             ncclGinWindow_t devWins[NCCL_GIN_MAX_CONNECTIONS], int winFlags, bool multiSegment,
-                             int memType) {
-  return g_devrGinRegister(comm, addr, size, hostWins, devWins, winFlags, multiSegment, memType);
+                             ncclGinWindow_t devWins[NCCL_GIN_MAX_CONNECTIONS],
+                             uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS], int winFlags,
+                             bool multiSegment, int memType) {
+  return g_devrGinRegister(comm, addr, size, hostWins, devWins, ginWinGenerations, winFlags, multiSegment, memType);
 }
 
-static ncclResult_t DefaultGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
-std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_devrGinDeregister =
-    DefaultGinDeregister;
+static ncclResult_t DefaultGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS],
+                                         uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS],
+                           uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS])>
+    g_devrGinDeregister = DefaultGinDeregister;
 
-ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* hostWins[NCCL_GIN_MAX_CONNECTIONS]) {
-  return g_devrGinDeregister(comm, hostWins);
+ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* hostWins[NCCL_GIN_MAX_CONNECTIONS],
+                               uint32_t const ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
+  return g_devrGinDeregister(comm, hostWins, ginWinGenerations);
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +422,18 @@ std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos =
 
 ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory* mem) { return g_devrBuildGinSegmentInfos(mem); }
 
+// Real body lives in dev_runtime_segments.cc. dev-runtime-test.cc compiles that
+// file as RealDevrCheckRegistrationSupport so this seam stays injectable; the
+// fixture points the hook at the real body.
+static ncclResult_t DefaultCheckRegistrationSupport(void*, size_t, struct ncclComm*, bool, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, size_t, struct ncclComm*, bool, int)> g_devrCheckRegistrationSupport =
+    DefaultCheckRegistrationSupport;
+
+ncclResult_t ncclDevrCheckRegistrationSupport(void* userPtr, size_t userSize, struct ncclComm* comm,
+                                              bool hasSysmemSegment, int winFlags) {
+  return g_devrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment, winFlags);
+}
+
 // ---------------------------------------------------------------------------
 // Team accessors (host variants).
 // ---------------------------------------------------------------------------
@@ -435,7 +449,7 @@ static ncclTeam_t DefaultTeamWorld(ncclComm_t comm) {
 }
 std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld = DefaultTeamWorld;
 extern "C" ncclTeam_t ncclTeamWorld(ncclComm_t comm) { return g_devrTeamWorld(comm); }
-extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) { return ncclTeam_t{}; }
+// ncclTeamRail is in devcomm_fakes.cc.
 
 // The CFT teams, read by symMemoryObtain and ncclDevrCommCreateInternal. Same
 // shape as the real host accessors in nccl_device/core.cc, reading the sizes
@@ -571,6 +585,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_devrVerifySegmentLayouts                = DefaultVerifySegmentLayouts;
   g_devrBuildGinSegmentInfos                = DefaultBuildGinSegmentInfos;
+  g_devrCheckRegistrationSupport            = DefaultCheckRegistrationSupport;
 
   // Not a hook either, but 12 tests assign it directly to steer the
   // POSIX-FD-vs-shareable-handle split in symMemory{Export,ImportAndMap}

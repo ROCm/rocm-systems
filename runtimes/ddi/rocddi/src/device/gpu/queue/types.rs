@@ -6,6 +6,8 @@
 //! mistaken for each other. Each creation requests an independently owned
 //! queue; publication policy belongs to the caller.
 
+use std::mem::{align_of, size_of};
+
 /// Scheduling priority requested from the native queue implementation. A
 /// backend rejects priorities it cannot implement instead of silently ignoring
 /// them. Priority never establishes an execution or memory dependency.
@@ -107,8 +109,10 @@ pub struct QueueScratch {
     pub device_address: u64,
     /// Bytes available to the queue starting at `device_address`.
     pub byte_length: u64,
-    /// Largest packet private-segment request accepted by the queue.
+    /// Largest private segment per execution lane accepted by the queue.
     pub maximum_private_segment_byte_length: u32,
+    /// Execution lanes per wave used to size the private segment.
+    pub lanes_per_wave: u32,
     /// Maximum number of simultaneously scratch-backed waves.
     pub maximum_wave_count: u32,
 }
@@ -162,6 +166,8 @@ pub struct QueueTransport {
     pub ring_device_address: u64,
     /// Usable ring capacity in bytes, independent of native index units.
     pub ring_size_bytes: u64,
+    /// Validated host control region for an AQL queue, when the backend has one.
+    pub aql_control: Option<AqlControlRegion>,
     /// Resolved engine ID for a targeted SDMA queue, or `None` for other
     /// formats and the backend-selected generic SDMA format.
     pub sdma_engine_id: Option<u32>,
@@ -192,4 +198,104 @@ pub struct QueueTransport {
     pub doorbell_device_address: Option<u64>,
     /// Required doorbell access width, not the size of its mapping.
     pub doorbell_width: QueueAccessWidth,
+}
+
+/// Backend-validated AQL control storage borrowed from a live native queue.
+/// Its field addresses refer to native control words, not HSA policy objects.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AqlControlRegion {
+    /// Host address of the complete native control layout.
+    host_base: usize,
+    /// Number of accessible bytes in that layout.
+    byte_length: usize,
+    /// Alignment guaranteed for the control base.
+    alignment: usize,
+    /// Initial bytes available for a frontend's public queue prefix.
+    writable_prefix_bytes: usize,
+    /// Host address of the device-maintained read index.
+    read_index_host_address: usize,
+    /// Host address of the producer-maintained write index.
+    write_index_host_address: usize,
+    /// Host address of the queue properties word.
+    properties_host_address: usize,
+}
+
+impl AqlControlRegion {
+    /// Validates the backend's aligned control span and named word addresses.
+    pub(crate) fn new(
+        host_base: usize,
+        byte_length: usize,
+        alignment: usize,
+        writable_prefix_bytes: usize,
+        read_index_host_address: usize,
+        write_index_host_address: usize,
+        properties_host_address: usize,
+    ) -> Option<Self> {
+        let end = host_base.checked_add(byte_length)?;
+        let contains = |address: usize, bytes: usize| {
+            address >= host_base
+                && address
+                    .checked_add(bytes)
+                    .is_some_and(|word_end| word_end <= end)
+        };
+        if host_base == 0
+            || alignment == 0
+            || !alignment.is_power_of_two()
+            || host_base % alignment != 0
+            || writable_prefix_bytes > byte_length
+            || !contains(read_index_host_address, size_of::<u64>())
+            || !contains(write_index_host_address, size_of::<u64>())
+            || !contains(properties_host_address, size_of::<u32>())
+            || read_index_host_address % align_of::<u64>() != 0
+            || write_index_host_address % align_of::<u64>() != 0
+            || properties_host_address % align_of::<u32>() != 0
+        {
+            return None;
+        }
+        Some(Self {
+            host_base,
+            byte_length,
+            alignment,
+            writable_prefix_bytes,
+            read_index_host_address,
+            write_index_host_address,
+            properties_host_address,
+        })
+    }
+
+    /// Host address of the validated native control layout.
+    #[must_use]
+    pub fn host_base(self) -> usize {
+        self.host_base
+    }
+    /// Accessible extent of the native control layout.
+    #[must_use]
+    pub fn byte_length(self) -> usize {
+        self.byte_length
+    }
+    /// Guaranteed alignment of the control base.
+    #[must_use]
+    pub fn alignment(self) -> usize {
+        self.alignment
+    }
+    /// Bytes available for a frontend public prefix.
+    #[must_use]
+    pub fn writable_prefix_bytes(self) -> usize {
+        self.writable_prefix_bytes
+    }
+    /// Host address of the native read index.
+    #[must_use]
+    pub fn read_index_host_address(self) -> usize {
+        self.read_index_host_address
+    }
+    /// Host address of the native write index.
+    #[must_use]
+    pub fn write_index_host_address(self) -> usize {
+        self.write_index_host_address
+    }
+    /// Host address of the native properties word.
+    #[must_use]
+    pub fn properties_host_address(self) -> usize {
+        self.properties_host_address
+    }
 }

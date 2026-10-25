@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file gfx12_dot_test.cpp
-/// @brief Hardware-derived GFX12 DOT2 arithmetic and operand regression tests.
+/// @brief GFX12 dot arithmetic and operand regression tests.
 
 #include "fixtures/float_dot/gfx1201_cases.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
@@ -266,6 +266,42 @@ TEST(Gfx12Dot, WmmaSignModifiersAndWaveSizes) {
   }
 }
 
+TEST(Gfx12Dot, WmmaTinyNegativeAccumulatorSubtractsFloorUnit) {
+  // gfx1201 wave32 captures: only k=0 of A is nonzero, B and C are uniform.
+  // The products' grid is below 2^-126, so the negative subnormal C subtracts
+  // one unit; dropping C would give 0x0c000000 and 0x0c80.
+  struct Case {
+    bool bf16_out;
+    uint16_t a, b;
+    uint32_t c, expected;
+  };
+  for (const Case &test : {Case{false, 0x2900, 0x2280, 0x8000082du, 0x0bffffffu},
+                           Case{true, 0x3800, 0x1400, 0x80518051u, 0x0c7f0c7fu}}) {
+    HostState restore;
+    for (bool scalar : {false, true}) {
+      util::set_force_scalar_for_testing(scalar);
+      DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
+      const uint32_t c_regs = test.bf16_out ? 4 : 8;
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        for (uint32_t reg = 0; reg < 4; ++reg) {
+          // A[row][k] sits in lane row (+16 for k >= 8), register k / 2, half k % 2.
+          machine.set(reg, lane, lane < 16 && reg == 0 ? test.a : 0u);
+          machine.set(8 + reg, lane, uint32_t(test.b) | (uint32_t(test.b) << 16));
+        }
+        for (uint32_t reg = 0; reg < c_regs; ++reg)
+          machine.set(16 + reg, lane, test.c);
+      }
+      machine.execute(rdna4::build_vop3p(
+          test.bf16_out ? rdna4::kVWmmaBf1616x16x16Bf16Vop3p : rdna4::kVWmmaF3216x16x16Bf16Vop3p,
+          {.vdst = 24, .src0 = 256, .src1 = 264, .src2 = 272, .opsel_hi = 3}));
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        for (uint32_t reg = 0; reg < c_regs; ++reg)
+          EXPECT_EQ(machine.get(24 + reg, lane), test.expected)
+              << "bf16_out=" << test.bf16_out << " scalar=" << scalar << " lane=" << lane;
+    }
+  }
+}
+
 TEST(Gfx12Dot, WmmaInlineAccumulatorPreservesAllOnesNan) {
   for (uint32_t width : {32u, 64u}) {
     DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4, width);
@@ -341,3 +377,34 @@ TEST(Gfx12Dot, AccumulateEncodingsAndInlineSources) {
   }
 }
 } // namespace
+
+// Pin the native eight-product contract independently of WMMA register layouts.
+TEST(Gfx12Dot, NativeF8SpecialValues) {
+  struct Case {
+    uint8_t a, b_even, b_odd;
+    uint32_t c, expected;
+  };
+  const Case cases[] = {
+      {0x7c, 0x3c, 0xbc, 0x3f800000, 0xffc00a3d}, // Opposite product infinities.
+      {0x7c, 0x3c, 0x3c, 0xff800000, 0xffc00a3d}, // Product infinity against opposite C infinity.
+      {0x7e, 0x3c, 0x3c, 0, 0xffc00a3d},          // BF8 factor NaN (0x7e is finite in FP8).
+      {0x7c, 0, 0, 0xffc54321, 0xffc00a3d},       // Invalid product takes precedence over C NaN.
+      {0x3c, 0x3c, 0x3c, 0xffc54321, 0xffc54321}, // C-NaN retention.
+  };
+  for (Case sample : cases) {
+    std::array<uint8_t, 8> a, b;
+    a.fill(sample.a);
+    for (size_t i = 0; i < b.size(); ++i)
+      b[i] = i % 2 ? sample.b_odd : sample.b_even;
+    // A_FP8=false, B_FP8=false selects BF8_BF8.
+    EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<false, false>(a, b, sample.c)), sample.expected);
+  }
+  std::array<uint8_t, 8> fp8, bf8;
+  fp8.fill(0x38); // FP8 1.0.
+  bf8.fill(0x3c); // BF8 1.0.
+  EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<true, false>(fp8, bf8, 0x3f800000)), 0x41100000u);
+  // FP8 has a distinct NaN encoding from BF8.
+  std::array<uint8_t, 8> fp8_nan;
+  fp8_nan.fill(0x7f);
+  EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<true, true>(fp8_nan, fp8, 0)), 0xffc00a3du);
+}

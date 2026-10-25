@@ -14,11 +14,13 @@ from amdisa.sema_ast import (
     SemaNodeKind,
     SemaType,
 )
+from amdisa.sema_enrich import enrich_block
 from amdisa.codegen.execute.sema_lower import (
     _INLINE_BINARY_OPS,
     _INLINE_TERNARY_OPS,
     _lower_apply_clamp,
     _lower_apply_omod,
+    _lower_call,
     InlineBinaryOp,
     LoweringContext,
     OperandBinding,
@@ -57,6 +59,32 @@ def test_scc_shift_add_inline_operations_do_not_read_scc(name):
 
 def test_non_scc_inline_operation_has_no_scc_effect():
     assert not isinstance(_INLINE_BINARY_OPS['add_co'], InlineBinaryOp)
+
+
+@pytest.mark.parametrize(
+    ('callee', 'ty', 'expected', 'unexpected'),
+    [
+        ('maxmin', SemaType.I32, 'std::min(std::max(', 'std::fmin'),
+        ('minmax', SemaType.U32, 'std::max(std::min(', 'std::fmax'),
+        ('maxmin', SemaType.F32, 'std::fmin(std::fmax(', 'std::min'),
+        ('minmax', SemaType.F32, 'std::fmax(std::fmin(', 'std::max'),
+    ],
+)
+def test_minmax_ternary_lowering_uses_result_type(callee, ty, expected, unexpected):
+    node = SemaNode(
+        SemaNodeKind.CALL,
+        call_name=callee,
+        ty=ty,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name=callee),
+            SemaNode(SemaNodeKind.LIT, lit_value='a', ty=ty),
+            SemaNode(SemaNodeKind.LIT, lit_value='b', ty=ty),
+            SemaNode(SemaNodeKind.LIT, lit_value='c', ty=ty),
+        ),
+    )
+    result = _lower_call(node, LoweringContext(exec_model=ExecModel.VECTOR))
+    assert expected in result
+    assert unexpected not in result
 
 
 def test_packed_byte_inline_operations_match_isa_special_cases():
@@ -625,6 +653,49 @@ class TestLowerVectorAdd:
             in result
         )
 
+    @pytest.mark.parametrize('modifier_format', [None, 'F16'])
+    def test_cndmask_b16_source_modifiers_flip_half_sign_bits(self, modifier_format):
+        u16 = SemaType('U', 16)
+        cond = SemaNode(
+            SemaNodeKind.ARRAYDEREF,
+            ty=SemaType.U1,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='VCC', ty=SemaType.U64),
+                SemaNode(SemaNodeKind.ID, id_name='laneId', ty=SemaType.U32),
+            ),
+        )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                _cast(_dst(0), u16),
+                SemaNode(
+                    SemaNodeKind.TERNARY,
+                    ty=u16,
+                    children=(cond, _cast(_src(1), u16), _cast(_src(0), u16)),
+                ),
+            ),
+        )
+        block = enrich_block(
+            SemaBlock('V_CNDMASK_B16', ExecModel.VECTOR, body),
+            enc_field_names=frozenset({'neg', 'abs'}),
+        )
+        ctx = LoweringContext(
+            exec_model=ExecModel.VECTOR, source_modifier_format=modifier_format
+        )
+
+        result = lower_sema_block(block, ctx)
+
+        # Integer selects ignore ABS/NEG unless the generator names the format
+        # whose sign bit they modify. No float conversion is involved.
+        helper = 'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
+        assert 'apply_to_float' not in result
+        if modifier_format is None:
+            assert helper not in result
+        else:
+            assert result.count(helper) == 2
+            assert ', 0, inst_.abs, inst_.neg)' in result
+            assert ', 1, inst_.abs, inst_.neg)' in result
+
     def test_true16_bf16_destination_converts_float_result(self):
         body = SemaNode(
             SemaNodeKind.ASSIGN,
@@ -807,7 +878,7 @@ class TestLowerVectorAdd:
         if result_type == SemaType.F16:
             assert result.index('util::f16_to_f32(') < result.index(flush)
 
-    @pytest.mark.parametrize('operation', ['add', 'rcp', 'ldexp'])
+    @pytest.mark.parametrize('operation', ['add', 'rcp'])
     def test_f16_helpers_receive_flushed_sources(self, operation: str):
         source = _cast(_src(0), SemaType.F16)
         if operation == 'add':
@@ -815,12 +886,6 @@ class TestLowerVectorAdd:
                 SemaNodeKind.ADD,
                 ty=SemaType.F16,
                 children=(source, _cast(_src(1), SemaType.F16)),
-            )
-        elif operation == 'ldexp':
-            value = SemaNode(
-                SemaNodeKind.LDEXP,
-                ty=SemaType.F16,
-                children=(source, _cast(_src(1), SemaType.I32)),
             )
         else:
             value = SemaNode(
@@ -838,6 +903,92 @@ class TestLowerVectorAdd:
         flushes = result.count('input_denormal::flush_input<amdgpu::fp_format::F16>(')
         assert flushes == (2 if operation == 'add' else 1)
         assert 'Policy::make(wf.fp_denorm_mode_f16_f64())' in result
+
+    @pytest.mark.parametrize('kind', [SemaNodeKind.FRACT, SemaNodeKind.LDEXP])
+    def test_rounded_f16_producer_requires_the_sdwa_rounded_store(self, kind):
+        sources = (_cast(_src(0), SemaType.F16),)
+        if kind == SemaNodeKind.LDEXP:
+            sources += (_cast(_src(1), SemaType.I32),)
+        value = SemaNode(kind, ty=SemaType.F16, children=sources)
+        body = SemaNode(
+            SemaNodeKind.ASSIGN, children=(_cast(_dst(0), SemaType.F16), value)
+        )
+        # The SDWA store would skip scaling for an instruction outside the list.
+        with pytest.raises(ValueError, match='SDWA_ROUNDED_F16_OPS'):
+            lower_sema_block(SemaBlock('V_UNLISTED_F16', ExecModel.VECTOR, body))
+        name = 'V_FRACT_F16' if kind == SemaNodeKind.FRACT else 'V_LDEXP_F16'
+        assert lower_sema_block(SemaBlock(name, ExecModel.VECTOR, body))
+
+    @pytest.mark.parametrize('operation', ['min', 'max'])
+    def test_raw_f16_selection_requires_the_sdwa_rounded_store(self, operation):
+        call = f'float_minmax_legacy_{operation}'
+        value = SemaNode(
+            SemaNodeKind.CALL,
+            call_name=call,
+            ty=SemaType.F16,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name=call),
+                _cast(_src(0), SemaType.F16),
+                _cast(_src(1), SemaType.F16),
+            ),
+        )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN, children=(_cast(_dst(0), SemaType.F16), value)
+        )
+        with pytest.raises(ValueError, match='SDWA_ROUNDED_F16_OPS'):
+            lower_sema_block(SemaBlock('V_UNLISTED_F16', ExecModel.VECTOR, body))
+        name = f'V_{operation.upper()}_F16'
+        assert lower_sema_block(SemaBlock(name, ExecModel.VECTOR, body))
+        # Scalar selection has no SDWA output stage to require.
+        assert lower_sema_block(
+            SemaBlock(f'S_{operation.upper()}_F16', ExecModel.SCALAR, body)
+        )
+
+    @pytest.mark.parametrize(
+        ('ty', 'template', 'policy'),
+        [
+            (
+                SemaType.F16,
+                '<amdgpu::fp_format::F16>',
+                'wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), '
+                'wf.fp16_ovfl(), amdgpu::sdwa::output_modifier<'
+                'amdgpu::sdwa::ResultFormat::F16>(*this, wf) != 0',
+            ),
+            (
+                SemaType.F32,
+                '<amdgpu::fp_format::F32>',
+                'wf.fp_denorm_mode_f32(), wf.fp_round_mode_f32(), false, false',
+            ),
+            (
+                SemaType.F64,
+                '<amdgpu::fp_format::F64, 32>',
+                'wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), false, false',
+            ),
+        ],
+    )
+    def test_ldexp_scales_raw_encodings_in_the_shared_helper(
+        self, ty, template, policy
+    ):
+        exponent = _cast(_src(1), SemaType.I32)
+        value = SemaNode(
+            SemaNodeKind.LDEXP, ty=ty, children=(_cast(_src(0), ty), exponent)
+        )
+        body = SemaNode(SemaNodeKind.ASSIGN, children=(_cast(_dst(0), ty), value))
+        result = lower_sema_block(
+            SemaBlock(f'V_LDEXP_F{ty.size}', ExecModel.VECTOR, body)
+        )
+
+        assert (
+            f'const auto ldexp_policy = amdgpu::ldexp::Policy::make({policy});'
+            in result
+        )
+        # An F16 destination may be SDWA: its OMOD makes a tiny result flush,
+        # and the store applies it. F64 reads a 32-bit exponent.
+        assert f'amdgpu::ldexp::evaluate{template}' in result
+        # The helper flushes the value itself, never the exponent, and rounds
+        # once; no host scaling or F16 narrowing remains.
+        assert 'input_denormal' not in result and 'std::ldexp' not in result
+        assert 'finish_arithmetic_f16' not in result and 'f16_to_f32' not in result
 
     def test_scalar_alu_rounding_keeps_unflushed_source(self):
         body = SemaNode(
