@@ -1918,6 +1918,8 @@ Enable GPU Direct RDMA buffer registration using the Linux dma-buf subsystem.
 
 The Linux dma-buf subsystem allows GPU Direct RDMA capable NICs to read and write CUDA buffers directly without CPU involvement.
 
+GIN registration of a window that contains host VMM memory requires this variable set to 1, because that memory is registered through a DMA-BUF memory region. With 0, registration fails with ``ncclInvalidUsage``.
+
 Value accepted
 ^^^^^^^^^^^^^^
 0 or 1. Default value is 1 (enabled), but the feature is automatically disabled if the Linux kernel or the CUDA/NIC driver do not support it.
