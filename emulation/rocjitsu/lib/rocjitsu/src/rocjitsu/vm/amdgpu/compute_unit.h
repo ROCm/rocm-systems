@@ -1265,6 +1265,10 @@ public:
   /// timing model looking ahead, so both decode the same target.
   static std::unique_ptr<Decoder> create_decoder(const Config &config);
 
+  /// Decode owned instruction bytes for diagnostic output on the CU execution thread.
+  /// Invalid or absent encodings produce an explicit placeholder.
+  std::string disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc) const;
+
   /// @brief Replace the concrete decoder in scheduler-level tests.
   /// @details Some concrete targets intentionally remain unavailable to full
   /// simulator configuration while individual instructions acquire execution

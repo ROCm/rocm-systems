@@ -209,6 +209,32 @@ TEST_F(FormattedLoadRaceTest, PartialWaitRetiresOneLoadWithAllItsDestinations) {
   EXPECT_FALSE(probe(13, 0xf, false));
 }
 
+TEST_F(FormattedLoadRaceTest, RecordingBytesDoesNotDisassemble) {
+  class ObservableInstruction final : public Instruction {
+  public:
+    ObservableInstruction() : Instruction("s_nop", nullptr) {
+      size_ = sizeof(word);
+      raw_encoding_ = &word;
+    }
+    uint32_t word = S_NOP | 7;
+    std::string disassemble() const override {
+      was_disassembled = true;
+      return Instruction::disassemble();
+    }
+    mutable bool was_disassembled = false;
+  } instruction;
+  for (uint64_t pc : {0x540024b100ULL, 0x100002a100ULL})
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(pc, instruction, *wave);
+  ASSERT_EQ(plugin_state->trace.size(), 2u);
+  EXPECT_EQ(plugin_state->trace[0].pc, 0x540024b100ULL);
+  EXPECT_EQ(plugin_state->trace[0].word_count, 1u);
+  EXPECT_EQ(plugin_state->trace[0].words[0], S_NOP | 7);
+  instruction.word = S_NOP | 9;
+  EXPECT_EQ(plugin_state->trace[0].words[0], S_NOP | 7);
+  EXPECT_EQ(plugin_state->trace[1].pc, 0x100002a100ULL);
+  EXPECT_FALSE(instruction.was_disassembled);
+}
+
 TEST_F(FormattedLoadRaceTest, RejectsWholeDestinationRangeWhenItExceedsTheWaveAllocation) {
   issue(rdna4::kBufferLoadFormatXyzwVbuffer, 46, 255, 4);
   EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
@@ -2161,6 +2187,136 @@ TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
 
 // -- Race trace tests --------------------------------------------------------
 
+TEST(RaceDetectorPluginOutputTest, ExecutedInstructionsHaveExactPcsIncludingExpiredTrace) {
+  for (unsigned padding : {1u, 270u}) {
+    SCOPED_TRACE(padding);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1));
+    PluginSinkConfig sink_config;
+    auto &sink = sink_config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+    const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 264, .vdst = 9});
+    std::vector<uint32_t> code{S_NOP, load[0], load[1]};
+    code.insert(code.end(), padding, S_NOP);
+    code.push_back(read[0]);
+    code.push_back(S_ENDPGM);
+    f.run_kernel(code.data(), code.size());
+
+    const auto &report = sink.str();
+    EXPECT_NE(report.find("  ==>  0x1044  ds_read_b32 v8, v0"), std::string::npos) << report;
+    EXPECT_NE(report.find(std::format("  ==>  0x{:x}  v_mov_b32_e32 v9, v8", 0x104c + 4 * padding)),
+              std::string::npos)
+        << report;
+    EXPECT_EQ(report.find("before trace window") != std::string::npos, padding > 256);
+    EXPECT_EQ(report.find("0x1040"), std::string::npos);
+    EXPECT_NE(report.find("; <-- wave 0 lane 0"), std::string::npos);
+  }
+}
+
+class RewriteRaceCode : public ExecutionPlugin {
+public:
+  RewriteRaceCode(GpuMemory &memory, uint64_t rewrite_pc)
+      : ExecutionPlugin("rewrite_race_code"), memory_(memory), rewrite_pc_(rewrite_pc) {}
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, Wavefront &) override {
+    if (pc == rewrite_pc_) {
+      memory_.write32(0x1044, S_NOP | 7);
+      memory_.write32(0x1048, S_NOP | 9);
+    }
+  }
+
+private:
+  GpuMemory &memory_;
+  uint64_t rewrite_pc_;
+};
+
+TEST(RaceDetectorPluginOutputTest, PreservesExecutedEncodingAfterCodeRewrite) {
+  for (unsigned padding : {1u, 270u}) {
+    const uint64_t consumer_pc = 0x104c + 4 * padding;
+    for (uint64_t rewrite_pc : {uint64_t{0x1040}, consumer_pc}) {
+      SCOPED_TRACE(std::format("padding={} rewrite_pc={:x}", padding, rewrite_pc));
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(1));
+      PluginSinkConfig config;
+      auto &sink = config.emplace<StringSink>();
+      f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+      ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RewriteRaceCode>(*f.mem, rewrite_pc)));
+      f.soc->set_plugin_group(f.plugin_group_);
+      f.plugin_group_->onInit();
+      const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+      const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 264, .vdst = 9});
+      std::vector<uint32_t> code{S_NOP, load[0], load[1]};
+      code.insert(code.end(), padding, S_NOP);
+      code.push_back(read[0]);
+      code.push_back(S_ENDPGM);
+      f.run_kernel(code.data(), code.size());
+      EXPECT_NE(sink.str().find("0x1044  ds_read_b32 v8, v0"), std::string::npos) << sink.str();
+      EXPECT_NE(sink.str().find(std::format("0x{:x}  v_mov_b32_e32 v9, v8", consumer_pc)),
+                std::string::npos)
+          << sink.str();
+      EXPECT_EQ(sink.str().find("0x1044  s_nop 7"), std::string::npos);
+      EXPECT_EQ(sink.str().find("before trace window") != std::string::npos, padding > 256);
+    }
+  }
+}
+
+TEST(RaceDetectorPluginOutputTest, CrossWaveSamePcKeepsProducerBytesAfterWaitAndTraceOverwrite) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(2));
+  PluginSinkConfig config;
+  auto &sink = config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+  auto race = std::make_unique<RaceDetectorPlugin>();
+  auto *plugin = race.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(race)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  auto *producer = f.cu()->dispatch_wf(0, 0x1000, 104, 256);
+  auto *consumer = f.cu()->dispatch_wf(1, 0x1000, 104, 256);
+  ASSERT_NE(producer, nullptr);
+  ASSERT_NE(consumer, nullptr);
+  std::array<Wavefront *, 2> waves{producer, consumer};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto store_words = cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 0, .data0 = 1});
+  auto store = decoder->decode_window(store_words);
+  ASSERT_TRUE(store.succeeded());
+  const auto expected_store = store.value()->disassemble();
+  f.plugin_group_->onAmdgpuBeforeExecuteInstruction(producer->pc, *store.value(), *producer);
+  ASSERT_TRUE(f.cu()->execute_instruction(store.value().get(), *producer).succeeded());
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *store.value(), *producer);
+  store.value().reset();
+  auto *state = static_cast<RaceWavefrontState *>(producer->plugin_state(plugin->slot_index()));
+  ASSERT_EQ(state->race_state->getWaveMemoryEvents().size(), 1u);
+  const auto event = state->race_state->getWaveMemoryEvents().front();
+  execute_wait(*f.plugin_group_, *producer, legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0));
+  EXPECT_FALSE(state->race_state->getDetector()->events().isTrimmable(event));
+  const std::array<uint32_t, 1> nop_words{S_NOP};
+  auto nop = decoder->decode_window(nop_words);
+  ASSERT_TRUE(nop.succeeded());
+  for (unsigned i = 0; i < 270; ++i) {
+    producer->pc = 0x2000 + 4 * i;
+    f.plugin_group_->onAmdgpuBeforeExecuteInstruction(producer->pc, *nop.value(), *producer);
+  }
+  const auto read_words = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+  auto read = decoder->decode_window(read_words);
+  ASSERT_TRUE(read.succeeded());
+  f.plugin_group_->onAmdgpuBeforeExecuteInstruction(consumer->pc, *read.value(), *consumer);
+  ASSERT_TRUE(f.cu()->execute_instruction(read.value().get(), *consumer).succeeded());
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *read.value(), *consumer);
+  EXPECT_NE(sink.str().find("0x1000  " + expected_store), std::string::npos) << sink.str();
+  EXPECT_NE(sink.str().find("0x1000  ds_read_b32 v8, v0"), std::string::npos) << sink.str();
+  EXPECT_NE(sink.str().find("; <-- wave 0"), std::string::npos);
+  EXPECT_NE(sink.str().find("; <-- wave 1 lane 0"), std::string::npos);
+  state->race_state->flushBarrierPendingEvents();
+  EXPECT_TRUE(state->race_state->getDetector()->events().isTrimmable(event));
+}
+
 TEST(FindConflictTest, UsesRecordedConflictingEvent) {
   RaceDetector detector(/*nWaves=*/
                         1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
@@ -2173,9 +2329,9 @@ TEST(FindConflictTest, UsesRecordedConflictingEvent) {
   ASSERT_NE(first, second);
 
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), second};
-  MarkedPc conflict = findConflict(violation, detector);
+  MarkedInstruction conflict = findConflict(violation, detector);
 
-  EXPECT_EQ(conflict.pc, 0x200u);
+  EXPECT_EQ(conflict.instruction.snapshot.pc, 0x200u);
 }
 
 TEST(FindConflictTest, RejectsUnavailableConflictingEvent) {
@@ -2211,9 +2367,9 @@ TEST(DecorateExceptionTest, UsesRecordedConflictingEvent) {
 }
 
 auto make_trace(std::initializer_list<uint64_t> pcs) {
-  plugins::race_detector::RingBuffer<uint64_t, 256> rb;
+  RingBuffer<InstructionSnapshot, 256> rb;
   for (auto pc : pcs)
-    rb.push(pc);
+    rb.push(InstructionSnapshot{.pc = pc});
   return rb;
 }
 
@@ -2224,11 +2380,15 @@ TEST(FormatTraceTest, WaveLaneAnnotations) {
       {0x108, "s_nop 0"},
       {0x10c, "ds_read_b32 v8, v9"},
   };
-  plugins::race_detector::MarkedPc conflict{0x100, 3, -1};
-  plugins::race_detector::MarkedPc read{0x10c, 0, 5};
-  auto result = formatTrace(trace, disasm, conflict, read);
+  MarkedInstruction conflict{{InstructionSnapshot{.pc = 0x100}, 0}, 3, -1};
+  MarkedInstruction read{{trace[2], trace.sequence(2)}, 0, 5};
+  auto result = formatTrace(
+      trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc); },
+      conflict, read);
   EXPECT_NE(result.find("; <-- wave 3"), std::string::npos);
   EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
+  EXPECT_NE(result.find("outside this wave's trace"), std::string::npos);
+  EXPECT_NE(result.find("0x108  s_nop 0"), std::string::npos);
 }
 
 TEST(FormatTraceTest, NoLineBeforeFirstMarker) {
@@ -2240,9 +2400,11 @@ TEST(FormatTraceTest, NoLineBeforeFirstMarker) {
       {0x10c, "s_nop 0"},
       {0x110, "ds_read_b32 v8, v9"},
   };
-  plugins::race_detector::MarkedPc conflict{0x108, 2, -1};
-  plugins::race_detector::MarkedPc read{0x110, 1, 3};
-  auto result = formatTrace(trace, disasm, conflict, read);
+  MarkedInstruction conflict{{trace[2], trace.sequence(2)}, 1, -1};
+  MarkedInstruction read{{trace[4], trace.sequence(4)}, 1, 3};
+  auto result = formatTrace(
+      trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc); },
+      conflict, read);
   EXPECT_EQ(result.substr(0, 5), "  ==>");
   EXPECT_EQ(result.find("0x100"), std::string::npos);
   EXPECT_EQ(result.find("0x104"), std::string::npos);
@@ -2256,49 +2418,130 @@ TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
       {0x204, "s_nop 0"},
       {0x208, "ds_read_b32 v8, v9"},
   };
-  plugins::race_detector::MarkedPc conflict{0x100, 3, -1};
-  plugins::race_detector::MarkedPc read{0x208, 0, 5};
-  auto result = formatTrace(trace, disasm, conflict, read);
+  MarkedInstruction conflict{{InstructionSnapshot{.pc = 0x100}}, 0, -1};
+  MarkedInstruction read{{trace[2], trace.sequence(2)}, 0, 5};
+  auto result = formatTrace(
+      trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc); },
+      conflict, read);
   EXPECT_NE(result.find("before trace window"), std::string::npos);
   EXPECT_NE(result.find("buffer_load_dwordx4"), std::string::npos);
-  EXPECT_NE(result.find("; <-- wave 3"), std::string::npos);
+  EXPECT_NE(result.find("; <-- wave 0"), std::string::npos);
+  EXPECT_NE(result.find("0x200  s_nop 0"), std::string::npos);
   EXPECT_NE(result.find("not recorded"), std::string::npos);
   EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
 }
 
-TEST(DisasmCacheTest, HandlesNonMonotonicPcOrder) {
-  plugins::race_detector::DisasmCache cache;
-  Instruction high_instruction("s_nop 0", nullptr);
-  Instruction low_instruction("s_endpgm", nullptr);
-  cache.record(0x540024b100, high_instruction);
-  cache.record(0x100002a100, low_instruction);
-
-  auto disasm = cache.to_map();
-  EXPECT_EQ(disasm.at(0x540024b100), "s_nop 0");
-  EXPECT_EQ(disasm.at(0x100002a100), "s_endpgm");
+TEST(FormatTraceTest, ResolvesOnlyPrintedInstructions) {
+  RingBuffer<InstructionSnapshot, 256> trace;
+  for (uint64_t pc = 0x100; pc <= 0x300; pc += 4)
+    trace.push(InstructionSnapshot{.pc = pc});
+  std::vector<uint64_t> requested;
+  auto resolve = [&](const InstructionSnapshot &instruction) {
+    requested.push_back(instruction.pc);
+    return "s_nop 0";
+  };
+  const auto report =
+      formatTrace(trace, resolve, MarkedInstruction{{trace[2], trace.sequence(2)}, 0, -1},
+                  {{trace[128], trace.sequence(128)}, 0, 0});
+  ASSERT_EQ(requested.size(), 32u);
+  EXPECT_EQ(requested.front(), 0x108u);
+  EXPECT_EQ(requested.back(), 0x300u);
+  EXPECT_NE(report.find("instructions elided"), std::string::npos);
 }
 
-TEST(DisasmCacheTest, DisassemblesOnlyFirstInstructionAtPc) {
-  class ObservableInstruction final : public Instruction {
-  public:
-    ObservableInstruction() : Instruction("s_count", nullptr) {}
-    bool was_disassembled() const { return !disassembly_.empty(); }
+TEST(FormatTraceTest, RepeatedPcUsesTheConflictingExecutionAndCurrentRead) {
+  RingBuffer<InstructionSnapshot, 256> trace;
+  trace.push({.pc = 0x100, .words = {S_NOP | 1}, .word_count = 1});
+  trace.push({.pc = 0x104, .words = {S_NOP | 2}, .word_count = 1});
+  trace.push({.pc = 0x100, .words = {S_NOP | 3}, .word_count = 1});
+  trace.push({.pc = 0x104, .words = {S_NOP | 4}, .word_count = 1});
+  auto resolve = [](const InstructionSnapshot &instruction) {
+    return std::format("s_nop {}", instruction.words[0] & 0xffff);
   };
+  const auto report =
+      formatTrace(trace, resolve, MarkedInstruction{{trace[2], 2}, 0, -1}, {{trace[3], 3}, 0, 0});
+  EXPECT_EQ(report.find("s_nop 1"), std::string::npos);
+  EXPECT_EQ(report.find("s_nop 2"), std::string::npos);
+  EXPECT_NE(report.find("0x100  s_nop 3"), std::string::npos);
+  EXPECT_NE(report.find("0x104  s_nop 4"), std::string::npos);
+}
 
-  plugins::race_detector::DisasmCache cache;
-  ObservableInstruction first;
-  ObservableInstruction duplicate;
+TEST(RaceDisassemblyTest, SnapshotsOwnShortLiteralAndMaximumWidthEncodings) {
+  const struct {
+    const char *arch;
+    rj_code_arch_t code_arch;
+    uint32_t wave_size;
+    std::array<uint32_t, 4> words;
+  } cases[] = {
+      {"cdna4", ROCJITSU_CODE_ARCH_CDNA4, 64, {S_NOP | 7}},
+      {"rdna4", ROCJITSU_CODE_ARCH_RDNA4, 32, {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu}},
+      {"cdna5", ROCJITSU_CODE_ARCH_CDNA5, 32, {0xCF455083u, 0x00000086u, 0x0A000001u}},
+      {"cdna4", ROCJITSU_CODE_ARCH_CDNA4, 64,
+       make_cdna4_mfma_scale_words(cdna4::kVMfmaF3216x16x128F8f6f4Vop3pMfma, 1, 448, 449)},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.arch);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1, test.arch, test.wave_size, 128));
+    PluginSinkConfig config;
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+    auto race = std::make_unique<RaceDetectorPlugin>();
+    auto *plugin = race.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(race)));
+    f.soc->set_plugin_group(f.plugin_group_);
+    auto *wave = f.cu()->dispatch_wf(0, 0x1000, 128, 256, test.wave_size);
+    ASSERT_NE(wave, nullptr);
+    std::array<Wavefront *, 1> waves{wave};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 128, waves);
+    std::string expected;
+    {
+      auto words = test.words;
+      auto decoder = Decoder::create(test.code_arch);
+      auto instruction = decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      expected = instruction.value()->disassemble();
+      f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *instruction.value(), *wave);
+      words.fill(0);
+    }
+    auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(plugin->slot_index()));
+    ASSERT_EQ(state->trace.size(), 1u);
+    EXPECT_EQ(wave->disassemble_instruction(state->trace[0].encoding(), state->trace[0].pc),
+              expected);
+  }
+}
 
-  // DisasmCache is keyed by the absolute instruction PC. The value itself is
-  // arbitrary here; using the same synthetic PC proves that a newly decoded
-  // instruction at an already-cached address is not disassembled again.
-  constexpr uint64_t synthetic_pc = 0x100;
-  cache.record(synthetic_pc, first);
-  cache.record(synthetic_pc, duplicate);
+TEST(RaceDisassemblyTest, CapturedEncodingNeedsNoCodeMapping) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1));
+  auto *wave = f.cu()->dispatch_wf(0, 0x1000, 104, 256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(7);
+  const std::array<uint32_t, 1> nop{S_NOP | 7};
+  EXPECT_EQ(wave->disassemble_instruction(nop, 0x1000), "s_nop 7");
+  EXPECT_EQ(wave->disassemble_instruction({}, 0x1000), "<disassembly unavailable>");
+  const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds);
+  EXPECT_EQ(wave->disassemble_instruction(std::span(load).first(1), 0x1000),
+            "<disassembly unavailable>");
+  EXPECT_EQ(wave->disassemble_instruction(load, 0x1000), "ds_read_b32 v0, v0");
+}
 
-  EXPECT_TRUE(first.was_disassembled());
-  EXPECT_FALSE(duplicate.was_disassembled());
-  EXPECT_EQ(cache.to_map().at(synthetic_pc), "s_count");
+TEST(RaceDisassemblyTest, ConcurrentCusDecodeCapturedBytes) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna4", 64, 104, 256, 4));
+  std::vector<std::thread> workers;
+  for (unsigned i = 0; i < 4; ++i) {
+    auto *wave = f.cu(i)->dispatch_wf(0, 0x1000, 104, 256);
+    ASSERT_NE(wave, nullptr);
+    workers.emplace_back([wave] {
+      const std::array<uint32_t, 1> first{S_NOP | 7}, second{S_NOP | 9};
+      for (unsigned repeat = 0; repeat < 100; ++repeat) {
+        EXPECT_EQ(wave->disassemble_instruction(first, 0x540024b100), "s_nop 7");
+        EXPECT_EQ(wave->disassemble_instruction(second, 0x100002a100), "s_nop 9");
+      }
+    });
+  }
+  for (auto &worker : workers)
+    worker.join();
 }
 
 TEST(RaceDetectorPluginOutputTest, DispatchLineUsesQuestionMarksForUnresolvedKernel) {

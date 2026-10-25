@@ -70,6 +70,11 @@ std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
   return address_space_ ? gpu_vm->snapshot(address_space_) : gpu_vm->snapshot_vmid(process_id_);
 }
 
+std::string Wavefront::disassemble_instruction(std::span<const uint32_t> encoding,
+                                               uint64_t pc) const {
+  return cu_.disassemble_instruction(encoding, pc);
+}
+
 VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const {
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {

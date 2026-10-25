@@ -3,6 +3,7 @@
 
 #pragma once
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
+#include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include <array>
@@ -35,7 +36,7 @@ namespace rocjitsu::plugins::race_detector {
 class EventRegistry {
   struct EventInfo {
     WaveId waveId;
-    uint64_t pc;
+    RecordedInstruction instruction;
     MemoryEventType type;
     std::array<amdgpu::MemoryCounterObligation, amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS>
         counterObligations;
@@ -55,12 +56,14 @@ public:
   EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
               uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0) {
+              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
+              RecordedInstruction instruction = {}) {
     int id = base_offset_ + static_cast<int>(entries_.size());
     assert(!counterObligations.empty());
     assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
+    instruction.snapshot.pc = pc;
     EventInfo event{waveId,
-                    pc,
+                    instruction,
                     type,
                     {},
                     static_cast<uint8_t>(counterObligations.size()),
@@ -144,7 +147,10 @@ public:
   MemoryOrderClass memoryOrder(EventId id) const { return entries_[index(id)].memoryOrder; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
   bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
-  uint64_t pc(EventId id) const { return entries_[index(id)].pc; }
+  uint64_t pc(EventId id) const { return instruction(id).snapshot.pc; }
+  const RecordedInstruction &instruction(EventId id) const {
+    return entries_[index(id)].instruction;
+  }
   uint8_t byteMask(EventId id) const { return entries_[index(id)].byteMask; }
   /// Packed loads can write fewer bytes in the last destination without
   /// creating a second event or consuming another wait-counter increment.
