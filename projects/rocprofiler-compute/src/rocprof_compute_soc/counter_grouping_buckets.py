@@ -71,10 +71,10 @@ def iter_metric_groups(
         panel_id,
         metric_idx,
         metric_name,
-        metric_yaml,
+        expressions,
     ) in soc._iter_arch_analysis_yaml_metrics():
         formula_hw, _ = extract_counters_and_variables(
-            metric_yaml,
+            "\n".join(expressions),
             soc._mspec.gpu_series,
             include_supported_denom=False,
         )
