@@ -23,7 +23,7 @@ Why this allocator: the shipping pack minimizes passes for the whole counter lis
 6. Place leftover multi-pass metric counters. Try the open buckets, then open one new bucket for the largest subset that fits an empty bucket (+0 extra passes on gfx942). If no remaining counter fits even that empty bucket, placement raises `ValueError` and does not drop the counter or keep looping.
 7. Keep those request-counter copies again, after the leftover multi-pass metric counters are placed.
 
-A `*_ACCUM` counter (for example `SQ_INST_LEVEL_VMEM_ACCUM`) uses hardware slots for itself and for its base counter. Charging happens when a counter is added to a bucket: two slots when the `*_ACCUM` counter is added alone (one for the base counter, one for its high-resolution accumulation), one extra slot when the base counter is already in the bucket, and no extra slot when the base counter is added after its `*_ACCUM`. The main flowchart stays the general placement flow. The TCC chart in §4 matches this order and stays out of that flowchart.
+A `*_ACCUM` counter (for example `SQ_INST_LEVEL_VMEM_ACCUM`) uses hardware slots for itself and for its base counter. Every `*_ACCUM` counter costs 2 slots, one for itself and one for its high-resolution accumulation. Its base counter costs 1, so a base counter and its `*_ACCUM` together cost 3, regardless of which is added first. The main flowchart stays the general placement flow. The TCC chart in §4 matches this order and stays out of that flowchart.
 
 **Decisions.** The list is in the high-level design: [Decisions and alternatives](hld-plan.md#decisions-and-alternatives).
 
