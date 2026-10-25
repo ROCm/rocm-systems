@@ -285,7 +285,7 @@ The symbol name gives the meaning of the patch site:
 
 ROCR applies these limits:
 
-- A kernel can have more than one PDI patch site, and the sites can name different PDI sections. For example, the control code from MLIR-AIR loads an empty PDI before and after the design runs. ROCR copies each different PDI into device memory one time for each kernel. Sites that name PDIs with the same contents use one copy.
+- A kernel can have more than one PDI patch site, and the sites can name different PDI sections. For example, the control code from MLIR-AIR loads an empty PDI before and after the design runs. ROCR copies each named *section* into device memory one time per kernel: sites naming the same section (resolved by name, see above) share that copy. Two sections are never merged by content, even when their bytes are identical — a kernel whose control code loads the same bytes from two separate sections (MLIR-AIR's empty-PDI-before and empty-PDI-after are two such sections) gets two device copies, one per section. An earlier version merged by content instead; that gave a correct first dispatch of the kernel and a wrong one on every repeat.
 - Each PDI patch site offset must not be 0, must be a multiple of 4, and `offset + 8` must not be more than the control-code size.
 - Each argument patch site offset must be a multiple of 4, and `offset + 12` must not be more than the control-code size.
 - An argument can have more than one patch site. An argument index can have no patch site.
