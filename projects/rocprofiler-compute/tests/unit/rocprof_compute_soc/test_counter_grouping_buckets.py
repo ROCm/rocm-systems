@@ -3,7 +3,10 @@
 
 import pytest
 
-from rocprof_compute_soc.counter_file import flat_counters_in_perfmon_file
+from rocprof_compute_soc.counter_file import (
+    flat_counters_in_perfmon_file,
+    perfmon_config_for_arch,
+)
 from rocprof_compute_soc.counter_grouping_buckets import (
     count_multi_bucket_metrics,
     count_single_pass_metrics_split_across_buckets,
@@ -54,7 +57,7 @@ def test_counters_fit_one_bucket_accum_costs_two():
 @pytest.mark.misc
 def test_sp_valu_and_sq_vmem_do_not_fit_one_pass():
     """gfx1250: both families charge SQ, and SP FLOP counters return zero together."""
-    sq_budget = {"SQ": 8}
+    sq_budget = perfmon_config_for_arch("gfx1250", {"SQ": 8})
     sp_only = frozenset({"SP_VALU_FLOPS_FP32", "SQ_INSTS_VALU"})
     vmem_only = frozenset({"SQ_VMEM_REQ", "SQ_INSTS_VMEM"})
     mixed = frozenset({"SP_VALU_FLOPS_FP32", "SQ_VMEM_REQ"})
@@ -122,3 +125,13 @@ def test_iter_metric_groups_reads_only_the_given_inputs():
         (frozenset({"SQ_WAVES", "TCC_HIT[0]", "TCC_HIT[1]"}), "2.2.1 (tcc hits)"),
         (frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"}), "1700.1701.1 (waves)"),
     ]
+
+
+def test_sp_valu_and_sq_vmem_share_a_pass_outside_gfx1250():
+    """The SP_VALU_*/SQ_VMEM_* split is a gfx1250 rule only."""
+    mixed = frozenset({"SP_VALU_FLOPS_FP32", "SQ_VMEM_REQ"})
+    for gpu_arch in ("gfx942", "gfx950", "gfx1151"):
+        sq_budget = perfmon_config_for_arch(gpu_arch, {"SQ": 8})
+        assert sq_budget.exclusive_families == ()
+        assert counters_fit_one_bucket(mixed, sq_budget)
+    assert counters_fit_one_bucket(mixed, {"SQ": 8})
