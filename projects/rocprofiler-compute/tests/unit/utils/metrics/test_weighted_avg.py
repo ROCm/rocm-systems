@@ -155,3 +155,42 @@ def test_weight_from_another_pass_does_not_change_the_number():
         pass_layout=layout,
     )
     assert result == "N/A"
+
+
+@pytest.mark.misc
+def test_single_pass_profile_evaluates_the_weighted_parent():
+    """One pass holds every weight, so the parent is not left unset."""
+    raw_pmc_df = pd.DataFrame({
+        "Dispatch_ID": [1],
+        "SQ_A": [100.0],
+        "SQ_B": [0.0],
+        "TCC_READ": [1.0],
+        "TCC_WRITE": [3.0],
+    })
+    df = pd.DataFrame(
+        [
+            ["1", "read_sub", build_eval_string("SUM(SQ_A)")],
+            ["2", "write_sub", build_eval_string("SUM(SQ_B)")],
+        ],
+        columns=["Metric_ID", "Metric", "Avg"],
+    ).set_index("Metric_ID")
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0",),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"SQ_A", "SQ_B", "TCC_READ", "TCC_WRITE"}),
+        },
+        duplicated=frozenset(),
+    )
+    result = evaluate_weighted_avg_parent(
+        ["read_sub", "write_sub"],
+        {
+            "read_sub": {"weight_counter": "TCC_READ"},
+            "write_sub": {"weight_counter": "TCC_WRITE"},
+        },
+        df,
+        raw_pmc_df,
+        {},
+        {},
+        pass_layout=layout,
+    )
+    assert result == pytest.approx((100 * 1 + 0 * 3) / 4)
