@@ -479,22 +479,27 @@ TEST_P(CbranchForkJoinTest, NestedIForksUnwindInnerThenOuter) {
   //   if (vcc) { v0 = s[38:39] lane set ? 4 : 3; } else { v0 = 2; }
   //   v1 = 7;
   write_program({
-      0xB8A21741u, // 0x00 s_getreg_b32 s34, hwreg(HW_REG_MODE, 29, 3)
-      0xBEA0017Eu, // 0x04 s_mov_b64 s[32:33], exec
-      0xB86A0002u, // 0x08 s_cbranch_i_fork vcc, OUTER_THEN
-      0x7E000282u, // 0x0C OUTER_ELSE: v_mov_b32 v0, 2
-      0xBF820008u, // 0x10 s_branch OUTER_JOIN
-      0xB8A31741u, // 0x14 OUTER_THEN: s_getreg_b32 s35, hwreg(HW_REG_MODE, 29, 3)
-      0xBEA4017Eu, // 0x18 s_mov_b64 s[36:37], exec
-      0xB8260002u, // 0x1C s_cbranch_i_fork s[38:39], INNER_THEN
-      0x7E000283u, // 0x20 INNER_ELSE: v_mov_b32 v0, 3
-      0xBF820001u, // 0x24 s_branch INNER_JOIN
-      0x7E000284u, // 0x28 INNER_THEN: v_mov_b32 v0, 4
-      0xBE802E23u, // 0x2C INNER_JOIN: s_cbranch_join s35
-      0xBEFE0124u, // 0x30 s_mov_b64 exec, s[36:37]
-      0xBE802E22u, // 0x34 OUTER_JOIN: s_cbranch_join s34
-      0xBEFE0120u, // 0x38 s_mov_b64 exec, s[32:33]
-      0x7E020287u, // 0x3C v_mov_b32 v1, 7
+      // Outer block: fork on vcc.
+      0xB8A21741u, // 0x00             s_getreg_b32     s34, hwreg(HW_REG_MODE, 29, 3) ; CSP
+      0xBEA0017Eu, // 0x04             s_mov_b64        s[32:33], exec                 ; EXEC
+      0xB86A0002u, // 0x08             s_cbranch_i_fork vcc, OUTER_THEN
+      0x7E000282u, // 0x0C OUTER_ELSE: v_mov_b32        v0, 2
+      0xBF820008u, // 0x10             s_branch         OUTER_JOIN
+
+      // Inner block, nested in OUTER_THEN: fork on s[38:39].
+      0xB8A31741u, // 0x14     OUTER_THEN: s_getreg_b32     s35, hwreg(HW_REG_MODE, 29, 3) ; CSP
+      0xBEA4017Eu, // 0x18                 s_mov_b64        s[36:37], exec                 ; EXEC
+      0xB8260002u, // 0x1C                 s_cbranch_i_fork s[38:39], INNER_THEN
+      0x7E000283u, // 0x20     INNER_ELSE: v_mov_b32        v0, 3
+      0xBF820001u, // 0x24                 s_branch         INNER_JOIN
+      0x7E000284u, // 0x28     INNER_THEN: v_mov_b32        v0, 4
+      0xBE802E23u, // 0x2C     INNER_JOIN: s_cbranch_join   s35
+      0xBEFE0124u, // 0x30                 s_mov_b64        exec, s[36:37]                 ; EXEC
+
+      // Back in the outer block.
+      0xBE802E22u, // 0x34 OUTER_JOIN: s_cbranch_join   s34
+      0xBEFE0120u, // 0x38             s_mov_b64        exec, s[32:33]                 ; EXEC
+      0x7E020287u, // 0x3C             v_mov_b32        v1, 7
   });
   wf->set_vcc(0x0F);    // lanes 0-3 take the outer THEN side
   set_sgpr64(38, 0x01); // lane 0 takes the inner THEN side
