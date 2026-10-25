@@ -53,10 +53,8 @@ from utils.utils_common import (
     validate_roofline_csv,
 )
 from utils.utils_counter_defs import (
-    counter_to_block,
     extract_counters_and_variables,
     metric_expressions,
-    pmc_slot_cost,
 )
 from vendored import yaml
 
@@ -844,15 +842,6 @@ def _rebuild_tcc_channel_file_map(
             if is_tcc_channel_counter(ctr):
                 result[ctr.split("[")[0]] = bucket
     return result
-
-
-def flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
-    """Ordered list of PMC counter names assigned to one perfmon bucket file."""
-    return [
-        ctr
-        for block_name in counter_file.blocks
-        for ctr in counter_file.blocks[block_name].elements
-    ]
 
 
 def _table_expressions(table: dict[str, Any]) -> list[str]:
