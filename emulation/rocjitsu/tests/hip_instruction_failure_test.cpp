@@ -6,6 +6,8 @@
 ///
 /// Requires the simulator interposer via LD_PRELOAD=librocjitsu.so.
 
+#include "sanitizer_diagnostic_test_util.h"
+
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -42,16 +44,19 @@ public:
     if (::testing::KilledBySignal(SIGABRT)(status_))
       pattern = kind_ == FailureKind::Decode ? "Queue error: HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION:"
                                              : "Queue error: HSA_STATUS_ERROR_EXCEPTION:";
-    const ::testing::Matcher<const std::string &> diagnostic = ::testing::ContainsRegex(pattern);
+    const ::testing::Matcher<const std::string &> diagnostic =
+        rocjitsu::test::SanitizerFreeDiagnostic(pattern);
     return diagnostic.MatchAndExplain(output, listener);
   }
 
   void DescribeTo(std::ostream *stream) const {
-    *stream << "contains the daemon disconnect or HIP queue-error diagnostic matching its exit";
+    *stream << "contains the daemon disconnect or HIP queue-error diagnostic matching its exit "
+               "without sanitizer diagnostics";
   }
 
   void DescribeNegationTo(std::ostream *stream) const {
-    *stream << "does not contain the daemon diagnostic matching its exit";
+    *stream << "contains sanitizer diagnostics or does not contain the daemon diagnostic "
+               "matching its exit";
   }
 
 private:
@@ -89,15 +94,18 @@ __global__ void valid_instruction(int *output) { *output = 17; }
 TEST(HipInstructionFailureTest, UnsupportedInstructionExitsWithFailure) {
   // Re-exec so the child owns its HIP runtime and interposer engine threads.
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Unsupported), native_instruction_failure,
-              "CU .*could not execute s_cbranch_i_fork.*pc=.*pid=.*qid=.*dispatch=.*unimplemented "
-              "instruction");
+  EXPECT_EXIT(
+      wait_for_instruction_failure(FailureKind::Unsupported), native_instruction_failure,
+      rocjitsu::test::SanitizerFreeDiagnostic(
+          "CU .*could not execute s_cbranch_i_fork.*pc=.*pid=.*qid=.*dispatch=.*unimplemented "
+          "instruction"));
 }
 
 TEST(HipInstructionFailureTest, DecodeFailureExitsWithFailure) {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
   EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Decode), native_instruction_failure,
-              "CU .*could not decode.*pc=.*pid=.*qid=.*dispatch=.*0xbfff0000");
+              rocjitsu::test::SanitizerFreeDiagnostic(
+                  "CU .*could not decode.*pc=.*pid=.*qid=.*dispatch=.*0xbfff0000"));
 }
 
 namespace {
@@ -153,7 +161,7 @@ TEST(HipDaemonInstructionFailureTest, ValidClientExitsWhenAnotherClientFails) {
     }
   };
   EXPECT_EXIT(run_valid_client(), ::testing::ExitedWithCode(EXIT_FAILURE),
-              "rocjitsu: daemon connection lost");
+              rocjitsu::test::SanitizerFreeDiagnostic("rocjitsu: daemon connection lost"));
 }
 
 int main(int argc, char **argv) {

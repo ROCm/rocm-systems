@@ -378,6 +378,7 @@ endif()
 
 add_executable(
     rocjitsu_tests
+    sanitizer_diagnostic_test.cpp
     rvsim_test.cpp
     amdgpu_vm_test.cpp
     gpu_queue_registry_test.cpp
@@ -4024,7 +4025,11 @@ if(RJ_ENABLE_HIP_TESTS)
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
         if(RJ_HIP_TEST_ARCH MATCHES "^(gfx942|gfx950)$")
-            rj_add_hip_test(hip_instruction_failure_test ARCH ${RJ_HIP_TEST_ARCH})
+            rj_add_hip_test(
+                hip_instruction_failure_test
+                ARCH ${RJ_HIP_TEST_ARCH}
+                DEPENDENCIES sanitizer_diagnostic_test_util.h
+            )
             rj_add_hip_test_case(
                 hip_instruction_failure_test
                 "HipInstructionFailureTest.UnsupportedInstructionExitsWithFailure"

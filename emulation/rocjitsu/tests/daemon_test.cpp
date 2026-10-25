@@ -8,6 +8,8 @@
 /// LD_PRELOAD as a subprocess, verifies the result, and tears down the
 /// daemon. CMake's rj_add_test_path stores paths in a generated data object.
 
+#include "sanitizer_diagnostic_test_util.h"
+
 #include <gtest/gtest.h>
 
 #include <array>
@@ -210,6 +212,11 @@ protected:
     ASSERT_GE(daemon_pid_, 0) << "fork failed: " << strerror(errno);
 
     if (daemon_pid_ == 0) {
+      const int output =
+          open((tmp_dir_ + "/daemon.log").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+      if (output < 0 || dup2(output, STDOUT_FILENO) < 0 || dup2(output, STDERR_FILENO) < 0)
+        _exit(127);
+      close(output);
       setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
       setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
       execl(daemon_bin(), daemon_bin(), "--daemon", "--config", config_path_.c_str(), nullptr);
@@ -258,6 +265,12 @@ protected:
       EXPECT_FALSE(std::filesystem::exists(sock_path_));
       daemon_pid_ = -1;
     }
+    std::ifstream daemon_log(tmp_dir_ + "/daemon.log");
+    const std::string output{std::istreambuf_iterator<char>(daemon_log),
+                             std::istreambuf_iterator<char>()};
+    EXPECT_FALSE(rocjitsu::test::has_sanitizer_diagnostic(output)) << output;
+    if (HasFailure())
+      std::fputs(output.c_str(), stderr);
     std::filesystem::remove_all(tmp_dir_);
   }
 
