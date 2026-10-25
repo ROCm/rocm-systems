@@ -9,9 +9,9 @@
 // A full ELF carries the PDIs, the control code, and the relocations that say where addresses go
 // in the control code. The loader parses the full ELF found in a unified hsaco's AIE section,
 // places the PDIs in the agent's device memory and keeps the control code in host memory with the
-// PDI addresses written in. No address is patched here. At dispatch time the driver copies the
-// control code into a per-dispatch device buffer and patches the argument addresses into that copy,
-// so concurrent dispatches of the same kernel never share a patch site.
+// PDI and external-symbol addresses written in. No address is patched here. At dispatch time the
+// driver copies the control code into a per-dispatch device buffer and patches the argument
+// addresses into that copy, so concurrent dispatches of the same kernel never share a patch site.
 
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_ELF_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_ELF_H_
@@ -45,6 +45,16 @@ struct Pdi {
   std::vector<uint32_t> patch_offsets;
 };
 
+/// @brief A symbol the control code takes the address of but the ELF does not carry, such as the
+/// control scratchpad (`scratch-pad-ctrl`). The application allocates it and defines it with
+/// hsa_executable_agent_global_variable_define before loading.
+struct ExternalSymbol {
+  /// @brief Bytes the control code expects at the address: the symbol's `st_size`.
+  uint32_t size = 0;
+  /// @brief Places in the control code taking the symbol's device address; never empty.
+  std::vector<PatchSite> sites;
+};
+
 /// @brief A parsed full-ELF kernel: the bytes to load and where addresses go.
 struct Kernel {
   /// @brief "<kernel>:<instance>", e.g. "main:sequence".
@@ -69,6 +79,8 @@ struct Kernel {
   std::vector<uint8_t> ctrl_code;
   /// @brief Patch sites per argument index. Entries may be empty for unused arguments.
   std::vector<std::vector<PatchSite>> arg_sites;
+  /// @brief External symbols the control code references, by name.
+  std::map<std::string, ExternalSymbol> external_symbols;
 
   /// @brief Number of arguments the control code references.
   uint32_t num_args() const { return static_cast<uint32_t>(arg_sites.size()); }
