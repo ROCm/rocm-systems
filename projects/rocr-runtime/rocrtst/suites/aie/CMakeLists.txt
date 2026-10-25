@@ -262,6 +262,15 @@ function(add_aie_kernel name source)
   set(${name}_INSTS_BIN "${insts}" PARENT_SCOPE)
   set(${name}_DESIGN_PDI "${pdi}" PARENT_SCOPE)
 
+  add_aie_full_elf(${name} "${source}" ${ARGN})
+  set(${name}_FULL_ELF "${${name}_FULL_ELF}" PARENT_SCOPE)
+  set(${name}_FULL_ELF_TARGET "${${name}_FULL_ELF_TARGET}" PARENT_SCOPE)
+endfunction()
+
+# add_aie_full_elf(<name> <source.py>) is the full-ELF half of add_aie_kernel, for a design
+# that only has a full-ELF build. It sets <name>_FULL_ELF and <name>_FULL_ELF_TARGET as above.
+function(add_aie_full_elf name source)
+  get_filename_component(source_name "${source}" NAME)
   set(elf_build_dir "${CMAKE_CURRENT_BINARY_DIR}/kernel_full_elf_${name}")
   set(elf_mlir "${elf_build_dir}/aie.mlir")
   set(elf "${elf_build_dir}/aie.elf")
@@ -316,6 +325,14 @@ add_aie_kernel(vsadd "${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_add.py")
 # value is compiled into the kernel and into the assertion that checks it.
 set(VSMUL_SCALE 3)
 add_aie_kernel(vsmul "${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_mul.py" "--scale=${VSMUL_SCALE}")
+# vector_scalar_add_param: like vsadd, but adds a value the host writes into the control
+# scratchpad. Full ELF and npu2 only, which the scratchpad needs.
+if(NPU_TARGET STREQUAL "npu2")
+  add_aie_full_elf(vsparam "${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_add_param.py")
+else()
+  set(vsparam_FULL_ELF "${CMAKE_CURRENT_BINARY_DIR}/kernel_full_elf_vsparam/aie.elf")
+  set(vsparam_FULL_ELF_TARGET "")
+endif()
 
 # ---------------------------------------------------------------------------
 # Unified hsaco packaging
@@ -428,6 +445,23 @@ if(AIE_FULL_ELF_SUPPORTED)
   add_custom_target(vsmul_elf_hsaco_artifact DEPENDS "${vsmul_ELF_HSACO}")
 endif()
 
+# The scratchpad design's full ELF, packaged the same way, for the external-variable tests.
+set(vsparam_ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsparam_elf.hsaco")
+if(vsparam_FULL_ELF_TARGET)
+  add_custom_command(
+    OUTPUT "${vsparam_ELF_HSACO}"
+    COMMAND "${AIE_HSACO}"
+            --hsaco "${vsparam_ELF_HSACO}"
+            --arch "${AIE_HSACO_ARCH}"
+            --kernel "elf:${vsparam_FULL_ELF}:0:1"
+    # Depend on the target, not its output files: see the vsadd_HSACO rule above for why.
+    DEPENDS ${vsparam_FULL_ELF_TARGET}
+    COMMENT "Packaging vsparam full-ELF artifact into a unified AIE hsaco"
+    VERBATIM
+  )
+  add_custom_target(vsparam_elf_hsaco_artifact DEPENDS "${vsparam_ELF_HSACO}")
+endif()
+
 # ---------------------------------------------------------------------------
 # test_dispatch executable
 # ---------------------------------------------------------------------------
@@ -464,6 +498,7 @@ target_compile_definitions(test_dispatch
     MUL_HSACO_PATH=${vsmul_HSACO}
     MUL_HSACO_KERNEL_NAME="${VSMUL_HSACO_KERNEL_NAME}"
     MUL_ELF_HSACO_PATH=${vsmul_ELF_HSACO}
+    PARAM_ELF_HSACO_PATH=${vsparam_ELF_HSACO}
 )
 target_link_libraries(test_dispatch
   PRIVATE
@@ -481,6 +516,9 @@ if(vsadd_FULL_ELF_TARGET OR vsmul_FULL_ELF_TARGET)
 endif()
 if(AIE_FULL_ELF_SUPPORTED)
   add_dependencies(test_dispatch vsadd_elf_hsaco_artifact vsmul_elf_hsaco_artifact)
+endif()
+if(TARGET vsparam_elf_hsaco_artifact)
+  add_dependencies(test_dispatch vsparam_elf_hsaco_artifact)
 endif()
 
 gtest_discover_tests(test_dispatch)
@@ -512,6 +550,9 @@ target_include_directories(elf_parse_test PRIVATE
 target_link_libraries(elf_parse_test PRIVATE GTest::gtest_main hsa-runtime64::hsa-runtime64)
 if(vsadd_FULL_ELF_TARGET)
   add_dependencies(elf_parse_test ${vsadd_FULL_ELF_TARGET})
+endif()
+if(vsparam_FULL_ELF_TARGET)
+  add_dependencies(elf_parse_test ${vsparam_FULL_ELF_TARGET})
 endif()
 add_test(NAME elf_parse_test COMMAND elf_parse_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 

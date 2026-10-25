@@ -311,6 +311,9 @@ const std::filesystem::path kMulElfHsacoPath = STRINGIFY(MUL_ELF_HSACO_PATH);
 // Neither design names its aie.device or its runtime sequence, so aiecc defaults both to the
 // same "<device>:<sequence>" key.
 constexpr const char* kMulElfHsacoKernelName = DEFAULT_ELF_HSACO_KERNEL_NAME;
+// The scratchpad design: vsadd's shape, adding a value it reads from the control scratchpad.
+const std::filesystem::path kParamElfHsacoPath = STRINGIFY(PARAM_ELF_HSACO_PATH);
+constexpr const char* kParamElfHsacoKernelName = DEFAULT_ELF_HSACO_KERNEL_NAME;
 
 // The build skips packaging an hsaco when the toolchain cannot produce what it is built from, so
 // every test that needs one checks first and skips itself rather than failing.
@@ -2256,9 +2259,11 @@ class FullElfDispatchTest : public DispatchTest {
  * @param reader receives the code object reader; left open on success, destroyed on failure
  * @return the status of hsa_executable_load_agent_code_object, or HSA_STATUS_ERROR if the reader
  * or executable could not be created
+ * @param variables agent variables to define before loading, by name and host address
  */
 hsa_status_t TryLoad(const std::vector<std::uint8_t>& bytes, hsa_agent_t agent,
-                     hsa_executable_t* executable, hsa_code_object_reader_t* reader) {
+                     hsa_executable_t* executable, hsa_code_object_reader_t* reader,
+                     const std::vector<std::pair<const char*, void*>>& variables = {}) {
   if (hsa_code_object_reader_create_from_memory(bytes.data(), bytes.size(), reader) !=
       HSA_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
@@ -2267,6 +2272,14 @@ hsa_status_t TryLoad(const std::vector<std::uint8_t>& bytes, hsa_agent_t agent,
                                 executable) != HSA_STATUS_SUCCESS) {
     hsa_code_object_reader_destroy(*reader);
     return HSA_STATUS_ERROR;
+  }
+  for (const auto& [name, address] : variables) {
+    if (hsa_executable_agent_global_variable_define(*executable, agent, name, address) !=
+        HSA_STATUS_SUCCESS) {
+      hsa_executable_destroy(*executable);
+      hsa_code_object_reader_destroy(*reader);
+      return HSA_STATUS_ERROR;
+    }
   }
 
   const hsa_status_t status =
@@ -2287,10 +2300,12 @@ hsa_status_t TryLoad(const std::vector<std::uint8_t>& bytes, hsa_agent_t agent,
  * @param agent agent to load the code object for
  * @param executable receives the executable, left open for the caller to inspect and destroy
  * @param reader receives the code object reader, left open for the caller to inspect and destroy
+ * @param variables agent variables to define before loading, as for TryLoad
  */
 void LoadAndFreeze(const std::vector<std::uint8_t>& bytes, hsa_agent_t agent,
-                   hsa_executable_t* executable, hsa_code_object_reader_t* reader) {
-  ASSERT_EQ(TryLoad(bytes, agent, executable, reader), HSA_STATUS_SUCCESS);
+                   hsa_executable_t* executable, hsa_code_object_reader_t* reader,
+                   const std::vector<std::pair<const char*, void*>>& variables = {}) {
+  ASSERT_EQ(TryLoad(bytes, agent, executable, reader, variables), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_executable_freeze(*executable, nullptr), HSA_STATUS_SUCCESS);
 }
 
@@ -2655,6 +2670,145 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
     EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
     EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
   }
+}
+
+// ---------------------------------------------------------------------------
+// External variables: the control scratchpad
+//
+// The control scratchpad is defined with hsa_executable_agent_global_variable_define before
+// loading, and the host writes parameters into it between dispatches.
+// ---------------------------------------------------------------------------
+class ExternalVariableTest : public FullElfDispatchTest {
+ protected:
+  // The name aiecc gives the control scratchpad's symbol.
+  static constexpr const char* kScratchpad = "scratch-pad-ctrl";
+
+  void SetUp() override {
+    FullElfDispatchTest::SetUp();
+    if (::testing::Test::HasFatalFailure() || ::testing::Test::IsSkipped()) return;
+    if (!std::filesystem::exists(kParamElfHsacoPath)) {
+      GTEST_SKIP() << "scratchpad full-ELF hsaco was not built: " << kParamElfHsacoPath;
+    }
+  }
+
+  /**
+   * @brief Encodes a value of the design's one scratchpad parameter.
+   *
+   * aiecc's params.txt for vector_scalar_add_param.py places "bias" in word 0 as a core
+   * parameter, which the firmware requires shifted left by 2.
+   *
+   * @param scratchpad the scratchpad the application defined
+   * @param bias value the design adds to every element
+   */
+  static void SetBias(void* scratchpad, std::uint32_t bias) {
+    static_cast<std::uint32_t*>(scratchpad)[0] = bias << 2;
+  }
+};
+
+TEST_F(ExternalVariableTest, LoadRefusesAnUndefinedScratchpad) {
+  // Without a definition there is no address to write into the control code.
+  hsa_executable_t executable{};
+  hsa_code_object_reader_t reader{};
+  EXPECT_EQ(TryLoad(read_hsaco(kParamElfHsacoPath), aie_agents.front(), &executable, &reader),
+            HSA_STATUS_ERROR_VARIABLE_UNDEFINED);
+}
+
+TEST_F(ExternalVariableTest, LoadRefusesAScratchpadOutsideAieMemory) {
+  // Plain host memory is not reachable by the NPU.
+  std::vector<std::uint32_t> host(1024);
+  hsa_executable_t executable{};
+  hsa_code_object_reader_t reader{};
+  EXPECT_EQ(TryLoad(read_hsaco(kParamElfHsacoPath), aie_agents.front(), &executable, &reader,
+                    {{kScratchpad, host.data()}}),
+            HSA_STATUS_ERROR_INVALID_ALLOCATION);
+}
+
+TEST_F(ExternalVariableTest, LoadRefusesAScratchpadPastTheEndOfItsAllocation) {
+  // The control code reads the whole scratchpad, so all of it must lie in one allocation.
+  constexpr std::size_t kAllocBytes = 4096;
+  pool_buffer scratchpad;
+  ASSERT_EQ(scratchpad.allocate(dev_pool, kAllocBytes), HSA_STATUS_SUCCESS);
+  hsa_executable_t executable{};
+  hsa_code_object_reader_t reader{};
+  EXPECT_EQ(TryLoad(read_hsaco(kParamElfHsacoPath), aie_agents.front(), &executable, &reader,
+                    {{kScratchpad, scratchpad.as<std::uint8_t>() + kAllocBytes - 2}}),
+            HSA_STATUS_ERROR_INVALID_ALLOCATION);
+}
+
+TEST_F(ExternalVariableTest, LoadRefusesAScratchpadPastTheEndOfAVmemMapping) {
+  // As above, for a vmem mapping, whose pointer info reports the queried pointer as its base.
+  std::vector<hsa_agent_t> access_agents;
+  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &access_agents),
+            HSA_STATUS_SUCCESS);
+  access_agents.insert(access_agents.end(), aie_agents.begin(), aie_agents.end());
+  vmem_buffer mapping{};
+  ASSERT_TRUE(vmem_allocate(data_pool, 4096, access_agents, &mapping));
+  hsa_executable_t executable{};
+  hsa_code_object_reader_t reader{};
+  EXPECT_EQ(TryLoad(read_hsaco(kParamElfHsacoPath), aie_agents.front(), &executable, &reader,
+                    {{kScratchpad, static_cast<std::uint8_t*>(mapping.va) + mapping.size - 2}}),
+            HSA_STATUS_ERROR_INVALID_ALLOCATION);
+  EXPECT_TRUE(vmem_free(mapping));
+}
+
+TEST_F(ExternalVariableTest, ScratchpadParameterChangesBetweenDispatches) {
+  // One loaded kernel, dispatched with a different parameter each time. The test writes each
+  // value with a plain store and no flush; the runtime flushes the scratchpad per dispatch.
+  constexpr std::size_t n = aie_full_elf_kernel::element_count;
+
+  // The command processor reads the scratchpad itself, which works only from the dev pool.
+  pool_buffer scratchpad, input, output, kernargs;
+  ASSERT_EQ(scratchpad.allocate(dev_pool, 4096), HSA_STATUS_SUCCESS);
+  std::memset(scratchpad.get(), 0, 4096);
+  ASSERT_EQ(input.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(output.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes),
+            HSA_STATUS_SUCCESS);
+
+  hsa_executable_t executable{};
+  hsa_code_object_reader_t reader{};
+  ASSERT_NO_FATAL_FAILURE(LoadAndFreeze(read_hsaco(kParamElfHsacoPath), aie_agents.front(),
+                                        &executable, &reader, {{kScratchpad, scratchpad.get()}}));
+  hsa_executable_symbol_t symbol{};
+  ASSERT_EQ(hsa_executable_get_symbol_by_name(executable, kParamElfHsacoKernelName,
+                                              &aie_agents.front(), &symbol),
+            HSA_STATUS_SUCCESS);
+  std::uint64_t kernel_object = 0;
+  ASSERT_EQ(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+                                           &kernel_object),
+            HSA_STATUS_SUCCESS);
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  auto* in = input.as<std::uint32_t>();
+  auto* out = output.as<std::uint32_t>();
+  std::iota(in, in + n, 0);
+  for (const std::uint32_t bias : {7u, 1000u, 0u, 123456u, 7u}) {
+    SetBias(scratchpad.get(), bias);
+    std::fill_n(out, n, 0xDEADBEEF);
+
+    hsa_signal_t signal{};
+    ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+    const auto wr_idx = aie_full_elf_kernel::dispatch_packet(
+        kernel_object, in, out, kernargs.as<std::uint64_t>(), signal, queue);
+    hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+    // A failed dispatch leaves the signal negative, so wait for < 1 rather than == 0.
+    const hsa_signal_value_t done = hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                                              UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+    EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+    ASSERT_EQ(done, 0) << "dispatch with bias " << bias << " failed";
+
+    for (std::size_t i = 0; i < n; ++i) {
+      ASSERT_EQ(out[i], in[i] + bias) << "bias " << bias << ", index " << i;
+    }
+  }
+
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_executable_destroy(executable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_code_object_reader_destroy(reader), HSA_STATUS_SUCCESS);
 }
 
 TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
