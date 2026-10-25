@@ -26,6 +26,7 @@ from rocprof_compute_soc.soc_base import (
     _trial_counter_file_with_extra,
     flat_counters_in_perfmon_file,
 )
+from utils.metrics.expression import composite_part_refs
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
@@ -945,3 +946,46 @@ def test_post_profiling_roofline_gating(
     soc.post_profiling()
 
     assert mock_benchmark.called is expect_benchmark
+
+
+def _composite_metric_ids(arch_dir: Path) -> list[tuple[str, list[str]]]:
+    """(metric id, part metric ids) of every composite parent under arch_dir."""
+    found: list[tuple[str, list[str]]] = []
+    for path in sorted(arch_dir.glob("*.yaml")):
+        panel = str(int(path.name.split("_")[0]) // 100)
+        with open(path, encoding="utf-8") as stream:
+            sections = yaml.safe_load(stream)["Panel Config"]["data source"]
+        for section in sections:
+            table = section.get("metric_table")
+            if not table:
+                continue
+            names = list((table.get("metric") or {}).keys())
+            prefix = f"{panel}.{table['id'] % 100}"
+            for index, name in enumerate(names):
+                body = table["metric"][name] or {}
+                refs = {
+                    ref
+                    for value in body.values()
+                    if isinstance(value, str)
+                    for ref in composite_part_refs(value)
+                }
+                if refs:
+                    parts = [f"{prefix}.{names.index(ref)}" for ref in refs]
+                    found.append((f"{prefix}.{index}", parts))
+    return found
+
+
+@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+def test_block_on_a_composite_metric_selects_its_parts(gpu_arch: str) -> None:
+    """-b <composite metric id> profiles the counters of the rows it combines."""
+    config_dir = config.analysis_configs_dir
+    arch_dir = config_dir / canonical_config_arch(gpu_arch)
+    for metric_id, part_ids in _composite_metric_ids(arch_dir):
+        selected, _ = offline_soc(
+            config_dir, gpu_arch, [metric_id], False
+        ).detect_counters()
+        for part_id in part_ids:
+            part, _ = offline_soc(
+                config_dir, gpu_arch, [part_id], False
+            ).detect_counters()
+            assert part <= selected, (metric_id, part_id, sorted(part - selected))

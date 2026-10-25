@@ -221,6 +221,21 @@ def reject_counter_bearing_composite_extents(
             )
 
 
+def composite_part_refs(formula: str) -> list[str]:
+    """Names of the metrics a composite formula combines, without their sign.
+
+    Returns an empty list when formula is not a WEIGHTED_AVG, COLLECT_SUM, or
+    COLLECT_RATIO call.
+    """
+    refs = parse_weighted_avg_submetrics(formula) or parse_collect_sum_submetrics(
+        formula
+    )
+    if refs is None:
+        ratio = parse_collect_ratio_parts(formula)
+        refs = ratio[0] + ratio[1] if ratio is not None else []
+    return [ref.lstrip("-").strip() for ref in refs]
+
+
 def is_composite_avg_formula(formula: str) -> bool:
     if not formula or not isinstance(formula, str):
         return False
