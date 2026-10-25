@@ -36,7 +36,8 @@ namespace hip
 {
 namespace graph
 {
-/// The kernel nodes a stream capture created, in capture order, for one graph exec (graph.cpp).
+/// The kernel nodes a stream capture created, in the order the runtime enqueues them, for one graph
+/// exec (graph.cpp).
 struct capture_plan;
 
 /// Per-launch state held in TLS while inside hipGraphLaunch.

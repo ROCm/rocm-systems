@@ -85,7 +85,7 @@ struct capture_plan
         mutable std::atomic<uint64_t> kernel_id = {0};  // the kernel id that last matched the name
     };
 
-    std::deque<kernel_node> kernels = {};  // the graph's captured kernel nodes, in capture order
+    std::deque<kernel_node> kernels = {};  // the graph's captured kernel nodes, in enqueue order
 };
 
 namespace
@@ -103,6 +103,7 @@ struct capture_api_t
 {
     decltype(::HipDispatchTable::hipStreamGetCaptureInfo_v2_fn)  get_capture_info   = nullptr;
     decltype(::HipDispatchTable::hipGraphGetNodes_fn)            get_nodes          = nullptr;
+    decltype(::HipDispatchTable::hipGraphGetEdges_fn)            get_edges          = nullptr;
     decltype(::HipDispatchTable::hipGraphNodeGetType_fn)         node_get_type      = nullptr;
     decltype(::HipDispatchTable::hipGraphKernelNodeGetParams_fn) kernel_node_params = nullptr;
     decltype(::HipDispatchTable::hipKernelNameRefByPtr_fn)       kernel_name        = nullptr;
@@ -246,8 +247,83 @@ forget_captured_graph(::hipGraph_t graph)
     g_captured_graphs.erase(graph);
 }
 
-// At instantiation: the captured kernel nodes of the source graph, in capture order, with the
-// names a replayed dispatch's kernel must match.
+// A graph's nodes in the order the HIP runtime enqueues them: depth-first from each root in
+// creation order, children in creation order, a node once all its parents are. A graph captured
+// from one stream is a chain, so this is its capture order. Across streams it is not: the runtime
+// enqueues a whole branch before the next, so launches captured alternately on two streams replay
+// one stream's after the other's (MI350X, ROCm 7.2.3: every replay of graphs captured on two and
+// four streams; #14200). Empty if the graph cannot be read.
+std::vector<::hipGraphNode_t>
+enqueue_order(::hipGraph_t graph)
+{
+    auto nodes = std::vector<::hipGraphNode_t>(graph_node_count(graph));
+    auto count = nodes.size();
+    if(count == 0 || !g_capture_api.get_edges ||
+       g_capture_api.get_nodes(graph, nodes.data(), &count) != hipSuccess)
+        return {};
+    nodes.resize(count);
+
+    size_t nedges = 0;
+    if(g_capture_api.get_edges(graph, nullptr, nullptr, &nedges) != hipSuccess) return {};
+    auto from = std::vector<::hipGraphNode_t>(nedges);
+    auto to   = std::vector<::hipGraphNode_t>(nedges);
+    if(nedges > 0 && g_capture_api.get_edges(graph, from.data(), to.data(), &nedges) != hipSuccess)
+        return {};
+
+    // hipGraphGetNodes lists a graph's nodes in the order they were added
+    auto index = std::unordered_map<::hipGraphNode_t, size_t>{};
+    for(size_t i = 0; i < nodes.size(); ++i)
+        index.emplace(nodes.at(i), i);
+    auto parents  = std::vector<std::vector<size_t>>(nodes.size());
+    auto children = std::vector<std::vector<size_t>>(nodes.size());
+    for(size_t e = 0; e < nedges && e < from.size(); ++e)
+    {
+        auto f = index.find(from.at(e));
+        auto t = index.find(to.at(e));
+        if(f == index.end() || t == index.end()) continue;
+        parents.at(t->second).emplace_back(f->second);
+        children.at(f->second).emplace_back(t->second);
+    }
+    for(auto& itr : children)
+        std::sort(itr.begin(), itr.end());
+
+    auto done  = std::vector<bool>(nodes.size(), false);
+    auto ready = [&](size_t j) {
+        return !done.at(j) && std::all_of(parents.at(j).begin(),
+                                          parents.at(j).end(),
+                                          [&](size_t p) { return done.at(p); });
+    };
+    auto order = std::vector<::hipGraphNode_t>{};
+    order.reserve(nodes.size());
+    auto stack = std::vector<std::pair<size_t, size_t>>{};  // node, next child to visit
+    for(size_t root = 0; root < nodes.size(); ++root)
+    {
+        if(!ready(root)) continue;
+        done.at(root) = true;
+        order.emplace_back(nodes.at(root));
+        stack.emplace_back(root, 0);
+        while(!stack.empty())
+        {
+            auto [node, next] = stack.back();
+            if(next >= children.at(node).size())
+            {
+                stack.pop_back();
+                continue;
+            }
+            ++stack.back().second;
+            auto child = children.at(node).at(next);
+            if(!ready(child)) continue;
+            done.at(child) = true;
+            order.emplace_back(nodes.at(child));
+            stack.emplace_back(child, 0);
+        }
+    }
+    return order.size() == nodes.size() ? order : std::vector<::hipGraphNode_t>{};
+}
+
+// At instantiation: the captured kernel nodes of the source graph, in the order the runtime will
+// enqueue them (enqueue_order; capture order if the graph cannot be read), with the names a
+// replayed dispatch's kernel must match.
 void
 plan_capture(::hipGraphExec_t exec, ::hipGraph_t graph)
 {
@@ -261,6 +337,19 @@ plan_capture(::hipGraphExec_t exec, ::hipGraph_t graph)
     if(!g_capture_api.node_get_type || !g_capture_api.kernel_node_params ||
        !g_capture_api.kernel_name)
         return;
+
+    if(auto order = enqueue_order(graph); !order.empty())
+    {
+        auto rank = std::unordered_map<::hipGraphNode_t, size_t>{};
+        for(size_t i = 0; i < order.size(); ++i)
+            rank.emplace(order.at(i), i);
+        std::stable_sort(nodes.begin(), nodes.end(), [&rank](const auto& lhs, const auto& rhs) {
+            auto l = rank.find(lhs.node);
+            auto r = rank.find(rhs.node);
+            return (l == rank.end() ? rank.size() : l->second) <
+                   (r == rank.end() ? rank.size() : r->second);
+        });
+    }
 
     auto plan = std::make_shared<capture_plan>();
     for(const auto& itr : nodes)
@@ -736,6 +825,7 @@ update_table(::HipDispatchTable* table)
     // the implementations, before the API tracing wrappers are installed over them
     g_capture_api = capture_api_t{.get_capture_info   = table->hipStreamGetCaptureInfo_v2_fn,
                                   .get_nodes          = table->hipGraphGetNodes_fn,
+                                  .get_edges          = table->hipGraphGetEdges_fn,
                                   .node_get_type      = table->hipGraphNodeGetType_fn,
                                   .kernel_node_params = table->hipGraphKernelNodeGetParams_fn,
                                   .kernel_name        = table->hipKernelNameRefByPtr_fn};
