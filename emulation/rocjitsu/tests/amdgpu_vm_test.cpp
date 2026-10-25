@@ -4997,9 +4997,9 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
 
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 19;
-  constexpr uint32_t kFirstPrivateBytes = 288;
-  constexpr uint32_t kSecondPrivateBytes = 1056;
-  constexpr uint32_t kThirdPrivateBytes = 10272;
+  // At wave32, 48/112 expose 1 KiB rounding; 72 needs nine 256-byte granules
+  // and also exposes incorrect 512-byte rounding.
+  constexpr std::array kPrivateBytes = {48u, 72u, 112u, 288u, 1056u, 10272u};
   constexpr uint64_t kRing = 0xF0000000;
   constexpr uint64_t kQueueDescriptor = 0xF0010000;
   constexpr uint64_t kDoorbell = 0xF0020000;
@@ -5017,15 +5017,6 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
   VmFixture fixture;
   ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna5", /*num_cus=*/1, /*num_wf_slots=*/2));
   const uint32_t code[] = {SOPP_S_ENDPGM};
-  const uint64_t first_kernel = fixture.write_kernel(0x1000, code, sizeof(code));
-  fixture.mem()->write32(first_kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
-                         kFirstPrivateBytes);
-  const uint64_t second_kernel = fixture.write_kernel(0x2000, code, sizeof(code));
-  fixture.mem()->write32(second_kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
-                         kSecondPrivateBytes);
-  const uint64_t third_kernel = fixture.write_kernel(0x3000, code, sizeof(code));
-  fixture.mem()->write32(third_kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
-                         kThirdPrivateBytes);
 
   const uint64_t read_pointer = kQueueDescriptor + offsetof(amd_queue_t, read_dispatch_id);
   const uint64_t write_pointer = kQueueDescriptor + offsetof(amd_queue_t, write_dispatch_id);
@@ -5086,14 +5077,13 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
     // retry signal so the next CP pass may safely consume the same packet.
     fixture.mem()->write64(
         kQueueDescriptor + offsetof(amd_queue_t, scratch_backing_memory_location), kScratchBacking);
-    const uint32_t private_bytes = scratch_requests == 1   ? kFirstPrivateBytes
-                                   : scratch_requests == 2 ? kSecondPrivateBytes
-                                                           : kThirdPrivateBytes;
+    ASSERT_LE(scratch_requests, kPrivateBytes.size());
+    const uint32_t private_bytes = kPrivateBytes[scratch_requests - 1];
     const uint64_t raw_per_wave = static_cast<uint64_t>(private_bytes) * 32;
-    const uint64_t per_wave_stride = ((raw_per_wave + 1023) / 1024) * 1024;
     const uint32_t wavesize_granule =
         isa_properties(ROCJITSU_CODE_ARCH_CDNA5).compute_tmpring_wavesize_granule;
-    const uint32_t provisioned_wavesize = static_cast<uint32_t>(per_wave_stride / wavesize_granule);
+    const uint32_t provisioned_wavesize =
+        static_cast<uint32_t>((raw_per_wave + wavesize_granule - 1) / wavesize_granule);
     fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_t, compute_tmpring_size),
                            1u | (provisioned_wavesize << kWaveSizeFieldShift));
     if (scratch_requests >= 2) {
@@ -5108,7 +5098,8 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
   queue.process_id = kProcessId;
   queue.queue_id = kQueueId;
   queue.ring_base_va = kRing;
-  queue.ring_size = 4 * amdgpu::kAqlPacketBytes;
+  queue.ring_size =
+      static_cast<uint32_t>(std::bit_ceil(kPrivateBytes.size())) * amdgpu::kAqlPacketBytes;
   queue.read_ptr_va = read_pointer;
   queue.write_ptr_va = write_pointer;
   queue.doorbell_va = kDoorbell;
@@ -5118,40 +5109,42 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
   ASSERT_NE(fixture.cp()->register_queue(std::move(queue)), 0u);
 
   auto *snapshots = fixture.capture_halts();
-  hsa_kernel_dispatch_packet_t first_packet =
-      make_dispatch_packet(first_kernel, 0, /*grid_size_x=*/64, /*workgroup_size_x=*/32);
-  first_packet.private_segment_size = kFirstPrivateBytes;
-  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&first_packet), sizeof(first_packet),
-                            kRing);
-  hsa_kernel_dispatch_packet_t second_packet =
-      make_dispatch_packet(second_kernel, 0, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
-  second_packet.private_segment_size = kSecondPrivateBytes;
-  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&second_packet),
-                            sizeof(second_packet), kRing + amdgpu::kAqlPacketBytes);
-  hsa_kernel_dispatch_packet_t third_packet =
-      make_dispatch_packet(third_kernel, 0, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
-  third_packet.private_segment_size = kThirdPrivateBytes;
-  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&third_packet), sizeof(third_packet),
-                            kRing + 2 * amdgpu::kAqlPacketBytes);
-  fixture.mem()->write64(write_pointer, 3);
-  fixture.mem()->write64(kDoorbell, 3);
+  std::vector<uint64_t> expected_request_pointers;
+  std::vector<uint64_t> expected_reclaim_pointers;
+  for (size_t index = 0; index < kPrivateBytes.size(); ++index) {
+    const uint64_t kernel = fixture.write_kernel(0x1000 * (index + 1), code, sizeof(code));
+    fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
+                           kPrivateBytes[index]);
+    hsa_kernel_dispatch_packet_t packet =
+        make_dispatch_packet(kernel, 0, /*grid_size_x=*/index == 0 ? 64 : 32,
+                             /*workgroup_size_x=*/32);
+    packet.private_segment_size = kPrivateBytes[index];
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet),
+                              kRing + index * amdgpu::kAqlPacketBytes);
+    expected_request_pointers.push_back(index);
+    if (index != 0)
+      expected_reclaim_pointers.push_back(index + 1);
+  }
+  fixture.mem()->write64(write_pointer, kPrivateBytes.size());
+  fixture.mem()->write64(kDoorbell, kPrivateBytes.size());
   fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
   fixture.engine->run();
 
-  EXPECT_EQ(scratch_requests, 3u);
-  EXPECT_EQ(scratch_reclaims, 2u);
-  EXPECT_EQ(read_pointers_at_request, (std::vector<uint64_t>{0, 1, 2}))
+  EXPECT_EQ(scratch_requests, kPrivateBytes.size());
+  EXPECT_EQ(scratch_reclaims, kPrivateBytes.size() - 1);
+  EXPECT_EQ(read_pointers_at_request, expected_request_pointers)
       << "a scratch dispatch was consumed before ROCr installed sufficient backing";
-  EXPECT_EQ(read_pointers_at_reclaim, (std::vector<uint64_t>{2, 3}))
+  EXPECT_EQ(read_pointers_at_reclaim, expected_reclaim_pointers)
       << "a packet following use-once scratch was consumed before ROCr reclaimed it";
-  EXPECT_EQ(fixture.cp()->accepted_entry_count_for_test(kQueueId, kProcessId), 3u);
-  EXPECT_EQ(fixture.mem()->read64(read_pointer), 3u);
+  EXPECT_EQ(fixture.cp()->accepted_entry_count_for_test(kQueueId, kProcessId),
+            kPrivateBytes.size());
+  EXPECT_EQ(fixture.mem()->read64(read_pointer), kPrivateBytes.size());
   EXPECT_EQ(fixture.mem()->read64(kQueueDescriptor +
                                   offsetof(amd_queue_t, scratch_backing_memory_location)),
             0u);
   EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(kQueueId, kProcessId));
   EXPECT_TRUE(fixture.cu()->is_idle());
-  ASSERT_EQ(snapshots->snapshots().size(), 4u);
+  ASSERT_EQ(snapshots->snapshots().size(), kPrivateBytes.size() + 1);
   EXPECT_TRUE(std::ranges::all_of(snapshots->snapshots(), [](const auto &wave) {
     return wave.wf_id == 0;
   })) << "the CP used a physical wave slot beyond COMPUTE_TMPRING_SIZE.WAVES";
@@ -5187,15 +5180,21 @@ TEST(CommandProcessorTest, RuntimeScratchStrideSurvivesLargeThenSmallPrivateSegm
       const uint64_t small = f.write_kernel(0x2000, code, sizeof(code));
       f.mem()->write32(large + offsetof(kernel_descriptor_t, private_segment_fixed_size), 1024);
       f.mem()->write32(small + offsetof(kernel_descriptor_t, private_segment_fixed_size), 16);
-      const uint64_t stride = alternate ? 128 * 1024 : 64 * 1024;
+      const uint64_t main_wave_stride = 64 * 1024;
+      const uint64_t alternate_wave_stride = 128 * 1024;
+      const uint64_t stride = alternate ? alternate_wave_stride : main_wave_stride;
       const uint32_t tmpring =
-          2u | (static_cast<uint32_t>(stride / properties.compute_tmpring_wavesize_granule) << 12);
+          2u |
+          (static_cast<uint32_t>(main_wave_stride / properties.compute_tmpring_wavesize_granule)
+           << 12);
       f.mem()->write64(kQueue + offsetof(amd_queue_t, read_dispatch_id), 1);
       f.mem()->write64(kQueue + offsetof(amd_queue_t, write_dispatch_id), 3);
       f.mem()->write64(kDoorbell, 3);
       f.mem()->write64(kQueue + offsetof(amd_queue_t, scratch_backing_memory_location),
                        kMainScratch);
       f.mem()->write32(kQueue + offsetof(amd_queue_t, compute_tmpring_size), tmpring);
+      f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, scratch_wave64_lane_byte_size),
+                       main_wave_stride / 64);
       if (alternate) {
         f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, caps),
                          AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM | AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM);
@@ -5203,9 +5202,14 @@ TEST(CommandProcessorTest, RuntimeScratchStrideSurvivesLargeThenSmallPrivateSegm
         f.mem()->write64(kQueue + offsetof(amd_queue_v2_t, alt_scratch_max_use_index), 3);
         f.mem()->write64(kQueue + offsetof(amd_queue_v2_t, alt_scratch_backing_memory_location),
                          kAltScratch);
-        f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_compute_tmpring_size), tmpring);
+        const uint32_t alternate_tmpring =
+            2u | (static_cast<uint32_t>(alternate_wave_stride /
+                                        properties.compute_tmpring_wavesize_granule)
+                  << 12);
+        f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_compute_tmpring_size),
+                         alternate_tmpring);
         f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_scratch_wave64_lane_byte_size),
-                         stride / 64);
+                         alternate_wave_stride / 64);
         f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_x),
                          2 * width);
         f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_y), 1);
@@ -5396,176 +5400,196 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
 
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 23;
-  constexpr uint32_t kPrivateBytes = 288;
-  constexpr uint64_t kRing = 0xF1000000;
-  constexpr uint64_t kQueueDescriptor = 0xF1010000;
-  constexpr uint64_t kDoorbell = 0xF1020000;
-  constexpr uint64_t kQueueSignal = 0xE1000000;
-  constexpr uint64_t kMailbox = 0xE1001000;
-  constexpr uint64_t kMainScratch = 0x00900000;
-  constexpr uint64_t kAlternateScratch = 0x00A00000;
-  constexpr uint32_t kEventId = 43;
-  constexpr uint32_t kPreservedCapability = 1u << 7;
-  constexpr uint64_t kInsufficientScratchWave32 = 0x401;
-  constexpr uint32_t kSignalValueOffset = 8;
-  constexpr uint32_t kMailboxPointerOffset = 16;
-  constexpr uint32_t kEventIdOffset = 24;
-  constexpr uint32_t kWaveSizeFieldShift = 12;
-  constexpr uint32_t kXccId = 2;
-  constexpr uint32_t kXccCount = 4;
+  for (const auto &[kPrivateBytes, alternate_wave_stride] :
+       {std::pair<uint32_t, uint64_t>{288, 9216}, {48, 2560}}) {
+    SCOPED_TRACE(kPrivateBytes);
+    constexpr uint64_t kRing = 0xF1000000;
+    constexpr uint64_t kQueueDescriptor = 0xF1010000;
+    constexpr uint64_t kDoorbell = 0xF1020000;
+    constexpr uint64_t kQueueSignal = 0xE1000000;
+    constexpr uint64_t kMailbox = 0xE1001000;
+    constexpr uint64_t kMainScratch = 0x00900000;
+    constexpr uint64_t kAlternateScratch = 0x00A00000;
+    constexpr uint32_t kEventId = 43;
+    constexpr uint32_t kPreservedCapability = 1u << 7;
+    constexpr uint64_t kInsufficientScratchWave32 = 0x401;
+    constexpr uint32_t kSignalValueOffset = 8;
+    constexpr uint32_t kMailboxPointerOffset = 16;
+    constexpr uint32_t kEventIdOffset = 24;
+    constexpr uint32_t kWaveSizeFieldShift = 12;
+    constexpr uint32_t kXccId = 2;
+    constexpr uint32_t kXccCount = 4;
+    constexpr uint32_t kMainWaves = 7;
+    constexpr uint32_t kAlternateWaves = 1;
+    // Distinguish the allocations; this offset is not the target allocation granule.
+    const uint64_t main_wave_stride = alternate_wave_stride + 1024;
 
-  VmFixture fixture;
-  ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna5", /*num_cus=*/1, /*num_wf_slots=*/2,
-                                             /*lds_size_kb=*/64,
-                                             /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256,
-                                             /*num_shader_engines=*/2));
-  fixture.cp()->set_scratch_wave_divisor(2);
-  fixture.cp()->set_scratch_xcc_layout_for_test(kXccId, kXccCount);
-  const uint32_t code[] = {SOPP_S_ENDPGM};
-  const uint64_t kernel = fixture.write_kernel(0x4000, code, sizeof(code));
-  fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
-                         kPrivateBytes);
+    VmFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna5", /*num_cus=*/1, /*num_wf_slots=*/2,
+                                               /*lds_size_kb=*/64,
+                                               /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256,
+                                               /*num_shader_engines=*/2));
+    fixture.cp()->set_scratch_wave_divisor(2);
+    fixture.cp()->set_scratch_xcc_layout_for_test(kXccId, kXccCount);
+    const uint32_t code[] = {SOPP_S_ENDPGM};
+    const uint64_t kernel = fixture.write_kernel(0x4000, code, sizeof(code));
+    fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
+                           kPrivateBytes);
 
-  const uint64_t read_pointer = kQueueDescriptor + offsetof(amd_queue_t, read_dispatch_id);
-  const uint64_t write_pointer = kQueueDescriptor + offsetof(amd_queue_t, write_dispatch_id);
-  const uint64_t caps_address = kQueueDescriptor + offsetof(amd_queue_v2_t, caps);
-  const uint64_t main_last_used = kQueueDescriptor +
-                                  offsetof(amd_queue_v2_t, scratch_last_used_index) +
-                                  kXccId * sizeof(scratch_last_used_index_xcc_t) +
-                                  offsetof(scratch_last_used_index_xcc_t, main);
-  const uint64_t alternate_last_used =
-      kQueueDescriptor + offsetof(amd_queue_v2_t, scratch_last_used_index) +
-      kXccId * sizeof(scratch_last_used_index_xcc_t) + offsetof(scratch_last_used_index_xcc_t, alt);
-  const auto properties = isa_properties(ROCJITSU_CODE_ARCH_CDNA5);
-  const uint64_t raw_per_wave = static_cast<uint64_t>(kPrivateBytes) * 32;
-  const uint64_t per_wave_stride = ((raw_per_wave + 1023) / 1024) * 1024;
-  const uint32_t provisioned_wavesize =
-      static_cast<uint32_t>(per_wave_stride / properties.compute_tmpring_wavesize_granule);
-  const uint32_t runtime_tmpring = 7u | (provisioned_wavesize << kWaveSizeFieldShift);
+    const uint64_t read_pointer = kQueueDescriptor + offsetof(amd_queue_t, read_dispatch_id);
+    const uint64_t write_pointer = kQueueDescriptor + offsetof(amd_queue_t, write_dispatch_id);
+    const uint64_t caps_address = kQueueDescriptor + offsetof(amd_queue_v2_t, caps);
+    const uint64_t main_last_used = kQueueDescriptor +
+                                    offsetof(amd_queue_v2_t, scratch_last_used_index) +
+                                    kXccId * sizeof(scratch_last_used_index_xcc_t) +
+                                    offsetof(scratch_last_used_index_xcc_t, main);
+    const uint64_t alternate_last_used = kQueueDescriptor +
+                                         offsetof(amd_queue_v2_t, scratch_last_used_index) +
+                                         kXccId * sizeof(scratch_last_used_index_xcc_t) +
+                                         offsetof(scratch_last_used_index_xcc_t, alt);
+    const auto properties = isa_properties(ROCJITSU_CODE_ARCH_CDNA5);
+    const uint32_t main_wavesize =
+        static_cast<uint32_t>(main_wave_stride / properties.compute_tmpring_wavesize_granule);
+    const uint32_t alternate_wavesize =
+        static_cast<uint32_t>(alternate_wave_stride / properties.compute_tmpring_wavesize_granule);
+    const uint32_t runtime_tmpring = kMainWaves | (main_wavesize << kWaveSizeFieldShift);
 
-  fixture.mem()->write64(read_pointer, 1);
-  fixture.mem()->write64(write_pointer, 1);
-  fixture.mem()->write64(kDoorbell, 1);
-  fixture.mem()->write32(caps_address, AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM | kPreservedCapability);
-  fixture.mem()->write64(
-      kQueueDescriptor + offsetof(amd_queue_v2_t, scratch_backing_memory_location), kMainScratch);
-  fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_v2_t, compute_tmpring_size),
-                         runtime_tmpring);
-  fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_v2_t, scratch_wave64_lane_byte_size),
-                         kPrivateBytes / 2);
-  fixture.mem()->write64(kQueueDescriptor + offsetof(amd_queue_v2_t, scratch_max_use_index), 0);
-  fixture.mem()->write64(kQueueDescriptor +
-                             offsetof(amd_queue_v2_t, alt_scratch_backing_memory_location),
-                         kAlternateScratch);
-  fixture.mem()->write64(kQueueDescriptor + offsetof(amd_queue_v2_t, alt_scratch_max_use_index), 1);
-  fixture.mem()->write32(kQueueDescriptor +
-                             offsetof(amd_queue_v2_t, alt_scratch_wave64_lane_byte_size),
-                         kPrivateBytes / 2);
-  fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_x),
-                         64);
-  fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_y),
-                         1);
-  fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_z),
-                         1);
-  fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_v2_t, alt_compute_tmpring_size),
-                         1u | (provisioned_wavesize << kWaveSizeFieldShift));
-  fixture.mem()->write64(kQueueDescriptor + offsetof(amd_queue_t, queue_inactive_signal),
-                         kQueueSignal);
-  fixture.mem()->write64(kQueueSignal + kSignalValueOffset, 0);
-  fixture.mem()->write64(kQueueSignal + kMailboxPointerOffset, kMailbox);
-  fixture.mem()->write32(kQueueSignal + kEventIdOffset, kEventId);
-
-  uint32_t scratch_requests = 0;
-  amdgpu::InterruptSubscription subscription([&](uint32_t process_id, uint32_t event_id) {
-    const uint64_t status = fixture.mem()->read64(kQueueSignal + kSignalValueOffset);
-    if (status == 0x10) {
-      fixture.mem()->write64(kQueueSignal + kSignalValueOffset, 0);
-      return;
-    }
-    if (status != kInsufficientScratchWave32)
-      return;
-    EXPECT_EQ(process_id, kProcessId);
-    EXPECT_EQ(event_id, kEventId);
-    EXPECT_EQ(fixture.mem()->read64(kMailbox), kEventId);
-    EXPECT_EQ(fixture.mem()->read64(read_pointer), 2u);
-    ++scratch_requests;
-
+    fixture.mem()->write64(read_pointer, 1);
+    fixture.mem()->write64(write_pointer, 1);
+    fixture.mem()->write64(kDoorbell, 1);
+    fixture.mem()->write32(caps_address, AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM | kPreservedCapability);
     fixture.mem()->write64(
         kQueueDescriptor + offsetof(amd_queue_v2_t, scratch_backing_memory_location), kMainScratch);
     fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_v2_t, compute_tmpring_size),
                            runtime_tmpring);
-    fixture.mem()->write64(kQueueDescriptor + offsetof(amd_queue_v2_t, scratch_max_use_index), 2);
+    fixture.mem()->write32(kQueueDescriptor +
+                               offsetof(amd_queue_v2_t, scratch_wave64_lane_byte_size),
+                           main_wave_stride / 64);
+    fixture.mem()->write64(kQueueDescriptor + offsetof(amd_queue_v2_t, scratch_max_use_index), 0);
+    fixture.mem()->write64(kQueueDescriptor +
+                               offsetof(amd_queue_v2_t, alt_scratch_backing_memory_location),
+                           kAlternateScratch);
+    fixture.mem()->write64(kQueueDescriptor + offsetof(amd_queue_v2_t, alt_scratch_max_use_index),
+                           1);
+    fixture.mem()->write32(kQueueDescriptor +
+                               offsetof(amd_queue_v2_t, alt_scratch_wave64_lane_byte_size),
+                           alternate_wave_stride / 64);
+    fixture.mem()->write32(
+        kQueueDescriptor + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_x), 64);
+    fixture.mem()->write32(
+        kQueueDescriptor + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_y), 1);
+    fixture.mem()->write32(
+        kQueueDescriptor + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_z), 1);
+    fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_v2_t, alt_compute_tmpring_size),
+                           kAlternateWaves | (alternate_wavesize << kWaveSizeFieldShift));
+    fixture.mem()->write64(kQueueDescriptor + offsetof(amd_queue_t, queue_inactive_signal),
+                           kQueueSignal);
     fixture.mem()->write64(kQueueSignal + kSignalValueOffset, 0);
-  });
+    fixture.mem()->write64(kQueueSignal + kMailboxPointerOffset, kMailbox);
+    fixture.mem()->write32(kQueueSignal + kEventIdOffset, kEventId);
 
-  amdgpu::ComputeQueueConfig queue{};
-  queue.interrupt_sink = subscription.sink();
-  queue.process_id = kProcessId;
-  queue.queue_id = kQueueId;
-  queue.ring_base_va = kRing;
-  queue.ring_size = 4 * amdgpu::kAqlPacketBytes;
-  queue.read_ptr_va = read_pointer;
-  queue.write_ptr_va = write_pointer;
-  queue.doorbell_va = kDoorbell;
-  queue.doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled;
-  queue.uses_kfd_queue_abi = true;
-  queue.queue_desc_va = kQueueDescriptor;
-  ASSERT_NE(fixture.cp()->register_queue(std::move(queue)), 0u);
-  EXPECT_EQ(fixture.mem()->read32(caps_address), AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM |
-                                                     AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM |
-                                                     kPreservedCapability);
+    uint32_t scratch_requests = 0;
+    amdgpu::InterruptSubscription subscription([&](uint32_t process_id, uint32_t event_id) {
+      const uint64_t status = fixture.mem()->read64(kQueueSignal + kSignalValueOffset);
+      if (status == 0x10) {
+        fixture.mem()->write64(kQueueSignal + kSignalValueOffset, 0);
+        return;
+      }
+      if (status != kInsufficientScratchWave32)
+        return;
+      EXPECT_EQ(process_id, kProcessId);
+      EXPECT_EQ(event_id, kEventId);
+      EXPECT_EQ(fixture.mem()->read64(kMailbox), kEventId);
+      EXPECT_EQ(fixture.mem()->read64(read_pointer), 2u);
+      ++scratch_requests;
 
-  auto *snapshots = fixture.capture_halts();
-  hsa_kernel_dispatch_packet_t first_packet =
-      make_dispatch_packet(kernel, 0, /*grid_size_x=*/64, /*workgroup_size_x=*/32);
-  first_packet.private_segment_size = kPrivateBytes;
-  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&first_packet), sizeof(first_packet),
-                            kRing + amdgpu::kAqlPacketBytes);
-  hsa_kernel_dispatch_packet_t second_packet = make_dispatch_packet(kernel, 0);
-  second_packet.private_segment_size = kPrivateBytes;
-  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&second_packet),
-                            sizeof(second_packet), kRing + 2 * amdgpu::kAqlPacketBytes);
-  fixture.mem()->write64(write_pointer, 3);
-  fixture.mem()->write64(kDoorbell, 3);
-  fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
-  fixture.engine->run();
+      fixture.mem()->write64(kQueueDescriptor +
+                                 offsetof(amd_queue_v2_t, scratch_backing_memory_location),
+                             kMainScratch);
+      fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_v2_t, compute_tmpring_size),
+                             runtime_tmpring);
+      fixture.mem()->write64(kQueueDescriptor + offsetof(amd_queue_v2_t, scratch_max_use_index), 2);
+      fixture.mem()->write64(kQueueSignal + kSignalValueOffset, 0);
+    });
 
-  EXPECT_EQ(scratch_requests, 1u)
-      << "the second dispatch used alternate scratch past its maximum-use index";
-  EXPECT_EQ(fixture.cp()->accepted_entry_count_for_test(kQueueId, kProcessId), 2u);
-  EXPECT_EQ(fixture.mem()->read64(read_pointer), 3u);
-  EXPECT_EQ(fixture.mem()->read64(alternate_last_used), 1u);
-  EXPECT_EQ(fixture.mem()->read64(main_last_used), 2u);
-  EXPECT_EQ(fixture.mem()->read64(kQueueDescriptor +
-                                  offsetof(amd_queue_v2_t, scratch_last_used_index) +
-                                  sizeof(scratch_last_used_index_xcc_t) +
-                                  offsetof(scratch_last_used_index_xcc_t, alt)),
-            0u);
-  EXPECT_EQ(
-      fixture.mem()->read32(kQueueDescriptor + offsetof(amd_queue_v2_t, compute_tmpring_size)),
-      runtime_tmpring)
-      << "the CP overwrote ROCr's scratch occupancy limit";
-  EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(kQueueId, kProcessId));
-  EXPECT_TRUE(fixture.cu()->is_idle());
-  ASSERT_FALSE(snapshots->snapshots().empty());
-  const uint32_t alternate_dispatch_id = snapshots->snapshots().front().dispatch_id;
-  uint32_t alternate_waves = 0;
-  const uint64_t alternate_scratch_end = kAlternateScratch + kXccCount * 2 * per_wave_stride;
-  std::array<bool, 2> used_shader_engine{};
-  for (const auto &wave : snapshots->snapshots()) {
-    if (wave.dispatch_id != alternate_dispatch_id)
-      continue;
-    ++alternate_waves;
-    EXPECT_EQ(wave.wf_id, 0u) << "alternate scratch exceeded ALT_COMPUTE_TMPRING_SIZE.WAVES";
-    ASSERT_LT(wave.shader_engine_id, used_shader_engine.size());
-    used_shader_engine[wave.shader_engine_id] = true;
-    EXPECT_EQ(wave.scratch_scoreboard_id, 0u);
-    EXPECT_GE(wave.scratch_base, kAlternateScratch);
-    EXPECT_LT(wave.scratch_base, alternate_scratch_end)
-        << "alternate scratch addressed beyond ROCr's compact per-SE backing";
+    amdgpu::ComputeQueueConfig queue{};
+    queue.interrupt_sink = subscription.sink();
+    queue.process_id = kProcessId;
+    queue.queue_id = kQueueId;
+    queue.ring_base_va = kRing;
+    queue.ring_size = 4 * amdgpu::kAqlPacketBytes;
+    queue.read_ptr_va = read_pointer;
+    queue.write_ptr_va = write_pointer;
+    queue.doorbell_va = kDoorbell;
+    queue.doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled;
+    queue.uses_kfd_queue_abi = true;
+    queue.queue_desc_va = kQueueDescriptor;
+    ASSERT_NE(fixture.cp()->register_queue(std::move(queue)), 0u);
+    EXPECT_EQ(fixture.mem()->read32(caps_address), AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM |
+                                                       AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM |
+                                                       kPreservedCapability);
+
+    auto *snapshots = fixture.capture_halts();
+    hsa_kernel_dispatch_packet_t first_packet =
+        make_dispatch_packet(kernel, 0, /*grid_size_x=*/64, /*workgroup_size_x=*/32);
+    first_packet.private_segment_size = kPrivateBytes;
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&first_packet),
+                              sizeof(first_packet), kRing + amdgpu::kAqlPacketBytes);
+    hsa_kernel_dispatch_packet_t second_packet = make_dispatch_packet(kernel, 0);
+    second_packet.private_segment_size = kPrivateBytes;
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&second_packet),
+                              sizeof(second_packet), kRing + 2 * amdgpu::kAqlPacketBytes);
+    fixture.mem()->write64(write_pointer, 3);
+    fixture.mem()->write64(kDoorbell, 3);
+    fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+    fixture.engine->run();
+
+    EXPECT_EQ(scratch_requests, 1u)
+        << "the second dispatch used alternate scratch past its maximum-use index";
+    EXPECT_EQ(fixture.cp()->accepted_entry_count_for_test(kQueueId, kProcessId), 2u);
+    EXPECT_EQ(fixture.mem()->read64(read_pointer), 3u);
+    EXPECT_EQ(fixture.mem()->read64(alternate_last_used), 1u);
+    EXPECT_EQ(fixture.mem()->read64(main_last_used), 2u);
+    EXPECT_EQ(fixture.mem()->read64(kQueueDescriptor +
+                                    offsetof(amd_queue_v2_t, scratch_last_used_index) +
+                                    sizeof(scratch_last_used_index_xcc_t) +
+                                    offsetof(scratch_last_used_index_xcc_t, alt)),
+              0u);
+    EXPECT_EQ(
+        fixture.mem()->read32(kQueueDescriptor + offsetof(amd_queue_v2_t, compute_tmpring_size)),
+        runtime_tmpring)
+        << "the CP overwrote ROCr's scratch occupancy limit";
+    EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(kQueueId, kProcessId));
+    EXPECT_TRUE(fixture.cu()->is_idle());
+    ASSERT_FALSE(snapshots->snapshots().empty());
+    const uint32_t alternate_dispatch_id = snapshots->snapshots().front().dispatch_id;
+    uint32_t alternate_waves = 0;
+    const uint64_t alternate_scratch_end =
+        kAlternateScratch + kXccCount * 2 * kAlternateWaves * alternate_wave_stride;
+    std::array<bool, 2> used_shader_engine{};
+    for (const auto &wave : snapshots->snapshots()) {
+      const bool alternate = wave.dispatch_id == alternate_dispatch_id;
+      const uint64_t scratch_slot =
+          (kXccId * 2 + wave.shader_engine_id) * (alternate ? kAlternateWaves : kMainWaves) +
+          wave.scratch_scoreboard_id;
+      EXPECT_EQ(wave.scratch_base,
+                (alternate ? kAlternateScratch : kMainScratch) +
+                    scratch_slot * (alternate ? alternate_wave_stride : main_wave_stride))
+          << "scratch addressing must retain the runtime's provisioned wave stride";
+      if (wave.dispatch_id != alternate_dispatch_id)
+        continue;
+      ++alternate_waves;
+      EXPECT_EQ(wave.wf_id, 0u) << "alternate scratch exceeded ALT_COMPUTE_TMPRING_SIZE.WAVES";
+      ASSERT_LT(wave.shader_engine_id, used_shader_engine.size());
+      used_shader_engine[wave.shader_engine_id] = true;
+      EXPECT_EQ(wave.scratch_scoreboard_id, 0u);
+      EXPECT_GE(wave.scratch_base, kAlternateScratch);
+      EXPECT_LT(wave.scratch_base, alternate_scratch_end)
+          << "alternate scratch addressed beyond ROCr's compact per-SE backing";
+    }
+    EXPECT_EQ(alternate_waves, 2u);
+    EXPECT_TRUE(std::ranges::all_of(used_shader_engine, [](bool used) { return used; }));
   }
-  EXPECT_EQ(alternate_waves, 2u);
-  EXPECT_TRUE(std::ranges::all_of(used_shader_engine, [](bool used) { return used; }));
 }
 
 TEST_P(IsaTest, RegisterFileIsolation) {
