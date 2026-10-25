@@ -197,7 +197,8 @@ void HostQueue::finish(bool cpu_wait) {
     }
     const Command::EventWaitList nullWaitList = {};
     // Send a finish to make sure we finished all commands
-    command = new Marker(*this, false, nullWaitList, nullptr, batchSize < minBatchSize);
+    const bool cpu_wait_marker = AMD_DIRECT_DISPATCH || (batchSize < minBatchSize);
+    command = new Marker(*this, false, nullWaitList, nullptr, cpu_wait_marker);
     if (command == NULL) {
       return;
     }
