@@ -316,7 +316,9 @@ def test_missing_pass_cell_is_nan_and_warned(monkeypatch) -> None:
         "utils.utils_analysis.console_warning",
         lambda *args: warnings.append(args),
     )
-    result = process_rocpd_csv(long_df, pass_layout=build_pass_layout(long_df))
+    result, _slot_to_id = process_rocpd_csv(
+        long_df, pass_layout=build_pass_layout(long_df)
+    )
     missing = result.loc[
         result["GRBM_GUI_ACTIVE"] == 50, "GRBM_GUI_ACTIVE@pass:pmc_perf_1"
     ]
@@ -355,7 +357,7 @@ def test_process_rocpd_csv_skips_provenance_merge_without_duplicates(
         fail_provenance_merge,
     )
 
-    result = process_rocpd_csv(long_df, pass_layout=layout)
+    result, _slot_to_id = process_rocpd_csv(long_df, pass_layout=layout)
 
     assert result["SQ_WAVES"].iloc[0] == 4
     assert result["TA_BUSY"].iloc[0] == 50
