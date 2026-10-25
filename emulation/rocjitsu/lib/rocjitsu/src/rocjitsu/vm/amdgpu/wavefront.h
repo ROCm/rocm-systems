@@ -366,8 +366,9 @@ public:
 
   /// Decode captured diagnostic bytes with this CU's target on its execution thread.
   /// Virtual dispatch keeps the target decoder accessible to standalone plugins.
+  /// Keep out-of-line virtuals off this interface so plugins can emit its type information.
   virtual std::string disassemble_instruction(std::span<const uint32_t> encoding,
-                                              uint64_t pc) const;
+                                              uint64_t pc) const = 0;
 
   /// @brief Read GPU memory in this wave's process address space.
   [[nodiscard]] VmAccessOutcome read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
@@ -1288,6 +1289,9 @@ public:
   IsaWavefront(ComputeUnitCore &cu, uint32_t wf_id)
       : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::WF_SIZE_MAX, Isa::MAX_SGPRS_PER_WF,
                   Isa::MAX_VGPRS_PER_WF, Isa::MODE_HAS_GPR_IDX_EN) {}
+
+  std::string disassemble_instruction(std::span<const uint32_t> encoding,
+                                      uint64_t pc) const override;
 };
 
 } // namespace amdgpu
