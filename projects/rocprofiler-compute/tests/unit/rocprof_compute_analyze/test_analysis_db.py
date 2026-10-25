@@ -42,6 +42,7 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
+from utils.metrics.pass_provenance import UNSET_EXPRESSION
 
 ISA_WORKLOAD_NAME = "vector_copy"
 ISA_WORKLOAD_SUB_NAME = "run"
@@ -781,6 +782,29 @@ def test_calc_dataframe_expressions_with_builtin_vars():
     assert result.iloc[0] == 51
     # None from evaluate becomes NaN in pandas Series
     assert pd.isna(result.iloc[1])
+
+
+def test_calc_dataframe_expressions_leaves_an_unbound_metric_unset():
+    """The same-pass unset marker evaluates to None without a failure record."""
+    expression_df = pd.DataFrame({
+        "metric_id": ["1.1"],
+        "value_name": ["avg"],
+        "value": [UNSET_EXPRESSION],
+    })
+
+    with patch(
+        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
+    ), patch(
+        "rocprof_compute_analyze.analysis_db.record_failed_expression"
+    ) as record_failed:
+        result = db_analysis.calc_dataframe_expressions(
+            pd.DataFrame({"Counter1": [1]}),
+            {"gpu_arch": "gfx942"},
+            expression_df,
+        )
+
+    assert pd.isna(result.iloc[0])
+    record_failed.assert_not_called()
 
 
 def test_calc_dataframe_expressions_empty_returns_assignable_series():
