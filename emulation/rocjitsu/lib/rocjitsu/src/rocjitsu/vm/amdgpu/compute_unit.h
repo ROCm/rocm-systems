@@ -1193,7 +1193,7 @@ public:
   const Decoder *decoder() const { return decoder_.get(); }
 
   /// Decode owned instruction bytes for diagnostic output on the CU execution thread.
-  /// Invalid or absent encodings produce an explicit placeholder.
+  /// Missing or invalid encodings throw std::logic_error.
   std::string disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc) const;
 
   /// @brief Replace the concrete decoder in scheduler-level tests.

@@ -35,9 +35,13 @@ InstructionSnapshot capture_instruction(uint64_t pc, const Instruction &inst) {
   InstructionSnapshot snapshot{.pc = pc};
   static_assert(InstructionSnapshot::kMaxWords * sizeof(uint32_t) ==
                 amdgpu::InstructionCache::kFetchBytes);
-  if (!inst.raw_encoding() || inst.size() <= 0 || inst.size() % sizeof(uint32_t) != 0 ||
+  if (!inst.raw_encoding())
+    throw std::logic_error(
+        std::format("race detector instruction at PC {:#x} has no encoding", pc));
+  if (inst.size() <= 0 || inst.size() % sizeof(uint32_t) != 0 ||
       static_cast<size_t>(inst.size()) > sizeof(snapshot.words))
-    return snapshot;
+    throw std::logic_error(std::format(
+        "race detector instruction at PC {:#x} has invalid encoding size {}", pc, inst.size()));
   snapshot.word_count = static_cast<uint32_t>(inst.size()) / sizeof(uint32_t);
   std::memcpy(snapshot.words.data(), inst.raw_encoding(), inst.size());
   return snapshot;
@@ -277,11 +281,11 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
       oss << ", lane " << v.lane;
     oss << "]\n";
 
-    const RecordedInstruction current =
-        ws->trace.size() && ws->trace[ws->trace.size() - 1].pc == pc
-            ? RecordedInstruction{ws->trace[ws->trace.size() - 1],
-                                  ws->trace.sequence(ws->trace.size() - 1)}
-            : RecordedInstruction{InstructionSnapshot{.pc = pc}};
+    if (!ws->trace.size() || ws->trace[ws->trace.size() - 1].pc != pc)
+      throw std::logic_error(
+          std::format("race detector has no current instruction at PC {:#x}", pc));
+    const RecordedInstruction current{ws->trace[ws->trace.size() - 1],
+                                      ws->trace.sequence(ws->trace.size() - 1)};
     MarkedInstruction access_mark{current, v.wave, v.lane};
     oss << formatTrace(
         ws->trace,
@@ -518,6 +522,7 @@ void RaceDetectorPlugin::onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf
 
 void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                                           amdgpu::Wavefront &wf) {
+  const auto instruction = capture_instruction(pc, inst);
   auto *s = get_state(wf);
   assert(s && s->race_state);
   if (supports_counter_capacity(wf.cu().arch())) {
@@ -535,7 +540,7 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
     if (std::string_view(inst.mnemonic()).starts_with("s_sendmsg"))
       s->race_state->prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT);
   }
-  s->trace.push(capture_instruction(pc, inst));
+  s->trace.push(instruction);
 }
 
 void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
