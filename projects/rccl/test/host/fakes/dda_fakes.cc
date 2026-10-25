@@ -13,6 +13,7 @@
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#include "fail_loud.h"
 #include "signature-drift.h"
 
 #define DEFINE_DDA_REDUCTION_ELIGIBLE(hook, prod)                                                        \
@@ -76,6 +77,44 @@ DEFINE_DDA_BLOCKS(reduceScatterDdaFabricBlocks, ncclReduceScatterDdaFabricBlocks
 DEFINE_DDA_BLOCKS(reduceScatterDdaFabricLLBlocks, ncclReduceScatterDdaFabricLLBlocks, 133)
 DEFINE_DDA_BLOCKS(reduceScatterDdaFabricLL128Blocks, ncclReduceScatterDdaFabricLL128Blocks, 134)
 
+#define DEFINE_DDA_LAUNCH(hook, prod)                                                                     \
+  DdaLaunchHook g_##hook = [](const void*, void*, size_t, ncclDataType_t, ncclComm*,                     \
+                              hipStream_t) -> ncclResult_t { FailLoudUnfaked("dda_fakes", #prod); };     \
+  ncclResult_t prod(const void* send, void* recv, size_t count, ncclDataType_t type, ncclComm* comm,     \
+                    hipStream_t stream) {                                                                \
+    return g_##hook(send, recv, count, type, comm, stream);                                              \
+  }                                                                                                      \
+  ASSERT_HOOK_MATCHES_PROD(g_##hook, prod);
+
+#define DEFINE_DDA_REDUCE_LAUNCH(hook, prod)                                                              \
+  DdaReduceLaunchHook g_##hook = [](const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm*,  \
+                                    hipStream_t) -> ncclResult_t { FailLoudUnfaked("dda_fakes", #prod); }; \
+  ncclResult_t prod(const void* send, void* recv, size_t count, ncclDataType_t type, ncclRedOp_t op,     \
+                    ncclComm* comm, hipStream_t stream) {                                                \
+    return g_##hook(send, recv, count, type, op, comm, stream);                                          \
+  }                                                                                                      \
+  ASSERT_HOOK_MATCHES_PROD(g_##hook, prod);
+
+DEFINE_DDA_LAUNCH(allGatherDdaIpc, ncclAllGatherDdaIpc)
+DEFINE_DDA_LAUNCH(allGatherDdaFabric, ncclAllGatherDdaFabric)
+DEFINE_DDA_LAUNCH(allGatherDdaFabricLL, ncclAllGatherDdaFabricLL)
+DEFINE_DDA_LAUNCH(allGatherDdaFabricLL128, ncclAllGatherDdaFabricLL128)
+DEFINE_DDA_LAUNCH(allToAllDdaIpc, ncclAllToAllDdaIpc)
+DEFINE_DDA_LAUNCH(allToAllDdaFabric, ncclAllToAllDdaFabric)
+DEFINE_DDA_LAUNCH(allToAllDdaFabricLL, ncclAllToAllDdaFabricLL)
+DEFINE_DDA_LAUNCH(allToAllDdaFabricLL128, ncclAllToAllDdaFabricLL128)
+DEFINE_DDA_REDUCE_LAUNCH(allReduceDdaIpc, ncclAllReduceDdaIpc)
+DEFINE_DDA_REDUCE_LAUNCH(allReduceDdaFabric, ncclAllReduceDdaFabric)
+DEFINE_DDA_REDUCE_LAUNCH(allReduceDdaFabricLL, ncclAllReduceDdaFabricLL)
+DEFINE_DDA_REDUCE_LAUNCH(allReduceDdaFabricLL128, ncclAllReduceDdaFabricLL128)
+DEFINE_DDA_REDUCE_LAUNCH(reduceScatterDdaIpc, ncclReduceScatterDdaIpc)
+DEFINE_DDA_REDUCE_LAUNCH(reduceScatterDdaFabric, ncclReduceScatterDdaFabric)
+DEFINE_DDA_REDUCE_LAUNCH(reduceScatterDdaFabricLL, ncclReduceScatterDdaFabricLL)
+DEFINE_DDA_REDUCE_LAUNCH(reduceScatterDdaFabricLL128, ncclReduceScatterDdaFabricLL128)
+
+#undef DEFINE_DDA_REDUCE_LAUNCH
+#undef DEFINE_DDA_LAUNCH
+#undef ASSERT_HOOK_MATCHES_PROD
 #undef DEFINE_DDA_BLOCKS
 #undef DEFINE_DDA_ALLGATHER_ELIGIBLE
 #undef DEFINE_DDA_REDUCTION_ELIGIBLE
