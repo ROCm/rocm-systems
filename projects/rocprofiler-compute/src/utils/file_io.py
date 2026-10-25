@@ -407,9 +407,7 @@ def load_df_pmc(
         layout = PassLayout.empty()
     else:
         layout = build_pass_layout(long_df)
-        df, _slot_to_id = utils_analysis.process_rocpd_csv(
-            long_df, pass_layout=layout
-        )
+        df, _slot_to_id = utils_analysis.process_rocpd_csv(long_df, pass_layout=layout)
 
     utils_analysis.add_unit_counter(df)
 
