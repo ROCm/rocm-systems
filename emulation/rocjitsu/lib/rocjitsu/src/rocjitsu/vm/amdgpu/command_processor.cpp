@@ -870,6 +870,8 @@ void CommandProcessor::shutdown() {
   drain_dispatch_fault_inbox();
   {
     std::lock_guard lock(hw_queue_mutex_);
+    assert(!dispatch_workers_active_ && "engine shutdown must follow the CU worker join");
+    // A host exception can unwind the doorbell handler before its normal drain.
     drain_pending_queue_failures();
   }
   retry_event_pending_.store(false, std::memory_order_release);
@@ -1461,6 +1463,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
     // way -- a CU-side call back into the CP while the wave-state lock is held
     // would deadlock a DESTROY_QUEUE against the engine worker.
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    assert(!dispatch_workers_active_ && "queue close must follow the CU worker join");
     const std::vector<ComputeQueueRecord>::iterator queue =
         std::ranges::find(compute_queues_, registration_id, &ComputeQueueRecord::registration_id);
     if (queue == compute_queues_.end())
@@ -3365,6 +3368,7 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
     return;
   }
   flush_gpu_caches();
+  // A prior worker exception may have left this queue's finalization deferred.
   std::erase(pending_queue_failures_, queue.registration_id);
   complete_failed_queue(queue);
 }

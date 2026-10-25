@@ -919,9 +919,15 @@ private:
   std::atomic<uint64_t> dispatched_workgroups_{0};
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
   uint32_t dispatch_threads_ = 1;
-  /// Protected by hw_queue_mutex_. Faults cancel waves immediately, but cache
-  /// maintenance and submission callbacks wait until the pool rejoins.
+  /// Protected by hw_queue_mutex_; true only while the CU batch owns its workers.
   bool dispatch_workers_active_ = false;
+  /// Queue registration IDs whose waves are cancelled but whose cache maintenance
+  /// and submission callbacks must wait for the CU worker join. Protected by
+  /// hw_queue_mutex_; queue_structure_mutex_ keeps their registrations alive.
+  /// The normal batch drains these IDs before releasing the shared structure lock.
+  /// If CpuDispatchPool::run() rethrows a host exception after joining, the handler
+  /// unwinds before that drain. Close, a later queue failure, or shutdown must then
+  /// finish the deferred work before releasing the queue's submission backing.
   std::vector<uint64_t> pending_queue_failures_;
   CpuDispatchPool *shared_dispatch_pool_ = nullptr;
   std::unique_ptr<CpuDispatchPool> local_dispatch_pool_;
