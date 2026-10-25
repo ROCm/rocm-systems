@@ -3850,9 +3850,25 @@
           "test_filter": "UBR_MultiSegment.DeepEP_HybridWindowRegistrationAndHandleReuse"
         },
         {
+          "name": "DeepEP_Hybrid_Window_Registration_Cast",
+          "description": "IB-CAST twin of DeepEP_Hybrid_Window_Registration: window registration through the CAST RMA proxy",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridWindowRegistrationAndHandleReuse",
+          "env_variables": {
+            "NCCL_NET": "IB-CAST"
+          }
+        },
+        {
           "name": "DeepEP_Hybrid_Rma_Positive_And_Stress",
           "description": "Hybrid imported-CPU RMA IGet positive, multi-node stress, and OOR reject",
           "test_filter": "RmaMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet:RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress:RmaMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
+        },
+        {
+          "name": "DeepEP_Hybrid_Rma_Positive_And_Stress_Cast",
+          "description": "IB-CAST twin of DeepEP_Hybrid_Rma_Positive_And_Stress: the CAST RMA proxy registers imported CPU segments with the owner's fd",
+          "test_filter": "RmaMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet:RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress:RmaMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected",
+          "env_variables": {
+            "NCCL_NET": "IB-CAST"
+          }
         },
         {
           "name": "DeepEP_Hybrid_Elastic_Gating",
@@ -3868,6 +3884,15 @@
           "test_filter": "UBR_MultiSegment.DeepEP_ElasticWindowRegistration",
           "env_variables": {
             "NCCL_SYM_REUSE_SYSMEM_HANDLES": "0"
+          }
+        },
+        {
+          "name": "DeepEP_Elastic_Window_Registration_Cast",
+          "description": "IB-CAST twin of DeepEP_Elastic_Window_Registration: window registration through the CAST RMA proxy",
+          "test_filter": "UBR_MultiSegment.DeepEP_ElasticWindowRegistration",
+          "env_variables": {
+            "NCCL_SYM_REUSE_SYSMEM_HANDLES": "0",
+            "NCCL_NET": "IB-CAST"
           }
         }
       ]
@@ -3903,6 +3928,15 @@
           "test_filter": "UBR_MultiSegment.Symmetric_LsaGin",
           "env_variables": {
             "NCCL_MULTI_SEGMENT_REGISTER": "1"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_LsaGin_Cast",
+          "description": "IB-CAST twin of UBR_MultiSegment_Symmetric_LsaGin: window registration through the CAST RMA proxy",
+          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "1",
+            "NCCL_NET": "IB-CAST"
           }
         }
       ]

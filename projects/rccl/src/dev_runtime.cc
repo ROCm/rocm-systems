@@ -912,7 +912,7 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
   if (mem->maxGlobalNumSegments > 1 && !mem->globalHasSysmemSegment &&
       !rcclDevrGinRegistersMultiSegment(comm, mem->minGlobalNumSegments, mem->maxGlobalNumSegments)) {
     WARN("Window %p spans %d physical segments; GIN registers it only with NCCL_MULTI_SEGMENT_REGISTER=1 on the "
-         "proxy backend over IB",
+         "proxy backend over IB or IB-CAST",
          mem->primaryAddr, mem->maxGlobalNumSegments);
     ret = ncclInvalidUsage;
     goto fail;

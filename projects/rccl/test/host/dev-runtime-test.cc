@@ -2396,6 +2396,22 @@ TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSe
   EXPECT_TRUE(registeredMultiSegment);
 }
 
+// The proxy GIN backend over the IB-CAST RMA proxy registers a device-only multi-segment window too.
+TEST_F(SymMemoryRegisterGinTest, MultiSegmentRegisterOn_ProxyOverIbCast_RegistersMultiSegmentWindow) {
+  mem.minGlobalNumSegments = 2;
+  mem.maxGlobalNumSegments = 2;
+  UseGinBackend(NCCL_GIN_TYPE_PROXY);
+  comm->rmaState.rmaProxyState.ncclRma = &IbCastRmaIbProxy;
+  ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());
+  ScopedHook reg(g_devrGinRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
+                   return ncclSuccess;
+                 });
+
+  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
+}
+
 // NCCL_MULTI_SEGMENT_REGISTER=1 does not help a GIN backend that registers the window as
 // one MR, so a device-only multi-segment window is still rejected before registering.
 TEST_F(SymMemoryRegisterGinTest, MultiSegmentRegisterOn_NonProxyGinBackend_RejectsMultiSegmentWindow) {
@@ -2888,6 +2904,20 @@ TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOn_RegistersWholeRange) {
   EXPECT_EQ(reg.calls, 1);
   EXPECT_EQ(registeredAddr, mem.primaryAddr);
   EXPECT_EQ(registeredSize, mem.size);
+}
+
+// Branch: the IB-CAST RMA backend also registers per segment, so it takes the same window.
+TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOn_IbCastBackend_RegistersWholeRange) {
+  mem.maxGlobalNumSegments = 2;
+  mem.minGlobalNumSegments = 2;
+  comm->rmaState.rmaProxyState.ncclRma = &IbCastRmaIbProxy;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 1 : deftVal;
+  });
+  ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
 }
 
 // Branch: with =1 but an RMA backend without per-segment MRs, a multi-segment

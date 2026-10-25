@@ -134,8 +134,9 @@ ncclResult_t rcclDevrGinSegmentRegType(bool globalHasSysmemSegment, int maxGloba
 
 bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm, int minGlobalNumSegments, int maxGlobalNumSegments) {
   // RCCL: only RMA backends that register one MR per physical segment can take a multi-segment window,
-  // and the IB proxy needs the same count on every rank within its MR table.
-  return ncclParamMultiSegmentRegister() && comm->rmaState.rmaProxyState.ncclRma == &ncclRmaIbProxy &&
+  // and the IB and IB-CAST proxies need the same count on every rank within their MR tables.
+  const ncclRma_t* rma = comm->rmaState.rmaProxyState.ncclRma;
+  return ncclParamMultiSegmentRegister() && (rma == &ncclRmaIbProxy || rma == &IbCastRmaIbProxy) &&
          minGlobalNumSegments == maxGlobalNumSegments && maxGlobalNumSegments <= NCCL_RMA_MAX_SEGMENTS;
 }
 

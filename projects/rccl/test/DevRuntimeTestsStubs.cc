@@ -279,6 +279,7 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm*, void*, size_t, void*[NCCL_GI
 }
 ncclResult_t ncclRmaProxyDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
 ncclRma_t ncclRmaIbProxy{};
+ncclRma_t IbCastRmaIbProxy{};
 
 // ---------------------------------------------------------------------------
 // CFT / LE helpers pulled in via #include of hipified dev_runtime.cc.

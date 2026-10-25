@@ -1771,7 +1771,7 @@ NET registration counts segments over the whole registered buffer. With this var
 
 For NET registration, the internal IB and IB-CAST net plugins register a buffer that spans several segments as one memory region per segment. Other net plugins are not supported with this variable set to 1.
 
-On HIP, GIN registration of a window that spans more than one device-memory segment requires this variable set to 1, the proxy GIN backend over InfiniBand, the same segment count on every rank, and at most 16 segments. Otherwise registration fails with ``ncclInvalidUsage`` instead of registering only the first segment.
+On HIP, GIN registration of a window that spans more than one device-memory segment requires this variable set to 1, the proxy GIN backend over the internal IB or IB-CAST net (``NCCL_NET=IB`` or ``IB-CAST``), the same segment count on every rank, and at most 16 segments. Otherwise registration fails with ``ncclInvalidUsage`` instead of registering only the first segment.
 
 RMA registration of such a window, including a hybrid window with host segments, has the same requirements; otherwise the window is registered without RMA.
 

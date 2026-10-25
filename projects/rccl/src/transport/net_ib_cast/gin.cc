@@ -16,6 +16,8 @@
 #include <sched.h>
 #include <time.h>
 
+extern int rcclHostSegmentFdLookup(uintptr_t addr, size_t len, uint64_t* offset);
+
 const int IBCAST_GIN_IB_ALLGATHER_TAG = 0xa0;
 const int IBCAST_GIN_IB_ALLTOALL_TAG = 0xa1;
 
@@ -633,10 +635,15 @@ static ncclResult_t rcclIbCastRmaIbProxyRegMrSymDmaBuf(void* collComm, void* dat
       uintptr_t exportBase = segPtr & ~(uintptr_t)(hostPageSize - 1);
       size_t exportLen = segPtr + thisLen - exportBase;
       ALIGN_SIZE(exportLen, hostPageSize);
-      CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&segFd, (CUdeviceptr)exportBase, exportLen,
-                                                CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0),
-                  ret, reconcile);
-      ret = IbCastRegMrDmaBufInternal(cComm->recvComm, (void*)segPtr, thisLen, type, 0ULL, segFd, mr_flags,
+      // RCCL: imported host segments cannot be exported here; use the owner's fd published by the window.
+      uint64_t segFdOffset = 0;
+      segFd = rcclHostSegmentFdLookup(exportBase, exportLen, &segFdOffset);
+      if (segFd < 0) {
+        CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&segFd, (CUdeviceptr)exportBase, exportLen,
+                                                  CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0),
+                    ret, reconcile);
+      }
+      ret = IbCastRegMrDmaBufInternal(cComm->recvComm, (void*)segPtr, thisLen, type, segFdOffset, segFd, mr_flags,
                                       (void**)&ginMrHandle->mrHandle[s]);
       (void)close(segFd);
       if (ret != ncclSuccess) goto reconcile;

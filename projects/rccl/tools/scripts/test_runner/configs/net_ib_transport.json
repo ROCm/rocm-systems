@@ -1783,6 +1783,16 @@
         }
       ]
     },
+    "cast_rma_multisegment_hybrid": {
+      "extends": "net_ib_rma_multisegment_hybrid",
+      "description": "IB-CAST twin of net_ib_rma_multisegment_hybrid: the same imported CPU-segment tests through the CAST RMA proxy, which must register those segments with the owner's fd.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2"
+      }
+    },
     "net_ib_multithread_base": {
       "extends": "net_ib_base",
       "timeout": 600,
@@ -2592,6 +2602,12 @@
       "name": "NET IB - RMA Multi-Segment DeepEP Hybrid (8-rank)",
       "description": "DeepEP hybrid elastic windows with one imported CPU segment per local rank; needs 4 ranks on each of 2 nodes",
       "config": "net_ib_rma_multisegment_hybrid",
+      "enabled": true
+    },
+    {
+      "name": "NET IB-CAST - RMA Multi-Segment DeepEP Hybrid (8-rank)",
+      "description": "IB-CAST twin of the DeepEP hybrid suite: imported CPU segments register with the owner's fd",
+      "config": "cast_rma_multisegment_hybrid",
       "enabled": true
     },
     {

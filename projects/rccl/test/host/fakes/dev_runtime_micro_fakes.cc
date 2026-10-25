@@ -374,8 +374,9 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* addr, size_t size
   return g_devrRmaProxyRegister(comm, addr, size, hostWins);
 }
 
-// Identity only: rcclDevrRmaRegistersMultiSegment compares the comm's RMA backend against it.
+// Identity only: rcclDevrRmaRegistersMultiSegment compares the comm's RMA backend against these.
 ncclRma_t ncclRmaIbProxy{};
+ncclRma_t IbCastRmaIbProxy{};
 
 static ncclResult_t DefaultRmaProxyDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) {
   return ncclSuccess;
