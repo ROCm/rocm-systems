@@ -76,11 +76,35 @@ _COLLECT_SUM_CALL_RE = re.compile(
 )
 
 
+# A composite may be wrapped once so the finished parent value is rounded or
+# floored at zero after its pieces combine, e.g. ROUND(COLLECT_SUM(a, b), 0).
+_COMPOSITE_FINISH_RE = re.compile(
+    r"^(?P<func>ROUND|NOISE_CLAMP)\s*\(\s*"
+    r"(?P<inner>(?:WEIGHTED_AVG|COLLECT_SUM|COLLECT_RATIO)\s*\(.+\))"
+    r"\s*,\s*(?P<arg>\d+(?:\.\d+)?)\s*\)$",
+    re.IGNORECASE,
+)
+
+
+def split_composite_finish(formula: str) -> tuple[str, tuple[str, float] | None]:
+    """Split ``ROUND(<composite>, n)`` or ``NOISE_CLAMP(<composite>, ref)``.
+
+    Returns the inner composite text and ``(function, argument)``, or the
+    stripped formula and None when there is no finishing wrapper.
+    """
+    text = formula.strip()
+    match = _COMPOSITE_FINISH_RE.match(text)
+    if match is None:
+        return text, None
+    finish = (match.group("func").upper(), float(match.group("arg")))
+    return match.group("inner").strip(), finish
+
+
 def parse_weighted_avg_submetrics(formula: str) -> list[str] | None:
     """Return submetric names from WEIGHTED_AVG(a, b, ...) or None if not a match."""
     if not formula or not isinstance(formula, str):
         return None
-    match = _WEIGHTED_AVG_CALL_RE.match(formula.strip())
+    match = _WEIGHTED_AVG_CALL_RE.match(split_composite_finish(formula)[0])
     if not match:
         return None
     return [part.strip() for part in match.group(1).split(",") if part.strip()]
@@ -90,7 +114,7 @@ def parse_collect_sum_submetrics(formula: str) -> list[str] | None:
     """Return collectable refs from COLLECT_SUM(a, b, ...) or None."""
     if not formula or not isinstance(formula, str):
         return None
-    match = _COLLECT_SUM_CALL_RE.match(formula.strip())
+    match = _COLLECT_SUM_CALL_RE.match(split_composite_finish(formula)[0])
     if not match:
         return None
     return [part.strip() for part in match.group(1).split(",") if part.strip()]
@@ -128,7 +152,7 @@ def parse_collect_ratio_parts(formula: str) -> tuple[list[str], list[str]] | Non
     """Parse COLLECT_RATIO(n1 + n2, d1 + d2) into (numerator_refs, denominator_refs)."""
     if not formula or not isinstance(formula, str):
         return None
-    match = _COLLECT_RATIO_CALL_RE.match(formula.strip())
+    match = _COLLECT_RATIO_CALL_RE.match(split_composite_finish(formula)[0])
     if not match:
         return None
     inner = match.group(1).strip()

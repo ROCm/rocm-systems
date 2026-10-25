@@ -4,7 +4,7 @@
 import argparse
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 
@@ -23,15 +23,18 @@ from utils.metrics.collectable import (
     COLLECT_RATIO_SPECS_ATTR,
     COLLECT_SUM_SPECS_ATTR,
     COLLECTABLE_IDS_ATTR,
+    COMPOSITE_FINISH_ATTR,
     WEIGHTED_AVG_ATTR,
     WEIGHTED_AVG_SUBS_ATTR,
 )
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import (
+    is_composite_avg_formula,
     parse_collect_ratio_parts,
     parse_collect_sum_submetrics,
     parse_weighted_avg_submetrics,
     reject_counter_bearing_composite_extents,
+    split_composite_finish,
 )
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
@@ -300,6 +303,7 @@ def _build_metric_table_df(
     collectable_ids: dict[str, str] = {}
     collect_sum_specs: dict[str, list[str]] = {}
     collect_ratio_specs: dict[str, dict[str, list[str]]] = {}
+    composite_finish: Dict[str, Tuple[str, float]] = {}
     metric_entries = data_config["metric"]
     kept_rows = _rows_kept_by_filter(
         metric_entries,
@@ -339,6 +343,9 @@ def _build_metric_table_df(
                     "numerator": nums,
                     "denominator": dens,
                 }
+            _inner, finish = split_composite_finish(composite_entry)
+            if finish is not None and is_composite_avg_formula(composite_entry):
+                composite_finish[metric_idx] = finish
         weighted_meta = entries.get("_weighted_avg")
         if isinstance(weighted_meta, dict):
             weighted_avg_specs[metric_idx] = weighted_meta
@@ -365,6 +372,7 @@ def _build_metric_table_df(
     df.attrs[COLLECTABLE_IDS_ATTR] = collectable_ids
     df.attrs[COLLECT_SUM_SPECS_ATTR] = collect_sum_specs
     df.attrs[COLLECT_RATIO_SPECS_ATTR] = collect_ratio_specs
+    df.attrs[COMPOSITE_FINISH_ATTR] = composite_finish
     return df, expressions
 
 

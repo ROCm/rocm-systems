@@ -14,6 +14,7 @@ from utils.metrics.collectable import (
     COLLECT_RATIO_SPECS_ATTR,
     COLLECT_SUM_SPECS_ATTR,
     COLLECTABLE_IDS_ATTR,
+    COMPOSITE_FINISH_ATTR,
     WEIGHTED_AVG_ATTR,
     WEIGHTED_AVG_SUBS_ATTR,
     CompositeKind,
@@ -22,8 +23,11 @@ from utils.metrics.collectable import (
 )
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import (
+    build_eval_string,
     build_metric_value_string,
+    is_composite_avg_formula,
     parse_collect_sum_submetrics,
+    split_composite_finish,
 )
 from utils.parser import build_dfs
 from vendored import yaml
@@ -298,3 +302,89 @@ def test_collect_sum_missing_denominator_is_unset():
         ],
     )
     assert result == "N/A"
+
+
+@pytest.mark.misc
+def test_finish_wrapper_is_peeled_before_the_composite_parse():
+    assert split_composite_finish("ROUND(COLLECT_SUM(a, b), 0)") == (
+        "COLLECT_SUM(a, b)",
+        ("ROUND", 0.0),
+    )
+    assert split_composite_finish("NOISE_CLAMP(COLLECT_SUM(a, b), 100)") == (
+        "COLLECT_SUM(a, b)",
+        ("NOISE_CLAMP", 100.0),
+    )
+    plain = "ROUND(SUM(SQ_A), 0)"
+    assert split_composite_finish(plain) == (plain, None)
+    assert parse_collect_sum_submetrics("ROUND(COLLECT_SUM(a, b), 0)") == ["a", "b"]
+    assert is_composite_avg_formula("NOISE_CLAMP(COLLECT_SUM(a, b), 100)")
+    assert build_eval_string("ROUND(COLLECT_SUM(a, b), 0)") == ""
+
+
+def finished_collect_sum_parent(pieces, finish):
+    raw = pd.DataFrame({"Dispatch_ID": [1], "HIT": [70.0], "ATOM": [90.0]})
+    rows = [[str(index), name, expr] for index, (name, expr) in enumerate(pieces, 1)]
+    parent_id = str(len(pieces) + 1)
+    rows.append([parent_id, "parent", ""])
+    df = pd.DataFrame(rows, columns=["Metric_ID", "Metric", "Avg"]).set_index(
+        "Metric_ID"
+    )
+    df.attrs[COLLECT_SUM_SPECS_ATTR] = {parent_id: [name for name, _expr in pieces]}
+    df.attrs[COMPOSITE_FINISH_ATTR] = {parent_id: finish}
+    df.attrs["collectable_expr_cache"] = dict(pieces)
+    apply_composite_metrics({1: df}, {1: "metric_table"}, raw, {}, {})
+    return df.at[parent_id, "Avg"]
+
+
+@pytest.mark.misc
+def test_noise_clamp_floors_the_finished_hit_rate_at_zero():
+    pieces = [
+        ("hit", "to_sum(raw_pmc_df['HIT'])"),
+        ("atom", "-to_sum(raw_pmc_df['ATOM'])"),
+    ]
+    # 70 - 90 is negative; the finished rate is floored, not each piece.
+    assert finished_collect_sum_parent(pieces, ("NOISE_CLAMP", 100.0)) == 0.0
+
+
+@pytest.mark.misc
+def test_round_applies_to_the_finished_composite():
+    pieces = [
+        ("hit", "to_sum(raw_pmc_df['HIT']) / 3"),
+        ("atom", "to_sum(raw_pmc_df['ATOM']) / 7"),
+    ]
+    expected = round(70.0 / 3 + 90.0 / 7, 0)
+    assert finished_collect_sum_parent(pieces, ("ROUND", 0.0)) == expected
+
+
+@pytest.mark.misc
+def test_build_dfs_records_the_finish_of_a_wrapped_composite():
+    ac = schema.ArchConfig()
+    ac.panel_configs = OrderedDict([
+        (
+            300,
+            {
+                "id": 300,
+                "title": "Memory Chart",
+                "data source": [
+                    {
+                        "metric_table": {
+                            "id": 301,
+                            "header": {"metric": "Metric", "value": "Value"},
+                            "metric": {
+                                "VL1 Hit": {
+                                    "value": "ROUND(COLLECT_SUM(_collect.a, "
+                                    "_collect.b), 0)"
+                                },
+                                "_collect.a": {"value": "SUM(SQ_A)"},
+                                "_collect.b": {"value": "SUM(SQ_B)"},
+                            },
+                        }
+                    }
+                ],
+            },
+        )
+    ])
+    build_dfs(ac, filter_metrics=None, sys_info=pd.Series({}), profiling_config={})
+    df = ac.dfs[301]
+    assert df.attrs[COLLECT_SUM_SPECS_ATTR] == {"3.1.0": ["_collect.a", "_collect.b"]}
+    assert df.attrs[COMPOSITE_FINISH_ATTR] == {"3.1.0": ("ROUND", 0.0)}
