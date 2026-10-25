@@ -35,7 +35,7 @@ import tempfile
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from rich.console import Console
 
