@@ -276,7 +276,9 @@ _SAME_PASS_COUNTERS = frozenset({
     "GRBM_GUI_ACTIVE_sum",
 })
 
-_UNSET_EXPRESSION = "None"
+# Both binders write this into a metric that fits no single pass, and both
+# evaluators leave such a cell unset.
+UNSET_EXPRESSION = ""
 
 
 def choose_metric_pass(
@@ -585,7 +587,7 @@ def bound_pass_for_metric(
 
 
 def _is_metric_expression(value: object) -> bool:
-    return isinstance(value, str) and bool(value) and value != _UNSET_EXPRESSION
+    return isinstance(value, str) and value not in (UNSET_EXPRESSION, "None")
 
 
 def _bind_metric_values(
@@ -600,7 +602,7 @@ def _bind_metric_values(
     pass_key, unset = _choose_metric_pass(label, expressions, layout, gpu_series)
     if unset:
         rewritten = [
-            _UNSET_EXPRESSION
+            UNSET_EXPRESSION
             if _is_metric_expression(value) and _reads_pass_data(value)
             else value
             for value in values
