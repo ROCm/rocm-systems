@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import common
 import pytest
 
+import config
 from rocprof_compute_soc.counter_file import flat_counters_in_perfmon_file
 from rocprof_compute_soc.soc_base import (
     CounterFile,
