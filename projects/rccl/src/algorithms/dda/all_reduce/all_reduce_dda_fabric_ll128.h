@@ -37,7 +37,8 @@ namespace dda::common {
 // scratch at slot selfRank, as LL128 lines carrying the epoch flag (flag-last).
 // Phase 2 (reduce): rank selfRank polls its own scratch slot for each other
 // rank (waiting on word 15 == flag), and folds those words with its own
-// sendbuff into recvbuff. Flag polling provides the cross-rank ordering, so no
+// sendbuff into recvbuff in rank order 0..nRanks-1, so every rank rounds
+// identically. Flag polling provides the cross-rank ordering, so no
 // GPU barrier is used. Scratch is double-buffered: bank = flag & 1.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
@@ -103,17 +104,21 @@ __launch_bounds__(1024)
     const size_t base = ln * (size_t)kDdaLL128DataElems;
     const size_t e = base + (size_t)lane;
     const bool hasWord = (lane < kDdaLL128DataElems) && (e < nWords);
-    uint64_t acc = hasWord ? sw[e] : 0ull;
-    for (int r = 1; r < nRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      LLLine128* src = myBase + (size_t)peer * slot;
-      // All 16 lanes poll the shared flag word (broadcast); unfenced.
-      while (ddaLL128LoadWord(&src[ln].w[kDdaLL128FlagElem]) != (uint64_t)flag) {
+    uint64_t acc = 0ull;
+    for (int peer = 0; peer < nRanks; ++peer) {
+      uint64_t d = 0ull;
+      if (peer == selfRank) {
+        d = hasWord ? sw[e] : 0ull;
+      } else {
+        LLLine128* src = myBase + (size_t)peer * slot;
+        // All 16 lanes poll the shared flag word (broadcast); unfenced.
+        while (ddaLL128LoadWord(&src[ln].w[kDdaLL128FlagElem]) != (uint64_t)flag) {
+        }
+        if (hasWord) {
+          d = ddaLL128LoadWord(&src[ln].w[lane]);
+        }
       }
-      if (hasWord) {
-        const uint64_t d = ddaLL128LoadWord(&src[ln].w[lane]);
-        acc = ddaLL128AddWord<T>(acc, d);
-      }
+      acc = (peer == 0) ? d : ddaLL128AddWord<T>(acc, d);
     }
     if (hasWord) {
       out[e] = acc;
