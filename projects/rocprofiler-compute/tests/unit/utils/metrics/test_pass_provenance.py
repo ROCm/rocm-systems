@@ -639,7 +639,7 @@ def _eval_sys_info() -> pd.Series:
 
 def _eval_one_metric(long_df: pd.DataFrame, expr: str) -> pd.DataFrame:
     layout = build_pass_layout(long_df)
-    raw_pmc_df = process_rocpd_csv(long_df, pass_layout=layout)
+    raw_pmc_df, _slot_to_id = process_rocpd_csv(long_df, pass_layout=layout)
     metric_df = pd.DataFrame({
         "Metric_ID": ["9.9.9"],
         "Metric": ["m"],
