@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
-from rocprof_compute_soc.counter_file import CounterFile
+from rocprof_compute_soc.counter_file import CounterFile, perfmon_config_for_arch
 from rocprof_compute_soc.counter_file import (
     LimitedSet as LimitedSet,
 )
@@ -408,7 +408,7 @@ class OmniSoC_Base:
         single_pass = try_allocate_single_pass_metrics(
             self,
             set(counters),
-            self.__perfmon_config,
+            perfmon_config_for_arch(self.__arch or "", self.__perfmon_config),
         )
         if single_pass is None:
             console_error(

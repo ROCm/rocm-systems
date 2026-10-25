@@ -5,7 +5,10 @@
 
 import pytest
 
-from rocprof_compute_soc.counter_file import flat_counters_in_perfmon_file
+from rocprof_compute_soc.counter_file import (
+    flat_counters_in_perfmon_file,
+    perfmon_config_for_arch,
+)
 from rocprof_compute_soc.counter_grouping_buckets import (
     iter_metric_groups,
     rebuild_counter_file,
@@ -88,7 +91,7 @@ def test_overlapping_unions_share_bucket_when_cap_allows():
 
 def test_sp_valu_and_sq_vmem_stay_in_different_passes():
     """Placement, merge, and leftover fill keep the two gfx1250 families apart."""
-    cfg = {"SQ": 8}
+    cfg = perfmon_config_for_arch("gfx1250", {"SQ": 8})
     sp_group = frozenset({"SP_VALU_FLOPS_FP32", "SP_VALU_FLOPS_FP16"})
     vmem_group = frozenset({"SQ_VMEM_REQ", "SQ_VMEM_STALL"})
     files, file_count = _ensure_single_pass_metric_set([], sp_group, cfg, 0)
