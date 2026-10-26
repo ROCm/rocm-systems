@@ -585,7 +585,7 @@ __device__ __forceinline__ void reduceCopyPacksWithBias(int nThreads, int& threa
 // System scope is required for peer visibility; non-temporal keeps remote data out of local caches.
 static constexpr CachePolicy kRcclTdmPolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
 
-#include "tdm_reduce.h"
+#include "tdm/tdm_reduce.h"
 
 template <int Unroll, int useAcc, typename RedFn, typename T, int MultimemSrcs, int MinSrcs, int MaxSrcs,
           int MultimemDsts, int MinDsts, int MaxDsts, int PreOpSrcs, typename IntBytes, int Pipeline,

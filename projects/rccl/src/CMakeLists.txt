@@ -89,7 +89,7 @@ set(SRC_FILES
   device/tdm/cachePolicy.h
   device/tdm/syncPolicy.h
   device/tdm/tdmCopy.h
-  device/tdm_reduce.h
+  device/tdm/tdm_reduce.h
   algorithms/dda/device/device_buffer.cc
   diagnostics.cc
   diagnostics.h

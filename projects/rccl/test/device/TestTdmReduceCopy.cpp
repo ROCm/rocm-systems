@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Tests for the TDM reduction path of reduceCopy (reduceCopyTdm in common_kernel.h).
+// Tests for the TDM reduction path of reduceCopy (reduceCopyTdm in tdm/tdm_reduce.h).
 //
 // Each kernel drives reduceCopy from one block the way genericOp does: the pointer
 // lists live in shared memory and EnableTdmReduce is set. Every case runs twice, with
