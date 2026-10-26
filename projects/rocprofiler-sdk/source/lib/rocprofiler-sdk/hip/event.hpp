@@ -77,12 +77,17 @@ struct barrier_plan_t
     hsa::rocprofiler_packet forwarding     = {};
 };
 
-// Decides how to submit a barrier packet. Intercepted when pkt is the GPU barrier produced by
-// a hipEventRecord or hipStreamWaitEvent on this thread, or when one of its dependency
+// Decides how to submit a barrier packet. Intercepted when pkt may be the GPU barrier of a
+// hipEventRecord on this thread (any barrier with a completion signal it submits; the record's
+// is chosen when the call returns), is the barrier of a hipStreamWaitEvent on this thread
+// (one depending on the awaited record's signal, or, when that record was not seen, any
+// barrier with a completion signal, chosen like a record's), or when one of its dependency
 // signals satisfies a hipStreamWaitEvent that CLR folded into it. An intercepted barrier gets
 // a pooled completion signal and a handler that reports each of those events with the
-// barrier's GPU start and end once it retires. Fires the ENTER/EXIT callbacks for a captured
-// record or wait. All event bookkeeping stays inside this call; the caller only emits packets.
+// barrier's GPU start and end once it retires. Fires the ENTER/EXIT callbacks of the event
+// call on this thread, before pkt is written, when pkt is the first barrier that can report
+// the call (see active_event_context_t in event.cpp). All event bookkeeping stays inside
+// event.cpp; the caller only emits packets.
 //
 // packet_type and is_barrier are supplied by the caller because AQL packet classification
 // (including the vendor BARRIER_VALUE header decode) belongs to the queue layer, and
@@ -91,9 +96,7 @@ barrier_plan_t
 plan_barrier(hsa::Queue&                    queue,
              const hsa::rocprofiler_packet& pkt,
              uint32_t                       packet_type,
-             bool                           is_barrier,
-             const tracing::tracing_data&   tracing_data_v,
-             context::correlation_id*       corr_id);
+             bool                           is_barrier);
 
 // For a dependency carried on a dispatch packet itself (the gfx12.5 ext kernel dispatch
 // dep_signal) rather than on a barrier. When dep_signal satisfies a traced

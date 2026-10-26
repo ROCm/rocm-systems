@@ -14,6 +14,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+  - HIP event tracing: a `hipEventRecord` or `hipStreamWaitEvent` is timed by the event's own barrier instead of a synchronization marker that HIP submits ahead of it, such as a blocking stream's implicit wait on the null stream. A `hipStreamWaitEvent` that creates no GPU dependency (for example, its event is already complete) is no longer reported with the times of such a marker.
+
 ### Known issues
 
 ### Removed
