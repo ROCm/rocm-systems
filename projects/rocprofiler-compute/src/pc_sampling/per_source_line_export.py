@@ -4,10 +4,10 @@
 """
 Per-source-line PC sampling CSV export.
 
-Writes one CSV file per captured source file, beside its exported copy. Each row
-is one line of the source file, with the PC sampling counts of the instructions
-compiled from that line and the rows of those instructions in the per-kernel
-ISA files.
+Writes one CSV file per captured source file, beside the exported copy of that
+source file. Each row holds one source line, the PC sampling counts of the
+instructions compiled from that source line, and the rows of those instructions
+in the per-kernel ISA files.
 """
 
 import itertools
@@ -31,7 +31,7 @@ from utils.analysis_orm import per_source_line_file_key_columns
 from utils.logger import console_debug
 
 SOURCE_LINE_FILE_SUFFIX = "_pc_sampling.csv"
-# Spreadsheets show each ISA file of a cell on its own line.
+# A spreadsheet shows each ISA file of the cell on a separate line of the cell.
 ISA_REFERENCE_SEPARATOR = "\n"
 
 BASE_COLUMNS = (
@@ -120,21 +120,18 @@ def _write_per_source_line_files(
 
 
 def _format_source_line_rows(file_rows: List[Row]) -> Iterator[List[Any]]:
-    """Replace the ISA references of each source line row with their text."""
+    """Format the ISA references of each source line row as text."""
     for *source_line_cells, isa_references_json in file_rows:
         yield [*source_line_cells, _format_isa_references(isa_references_json)]
 
 
-def _format_isa_references(isa_references_json: Optional[str]) -> str:
-    """Return the ISA references of one source line, one ISA file per line.
+def _format_isa_references(isa_references_json: str) -> str:
+    """Return the ISA references of one source line as text.
 
-    Each line reads "<kernel folder>/<ISA file>:<instruction line numbers>",
-    and consecutive instruction line numbers are written as one range. A source
-    line without instructions has no references.
+    Each ISA file goes on its own line of text, written as
+    "<kernel folder>/<ISA file>:<instruction line numbers>". Consecutive
+    instruction line numbers are written as one range.
     """
-    if isa_references_json is None:
-        return ""
-
     isa_references = sorted(
         IsaReference(**isa_reference)
         for isa_reference in json.loads(isa_references_json)

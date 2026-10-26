@@ -13,7 +13,7 @@ import pytest
 
 from pc_sampling import pc_sampling_analysis
 from pc_sampling.pc_sampling_analysis import (
-    add_up_instruction_lines,
+    aggregate_instruction_lines,
     aggregate_pc_sample_records,
     detect_pc_sampling_method,
     enrich_with_metadata,
@@ -785,21 +785,21 @@ def test_aggregate_wave_measurements_exclude_missing_fields_independently() -> N
     )
 
 
-def test_add_up_instruction_lines_sums_counts_and_weights_percentages() -> None:
-    """Counts add up, and each percentage is weighted by sample count.
+def test_aggregate_instruction_lines_sums_counts_and_weights_percentages() -> None:
+    """Counts are summed, and each percentage is weighted by sample count.
 
-    A line without a percentage adds no weight, and a count that no line has
-    stays unknown.
+    An instruction line without a percentage adds no weight, and a count that
+    no instruction line has stays unknown.
     """
-    totals = add_up_instruction_lines([
+    totals = aggregate_instruction_lines([
         make_instruction_line_record(3, 1, {"WAITCNT": 2}, None, 50.0),
         make_instruction_line_record(5, 4, {"NONE": 1}, 80.0, 10.0),
     ])
-    host_trap_totals = add_up_instruction_lines([
+    host_trap_totals = aggregate_instruction_lines([
         make_instruction_line_record(2, None, {}, 50.0, None)
     ])
 
-    assert totals == pc_sampling_analysis.SampleTotals(
+    assert totals == pc_sampling_analysis.SourceLineRecord(
         total_count=8,
         issue_count=5,
         stall_count=3,

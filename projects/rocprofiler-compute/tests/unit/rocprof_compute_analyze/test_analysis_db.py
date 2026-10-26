@@ -3099,11 +3099,13 @@ def test_run_analysis_keeps_sampled_row_without_a_comment(db_session, tmp_path):
     assert rebuilt_sources == {0x10: "/home/u/app/vcopy.cpp:1", 0x20: None}
 
 
-def test_run_analysis_adds_up_each_source_lines_instructions(db_session, tmp_path):
-    """A source line adds up the instructions of every process that name it.
+def test_run_analysis_aggregates_each_source_line_over_all_processes(
+    db_session, tmp_path
+):
+    """Each source line aggregates the instructions of all processes.
 
-    An instruction counts toward each line of its inline stack, and once
-    toward a line that its stack names twice.
+    An instruction counts toward each source line of its inline stack, and
+    counts once toward a source line that appears twice in that stack.
     """
     workload_path = tmp_path / "workload"
     tool_data_records = make_source_workload_tool_data_records(
@@ -3368,14 +3370,15 @@ def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
 
 
 def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path):
-    """A source file's per-source-line file sits beside its copy and cites ISA rows."""
+    """The per-source-line file sits beside the source copy and has ISA references."""
     workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
     tool_data_records = make_source_workload_tool_data_records(
         workload_path,
         {"/s/a.cpp": "int first;\nint second;\nint third;\n"},
         ["/s/a.cpp:1", "/s/a.cpp:2"],
     )
-    # Both offsets belong to one kernel, so the references number its ISA rows.
+    # Both offsets belong to one kernel, so both ISA references point into the
+    # ISA file of that kernel.
     tool_data = tool_data_records[0]
     tool_data["kernel_symbols"][1]["kernel_id"] = 100
     tool_data["buffer_records"]["kernel_dispatch"][1]["dispatch_info"]["kernel_id"] = (

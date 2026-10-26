@@ -82,8 +82,12 @@ class CodeObjectRecord(NamedTuple):
     instruction_lines: list[InstructionLineRecord]
 
 
-class SampleTotals(NamedTuple):
-    """The PC sampling counts of several instruction lines, added up."""
+class SourceLineRecord(NamedTuple):
+    """The PC sampling counts of one source line.
+
+    The counts are aggregated over the instructions compiled from that source
+    line.
+    """
 
     total_count: int
     issue_count: Optional[int]
@@ -327,19 +331,20 @@ def load_aggregated_pc_sampling(
     return records
 
 
-def add_up_instruction_lines(
+def aggregate_instruction_lines(
     instruction_lines: List[InstructionLineRecord],
-) -> SampleTotals:
-    """Add up the counts of instruction lines, and average their percentages.
+) -> SourceLineRecord:
+    """Aggregate the counts of the instruction lines of one source line.
 
-    Each percentage is weighted by the line's sample count. A line without the
-    percentage adds no weight.
+    Counts and stall reasons are summed. Each percentage is averaged, weighted
+    by the sample count of each instruction line. An instruction line without
+    the percentage adds no weight.
     """
     stall_reasons = Counter()
     for line in instruction_lines:
         stall_reasons.update(line.stall_reasons)
 
-    return SampleTotals(
+    return SourceLineRecord(
         total_count=sum(line.total_count for line in instruction_lines),
         issue_count=_sum_known([line.issue_count for line in instruction_lines]),
         stall_count=_sum_known([line.stall_count for line in instruction_lines]),
