@@ -65,24 +65,31 @@ def test_non_scc_inline_operation_has_no_scc_effect():
     ('callee', 'ty', 'expected', 'unexpected'),
     [
         ('maxmin', SemaType.I32, 'std::min(std::max(', 'std::fmin'),
+        ('minmax', SemaType.I32, 'std::max(std::min(', 'std::fmax'),
+        ('maxmin', SemaType.U32, 'std::min(std::max(', 'std::fmin'),
         ('minmax', SemaType.U32, 'std::max(std::min(', 'std::fmax'),
         ('maxmin', SemaType.F32, 'std::fmin(std::fmax(', 'std::min'),
         ('minmax', SemaType.F32, 'std::fmax(std::fmin(', 'std::max'),
     ],
 )
-def test_minmax_ternary_lowering_uses_result_type(callee, ty, expected, unexpected):
+@pytest.mark.parametrize('full_block', [False, True])
+def test_minmax_ternary_lowering_uses_result_type(
+    callee, ty, expected, unexpected, full_block
+):
     node = SemaNode(
         SemaNodeKind.CALL,
         call_name=callee,
         ty=ty,
         children=(
             SemaNode(SemaNodeKind.ID, id_name=callee),
-            SemaNode(SemaNodeKind.LIT, lit_value='a', ty=ty),
-            SemaNode(SemaNodeKind.LIT, lit_value='b', ty=ty),
-            SemaNode(SemaNodeKind.LIT, lit_value='c', ty=ty),
+            *(_cast(_src(i), ty) for i in range(3)),
         ),
     )
-    result = _lower_call(node, LoweringContext(exec_model=ExecModel.VECTOR))
+    if full_block:
+        body = SemaNode(SemaNodeKind.ASSIGN, children=(_cast(_dst(0), ty), node))
+        result = lower_sema_block(SemaBlock('V_TEST', ExecModel.VECTOR, body))
+    else:
+        result = _lower_call(node, LoweringContext(exec_model=ExecModel.VECTOR))
     assert expected in result
     assert unexpected not in result
 
@@ -1480,22 +1487,3 @@ class TestSemaXmlLowering:
     def test_s_endpgm_stub(self, blocks):
         result = lower_sema_block(blocks['S_ENDPGM'])
         assert '(void)wf;' in result
-
-
-@pytest.mark.parametrize('ty', [SemaType.I32, SemaType.U32, SemaType.F32])
-@pytest.mark.parametrize('callee', ['minmax', 'maxmin'])
-def test_minmax_uses_integer_comparisons_for_integer_results(ty, callee):
-    call = SemaNode(
-        SemaNodeKind.CALL,
-        ty=ty,
-        call_name=callee,
-        children=(
-            SemaNode(SemaNodeKind.ID, id_name=callee),
-            *(_cast(_src(i), ty) for i in range(3)),
-        ),
-    )
-    body = SemaNode(SemaNodeKind.ASSIGN, children=(_cast(_dst(0), ty), call))
-    output = lower_sema_block(SemaBlock('V_TEST', ExecModel.VECTOR, body))
-    outer, inner = ('max', 'min') if callee == 'minmax' else ('min', 'max')
-    prefix = 'f' if ty == SemaType.F32 else ''
-    assert f'std::{prefix}{outer}(std::{prefix}{inner}(' in output
