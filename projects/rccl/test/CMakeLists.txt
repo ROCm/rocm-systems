@@ -462,17 +462,26 @@ if(BUILD_TESTS)
   if(ENABLE_ROCSHMEM_GIN AND ROCM_VERSION VERSION_GREATER_EQUAL "60400")
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsGinAnvilPlugin)
 
+    # The plugin sources are written with CUDA names (CUdeviceptr, CUresult, ...)
+    # that only their hipified copies rename, and they call host-only helpers a
+    # device pass cannot see. Compile the hipified copies host-only, as librccl does.
+    set(_GIN_ANVIL_PLUGIN_SRCS
+      ${PROJECT_BINARY_DIR}/hipify/src/gin/gin_plugin_anvil_sdma.cc
+      ${PROJECT_BINARY_DIR}/hipify/src/gin/gin_anvil_ipc_table_host.cc
+      ${PROJECT_BINARY_DIR}/hipify/src/gin/gin_fabric_a2a_lane.cc
+    )
+    set_source_files_properties(${_GIN_ANVIL_PLUGIN_SRCS} PROPERTIES GENERATED TRUE)
+
     add_executable(rccl-UnitTestsGinAnvilPlugin
       gin/GinAnvilPlugin_test.cpp
       gin/gin_anvil_plugin_test_stubs.cc
-      ../src/gin/gin_plugin_anvil_sdma.cc
-      ../src/gin/gin_anvil_ipc_table_host.cc
-      ../src/gin/gin_fabric_a2a_lane.cc
+      ${_GIN_ANVIL_PLUGIN_SRCS}
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
+    target_compile_options(rccl-UnitTestsGinAnvilPlugin PRIVATE --offload-host-only)
 
     target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
       ${PROJECT_BINARY_DIR}/hipify/src

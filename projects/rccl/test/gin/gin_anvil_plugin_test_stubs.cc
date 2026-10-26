@@ -81,22 +81,23 @@ void SetFabricRetainOk(bool ok) { g.fabricRetainOk = ok; }
 
 namespace GinAnvilPluginTestHooks {
 
-ncclResult_t queryVmmRange(void* data, size_t size, CUdeviceptr* base, size_t* memSize, int* numSegments) {
+// HIP names: these definitions must match the hipified plugin declarations.
+ncclResult_t queryVmmRange(void* data, size_t size, hipDeviceptr_t* base, size_t* memSize, int* numSegments) {
   if (!GinAnvilPluginStubs::g.fabricVmmQueryOk) return ncclSystemError;
   if (base == nullptr || memSize == nullptr || numSegments == nullptr) return ncclInvalidArgument;
-  *base = reinterpret_cast<CUdeviceptr>(GinAnvilPluginStubs::g.fabricPeerBase);
+  *base = reinterpret_cast<hipDeviceptr_t>(GinAnvilPluginStubs::g.fabricPeerBase);
   *memSize = size + 0x1000;
   *numSegments = 1;
   (void)data;
   return ncclSuccess;
 }
 
-CUresult retainAllocationHandle(CUmemGenericAllocationHandle* handle, void* addr) {
-  if (!GinAnvilPluginStubs::g.fabricRetainOk) return CUDA_ERROR_UNKNOWN;
-  if (handle == nullptr) return CUDA_ERROR_INVALID_VALUE;
-  *handle = CUmemGenericAllocationHandle{};
+hipError_t retainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void* addr) {
+  if (!GinAnvilPluginStubs::g.fabricRetainOk) return hipErrorUnknown;
+  if (handle == nullptr) return hipErrorInvalidValue;
+  *handle = hipMemGenericAllocationHandle_t{};
   (void)addr;
-  return CUDA_SUCCESS;
+  return hipSuccess;
 }
 
 }  // namespace GinAnvilPluginTestHooks
@@ -275,7 +276,7 @@ ncclFabricMemHandler::ncclFabricMemHandler(void* bootstrap, int rank, int nranks
 
 ncclFabricMemHandler::~ncclFabricMemHandler() {}
 
-ncclResult_t ncclFabricMemHandler::addSelfDeviceMem(void* deviceMemPtr, CUmemGenericAllocationHandle handle,
+ncclResult_t ncclFabricMemHandler::addSelfDeviceMem(void* deviceMemPtr, hipMemGenericAllocationHandle_t handle,
                                                     size_t size) {
   if (GinAnvilPluginStubs::g.fabricAddSelfFail) return ncclSystemError;
   selfPtr_ = deviceMemPtr;
