@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <new>
 #include <vector>
 #include <ctype.h>
 #include <stdio.h>
@@ -112,29 +113,38 @@ static ncclResult_t ncclDiagDetectTransportMask(struct ncclComm* comm, unsigned 
     // The all-gather below is collective: every peer blocks in it. If the per-rank buffer
     // allocation fails on one rank only, that rank must NOT return early, or its peers hang in the
     // all-gather and every later diagnostics collective desyncs. On failure, still join the
-    // collective using a local fallback buffer and surface the allocation error afterwards.
+    // collective using a local fallback buffer, then publish the gathered union (so this rank makes
+    // the same net-vs-local check decisions as its peers) and surface the allocation error.
     ncclResult_t allocRes = ncclCalloc(&allPathMasks, comm->nRanks);
     std::vector<unsigned int> fallbackMasks;
     unsigned int* masks = allPathMasks;
     if (allocRes != ncclSuccess) {
-      fallbackMasks.assign(comm->nRanks, 0u);
+      // The fallback is itself a heap allocation; if it also fails we have no buffer to gather into
+      // and cannot join the collective. Catch the throw so it never unwinds through these C frames:
+      // peers may then hang, but only under genuine memory exhaustion where nothing can be done.
+      try {
+        fallbackMasks.assign(comm->nRanks, 0u);
+      } catch (const std::bad_alloc&) {
+        ret = allocRes;
+        goto fail;
+      }
       masks = fallbackMasks.data();
     }
 
     masks[comm->rank] = localPathMask;
     NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, masks, sizeof(unsigned int)), ret, fail);
 
-    if (allocRes != ncclSuccess) {
-      // We joined the collective so peers progressed; now report the allocation failure.
-      ret = allocRes;
-      goto fail;
-    }
-
+    // The all-gather filled every slot, so masks[] holds the full picture even when our own buffer
+    // allocation failed. Publish the union regardless, so a rank that failed to allocate still takes
+    // the same PATH_NET branch as its peers in the collectives that follow and stays in lockstep.
     if (outUnionMask != nullptr) {
       unsigned int unionMask = 0;
       for (int r = 0; r < comm->nRanks; r++) unionMask |= masks[r];
       *outUnionMask = unionMask;
     }
+
+    // Surface the allocation failure after the rank has rejoined its peers.
+    if (allocRes != ncclSuccess) ret = allocRes;
   }
 
 fail:
