@@ -119,3 +119,14 @@ add_rr_decline_test(test-range-replay-decline-hip-free MODE hip-free EXPECT
 # C4: begin then end with nothing recorded closes with NO_DISPATCH and zero dispatches.
 add_rr_decline_test(test-range-replay-decline-empty MODE empty EXPECT NO_DISPATCH
                     DISPATCHES 0)
+
+# C5: a HIP graph launch on the thread that owns the range. The graph is captured and
+# warmed up before the range opens, so the decline is GRAPH_LAUNCH rather than a
+# code-object load. The launch is not recorded: CLOSE reports zero dispatches.
+add_rr_decline_test(test-range-replay-decline-graph-launch MODE graph-launch EXPECT
+                    GRAPH_LAUNCH DISPATCHES 0)
+
+# C6: another thread's kernel on the same agent while the range is open, after the range
+# has bound to that agent. CLOSE reports the binding dispatch only.
+add_rr_decline_test(test-range-replay-decline-concurrent-dispatch MODE
+                    concurrent-dispatch EXPECT CONCURRENT_DISPATCH DISPATCHES 1)

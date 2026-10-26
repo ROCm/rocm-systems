@@ -52,8 +52,13 @@ copy_pattern(size_t i)
 constexpr int kExpectedCopyResult = 3 + copy_pattern(0) + copy_pattern(kCopyElements - 1);
 
 // Acc after only rr_decline_first runs (ALLOCATION_CHANGED modes: one binding kernel, then
-// hipMalloc / hipFree, then close).
+// hipMalloc / hipFree, then close). Also the binding kernel of the concurrent-dispatch mode.
 constexpr int kExpectedFirstOnlyResult = 1;
+
+// rr_decline_count increments once per launch. The graph-launch mode warms the executable up
+// outside the range and launches it once inside, so the counter is 2. The concurrent-dispatch
+// mode does the same with an ordinary kernel from the other thread.
+constexpr int kExpectedTwoLaunches = 2;
 
 // Set by the application before it exits without opening the range, so the tool reports a skip
 // rather than a missing CLOSE. Its value is the reason.

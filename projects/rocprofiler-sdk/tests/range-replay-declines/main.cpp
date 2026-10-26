@@ -32,9 +32,17 @@
 //   hip-free          one binding kernel, then hipFree of a pre-range allocation
 //                     (ALLOCATION_CHANGED_IN_RANGE at close)
 //   empty             begin then end with no dispatch (NO_DISPATCH)
+//   graph-launch      a HIP graph, captured and warmed up before the range, launched once inside
+//                     it (GRAPH_LAUNCH; the launch is not recorded)
+//   concurrent-dispatch
+//                     one binding kernel, then another thread's kernel on the same agent
+//                     (CONCURRENT_DISPATCH)
 //
 // The range is bound by its first kernel before a copy or allocation change runs: those declines
-// need a range that already belongs to an agent (and, for allocations, an entry snapshot).
+// need a range that already belongs to an agent (and, for allocations, an entry snapshot). The
+// graph is warmed up before the range opens so the decline is the launch itself, not a code-object
+// load. The other thread waits until the binding kernel has returned, which is when the range's
+// agent is published.
 
 #include "range.hpp"
 
@@ -46,11 +54,14 @@
 
 #include <dlfcn.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #define HIP_CHECK(call)                                                                            \
@@ -80,6 +91,14 @@ __global__ void
 rr_decline_second(int* acc, const int* copied, size_t count)
 {
     if(threadIdx.x == 0) *acc = (*acc * 3) + copied[0] + copied[count - 1];
+}
+
+// One increment per launch. The graph-launch and concurrent-dispatch modes each run it twice:
+// once to warm the code object up, and once for the decline itself.
+__global__ void
+rr_decline_count(int* counter)
+{
+    if(threadIdx.x == 0) *counter += 1;
 }
 
 namespace
@@ -184,6 +203,36 @@ prepare_batch_copy(batch_copier& copier, const void* device_buffer)
 }
 #endif
 
+// Joins the worker on every exit path, including the early returns of HIP_CHECK. Setting stop
+// first lets a worker still waiting to bind leave instead of holding the join for its timeout.
+struct thread_joiner
+{
+    std::thread&      thread;
+    std::atomic<int>& stop;
+
+    ~thread_joiner()
+    {
+        stop.store(1);
+        if(thread.joinable()) thread.join();
+    }
+};
+
+bool
+wait_until(const std::atomic<int>& flag, const char* what)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{60};
+    while(flag.load() == 0)
+    {
+        if(std::chrono::steady_clock::now() > deadline)
+        {
+            fprintf(stderr, "[app] FAIL: timed out waiting for %s\n", what);
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds{100});
+    }
+    return true;
+}
+
 bool
 begin_range()
 {
@@ -223,6 +272,133 @@ end_range()
     }
     return true;
 }
+
+// Captured and launched once before the range, so the in-range launch is GRAPH_LAUNCH rather than
+// a code object loading on first use. The launch is not recorded, so CLOSE reports no dispatches.
+int
+run_graph_launch(const char* mode)
+{
+    int*           counter = nullptr;
+    hipStream_t    stream  = nullptr;
+    hipGraph_t     graph   = nullptr;
+    hipGraphExec_t exec    = nullptr;
+    HIP_CHECK(hipMalloc(&counter, sizeof(int)));
+    HIP_CHECK(hipMemset(counter, 0, sizeof(int)));
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
+    rr_decline_count<<<1, 64, 0, stream>>>(counter);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    if(!begin_range()) return EXIT_FAILURE;
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    if(!end_range()) return EXIT_FAILURE;
+
+    auto counter_h = 0;
+    HIP_CHECK(hipMemcpy(&counter_h, counter, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipFree(counter));
+
+    printf("[app] mode=%s counter=%d\n", mode, counter_h);
+    if(counter_h != kExpectedTwoLaunches)
+    {
+        fprintf(stderr, "[app] FAIL: counter=%d (expected %d)\n", counter_h, kExpectedTwoLaunches);
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
+// The binding kernel publishes the range's agent before this returns. The worker waits for that,
+// then launches on the same device. Ending the range before that launch would replay instead.
+int
+run_concurrent_dispatch(const char* mode)
+{
+    int* acc     = nullptr;
+    int* counter = nullptr;
+    HIP_CHECK(hipMalloc(&acc, sizeof(int)));
+    HIP_CHECK(hipMalloc(&counter, sizeof(int)));
+    HIP_CHECK(hipMemset(acc, 0, sizeof(int)));
+    HIP_CHECK(hipMemset(counter, 0, sizeof(int)));
+
+    // The foreign kernel's code object is loaded here, outside the range.
+    rr_decline_count<<<1, 64>>>(counter);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    auto bound         = std::atomic<int>{0};
+    auto done          = std::atomic<int>{0};
+    auto stop          = std::atomic<int>{0};
+    auto worker_failed = std::atomic<int>{0};
+    auto worker        = std::thread{[&]() {
+        if(hipSetDevice(0) != hipSuccess)
+        {
+            worker_failed.store(1);
+            done.store(1);
+            return;
+        }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{60};
+        while(bound.load() == 0 && stop.load() == 0)
+        {
+            if(std::chrono::steady_clock::now() > deadline)
+            {
+                fprintf(stderr, "[app] FAIL: timed out waiting for the range to bind\n");
+                worker_failed.store(1);
+                done.store(1);
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::microseconds{100});
+        }
+        if(stop.load() != 0) return;
+
+        rr_decline_count<<<1, 64>>>(counter);
+        if(hipGetLastError() != hipSuccess || hipDeviceSynchronize() != hipSuccess)
+            worker_failed.store(1);
+        done.store(1);
+    }};
+    auto join_worker   = thread_joiner{worker, stop};
+
+    if(!begin_range()) return EXIT_FAILURE;
+
+    rr_decline_first<<<1, 64>>>(acc);
+    HIP_CHECK(hipGetLastError());
+    bound.store(1);
+
+    if(!wait_until(done, "the other thread's kernel")) return EXIT_FAILURE;
+    if(!end_range()) return EXIT_FAILURE;
+
+    if(worker_failed.load() != 0)
+    {
+        fprintf(stderr, "[app] FAIL: the other thread's kernel failed\n");
+        return EXIT_FAILURE;
+    }
+
+    auto acc_h     = 0;
+    auto counter_h = 0;
+    HIP_CHECK(hipMemcpy(&acc_h, acc, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&counter_h, counter, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(acc));
+    HIP_CHECK(hipFree(counter));
+
+    printf("[app] mode=%s acc=%d counter=%d\n", mode, acc_h, counter_h);
+    if(acc_h != kExpectedFirstOnlyResult)
+    {
+        fprintf(stderr, "[app] FAIL: acc=%d (expected %d)\n", acc_h, kExpectedFirstOnlyResult);
+        return EXIT_FAILURE;
+    }
+    if(counter_h != kExpectedTwoLaunches)
+    {
+        fprintf(stderr, "[app] FAIL: counter=%d (expected %d)\n", counter_h, kExpectedTwoLaunches);
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
 }  // namespace
 
 int
@@ -235,7 +411,8 @@ main()
     const char* mode_env = std::getenv("RR_DECLINE_MODE");
     const auto  mode     = std::string_view{mode_env != nullptr ? mode_env : ""};
     if(mode != "hip-memcpy-async" && mode != "hsa-batch-copy" && mode != "hip-malloc" &&
-       mode != "hip-free" && mode != "empty")
+       mode != "hip-free" && mode != "empty" && mode != "graph-launch" &&
+       mode != "concurrent-dispatch")
     {
         fprintf(stderr, "[app] FAIL: unknown RR_DECLINE_MODE '%s'\n", mode_env ? mode_env : "");
         return EXIT_FAILURE;
@@ -249,6 +426,9 @@ main()
         printf("[app] mode=%s\n", mode_env);
         return EXIT_SUCCESS;
     }
+
+    if(mode == "graph-launch") return run_graph_launch(mode_env);
+    if(mode == "concurrent-dispatch") return run_concurrent_dispatch(mode_env);
 
     // Everything the range touches is allocated and settled before it opens, except the deliberate
     // hipMalloc / hipFree of the allocation-change modes.
