@@ -16,14 +16,14 @@ namespace {
 
 struct CallableProbeCase {
   uint32_t target;
-  uint32_t wave;
+  uint32_t wave_size;
 };
 
 class ConSanCallableProbe : public ::testing::TestWithParam<CallableProbeCase> {};
 
 TEST_P(ConSanCallableProbe, CompiledBodiesAreSelfContainedAndUseOnlyTheirArguments) {
   const CallableProbeCase mode = GetParam();
-  const std::span<const uint8_t> image = lds_probe_image(mode.target, mode.wave);
+  const std::span<const uint8_t> image = lds_probe_image(mode.target, mode.wave_size);
   ASSERT_FALSE(image.empty());
   AmdGpuCodeObject object(image.data(), image.size());
   ASSERT_TRUE(object.is_valid());
@@ -55,7 +55,7 @@ INSTANTIATE_TEST_SUITE_P(ConSanProbeModes, ConSanCallableProbe,
                                            CallableProbeCase{1250, 32}),
                          [](const ::testing::TestParamInfo<CallableProbeCase> &info) {
                            return "gfx" + std::to_string(info.param.target) + "Wave" +
-                                  std::to_string(info.param.wave);
+                                  std::to_string(info.param.wave_size);
                          });
 
 } // namespace
