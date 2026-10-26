@@ -820,7 +820,7 @@ ncclResult_t CaptureStrideDestroyContext(void* /*ginCtx*/) { return ncclSuccess;
 // NCCL_GIN_CONNECTION_CUSTOM_STRIDE (AICOMRCCL-2000): the requested world-rank
 // stride must be positive, no larger than the rail team, and a multiple of the
 // stride the communicator actually connected. The plugin sees that stride in
-// units of the connected group.
+// NCCL_GIN_CONNECTION_CUSTOM_STRIDE (AICOMRCCL-2000): the plugin sees the stride in units of the connected group.
 class GinHostCustomStrideMicrotest : public ::testing::Test {
 protected:
   std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
