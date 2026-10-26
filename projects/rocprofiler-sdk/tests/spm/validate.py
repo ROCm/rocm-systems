@@ -122,20 +122,25 @@ def _get_counter_value(counters, name):
 
 def _validate_dispatch_counters(dispatch_id, counters, agent_name):
     busy_name, wavefront_name = _ta_counter_names(agent_name)
-    assert float(_get_counter_value(counters, busy_name)) > _get_counter_value(
-        counters, wavefront_name
-    )
+    busy = _get_counter_value(counters, busy_name)
+    wavefronts = _get_counter_value(counters, wavefront_name)
+    assert busy is not None, f"Dispatch {dispatch_id} missing {busy_name}"
+    assert (
+        wavefronts is not None
+    ), f"Dispatch {dispatch_id} missing {wavefront_name}"
+    assert float(busy) > float(wavefronts)
 
-    assert (
-        100
-        * _get_counter_value(counters, "SQC_ICACHE_MISSES")
-        / _get_counter_value(counters, "SQC_ICACHE_REQ")
-    ) <= 100
-    assert (
-        100
-        * _get_counter_value(counters, "SQC_ICACHE_HITS")
-        / _get_counter_value(counters, "SQC_ICACHE_REQ")
-    ) <= 100
+    # 100 * value / requests <= 100 is value <= requests. A dispatch can report
+    # no I-cache traffic once the cache is warm, so a zero request count is valid
+    # when hits and misses are also zero.
+    requests = _get_counter_value(counters, "SQC_ICACHE_REQ")
+    assert requests is not None, f"Dispatch {dispatch_id} missing SQC_ICACHE_REQ"
+    for name in ("SQC_ICACHE_HITS", "SQC_ICACHE_MISSES"):
+        value = _get_counter_value(counters, name)
+        assert value is not None, f"Dispatch {dispatch_id} missing {name}"
+        assert float(value) <= float(requests), (
+            f"Dispatch {dispatch_id} {name} {value} exceeds SQC_ICACHE_REQ {requests}"
+        )
 
 
 def _accumulate_counter(counter_map, name, value):
