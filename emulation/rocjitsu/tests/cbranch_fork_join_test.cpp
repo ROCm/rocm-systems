@@ -278,8 +278,9 @@ TEST_P(CbranchForkJoinTest, ForkAndJoinUseTheSecondWavesPhysicalStack) {
   EXPECT_EQ(wf->cond_stack_ptr(), 3u);
   for (uint32_t index = 0; index < 32; ++index) {
     EXPECT_EQ(cu->read_sgpr(first_wave->sgpr_alloc().base + index), 0x12340000u + index);
-    if (index < 12 || index >= 16)
+    if (index < 12 || index >= 16) {
       EXPECT_EQ(sgpr(index), 0x56780000u + index);
+    }
   }
   EXPECT_EQ(cu->isa_diagnostic_count(), 0u);
   first_wave->halt();
