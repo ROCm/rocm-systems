@@ -176,7 +176,7 @@ rollback_started_agents(std::vector<rocprofiler::SPM::spm_agent_callback_data>& 
         counters::counter_collection_ptl_enable(ag->get_rocp_agent());
         if(counters::counter_collection_has_device_lock())
         {
-            counters::counter_collection_device_unlock(ag->get_rocp_agent());
+            counters::counter_collection_device_unlock(ag->get_rocp_agent(), true);
         }
 
         if(hsa::use_ondemand_queue())
@@ -259,7 +259,7 @@ spm_start_agent_ctx(const context::context* ctx)
         // Lock the device for profiling
         if(counters::counter_collection_has_device_lock())
         {
-            counters::counter_collection_device_lock(agent->get_rocp_agent(), true);
+            counters::counter_collection_device_lock(agent->get_rocp_agent(), true, true);
         }
 
         counters::counter_collection_ptl_disable(agent->get_rocp_agent());
@@ -319,7 +319,7 @@ spm_start_agent_ctx(const context::context* ctx)
             counters::counter_collection_ptl_enable(agent->get_rocp_agent());
             if(counters::counter_collection_has_device_lock())
             {
-                counters::counter_collection_device_unlock(agent->get_rocp_agent());
+                counters::counter_collection_device_unlock(agent->get_rocp_agent(), true);
             }
             if(hsa::use_ondemand_queue())
             {
@@ -348,7 +348,7 @@ spm_start_agent_ctx(const context::context* ctx)
             counters::counter_collection_ptl_enable(agent->get_rocp_agent());
             if(counters::counter_collection_has_device_lock())
             {
-                counters::counter_collection_device_unlock(agent->get_rocp_agent());
+                counters::counter_collection_device_unlock(agent->get_rocp_agent(), true);
             }
             if(hsa::use_ondemand_queue())
             {
@@ -453,7 +453,7 @@ spm_stop_agent_ctx(const context::context* ctx)
         counters::counter_collection_ptl_enable(agent->get_rocp_agent());
         if(counters::counter_collection_has_device_lock())
         {
-            counters::counter_collection_device_unlock(agent->get_rocp_agent());
+            counters::counter_collection_device_unlock(agent->get_rocp_agent(), true);
         }
 
         if(hsa::use_ondemand_queue())

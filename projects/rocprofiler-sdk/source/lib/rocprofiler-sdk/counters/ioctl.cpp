@@ -84,6 +84,7 @@ profiler_ioctl(kfd_ioctl_profiler_args& args)
         return ROCPROFILER_STATUS_SUCCESS;
     return ROCPROFILER_STATUS_ERROR;
 }
+
 }  // namespace
 
 unsigned long
@@ -98,22 +99,66 @@ get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_ve
 }
 
 bool
+dispatch_mode_supported_for_version(uint32_t version)
+{
+    return version >= KFD_IOC_PROFILER_VERSION_NUM;
+}
+
+// Dispatch mode (KFD_IOC_PROFILER_PMC with lock=0, perfcount_enable=1) trades the old
+// exclusive profiler_process lock for a per-process perfmon clock override, and relies on
+// process teardown (not an explicit unlock ioctl) to release it. The kernel only honors this
+// behavior starting at KFD_IOC_PROFILER_VERSION_NUM 2; on older kernels it falls through to
+// the exclusive-lock path and would spuriously fail. Version numbers are cumulative (see the
+// history comment above KFD_IOC_PROFILER_VERSION_NUM in kfd_ioctl.h), so any version >= 2
+// retains this behavior.
+bool
+dispatch_mode_supported()
+{
+    return dispatch_mode_supported_for_version(kfd_profiler_version());
+}
+
+uint32_t
+kfd_profiler_version()
+{
+    static uint32_t version = []() -> uint32_t {
+        kfd_ioctl_profiler_args args = {};
+        args.op                      = KFD_IOC_PROFILER_VERSION;
+        if(profiler_ioctl(args) != ROCPROFILER_STATUS_SUCCESS) return 0;
+        return args.version;
+    }();
+    return version;
+}
+
+bool
 counter_collection_has_device_lock()
 {
-    kfd_ioctl_profiler_args args = {};
-    args.op                      = KFD_IOC_PROFILER_VERSION;
-    return profiler_ioctl(args) == ROCPROFILER_STATUS_SUCCESS;
+    return kfd_profiler_version() != 0;
 }
 
 rocprofiler_status_t
-counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues)
+counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues, bool exclusive)
 {
     CHECK(agent);
+
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_PMC;
     args.pmc.gpu_id              = agent->gpu_id;
-    args.pmc.lock                = 1;
-    args.pmc.perfcount_enable    = all_queues ? 1 : 0;
+
+    if(!exclusive)
+    {
+        // Dispatch mode is a no-op success on kernels that don't support it, rather than
+        // falling back to the exclusive lock below: that lock is CAP_PERFMON-gated, and
+        // dispatch counting must not pick up that requirement just because the kernel is old.
+        if(!dispatch_mode_supported()) return ROCPROFILER_STATUS_SUCCESS;
+
+        args.pmc.lock             = 0;
+        args.pmc.perfcount_enable = 1;
+    }
+    else
+    {
+        args.pmc.lock             = 1;
+        args.pmc.perfcount_enable = all_queues ? 1 : 0;
+    }
 
     auto status = profiler_ioctl(args);
     if(status == ROCPROFILER_STATUS_ERROR)
@@ -154,9 +199,19 @@ counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues
 }
 
 rocprofiler_status_t
-counter_collection_device_unlock(const rocprofiler_agent_t* agent)
+counter_collection_device_unlock(const rocprofiler_agent_t* agent, bool exclusive)
 {
     CHECK(agent);
+
+    if(!exclusive)
+    {
+        // Dispatch mode (lock=0, perfcount_enable=1 at lock time) has no unprivileged "off"
+        // ioctl: the kernel only clears perfmon_clk_req when this process's KFD device context
+        // is torn down. Sending lock=0, perfcount_enable=0 here would just hit the
+        // perfmon_capable() check and fail EPERM, so there is nothing to do.
+        return ROCPROFILER_STATUS_SUCCESS;
+    }
+
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_PMC;
     args.pmc.gpu_id              = agent->gpu_id;
@@ -184,9 +239,9 @@ ptl_control_supported()
 }
 
 bool
-use_device_lock_at_start()
+lock_at_configure_time()
 {
-    static bool value = rocprofiler::common::get_env("ROCPROFILER_DEVICE_LOCK_AT_START", false);
+    static bool value = rocprofiler::common::get_env("ROCPROFILER_DEVICE_LOCK_AT_CONFIGURE", false);
     return value;
 }
 

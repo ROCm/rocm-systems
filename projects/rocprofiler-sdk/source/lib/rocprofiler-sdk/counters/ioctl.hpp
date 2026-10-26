@@ -33,20 +33,54 @@ namespace counters
 unsigned long
 get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_version);
 
+// Returns the KFD profiler interface version reported by the running kernel (via the
+// KFD_IOC_PROFILER_VERSION op), or 0 if that op is not available (e.g. no /dev/kfd, or a
+// kernel predating the profiler ioctl entirely).
+uint32_t
+kfd_profiler_version();
+
+// Whether the given KFD profiler interface version supports dispatch mode (see
+// KFD_IOC_PROFILER_VERSION_NUM history in kfd_ioctl.h). Exposed separately from
+// dispatch_mode_supported() so the version-comparison logic can be unit tested without a real
+// /dev/kfd.
+bool
+dispatch_mode_supported_for_version(uint32_t version);
+
+// Whether the running kernel supports dispatch mode, i.e. dispatch_mode_supported_for_version()
+// on the version reported by kfd_profiler_version(). Dispatch counting callers use this to
+// decide whether to attempt the device lock at all (see counter_collection_device_lock()'s
+// `exclusive` parameter).
+bool
+dispatch_mode_supported();
+
 bool
 counter_collection_has_device_lock();
 
+// `exclusive` selects which KFD_IOC_PROFILER_PMC variant to request:
+//  - true  (device counting): device-wide collection isn't scoped to one dispatch, so another
+//    process's concurrent kernels would pollute the values without exclusivity. Always requests
+//    the exclusive profiler_process lock (lock=1), which the kernel gates on CAP_PERFMON
+//    regardless of KFD profiler interface version.
+//  - false (dispatch counting): already serializes hardware execution to one dispatch at a
+//    time, so no exclusivity is needed -- only request dispatch mode (lock=0,
+//    perfcount_enable=1) to force the perfmon clock on, which the kernel allows without
+//    CAP_PERFMON. Only available starting at KFD_IOC_PROFILER_VERSION_NUM 2 (see
+//    dispatch_mode_supported()); a no-op success on older kernels rather than falling back to
+//    the CAP_PERFMON-gated exclusive lock.
 rocprofiler_status_t
-counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues);
+counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues, bool exclusive);
 
+// See counter_collection_device_lock() for what `exclusive` selects. The dispatch-mode (false)
+// case has no unprivileged "off" ioctl -- the kernel only clears the perfmon clock request when
+// this process's KFD device context is torn down -- so it is a no-op here.
 rocprofiler_status_t
-counter_collection_device_unlock(const rocprofiler_agent_t* agent);
+counter_collection_device_unlock(const rocprofiler_agent_t* agent, bool exclusive);
 
 bool
 ptl_control_supported();
 
 bool
-use_device_lock_at_start();
+lock_at_configure_time();
 
 rocprofiler_status_t
 counter_collection_ptl_disable(const rocprofiler_agent_t* agent);

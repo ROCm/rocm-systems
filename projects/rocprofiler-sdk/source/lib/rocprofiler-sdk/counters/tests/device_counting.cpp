@@ -940,6 +940,27 @@ TEST(profiler_ioctl_request, version_2_0_uses_mainline_request)
               static_cast<unsigned long>(AMDKFD_IOWR(0x28, struct kfd_ioctl_profiler_args)));
 }
 
+// KFD_IOC_PROFILER_VERSION_NUM is documented in kfd_ioctl.h as cumulative: each new version
+// keeps all prior behavior and adds more. dispatch_mode_supported_for_version() must therefore
+// treat any version >= KFD_IOC_PROFILER_VERSION_NUM as supporting dispatch mode, not just an
+// exact match (a future kernel reporting a newer version must not disable dispatch mode).
+TEST(kfd_profiler_version, dispatch_mode_not_supported_below_threshold)
+{
+    EXPECT_FALSE(counters::dispatch_mode_supported_for_version(0));
+    EXPECT_FALSE(counters::dispatch_mode_supported_for_version(KFD_IOC_PROFILER_VERSION_NUM - 1));
+}
+
+TEST(kfd_profiler_version, dispatch_mode_supported_at_threshold)
+{
+    EXPECT_TRUE(counters::dispatch_mode_supported_for_version(KFD_IOC_PROFILER_VERSION_NUM));
+}
+
+TEST(kfd_profiler_version, dispatch_mode_supported_above_threshold)
+{
+    EXPECT_TRUE(counters::dispatch_mode_supported_for_version(KFD_IOC_PROFILER_VERSION_NUM + 1));
+    EXPECT_TRUE(counters::dispatch_mode_supported_for_version(100));
+}
+
 // WSL2/DXG does not expose KFD: the KFD-only device lock and PTL controls must degrade to
 // "unsupported" so PMC collection continues without them.
 TEST(profiler_ioctl_request, no_kfd_device_lock_and_ptl_unavailable)
@@ -952,9 +973,9 @@ TEST(profiler_ioctl_request, no_kfd_device_lock_and_ptl_unavailable)
     EXPECT_EQ(pc_sampling::ioctl::get_kfd_fd(), -1);
     EXPECT_FALSE(counters::counter_collection_has_device_lock());
     EXPECT_FALSE(counters::ptl_control_supported());
-    EXPECT_EQ(counters::counter_collection_device_lock(&agent, true),
+    EXPECT_EQ(counters::counter_collection_device_lock(&agent, true, true),
               ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);
-    EXPECT_EQ(counters::counter_collection_device_unlock(&agent),
+    EXPECT_EQ(counters::counter_collection_device_unlock(&agent, true),
               ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);
     EXPECT_EQ(counters::counter_collection_ptl_disable(&agent),
               ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);

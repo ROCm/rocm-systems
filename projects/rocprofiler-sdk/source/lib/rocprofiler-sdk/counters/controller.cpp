@@ -48,6 +48,12 @@ namespace
 void
 check_power_performance_level()
 {
+    // KFD profiler interface version 2+ forces the perfmon clock on for the duration of the
+    // lock (see counters::kfd_profiler_version()), which is what profile_standard previously
+    // had to be set manually for. The manual power_dpm_force_performance_level requirement
+    // only applies to older kernels.
+    if(counters::kfd_profiler_version() > 1) return;
+
     // Check if power_dpm_force_performance_level is set to profile_standard
     // for GPU agents that support counter collection. gfx1100 up to (but not
     // including) gfx1250 requires profile_standard for stable counter
@@ -179,12 +185,16 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t          
     ctx.device_counter_collection->agent_data.back().cb       = cb;
     ctx.device_counter_collection->agent_data.back().buffer   = buffer_id;
 
-    // OLD behavior: Lock the device and disable PTL at configuration time instead of context start
-    if(counters::use_device_lock_at_start())
+    // By default the device lock and PTL disable happen at context start (see
+    // core.cpp's start_context() / device_counting.cpp's start_agent_ctx()).
+    // ROCPROFILER_DEVICE_LOCK_AT_CONFIGURE is the legacy opt-in that moves both here, at
+    // configuration time; configure_dispatch() below does the same for dispatch collection.
+    if(counters::lock_at_configure_time())
     {
         if(counters::counter_collection_has_device_lock())
         {
-            counters::counter_collection_device_lock(rocprofiler::agent::get_agent(agent_id), true);
+            counters::counter_collection_device_lock(
+                rocprofiler::agent::get_agent(agent_id), true, true);
         }
         counters::counter_collection_ptl_disable(rocprofiler::agent::get_agent(agent_id));
     }
@@ -224,13 +234,23 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
         // Disable PTL for all GPUs for dispatch counter collection
         for(const auto& agent : agent::get_agents())
         {
-            if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+            if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+            if(counters::ptl_control_supported())
             {
-                if(counters::ptl_control_supported())
-                {
-                    counters::counter_collection_ptl_disable(
-                        rocprofiler::agent::get_agent(agent->id));
-                }
+                counters::counter_collection_ptl_disable(agent);
+            }
+
+            // By default the device lock is acquired at context start (see core.cpp's
+            // start_context() / device_counting.cpp's start_agent_ctx()).
+            // ROCPROFILER_DEVICE_LOCK_AT_CONFIGURE is the legacy opt-in that moves it here, at
+            // configuration time; configure_agent_collection() above does the same for
+            // agent collection. Dispatch counting only needs the non-exclusive dispatch-mode
+            // lock (see counter_collection_device_lock()'s `exclusive` parameter), which is
+            // only available once the kernel reports KFD profiler interface version 2+.
+            if(counters::lock_at_configure_time() && counters::dispatch_mode_supported())
+            {
+                counters::counter_collection_device_lock(agent, true, false);
             }
         }
 
