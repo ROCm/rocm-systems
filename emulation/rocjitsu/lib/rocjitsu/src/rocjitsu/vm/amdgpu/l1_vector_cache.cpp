@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/vm/amdgpu/coalesced_lane_runs.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
@@ -19,31 +20,6 @@
 namespace rocjitsu {
 namespace amdgpu {
 namespace {
-
-template <typename F>
-uint32_t for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
-                                     uint32_t stride, F &&fn) {
-  uint32_t run_count = 0;
-  uint64_t remaining = lane_mask;
-  while (remaining) {
-    const uint32_t first_lane = std::countr_zero(remaining);
-    remaining &= ~(uint64_t{1} << first_lane);
-
-    uint32_t last_lane = first_lane;
-    while (last_lane + 1 < wf_size) {
-      const uint32_t next_lane = last_lane + 1;
-      const uint64_t next_bit = uint64_t{1} << next_lane;
-      if (!(remaining & next_bit) || addrs[next_lane] != addrs[last_lane] + stride)
-        break;
-      remaining &= ~next_bit;
-      last_lane = next_lane;
-    }
-
-    fn(first_lane, last_lane - first_lane + 1);
-    ++run_count;
-  }
-  return run_count;
-}
 
 bool all_elements_use_lane_mask(std::span<const uint64_t> element_lane_masks, uint64_t lane_mask,
                                 uint32_t num_elems) {
@@ -64,8 +40,13 @@ uint64_t fully_valid_lane_mask(std::span<const uint64_t> element_lane_masks, uin
 
 } // namespace
 
-L1VectorCache::L1VectorCache(L2Cache *l2)
-    : l2_(l2), coherence_epoch_(l2_ ? l2_->coherence_domain()->current_epoch() : 0) {}
+// Supported transaction sizes are powers of two that divide a cache line, so
+// bounding a transfer by its transaction also bounds it by its cache line.
+static_assert(L1VectorCache::LINE_SIZE % kMaxMemoryTransactionBytes == 0);
+
+L1VectorCache::L1VectorCache(L2Cache *l2, MemoryTransactionPolicy transactions)
+    : l2_(l2), transactions_(transactions),
+      coherence_epoch_(l2_ ? l2_->coherence_domain()->current_epoch() : 0) {}
 
 L1VectorCache::~L1VectorCache() = default;
 
@@ -158,7 +139,7 @@ VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t 
   while (copied < size) {
     const uint64_t ea = addr + copied;
     const uint32_t line_offset = CacheStore::line_offset(ea);
-    const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+    const uint32_t chunk = transactions_.chunk_size(ea, size - copied);
     const Mtype chunk_mtype = mtypes.at(ea);
 
     if (chunk_mtype == Mtype::UC || non_temporal || request_l1_bypass) {
@@ -229,7 +210,7 @@ VmAccessOutcome L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, ui
   while (copied < size) {
     const uint64_t ea = addr + copied;
     const uint32_t line_offset = CacheStore::line_offset(ea);
-    const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+    const uint32_t chunk = transactions_.chunk_size(ea, size - copied);
     const Mtype chunk_mtype = mtypes.at(ea);
 
     if (chunk_mtype == Mtype::UC || non_temporal) {
@@ -266,6 +247,34 @@ VmAccessOutcome L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, ui
     copied += chunk;
   }
   return VmAccessOutcome::Complete;
+}
+
+// A reordered transaction owns one snapshot or publication at L2. Gather and
+// scatter only its participating lanes, without accessing gaps or inactive bytes.
+RJ_NOINLINE VmAccessOutcome L1VectorCache::read_reordered(const CoalescedLaneRun &run,
+                                                          const uint64_t *addrs, uint8_t *dst,
+                                                          uint32_t stride, bool non_temporal,
+                                                          bool request_l1_bypass, uint32_t vmid,
+                                                          RequestMtypeResolver &mtypes) {
+  assert(run.size <= LINE_SIZE);
+  std::array<uint8_t, LINE_SIZE> bytes;
+  const auto outcome = read_bytes(run.address, bytes.data(), run.size, non_temporal,
+                                  request_l1_bypass, vmid, mtypes);
+  if (outcome != VmAccessOutcome::Complete)
+    return outcome;
+  scatter_lane_run(run.address, run.lane_mask, run.size, addrs, bytes.data(), stride, dst);
+  return VmAccessOutcome::Complete;
+}
+
+RJ_NOINLINE VmAccessOutcome L1VectorCache::write_reordered(const CoalescedLaneRun &run,
+                                                           const uint64_t *addrs,
+                                                           const uint8_t *src, uint32_t stride,
+                                                           bool non_temporal, uint32_t vmid,
+                                                           RequestMtypeResolver &mtypes) {
+  assert(run.size <= LINE_SIZE);
+  std::array<uint8_t, LINE_SIZE> bytes;
+  gather_lane_run(run.address, run.lane_mask, run.size, addrs, src, stride, bytes.data());
+  return write_bytes(run.address, bytes.data(), run.size, non_temporal, vmid, mtypes);
 }
 
 VmAccessOutcome L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
@@ -317,10 +326,13 @@ VmAccessOutcome L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, u
     uint64_t full_lane_mask = fully_valid_lane_mask(element_lane_masks, lane_mask);
     VmAccessOutcome outcome = VmAccessOutcome::Complete;
     for_each_coalesced_lane_run(
-        addrs, full_lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
-          if (outcome == VmAccessOutcome::Complete)
-            outcome = read_bytes(addrs[first_lane], dst + first_lane * stride, run_lanes * stride,
-                                 non_temporal, request_l1_bypass, vmid, mtypes);
+        addrs, full_lane_mask, wf_size, stride, transactions_, [&](const CoalescedLaneRun &run) {
+          outcome = run.lane_ordered
+                        ? read_bytes(run.address, dst + run.first_lane * stride, run.size,
+                                     non_temporal, request_l1_bypass, vmid, mtypes)
+                        : read_reordered(run, addrs, dst, stride, non_temporal, request_l1_bypass,
+                                         vmid, mtypes);
+          return outcome == VmAccessOutcome::Complete;
         });
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
@@ -340,10 +352,13 @@ VmAccessOutcome L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, u
   }
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   for_each_coalesced_lane_run(
-      addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
-        if (outcome == VmAccessOutcome::Complete)
-          outcome = read_bytes(addrs[first_lane], dst + first_lane * stride, run_lanes * stride,
-                               non_temporal, request_l1_bypass, vmid, mtypes);
+      addrs, lane_mask, wf_size, stride, transactions_, [&](const CoalescedLaneRun &run) {
+        outcome = run.lane_ordered
+                      ? read_bytes(run.address, dst + run.first_lane * stride, run.size,
+                                   non_temporal, request_l1_bypass, vmid, mtypes)
+                      : read_reordered(run, addrs, dst, stride, non_temporal, request_l1_bypass,
+                                       vmid, mtypes);
+        return outcome == VmAccessOutcome::Complete;
       });
   return outcome;
 }
@@ -472,11 +487,14 @@ VmAccessOutcome L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, 
   if (!all_elements_use_lane_mask(element_lane_masks, lane_mask, num_elems)) {
     uint64_t full_lane_mask = fully_valid_lane_mask(element_lane_masks, lane_mask);
     VmAccessOutcome outcome = VmAccessOutcome::Complete;
-    store_l2_writes_ += for_each_coalesced_lane_run(
-        addrs, full_lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
-          if (outcome == VmAccessOutcome::Complete)
-            outcome = write_bytes(addrs[first_lane], src + first_lane * stride, run_lanes * stride,
-                                  non_temporal, vmid, mtypes);
+    for_each_coalesced_lane_run(
+        addrs, full_lane_mask, wf_size, stride, transactions_, [&](const CoalescedLaneRun &run) {
+          ++store_l2_writes_;
+          outcome = run.lane_ordered
+                        ? write_bytes(run.address, src + run.first_lane * stride, run.size,
+                                      non_temporal, vmid, mtypes)
+                        : write_reordered(run, addrs, src, stride, non_temporal, vmid, mtypes);
+          return outcome == VmAccessOutcome::Complete;
         });
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
@@ -496,11 +514,14 @@ VmAccessOutcome L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, 
     return VmAccessOutcome::Complete;
   }
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
-  store_l2_writes_ += for_each_coalesced_lane_run(
-      addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
-        if (outcome == VmAccessOutcome::Complete)
-          outcome = write_bytes(addrs[first_lane], src + first_lane * stride, run_lanes * stride,
-                                non_temporal, vmid, mtypes);
+  for_each_coalesced_lane_run(
+      addrs, lane_mask, wf_size, stride, transactions_, [&](const CoalescedLaneRun &run) {
+        ++store_l2_writes_;
+        outcome = run.lane_ordered
+                      ? write_bytes(run.address, src + run.first_lane * stride, run.size,
+                                    non_temporal, vmid, mtypes)
+                      : write_reordered(run, addrs, src, stride, non_temporal, vmid, mtypes);
+        return outcome == VmAccessOutcome::Complete;
       });
   return outcome;
 }

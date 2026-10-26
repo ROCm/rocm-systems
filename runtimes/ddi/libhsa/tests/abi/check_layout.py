@@ -16,7 +16,7 @@ HERE = Path(__file__).resolve().parent
 RUNTIMES = HERE.parents[3]
 LIBRARY = Path(os.environ.get("CARGO_TARGET_DIR", HERE.parents[3] / "target")) / "release/librocddi_runtime.so"
 HEADERS = RUNTIMES / "api-headers/include"
-EXPECTED_RECORDS = 26
+EXPECTED_RECORDS = 32
 
 
 def run(command: list[str], environment: dict[str, str] | None = None) -> str:
