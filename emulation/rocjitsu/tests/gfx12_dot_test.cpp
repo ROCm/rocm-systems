@@ -19,6 +19,7 @@
 #include "util/data_types.h"
 #include "util/simd_test_hooks.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cfenv>
