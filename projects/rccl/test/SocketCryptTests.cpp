@@ -569,6 +569,7 @@ TEST(SocketCrypt, PlaintextListenerDropsTlsPeer) {
     acceptor.join();
     EXPECT_FALSE(ready) << "TLS client became ready against a plaintext listener";
     EXPECT_NE(ncclSuccess, res) << "TLS client handshake did not fail";
+    EXPECT_NE(ncclSuccess, acceptRes) << "accept returned before the abort";
     EXPECT_NE(ncclSocketStateReady, server.state) << "plaintext listener accepted the TLS peer";
     ncclSocketClose(&server);
     ncclSocketClose(&tls);

@@ -365,7 +365,7 @@ static ncclResult_t cryptInitLib() {
   }
   ncclCryptOpenSsl.pfn_SSL_CTX_set_verify(ncclCryptClientCtx, SSL_VERIFY_PEER, nullptr);
   ncclCryptOpenSsl.pfn_SSL_CTX_set_verify(ncclCryptServerCtx, SSL_VERIFY_NONE, nullptr);
-  // Every connection derives its session from the PSK, so tickets are never used. A
+  // RCCL: every connection derives its session from the PSK, so tickets are never used. A
   // client that only writes (bootstrapSend, the unidirectional ring) never reads them,
   // and closing a TCP socket with unread data sends RST and drops its unsent bytes.
   if (ncclCryptOpenSsl.pfn_SSL_CTX_set_num_tickets(ncclCryptServerCtx, 0) != 1) {
