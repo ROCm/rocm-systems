@@ -150,6 +150,7 @@ do_host_tests() {
   # rccl-HostUnitTests keeps host_tests.xml for backward compatibility.
   local -a binaries=(
     "rccl-HostUnitTests:$XML_FILE"
+    "rccl-UnitTestsMicroBootstrap:$SCRIPT_DIR/host_tests_micro_bootstrap.xml"
     "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
     "rccl-UnitTestsMicroCollectives:$SCRIPT_DIR/host_tests_micro_collectives.xml"
     "rccl-UnitTestsMicroOnerank:$SCRIPT_DIR/host_tests_micro_onerank.xml"
