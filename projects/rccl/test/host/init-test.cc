@@ -22,10 +22,6 @@
 #include <memory>
 #include <new>
 #include <string>
-#if defined(__linux__)
-#include <sys/prctl.h>
-#endif
-#include <sys/resource.h>
 #include <tuple>
 #include <utility>
 #include <atomic>
@@ -87,6 +83,7 @@ static inline int __get_cpuid(unsigned int __leaf, unsigned int* __eax,
 #include "kernel_config.h"
 #include "os.h"
 
+#include "ExpectedCrash.h"
 #include "ScopedHook.h"
 
 // Each default forwards to what the UUT would otherwise call, so an uninstalled redirect is a no-op.
@@ -170,33 +167,6 @@ class DeleteWatch {
   }
   int hits() const { return g_deleteWatchHits; }
 };
-
-// ASan turns a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under it; match the exit instead.
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-#define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
-#else
-#define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
-#endif
-
-// These tests deliberately raise fatal signals. Some CI environments enable core dumps, and a
-// shuffled death test can inherit a large address space from an earlier test. Dumping that address
-// space turns a millisecond assertion into a multi-second test. PR_SET_DUMPABLE covers both regular
-// core files and piped collectors (for which Linux ignores RLIMIT_CORE); retain the limit as defense
-// in depth. Apply both inside the death statement so only gtest's child is affected and unexpected
-// parent-process crashes remain dumpable.
-static void DisableCoreDumpsForExpectedCrash() {
-#if defined(__linux__)
-  if (prctl(PR_SET_DUMPABLE, 0) != 0) {
-    std::perror("prctl(PR_SET_DUMPABLE) failed");
-    _exit(1);
-  }
-#endif
-  const struct rlimit noCore = {0, 0};
-  if (setrlimit(RLIMIT_CORE, &noCore) != 0) {
-    std::perror("setrlimit(RLIMIT_CORE) failed");
-    _exit(1);
-  }
-}
 
 class InitMicrotest : public ::testing::Test {
  protected:
