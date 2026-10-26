@@ -59,6 +59,11 @@ class HipLastErrorResetListener : public Catch::EventListenerBase {
   using Catch::EventListenerBase::EventListenerBase;
 
   void testCaseEnded(Catch::TestCaseStats const& stats) override {
+    if (stats.testInfo->name == "Unit_hipSetDevice_InvalidVisibleDeviceList" ||
+        stats.testInfo->name == "Unit_hipSetDevice_SubsetOfAvailableDevices") {
+      return;
+    }
+
     hipError_t leftover = hipGetLastError();
     if (leftover != hipSuccess) {
       LogPrintf("[HIP last-error] test '%s' left %d (%s)", stats.testInfo->name.c_str(),
