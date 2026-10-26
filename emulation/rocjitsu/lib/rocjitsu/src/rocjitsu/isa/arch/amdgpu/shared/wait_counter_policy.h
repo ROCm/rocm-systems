@@ -79,6 +79,11 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
   return model != WaitcntModel::SplitGfx12;
 }
 
+/// @brief Name of `counter` as written in `model`'s wait instructions.
+/// @details Legacy models name the Load, Store and Ds domains vmcnt, vscnt and
+/// lgkmcnt.
+[[nodiscard]] std::string_view wait_counter_name(WaitCounterKind counter, WaitcntModel model);
+
 [[nodiscard]] constexpr bool has_legacy_vscnt(WaitcntModel model) {
   return model == WaitcntModel::LegacyVscnt;
 }

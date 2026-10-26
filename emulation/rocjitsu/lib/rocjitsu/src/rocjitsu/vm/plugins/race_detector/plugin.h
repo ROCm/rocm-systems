@@ -8,6 +8,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -53,21 +54,35 @@ private:
 /// Returns failure if the detector no longer holds the conflicting event.
 util::FailureOr<MarkedInstruction> findConflict(const RaceViolation &, RaceDetector &);
 
-/// Format the instructions that one wave executed between a conflicting memory
-/// instruction and the access that raced with it.
-///
-/// Marks trace entries whose PC and encoding match `conflict` or `read` with `==>` and
-/// annotates them with wave and lane. Drops entries before the first marked one
-/// and after the first match of `read` that follows it, and elides the middle of
-/// a remaining span longer than 32 rows. If the trace contains no entry at the
-/// conflict's PC and encoding, prints the conflict first with a "(before trace window)"
-/// note. Each trace row prints its own captured bytes. Calls `disassemble` only
-/// for printed rows. Repeated executions of identical bytes at the same PC are
-/// not distinguished. Returns failure when `disassemble` fails. The callback must not throw.
-util::FailureOr<std::string> formatTrace(
-    const RingBuffer<InstructionSnapshot, 256> &trace,
-    const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble,
-    std::optional<MarkedInstruction> conflict, MarkedInstruction read);
+/// Maximum trace rows printed before formatTrace elides the middle of a report.
+inline constexpr size_t kTraceContextRows = 128;
+
+/// Trace rows printed for another wave's conflict when the reporting wave never
+/// ran the conflicting instruction.
+inline constexpr size_t kOtherWaveContextRows = 16;
+
+/// Format the reporting wave's trace, marking the first matching same-wave
+/// conflict and the last matching current access by PC and encoding. Identical
+/// producer executions are not distinguished. A conflict from another wave, or
+/// one no longer retained, is printed separately before the trace. For another
+/// wave's conflict, the trace starts at the reporting wave's latest execution of
+/// the same instruction, or shows the last kOtherWaveContextRows rows when it has
+/// none. A span longer than kTraceContextRows keeps its first and last rows,
+/// synchronization and control-flow rows, and both sides of each jump.
+/// Disassemble only printed rows. Returns failure when `disassemble` fails.
+/// The callback must not throw.
+util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
+                        const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble,
+                        std::optional<MarkedInstruction> conflict, MarkedInstruction read);
+
+/// Describe a violation: the hazard direction, the current access at
+/// `access_pc`, the conflicting event, and that event's completion and
+/// synchronization state, with counter names for `arch`.
+/// Throws std::out_of_range if `events` no longer holds the conflicting event,
+/// std::invalid_argument for an architecture without a wait-counter model, and
+/// std::logic_error if the event is already retired.
+std::string formatRaceDescription(const RaceViolation &violation, const EventRegistry &events,
+                                  uint64_t access_pc, rj_code_arch_t arch);
 
 struct RaceWavefrontState : WavefrontState {
   /// The wave's most recently issued instructions, oldest first. Each entry owns
@@ -176,7 +191,9 @@ private:
   mutable std::mutex dispatch_mutex_;
   std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
 
-  std::mutex report_mutex_;
+  mutable std::mutex report_mutex_;
+  uint64_t reports_emitted_ = 0;
+  uint64_t observations_suppressed_ = 0;
   std::set<std::pair<uint32_t, uint64_t>> observed_races_;
   std::unordered_map<uint32_t, KernelNames> dispatch_kernel_names_;
 };

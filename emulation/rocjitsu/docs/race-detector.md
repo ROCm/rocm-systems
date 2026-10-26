@@ -87,14 +87,22 @@ Run it under the emulator:
 $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
-You should see output:
+A report identifies the conflicting instructions and their owning waves. This
+excerpt illustrates the layout; PCs and register assignments depend on the
+compiled kernel:
 
 ```
 RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
-Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
-  ==>  0x7f6a1e801010  ds_write_b32 v0, v1  ; <-- wave 1
-       0x7f6a1e801018  v_sub_u32_e32 v1, 0, v0
-  ==>  0x7f6a1e80101c  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
+Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RAW).
+  Current access: read at PC 0x1018.
+  Conflict: transfer from VGPRs into LDS at PC 0x1010, wave 1.
+  Completed for wave 1.
+  Waves 1 and 0 have not synchronized this access.
+       PC      Instruction
+  ==>  0x1010  ds_write_b32 v0, v1  ; <-- wave 1
+       Execution trace below is for wave 0.
+       0x1014  v_sub_u32_e32 v1, 0, v0
+  ==>  0x1018  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
 END_RACE
 ```
 
@@ -104,34 +112,6 @@ without a barrier in between. The `kernel` field is a compact display name, and
 `symbol` is the exact ELF symbol when rocjitsu can resolve it. If a name cannot
 be resolved, rocjitsu reports `?` for the unresolved field. The fix is to add
 `__syncthreads()` between the write and the read.
-
-Each trace line shows an instruction's GPU virtual address, which varies
-between runs, and its disassembly. The trace lists instructions that the
-reporting wave (here wave 0) executed, oldest first. `==>` marks entries matching
-the PC and captured encoding of either instruction involved in the race, and
-the `<--` annotation names the wave and lane that performed that access. When the
-conflicting instruction ran in another wave, as with wave 1's `ds_write_b32`
-above, the marker is placed where the reporting wave executed the same bytes
-at the same address, if such an entry is present. Repeated executions of identical
-bytes at the same address are not distinguished; the displayed span ends at the
-first matching racing access after its first marker.
-
-The race detector retains the last 256 instructions of each wave. If the
-reporting wave has no entry matching the conflicting PC and encoding, the report
-prints the retained producer instruction first with a `(before trace window)`
-note. This can mean the instruction has left the trace, but it can also mean that
-another wave executed an instruction the reporting wave never executed. The note
-does not establish that the conflict is more than 256 instructions old.
-
-For example, if another wave's producer is at `0x1000` and the reporting wave's
-trace contains only its racing access at `0x3000`, the producer appears with
-`(before trace window)` and `0 instructions not recorded`. That count is the
-number of retained reporting-wave entries skipped before the first displayed
-marker, not the number of instructions since the producer ran.
-
-Traces longer than 32 instructions show only their first and last 16. Each trace
-row is disassembled from its own captured bytes, so it remains accurate if the
-kernel's code is later overwritten or unmapped.
 
 ### Running your own application
 
@@ -158,6 +138,59 @@ scripted workflows), add a `sinks` section to your config:
 $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
+
+## Reading a report
+
+The human-readable heading names the affected register or LDS byte and identifies
+read-after-write (RAW), write-after-read (WAR), or write-after-write (WAW). The
+next lines identify the current access and the conflicting memory event by
+where its data moves, such as from global memory into VGPRs. For a pending
+event, the report lists the completion counters that remain unsatisfied, using
+the architectural wait names for the target. Internal GFX11 subsets are
+displayed as their covering `vmcnt`, `vscnt`, or `lgkmcnt` domains. When the
+event belongs to another wave, the report also states that the two waves have
+not synchronized the access. Completion and inter-wave synchronization are
+separate conditions; one wait instruction is not a universal fix for every
+reported hazard.
+
+Each trace row is disassembled from its own captured bytes, so code rewrites or
+unmapping do not change the reported instructions. Within the reporting wave,
+the displayed span starts at the first matching producer PC and encoding and
+ends at the last matching current access. Repeated producer executions with
+identical PCs and encodings are not distinguished.
+
+When the conflict belongs to another wave, the reporting wave's trace starts at
+its own latest execution of the same instruction. Waves usually run the same
+code, so this shows the path from that instruction to the racing access, where
+synchronization is missing. If the reporting wave never ran that instruction,
+the report shows its last 16 instructions.
+
+The instruction table follows the reporting wave's execution order. A separate
+`--- jump forward ---` or `--- jump backward ---` line highlights a
+nonsequential transition immediately before its destination. A transition back
+to the same PC uses `--- same PC executed again ---`. These markers describe
+ordinary control flow; they do not imply a race. An event from another wave, or
+one older than the trace window, is shown separately without a jump marker
+across that boundary.
+
+Instruction lengths vary. A transition is nonsequential only when the next PC
+differs from the end of the previous captured instruction. Sequential progress
+by 4, 8, 12, 16 or 20 bytes does not introduce a marker.
+
+Each wave retains 256 instruction records. An excerpt longer than 128 records
+shows the first 64 and last 64. Synchronization and control-flow instructions,
+and both sides of nonsequential transitions, remain visible in the middle. The
+number of elided instructions is shown at each gap. Older unrecorded history
+is identified separately.
+
+The final summary counts emitted reports and observations suppressed by the
+existing PC-based deduplication. These counts are not the number of affected
+lanes or independent bugs. The structured `RACE` header and `END_RACE` delimiter
+remain available for tools that consume reports.
+
+The separate memory-wait warning states the threshold required immediately
+before its reported access. That threshold need not be sufficient at an earlier
+wait instruction, because more operations may have been issued in between.
 
 ## What is a race?
 
