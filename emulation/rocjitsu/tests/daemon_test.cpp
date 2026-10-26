@@ -285,6 +285,10 @@ protected:
     cmd += " LD_PRELOAD=";
     cmd += sanitizer_preload();
     cmd += preload_lib();
+    // Apply HIP runtime suppressions only to this client, leaving the daemon
+    // and its simulator threads subject to full TSan checking.
+    if (std::getenv("ROCJITSU_TEST_HIP_TSAN_OPTIONS"))
+      cmd += " TSAN_OPTIONS=\"$ROCJITSU_TEST_HIP_TSAN_OPTIONS\"";
     cmd += " HSA_ENABLE_SDMA=1 ";
     cmd += binary;
     if (gtest_filter && gtest_filter[0]) {
@@ -411,6 +415,8 @@ TEST_F(DaemonTest, HipFatalDecodeDisconnectsValidClient) {
     setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
     setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
     setenv("ROCJITSU_TEST_CLIENT_READY", ready_path.c_str(), 1);
+    if (const char *tsan_options = std::getenv("ROCJITSU_TEST_HIP_TSAN_OPTIONS"))
+      setenv("TSAN_OPTIONS", tsan_options, 1);
     const std::string preload = std::string(sanitizer_preload()) + preload_lib();
     setenv("LD_PRELOAD", preload.c_str(), 1);
     execl(hip_instruction_failure_bin(), hip_instruction_failure_bin(),
