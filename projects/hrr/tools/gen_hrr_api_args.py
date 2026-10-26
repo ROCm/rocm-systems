@@ -2061,8 +2061,11 @@ _HEADER_PREAMBLE = """\
  * taking the first compiler ID and shifting the compiler API IDs up by one.
  * A v8 reader would decode those events as the wrong API.
  * v10: a kernel launch event carries pinned host snapshot records after its
- * arguments (num_snapshots was always 0). A v9 reader would not restore them. */
-#define HRR_VERSION ((uint16_t)10u)
+ * arguments (num_snapshots was always 0). A v9 reader would not restore them.
+ * v11: hipKernelSetCacheConfig was appended to HipDispatchTable, taking the
+ * first compiler ID and shifting the compiler API IDs up by one.
+ * A v10 reader would decode those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)11u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
