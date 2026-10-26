@@ -80,14 +80,16 @@ def required_names():
         'ConSanHsaPlugin.RejectedNonDispatchPacketDoesNotModifyATrackedSignal',
         'ConSanHsaPlugin.IndividualBarriersStillPassThroughWithoutDispatchAdmission',
     }
-    for gpu, wave in MODES:
-        suffix = f'{gpu}Wave{wave}'
+    for gpu, wave_size in MODES:
+        suffix = f'{gpu}Wave{wave_size}'
         for case in RUNTIME_CASES:
-            names.add(f'ConSanSimRuntimeE2E.{gpu}.wave{wave}.named-assembly.{case}')
+            names.add(
+                f'ConSanSimRuntimeE2E.{gpu}.wave{wave_size}.named-assembly.{case}'
+            )
         for case in ANALYSIS_CASES:
-            names.add(f'ConSanSimE2E.{gpu}.wave{wave}.named-assembly.{case}')
+            names.add(f'ConSanSimE2E.{gpu}.wave{wave_size}.named-assembly.{case}')
         kind = 'assembly' if gpu == 'gfx1250' else 'hip'
-        names.add(f'ConSanSimE2E.{gpu}.wave{wave}.{kind}.partial')
+        names.add(f'ConSanSimE2E.{gpu}.wave{wave_size}.{kind}.partial')
         for case in (
             'missing-statistics',
             'batch-barrier-and',
@@ -98,7 +100,7 @@ def required_names():
             'amd-late-barrier-and',
             'amd-late-barrier-or',
         ):
-            names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave}.{kind}.{case}')
+            names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.{kind}.{case}')
         for case in (
             'EquivalentMetadataEnvironmentsPreserveTargetAndAbiValidation',
             'AssemblyLoweringPreservesConcreteIdentityAndLoadableImages',
@@ -114,23 +116,23 @@ def required_names():
             'ThreeWavesAndPartialTailUseDistinctRows',
         ):
             names.add(f'ConSanTargets/ConSanTargetSim.{case}/{suffix}')
-        names.add(f'ConSanSimE2E.{gpu}.wave{wave}.assembly.high_lane')
+        names.add(f'ConSanSimE2E.{gpu}.wave{wave_size}.assembly.high_lane')
         kind = 'assembly' if gpu == 'gfx1250' else 'hip'
-        names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave}.{kind}.disjoint')
+        names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.{kind}.disjoint')
         for case in ('race', 'disjoint', 'read_read'):
-            names.add(f'ConSanSimE2E.{gpu}.wave{wave}.{kind}.{case}')
+            names.add(f'ConSanSimE2E.{gpu}.wave{wave_size}.{kind}.{case}')
         if kind == 'hip':
             names.add(
                 f'ConSanTargets/ConSanHipSim.CompiledHipRaceDisjointAndReadReadExecuteTheirNativeSites/{suffix}'
             )
-    for gpu, wave in MODES:
+    for gpu, wave_size in MODES:
         names.add(
             'ConSanTargets/ConSanTargetStatic.'
-            f'CallableArtifactsPreserveStaticSitesAndPrivateFrameAdmission/{gpu}Wave{wave}'
+            f'CallableArtifactsPreserveStaticSitesAndPrivateFrameAdmission/{gpu}Wave{wave_size}'
         )
         names.add(
             'ConSanProbeModes/ConSanCallableProbe.'
-            f'CompiledBodiesAreSelfContainedAndUseOnlyTheirArguments/{gpu}Wave{wave}'
+            f'CompiledBodiesAreSelfContainedAndUseOnlyTheirArguments/{gpu}Wave{wave_size}'
         )
     return names
 

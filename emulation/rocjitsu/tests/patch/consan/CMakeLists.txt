@@ -258,7 +258,7 @@ if(TARGET consan_hsa_runner)
         consan_add_target_e2e
         environment
         gpu
-        wave
+        wave_size
         kind
         scenario
         threads
@@ -287,7 +287,7 @@ if(TARGET consan_hsa_runner)
             message(FATAL_ERROR "Unknown ConSan test stage: ${stage}")
         endif()
         set(_name
-            ConSan${environment}${_stage_name}${_variant_name}E2E.${gpu}.wave${wave}.${kind}.${scenario}
+            ConSan${environment}${_stage_name}${_variant_name}E2E.${gpu}.wave${wave_size}.${kind}.${scenario}
         )
         set(_case ${scenario})
         set(_entry_options)
@@ -339,8 +339,9 @@ if(TARGET consan_hsa_runner)
                 $<TARGET_FILE:${_plugin}> ${_statistics} ${_analysis_options}
                 --fixtures ${_fixture_dir} --source ${PROJECT_SOURCE_DIR} --root
                 ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --case ${_case} --target ${gpu}
-                --wave-size ${wave} --threads ${threads} --fixture-kind ${kind}
-                ${_entry_options} ${_signal_options} ${_execution_options}
+                --wave-size ${wave_size} --threads ${threads} --fixture-kind
+                ${kind} ${_entry_options} ${_signal_options}
+                ${_execution_options}
         )
         set_tests_properties(${_name} PROPERTIES TIMEOUT 120)
         if(environment STREQUAL "Sim")
@@ -394,31 +395,31 @@ if(TARGET consan_hsa_runner)
     )
         string(REPLACE ":" ";" _parts ${_mode})
         list(GET _parts 0 _gpu)
-        list(GET _parts 1 _wave)
-        math(EXPR _threads "2 * ${_wave}")
-        math(EXPR _partial_threads "3 * ${_wave} + 1")
+        list(GET _parts 1 _wave_size)
+        math(EXPR _threads "2 * ${_wave_size}")
+        math(EXPR _partial_threads "3 * ${_wave_size} + 1")
         set(_kind hip)
         if(_gpu STREQUAL "gfx1250")
             set(_kind assembly)
         endif()
         foreach(_environment IN ITEMS Sim Physical)
             foreach(_scenario IN LISTS _named_runtime_cases)
-                consan_add_target_e2e(${_environment} ${_gpu} ${_wave} named-assembly
+                consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} named-assembly
                     ${_scenario} ${_threads} testable runtime
                 )
             endforeach()
             if(RJ_BUILD_CONSAN_ANALYZER)
                 foreach(_scenario IN LISTS _named_analysis_cases)
-                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave} named-assembly
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} named-assembly
                         ${_scenario} ${_threads} testable analysis
                     )
                 endforeach()
                 foreach(_scenario IN ITEMS race disjoint read_read)
-                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave} ${_kind}
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} ${_kind}
                         ${_scenario} ${_threads} testable analysis
                     )
                 endforeach()
-                consan_add_target_e2e(${_environment} ${_gpu} ${_wave} assembly
+                consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                     high_lane ${_threads} testable analysis
                 )
                 foreach(
@@ -435,11 +436,11 @@ if(TARGET consan_hsa_runner)
                         amd-late-barrier-and
                         amd-late-barrier-or
                 )
-                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave} ${_kind}
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} ${_kind}
                         ${_scenario} ${_threads} production analysis
                     )
                 endforeach()
-                consan_add_target_e2e(${_environment} ${_gpu} ${_wave} ${_kind}
+                consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} ${_kind}
                     partial ${_partial_threads} testable analysis
                 )
             endif()

@@ -30,15 +30,15 @@ foreach(
 )
     string(REPLACE ":" ";" _parts ${_mode})
     list(GET _parts 0 _gpu)
-    list(GET _parts 1 _wave)
-    set(_wave_option -mno-wavefrontsize64)
-    if(_wave EQUAL 64)
-        set(_wave_option -mwavefrontsize64)
+    list(GET _parts 1 _wave_size)
+    set(_wave_size_option -mno-wavefrontsize64)
+    if(_wave_size EQUAL 64)
+        set(_wave_size_option -mwavefrontsize64)
     endif()
-    set(_name consan_probe_gfx${_gpu}_wave${_wave})
+    set(_name consan_probe_gfx${_gpu}_wave${_wave_size})
     rj_add_probe_object(probes gfx${_gpu} OUTPUT_NAME ${_name}
-        COMPILE_OPTIONS -std=c++20 -mcode-object-version=5 ${_wave_option}
-        -DCONSAN_PROBE_WAVE_SIZE=${_wave}
+        COMPILE_OPTIONS -std=c++20 -mcode-object-version=5 ${_wave_size_option}
+        -DCONSAN_PROBE_WAVE_SIZE=${_wave_size}
         -I${ROCJITSU_SRC_DIR} -I${ROCJITSU_INCLUDE_DIR}
         -I${PROJECT_SOURCE_DIR}/lib/util/include
         DEPENDS ${ROCJITSU_SRC_DIR}/rocjitsu/code/consan/contract.h
@@ -46,7 +46,7 @@ foreach(
     )
     list(
         APPEND _probe_images
-        ${_gpu}:${_wave}:${KERNEL_OUTPUT_DIR}/${_name}.hsaco
+        ${_gpu}:${_wave_size}:${KERNEL_OUTPUT_DIR}/${_name}.hsaco
     )
     list(APPEND _probe_inputs ${KERNEL_OUTPUT_DIR}/${_name}.hsaco)
 endforeach()

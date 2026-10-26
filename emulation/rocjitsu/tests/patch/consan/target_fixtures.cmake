@@ -7,28 +7,28 @@ foreach(
     IN
     ITEMS gfx942 gfx950 gfx1100 gfx1201 gfx1250
 )
-    foreach(_wave IN ITEMS 32 64)
+    foreach(_wave_size IN ITEMS 32 64)
         set(_legacy 0)
         set(_gfx12 0)
         if(_gpu STREQUAL "gfx942" OR _gpu STREQUAL "gfx950")
-            if(_wave EQUAL 32)
+            if(_wave_size EQUAL 32)
                 continue()
             endif()
             set(_legacy 1)
-        elseif(_gpu STREQUAL "gfx1250" AND _wave EQUAL 64)
+        elseif(_gpu STREQUAL "gfx1250" AND _wave_size EQUAL 64)
             continue()
         endif()
         if(_gpu STREQUAL "gfx1201" OR _gpu STREQUAL "gfx1250")
             set(_gfx12 1)
         endif()
-        set(_directory ${_fixture_dir}/targets/${_gpu}/wave${_wave})
+        set(_directory ${_fixture_dir}/targets/${_gpu}/wave${_wave_size})
         file(MAKE_DIRECTORY ${_directory})
-        set(_wave_options)
+        set(_wave_size_options)
         if(NOT _legacy)
-            if(_wave EQUAL 64)
-                set(_wave_options -mwavefrontsize64)
+            if(_wave_size EQUAL 64)
+                set(_wave_size_options -mwavefrontsize64)
             else()
-                set(_wave_options -mno-wavefrontsize64)
+                set(_wave_size_options -mno-wavefrontsize64)
             endif()
         endif()
         foreach(
@@ -84,10 +84,10 @@ foreach(
                 COMMAND
                     ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x
                     assembler-with-cpp -P -target amdgcn-amd-amdhsa
-                    -mcpu=${_gpu} -mcode-object-version=5 ${_wave_options}
+                    -mcpu=${_gpu} -mcode-object-version=5 ${_wave_size_options}
                     -DCONSAN_TARGET="amdgcn-amd-amdhsa--${_gpu}"
                     -DCONSAN_METADATA_TARGET="${_metadata_target}"
-                    -DCONSAN_WAVE_SIZE=${_wave} -DCONSAN_LEGACY=${_legacy}
+                    -DCONSAN_WAVE_SIZE=${_wave_size} -DCONSAN_LEGACY=${_legacy}
                     -DCONSAN_GFX12=${_gfx12} -DCONSAN_CASE=${_case_number}
                     ${_group_options} ${_layout_options} -c
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_lds.s -o
@@ -114,7 +114,7 @@ foreach(
                     ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x hip
                     --offload-arch=${_gpu} --rocm-path=${ROCM_PATH}
                     --cuda-device-only -O2 -mcode-object-version=5 -mllvm
-                    -amdgpu-enable-vopd=0 ${_wave_options}
+                    -amdgpu-enable-vopd=0 ${_wave_size_options}
                     -DCONSAN_CASE=${_case}
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_lds.hip -o
                     ${_bundle}
