@@ -45,6 +45,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
@@ -1122,6 +1124,42 @@ void check_private_flat_atomic64_faults(rj_code_arch_t arch, const FlatAtomicOpc
   }
 }
 
+// RDNA3/3.5/4 section 11.1.
+TEST(Rdna3MemoryExecutionHarness, PrivateFlatAtomic64FaultsBeforeAnySideEffect) {
+  check_private_flat_atomic64_faults<rdna3::Isa>(
+      ROCJITSU_CODE_ARCH_RDNA3,
+      {rdna3::kFlatAtomicSwapB32Flat, rdna3::kFlatAtomicSwapB64Flat,
+       rdna3::kFlatAtomicCmpswapB64Flat, rdna3::kFlatAtomicAddU64Flat},
+      [](uint16_t opcode) {
+        const auto encoded = rdna3::build_flat(
+            opcode, {.glc = 1, .seg = 0, .addr = 0, .data = 8, .saddr = 0x7C, .vdst = 16});
+        return std::array<uint32_t, 3>{encoded[0], encoded[1], 0};
+      });
+}
+
+TEST(Rdna3_5MemoryExecutionHarness, PrivateFlatAtomic64FaultsBeforeAnySideEffect) {
+  check_private_flat_atomic64_faults<rdna3_5::Isa>(
+      ROCJITSU_CODE_ARCH_RDNA3_5,
+      {rdna3_5::kFlatAtomicSwapB32Flat, rdna3_5::kFlatAtomicSwapB64Flat,
+       rdna3_5::kFlatAtomicCmpswapB64Flat, rdna3_5::kFlatAtomicAddU64Flat},
+      [](uint16_t opcode) {
+        const auto encoded = rdna3_5::build_flat(
+            opcode, {.glc = 1, .seg = 0, .addr = 0, .data = 8, .saddr = 0x7C, .vdst = 16});
+        return std::array<uint32_t, 3>{encoded[0], encoded[1], 0};
+      });
+}
+
+TEST(Rdna4MemoryExecutionHarness, PrivateFlatAtomic64FaultsBeforeAnySideEffect) {
+  check_private_flat_atomic64_faults<rdna4::Isa>(
+      ROCJITSU_CODE_ARCH_RDNA4,
+      {rdna4::kFlatAtomicSwapB32Vflat, rdna4::kFlatAtomicSwapB64Vflat,
+       rdna4::kFlatAtomicCmpswapB64Vflat, rdna4::kFlatAtomicAddU64Vflat},
+      [](uint16_t opcode) {
+        return rdna4::build_vflat(opcode,
+                                  {.saddr = 124, .vdst = 16, .th = 1, .vsrc = 8, .vaddr = 0});
+      });
+}
+
 // CDNA5 section 10.2.
 TEST(Gfx1250MemoryExecutionHarness, PrivateFlatAtomic64FaultsBeforeAnySideEffect) {
   check_private_flat_atomic64_faults<cdna5::Isa>(
@@ -1248,9 +1286,7 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
       const uint32_t vb = wf->vgpr_alloc().base;
       const bool is_cdna5 = arch == ROCJITSU_CODE_ARCH_CDNA5;
       auto scratch_address = [&](uint32_t lane, uint32_t word) {
-        // CDNA5 interleaves DWORDs across lanes; RDNA4 uses per-lane backing.
-        return scratch_base +
-               (is_cdna5 ? (word * wf->wf_size() + lane) * 4 : lane * 128 + word * 4);
+        return scratch_base + (word * wf->wf_size() + lane) * 4;
       };
       auto initial = [](uint32_t lane, uint32_t word) { return 0xabc00000u + lane * 16 + word; };
       auto source = [](uint32_t lane, uint32_t word) { return 0x12300000u + lane * 16 + word; };
@@ -1437,9 +1473,7 @@ void check_block_transfer_masks(rj_code_arch_t arch, bool general_completion = f
         }
         const uint32_t vb = wf->vgpr_alloc().base;
         auto address = [&](uint32_t lane, uint32_t word) {
-          return base + (scratch && arch == ROCJITSU_CODE_ARCH_CDNA5
-                             ? (word * wf->wf_size() + lane) * 4
-                             : lane * 128 + word * 4);
+          return base + (scratch ? (word * wf->wf_size() + lane) * 4 : lane * 128 + word * 4);
         };
         auto value = [](uint32_t lane, uint32_t word) { return 0xabc00000u + lane * 32 + word; };
         for (uint32_t lane = 0; lane < 3; ++lane) {
@@ -1550,9 +1584,7 @@ template <typename Isa> void check_block_transfer_ownership(rj_code_arch_t arch)
           wave->set_scratch_lane_size(128);
         }
         const auto address = [&](uint32_t lane, uint32_t word) {
-          return base + (scratch && arch == ROCJITSU_CODE_ARCH_CDNA5
-                             ? (word * wave->wf_size() + lane) * 4
-                             : lane * 128 + word * 4);
+          return base + (scratch ? (word * wave->wf_size() + lane) * 4 : lane * 128 + word * 4);
         };
         const auto value = [](uint32_t lane, uint32_t word) {
           return 0xabc00000u + lane * 32 + word;

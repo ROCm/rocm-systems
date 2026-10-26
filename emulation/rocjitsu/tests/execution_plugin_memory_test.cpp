@@ -1475,9 +1475,8 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
             cu->write_vgpr(vb + 4, lane, 1);
             const uint32_t value = 17;
             cu->lds().write32(wf->lds_base() + lane * 4, value);
-            const uint64_t backing = !private_lane     ? global + lane * 4
-                                     : arch == "rdna4" ? scratch + lane * 256 + 0x20
-                                                       : scratch + 8 * wave_size * 4 + lane * 4;
+            const uint64_t backing =
+                !private_lane ? global + lane * 4 : scratch + 8 * wave_size * 4 + lane * 4;
             f.mem->load_image(reinterpret_cast<const uint8_t *>(&value), 4, backing);
           }
           auto decoder = Decoder::create(cu->arch());

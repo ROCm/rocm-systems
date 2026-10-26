@@ -1672,9 +1672,8 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
                 if (space == Space::Lds) {
                   cu->lds().write32(wf->lds_base() + lane * 16 + part * 4, value);
                 } else {
-                  const uint64_t physical = !scratch ? address + part * 4
-                                            : arch == "rdna4"
-                                                ? kScratch + lane * 256 + 0x20 + part * 4
+                  const uint64_t physical = !scratch
+                                                ? address + part * 4
                                                 : kScratch + (8 + part) * wave_size * 4 + lane * 4;
                   f.mem->load_image(reinterpret_cast<const uint8_t *>(&value), 4, physical);
                 }

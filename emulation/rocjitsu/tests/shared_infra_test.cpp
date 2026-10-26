@@ -85,6 +85,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
@@ -6119,53 +6120,104 @@ TEST(RdnaAddrCalcTest, Rdna3Saddr7cUsesVgprPair) {
   EXPECT_EQ(d.per_lane_addr[0], 0x2'0000'3050ULL);
 }
 
-TEST(RdnaAddrCalcTest, Rdna3ScratchOffUsesScratchBaseAndLaneStride) {
-  amdgpu::GpuMemory mem("rdna3_scratch_addr_mem");
-  amdgpu::L2Cache l2("rdna3_scratch_addr_l2");
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3;
-  cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 128;
-  cfg.vgprs_per_wf = 16;
-  cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("rdna3_scratch_addr_cu", cfg, &mem, &l2);
-  ASSERT_NE(cu, nullptr);
+// RDNA3/3.5 ISA 11.2: Addr = SCRATCH_BASE + (offset/4)*4*index_stride + offset%4 + TID*4,
+// with index_stride equal to the wave size.
+template <typename FlatInst, typename CalculateAddresses>
+void expect_rdna3_scratch_layout(rj_code_arch_t arch, CalculateAddresses calculate) {
+  for (uint32_t wave_size : {32u, 64u}) {
+    SCOPED_TRACE(wave_size);
+    amdgpu::GpuMemory mem("rdna3_scratch_addr_mem");
+    amdgpu::L2Cache l2("rdna3_scratch_addr_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 128;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("rdna3_scratch_addr_cu", cfg, &mem, &l2);
+    ASSERT_NE(cu, nullptr);
 
-  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
-  ASSERT_NE(wf, nullptr);
-  wf->set_exec(0x3ULL);
-  wf->set_scratch_base(0x6'0000'0000ULL);
-  wf->set_scratch_lane_size(0x100);
+    auto *wf = cu->dispatch_wf(0, 0, 128, 16, wave_size);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), wave_size);
+    wf->set_exec(0x3ULL);
+    constexpr uint64_t kScratchBase = 0x6'0000'0000ULL;
+    wf->set_scratch_base(kScratchBase);
+    wf->set_scratch_lane_size(0x100);
+    const auto swizzled = [&](uint64_t offset, uint32_t lane) {
+      return kScratchBase + (offset / 4) * wave_size * 4 + lane * 4 + offset % 4;
+    };
 
-  uint32_t sbase = wf->sgpr_alloc().base;
-  uint32_t vbase = wf->vgpr_alloc().base;
-  cu->write_vgpr(vbase, 0, 0x20);
-  cu->write_vgpr(vbase, 1, 0x30);
-  cu->write_vgpr(vbase + 1, 0, 0xBAD0);
-  cu->write_vgpr(vbase + 1, 1, 0xBAD1);
-  cu->write_sgpr(sbase + 0x7C, 0xDEAD0000);
-  cu->write_sgpr(sbase + 0x7D, 0xDEAD0001);
+    uint32_t sbase = wf->sgpr_alloc().base;
+    uint32_t vbase = wf->vgpr_alloc().base;
+    cu->write_vgpr(vbase, 0, 0x20);
+    cu->write_vgpr(vbase, 1, 0x31);
+    cu->write_vgpr(vbase + 1, 0, 0xBAD0);
+    cu->write_vgpr(vbase + 1, 1, 0xBAD1);
+    cu->write_sgpr(sbase + 0x7C, 0xDEAD0000);
+    cu->write_sgpr(sbase + 0x7D, 0xDEAD0001);
 
-  rdna3::FlatMachineInst inst{};
-  inst.seg = 1;
-  inst.saddr = 0x7C;
-  inst.sve = 1;
-  inst.addr = 0;
-  inst.offset = 0x10;
+    FlatInst inst{};
+    inst.seg = 1;
+    inst.saddr = 0x7C;
+    inst.sve = 1;
+    inst.addr = 0;
+    inst.offset = 0x10;
 
-  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
-  rdna3::flat_calculate_addresses(inst, *wf, d);
-  EXPECT_EQ(d.per_lane_addr[0], 0x6'0000'0030ULL);
-  EXPECT_EQ(d.per_lane_addr[1], 0x6'0000'0140ULL);
+    amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+    calculate(inst, *wf, d);
+    EXPECT_EQ(d.per_lane_addr[0], swizzled(0x30, 0));
+    EXPECT_EQ(d.per_lane_addr[1], swizzled(0x41, 1));
+    EXPECT_EQ(d.per_lane_addr[1], kScratchBase + 0x10 * wave_size * 4 + 5);
+    EXPECT_TRUE(d.scratch_swizzle);
+    EXPECT_TRUE(d.requires_scratch_backing);
+    EXPECT_EQ(d.scratch_lane_mask, 0x3u);
+    EXPECT_EQ(d.scratch_addr_stride, wave_size * sizeof(uint32_t));
 
-  cu->write_sgpr(sbase + 4, 0x70);
-  cu->write_vgpr(vbase, 0, 0x200);
-  cu->write_vgpr(vbase, 1, 0x300);
-  inst.saddr = 4;
-  inst.sve = 0;
-  rdna3::flat_calculate_addresses(inst, *wf, d);
-  EXPECT_EQ(d.per_lane_addr[0], 0x6'0000'0080ULL);
-  EXPECT_EQ(d.per_lane_addr[1], 0x6'0000'0180ULL);
+    cu->write_sgpr(sbase + 4, 0x70);
+    cu->write_vgpr(vbase, 0, 0x200);
+    cu->write_vgpr(vbase, 1, 0x300);
+    inst.saddr = 4;
+    inst.sve = 0;
+    calculate(inst, *wf, d);
+    EXPECT_EQ(d.per_lane_addr[0], swizzled(0x80, 0));
+    EXPECT_EQ(d.per_lane_addr[1], swizzled(0x80, 1));
+
+    // FLAT private-aperture lanes take the same layout; global lanes are untouched.
+    constexpr uint64_t kPrivateBase = 0x0007'0000'0000'0000ULL;
+    wf->set_apertures(0x0001'0000'0000'0000ULL, 0x0001'0000'ffff'ffffULL, kPrivateBase,
+                      kPrivateBase + 0xffff'ffffULL);
+    cu->write_vgpr(vbase, 0, 0x40);
+    cu->write_vgpr(vbase + 1, 0, static_cast<uint32_t>(kPrivateBase >> 32));
+    cu->write_vgpr(vbase, 1, 0x8000);
+    cu->write_vgpr(vbase + 1, 1, 0x0005);
+    FlatInst flat_inst{};
+    flat_inst.seg = 0;
+    flat_inst.saddr = 0x7C;
+    flat_inst.addr = 0;
+    flat_inst.offset = 0x6;
+    amdgpu::VectorMemState flat_private(amdgpu::GLOBAL_MEM);
+    calculate(flat_inst, *wf, flat_private);
+    EXPECT_EQ(flat_private.per_lane_addr[0], swizzled(0x46, 0));
+    EXPECT_EQ(flat_private.per_lane_addr[0], kScratchBase + 0x11 * wave_size * 4 + 2);
+    EXPECT_EQ(flat_private.per_lane_addr[1], 0x5'0000'8006ULL);
+    EXPECT_TRUE(flat_private.scratch_swizzle);
+    EXPECT_TRUE(flat_private.requires_scratch_backing);
+    EXPECT_EQ(flat_private.scratch_lane_mask, 0x1u);
+    EXPECT_EQ(flat_private.scratch_addr_stride, wave_size * sizeof(uint32_t));
+  }
+}
+
+TEST(RdnaAddrCalcTest, Rdna3ScratchUsesDwordInterleavedLayout) {
+  expect_rdna3_scratch_layout<rdna3::FlatMachineInst>(
+      ROCJITSU_CODE_ARCH_RDNA3,
+      [](const auto &inst, auto &wf, auto &d) { rdna3::flat_calculate_addresses(inst, wf, d); });
+}
+
+TEST(RdnaAddrCalcTest, Rdna3_5ScratchUsesDwordInterleavedLayout) {
+  expect_rdna3_scratch_layout<rdna3_5::FlatMachineInst>(
+      ROCJITSU_CODE_ARCH_RDNA3_5,
+      [](const auto &inst, auto &wf, auto &d) { rdna3_5::flat_calculate_addresses(inst, wf, d); });
 }
 
 TEST(RdnaScratchExecutionTest, Rdna3B128StoreFeedsB32LoadsWithVectorOffsets) {
@@ -6505,8 +6557,14 @@ TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
   EXPECT_EQ(d.per_lane_addr[0], 0x5'0000'8030ULL);
 
   wf->set_exec(0x3ULL);
-  wf->set_scratch_base(0x6'0000'0000ULL);
+  constexpr uint64_t kScratchBase = 0x6'0000'0000ULL;
+  wf->set_scratch_base(kScratchBase);
   wf->set_scratch_lane_size(0x100);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  // RDNA4 ISA 11.2: SCRATCH_BASE + SWIZZLE(offset, ThreadID), dword-interleaved.
+  const auto swizzled = [](uint64_t offset, uint32_t lane) {
+    return kScratchBase + (offset / 4) * 32 * 4 + lane * 4 + offset % 4;
+  };
   cu->write_vgpr(vbase, 0, 0x80);
   cu->write_vgpr(vbase, 1, 0x90);
   cu->write_vgpr(vbase + 1, 0, 0xBAD);
@@ -6518,8 +6576,12 @@ TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
   scratch_inst.vaddr = 0;
   scratch_inst.ioffset = 0x24;
   rdna4::flat_calculate_addresses(scratch_inst, *wf, d);
-  EXPECT_EQ(d.per_lane_addr[0], 0x6'0000'00A4ULL);
-  EXPECT_EQ(d.per_lane_addr[1], 0x6'0000'01B4ULL);
+  EXPECT_EQ(d.per_lane_addr[0], swizzled(0xA4, 0));
+  EXPECT_EQ(d.per_lane_addr[1], swizzled(0xB4, 1));
+  EXPECT_TRUE(d.scratch_swizzle);
+  EXPECT_TRUE(d.requires_scratch_backing);
+  EXPECT_EQ(d.scratch_lane_mask, 0x3u);
+  EXPECT_EQ(d.scratch_addr_stride, 32u * sizeof(uint32_t));
 
   cu->write_sgpr(wf->sgpr_alloc().base + 4, 0x7000);
   cu->write_vgpr(vbase, 0, 0x60);
@@ -6527,13 +6589,32 @@ TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
   scratch_inst.saddr = 4;
   scratch_inst.ioffset = 0x10;
   rdna4::flat_calculate_addresses(scratch_inst, *wf, d);
-  EXPECT_EQ(d.per_lane_addr[0], 0x6'0000'7070ULL);
-  EXPECT_EQ(d.per_lane_addr[1], 0x6'0000'7180ULL);
+  EXPECT_EQ(d.per_lane_addr[0], swizzled(0x7070, 0));
+  EXPECT_EQ(d.per_lane_addr[1], swizzled(0x7080, 1));
 
   scratch_inst.sve = 0;
   rdna4::flat_calculate_addresses(scratch_inst, *wf, d);
-  EXPECT_EQ(d.per_lane_addr[0], 0x6'0000'7010ULL);
-  EXPECT_EQ(d.per_lane_addr[1], 0x6'0000'7110ULL);
+  EXPECT_EQ(d.per_lane_addr[0], swizzled(0x7010, 0));
+  EXPECT_EQ(d.per_lane_addr[1], swizzled(0x7010, 1));
+
+  // FLAT pointers in the private aperture take the same swizzle per lane, and
+  // only those lanes are marked as scratch.
+  constexpr uint64_t kPrivateBase = 0x0007'0000'0000'0000ULL;
+  wf->set_apertures(0x0001'0000'0000'0000ULL, 0x0001'0000'ffff'ffffULL, kPrivateBase,
+                    kPrivateBase + 0xffff'ffffULL);
+  cu->write_vgpr(vbase, 0, 0x40);
+  cu->write_vgpr(vbase + 1, 0, static_cast<uint32_t>(kPrivateBase >> 32));
+  cu->write_vgpr(vbase, 1, 0x8000);
+  cu->write_vgpr(vbase + 1, 1, 0x0005);
+  flat_inst.ioffset = 0x6;
+  amdgpu::VectorMemState flat_private(amdgpu::GLOBAL_MEM);
+  rdna4::flat_calculate_addresses(flat_inst, *wf, flat_private);
+  EXPECT_EQ(flat_private.per_lane_addr[0], swizzled(0x46, 0));
+  EXPECT_EQ(flat_private.per_lane_addr[1], 0x5'0000'8006ULL);
+  EXPECT_TRUE(flat_private.scratch_swizzle);
+  EXPECT_TRUE(flat_private.requires_scratch_backing);
+  EXPECT_EQ(flat_private.scratch_lane_mask, 0x1u);
+  EXPECT_EQ(flat_private.scratch_addr_stride, 32u * sizeof(uint32_t));
 }
 
 TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {

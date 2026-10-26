@@ -1178,7 +1178,9 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
   }
 }
 
-TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyRegisterAccess) {
+enum class FlatPlanShape { LoadB32, LoadB128, AtomicAddReturn };
+
+void check_decoded_flat_plans_match_executed_addresses(FlatPlanShape shape) {
   class Observer final : public ExecutionPlugin {
   public:
     Observer() : ExecutionPlugin("flat_planning_observer") {}
@@ -1243,40 +1245,64 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
             cu->write_vgpr(base, lane, static_cast<uint32_t>(value));
             cu->write_vgpr(base + 1, lane, value >> 32);
           }
+          // Returning atomics read their data from v8 and report on the load counter.
+          const bool atomic = shape == FlatPlanShape::AtomicAddReturn;
+          const auto pick = [shape](uint16_t b32, uint16_t b128, uint16_t atomic_add) {
+            return shape == FlatPlanShape::LoadB32    ? b32
+                   : shape == FlatPlanShape::LoadB128 ? b128
+                                                      : atomic_add;
+          };
           std::vector<uint32_t> words;
           if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
-            append_instruction(words,
-                               cdna3::build_flat(cdna3::kFlatLoadDwordFlat,
-                                                 {.offset = static_cast<uint16_t>(offset & 0xfff),
-                                                  .addr = 0,
-                                                  .saddr = saddr,
-                                                  .vdst = 2}));
+            append_instruction(
+                words,
+                cdna3::build_flat(pick(cdna3::kFlatLoadDwordFlat, cdna3::kFlatLoadDwordx4Flat,
+                                       cdna3::kFlatAtomicAddFlat),
+                                  {.offset = static_cast<uint16_t>(offset & 0xfff),
+                                   .sc0 = atomic,
+                                   .addr = 0,
+                                   .data = 8,
+                                   .saddr = saddr,
+                                   .vdst = 2}));
           else if (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2)
-            append_instruction(words,
-                               rdna1::build_flat(rdna1::kFlatLoadDwordFlat,
-                                                 {.offset = static_cast<uint16_t>(offset & 0xfff),
-                                                  .addr = 0,
-                                                  .saddr = saddr,
-                                                  .vdst = 2}));
+            append_instruction(
+                words,
+                rdna1::build_flat(pick(rdna1::kFlatLoadDwordFlat, rdna1::kFlatLoadDwordx4Flat,
+                                       rdna1::kFlatAtomicAddFlat),
+                                  {.offset = static_cast<uint16_t>(offset & 0xfff),
+                                   .glc = atomic,
+                                   .addr = 0,
+                                   .data = 8,
+                                   .saddr = saddr,
+                                   .vdst = 2}));
           else if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
-            append_instruction(words,
-                               rdna3::build_flat(rdna3::kFlatLoadB32Flat,
-                                                 {.offset = static_cast<uint16_t>(offset & 0x1fff),
-                                                  .addr = 0,
-                                                  .saddr = saddr,
-                                                  .vdst = 2}));
+            append_instruction(
+                words, rdna3::build_flat(pick(rdna3::kFlatLoadB32Flat, rdna3::kFlatLoadB128Flat,
+                                              rdna3::kFlatAtomicAddU32Flat),
+                                         {.offset = static_cast<uint16_t>(offset & 0x1fff),
+                                          .glc = atomic,
+                                          .addr = 0,
+                                          .data = 8,
+                                          .saddr = saddr,
+                                          .vdst = 2}));
           else if (arch == ROCJITSU_CODE_ARCH_RDNA4)
             append_instruction(
-                words, rdna4::build_vflat(rdna4::kFlatLoadB32Vflat,
+                words, rdna4::build_vflat(pick(rdna4::kFlatLoadB32Vflat, rdna4::kFlatLoadB128Vflat,
+                                               rdna4::kFlatAtomicAddU32Vflat),
                                           {.saddr = saddr,
                                            .vdst = 2,
+                                           .th = atomic,
+                                           .vsrc = 8,
                                            .vaddr = 0,
                                            .ioffset = static_cast<uint32_t>(offset) & 0xffffff}));
           else
             append_instruction(
-                words, cdna5::build_vflat(cdna5::kFlatLoadB32Vflat,
+                words, cdna5::build_vflat(pick(cdna5::kFlatLoadB32Vflat, cdna5::kFlatLoadB128Vflat,
+                                               cdna5::kFlatAtomicAddU32Vflat),
                                           {.saddr = saddr,
                                            .vdst = 2,
+                                           .th = atomic,
+                                           .vsrc = 8,
                                            .vaddr = 0,
                                            .ioffset = static_cast<uint32_t>(offset) & 0xffffff}));
           util::StringDiagnostic error;
@@ -1327,6 +1353,16 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
       }
     }
     group->onShutdown();
+  }
+}
+
+// Multi-dword and atomic shapes cover private lanes whose execution splits per
+// interleaved dword or takes the atomic handlers.
+TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyRegisterAccess) {
+  for (const auto shape :
+       {FlatPlanShape::LoadB32, FlatPlanShape::LoadB128, FlatPlanShape::AtomicAddReturn}) {
+    SCOPED_TRACE(static_cast<int>(shape));
+    check_decoded_flat_plans_match_executed_addresses(shape);
   }
 }
 
