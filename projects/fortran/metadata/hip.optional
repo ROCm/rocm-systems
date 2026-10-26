@@ -1,0 +1,18 @@
+# <function> <nullable-by-reference-arg> ...   (`*`: every function; see apply_arg_overrides)
+#
+# Arguments documented as nullable. The module procedures take them OPTIONAL and
+# pass c_null_ptr when absent (an OPTIONAL dummy in a bind(C) interface needs F2018).
+hipGetDriverEntryPoint driverStatus
+hipGetProcAddress symbolStatus
+hipGraphGetEdges from to
+hipGraphGetNodes nodes
+hipGraphGetRootNodes pRootNodes
+hipGraphNodeGetDependencies pDependencies
+hipGraphNodeGetDependentNodes pDependentNodes
+hipKernelGetParamInfo paramSize
+hipLibraryGetGlobal dptr bytes
+hipLibraryGetManaged dptr bytes
+hipLinkComplete sizeOut
+hipModuleGetGlobal dptr bytes
+hipStreamGetCaptureInfo pId
+hipStreamGetCaptureInfo_v2 id_out graph_out dependencies_out numDependencies_out

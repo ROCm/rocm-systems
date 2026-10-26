@@ -60,8 +60,8 @@ jobs:
       - name: "Fetch 'build_tools' from repository"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          repository: "ROCm/TheRock"
-          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
+          repository: "amontoison/TheRock"
+          ref: a71b0b0b8aa99ca338eda2e18c312e5e5278713d # TEST ONLY: ROCm/TheRock#9446 on top of 488e66e7
           sparse-checkout: build_tools
           path: "prejob"
 
@@ -78,8 +78,8 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          repository: "ROCm/TheRock"
-          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
+          repository: "amontoison/TheRock"
+          ref: a71b0b0b8aa99ca338eda2e18c312e5e5278713d # TEST ONLY: ROCm/TheRock#9446 on top of 488e66e7
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'

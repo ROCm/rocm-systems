@@ -1,0 +1,103 @@
+# <function> <scalar-pointer-arg> ...
+# Every typed pointer not listed here is treated as a data buffer.
+hipBindTexture offset
+hipBindTexture2D offset
+hipCtxGetDevice device
+hipDeviceGet device
+hipDeviceGetByPCIBusId device
+hipDeviceGetLimit pValue
+hipDeviceTotalMem bytes
+hipGetDevice deviceId
+hipGetDeviceCount count
+hipGetSymbolSize mySize
+hipGetTextureAlignmentOffset offset
+hipMallocPitch pitch
+hipMemAllocPitch pitch
+hipMemGetAddressRange psize
+hipMemGetInfo free total
+hipMemPtrGetInfo mySize
+hipModuleGetGlobal bytes
+hipTexRefSetAddress ByteOffset
+hipCtxGetApiVersion apiVersion
+hipCtxGetFlags flags
+hipDeviceCanAccessPeer canAccessPeer
+hipDeviceComputeCapability major minor
+hipDeviceGetAttribute pi
+hipDeviceGetP2PAttribute value
+hipDeviceGetStreamPriorityRange leastPriority greatestPriority
+hipDevicePrimaryCtxGetState flags active
+hipDriverGetVersion driverVersion
+hipEventElapsedTime ms
+hipExtGetLinkTypeAndHopCount linktype hopcount
+hipFuncGetAttribute value
+hipGetDeviceFlags flags
+hipGraphNodeGetEnabled isEnabled
+hipLibraryGetKernelCount count
+hipModuleGetFunctionCount count
+hipModuleOccupancyMaxActiveBlocksPerMultiprocessor numBlocks
+hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags numBlocks
+hipModuleOccupancyMaxPotentialBlockSize gridSize blockSize
+hipModuleOccupancyMaxPotentialBlockSizeWithFlags gridSize blockSize
+hipRuntimeGetVersion runtimeVersion
+hipStreamGetFlags flags
+hipStreamGetPriority priority
+hipStreamGetDevice device
+# Not listed: enum pointers that are input arrays with their own count
+# (hipDrvPointerGetAttributes attributes, hipLibraryLoad* jitOptions/libraryOptions).
+hipCtxGetCacheConfig cacheConfig
+hipCtxGetSharedMemConfig pConfig
+hipDeviceGetCacheConfig cacheConfig
+hipDeviceGetSharedMemConfig pConfig
+hipGraphNodeGetType pType
+hipMemPoolGetAccess flags
+hipStreamGetCaptureInfo pCaptureStatus
+hipStreamGetCaptureInfo_v2 captureStatus_out
+hipStreamIsCapturing pCaptureStatus
+hipTexRefGetAddressMode pam
+hipTexRefGetFilterMode pfm
+hipTexRefGetFormat pFormat
+hipTexRefGetMipmapFilterMode pfm
+# hipGraphExecUpdate documents updateResult_out as [in], but it is an output.
+hipArrayGetInfo flags
+hipDeviceGetLuid deviceNodeMask
+hipDeviceGetTexture1DLinearMaxWidth max_width
+hipExecutionCtxGetDevice device
+hipExecutionCtxGetId ctxId
+hipGetDriverEntryPoint driverStatus
+hipGetProcAddress symbolStatus
+hipGraphExecGetFlags flags
+hipGraphExecUpdate updateResult_out
+hipGraphGetEdges numEdges
+hipGraphGetNodes numNodes
+hipGraphGetRootNodes pNumRootNodes
+hipGraphNodeGetDependencies pNumDependencies
+hipGraphNodeGetDependentNodes pNumDependentNodes
+hipGraphicsResourceGetMappedPointer size
+hipKernelGetAttribute pi
+hipKernelGetParamInfo paramOffset paramSize
+hipLibraryGetGlobal bytes
+hipLibraryGetManaged bytes
+hipLinkComplete sizeOut
+hipMemGetAccess flags
+hipMemGetAllocationGranularity granularity
+hipOccupancyAvailableDynamicSMemPerBlock dynamicSmemSize
+hipOccupancyMaxActiveBlocksPerMultiprocessor numBlocks
+hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags numBlocks
+hipOccupancyMaxActiveClusters numClusters
+hipOccupancyMaxPotentialBlockSize gridSize blockSize
+hipOccupancyMaxPotentialClusterSize clusterSize
+hipStreamGetCaptureInfo pId
+hipStreamGetCaptureInfo_v2 id_out numDependencies_out
+hipStreamGetId streamId
+hipTexRefGetFlags pFlags
+hipTexRefGetFormat pNumChannels
+hipTexRefGetMaxAnisotropy pmaxAnsio
+hipTexRefGetMipmapLevelBias pbias
+hipTexRefGetMipmapLevelClamp pminMipmapLevelClamp pmaxMipmapLevelClamp
+hipThreadExchangeStreamCaptureMode mode
+
+# hipChooseDevice is declared under its versioned symbol, which the key must name.
+hipChooseDeviceR0600 device
+hipDevSmResourceSplitByCount nbGroups
+hipMemcpy3DBatchAsync failIdx
+hipMemcpyBatchAsync failIdx
