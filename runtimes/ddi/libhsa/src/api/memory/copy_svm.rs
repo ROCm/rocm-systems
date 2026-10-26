@@ -380,7 +380,10 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_set(
         if attributes.len() > SVM_MAX_ATTRIBUTES {
             return INVALID_ARGUMENT;
         }
-        linux_interop::set_kfd_svm_attributes(&runtime.session, address, size, &attributes)
+        let Some(session) = runtime.session() else {
+            return ERROR;
+        };
+        linux_interop::set_kfd_svm_attributes(session, address, size, &attributes)
             .map_or_else(map_error, |()| SUCCESS)
     })
 }
@@ -488,8 +491,11 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
         if attributes.len() > SVM_MAX_ATTRIBUTES {
             return INVALID_ARGUMENT;
         }
+        let Some(session) = runtime.session() else {
+            return ERROR;
+        };
         if let Err(error) =
-            linux_interop::get_kfd_svm_attributes(&runtime.session, address, size, &mut attributes)
+            linux_interop::get_kfd_svm_attributes(session, address, size, &mut attributes)
         {
             return map_error(error);
         }
@@ -677,7 +683,9 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
             Ok(pending) => pending,
             Err(status) => return status,
         };
-        let session = runtime.session.clone();
+        let Some(session) = runtime.session.clone() else {
+            return ERROR;
+        };
         let stop = runtime.stop_workers.clone();
         let worker_handles = pending.handles.clone();
         let dependency_len = dependency_slice.len();

@@ -265,10 +265,12 @@ pub(crate) fn agent_pool_relationship(
             (Some(requester), Some(owner))
                 if matches!(storage, PoolStorage::LocalCoarse | PoolStorage::LocalFine) =>
             {
-                runtime.session.can_access_local_memory(
-                    &runtime.gpus[requester].endpoint,
-                    &runtime.gpus[owner].endpoint,
-                )
+                runtime.session().is_some_and(|session| {
+                    session.can_access_local_memory(
+                        &runtime.gpus[requester].endpoint,
+                        &runtime.gpus[owner].endpoint,
+                    )
+                })
             }
             _ => link.is_some_and(|link| link.hop_count() != 0),
         };
