@@ -10988,7 +10988,7 @@ amdsmi_status_t amdsmi_reset_ttm_pages_limit(void);
  *  as LLM training.
  *
  *  @note Available only when the platform firmware implements Power
- *  Stabilization; never available for multi-VF devices. 
+ *  Stabilization; never available for multi-VF devices.
  *  @{
  */
 
