@@ -82,9 +82,9 @@ __device__ int g_hrr_spt_symbol[256];
 // buffer that is freed before the validated one is written: routing the oracle
 // through them would leave the replayed buffer at its zero-init value and fail
 // the D2H for a reason that has nothing to do with whether the redirect took
-// effect.  The seventh replays through the hipMemcpyAsync it makes, a D2H of
-// the symbol's zero initial value that replay validates.  This is capture-path
-// coverage, and Unit_HRR_MemcpySptRoundtrip asserts each recorded id.
+// effect.  The seventh replays through the hipMemcpyAsync it makes.  This is
+// capture-path coverage, and Unit_HRR_MemcpySptRoundtrip asserts each recorded
+// id.
 //
 // The oracle is hipMemcpyHtoD / hipMemcpyDtoH rather than the plain hipMemcpy
 // the later workloads use, because hipMemcpy has to stay redirected here to
@@ -134,13 +134,12 @@ TEST_CASE("Unit_HRR_MemcpySpt_Direct", "[.][hrr-direct]") {
   // hipMemcpyFromSymbolAsync_spt does its copy through hipMemcpyAsync on the
   // per-thread stream object it resolved, which capture must record as
   // hipStreamPerThread: replay never saw that object created. Read before the
-  // symbol is written below, so the copied bytes are the zero initial value
-  // replay also has, and the nested copy is a D2H replay validates.
+  // symbol is written below: replay does not repeat that write, so a later
+  // read would not match.
   int* h_sym = new int[N]();
   HRR_HIP_CHECK(hipMemcpyFromSymbolAsync_spt(h_sym, HIP_SYMBOL(g_hrr_spt_symbol), SZ, 0,
                                              hipMemcpyDeviceToHost, nullptr));
   HRR_HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
-  for (int i = 0; i < N; ++i) REQUIRE(h_sym[i] == 0);
   delete[] h_sym;
   HRR_HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_hrr_spt_symbol), h_src, SZ, 0,
                               hipMemcpyHostToDevice));

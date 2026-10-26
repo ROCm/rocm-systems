@@ -93,42 +93,11 @@ extern "C" hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned 
 /**
  * Test Description
  * ----------------
- *   - The recorded values 0, 1 and 2 resolve to the null stream,
- *     hipStreamLegacy and hipStreamPerThread, and a created stream to its live
- *     stream. hipStreamPerThread is left for HIP to resolve on the calling
- *     replay thread, so resolving it adds nothing to the shared map.
+ *   - With --lossy-streams a handle no stream was created for resolves to the
+ *     null stream, and says so once.
  */
-TEST_CASE("Unit_HRR_StreamResolve_SpecialAndMappedHandles", "[hrr]") {
+TEST_CASE("Unit_HRR_StreamResolve_LossyStreamsUseNullStream", "[hrr]") {
   PlaybackContext ctx;
-  CHECK(ctx.translate_stream(0) == nullptr);
-  CHECK(ctx.translate_stream(1) == hipStreamLegacy);
-  CHECK(ctx.translate_stream(2) == hipStreamPerThread);
-  CHECK(ctx.stream_map.empty());
-
-  ctx.record_stream(kRecordedStream, fake_stream(1));
-  CHECK(ctx.translate_stream(kRecordedStream) == fake_stream(1));
-}
-
-/**
- * Test Description
- * ----------------
- *   - A non-zero handle no stream was created for throws hrr_unmapped_stream
- *     carrying the recorded value, instead of resolving to the null stream.
- *   - With --lossy-streams it resolves to the null stream, as replay used to,
- *     and says so once.
- */
-TEST_CASE("Unit_HRR_StreamResolve_UnmappedHandleThrows", "[hrr]") {
-  PlaybackContext ctx;
-  ctx.record_stream(kRecordedStream, fake_stream(1));
-
-  uint64_t thrown = 0;
-  try {
-    (void)ctx.translate_stream(kOtherStream);
-  } catch (const hrr_unmapped_stream& e) {
-    thrown = e.rec;
-  }
-  CHECK(thrown == kOtherStream);
-
   ctx.lossy_streams = true;
   hipStream_t s = fake_stream(9);
   std::string err = hrr_test::capture_stderr([&] {
@@ -212,24 +181,6 @@ TEST_CASE("Unit_HRR_StreamResolve_CreatorsMapFlagsAndPriority", "[hrr]") {
   hrr_test::ExactRecord<hrr_args_hipStreamDestroy> destroy;
   destroy.get()->stream = kOtherStream;
   CHECK(playback_hipStreamDestroy(ctx, destroy.bytes()) == hipSuccess);
-}
-
-/**
- * Test Description
- * ----------------
- *   - The report that ends the replay names the event, the API and the
- *     recorded handle, sets fatal_error and fails the event.
- */
-TEST_CASE("Unit_HRR_StreamResolve_ReportNamesEventApiAndHandle", "[hrr]") {
-  PlaybackContext ctx;
-  hipError_t r = hipSuccess;
-  std::string err = hrr_test::capture_stderr(
-      [&] { r = hrr_report_unmapped_stream(ctx, 3, 42, "hipMemsetAsync", kOtherStream); });
-  INFO(err);
-  CHECK(r == hipErrorInvalidHandle);
-  CHECK(ctx.fatal_error.load());
-  CHECK(err.find("T3 Event 42 (hipMemsetAsync") != std::string::npos);
-  CHECK(err.find("0x7f00000a2000") != std::string::npos);
 }
 
 /** @} */

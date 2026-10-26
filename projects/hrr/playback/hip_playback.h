@@ -269,7 +269,7 @@ struct PlaybackContext {
     // after it do — rather than to reproduce a fault.
     bool continue_on_error = false;
     // --lossy-streams: run work recorded on a stream replay never created on
-    // the null stream, as replay used to, instead of ending the replay there.
+    // the null stream instead of ending the replay there.
     // Also lets hipStreamBeginCapture make a stand-in stream to capture on.
     // The result is not a faithful reproduction, even when its bytes match.
     bool lossy_streams = false;
@@ -783,15 +783,10 @@ struct PlaybackContext {
     }
 
     // ---- Handle resolution (shared lock — concurrent reads safe) ----
-    // A recorded stream is the null stream (0), one of the handles HIP defines
-    // as constants, or a stream the capture saw created. The constants pass
-    // through as themselves: HIP resolves hipStreamPerThread to the calling
-    // replay thread's own stream, so it is never put in stream_map. Any other
-    // handle missing from the map is a stream whose creating call was not
-    // replayed, and the null stream in its place would run the work where the
-    // capture did not, silently whenever the bytes still come out right. That
-    // throws hrr_unmapped_stream unless --lossy-streams asked for the old
-    // substitution.
+    // 0, hipStreamLegacy and hipStreamPerThread pass through as themselves;
+    // HIP resolves hipStreamPerThread on the calling replay thread. Any other
+    // handle is the stream replay created for it, or throws hrr_unmapped_stream
+    // unless --lossy-streams substitutes the null stream.
     hipStream_t   translate_stream  (uint64_t rec) const {
         if (rec == 0) return nullptr;
         if (rec == reinterpret_cast<uint64_t>(hipStreamLegacy))    return hipStreamLegacy;
