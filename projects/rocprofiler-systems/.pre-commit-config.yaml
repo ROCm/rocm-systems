@@ -47,11 +47,13 @@ repos:
     rev: 26.5.1
     hooks:
       - id: black # Format Python (settings in pyproject.toml)
+        files: ^projects/rocprofiler-systems/
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.17.1 # Keep in sync with .github/workflows/rocprofiler-systems-python.yml
     hooks:
       - id: ruff-check # Lint Python (settings in pyproject.toml)
+        files: ^projects/rocprofiler-systems/
 
   - repo: https://github.com/BlankSpruce/gersemi
     rev: 0.25.1
