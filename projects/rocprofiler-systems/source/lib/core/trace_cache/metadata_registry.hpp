@@ -209,15 +209,14 @@ struct metadata_registry
     void add_stream(const std::uint64_t& stream_handle);
     void add_string(const std::string_view string_value);
 
-    info::process               get_process_info() const;
-    std::optional<info::pmc>    get_pmc_info(const std::string_view& unique_name) const;
-    std::optional<info::thread> get_thread_info(const std::uint32_t& thread_id) const;
-    std::optional<info::track>  get_track_info(const std::string_view& track_name) const;
-    std::vector<info::pmc>      get_pmc_info_list() const;
-    std::vector<info::thread>   get_thread_info_list() const;
-    std::vector<info::track>    get_track_info_list() const;
-    std::vector<std::uint64_t>  get_queue_list() const;
-    std::vector<std::uint64_t>  get_stream_list() const;
+    info::process              get_process_info() const;
+    std::optional<info::pmc>   get_pmc_info(const std::string_view& unique_name) const;
+    std::optional<info::track> get_track_info(const std::string_view& track_name) const;
+    std::vector<info::pmc>     get_pmc_info_list() const;
+    std::vector<info::thread>  get_thread_info_list() const;
+    std::vector<info::track>   get_track_info_list() const;
+    std::vector<std::uint64_t> get_queue_list() const;
+    std::vector<std::uint64_t> get_stream_list() const;
     std::vector<std::string_view> get_string_list() const;
 
     bool save_to_file(const std::string&                         filepath,

@@ -1538,11 +1538,6 @@ struct externals
         {
             return std::nullopt;
         }
-        [[nodiscard]] std::optional<thread_info_t> get_thread_info(
-            std::uint32_t /*thread_id*/) const
-        {
-            return std::nullopt;
-        }
         [[nodiscard]] std::optional<track_t> get_track_info(
             std::string_view /*track_name*/) const
         {

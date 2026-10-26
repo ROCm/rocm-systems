@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <sys/types.h>
 #include <unistd.h>
@@ -29,9 +30,12 @@ constexpr std::uint64_t k_start = 1'000'000'000'001'000;
 constexpr std::uint64_t k_end   = 1'000'000'000'009'000;
 static_assert(k_start > std::numeric_limits<std::uint32_t>::max());
 
-constexpr pid_t         k_pid       = 200;
-constexpr pid_t         k_ppid      = 100;
-constexpr std::uint64_t k_thread_id = 300;
+// Not a realistic TID (Linux caps TIDs at 2^22). Tests that the JSON keeps 64 bits field
+constexpr std::uint64_t k_thread_id = 5'000'000'300;
+static_assert(k_thread_id > std::numeric_limits<std::uint32_t>::max());
+
+constexpr pid_t k_pid  = 200;
+constexpr pid_t k_ppid = 100;
 
 void
 set_test_process(metadata_registry& registry)
@@ -103,4 +107,34 @@ TEST_F(metadata_registry_json_test_interface, thread_timestamps_survive_round_tr
     EXPECT_EQ(threads[0].thread_id, k_thread_id);
     EXPECT_EQ(threads[0].start, k_start);
     EXPECT_EQ(threads[0].end, k_end);
+}
+
+TEST_F(metadata_registry_json_test_interface, track_thread_id_survives_round_trip)
+{
+    metadata_registry saved;
+    set_test_process(saved);
+    saved.add_track(
+        { .track_name = "test_track", .thread_id = k_thread_id, .extdata = "{}" });
+
+    metadata_registry loaded;
+    ASSERT_TRUE(round_trip(saved, loaded));
+
+    auto const tracks = loaded.get_track_info_list();
+    ASSERT_EQ(tracks.size(), 1U);
+    EXPECT_EQ(tracks[0].thread_id, k_thread_id);
+}
+
+TEST_F(metadata_registry_json_test_interface, track_without_thread_id_survives_round_trip)
+{
+    metadata_registry saved;
+    set_test_process(saved);
+    saved.add_track(
+        { .track_name = "test_track", .thread_id = std::nullopt, .extdata = "{}" });
+
+    metadata_registry loaded;
+    ASSERT_TRUE(round_trip(saved, loaded));
+
+    auto const tracks = loaded.get_track_info_list();
+    ASSERT_EQ(tracks.size(), 1U);
+    EXPECT_FALSE(tracks[0].thread_id.has_value());
 }
