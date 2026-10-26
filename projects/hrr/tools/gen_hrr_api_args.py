@@ -2627,6 +2627,24 @@ CUSTOM_CAPTURE_SHIMS: Dict[str, str] = {
         "  return r;\n"
         "}\n"
     ),
+    # hipStreamEndCapture on an invalidated or unjoined capture fails, yields no
+    # graph, and still ends the capture. Record those failures too, or replay
+    # never ends its own capture and treats every later call as captured.
+    "hipStreamEndCapture": (
+        "// Generated shim (custom: also record the failures that end the capture)\n"
+        "static hipError_t capture_hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {\n"
+        "  hipError_t r = g_real_table.hipStreamEndCapture_fn(stream, pGraph);\n"
+        "  if (r == hipSuccess || r == hipErrorStreamCaptureInvalidated ||\n"
+        "      r == hipErrorStreamCaptureUnjoined) {\n"
+        "    hrr_args_hipStreamEndCapture a{};\n"
+        "    a.ret         = static_cast<int32_t>(r);\n"
+        "    a.stream = reinterpret_cast<uint64_t>(stream);\n"
+        "    if (pGraph) a.pGraph = reinterpret_cast<uint64_t>(*pGraph);\n"
+        "    hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMENDCAPTURE, &a.hdr, sizeof(a));\n"
+        "  }\n"
+        "  return r;\n"
+        "}\n"
+    ),
 }
 
 CUSTOM_PLAYBACK_BODIES: Dict[str, str] = {
@@ -3112,7 +3130,7 @@ _POST_CALL_EXTRA: Dict[str, List[str]] = {
 # Playback calls the PUBLIC HIP API by name; capture goes through the dispatch
 # table. Those are two different declarations, and they are allowed to diverge:
 # hip_api_trace.hpp is append-only ABI, while hip_runtime_api.h re-declares an
-# API with a new signature under a HIP_FORCE_API_VERSION guard.
+# API with a new signature under a HIP_TARGET_API_VERSION guard.
 #
 # validate_playback_signatures() refuses to generate when the two disagree, so
 # a divergence cannot silently produce a wrong cast. An entry here is the
@@ -3141,7 +3159,7 @@ _PLAYBACK_ARG_BRIDGES: Dict[str, Dict[str, object]] = {
     # bridge rebuilds a hipMemLocation from it rather than passing a zeroed
     # struct — the recorded device is preserved on both sides of the guard.
     'hipMemAdvise': {
-        'guard': 'HIP_FORCE_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)',
+        'guard': 'HIP_TARGET_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)',
         'param': 'device',
         'pre': [
             '  hipMemLocation _loc_{name}{{}};',
@@ -3861,7 +3879,7 @@ def generate_playback_cpp(entries: List[ApiEntry]) -> str:
 # public API by name. Deriving playback casts from the table is therefore only
 # sound while the two declarations agree, and they are not required to: the
 # table is append-only ABI, while hip_runtime_api.h may re-declare an API with
-# a different signature under a HIP_FORCE_API_VERSION guard (hipMemAdvise gained
+# a different signature under a HIP_TARGET_API_VERSION guard (hipMemAdvise gained
 # a hipMemLocation parameter in HIP 8.0 this way).
 #
 # This pass parses the public header and refuses to generate when a playback
@@ -3872,7 +3890,7 @@ def generate_playback_cpp(entries: List[ApiEntry]) -> str:
 class PublicDecl:
     """One non-template declaration of a public HIP API."""
     types:   Tuple[str, ...]
-    guarded: bool          # inside a HIP_FORCE_API_VERSION / HIP_ABI_IMPL #if
+    guarded: bool          # inside a HIP_TARGET_API_VERSION / HIP_ABI_IMPL #if
     line:    int
 
 

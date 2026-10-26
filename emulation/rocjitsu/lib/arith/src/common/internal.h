@@ -15,6 +15,11 @@
 
 namespace rocjitsu::arith {
 
+// EXEC has one bit per lane in the instruction wave.
+template <int Lanes>
+  requires(Lanes == 32 || Lanes == 64)
+using ExecMask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+
 // Reinterpret FP32 bits as float without conversion or aliasing violations.
 inline float as_float(uint32_t v) { return std::bit_cast<float>(v); }
 
