@@ -339,7 +339,8 @@ bool contains(const std::vector<uint8_t>& hay, const char* needle) {
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// One capture covers both paths, and its archive replays.
+// One capture covers both paths, and its archive replays, also with the live
+// bundle stored as a blob.
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_fatbin_header.hrr");
@@ -422,6 +423,56 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
   auto [rc, replay] = hrr_playback_merged(archive);
   INFO("Replay:\n" << replay);
   CHECK(rc == 0);
+
+  // A registration whose bundle is stored as a blob replays through the
+  // register handler, which loads the blob as a module. Rewrite the live
+  // kernel's registration that way, and its launch to name no code object, so
+  // only that module holds the kernel.
+  std::string events = read_text_file(archive / "events.bin");
+  auto at = [&](const hrr::Event& ev) {
+    const size_t pos = events.find(std::string(ev.raw_payload.begin(), ev.raw_payload.end()));
+    REQUIRE(pos != std::string::npos);
+    return pos;
+  };
+  std::string hex;
+  for (const auto& ev : arc.events) {
+    if (!ev.kernel_launch || ev.kernel_launch->kernel_name != kLiveKernel) continue;
+    hex = hrr::hash_hex(ev.kernel_launch->co_hash_lo, ev.kernel_launch->co_hash_hi);
+    // After the stream, the name's length and the name.
+    const uint64_t none[2] = {0, 0};
+    std::memcpy(&events[at(ev) + sizeof(hrr_event_header) + 10 + std::strlen(kLiveKernel)],
+                none, sizeof(none));
+  }
+  INFO("Code object: " << hex);
+  REQUIRE(arc.code_objects.count(hex) == 1);
+  std::vector<uint8_t> co;
+  REQUIRE(hrr::read_file_capped(arc.code_objects.at(hex), co));
+  hipDeviceProp_t prop{};
+  HRR_HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  const auto bundle = target_bundle(std::string(kTargetPrefix) + prop.gcnArchName, co);
+  const fs::path blob = archive / "blobs" / hex.substr(0, 2) / (hex + ".blob");
+  fs::create_directories(blob.parent_path());
+  std::ofstream(blob, std::ios::binary)
+      .write(reinterpret_cast<const char*>(bundle.data()),
+             static_cast<std::streamsize>(bundle.size()));
+  fs::remove(arc.code_objects.at(hex));
+  const uint64_t blob_size = bundle.size();
+  size_t registrations = 0;
+  for (const auto& ev : arc.events) {
+    if (ev.header().event_type != HRR_API_HIPREGISTERFATBINARY) continue;
+    const auto* a =
+        reinterpret_cast<const hrr_args___hipRegisterFatBinary*>(ev.raw_payload.data());
+    if (hrr::hash_hex(a->blob_hash_lo, a->blob_hash_hi) != hex) continue;
+    std::memcpy(&events[at(ev) + offsetof(hrr_args___hipRegisterFatBinary, blob_size)],
+                &blob_size, sizeof(blob_size));
+    ++registrations;
+  }
+  REQUIRE(registrations == 1);
+  std::ofstream(archive / "events.bin", std::ios::binary | std::ios::trunc)
+      .write(events.data(), static_cast<std::streamsize>(events.size()));
+  auto [rc_old, replay_old] = hrr_playback_merged(archive);
+  INFO("Replay of the rewritten archive:\n" << replay_old);
+  CHECK(rc_old == 0);
 }
 
 // ===========================================================================
