@@ -306,6 +306,12 @@ bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm);
 bool ncclCommIsSuspended(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
+// Segments behind the whole NET registration, not the collective's slice (cached).
+ncclResult_t rcclNetRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments);
+// Graph variant: no-op for a NULL record; drops the graph reference on failure or when =0 skips a multi-segment record.
+ncclResult_t rcclNetGraphRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments);
+// Records an all-peers NET registration.
+void rcclNetRegCommit(struct ncclComm* comm, struct ncclReg* regRecord, int numSegments);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm);
 ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm);
@@ -474,6 +480,11 @@ inline int rcclAllocP2pNetLLBuffers(int cudaArch, int nNodes, int nRanks, int64_
   if (cudaArch == 1250 && enable > 0) return 1;
   return 0;
 }
+// Classifies a non-symmetric window and rejects host VMM across the LSA team (rccl_dev_runtime.cc).
+ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags);
+// GIN MR pointer type for a symmetric segment; host VMM needs DMA-BUF (rccl_dev_runtime.cc).
+ncclResult_t rcclDevrGinSegmentRegType(bool globalHasSysmemSegment, int maxGlobalNumSegments, int* ptrType,
+                                       bool* needDmabuf);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);
