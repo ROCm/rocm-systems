@@ -1092,24 +1092,25 @@ inline bool hrr_host_snapshots_fit(const uint8_t* p, const uint8_t* end, uint16_
     return p <= end && static_cast<size_t>(end - p) / kHostSnapRecordSize >= n;
 }
 
-// Whether the arguments a launch record carries fit the kernel's signature:
-// the same count, and each argument exactly as many bytes as its parameter. HIP
+// Whether the arguments a launch record carries cover the kernel's signature: at
+// least as many arguments, each at least as many bytes as its parameter. HIP
 // walks the signature of the loaded code object and copies each parameter's size
-// out of kernelParams[i], so an argument list that is short, or an argument that
-// is narrower than its parameter, is read past. On a mismatch *why says which.
+// out of kernelParams[i] (rocclr/platform/kernel.cpp, captureHIPArgs), so only a
+// short list or a narrower argument is read past; extra arguments and wider ones
+// are never touched. On a mismatch *why says which.
 inline bool hrr_kernel_args_match(const std::vector<size_t>& recorded,
                                   const std::vector<size_t>& declared,
                                   std::string* why) {
     char buf[160];
-    if (recorded.size() != declared.size()) {
+    if (recorded.size() < declared.size()) {
         snprintf(buf, sizeof(buf),
                  "the record carries %zu arguments, the kernel declares %zu",
                  recorded.size(), declared.size());
         if (why) *why = buf;
         return false;
     }
-    for (size_t i = 0; i < recorded.size(); i++) {
-        if (recorded[i] == declared[i]) continue;
+    for (size_t i = 0; i < declared.size(); i++) {
+        if (recorded[i] >= declared[i]) continue;
         snprintf(buf, sizeof(buf),
                  "argument %zu is %zu bytes, the kernel declares %zu", i,
                  recorded[i], declared[i]);

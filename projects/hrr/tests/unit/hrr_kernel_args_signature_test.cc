@@ -63,22 +63,10 @@ struct Payload {
 // the records `fill` writes.
 template <typename Fill>
 Payload launch(const char* name, uint16_t declared, Fill&& fill) {
+  Payload records;
+  fill(records);
   Payload p;
-  p.b.assign(sizeof(hrr_event_header), 0);
-  const uint64_t stream = 0, co_hash[2] = {0, 0};
-  const uint16_t name_len = static_cast<uint16_t>(std::strlen(name));
-  const uint32_t dims[7] = {1, 1, 1, 1, 1, 1, 0};
-  const uint16_t counts[2] = {declared, 0};  // num_args, num_snapshots
-  p.put(&stream, 8);
-  p.put(&name_len, 2);
-  p.put(name, name_len);
-  p.put(co_hash, 16);
-  p.put(dims, sizeof(dims));
-  p.put(counts, sizeof(counts));
-  fill(p);
-  const uint32_t attrs[2] = {0, 0};
-  p.put(attrs, sizeof(attrs));
-  p.finish(HRR_API_HIPMODULELAUNCHKERNEL);
+  p.b = hrr_test::make_launch_event(kSeq, name, declared, /*num_snapshots=*/0, records.b);
   return p;
 }
 
@@ -116,21 +104,22 @@ void check_refused(PlaybackContext& ctx, const Payload& p, const char* what) {
 /**
  * Test Description
  * ----------------
- *   - The comparison accepts an argument list that is the signature's size for
- *     size and refuses a short list, a long list and a wrongly sized argument,
- *     saying which.
+ *   - The comparison accepts an argument list that covers the signature: the
+ *     same sizes, and also extra arguments or wider ones, which CLR never
+ *     reads. It refuses a short list and a narrower argument, saying which.
  */
 TEST_CASE("Unit_HRR_KernelArgsSignature_Match", "[hrr]") {
   std::string why;
   CHECK(hrr_kernel_args_match({8, 4}, {8, 4}, &why));
   CHECK(hrr_kernel_args_match({}, {}, &why));
+  CHECK(hrr_kernel_args_match({8, 4, 4}, {8, 4}, &why));  // extra argument
+  CHECK(hrr_kernel_args_match({4}, {}, &why));            // kernel declares none
+  CHECK(hrr_kernel_args_match({16, 4}, {8, 4}, &why));    // wider argument
   CHECK_FALSE(hrr_kernel_args_match({8}, {8, 4}, &why));
   CHECK(why.find("carries 1 arguments, the kernel declares 2") != std::string::npos);
-  CHECK_FALSE(hrr_kernel_args_match({8, 4, 4}, {8, 4}, &why));
-  CHECK(why.find("carries 3 arguments, the kernel declares 2") != std::string::npos);
   CHECK_FALSE(hrr_kernel_args_match({8, 4}, {8, 8}, &why));
   CHECK(why.find("argument 1 is 4 bytes, the kernel declares 8") != std::string::npos);
-  CHECK_FALSE(hrr_kernel_args_match({16, 4}, {8, 4}, nullptr));
+  CHECK_FALSE(hrr_kernel_args_match({8, 2}, {8, 4}, nullptr));
 }
 
 /**
@@ -149,33 +138,15 @@ TEST_CASE("Unit_HRR_KernelArgsSignature_TooFewArguments", "[hrr]") {
 /**
  * Test Description
  * ----------------
- *   - A launch record with more arguments than the kernel declares, and one
- *     for a kernel that declares none, are refused before the launch.
+ *   - An argument narrower than its parameter is refused before the launch,
+ *     with the argument's index. Extra and wider arguments are not refused:
+ *     they go on to HIP, which the integration suite covers on a GPU.
  */
-TEST_CASE("Unit_HRR_KernelArgsSignature_TooManyArguments", "[hrr]") {
-  PlaybackContext ctx;
-  declare(ctx, {8});
-  auto p = launch("k", 3, [](Payload& p) { p.args({8, 8, 4}); });
-  check_refused(ctx, p, "carries 3 arguments, the kernel declares 1");
-
-  declare(ctx, {});
-  auto q = launch("k", 1, [](Payload& p) { p.args({4}); });
-  check_refused(ctx, q, "carries 1 arguments, the kernel declares 0");
-}
-
-/**
- * Test Description
- * ----------------
- *   - An argument narrower or wider than its parameter is refused before the
- *     launch, with the argument's index.
- */
-TEST_CASE("Unit_HRR_KernelArgsSignature_WronglySizedArgument", "[hrr]") {
+TEST_CASE("Unit_HRR_KernelArgsSignature_NarrowArgument", "[hrr]") {
   PlaybackContext ctx;
   declare(ctx, {8, 16});
   auto narrow = launch("k", 2, [](Payload& p) { p.args({8, 4}); });
   check_refused(ctx, narrow, "argument 1 is 4 bytes, the kernel declares 16");
-  auto wide = launch("k", 2, [](Payload& p) { p.args({32, 16}); });
-  check_refused(ctx, wide, "argument 0 is 32 bytes, the kernel declares 8");
 }
 
 /**
@@ -253,6 +224,62 @@ TEST_CASE("Unit_HRR_KernelArgsSignature_GraphKernelNode", "[hrr]") {
   CHECK(err.find("seq=4242") != std::string::npos);
   CHECK(err.find("carries 1 arguments, the kernel declares 2") != std::string::npos);
   CHECK(ctx.incomplete_graphs.count(0x77) == 1);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A set-params record whose arguments do not cover the signature fails with
+ *     hipErrorInvalidValue, as a refused launch does, instead of returning
+ *     hipSuccess and leaving the node on its old arguments. Covers
+ *     hipGraphKernelNodeSetParams and hipGraphExecKernelNodeSetParams.
+ */
+TEST_CASE("Unit_HRR_KernelArgsSignature_GraphSetParams", "[hrr]") {
+  PlaybackContext ctx;
+  declare(ctx, {8, 8, 4});
+  ctx.graph_node_map[0x88] = reinterpret_cast<hipGraphNode_t>(uintptr_t{0x3000});
+  ctx.graph_exec_map[0x99] = reinterpret_cast<hipGraphExec_t>(uintptr_t{0x4000});
+
+  // Two arguments for a three-parameter kernel.
+  auto tail = [](Payload& p) {
+    const char* name = "k";
+    const uint16_t name_len = 1, num_args = 2;
+    const uint64_t co_hash[2] = {0, 0};
+    p.put(&name_len, 2);
+    p.put(name, 1);
+    p.put(co_hash, 16);
+    p.put(&num_args, 2);
+    p.args({8, 8});
+  };
+  auto run = [&](Payload& p, hrr_api_id_t id) {
+    hipError_t r = hipSuccess;
+    std::string err = hrr_test::capture_stderr([&] {
+      hrr_dispatch_seq = kSeq;
+      r = hrr_playback_dispatch[id](ctx, p.b.data());
+    });
+    CHECK(r == hipErrorInvalidValue);
+    CHECK(err.find("launch refused") != std::string::npos);
+    CHECK(err.find("carries 2 arguments, the kernel declares 3") != std::string::npos);
+  };
+
+  Payload node;
+  node.b.assign(sizeof(hrr_args_hipGraphKernelNodeSetParams), 0);
+  auto* n = reinterpret_cast<hrr_args_hipGraphKernelNodeSetParams*>(node.b.data());
+  n->node = 0x88;
+  n->pNodeParams_present = 1;
+  tail(node);
+  node.finish(HRR_API_HIPGRAPHKERNELNODESETPARAMS);
+  run(node, HRR_API_HIPGRAPHKERNELNODESETPARAMS);
+
+  Payload exec;
+  exec.b.assign(sizeof(hrr_args_hipGraphExecKernelNodeSetParams), 0);
+  auto* e = reinterpret_cast<hrr_args_hipGraphExecKernelNodeSetParams*>(exec.b.data());
+  e->hGraphExec = 0x99;
+  e->node = 0x88;
+  e->pNodeParams_present = 1;
+  tail(exec);
+  exec.finish(HRR_API_HIPGRAPHEXECKERNELNODESETPARAMS);
+  run(exec, HRR_API_HIPGRAPHEXECKERNELNODESETPARAMS);
 }
 
 /** @} */

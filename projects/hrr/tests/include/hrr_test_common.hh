@@ -148,6 +148,19 @@ struct ScopedDir {
   ~ScopedDir() { fs::remove_all(path); }
 };
 
+inline std::vector<uint8_t> read_file(const fs::path& path) {
+  std::ifstream f(path, std::ios::binary);
+  REQUIRE(f.good());
+  return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
+}
+
+inline void write_file(const fs::path& path, const std::vector<uint8_t>& bytes) {
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  f.write(reinterpret_cast<const char*>(bytes.data()),
+          static_cast<std::streamsize>(bytes.size()));
+  REQUIRE(f.good());
+}
+
 inline std::string read_text_file(const fs::path& path) {
   std::ifstream in(path, std::ios::binary);
   std::ostringstream ss;

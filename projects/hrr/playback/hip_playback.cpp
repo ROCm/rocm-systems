@@ -1033,10 +1033,11 @@ static bool decode_kernel_args(
     return true;
 }
 
-// Refuse a launch whose decoded arguments do not match the signature of the
+// Refuse a launch whose decoded arguments do not cover the signature of the
 // kernel it resolved to. HIP's argument capture walks the code object's full
-// signature and reads kernelParams[i] for each parameter, so a count or size the
-// code object disagrees with is an over-read of replay's own vectors. The archive
+// signature and reads kernelParams[i] for each parameter, so a short list or an
+// argument narrower than its parameter is an over-read of replay's own vectors
+// (extra or wider arguments are never read). The archive
 // is input like any other: the record and the code object it names are not
 // guaranteed to agree. `complete` is false when the payload ended early.
 // Returns true when the launch may go ahead; otherwise says why on stderr.
@@ -1076,7 +1077,7 @@ static bool kernel_args_fit_signature(
     }
     fprintf(stderr,
             "[HRR] %s seq=%llu kernel '%s': %s — launch refused; its arguments "
-            "would not match the kernel's signature\n",
+            "would not cover the kernel's signature\n",
             api, (unsigned long long)hrr_dispatch_seq,
             compact_kernel_name(kernel_name).c_str(), why.c_str());
     return false;
@@ -5633,7 +5634,7 @@ hipError_t playback_hipGraphKernelNodeSetParams(PlaybackContext& ctx,
                                     sizeof(*a), a->pNodeParams_bytes,
                                     a->pNodeParams_present, knp, arg_ptrs,
                                     arg_storage))
-        return hipSuccess;
+        return hipErrorInvalidValue;  // the node keeps its old arguments
     hipError_t r = hipGraphKernelNodeSetParams(node, &knp);
     return hrr_replayed_recorded_error(ctx, "hipGraphKernelNodeSetParams",
                                        a->ret, r) ? hipSuccess : r;
@@ -5654,7 +5655,7 @@ hipError_t playback_hipGraphExecKernelNodeSetParams(PlaybackContext& ctx,
                                     sizeof(*a), a->pNodeParams_bytes,
                                     a->pNodeParams_present, knp, arg_ptrs,
                                     arg_storage))
-        return hipSuccess;
+        return hipErrorInvalidValue;  // the node keeps its old arguments
     hipError_t r = hipGraphExecKernelNodeSetParams(exec, node, &knp);
     return hrr_replayed_recorded_error(ctx, "hipGraphExecKernelNodeSetParams",
                                        a->ret, r) ? hipSuccess : r;

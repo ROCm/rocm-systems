@@ -10,6 +10,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "hrr_launch_event.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <string>

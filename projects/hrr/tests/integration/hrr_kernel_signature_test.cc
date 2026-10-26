@@ -15,15 +15,18 @@
  * launch on a GPU, so the signature replay compares against comes from
  * hipKernelGetParamInfo on the code object the archive carries. It replays the
  * archive unmodified as the control, then replays copies whose launch record
- * is edited to disagree with that signature:
+ * is edited to disagree with that signature. CLR reads kernelParams[i] only for
+ * the kernel's own parameters, and only each parameter's size, so only a record
+ * that does not cover the signature is refused:
  *
- *   - too few arguments: the last explicit argument is dropped
- *   - too many arguments: one more is appended
- *   - a wrongly sized argument: an int recorded as eight bytes
- *   - a truncated payload: the record ends inside its last explicit argument
+ *   - too few arguments: the last argument is dropped
+ *   - a narrow argument: an int recorded as two bytes
+ *   - a truncated payload: the record ends inside its last argument
  *
  * Each must be refused with a line naming the sequence and the kernel, exit
- * non-zero, and launch nothing.
+ * non-zero, and launch nothing. Two edits are not refused, because nothing is
+ * read past the record: one more argument appended, and an int recorded as eight
+ * bytes. Each must replay as the unmodified archive does.
  */
 
 #include "hrr_test_common.hh"
@@ -81,19 +84,6 @@ TEST_CASE("Unit_HRR_KernelSignature_Direct", "[.][hrr-direct]") {
 
 namespace {
 
-std::vector<uint8_t> read_bytes(const fs::path& path) {
-  std::ifstream f(path, std::ios::binary);
-  REQUIRE(f.good());
-  return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
-}
-
-void write_bytes(const fs::path& path, const std::vector<uint8_t>& bytes) {
-  std::ofstream f(path, std::ios::binary | std::ios::trunc);
-  f.write(reinterpret_cast<const char*>(bytes.data()),
-          static_cast<std::streamsize>(bytes.size()));
-  REQUIRE(f.good());
-}
-
 // One recorded argument: where its 3-byte (kind, size) prefix starts in the
 // record, and the whole of it, trailing pointer-offset list included.
 struct ArgSpan {
@@ -141,15 +131,6 @@ struct LaunchRecord {
     }
   }
 
-  // The last argument that is a plain value or a pointer. Hidden arguments
-  // (kind 2) are not part of the signature replay compares against.
-  size_t last_explicit() const {
-    for (size_t i = args.size(); i-- > 0;)
-      if (args[i].kind != 2 && args[i].kind != 3) return i;
-    FAIL("the launch record has no explicit argument");
-    return 0;
-  }
-
   void set_num_args(int delta) {
     uint16_t n = 0;
     std::memcpy(&n, bytes.data() + num_args_at, 2);
@@ -165,14 +146,15 @@ struct LaunchRecord {
   }
 };
 
-enum class Mutation { TooFew, TooMany, WrongSize, Truncated };
+enum class Mutation { TooFew, Narrow, Truncated, TooMany, Wide };
 
 const char* mutation_name(Mutation m) {
   switch (m) {
     case Mutation::TooFew:    return "too few arguments";
-    case Mutation::TooMany:   return "too many arguments";
-    case Mutation::WrongSize: return "a wrongly sized argument";
+    case Mutation::Narrow:    return "a narrow argument";
     case Mutation::Truncated: return "a truncated payload";
+    case Mutation::TooMany:   return "one more argument";
+    case Mutation::Wide:      return "a wide argument";
   }
   return "?";
 }
@@ -180,38 +162,47 @@ const char* mutation_name(Mutation m) {
 // Every mutation edits the record only; the code object it names is untouched,
 // so its signature stays what the kernel was compiled with.
 void mutate(LaunchRecord& rec, Mutation m) {
-  const size_t last = rec.last_explicit();
+  // Capture never records hidden arguments: the pointer, scale and bias.
+  REQUIRE(rec.args.size() == 3);
+  const ArgSpan& last = rec.args[2];
+  const ArgSpan& scale = rec.args[1];
   switch (m) {
     case Mutation::TooFew: {
-      const ArgSpan& a = rec.args[last];
-      rec.bytes.erase(rec.bytes.begin() + a.at, rec.bytes.begin() + a.at + a.len);
+      rec.bytes.erase(rec.bytes.begin() + last.at, rec.bytes.begin() + last.at + last.len);
       rec.set_num_args(-1);
       break;
     }
     case Mutation::TooMany: {
-      const ArgSpan& a = rec.args.back();
       const uint8_t extra[3 + 4] = {0, 4, 0, 0, 0, 0, 0};
-      rec.bytes.insert(rec.bytes.begin() + a.at + a.len, extra, extra + sizeof(extra));
+      rec.bytes.insert(rec.bytes.begin() + last.at + last.len, extra, extra + sizeof(extra));
       rec.set_num_args(+1);
       break;
     }
-    case Mutation::WrongSize: {
-      // The int `scale` (the second explicit argument) recorded as 8 bytes.
-      const ArgSpan& a = rec.args[last - 1];
-      REQUIRE(a.kind == 0);
-      REQUIRE(a.size == sizeof(int));
+    case Mutation::Narrow: {
+      // The int `scale` recorded as 2 bytes.
+      REQUIRE(scale.kind == 0);
+      REQUIRE(scale.size == sizeof(int));
+      const uint16_t narrow = 2;
+      std::memcpy(rec.bytes.data() + scale.at + 1, &narrow, 2);
+      rec.bytes.erase(rec.bytes.begin() + scale.at + 3 + 2,
+                      rec.bytes.begin() + scale.at + scale.len);
+      break;
+    }
+    case Mutation::Wide: {
+      // The int `scale` recorded as 8 bytes, the extra bytes zero.
+      REQUIRE(scale.kind == 0);
+      REQUIRE(scale.size == sizeof(int));
       const uint16_t wide = 8;
-      std::memcpy(rec.bytes.data() + a.at + 1, &wide, 2);
+      std::memcpy(rec.bytes.data() + scale.at + 1, &wide, 2);
       const uint8_t pad[4] = {};
-      rec.bytes.insert(rec.bytes.begin() + a.at + a.len, pad, pad + sizeof(pad));
+      rec.bytes.insert(rec.bytes.begin() + scale.at + scale.len, pad, pad + sizeof(pad));
       break;
     }
     case Mutation::Truncated: {
-      // End the record two bytes into the last explicit argument's value, after
-      // the count already promised every argument.
-      const ArgSpan& a = rec.args[last];
-      REQUIRE(a.size == sizeof(int));
-      rec.bytes.resize(a.at + 3 + 2);
+      // End the record two bytes into the last argument's value, after the
+      // count already promised every argument.
+      REQUIRE(last.size == sizeof(int));
+      rec.bytes.resize(last.at + 3 + 2);
       break;
     }
   }
@@ -225,7 +216,7 @@ void splice_record(const fs::path& copy_root, const std::vector<uint8_t>& origin
   const std::vector<fs::path> archives = hrr_process_archives(copy_root);
   REQUIRE(archives.size() == 1);
   const fs::path events = archives.front() / "events.bin";
-  std::vector<uint8_t> file = read_bytes(events);
+  std::vector<uint8_t> file = read_file(events);
   const auto found = std::search(file.begin(), file.end(), original.begin(), original.end());
   REQUIRE(found != file.end());
   // The record has to be unique in the stream, or the edit could land elsewhere.
@@ -233,7 +224,7 @@ void splice_record(const fs::path& copy_root, const std::vector<uint8_t>& origin
   const auto at = found - file.begin();
   file.erase(file.begin() + at, file.begin() + at + static_cast<ptrdiff_t>(original.size()));
   file.insert(file.begin() + at, replacement.begin(), replacement.end());
-  write_bytes(events, file);
+  write_file(events, file);
 }
 
 // The one launch record of the kernel under test.
@@ -274,6 +265,8 @@ size_t kernels_launched(const std::string& out) {
 //   - Each mutated copy: replay exits non-zero, prints the refusal naming the
 //     record's sequence and the kernel, launches no kernel, and the read-back
 //     of the buffer the kernel would have written does not pass.
+//   - An extra argument, or one wider than its parameter, replays like the
+//     control: CLR reads neither past the record.
 // ---------------------------------------------------------------------------
 TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_kernel_signature.hrr");
@@ -282,8 +275,8 @@ TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
 
   const std::vector<uint8_t> original = find_launch_record(archive);
   const LaunchRecord parsed(original);
-  // Pointer, scale, bias and whatever hidden arguments the compiler adds.
-  REQUIRE(parsed.args.size() >= 3);
+  // Pointer, scale, bias: capture records no hidden arguments.
+  REQUIRE(parsed.args.size() == 3);
 
   SECTION("the unmodified archive replays") {
     auto [rc, out] = hrr_playback_merged(cap.path);
@@ -297,8 +290,7 @@ TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
     CHECK(fail == 0);
   }
 
-  for (const Mutation m : {Mutation::TooFew, Mutation::TooMany, Mutation::WrongSize,
-                           Mutation::Truncated}) {
+  for (const Mutation m : {Mutation::TooFew, Mutation::Narrow, Mutation::Truncated}) {
     DYNAMIC_SECTION("a launch record with " << mutation_name(m) << " is refused") {
       ScopedDir copy(fs::temp_directory_path() / "hrr_kernel_signature_edit.hrr");
       fs::copy(cap.path, copy.path, fs::copy_options::recursive);
@@ -330,6 +322,29 @@ TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
       REQUIRE(hrr_parse_d2h_summary(out2, pass, fail));
       CHECK(pass == 0);
       CHECK(fail >= 1);
+    }
+  }
+
+  // CLR reads the kernel's own parameters, each at its own size: an extra
+  // argument, or an argument wider than its parameter, is never read past.
+  for (const Mutation m : {Mutation::TooMany, Mutation::Wide}) {
+    DYNAMIC_SECTION("a launch record with " << mutation_name(m) << " replays") {
+      ScopedDir copy(fs::temp_directory_path() / "hrr_kernel_signature_edit.hrr");
+      fs::copy(cap.path, copy.path, fs::copy_options::recursive);
+      LaunchRecord edited(original);
+      mutate(edited, m);
+      REQUIRE(edited.bytes != original);
+      splice_record(copy.path, original, edited.bytes);
+
+      auto [rc, out] = hrr_playback_merged(copy.path);
+      INFO("Replay of the edited archive:\n" << out);
+      CHECK(rc == 0);
+      CHECK(out.find("launch refused") == std::string::npos);
+      CHECK(kernels_launched(out) == 1);
+      int pass = 0, fail = 0;
+      REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
+      CHECK(pass >= 1);
+      CHECK(fail == 0);
     }
   }
 }

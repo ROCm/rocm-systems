@@ -733,16 +733,18 @@ The archive is input, and a launch record does not have to agree with the code
 object it names. HIP walks the loaded kernel's full signature and copies
 `size` bytes out of `kernelParams[i]` for every parameter, so a record with fewer
 arguments than the kernel declares, or an argument narrower than its parameter,
-is an over-read of replay's own argument vectors. After resolving the kernel,
-replay reads its signature with `hipKernelGetParamInfo` and refuses the launch
-(`hipErrorInvalidValue`, one `[HRR] ... seq=<n> ... launch refused` line naming
-the mismatch) unless the decoded argument count and each argument's size equal the
-signature's. A payload that ends before its declared arguments is refused the same
+is an over-read of replay's own argument vectors. Extra arguments and wider ones
+are never read. After resolving the kernel, replay reads its signature with
+`hipKernelGetParamInfo` and refuses the launch (`hipErrorInvalidValue`, one
+`[HRR] ... seq=<n> ... launch refused` line naming the mismatch) unless the decoded
+record has at least as many arguments and each is at least as wide as its
+parameter. A payload that ends before its declared arguments is refused the same
 way. The graph kernel-node paths apply the same check: an add skips the node and
-marks its graph incomplete, a set-params call is skipped like any other node
-parameter record replay cannot rebuild. A `--replace-kernel` code object is
-checked against the recorded arguments the same way, so a replacement must keep
-the original signature. The runtime exposes each parameter's size and offset but
+marks its graph incomplete; a set-params call (graph or exec) returns
+`hipErrorInvalidValue`, like a refused launch, because the node would otherwise
+keep its old arguments. A `--replace-kernel` code object is checked against the
+recorded arguments the same way, so a replacement may not declare more parameters,
+or wider ones, than the record carries. The runtime exposes each parameter's size and offset but
 not its type, so the type is not compared.
 
 ## Fat Binary Registration
