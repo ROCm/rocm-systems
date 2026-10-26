@@ -90,7 +90,6 @@ static thread_local int ibDmaSupportInitDev; // which device to init, must be th
 static void ibDmaBufSupportInitOnce() {
   ncclResult_t res;
   int dev_fail = 0;
-  int probeErrno = 0;
 
   // This is a physical device, not a virtual one, so select from ibDevs
   ncclIbMergedDev* mergedDev = ncclIbMergedDevs + ibDmaSupportInitDev;
@@ -100,15 +99,12 @@ static void ibDmaBufSupportInitOnce() {
   res = rocmLibraryInit();
   if (res != ncclSuccess) goto failure;
   NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, ctx), res, failure);
-  // Test kernel DMA-BUF support with a dummy call (fd=-1). Clear errno first: the
-  // data-direct probe sets EOPNOTSUPP when mlx5dv_reg_dmabuf_mr is missing, and
-  // that must not be read as "ibv DMA-BUF unsupported". A false result here is
-  // what sends GPU registration down ibv_reg_mr_iova2 (fd == -1).
-  errno = 0;
+  // Test kernel DMA-BUF support with a dummy call (fd=-1).
+  // wrap_direct_ibv_reg_dmabuf_mr writes errno itself, so a leftover from the
+  // data-direct probe cannot decide dev_fail.
   (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);
   // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
-  probeErrno = errno;
-  dev_fail |= (probeErrno == EOPNOTSUPP) || (probeErrno == EPROTONOSUPPORT);
+  dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
   NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
   // stop the search and goto failure
   if (dev_fail) goto failure;

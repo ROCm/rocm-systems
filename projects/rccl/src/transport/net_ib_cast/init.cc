@@ -175,14 +175,11 @@ static bool ncclMlx5dvDmaBufCapable(ibv_context* context) {
                                          0 /* mlx5 flags*/);
   dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
   NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
-  // A missing mlx5dv_reg_dmabuf_mr is "not data-direct", not a generic DMA-BUF
-  // failure. Drop its EOPNOTSUPP so the DMA-BUF probe does not inherit it and
-  // send GPU registration to ibv_reg_mr_iova2.
-  errno = 0;
+  // errno is sampled after each call above. Clearing it here would not change
+  // IbCastDmaBufSupport(): that probe calls wrap_direct_ibv_reg_dmabuf_mr again.
   if (dev_fail) goto failure;
   return true;
 failure:
-  errno = 0;
   return false;
 }
 

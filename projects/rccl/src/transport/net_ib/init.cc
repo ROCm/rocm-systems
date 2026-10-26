@@ -239,9 +239,9 @@ static bool ncclMlx5dvDmaBufCapable(ibv_context* context) {
 
   struct ibv_pd* pd;
   NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, context), res, failure);
-  // Test kernel DMA-BUF support with a dummy call (fd=-1). Check errno after
-  // each probe: a missing mlx5dv_reg_dmabuf_mr sets EOPNOTSUPP and must not be
-  // masked by a later success, nor should ibv failure be overwritten.
+  // Sample errno after each dummy call. The second call overwrites errno, and
+  // clearing it here would not change ncclIbDmaBufSupport(): that probe calls
+  // wrap_direct_ibv_reg_dmabuf_mr again and reads the errno that call sets.
   (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);
   // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
   dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
@@ -250,14 +250,9 @@ static bool ncclMlx5dvDmaBufCapable(ibv_context* context) {
   // mlx5dv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
   dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
   NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
-  // A missing mlx5dv_reg_dmabuf_mr is "not data-direct", not a generic DMA-BUF
-  // failure. Drop its EOPNOTSUPP so ncclIbDmaBufSupport() does not inherit it
-  // and send GPU registration to ibv_reg_mr_iova2.
-  errno = 0;
   if (dev_fail) goto failure;
   return true;
 failure:
-  errno = 0;
   return false;
 }
 

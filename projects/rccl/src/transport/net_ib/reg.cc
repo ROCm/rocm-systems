@@ -28,9 +28,7 @@ ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, 
       bool relaxedOrdering = ncclIbRelaxedOrderingEnabled && (mrFlags & NCCL_NET_MR_FLAG_FORCE_SO) == 0;
       if (relaxedOrdering) flags |= IBV_ACCESS_RELAXED_ORDERING;
       if (fd != -1) {
-        /* DMA-BUF fd. dataDirect is set only when mlx5dv_reg_dmabuf_mr exists;
-         * otherwise this is ibv_reg_dmabuf_mr. The fd == -1 arm below is
-         * ibv_reg_mr_iova2 and is reached when ncclIbDmaBufSupport() fails. */
+        /* DMA-BUF fd. dataDirect tries mlx5 first and falls back to ibv_reg_dmabuf_mr. */
         NCCLCHECK(wrap_reg_dmabuf_mr(&mr, base->pd, offset, pages * pageSize, addr, fd, flags,
                                      ncclIbDevs[base->ibDevN].capsProvider.mlx5.dataDirect));
       } else {
