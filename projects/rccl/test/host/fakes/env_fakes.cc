@@ -152,6 +152,12 @@ int64_t DefaultLoadParam(char const* env, int64_t deftVal, int64_t /*uninitializ
     if (errno == 0 && end != str) value = parsed;
   }
 
+  // `cache` has to be written even though nothing here wants caching: RCCL_PARAM discards the
+  // return value and returns `cache` (param.h:44), so leaving it at `uninitialized` would make
+  // every rcclParam*() answer INT64_MIN. The cost is that a param's FIRST read in a binary wins
+  // for the whole binary -- the macro short-circuits on `cache` before ncclLoadParam is reached,
+  // so a later SetMicroEnv cannot change it. A test needing a per-test value must either pick a
+  // param no earlier test reads, or script g_ncclLoadParam instead of the environment.
   if (cache) *cache = value;
   if (noCache) *noCache = 0;
   return value;

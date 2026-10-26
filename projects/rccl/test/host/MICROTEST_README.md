@@ -945,8 +945,9 @@ triage it into the right bucket:
   `fakes/utils_fakes.cc`, since `src/misc/utils.cc` owns them). Only
   when the symbol has no owning TU does it belong in the test itself.
 - **It's a logging or env-param helper** → already covered by
-  `ncclDebugLog` (prints to stderr) / `ncclLoadParam` (no-op). If a new
-  logging primitive
+  `ncclDebugLog` (prints to stderr) / `ncclLoadParam` (parses the value
+  `SetMicroEnv` scripted for that name, and the param's compile-time default
+  when the name is unmapped). If a new logging primitive
   appears, follow the same pattern.
 - **It's a `ncclProxy*` / `ncclShm*` / `ncclCommGraph*` / `ncclTopo*`
   function** → add a return-failure stub. If a future test will need
