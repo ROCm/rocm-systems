@@ -86,6 +86,27 @@ TEST(SysfsTopologyTest, DefaultGpuInfoHasCoherentSdmaCounts) {
   EXPECT_EQ(props["num_sdma_queues_per_engine"], 0u);
 }
 
+TEST(SysfsTopologyTest, LegacyMultiGpuTopologyKeepsPeerLinks) {
+  auto first = make_gpu_info(120500);
+  auto second = first;
+  second.gpu_id = 2;
+  second.drm_render_minor = 129;
+
+  Sysfs sysfs;
+  const auto topology_dir = sysfs.generate(std::vector<Sysfs::GpuInfo>{first, second});
+  ASSERT_FALSE(topology_dir.empty());
+  for (const auto node : {"1", "2"}) {
+    const auto path = std::filesystem::path(topology_dir) / "nodes" / node;
+    const auto properties = read_properties((path / "properties").string());
+    ASSERT_TRUE(properties.contains("io_links_count"));
+    ASSERT_TRUE(properties.contains("p2p_links_count"));
+    EXPECT_EQ(properties.at("io_links_count"), 2u);
+    EXPECT_EQ(properties.at("p2p_links_count"), 1u);
+    EXPECT_TRUE(std::filesystem::exists(path / "io_links" / "1" / "properties"));
+    EXPECT_TRUE(std::filesystem::exists(path / "p2p_links" / "0" / "properties"));
+  }
+}
+
 TEST(SysfsTopologyTest, W7900PublishesComputeIpDiscoveryVersions) {
   Sysfs sysfs;
   util::StringDiagnostic diagnostic;
@@ -642,7 +663,11 @@ TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
     SCOPED_TRACE(name);
 
     config::LoadedConfig loaded;
-    ASSERT_TRUE(test::load_valid_config(entry.path().string(), loaded));
+    if (name == "gfx1250_mi455x_kmd_2node_net.json") {
+      ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), loaded, "node0"));
+    } else {
+      ASSERT_TRUE(test::load_valid_config(entry.path().string(), loaded));
+    }
     if (!loaded.device.present || loaded.soc() == nullptr)
       continue;
     ++checked;
