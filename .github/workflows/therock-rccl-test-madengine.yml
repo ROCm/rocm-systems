@@ -119,6 +119,11 @@ jobs:
       # everything else it runs, and nothing here prunes those caches, so they
       # only ever grow -- across runs, workloads and branches alike. Put them
       # under WORK_DIR instead, which the cleanup step below deletes.
+      # pip reads XDG_CACHE_HOME; conda does not, and keeps its own under
+      # ~/.conda. The literal is repeated because entries in this block cannot
+      # reference each other.
+      XDG_CACHE_HOME: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache"
+      CONDA_PKGS_DIRS: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache/conda-pkgs"
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -138,6 +143,21 @@ jobs:
             echo "Unsupported arch for MADEngine: ${{ inputs.amdgpu_families }}"
             exit 1
           fi
+
+      # The runner account's home is a separate, much smaller allotment than
+      # /apps, and exhausting it fails the conda step below with a bare
+      # "[Errno 122] Disk quota exceeded" that names no path -- which reads as
+      # a full filesystem and sends you to df on the wrong mount. Report both
+      # mounts and the biggest entries in home up front, so the log says which
+      # one ran out and what is holding it.
+      - name: Report runner storage
+        run: |
+          echo "== home =="
+          df -h "${HOME}" || true
+          echo "== /apps =="
+          df -h /apps || true
+          echo "== largest entries in ${HOME} =="
+          du -shx "${HOME}"/* "${HOME}"/.[!.]* 2>/dev/null | sort -h | tail -25 || true
 
       # Conda-forge Python under WORK_DIR: the compute nodes (another distro, older
       # glibc) run madengine from it via PATH, where setup-python's build won't start.
@@ -349,7 +369,8 @@ jobs:
           # runner account is quota-bound on /apps.
           rm -rf "${WORK_DIR}/madengine" "${WORK_DIR}/MAD" "${WORK_DIR}/conda" \
                  "${WORK_DIR}/env" "${WORK_DIR}/overlay_ctx" \
-                 "${WORK_DIR}/docker_builds" "${WORK_DIR}/ab" "${WORK_DIR}/repro"
+                 "${WORK_DIR}/docker_builds" "${WORK_DIR}/ab" "${WORK_DIR}/repro" \
+                 "${WORK_DIR}/cache"
           echo "Remaining in ${WORK_DIR}:"
           du -sh "${WORK_DIR}" 2>/dev/null || true
 
