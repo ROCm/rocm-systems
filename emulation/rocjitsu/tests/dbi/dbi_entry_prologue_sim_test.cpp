@@ -499,8 +499,10 @@ protected:
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     for (uint16_t sdst = 0; sdst < REGISTER_SET_ALLOCATABLE_SGPRS - 1; sdst += 2) {
-      const auto load =
+      const auto load_result =
           build_s_load_dwordx2(sdst, /*sbase=*/0, layout->payload_offsets.front(), a_.arch);
+      ASSERT_TRUE(load_result.succeeded());
+      const auto load = load_result.value();
       for (size_t i = 0; i + 1 < words.size(); ++i) {
         if (words[i] != load[0] || words[i + 1] != load[1])
           continue;
