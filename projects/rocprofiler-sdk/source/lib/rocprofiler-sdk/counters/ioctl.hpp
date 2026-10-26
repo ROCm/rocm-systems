@@ -39,6 +39,13 @@ get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_ve
 uint32_t
 kfd_profiler_version();
 
+// Whether the given KFD profiler interface version supports dispatch mode (see
+// KFD_IOC_PROFILER_VERSION_NUM history in kfd_ioctl.h). Exposed separately from
+// dispatch_mode_supported() so the version-comparison logic can be unit tested without a real
+// /dev/kfd.
+bool
+dispatch_mode_supported_for_version(uint32_t version);
+
 bool
 counter_collection_has_device_lock();
 

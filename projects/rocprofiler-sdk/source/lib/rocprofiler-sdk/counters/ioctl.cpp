@@ -95,7 +95,7 @@ profiler_ioctl(kfd_ioctl_profiler_args& args)
 bool
 dispatch_mode_supported()
 {
-    return kfd_profiler_version() >= KFD_IOC_PROFILER_VERSION_NUM;
+    return dispatch_mode_supported_for_version(kfd_profiler_version());
 }
 }  // namespace
 
@@ -108,6 +108,12 @@ get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_ve
     }
 
     return AMDKFD_IOC_PROFILER;
+}
+
+bool
+dispatch_mode_supported_for_version(uint32_t version)
+{
+    return version >= KFD_IOC_PROFILER_VERSION_NUM;
 }
 
 uint32_t
