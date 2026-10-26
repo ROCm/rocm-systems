@@ -31,5 +31,7 @@ void SetFabricPeerBase(void* ptr);
 void SetFabricPeerStride(size_t stride);
 void SetFabricVmmQueryOk(bool ok);
 void SetFabricRetainOk(bool ok);
+/** ncclFabricMemHandler instances constructed and not yet destroyed. */
+int LiveFabricHandlers();
 
 }  // namespace GinAnvilPluginStubs

@@ -634,21 +634,57 @@ TEST_F(GinAnvilPluginTest, RegMrSym_FabricRefcountAndExchangeFail) {
 
   void* data = reinterpret_cast<void*>(0x80001000ULL);
 
+  // Expects every fabric map to hold `entries` keys, `data` to hold `refcount`
+  // references, and `live` stub handlers to exist.
+  auto expectFabric = [&](size_t entries, int refcount, int live) {
+    ncclGinAnvilFabricTestState st{};
+    ncclGinAnvilPluginTestFabricState(coll, data, &st);
+    EXPECT_EQ(st.handlers, entries);
+    EXPECT_EQ(st.handles, entries);
+    EXPECT_EQ(st.refcounts, entries);
+    EXPECT_EQ(st.refcount, refcount);
+    EXPECT_EQ(GinAnvilPluginStubs::LiveFabricHandlers(), live);
+  };
+
+  // A failed exchange publishes nothing, and FabricSetupGuard deletes the
+  // handler it allocated.
   GinAnvilPluginStubs::SetFabricExchangeFail(true);
   void* mhFail = nullptr;
   void* ghFail = nullptr;
   EXPECT_NE(plugin_.regMrSym(coll, data, 4096, 0, 0, &mhFail, &ghFail), ncclSuccess);
   GinAnvilPluginStubs::SetFabricExchangeFail(false);
+  {
+    SCOPED_TRACE("after failed exchange");
+    expectFabric(0, 0, 0);
+  }
 
   void* mh1 = nullptr;
   void* gh1 = nullptr;
   void* mh2 = nullptr;
   void* gh2 = nullptr;
   ASSERT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh1, &gh1), ncclSuccess);
+  {
+    SCOPED_TRACE("after first registration");
+    expectFabric(1, 1, 1);
+  }
+  // The second registration of the same buffer reuses the published handler.
   ASSERT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh2, &gh2), ncclSuccess);
   EXPECT_NE(mh1, mh2);
+  {
+    SCOPED_TRACE("after second registration");
+    expectFabric(1, 2, 1);
+  }
   EXPECT_EQ(plugin_.deregMrSym(coll, mh1), ncclSuccess);
+  {
+    SCOPED_TRACE("after first deregistration");
+    expectFabric(1, 1, 1);
+  }
+  // Dropping the last reference erases all three entries and deletes the handler.
   EXPECT_EQ(plugin_.deregMrSym(coll, mh2), ncclSuccess);
+  {
+    SCOPED_TRACE("after last deregistration");
+    expectFabric(0, 0, 0);
+  }
   plugin_.closeColl(coll);
   plugin_.finalize(ictx);
 }

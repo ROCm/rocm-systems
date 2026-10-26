@@ -267,6 +267,16 @@ void ncclGinAnvilPluginTestResetHostState(void) {
   ncclGinFabricA2ALaneClearAll();
 }
 
+void ncclGinAnvilPluginTestFabricState(void* collComm, void* data, struct ncclGinAnvilFabricTestState* out) {
+  if (out == nullptr) return;
+  std::lock_guard<std::mutex> lock(pluginMutex);
+  out->handlers = fabricBufferHandlers.size();
+  out->handles = fabricBufferHandles.size();
+  out->refcounts = fabricBufferRefcount.size();
+  auto it = fabricBufferRefcount.find(GinAnvilFabricKey{collComm, data});
+  out->refcount = (it == fabricBufferRefcount.end()) ? 0 : it->second;
+}
+
 static ncclResult_t ginAnvilInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
   const char* gin_type = getenv("NCCL_GIN_TYPE");
   if (gin_type && atoi(gin_type) != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return ncclInternalError;

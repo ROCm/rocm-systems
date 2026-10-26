@@ -22,4 +22,14 @@ void ncclGinAnvilSetInitContext(void* initCtx, struct ncclComm* comm);
 /** Clears plugin host singleton state (pending signal binds, MR refcounts). For unit tests. */
 void ncclGinAnvilPluginTestResetHostState(void);
 
+/** Fabric MR bookkeeping, for unit tests: the entry count of each per-buffer map,
+ *  and the reference count of the (collComm, data) key, or 0 if it is not registered. */
+struct ncclGinAnvilFabricTestState {
+  size_t handlers;
+  size_t handles;
+  size_t refcounts;
+  int refcount;
+};
+void ncclGinAnvilPluginTestFabricState(void* collComm, void* data, struct ncclGinAnvilFabricTestState* out);
+
 #endif

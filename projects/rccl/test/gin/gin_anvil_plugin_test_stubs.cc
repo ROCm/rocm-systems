@@ -43,6 +43,8 @@ struct State {
   size_t fabricPeerStride = 0x1000;
   bool fabricVmmQueryOk = true;
   bool fabricRetainOk = true;
+  // Constructed minus destroyed ncclFabricMemHandler instances.
+  int liveFabricHandlers = 0;
 };
 
 struct FakeSdmaOpaque {
@@ -76,6 +78,7 @@ void SetFabricPeerBase(void* ptr) { g.fabricPeerBase = ptr; }
 void SetFabricPeerStride(size_t stride) { g.fabricPeerStride = stride; }
 void SetFabricVmmQueryOk(bool ok) { g.fabricVmmQueryOk = ok; }
 void SetFabricRetainOk(bool ok) { g.fabricRetainOk = ok; }
+int LiveFabricHandlers() { return g.liveFabricHandlers; }
 
 }  // namespace GinAnvilPluginStubs
 
@@ -272,9 +275,11 @@ bool ginFabricLsaA2ACapable(struct ncclComm* comm, int ginNranks) {
 
 ncclFabricMemHandler::ncclFabricMemHandler(void* bootstrap, int rank, int nranks, struct ncclMemManager* manager)
   : bootstrap_(bootstrap), rank_(rank), nranks_(nranks), manager_(manager), selfPtr_(nullptr), selfHandle_{},
-    selfSize_(0), memPtrs_(static_cast<size_t>(nranks), nullptr), exchanged_(false) {}
+    selfSize_(0), memPtrs_(static_cast<size_t>(nranks), nullptr), exchanged_(false) {
+  ++GinAnvilPluginStubs::g.liveFabricHandlers;
+}
 
-ncclFabricMemHandler::~ncclFabricMemHandler() {}
+ncclFabricMemHandler::~ncclFabricMemHandler() { --GinAnvilPluginStubs::g.liveFabricHandlers; }
 
 ncclResult_t ncclFabricMemHandler::addSelfDeviceMem(void* deviceMemPtr, hipMemGenericAllocationHandle_t handle,
                                                     size_t size) {
