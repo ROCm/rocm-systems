@@ -22,7 +22,7 @@ def write(path: Path, text: str) -> None:
 
 
 class Tree(unittest.TestCase):
-    """A fake checkout whose generator writes whatever self.generated holds."""
+    """A fake checkout whose runner records the commands it is given."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -30,11 +30,7 @@ class Tree(unittest.TestCase):
         self.root = base / "src"
         self.out = base / "out"
         self.out.mkdir()
-        for tracked in chk.GENERATED_FILES:
-            write(self.root / tracked, f"// {tracked}\n")
-        write(self.root / chk.MATRIX_EXPECTATIONS, "expect\n")
-        self.generated = {t: f"// {t}\n" for t in chk.GENERATED_FILES}
-        self.emitted = "expect\n"
+        write(self.root / chk.API_ARGS_HEADER, "// current header\n")
         self.calls = []
         self.rc = {}
 
@@ -43,13 +39,7 @@ class Tree(unittest.TestCase):
 
     def runner(self, cmd):
         self.calls.append(list(cmd))
-        script = Path(cmd[1]).name
-        if script == "gen_hrr_api_args.py":
-            for tracked, name in chk.GENERATED_FILES.items():
-                write(self.out / name, self.generated[tracked])
-        if "--emit-cxx" in cmd:
-            write(Path(cmd[cmd.index("--emit-cxx") + 1]), self.emitted)
-        return self.rc.get(script, 0)
+        return self.rc.get(Path(cmd[1]).name, 0)
 
     def quiet(self, fn, *args, **kwargs):
         buf = io.StringIO()
@@ -58,41 +48,8 @@ class Tree(unittest.TestCase):
         return result, buf.getvalue()
 
 
-class GeneratedTest(Tree):
-    def test_up_to_date(self):
-        ok, _ = self.quiet(chk.check_generated, self.root, self.out, self.runner)
-        self.assertTrue(ok)
-        self.assertIn("--check-hrr-coverage", self.calls[0])
-
-    def test_stale_file_is_reported(self):
-        stale = "projects/hrr/playback/hip_playback_generated.cpp"
-        self.generated[stale] = "// changed\n"
-        ok, output = self.quiet(chk.check_generated, self.root, self.out, self.runner)
-        self.assertFalse(ok)
-        self.assertIn("::error::checked-in HRR generated sources are stale", output)
-        self.assertIn(stale, output)
-        self.assertIn("+// changed", output)
-
-    def test_line_endings_are_ignored(self):
-        tracked = chk.API_ARGS_HEADER
-        self.generated[tracked] = f"// {tracked}\r\n"
-        ok, _ = self.quiet(chk.check_generated, self.root, self.out, self.runner)
-        self.assertTrue(ok)
-
-    def test_generator_failure(self):
-        self.rc["gen_hrr_api_args.py"] = 2
-        ok, output = self.quiet(chk.check_generated, self.root, self.out, self.runner)
-        self.assertFalse(ok)
-        self.assertIn("failed (exit 2)", output)
-
-
 class ApiCompatTest(Tree):
-    def regenerate(self):
-        self.quiet(chk.check_generated, self.root, self.out, self.runner)
-        self.calls.clear()
-
     def test_compares_against_base(self):
-        self.regenerate()
         ok, _ = self.quiet(
             chk.check_api_compat, self.root, self.out, "abc",
             self.runner, lambda root, sha: ("base header\n", None),
@@ -100,11 +57,12 @@ class ApiCompatTest(Tree):
         self.assertTrue(ok)
         cmd = self.calls[0]
         self.assertEqual(Path(cmd[1]).name, "check_hrr_api_compat.py")
+        current = Path(cmd[cmd.index("--current-header") + 1])
+        self.assertEqual(current, self.root / chk.API_ARGS_HEADER)
         base = Path(cmd[cmd.index("--base-header") + 1])
         self.assertEqual(base.read_text(), "base header\n")
 
     def test_incompatible_ids_fail(self):
-        self.regenerate()
         self.rc["check_hrr_api_compat.py"] = 1
         ok, output = self.quiet(
             chk.check_api_compat, self.root, self.out, "abc",
@@ -114,7 +72,6 @@ class ApiCompatTest(Tree):
         self.assertIn("not compatible with abc", output)
 
     def test_missing_base_header_passes(self):
-        self.regenerate()
         ok, output = self.quiet(
             chk.check_api_compat, self.root, self.out, "abc",
             self.runner, lambda root, sha: (None, None),
@@ -126,7 +83,6 @@ class ApiCompatTest(Tree):
     def test_git_failure_fails_instead_of_passing(self):
         # A base blob the blob:none clone cannot fetch, or a base commit it
         # does not have: not "the file is absent", so no silent pass.
-        self.regenerate()
         failure = (None, "cannot read projects/hrr/include/hrr/hrr_api_args.h "
                          "at abc: fatal: could not read from remote repository")
         ok, output = self.quiet(
@@ -137,14 +93,6 @@ class ApiCompatTest(Tree):
         self.assertEqual(self.calls, [])
         self.assertIn("::error::cannot read", output)
         self.assertIn("do not pass it silently", output)
-
-    def test_needs_regenerated_header(self):
-        ok, output = self.quiet(
-            chk.check_api_compat, self.root, self.out, "abc",
-            self.runner, lambda root, sha: ("x", None),
-        )
-        self.assertFalse(ok)
-        self.assertIn("run the generated check first", output)
 
 
 class BaseHeaderTest(unittest.TestCase):
@@ -190,24 +138,18 @@ class BaseHeaderTest(unittest.TestCase):
         self.assertIn("at " + "0" * 40, failure)
 
 
-class ApiMatrixTest(Tree):
-    def test_up_to_date(self):
-        ok, _ = self.quiet(chk.check_api_matrix, self.root, self.out, self.runner)
+class WorkloadsTest(Tree):
+    def test_runs_the_workload_check(self):
+        ok, _ = self.quiet(chk.check_workloads, self.root, self.runner)
         self.assertTrue(ok)
-        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(Path(self.calls[0][1]).name, "check_matrix.py")
+        self.assertIn("--check-workloads", self.calls[0])
 
-    def test_stale_expectations(self):
-        self.emitted = "different\n"
-        ok, output = self.quiet(chk.check_api_matrix, self.root, self.out, self.runner)
+    def test_failure_is_reported(self):
+        self.rc["check_matrix.py"] = 2
+        ok, output = self.quiet(chk.check_workloads, self.root, self.runner)
         self.assertFalse(ok)
-        self.assertIn("hrr_api_matrix_expectations.h is stale", output)
-
-    def test_step_failure_stops(self):
-        self.rc["derive_manifest.py"] = 3
-        ok, output = self.quiet(chk.check_api_matrix, self.root, self.out, self.runner)
-        self.assertFalse(ok)
-        self.assertEqual(len(self.calls), 1)
-        self.assertIn("derive_manifest.py failed (exit 3)", output)
+        self.assertIn("--check-workloads failed (exit 2)", output)
 
 
 class ResolveBaseTest(unittest.TestCase):

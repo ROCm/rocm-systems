@@ -1,23 +1,22 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Check the HRR sources that are generated from the HIP API headers.
+"""Check the HRR sources against their base and the Catch2 sources.
 
-  generated   Regenerate hrr_api_args.h and the capture and playback dispatch
-              sources and compare them with the checked-in copies.
-  api-compat  Check that the regenerated API IDs stay compatible with the
+  api-compat  Check that the checked-in API IDs stay compatible with the
               header on the base commit (IDs are part of the archive format).
-  api-matrix  Re-derive the API class manifest and compare the generated
-              test expectations with the checked-in header.
-  all         All three, reporting every failure.
+  workloads   Read the API matrix tier workload lists against the Catch2
+              sources.
+  all         Both, reporting every failure.
 
+That the checked-in generated files are current is tools/tests/
+test_generated_files_current.py, which the script tests job runs.
 Everything is written under --out; checked-in files are never modified.
 """
 
 from __future__ import annotations
 
 import argparse
-import difflib
 import re
 import subprocess
 import sys
@@ -26,21 +25,9 @@ from typing import Callable, Sequence
 
 Runner = Callable[[Sequence[str]], int]
 
-API_TRACE = "projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp"
-PUBLIC_HEADER = "projects/hip/include/hip/hip_runtime_api.h"
-MANUAL_CAPTURE = "projects/clr/hipamd/src/hrr/hip_capture.cpp"
-GENERATOR = "projects/hrr/tools/gen_hrr_api_args.py"
 COMPAT_CHECKER = "projects/hrr/tools/check_hrr_api_compat.py"
 MATRIX_TOOLS = "projects/hrr/tools/api-matrix"
 API_ARGS_HEADER = "projects/hrr/include/hrr/hrr_api_args.h"
-MATRIX_EXPECTATIONS = "projects/hrr/tests/integration/hrr_api_matrix_expectations.h"
-
-# Checked-in file -> name of the regenerated copy under --out.
-GENERATED_FILES = {
-    API_ARGS_HEADER: "include/hrr/hrr_api_args.h",
-    "projects/clr/hipamd/src/hrr/hip_capture_generated.cpp": "hip_capture_generated.cpp",
-    "projects/hrr/playback/hip_playback_generated.cpp": "hip_playback_generated.cpp",
-}
 
 
 def run(cmd: Sequence[str]) -> int:
@@ -50,50 +37,6 @@ def run(cmd: Sequence[str]) -> int:
 
 def error(message: str) -> None:
     print(f"::error::{message}", flush=True)
-
-
-def diff_files(expected: Path, actual: Path) -> list[str]:
-    """Unified diff of two text files, ignoring line-ending differences."""
-    a = expected.read_text(encoding="utf-8").splitlines()
-    b = actual.read_text(encoding="utf-8").splitlines()
-    return list(
-        difflib.unified_diff(a, b, fromfile=str(expected), tofile=str(actual), lineterm="")
-    )
-
-
-def check_generated(root: Path, out: Path, runner: Runner = run) -> bool:
-    (out / "include" / "hrr").mkdir(parents=True, exist_ok=True)
-    rc = runner(
-        [
-            sys.executable, str(root / GENERATOR),
-            "--input", str(root / API_TRACE),
-            "--public-header", str(root / PUBLIC_HEADER),
-            "--output-header", str(out / GENERATED_FILES[API_ARGS_HEADER]),
-            "--output-capture", str(out / "hip_capture_generated.cpp"),
-            "--output-playback", str(out / "hip_playback_generated.cpp"),
-            "--check-hrr-coverage",
-            "--manual-capture-source", str(root / MANUAL_CAPTURE),
-            "--silent",
-        ]
-    )
-    if rc != 0:
-        error(f"{GENERATOR} failed (exit {rc})")
-        return False
-
-    stale = []
-    for tracked, generated in GENERATED_FILES.items():
-        lines = diff_files(root / tracked, out / generated)
-        if lines:
-            print("\n".join(lines))
-            stale.append(tracked)
-    if stale:
-        error(
-            "checked-in HRR generated sources are stale: "
-            + ", ".join(stale)
-            + f". Regenerate them with {GENERATOR} --check-hrr-coverage."
-        )
-        return False
-    return True
 
 
 def base_header(root: Path, base_sha: str) -> tuple[str | None, str | None]:
@@ -158,10 +101,7 @@ def check_api_compat(
     runner: Runner = run,
     read_base: Callable[[Path, str], tuple[str | None, str | None]] = base_header,
 ) -> bool:
-    current = out / GENERATED_FILES[API_ARGS_HEADER]
-    if not current.is_file():
-        error("api-compat needs the regenerated header; run the generated check first")
-        return False
+    current = root / API_ARGS_HEADER
     text, failure = read_base(root, base_sha)
     if failure:
         error(failure)
@@ -185,39 +125,18 @@ def check_api_compat(
     return True
 
 
-def check_api_matrix(root: Path, out: Path, runner: Runner = run) -> bool:
-    tools = root / MATRIX_TOOLS
-    matrix_out = out / "api-matrix"
-    matrix_out.mkdir(parents=True, exist_ok=True)
-    manifest = matrix_out / "api_classes.json"
-    emitted = matrix_out / "hrr_api_matrix_expectations.h"
-    steps = [
-        [sys.executable, str(tools / "derive_manifest.py"), "--quiet", "--output", str(manifest)],
-        [sys.executable, str(tools / "check_matrix.py"), "--check-workloads"],
-        [
-            sys.executable, str(tools / "check_matrix.py"),
-            "--manifest", str(manifest), "--emit-cxx", str(emitted),
-        ],
-    ]
-    for step in steps:
-        rc = runner(step)
-        if rc != 0:
-            error(f"{Path(step[1]).name} failed (exit {rc})")
-            return False
-    lines = diff_files(root / MATRIX_EXPECTATIONS, emitted)
-    if lines:
-        print("\n".join(lines))
-        error(
-            f"{MATRIX_EXPECTATIONS} is stale; run derive_manifest.py, then "
-            f"check_matrix.py --emit-cxx, in {MATRIX_TOOLS}"
-        )
-        return False
-    return True
+def check_workloads(root: Path, runner: Runner = run) -> bool:
+    rc = runner(
+        [sys.executable, str(root / MATRIX_TOOLS / "check_matrix.py"), "--check-workloads"]
+    )
+    if rc != 0:
+        error(f"check_matrix.py --check-workloads failed (exit {rc})")
+    return rc == 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("check", choices=("generated", "api-compat", "api-matrix", "all"))
+    parser.add_argument("check", choices=("api-compat", "workloads", "all"))
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--out", type=Path, default=Path("build/hrr-codegen"))
     parser.add_argument("--base-sha", default="")
@@ -228,12 +147,10 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
 
     ok = True
-    if args.check in ("generated", "all"):
-        ok &= check_generated(root, out)
     if args.check in ("api-compat", "all"):
         ok &= check_api_compat(root, out, resolve_base(root, args.base_sha))
-    if args.check in ("api-matrix", "all"):
-        ok &= check_api_matrix(root, out)
+    if args.check in ("workloads", "all"):
+        ok &= check_workloads(root)
     return 0 if ok else 1
 
 

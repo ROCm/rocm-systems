@@ -27,10 +27,8 @@ simulator.default_families, not the families marked enabled. The
 workflow_dispatch families input replaces the selection. A simulator family
 with no config is an error. ci:gfx labels are TheRock's, so this script does
 not read them. The GPU backend
-runs every enabled family whose triggers include the event, on TheRock's
-runner unless ci.yaml overrides it, and takes the multi-GPU runner only on
-its multi_gpu_triggers. workflow_dispatch uses its backend input; any other
-event uses backend.default unless the event is in backend.gpu.triggers.
+runs every enabled family on TheRock's runner. workflow_dispatch uses its
+backend input; any other event uses backend.default.
 """
 
 from __future__ import annotations
@@ -67,15 +65,11 @@ class ConfigError(ValueError):
 @dataclass(frozen=True)
 class Family:
     enabled: bool = True
-    triggers: tuple[str, ...] = EVENTS
-    runner: str = ""
-    multi_gpu_triggers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class Backend:
     default: str
-    gpu_triggers: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -139,29 +133,14 @@ def _bool(where: str, value) -> bool:
     return value
 
 
-def _triggers(where: str, value, allow_empty: bool = False) -> tuple[str, ...]:
-    if allow_empty and isinstance(value, list) and not value:
-        return ()
-    triggers = _strings(where, value)
-    for trigger in triggers:
-        if trigger not in EVENTS:
-            raise ConfigError(
-                f"{where}: unknown trigger {trigger!r} (expected {', '.join(EVENTS)})"
-            )
-    return triggers
-
-
 def _backend(value) -> Backend:
-    value = _mapping("backend", value, ("default", "gpu"))
+    value = _mapping("backend", value, ("default",))
     default = _string("backend.default", value["default"])
     if default not in ("simulator", "gpu"):
         raise ConfigError(
             f"backend.default: expected simulator or gpu, got {default!r}"
         )
-    gpu = _mapping("backend.gpu", value["gpu"], ("triggers",))
-    return Backend(
-        default, _triggers("backend.gpu.triggers", gpu["triggers"], allow_empty=True)
-    )
+    return Backend(default)
 
 
 def _simulator(value, families: dict) -> Simulator:
@@ -193,19 +172,8 @@ def _simulator(value, families: dict) -> Simulator:
 
 
 def _family(where: str, value) -> Family:
-    value = _mapping(
-        where, value or {}, (), ("enabled", "triggers", "runner", "multi_gpu_triggers")
-    )
-    return Family(
-        enabled=_bool(f"{where}.enabled", value.get("enabled", True)),
-        triggers=_triggers(f"{where}.triggers", value.get("triggers", list(EVENTS))),
-        runner=_string(f"{where}.runner", value["runner"]) if "runner" in value else "",
-        multi_gpu_triggers=(
-            _triggers(f"{where}.multi_gpu_triggers", value["multi_gpu_triggers"])
-            if "multi_gpu_triggers" in value
-            else ()
-        ),
-    )
+    value = _mapping(where, value or {}, (), ("enabled",))
+    return Family(enabled=_bool(f"{where}.enabled", value.get("enabled", True)))
 
 
 def parse_config(data) -> Config:
@@ -329,15 +297,7 @@ def label_matters(label: str, config: Config) -> bool:
     return label == config.capture_label.lower()
 
 
-def runner_for(
-    linux: dict, pick_weighted: Callable[[list, str], str], multi_gpu: bool = False
-) -> str:
-    if multi_gpu:
-        labels = linux.get("test-runs-on-multi-gpu-labels")
-        if labels:
-            return pick_weighted(labels, "hrr-multi-gpu")
-        if linux.get("test-runs-on-multi-gpu"):
-            return linux["test-runs-on-multi-gpu"]
+def runner_for(linux: dict, pick_weighted: Callable[[list, str], str]) -> str:
     labels = linux.get("test-runs-on-labels")
     if labels:
         return pick_weighted(labels, "hrr")
@@ -345,14 +305,11 @@ def runner_for(
 
 
 def resolve_backend(event: str, config: Config, backend_input: str) -> str:
-    """workflow_dispatch uses its input. Any other event uses the default,
-    unless that event is listed under backend.gpu.triggers."""
+    """workflow_dispatch uses its input. Any other event uses the default."""
     if event == "workflow_dispatch" and backend_input:
         if backend_input not in ("simulator", "gpu"):
             raise ConfigError(f"backend {backend_input!r} is not simulator or gpu")
         return backend_input
-    if event in config.backend.gpu_triggers:
-        return "gpu"
     return config.backend.default
 
 
@@ -370,8 +327,17 @@ def _job(family: str, runner: str, backend: str, arch: str, config: str = "") ->
     }
 
 
+def _requested(config: Config, requested: list[str]) -> set[str]:
+    unknown = [key for key in requested if key not in config.families]
+    if unknown:
+        raise ConfigError(
+            f"requested families {', '.join(unknown)} are not in ci.yaml"
+            f" (known: {', '.join(config.families)})"
+        )
+    return set(requested)
+
+
 def select_families(
-    event: str,
     config: Config,
     requested: list[str],
     matrix: dict,
@@ -380,34 +346,21 @@ def select_families(
     """GPU families to test and the other ci.yaml families with the reason, in
     ci.yaml order."""
     if requested:
-        unknown = [key for key in requested if key not in config.families]
-        if unknown:
-            raise ConfigError(
-                f"requested families {', '.join(unknown)} are not in ci.yaml"
-                f" (known: {', '.join(config.families)})"
-            )
-        chosen = set(requested)
+        chosen = _requested(config, requested)
     else:
-        chosen = {
-            key
-            for key, family in config.families.items()
-            if family.enabled and event in family.triggers
-        }
+        chosen = {key for key, family in config.families.items() if family.enabled}
 
     families, skipped = [], []
     for key, family in config.families.items():
         if key not in chosen:
             if requested:
                 reason = "not requested"
-            elif not family.enabled:
-                reason = "disabled in ci.yaml"
             else:
-                reason = f"not run on {event} (ci.yaml triggers)"
+                reason = "disabled in ci.yaml"
             skipped.append({"family": key, "reason": reason})
             continue
         linux = matrix.get(key, {}).get("linux", {})
-        multi_gpu = event in family.multi_gpu_triggers
-        runner = family.runner or runner_for(linux, pick_weighted, multi_gpu)
+        runner = runner_for(linux, pick_weighted)
         if not runner:
             skipped.append({"family": key, "reason": NO_RUNNER})
             continue
@@ -423,13 +376,7 @@ def select_simulator(
     """rocJitsu families. default_families, unless the dispatch input replaces
     them. A family with no config is an error."""
     if requested:
-        unknown = [key for key in requested if key not in config.families]
-        if unknown:
-            raise ConfigError(
-                f"requested families {', '.join(unknown)} are not in ci.yaml"
-                f" (known: {', '.join(config.families)})"
-            )
-        chosen = set(requested)
+        chosen = _requested(config, requested)
     else:
         chosen = set(config.simulator.default_families)
     missing = sorted(key for key in chosen if key not in config.simulator.configs)
@@ -521,9 +468,7 @@ def decide(
     if resolved == "simulator":
         families, skipped = select_simulator(config, requested, matrix)
     else:
-        families, skipped = select_families(
-            event, config, requested, matrix, pick_weighted
-        )
+        families, skipped = select_families(config, requested, matrix, pick_weighted)
     no_runner = [s["family"] for s in skipped if s["reason"] == NO_RUNNER]
     if no_runner:
         why += f"; no runner for {', '.join(no_runner)}"

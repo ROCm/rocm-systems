@@ -29,7 +29,6 @@ LD_LIBRARY_PATH.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -91,20 +90,6 @@ INTEGRATION_CONFIG = Path("projects/hrr/tests/config/integration.yaml")
 
 # What the GPU suite runs. The host unit suite is built and run by hrr-ci.yml.
 HRR_TARGETS = ("hrr-playback", "hrr-integration-tests", "hrr-test-dispatch-tool")
-
-# What the capture cache key hashes. ci.yaml is a suite-selection file and is
-# deliberately absent: a family or backend edit must restore this build.
-CACHE_SOURCE_PATHS = (
-    "projects/clr",
-    "projects/hip",
-    "projects/hrr/CMakeLists.txt",
-    "projects/hrr/include",
-    "projects/hrr/playback",
-    "projects/hrr/tests/CMakeLists.txt",
-    "projects/hrr/tests/include",
-    "projects/hrr/tests/integration",
-    "projects/hrr/tests/scripts/hrr_capture_build.py",
-)
 
 # Uploaded by hrr-gpu.yml's build job, relative to --build.
 EXECUTABLES = (
@@ -291,9 +276,8 @@ def staged_library_sources(ldd_output: str, lib_dir: Path) -> list[Path]:
     """Libraries ldd resolved outside lib_dir and outside the system directories.
 
     The integration binary's RUNPATH searches dist/lib, which is where it loads
-    amdhip64. A cache restore skips the build, so a dependency that the build
-    tree had and the base artifacts do not (librocm_kpack.so.0) has to be
-    copied here for the restored binary to start.
+    amdhip64. A dependency that the build tree has and the base artifacts do
+    not (librocm_kpack.so.0) has to be copied here for the binary to start.
     """
     system_roots = (Path("/lib"), Path("/lib64"), Path("/usr/lib"), Path("/usr/lib64"))
     sources: list[Path] = []
@@ -310,14 +294,12 @@ def staged_library_sources(ldd_output: str, lib_dir: Path) -> list[Path]:
     return sources
 
 
-def stage_runtime_libs(
-    binary: Path, lib_dir: Path, env: dict | None = None
-) -> list[str]:
+def stage_runtime_libs(binary: Path, lib_dir: Path) -> list[str]:
     """Copy non-system libraries the binary loads into lib_dir. Returns names copied."""
     if not binary.is_file():
         return []
     out = subprocess.run(
-        ["ldd", str(binary)], check=True, capture_output=True, text=True, env=env
+        ["ldd", str(binary)], check=True, capture_output=True, text=True
     ).stdout
     lib_dir.mkdir(parents=True, exist_ok=True)
     copied: list[str] = []
@@ -380,28 +362,6 @@ def cmd_build(args: argparse.Namespace, runner: Runner = run) -> int:
     return 0
 
 
-def cmd_stage(args: argparse.Namespace) -> int:
-    """Stage the runtime libraries again after a cache restore.
-
-    The cache keeps the binary but not the copies build staged into dist/lib.
-    Without the build tree, ldd finds the libraries only in the installed
-    subtrees (dist/lib/llvm/lib, dist/lib/rocm_sysdeps/lib), so put those on
-    its search path.
-    """
-    lib_dir = args.dist / "lib"
-    search = [str(p) for p in sorted(lib_dir.glob("*/lib")) if p.is_dir()]
-    env = dict(os.environ)
-    env["LD_LIBRARY_PATH"] = os.pathsep.join(
-        search + ([env["LD_LIBRARY_PATH"]] if env.get("LD_LIBRARY_PATH") else [])
-    )
-    stage_runtime_libs(
-        args.build / "hrr" / "tests" / "integration" / "hrr-integration-tests",
-        lib_dir,
-        env,
-    )
-    return 0
-
-
 def cmd_verify(args: argparse.Namespace) -> int:
     exe = args.build / "hrr" / "tests" / "integration" / "hrr-integration-tests"
     run(
@@ -430,58 +390,6 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return check_linkage(exe, args.dist / "lib")
 
 
-def _tree_digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    if path.is_file():
-        digest.update(path.read_bytes())
-        return digest.hexdigest()
-    if path.is_dir():
-        files = sorted(item for item in path.rglob("*") if item.is_file())
-        for item in files:
-            digest.update(item.relative_to(path).as_posix().encode())
-            digest.update(b"\0")
-            digest.update(item.read_bytes())
-            digest.update(b"\0")
-    return digest.hexdigest()
-
-
-def cache_key_digest(
-    src: Path, base: dict, therock_pin: str, image: str, archs: str
-) -> str:
-    """Content key for the capture build. Not the merge SHA."""
-    digest = hashlib.sha256()
-    header = "\n".join(
-        [
-            f"repo={base['repo']}",
-            f"run_id={base['run_id']}",
-            f"commit={base['commit']}",
-            f"artifact_group={base['artifact_group']}",
-            f"therock={therock_pin}",
-            f"image={image}",
-            f"archs={archs}",
-        ]
-    )
-    digest.update(header.encode())
-    for rel in CACHE_SOURCE_PATHS:
-        digest.update(b"\n")
-        digest.update(rel.encode())
-        digest.update(b"\n")
-        digest.update(_tree_digest(src / rel).encode())
-    return digest.hexdigest()
-
-
-def cmd_cache_key(args: argparse.Namespace) -> int:
-    base = json.loads(args.base_json.read_text())
-    digest = cache_key_digest(args.src, base, args.therock_pin, args.image, args.archs)
-    line = f"digest={digest}\n"
-    output = os.environ.get("GITHUB_OUTPUT", "")
-    if output:
-        with open(output, "a", encoding="utf-8") as handle:
-            handle.write(line)
-    sys.stdout.write(line)
-    return 0
-
-
 def restore_executable_bits(build: Path) -> None:
     """Artifact downloads drop the executable bit."""
     for rel in EXECUTABLES:
@@ -506,7 +414,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "command",
-        choices=("fetch-base", "build", "stage", "verify", "install-base", "cache-key"),
+        choices=("fetch-base", "build", "verify", "install-base"),
     )
     parser.add_argument("--therock", type=Path, default=Path("therock"))
     parser.add_argument("--src", type=Path, default=Path.cwd())
@@ -519,14 +427,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="",
         help=f"Semicolon-separated GPU targets; default targets.arch of {INTEGRATION_CONFIG}",
     )
-    parser.add_argument(
-        "--therock-pin", default="", help="TheRock commit the build tools came from"
-    )
-    parser.add_argument("--image", default="", help="Build container image digest")
     args = parser.parse_args(argv)
     for name in ("therock", "src", "dist", "build", "capture_lib", "base_json"):
         setattr(args, name, getattr(args, name).resolve())
-    if args.command in ("build", "verify", "cache-key") and not args.archs:
+    if args.command in ("build", "verify") and not args.archs:
         config = hrr_test_config.load(args.src / INTEGRATION_CONFIG)
         args.archs = ";".join(config["targets"]["arch"])
     return args
@@ -537,10 +441,8 @@ def main(argv: list[str] | None = None) -> int:
     return {
         "fetch-base": cmd_fetch_base,
         "build": cmd_build,
-        "stage": cmd_stage,
         "verify": cmd_verify,
         "install-base": cmd_install_base,
-        "cache-key": cmd_cache_key,
     }[args.command](args)
 
 

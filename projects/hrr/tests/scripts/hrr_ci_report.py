@@ -40,8 +40,6 @@ JOB_PATTERNS = (
     ("Script tests", re.compile(r"^HRR script tests$")),
     ("Unit", re.compile(r"(?:^|/ )Unit \((?P<name>[^)]+)\)$")),
     ("Build", re.compile(r"(?:^|/ )Build capture-enabled HIP and HRR$")),
-    # The simulator jobs download this one build of rocJitsu; its failure fails them too.
-    ("Build", re.compile(r"(?:^|/ )Build rocJitsu$")),
     # The real-GPU job is "Integration (<family>)", the rocJitsu one "rocJitsu (<family>)".
     ("Integration", re.compile(r"(?:^|/ )(?:Integration|rocJitsu) \((?P<name>[^)]+)\)$")),
 )

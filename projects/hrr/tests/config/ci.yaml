@@ -47,8 +47,7 @@ paths:
     - projects/hrr/tests/scripts/hrr_ci_report.py
     - .github/workflows/hrr-ci.yml
     - .github/workflows/hrr-gpu.yml
-  # Runs the suite without changing the capture binary. The capture cache key
-  # does not include these paths.
+  # Runs the suite without changing the capture binary.
   suite:
     - projects/hrr/tests/config/ci.yaml
   # Ignored by both lists; hrr-skills.yml covers these.
@@ -62,14 +61,12 @@ paths:
 capture_label: ci:hrr-capture
 
 # simulator runs rocJitsu on ubuntu-24.04. gpu runs TheRock's real runners.
-# workflow_dispatch passes its backend input. Any other event uses default,
-# unless the event is listed under backend.gpu.triggers. No event is, so a
-# pull request, a push and the nightly schedule never queue on a real GPU
-# runner; a person asks for one with workflow_dispatch (backend gpu).
+# workflow_dispatch passes its backend input. Any other event uses default, so
+# a pull request, a push and the nightly schedule run on the simulator and
+# never queue on a real GPU runner; a person asks for one with
+# workflow_dispatch (backend gpu).
 backend:
   default: simulator
-  gpu:
-    triggers: []
 
 # Default simulator jobs. These do not consult families.*.enabled. Each row is
 # a rocJitsu KMD config that exposes the family's GPU to HIP, and the whole
@@ -100,19 +97,10 @@ simulator:
 #   enabled    false: run only when the workflow_dispatch families input names
 #              it. Default true. ci:gfx labels belong to TheRock and are not
 #              read here.
-#   triggers   Events that run this family: pull_request, push, schedule,
-#              workflow_dispatch. Default all four.
-#   runner     Runner label to use instead of TheRock's.
-#   multi_gpu_triggers
-#              Events on which to take TheRock's multi-GPU runner instead of
-#              its single-GPU one. Default none. The cases that need two
-#              devices (the T3 tier) skip on a single GPU. TheRock's only
-#              multi-GPU pools are 8-GPU nodes, so name only events that must
-#              cover those cases.
 #
 # A family without a runner label is skipped. Every job queues on its own
-# runner pool and the summary waits for all of them, so to reduce GPU load or
-# take a pool out, set enabled: false or narrow triggers here.
+# runner pool and the summary waits for all of them, so to take a pool out,
+# set enabled: false.
 #
 # Real GPUs run only when a person starts workflow_dispatch with backend gpu.
 # Then only gfx94x is enabled; the other families stay listed and disabled, so
@@ -126,10 +114,7 @@ families:
   gfx90a:
     enabled: false
   gfx94x: {}
-  # Off by default with the other non-gfx94x families. Nightly on an 8-GPU
-  # node, so once re-enabled the multi-device cases run once a day.
   gfx950:
-    multi_gpu_triggers: [schedule]
     enabled: false
   gfx103x:
     enabled: false

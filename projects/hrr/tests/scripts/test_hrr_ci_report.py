@@ -81,19 +81,18 @@ class RocJitsuJobTest(unittest.TestCase):
         self.assertEqual(rpt.missing_families(families, rows), [])
 
 
-    def test_a_failed_rocjitsu_build_fails_the_summary_and_is_no_missing_family(self):
+    def test_a_failed_rocjitsu_build_leaves_its_families_missing(self):
+        # The simulator jobs skip, and a skipped matrix job keeps its
+        # unexpanded name, so the build's failure shows as missing families.
         rows = rpt.classify_jobs(
             [
                 {"name": "GPU / Build rocJitsu", "conclusion": "failure", "html_url": "u0"},
-                {"name": "GPU / rocJitsu (gfx90a)", "conclusion": "skipped", "html_url": "u1"},
+                {"name": "GPU / rocJitsu (${{ matrix.family }})", "conclusion": "skipped"},
             ]
         )
-        self.assertEqual(
-            [(r["kind"], r["name"], r["conclusion"]) for r in rows],
-            [("Build", "", "failure"), ("Integration", "gfx90a", "skipped")],
-        )
-        self.assertEqual(rpt.missing_families([{"family": "gfx90a"}], rows), [])
-        self.assertFalse(rpt.overall_ok(rows, []))
+        missing = rpt.missing_families([{"family": "gfx90a"}], rows)
+        self.assertEqual(missing, ["gfx90a"])
+        self.assertFalse(rpt.overall_ok(rows, missing))
 
 
 class OverallTest(unittest.TestCase):
@@ -181,7 +180,6 @@ class RenderTest(unittest.TestCase):
             {"name": "Unit (ubuntu-24.04)", "conclusion": "success"},
             {"name": "Unit (windows-2022)", "conclusion": "success"},
             {"name": "GPU / Build capture-enabled HIP and HRR", "conclusion": "success"},
-            {"name": "GPU / Build rocJitsu", "status": "in_progress", "html_url": "u1"},
             {"name": "GPU / rocJitsu (gfx950)", "status": "queued", "html_url": "u2"},
         ]
         needs = {

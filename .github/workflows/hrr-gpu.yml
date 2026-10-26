@@ -14,16 +14,12 @@ name: HRR GPU
 on:
   workflow_call:
     inputs:
-      families:
-        description: JSON list of {family, runner, backend, arch, config} from hrr_ci_configure.py
-        type: string
-        required: true
       simulator_families:
-        description: Simulator rows from that list. [] skips the rocJitsu jobs.
+        description: JSON list of {family, runner, backend, arch, config} rows from hrr_ci_configure.py for the rocJitsu jobs. [] skips them.
         type: string
         default: "[]"
       gpu_families:
-        description: Real-GPU rows from that list. [] skips the GPU jobs.
+        description: Real-GPU rows in the same form. [] skips the GPU jobs.
         type: string
         default: "[]"
       ignore_test_config:
@@ -75,8 +71,7 @@ jobs:
 
       # No cache restore: a cache hit left librocm_kpack.so.0 out of the tree and
       # Verify failed. Off until that failure is understood, so the build always
-      # runs. The `cache-key` and `stage` commands of hrr_capture_build.py are
-      # the pieces to reuse.
+      # runs.
       - name: Build
         run: python3 projects/hrr/tests/scripts/hrr_capture_build.py build
 
@@ -125,19 +120,6 @@ jobs:
             runtimes/api-headers
             shared/machine-readable-isa
 
-      - name: Checkout TheRock artifact tools
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-          repository: ROCm/TheRock
-          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
-          path: therock
-          sparse-checkout: |
-            build_tools
-            cmake/therock_amdgpu_targets.cmake
-            requirements.txt
-          sparse-checkout-cone-mode: false
-
       - name: Install rocJitsu build packages
         shell: bash
         run: |
@@ -155,8 +137,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m venv "${RUNNER_TEMP}/hrr-venv"
-          "${RUNNER_TEMP}/hrr-venv/bin/python" -m pip install --no-cache-dir \
-            -r therock/requirements.txt 'cmake==3.31.10' 'PyYAML==6.0.2'
+          "${RUNNER_TEMP}/hrr-venv/bin/python" -m pip install --no-cache-dir 'cmake==3.31.10'
           echo "${RUNNER_TEMP}/hrr-venv/bin" >> "${GITHUB_PATH}"
 
       - name: Build rocJitsu
@@ -188,7 +169,7 @@ jobs:
     name: rocJitsu (${{ matrix.family }})
     needs: [build, rocjitsu-build]
     if: inputs.simulator_families != '[]'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
       fail-fast: false

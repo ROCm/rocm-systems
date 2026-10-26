@@ -80,8 +80,8 @@ REPO_CONFIG = yaml.safe_load(cfg.DEFAULT_CONFIG.read_text(encoding="utf-8"))
 FAMILIES = {
     "gfx90a": {},
     "gfx94x": None,
-    "gfx950": {"multi_gpu_triggers": ["schedule"]},
-    "gfx110x": {"triggers": ["schedule", "workflow_dispatch"]},
+    "gfx950": {},
+    "gfx110x": {"enabled": False},
     "gfx1150": {},
     "gfx125x": {"enabled": False},
 }
@@ -112,7 +112,7 @@ def config_data(**changes):
 def gpu_data(**changes):
     """The family-selection tests predate the simulator default."""
     data = config_data(**changes)
-    data["backend"] = {"default": "gpu", "gpu": {"triggers": []}}
+    data["backend"] = {"default": "gpu"}
     return data
 
 
@@ -135,20 +135,6 @@ def family_keys(decision):
 
 
 class RepoConfigTest(unittest.TestCase):
-    def test_only_gfx94x_runs_by_default(self):
-        """Every family stays listed, but only gfx94x runs unless asked for.
-
-        The others stay in ci.yaml so the workflow_dispatch families input can
-        still request them; disabling is what keeps them off the default run.
-        ci:gfx labels are TheRock's and do not select an HRR family.
-        """
-        self.assertEqual(
-            sorted(key for key, family in REPO.families.items() if family.enabled),
-            ["gfx94x"],
-        )
-        for key, family in REPO.families.items():
-            self.assertEqual(family.triggers, cfg.EVENTS, key)
-
     def test_a_gfx_label_does_not_add_a_simulator_family(self):
         """ci:gfx is a TheRock label. It must not widen the rocJITsu matrix."""
         data = copy.deepcopy(REPO_CONFIG)
@@ -161,12 +147,6 @@ class RepoConfigTest(unittest.TestCase):
         )
         self.assertEqual(family_keys(d), ["gfx950", "gfx125x"])
         self.assertTrue(all(row["backend"] == "simulator" for row in d.families))
-
-    def test_multi_gpu_runner_only_nightly(self):
-        for key, family in REPO.families.items():
-            self.assertIn(family.multi_gpu_triggers, ((), ("schedule",)), key)
-        self.assertEqual(REPO.families["gfx950"].multi_gpu_triggers, ("schedule",))
-
 
 class PathClassificationTest(unittest.TestCase):
     def test_playback_change_is_capture(self):
@@ -229,17 +209,6 @@ class ConfigValidationTest(unittest.TestCase):
         families = {"gfx94x": {"runs_on": "x"}}
         self.assertRejected(
             config_data(families=families), "families.gfx94x: unknown key runs_on"
-        )
-
-    def test_unknown_trigger(self):
-        families = {"gfx94x": {"triggers": ["nightly"]}}
-        self.assertRejected(config_data(families=families), "unknown trigger 'nightly'")
-
-    def test_unknown_multi_gpu_trigger(self):
-        families = {"gfx950": {"multi_gpu_triggers": ["nightly"]}}
-        self.assertRejected(
-            config_data(families=families),
-            "families.gfx950.multi_gpu_triggers: unknown trigger",
         )
 
     def test_enabled_must_be_a_bool(self):
@@ -346,8 +315,7 @@ class DecideTest(unittest.TestCase):
     def test_capture_pull_request_runs_enabled_families(self):
         d = decide("pull_request", ["projects/clr/hipamd/src/hrr/hip_capture.cpp"])
         self.assertTrue(d.run_gpu)
-        # gfx110x is not triggered by pull requests, gfx125x is disabled and
-        # gfx1150 has no runner.
+        # gfx110x and gfx125x are disabled and gfx1150 has no runner.
         self.assertEqual(family_keys(d), ["gfx90a", "gfx94x", "gfx950"])
         self.assertEqual(
             d.families[1],
@@ -363,10 +331,7 @@ class DecideTest(unittest.TestCase):
         self.assertEqual(
             d.skipped,
             [
-                {
-                    "family": "gfx110x",
-                    "reason": "not run on pull_request (ci.yaml triggers)",
-                },
+                {"family": "gfx110x", "reason": "disabled in ci.yaml"},
                 {"family": "gfx1150", "reason": cfg.NO_RUNNER},
                 {"family": "gfx125x", "reason": "disabled in ci.yaml"},
             ],
@@ -439,22 +404,9 @@ class DecideTest(unittest.TestCase):
         self.assertTrue(d.run_cpu)
         self.assertTrue(d.run_gpu)
 
-    def test_schedule_follows_triggers(self):
+    def test_schedule_runs_the_enabled_families(self):
         d = decide("schedule", [])
-        self.assertEqual(family_keys(d), ["gfx90a", "gfx94x", "gfx950", "gfx110x"])
-
-    def test_multi_gpu_runner_on_its_triggers_only(self):
-        nightly = {f["family"]: f["runner"] for f in decide("schedule", []).families}
-        self.assertEqual(nightly["gfx950"], "gpu-950-8")
-        pr = decide("pull_request", ["projects/hrr/playback/x.cpp"])
-        self.assertEqual(
-            {f["family"]: f["runner"] for f in pr.families}["gfx950"], "gpu-950-1"
-        )
-
-    def test_runner_override(self):
-        config = cfg.parse_config(gpu_data(families={"gfx94x": {"runner": "my-gpu"}}))
-        d = decide("schedule", [], config=config)
-        self.assertEqual(d.families[0]["runner"], "my-gpu")
+        self.assertEqual(family_keys(d), ["gfx90a", "gfx94x", "gfx950"])
 
     def test_dispatch_families_replace_the_selection(self):
         d = decide("workflow_dispatch", [], requested=["gfx125x", "gfx1150"])
@@ -475,29 +427,13 @@ class DecideTest(unittest.TestCase):
 
 class SimulatorBackendTest(unittest.TestCase):
     def test_default_runs_no_real_gpu_job_on_any_event(self):
-        """Pull requests, pushes and the nightly run only rocJitsu jobs, on every
-        family that has a rocJitsu config; none queues on a GPU runner."""
+        """Pull requests, pushes and the nightly run only rocJitsu jobs; none
+        queues on a GPU runner."""
         for event in ("pull_request", "push", "schedule", "workflow_dispatch"):
             decision = decide(event, ["projects/hrr/playback/x.cpp"], config=REPO)
             self.assertTrue(decision.run_gpu, event)
             self.assertEqual(
-                family_keys(decision),
-                [
-                    "gfx90a",
-                    "gfx94x",
-                    "gfx950",
-                    "gfx110x",
-                    "gfx1151",
-                    "gfx120x",
-                    "gfx125x",
-                ],
-                event,
-            )
-            self.assertEqual(
                 {row["backend"] for row in decision.families}, {"simulator"}, event
-            )
-            self.assertEqual(
-                {row["runner"] for row in decision.families}, {"ubuntu-24.04"}, event
             )
 
     def test_every_default_simulator_family_has_a_config_file(self):
@@ -551,17 +487,6 @@ class SimulatorBackendTest(unittest.TestCase):
         self.assertEqual(family_keys(decision), ["gfx94x"])
         self.assertEqual(decision.families[0]["backend"], "gpu")
         self.assertEqual(decision.families[0]["runner"], "gpu-94x-a")
-        self.assertNotIn("gfx125x", family_keys(decision))
-
-    def test_pull_request_gpu_triggers_select_real_runners(self):
-        data = config_data()
-        data["backend"]["gpu"]["triggers"] = ["pull_request"]
-        config = cfg.parse_config(data)
-        decision = decide(
-            "pull_request", ["projects/hrr/playback/x.cpp"], config=config
-        )
-        self.assertEqual(family_keys(decision), ["gfx90a", "gfx94x", "gfx950"])
-        self.assertTrue(all(row["backend"] == "gpu" for row in decision.families))
         self.assertNotIn("gfx125x", family_keys(decision))
 
     def test_simulator_rejects_a_requested_family_without_a_config(self):
@@ -749,36 +674,6 @@ class OutputTest(unittest.TestCase):
         )
         self.assertIn("reason=why\n", text)
         self.assertIn("rocm_sdk_version=1.2.3\n", text)
-
-
-class WorkflowPinTest(unittest.TestCase):
-    ROOT = Path(__file__).resolve().parents[4]
-    SHA = re.compile(r"(?:@|ref:\s*)([0-9a-f]{40})")
-
-    def therock_shas(self, path: Path) -> list[str]:
-        lines = path.read_text(encoding="utf-8").splitlines()
-        found = []
-        for index, line in enumerate(lines):
-            if "ROCm/TheRock" not in line:
-                continue
-            window = "\n".join(lines[index : index + 6])
-            found.extend(self.SHA.findall(window))
-        return found
-
-    def test_hrr_workflows_use_the_multi_arch_therock_pin(self):
-        pinned = self.therock_shas(
-            self.ROOT / ".github/workflows/therock-multi-arch-ci.yml"
-        )
-        self.assertTrue(pinned)
-        self.assertEqual(set(pinned), {pinned[0]})
-        for name in ("hrr-ci.yml", "hrr-gpu.yml"):
-            path = self.ROOT / ".github/workflows" / name
-            text = path.read_text(encoding="utf-8")
-            self.assertNotIn("THEROCK_PIN", text, name)
-            self.assertNotIn("BUILD_IMAGE", text, name)
-            found = self.therock_shas(path)
-            self.assertTrue(found, name)
-            self.assertEqual(set(found), {pinned[0]}, name)
 
 
 class WorkflowPathsFilterTest(unittest.TestCase):

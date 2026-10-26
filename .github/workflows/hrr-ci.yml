@@ -1,4 +1,4 @@
-# HRR CI: generated-source checks, the HRR helper-script tests and the host
+# HRR CI: API-ID and workload checks, the HRR helper-script tests and the host
 # unit suite, plus the GPU capture/replay suite (hrr-gpu.yml) for changes that
 # touch capture or replay. projects/hrr/tests/scripts/hrr_ci_configure.py
 # decides what runs from projects/hrr/tests/config/ci.yaml; "HRR CI Summary"
@@ -48,7 +48,8 @@ on:
       - "!projects/hrr/README.md"
       - "!projects/hrr/skills/**"
   schedule:
-    # Nightly: capture-enabled build and the GPU suite on every HRR family.
+    # Nightly: capture-enabled build and the rocJitsu simulator suite on
+    # simulator.default_families. Real GPUs run only on workflow_dispatch.
     - cron: "0 3 * * *"
   workflow_dispatch:
     inputs:
@@ -197,7 +198,7 @@ jobs:
       - name: Install PyYAML
         run: python -m pip install --no-cache-dir PyYAML==6.0.2
 
-      - name: Check generated sources, API IDs and the API matrix
+      - name: Check API IDs and the API matrix workloads
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: python projects/hrr/tools/hrr_check_sources.py all --base-sha "${BASE_SHA}"
@@ -369,7 +370,6 @@ jobs:
     uses: ./.github/workflows/hrr-gpu.yml
     # Note: not using 'secrets: inherit' here; no secrets are needed.
     with:
-      families: ${{ needs.configure.outputs.families }}
       simulator_families: ${{ needs.configure.outputs.simulator_families }}
       gpu_families: ${{ needs.configure.outputs.gpu_families }}
       ignore_test_config: ${{ inputs.ignore_test_config || false }}

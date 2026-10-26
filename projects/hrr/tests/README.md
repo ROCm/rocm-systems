@@ -143,7 +143,7 @@ python3 -m unittest discover -s projects/hrr/tests/scripts -p 'test_*.py' -v
 They cover `run_catch2.py`, `summarize_junit.py`, `hrr_test_config.py`, and the
 HRR CI scripts (`hrr_ci_configure.py`, `hrr_capture_build.py`, `hrr_ci_report.py`),
 plus the tools in `../tools`: the HRR API ID compatibility check, the
-generated-source checks (`hrr_check_sources.py`), the playback-handler default in
+API-ID and workload checks (`hrr_check_sources.py`), the playback-handler default in
 the generator, and the [api-matrix](../tools/api-matrix/README.md) scripts.
 
 ## Choosing what CI runs
@@ -159,27 +159,24 @@ applies (`scripts/hrr_ci_configure.py`):
 - `capture_label` (`ci:hrr-capture`) runs the GPU suite on a pull request that touches
   an HRR path but no capture path. Adding it restarts the run; adding any other label,
   including TheRock's `ci:gfx...` labels, leaves the run in progress alone.
-- `families`: the GPU families the suite runs on, as TheRock family keys, on the runner
-  TheRock's family matrix names. By default each runs on every event (`pull_request`,
-  `push`, `schedule`, `workflow_dispatch`). Per family, `enabled: false` leaves it to
-  explicit requests, `triggers` narrows the events, `runner` overrides the runner label
-  and `multi_gpu_triggers` names the events on which it takes TheRock's multi-GPU
-  runner instead of the single-GPU one. TheRock's multi-GPU pools are 8-GPU nodes, so
-  only gfx950 uses one, nightly; elsewhere the cases that need two devices skip and
-  show in the summary's Skip column. The `workflow_dispatch` input `families`
-  replaces the selection and can name a disabled family. Only gfx94x is enabled
-  today; the others are listed with `enabled: false`, so a real-GPU run includes
-  them only when that input names them. `ci:gfx...` labels are TheRock's and do
-  not select an HRR family.
+- `backend` and `simulator`: every event except a `workflow_dispatch` that asks for
+  `backend: gpu` runs on the rocJitsu simulator, on the families in
+  `simulator.default_families`, each with its rocJitsu config from `simulator.configs`.
+  No pull request, push or nightly run queues on a real GPU runner.
+- `families`: the GPU families as TheRock family keys. They matter only for a
+  `workflow_dispatch` with `backend: gpu`, which runs the `enabled` ones on the runner
+  TheRock's family matrix names, or the ones the `families` input names, disabled or
+  not. Only gfx94x is enabled today; the others are listed with `enabled: false`.
+  The input also replaces the default families of a simulator run. `ci:gfx...` labels
+  are TheRock's and do not select an HRR family.
   `targets.arch` in `config/integration.yaml` stays wide on purpose: configure fails
   unless it covers every family listed here, and a requested family needs its
   architecture compiled into the binary.
 - `rocm_sdk_version`: the ROCm SDK the unit job installs.
 
-An unknown key, trigger or family fails the configure job, and so does a family whose
+An unknown key or family fails the configure job, and so does a family whose
 GPU targets in TheRock's family matrix are not all in `targets.arch` of
-`config/integration.yaml`. To take load off the GPU
-pools, disable families or narrow their triggers here.
+`config/integration.yaml`. To take a pool out of a real-GPU run, set `enabled: false`.
 
 TheRock never reads the HRR workflows or `projects/hrr/tests`, `tools` and `skills`,
 so `.github/skip-ci-config.toml` lists them: a pull request that changes only those
