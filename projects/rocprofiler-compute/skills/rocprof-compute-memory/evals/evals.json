@@ -52,7 +52,7 @@
       "skill_should_trigger": true,
       "prompt": "run the guided memory bandwidth analysis on my MI350 workload",
       "expected_behavior": [
-        "uses --experimental --membw-analysis",
+        "profiles and analyzes only blocks 3 and 30, passing --experimental --membw-analysis to profile",
         "notes that the analysis is experimental and shipped for gfx950",
         "reports the guidance the tool produced rather than substituting its own cutoffs"
       ],
