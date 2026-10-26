@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: MIT
  */
 
-// This test doesn't test the ABI, it tests if the API is alias to the R0000 when HIP_FORCE_API_VERSION is set.
+// This test doesn't test the ABI, it tests if the API is alias to the R0000 when HIP_TARGET_API_VERSION is set.
 // HIP Nvidia doesn't support this mechanism, so we can't test this.
 
 #if HT_AMD
 
 #undef HIP_ABI_IMPL
-#define HIP_FORCE_API_VERSION 500
+#define HIP_TARGET_API_VERSION 500
 #include <hip/hip_runtime_api.h>
 #include <catch2/catch_all.hpp>
 
