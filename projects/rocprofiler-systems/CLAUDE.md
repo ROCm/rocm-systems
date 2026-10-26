@@ -44,6 +44,11 @@ Load only skills relevant to the current task. Skills are in
 - `/coverage` — coverage-preset build, run unit tests, generate report
 - `/test` — run the aggregated unit-test binary
 
+## Linting
+
+Formatting hooks (clang-format, black, gersemi, cmake-format) are defined in
+`.pre-commit-config.yaml`. Run `pre-commit run --files <changed files>`.
+
 ## Core rules (non-negotiable)
 
 - English output only, regardless of input language.
