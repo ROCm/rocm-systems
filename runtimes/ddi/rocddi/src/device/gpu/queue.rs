@@ -7,9 +7,11 @@
 //! destruction succeeds. Packet-format policy and public ABI behavior remain
 //! responsibilities of the frontend using rocddi.
 
+mod layout;
 mod scratch;
 mod types;
 pub use super::kernel_queue::*;
+pub(crate) use layout::{AqlControlLayout, AqlQueueHeader};
 pub use scratch::{MAX_PRIVATE_SEGMENT_BYTES, ScratchPlan, plan_scratch};
 pub use types::*;
 
@@ -624,6 +626,7 @@ mod queue_resource_tests {
             ring_host_address: 0x1000,
             ring_device_address: 0x2000,
             ring_size_bytes: 4096,
+            aql_control: None,
             sdma_engine_id: None,
             read_index_host_address: 0x3000,
             read_index_device_address: 0x4000,

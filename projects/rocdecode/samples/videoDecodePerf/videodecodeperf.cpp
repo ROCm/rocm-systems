@@ -45,7 +45,7 @@ THE SOFTWARE.
 void DecProc(RocVideoDecoder *p_dec, VideoDemuxer *demuxer, int *pn_frame, int *pn_pic_dec, double *pn_fps, double *pn_fps_dec, int max_num_frames, OutputSurfaceMemoryType mem_type) {
     int n_video_bytes = 0, n_frame_returned = 0, n_frame = 0;
     int n_pic_decoded = 0, decoded_pics = 0;
-    uint8_t *p_video = nullptr;
+    uint8_t *p_video = nullptr, *p_frame = nullptr;
     int64_t pts = 0;
     double total_dec_time = 0.0;
     auto start_time = std::chrono::high_resolution_clock::now();
@@ -53,6 +53,17 @@ void DecProc(RocVideoDecoder *p_dec, VideoDemuxer *demuxer, int *pn_frame, int *
     do {
         demuxer->Demux(&p_video, &n_video_bytes, &pts);
         n_frame_returned = p_dec->DecodeFrame(p_video, n_video_bytes, 0, pts, &decoded_pics);
+        // exercise the output/display path for the mapped output memory types
+        if (mem_type != OUT_SURFACE_MEM_NOT_MAPPED) {
+            for (int i = 0; i < n_frame_returned; i++) {
+                p_frame = p_dec->GetFrame(&pts);
+                if (p_frame == nullptr) {
+                    break;
+                }
+                // release frame
+                p_dec->ReleaseFrame(pts);
+            }
+        }
         n_frame += n_frame_returned;
         n_pic_decoded += decoded_pics;
         if (max_num_frames && max_num_frames <= n_frame) {
@@ -83,6 +94,8 @@ void ShowHelpAndExit(const char *option = NULL) {
     << "-i Input File Path - required" << std::endl
     << "-t Number of threads (>= 1) - optional; default: 1" << std::endl
     << "-d Device ID (>= 0) - optional; default: 0" << std::endl
+    << "-backend backend (0 for GPU, 1 CPU-FFMpeg) - optional; default: 0" << std::endl
+    << "-f Number of decoded frames - specify the number of pictures to be decoded per thread - optional" << std::endl
     << "-z Force zero latency (decoded frames will be flushed out for display immediately) - optional" << std::endl
     << "-disp_delay -specify the number of frames to be delayed for display; optional; default: 1" << std::endl
     << "-m Memory type (integer values between 0 to 3: specifies where to store the decoded output:" << std::endl
@@ -165,7 +178,11 @@ int main(int argc, char **argv) {
             if (++i == argc) {
                 ShowHelpAndExit("-m");
             }
-            mem_type = static_cast<OutputSurfaceMemoryType>(atoi(argv[i]));
+            int mem_type_arg = atoi(argv[i]);
+            if (mem_type_arg < OUT_SURFACE_MEM_DEV_INTERNAL || mem_type_arg > OUT_SURFACE_MEM_NOT_MAPPED) {
+                ShowHelpAndExit(argv[i]);
+            }
+            mem_type = static_cast<OutputSurfaceMemoryType>(mem_type_arg);
             continue;
         }
         if (!strcmp(argv[i], "-backend")) {
@@ -177,9 +194,9 @@ int main(int argc, char **argv) {
         }
         ShowHelpAndExit(argv[i]);
     }
-    
+
     try {
-        // TODO: Change this block to use VCN query API 
+        // TODO: Change this block to use VCN query API
         int num_devices = 0, sd = 0;
         hipError_t hip_status = hipSuccess;
         hipDeviceProp_t hip_dev_prop;
@@ -205,7 +222,7 @@ int main(int argc, char **argv) {
         std::size_t pos = gcn_arch_name.find_first_of(":");
         std::string gcn_arch_name_base = (pos != std::string::npos) ? gcn_arch_name.substr(0, pos) : gcn_arch_name;
 
-        // gfx90a has two GCDs as two separate devices 
+        // gfx90a has two GCDs as two separate devices
         if (!gcn_arch_name_base.compare("gfx90a") && num_devices > 1) {
             sd = 1;
         }

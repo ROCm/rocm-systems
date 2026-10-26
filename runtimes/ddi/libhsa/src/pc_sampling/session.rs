@@ -802,21 +802,21 @@ impl SessionHandle {
     }
 
     /// Starts this session.
-    pub(super) fn start(&self) -> Status {
+    pub(crate) fn start(&self) -> Status {
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.start())
     }
 
     /// Stops this session.
-    pub(super) fn stop(&self) -> Status {
+    pub(crate) fn stop(&self) -> Status {
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.stop())
     }
 
     /// Flushes pending samples through the synchronized session.
-    pub(super) fn flush(&self) -> Status {
+    pub(crate) fn flush(&self) -> Status {
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.flush())
