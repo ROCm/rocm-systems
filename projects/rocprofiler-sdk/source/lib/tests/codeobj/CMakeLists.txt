@@ -36,14 +36,13 @@ find_program(
     PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
     PATH_SUFFIXES bin llvm/bin NO_CACHE)
 
-# The aggregate dist root does not contain the HIP runtime used by amdclang++.
-# Derive the runtime root from the HIP package selected by the super-project.
+# The aggregate dist root does not contain the HIP runtime used by amdclang++. Derive the
+# runtime root from the HIP package selected by the super-project.
 set(CODEOBJ_ROCM_PATH "${ROCM_PATH}")
 if(DEFINED hip_DIR)
     get_filename_component(CODEOBJ_ROCM_PATH "${hip_DIR}/../../.." ABSOLUTE)
 endif()
-set(CODEOBJ_ROCM_DEVICE_LIB_PATH
-    "${CODEOBJ_ROCM_PATH}/lib/llvm/amdgcn/bitcode")
+set(CODEOBJ_ROCM_DEVICE_LIB_PATH "${CODEOBJ_ROCM_PATH}/lib/llvm/amdgcn/bitcode")
 
 # The arch only matters for compilation, not execution -- the test only parses DWARF debug
 # info from the resulting ELF.  Any valid arch works here.
@@ -57,9 +56,8 @@ add_custom_command(
     COMMAND
         ${CODEOBJ_AMDCLANGPP} -x hip -ggdb --offload-arch=${_SYNCKERNEL_ARCH}
         --rocm-path=${CODEOBJ_ROCM_PATH}
-        --rocm-device-lib-path=${CODEOBJ_ROCM_DEVICE_LIB_PATH}
-        --offload-device-only -c -fno-gpu-rdc -o "${_SYNCKERNEL_BUNDLE}"
-        "${_SYNCKERNEL_SRC}"
+        --rocm-device-lib-path=${CODEOBJ_ROCM_DEVICE_LIB_PATH} --offload-device-only -c
+        -fno-gpu-rdc -o "${_SYNCKERNEL_BUNDLE}" "${_SYNCKERNEL_SRC}"
     COMMAND
         ${CODEOBJ_OFFLOAD_BUNDLER} --type=o --input=${_SYNCKERNEL_BUNDLE}
         --output=${_SYNCKERNEL_BIN} --unbundle
