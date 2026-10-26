@@ -18,6 +18,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/host_target.h"
 
 #include <gtest/gtest.h>
 
@@ -814,7 +815,7 @@ TEST(VAddSimdBenchmark, Cdna4_VFrexpExpI32F32_Vop3) {
 
 // Diagnostic: report whether the SIMD fast path is compiled in.
 TEST(VAddSimdBenchmark, SimdCompileTimeReport) {
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
   using simd_u32 = std::experimental::native_simd<uint32_t>;
   std::printf("\n  util::has_stdx_simd=true, native_simd<uint32_t>::size() = %zu\n",
               simd_u32::size());

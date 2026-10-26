@@ -19,6 +19,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
+#include "util/host_target.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -1926,7 +1927,7 @@ public:
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *, uint32_t reg, uint64_t, uint8_t) override {
     read_registers.push_back(reg);
     read_roundings.push_back(std::fegetround());
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     read_mxcsrs.push_back(_mm_getcsr());
 #endif
   }
@@ -1984,7 +1985,7 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoded.data()));
         ASSERT_NE(inst, nullptr);
         ASSERT_EQ(std::fegetround(), FE_TONEAREST);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
         // A pre-existing underflow flag must stay visible to callbacks, and the
         // inexact results here must not add the inexact flag.
         const uint32_t saved_mxcsr = _mm_getcsr();
@@ -2005,7 +2006,7 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
           else
             EXPECT_TRUE(tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOP2_BINARY));
         }
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
         const uint32_t after_mxcsr = _mm_getcsr();
         _mm_setcsr(saved_mxcsr);
         if (test.preserves_flags) {
@@ -2028,7 +2029,7 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
   }
 }
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 // VOPD arithmetic requires host and guest nearest-even, so rounding alone cannot
 // detect a scope opened before operand acquisition. A sticky underflow flag is
 // cleared inside the scope and must remain visible to reads from both slots.
@@ -2291,7 +2292,7 @@ TEST(ExecutionPluginTest, F64SourceReadObservationReportsBothHalves) {
     delete inst;
 
     const auto reads = vgpr_read_events(*plugin);
-    if constexpr (UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS) {
+    if constexpr (RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS) {
       // The Clang/AVX-512 workaround executes F64 one lane at a time, so
       // require both halves of every source once per active lane.
       ASSERT_EQ(reads.size(), 6u * std::popcount(kPartialExecMask));

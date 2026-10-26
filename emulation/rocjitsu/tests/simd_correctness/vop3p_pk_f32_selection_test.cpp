@@ -7,6 +7,7 @@
 /// NaN selection and quieting must also agree with the architectural policy.
 
 #include "decode_test_util.h"
+#include "util/host_target.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -30,7 +31,7 @@
 #include <memory>
 #include <tuple>
 
-#if defined(__x86_64__) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 #include <xmmintrin.h>
 #endif
 
@@ -236,7 +237,7 @@ TEST_P(PackedF32Selection, RestoresHostEnvironment) {
     ASSERT_EQ(std::fesetround(rounding), 0);
     std::feclearexcept(FE_ALL_EXCEPT);
     std::feraiseexcept(FE_DIVBYZERO);
-#if defined(__x86_64__) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     _mm_setcsr(_mm_getcsr() | (1u << 6) | (1u << 15));
     const uint32_t mxcsr = _mm_getcsr();
 #endif
@@ -244,7 +245,7 @@ TEST_P(PackedF32Selection, RestoresHostEnvironment) {
     compare(machine, 0, 2, 0, 0, 0xf1, 0, 6, SourceKind::Vgpr, ~uint64_t{0});
     EXPECT_EQ(std::fegetround(), rounding);
     EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), exceptions);
-#if defined(__x86_64__) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     EXPECT_EQ(_mm_getcsr(), mxcsr);
 #endif
   }

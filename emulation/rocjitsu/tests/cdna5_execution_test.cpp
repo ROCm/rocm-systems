@@ -11,11 +11,12 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/target_provider.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "util/host_target.h"
 
 #include <cfenv>
 #include <span>
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 #include <xmmintrin.h>
 #endif
 
@@ -100,7 +101,7 @@ private:
   bool saved_;
 };
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 class HostMxcsrGuard {
 public:
   HostMxcsrGuard() : saved_(_mm_getcsr()) {}
@@ -109,7 +110,7 @@ public:
 private:
   uint32_t saved_;
 };
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
 class HostFpcrGuard {
 public:
   HostFpcrGuard() : saved_(amdgpu::fp_mode::detail::read_fpcr()) {}
@@ -870,7 +871,7 @@ TEST(FpModePolicyTest, F32ToBf16FmaRestoresAmbientHostEnvironment) {
   EXPECT_EQ(std::fegetround(), FE_UPWARD);
 }
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFtzDaz) {
   HostMxcsrGuard environment_guard;
   constexpr uint32_t kDazMask = 1u << 6;
@@ -881,7 +882,7 @@ TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFtzDaz) {
   EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(subnormal, 1.0f, 0.0f, 0, false, true), 0x0002u);
   EXPECT_EQ(_mm_getcsr() & (kDazMask | kFtzMask), kDazMask | kFtzMask);
 }
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
 TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFpcrFlushModes) {
   HostFpcrGuard environment_guard;
   constexpr uint64_t kFizMask = uint64_t{1} << 0;
@@ -1940,7 +1941,7 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
   };
 
   run_case(true);
-  if constexpr (util::has_stdx_simd && !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS)
+  if constexpr (util::has_stdx_simd && !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS)
     run_case(false);
 }
 
