@@ -185,21 +185,33 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     barrierState->barrierHost = barrierPair.second;
   }
 
-  // Zero the scratch once so the first epoch (>= 1) across all LL operations
-  // never false-matches leftover flag words. Subsequent LL calls rely on
-  // monotonic epochs + the 2-bank layout rather than re-zeroing.
-  CUDACHECKGOTO(cudaMemset(scratch, 0, bytes), res, fail);
-
-  // Device epoch cells for the LL collectives: zero-initialised
-  // so the first device-derived flag is 1. Bumped on the device every LL launch.
-  CUDACHECKGOTO(cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), res, fail);
-  CUDACHECKGOTO(cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)), res, fail);
-
-  // cudaMemset on device memory is host-asynchronous on the null stream, which does not order
-  // against non-blocking user streams. Both zero fills must complete on every rank before any
-  // rank's first LL kernel reads its epoch cells or writes packets into a peer's scratch.
-  CUDACHECKGOTO(cudaStreamSynchronize(nullptr), res, fail);
-  NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, comm->rank, nRanks, 0xDDA0), res, fail);
+  {
+    auto cudaOk = [](cudaError_t err, const char* what) {
+      if (err != cudaSuccess) {
+        WARN("ncclDdaFabricCommInit: %s failed: %s", what, cudaGetErrorString(err));
+        return false;
+      }
+      return true;
+    };
+    // Zero the scratch once so the first epoch (>= 1) across all LL operations
+    // never false-matches leftover flag words. Subsequent LL calls rely on
+    // monotonic epochs + the 2-bank layout rather than re-zeroing.
+    // Device epoch cells for the LL collectives: zero-initialised
+    // so the first device-derived flag is 1. Bumped on the device every LL launch.
+    // Null-stream memsets don't order with non-blocking streams; sync, then agree before any rank's first LL kernel.
+    std::vector<int> zeroed(nRanks, 0);
+    zeroed[comm->rank] = cudaOk(cudaMemset(scratch, 0, bytes), "scratch memset") &&
+                         cudaOk(cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), "epoch alloc") &&
+                         cudaOk(cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)), "epoch memset") &&
+                         cudaOk(cudaStreamSynchronize(nullptr), "zero-fill sync");
+    NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, zeroed.data(), sizeof(int)), res, fail);
+    for (int r = 0; r < nRanks; ++r) {
+      if (!zeroed[r]) {
+        INFO(NCCL_INIT, "ncclDdaFabricCommInit: rank %d failed to zero its LL buffers; skipping fabric DDA path", r);
+        goto fail;
+      }
+    }
+  }
 
   // Success: hand ownership of every resource to comm.
   comm->ddaFabricMemHandler = handler;

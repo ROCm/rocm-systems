@@ -34,11 +34,15 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <random>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace MPITestConstants;
@@ -472,6 +476,102 @@ TEST_F(DdaMPI_AllReduce, LLOneShotBitIdenticalAcrossRanks)
 {
     runBitIdenticalAcrossRanks({ncclFloat32, ncclBfloat16}, {256 * 1024}, kOneShotLogNeedle,
                                "DdaMPI_AllReduce/LLOneShotBitIdenticalAcrossRanks");
+}
+
+// Comm init zeroes the LL scratch and epoch cells on the null stream, which a non-blocking stream
+// does not wait for, and the fixture's blocking stream plus MPI barrier hide that. Each iteration
+// creates a fresh comm with staggered rank arrival and issues two LL calls right away: a zero fill
+// landing after a rank's first call leaves that rank on a stale epoch, so the second call hangs or
+// returns the first call's data.
+TEST_F(DdaMPI_AllReduce, LLFreshCommNonBlockingStream)
+{
+    if(!validateTestPrerequisites(kMinProcessesForMPI))
+        GTEST_SKIP() << "Need at least 2 MPI ranks";
+
+    DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric LL requires gfx1250"));
+
+    constexpr int    kIters        = 32;
+    constexpr int    kMaxStaggerMs = 100;
+    constexpr size_t kCount        = 12288; // 48 KiB of f32: one LL one-shot launch that finishes fast
+    const size_t     bytes         = kCount * sizeof(float);
+
+    const int rank   = MPIEnvironment::world_rank;
+    const int nRanks = MPIEnvironment::world_size;
+
+    hipStream_t stream = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    HipStreamAutoGuard streamGuard(stream);
+
+    void *sendA = nullptr, *sendB = nullptr, *recvA = nullptr, *recvB = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendA, bytes));
+    DeviceBufferAutoGuard sendAGuard(sendA);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendB, bytes));
+    DeviceBufferAutoGuard sendBGuard(sendB);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvA, bytes));
+    DeviceBufferAutoGuard recvAGuard(recvA);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvB, bytes));
+    DeviceBufferAutoGuard recvBGuard(recvB);
+
+    std::vector<float> host(kCount, static_cast<float>(rank + 1));
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendA, host.data(), bytes, hipMemcpyHostToDevice));
+    std::fill(host.begin(), host.end(), static_cast<float>(2 * (rank + 1)));
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendB, host.data(), bytes, hipMemcpyHostToDevice));
+
+    const float sumA = static_cast<float>(nRanks * (nRanks + 1) / 2);
+    const float sumB = 2.0f * sumA;
+
+    std::mt19937                       rng(1234u + static_cast<unsigned>(rank));
+    std::uniform_int_distribution<int> staggerMs(0, kMaxStaggerMs);
+
+    for(int iter = 0; iter < kIters; ++iter)
+    {
+        SCOPED_TRACE("iteration " + std::to_string(iter));
+
+        ncclUniqueId id{};
+        if(rank == 0)
+            ASSERT_EQ(ncclSuccess, ncclGetUniqueId(&id));
+        ASSERT_EQ(MPI_SUCCESS, MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD));
+
+        // Stream-ordered, so it cannot drain the null stream the way a blocking call after init would.
+        ASSERT_EQ(hipSuccess, hipMemsetAsync(recvA, 0, bytes, stream));
+        ASSERT_EQ(hipSuccess, hipMemsetAsync(recvB, 0, bytes, stream));
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(staggerMs(rng)));
+
+        ncclComm_t comm = nullptr;
+        ASSERT_EQ(ncclSuccess, ncclCommInitRank(&comm, nRanks, id, rank));
+        auto commGuard = makeScopeGuard([&]() { (void)ncclCommDestroy(comm); });
+
+        // Nothing between init and these launches may synchronize the device or the ranks.
+        ASSERT_EQ(ncclSuccess, ncclAllReduce(sendA, recvA, kCount, ncclFloat32, ncclSum, comm, stream));
+        ASSERT_EQ(ncclSuccess, ncclAllReduce(sendB, recvB, kCount, ncclFloat32, ncclSum, comm, stream));
+        DdaFabricMPI::abortJobUnlessAllRanksDrained(
+            DdaFabricMPI::waitStreamBounded(stream, std::chrono::seconds(30)),
+            "LL AllReduce pair on a fresh communicator");
+
+        if(iter == 0)
+        {
+            DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(comm->ddaFabricBarrierState == nullptr,
+                                                             "DDA fabric path did not initialize"));
+        }
+
+        int64_t bad = 0;
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(host.data(), recvA, bytes, hipMemcpyDeviceToHost));
+        bad += std::count_if(host.begin(), host.end(), [sumA](float v) { return v != sumA; });
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(host.data(), recvB, bytes, hipMemcpyDeviceToHost));
+        const int64_t badB = std::count_if(host.begin(), host.end(), [sumB](float v) { return v != sumB; });
+        bad += badB;
+        EXPECT_EQ(0, bad) << "Rank " << rank << ": " << bad << " wrong elements (" << badB
+                          << " in the second AllReduce, first sample " << host[0] << ", expected " << sumB << ")";
+
+        int64_t totalBad = bad;
+        MPI_Allreduce(MPI_IN_PLACE, &totalBad, 1, MPI_INT64_T, MPI_SUM, MPI_COMM_WORLD);
+        if(totalBad != 0)
+            break;
+    }
+
+    EXPECT_TRUE(logContainsNeedle(kOneShotLogNeedle))
+        << "Rank " << rank << ": the AllReduce pairs did not take the DDA fabric LL one-shot path";
 }
 
 // Sets the same thresholds as LL128OneShotMultiRank, so it needs its own process (see the note above).
