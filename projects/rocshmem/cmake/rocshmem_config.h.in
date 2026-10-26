@@ -30,6 +30,7 @@
 #cmakedefine USE_IPC
 #cmakedefine USE_GDA
 #cmakedefine USE_SDMA
+#cmakedefine USE_TDM
 #cmakedefine USE_THREADS
 #cmakedefine USE_SHARED_CTX
 #cmakedefine USE_WF_COAL

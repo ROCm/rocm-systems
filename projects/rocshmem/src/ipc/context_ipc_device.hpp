@@ -535,22 +535,28 @@ class IPCContext : public Context {
                                   size_t nelems, int pe);
 
   __device__ void internal_putmem_wg(void *dest, const void *source,
-                                    size_t nelems, int pe);
+                                     size_t nelems, int pe);
 
   __device__ void internal_getmem_wg(void *dest, const void *source,
-                                    size_t nelems, int pe);
+                                     size_t nelems, int pe);
+
+  __device__ void internal_putmem_wg_tdm(void *dest, const void *source,
+                                         size_t nelems, int pe);
+
+  __device__ void internal_getmem_wg_tdm(void *dest, const void *source,
+                                         size_t nelems, int pe);
 
   __device__ void internal_putmem_wave(void *dest, const void *source,
-                                      size_t nelems, int pe);
+                                       size_t nelems, int pe);
 
   __device__ void internal_getmem_wave(void *dest, const void *source,
-                                      size_t nelems, int pe);
+                                       size_t nelems, int pe);
 
   __device__ void internal_alltoallmem_wave(rocshmem_team_t team, void *dst,
                                             const void *src, int nelems);
 
   __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
-                                            const void *src, int nelems);
+                                          const void *src, int nelems);
 
   __device__ void alltoallmem_linear_thread_puts_wave(rocshmem_team_t team,
       void *dst, const void *src, int nelems);
