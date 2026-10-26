@@ -29,6 +29,9 @@
 #include <vector>
 
 namespace rocjitsu {
+namespace amdgpu {
+class Wavefront;
+}
 namespace kmd {
 
 /// @brief Context-save record layouts implemented by this codec.
@@ -231,6 +234,12 @@ struct CwsrWaveState {
   /// Workgroup LDS bytes. Present only on the first wave in each workgroup.
   std::vector<uint8_t> lds;
 };
+
+/// Capture and restore the architectural state shared by KFD and MES preemption.
+CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wave, rj_code_arch_t arch,
+                                    bool runtime_save = false);
+void prepare_cwsr_wave_states(std::vector<CwsrWaveState> &waves);
+void apply_cwsr_to_wave(amdgpu::Wavefront &wave, const CwsrWaveState &state, rj_code_arch_t arch);
 
 /// @brief The runtime-owned displaced-stepping region in a CWSR header.
 struct CwsrDebugRegion {
