@@ -751,7 +751,10 @@ missing stream handles by creating a temporary stream.
 The full `hipStreamBeginCapture` → `hipStreamEndCapture` → `hipGraphInstantiate` →
 `hipGraphLaunch` chain is supported. All four are `MANUAL_PLAYBACK_APIS`. `BeginCapture`
 falls back to `hipStreamCaptureModeGlobal` if `ThreadLocal` fails. `EndCapture` records
-the returned `hipGraph_t` into `graph_map`. `GraphInstantiate` uses
+the returned `hipGraph_t` into `graph_map`. Capture also records an `EndCapture` that
+failed with `hipErrorStreamCaptureInvalidated` or `hipErrorStreamCaptureUnjoined`, since
+both still end the capture; replay ends its own capture and discards the graph.
+`GraphInstantiate` uses
 `hipGraphInstantiateWithFlags(..., 0)` and records the exec into `graph_exec_map`.
 `GraphLaunch` translates both handles and, when `--timing` is active, wraps the call
 with `hipEventRecord` to accumulate elapsed time into `total_graph_ms`.
