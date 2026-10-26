@@ -55,8 +55,13 @@ protected:
     set(124, 4, type);
     set(128, 13, 17);
     set(gfx9 ? 160 : 144, 13, view ? 3 : 0);
-    if (gfx12)
-      set(157, 1, 1); // Adjacent GFX12 field is not part of BASE_ARRAY.
+    if (gfx12) {
+      // RDNA4 ISA Table 60 defines BASE_ARRAY as bits 156:144, so this sets the
+      // adjacent bit to verify that spec-defined width. ROCr resource_gfx12.h
+      // instead names bit 157 BASE_ARRAY_MSB; the gfx1201 RESINFO probe cited
+      // below did not isolate this bit, so it is not evidence for either layout.
+      set(157, 1, 1);
+    }
     if (uav)
       set(gfx12 ? 164 : 160, 1, 1);
     return r;
