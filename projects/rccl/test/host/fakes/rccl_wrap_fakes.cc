@@ -24,6 +24,8 @@ ASSERT_HOOK_MATCHES_PROD(g_rcclDdaEntryThreshold, rcclDdaEntryThreshold);
 ASSERT_HOOK_MATCHES_PROD(g_rcclGetAlgoName, rcclGetAlgoName);
 ASSERT_HOOK_MATCHES_PROD(g_rcclUseAllGatherDirect, rcclUseAllGatherDirect);
 ASSERT_HOOK_MATCHES_PROD(g_rcclUseReduceScatterDirect, rcclUseReduceScatterDirect);
+ASSERT_HOOK_MATCHES_PROD(g_rcclNetRegSegmentCount, rcclNetRegSegmentCount);
+ASSERT_HOOK_MATCHES_PROD(g_rcclNetGraphRegSegmentCount, rcclNetGraphRegSegmentCount);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // ===========================================================================
@@ -266,6 +268,24 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
 int64_t g_rcclParamDdaEnable = 1;  // rccl_wrap.cc:98 RCCL_PARAM default
 int64_t rcclParamDdaEnable() { return g_rcclParamDdaEnable; }
 
+static ncclResult_t DefaultNetRegSegmentCount(struct ncclComm*, struct ncclReg*, int*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*, struct ncclReg*, int*)> g_rcclNetRegSegmentCount =
+    DefaultNetRegSegmentCount;
+std::function<ncclResult_t(struct ncclComm*, struct ncclReg*, int*)> g_rcclNetGraphRegSegmentCount =
+    DefaultNetRegSegmentCount;
+ncclResult_t rcclNetRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments) {
+  return g_rcclNetRegSegmentCount(comm, regRecord, numSegments);
+}
+ncclResult_t rcclNetGraphRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments) {
+  return g_rcclNetGraphRegSegmentCount(comm, regRecord, numSegments);
+}
+int g_rcclNetRegCommitCalls = 0;
+int g_rcclNetRegCommitLastSegments = 0;
+void rcclNetRegCommit(struct ncclComm*, struct ncclReg*, int numSegments) {
+  ++g_rcclNetRegCommitCalls;
+  g_rcclNetRegCommitLastSegments = numSegments;
+}
+
 void ResetRcclWrapFakes() {
   g_rcclUpdateCollectiveProtocol = DefaultNoOpTune;
   g_rcclSetPipelining = DefaultNoOpTune;
@@ -315,6 +335,10 @@ void ResetRcclWrapFakes() {
   g_rcclUseAllGatherDirect = DefaultUseAllGatherDirect;
   g_rcclUseReduceScatterDirect = DefaultUseReduceScatterDirect;
   g_rcclParamDdaEnable = 1;
+  g_rcclNetRegSegmentCount = DefaultNetRegSegmentCount;
+  g_rcclNetGraphRegSegmentCount = DefaultNetRegSegmentCount;
+  g_rcclNetRegCommitCalls = 0;
+  g_rcclNetRegCommitLastSegments = 0;
 }
 
 bool g_validHsaScratch = true;

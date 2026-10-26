@@ -19,6 +19,7 @@
 #include "nccl_common.h"
 
 struct ncclComm;
+struct ncclReg;
 struct ncclTaskColl;
 struct rcclCollDecision;
 
@@ -130,6 +131,13 @@ extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseAllGatherDirect;
 extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseReduceScatterDirect;
 // RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1).
 extern int64_t g_rcclParamDdaEnable;
+
+// NET user-buffer registration (net.cc's ncclNet{Local,Graph}RegisterBuffer). Both segment
+// counts default to keeping the caller's *numSegments; rcclNetRegCommit records its calls.
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclReg*, int*)> g_rcclNetRegSegmentCount;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclReg*, int*)> g_rcclNetGraphRegSegmentCount;
+extern int g_rcclNetRegCommitCalls;
+extern int g_rcclNetRegCommitLastSegments;
 
 void ResetRcclWrapFakes();
 

@@ -886,6 +886,7 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_stubs.cc                  # core floor, incl. proxy profiler hooks
     fakes/os_fakes.cc
     fakes/proxy_fakes.cc
+    fakes/rccl_wrap_fakes.cc             # NET registration segment count / commit
     fakes/rocmwrap_fakes.cc
     fakes/topo_stubs.cc
     fakes/transport_net_ib_fakes.cc      # ncclNetIb / netIbCast
@@ -2300,6 +2301,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNet
   SOURCES ${TEST_MICRO_NET_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
+    ${_MICRO_DMABUF_EXPORT_DEF}  # standalone: the cuMem DMA-BUF arms in-build gets from rccl
     # net_tmp.cc, not net.cc: src/CMakeLists.txt lists plugin/net.cc first, so
     # add_file_unique() renames this one. Re-check after any source-list reorder.
     NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_tmp.cc"
