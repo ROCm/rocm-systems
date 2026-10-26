@@ -34,13 +34,7 @@ process_cpu_info_data()
     bool        has_processor_entry = false;
 
     auto parse_long = [](const std::string& value) -> long {
-        try
-        {
-            return std::stol(value);
-        } catch(const std::exception&)
-        {
-            return -1;
-        }
+        return utility::string::safe_stoi(value).value_or(-1);
     };
 
     static const std::unordered_map<std::string,

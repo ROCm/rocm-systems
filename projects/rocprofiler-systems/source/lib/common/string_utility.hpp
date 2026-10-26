@@ -9,8 +9,11 @@
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -101,6 +104,122 @@ equals_ignore_case(std::string_view lhs, std::string_view rhs) noexcept
     return std::ranges::equal(lhs, rhs, [](char left, char right) {
         return std::tolower(left) == std::tolower(right);
     });
+}
+
+/// @brief Check whether a string is non-empty and consists only of ASCII digits.
+[[nodiscard]] constexpr bool
+is_numeric(std::string_view value) noexcept
+{
+    return !value.empty() &&
+           std::ranges::all_of(value, [](char chr) { return chr >= '0' && chr <= '9'; });
+}
+
+/// @brief Number of decimal digits needed to print @p value (0 -> 1).
+[[nodiscard]] constexpr size_t
+decimal_width(size_t value) noexcept
+{
+    constexpr std::size_t k_ten = 10;
+    size_t                width = 1;
+    for(; value >= k_ten; value /= k_ten)
+    {
+        ++width;
+    }
+    return width;
+}
+
+/// @brief Non-owning key/value views of a "KEY=VALUE" entry.
+struct key_value
+{
+    std::string_view key;
+    std::string_view value;
+};
+
+/// @brief Split a "KEY=VALUE" string at the first '='.
+/// @return The key/value views, or nullopt if @p entry has no '='.
+[[nodiscard]] constexpr std::optional<key_value>
+split_key_value(std::string_view entry) noexcept
+{
+    auto const eq_pos = entry.find('=');
+    if(eq_pos == std::string_view::npos)
+    {
+        return std::nullopt;
+    }
+    return key_value{ .key = entry.substr(0, eq_pos), .value = entry.substr(eq_pos + 1) };
+}
+
+/// @brief Check whether a "KEY=VALUE" entry belongs to @p key.
+[[nodiscard]] constexpr bool
+has_env_key(std::string_view entry, std::string_view key) noexcept
+{
+    return entry.starts_with(key) && entry.size() > key.size() &&
+           entry[key.size()] == '=';
+}
+
+/// @brief Strictly parse a whole string as an integral Tp; nullopt on empty, partial or
+///        overflow.
+template <std::integral Tp>
+[[nodiscard]] inline std::optional<Tp>
+safe_from_chars(std::string_view s)
+{
+    if(s.empty())
+    {
+        return std::nullopt;
+    }
+    Tp         value  = 0;
+    const auto result = std::from_chars(s.data(), s.data() + s.size(), value);
+    // Reject partial parses (e.g. "12.5" -> 12) by checking entire string was consumed
+    if(result.ec != std::errc{} || result.ptr != s.data() + s.size())
+    {
+        return std::nullopt;
+    }
+    return value;
+}
+
+/// @brief Strictly parse a whole string as an int; nullopt on empty, partial or overflow.
+[[nodiscard]] inline std::optional<int>
+safe_stoi(std::string_view s)
+{
+    return safe_from_chars<int>(s);
+}
+
+/// @brief Strictly parse a whole string as a long; nullopt on empty, partial or overflow.
+[[nodiscard]] inline std::optional<long>
+safe_stol(std::string_view s)
+{
+    return safe_from_chars<long>(s);
+}
+
+/// @brief Strictly parse a whole string as a double; nullopt on empty or partial parse.
+[[nodiscard]] inline std::optional<double>
+safe_stod(std::string_view number_str)
+{
+    if(number_str.empty())
+    {
+        return std::nullopt;
+    }
+    double value = 0.0;
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
+    // Prefer from_chars: locale-independent, zero-allocation
+    const auto result =
+        std::from_chars(number_str.data(), number_str.data() + number_str.size(), value);
+    if(result.ec != std::errc{} || result.ptr != number_str.data() + number_str.size())
+    {
+        return std::nullopt;
+    }
+#else
+    // Fallback for older compilers (GCC <11, Clang <16).
+    // Note: std::stod is locale-sensitive -assumes C/POSIX locale.
+    try
+    {
+        std::size_t pos = 0;
+        value           = std::stod(std::string{ s }, &pos);
+        if(pos != s.size()) return std::nullopt;
+    } catch(const std::exception&)
+    {
+        return std::nullopt;
+    }
+#endif
+    return value;
 }
 
 /// @brief Parse a string into a boolean.

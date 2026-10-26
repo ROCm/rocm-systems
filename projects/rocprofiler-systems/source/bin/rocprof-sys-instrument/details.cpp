@@ -13,6 +13,7 @@
 #include <Symbol.h>
 
 #include "common/path.hpp"
+#include "common/regex_utility.hpp"
 #include "common/string_utility.hpp"
 #include "core/demangler.hpp"
 
@@ -209,13 +210,6 @@ get_parameter_types(procedure_t* func)
     return _param_names;
 }
 
-// True if any regex in _res matches _name.
-bool
-regex_match_any(const std::string& _name, const regexvec_t& _res)
-{
-    return std::ranges::any_of(
-        _res, [&](const auto& _re) { return std::regex_search(_name, _re); });
-}
 }  // namespace
 
 //======================================================================================//
@@ -787,44 +781,12 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
     }
 
     auto const _get_chain = [&_open_modes](const char* _name) {
-        void* _handle = nullptr;
-        bool  _noload = false;
-        for(auto const _mode : _open_modes)
+        auto _chain =
+            rocprofsys::path::get_link_map(_name, std::vector<int>{ _open_modes }, true);
+        if(_name == nullptr)
         {
-            _handle = dlopen(_name, _mode);
-            _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-            if(_handle)
-            {
-                break;
-            }
-        }
-
-        auto _chain = std::vector<std::string>{};
-        if(_handle)
-        {
-            struct link_map* _link_map = nullptr;
-            dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
-            struct link_map const* _next = _link_map;
-            while(_next)
-            {
-                if(_name == nullptr && _next == _link_map &&
-                   std::string_view{ _next->l_name }.empty())
-                {
-                    // only insert exe name if dlopened the exe and
-                    // empty name is first entry
-                    _chain.emplace_back(rocprofsys_get_exe_realpath());
-                }
-                else if(!std::string_view{ _next->l_name }.empty())
-                {
-                    _chain.emplace_back(_next->l_name);
-                }
-                _next = _next->l_next;
-            }
-
-            if(!_noload)
-            {
-                dlclose(_handle);
-            }
+            // dlopen(nullptr) names the exe with an empty first entry
+            _chain.insert(_chain.begin(), rocprofsys_get_exe_realpath());
         }
         return _chain;
     };
@@ -1079,7 +1041,7 @@ filter_objects(std::vector<object_t*> const* app_objects)
                     continue;
                 }
                 auto const _module_name = std::string{ get_name(mod) };
-                if(regex_match_any(_module_name, file_include))
+                if(rocprofsys::utility::regex_match_any(_module_name, file_include))
                 {
                     _included_module = true;
                     verbprintf(2,
@@ -1089,7 +1051,7 @@ filter_objects(std::vector<object_t*> const* app_objects)
                     break;
                 }
 
-                if(regex_match_any(_module_name, file_restrict))
+                if(rocprofsys::utility::regex_match_any(_module_name, file_restrict))
                 {
                     _included_module = true;
                     verbprintf(2,
@@ -1222,7 +1184,7 @@ filter_modules(std::vector<module_t*> const* app_modules)
         }
 
         // -ME: skip if module matches an exclude regex
-        if(regex_match_any(_module_name, file_exclude))
+        if(rocprofsys::utility::regex_match_any(_module_name, file_exclude))
         {
             _is_excluded = true;
             verbprintf(2, "[filter] skipping module-exclude-regex: '%s'\n",
@@ -1231,7 +1193,7 @@ filter_modules(std::vector<module_t*> const* app_modules)
 
         // -MR: skip if restrict is specified and module does NOT match
         if(!_is_excluded && !file_restrict.empty() &&
-           !regex_match_any(_module_name, file_restrict))
+           !rocprofsys::utility::regex_match_any(_module_name, file_restrict))
         {
             _is_excluded = true;
             verbprintf(2, "[filter] skipping module-restrict-regex: '%s'\n",
@@ -1239,7 +1201,8 @@ filter_modules(std::vector<module_t*> const* app_modules)
         }
 
         // -MI: if module matches an include regex, force it through
-        if(_is_excluded && regex_match_any(_module_name, file_include))
+        if(_is_excluded &&
+           rocprofsys::utility::regex_match_any(_module_name, file_include))
         {
             _is_excluded = false;
             verbprintf(2, "[filter] forcing module-include-regex: '%s'\n",

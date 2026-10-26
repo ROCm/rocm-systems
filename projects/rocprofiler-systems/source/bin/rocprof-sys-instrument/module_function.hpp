@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/string_utility.hpp"
 #include "function_signature.hpp"
 #include "fwd.hpp"
 #include <cstdint>
@@ -149,10 +150,9 @@ public:
             return _inc;
         };
 
-        std::stringstream _addr{};
-        _addr << "0x" << std::hex << rhs.start_address;
+        auto const _addr = rocprofsys::utility::string::hex_padded(rhs.start_address, 0);
         // clang-format off
-        ss << std::setw(14) << _addr.str() << " "
+        ss << std::setw(14) << _addr << " "
            << std::setw(14) << rhs.address_range << " "
            << std::setw(14) << rhs.num_instructions << " "
            << std::setw(6) << std::setprecision(2) << std::fixed << (rhs.address_range / static_cast<double>(rhs.num_instructions)) << "  "
@@ -175,9 +175,8 @@ module_function::serialize(ArchiveT& ar, const unsigned)
     namespace cereal = tim::cereal;
     if constexpr(tim::concepts::is_output_archive<ArchiveT>::value)
     {
-        std::stringstream _addr{};
-        _addr << "0x" << std::hex << start_address;
-        ar(cereal::make_nvp("start_address", _addr.str()));
+        ar(cereal::make_nvp("start_address",
+                            rocprofsys::utility::string::hex_padded(start_address, 0)));
     }
 
     ar(cereal::make_nvp("address_range", address_range),
@@ -242,9 +241,9 @@ module_function::serialize(ArchiveT& ar, const unsigned)
                 ar.startNode();
                 for(auto&& iitr : itr)
                 {
-                    std::stringstream _addr{};
-                    _addr << "0x" << std::hex << iitr.second;
-                    ar(cereal::make_nvp(_addr.str().c_str(), iitr.first.format()));
+                    auto const _addr =
+                        rocprofsys::utility::string::hex_padded(iitr.second, 0);
+                    ar(cereal::make_nvp(_addr.c_str(), iitr.first.format()));
                 }
                 ar.finishNode();
             }

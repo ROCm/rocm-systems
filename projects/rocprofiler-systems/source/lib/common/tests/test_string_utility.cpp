@@ -189,3 +189,109 @@ TEST(hex_padded, custom_width_narrower_than_value_is_not_truncated)
 {
     EXPECT_EQ(hex_padded(std::uintptr_t{ 0x1234 }, 2), "0x1234");
 }
+
+TEST(is_numeric, digits_only)
+{
+    EXPECT_TRUE(is_numeric("0"));
+    EXPECT_TRUE(is_numeric("0123456789"));
+}
+
+TEST(is_numeric, rejects_empty_and_non_digits)
+{
+    EXPECT_FALSE(is_numeric(""));
+    EXPECT_FALSE(is_numeric("12a"));
+    EXPECT_FALSE(is_numeric("-1"));
+    EXPECT_FALSE(is_numeric("1.5"));
+    EXPECT_FALSE(is_numeric(" 1"));
+}
+
+TEST(decimal_width, counts_digits)
+{
+    EXPECT_EQ(decimal_width(0), 1U);
+    EXPECT_EQ(decimal_width(9), 1U);
+    EXPECT_EQ(decimal_width(10), 2U);
+    EXPECT_EQ(decimal_width(99), 2U);
+    EXPECT_EQ(decimal_width(100), 3U);
+    EXPECT_EQ(decimal_width(1234567), 7U);
+}
+
+TEST(split_key_value, splits_at_first_equals)
+{
+    auto const kv = split_key_value("KEY=a=b");
+    ASSERT_TRUE(kv.has_value());
+    EXPECT_EQ(kv->key, "KEY");
+    EXPECT_EQ(kv->value, "a=b");
+}
+
+TEST(split_key_value, empty_value_and_empty_key)
+{
+    auto const empty_value = split_key_value("KEY=");
+    ASSERT_TRUE(empty_value.has_value());
+    EXPECT_EQ(empty_value->key, "KEY");
+    EXPECT_TRUE(empty_value->value.empty());
+
+    auto const empty_key = split_key_value("=v");
+    ASSERT_TRUE(empty_key.has_value());
+    EXPECT_TRUE(empty_key->key.empty());
+    EXPECT_EQ(empty_key->value, "v");
+}
+
+TEST(split_key_value, no_equals_yields_nullopt)
+{
+    EXPECT_FALSE(split_key_value("KEY").has_value());
+    EXPECT_FALSE(split_key_value("").has_value());
+}
+
+TEST(has_env_key, matches_whole_key_only)
+{
+    EXPECT_TRUE(has_env_key("PATH=/usr/bin", "PATH"));
+    EXPECT_TRUE(has_env_key("PATH=", "PATH"));
+    EXPECT_FALSE(has_env_key("PATHX=/usr/bin", "PATH"));
+    EXPECT_FALSE(has_env_key("PAT=1", "PATH"));
+    EXPECT_FALSE(has_env_key("PATH", "PATH"));
+    EXPECT_FALSE(has_env_key("", "PATH"));
+}
+
+TEST(safe_stoi, parses_whole_string)
+{
+    EXPECT_EQ(safe_stoi("42"), 42);
+    EXPECT_EQ(safe_stoi("-7"), -7);
+}
+
+TEST(safe_stoi, rejects_invalid_input)
+{
+    EXPECT_FALSE(safe_stoi("").has_value());
+    EXPECT_FALSE(safe_stoi("12a").has_value());
+    EXPECT_FALSE(safe_stoi("12.5").has_value());
+    EXPECT_FALSE(safe_stoi(" 1").has_value());
+    EXPECT_FALSE(safe_stoi("99999999999").has_value());
+}
+
+TEST(safe_stol, parses_whole_string)
+{
+    EXPECT_EQ(safe_stol("42"), 42L);
+    EXPECT_EQ(safe_stol("-7"), -7L);
+    EXPECT_EQ(safe_stol("9223372036854775807"), 9223372036854775807L);
+}
+
+TEST(safe_stol, rejects_invalid_input)
+{
+    EXPECT_FALSE(safe_stol("").has_value());
+    EXPECT_FALSE(safe_stol("12a").has_value());
+    EXPECT_FALSE(safe_stol("12.5").has_value());
+    EXPECT_FALSE(safe_stol(" 1").has_value());
+    EXPECT_FALSE(safe_stol("9223372036854775808").has_value());
+}
+
+TEST(safe_stod, parses_whole_string)
+{
+    EXPECT_DOUBLE_EQ(safe_stod("1.5").value_or(0.0), 1.5);
+    EXPECT_DOUBLE_EQ(safe_stod("-2").value_or(0.0), -2.0);
+}
+
+TEST(safe_stod, rejects_invalid_input)
+{
+    EXPECT_FALSE(safe_stod("").has_value());
+    EXPECT_FALSE(safe_stod("1.5x").has_value());
+    EXPECT_FALSE(safe_stod("abc").has_value());
+}

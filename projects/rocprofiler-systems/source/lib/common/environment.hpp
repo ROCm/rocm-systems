@@ -32,6 +32,10 @@
 
 namespace rocprofsys::inline common
 {
+/// Runtime-provided environment variables holding the global MPI rank, in lookup order.
+inline constexpr auto k_mpi_rank_env_names =
+    std::to_array<std::string_view>({ "MPI_RANKID", "PMI_RANK", "MV2_COMM_WORLD_RANK",
+                                      "OMPI_COMM_WORLD_RANK", "SLURM_PROCID" });
 
 /// @brief Production environment backend that forwards to the real POSIX
 ///        ::getenv / ::setenv. Used as the default @p EnvType of @ref environment;
@@ -375,20 +379,18 @@ inline void
 remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
            const std::unordered_set<std::string>& original_envs)
 {
-    auto key = fmt::format("{}=", env_variable);
-
-    env_list.erase(
-        std::ranges::remove_if(env_list,
-                               [&key](const std::string& entry) {
-                                   return std::string_view{ entry }.starts_with(key);
-                               })
-            .begin(),
-        env_list.end());
+    env_list.erase(std::ranges::remove_if(env_list,
+                                          [&env_variable](const std::string& entry) {
+                                              return utility::string::has_env_key(
+                                                  entry, env_variable);
+                                          })
+                       .begin(),
+                   env_list.end());
 
     // Restore from original_envs if previously existed
     for(const auto& orig : original_envs)
     {
-        if(std::string_view{ orig }.starts_with(key))
+        if(utility::string::has_env_key(orig, env_variable))
         {
             env_list.emplace_back(orig);
         }
@@ -509,8 +511,7 @@ is_python_interpreter(std::string_view executable)
 
     const auto version_digits = basename.substr(python3_prefix.size());
 
-    return std::ranges::all_of(version_digits,
-                               [](unsigned char c) { return std::isdigit(c); });
+    return utility::string::is_numeric(version_digits);
 }
 
 /// @brief Discover the PyTorch library directory for a given Python interpreter.
@@ -668,10 +669,9 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     _updated_envs.emplace(updated_value_t{ _env_var });
 
     const auto _env_val_str = to_env_string(std::forward<Tp>(_env_val));
-    const auto _key         = fmt::format("{}=", _env_var);
 
-    const auto matches_key = [&_key](const std::string& entry) {
-        return std::string_view{ entry }.starts_with(_key);
+    const auto matches_key = [&_env_var](const std::string& entry) {
+        return utility::string::has_env_key(entry, _env_var);
     };
 
     auto const first = std::find_if(_environ.begin(), _environ.end(), matches_key);
@@ -698,7 +698,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
             {
                 return;
             }
-            auto _val = first->substr(_key.size());
+            auto _val = first->substr(std::string_view{ _env_var }.size() + 1);
             *first =
                 (_mode == update_mode::prepend)
                     ? fmt::format("{}={}{}{}", _env_var, _env_val_str, _join_delim, _val)
@@ -824,18 +824,7 @@ consolidate_env_entries(std::vector<std::string>& envp)
         }
     };
 
-    /// Parses an environment entry string into key and value components.
-    /// @param entry String in "KEY=VALUE" format
-    /// @return Optional pair of (key, value) views, or nullopt if no '=' found
-    auto const parse_entry = [](std::string_view entry)
-        -> std::optional<std::pair<std::string_view, std::string_view>> {
-        auto const eq_pos = entry.find('=');
-        if(eq_pos == std::string_view::npos)
-        {
-            return std::nullopt;
-        }
-        return std::make_pair(entry.substr(0, eq_pos), entry.substr(eq_pos + 1));
-    };
+    auto const parse_entry = utility::string::split_key_value;
 
     /// Reconstructs an environment entry string from key and value parts.
     /// @param key   The environment variable name

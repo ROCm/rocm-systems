@@ -70,7 +70,7 @@ print_log_entries(std::ostream& _os, std::int64_t _count,
 {
     const size_t i0 =
         (_count < 0) ? 0 : std::max<std::int64_t>(log_entries.size() - _count, 0);
-    const size_t _w = std::log10(log_entries.size()) + 1;
+    const size_t _w = rocprofsys::utility::string::decimal_width(log_entries.size());
 
     if(dynamic_cast<std::ofstream*>(&_os) ||
        (&_os != &std::cout && &_os != &std::cerr && &_os != &std::clog))
