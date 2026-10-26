@@ -9998,8 +9998,9 @@ protected:
     }
     if (inspect_worker_cache || vm_fault) {
       fixture.cu(0)->set_notification_flush_hook_for_testing([&] {
-        if (inspect_worker_cache)
+        if (inspect_worker_cache) {
           ASSERT_EQ(busy_ready.wait_for(5s), std::future_status::ready);
+        }
         if (vm_fault)
           fixture.cp()->notify_dispatch_vm_fault(1, 0, failed_dispatch,
                                                  amdgpu::VmAccessOutcome::Faulted);
@@ -10016,8 +10017,9 @@ protected:
     EXPECT_EQ(completion_signal_value(fixture.mem(), kFailureSignal), 1);
     EXPECT_EQ(completion_signal_value(fixture.mem(), kBarrierSignal), 1);
     EXPECT_EQ(completion_signal_value(fixture.mem(), kBusySignal), vm_fault ? 0 : 1);
-    if (inspect_worker_cache)
+    if (inspect_worker_cache) {
       EXPECT_GT(fixture.cu(1)->instruction_cache().epoch(), busy_cache_epoch);
+    }
   }
 };
 
