@@ -8,6 +8,8 @@
 #include <hip/hip_ext_ocp.h>
 
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -263,6 +265,48 @@ HIP_TEST_CASE(Unit_ext_ocp_fp8_fp16_bf16_source_host) {
     REQUIRE(from_fp16.__x == from_float_v.__x);
     REQUIRE(from_bf16.__x == from_float_v.__x);
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - A binary16 subnormal has no implicit leading 1. Converting it to fp8 must
+ *    give the same encoding as converting the same value from float, for every
+ *    binary16 subnormal (both signs). Known values: 2^-24 -> 0x00 and
+ *    1.5 * 2^-15 -> 0x03 for E5M2.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/ext_ocp_fp8.cc
+ */
+HIP_TEST_CASE(Unit_ext_ocp_fp8_fp16_subnormal_source_host) {
+  auto fp16_from_bits = [](unsigned bits) {
+    uint16_t u = static_cast<uint16_t>(bits);
+    __amd_fp16_storage_t h;
+    std::memcpy(&h, &u, sizeof(h));
+    return h;
+  };
+  auto encode_fp16 = [&](unsigned bits, __amd_fp8_interpretation_t interp) {
+    __amd_fp16_storage_t h = fp16_from_bits(bits);
+    return __amd_cvt_fp16x2_to_fp8x2(__amd_fp16x2_storage_t{h, h}, interp) & 0xffu;
+  };
+  auto encode_float = [&](unsigned bits, __amd_fp8_interpretation_t interp) {
+    float f = static_cast<float>(fp16_from_bits(bits));
+    return __amd_cvt_floatx2_to_fp8x2(__amd_floatx2_storage_t{f, f}, interp) & 0xffu;
+  };
+
+  for (auto interp : {__AMD_OCP_E4M3, __AMD_OCP_E5M2}) {
+    for (unsigned sign : {0x0000u, 0x8000u}) {
+      for (unsigned bits = 1; bits <= 0x3ffu; ++bits) {
+        INFO("interpretation " << interp << " binary16 0x" << std::hex << (sign | bits));
+        REQUIRE(encode_fp16(sign | bits, interp) == encode_float(sign | bits, interp));
+      }
+    }
+  }
+
+  REQUIRE(encode_fp16(0x0001, __AMD_OCP_E5M2) == 0x00);  // 2^-24
+  REQUIRE(encode_fp16(0x0300, __AMD_OCP_E5M2) == 0x03);  // 1.5 * 2^-15
+  REQUIRE(encode_fp16(0x03ff, __AMD_OCP_E5M2) == 0x04);  // rounds up to 2^-14, the min normal
+  REQUIRE(encode_fp16(0x8300, __AMD_OCP_E5M2) == 0x83);
 }
 
 // ---- Device consistency -----------------------------------------------------
