@@ -91,9 +91,13 @@ on_kfd_queue(typename SdkBackend::kfd_queue_record* record, [[maybe_unused]] voi
 
     auto& metadata_registry = Externals::get_metadata_registry();
     metadata_registry.ensure_thread(tid, [&] {
-        return typename Externals::thread_info_t{
-            Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}"
-        };
+        return
+            typename Externals::thread_info_t{ .parent_process_id = Externals::get_ppid(),
+                                               .process_id        = Externals::get_pid(),
+                                               .thread_id         = tid,
+                                               .start             = 0,
+                                               .end               = 0,
+                                               .extdata           = "{}" };
     });
 
     auto const agent_label = [](const auto* agent_ptr) {

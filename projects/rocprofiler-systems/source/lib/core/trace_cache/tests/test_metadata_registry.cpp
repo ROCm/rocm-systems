@@ -28,7 +28,12 @@ TEST(metadata_registry_test, ensure_thread_builds_only_when_unknown)
     int               builds = 0;
     auto const        make   = [&builds] {
         ++builds;
-        return info::thread{ 1, 2, 42, 0, 0, "{}" };
+        return info::thread{ .parent_process_id = 1,
+                                      .process_id        = 2,
+                                      .thread_id         = 42,
+                                      .start             = 0,
+                                      .end               = 0,
+                                      .extdata           = "{}" };
     };
 
     registry.ensure_thread(42, make);

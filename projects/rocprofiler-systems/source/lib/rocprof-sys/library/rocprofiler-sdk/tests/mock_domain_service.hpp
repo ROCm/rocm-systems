@@ -1583,7 +1583,9 @@ struct externals
             if(g_metadata_registry_mock)
             {
                 g_metadata_registry_mock->ensure_track(
-                    track_t{ std::string{ name }, thread_id, std::string{ extdata } });
+                    track_t{ .track_name = std::string{ name },
+                             .thread_id  = thread_id,
+                             .extdata    = std::string{ extdata } });
             }
         }
         void add_pmc_info(const pmc_info_t& info)

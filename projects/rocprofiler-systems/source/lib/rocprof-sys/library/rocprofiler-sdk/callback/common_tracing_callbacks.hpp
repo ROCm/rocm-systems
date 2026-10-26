@@ -117,9 +117,13 @@ on_tracing_api_exit(
     metadata_registry.add_string(Category<Externals>::k_name);
 
     metadata_registry.ensure_thread(record.thread_id, [&] {
-        return typename Externals::thread_info_t{
-            Externals::get_ppid(), Externals::get_pid(), record.thread_id, 0, 0, "{}"
-        };
+        return
+            typename Externals::thread_info_t{ .parent_process_id = Externals::get_ppid(),
+                                               .process_id        = Externals::get_pid(),
+                                               .thread_id         = record.thread_id,
+                                               .start             = 0,
+                                               .end               = 0,
+                                               .extdata           = "{}" };
     });
 
     const std::string args_str = get_args_string(args);

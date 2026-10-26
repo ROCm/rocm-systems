@@ -207,13 +207,9 @@ void
 metadata_initialize_thread_info(size_t tid)
 {
     const auto& _thread_info = thread_info::get(tid, SequentTID);
-    if(!_thread_info)
+    if(!_thread_info || !_thread_info->index_data)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
-    }
-    if(!_thread_info)
-    {
-        return;
     }
 
     auto const thread_id = static_cast<size_t>(_thread_info->index_data->system_value);

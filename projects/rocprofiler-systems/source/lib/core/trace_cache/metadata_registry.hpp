@@ -248,11 +248,12 @@ template <typename Synchronized, typename Key, typename MakeFn>
 void
 insert_if_absent(Synchronized& data, const Key& key, MakeFn&& make)
 {
-    data.ulock([&key](const auto& _data) { return _data.find(key) != _data.end(); },
-               [&make](auto& _data) {
-                   _data.emplace(make());
-                   return true;
-               });
+    data.ulock(
+        [&key](const auto& container) { return container.find(key) != container.end(); },
+        [&make](auto& container) {
+            container.emplace(make());
+            return true;
+        });
 }
 
 template <typename Synchronized, typename Key>
@@ -275,12 +276,18 @@ struct metadata_registry
     void add_pmc_info(const info::pmc& pmc_info);
 
     /// Registers the thread only if @p thread_id is unknown; @p make (-> info::thread)
-    /// is invoked under the write lock, so the known path builds nothing.
+    /// is invoked under the write lock, so the known path builds nothing. @p make must be
+    /// lightweight and must not call back into the registry (the lock is already held).
     template <typename MakeFn>
         requires std::is_invocable_r_v<info::thread, MakeFn>
     void ensure_thread(std::uint64_t thread_id, MakeFn&& make)
     {
-        detail::insert_if_absent(m_threads, thread_id, std::forward<MakeFn>(make));
+        detail::insert_if_absent(m_threads, thread_id, [&] {
+            auto thread = std::invoke(std::forward<MakeFn>(make));
+            assert(thread.thread_id == thread_id &&
+                   "ensure_thread: key and thread.thread_id must match");
+            return thread;
+        });
     }
 
     /// Registers the track only if @p name is unknown; the track is built on insert only.

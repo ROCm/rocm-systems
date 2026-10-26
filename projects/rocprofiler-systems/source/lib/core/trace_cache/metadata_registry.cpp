@@ -200,7 +200,7 @@ to_json(const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
     result["load_size"]      = static_cast<long long>(code_object.load_size);
     result["load_delta"]     = static_cast<long long>(code_object.load_delta);
     result["storage_type"]   = static_cast<int>(code_object.storage_type);
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     result["agent_id_handle"] = static_cast<long long>(code_object.agent_id.handle);
 #else
     result["agent_id_handle"] = static_cast<long long>(code_object.rocp_agent.handle);
@@ -221,7 +221,7 @@ from_json_code_object(const nlohmann::json& _json)
     co.storage_type    = static_cast<rocprofiler_code_object_storage_type_t>(
         _json["storage_type"].get<int>());
     auto const handle = _json["agent_id_handle"].get<long long>();
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     co.agent_id.handle = handle;
 #else
     co.rocp_agent.handle = handle;
@@ -471,7 +471,9 @@ metadata_registry::ensure_track(std::string_view name, std::optional<size_t> thr
                                 std::string_view extdata)
 {
     detail::insert_if_absent(m_tracks, name, [&] {
-        return info::track{ std::string{ name }, thread_id, std::string{ extdata } };
+        return info::track{ .track_name = std::string{ name },
+                            .thread_id  = thread_id,
+                            .extdata    = std::string{ extdata } };
     });
 }
 
