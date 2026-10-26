@@ -160,26 +160,13 @@ class CheckReplayCompatTests(unittest.TestCase):
     def test_probe_host_falls_back_to_amd_smi(
         self, _which_mock: mock.Mock, run_mock: mock.Mock, _comgr_mock: mock.Mock
     ) -> None:
-        # `amd-smi static`, amdsmi docs/how-to/amdsmi-cli-tool.md:1399-1415.
+        # The fields read, from amdsmi docs/how-to/amdsmi-cli-tool.md:1399-1415.
         run_mock.return_value = mock.Mock(
             stdout=(
                 "GPU: 0\n"
                 "    ASIC:\n"
                 "        MARKET_NAME: AMD Instinct MI300A\n"
-                "        VENDOR_ID: 0x1002\n"
-                "        VENDOR_NAME: Advanced Micro Devices, Inc. [AMD/ATI]\n"
-                "        SUBVENDOR_ID: 0x1002\n"
-                "        DEVICE_ID: 0x74a0\n"
-                "        SUBSYSTEM_ID: 0x74a0\n"
-                "        REV_ID: 0x00\n"
-                "        CHIP_REV_ID: 0x01\n"
-                "        EXTERNAL_REV_ID: 0x47\n"
-                "        ASIC_SERIAL: 0xXXXXXXXXXXXXXXXX\n"
-                "        OAM_ID: 0\n"
-                "        PHYSICAL_ACC_ID: N/A\n"
-                "        NUM_COMPUTE_UNITS: 228\n"
                 "        TARGET_GRAPHICS_VERSION: gfx942\n"
-                "        FLAGS: 17\n"
             ),
             stderr="",
         )
@@ -237,10 +224,6 @@ class CheckReplayCompatTests(unittest.TestCase):
             count._obj.value = 1
             return 0
 
-        def get_attribute(value, attr, device):
-            value._obj.value = 2048  # 57 is hipDeviceAttributeMaxThreadsPerMultiProcessor
-            return 0
-
         def get_properties(props, device):
             base = ctypes.addressof(props._obj)
             ctypes.memmove(base, b"AMD Instinct MI300X\0", 20)
@@ -253,7 +236,6 @@ class CheckReplayCompatTests(unittest.TestCase):
 
         hip = types.SimpleNamespace(
             hipGetDeviceCount=get_device_count,
-            hipDeviceGetAttribute=get_attribute,
             hipGetDeviceProperties=get_properties,
             hipRuntimeGetVersion=runtime_get_version,
         )
