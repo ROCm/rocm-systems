@@ -31,6 +31,7 @@ INTERFACE library that contributes an include path and nothing to link.
 
 | File | Description |
 |------|-------------|
+| `aligned_atomic.h` | `AlignedAtomic<T>` preserves `std::atomic<T>` operations with at least 64-byte alignment and padding to separate independently accessed data. |
 | `arena_alloc.h` | Fixed-size block pool allocator with free-list. `ArenaAlloc<BlockSize, NumBlocks, BlockAlign>` provides O(1) alloc/dealloc with global-allocator fallback. |
 | `spinlock.h` | TTAS spinlock optimized for sub-microsecond critical sections. Uses C++20 `atomic::wait()` with ThreadSanitizer annotations. |
 | `conditional_wake_spinlock.h` | Parking lock for many independent, rarely contended critical sections where release cost dominates. A caller-supplied host policy provides timed waits and wakes, keeping native/interposed API selection outside util. Linux uses a store release; a missed wake waits up to the current timeout (capped at 2 ms) plus scheduling delay. Sustained contention may be slower than `Spinlock`. The lock must outlive every in-flight `unlock()` call; other hosts use `Spinlock`. |

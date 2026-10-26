@@ -8,6 +8,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/instruction.h"
+#include "util/aligned_atomic.h"
 #include "util/host_target.h"
 
 #include <algorithm>
@@ -138,7 +139,7 @@ private:
     }
   }
 
-  alignas(64) std::atomic<int> state_{0};
+  util::AlignedAtomic<int> state_{0};
   alignas(64) Instruction *instruction_ = nullptr;
   void *wave_ = nullptr;
   std::fenv_t environment_{};

@@ -512,6 +512,7 @@ add_executable(
     scoped_temp_test.cpp
     wave_debug_test.cpp
     decode_execute_benchmark.cpp
+    util_aligned_atomic_test.cpp
     util_conditional_wake_spinlock_test.cpp
     util_distributed_shared_mutex_test.cpp
     util_observable_shared_mutex_test.cpp

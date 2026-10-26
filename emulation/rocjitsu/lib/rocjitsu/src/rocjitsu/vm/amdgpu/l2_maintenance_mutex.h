@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "util/aligned_atomic.h"
+
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -58,7 +60,7 @@ public:
 #ifdef ROCJITSU_L2_MUTEX_TSAN
     __tsan_mutex_pre_unlock(this, __tsan_mutex_read_lock);
 #endif
-    release_reader(readers_[reader_shard()].count);
+    release_reader(readers_[reader_shard()]);
 #ifdef ROCJITSU_L2_MUTEX_TSAN
     __tsan_mutex_post_unlock(this, __tsan_mutex_read_lock);
 #endif
@@ -74,7 +76,7 @@ public:
     if (acquired) {
       writer_pending_.store(1, std::memory_order_seq_cst);
       for (auto &reader : readers_) {
-        if (reader.count.load(std::memory_order_seq_cst) != 0) {
+        if (reader.load(std::memory_order_seq_cst) != 0) {
           reopen_admission();
           acquired = false;
           break;
@@ -113,7 +115,7 @@ private:
 #ifdef ROCJITSU_L2_MUTEX_TSAN
     __tsan_mutex_pre_lock(this, __tsan_mutex_read_lock);
 #endif
-    auto &counter = readers_[reader_shard()].count;
+    auto &counter = readers_[reader_shard()];
     for (;;) {
       while (writer_pending_.load(std::memory_order_acquire))
         writer_pending_.wait(1, std::memory_order_acquire);
@@ -140,7 +142,7 @@ private:
 #endif
     bool acquired = false;
     if (!writer_pending_.load(std::memory_order_acquire)) {
-      auto &counter = readers_[reader_shard()].count;
+      auto &counter = readers_[reader_shard()];
       hooks.before_reader_increment();
       counter.fetch_add(1, std::memory_order_seq_cst);
       acquired = !writer_pending_.load(std::memory_order_seq_cst);
@@ -160,11 +162,11 @@ private:
     writers_.lock();
     writer_pending_.store(1, std::memory_order_seq_cst);
     for (auto &reader : readers_) {
-      unsigned active = reader.count.load(std::memory_order_seq_cst);
+      unsigned active = reader.load(std::memory_order_seq_cst);
       while (active != 0) {
         hooks.before_writer_wait(active);
-        reader.count.wait(active, std::memory_order_acquire);
-        active = reader.count.load(std::memory_order_seq_cst);
+        reader.wait(active, std::memory_order_acquire);
+        active = reader.load(std::memory_order_seq_cst);
       }
     }
 #ifdef ROCJITSU_L2_MUTEX_TSAN
@@ -172,14 +174,11 @@ private:
 #endif
   }
 
-  struct alignas(64) Reader {
-    std::atomic<unsigned> count{0};
-  };
   static constexpr std::size_t kReaderShards = 128;
-  std::array<Reader, kReaderShards> readers_;
+  std::array<util::AlignedAtomic<unsigned>, kReaderShards> readers_;
   // A word-sized gate permits direct futex waiting on Linux rather than the
   // shared proxy used for byte-sized atomics by some standard libraries.
-  alignas(64) std::atomic<uint32_t> writer_pending_{0};
+  util::AlignedAtomic<uint32_t> writer_pending_{0};
   alignas(64) std::mutex writers_;
 
   static std::size_t reader_shard() {

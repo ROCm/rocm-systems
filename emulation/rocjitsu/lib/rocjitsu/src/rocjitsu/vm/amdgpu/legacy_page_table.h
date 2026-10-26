@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "util/aligned_atomic.h"
 
 #include <array>
 #include <atomic>
@@ -101,10 +102,10 @@ public:
     draining_.store(true, std::memory_order_seq_cst);
     generation_.fetch_add(1, std::memory_order_seq_cst);
     for (auto &shard : readers_) {
-      uint64_t active = shard.count.load(std::memory_order_seq_cst);
+      uint64_t active = shard.load(std::memory_order_seq_cst);
       while (active != 0) {
-        shard.count.wait(active, std::memory_order_seq_cst);
-        active = shard.count.load(std::memory_order_seq_cst);
+        shard.wait(active, std::memory_order_seq_cst);
+        active = shard.load(std::memory_order_seq_cst);
       }
     }
     draining_.store(false, std::memory_order_seq_cst);
@@ -115,19 +116,16 @@ private:
   // lines, and let unrelated simulation threads admit independently. Hash
   // collisions preserve exclusion, including nested reads on one thread.
   static constexpr std::size_t kReaderShards = 128;
-  struct alignas(64) ReaderShard {
-    std::atomic<uint64_t> count{0};
-  };
   alignas(64) std::atomic<uint64_t> generation_{1};
   std::atomic<bool> draining_{false};
-  mutable std::array<ReaderShard, kReaderShards> readers_;
+  mutable std::array<util::AlignedAtomic<uint64_t>, kReaderShards> readers_;
 
   std::atomic<uint64_t> &reader_count() const {
     // Thread identity gives inline calls in different shared libraries the
     // same slot, without retaining thread-owned state in the cache object.
     static thread_local const std::size_t shard =
         std::hash<std::thread::id>{}(std::this_thread::get_id()) % kReaderShards;
-    return readers_[shard].count;
+    return readers_[shard];
   }
 };
 

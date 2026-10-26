@@ -33,7 +33,7 @@ public:
     mutex.lock_impl(hooks);
   }
   static std::atomic<unsigned> &reader_count(L2MaintenanceMutex &mutex, size_t shard) {
-    return mutex.readers_[shard].count;
+    return mutex.readers_[shard];
   }
 };
 

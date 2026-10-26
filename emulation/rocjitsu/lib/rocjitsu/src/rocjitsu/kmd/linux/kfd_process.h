@@ -17,6 +17,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "util/aligned_atomic.h"
 #include "util/distributed_shared_mutex.h"
 #include "util/unique_handle.h"
 
@@ -892,13 +893,10 @@ private:
   uint64_t page_table_generation_{1};
   // Cache hits read the epoch while misses copy and release its shared_ptr.
   // Keep the epoch off the cache line containing make_shared's reference count.
-  struct alignas(64) PageTableMutationEpoch : std::atomic<uint64_t> {
-    PageTableMutationEpoch() : std::atomic<uint64_t>(1) {}
-  };
   /// @brief Retained atomic token for lockless copied-policy checks.
   /// @details Invalidate before mutation, including partially throwing updates.
   std::shared_ptr<std::atomic<uint64_t>> page_table_mutation_epoch_ =
-      std::make_shared<PageTableMutationEpoch>();
+      std::make_shared<util::AlignedAtomic<uint64_t>>(1);
   std::shared_ptr<amdgpu::LegacyPageTableCacheState> page_table_cache_state_ =
       std::make_shared<amdgpu::LegacyPageTableCacheState>();
 };
