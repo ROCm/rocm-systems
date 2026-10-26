@@ -1,6 +1,6 @@
 """
 GoogleTest runner -- executes the rdctst binary in embedded batch mode and the
-rdc_client_tests binary.
+GoogleTest binaries that run without a GPU.
 """
 
 import subprocess
@@ -34,6 +34,22 @@ class TestGoogleTestSuite:
             f"rdctst batch mode failed (rc={result.returncode}):\n{result.stderr[-2000:]}"
         )
 
+    def test_rdc_partition_count(self, rocm_dir, rdctst_path):
+        # rdctst_path skips this test unless the RDC test package is installed, and
+        # every build that installs rdctst also installs rdc_partition_count_tests.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_partition_count_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=120)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_partition_count_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+
     def test_rdc_client_shutdown(self, rocm_dir, rdctst_path):
         # rdctst_path skips this test unless the RDC test package is installed. rdctst
         # is built only with the standalone client, so rdc_client_tests must be too.
@@ -50,9 +66,74 @@ class TestGoogleTestSuite:
             f"rdc_client_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
         )
 
+    def test_rdc_power_usage(self, rocm_dir, rdctst_path):
+        # rdctst_path skips this test unless the RDC test package is installed, and
+        # every build that installs rdctst also installs rdc_power_usage_tests.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_power_usage_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=120)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_power_usage_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+
+    def test_rdc_link_status(self, rocm_dir, rdctst_path):
+        # rdctst_path skips this test unless the RDC test package is installed, and
+        # every build that installs rdctst also installs rdc_link_status_tests.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_link_status_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=120)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_link_status_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+
+    def test_rdc_metric_fetcher(self, rocm_dir, rdctst_path):
+        # rdctst_path skips this test unless the RDC test package is installed, and
+        # every build that installs rdctst also installs rdc_metric_fetcher_tests.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_metric_fetcher_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        # If the destructor can hang again, this binary hangs and the timeout fails this test.
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=120)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_metric_fetcher_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+
     def test_rdctst_help(self, rdctst_path):
         result = subprocess.run(
             [rdctst_path, "--rdctst_help"], capture_output=True, text=True, timeout=30
         )
         combined = (result.stdout + result.stderr).lower()
         assert "batch_mode" in combined or "rdctst_help" in combined
+
+    def test_rdc_topology(self, rocm_dir, rdctst_path):
+        # Needs no GPU: the binary runs the topology code against fake AMD SMI calls.
+        # rdctst_path skips this test unless the RDC test package is installed.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_topology_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=120)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_topology_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )

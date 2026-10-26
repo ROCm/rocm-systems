@@ -229,6 +229,7 @@ void VfioDeviceHost::detach() {
   {
     const std::lock_guard lock(state_mutex_);
     attached_ = false;
+    disconnect_in_progress_ = false;
     pending_reset_.reset();
     closing = device_.revoke_transport_session(&transport_);
     client_session_.reset();
@@ -241,6 +242,13 @@ void VfioDeviceHost::detach() {
   // cannot release the one that did. detach_transport also drains a session if
   // a future caller reaches this path without the explicit revoke above.
   owns_device_ = !device_.detach_transport(&transport_);
+}
+
+VfioDeviceHost::ClientSnapshot VfioDeviceHost::client_snapshot() const {
+  const std::lock_guard lock(state_mutex_);
+  return {.attached = attached_,
+          .disconnect_in_progress = disconnect_in_progress_,
+          .completed_disconnects = completed_disconnects_};
 }
 
 void VfioDeviceHost::request_reset(simdojo::ResetKind kind) {
@@ -589,13 +597,19 @@ VfioDeviceHost::ServeResult VfioDeviceHost::run(std::stop_token stop_token) {
       disconnected = run_result < 0 && run_error == ENOTCONN;
       if (reset == simdojo::ResetKind::LostConnection)
         disconnected = true;
+      // ENOTCONN can arrive without a reset callback. Revoke the old session
+      // before resetting the device or accepting another client in that case.
+      if (disconnected)
+        reset = simdojo::ResetKind::LostConnection;
 
       if (reset.has_value()) {
         // Refuse fresh leases before reset. Draining and device teardown happen
         // below, after the callback-state lock and the library-call lock are
         // both released.
-        if (disconnected)
+        if (disconnected) {
           attached_ = false;
+          disconnect_in_progress_ = true;
+        }
         closing_session = device_.revoke_transport_session(&transport_);
         client_session_.reset();
       }
@@ -604,12 +618,20 @@ VfioDeviceHost::ServeResult VfioDeviceHost::run(std::stop_token stop_token) {
         declined_regions = declined_regions_;
         declined_bytes = declined_bytes_;
         stop_after_disconnect = single_client_;
-        reset = simdojo::ResetKind::LostConnection;
       }
     }
 
     if (reset.has_value() && !finish_session_reset(*reset, std::move(closing_session)))
       return ServeResult::Failed;
+
+    if (disconnected) {
+      // Publish completion only after reset and admitted transport work are
+      // complete. The early attached_ clear continues to reject stale DMA/IRQ
+      // calls while the node coordinator sees the reset as in progress.
+      const std::lock_guard lock(state_mutex_);
+      ++completed_disconnects_;
+      disconnect_in_progress_ = false;
+    }
 
     if (reset.has_value() && !disconnected) {
       std::shared_ptr<simdojo::PciTransportSession> session =

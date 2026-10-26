@@ -100,9 +100,11 @@ fn negotiation_and_short_records_preserve_outputs() {
         assert_eq!(api, sentinel);
         assert_eq!(amdf_query_api(1, 4, &raw mut api), VERSION);
         assert_eq!(api, sentinel);
-        assert_eq!(amdf_query_api(1, 5, &raw mut api), 0);
+        assert_eq!(amdf_query_api(1, 5, &raw mut api), VERSION);
+        assert_eq!(amdf_query_api(11, 11, &raw mut api), VERSION);
+        assert_eq!(amdf_query_api(1, 12, &raw mut api), 0);
         assert_eq!(api, &raw const API);
-        assert_eq!((*api).abi_version, AMDF_ABI_VERSION_5);
+        assert_eq!((*api).abi_version, AMDF_ABI_VERSION_12);
         let mut extension = sentinel.cast::<c_void>();
         assert_eq!(
             query_extension(AMDF_EXTENSION_XDNA, 1, 1, &raw mut extension),
