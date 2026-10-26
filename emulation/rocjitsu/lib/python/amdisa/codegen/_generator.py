@@ -11535,6 +11535,11 @@ class CodeGenerator:
                     _image_address_metadata = self._issues_image_memory(
                         inst.name
                     ) and self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4')
+                    _image_d16_preserves_destination = (
+                        _image_address_metadata
+                        and inst.name.upper() == 'IMAGE_LOAD'
+                        and not self.isa_spec.profile.d16_loads_zero_unselected_half
+                    )
                     if _image_address_metadata:
                         public_members.append(
                             cgen.Statement(
@@ -13943,6 +13948,16 @@ class CodeGenerator:
                                 'amdgpu::gfx11_image_address_registers('
                                 'inst_.nsa, inst_.vaddr, raw_encoding())'
                             )
+                        image_d16_preservation = (
+                            '  const uint32_t components = '
+                            'std::popcount(uint32_t{inst_.dmask});\n'
+                            '  if (inst_.d16 && (components & 1u))\n'
+                            '    if (auto r = vdata.to_register_ref())\n'
+                            '      uses.expand(RegisterRef{r->cls,\n'
+                            '          static_cast<uint16_t>(r->index + components / 2), 1});\n'
+                            if _image_d16_preserves_destination
+                            else ''
+                        )
                         inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::implicit_uses'
@@ -13954,6 +13969,7 @@ class CodeGenerator:
                                 '  for (uint32_t index = 0; index < count; ++index)\n'
                                 '    uses.expand(RegisterRef{RegClass::VGPR,\n'
                                 '        static_cast<uint16_t>(registers[index]), 1});\n'
+                                f'{image_d16_preservation}'
                                 '}'
                             )
                         )

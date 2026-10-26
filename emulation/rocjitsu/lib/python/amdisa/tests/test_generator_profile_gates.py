@@ -4811,6 +4811,32 @@ def test_generated_gfx11_image_address_width_uses_dim_and_preserves_fixed_bvh(
     )
 
 
+@pytest.mark.parametrize(
+    ('arch', 'stem', 'suffix'),
+    [
+        ('rdna3', 'mimg', 'Mimg'),
+        ('rdna3_5', 'mimg', 'Mimg'),
+        ('rdna4', 'vimage', 'Vimage'),
+    ],
+)
+def test_generated_rdna_image_load_tracks_d16_destination_preservation(
+    amdgpu_generated_root: Path, arch: str, stem: str, suffix: str
+):
+    source = (
+        amdgpu_generated_root / _generated_dir_name(arch) / f'{stem}.cpp'
+    ).read_text()
+    image_load_uses = _generated_function_body(
+        source, f'void ImageLoad{suffix}::implicit_uses'
+    )
+    assert 'std::popcount(uint32_t{inst_.dmask})' in image_load_uses
+    assert 'inst_.d16 && (components & 1u)' in image_load_uses
+    assert 'r->index + components / 2' in image_load_uses
+    image_store_uses = _generated_function_body(
+        source, f'void ImageStore{suffix}::implicit_uses'
+    )
+    assert 'std::popcount(uint32_t{inst_.dmask})' not in image_store_uses
+
+
 def test_gfx1250_compact_literal_policy_precedes_extension_sizing(
     gfx1250_generated_root: Path,
 ):

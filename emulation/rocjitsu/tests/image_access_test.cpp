@@ -605,15 +605,16 @@ protected:
   }
 
   DecodeResult decode(bool load, bool r128 = false, uint8_t dim = 1, bool a16 = false,
-                      bool nsa = true) {
+                      bool nsa = true, uint8_t dmask = 1, bool d16 = false) {
     if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
       const auto base =
           rdna3::build_mimg(load ? rdna3::kImageLoadMimg : rdna3::kImageStoreMimg, {.nsa = nsa,
                                                                                     .dim = dim,
                                                                                     .unorm = 1,
-                                                                                    .dmask = 1,
+                                                                                    .dmask = dmask,
                                                                                     .r128 = r128,
                                                                                     .a16 = a16,
+                                                                                    .d16 = d16,
                                                                                     .vaddr = 2,
                                                                                     .vdata = 8});
       if (!nsa)
@@ -626,9 +627,10 @@ protected:
           load ? rdna3_5::kImageLoadMimg : rdna3_5::kImageStoreMimg, {.nsa = nsa,
                                                                       .dim = dim,
                                                                       .unorm = 1,
-                                                                      .dmask = 1,
+                                                                      .dmask = dmask,
                                                                       .r128 = r128,
                                                                       .a16 = a16,
+                                                                      .d16 = d16,
                                                                       .vaddr = 2,
                                                                       .vdata = 8});
       if (!nsa)
@@ -637,8 +639,14 @@ protected:
       return decoder->decode(words.data());
     }
     const auto words = rdna4::build_vimage(
-        load ? rdna4::kImageLoadVimage : rdna4::kImageStoreVimage,
-        {.dim = dim, .r128 = r128, .a16 = a16, .dmask = 1, .vdata = 8, .vaddr0 = 2, .vaddr1 = 6});
+        load ? rdna4::kImageLoadVimage : rdna4::kImageStoreVimage, {.dim = dim,
+                                                                    .r128 = r128,
+                                                                    .d16 = d16,
+                                                                    .a16 = a16,
+                                                                    .dmask = dmask,
+                                                                    .vdata = 8,
+                                                                    .vaddr0 = 2,
+                                                                    .vaddr1 = 6});
     return decoder->decode(words.data());
   }
 
@@ -687,6 +695,56 @@ TEST_P(RdnaDecodedImageAccessTest,
   EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x11111111u);
   EXPECT_EQ(cu->read_vgpr(vb + 8, 1), 0xdeadbeefu);
   EXPECT_EQ(cu->read_vgpr(vb + 8, 2), 0x33333333u);
+}
+
+TEST_P(RdnaDecodedImageAccessTest, D16LoadPreservesAndReadsOnlyThePartialDestination) {
+  const uint32_t vb = wf->vgpr_alloc().base;
+  wf->set_exec(1);
+  cu->write_vgpr(vb + 2, 0, 0);
+  cu->write_vgpr(vb + 6, 0, 0);
+  memory.write32(kBase, 0x1234);
+
+  for (const bool d16 : {false, true}) {
+    for (const uint8_t dmask : {1, 3, 7, 15}) {
+      SCOPED_TRACE(testing::Message() << "d16=" << d16 << " dmask=" << unsigned{dmask});
+      for (uint32_t reg = 8; reg < 12; ++reg)
+        cu->write_vgpr(vb + reg, 0, 0xabcdffff);
+
+      auto decoded = decode(true, false, 1, false, true, dmask, d16);
+      ASSERT_TRUE(decoded.succeeded());
+      std::unique_ptr<Instruction> inst = std::move(decoded).value();
+      ASSERT_NE(inst, nullptr);
+
+      const uint32_t components = std::popcount(dmask);
+      const uint32_t registers = d16 ? (components + 1) / 2 : components;
+      const bool preserves_last = d16 && (components & 1u);
+      const InstDefUse def_use(*inst);
+      EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 8, static_cast<uint8_t>(registers)}));
+      for (uint32_t offset = 0; offset < registers; ++offset) {
+        const bool expected_use = preserves_last && offset == components / 2;
+        EXPECT_EQ(def_use.uses.contains({RegClass::VGPR, static_cast<uint16_t>(8 + offset), 1}),
+                  expected_use)
+            << "offset=" << offset;
+      }
+
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+      ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+      cu->l1_vector().flush_all();
+      l2.flush_all();
+
+      for (uint32_t offset = 0; offset < registers; ++offset) {
+        uint32_t expected = offset == 0 ? 0x1234 : 0;
+        if (!d16 && dmask == 15 && offset == 3)
+          expected = 1; // Descriptor W selector is constant one.
+        if (d16 && dmask == 15 && offset == 1)
+          expected = 1u << 16;
+        if (preserves_last && offset == components / 2)
+          expected |= 0xabcd0000;
+        EXPECT_EQ(cu->read_vgpr(vb + 8 + offset, 0), expected) << "offset=" << offset;
+      }
+    }
+  }
 }
 
 TEST_P(RdnaDecodedImageAccessTest, NonNsaAddressWidthFollowsDimAndA16) {
