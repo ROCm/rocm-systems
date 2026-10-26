@@ -99,19 +99,21 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   Fan fan;
   T* userBufs[3];
   bool userRegUsed = false; // runtime: user buffers registered (cacheable) -> need cache-bypass
+  // No two NULL-initialized members may be adjacent. MemCpyOpt merges adjacent null stores
+  // into a memset on this scratch-resident object, and the LL128 loops then reload these
+  // pointers from scratch.
   struct ncclConnInfo* recvConn = NULL;
-  volatile uint64_t* recvConnHeadPtr = NULL;
   uint64_t recvConnHead;
-
-  struct ncclConnInfo* sendConn = NULL;
-  volatile struct ncclConnFifo* sendConnFifo = NULL;
-  volatile uint64_t* sendConnTailPtr = NULL;
+  volatile uint64_t* recvConnHeadPtr = NULL;
   uint64_t sendConnTail;
-  volatile uint64_t* sendConnHeadPtr = NULL;
+  struct ncclConnInfo* sendConn = NULL;
   uint64_t sendConnHead;
+  volatile struct ncclConnFifo* sendConnFifo = NULL;
   uint64_t sendConnHeadCache; // Cache last seen value
-
+  volatile uint64_t* sendConnTailPtr = NULL;
   uint64_t recvStep[MaxRecv];
+  volatile uint64_t* sendConnHeadPtr = NULL;
+
   uint64_t sendStep[MaxSend];
   uint64_t* recvBuff[MaxRecv];
   uint64_t* sendBuff[MaxSend];

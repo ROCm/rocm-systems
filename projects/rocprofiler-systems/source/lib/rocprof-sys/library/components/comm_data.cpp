@@ -149,7 +149,7 @@ cache_comm_data_events(const std::uint32_t device_id, int bytes)
     std::uint64_t        _now  = 0;
     {
         const std::unique_lock<std::mutex> _lk{ _mutex };
-        _now  = rocprofsys::tracing::now<std::uint64_t>();
+        _now  = rocprofsys::tracing::now();
         bytes = (value += bytes);
     }
     const std::string track_name      = Track::label;
