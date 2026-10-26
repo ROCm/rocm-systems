@@ -11,10 +11,10 @@ from membw_analysis.engine import run_membw_analysis
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
+from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.ml_api_selectors import (
-    OperatorPatterns,
     resolve_list_selectors,
     resolve_operator_patterns,
 )
@@ -33,10 +33,9 @@ from utils.utils_common import validate_roofline_csv
 _ML_API_LABELS = {
     "torch": "PyTorch",
     "triton": "Triton",
-    "jax": "JAX",
     "user": "User",
 }
-_UNSCOPED_OPERATOR_BACKENDS = ("torch", "triton", "user")
+_OPERATOR_BACKENDS = KNOWN_ML_API_BACKENDS + ("user",)
 
 
 def _labels_for_backends(backends: list[str]) -> str:
@@ -47,31 +46,19 @@ def _labels_for_backends(backends: list[str]) -> str:
 
 
 def _framewise_from_resolved(
-    resolved: OperatorPatterns,
+    selections: dict[str, list[str]],
 ) -> dict[str, list[str]]:
-    """Copy explicit prefixes and unscoped globs onto backends used for matching."""
-    framewise: dict[str, list[str]] = {}
-    for backend, patterns in resolved.explicit.items():
-        framewise[backend] = list(patterns)
-    if not resolved.unscoped:
-        return framewise
-    for backend in _UNSCOPED_OPERATOR_BACKENDS:
-        combined = list(framewise.get(backend, []))
-        combined.extend(resolved.unscoped)
-        framewise[backend] = combined
-    return framewise
+    """Keep patterns whose backend is a known framework or user."""
+    return {
+        backend: list(patterns)
+        for backend, patterns in selections.items()
+        if backend in _OPERATOR_BACKENDS
+    }
 
 
-def _operator_display_backends(resolved: OperatorPatterns) -> list[str]:
+def _operator_display_backends(selections: dict[str, list[str]]) -> list[str]:
     """Backends named by an --operator request, for display labels."""
-    backends = list(resolved.explicit)
-    if resolved.unscoped:
-        for backend in _UNSCOPED_OPERATOR_BACKENDS:
-            if backend not in backends:
-                backends.append(backend)
-    if resolved.jax_requested and "jax" not in backends:
-        backends.append("jax")
-    return backends
+    return list(_framewise_from_resolved(selections))
 
 
 def _unique_pattern_text(framewise_patterns: dict[str, list[str]]) -> str:
@@ -479,7 +466,7 @@ class cli_analysis(OmniAnalyze_Base):
         if not framewise_patterns:
             console_error(
                 "ml api trace",
-                f"No {labels} operators matched the pattern(s): jax",
+                f"No {labels} operators matched the pattern(s).",
             )
         confined_forest = filter_forest_by_backends(
             workload.ml_api_call_trees, list(framewise_patterns)

@@ -520,9 +520,9 @@ Examples:
         help=(
             "\t\t\tTrace ML APIs [frameworks]... User-defined regions are\n"
             "\t\t\tincluded. user is not a value.\n"
-            "\t\t\tWith no arguments, traces torch, triton, and jax.\n"
-            "\t\t\tJAX is not collected yet.\n"
-            "\t\t\tValues: torch, triton, jax."
+            "\t\t\tWith no arguments, traces all supported ML frameworks\n"
+            "\t\t\tand user-defined regions.\n"
+            "\t\t\tValues: all supported ML frameworks."
         ),
     )
     profile_group.add_argument(
@@ -667,9 +667,8 @@ Examples:
         help=(
             "\t\tList collected operators as a unified call tree [frameworks]...\n"
             "\t\tWith no arguments, lists every collected ML API and user region.\n"
-            "\t\tRequires --output-format stdout. Ignores --operator if both "
-            "are given.\n"
-            "\t\tValues: torch, triton, jax, user."
+            "\t\tRequires --output-format stdout. Ignores --operator.\n"
+            "\t\tValues: all supported ML frameworks and user-defined regions."
         ),
     )
     analyze_group.add_argument(
@@ -685,12 +684,13 @@ Examples:
         feature_label="Operator filter",
         help=(
             "\t\tFilter operators with glob patterns [selectors]...\n"
-            "\t\tForm: FW:PATTERN[,PATTERN]. FW is optional.\n"
-            "\t\tExample: --operator torch:*conv* triton:*matmul*\n"
+            "\t\tForm: [FW:]PATTERN[,[FW:]PATTERN]. FW is optional.\n"
+            "\t\tA comma piece with its own FW starts that selector.\n"
+            "\t\tExample: --operator torch:*conv*,triton:*matmul*\n"
             "\t\tWith no arguments, matches the collected stack.\n"
             "\t\tRequires --output-format stdout.\n"
             "\t\tIgnored when --list-operators is set.\n"
-            "\t\tValues: torch, triton, jax, user.\n"
+            "\t\tValues: all supported ML frameworks and user-defined regions.\n"
             "\t\t(Default: **)"
         ),
     )

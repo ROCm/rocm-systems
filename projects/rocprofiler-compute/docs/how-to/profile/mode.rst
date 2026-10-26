@@ -1158,9 +1158,9 @@ To analyze the captured Triton kernels, use ``--list-operators triton`` and
 ML API trace
 ============
 
-``--trace-ml-api`` with no selector traces torch, triton, and jax.
+``--trace-ml-api`` with no selector traces all supported ML frameworks
+and user-defined regions.
 User-defined regions are included with every ``--trace-ml-api`` run.
-``jax`` is accepted and is not collected yet.
 
 .. warning::
 

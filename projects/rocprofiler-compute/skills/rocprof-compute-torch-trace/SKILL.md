@@ -49,7 +49,7 @@ rocprof-compute profile --experimental --trace-ml-api triton --name <name> -- py
 do not get `|triton` ranges. Attribute them with `--trace-ml-api torch`.
 
 The two combine as `--trace-ml-api torch,triton`. A bare `--trace-ml-api`
-traces torch, triton, and jax.
+traces all supported ML frameworks and user-defined regions.
 
 Tracing adds overhead on top of the usual counter replay. Profile a few
 iterations of a steady-state model rather than a full training run, and skip

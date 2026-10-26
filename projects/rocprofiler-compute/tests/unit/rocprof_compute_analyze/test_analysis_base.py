@@ -13,7 +13,6 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils.ml_api_selectors import JAX_NOT_COLLECTED_WARNING
 
 MODULE = "rocprof_compute_analyze.analysis_base"
 
@@ -178,7 +177,7 @@ def test_membw_analysis_collected_without_config_attribute() -> None:
 
 
 def test_sanitize_authorizes_trace_ml_api_selectors(tmp_path, monkeypatch) -> None:
-    """trace_ml_api [torch] allows torch, user, and unscoped; rejects triton."""
+    """trace_ml_api [torch] allows torch and user; rejects triton."""
     workload = tmp_path / "app" / "MI300"
     workload.mkdir(parents=True)
     (workload / "profiling_config.yaml").write_text("trace_ml_api:\n- torch\n")
@@ -186,19 +185,12 @@ def test_sanitize_authorizes_trace_ml_api_selectors(tmp_path, monkeypatch) -> No
         "rocprof_compute_analyze.analysis_base.validate_workload",
         lambda path: None,
     )
-    warnings = []
     errors = []
-
-    def record_warning(*argv):
-        warnings.append(argv)
 
     def record_error(*argv, **_kwargs):
         errors.append(argv)
         raise SystemExit(1)
 
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_base.console_warning", record_warning
-    )
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_base.console_error", record_error
     )
@@ -217,9 +209,7 @@ def test_sanitize_authorizes_trace_ml_api_selectors(tmp_path, monkeypatch) -> No
 
     run_sanitize(list_operators=["torch"])
     run_sanitize(list_operators=["user"])
-    run_sanitize(operator=["*relu*"])
-    run_sanitize(list_operators=["jax"])
-    assert any(JAX_NOT_COLLECTED_WARNING in str(item) for item in warnings)
+    run_sanitize(operator=["torch:*relu*"])
 
     with pytest.raises(SystemExit):
         run_sanitize(list_operators=["triton"])
