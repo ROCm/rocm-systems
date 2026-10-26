@@ -7,7 +7,7 @@
 # TheRock's reusable workflows directly. It provides sharded, multi-stage
 # builds with per-architecture testing.
 #
-# Key differences from therock-ci.yml:
+# Key characteristics:
 # - Uses TheRock's multi-arch sharded build pipeline (foundation -> compiler-runtime -> math-libs)
 # - Supports prebuilt stages to skip certain build stages
 # - Better parallelization across GPU architectures
