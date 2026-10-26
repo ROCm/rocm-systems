@@ -8,6 +8,9 @@ Full documentation for the ROCR Debug Agent library is available at
 - After printing the waves on `SIGQUIT`, the agent resumes them and the
   program continues.  Previously the waves stayed stopped and the program
   hung after the dump.
+- The agent can be loaded with `LD_PRELOAD` as well as `HSA_TOOLS_LIB`, and no
+  longer links `libhsa-runtime64`.  Without `HSA_TOOLS_LIB`, the code object
+  list is read when waves are printed, as with `--lazy`.
 
 ## ROCR Debug Agent 2.2.0  for ROCm 10.1
 
