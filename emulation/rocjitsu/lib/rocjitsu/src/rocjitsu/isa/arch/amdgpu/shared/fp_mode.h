@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "util/data_types.h"
+#include "util/host_target.h"
 
 #include <algorithm>
 #include <bit>
@@ -27,7 +28,7 @@
 #include <limits>
 #include <type_traits>
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 #include <xmmintrin.h>
 #endif
 
@@ -62,7 +63,7 @@ inline int host_round_mode(uint32_t round_mode) {
   }
 }
 
-#if defined(__aarch64__)
+#if RJ_HOST_ARCH_AARCH64
 inline uint64_t read_fpcr() {
   uint64_t value;
   __asm__ volatile("mrs %0, fpcr" : "=r"(value) : : "memory");
@@ -77,19 +78,19 @@ inline void write_fpcr(uint64_t value) {
 class ScopedFenv {
 public:
   explicit ScopedFenv(uint32_t round_mode) {
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     saved_mxcsr_ = _mm_getcsr();
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
     saved_fpcr_ = read_fpcr();
 #endif
     saved_ = std::feholdexcept(&environment_) == 0;
     if (saved_)
       std::fesetround(host_round_mode(round_mode));
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     constexpr uint32_t kDazMask = 1u << 6;
     constexpr uint32_t kFtzMask = 1u << 15;
     _mm_setcsr(_mm_getcsr() & ~(kDazMask | kFtzMask));
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
     constexpr uint64_t kFizMask = uint64_t{1} << 0;
     constexpr uint64_t kFz16Mask = uint64_t{1} << 19;
     constexpr uint64_t kFzMask = uint64_t{1} << 24;
@@ -103,9 +104,9 @@ public:
   ~ScopedFenv() {
     if (saved_)
       std::fesetenv(&environment_);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     _mm_setcsr(saved_mxcsr_);
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
     write_fpcr(saved_fpcr_);
 #endif
   }
@@ -113,9 +114,9 @@ public:
 private:
   std::fenv_t environment_{};
   bool saved_ = false;
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
   uint32_t saved_mxcsr_ = 0;
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
   uint64_t saved_fpcr_ = 0;
 #endif
 };
@@ -972,10 +973,10 @@ inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_
 inline bool native_arithmetic_matches(uint32_t round_mode, uint32_t denorm_mode) {
   if (denorm_mode != 3 || round_mode != 0 || std::fegetround() != FE_TONEAREST)
     return false;
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
   // MXCSR rounding can differ from the x87 rounding reported by fegetround().
   return (_mm_getcsr() & (_MM_ROUND_MASK | (1u << 6) | (1u << 15))) == 0;
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
   return (detail::read_fpcr() & ((uint64_t{1} << 0) | (uint64_t{1} << 19) | (uint64_t{1} << 24))) ==
          0;
 #else
