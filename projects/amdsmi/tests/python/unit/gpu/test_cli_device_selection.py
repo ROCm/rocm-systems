@@ -321,6 +321,36 @@ class TestRepeatedDeviceSelection(_CliFixture):
             self.parse("metric", "-g=0", "1")
 
 
+class TestRepeatedVfSelection(_CliFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        patcher = mock.patch.multiple(
+            self.helpers,
+            is_baremetal=mock.Mock(return_value=False),
+            is_hypervisor=mock.Mock(return_value=True),
+            os_info=mock.Mock(return_value="Linux Hypervisor"),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_repeated_vf_options_keep_last_values(self) -> None:
+        for argv, expected in (
+            (["-v", "1", "-v", "2"], ["2"]),
+            (["--vf", "1", "--vf", "2", "3"], ["2", "3"]),
+            (["-v=1", "-v=2"], ["2"]),
+            (["--vf=1", "--vf=2"], ["2"]),
+            (["-v", "1", "2", "--vf", "3"], ["3"]),
+            (["--vf", "1", "--vf", "2", "2"], ["2", "2"]),
+        ):
+            with self.subTest(argv=argv):
+                self.assertEqual(self.parse("list", *argv).vf, expected)
+
+    def test_single_vf_selections_unchanged(self) -> None:
+        self.assertEqual(self.parse("list", "-v", "1").vf, ["1"])
+        self.assertEqual(self.parse("list", "--vf", "1", "2").vf, ["1", "2"])
+        self.assertIsNone(self.parse("list").vf)
+
+
 class TestRepeatedSetValues(_CliFixture):
     """Single-value set options keep the last value; only different setters conflict."""
 
