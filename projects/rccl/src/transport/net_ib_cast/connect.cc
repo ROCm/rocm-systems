@@ -2313,11 +2313,11 @@ ncclResult_t IbCastAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
   }
 
   NCCLCHECK(ncclIbMalloc((void**)&rComm, sizeof(struct ncclIbRecvComm)));
+  NCCLCHECKGOTO(ncclSocketInit(&rComm->base.sock), ret, fail);
   NCCLCHECKGOTO(IbCastRecvCommInit(rComm), ret, fail);
   NCCLCHECKGOTO(IbCastStatsInit(&rComm->base.stats), ret, fail);
   stage->comm = rComm;
   stage->state = ncclIbCommStateAccept;
-  NCCLCHECKGOTO(ncclSocketInit(&rComm->base.sock), ret, fail);
   NCCLCHECKGOTO(ncclSocketAccept(&rComm->base.sock, &lComm->sock), ret, fail);
 
   // Alloc stage->buffer here to be used for all following steps
@@ -2714,6 +2714,7 @@ exit:
   lComm->stage = NULL;
   return ret;
 fail:
+  (void)ncclSocketClose(&rComm->base.sock);
   free(rComm);
   goto exit;
 }
