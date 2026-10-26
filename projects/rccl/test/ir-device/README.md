@@ -4,7 +4,7 @@
 
 This directory contains a pytest harness that builds and runs the GoogleTest
 binary defined in `bindings/ir/test/IR_test.cpp`. That test exercises every
-active API exported by `nccl_device_wrapper__impl.h` on real GPU hardware:
+active API exported by `nccl_device_ir.cu` (formerly `nccl_device_wrapper__impl.h`) on real GPU hardware:
 
 | Group | API |
 |-------|-----|

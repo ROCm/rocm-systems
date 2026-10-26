@@ -21,7 +21,7 @@
 #   ${CMAKE_BINARY_DIR}/include/nccl_device_wrapper.h  (public C wrapper)
 
 ##### Source and output paths #####
-set(LLVM_SRC      ${CMAKE_CURRENT_SOURCE_DIR}/nccl_device_wrapper__impl.h)
+set(LLVM_SRC      ${CMAKE_CURRENT_SOURCE_DIR}/nccl_device_ir.cu)
 set(OBJDIR        ${CMAKE_BINARY_DIR}/obj/llvm_ir)
 set(LIBDIR        ${CMAKE_BINARY_DIR}/lib)
 set(INCLUDEDIR    ${CMAKE_BINARY_DIR}/include)
@@ -231,6 +231,7 @@ set(RCCL_DEVICE_BC_PUBLIC_API
     ncclLsaBarrierSessionDestroy
     # [C] GIN + composite barrier session
     ncclGinBarrierSessionInit
+    ncclGinBarrierSessionInitAllContexts
     ncclGinBarrierSessionSync
     ncclGinBarrierSessionDestroy
     ncclBarrierSessionInit

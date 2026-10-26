@@ -46,7 +46,7 @@ endif
 ifneq ($(EMIT_LLVM_IR), 0)
 
 ##### Source #####
-LLVM_SRC := nccl_device_wrapper__impl.h
+LLVM_SRC := nccl_device_ir.cu
 
 ##### RCCL root (bindings/ir -> projects/rccl) #####
 RCCL_ROOT ?= $(abspath ../..)
@@ -160,7 +160,7 @@ RCCL_IR_REDUCE_COPY_API := \
 RCCL_IR_EMPTY :=
 RCCL_IR_SPACE := $(RCCL_IR_EMPTY) $(RCCL_IR_EMPTY)
 RCCL_IR_COMMA := ,
-RCCL_DEVICE_BC_PUBLIC_API := ncclLsaBarrierSession_C_size,ncclGinBarrierSession_C_size,ncclBarrierSession_C_size,ncclDevComm_Rank,ncclDevComm_NRanks,ncclDevComm_LsaRank,ncclDevComm_LsaSize,ncclDevComm_LsaBarrier,ncclDevComm_RailGinBarrier,ncclDevComm_HybridLsaBarrier,ncclDevComm_HybridRailGinBarrier,ncclDevComm_WorldGinBarrier,ncclDevComm_LsaMultimem,ncclGetPeerPointerTeam,ncclCoopAnyInitThread,ncclCoopAnyInitWarp,ncclCoopAnyInitLanes,ncclCoopAnyInitWarpSpan,ncclCoopAnyInitCta,ncclCoopThreadRank,ncclCoopSize,ncclCoopNumThreads,ncclCoopSync,ncclLsaBarrierSessionInit,ncclLsaBarrierSessionArrive,ncclLsaBarrierSessionWait,ncclLsaBarrierSessionSync,ncclLsaBarrierSessionDestroy,ncclGinBarrierSessionInit,ncclGinBarrierSessionSync,ncclGinBarrierSessionDestroy,ncclBarrierSessionInit,ncclBarrierSessionSync,ncclBarrierSessionDestroy,$(subst $(RCCL_IR_SPACE),$(RCCL_IR_COMMA),$(strip $(RCCL_IR_REDUCE_COPY_API)))
+RCCL_DEVICE_BC_PUBLIC_API := ncclLsaBarrierSession_C_size,ncclGinBarrierSession_C_size,ncclBarrierSession_C_size,ncclDevComm_Rank,ncclDevComm_NRanks,ncclDevComm_LsaRank,ncclDevComm_LsaSize,ncclDevComm_LsaBarrier,ncclDevComm_RailGinBarrier,ncclDevComm_HybridLsaBarrier,ncclDevComm_HybridRailGinBarrier,ncclDevComm_WorldGinBarrier,ncclDevComm_LsaMultimem,ncclGetPeerPointerTeam,ncclCoopAnyInitThread,ncclCoopAnyInitWarp,ncclCoopAnyInitLanes,ncclCoopAnyInitWarpSpan,ncclCoopAnyInitCta,ncclCoopThreadRank,ncclCoopSize,ncclCoopNumThreads,ncclCoopSync,ncclLsaBarrierSessionInit,ncclLsaBarrierSessionArrive,ncclLsaBarrierSessionWait,ncclLsaBarrierSessionSync,ncclLsaBarrierSessionDestroy,ncclGinBarrierSessionInit,ncclGinBarrierSessionInitAllContexts,ncclGinBarrierSessionSync,ncclGinBarrierSessionDestroy,ncclBarrierSessionInit,ncclBarrierSessionSync,ncclBarrierSessionDestroy,$(subst $(RCCL_IR_SPACE),$(RCCL_IR_COMMA),$(strip $(RCCL_IR_REDUCE_COPY_API)))
 
 OPT_PASSES := --passes=internalize,inline,globaldce \
 	-internalize-public-api-list=$(RCCL_DEVICE_BC_PUBLIC_API)

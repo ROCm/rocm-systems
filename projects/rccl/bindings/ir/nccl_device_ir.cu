@@ -4,8 +4,6 @@
  *
  * See LICENSE.txt for more license information
  ************************************************************************/
-#ifndef _NCCL_DEVICE_WRAPPER__IMPL_H_
-#define _NCCL_DEVICE_WRAPPER__IMPL_H_
 
 /*
  * NCCL Device API force instantiation and C style APIs for LLVM IR generation
@@ -26,61 +24,62 @@
 #include <new>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-/* Session size getters */
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE size_t ncclLsaBarrierSession_C_size() { return sizeof(ncclLsaBarrierSession_C); }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE size_t ncclGinBarrierSession_C_size() { return sizeof(ncclGinBarrierSession_C); }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE size_t ncclBarrierSession_C_size()    { return sizeof(ncclBarrierSession_C); }
+
+/* Session struct size getters */
+NCCL_IR_EXPORT size_t ncclLsaBarrierSession_C_size() { return sizeof(ncclLsaBarrierSession_C); }
+NCCL_IR_EXPORT size_t ncclGinBarrierSession_C_size() { return sizeof(ncclGinBarrierSession_C); }
+NCCL_IR_EXPORT size_t ncclBarrierSession_C_size()    { return sizeof(ncclBarrierSession_C); }
 
 /* ncclDevComm field accessors */
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE int                  ncclDevComm_Rank(ncclDevComm const* comm)                 { return comm->rank; }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE int                  ncclDevComm_NRanks(ncclDevComm const* comm)               { return comm->nRanks; }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE int                  ncclDevComm_LsaRank(ncclDevComm const* comm)              { return comm->lsaRank; }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE int                  ncclDevComm_LsaSize(ncclDevComm const* comm)              { return comm->lsaSize; }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclLsaBarrierHandle ncclDevComm_LsaBarrier(ncclDevComm const* comm)            { return comm->lsaBarrier; }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclGinBarrierHandle ncclDevComm_RailGinBarrier(ncclDevComm const* comm)        { return comm->railGinBarrier; }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclLsaBarrierHandle ncclDevComm_HybridLsaBarrier(ncclDevComm const* comm)      { return comm->hybridLsaBarrier; }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclGinBarrierHandle ncclDevComm_HybridRailGinBarrier(ncclDevComm const* comm)  { return comm->hybridRailGinBarrier; }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclGinBarrierHandle ncclDevComm_WorldGinBarrier(ncclDevComm const* comm)       { return comm->worldGinBarrier; }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclMultimemHandle   ncclDevComm_LsaMultimem(ncclDevComm const* comm)           { return comm->lsaMultimem; }
+NCCL_IR_EXPORT int                  ncclDevComm_Rank(ncclDevComm const* comm)                 { return comm->rank; }
+NCCL_IR_EXPORT int                  ncclDevComm_NRanks(ncclDevComm const* comm)               { return comm->nRanks; }
+NCCL_IR_EXPORT int                  ncclDevComm_LsaRank(ncclDevComm const* comm)              { return comm->lsaRank; }
+NCCL_IR_EXPORT int                  ncclDevComm_LsaSize(ncclDevComm const* comm)              { return comm->lsaSize; }
+NCCL_IR_EXPORT ncclLsaBarrierHandle ncclDevComm_LsaBarrier(ncclDevComm const* comm)            { return comm->lsaBarrier; }
+NCCL_IR_EXPORT ncclGinBarrierHandle ncclDevComm_RailGinBarrier(ncclDevComm const* comm)        { return comm->railGinBarrier; }
+NCCL_IR_EXPORT ncclLsaBarrierHandle ncclDevComm_HybridLsaBarrier(ncclDevComm const* comm)      { return comm->hybridLsaBarrier; }
+NCCL_IR_EXPORT ncclGinBarrierHandle ncclDevComm_HybridRailGinBarrier(ncclDevComm const* comm)  { return comm->hybridRailGinBarrier; }
+NCCL_IR_EXPORT ncclGinBarrierHandle ncclDevComm_WorldGinBarrier(ncclDevComm const* comm)       { return comm->worldGinBarrier; }
+NCCL_IR_EXPORT ncclMultimemHandle   ncclDevComm_LsaMultimem(ncclDevComm const* comm)           { return comm->lsaMultimem; }
 
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetPeerPointerTeam(ncclWindow_t w, size_t offset, ncclTeam tm, int peer) {
+NCCL_IR_EXPORT void* ncclGetPeerPointerTeam(ncclWindow_t w, size_t offset, ncclTeam tm, int peer) {
     return ncclGetPeerPointer(w, offset, tm, peer);
 }
 
 /* coop */
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopAnyInitThread(ncclCoopAny* coop) {
+NCCL_IR_EXPORT void ncclCoopAnyInitThread(ncclCoopAny* coop) {
     ::new (coop) ncclCoopAny(ncclCoopThread());
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopAnyInitWarp(ncclCoopAny* coop) {
+NCCL_IR_EXPORT void ncclCoopAnyInitWarp(ncclCoopAny* coop) {
     ::new (coop) ncclCoopAny(ncclCoopWarp());
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopAnyInitLanes(ncclCoopAny* coop, ncclCoopMask_t lane_mask) {
+NCCL_IR_EXPORT void ncclCoopAnyInitLanes(ncclCoopAny* coop, ncclCoopMask_t lane_mask) {
     ::new (coop) ncclCoopAny(ncclCoopLanes(lane_mask));
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopAnyInitWarpSpan(
+NCCL_IR_EXPORT void ncclCoopAnyInitWarpSpan(
     ncclCoopAny* coop, int warp0, int nWarps, int id, void* barrierLds) {
     ::new (coop) ncclCoopAny(
         ncclCoopWarpSpan(warp0, nWarps, id, static_cast<ncclCoopNamedBarrierSlot*>(barrierLds)));
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopAnyInitCta(ncclCoopAny* coop) {
+NCCL_IR_EXPORT void ncclCoopAnyInitCta(ncclCoopAny* coop) {
     ::new (coop) ncclCoopAny(ncclCoopCta());
 }
 
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE int ncclCoopThreadRank(const ncclCoopAny* coop) {
+NCCL_IR_EXPORT int ncclCoopThreadRank(const ncclCoopAny* coop) {
     return coop->thread_rank();
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE int ncclCoopSize(const ncclCoopAny* coop) {
+NCCL_IR_EXPORT int ncclCoopSize(const ncclCoopAny* coop) {
     return coop->size();
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE int ncclCoopNumThreads(const ncclCoopAny* coop) {
+NCCL_IR_EXPORT int ncclCoopNumThreads(const ncclCoopAny* coop) {
     return coop->num_threads();
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopSync(const ncclCoopAny* coop) {
+NCCL_IR_EXPORT void ncclCoopSync(const ncclCoopAny* coop) {
     const_cast<ncclCoopAny*>(coop)->sync();
 }
 
 /* lsa barrier session */
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclLsaBarrierSessionInit(
+NCCL_IR_EXPORT void ncclLsaBarrierSessionInit(
     ncclLsaBarrierSession_C* session,
     ncclCoopAny coop,
     ncclDevComm const& comm,
@@ -91,26 +90,26 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclLsaBarrierSessionInit(
     ncclMultimemHandle mmHandle) {
     ::new (&(session->bar)) ncclLsaBarrierSession<ncclCoopAny>(coop, comm, team, handle, index, multimem, mmHandle);
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE
+NCCL_IR_EXPORT
 void ncclLsaBarrierSessionArrive(ncclLsaBarrierSession_C* session, ncclCoopAny coop, cuda::memory_order order) {
     session->bar.arrive(coop, order);
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE
+NCCL_IR_EXPORT
 void ncclLsaBarrierSessionWait(ncclLsaBarrierSession_C* session, ncclCoopAny coop, cuda::memory_order order) {
     session->bar.wait(coop, order);
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE
+NCCL_IR_EXPORT
 void ncclLsaBarrierSessionSync(ncclLsaBarrierSession_C* session, ncclCoopAny coop, cuda::memory_order order) {
     session->bar.sync(coop, order);
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE
+NCCL_IR_EXPORT
 void ncclLsaBarrierSessionDestroy(ncclLsaBarrierSession_C* session) {
     using Session = ncclLsaBarrierSession<ncclCoopAny>;
     session->bar.~Session();
 }
 
 /* GIN barrier session */
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinBarrierSessionInit(
+NCCL_IR_EXPORT void ncclGinBarrierSessionInit(
     ncclGinBarrierSession_C* session,
     ncclCoopAny coop,
     ncclGin_C const* net,
@@ -120,7 +119,7 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinBarrierSessionInit(
     ::new (&(session->bar)) ncclGinBarrierSession<ncclCoopAny>(coop, reinterpret_cast<ncclGin const&>(*net), team, handle, index);
 }
 
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinBarrierSessionInitAllContexts(
+NCCL_IR_EXPORT void ncclGinBarrierSessionInitAllContexts(
     ncclGinBarrierSession_C* session,
     ncclCoopAny coop,
     ncclDevComm const& comm,
@@ -130,21 +129,22 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinBarrierSessionInitAllContexts(
     ::new (&(session->bar)) ncclGinBarrierSession<ncclCoopAny>(coop, ncclGinAllContexts(comm), team, handle, index);
 }
 
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinBarrierSessionSync(
+/* GIN barrier session */
+NCCL_IR_EXPORT void ncclGinBarrierSessionSync(
     ncclGinBarrierSession_C* session,
     ncclCoopAny coop,
     cuda::memory_order order,
     ncclGinFenceLevel fence) {
     session->bar.sync(coop, order, fence);
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE
+NCCL_IR_EXPORT
 void ncclGinBarrierSessionDestroy(ncclGinBarrierSession_C* session) {
     using Session = ncclGinBarrierSession<ncclCoopAny>;
     session->bar.~Session();
 }
 
-/* Barrier Session*/
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclBarrierSessionInit(
+/* Barrier Session */
+NCCL_IR_EXPORT void ncclBarrierSessionInit(
     ncclBarrierSession_C* session,
     ncclCoopAny coop,
     ncclTeam innerTeam,
@@ -158,14 +158,14 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclBarrierSessionInit(
            innerBarHandle, outerBarHandle, index, multimem, innerMmHandle);
 }
 
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclBarrierSessionSync(
+NCCL_IR_EXPORT void ncclBarrierSessionSync(
     ncclBarrierSession_C* session,
     ncclCoopAny coop,
     cuda::memory_order order,
     ncclGinFenceLevel fence) {
     session->bar.sync(coop, order, fence);
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE
+NCCL_IR_EXPORT
 void ncclBarrierSessionDestroy(ncclBarrierSession_C* session) {
     using Session = ncclBarrierSession<ncclCoopAny>;
     session->bar.~Session();
@@ -173,46 +173,46 @@ void ncclBarrierSessionDestroy(ncclBarrierSession_C* session) {
 
 // ReduceCopy APIs
 #define NCCL_IR_DEFINE_ncclLsaReduceSum(suffix, type) \
-  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclLsaReduceSum_##suffix( \
+  NCCL_IR_EXPORT void ncclLsaReduceSum_##suffix( \
       ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset, \
       type* dst, size_t count, ncclTeam team) { \
     ncclLsaReduceSum<type, ncclCoopAny, size_t>( \
         coop, srcWindow, srcOffset, dst, count, team); \
   }
 #define NCCL_IR_DEFINE_ncclMultimemReduceSum(suffix, type) \
-  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclMultimemReduceSum_##suffix( \
+  NCCL_IR_EXPORT void ncclMultimemReduceSum_##suffix( \
       ncclCoopAny coop, type* mcSrc, type* dst, size_t count) { \
     ncclMultimemReduceSum<type, ncclCoopAny, size_t>( \
         coop, mcSrc, dst, count); \
   }
 #define NCCL_IR_DEFINE_ncclLsaCopy(suffix, type) \
-  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclLsaCopy_##suffix( \
+  NCCL_IR_EXPORT void ncclLsaCopy_##suffix( \
       ncclCoopAny coop, type* src, ncclWindow_t dstWindow, \
       size_t dstOffset, size_t count, ncclTeam team) { \
     ncclLsaCopy<type, ncclCoopAny, size_t>( \
         coop, src, dstWindow, dstOffset, count, team); \
   }
 #define NCCL_IR_DEFINE_ncclMultimemCopy(suffix, type) \
-  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclMultimemCopy_##suffix( \
+  NCCL_IR_EXPORT void ncclMultimemCopy_##suffix( \
       ncclCoopAny coop, type* src, type* mcDst, size_t count) { \
     ncclMultimemCopy<type, ncclCoopAny, size_t>( \
         coop, src, mcDst, count); \
   }
 #define NCCL_IR_DEFINE_ncclLsaReduceSumCopy(suffix, type) \
-  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclLsaReduceSumCopy_##suffix( \
+  NCCL_IR_EXPORT void ncclLsaReduceSumCopy_##suffix( \
       ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset, \
       ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team) { \
     ncclLsaReduceSumCopy<type, ncclCoopAny, size_t>( \
         coop, srcWindow, srcOffset, dstWindow, dstOffset, count, team); \
   }
 #define NCCL_IR_DEFINE_ncclMultimemReduceSumCopy(suffix, type) \
-  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclMultimemReduceSumCopy_##suffix( \
+  NCCL_IR_EXPORT void ncclMultimemReduceSumCopy_##suffix( \
       ncclCoopAny coop, type* mcSrc, type* mcDst, size_t count) { \
     ncclMultimemReduceSumCopy<type, ncclCoopAny, size_t>( \
         coop, mcSrc, mcDst, count); \
   }
 #define NCCL_IR_DEFINE_ncclLocalReduceSumCopy(suffix, type) \
-  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclLocalReduceSumCopy_##suffix( \
+  NCCL_IR_EXPORT void ncclLocalReduceSumCopy_##suffix( \
       ncclCoopAny coop, int nSrc, type* srcBase, size_t srcDispl, \
       int nDst, type* dstBase, size_t dstDispl, size_t count) { \
     ncclLocalReduceSumCopy<type, ncclCoopAny, size_t>( \
@@ -227,5 +227,3 @@ NCCL_IR_DEFINE_API_ALL_TYPES(ncclLsaReduceSumCopy)
 NCCL_IR_DEFINE_API_MULTIMEM_TYPES(ncclMultimemReduceSumCopy)
 NCCL_IR_DEFINE_API_ALL_TYPES(ncclLocalReduceSumCopy)
 #endif //  __CUDACC__
-
-#endif // _NCCL_DEVICE_WRAPPER__IMPL_H_
