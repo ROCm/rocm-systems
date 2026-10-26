@@ -562,8 +562,9 @@ __device__ inline bool hierPeerUsesNet(int peer, int rank, int lsaBase, int lsaS
   return groupSize > 0 && (peer - lsaBase) / groupSize != (rank - lsaBase) / groupSize;
 }
 
-// A put to peer r signals index r % groupCtas on r, so every receiver waits for
-// all nPeers puts on one index, from the CTA with that index.
+// Each CTA signals its own index, and the barriers are per CTA index. Every put to
+// a given rank comes from the same CTA index on all senders, so the receiving CTA
+// with that index reads signalBase before its barrier admits any of those puts.
 template <typename T>
 __device__ void hierPutWait(ncclGin& gin, ncclTeam world, bool net, int lsaBase, int lsaSize, int groupSize,
                             ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
@@ -576,12 +577,12 @@ __device__ void hierPutWait(ncclGin& gin, ncclTeam world, bool net, int lsaBase,
     gin.put(world, r,
         recvwin, recvoffset + world.rank * size,
         sendwin, sendoffset + r * size,
-        size, TEST_GIN_WEAK_SIGNAL_INC((unsigned int)(r % groupCtas)));
+        size, TEST_GIN_WEAK_SIGNAL_INC((unsigned int)groupCta));
   }
 
-  const int signalIndex = world.rank % groupCtas;
-  if (groupCta == signalIndex && nPeers > 0)
-    gin.waitSignal(ncclCoopCta(), signalIndex, signalBase + nPeers);
+  const int receivingCta = (world.rank % nthreads) / blockDim.x;
+  if (groupCta == receivingCta && nPeers > 0)
+    gin.waitSignal(ncclCoopCta(), (unsigned int)groupCta, signalBase + nPeers);
   gin.flush(ncclCoopCta());
 }
 
@@ -605,7 +606,7 @@ __device__ void hierAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWi
   const int nPeers = net ? world.nRanks - lsaPeers : lsaPeers;
 
   ncclGin gin { devComm, 0 };
-  const uint64_t signalBase = gin.readSignal(world.rank % groupCtas);
+  const uint64_t signalBase = gin.readSignal(groupCta);
 
   if (net) {
     ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, (uint32_t)groupCta };
