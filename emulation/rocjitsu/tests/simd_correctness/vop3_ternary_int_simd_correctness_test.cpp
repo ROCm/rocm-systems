@@ -318,14 +318,24 @@ TEST(Vop3TernaryIntSimdCorrectness, IsaGoldenByteOperations) {
 } // namespace
 
 TEST(Vop3TernaryIntSimdCorrectness, IntegerMinmaxPreservesSignedAndUnsignedBits) {
+  struct Operation {
+    uint16_t rdna4_op, cdna5_op;
+    bool is_signed, maxmin;
+  };
+  constexpr std::array operations{
+      Operation{rdna4::kVMaxminU32Vop3, cdna5::kVMaxminU32Vop3, false, true},
+      Operation{rdna4::kVMinmaxU32Vop3, cdna5::kVMinmaxU32Vop3, false, false},
+      Operation{rdna4::kVMaxminI32Vop3, cdna5::kVMaxminI32Vop3, true, true},
+      Operation{rdna4::kVMinmaxI32Vop3, cdna5::kVMinmaxI32Vop3, true, false}};
   ForceScalarGuard guard;
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     Fixture fx(arch, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64);
     ASSERT_NE(fx.wf, nullptr);
     for (bool scalar : {false, true}) {
       util::set_force_scalar_for_testing(scalar);
-      for (uint16_t op : {rdna4::kVMaxminU32Vop3, rdna4::kVMinmaxU32Vop3, rdna4::kVMaxminI32Vop3,
-                          rdna4::kVMinmaxI32Vop3}) {
+      for (auto operation : operations) {
+        const uint16_t op =
+            arch == ROCJITSU_CODE_ARCH_CDNA5 ? operation.cdna5_op : operation.rdna4_op;
         const auto words =
             arch == ROCJITSU_CODE_ARCH_CDNA5
                 ? cdna5::build_vop3(op, {.vdst = kDstVgpr, .src0 = 256, .src1 = 257, .src2 = 258})
@@ -339,14 +349,15 @@ TEST(Vop3TernaryIntSimdCorrectness, IntegerMinmaxPreservesSignedAndUnsignedBits)
             const uint32_t a = kVals[lane % kVals.size()];
             const uint32_t b = kVals[(lane + rot) % kVals.size()];
             const uint32_t c = kVals[(lane + 2 * rot) % kVals.size()];
-            const bool maxmin = op == rdna4::kVMaxminU32Vop3 || op == rdna4::kVMaxminI32Vop3;
             uint32_t expected;
-            if (op == rdna4::kVMaxminI32Vop3 || op == rdna4::kVMinmaxI32Vop3) {
+            if (operation.is_signed) {
               const int32_t x = static_cast<int32_t>(a), y = static_cast<int32_t>(b),
                             z = static_cast<int32_t>(c);
-              expected = maxmin ? std::min(std::max(x, y), z) : std::max(std::min(x, y), z);
+              expected =
+                  operation.maxmin ? std::min(std::max(x, y), z) : std::max(std::min(x, y), z);
             } else {
-              expected = maxmin ? std::min(std::max(a, b), c) : std::max(std::min(a, b), c);
+              expected =
+                  operation.maxmin ? std::min(std::max(a, b), c) : std::max(std::min(a, b), c);
             }
             EXPECT_EQ(actual[lane], (exec & (uint64_t{1} << lane)) ? expected : DST_SENTINEL)
                 << "arch=" << arch << " op=" << op << " lane=" << lane << " rot=" << rot;
