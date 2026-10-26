@@ -1017,6 +1017,123 @@ TEST(Gfx1250MemoryExecutionHarness, DdsFaultsWithoutWrappingIntoAnotherLdsAlloca
   }
 }
 
+struct FlatAtomicOpcodes {
+  uint16_t swap_b32;
+  uint16_t swap_b64;
+  uint16_t cmpswap_b64;
+  uint16_t add_u64;
+};
+
+// 8-byte FLAT atomics that resolve to dword-interleaved scratch return MEMVIOL,
+// while 4-byte private atomics are supported.
+template <typename Isa, typename Encode>
+void check_private_flat_atomic64_faults(rj_code_arch_t arch, const FlatAtomicOpcodes &opcodes,
+                                        Encode encode) {
+  struct Case {
+    uint16_t opcode;
+    uint64_t exec;
+    bool faults;
+  };
+  // Lane 0 is global and issues before private lane 1. Lane 2 stays inactive;
+  // its scratch dword sits directly after lane 1's.
+  const std::array cases = {
+      Case{opcodes.swap_b64, 0x3, true},  Case{opcodes.cmpswap_b64, 0x3, true},
+      Case{opcodes.add_u64, 0x3, true},   Case{opcodes.swap_b32, 0x3, false},
+      Case{opcodes.swap_b64, 0x1, false},
+  };
+  for (const Case &test : cases) {
+    SCOPED_TRACE(testing::Message() << "opcode=" << test.opcode << " exec=" << test.exec);
+    amdgpu::GpuMemory memory("private_atomic64_memory");
+    amdgpu::L2Cache l2("private_atomic64_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 128;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+    MemoryTestCu<Isa> cu("private_atomic64", cfg, &memory, &l2);
+    constexpr uint64_t shared_base = uint64_t{1} << 48;
+    constexpr uint64_t private_base = uint64_t{2} << 48;
+    constexpr uint64_t global_address = 0x4000;
+    constexpr uint64_t scratch_base = 0x8000;
+    constexpr uint32_t offset = 0x20;
+    constexpr uint32_t canary = 0xdeadbeef;
+    cu.set_apertures(shared_base, shared_base + 0xffff, private_base, private_base + 0xffff);
+    auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+    wf->set_exec(test.exec);
+    wf->set_scratch_base(scratch_base);
+    wf->set_scratch_lane_size(128);
+    const auto scratch_address = [](uint32_t lane, uint32_t word) {
+      return scratch_base + (word * 32 + lane) * 4;
+    };
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      for (uint32_t word = 0; word < 32; ++word)
+        memory.write32(scratch_address(lane, word), canary);
+    memory.write32(global_address, canary);
+    memory.write32(global_address + 4, canary);
+
+    const auto source = [](uint32_t lane, uint32_t word) { return 0x12340000u + lane * 16 + word; };
+    const uint32_t vb = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < 3; ++lane) {
+      // CDNA5 private pointers encode the lane above bit 51; RDNA uses the aperture.
+      const uint64_t private_address = arch == ROCJITSU_CODE_ARCH_CDNA5
+                                           ? scratch_base + offset + (uint64_t{lane} << 52)
+                                           : private_base + offset;
+      const uint64_t address = lane == 0 ? global_address : private_address;
+      cu.write_vgpr(vb, lane, static_cast<uint32_t>(address));
+      cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+      for (uint32_t word = 0; word < 4; ++word) {
+        cu.write_vgpr(vb + 8 + word, lane, source(lane, word));
+        cu.write_vgpr(vb + 16 + word, lane, canary);
+      }
+    }
+
+    const auto words = encode(test.opcode);
+    auto decoder = Decoder::create(arch);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu.route_memory_inst(inst.release(), *wf),
+              test.faults ? amdgpu::VmAccessOutcome::Faulted : amdgpu::VmAccessOutcome::Complete);
+    cu.flush_all();
+    EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
+    EXPECT_TRUE(wf->wait_counters().empty());
+
+    const bool wide = test.opcode != opcodes.swap_b32;
+    const bool private_written = !test.faults && (test.exec & 0x2);
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      for (uint32_t word = 0; word < 32; ++word) {
+        const uint32_t expected =
+            private_written && lane == 1 && word == offset / 4 ? source(1, 0) : canary;
+        EXPECT_EQ(memory.read32(scratch_address(lane, word)), expected)
+            << "lane=" << lane << " word=" << word;
+      }
+    }
+    EXPECT_EQ(memory.read32(global_address), test.faults ? canary : source(0, 0));
+    EXPECT_EQ(memory.read32(global_address + 4), test.faults || !wide ? canary : source(0, 1));
+    if (test.faults) {
+      for (uint32_t lane = 0; lane < 3; ++lane)
+        for (uint32_t word = 0; word < 4; ++word)
+          EXPECT_EQ(cu.read_vgpr(vb + 16 + word, lane), canary);
+    }
+    wf->halt();
+  }
+}
+
+// CDNA5 section 10.2.
+TEST(Gfx1250MemoryExecutionHarness, PrivateFlatAtomic64FaultsBeforeAnySideEffect) {
+  check_private_flat_atomic64_faults<cdna5::Isa>(
+      ROCJITSU_CODE_ARCH_CDNA5,
+      {cdna5::kFlatAtomicSwapB32Vflat, cdna5::kFlatAtomicSwapB64Vflat,
+       cdna5::kFlatAtomicCmpswapB64Vflat, cdna5::kFlatAtomicAddU64Vflat},
+      [](uint16_t opcode) {
+        return cdna5::build_vflat(opcode,
+                                  {.saddr = 124, .vdst = 16, .th = 1, .vsrc = 8, .vaddr = 0});
+      });
+}
+
 TEST(Gfx1250MemoryExecutionHarness, MixedFlatLdsAndGlobalLanesPreserveEachResult) {
   struct Case {
     uint16_t opcode;
