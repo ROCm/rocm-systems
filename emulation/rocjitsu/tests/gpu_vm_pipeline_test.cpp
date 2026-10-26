@@ -1654,6 +1654,52 @@ TEST(GpuVmPipeline, TranslatedAtomicsUseStrongBackingOperationsForBothWidths) {
   EXPECT_EQ(context.external->compare_exchange_calls, kCases.size());
 }
 
+// BUFFER descriptors may request the same swizzle as private scratch while
+// still targeting global backing. Only private FLAT atomics must fault.
+TEST(GpuVmPipeline, TranslatedAtomic64RejectsPrivateButPreservesBufferSwizzling) {
+  for (bool private_backing : {true, false}) {
+    SCOPED_TRACE(private_backing);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    constexpr uint64_t address = 0x300, canary = 0xdeadbeefdeadbeefULL;
+    constexpr uint64_t source = 0x123456789abcdef0ULL;
+    context.external->store(address, canary);
+    context.wf->set_scratch_base(0x100);
+    auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    state->elem_size = 8;
+    state->num_elems = 1;
+    state->is_load = true;
+    state->atomic_op = amdgpu::AtomicOp::SWAP;
+    state->wf_size = context.wf->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->scratch_swizzle = true;
+    state->requires_scratch_backing = private_backing;
+    state->scratch_lane_mask = 1;
+    state->scratch_addr_stride = state->wf_size * 4;
+    state->per_lane_addr[0] = address;
+    const uint32_t dst = context.wf->vgpr_alloc().base + 12;
+    state->dst_reg_base = dst;
+    context.cu->write_vgpr(dst, 0, 0xbaadf00d);
+    context.cu->write_vgpr(dst + 1, 0, 0xbaadf00d);
+    state->store_data.resize(state->wf_size * 8);
+    std::memcpy(state->store_data.data(), &source, sizeof(source));
+
+    amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+    EXPECT_EQ(pipeline.issue(new TestMemoryInstruction(std::move(state)), *context.wf),
+              private_backing ? amdgpu::VmAccessOutcome::Faulted
+                              : amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(context.external->load<uint64_t>(address), private_backing ? canary : source);
+    EXPECT_EQ(context.external->atomic_load_calls, private_backing ? 0u : 1u);
+    EXPECT_EQ(context.external->compare_exchange_calls, private_backing ? 0u : 1u);
+    EXPECT_EQ(context.cu->read_vgpr(dst, 0), private_backing ? 0xbaadf00du : uint32_t(canary));
+    EXPECT_EQ(context.cu->read_vgpr(dst + 1, 0),
+              private_backing ? 0xbaadf00du : uint32_t(canary >> 32));
+    EXPECT_TRUE(context.wf->wait_counters().empty());
+  }
+}
+
 TEST(GpuVmPipeline, UnavailableAtomicDoesNotCompleteArchitecturalState) {
   TranslatedPipelineContext context;
   ASSERT_NO_FATAL_FAILURE(context.initialize());
