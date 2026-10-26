@@ -1097,6 +1097,41 @@ TEST(InterposerDrmTest, DeviceInfoReportsActiveCuCount) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+// This test uses an explicit 256-MiB aperture, smaller than physical VRAM.
+TEST(InterposerDrmTest, PartialVramApertureLimitsCpuAccessibleQueries) {
+  constexpr uint64_t kTotalVram = 463856467968ull;
+  constexpr uint64_t kVisibleVram = 256ull << 20;
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+
+  drm_amdgpu_info_vram_gtt vram_gtt{};
+  drm_amdgpu_info query{};
+  query.query = AMDGPU_INFO_VRAM_GTT;
+  query.return_pointer = reinterpret_cast<uint64_t>(&vram_gtt);
+  query.return_size = sizeof(vram_gtt);
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_INFO, &query), 0);
+  EXPECT_EQ(vram_gtt.vram_size, kTotalVram);
+  EXPECT_EQ(vram_gtt.vram_cpu_accessible_size, kVisibleVram);
+
+  drm_amdgpu_memory_info memory{};
+  query.query = AMDGPU_INFO_MEMORY;
+  query.return_pointer = reinterpret_cast<uint64_t>(&memory);
+  query.return_size = sizeof(memory);
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_INFO, &query), 0);
+  EXPECT_EQ(memory.vram.total_heap_size, kTotalVram);
+  EXPECT_EQ(memory.vram.usable_heap_size, kTotalVram);
+  EXPECT_EQ(memory.vram.max_allocation, kTotalVram);
+  EXPECT_EQ(memory.cpu_accessible_vram.total_heap_size, kVisibleVram);
+  EXPECT_EQ(memory.cpu_accessible_vram.usable_heap_size, kVisibleVram);
+  EXPECT_EQ(memory.cpu_accessible_vram.max_allocation, kVisibleVram);
+  EXPECT_EQ(memory.cpu_accessible_vram.total_heap_size, vram_gtt.vram_cpu_accessible_size);
+
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
 TEST(InterposerDrmTest, OpensWithinCurrentDescriptorLimit) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
