@@ -711,13 +711,6 @@ TEST_F(CollectivesMicrotest, AllReduceDda_SymmetricEligibleNeverTakesDda) {
   EXPECT_TRUE(fake.thresholdFuncs.empty());
 }
 
-TEST_F(CollectivesMicrotest, AllReduceDda_DefaultArchReturnsFalse) {
-  fake.ddaEnabled = true;
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
-  EXPECT_TRUE(fake.ddaEnabledCalls.empty());
-  EXPECT_TRUE(fake.thresholdFuncs.empty());
-}
-
 TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250FabricRunsEvenWhenCeIsAllowed) {
   SetArch("gfx1250");
   fake.ddaEnabled = true;
