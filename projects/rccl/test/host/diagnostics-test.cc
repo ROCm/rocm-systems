@@ -209,6 +209,8 @@ class DiagnosticsMicrotest : public ::testing::Test {
     comm_->nRanks = nRanks;
     comm_->nNodes = nNodes;
     comm_->bootstrap = reinterpret_cast<void*>(kBootstrapBits);
+    abortFlag_ = 0;
+    comm_->abortFlag = &abortFlag_;
     peerMasks_.assign(nRanks, 0);
   }
 
@@ -263,6 +265,7 @@ class DiagnosticsMicrotest : public ::testing::Test {
   std::vector<std::vector<ncclTopoLinkList>> links_;
   std::vector<unsigned int> peerMasks_;
   unsigned int myMask_ = 0;
+  uint32_t abortFlag_ = 0;
   int gathers_ = 0;
   ncclResult_t gatherResult_ = ncclSuccess;
   std::vector<std::string> checks_;
@@ -488,32 +491,21 @@ TEST_F(DiagnosticsMicrotest, DetectTransportMask_AllGatherFailureLeavesMaskZero)
   EXPECT_EQ(ret, ncclRemoteError);
 }
 
-// On calloc failure the rank still joins the all-gather via the fallback buffer and publishes the
-// gathered union, so it surfaces the allocation error yet stays in lockstep with its peers.
-TEST_F(DiagnosticsMicrotest, DetectTransportMask_CallocFailureStillJoinsAllGatherAndPublishesUnion) {
+// A rank that cannot allocate the gather buffer cannot join the collective, and retrying the same
+// allocator would fail the same way. Rather than returning early and leaving peers to hang in the
+// all-gather, diagnostics requests a communicator abort and surfaces the error; it never enters the
+// all-gather. This only fires under genuine memory exhaustion.
+TEST_F(DiagnosticsMicrotest, DetectTransportMask_CallocFailureAbortsCommWithoutJoiningAllGather) {
   BuildComm(2, 0, 2);
   peerMasks_ = {0, Bit(PATH_NET)};
   g_diagnosticsCallocFailAt = 1;
   ncclResult_t ret;
-  // No local topo, so this rank classifies its peer as PATH_DIS; the gathered fallback buffer still
-  // carries the peer's PATH_NET bit into the published union, which is not left at zero.
-  EXPECT_EQ(Detect(&ret), Bit(PATH_LOC) | Bit(PATH_DIS) | Bit(PATH_NET));
-  // The allocation failure is still surfaced...
+  EXPECT_EQ(Detect(&ret), 0u);
   EXPECT_EQ(ret, ncclSystemError);
-  // ...but the rank joins the all-gather via the fallback buffer, so peers do not hang.
-  EXPECT_EQ(gathers_, 1);
-}
-
-// End-to-end lockstep guard: with a peer on PATH_NET and calloc failing, this rank must still run
-// the net bw check its peers run. Before the union was published on the failure path it saw a zero
-// mask, skipped ncclDiagRunIbWriteBw, and desynced the very collective that check issues.
-TEST_F(DiagnosticsMicrotest, Run_CallocFailureStillRunsNetBwInLockstep) {
-  BuildComm(2, 0, 2);
-  peerMasks_[1] = Bit(PATH_NET);
-  g_diagnosticsCallocFailAt = 1;
-  ncclResult_t ret;
-  Run(&ret);
-  EXPECT_EQ(checks_, (std::vector<std::string>{"ib", "p2p"}));
+  // The rank never joined the all-gather...
+  EXPECT_EQ(gathers_, 0);
+  // ...and it raised the communicator abort flag so peers are released instead of hanging.
+  EXPECT_EQ(abortFlag_, 1u);
 }
 
 TEST_F(DiagnosticsMicrotest, Run_SingleHostSkipsNetBwAndRunsP2p) {

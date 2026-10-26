@@ -22,8 +22,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <new>
-#include <vector>
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -109,42 +107,24 @@ static ncclResult_t ncclDiagDetectTransportMask(struct ncclComm* comm, unsigned 
     localPathMask |= 1u << t;
   }
 
-  {
-    // The all-gather below is collective: every peer blocks in it. If the per-rank buffer
-    // allocation fails on one rank only, that rank must NOT return early, or its peers hang in the
-    // all-gather and every later diagnostics collective desyncs. On failure, still join the
-    // collective using a local fallback buffer, then publish the gathered union (so this rank makes
-    // the same net-vs-local check decisions as its peers) and surface the allocation error.
-    ncclResult_t allocRes = ncclCalloc(&allPathMasks, comm->nRanks);
-    std::vector<unsigned int> fallbackMasks;
-    unsigned int* masks = allPathMasks;
-    if (allocRes != ncclSuccess) {
-      // The fallback is itself a heap allocation; if it also fails we have no buffer to gather into
-      // and cannot join the collective. Catch the throw so it never unwinds through these C frames:
-      // peers may then hang, but only under genuine memory exhaustion where nothing can be done.
-      try {
-        fallbackMasks.assign(comm->nRanks, 0u);
-      } catch (const std::bad_alloc&) {
-        ret = allocRes;
-        goto fail;
-      }
-      masks = fallbackMasks.data();
-    }
+  // The all-gather below is collective: every peer blocks in it. A rank that cannot allocate the
+  // per-rank buffer cannot join, and retrying the same allocator would fail the same way, so there
+  // is no way to keep this rank in step. Rather than returning early and leaving its peers to hang
+  // in the all-gather, request a communicator abort (the net ring all-gather polls comm->abortFlag)
+  // and surface the error. This only fires under genuine memory exhaustion, where aborting is right.
+  if (ncclCalloc(&allPathMasks, comm->nRanks) != ncclSuccess) {
+    WARN("Diagnostics: failed to allocate %d-rank transport-mask buffer; aborting communicator", comm->nRanks);
+    if (comm->abortFlag) __atomic_store_n(comm->abortFlag, 1u, __ATOMIC_RELEASE);
+    ret = ncclSystemError;
+    goto fail;
+  }
+  allPathMasks[comm->rank] = localPathMask;
+  NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allPathMasks, sizeof(unsigned int)), ret, fail);
 
-    masks[comm->rank] = localPathMask;
-    NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, masks, sizeof(unsigned int)), ret, fail);
-
-    // The all-gather filled every slot, so masks[] holds the full picture even when our own buffer
-    // allocation failed. Publish the union regardless, so a rank that failed to allocate still takes
-    // the same PATH_NET branch as its peers in the collectives that follow and stays in lockstep.
-    if (outUnionMask != nullptr) {
-      unsigned int unionMask = 0;
-      for (int r = 0; r < comm->nRanks; r++) unionMask |= masks[r];
-      *outUnionMask = unionMask;
-    }
-
-    // Surface the allocation failure after the rank has rejoined its peers.
-    if (allocRes != ncclSuccess) ret = allocRes;
+  if (outUnionMask != nullptr) {
+    unsigned int unionMask = 0;
+    for (int r = 0; r < comm->nRanks; r++) unionMask |= allPathMasks[r];
+    *outUnionMask = unionMask;
   }
 
 fail:
