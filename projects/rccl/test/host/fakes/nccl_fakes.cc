@@ -103,6 +103,19 @@ void ncclDebugLog(ncclDebugLogLevel level,
     g_ncclDebugLog(level, flags, filefunc, line, msg.c_str());
 }
 
+// src/debug.cc's pthread_t overload; the hook gets the name as production would set it. Default: no-op,
+// like production at its NCCL_SET_THREAD_NAME=0 default. Weak so a suite with its own copy still links.
+static void DefaultSetThreadName(pthread_t, const char*) {}
+std::function<void(pthread_t, const char*)> g_ncclSetThreadName = DefaultSetThreadName;
+__attribute__((weak)) void ncclSetThreadName(pthread_t thread, const char* fmt, ...) {
+    char name[NCCL_THREAD_NAMELEN];
+    std::va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(name, sizeof(name), fmt, ap);
+    va_end(ap);
+    g_ncclSetThreadName(thread, name);
+}
+
 // Every param sits at its default. The NCCL_PARAM bodies that p2p-test.cc redirects through g_loadParam bypass this.
 int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
   if (cache) {
@@ -587,10 +600,10 @@ ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm*           comm
                                              numSegments);
 }
 
-// NCCL_PARAM(MultiSegmentRegister, ...) generated symbol. Return 0 so the
+// NCCL_PARAM(MultiSegmentRegister, ...) generated symbol. Defaults to 0 so the
 // `multiSegment && ... ncclParamMultiSegmentRegister()` guard in p2p.cc
-// keeps the single-segment path the microtests exercise.
-int64_t ncclParamMultiSegmentRegister() { return 0; }
+// keeps the single-segment path the microtests exercise; g_loadParam can flip it.
+int64_t ncclParamMultiSegmentRegister() { return g_loadParam("MULTI_SEGMENT_REGISTER", 0); }
 
 // ---------------------------------------------------------------------------
 // Reset
@@ -621,4 +634,5 @@ void ResetNcclFakes()
     g_shmAllocateShareableBuffer   = DefaultShmAllocateShareableBuffer;
     g_commGraphRegister            = DefaultCommGraphRegister;
     g_commGraphDeregister          = DefaultCommGraphDeregister;
+    g_ncclSetThreadName            = DefaultSetThreadName;
 }

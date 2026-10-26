@@ -172,6 +172,9 @@ extern std::function<ncclResult_t(size_t /*size*/, bool /*legacy*/,
                                   void** /*hptr*/, void** /*dptr*/)>
     g_shmAllocateShareableBuffer;
 
+// ncclSetThreadName(pthread_t, fmt, ...) hands the formatted name here.
+extern std::function<void(pthread_t, const char* /*name*/)> g_ncclSetThreadName;
+
 // Restore every NCCL controllable seam in this header to its default.
 // Called by ResetP2pFakes(); exposed for tests that only touch NCCL hooks.
 // Hands back an fd the caller must close. Defaults to ncclSystemError (the
