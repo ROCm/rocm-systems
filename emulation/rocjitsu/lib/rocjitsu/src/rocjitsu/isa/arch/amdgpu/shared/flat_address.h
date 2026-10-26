@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 namespace rocjitsu::amdgpu {
@@ -24,6 +25,17 @@ constexpr uint64_t scratch_lane_address(uint64_t scratch_base, uint64_t private_
                                         uint32_t lane, uint32_t wave_size) {
   return scratch_base + private_offset / kScratchInterleaveBytes * scratch_unit_stride(wave_size) +
          uint64_t{lane} * kScratchInterleaveBytes + private_offset % kScratchInterleaveBytes;
+}
+
+/// @brief Add private lanes whose transfers follow the dword-interleaved scratch layout.
+/// @details OR the mask so mixed FLAT requests retain every private lane. BUFFER
+/// descriptor swizzling has different address-space provenance and must not use this helper.
+inline void add_private_scratch_lanes(VectorMemState &d, uint32_t wave_size, uint64_t lanes) {
+  d.scratch_swizzle = true;
+  d.requires_scratch_backing = true;
+  d.scratch_addr_stride = scratch_unit_stride(wave_size);
+  d.scratch_swizzle_unit = kScratchInterleaveBytes;
+  d.scratch_lane_mask |= lanes;
 }
 
 enum class FlatPrivateLayout { None, Interleaved, EncodedLane };
