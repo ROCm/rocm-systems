@@ -306,6 +306,17 @@ test_categories:
       - "GdrFlushFlagTest.*"
       - "GdrFlushTest.*"
       - "GdrFlushFlagProtoSwitchMPITest.*"
+    exclude:
+      - "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_IB_GDR_FLUSH_FLAG=1"
+  standard_env_gdr_flush_flag_fused_nic:
+    description: "Remote GDR flush flag over a fused (two-NIC) device, which keeps the RDMA read flush. Its own process: the vNIC it makes stays in the device list, and later comms in the process would use it and run without the flag. Cluster jobs run this via test_runner suite net_ib_gdr_flush_flag (2 ranks on 2 nodes)."
+    test_patterns:
+      - "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
     exclude_windows: *mpi_exclude_windows
     labels: *mpi_standard_labels
     env_variables:
@@ -316,6 +327,8 @@ test_categories:
     test_patterns:
       - "GdrFlushFlagTest.*"
       - "GdrFlushFlagProtoSwitchMPITest.*"
+    exclude:
+      - "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
     exclude_windows: *mpi_exclude_windows
     labels: *mpi_standard_labels
     env_variables:
@@ -327,6 +340,8 @@ test_categories:
     test_patterns:
       - "GdrFlushFlagTest.*"
       - "GdrFlushFlagProtoSwitchMPITest.*"
+    exclude:
+      - "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
     exclude_windows: *mpi_exclude_windows
     labels: *mpi_standard_labels
     env_variables:

@@ -313,7 +313,12 @@
         {
           "name": "GdrFlushFlag_DefaultQps",
           "description": "Remote GDR flush flag with default QPs. GdrFlushFlagTest needs 2 ranks; GdrFlushFlagProtoSwitchMPITest needs 2 nodes.",
-          "test_filter": "GdrFlushFlagTest.*:GdrFlushTest.*:GdrFlushFlagProtoSwitchMPITest.*"
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        },
+        {
+          "name": "GdrFlushFlag_FusedNic",
+          "description": "Fused (two-NIC) device keeps the RDMA read flush. Its own process: the vNIC it makes stays in the device list, and later comms in the process would use it and run without the flag.",
+          "test_filter": "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
         }
       ]
     },
@@ -326,7 +331,7 @@
         {
           "name": "GdrFlushFlag_4Qps",
           "description": "Remote GDR flush flag over 4 QPs per connection: requests rotate over the QPs and each flag tracks its own QP.",
-          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*"
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
         }
       ]
     },
@@ -340,7 +345,7 @@
         {
           "name": "GdrFlushFlag_4QpsSplit",
           "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1: every request spans all 4 QPs, and the GPU waits on all 4 flags.",
-          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*"
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
         }
       ]
     },
