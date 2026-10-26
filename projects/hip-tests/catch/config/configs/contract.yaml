@@ -1509,6 +1509,9 @@ contract:
   Contract_DeviceConfig_HipDeviceSetLimit_Default_RoundTripsOrIsUnsupported:
     <<: *level_0
     tags: [device_config, P0]
+  Contract_DeviceConfig_HipDeviceSetLimit_PersistingL2_RoundTripsAndRejectsOverMax:
+    <<: *level_0
+    tags: [device_config, P0]
   Contract_DeviceConfig_HipGetDeviceFlags_AndStreamPriorityRange_AreConsistent:
     <<: *level_0
     tags: [device_config, P0]
