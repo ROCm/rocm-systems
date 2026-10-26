@@ -97,7 +97,7 @@ private:
   size_t nodes_ = 0;
 };
 
-std::optional<std::span<const uint8_t>> note(std::span<const uint8_t> image) {
+std::optional<std::span<const uint8_t>> find_metadata_note(std::span<const uint8_t> image) {
   Elf64_Ehdr header{};
   if (image.size() < sizeof(header))
     return std::nullopt;
@@ -163,7 +163,7 @@ bool MetadataValue::text_field_is(std::string_view name, std::string_view expect
 
 FailureOr<MetadataDocument> MetadataDocument::parse(std::span<const uint8_t> image,
                                                     std::string *error) {
-  const std::optional<std::span<const uint8_t>> payload = note(image);
+  const std::optional<std::span<const uint8_t>> payload = find_metadata_note(image);
   if (!payload)
     return fail(error, "missing or invalid AMDHSA metadata note");
   MetadataDocument document;
