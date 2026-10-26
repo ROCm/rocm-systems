@@ -72,7 +72,7 @@ Result IntFlag::set_value(int64_t value, DiagnosticEmitter) {
 std::string IntFlag::format_value() const { return std::to_string(value_); }
 
 Result IntFlag::parse_value(std::string_view text, DiagnosticEmitter diagnostic) {
-  auto value = parse_int(text, diagnostic);
+  FailureOr<int64_t> value = parse_int(text, diagnostic);
   if (value.failed())
     return Result::failure();
   return set_value(value.value(), diagnostic);
@@ -86,7 +86,7 @@ Result UIntFlag::set_value(uint64_t value, DiagnosticEmitter) {
 std::string UIntFlag::format_value() const { return std::to_string(value_); }
 
 Result UIntFlag::parse_value(std::string_view text, DiagnosticEmitter diagnostic) {
-  auto value = parse_uint(text, diagnostic);
+  FailureOr<uint64_t> value = parse_uint(text, diagnostic);
   if (value.failed())
     return Result::failure();
   return set_value(value.value(), diagnostic);
@@ -117,14 +117,15 @@ Result Flag::parse_and_set(std::string_view text, DiagnosticEmitter diagnostic) 
 
 std::string Command::path() const { return parent_ ? parent_->path() + " " + name_ : name_; }
 
-FailureOr<Command *> Command::add_command(std::string name, DiagnosticEmitter diagnostic) {
+FailureOr<Command *> Command::add_command(std::string name, DiagnosticEmitter diagnostic,
+                                          PositionalMode positional_mode) {
   if (sealed_)
     return diagnostic.emit() << path() << ": registration is closed";
   if (!valid_word(name) || name.front() == '-')
     return diagnostic.emit() << path() << ": invalid command name '" << name << "'";
   if (find_command(name))
     return diagnostic.emit() << path() << ": duplicate command '" << name << "'";
-  auto command = std::make_unique<Command>(std::move(name));
+  auto command = std::make_unique<Command>(std::move(name), positional_mode);
   command->parent_ = this;
   Command *result = command.get();
   commands_.push_back(std::move(command));
@@ -157,7 +158,7 @@ Result Command::add_flags(std::string description, std::vector<std::shared_ptr<F
         return diagnostic.emit() << path() << ": invalid flag spelling '" << name << "'";
       if (!unique.insert(name).second)
         return diagnostic.emit() << path() << ": repeated spelling '" << name << "'";
-      if (auto existing = find_flag(name))
+      if (std::shared_ptr<Flag> existing = find_flag(name))
         return diagnostic.emit() << path() << ": spelling '" << name << "' for " << info.name
                                  << " conflicts with " << existing->info().name;
     }
@@ -279,8 +280,11 @@ std::string format_help(const Command &command) {
   out << "Usage: " << command.path() << " [options]";
   if (!command.commands().empty())
     out << " <command>";
-  out << (command.positional_mode() == PositionalMode::AfterSeparator ? " --" : " [--]")
-      << " [arguments...]\n";
+  if (!command.positional_usage().empty()) {
+    out << (command.positional_mode() == PositionalMode::AfterSeparator ? " --" : " [--]") << ' '
+        << command.positional_usage();
+  }
+  out << "\n";
   for (const auto &group : command.groups()) {
     out << "\n" << (group.description.empty() ? "Options" : group.description) << ":\n";
     for (const auto &flag : group.flags) {
