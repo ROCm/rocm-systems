@@ -902,6 +902,41 @@ static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* me
   }
 }
 
+// Undo a partial GIN activation; any GIN state on existing memories and windows came from it.
+static void symGinActivationRollbackWindows(struct ncclDevrState* devr, cudaStream_t stream) {
+  for (int i = 0; i < devr->winSortedCount; i++) {
+    struct ncclDevrWindow* win = devr->winSorted[i].win;
+    struct ncclWindow_vidmem* winHost;
+    if (ncclShadowPoolToHost(&devr->shadows, win->vidmem, &winHost) != ncclSuccess) continue;
+    if (winHost->ginMultiSegmentWins == nullptr) continue;
+    (void)ncclShadowPoolFree(&devr->shadows, winHost->ginMultiSegmentWins, stream);
+    winHost->ginMultiSegmentWins = nullptr;
+    winHost->numSegments = 0;
+    for (int c = 0; c < NCCL_GIN_MAX_CONNECTIONS; c++) winHost->ginWinsDefaultBackend[c] = nullptr;
+    CUDACHECKIGNORE(
+      cudaMemcpyAsync(win->vidmem, winHost, sizeof(struct ncclWindow_vidmem), cudaMemcpyHostToDevice, stream));
+  }
+}
+
+static void symGinActivationRollbackMemories(struct ncclComm* comm) {
+  struct ncclDevrState* devr = &comm->devrState;
+  for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
+    if (mem->ginSegmentInfos == nullptr) continue;
+    for (int segment = 0; segment < mem->numGinSegments; segment++) {
+      (void)ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins,
+                              mem->ginSegmentInfos[segment].ginWinGenerations);
+    }
+    free(mem->ginSegmentInfos);
+    mem->ginSegmentInfos = nullptr;
+    mem->numGinSegments = 1;
+    for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS; i++) {
+      mem->ginHostWins[i] = nullptr;
+      mem->ginDevWins[i] = nullptr;
+    }
+  }
+  devr->ginEnabled = false;
+}
+
 static void symMemoryUnmapLsaRank(struct ncclDevrState* devr, struct ncclDevrMemory* mem, int rank) {
   uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
   uintptr_t addr = base + rank * devr->bigSize + mem->bigOffset;
@@ -1996,6 +2031,7 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   struct ncclTeam world = ncclTeamWorld(comm);
   struct ncclTeam lsa = ncclTeamInnerFactor(world, devr->lsaSize);
   bool ginActivated = false;
+  bool ginActivationDone = false;
   bool cftUcActivated = false;
   bool hasCountedCftMemory = symHasCountedCftMemory(devr);
   struct ncclDevrTeam* tmLsa;
@@ -2278,6 +2314,7 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
                                     stream),
                     ret, fail_stream);
     }
+    ginActivationDone = true;
   }
 
   NCCLCHECKGOTO(symWindowTableInitOnce(comm, stream), ret, fail_stream); // ensure devr->windowTable exists
@@ -2354,6 +2391,7 @@ fail_stream_mem:
   }
   symMemoryDropRef(comm, mem);
 fail_stream:
+  if (ginActivated && !ginActivationDone) symGinActivationRollbackWindows(devr, stream);
   CUDACHECKIGNORE(cudaStreamDestroy(stream));
 fail:
   // Destroy the GIN contexts this call created. Without this, a failure between
@@ -2363,6 +2401,8 @@ fail:
   if (ginDevCommSetupDone && ncclGinDevCommFree(comm, outDevComm) == ncclSuccess) {
     ncclGinDevCommClearFields(outDevComm);
   }
+  // A retry skips activation once ginEnabled is set, so roll back a partial one.
+  if (ginActivated && !ginActivationDone) symGinActivationRollbackMemories(comm);
   CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
   return ret;
 }

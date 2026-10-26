@@ -6710,9 +6710,9 @@ TEST(DevrGinContextsTotal, ZeroConnectionBackend_TreatedAsOne) {
 // is touched and rejects combinations the communicator cannot serve, and the
 // resource-window sizing that follows it, up to the cuMemCreate call.
 //
-// The rest of the devcomm build -- symmetric-memory window creation, GIN
-// window registration, barriers -- is not covered here beyond a failed GIN
-// connect.
+// The rest of the devcomm build -- GIN activation, symmetric-memory window
+// creation, GIN window registration, barriers -- is not covered here beyond a
+// failed GIN activation.
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
@@ -6843,6 +6843,62 @@ TEST_F(DevrCommCreateInternalTest, GinConnectFails_RetryConnectsAgain) {
   EXPECT_EQ(Create(), ncclSystemError);
   EXPECT_EQ(connect.calls, 2);
   EXPECT_FALSE(comm->devrState.ginEnabled);
+}
+
+// Register fails after connect: activation rolls back, so the retry registers again.
+TEST_F(DevrCommCreateInternalTest, GinRegisterFailsAfterConnect_RollsBackActivation) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+  size_t segmentSizes[2] = {8192, 8192};
+  hipMemGenericAllocationHandle_t memHandles[2] = {reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55),
+                                                   reinterpret_cast<hipMemGenericAllocationHandle_t>(0x56)};
+  ncclDevrMemory mems[2] = {};
+  for (int m = 0; m < 2; m++) {
+    mems[m].primaryAddr = reinterpret_cast<void*>(0x100000 * (m + 1));
+    mems[m].size = segmentSizes[m];
+    mems[m].numSegments = 1;
+    mems[m].maxGlobalNumSegments = 1;
+    mems[m].segmentSizes = &segmentSizes[m];
+    mems[m].memHandles = &memHandles[m];
+  }
+  mems[0].next = &mems[1];
+  comm->devrState.memHead = &mems[0];
+
+  void* const goodHostWin = reinterpret_cast<void*>(0xa1);
+  int goodRegistrations = 0;
+  int goodDeregistrations = 0;
+  ScopedHook connect(g_devrGinConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void* addr, size_t, void* hostWins[], ncclGinWindow_t[], uint32_t[],
+                                        int, bool, int) {
+    // Registration only runs once connect has latched GIN.
+    EXPECT_TRUE(comm->devrState.ginEnabled);
+    if (addr != mems[0].primaryAddr) return ncclSystemError;
+    hostWins[0] = goodHostWin;
+    goodRegistrations++;
+    return ncclSuccess;
+  });
+  ScopedHook dereg(g_devrGinDeregister, [&](ncclComm*, void* hostWins[], uint32_t const[]) {
+    if (hostWins[0] == goodHostWin) goodDeregistrations++;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  ASSERT_FALSE(comm->devrState.ginEnabled);
+  EXPECT_EQ(goodRegistrations, 1);
+  EXPECT_EQ(goodDeregistrations, 1);
+  EXPECT_EQ(mems[0].ginSegmentInfos, nullptr);
+  EXPECT_EQ(mems[0].ginHostWins[0], nullptr);
+  EXPECT_EQ(mems[1].ginSegmentInfos, nullptr);
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  EXPECT_EQ(connect.calls, 2);
+  EXPECT_EQ(goodRegistrations, 2);
+  EXPECT_EQ(goodDeregistrations, 2);
+  EXPECT_FALSE(comm->devrState.ginEnabled);
+
+  comm->devrState.memHead = nullptr;
+  for (ncclDevrMemory& mem : mems) free(mem.ginSegmentInfos);
 }
 
 // Branch: a GIN request rejected after the support checks but before connect
