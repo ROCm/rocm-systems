@@ -1134,6 +1134,18 @@ size_t rcclCeNonRegMax(const struct ncclComm* comm, ncclFunc_t func) {
 size_t rcclCeAr2ShotMin(const struct ncclComm* comm) {
   return rcclCeNonRegMinTab(extAlgoArchTable(comm), ncclFuncAllReduce);
 }
+size_t rcclCeArNonRegCap(const ncclComm* comm) {
+  const int64_t param = rcclParamCeArMaxMsgBytes();
+  if (param >= 0) return (size_t)param;
+  // Read comm->archThresholds directly (not extAlgoArchTable) so that
+  // RCCL_IGNORE_ARCH_TABLE does not substitute the nullptr-fallback 256 MiB
+  // default; the ZERO-policy override applies on the same basis as ncclCeInit.
+  const size_t tableMax = (comm->archThresholds != nullptr)
+      ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : 0;
+  if (tableMax != 0) return tableMax;
+  const bool zeroPolicyActive = (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
+  return zeroPolicyActive ? NCCL_CE_AR_TMPBUF_DEFAULT_BYTES : 0;
+}
 
 // Returns true when the message is within the CE-registered (2-shot) AllGather
 // window. Does not check symk eligibility -- callers gate on !symEligible explicitly.
@@ -1964,7 +1976,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // caps at ceArMaxBytes. Suppressed only by explicit RCCL_FORCE_CE_ALLREDUCE=0.
   const bool ceZeroStagedWindow = arCeZeroPolicy &&
       rcclParamForceCeAllReduce() != 0 &&
-      msgBytes <= comm->ceColl.ceArMaxBytes;
+      rcclWindowFits(msgBytes, arTwoShotMin, rcclCeArNonRegCap(comm));
   // Force arm: RCCL_FORCE_CE_ALLREDUCE=1 without ZERO policy obeys arTwoShotMax;
   // twoShotWindow=false when arTwoShotMax=0 so placeholder arches are blocked here.
   const bool ceForceStagedWindow = force && twoShotWindow;

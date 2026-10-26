@@ -266,6 +266,8 @@ size_t rcclCeAr2ShotMin(const struct ncclComm* comm);
 // ncclCeAllReduceChooseChunkBytes, and the reduce kernel scalar-reduces the
 // tail, so a shard that is not a multiple of 16 still runs.
 bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op);
+// AR CE non-reg cap with ZERO-policy override: safe to call before ncclCeInit.
+size_t rcclCeArNonRegCap(const struct ncclComm* comm);
 // Updates the CE AllReduce graph latch from this call's capture state.
 // Invoke once per collective (any type) at each CE AR decision point.
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);

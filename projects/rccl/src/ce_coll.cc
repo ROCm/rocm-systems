@@ -193,18 +193,8 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclWindow_vidmem* sigWinDevHost = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
-  static int64_t paramMax     = rcclParamCeArMaxMsgBytes();
   static int64_t paramStaging = rcclParamCeArStagingBytes();
-  static constexpr size_t kCeArMaxDefault = 256ULL * 1024 * 1024;
-  // A table entry of 0 means 2-shot disabled by default (e.g. gfx1250 placeholder).
-  // Under ZERO CU policy, fall back to kCeArMaxDefault so CE 2-shot is usable.
-  // This is the single place ZERO policy overrides a zero table entry; both the
-  // selector (ceZeroStagedWindow) and enqueue (twoShotMax) derive from this value.
-  const bool zeroPolicyActive = (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
-  const size_t tableNonRegMax = (comm->archThresholds != nullptr)
-      ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : 0;
-  comm->ceColl.ceArMaxBytes     = (paramMax >= 0) ? (size_t)paramMax
-      : (tableNonRegMax != 0 ? tableNonRegMax : (zeroPolicyActive ? kCeArMaxDefault : 0));
+  comm->ceColl.ceArMaxBytes     = rcclCeArNonRegCap(comm);
   comm->ceColl.ceArStagingBytes = (paramStaging >= 0) ? (size_t)paramStaging : (size_t)NCCL_CE_AR_STAGING_BYTES;
 
   int i = 0;
