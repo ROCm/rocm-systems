@@ -103,18 +103,14 @@ bool Memory::create(Resource::MemoryType memType, Resource::CreateParams* params
       memType = Persistent;
     }
 
-    const bool apuPlaced = amd::IS_HIP && dev().settings().apuSystem_ && deviceMemory;
-    if (apuPlaced && !dev().ApuPlaceDeviceMemory(size(), &memType)) {
+    if (amd::IS_HIP && dev().settings().apuSystem_ && deviceMemory &&
+        !dev().ApuPlaceDeviceMemory(size(), &memType, &apuReservation_)) {
       result = false;
       break;
     }
-    apuReserved_ = apuPlaced ? size() : 0;
     // Create a resource in PAL
     result = Resource::create(memType, params, forceLinear);
-    if (apuPlaced) {
-      dev().ApuReleaseReservation(size());
-      apuReserved_ = 0;
-    }
+    dev().ApuReleaseReservation(&apuReservation_);
     if (!result) {
       size_t freeMemory[2];
       // if requested memory is greater than available then exit the loop

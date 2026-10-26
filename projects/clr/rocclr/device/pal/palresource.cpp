@@ -724,15 +724,15 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
 
     // Memory::create reserved an APU image's base level. Reserve the rest of its backing memory,
     // mip levels and padding included, until it is accounted.
-    Pal::gpusize apuExtra = 0;
-    if ((apuReserved_ > 0) && (createInfo.size > apuReserved_)) {
-      apuExtra = createInfo.size - apuReserved_;
+    ApuReservation apuExtra;
+    if ((apuReservation_.size > 0) && (createInfo.size > apuReservation_.size)) {
       MemoryType memType = memoryType();
-      if (!dev().ApuPlaceDeviceMemory(apuExtra, &memType, false)) {
+      if (!dev().ApuPlaceDeviceMemory(createInfo.size - apuReservation_.size, &memType, &apuExtra,
+                                      false)) {
         return false;
       }
       if (memType != memoryType()) {
-        dev().ApuReleaseReservation(apuExtra);
+        dev().ApuReleaseReservation(&apuExtra);
         return false;
       }
     }
@@ -741,9 +741,7 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
     if (nullptr == memRef_) {
       memRef_ = GpuMemoryReference::Create(dev(), createInfo);
     }
-    if (apuExtra > 0) {
-      dev().ApuReleaseReservation(apuExtra);
-    }
+    dev().ApuReleaseReservation(&apuExtra);
     if (nullptr == memRef_) {
       LogError("Failed PAL memory allocation!");
       return false;
@@ -2122,15 +2120,19 @@ void MemorySubAllocator::forceResident(GpuMemoryReference* mem_ref) {
 
 // ================================================================================================
 // An APU takes a device memory chunk only in its carve-out, and reserves it until the chunk is
-// accounted. This runs under the cache lock, so the cache isn't released; past the carve-out the
-// allocation gets its own memory instead.
-static bool ApuReserveChunk(const Device& dev, Pal::gpusize chunkSize) {
+// accounted; other devices take it as before. This runs under the cache lock, so the cache isn't
+// released; past the carve-out the allocation gets its own memory instead.
+static bool ApuReserveChunk(const Device& dev, Pal::gpusize chunkSize,
+                            ApuReservation* reservation) {
+  if (!amd::IS_HIP || !dev.settings().apuSystem_) {
+    return true;
+  }
   Resource::MemoryType memType = Resource::Local;
-  if (!dev.ApuPlaceDeviceMemory(chunkSize, &memType, false)) {
+  if (!dev.ApuPlaceDeviceMemory(chunkSize, &memType, reservation, false)) {
     return false;
   }
   if (memType != Resource::Local) {
-    dev.ApuReleaseReservation(chunkSize);
+    dev.ApuReleaseReservation(reservation);
     return false;
   }
   return true;
@@ -2139,8 +2141,8 @@ static bool ApuReserveChunk(const Device& dev, Pal::gpusize chunkSize) {
 // ================================================================================================
 bool MemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
   const Pal::gpusize chunkSize = device_->settings().subAllocationChunkSize_;
-  const bool apuPlaced = amd::IS_HIP && device_->settings().apuSystem_;
-  if (apuPlaced && !ApuReserveChunk(*device_, chunkSize)) {
+  ApuReservation apuReservation;
+  if (!ApuReserveChunk(*device_, chunkSize, &apuReservation)) {
     return false;
   }
   Pal::GpuMemoryCreateInfo createInfo = {};
@@ -2159,9 +2161,7 @@ bool MemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
     createInfo.flags.interprocess = 1;
   }
   GpuMemoryReference* mem_ref = GpuMemoryReference::Create(*device_, createInfo);
-  if (apuPlaced) {
-    device_->ApuReleaseReservation(chunkSize);
-  }
+  device_->ApuReleaseReservation(&apuReservation);
   if (mem_ref != nullptr) {
     // Workaround: some chunk memory are not guaranteed to be resident during initial allocation.
     forceResident(mem_ref);
@@ -2173,8 +2173,8 @@ bool MemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
 // ================================================================================================
 bool CoarseMemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
   const Pal::gpusize chunkSize = device_->settings().subAllocationChunkSize_;
-  const bool apuPlaced = amd::IS_HIP && device_->settings().apuSystem_;
-  if (apuPlaced && !ApuReserveChunk(*device_, chunkSize)) {
+  ApuReservation apuReservation;
+  if (!ApuReserveChunk(*device_, chunkSize, &apuReservation)) {
     return false;
   }
   Pal::GpuMemoryCreateInfo createInfo = {};
@@ -2193,9 +2193,7 @@ bool CoarseMemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
     createInfo.flags.interprocess = 1;
   }
   GpuMemoryReference* mem_ref = GpuMemoryReference::Create(*device_, createInfo);
-  if (apuPlaced) {
-    device_->ApuReleaseReservation(chunkSize);
-  }
+  device_->ApuReleaseReservation(&apuReservation);
   if (mem_ref != nullptr) {
     // Workaround: some chunk memory are not guaranteed to be resident during initial allocation.
     forceResident(mem_ref);
@@ -2359,8 +2357,7 @@ bool ResourceCache::addGpuMemory(Resource::Descriptor* desc, GpuMemoryReference*
        (desc->type_ == Resource::Remote) || (desc->type_ == Resource::RemoteUSWC)) &&
       (size < cacheSizeLimit_ && !(desc->SVMRes_ && desc->reserved_va_))) {
     // Validate the cache size limit. Loop until we have enough space
-    while ((cacheSize_ + size) > cacheSizeLimit_) {
-      removeLast();
+    while (((cacheSize_ + size) > cacheSizeLimit_) && removeLast()) {
     }
 
     Resource::Descriptor* descCached = new Resource::Descriptor;
@@ -2448,41 +2445,44 @@ GpuMemoryReference* ResourceCache::findGpuMemory(Resource::Descriptor* desc, Pal
 
 // ================================================================================================
 bool ResourceCache::free(size_t minCacheEntries) {
-  bool result = false;
-  if (minCacheEntries < resCache_.size()) {
-    result = true;
-    // Clear the cache
-    while (static_cast<int64_t>(cacheSize_) > 0) {
-      removeLast();
+  {
+    std::scoped_lock l(lockCacheOps_);
+    if (minCacheEntries >= resCache_.size()) {
+      return false;
     }
-    CondLog((cacheSize_ != 0), "Incorrect size for cache release!");
   }
-  return result;
+  // Clear the cache. Concurrent callers drain it together until it is empty.
+  while (removeLast()) {
+  }
+  CondLog((cacheSize_ != 0), "Incorrect size for cache release!");
+  return true;
 }
 
 // ================================================================================================
-void ResourceCache::removeLast() {
+bool ResourceCache::removeLast() {
   std::pair<Resource::Descriptor*, GpuMemoryReference*> entry;
   {
     // Protect access to the global data
     std::scoped_lock l(lockCacheOps_);
-    if (resCache_.size() > 0) {
-      entry = resCache_.back();
-      resCache_.pop_back();
-      auto mem_size = entry.second->iMem()->Desc().size;
-      cacheSize_ -= mem_size;
-      if (entry.first->type_ == Resource::Local) {
-        lclCacheSize_ -= mem_size;
-      } else if (entry.first->type_ == Resource::Persistent) {
-        persistentCacheSize_ -= mem_size;
-      }
-      // Delete Descriptor
-      delete entry.first;
+    if (resCache_.empty()) {
+      return false;
     }
+    entry = resCache_.back();
+    resCache_.pop_back();
+    auto mem_size = entry.second->iMem()->Desc().size;
+    cacheSize_ -= mem_size;
+    if (entry.first->type_ == Resource::Local) {
+      lclCacheSize_ -= mem_size;
+    } else if (entry.first->type_ == Resource::Persistent) {
+      persistentCacheSize_ -= mem_size;
+    }
+    // Delete Descriptor
+    delete entry.first;
   }
 
-  // Destroy PAL resource
+  // Destroy PAL resource outside the lock
   entry.second->release();
+  return true;
 }
 
 }  // namespace amd::pal

@@ -1997,37 +1997,51 @@ bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pCont
 // running it out hangs the OS instead of failing allocations. So past the carve-out, borrow only up
 // to the borrow limit and fail the allocation otherwise.
 bool Device::ApuPlaceDeviceMemory(Pal::gpusize size, Resource::MemoryType* memType,
-                                  bool releaseCache) const {
+                                  ApuReservation* reservation, bool releaseCache) const {
   // REMOTE_ALLOC, set for tiny carve-outs too, makes Resource::create place it in host RAM
   const bool hostOnly = settings().remoteAlloc_ || (*memType == Resource::RemoteUSWC);
-  // Reserves the size until the allocation is accounted, so concurrent ones can't overcommit.
-  // An allocation is accounted before its reservation ends under this lock, so the counters read
-  // here never miss one. They include cached allocations, which hold their memory too.
+  // A small request in host RAM may create a whole host suballocation chunk
+  const Pal::gpusize hostSize = (size < settings().subAllocationMaxSize_)
+                                    ? std::max(size, settings().subAllocationChunkSize_)
+                                    : size;
+  // Reserves the memory against its pool until the allocation is accounted, so concurrent ones
+  // can't overcommit. An allocation is accounted before its reservation ends under this lock, so
+  // the counters read here never miss one. They include cached allocations, which hold their
+  // memory too.
   auto reserve = [&](bool host) {
+    const Pal::gpusize reserveSize = host ? hostSize : size;
     const Pal::gpusize limit = host ? apuBorrowLimit_ : apuCarveOutLimit_;
     std::lock_guard<std::mutex> lock(apuReserveLock_);
+    Pal::gpusize& reserved = host ? apuReservedHost_ : apuReservedCarveOut_;
     const Pal::gpusize used =
         host ? allocedMem[Pal::GpuHeapGartUswc] + allocedMem[Pal::GpuHeapGartCacheable]
              : allocedMem[Pal::GpuHeapLocal] + allocedMem[Pal::GpuHeapInvisible];
-    if (used + apuReserved_ + size > limit) {
+    if (used + reserved + reserveSize > limit) {
       return false;
     }
-    apuReserved_ += size;
+    reserved += reserveSize;
+    reservation->size = reserveSize;
+    reservation->host = host;
     return true;
   };
-  if (!hostOnly && reserve(false)) {
-    return true;
-  }
-  // Release the cache before borrowing host RAM, as GpuMemoryReference::Create does when PAL fails
-  const bool cacheReleased = releaseCache && resourceCache().free();
-  if (!hostOnly && cacheReleased && reserve(false)) {
-    return true;
-  }
-  if (reserve(true)) {
-    if (!settings().remoteAlloc_) {
-      *memType = Resource::RemoteUSWC;
+  if (hostOnly) {
+    // Release the cache only if the host budget has no room
+    if (reserve(true) || (releaseCache && resourceCache().free() && reserve(true))) {
+      return true;
     }
-    return true;
+  } else {
+    if (reserve(false)) {
+      return true;
+    }
+    // Release the cache before borrowing host RAM, as GpuMemoryReference::Create does when PAL
+    // fails
+    if (releaseCache && resourceCache().free() && reserve(false)) {
+      return true;
+    }
+    if (reserve(true)) {
+      *memType = Resource::RemoteUSWC;
+      return true;
+    }
   }
   ClPrint(amd::LOG_WARNING, amd::LOG_MEM, "APU can't place %llu MB of device memory", size / Mi);
   return false;
@@ -2114,6 +2128,21 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
   }
   if (local < heaps_[Pal::GpuHeapLocal].logicalSize) {
     largest_block = std::max(largest_block, heaps_[Pal::GpuHeapLocal].logicalSize - invisible);
+  }
+
+  // Report no more than ApuPlaceDeviceMemory admits, whose limits leave out the per-heap reserves.
+  // Cached allocations are released on demand.
+  if (amd::IS_HIP && settings().apuSystem_) {
+    const Pal::gpusize deviceUsed =
+        allocedMem[Pal::GpuHeapLocal] + allocedMem[Pal::GpuHeapInvisible];
+    const Pal::gpusize hostUsed =
+        allocedMem[Pal::GpuHeapGartUswc] + allocedMem[Pal::GpuHeapGartCacheable];
+    const Pal::gpusize admitted =
+        ((apuCarveOutLimit_ > deviceUsed) ? apuCarveOutLimit_ - deviceUsed : 0) +
+        ((apuBorrowLimit_ > hostUsed) ? apuBorrowLimit_ - hostUsed : 0) +
+        resourceCache().cacheSize();
+    freeMemory[TotalFreeMemory] =
+        std::min(freeMemory[TotalFreeMemory], static_cast<size_t>(admitted / Ki));
   }
 
   largest_block /= Ki;

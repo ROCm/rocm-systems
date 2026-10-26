@@ -694,14 +694,18 @@ class Device : public NullDevice {
   Pal::gpusize GetMaxFrameBuffer() const { return maxFrameBufferAllocation_; }
 
   //! Moves device memory of an APU to host memory past the carve-out, within the borrow limit,
-  //! and reserves its size until ApuReleaseReservation. False if it fits in neither.
+  //! and reserves it until ApuReleaseReservation. False if it fits in neither.
   bool ApuPlaceDeviceMemory(Pal::gpusize size, Resource::MemoryType* memType,
-                            bool releaseCache = true) const;
+                            ApuReservation* reservation, bool releaseCache = true) const;
 
   //! Ends a reservation of ApuPlaceDeviceMemory, once the allocation is accounted or failed
-  void ApuReleaseReservation(Pal::gpusize size) const {
+  void ApuReleaseReservation(ApuReservation* reservation) const {
+    if (reservation->size == 0) {
+      return;
+    }
     std::lock_guard<std::mutex> lock(apuReserveLock_);
-    apuReserved_ -= size;
+    (reservation->host ? apuReservedHost_ : apuReservedCarveOut_) -= reservation->size;
+    reservation->size = 0;
   }
 
   Pal::gpusize TotalAlloc() const {
@@ -789,7 +793,8 @@ class Device : public NullDevice {
   Pal::gpusize apuCarveOutLimit_ = 0;      //!< Device memory an APU's carve-out holds
   //! Guards admission against the counters together with the end of a reservation
   mutable std::mutex apuReserveLock_;
-  mutable Pal::gpusize apuReserved_ = 0;                  //!< APU device memory being allocated
+  mutable Pal::gpusize apuReservedCarveOut_ = 0;          //!< APU carve-out memory being allocated
+  mutable Pal::gpusize apuReservedHost_ = 0;              //!< APU host RAM being borrowed
   std::map<Pal::IQueue*, QueueRecycleInfo*> queue_pool_;  //!< Pool of PAL queues for recycling
   amd::Program* trap_handler_ = nullptr;  //!< Trap handler program for debugger setup
 };

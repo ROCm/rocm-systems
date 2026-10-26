@@ -72,6 +72,12 @@ class GpuMemoryReference : public amd::ReferenceCountedObject {
 
 static constexpr Pal::gpusize MaxGpuAlignment = 4 * Ki;
 
+//! APU device memory reserved until its allocation is accounted
+struct ApuReservation {
+  Pal::gpusize size = 0;  //!< Reserved size
+  bool host = false;      //!< Reserved against the host RAM borrow limit, not the carve-out
+};
+
 //! GPU resource
 class Resource {
  public:
@@ -484,7 +490,7 @@ class Resource {
                  Pal::gpusize svmPtr);
 
   uint elementSize_;  //!< Size of a single element in bytes
-  Pal::gpusize apuReserved_ = 0;  //!< APU device memory reserved for this resource while created
+  ApuReservation apuReservation_;  //!< APU device memory reserved for this resource while created
 
   //! Returns PAL image object
   Pal::IImage* image() const { return image_; }
@@ -641,8 +647,8 @@ class ResourceCache {
   //! Disable operator=
   ResourceCache& operator=(const ResourceCache&);
 
-  //! Removes one last entry from the cache
-  void removeLast();
+  //! Removes one last entry from the cache. False if the cache was empty.
+  bool removeLast();
 
   std::recursive_mutex lockCacheOps_;  //!< Lock to serialise cache access
 
