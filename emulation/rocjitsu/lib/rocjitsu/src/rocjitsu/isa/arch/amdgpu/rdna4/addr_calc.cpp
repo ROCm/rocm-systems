@@ -163,8 +163,9 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
 
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d) {
-  // GFX12 VSCRATCH: optional VGPR (signed 32-bit) + optional signed saddr +
-  // signed 24-bit offset, interleaved by scratch_lane_address().
+  // GFX12 VSCRATCH: optional VGPR + optional saddr + signed 24-bit offset,
+  // interleaved by scratch_lane_address(). RDNA4 section 11.2 defines both
+  // register offsets as signed 32-bit values.
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
   uint64_t exec = d.exec_mask;
@@ -192,10 +193,10 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    const int64_t vaddr =
+    const int64_t voffset =
         inst.sve ? amdgpu::flat_vector_offset(vaddr_region->lane(0, lane), /*signed_offset=*/true)
                  : 0;
-    const uint64_t private_offset = static_cast<uint64_t>(vaddr + saddr_val + offset);
+    const uint64_t private_offset = static_cast<uint64_t>(voffset + saddr_val + offset);
     d.per_lane_addr[lane] =
         amdgpu::scratch_lane_address(scratch_base, private_offset, lane, wf.wf_size());
   }
