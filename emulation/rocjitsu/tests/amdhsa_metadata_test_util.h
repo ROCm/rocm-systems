@@ -60,7 +60,8 @@ inline std::vector<uint8_t> resource_metadata_payload(std::initializer_list<Meta
     append_metadata_integer(bytes, kernel.sgprs, narrow);
     append_metadata_text(bytes, ".vgpr_count");
     append_metadata_integer(bytes, kernel.vgprs, narrow);
-    // This valid generic metadata lies outside ConSan's private-segment scope.
+    // Keep a nonzero scratch baseline to check that unrelated kernarg/GPR edits
+    // preserve the existing private-segment metadata.
     append_metadata_text(bytes, ".private_segment_fixed_size");
     append_metadata_integer(bytes, 4096, narrow);
   }
