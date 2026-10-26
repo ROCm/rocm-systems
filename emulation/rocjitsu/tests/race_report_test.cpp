@@ -41,6 +41,8 @@ std::vector<PrintedRow> rows(const std::string &report) {
   std::istringstream lines(report);
   std::string line, transition;
   while (std::getline(lines, line)) {
+    EXPECT_EQ(line.find("Trace window:"), std::string::npos);
+    EXPECT_EQ(line.find("Same-wave instruction distance:"), std::string::npos);
     std::smatch match;
     if (std::regex_search(line, match, marker)) {
       EXPECT_TRUE(transition.empty());
@@ -77,9 +79,7 @@ TEST(RaceReportTraceTest, VariableWidthSequentialInstructionsHaveNoJumpMarkers) 
   for (const auto &row : printed)
     EXPECT_TRUE(row.transition.empty());
   EXPECT_EQ(report.find("PC diff"), std::string::npos);
-  EXPECT_NE(report.find("5 recorded instructions, 5 shown, 0 elided"), std::string::npos);
-  EXPECT_NE(report.find("0 nonsequential PC transitions (0 backward)"), std::string::npos);
-  EXPECT_NE(report.find("4 instruction steps"), std::string::npos);
+  EXPECT_EQ(elided_count(report), 0u);
 }
 
 TEST(RaceReportTraceTest, ExactForwardBackwardAndRepeatedPcSeparators) {
@@ -94,10 +94,7 @@ TEST(RaceReportTraceTest, ExactForwardBackwardAndRepeatedPcSeparators) {
             "       --- jump backward ---\n"
             "       0x108  instruction 2\n"
             "       --- same PC executed again ---\n"
-            "  ==>  0x108  instruction 3  ; <-- wave 0 lane 0\n"
-            "  Trace window: 4 recorded instructions, 4 shown, 0 elided; 3 nonsequential PC "
-            "transitions (1 backward).\n"
-            "  Same-wave instruction distance: 3 instruction steps.\n");
+            "  ==>  0x108  instruction 3  ; <-- wave 0 lane 0\n");
 }
 
 TEST(RaceReportTraceTest, FullAddressRangeAndSelfLoopHaveCorrectJumpMarkers) {
@@ -113,7 +110,6 @@ TEST(RaceReportTraceTest, FullAddressRangeAndSelfLoopHaveCorrectJumpMarkers) {
   EXPECT_EQ(printed[1].transition, "jump forward");
   EXPECT_EQ(printed[2].transition, "jump backward");
   EXPECT_EQ(printed[3].transition, "same PC executed again");
-  EXPECT_NE(report.find("3 nonsequential PC transitions (1 backward)"), std::string::npos);
 }
 
 TEST(RaceReportTraceTest, ContextLimitsAndRingWrapPreserveRowsAndAccountForEveryGap) {
@@ -134,8 +130,6 @@ TEST(RaceReportTraceTest, ContextLimitsAndRingWrapPreserveRowsAndAccountForEvery
       for (const auto &row : printed)
         EXPECT_TRUE(row.transition.empty());
       EXPECT_EQ(printed.size() + elided_count(report), trace.size());
-      EXPECT_NE(report.find(std::format("{} instruction steps", trace.size() - 1)),
-                std::string::npos);
     }
   }
 }
@@ -163,7 +157,6 @@ TEST(RaceReportTraceTest, ElisionNeverHidesSynchronizationOrEitherSideOfAJump) {
   EXPECT_NE(report.find("instruction 99\n       --- jump backward ---\n       0x"),
             std::string::npos);
   EXPECT_EQ(printed.size() + elided_count(report), 200u);
-  EXPECT_NE(report.find("1 nonsequential PC transitions (1 backward)"), std::string::npos);
 }
 
 TEST(RaceReportTraceTest, RepeatedPcSelectsExactExecutionWithoutAJumpBeforeTheWindow) {
@@ -176,7 +169,7 @@ TEST(RaceReportTraceTest, RepeatedPcSelectsExactExecutionWithoutAJumpBeforeTheWi
   EXPECT_EQ(printed[0].sequence, 2u);
   EXPECT_TRUE(printed[0].transition.empty());
   EXPECT_EQ(printed[2].transition, "jump backward");
-  EXPECT_NE(report.find("3 instruction steps"), std::string::npos);
+  EXPECT_EQ(printed.back().sequence, 5u);
 }
 
 TEST(RaceReportTraceTest, OtherWaveConflictIsSeparateEvenWhenPcsAndSequencesMatch) {
@@ -189,10 +182,9 @@ TEST(RaceReportTraceTest, OtherWaveConflictIsSeparateEvenWhenPcsAndSequencesMatc
   for (const auto &row : printed)
     EXPECT_TRUE(row.transition.empty());
   EXPECT_NE(report.find("outside this wave's trace"), std::string::npos);
-  EXPECT_EQ(report.find("instruction steps"), std::string::npos);
 }
 
-TEST(RaceReportTraceTest, ExpiredProducerRetainsIdentityAndDistanceWithoutInventingAJump) {
+TEST(RaceReportTraceTest, ExpiredProducerRetainsIdentityAndMissingHistoryWithoutInventingAJump) {
   Trace trace;
   const InstructionSnapshot producer{.pc = 0x100, .words = {0}, .word_count = 1};
   trace.push(producer);
@@ -207,7 +199,8 @@ TEST(RaceReportTraceTest, ExpiredProducerRetainsIdentityAndDistanceWithoutInvent
   EXPECT_TRUE(printed[1].transition.empty());
   EXPECT_NE(report.find("before trace window"), std::string::npos);
   EXPECT_NE(report.find("43 earlier instructions not recorded"), std::string::npos);
-  EXPECT_NE(report.find("299 instruction steps"), std::string::npos);
+  EXPECT_EQ(printed.back().sequence, 299u);
+  EXPECT_EQ(printed.size() - 1 + elided_count(report), trace.size());
 }
 
 TEST(RaceReportTraceTest, EmptyAndMissingCurrentTraceDoNotFabricateExecutionContinuity) {
@@ -215,7 +208,6 @@ TEST(RaceReportTraceTest, EmptyAndMissingCurrentTraceDoNotFabricateExecutionCont
   const auto report = formatTrace({}, text, std::nullopt, current);
   ASSERT_EQ(rows(report).size(), 1u);
   EXPECT_TRUE(rows(report)[0].transition.empty());
-  EXPECT_NE(report.find("0 recorded instructions, 0 shown, 0 elided"), std::string::npos);
   EXPECT_NE(report.find("outside recorded trace"), std::string::npos);
 }
 

@@ -2248,10 +2248,11 @@ TEST(RaceDetectorPluginOutputTest, ExecutedJumpsHaveSeparatorsAtTheirDestination
   EXPECT_NE(report.find("       --- jump backward ---\n  ==>  0x1050  v_mov_b32_e32 v9, v8"),
             std::string::npos)
       << report;
-  EXPECT_NE(report.find("4 recorded instructions, 4 shown, 0 elided; 2 nonsequential PC "
-                        "transitions (1 backward)"),
-            std::string::npos)
-      << report;
+  EXPECT_NE(report.find("  ==>  0x1044  ds_read_b32 v8, v0"), std::string::npos) << report;
+  EXPECT_NE(report.find("0x1058  s_branch 65533\n"), std::string::npos) << report;
+  EXPECT_EQ(report.find("instructions elided"), std::string::npos);
+  EXPECT_EQ(report.find("Trace window:"), std::string::npos);
+  EXPECT_EQ(report.find("Same-wave instruction distance:"), std::string::npos);
   RecordProperty("race_report", report);
 }
 
@@ -2404,7 +2405,6 @@ TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveR
               std::string::npos)
         << report;
     EXPECT_NE(report.find("  ==>  0x1000  ds_write_b32 v0, v1"), std::string::npos) << report;
-    EXPECT_EQ(report.find("instruction steps"), std::string::npos);
     if (complete) {
       EXPECT_NE(report.find("Completed for wave 0, but not synchronized with wave 1."),
                 std::string::npos)
@@ -2750,7 +2750,8 @@ TEST(RaceDetectorPluginOutputTest, CapturesSplitWaitBarrierAndBranchMetadataForE
 }
 
 TEST(RaceDetectorPluginOutputTest, ConfiguredContextLimitControlsAnExecutedRaceReport) {
-  for (size_t limit : {2u, 128u, 256u}) {
+  for (const auto [limit, head_nops, tail_start] :
+       {std::array<size_t, 3>{2, 0, 201}, {128, 63, 138}, {256, 200, 201}}) {
     SCOPED_TRACE(limit);
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(1));
@@ -2768,10 +2769,26 @@ TEST(RaceDetectorPluginOutputTest, ConfiguredContextLimitControlsAnExecutedRaceR
     code.push_back(read[0]);
     code.push_back(S_ENDPGM);
     f.run_kernel(code.data(), code.size());
-    const auto shown = std::min(limit, size_t{202});
-    EXPECT_NE(sink.str().find(std::format("202 recorded instructions, {} shown, {} elided", shown,
-                                          202 - shown)),
-              std::string::npos);
+    const auto &report = sink.str();
+    EXPECT_NE(report.find("  ==>  0x1044  ds_read_b32 v8, v0"), std::string::npos) << report;
+    EXPECT_NE(report.find("  ==>  0x136c  v_mov_b32_e32 v9, v8"), std::string::npos) << report;
+    size_t shown = 2;
+    for (size_t i = 1; i <= 200; ++i) {
+      const bool expected = i <= head_nops || i >= tail_start;
+      const auto row = std::format("       0x{:x}  s_nop 0\n", 0x1048 + i * 4);
+      const bool present = report.find(row) != std::string::npos;
+      EXPECT_EQ(present, expected) << row << report;
+      shown += present;
+    }
+    EXPECT_EQ(shown, std::min(limit, size_t{202}));
+    if (shown < 202)
+      EXPECT_NE(report.find(std::format("... {} instructions elided ...", 202 - shown)),
+                std::string::npos)
+          << report;
+    else
+      EXPECT_EQ(report.find("instructions elided"), std::string::npos);
+    EXPECT_EQ(report.find("Trace window:"), std::string::npos);
+    EXPECT_EQ(report.find("Same-wave instruction distance:"), std::string::npos);
   }
 }
 

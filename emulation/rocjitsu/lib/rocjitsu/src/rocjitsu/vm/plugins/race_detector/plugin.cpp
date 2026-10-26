@@ -185,16 +185,11 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
   std::array<bool, 256> shown{};
   const size_t head = (trace_context_instructions + 1) / 2;
   const size_t tail = trace_context_instructions / 2;
-  size_t nonsequential_count = 0;
-  size_t backward_count = 0;
   for (size_t i = first; i < last; ++i) {
     shown[i] = span <= trace_context_instructions || i - first < head || last - i <= tail ||
                trace[i].keep_in_trace;
-    if (nonsequential(i)) {
+    if (nonsequential(i))
       shown[i - 1] = shown[i] = true;
-      ++nonsequential_count;
-      backward_count += trace[i].pc < trace[i - 1].pc;
-    }
   }
   std::ostringstream oss;
   oss << "       PC  Instruction\n";
@@ -245,11 +240,9 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
       annotation(read);
     oss << '\n';
   };
-  size_t shown_count = 0;
   for (size_t i = first; i < last;) {
     if (shown[i]) {
       emit(i++);
-      ++shown_count;
     } else {
       const size_t gap = i;
       while (i < last && !shown[i])
@@ -259,14 +252,6 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
   }
   if (!read_index)
     external(read, "  (outside recorded trace)");
-  oss << "  Trace window: " << span << " recorded instructions, " << shown_count << " shown, "
-      << span - shown_count << " elided; " << nonsequential_count
-      << " nonsequential PC transitions (" << backward_count << " backward).\n";
-  if (conflict && conflict->wave == read.wave && conflict->instruction.sequence != UINT64_MAX &&
-      read.instruction.sequence != UINT64_MAX &&
-      read.instruction.sequence >= conflict->instruction.sequence)
-    oss << "  Same-wave instruction distance: "
-        << read.instruction.sequence - conflict->instruction.sequence << " instruction steps.\n";
   return oss.str();
 }
 

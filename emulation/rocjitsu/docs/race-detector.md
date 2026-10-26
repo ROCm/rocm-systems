@@ -165,15 +165,13 @@ across that boundary.
 
 Instruction lengths vary. A transition is nonsequential only when the next PC
 differs from the end of the previous captured instruction. Sequential progress
-by 4, 8, 12 or 16 bytes does not introduce a marker. Transition counts cover the
-recorded window, including elided instructions. Same-wave instruction distance
-counts instruction steps, not execution time or memory latency.
+by 4, 8, 12 or 16 bytes does not introduce a marker.
 
 Each wave retains 256 instruction records. By default, a long excerpt shows the
 first 64 and last 64 records. Synchronization and control-flow instructions, and
 both sides of nonsequential transitions, remain visible in the middle. The
-window summary reports recorded, shown and elided counts. Older unrecorded
-history is identified separately.
+number of elided instructions is shown at each gap. Older unrecorded history
+is identified separately.
 
 Set `trace_context_instructions` in the race plugin's configuration to change
 the excerpt size. It accepts an integer from 2 through 256; synchronization and
