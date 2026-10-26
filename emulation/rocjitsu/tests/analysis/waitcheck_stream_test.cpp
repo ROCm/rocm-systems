@@ -769,6 +769,39 @@ TEST(WaitcheckStream, LegacyMadScalarDestinationsFollowWaveWidth) {
   }
 }
 
+TEST(WaitcheckStream, ScalarMaskSourcesFollowWaveWidth) {
+  // src2 names s8 (s[8:9] in Wave64) as the v_cndmask_b32 selector and the
+  // v_add_co_ci_u32 carry-in, but s[8:9] in either wave size as the 64-bit
+  // addend of v_mad_co_u64_u32 (v_mad_u64_u32 on RDNA3/3.5). Encodings
+  // checked with LLVM's disassembler.
+  constexpr uint32_t kSources = 257u | (258u << 9) | (8u << 18); // v1, v2, s8.
+  struct Case {
+    uint32_t word0;
+    bool wave_mask;
+  };
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (const Case &tc :
+         {Case{0xd5010000u, true}, Case{0xd5200200u, true}, Case{0xd6fe0200u, false}}) {
+      for (uint32_t wave : {32u, 64u}) {
+        for (uint32_t loaded : {8u, 9u}) {
+          SCOPED_TRACE(testing::Message()
+                       << std::hex << tc.word0 << std::dec << " wave" << wave << " s" << loaded);
+          const auto report = analyze(
+              {0xf4000002u | (loaded << 6), 0xf8000000u, tc.word0, kSources}, arch, false, wave);
+          ASSERT_FALSE(report.incomplete);
+          const bool reads = !tc.wave_mask || wave == 64 || loaded == 8;
+          ASSERT_EQ(report.diagnostics.size(), reads ? 1u : 0u);
+          if (reads) {
+            EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Read);
+            EXPECT_EQ(report.diagnostics[0].reg.index, loaded);
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(WaitcheckStream, EmptyStreamHasNoHazards) {
   const auto report = analyze({});
   EXPECT_FALSE(report.incomplete);

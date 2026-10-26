@@ -139,6 +139,8 @@ class Operand:
         order: Order of the operand.
         data_format_name: ISA data format name from the XML operand signature.
         fieldless: True if the operand has no ``<FieldName>`` in the MR ISA.
+        wave_mask: True if the MR ISA data format is ``FMT_NUM_M64``, a lane
+            mask that is one SGPR in Wave32 and an SGPR pair in Wave64.
     """
 
     name: str
@@ -151,6 +153,7 @@ class Operand:
     order: int
     data_format_name: str = ''
     fieldless: bool = False
+    wave_mask: bool = False
 
 
 @dataclass
