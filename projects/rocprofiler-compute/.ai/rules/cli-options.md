@@ -108,3 +108,6 @@ it at the end of the description as `(Default: value)`.
 --option <arg>   Description of the option (Default: value).
                  Values: <value1>, <value2>, ..., <valueN>
 ```
+
+The `Values:` line only lists the accepted values. To pass several of them,
+separate them with spaces (see [Arguments](#arguments)).
