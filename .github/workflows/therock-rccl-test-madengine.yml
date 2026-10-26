@@ -323,6 +323,21 @@ jobs:
             ${{ env.WORK_DIR }}/ab/*/slurm_output/*.err
           retention-days: 30
 
+      # What a rerun by hand needs once the cleanup below has deleted WORK_DIR:
+      # the overlay's build context with the CI RCCL, the model scripts, and
+      # manifests with paths relative to the bundle. See its REPRO.md.
+      - name: Upload repro bundle
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: madengine-repro-${{ inputs.workload }}-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}
+          path: ${{ env.WORK_DIR }}/repro
+          # The kpack GPU kernels sit in overlay_ctx/rccl_libs/.kpack, and
+          # upload-artifact drops dot-paths unless told otherwise.
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Cleanup work directory
         if: always()
         run: |
@@ -334,7 +349,7 @@ jobs:
           # runner account is quota-bound on /apps.
           rm -rf "${WORK_DIR}/madengine" "${WORK_DIR}/MAD" "${WORK_DIR}/conda" \
                  "${WORK_DIR}/env" "${WORK_DIR}/overlay_ctx" \
-                 "${WORK_DIR}/docker_builds" "${WORK_DIR}/ab"
+                 "${WORK_DIR}/docker_builds" "${WORK_DIR}/ab" "${WORK_DIR}/repro"
           echo "Remaining in ${WORK_DIR}:"
           du -sh "${WORK_DIR}" 2>/dev/null || true
 
