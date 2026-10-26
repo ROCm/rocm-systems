@@ -128,9 +128,12 @@ public:
   static bool supports(CounterDomain domain) { return domain.race.has_value(); }
   void load(CounterDomain domain, unsigned reg, bool unordered = false, uint64_t lanes = 1,
             uint8_t bytes = 0xf) {
-    state_->registerEvent(0x100 + reg * 4, MemoryEventType::GLOBAL_TO_VGPR, {reg}, lanes, bytes,
-                          *domain.race,
-                          unordered ? MemoryOrderClass::UNORDERED : MemoryOrderClass::VMEM);
+    const uint64_t pc = 0x100 + reg * 4;
+    const auto order = unordered ? MemoryOrderClass::UNORDERED : MemoryOrderClass::VMEM;
+    const std::array obligations{MemoryCounterObligation{*domain.race, order}};
+    const InstructionSnapshot instruction{.pc = pc, .words = {kProbeWord}, .word_count = 1};
+    state_->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR, {reg}, lanes, bytes, obligations,
+                          order, 0, instruction);
   }
   void counter_only(CounterDomain domain) {
     state_->registerEvent(0x800, MemoryEventType::VGPR_TO_GLOBAL, {}, 1, 0xf, *domain.race,
@@ -148,6 +151,12 @@ public:
   bool reports(unsigned reg, uint64_t lanes = 1, uint8_t bytes = 0xf, bool write = false) {
     const auto before = sink_->str().size();
     wave_->pc = 0x1000 + reg * 4;
+    auto decoder = Decoder::create(cu_->arch());
+    auto probe = decoder->decode_window(std::span<const uint32_t>(&kProbeWord, 1), wave_->pc);
+    EXPECT_TRUE(probe.succeeded());
+    if (probe.failed())
+      return false;
+    plugins_->onAmdgpuBeforeExecuteInstruction(wave_->pc, *probe.value(), *wave_);
     if (write)
       plugins_->onAmdgpuWriteVgprLanes(wave_, wave_->vgpr_alloc().base + reg, lanes, bytes);
     else
@@ -156,6 +165,7 @@ public:
   }
 
 private:
+  static constexpr uint32_t kProbeWord = 0xbf800000u; // s_nop 0
   GpuMemory memory_{"shared_wait_memory"};
   L2Cache l2_{"shared_wait_l2"};
   std::shared_ptr<ExecutionPluginGroup> plugins_;

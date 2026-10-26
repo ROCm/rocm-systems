@@ -36,7 +36,7 @@ namespace rocjitsu::plugins::race_detector {
 class EventRegistry {
   struct EventInfo {
     WaveId waveId;
-    RecordedInstruction instruction;
+    InstructionSnapshot instruction;
     MemoryEventType type;
     std::array<amdgpu::MemoryCounterObligation, amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS>
         counterObligations;
@@ -57,11 +57,11 @@ public:
               uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
               MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
-              RecordedInstruction instruction = {}) {
+              InstructionSnapshot instruction = {}) {
     int id = base_offset_ + static_cast<int>(entries_.size());
     assert(!counterObligations.empty());
     assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
-    instruction.snapshot.pc = pc;
+    instruction.pc = pc;
     EventInfo event{waveId,
                     instruction,
                     type,
@@ -147,8 +147,8 @@ public:
   MemoryOrderClass memoryOrder(EventId id) const { return entries_[index(id)].memoryOrder; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
   bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
-  uint64_t pc(EventId id) const { return instruction(id).snapshot.pc; }
-  const RecordedInstruction &instruction(EventId id) const {
+  uint64_t pc(EventId id) const { return instruction(id).pc; }
+  const InstructionSnapshot &instruction(EventId id) const {
     return entries_[index(id)].instruction;
   }
   uint8_t byteMask(EventId id) const { return entries_[index(id)].byteMask; }

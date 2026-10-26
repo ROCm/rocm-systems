@@ -63,7 +63,7 @@ public:
                           uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                           MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
-                          RecordedInstruction instruction = {});
+                          InstructionSnapshot instruction = {});
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);

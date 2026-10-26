@@ -23,7 +23,7 @@
 namespace rocjitsu::plugins::race_detector {
 
 struct MarkedInstruction {
-  RecordedInstruction instruction;
+  InstructionSnapshot instruction;
   int wave;
   int lane; // -1 for scalar
 };
@@ -32,19 +32,16 @@ template <typename T, size_t N> struct RingBuffer {
   std::array<T, N> data{};
   size_t head = 0;
   size_t len = 0;
-  uint64_t next_sequence = 0;
 
   void push(T val) {
     data[head] = val;
     head = (head + 1) % N;
     if (len < N)
       ++len;
-    ++next_sequence;
   }
 
   T operator[](size_t i) const { return data[(head - len + i) % N]; }
   size_t size() const { return len; }
-  uint64_t sequence(size_t i) const { return next_sequence - len + i; }
 };
 
 /// Return the memory instruction recorded as the exact conflict.

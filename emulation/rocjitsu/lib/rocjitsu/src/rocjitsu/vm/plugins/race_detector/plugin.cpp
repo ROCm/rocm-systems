@@ -149,70 +149,84 @@ MarkedInstruction findConflict(const RaceViolation &v, RaceDetector &detector) {
 std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                         const std::function<std::string(const InstructionSnapshot &)> &disassemble,
                         std::optional<MarkedInstruction> conflict, MarkedInstruction read) {
-  const size_t n = trace.size();
-  auto trace_index = [&](const MarkedInstruction &mark) -> std::optional<size_t> {
-    if (mark.wave != read.wave || mark.instruction.sequence == UINT64_MAX)
-      return std::nullopt;
-    for (size_t i = 0; i < n; ++i)
-      if (trace.sequence(i) == mark.instruction.sequence)
-        return i;
-    return std::nullopt;
+  auto isMarked = [&](uint64_t pc) {
+    return pc == read.instruction.pc || (conflict && pc == conflict->instruction.pc);
   };
-  const auto conflict_index = conflict ? trace_index(*conflict) : std::nullopt;
-  const auto read_index = trace_index(read);
-  const size_t first = conflict ? conflict_index.value_or(0) : read_index.value_or(n);
-  const size_t last = read_index ? *read_index + 1 : n;
-  std::ostringstream oss;
 
-  auto annotation = [&](const MarkedInstruction &mark) {
-    oss << "  ; <-- wave " << mark.wave;
-    if (mark.lane >= 0)
-      oss << " lane " << mark.lane;
-  };
-  if (conflict && !conflict_index) {
-    const auto &instruction = conflict->instruction.snapshot;
-    oss << "  ==>  0x" << std::hex << instruction.pc << std::dec << "  " << disassemble(instruction)
-        << (conflict->wave == read.wave ? "  (before trace window)"
-                                        : "  (outside this wave's trace)");
-    annotation(*conflict);
-    oss << '\n';
-    if (conflict->wave == read.wave)
-      oss << "       ... earlier instructions not recorded ...\n";
+  size_t n = trace.size();
+  size_t first = n;
+  bool conflict_found = false;
+  for (size_t i = 0; i < n; ++i) {
+    if (isMarked(trace[i].pc)) {
+      first = i;
+      break;
+    }
+  }
+  if (conflict) {
+    for (size_t i = 0; i < n; ++i)
+      if (trace[i].pc == conflict->instruction.pc) {
+        conflict_found = true;
+        break;
+      }
   }
 
+  std::ostringstream oss;
+
+  if (conflict && !conflict_found) {
+    oss << "  ==>  0x" << std::hex << conflict->instruction.pc << std::dec << "  ";
+    const auto d = disassemble(conflict->instruction);
+    if (!d.empty())
+      oss << d << "  ";
+    oss << "(before trace window)";
+    oss << "  ; <-- wave " << conflict->wave;
+    if (conflict->lane >= 0)
+      oss << " lane " << conflict->lane;
+    oss << "\n       ... " << first << " instructions not recorded ...\n";
+  }
+
+  size_t last = n;
+  for (size_t i = first; i < n; ++i) {
+    if (trace[i].pc == read.instruction.pc) {
+      last = i + 1;
+      break;
+    }
+  }
+
+  constexpr size_t MAX_PRINT_SIZE = 32;
+  size_t span = (last > first) ? last - first : 0;
+
   auto emit = [&](size_t i) {
-    const bool is_conflict = conflict_index && i == *conflict_index;
-    const bool is_read = read_index && i == *read_index;
-    const auto instruction = is_conflict ? conflict->instruction.snapshot
-                             : is_read   ? read.instruction.snapshot
+    uint64_t pc = trace[i].pc;
+    bool is_conflict = conflict && pc == conflict->instruction.pc;
+    bool is_read = pc == read.instruction.pc;
+    oss << ((is_conflict || is_read) ? "  ==>  " : "       ");
+    const auto instruction = is_conflict ? conflict->instruction
+                             : is_read   ? read.instruction
                                          : trace[i];
-    oss << ((is_conflict || is_read) ? "  ==>  " : "       ") << "0x" << std::hex << instruction.pc
-        << std::dec << "  " << disassemble(instruction);
-    if (is_conflict)
-      annotation(*conflict);
-    if (is_read)
-      annotation(read);
+    oss << "0x" << std::hex << pc << std::dec << "  " << disassemble(instruction);
+    if (is_conflict) {
+      oss << "  ; <-- wave " << conflict->wave;
+      if (conflict->lane >= 0)
+        oss << " lane " << conflict->lane;
+    }
+    if (is_read) {
+      oss << "  ; <-- wave " << read.wave;
+      if (read.lane >= 0)
+        oss << " lane " << read.lane;
+    }
     oss << "\n";
   };
-  constexpr size_t kMaxPrintSize = 32;
-  const size_t span = last > first ? last - first : 0;
-  if (span <= kMaxPrintSize) {
+
+  if (span <= MAX_PRINT_SIZE) {
     for (size_t i = first; i < last; ++i)
       emit(i);
   } else {
-    constexpr size_t half = kMaxPrintSize / 2;
+    size_t half = MAX_PRINT_SIZE / 2;
     for (size_t i = first; i < first + half; ++i)
       emit(i);
-    oss << "       ... " << span - kMaxPrintSize << " instructions elided ...\n";
+    oss << "       ... " << (span - MAX_PRINT_SIZE) << " instructions elided ...\n";
     for (size_t i = last - half; i < last; ++i)
       emit(i);
-  }
-  if (!read_index) {
-    const auto &instruction = read.instruction.snapshot;
-    oss << "  ==>  0x" << std::hex << instruction.pc << std::dec << "  "
-        << disassemble(instruction);
-    annotation(read);
-    oss << "\n";
   }
   return oss.str();
 }
@@ -254,7 +268,13 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     assert(v.wave >= 0 && static_cast<size_t>(v.wave) < wf_ptrs.size() &&
            "wave index out of range");
     amdgpu::Wavefront *wf = wf_ptrs[v.wave];
-    uint64_t pc = wf->pc;
+    auto *ws = get_state(wf);
+    assert(ws && ws->race_state && "no wavefront state for race");
+    if (!ws->trace.size())
+      throw std::logic_error(
+          std::format("race detector has no current instruction at PC {:#x}", wf->pc));
+    const auto current = ws->trace[ws->trace.size() - 1];
+    uint64_t pc = current.pc;
 
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
@@ -262,8 +282,6 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
         return;
     }
 
-    auto *ws = get_state(wf);
-    assert(ws && ws->race_state && "no wavefront state for race");
     auto *detector = ws->race_state->getDetector();
     MarkedInstruction conflict = findConflict(v, *detector);
 
@@ -282,11 +300,6 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
       oss << ", lane " << v.lane;
     oss << "]\n";
 
-    if (!ws->trace.size() || ws->trace[ws->trace.size() - 1].pc != pc)
-      throw std::logic_error(
-          std::format("race detector has no current instruction at PC {:#x}", pc));
-    const RecordedInstruction current{ws->trace[ws->trace.size() - 1],
-                                      ws->trace.sequence(ws->trace.size() - 1)};
     MarkedInstruction access_mark{current, v.wave, v.lane};
     oss << formatTrace(
         ws->trace,
@@ -298,10 +311,10 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
       bool is_new = !observed_races_.count({dispatch_id, pc}) &&
-                    !observed_races_.count({dispatch_id, conflict.instruction.snapshot.pc});
+                    !observed_races_.count({dispatch_id, conflict.instruction.pc});
       observed_races_.emplace(dispatch_id, pc);
       if (is_new) {
-        observed_races_.emplace(dispatch_id, conflict.instruction.snapshot.pc);
+        observed_races_.emplace(dispatch_id, conflict.instruction.pc);
         const char *space = v.space == RaceViolation::Space::VGPR   ? "VGPR"
                             : v.space == RaceViolation::Space::SGPR ? "SGPR"
                             : v.space == RaceViolation::Space::TTMP ? "TTMP"
@@ -348,10 +361,8 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   auto *rs = s->race_state;
   auto *detector = rs->getDetector();
   auto waveId = rs->getWaveId();
-  const RecordedInstruction instruction{capture_instruction(wf.pc, inst),
-                                        s->trace.size() && s->trace[s->trace.size() - 1].pc == wf.pc
-                                            ? s->trace.sequence(s->trace.size() - 1)
-                                            : UINT64_MAX};
+  const auto instruction =
+      capture_instruction(s->trace.size() ? s->trace[s->trace.size() - 1].pc : wf.pc, inst);
   const auto *decoded = inst.amdgpu_memory_issue_info();
   assert(decoded && "memory instruction reached the race detector without issue metadata");
   if (!decoded)

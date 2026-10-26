@@ -46,7 +46,7 @@ void register_pending_event(WaveRaceState &race, uint64_t pc, MemoryEventType ty
                             std::vector<uint32_t> registers, WaitCounterType counter,
                             MemoryOrderClass order) {
   const std::array obligations{MemoryCounterObligation{counter, order}};
-  const RecordedInstruction instruction{{.pc = pc, .words = {S_NOP}, .word_count = 1}};
+  const InstructionSnapshot instruction{.pc = pc, .words = {S_NOP}, .word_count = 1};
   race.registerEvent(pc, type, std::move(registers), 1, 0xf, obligations, order, 0, instruction);
 }
 
@@ -279,18 +279,13 @@ TEST_F(FormattedLoadRaceTest, RejectsInvalidEncodingAtCapture) {
   }
 }
 
-TEST_F(FormattedLoadRaceTest, RejectsMissingCurrentInstructionWhenReporting) {
+TEST_F(FormattedLoadRaceTest, RejectsMissingInstructionHistoryWhenReporting) {
   issue(rdna4::kBufferLoadFormatXVbuffer, 46, 8, 1);
   ASSERT_EQ(plugin_state->race_state->getWaveMemoryEvents().size(), 1u);
-  wave->pc += 4;
-  for (const bool empty_trace : {false, true}) {
-    SCOPED_TRACE(empty_trace);
-    if (empty_trace)
-      plugin_state->trace = {};
-    EXPECT_THROW(fixture.plugin_group_->onAmdgpuReadVgprLanes(wave, wave->vgpr_alloc().base + 8, 1),
-                 std::logic_error);
-    EXPECT_EQ(sink->str().find("RACE "), std::string::npos);
-  }
+  plugin_state->trace = {};
+  EXPECT_THROW(fixture.plugin_group_->onAmdgpuReadVgprLanes(wave, wave->vgpr_alloc().base + 8, 1),
+               std::logic_error);
+  EXPECT_EQ(sink->str().find("RACE "), std::string::npos);
 }
 
 TEST_F(FormattedLoadRaceTest, RejectsWholeDestinationRangeWhenItExceedsTheWaveAllocation) {
@@ -2276,6 +2271,41 @@ TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
 
 // -- Race trace tests --------------------------------------------------------
 
+TEST(RaceDetectorPluginOutputTest, SwapPcDisassemblesAtTheCapturedInstructionAddress) {
+  for (bool waited : {false, true}) {
+    SCOPED_TRACE(waited);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1));
+    PluginSinkConfig config;
+    auto &sink = config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+    ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    const uint32_t target = waited ? 0x106c : 0x1068;
+    const auto mov = [](uint8_t dst, uint8_t src) {
+      return cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = src, .sdst = dst})[0];
+    };
+    const auto load = cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sdata = 8, .imm = 1});
+    const auto swap = cdna4::build_sop1(cdna4::kSSwapPcB64Sop1, {.ssrc0 = 2, .sdst = 8});
+    std::vector<uint32_t> code{mov(0, 255), 0x3000,      mov(1, 128), mov(2, 255),
+                               target,      mov(3, 128), load[0],     load[1]};
+    if (waited)
+      code.push_back(legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0));
+    code.insert(code.end(), {swap[0], S_NOP, S_ENDPGM});
+    const uint32_t value = 7;
+    f.mem->load_image(reinterpret_cast<const uint8_t *>(&value), sizeof(value), 0x3000);
+    ASSERT_NO_THROW(f.run_kernel(code.data(), code.size()));
+    if (waited) {
+      EXPECT_EQ(sink.str().find("RACE "), std::string::npos) << sink.str();
+    } else {
+      EXPECT_NE(sink.str().find("  ==>  0x1060  s_swappc_b64 s[8:9], s[2:3]"), std::string::npos)
+          << sink.str();
+    }
+  }
+}
+
 TEST(RaceDetectorPluginOutputTest, ExecutedInstructionsHaveExactPcsIncludingExpiredTrace) {
   for (unsigned padding : {1u, 270u}) {
     SCOPED_TRACE(padding);
@@ -2354,7 +2384,7 @@ TEST(RaceDetectorPluginOutputTest, PreservesExecutedEncodingAfterCodeRewrite) {
   }
 }
 
-TEST(RaceDetectorPluginOutputTest, CrossWaveSamePcKeepsProducerBytesAfterWaitAndTraceOverwrite) {
+TEST(RaceDetectorPluginOutputTest, KeepsProducerBytesAfterWaitAndTraceOverwrite) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(2));
   PluginSinkConfig config;
@@ -2366,7 +2396,7 @@ TEST(RaceDetectorPluginOutputTest, CrossWaveSamePcKeepsProducerBytesAfterWaitAnd
   f.soc->set_plugin_group(f.plugin_group_);
   f.plugin_group_->onInit();
   auto *producer = f.cu()->dispatch_wf(0, 0x1000, 104, 256);
-  auto *consumer = f.cu()->dispatch_wf(1, 0x1000, 104, 256);
+  auto *consumer = f.cu()->dispatch_wf(1, 0x3000, 104, 256);
   ASSERT_NE(producer, nullptr);
   ASSERT_NE(consumer, nullptr);
   std::array<Wavefront *, 2> waves{producer, consumer};
@@ -2399,7 +2429,7 @@ TEST(RaceDetectorPluginOutputTest, CrossWaveSamePcKeepsProducerBytesAfterWaitAnd
   ASSERT_TRUE(f.cu()->execute_instruction(read.value().get(), *consumer).succeeded());
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *read.value(), *consumer);
   EXPECT_NE(sink.str().find("0x1000  " + expected_store), std::string::npos) << sink.str();
-  EXPECT_NE(sink.str().find("0x1000  ds_read_b32 v8, v0"), std::string::npos) << sink.str();
+  EXPECT_NE(sink.str().find("0x3000  ds_read_b32 v8, v0"), std::string::npos) << sink.str();
   EXPECT_NE(sink.str().find("; <-- wave 0"), std::string::npos);
   EXPECT_NE(sink.str().find("; <-- wave 1 lane 0"), std::string::npos);
   state->race_state->flushBarrierPendingEvents();
@@ -2420,7 +2450,7 @@ TEST(FindConflictTest, UsesRecordedConflictingEvent) {
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), second};
   MarkedInstruction conflict = findConflict(violation, detector);
 
-  EXPECT_EQ(conflict.instruction.snapshot.pc, 0x200u);
+  EXPECT_EQ(conflict.instruction.pc, 0x200u);
 }
 
 TEST(FindConflictTest, RejectsUnavailableConflictingEvent) {
@@ -2469,14 +2499,16 @@ TEST(FormatTraceTest, WaveLaneAnnotations) {
       {0x108, "s_nop 0"},
       {0x10c, "ds_read_b32 v8, v9"},
   };
-  MarkedInstruction conflict{{InstructionSnapshot{.pc = 0x100}, 0}, 3, -1};
-  MarkedInstruction read{{trace[2], trace.sequence(2)}, 0, 5};
+  MarkedInstruction conflict{InstructionSnapshot{.pc = 0x100}, 3, -1};
+  MarkedInstruction read{trace[2], 0, 5};
   auto result = formatTrace(
       trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc); },
       conflict, read);
   EXPECT_NE(result.find("; <-- wave 3"), std::string::npos);
   EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
-  EXPECT_NE(result.find("outside this wave's trace"), std::string::npos);
+  EXPECT_EQ(result, "  ==>  0x100  ds_write_b32 v9, v12  ; <-- wave 3\n"
+                    "       0x108  s_nop 0\n"
+                    "  ==>  0x10c  ds_read_b32 v8, v9  ; <-- wave 0 lane 5\n");
   EXPECT_NE(result.find("0x108  s_nop 0"), std::string::npos);
 }
 
@@ -2489,8 +2521,8 @@ TEST(FormatTraceTest, NoLineBeforeFirstMarker) {
       {0x10c, "s_nop 0"},
       {0x110, "ds_read_b32 v8, v9"},
   };
-  MarkedInstruction conflict{{trace[2], trace.sequence(2)}, 1, -1};
-  MarkedInstruction read{{trace[4], trace.sequence(4)}, 1, 3};
+  MarkedInstruction conflict{trace[2], 1, -1};
+  MarkedInstruction read{trace[4], 1, 3};
   auto result = formatTrace(
       trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc); },
       conflict, read);
@@ -2507,15 +2539,15 @@ TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
       {0x204, "s_nop 0"},
       {0x208, "ds_read_b32 v8, v9"},
   };
-  MarkedInstruction conflict{{InstructionSnapshot{.pc = 0x100}}, 0, -1};
-  MarkedInstruction read{{trace[2], trace.sequence(2)}, 0, 5};
+  MarkedInstruction conflict{InstructionSnapshot{.pc = 0x100}, 0, -1};
+  MarkedInstruction read{trace[2], 0, 5};
   auto result = formatTrace(
       trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc); },
       conflict, read);
   EXPECT_NE(result.find("before trace window"), std::string::npos);
   EXPECT_NE(result.find("buffer_load_dwordx4"), std::string::npos);
   EXPECT_NE(result.find("; <-- wave 0"), std::string::npos);
-  EXPECT_NE(result.find("0x200  s_nop 0"), std::string::npos);
+  EXPECT_EQ(result.find("0x200  s_nop 0"), std::string::npos);
   EXPECT_NE(result.find("not recorded"), std::string::npos);
   EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
 }
@@ -2530,29 +2562,20 @@ TEST(FormatTraceTest, ResolvesOnlyPrintedInstructions) {
     return "s_nop 0";
   };
   const auto report =
-      formatTrace(trace, resolve, MarkedInstruction{{trace[2], trace.sequence(2)}, 0, -1},
-                  {{trace[128], trace.sequence(128)}, 0, 0});
+      formatTrace(trace, resolve, MarkedInstruction{trace[2], 0, -1}, {trace[128], 0, 0});
   ASSERT_EQ(requested.size(), 32u);
   EXPECT_EQ(requested.front(), 0x108u);
   EXPECT_EQ(requested.back(), 0x300u);
   EXPECT_NE(report.find("instructions elided"), std::string::npos);
 }
 
-TEST(FormatTraceTest, RepeatedPcUsesTheConflictingExecutionAndCurrentRead) {
-  RingBuffer<InstructionSnapshot, 256> trace;
-  trace.push({.pc = 0x100, .words = {S_NOP | 1}, .word_count = 1});
-  trace.push({.pc = 0x104, .words = {S_NOP | 2}, .word_count = 1});
-  trace.push({.pc = 0x100, .words = {S_NOP | 3}, .word_count = 1});
-  trace.push({.pc = 0x104, .words = {S_NOP | 4}, .word_count = 1});
-  auto resolve = [](const InstructionSnapshot &instruction) {
-    return std::format("s_nop {}", instruction.words[0] & 0xffff);
-  };
+TEST(FormatTraceTest, RepeatedPcKeepsPcBasedSelection) {
+  auto trace = make_trace({0x100, 0x104, 0x108, 0x100, 0x104});
+  auto resolve = [](const InstructionSnapshot &) { return "s_nop 0"; };
   const auto report =
-      formatTrace(trace, resolve, MarkedInstruction{{trace[2], 2}, 0, -1}, {{trace[3], 3}, 0, 0});
-  EXPECT_EQ(report.find("s_nop 1"), std::string::npos);
-  EXPECT_EQ(report.find("s_nop 2"), std::string::npos);
-  EXPECT_NE(report.find("0x100  s_nop 3"), std::string::npos);
-  EXPECT_NE(report.find("0x104  s_nop 4"), std::string::npos);
+      formatTrace(trace, resolve, MarkedInstruction{trace[3], 0, -1}, {trace[4], 0, 0});
+  EXPECT_EQ(report, "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
+                    "  ==>  0x104  s_nop 0  ; <-- wave 0 lane 0\n");
 }
 
 TEST(RaceDisassemblyTest, SnapshotsOwnShortLiteralAndMaximumWidthEncodings) {

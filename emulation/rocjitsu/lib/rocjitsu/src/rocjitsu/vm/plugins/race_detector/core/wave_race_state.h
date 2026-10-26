@@ -72,7 +72,7 @@ public:
                      uint64_t execMask, uint8_t byteMask,
                      std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                      MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
-                     RecordedInstruction instruction = {});
+                     InstructionSnapshot instruction = {});
 
   /// Register an in-flight scalar load using its architectural destination.
   void registerScalarLoad(
@@ -81,7 +81,7 @@ public:
       std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
   void registerScalarLoad(uint64_t pc, RegisterRef destination, uint64_t execMask,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                          MemoryOrderClass memoryOrder, RecordedInstruction instruction = {});
+                          MemoryOrderClass memoryOrder, InstructionSnapshot instruction = {});
 
   /// Register an in-flight memory event that involves LDS.
   /// The LDS memory involved is defined by `laneBaseAddresses` and `bytesPerLane`. Each active lane
@@ -110,7 +110,7 @@ public:
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                         MemoryOrderClass memoryOrder, uint64_t ldsLaneMask = ~uint64_t{0},
-                        int elementBytes = 0, RecordedInstruction instruction = {},
+                        int elementBytes = 0, InstructionSnapshot instruction = {},
                         std::optional<uint64_t> allocationEnd = std::nullopt);
   /// Register two LDS address sets per lane. elementBytes selects the granularity
   /// of complete elements retained at the backing boundary; zero treats the
@@ -122,7 +122,7 @@ public:
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                         MemoryOrderClass memoryOrder, int elementBytes = 0,
-                        RecordedInstruction instruction = {});
+                        InstructionSnapshot instruction = {});
 
   /// Register an LDS event with dual-offset intervals. Each active lane
   /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8
@@ -204,7 +204,7 @@ private:
                                   uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
                                   std::span<const amdgpu::MemoryCounterObligation>,
                                   MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
-                                  RecordedInstruction instruction = {});
+                                  InstructionSnapshot instruction = {});
   void retireEventRegisters(EventId);
   void checkScalarAccess(RegisterRef reg, bool isWrite) const;
 
