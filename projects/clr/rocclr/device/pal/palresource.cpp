@@ -722,6 +722,14 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
     createInfo.priority = Pal::GpuMemPriority::Normal;
     memTypeToHeap(&createInfo);
 
+    // Without memory, destroy the image created above, so Memory::create can retry without leaking
+    auto destroyImage = [this]() {
+      if (image_ != nullptr) {
+        image_->Destroy();
+        delete[] reinterpret_cast<char*>(image_);
+        image_ = nullptr;
+      }
+    };
     // Memory::create reserved an APU image's base level. Reserve the rest of its backing memory,
     // mip levels and padding included, until it is accounted.
     ApuReservation apuExtra;
@@ -729,10 +737,12 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
       MemoryType memType = memoryType();
       if (!dev().ApuPlaceDeviceMemory(createInfo.size - apuReservation_.size, &memType, &apuExtra,
                                       false)) {
+        destroyImage();
         return false;
       }
       if (memType != memoryType()) {
         dev().ApuReleaseReservation(&apuExtra);
+        destroyImage();
         return false;
       }
     }
@@ -744,6 +754,7 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
     dev().ApuReleaseReservation(&apuExtra);
     if (nullptr == memRef_) {
       LogError("Failed PAL memory allocation!");
+      destroyImage();
       return false;
     }
     offset_ += static_cast<size_t>(subOffset_);

@@ -2142,8 +2142,7 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
         cachedTotal - std::min<Pal::gpusize>(cachedTotal, cache_group_local);
     const Pal::gpusize deviceAfterCache =
         deviceUsed - std::min<Pal::gpusize>(deviceUsed, cache_group_local);
-    const Pal::gpusize hostAfterCache =
-        hostUsed - std::min(hostUsed, cachedHost);
+    const Pal::gpusize hostAfterCache = hostUsed - std::min(hostUsed, cachedHost);
     const Pal::gpusize admitted =
         ((!settings().remoteAlloc_ && (apuCarveOutLimit_ > deviceAfterCache))
              ? apuCarveOutLimit_ - deviceAfterCache
