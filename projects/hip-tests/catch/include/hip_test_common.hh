@@ -912,6 +912,9 @@ class BlockingContext {
       stream_err = hipErrorStreamCaptureInvalidated;                                               \
     }                                                                                              \
     HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), stream_err);                              \
+    if (stream_err != hipSuccess) {                                                                \
+      static_cast<void>(hipGetLastError());                                                        \
+    }                                                                                              \
     if (graph != nullptr) {                                                                        \
       HIP_CHECK(hipGraphDestroy(graph));                                                           \
     }                                                                                              \
