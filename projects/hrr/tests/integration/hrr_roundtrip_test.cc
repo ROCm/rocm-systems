@@ -212,7 +212,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
  *   - Replay with no key still runs it (an unsigned or same-machine archive stays
  *     convenient).
  *   - One byte of a blob is flipped: replay with --trusted-key exits non-zero and
- *     names that blob, before any GPU call; replay with another key is refused too.
+ *     names that blob, before any GPU call. (A wrong key is Unit_HRR_Sign_UnsignedAndWrongKey.)
  */
 HRR_TEST_CASE(Unit_HRR_CaptureSignedArchiveRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_signed_gpu"};
@@ -260,10 +260,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureSignedArchiveRoundtrip) {
   INFO(out);
   CHECK(ret != 0);
   CHECK(out.find(fs::relative(blob, archive).generic_string()) != std::string::npos);
-
-  const fs::path other = keys.path / "other.pub";
-  { std::ofstream(other) << std::string(64, '2') << "\n"; }
-  CHECK(hrr_playback_merged(cap.path, "--trusted-key " + hrr_quote_path(other)).first != 0);
 }
 
 /**

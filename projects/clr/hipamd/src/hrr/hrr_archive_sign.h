@@ -53,9 +53,6 @@ enum class VerifyResult {
 VerifyResult verify_archive(const std::string& dir, const uint8_t public_key[kPublicKeySize],
                             std::string* err);
 
-// Overwrites key material in a way the optimiser may not drop.
-void wipe(void* p, size_t n);
-
 // A key file holds 64 hex digits and an optional newline. A seed file is refused
 // when group or others can read it (POSIX), as ssh does for a private key.
 bool read_key_file(const std::string& path, bool is_seed, uint8_t out[32], std::string* err);

@@ -47,6 +47,7 @@
 #include "hip_capture_metadata.h"
 #include "hip_capture_scrub.h"
 #include "hrr_archive_sign.h"
+#include "rocm/sha2/sha256.h"
 
 #include "os/os.hpp"           // amd::Os::timeNanos()
 #include "utils/debug.hpp"     // LogPrintfError, LogPrintfWarning, LogPrintfInfo
@@ -1347,7 +1348,7 @@ static void sign_finished_archive(int dir_fd, const std::string& out_dir) {
   } else {
     fprintf(stderr, "[HRR capture] NOT signed, %s: %s\n", out_dir.c_str(), err.c_str());
   }
-  hrr_sign::wipe(seed, sizeof(seed));
+  rocm::sha2::secure_zero(seed, sizeof(seed));
 }
 
 void flush(const char* /*output_dir*/) {

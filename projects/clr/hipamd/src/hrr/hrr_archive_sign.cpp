@@ -70,8 +70,7 @@ bool sha256_file(const fs::path& p, std::string* hex_out) {
   const bool ok = !ferror(f);
   fclose(f);
   if (!ok) return false;
-  const auto d = h.digest();
-  *hex_out = hex(d.data(), d.size());
+  *hex_out = h.hexdigest();
   return true;
 }
 
@@ -151,8 +150,7 @@ bool sha256_at(int dir, const char* name, std::string* hex_out) {
   }
   close(fd);
   if (!ok) return false;
-  const auto d = h.digest();
-  *hex_out = hex(d.data(), d.size());
+  *hex_out = h.hexdigest();
   return true;
 }
 
@@ -228,8 +226,6 @@ bool write_at(int dir, const char* name, const std::string& data, std::string* e
 #endif
 
 }  // namespace
-
-void wipe(void* p, size_t n) { crypto_wipe(p, n); }
 
 bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::string* err,
                   int dir_fd) {
@@ -367,7 +363,7 @@ bool read_key_file(const std::string& path, bool is_seed, uint8_t out[32], std::
   }
   while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) text.pop_back();
   const bool parsed = unhex(text, out, 32);
-  wipe(text.data(), text.size());
+  rocm::sha2::secure_zero(text.data(), text.size());
   if (!parsed) {
     *err = path + ": expected 64 hex digits (a 32-byte " + (is_seed ? "seed" : "public key") + ")";
     return false;
@@ -407,7 +403,7 @@ bool generate_key_pair(const std::string& seed_path, const std::string& public_p
     return ok;
   };
   const bool seed_ok = create(seed_path, seed_hex, 0600);
-  wipe(seed_hex.data(), seed_hex.size());
+  rocm::sha2::secure_zero(seed_hex.data(), seed_hex.size());
   if (!seed_ok) {
     *err = seed_path + ": cannot create (it must not exist)";
     return false;

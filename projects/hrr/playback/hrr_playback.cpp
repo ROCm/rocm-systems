@@ -88,6 +88,7 @@
 #include "hrr_safe_fs.h"
 #ifdef HRR_HAVE_ARCHIVE_SIGN
 #include "hrr_archive_sign.h"
+#include "rocm/sha2/sha256.h"
 #endif
 
 namespace fs = std::filesystem;
@@ -1227,7 +1228,7 @@ static bool resign_repaired(const fs::path& dir) {
     uint8_t seed[hrr_sign::kSeedSize];
     const bool signed_ok = hrr_sign::read_key_file(g_signing_key_path, true, seed, &err) &&
                            hrr_sign::sign_archive(dir.string(), seed, &err);
-    hrr_sign::wipe(seed, sizeof(seed));  // on failure too
+    rocm::sha2::secure_zero(seed, sizeof(seed));  // on failure too
     if (!signed_ok) {
       fprintf(stderr, "[HRR] repair: not signed: %s\n", err.c_str());
       return false;
@@ -1826,7 +1827,7 @@ int main(int argc, char** argv) {
     }
   if (do_repair && !trusted_key_path.empty()) {
     fprintf(stderr, "[HRR] --repair rewrites the archive and does not check a signature; "
-                    "verify first with --info --trusted-key, then repair\n");
+                    "verify first with --info --trusted-key on the pid-<pid> directory, then repair\n");
     return 1;
   }
   if (!signing_key_path.empty() && !do_repair) {
@@ -1852,8 +1853,11 @@ int main(int argc, char** argv) {
 #endif
 
   // --info on an archive root prints the common process summary. Direct
-  // pid-<pid> paths continue through load_archive for detailed event info.
-  if (show_info && print_root_info(archive_path))
+  // pid-<pid> paths continue through load_archive for detailed event info. With
+  // a trusted key the summary is skipped, as it reads files without checking
+  // them: load_archive verifies the one archive a root holds, and refuses a
+  // root with several, naming each pid-<pid> to check.
+  if (show_info && trusted_key_path.empty() && print_root_info(archive_path))
     return 0;
 
   // --repair on an archive root repairs every process capture underneath it.

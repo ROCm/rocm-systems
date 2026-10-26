@@ -242,7 +242,9 @@ under an older key then stops replaying.
 
 **What replay does.** Verification runs in `load_archive` (through `hrr::set_archive_check`),
 before any file in the archive is opened, so no tampered byte is parsed. `--info` on an
-archive root reads only the manifests and is not checked; `--info` on a `pid-<pid>/` is.
+archive root without `--trusted-key` prints the process summary from the manifests and
+each `events.bin` trailer, unchecked; with `--trusted-key` it loads the root's single
+`pid-<pid>/` and verifies it (a root with several is refused, naming each).
 `--repair` refuses `--trusted-key`: it rewrites files and does not verify them. It refuses, naming the file, when
 the signature does not verify, any file differs from its manifest line, a file is
 listed and missing, a file exists and is not listed, or an entry is a link or other
