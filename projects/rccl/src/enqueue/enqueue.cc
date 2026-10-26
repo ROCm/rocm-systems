@@ -1521,15 +1521,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       bool lat = useLL128OptIn ? hasLL128[dir] : hasLL[dir];
       ssize_t latencyThreshold = useLL128OptIn ? ncclParamP2pLL128Threshold() : ncclParamP2pLLThreshold();
       ssize_t latencyBytesMax = nChannels[dir] * latencyThreshold;
-      // nChannels here is the SIMPLE estimate, which collapses to 1 for latency-bound sizes and so
-      // hides the latency protocol on topologies that expose many P2P channels per peer. Single-node
-      // all-XGMI gfx942/gfx950 exposes 8, where the SIMPLE estimate costs ~11% bus bandwidth on
-      // 8-rank alltoall between 128 KiB and 512 KiB total (16-64 KiB per peer). Widen eligibility to
-      // the smallest SIMPLE part there, capped at the measured 64 KiB/peer crossover so 128 KiB/peer
-      // and above keep SIMPLE (going past it regresses 1-4 MiB total). This covers every P2P op --
-      // send/recv, alltoall, gather, scatter and the p2p-based all-gather/reduce-scatter -- since
-      // they all size their transfers here. A user-set NCCL_P2P_LL_THRESHOLD keeps the stock rule, as
-      // does the LL128 P2P path, whose crossover has not been measured on single node.
+      // SIMPLE's channel count is 1 here, so the per-channel LL threshold never selects LL on
+      // single-node gfx942/gfx950. Allow LL up to p2pChunkSize/8, capped at 64 KiB/peer. A set
+      // NCCL_P2P_LL_THRESHOLD, and the LL128 path, keep the stock rule.
       static bool const userSetP2pLLThreshold = ncclGetEnv("NCCL_P2P_LL_THRESHOLD") != nullptr;
       if (comm->nNodes <= 1 && comm->isAllNvlink && !useLL128OptIn &&
           (comm->cudaArch == 940 || comm->cudaArch == 950) && !userSetP2pLLThreshold) {
