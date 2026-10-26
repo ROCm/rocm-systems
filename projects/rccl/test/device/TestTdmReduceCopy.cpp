@@ -15,6 +15,7 @@
 #include "DeviceTestBase.hpp"
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -274,6 +275,36 @@ TEST_F(TdmReduceCopyTest, SumF32MisalignedFallsBack) {
 // Less than one tile also takes the vector path.
 TEST_F(TdmReduceCopyTest, SumF32BelowOneTileFallsBack) {
   run<FuncSum<float>, float, 2, 1, 0>(1000, 0, 0, false, false, sumRef, "sumSmall");
+}
+
+// Every case above skips when the TDM reduce path is not built, so a TDM test config would pass while covering nothing.
+// With RCCL_TEST_EXPECT_TDM_SIMPLE set, this case fails instead when the build flag or the device pass disagrees.
+TEST_F(TdmReduceCopyTest, BuildFlagMatchesExpectation) {
+  const char* want = getenv("RCCL_TEST_EXPECT_TDM_SIMPLE");
+  if (want == nullptr) GTEST_SKIP() << "set RCCL_TEST_EXPECT_TDM_SIMPLE=1 to assert the TDM SIMPLE build flag";
+  const int expect = atoi(want);
+#if ENABLE_TDM_SIMPLE
+  constexpr int built = 1;
+#else
+  constexpr int built = 0;
+#endif
+  ASSERT_EQ(built, expect) << "ENABLE_TDM_SIMPLE is " << built << " but RCCL_TEST_EXPECT_TDM_SIMPLE asks for " << expect
+                           << ". Either the build is missing --enable-tdm-simple (in which case every TDM reduce suite "
+                           << "runs the vector path and covers nothing), or the config sets the wrong expectation.";
+  if (expect == 0) return;
+  if (!supported_) GTEST_SKIP() << "TDM not supported on this device";
+
+  const size_t nElts = tileElts<float>(1);
+  DeviceBuffer<float> src0(nElts), src1(nElts), dst(nElts);
+  DeviceBuffer<float*> dSrcPtrs(2), dDstPtrs(1);
+  dSrcPtrs.copyFrom(std::vector<float*>{src0.ptr, src1.ptr});
+  dDstPtrs.copyFrom(std::vector<float*>{dst.ptr});
+  DeviceBuffer<int> dGate(1);
+  kTdmReduceGate<FuncSum<float>, float, 2, 1, 0><<<1, kBlockThreads>>>(
+    dSrcPtrs.ptr, dDstPtrs.ptr, static_cast<ssize_t>(nElts), /*postOp=*/false, /*tdmReduce=*/1, dGate.ptr);
+  syncAndCheck();
+  EXPECT_EQ(1, dGate.copyTo()[0]) << "The device pass has no TDM reduce path (TDM_SUPPORTED is 0 there), so every TDM "
+                                  << "reduce suite runs the vector path.";
 }
 
 } // namespace RcclUnitTesting
