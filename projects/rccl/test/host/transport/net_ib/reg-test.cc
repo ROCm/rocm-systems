@@ -200,14 +200,14 @@ TEST_F(NetIbRegMicrotest, RegMrInternal_DmaBufSelectsProviderSpecificRegistratio
   auto base = MakeDevBase();
   ibv_mr verbsMr{};
   ibv_mr mlx5Mr{};
-  ScopedHook verbs(g_ibvRegDmaBufMr,
+  ScopedHook verbs(g_ibvRegDmabufMr,
                    [&verbsMr](ibv_mr** out, ibv_pd*, uint64_t offset, size_t, uint64_t, int fd, int) {
                      EXPECT_EQ(offset, 7u);
                      EXPECT_EQ(fd, 11);
                      *out = &verbsMr;
                      return ncclSuccess;
                    });
-  ScopedHook mlx5(g_mlx5dvRegDmaBufMr,
+  ScopedHook mlx5(g_mlx5dvRegDmabufMr,
                   [&mlx5Mr](ibv_mr** out, ibv_pd*, uint64_t, size_t, uint64_t, int, int, int mlx5Access) {
                     EXPECT_EQ(mlx5Access, MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT);
                     *out = &mlx5Mr;
@@ -312,7 +312,7 @@ TEST_F(NetIbRegMicrotest, RegMrDmaBuf_PublicWrapperForwardsOffsetAndFd) {
   comm.base.vProps.ndevs = 1;
   comm.devs[0].base = MakeDevBase(0);
   ibv_mr mr{};
-  ScopedHook reg(g_ibvRegDmaBufMr,
+  ScopedHook reg(g_ibvRegDmabufMr,
                  [&mr](ibv_mr** out, ibv_pd*, uint64_t offset, size_t, uint64_t, int fd, int) {
                    EXPECT_EQ(offset, 17u);
                    EXPECT_EQ(fd, 23);

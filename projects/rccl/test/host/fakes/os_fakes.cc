@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <sched.h>
 
 void* ncclOsAlignedAlloc(size_t alignment, size_t size) {
@@ -26,6 +27,7 @@ void ncclOsAlignedFree(void* ptr) { free(ptr); }
 
 ncclResult_t ncclOsInitialize() { return ncclSuccess; }
 uint64_t ncclOsGetPid() { return 4321; }
+ncclResult_t ncclOsSetFilesLimit() { return ncclSuccess; }
 char* ncclOsStrSep(char** stringp, const char* delim) { return strsep(stringp, delim); }
 size_t ncclOsGetPageSize() { return 4096; }
 size_t ncclOsGetCommMempoolMaxSize() { return 0; }  // src/os/linux.cc: 0 = no cap
@@ -36,7 +38,9 @@ size_t ncclOsGetCommMempoolMaxSize() { return 0; }  // src/os/linux.cc: 0 = no c
 int g_ncclOsCpuCountValue = 0;
 int g_ncclOsCpuCountCalls = 0;
 std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
+static std::mutex g_affinityMutex;  // proxy.cc's two service threads call these concurrently
 int ncclOsCpuCount(const ncclAffinity& affinity) {
+  std::lock_guard<std::mutex> lock(g_affinityMutex);
   g_ncclOsCpuCountCalls++;
   g_ncclOsCpuCountMasks.push_back(affinity);
   return g_ncclOsCpuCountValue;
@@ -57,6 +61,7 @@ ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { return g_ncclOsGetAffin
 ncclResult_t g_ncclOsSetAffinityResult = ncclSuccess;
 std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
 ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
+  std::lock_guard<std::mutex> lock(g_affinityMutex);
   g_ncclOsSetAffinityMasks.push_back(affinity);
   return g_ncclOsSetAffinityResult;
 }
@@ -116,6 +121,21 @@ ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* busId, char* 
 
 void ncclOsCpuZero(ncclAffinity& affinity) { CPU_ZERO(&affinity); }
 void ncclOsCpuSet(ncclAffinity& affinity, int cpu) { CPU_SET(cpu, &affinity); }
+bool ncclOsCpuIsSet(const ncclAffinity& affinity, int cpu) { return CPU_ISSET(cpu, &affinity); }
+int ncclOsGetCpu() { return 0; }
+uint64_t ncclOsGetTid() { return 0; }
+
+// The real pair makes the mutex/cond process-shared; the counters show each was called.
+int g_ncclOsMutexCondSharedCalls = 0;
+int g_ncclOsMutexCondUnsharedCalls = 0;
+void ncclOsSetMutexCondShared(std::mutex&, std::condition_variable&, int* initialized) {
+  g_ncclOsMutexCondSharedCalls++;
+  *initialized = 1;
+}
+void ncclOsUnsetMutexCondShared(std::mutex&, std::condition_variable&, int* initialized) {
+  g_ncclOsMutexCondUnsharedCalls++;
+  *initialized = 0;
+}
 
 // Topology discovery's sysfs reads. With no PCI path, ncclTopoGetXmlFromSys keeps whatever attributes a test pre-built.
 ncclResult_t ncclOsGetPciPath(const char*, char** path) {
@@ -142,6 +162,8 @@ void ResetOsFakes() {
   g_ncclOsGetAffinity = [](ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
   g_ncclOsSetAffinityResult = ncclSuccess;
   g_ncclOsSetAffinityMasks.clear();
+  g_ncclOsMutexCondSharedCalls = 0;
+  g_ncclOsMutexCondUnsharedCalls = 0;
   g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
   g_ncclOsTopoGetStrFromSysCalls = 0;
   g_ncclOsTopoGetStrFromSys = DefaultOsTopoGetStrFromSys;
