@@ -434,15 +434,17 @@ TEST_F(NetIbInitMicrotest, Mlx5DmaBufCapable_ProbeErrnoSelectsCapability) {
 
   EXPECT_TRUE(ncclMlx5dvDmaBufCapable(&context));
 
-  ScopedHook unsupported(g_mlx5dvDirectRegDmabufMr,
-                         [](ibv_pd*, uint64_t, size_t, uint64_t, int, int, int) -> ibv_mr* {
-                           errno = EOPNOTSUPP;
-                           return nullptr;
-                         });
-  EXPECT_FALSE(ncclMlx5dvDmaBufCapable(&context));
-  EXPECT_EQ(dmaProbe.alloc.calls, 2);
-  EXPECT_EQ(dmaProbe.probe.calls, 2);
-  EXPECT_EQ(dmaProbe.dealloc.calls, 2);
+  for (int probeErrno : {EOPNOTSUPP, EPROTONOSUPPORT}) {
+    ScopedHook unsupported(g_mlx5dvDirectRegDmabufMr,
+                           [probeErrno](ibv_pd*, uint64_t, size_t, uint64_t, int, int, int) -> ibv_mr* {
+                             errno = probeErrno;
+                             return nullptr;
+                           });
+    EXPECT_FALSE(ncclMlx5dvDmaBufCapable(&context));
+  }
+  EXPECT_EQ(dmaProbe.alloc.calls, 3);
+  EXPECT_EQ(dmaProbe.probe.calls, 3);
+  EXPECT_EQ(dmaProbe.dealloc.calls, 3);
 }
 
 TEST_F(NetIbInitMicrotest, AutoAssignRailPlane_NoRailPolicyLeavesExplicitIdsUnchanged) {
