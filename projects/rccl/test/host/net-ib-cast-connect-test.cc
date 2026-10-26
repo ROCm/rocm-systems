@@ -46,6 +46,10 @@
 
 #include "fakes/param_redirect.h"
 
+// rocmwrap.cc's param, read by connect.cc's flush DMA-BUF arm. rocmwrap_fakes.cc leaves it
+// to dev_runtime_micro_fakes.cc, which this binary does not link.
+NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1);
+
 #include NET_IB_CAST_QP_SHARING_CC_PATH
 
 // IbCastRoceGetVersionNum opens a sysfs path; libc_seam has no open().

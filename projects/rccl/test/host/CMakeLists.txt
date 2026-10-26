@@ -144,9 +144,9 @@ while(_rccl_cast_pins)
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/${_fake}" "${_copy}" "the ${_src} copy")
 endwhile()
 rccl_assert_source_line("${_rccl_src_root}/misc/rocmwrap.cc"
-  "NCCL_PARAM(DmaBufEnable, \"DMABUF_ENABLE\", 1);" "fakes/rocmwrap_fakes.cc: ncclParamDmaBufEnable()")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rocmwrap_fakes.cc"
-  "return g_loadParam(\"DMABUF_ENABLE\", 1); }" "the rocmwrap.cc DmaBufEnable param")
+  "NCCL_PARAM(DmaBufEnable, \"DMABUF_ENABLE\", 1);" "net-ib-cast-connect-test.cc")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/net-ib-cast-connect-test.cc"
+  "NCCL_PARAM(DmaBufEnable, \"DMABUF_ENABLE\", 1);" "the rocmwrap.cc DmaBufEnable param")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
