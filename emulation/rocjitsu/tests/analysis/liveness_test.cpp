@@ -30,6 +30,7 @@
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/host_target.h"
 
 #include <gtest/gtest.h>
 
@@ -388,7 +389,7 @@ uint32_t build_s_call_b64(uint16_t sdst, int16_t simm16) {
 
 // Exercise the scalar fallback even when the production type uses AVX2.
 template <typename Set> class RegisterSetTyped : public testing::Test {};
-#if defined(__AVX2__)
+#if RJ_HOST_HAS_AVX2
 using RegisterSetTypes = testing::Types<RegisterSetT<RegisterSetWordType::StandardUint64>,
                                         RegisterSetT<RegisterSetWordType::Avx2M256>>;
 #else
