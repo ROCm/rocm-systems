@@ -98,7 +98,7 @@ def test_write_grouped_csv_files_writes_one_file_per_file_key(tmp_path):
         1,
         ["Value"],
         lambda file_key: resolve_export_path_under(tmp_path, file_key),
-        lambda file_rows: file_rows,
+        lambda file_key, file_rows: file_rows,
     )
 
     assert file_count == 2
@@ -113,7 +113,7 @@ def test_write_grouped_csv_files_writes_nothing_without_rows(tmp_path):
         1,
         ["Value"],
         lambda file_key: resolve_export_path_under(tmp_path / "out", file_key),
-        lambda file_rows: file_rows,
+        lambda file_key, file_rows: file_rows,
     )
 
     assert file_count == 0

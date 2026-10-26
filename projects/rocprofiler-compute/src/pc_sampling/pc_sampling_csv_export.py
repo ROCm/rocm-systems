@@ -4,16 +4,16 @@
 """
 PC sampling CSV export.
 
-Names the per-kernel ISA files, builds CSV headers with one column per stall
-reason, and writes rows that arrive grouped by file into one CSV file per
-group.
+Names the per-kernel ISA files, records where each instruction is written in
+them, builds CSV headers with one column per stall reason, and writes rows that
+arrive grouped by file into one CSV file per group.
 """
 
 import csv
 import re
 from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, List, NamedTuple, Optional, Sequence, Tuple
 
 STALL_COLUMN_PREFIX = "Stall "
 
@@ -27,6 +27,15 @@ MAX_SHORT_NAME_LENGTH = 64
 UNNAMED_KERNEL_FOLDER_PREFIX = "kernel"
 
 Row = Tuple[Any, ...]
+
+
+class IsaLineLocation(NamedTuple):
+    """Where one instruction is written in the per-kernel ISA files."""
+
+    # The ISA file, relative to the folder of its workload
+    isa_file: Path
+    # The position of the instruction in the ISA file, counting from 1
+    instruction_line_number: int
 
 
 def build_header(
@@ -71,13 +80,13 @@ def write_grouped_csv_files(
     file_key_column_count: int,
     header: List[str],
     resolve_export_path: Callable[[Row], Path],
-    format_file_rows: Callable[[List[Row]], Iterable[Sequence[Any]]],
+    format_file_rows: Callable[[Row, List[Row]], Iterable[Sequence[Any]]],
 ) -> int:
     """Write rows that arrive grouped by file, and return the number of files.
 
     The first file_key_column_count columns of a row name its file.
-    resolve_export_path receives those columns, and format_file_rows receives
-    the rest of each row of one file.
+    resolve_export_path receives those columns. format_file_rows receives those
+    columns and the rest of each row of one file.
     """
     file_count = 0
     for file_key, file_rows in _group_rows_by_file(rows, file_key_column_count):
@@ -86,7 +95,7 @@ def write_grouped_csv_files(
         with export_path.open("w", newline="", encoding="utf-8") as export_file:
             writer = csv.writer(export_file)
             writer.writerow(header)
-            writer.writerows(format_file_rows(file_rows))
+            writer.writerows(format_file_rows(file_key, file_rows))
         file_count += 1
     return file_count
 

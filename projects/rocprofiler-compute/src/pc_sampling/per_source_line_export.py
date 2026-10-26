@@ -15,12 +15,12 @@ import json
 from collections.abc import Iterable, Iterator
 from functools import partial
 from pathlib import Path
-from typing import Any, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Tuple
 
 from pc_sampling.pc_sampling_csv_export import (
+    IsaLineLocation,
     Row,
     build_header,
-    resolve_isa_relative_path,
     write_grouped_csv_files,
 )
 from pc_sampling.source_snapshot_analysis import (
@@ -50,16 +50,6 @@ TRAILING_COLUMNS = ("ISA references",)
 FileKey = Tuple[str, str, str]
 
 
-class IsaReference(NamedTuple):
-    """Identifies the row of one instruction in a per-kernel ISA file."""
-
-    kernel_uuid: int
-    short_name: Optional[str]
-    code_object_id: int
-    pid: int
-    instruction_line_number: int
-
-
 class WorkloadSourceLineExport(NamedTuple):
     """Holds one workload's source line rows and the stall reasons they carry."""
 
@@ -70,14 +60,20 @@ class WorkloadSourceLineExport(NamedTuple):
 
 def export_per_source_line_files(
     export_directory: Path,
+    isa_line_locations: Dict[int, IsaLineLocation],
     workload_source_line_exports: Iterable[WorkloadSourceLineExport],
 ) -> None:
-    """Write every workload's per-source-line files beside its source copies."""
+    """Write every workload's per-source-line files beside its source copies.
+
+    isa_line_locations holds where the per-kernel ISA export wrote each
+    instruction, keyed by instruction uuid.
+    """
     for workload_source_line_export in workload_source_line_exports:
         file_count = _write_per_source_line_files(
             export_directory,
             workload_source_line_export.source_line_rows,
             workload_source_line_export.stall_reasons,
+            isa_line_locations,
         )
         console_debug(
             f"Exported {file_count} per-source-line files for workload "
@@ -108,6 +104,7 @@ def _write_per_source_line_files(
     export_directory: Path,
     source_line_rows: Iterator[Row],
     stall_reasons: List[str],
+    isa_line_locations: Dict[int, IsaLineLocation],
 ) -> int:
     """Write one workload's grouped source line rows, and return the file count."""
     return write_grouped_csv_files(
@@ -115,45 +112,46 @@ def _write_per_source_line_files(
         len(per_source_line_file_key_columns()),
         build_header(BASE_COLUMNS, stall_reasons, TRAILING_COLUMNS),
         partial(_resolve_source_line_export_path, export_directory),
-        _format_source_line_rows,
+        lambda file_key, file_rows: _format_source_line_rows(
+            file_rows, isa_line_locations
+        ),
     )
 
 
-def _format_source_line_rows(file_rows: List[Row]) -> Iterator[List[Any]]:
-    """Format the ISA references of each source line row as text."""
-    for *source_line_cells, isa_references_json in file_rows:
-        yield [*source_line_cells, _format_isa_references(isa_references_json)]
+def _format_source_line_rows(
+    file_rows: List[Row],
+    isa_line_locations: Dict[int, IsaLineLocation],
+) -> Iterator[List[Any]]:
+    """Replace the instruction uuids of each source line row with ISA references."""
+    for *source_line_cells, instruction_uuids_json in file_rows:
+        yield [
+            *source_line_cells,
+            _format_isa_references(instruction_uuids_json, isa_line_locations),
+        ]
 
 
-def _format_isa_references(isa_references_json: str) -> str:
+def _format_isa_references(
+    instruction_uuids_json: str,
+    isa_line_locations: Dict[int, IsaLineLocation],
+) -> str:
     """Return the ISA references of one source line as text.
 
     Each ISA file goes on its own line of text, written as
     "<kernel folder>/<ISA file>:<instruction line numbers>". Consecutive
     instruction line numbers are written as one range.
     """
-    isa_references = sorted(
-        IsaReference(**isa_reference)
-        for isa_reference in json.loads(isa_references_json)
+    locations = sorted(
+        isa_line_locations[instruction_uuid]
+        for instruction_uuid in json.loads(instruction_uuids_json)
     )
     return ISA_REFERENCE_SEPARATOR.join(
         f"{isa_file.as_posix()}:"
         + _format_number_ranges([
-            isa_reference.instruction_line_number for isa_reference in file_references
+            location.instruction_line_number for location in file_locations
         ])
-        for isa_file, file_references in itertools.groupby(
-            isa_references, key=_resolve_isa_reference_file
+        for isa_file, file_locations in itertools.groupby(
+            locations, key=lambda location: location.isa_file
         )
-    )
-
-
-def _resolve_isa_reference_file(isa_reference: IsaReference) -> Path:
-    """Return the per-kernel ISA file that holds one referenced instruction."""
-    return resolve_isa_relative_path(
-        isa_reference.kernel_uuid,
-        isa_reference.short_name,
-        isa_reference.code_object_id,
-        isa_reference.pid,
     )
 
 
