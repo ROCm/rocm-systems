@@ -6121,7 +6121,7 @@ TEST(RdnaAddrCalcTest, Rdna3Saddr7cUsesVgprPair) {
 }
 
 // RDNA3/3.5 ISA 11.2: Addr = SCRATCH_BASE + (offset/4)*4*index_stride + offset%4 + TID*4,
-// with index_stride equal to the wave size.
+// with index_stride equal to the wave size. Register offsets are unsigned.
 template <typename FlatInst, typename CalculateAddresses>
 void expect_rdna3_scratch_layout(rj_code_arch_t arch, CalculateAddresses calculate) {
   for (uint32_t wave_size : {32u, 64u}) {
@@ -6182,6 +6182,12 @@ void expect_rdna3_scratch_layout(rj_code_arch_t arch, CalculateAddresses calcula
     calculate(inst, *wf, d);
     EXPECT_EQ(d.per_lane_addr[0], swizzled(0x80, 0));
     EXPECT_EQ(d.per_lane_addr[1], swizzled(0x80, 1));
+
+    // Unsigned register offsets: 0x80000000 lands 2 GiB of private space up, not below.
+    cu->write_sgpr(sbase + 4, 0x8000'0000u);
+    inst.offset = 0;
+    calculate(inst, *wf, d);
+    EXPECT_EQ(d.per_lane_addr[0], swizzled(0x8000'0000u, 0));
 
     // FLAT private-aperture lanes take the same layout; global lanes are untouched.
     constexpr uint64_t kPrivateBase = 0x0007'0000'0000'0000ULL;
@@ -6617,6 +6623,59 @@ TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
   EXPECT_EQ(flat_private.scratch_addr_stride, 32u * sizeof(uint32_t));
 }
 
+// RDNA4 ISA 11.2: SWIZZLE(SGPR_offset I32 + VGPR_offset I32 + IOFFSET I24, ThreadID).
+TEST(RdnaAddrCalcTest, Rdna4ScratchRegisterOffsetsAreSigned) {
+  amdgpu::GpuMemory mem("rdna4_signed_scratch_mem");
+  amdgpu::L2Cache l2("rdna4_signed_scratch_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_signed_scratch_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec(0x3ULL);
+  constexpr uint64_t kScratchBase = 0x6'0000'0000ULL;
+  wf->set_scratch_base(kScratchBase);
+  wf->set_scratch_lane_size(0x1000);
+
+  const uint32_t sbase = wf->sgpr_alloc().base;
+  const uint32_t vbase = wf->vgpr_alloc().base;
+  rdna4::VscratchMachineInst inst{};
+  inst.saddr = 4;
+  inst.sve = 1;
+  inst.vaddr = 0;
+  inst.ioffset = 0;
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+
+  // Lane 0: 0x100 + -64 = 0xC0. Lane 1 is a positive control: 0x100 + 0x10 = 0x110.
+  cu->write_sgpr(sbase + 4, 0x100);
+  cu->write_vgpr(vbase, 0, 0xFFFF'FFC0u);
+  cu->write_vgpr(vbase, 1, 0x10);
+  rdna4::flat_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.per_lane_addr[0], kScratchBase + 0x1800);
+  EXPECT_EQ(d.per_lane_addr[1], kScratchBase + 0x2204);
+
+  // A negative SGPR offset with a larger VGPR offset is also nonnegative in total.
+  cu->write_sgpr(sbase + 4, 0xFFFF'FFC0u);
+  cu->write_vgpr(vbase, 0, 0x100);
+  cu->write_vgpr(vbase, 1, 0x150);
+  rdna4::flat_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.per_lane_addr[0], kScratchBase + 0x1800);
+  EXPECT_EQ(d.per_lane_addr[1], kScratchBase + 0x2204);
+
+  // IOFFSET still participates after both registers are sign-extended.
+  inst.ioffset = 0x40;
+  cu->write_sgpr(sbase + 4, 0xFFFF'FF00u);
+  cu->write_vgpr(vbase, 0, 0x180);
+  rdna4::flat_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.per_lane_addr[0], kScratchBase + 0x1800);
+}
+
 TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
   ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   amdgpu::GpuMemory mem("gfx1250_flat_private_mem");
@@ -6719,6 +6778,61 @@ TEST(Gfx1250AddrCalcTest, ScratchUsesDwordInterleavedWave32Layout) {
   EXPECT_TRUE(d.requires_scratch_backing);
   EXPECT_EQ(d.scratch_lane_mask, 0x3u);
   EXPECT_EQ(d.scratch_addr_stride, 32u * sizeof(uint32_t));
+}
+
+// CDNA5 ISA 10.2: SWIZZLE(SGPR_offset I32 + VGPR_offset I32 * ScaleFactor + IOFFSET I24, TID).
+TEST(Gfx1250AddrCalcTest, ScratchRegisterOffsetsAreSignedBeforeScaling) {
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
+  amdgpu::GpuMemory mem("gfx1250_signed_scratch_mem");
+  amdgpu::L2Cache l2("gfx1250_signed_scratch_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_signed_scratch_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, 128, 32);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec(0x3);
+  constexpr uint64_t kScratchBase = 0x0002'0000'0000'0000ULL;
+  wf->set_scratch_base(kScratchBase);
+  wf->set_scratch_lane_size(0x1000);
+
+  const uint32_t sbase = wf->sgpr_alloc().base;
+  const uint32_t vbase = wf->vgpr_alloc().base;
+  cdna5::VscratchMachineInst inst{};
+  inst.saddr = 4;
+  inst.sve = 1;
+  inst.vaddr = 0;
+  inst.ioffset = 0;
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  d.elem_size = 4;
+  d.num_elems = 1;
+
+  // Lane 0: 0x100 + -64 = 0xC0. Lane 1 is a positive control: 0x100 + 0x10 = 0x110.
+  cu->write_sgpr(sbase + 4, 0x100);
+  cu->write_vgpr(vbase, 0, 0xFFFF'FFC0u);
+  cu->write_vgpr(vbase, 1, 0x10);
+  cdna5::flat_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.per_lane_addr[0], kScratchBase + 0x1800);
+  EXPECT_EQ(d.per_lane_addr[1], kScratchBase + 0x2204);
+
+  cu->write_sgpr(sbase + 4, 0xFFFF'FFC0u);
+  cu->write_vgpr(vbase, 0, 0x100);
+  cdna5::flat_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.per_lane_addr[0], kScratchBase + 0x1800);
+
+  // SCALE_OFFSET multiplies the sign-extended VGPR: 0x100 + -16 * 4 = 0xC0.
+  inst.scale_offset = 1;
+  cu->write_sgpr(sbase + 4, 0x100);
+  cu->write_vgpr(vbase, 0, 0xFFFF'FFF0u);
+  cu->write_vgpr(vbase, 1, 0x4);
+  cdna5::flat_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.per_lane_addr[0], kScratchBase + 0x1800);
+  EXPECT_EQ(d.per_lane_addr[1], kScratchBase + 0x2204);
 }
 
 TEST(RdnaAddrCalcTest, Rdna4SmemSoffsetHandlesNullM0AndSgprSelectors) {

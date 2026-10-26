@@ -276,16 +276,15 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   d.requires_scratch_backing = true;
   d.scratch_lane_mask = exec;
   d.scratch_addr_stride = amdgpu::scratch_unit_stride(wf.wf_size());
+  // CDNA5 section 10.2 defines both register offsets as signed 32-bit values
+  // and scales the VGPR offset after sign extension.
+  const int64_t soffset = static_cast<int32_t>(saddr_val);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t vaddr = 0;
-    if (inst.sve) {
-      vaddr = vaddr_region->lane(0, lane);
-      vaddr *= scale;
-    }
-    const uint64_t private_offset =
-        static_cast<uint64_t>(static_cast<int64_t>(vaddr) + saddr_val + offset);
+    const uint64_t voffset =
+        inst.sve ? amdgpu::flat_vector_offset(vaddr_region->lane(0, lane), true, scale) : 0;
+    const uint64_t private_offset = voffset + static_cast<uint64_t>(soffset + offset);
     d.per_lane_addr[lane] =
         amdgpu::scratch_lane_address(scratch_base, private_offset, lane, wf.wf_size());
   }
