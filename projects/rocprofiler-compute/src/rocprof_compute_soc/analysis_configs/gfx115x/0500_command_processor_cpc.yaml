@@ -22,19 +22,19 @@ Panel Config:
         unit: Unit
       metric:
         CPC Busy:
-          avg: 100 * SUM(CPC_STAT_BUSY) / SUM(CPC_ALWAYS_COUNT)
-          min: 100 * MIN(CPC_STAT_BUSY / CPC_ALWAYS_COUNT)
-          max: 100 * MAX(CPC_STAT_BUSY / CPC_ALWAYS_COUNT)
+          avg: 100 * SUM(CPC_CPC_STAT_BUSY) / SUM(CPC_ALWAYS_COUNT)
+          min: 100 * MIN(CPC_CPC_STAT_BUSY / CPC_ALWAYS_COUNT)
+          max: 100 * MAX(CPC_CPC_STAT_BUSY / CPC_ALWAYS_COUNT)
           unit: Percent
         CPC Idle:
-          avg: 100 * SUM(CPC_STAT_IDLE) / SUM(CPC_ALWAYS_COUNT)
-          min: 100 * MIN(CPC_STAT_IDLE / CPC_ALWAYS_COUNT)
-          max: 100 * MAX(CPC_STAT_IDLE / CPC_ALWAYS_COUNT)
+          avg: 100 * SUM(CPC_CPC_STAT_IDLE) / SUM(CPC_ALWAYS_COUNT)
+          min: 100 * MIN(CPC_CPC_STAT_IDLE / CPC_ALWAYS_COUNT)
+          max: 100 * MAX(CPC_CPC_STAT_IDLE / CPC_ALWAYS_COUNT)
           unit: Percent
         CPC Stalled:
-          avg: 100 * SUM(CPC_STAT_STALL) / SUM(CPC_ALWAYS_COUNT)
-          min: 100 * MIN(CPC_STAT_STALL / CPC_ALWAYS_COUNT)
-          max: 100 * MAX(CPC_STAT_STALL / CPC_ALWAYS_COUNT)
+          avg: 100 * SUM(CPC_CPC_STAT_STALL) / SUM(CPC_ALWAYS_COUNT)
+          min: 100 * MIN(CPC_CPC_STAT_STALL / CPC_ALWAYS_COUNT)
+          max: 100 * MAX(CPC_CPC_STAT_STALL / CPC_ALWAYS_COUNT)
           unit: Percent
 
   # =========================================================================
@@ -51,14 +51,14 @@ Panel Config:
         unit: Unit
       metric:
         TCIU Busy:
-          avg: 100 * SUM(CPC_TCIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
-          min: 100 * MIN(CPC_TCIU_BUSY / CPC_ALWAYS_COUNT)
-          max: 100 * MAX(CPC_TCIU_BUSY / CPC_ALWAYS_COUNT)
+          avg: 100 * SUM(CPC_CPC_TCIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
+          min: 100 * MIN(CPC_CPC_TCIU_BUSY / CPC_ALWAYS_COUNT)
+          max: 100 * MAX(CPC_CPC_TCIU_BUSY / CPC_ALWAYS_COUNT)
           unit: Percent
         UTCL2 Busy:
-          avg: 100 * SUM(CPC_UTCL2IU_BUSY) / SUM(CPC_ALWAYS_COUNT)
-          min: 100 * MIN(CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT)
-          max: 100 * MAX(CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT)
+          avg: 100 * SUM(CPC_CPC_UTCL2IU_BUSY) / SUM(CPC_ALWAYS_COUNT)
+          min: 100 * MIN(CPC_CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT)
+          max: 100 * MAX(CPC_CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT)
           unit: Percent
         GCRIU Busy:
           avg: 100 * SUM(CPC_GCRIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
