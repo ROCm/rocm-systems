@@ -1178,7 +1178,7 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
   std::vector<hsa_signal_condition_t> valid_conds;
   std::vector<hsa_signal_value_t> valid_values;
   for (uint32_t i = 0; i < signal_count; i++){
-    if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
+    if (core::Signal::IsValidHandle(hsa_signals[i])) {
       valid_signals.emplace_back(hsa_signals[i]);
       valid_signal_ids.emplace_back(i);
       valid_conds.emplace_back(conds[i]);
@@ -1236,7 +1236,7 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
   std::vector<hsa_signal_condition_t> valid_conds;
   std::vector<hsa_signal_value_t> valid_values;
   for (uint32_t i = 0; i < signal_count; i++){
-    if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
+    if (core::Signal::IsValidHandle(hsa_signals[i])) {
       valid_signals.emplace_back(hsa_signals[i]);
       valid_signal_ids.emplace_back(i);
       valid_conds.emplace_back(conds[i]);

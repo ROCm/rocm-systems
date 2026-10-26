@@ -127,6 +127,9 @@ static hipError_t DefaultHipPointerGetAttribute(void* data,
     if (data && attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) {
         *static_cast<int*>(data) = 0;   // matches `int legacyIpcCap` in p2p.cc
     }
+    if (data && attribute == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
+        *static_cast<hipMemoryType*>(data) = hipMemoryTypeDevice;
+    }
     return hipSuccess;
 }
 
@@ -432,6 +435,11 @@ static hipError_t DefaultHipExtLaunchKernel(const void*, dim3, dim3, void**, siz
 }
 std::function<hipError_t(const void*, dim3, dim3, void**, size_t, hipStream_t, hipEvent_t, hipEvent_t, int)>
     g_hipExtLaunchKernel = DefaultHipExtLaunchKernel;
+static hipError_t DefaultHipLaunchKernel(const void*, dim3, dim3, void**, size_t, hipStream_t) {
+    FailLoudUnfaked("hip_fakes", "hipLaunchKernel");
+}
+std::function<hipError_t(const void*, dim3, dim3, void**, size_t, hipStream_t)> g_hipLaunchKernel =
+    DefaultHipLaunchKernel;
 
 // --- the working host-memory VMM stand-in (opt-in) -----------------------
 // A reserved VA range mirrors cuMemAddressReserve with an uncommitted anonymous
@@ -688,6 +696,7 @@ void ResetHipFakes()
     g_hipThreadExchangeStreamCaptureMode = DefaultHipThreadExchangeStreamCaptureMode;
     g_hipGetLastError               = DefaultHipGetLastError;
     g_hipExtLaunchKernel            = DefaultHipExtLaunchKernel;
+    g_hipLaunchKernel               = DefaultHipLaunchKernel;
     g_hipEventRecord                = DefaultHipEventRecord;
     g_hipStreamWaitEvent            = DefaultHipStreamWaitEvent;
     g_hipEventQueryRequiresRecord   = false;
@@ -941,7 +950,7 @@ hipError_t hipMemcpyAsync(void* dst, const void* src, size_t bytes, hipMemcpyKin
                           hipStream_t stream)
 {
     g_hipMemcpyAsyncCalls++;
-    g_hipMemcpyAsyncArgs.push_back({dst, src, bytes});
+    g_hipMemcpyAsyncArgs.push_back({dst, src, bytes, kind, stream});
     return g_hipMemcpyAsync(dst, src, bytes, kind, stream);
 }
 
@@ -1091,11 +1100,16 @@ hipError_t hipExtLaunchKernel(const void* function, dim3 grid, dim3 block, void*
                               hipStream_t stream, hipEvent_t startEvent, hipEvent_t stopEvent, int flags) {
   return g_hipExtLaunchKernel(function, grid, block, args, sharedMemBytes, stream, startEvent, stopEvent, flags);
 }
+hipError_t hipLaunchKernel(const void* function, dim3 grid, dim3 block, void** args, size_t sharedMemBytes,
+                           hipStream_t stream) {
+  return g_hipLaunchKernel(function, grid, block, args, sharedMemBytes, stream);
+}
 }  // extern "C"
 
 // ---- Kernel registration the compiler emits for a TU that defines __global__ functions ----
 // Reached from static init of a test TU that #includes a .cu; the launches themselves go through
-// g_hipExtLaunchKernel. Such a TU must embed a GPU binary (-fcuda-include-gpubinary) or clang
+// g_hipExtLaunchKernel, or g_hipLaunchKernel for a <<<>>> launch, which pushes its configuration and
+// pops it in the kernel stub before calling hipLaunchKernel. Such a TU must embed a GPU binary (-fcuda-include-gpubinary) or clang
 // also references an external __hip_fatbin_<cuid> that nothing defines.
 extern "C" {
 void** __hipRegisterFatBinary(const void*) {
@@ -1105,8 +1119,21 @@ void** __hipRegisterFatBinary(const void*) {
 void __hipRegisterFunction(void**, const void*, char*, const char*, unsigned int, void*, void*, void*, void*,
                            int*) {}
 void __hipUnregisterFatBinary(void**) {}
-hipError_t __hipPopCallConfiguration(dim3*, dim3*, size_t*, hipStream_t*) {
-  FailLoudUnfaked("hip_fakes", "__hipPopCallConfiguration");
+static struct {
+  dim3 grid, block;
+  size_t shmem;
+  hipStream_t stream;
+} g_callConfiguration;
+hipError_t __hipPushCallConfiguration(dim3 grid, dim3 block, size_t shmem, hipStream_t stream) {
+  g_callConfiguration = {grid, block, shmem, stream};
+  return hipSuccess;
+}
+hipError_t __hipPopCallConfiguration(dim3* grid, dim3* block, size_t* shmem, hipStream_t* stream) {
+  *grid = g_callConfiguration.grid;
+  *block = g_callConfiguration.block;
+  *shmem = g_callConfiguration.shmem;
+  *stream = g_callConfiguration.stream;
+  return hipSuccess;
 }
 // clang >= 23 registers per-kernel profile shadows under -fprofile-instr-generate; these keep the ROCm profile runtime out.
 void __hipRegisterVar(void**, char*, char*, const char*, int, size_t, int, int) {}
