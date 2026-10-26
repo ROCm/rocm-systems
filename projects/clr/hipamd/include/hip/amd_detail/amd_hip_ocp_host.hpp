@@ -541,6 +541,13 @@ __OCP_FP_HOST_DEVICE_STATIC__ T to_float(__hip_uint32_t u32, __hip_int8_t scale_
 
   auto sign = signbit<E, sat>(u32) << (dstEnc.ExpBits + dstEnc.ManBits);
 
+  // Without a scale, E5M2 subnormals (and E5M2Nanoo normals/subnormals) lie below the binary16
+  // minimum normal. dstExp is < 1 here (and may have wrapped around): encode as a subnormal.
+  if (!enc.MxScale && (__hip_int32_t)dstExp < 1) {
+    dstMan = (dstMan | ((__hip_uint32_t)1 << dstEnc.ManBits)) >> (1 - (__hip_int32_t)dstExp);
+    dstExp = 0;
+  }
+
   if (enc.MxScale) {
     __hip_int32_t exp = dstExp - dstEnc.ExpBias;
     __hip_int32_t tmp = exp + (__hip_int32_t)scale_exp;

@@ -354,6 +354,38 @@ HIP_TEST_CASE(Unit_ext_ocp_fp8_overflow_saturates_host) {
   }
 }
 
+/**
+ * Test Description
+ * ------------------------
+ *  - Every fp8 value is exactly representable in binary16, so decoding to fp16
+ *    must give the same value as decoding to float for all 256 bit patterns.
+ *    E5M2 subnormals (0x01-0x03) lie in the binary16 subnormal range.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/ext_ocp_fp8.cc
+ */
+HIP_TEST_CASE(Unit_ext_ocp_fp8_to_fp16_matches_float_host) {
+  for (auto interp : {__AMD_OCP_E4M3, __AMD_OCP_E5M2}) {
+    for (unsigned c = 0; c <= 0xffu; ++c) {
+      float f = __amd_cvt_fp8_to_float(static_cast<__amd_fp8_storage_t>(c), interp);
+      float h =
+          static_cast<float>(__amd_cvt_fp8_to_fp16(static_cast<__amd_fp8_storage_t>(c), interp));
+      INFO("interpretation " << interp << " pattern 0x" << std::hex << c << " float " << f
+                             << " fp16 " << h);
+      if (std::isnan(f)) {
+        REQUIRE(std::isnan(h));
+      } else {
+        REQUIRE(h == f);
+        REQUIRE(std::signbit(h) == std::signbit(f));
+      }
+    }
+  }
+
+  // E5M2 min subnormal 2^-16 and 0x03 = 3 * 2^-16
+  REQUIRE(static_cast<float>(__amd_cvt_fp8_to_fp16(0x01, __AMD_OCP_E5M2)) == 0x1p-16f);
+  REQUIRE(static_cast<float>(__amd_cvt_fp8_to_fp16(0x83, __AMD_OCP_E5M2)) == -3 * 0x1p-16f);
+}
+
 // ---- Device consistency -----------------------------------------------------
 
 __global__ void fp8_e4m3_roundtrip_kernel(const float* in, float* out, size_t n) {
