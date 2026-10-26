@@ -3680,6 +3680,8 @@ typedef union rocprofiler_hip_api_args_t
     } hipKernelSetCacheConfig;
 #endif
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 39
+    struct
+    {
         void**                  dsts;
         void**                  srcs;
         size_t*                 sizes;
