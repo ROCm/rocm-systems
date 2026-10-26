@@ -13,6 +13,7 @@ import pytest
 
 from pc_sampling import pc_sampling_analysis
 from pc_sampling.pc_sampling_analysis import (
+    add_up_instruction_lines,
     aggregate_pc_sample_records,
     detect_pc_sampling_method,
     enrich_with_metadata,
@@ -218,6 +219,29 @@ def make_tool_data(
         "agents": agents if agents is not None else [],
         "code_objects": code_objects if code_objects is not None else [],
     }
+
+
+def make_instruction_line_record(
+    total_count: int,
+    issue_count: int | None,
+    stall_reasons: dict[str, int],
+    active_thread_percent: float | None,
+    wave_occupancy_percent: float | None,
+) -> pc_sampling_analysis.InstructionLineRecord:
+    """Build one aggregated instruction line with the given counts."""
+    return pc_sampling_analysis.InstructionLineRecord(
+        code_object_offset=0x10,
+        kernel_name="k",
+        instruction="v_mov",
+        source="/s/a.cpp:1",
+        total_count=total_count,
+        issue_count=issue_count,
+        stall_count=None if issue_count is None else total_count - issue_count,
+        stall_reasons=stall_reasons,
+        inst_types={},
+        active_thread_percent=active_thread_percent,
+        wave_occupancy_percent=wave_occupancy_percent,
+    )
 
 
 def write_results_json(path: Path, **kwargs) -> Path:
@@ -759,6 +783,32 @@ def test_aggregate_wave_measurements_exclude_missing_fields_independently() -> N
     assert row["wave_occupancy_percent"] == 37.5, (
         "wave_cnt mean must use exactly the samples carrying wave_cnt"
     )
+
+
+def test_add_up_instruction_lines_sums_counts_and_weights_percentages() -> None:
+    """Counts add up, and each percentage is weighted by sample count.
+
+    A line without a percentage adds no weight, and a count that no line has
+    stays unknown.
+    """
+    totals = add_up_instruction_lines([
+        make_instruction_line_record(3, 1, {"WAITCNT": 2}, None, 50.0),
+        make_instruction_line_record(5, 4, {"NONE": 1}, 80.0, 10.0),
+    ])
+    host_trap_totals = add_up_instruction_lines([
+        make_instruction_line_record(2, None, {}, 50.0, None)
+    ])
+
+    assert totals == pc_sampling_analysis.SampleTotals(
+        total_count=8,
+        issue_count=5,
+        stall_count=3,
+        stall_reasons={"WAITCNT": 2, "NONE": 1},
+        active_thread_percent=80.0,
+        wave_occupancy_percent=(50.0 * 3 + 10.0 * 5) / 8,
+    )
+    assert (host_trap_totals.issue_count, host_trap_totals.stall_count) == (None, None)
+    assert host_trap_totals.wave_occupancy_percent is None
 
 
 def test_aggregate_wave_measurements_are_none_without_sys_info() -> None:

@@ -125,17 +125,19 @@ def _format_source_line_rows(file_rows: List[Row]) -> Iterator[List[Any]]:
         yield [*source_line_cells, _format_isa_references(isa_references_json)]
 
 
-def _format_isa_references(isa_references_json: str) -> str:
+def _format_isa_references(isa_references_json: Optional[str]) -> str:
     """Return the ISA references of one source line, one ISA file per line.
 
     Each line reads "<kernel folder>/<ISA file>:<instruction line numbers>",
-    and consecutive instruction line numbers are written as one range.
+    and consecutive instruction line numbers are written as one range. A source
+    line without instructions has no references.
     """
-    # A source line that no instruction came from has one all-null reference.
+    if isa_references_json is None:
+        return ""
+
     isa_references = sorted(
         IsaReference(**isa_reference)
         for isa_reference in json.loads(isa_references_json)
-        if isa_reference["kernel_uuid"] is not None
     )
     return ISA_REFERENCE_SEPARATOR.join(
         f"{isa_file.as_posix()}:"

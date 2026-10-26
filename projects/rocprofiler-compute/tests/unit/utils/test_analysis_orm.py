@@ -1092,39 +1092,46 @@ def test_per_kernel_isa_select_leads_with_the_file_key_columns():
     ]
 
 
-def test_per_source_line_rows_add_up_the_instructions_of_each_line(db_session):
-    """Each line of a captured file adds up the instructions that came from it."""
+def test_per_source_line_rows_read_each_lines_state_and_references(db_session):
+    """Each line of a captured file shows its stored state and its ISA rows."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
-    add_captured_source_file(db_session, workload, "/s/a.cpp", line_count=3)
-    add_captured_source_file(db_session, workload, "/s/hip.h", line_count=2)
-    for instruction in (
-        {
-            "code_object_id": 5,
-            "source": "/s/hip.h:2 -> /s/a.cpp:2",
-            "total_count": 3,
-            "issue_count": 1,
-            "stall_count": 2,
-            "wave_occupancy_percent": 50.0,
-            "stall_reasons": {"WAITCNT": 2},
-        },
-        # A line that appears twice in one stack counts once.
-        {
-            "code_object_id": 6,
-            "source": "/s/a.cpp:2 -> /s/a.cpp:2",
-            "total_count": 5,
-            "issue_count": 4,
-            "stall_count": 1,
-            "wave_occupancy_percent": 10.0,
-            "active_thread_percent": 80.0,
-            "stall_reasons": {"NONE": 1},
-        },
-        {"code_object_id": 7, "source": "/s/a.cpp:?"},
-        {"code_object_id": 8, "source": "/s/absent.cpp:1"},
+    source_file = add_captured_source_file(db_session, workload, "/s/a.cpp", 3)
+    add_captured_source_file(db_session, workload, "/s/hip.h", 2)
+    for code_object_id, source in (
+        (5, "/s/hip.h:2 -> /s/a.cpp:2"),
+        # A line that appears twice in one stack is referenced once.
+        (6, "/s/a.cpp:2 -> /s/a.cpp:2"),
+        (7, "/s/a.cpp:?"),
+        (8, "/s/absent.cpp:1"),
     ):
         add_pc_sampling_state(
-            db_session, workload=workload, kernel=kernel, pid=42, **instruction
+            db_session,
+            workload=workload,
+            kernel=kernel,
+            pid=42,
+            code_object_id=code_object_id,
+            source=source,
         )
+    # Only a.cpp:2 has a state, so hip.h:2 shows references without counts.
+    line_state = PCSampleState(
+        source_line=source_file.source_lines[1],
+        total_count=8,
+        issue_count=5,
+        stall_count=3,
+        wave_occupancy_percent=25.0,
+        active_thread_percent=80.0,
+    )
+    db_session.add_all([
+        PCSampleStallReason(
+            pc_sample_state=line_state,
+            stall_reason_lookup=Database.get_or_create_type(
+                PCSampleStallReasonLookup, reason
+            ),
+            count=count,
+        )
+        for reason, count in (("NONE", 1), ("WAITCNT", 2))
+    ])
     db_session.commit()
 
     rows = [
@@ -1132,8 +1139,7 @@ def test_per_source_line_rows_add_up_the_instructions_of_each_line(db_session):
             *row[:-1],
             [
                 isa_reference["code_object_id"]
-                for isa_reference in json.loads(row[-1])
-                if isa_reference["kernel_uuid"] is not None
+                for isa_reference in json.loads(row[-1] or "[]")
             ],
         )
         for row in Database.stream_per_source_line_rows(
@@ -1147,5 +1153,35 @@ def test_per_source_line_rows_add_up_the_instructions_of_each_line(db_session):
         ("w", "s", "/s/a.cpp", 2, "line 2", 8, 5, 3, 25.0, 80.0, 1, 2, [5, 6]),
         ("w", "s", "/s/a.cpp", 3, "line 3", *empty_counts, []),
         ("w", "s", "/s/hip.h", 1, "line 1", *empty_counts, []),
-        ("w", "s", "/s/hip.h", 2, "line 2", 3, 1, 2, 50.0, None, None, 2, [5]),
+        ("w", "s", "/s/hip.h", 2, "line 2", *empty_counts, [5]),
     ]
+
+
+@pytest.mark.parametrize("owner_count", [0, 2], ids=["neither", "both"])
+def test_pc_sample_state_needs_exactly_one_owner(db_session, owner_count):
+    """A sample state belongs to an instruction line or a source line, not both."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="k", workload=workload)
+    source_file = add_captured_source_file(db_session, workload, "/s/a.cpp", 1)
+    instruction_line = InstructionLine(
+        code_object_offset=0x10,
+        instruction="v_mov",
+        kernel_symbol=KernelSymbol(
+            code_object_store=CodeObjectStore(
+                code_object_id=5, pid=42, load_base=0x1000, workload=workload
+            ),
+            kernel=kernel,
+        ),
+    )
+    owners = (
+        {
+            "instruction_line": instruction_line,
+            "source_line": source_file.source_lines[0],
+        }
+        if owner_count == 2
+        else {}
+    )
+    db_session.add_all([instruction_line, PCSampleState(total_count=1, **owners)])
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()

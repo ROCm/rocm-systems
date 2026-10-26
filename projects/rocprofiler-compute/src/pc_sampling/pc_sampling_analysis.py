@@ -7,7 +7,8 @@ Helpers for building a normalized PC sampling dataframe from a parsed
 ``rocprofiler-sdk-tool[0]`` dict.
 """
 
-from typing import Any, NamedTuple, Optional
+from collections import Counter
+from typing import Any, Callable, Dict, List, NamedTuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -79,6 +80,17 @@ class CodeObjectRecord(NamedTuple):
     code_object_id: int
     load_base: Optional[int]
     instruction_lines: list[InstructionLineRecord]
+
+
+class SampleTotals(NamedTuple):
+    """The PC sampling counts of several instruction lines, added up."""
+
+    total_count: int
+    issue_count: Optional[int]
+    stall_count: Optional[int]
+    stall_reasons: Dict[str, int]
+    active_thread_percent: Optional[float]
+    wave_occupancy_percent: Optional[float]
 
 
 def detect_pc_sampling_method(tool_data: dict[str, Any]) -> Optional[str]:
@@ -313,6 +325,55 @@ def load_aggregated_pc_sampling(
             )
         )
     return records
+
+
+def add_up_instruction_lines(
+    instruction_lines: List[InstructionLineRecord],
+) -> SampleTotals:
+    """Add up the counts of instruction lines, and average their percentages.
+
+    Each percentage is weighted by the line's sample count. A line without the
+    percentage adds no weight.
+    """
+    stall_reasons = Counter()
+    for line in instruction_lines:
+        stall_reasons.update(line.stall_reasons)
+
+    return SampleTotals(
+        total_count=sum(line.total_count for line in instruction_lines),
+        issue_count=_sum_known([line.issue_count for line in instruction_lines]),
+        stall_count=_sum_known([line.stall_count for line in instruction_lines]),
+        stall_reasons=dict(stall_reasons),
+        active_thread_percent=_sample_weighted_average(
+            instruction_lines, lambda line: line.active_thread_percent
+        ),
+        wave_occupancy_percent=_sample_weighted_average(
+            instruction_lines, lambda line: line.wave_occupancy_percent
+        ),
+    )
+
+
+def _sum_known(counts: List[Optional[int]]) -> Optional[int]:
+    """Return the sum of the known counts, or None when no count is known."""
+    known_counts = [count for count in counts if count is not None]
+    return sum(known_counts) if known_counts else None
+
+
+def _sample_weighted_average(
+    instruction_lines: List[InstructionLineRecord],
+    percent_of: Callable[[InstructionLineRecord], Optional[float]],
+) -> Optional[float]:
+    """Average one percentage of instruction lines, weighted by sample count."""
+    weighted_lines = [
+        (percent_of(line), line.total_count)
+        for line in instruction_lines
+        if percent_of(line) is not None
+    ]
+    if not weighted_lines:
+        return None
+    return sum(percent * count for percent, count in weighted_lines) / sum(
+        count for _, count in weighted_lines
+    )
 
 
 def _to_instruction_line_record(row: Any) -> InstructionLineRecord:  # noqa: ANN401

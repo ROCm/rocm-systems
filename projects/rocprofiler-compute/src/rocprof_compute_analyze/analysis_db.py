@@ -6,7 +6,7 @@ import json
 import re
 import warnings
 from pathlib import Path
-from typing import Any, List, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -22,6 +22,8 @@ from pc_sampling.code_object_analysis import (
 from pc_sampling.pc_sampling_analysis import (
     SOURCE_LINE_MISSING,
     InstructionLineRecord,
+    SampleTotals,
+    add_up_instruction_lines,
     load_aggregated_pc_sampling,
 )
 from pc_sampling.per_kernel_isa_export import (
@@ -705,6 +707,9 @@ class db_analysis(OmniAnalyze_Base):
         row with nothing under it.
         """
         code_object_stores: dict[CodeObjectKey, orm.CodeObjectStore] = {}
+        sampled_instruction_lines: List[
+            Tuple[orm.InstructionLine, InstructionLineRecord]
+        ] = []
         tool_data_records = self._pc_sampling_tool_data_per_workload.get(
             workload_path, []
         )
@@ -719,7 +724,7 @@ class db_analysis(OmniAnalyze_Base):
                         # Drop lines whose kernel was filtered out or never mapped.
                         continue
 
-                    self._add_instruction_line(
+                    instruction_line = self._add_instruction_line(
                         line,
                         self._get_or_create_code_object_store(
                             code_object_stores,
@@ -732,7 +737,10 @@ class db_analysis(OmniAnalyze_Base):
                         source_frames,
                         sys_info.get("gpu_arch"),
                     )
+                    sampled_instruction_lines.append((instruction_line, line))
 
+        # A source line adds up the instructions of every process.
+        self._add_source_line_sample_states(sampled_instruction_lines)
         return code_object_stores
 
     @staticmethod
@@ -797,8 +805,8 @@ class db_analysis(OmniAnalyze_Base):
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
         source_frames: SourceFrameCollector,
         gpu_arch: Optional[str] = None,
-    ) -> None:
-        """Insert one instruction line, its sample state, and child counts."""
+    ) -> orm.InstructionLine:
+        """Insert one instruction line with its sample state, and return the line."""
         instruction_line = orm.InstructionLine(
             code_object_offset=line.code_object_offset,
             instruction=line.instruction,
@@ -812,26 +820,9 @@ class db_analysis(OmniAnalyze_Base):
         Database.get_session().add(instruction_line)
         source_frames.add_instruction(instruction_line, line.source)
 
-        sample_state = orm.PCSampleState(
-            total_count=line.total_count,
-            issue_count=line.issue_count,
-            stall_count=line.stall_count,
-            active_thread_percent=line.active_thread_percent,
-            wave_occupancy_percent=line.wave_occupancy_percent,
-            instruction_line=instruction_line,
+        sample_state = db_analysis._add_pc_sample_state(
+            line, instruction_line=instruction_line
         )
-        Database.get_session().add(sample_state)
-
-        for text, count in line.stall_reasons.items():
-            Database.get_session().add(
-                orm.PCSampleStallReason(
-                    pc_sample_state=sample_state,
-                    stall_reason_lookup=Database.get_or_create_type(
-                        orm.PCSampleStallReasonLookup, text
-                    ),
-                    count=count,
-                )
-            )
         for text, count in line.inst_types.items():
             Database.get_session().add(
                 orm.InstructionSample(
@@ -842,6 +833,68 @@ class db_analysis(OmniAnalyze_Base):
                     count=count,
                 )
             )
+        return instruction_line
+
+    @staticmethod
+    def _add_source_line_sample_states(
+        sampled_instruction_lines: List[
+            Tuple[orm.InstructionLine, InstructionLineRecord]
+        ],
+    ) -> None:
+        """Insert one sample state per source line, adding up its instructions.
+
+        An instruction counts once toward each distinct line of its inline stack.
+        """
+        instruction_lines_by_source_line: Dict[
+            orm.SourceLine, List[InstructionLineRecord]
+        ] = {}
+        for instruction_line, line in sampled_instruction_lines:
+            source_lines = dict.fromkeys(
+                frame.source_line for frame in instruction_line.source_lines
+            )
+            for source_line in source_lines:
+                instruction_lines_by_source_line.setdefault(source_line, []).append(
+                    line
+                )
+
+        for source_line, lines in instruction_lines_by_source_line.items():
+            db_analysis._add_pc_sample_state(
+                add_up_instruction_lines(lines), source_line=source_line
+            )
+
+    @staticmethod
+    def _add_pc_sample_state(
+        samples: Union[InstructionLineRecord, SampleTotals],
+        *,
+        instruction_line: Optional[orm.InstructionLine] = None,
+        source_line: Optional[orm.SourceLine] = None,
+    ) -> orm.PCSampleState:
+        """Insert the sample state of one instruction line or one source line.
+
+        The state's stall-reason counts are inserted with it.
+        """
+        sample_state = orm.PCSampleState(
+            total_count=samples.total_count,
+            issue_count=samples.issue_count,
+            stall_count=samples.stall_count,
+            active_thread_percent=samples.active_thread_percent,
+            wave_occupancy_percent=samples.wave_occupancy_percent,
+            instruction_line=instruction_line,
+            source_line=source_line,
+        )
+        Database.get_session().add(sample_state)
+
+        for text, count in samples.stall_reasons.items():
+            Database.get_session().add(
+                orm.PCSampleStallReason(
+                    pc_sample_state=sample_state,
+                    stall_reason_lookup=Database.get_or_create_type(
+                        orm.PCSampleStallReasonLookup, text
+                    ),
+                    count=count,
+                )
+            )
+        return sample_state
 
     def add_code_object_isa(
         self,
