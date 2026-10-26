@@ -4,6 +4,7 @@
  */
 
 #include "buffer.h"
+#include "configuration.h"
 #include "context.h"
 #include "hip.h"
 #include "passkey.h"
@@ -59,7 +60,12 @@ Buffer::Buffer(const void *_buffer, size_t _length, int _flags, const PassKey<Bu
     }
 
     hipPointerAttribute_t _attrs = Context<Hip>::get()->hipPointerGetAttributes(buffer);
-    if (_attrs.type != hipMemoryTypeDevice && _attrs.type != hipMemoryTypeHost) {
+
+    auto validTypes = Context<Configuration>::get()->host()
+                          ? std::initializer_list{hipMemoryTypeDevice}
+                          : std::initializer_list{hipMemoryTypeDevice, hipMemoryTypeHost};
+
+    if (std::find(validTypes.begin(), validTypes.end(), _attrs.type) == validTypes.end()) {
         throw InvalidMemoryType();
     }
     type = _attrs.type;
@@ -121,8 +127,6 @@ Buffer::getType() const
 int
 Buffer::getGpuId() const
 {
-    if (type == hipMemoryTypeHost)
-        throw std::logic_error("Host buffers are not bound to any GPU device");
     return gpu_id;
 }
 

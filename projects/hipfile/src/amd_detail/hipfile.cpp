@@ -717,10 +717,11 @@ hipFileGetStatsL1(hipFileStatsLevel1_t *stats)
 
         *stats = {};
 
-        static constexpr IoType ioTypes[]{IoType::Read, IoType::Write};
+        static constexpr IoType       ioTypes[]{IoType::Read, IoType::Write};
+        static constexpr StatsBackend backends[]{StatsBackend::Fastpath, StatsBackend::Fallback};
 
         for (size_t gpuId{}; gpuId < Stats::MaxGpus; ++gpuId) {
-            for (const StatsBackend &backend : getStatBackends()) {
+            for (const auto &backend : backends) {
                 const PerGpuStatsV1 *g{s->getPerGpuStats(gpuId, backend)};
                 if (g == nullptr) {
                     continue;
@@ -830,7 +831,8 @@ hipFileGetStatsL3(hipFileStatsLevel3_t *stats)
             }
 
             // Fastpath maps to nvfs; fallback maps to posix
-            for (const StatsBackend &backend : getStatBackends()) {
+            static constexpr StatsBackend backends[]{StatsBackend::Fastpath, StatsBackend::Fallback};
+            for (const auto &backend : backends) {
                 const PerGpuStatsV1 *pg{s->getPerGpuStats(gpuId, backend)};
                 if (pg == nullptr) {
                     continue;

@@ -123,11 +123,9 @@ CopyOp<CopyFn>::run()
                 io_bytes = -1; // while condition re-evaluated after continue
                 continue;
             }
-            Context<StatsCollection>::get()->error(CopyFn::op_type, StatsBackend::Host, size);
             throw;
         }
         catch (...) {
-            Context<StatsCollection>::get()->error(CopyFn::op_type, StatsBackend::Host, size);
             throw;
         }
     } while (io_bytes != 0 && total_io_bytes < size);
@@ -147,8 +145,6 @@ Host::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer
         throw BackendDisabled();
     }
 
-    StatsIoTracker ioTracker{type, StatsBackend::Host, file, buffer, size, file_offset, buffer_offset};
-
     size = std::min(size, hipFile::getMaxRwCount());
 
     if (!paramsValid(buffer, size, file_offset, buffer_offset)) {
@@ -158,8 +154,6 @@ Host::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer
     size_t total_io_bytes = type == IoType::Read
                                 ? CopyOp<ReadFileFn>(*file, *buffer, size, file_offset, buffer_offset).run()
                                 : CopyOp<WriteFileFn>(*file, *buffer, size, file_offset, buffer_offset).run();
-
-    ioTracker.complete(total_io_bytes);
 
     return static_cast<ssize_t>(total_io_bytes);
 }

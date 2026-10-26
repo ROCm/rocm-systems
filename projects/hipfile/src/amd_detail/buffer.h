@@ -8,7 +8,6 @@
 #include <cstddef>
 #include <hip/hip_runtime_api.h>
 #include <memory>
-#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 
