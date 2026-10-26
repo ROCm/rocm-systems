@@ -1891,7 +1891,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
 set_source_files_properties(wrap-test.cc PROPERTIES COMPILE_DEFINITIONS ENABLE_LL128)
 
 # Fake ibverbs provider dv libraries for dv_symbols_test.cc; the SONAME is what the builders' dlopen matches.
-# The test finds them beside its own executable, in the build tree and in an install.
+# In the build tree the fakes sit beside the test binary; in an install they are in
+# the library directory. FakeProviderPath() checks both locations.
 foreach(_fake ionic ionic-no-gda mlx5)
   string(REGEX REPLACE "-.*" "" _dv "${_fake}")
   add_library(rccl-micro-dv-provider-fake-${_fake} SHARED fakes/dv_provider_fake.cc)
@@ -1900,7 +1901,7 @@ foreach(_fake ionic ionic-no-gda mlx5)
   target_link_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE -no-hip-rt -Wl,-soname,lib${_dv}.so)
   add_dependencies(rccl-UnitTestsMicro rccl-micro-dv-provider-fake-${_fake})
   if(BUILD_TESTS)
-    install(TARGETS rccl-micro-dv-provider-fake-${_fake} LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT tests)
+    install(TARGETS rccl-micro-dv-provider-fake-${_fake} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT tests)
   endif()
 endforeach()
 target_compile_definitions(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE DV_PROVIDER_FAKE_IONIC_NO_GDA)
