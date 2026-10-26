@@ -75,19 +75,9 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
   }
 
   if (inst.seg == 1) {
-    // SCRATCH: wave-private memory with a dword-interleaved backing layout.
-    // The hardware stores scratch in a dword-interleaved ("swizzled") layout:
-    // a lane's private byte offset `off` maps to
-    //   scratch_base + (off/4)*lane_count*4 + lane*4 + off%4
-    // so consecutive dwords of one lane are lane_count*4 bytes apart. We
-    // reproduce that exact layout (rather than lane-major) so it matches how
-    // rocm-dbgapi reads private_swizzled memory (rocdbgapi memory.cpp), letting
-    // ROCgdb resolve scratch-resident variables. The interleave granule is a
-    // dword (rocdbgapi architecture.cpp: private_lane interleave_size =
-    // sizeof(uint32_t)). FLAT_SCRATCH is a dedicated register held in the
+    // SCRATCH: wave-private memory in the dword-interleaved layout of
+    // scratch_lane_address(). FLAT_SCRATCH is a dedicated register held in the
     // wavefront's scratch_base_ member.
-    constexpr uint32_t kScratchInterleave = sizeof(uint32_t);
-    const uint32_t lane_count = wf.wf_size();
     uint64_t scratch_base = wf.scratch_base();
     int64_t saddr_val = 0;
     if (inst.saddr != 0x7F && (!rdna || inst.saddr != 0x7D)) {
@@ -123,7 +113,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
       vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
     d.scratch_swizzle = true;
     d.requires_scratch_backing = true;
-    d.scratch_addr_stride = lane_count * kScratchInterleave;
+    d.scratch_addr_stride = scratch_unit_stride(wf.wf_size());
     d.scratch_lane_mask = exec;
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
@@ -132,9 +122,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
       if (has_vaddr)
         vaddr = vaddr_region->lane(0, lane);
       uint64_t priv_off = static_cast<uint64_t>(static_cast<int64_t>(vaddr) + saddr_val + offset);
-      d.per_lane_addr[lane] =
-          scratch_base + (priv_off / kScratchInterleave) * lane_count * kScratchInterleave +
-          static_cast<uint64_t>(lane) * kScratchInterleave + (priv_off % kScratchInterleave);
+      d.per_lane_addr[lane] = scratch_lane_address(scratch_base, priv_off, lane, wf.wf_size());
     }
   } else if (inst.seg == 2) {
     // GLOBAL: saddr (64-bit SGPR pair) + VGPR (32-bit) + offset,
@@ -171,8 +159,6 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     // unmapped aperture VA range, using the same dword-interleaved swizzle as
     // dedicated SCRATCH ops so the private layout is uniform (and readable by
     // rocm-dbgapi).
-    constexpr uint32_t kScratchInterleave = sizeof(uint32_t);
-    const uint32_t lane_count = wf.wf_size();
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     auto vaddr_region = regs.read_vgpr_region(vbase, 2, exec);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -186,7 +172,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
         addr = translated.value;
         d.scratch_swizzle = true;
         d.requires_scratch_backing = true;
-        d.scratch_addr_stride = lane_count * kScratchInterleave;
+        d.scratch_addr_stride = scratch_unit_stride(wf.wf_size());
         d.scratch_lane_mask |= 1ULL << lane;
       }
       d.per_lane_addr[lane] = addr;
