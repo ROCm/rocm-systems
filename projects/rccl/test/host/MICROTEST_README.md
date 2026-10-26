@@ -334,6 +334,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   binaries cover both arms of both without a 2x2 cross product. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
   TUs) from the hipify tree rather than stubbing them; `--gc-sections` drops the
   deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
+- **`rccl-UnitTestsMicroGinHostProxy`** — `gin/gin_host_proxy.cc` and the three
+  `gin/proxy_gpucontext/` writers (`GIN_HOST_PROXY_CC_PATH`, `GPUCONTEXT{,_V1,_V2}_CC_PATH`,
+  from `gin-host-proxy-test.cc`); suites `GinHostProxy*`, against the scripted RMA plugin in
+  `fakes/rma_vtable_fake.h`. Its own binary:
+  `gin-plugin-init-test.cc` in `rccl-UnitTestsMicro` defines `ncclGinProxy` and
+  `ncclGinProxyVersion`. See `test_categories_micro_gin_host_proxy.yaml`.
 - **`rccl-UnitTestsMicroWarpSpeed`** — `allgatherv_sched.cc` +
   `symmetric_sched.cc` (via `ALLGATHERV_SCHED_CC_PATH`/`SYMMETRIC_SCHED_CC_PATH`,
   both from `scheduler-test.cc`); suite `SchedulerMicrotest.*`. Its own binary,
@@ -1105,6 +1111,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroApiTrace           # misc/api_trace.cc tests
 ./build/rccl-UnitTestsMicroDebug              # debug.cc tests
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
+./build/rccl-UnitTestsMicroGinHostProxy       # src/gin/gin_host_proxy.cc + proxy_gpucontext/
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc + src/diagnostics/ tests
