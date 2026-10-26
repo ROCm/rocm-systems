@@ -89,6 +89,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `Sym*` CTest pattern). Each kernel `__global__` is neutered to an ordinary
     host stub (see the file's own header comment) so the 84 generated function
     pointers link without the HIP runtime.
+  - `commDump.cc` (`COMM_DUMP_CC_PATH`, from `comm-dump-test.cc`); suite
+    `CommDumpMicrotest.*`. Reads the dump back from `fakes/profiler_fakes.cc`.
+  - `include/timer.h` built with `ENABLE_TIMER`, from `timer-test.cc`; suite
+    `TimerMicrotest.*`. Header-only, no `_CC_PATH` macro needed; x86-64 only,
+    as that arm uses `__rdtsc`.
   - `rccl_wrap.cc` (`WRAP_CC_PATH`, from `wrap-test.cc`); suites
     `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Shared dependency seams live
     in their production-TU owners (`ce_fakes.cc`, `sym_kernels_fakes.cc`,
@@ -461,6 +466,29 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   cannot drive. Topologies come from XML built in `TopoScene.h`; HIP and amd-smi come from
   `fakes/hip_fakes.cc` and `fakes/amdsmi_fakes.cc`, the other externals from
   `fakes/graph_fakes.cc`. See `test_categories_micro_topo.yaml`.
+
+- **`rccl-UnitTestsMicroDebug`** — `debug.cc` (via `DEBUG_CC_PATH`, from
+  `debug-test.cc`); suite `Debug*`. Its own binary because it is the real
+  `ncclDebugLog`, which every shared fake set also defines. See
+  `test_categories_micro_debug.yaml`.
+
+- **`rccl-UnitTestsMicroApiTrace`** — `misc/api_trace.cc` (via `API_TRACE_CC_PATH`,
+  from `api-trace-test.cc`); suite `ApiTrace*`. Its own binary because it defines
+  the public `NCCL_API` entry points that `fakes/api_trace_fakes.cc` supplies
+  elsewhere. Built without `RCCL_ROCPROFILER_REGISTER`, so the rocprofiler-register
+  block is not covered. See `test_categories_micro_api_trace.yaml`.
+
+- **`rccl-UnitTestsMicroRecorder`** — `misc/recorder.cc` (via `RECORDER_CC_PATH`,
+  from `recorder-test.cc`); suite `Recorder*`. Its own binary because it is the
+  real `rccl::Recorder`, which `fakes/recorder_fakes.cc` supplies elsewhere. See
+  `test_categories_micro_recorder.yaml`.
+
+- **`rccl-UnitTestsMicroCollTrace`** — `misc/latency_profiler/CollTrace{,Event,Func,Utils}.cc`
+  (via `COLL_TRACE{,_EVENT,_FUNC,_UTILS}_CC_PATH`, all from `coll-trace-test.cc`);
+  suites `CollTrace*`. Its own binary because its `ncclDebugLog`, HIP event and
+  bootstrap seams would collide with the shared fakes. See
+  `test_categories_micro_coll_trace.yaml`.
+
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
@@ -629,6 +657,7 @@ symbol.
 | externals `src/bootstrap.cc` reaches (`rccl-UnitTestsMicroBootstrap`, which compiles it) | `fakes/bootstrap_micro_fakes.cc` |
 | `src/ce_coll.cc` (targets that do not compile the real file) | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
+| `src/debug.cc` (`ncclDebugLog` recorder for binaries that cannot link `nccl_fakes.cc`, which owns it everywhere else) | `fakes/debug_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
 | `src/diagnostics.cc` (`ncclDiagChildRun*` external-tool runners) | `fakes/diagnostics_fakes.cc` |
 | externals `src/dev_runtime.cc` reaches (`rccl-UnitTestsMicro`, which compiles it) | `fakes/dev_runtime_micro_fakes.cc` |
@@ -655,11 +684,13 @@ symbol.
 | `src/misc/mlx5dvwrap.cc` | `fakes/mlx5dvwrap_fakes.cc` |
 | `src/misc/param.cc` + `getenv` interposition | `fakes/env_fakes.cc` |
 | `src/misc/rocmwrap.cc` | `fakes/rocmwrap_fakes.cc` |
+| `src/misc/roctx.cc` (`roctx_scoped_range_in`, recorded) | `fakes/roctx_fakes.cc` |
 | `src/misc/socket.cc` | `fakes/socket_fakes.cc` |
 | `src/misc/strongstream.cc` | `fakes/strongstream_stubs.cc` |
 | `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
 | `src/os/linux.cc` | `fakes/os_fakes.cc` |
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
+| `src/plugin/profiler.cc` (`ncclProfilerProxyTraceDumpIfAny`, recorded) | `fakes/profiler_fakes.cc` |
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` (targets that do not compile the real file) | `fakes/gin_fakes.cc` |
 | `src/plugin/profiler.cc` (`ncclProfilerCallback`, until it has its own fakes file) | `fakes/nccl_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
@@ -1069,6 +1100,10 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroDdaColl            # src/algorithms/dda/*/dda_*.cu launchers
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
+./build/rccl-UnitTestsMicroCollTrace          # misc/latency_profiler tests
+./build/rccl-UnitTestsMicroRecorder           # misc/recorder.cc tests
+./build/rccl-UnitTestsMicroApiTrace           # misc/api_trace.cc tests
+./build/rccl-UnitTestsMicroDebug              # debug.cc tests
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
