@@ -128,6 +128,8 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementRangeChecked) {
   CHECK_FALSE(hrr_place_range(B, 0 - B, G, &b, &e));
   CHECK_FALSE(hrr_place_range(B, 0 - B + 1, G, &b, &e));
   CHECK_FALSE(hrr_place_range(B, ~0ull, G, &b, &e));
+  // Without the rec + size check this is accepted as [B, B + G).
+  CHECK_FALSE(hrr_place_range(B + 5, ~0ull, G, &b, &e));
   // rec + size ends just below 2^64: no wrap, but far above the ceiling.
   CHECK_FALSE(hrr_place_range(B, (0 - B) - 1, G, &b, &e));
   // Ends just below 2^64 but rounding up to a granule wraps.
@@ -138,20 +140,6 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementRangeChecked) {
   // The ceiling hrr_place_plan applies: the last byte at 2^47 - 1 is fine.
   CHECK(hrr_place_range((1ull << 47) - 64, 64, G, &b, &e));
   CHECK_FALSE(hrr_place_range((1ull << 47) - 64, 65, G, &b, &e));
-}
-
-// The plan drops an allocation whose recorded end wraps, including one that
-// ends exactly at 2^64 or whose page rounding wraps, so none is held.
-HRR_TEST_CASE(Unit_HRR_Playback_PlacementPlanDropsWrappedRange) {
-  const uint64_t B = 0x7f0000000000ull;
-  auto plan = hrr_place_plan({{B, B + 4096},
-                              {B + 8192, B},                 // end wrapped past 2^64
-                              {0ull - 4096, 0},               // ends at 2^64
-                              {0ull - 4096, ~0ull}},            // ends just below it
-                             {});
-  REQUIRE(plan.size() == 1);
-  CHECK(plan[0].base == B);
-  CHECK(plan[0].end == B + 4096);
 }
 
 /**

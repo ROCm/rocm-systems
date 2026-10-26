@@ -2611,10 +2611,12 @@ static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size, voi
     const size_t   gran = hrr_vmm_granularity(dev);
     uint64_t base, end;
     if (!hrr_place_range(rec, size, gran, &base, &end)) {
-        fprintf(stderr,
-                "[HRR] Placement: seq=%llu: refusing 0x%llx + %zu bytes (the range wraps, is "
-                "empty or lies above the placement ceiling); allocating without placement\n",
-                (unsigned long long)hrr_dispatch_seq, (unsigned long long)rec, size);
+        // hipMalloc(&p, 0) is legal and recorded; it has nothing to place.
+        if (size != 0)
+            fprintf(stderr,
+                    "[HRR] Placement: seq=%llu: refusing 0x%llx + %zu bytes (the range wraps, is "
+                    "empty or lies above the placement ceiling); allocating without placement\n",
+                    (unsigned long long)hrr_dispatch_seq, (unsigned long long)rec, size);
         ctx.place_fell_back++;
         return false;
     }
