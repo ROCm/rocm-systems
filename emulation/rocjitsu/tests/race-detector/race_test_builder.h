@@ -26,7 +26,7 @@ public:
       : waveSize_(waveSize), defaultExec_(waveSize == 64 ? ~0ULL : (1ULL << waveSize) - 1) {
     detector_ = std::make_unique<RaceDetector>(
         numWaves, vgprs, sgprs, wgId, [this](RaceViolation v) { violations_.push_back(v); },
-        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4));
+        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4), /*ldsSizeBytes=*/64 * 1024);
     for (int w = 0; w < numWaves; ++w) {
       waves_.push_back(&detector_->getWaveRaceState(w));
     }

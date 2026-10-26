@@ -79,14 +79,6 @@ void add_gpu_with_profile_status(amdsmi_status_t status) {
   g_sockets.push_back({processor});
 }
 
-// The tests share one fetcher and never destroy it: ~RdcMetricFetcherImpl() can
-// fail to wake its worker thread and then wait for the thread forever. The
-// fetcher keeps no state for the field these tests fetch.
-amd::rdc::RdcMetricFetcherImpl& fetcher() {
-  static auto* const instance = new amd::rdc::RdcMetricFetcherImpl();
-  return *instance;
-}
-
 class PartitionCountTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -97,8 +89,10 @@ class PartitionCountTest : public ::testing::Test {
   // Fetches RDC_FI_GPU_PARTITION_COUNT for the GPU at RDC index gpu_index.
   rdc_status_t fetch(uint32_t gpu_index, rdc_field_value* value) {
     *value = {};
-    return fetcher().fetch_smi_field(gpu_index, RDC_FI_GPU_PARTITION_COUNT, value);
+    return fetcher_.fetch_smi_field(gpu_index, RDC_FI_GPU_PARTITION_COUNT, value);
   }
+
+  amd::rdc::RdcMetricFetcherImpl fetcher_;
 };
 
 }  // namespace

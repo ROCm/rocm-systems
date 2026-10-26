@@ -102,6 +102,8 @@ pub enum MemoryKind {
         host_visible: bool,
         /// Request coherent device mappings for fine-grained access.
         coherent: bool,
+        /// Promote device-scope atomic coherence to extended system scope.
+        extended_coherent: bool,
         /// Bypass device caches for this allocation.
         uncached: bool,
         /// Request physically contiguous backing.
@@ -114,11 +116,17 @@ pub enum MemoryKind {
 /// retains it with a live registration, and quarantines it when cleanup cannot
 /// prove that native access has ended.
 pub(crate) struct HostRegistration {
+    /// First caller-owned or runtime-owned host byte.
     pub(crate) address: usize,
+    /// Native cache behavior requested for the registered pages.
     pub(crate) policy: HostMappingPolicy,
+    /// Exact byte extent to expose to the device.
     pub(crate) size: u64,
+    /// Required device address alignment.
     pub(crate) alignment: u64,
+    /// Device access established at registration.
     pub(crate) permissions: DeviceAccess,
+    /// Retained owner for runtime-allocated backing, when present.
     pub(crate) backing: Option<HostBackingLease>,
 }
 
@@ -146,6 +154,17 @@ pub struct VirtualMemoryInfo {
     pub mapping_granularity: u64,
     /// Stable native identity shared by equivalent handles for this backing.
     pub physical_backing_id: [u64; 2],
+    /// Native placement, if the driver could describe the backing.
+    pub placement: Option<VirtualMemoryPlacement>,
+}
+
+/// Placement class of a detached virtual-memory backing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VirtualMemoryPlacement {
+    /// System memory visible through a CPU agent.
+    System,
+    /// Device memory owned by the KFD GPU with this native identity.
+    Device(u32),
 }
 
 /// Cached facts for one reserved process virtual-address range.
@@ -162,8 +181,12 @@ pub struct VirtualAddressInfo {
 /// One checked placement request for a driver virtual-memory mapping.
 #[derive(Clone, Copy)]
 pub(crate) struct VirtualMapRequest {
+    /// First virtual byte to map inside the reservation.
     pub(crate) address: u64,
+    /// Byte offset into physical backing.
     pub(crate) offset: u64,
+    /// Byte extent of the mapping.
     pub(crate) size: u64,
+    /// Access granted to the selected address space.
     pub(crate) permissions: DeviceAccess,
 }

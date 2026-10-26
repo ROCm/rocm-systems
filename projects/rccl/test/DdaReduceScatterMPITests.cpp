@@ -11,9 +11,9 @@
  * Each input element depends on the sending rank, the destination shard, the element index and the
  * call, so a wrong peer, shard, packet or line index, or a stale scratch bank, changes the sum. The
  * two single-tier tests enqueue every call back to back with no host sync, so consecutive calls
- * alternate the two scratch banks and the third reuses the first; the two interleaved tests drain
- * the stream and barrier at each LL/LL128 switch. The COLL log line of every launch confirms the
- * tier, since the fallback paths also sum correctly.
+ * alternate the two scratch banks and the third reuses the first. LLAndLL128Interleaved drains
+ * and barriers at each tier switch; LLAndLL128InterleavedUnsynchronised does not. The COLL log
+ * line of every launch confirms the tier, since the fallback paths also sum correctly.
  *
  * nRanks 4 and 8 reach the launchers' unrolled NRANKS_CT kernels; any other count reaches the
  * runtime one. Run (example):
@@ -58,7 +58,7 @@ constexpr char kLL128Needle[] = "DDA fabric ReduceScatter LL128:";
 
 constexpr int      kCallsPerShape = 3;
 constexpr size_t   kLLShapes      = 3;      // llShapes() under the default gfx1250 thresholds at up to 16 ranks
-constexpr size_t   kLL128Shapes   = 4;      // ll128Shapes() under the default gfx1250 thresholds at up to 87 ranks
+constexpr size_t   kLL128Shapes   = 4;      // ll128Shapes() from the bank-derived slot and gfx1250 caps
 constexpr size_t   kGuardElems    = 64;     // past recvcount; a store beyond the shard lands here
 constexpr size_t   kAlignElems    = 64;     // 256 B between per-call buffers in one arena
 constexpr uint32_t kPoisonBits    = ~0u;    // NaN; an unwritten output never compares equal
@@ -133,38 +133,77 @@ std::vector<size_t> llShapes(const ncclComm* comm, int nRanks)
     return shapes;
 }
 
-// LL claims every 16 B-multiple shard first, so under default tables LL128 only serves an odd number of 8 B words.
+// 16-byte shards above the LL cap. The slot is the scratch bank split across ranks and
+// floored to whole slices (ddaLL128RsSlotWords), then clipped by the LL128 arch cap.
+// LL takes every aligned shard up to its cap, so these counts are what the selector
+// can still hand to LL128.
 std::vector<size_t> ll128Shapes(const ncclComm* comm, int nRanks)
 {
-    const size_t capBytes = std::min(dda::common::kDdaLL128RsMaxBytes,
-                                     rcclDdaLL128Threshold(comm, ncclFuncReduceScatter) / nRanks);
-    const size_t maxWords = capBytes / 8;
-    if(maxWords == 0)
+    const size_t llCap    = rcclDdaLLThreshold(comm, ncclFuncReduceScatter);
+    const size_t ll128Cap = rcclDdaLL128Threshold(comm, ncclFuncReduceScatter);
+    if(nRanks < 2 || ll128Cap <= llCap)
     {
         return {};
     }
-    std::vector<size_t> words;
-    // 1: a lone partial line. 77: five lines plus two words. 3007: 201 lines, four blocks of 64 line groups.
-    for(size_t w : {size_t{1}, size_t{77}, size_t{3007}})
+
+    const size_t sliceBytes = static_cast<size_t>(dda::common::kDdaLL128DataBytesPerSlice);
+    const size_t slotWords  = dda::common::ddaLL128RsSlotWords(dda::common::ddaBankSize(comm->ddaScratchBytes), nRanks);
+    const size_t slotSlices = slotWords / static_cast<size_t>(dda::common::kDdaLL128WireWordsPerSlice);
+    size_t       maxBytes   = (ll128Cap / static_cast<size_t>(nRanks)) & ~size_t{15};
+    const size_t slotBytes  = slotSlices * sliceBytes;
+    if(maxBytes > slotBytes)
     {
-        if(w <= maxWords)
+        maxBytes = slotBytes & ~size_t{15};
+    }
+
+    // Smallest 16-byte shard whose total message is past the LL cap.
+    size_t minBytes = (llCap + 16 + static_cast<size_t>(nRanks) - 1) / static_cast<size_t>(nRanks);
+    minBytes        = (minBytes + 15) & ~size_t{15};
+    if(minBytes * static_cast<size_t>(nRanks) <= llCap)
+    {
+        minBytes += 16;
+    }
+    if(minBytes == 0 || minBytes > maxBytes)
+    {
+        return {};
+    }
+
+    std::vector<size_t> bytes;
+    auto                consider = [&](size_t n) {
+        if(n < minBytes || n > maxBytes || (n & 15) != 0)
         {
-            words.push_back(w);
+            return;
         }
-    }
-    size_t largest = (maxWords % 2 == 0) ? maxWords - 1 : maxWords;
-    while(largest > 3007 && largest % dda::common::kDdaLL128DataElems == 0)
+        if(std::find(bytes.begin(), bytes.end(), n) == bytes.end())
+        {
+            bytes.push_back(n);
+        }
+    };
+
+    consider(minBytes);
+    // First shard that ends on a slice boundary, then one two-block stride past it
+    // (2 * 512/32 slices). The cap is pulled off an exact slice so the tail slice is partial.
+    const size_t nextSlice = (minBytes / sliceBytes + 1) * sliceBytes;
+    consider(nextSlice);
+    constexpr size_t kWarpsPerBlock = 512 / dda::common::kDdaLL128Warp;
+    consider(nextSlice + 2 * kWarpsPerBlock * sliceBytes);
+    size_t largest = maxBytes;
+    if(sliceBytes != 0 && largest % sliceBytes == 0 && largest > minBytes)
     {
-        largest -= 2;
+        largest -= 16;
     }
-    if(largest > 3007)
+    consider(largest);
+    for(size_t step = 16; bytes.size() < kLL128Shapes && minBytes + step < largest; step += 16)
     {
-        words.push_back(largest);
+        consider(minBytes + step);
     }
+
+    std::sort(bytes.begin(), bytes.end());
     std::vector<size_t> shapes;
-    for(size_t w : words)
+    shapes.reserve(bytes.size());
+    for(size_t n : bytes)
     {
-        shapes.push_back(w * 2);
+        shapes.push_back(n / sizeof(float));
     }
     return shapes;
 }
@@ -338,7 +377,7 @@ protected:
         {
             if(syncOnTierSwitch && s > 0 && steps[s].tier != steps[s - 1].tier)
             {
-                // LL and LL128 banks alias in the scratch, so a rank must not switch protocol while a peer still polls.
+                // Synchronized variant: every rank finishes the previous tier before any rank launches the next.
                 DdaFabricMPI::abortJobUnlessAllRanksDrained(
                     DdaFabricMPI::waitStreamBounded(getActiveStream(), kDrainTimeout), testId);
                 MPI_Barrier(MPI_COMM_WORLD);
@@ -440,7 +479,7 @@ TEST_F(DdaMPI_ReduceScatter, LLTierBackToBackShapes)
              kLLShapes * kCallsPerShape);
 }
 
-// Shards of an odd number of 8 B words: one partial line, several lines with a partial last one, many blocks.
+// 16-byte shards in the LL128 window: just past the LL cap, the next whole slice, two blocks of warps past that slice, and the slot or arch cap.
 TEST_F(DdaMPI_ReduceScatter, LL128TierBackToBackShapes)
 {
     runSteps("DdaMPI_ReduceScatter/LL128TierBackToBackShapes", /*needsLL128=*/true,
@@ -450,15 +489,15 @@ TEST_F(DdaMPI_ReduceScatter, LL128TierBackToBackShapes)
              kLL128Shapes * kCallsPerShape);
 }
 
-// Same-tier calls stay back to back; each tier switch drains and barriers because LL and LL128 banks overlap.
+// Same-tier calls stay back to back. This variant drains and barriers at each tier switch.
 TEST_F(DdaMPI_ReduceScatter, LLAndLL128Interleaved)
 {
     runSteps("DdaMPI_ReduceScatter/LLAndLL128Interleaved", /*needsLL128=*/true, interleavedSteps,
              2 * (kLLShapes + kLL128Shapes), /*maxBlocks=*/nullptr, /*syncOnTierSwitch=*/true);
 }
 
-// BUG: unsynced LL<->LL128 switches hang (job aborts) or sum stale slots at 2 blocks, np 3 and 8. Enable when fixed.
-TEST_F(DdaMPI_ReduceScatter, DISABLED_LLAndLL128InterleavedUnsynchronised)
+// No drain on an LL/LL128 switch, at two blocks. Both tiers double-buffer on the shared bank stride.
+TEST_F(DdaMPI_ReduceScatter, LLAndLL128InterleavedUnsynchronised)
 {
     runSteps("DdaMPI_ReduceScatter/LLAndLL128InterleavedUnsynchronised", /*needsLL128=*/true, interleavedSteps,
              2 * (kLLShapes + kLL128Shapes), /*maxBlocks=*/"2", /*syncOnTierSwitch=*/false);
