@@ -119,7 +119,7 @@ extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, 
                                   bool, struct rcclCollDecision*)>
     g_rcclSelectAllGather;
 extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, bool,
-                                  struct rcclCollDecision*)>
+                                  struct rcclCollDecision*, bool)>
     g_rcclSelectReduceScatter;
 extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool,
                                   bool, struct rcclCollDecision*)>

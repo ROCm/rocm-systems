@@ -206,16 +206,17 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
 }
 
 static ncclResult_t DefaultSelectReduceScatter(struct ncclComm*, const void*, void*, size_t, ncclDataType_t,
-                                               ncclRedOp_t, bool, struct rcclCollDecision*) {
+                                               ncclRedOp_t, bool, struct rcclCollDecision*, bool) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSelectReduceScatter");
 }
 std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, bool,
-                           struct rcclCollDecision*)>
+                           struct rcclCollDecision*, bool)>
     g_rcclSelectReduceScatter = DefaultSelectReduceScatter;
 ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                      ncclDataType_t datatype, ncclRedOp_t op, bool query,
-                                     struct rcclCollDecision* decision) {
-  return g_rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, query, decision);
+                                     struct rcclCollDecision* decision, bool graphCapturingHint) {
+  return g_rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, query, decision,
+                                   graphCapturingHint);
 }
 
 static ncclResult_t DefaultSelectAlltoAll(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t,
