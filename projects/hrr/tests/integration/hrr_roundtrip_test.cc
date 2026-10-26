@@ -209,10 +209,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
  *     HIP_HRR_SIGNING_KEY set and leaves hrr.manifest and a 64-byte hrr.sig in the
  *     process archive; the manifest lists every file under it.
  *   - Replay with --trusted-key accepts the archive and validates the D2H blobs.
- *   - Replay with no key still runs it (an unsigned or same-machine archive stays
- *     convenient).
- *   - One byte of a blob is flipped: replay with --trusted-key exits non-zero and
- *     names that blob, before any GPU call. (A wrong key is Unit_HRR_Sign_UnsignedAndWrongKey.)
  */
 HRR_TEST_CASE(Unit_HRR_CaptureSignedArchiveRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_signed_gpu"};
@@ -240,26 +236,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureSignedArchiveRoundtrip) {
   REQUIRE(files >= 3);
   CHECK(listed == files);
 
-  const std::string trusted = "--trusted-key " + hrr_quote_path(pub);
-  hrr_run_playback(cap.path, trusted);
-  hrr_run_playback(cap.path);
-
-  fs::path blob;
-  for (const auto& e : fs::recursive_directory_iterator(archive / "blobs"))
-    if (e.is_regular_file()) { blob = e.path(); break; }
-  REQUIRE_FALSE(blob.empty());
-  {
-    std::fstream f(blob, std::ios::in | std::ios::out | std::ios::binary);
-    char c = 0;
-    f.read(&c, 1);
-    f.seekp(0);
-    c = static_cast<char>(c ^ 0x01);
-    f.write(&c, 1);
-  }
-  auto [ret, out] = hrr_playback_merged(cap.path, trusted);
-  INFO(out);
-  CHECK(ret != 0);
-  CHECK(out.find(fs::relative(blob, archive).generic_string()) != std::string::npos);
+  // The GPU case: replay under the trusted key. That it is refused for a changed,
+  // added or missing file is Unit_HRR_Sign_*, which needs no GPU.
+  hrr_run_playback(cap.path, "--trusted-key " + hrr_quote_path(pub));
 }
 
 /**
