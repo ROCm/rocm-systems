@@ -3,9 +3,15 @@
 
 from __future__ import annotations
 
+import contextlib
+import ctypes
+import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -144,6 +150,117 @@ class CheckReplayCompatTests(unittest.TestCase):
         env = crc.probe_host_replay_env()
         self.assertEqual(env.visible_gpus, 2)
         self.assertEqual(env.comgr_version, "3.0")
+
+    @mock.patch("check_replay_compat.probe_comgr_version", return_value=None)
+    @mock.patch("check_replay_compat._run")
+    @mock.patch(
+        "check_replay_compat.shutil.which",
+        side_effect=lambda name: "/opt/rocm/bin/amd-smi" if name == "amd-smi" else None,
+    )
+    def test_probe_host_falls_back_to_amd_smi(
+        self, _which_mock: mock.Mock, run_mock: mock.Mock, _comgr_mock: mock.Mock
+    ) -> None:
+        # The fields read, from amdsmi docs/how-to/amdsmi-cli-tool.md:1399-1415.
+        run_mock.return_value = mock.Mock(
+            stdout=(
+                "GPU: 0\n"
+                "    ASIC:\n"
+                "        MARKET_NAME: AMD Instinct MI300A\n"
+                "        TARGET_GRAPHICS_VERSION: gfx942\n"
+            ),
+            stderr="",
+        )
+        with mock.patch.object(crc, "_IS_WIN", False):
+            env = crc.probe_host_replay_env()
+        self.assertEqual(run_mock.call_args_list[0].args[0][:2], ["/opt/rocm/bin/amd-smi", "static"])
+        self.assertEqual(env.visible_gpus, 1)
+        self.assertEqual(env.gpu_archs, ["gfx942"])
+        self.assertEqual(env.gpu_names, ["AMD Instinct MI300A"])
+
+    @mock.patch("check_replay_compat.probe_comgr_version", return_value=None)
+    @mock.patch("check_replay_compat._run")
+    @mock.patch(
+        "check_replay_compat.shutil.which",
+        side_effect=lambda name: "/opt/rocm/bin/amd-smi" if name == "amd-smi" else None,
+    )
+    def test_amd_smi_unknown_arch_skips_arch_check(
+        self, _which_mock: mock.Mock, run_mock: mock.Mock, _comgr_mock: mock.Mock
+    ) -> None:
+        # amd-smi prints N/A when the ASIC query fails (amdsmi_cli/subcommands/static.py).
+        run_mock.return_value = mock.Mock(
+            stdout=(
+                "GPU: 0\n"
+                "    ASIC:\n"
+                "        TARGET_GRAPHICS_VERSION: N/A\n"
+                "GPU: 1\n"
+                "    ASIC:\n"
+                "        TARGET_GRAPHICS_VERSION: gfx942\n"
+            ),
+            stderr="",
+        )
+        with mock.patch.object(crc, "_IS_WIN", False):
+            env = crc.probe_host_replay_env()
+        self.assertEqual(env.gpu_archs, ["", "gfx942"])
+        capture = crc.CaptureMetadata(
+            device_count=2, devices=SAMPLE_METADATA["devices"]
+        )
+        report = crc.evaluate_compat(capture, env, gpu=0, strict_arch=True)
+        self.assertTrue(report.ok)
+        self.assertFalse(report.warnings)
+        self.assertIn("- gpu_archs: n/a, gfx942", crc.render_report(report))
+
+    @mock.patch("check_replay_compat.probe_comgr_version", return_value=None)
+    @mock.patch("check_replay_compat._find_hip_exe", return_value=None)
+    def test_probe_windows_reads_arch_and_version_like_capture(
+        self, _exe_mock: mock.Mock, _comgr_mock: mock.Mock
+    ) -> None:
+        """Runs the probe scripts against a fake amdhip64.dll.
+
+        The fake fills hipDeviceProp_tR0000 at its C offsets (gcnArchName at 396
+        on x86_64, hip_deprecated.h) and returns HIP_VERSION 7.13.25443, which
+        capture records as "7.13.25443" (hip_capture_metadata.cpp).
+        """
+        def get_device_count(count):
+            count._obj.value = 1
+            return 0
+
+        def get_properties(props, device):
+            base = ctypes.addressof(props._obj)
+            ctypes.memmove(base, b"AMD Instinct MI300X\0", 20)
+            ctypes.memmove(base + 396, b"gfx942:sramecc+:xnack-\0", 23)
+            return 0
+
+        def runtime_get_version(version):
+            version._obj.value = 71325443
+            return 0
+
+        hip = types.SimpleNamespace(
+            hipGetDeviceCount=get_device_count,
+            hipGetDeviceProperties=get_properties,
+            hipRuntimeGetVersion=runtime_get_version,
+        )
+
+        def run_probe(cmd: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
+            out = io.StringIO()
+            rc = 0
+            with contextlib.redirect_stdout(out):
+                try:
+                    exec(cmd[2], {})
+                except SystemExit as e:
+                    rc = e.code or 0
+            return subprocess.CompletedProcess(cmd, rc, out.getvalue(), "")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "bin").mkdir()
+            (Path(tmp) / "bin" / "amdhip64.dll").write_bytes(b"")
+            with mock.patch.dict(os.environ, {"HIP_PATH": tmp}), \
+                    mock.patch("ctypes.CDLL", return_value=hip), \
+                    mock.patch.object(crc, "_run", side_effect=run_probe):
+                env = crc.probe_host_replay_env_windows()
+        self.assertEqual(env.visible_gpus, 1)
+        self.assertEqual(env.gpu_names, ["AMD Instinct MI300X"])
+        self.assertEqual(env.gpu_archs, ["gfx942"])
+        self.assertEqual(env.hip_runtime_version, "7.13.25443")
 
     def test_parse_hip_version_formats(self) -> None:
         self.assertEqual(

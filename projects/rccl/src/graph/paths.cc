@@ -1648,9 +1648,20 @@ ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink
 }
 
 // Check whether the system is all GPUs connected directly to each other through NVLink/NVSwitch.
+// RCCL: another host's GPUs are only in the system as MNNVL clique peers, which have no topology edge (PATH_DIS)
+// and reach each other through fabric memory handles, so only pairs on the same host are checked.
+// TODO: Drop the host check once cross-node MNNVL pairs get PATH_NVL from the topology (see ncclTopoTrimSystem).
 ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* directNvlink) {
-  int maxPath;
-  NCCLCHECK(ncclTopoGetGpuMaxPath(system, GPU, &maxPath));
+  int maxPath = PATH_LOC;
+  for (int i = 0; i < system->nodes[GPU].count; i++) {
+    struct ncclTopoNode* gpu = system->nodes[GPU].nodes + i;
+    if (gpu->paths[GPU] == NULL) continue;
+    for (int j = 0; j < system->nodes[GPU].count; j++) {
+      struct ncclTopoNode* peer = system->nodes[GPU].nodes + j;
+      if (i == j || NCCL_TOPO_ID_SYSTEM_ID(peer->id) != NCCL_TOPO_ID_SYSTEM_ID(gpu->id)) continue;
+      maxPath = std::max(maxPath, gpu->paths[GPU][j].type);
+    }
+  }
   *directNvlink = maxPath <= PATH_NVL;
   return ncclSuccess;
 }
