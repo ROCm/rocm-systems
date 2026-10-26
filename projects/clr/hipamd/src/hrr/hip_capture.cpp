@@ -2933,8 +2933,7 @@ void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims) {
 // Record a fat binary registered before capture started as a
 // HRR_API_HIPREGISTERFATBINARY event, with the code object HIP has loaded from
 // it so far (fbi is null until HIP digests it).
-static void record_fat_binary(const void* data, hip::FatBinaryInfo* fbi) {
-  if (!data) return;
+static void record_fat_binary(hip::FatBinaryInfo* fbi) {
   // ret 0: the handle is not meaningful at init time.
   write_register_fat_binary_event(0, record_fat_binary_code_object(fbi));
 }

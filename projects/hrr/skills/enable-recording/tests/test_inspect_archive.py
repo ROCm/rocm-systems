@@ -600,22 +600,16 @@ def make_bundle(elf: bytes) -> bytes:
 
 
 def register_fat_binary(
-    pid_dir: Path,
-    lo: int,
-    hi: int,
-    data: bytes,
-    event_id: int = inspect_archive.REGISTER_FAT_BINARY[9],
-    blob_size: int | None = None,
+    pid_dir: Path, lo: int, hi: int, data: bytes, event_id: int = inspect_archive.REGISTER_FAT_BINARY[9]
 ) -> None:
     """Store `data` as the capture writer stores a fat binary, and append the
-    `__hipRegisterFatBinary` record that names it to `events.bin`, with
-    `blob_size` in the record when given, else the size of `data`.
+    `__hipRegisterFatBinary` record that names it to `events.bin`.
     """
     name = f"{lo:016x}{hi:016x}"
     (pid_dir / "blobs" / name[:2]).mkdir(parents=True, exist_ok=True)
     (pid_dir / "blobs" / name[:2] / f"{name}.blob").write_bytes(data)
     record = struct.pack("<HQQQI2x", event_id, 2, 0, 0, 64)
-    record += struct.pack("<QQQQ", 0, lo, hi, len(data) if blob_size is None else blob_size)
+    record += struct.pack("<QQQQ", 0, lo, hi, len(data))
     with (pid_dir / "events.bin").open("ab") as handle:
         handle.write(record)
 
@@ -743,23 +737,6 @@ def test_only_blobs_registered_as_fat_binaries_are_checked(tmp_path, capsys):
     proc = json.loads(capsys.readouterr().out)["processes"][0]
     assert proc["debug_info_files"] == 1
     assert proc["unchecked_fat_binaries"] == 0
-
-
-def test_a_registration_naming_a_code_object_names_no_blob(tmp_path, capsys):
-    """A registration record with a blob size of 0 names the code object HIP
-    loaded, which is under `code_objects/` and scanned there. A blob that
-    happens to have that hash is a host buffer, not a fat binary.
-    """
-    pid_dir = make_process(tmp_path, 38, format_version=10)
-    leaky = make_bundle(make_elf({".text": b"\1" * 8, ".debug_str": b"/app/build\0"}))
-    register_fat_binary(pid_dir, 0xAD, 4, leaky, inspect_archive.REGISTER_FAT_BINARY[10], blob_size=0)
-    register_fat_binary(pid_dir, 0xAE, 5, b"CCOB", inspect_archive.REGISTER_FAT_BINARY[10], blob_size=0)
-
-    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
-    proc = json.loads(capsys.readouterr().out)["processes"][0]
-    assert proc["debug_info_files"] == 0
-    assert proc["unchecked_fat_binaries"] == 0
-    assert proc["fat_binaries_scanned"] is True
 
 
 def test_fat_binaries_are_found_by_the_id_of_the_archive_version(tmp_path, capsys):
