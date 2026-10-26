@@ -60,13 +60,58 @@
 #include "nccl_device/utility.h"
 #undef NCCL_DEVICE_INLINE
 #undef NCCL_HOST_DEVICE_INLINE
+
+/* ------------------------------------------------------------------------
+ * Two orthogonal build macros, deliberately nested rather than siblings.
+ *
+ *   __clang_llvm_bitcode_lib__   "I am the bitcode library."
+ *                                Defined by BOTH artifact builds. Besides the
+ *                                inline attribute below it also drives the
+ *                                caller-owned-LDS gates in
+ *                                nccl_device/coop.h and NCCL_IR_EXTERN_C in
+ *                                nccl_device/utility.h -- neither of which has
+ *                                anything to do with inlining policy.
+ *
+ *   __RCCL_DEVICE_LTO_BC_LIB__   "...and I am the deferred-inlining variant."
+ *                                A modifier on the above, never a replacement.
+ *                                Selects ONLY the exported-thunk inline
+ *                                attribute.
+ *
+ * These were siblings in an earlier revision, so the LTO build defined only
+ * the second one and silently took the *native* path through coop.h: the
+ * resulting librccl_device.lto.bc baked in a function-local `addrspace(3)`
+ * LDS array reachable only through an indirect call, which the AMDGPU
+ * group-segment sizing pass cannot see (HSA exception 0x1016 at runtime,
+ * "local memory global used by non-kernel function" from lld at link time).
+ * It went unnoticed only because nothing linked that artifact yet. The
+ * nesting plus the #error below make that divergence unrepresentable.
+ * ----------------------------------------------------------------------*/
+#if defined(__RCCL_DEVICE_LTO_BC_LIB__) && !defined(__clang_llvm_bitcode_lib__)
+#error "__RCCL_DEVICE_LTO_BC_LIB__ selects a variant of the bitcode library and must be defined together with __clang_llvm_bitcode_lib__, not instead of it."
+#endif
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
-#if defined(__NCCL_DEVICE_LTOIR_LIB__)
-#define NCCL_DEVICE_INLINE __device__ __inline_hint__
-#define NCCL_HOST_DEVICE_INLINE __host__ __device__ __inline_hint__
-#elif defined(__clang_llvm_bitcode_lib__)
+#if defined(__clang_llvm_bitcode_lib__)
+#if defined(__RCCL_DEVICE_LTO_BC_LIB__)
+/* Deferred-inlining bitcode variant (RCCL analogue of NCCL's __inline_hint__
+ * via -dlto --ltoir). AMDGPU/clang has no __inline_hint__ attribute, so this
+ * carries NO inlining attribute at all: the callee is an ordinary external
+ * __device__ function subject to the normal inliner cost model, which is the
+ * closest analogue of an advisory hint. The downstream AMDGPU LTO link (lld)
+ * can then re-decide inlining with the real caller visible.
+ *
+ * Do NOT spell this with the `inline` keyword. Per the comment above, the
+ * keyword gives these functions linkonce_odr linkage, so clang discards them
+ * and the artifact exports no symbols at all -- the thunk definitions in
+ * nccl_device_wrapper__impl.h are declared `NCCL_IR_EXTERN_C
+ * NCCL_DEVICE_INLINE`, so this macro -- not NCCL_IR_EXPORT -- is what
+ * determines the exported thunks' linkage. */
+#define NCCL_DEVICE_INLINE __device__
+#define NCCL_HOST_DEVICE_INLINE __host__ __device__
+#else
 #define NCCL_DEVICE_INLINE __device__ __attribute__((always_inline))
 #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __attribute__((always_inline))
+#endif
 #else
 // Consumer hipcc compile (IR_test.exe): hip_compat sets NCCL_DEVICE_COMPILE
 // for both host and device passes, so coop.h bodies are parsed on the host
@@ -123,7 +168,7 @@
  * body; this macro only controls the linkage of the thunk itself.
  * ----------------------------------------------------------------------*/
 #ifndef NCCL_IR_EXPORT
-  #ifdef __clang_llvm_bitcode_lib__
+  #if defined(__clang_llvm_bitcode_lib__)
     /* Building the bitcode artifact: applied to the definitions in
      * nccl_device_wrapper__impl.h. Three attributes are needed:
      *   `used`                -> @llvm.compiler.used : block compiler-driven DCE.
@@ -141,6 +186,20 @@
      *                              `undefined hidden symbol` errors when
      *                              downstream apps let the driver handle
      *                              the bitcode link (the more common case).
+     *
+     * Shared verbatim by both artifacts -- the deferred-inlining variant
+     * (librccl_device.lto.bc) wants exactly this attribute set too, and
+     * deliberately NO `noinline`. An earlier revision added `noinline` on the
+     * LTO path to stop clang folding the thunk into an in-TU caller before
+     * the LTO link, but measurement on gfx950 showed it only ever hurts: it
+     * also blocks lld from inlining the thunk into the *consumer* kernel, so
+     * the small accessor thunks degrade from a bare global_load_dword (what
+     * the plain .bc achieves) to real s_swappc_b64 call sequences. On the
+     * large ReduceSumCopy thunks it changes nothing -- at ~19k IR
+     * instructions the inliner's cost model declines on its own. The same
+     * reasoning rules out -fno-inline and -finline-hint-functions on this
+     * path: both stamp `noinline` into the IR, which survives into the LTO
+     * link and reproduces the regression.
      */
     #define NCCL_IR_EXPORT extern "C" __device__ \
         __attribute__((used, retain, visibility("default")))
@@ -166,24 +225,24 @@
  * Used by the Python device API to allocate session storage with the correct
  * size via llvm.alloca, without duplicating the C++ struct layout in Python.
  */
-NCCL_IR_EXTERN_C __device__ size_t ncclLsaBarrierSession_C_size();
-NCCL_IR_EXTERN_C __device__ size_t ncclGinBarrierSession_C_size();
-NCCL_IR_EXTERN_C __device__ size_t ncclBarrierSession_C_size();
+NCCL_IR_EXPORT size_t ncclLsaBarrierSession_C_size();
+NCCL_IR_EXPORT size_t ncclGinBarrierSession_C_size();
+NCCL_IR_EXPORT size_t ncclBarrierSession_C_size();
 
 /* ncclDevComm field accessors
  *
  * ncclDevComm is a public C struct, the following accessors are deprecated and will be removed.
  */
-NCCL_IR_EXTERN_C __device__ int                  ncclDevComm_Rank(ncclDevComm const* comm);
-NCCL_IR_EXTERN_C __device__ int                  ncclDevComm_NRanks(ncclDevComm const* comm);
-NCCL_IR_EXTERN_C __device__ int                  ncclDevComm_LsaRank(ncclDevComm const* comm);
-NCCL_IR_EXTERN_C __device__ int                  ncclDevComm_LsaSize(ncclDevComm const* comm);
-NCCL_IR_EXTERN_C __device__ ncclLsaBarrierHandle ncclDevComm_LsaBarrier(ncclDevComm const* comm);
-NCCL_IR_EXTERN_C __device__ ncclGinBarrierHandle ncclDevComm_RailGinBarrier(ncclDevComm const* comm);
-NCCL_IR_EXTERN_C __device__ ncclLsaBarrierHandle ncclDevComm_HybridLsaBarrier(ncclDevComm const* comm);
-NCCL_IR_EXTERN_C __device__ ncclGinBarrierHandle ncclDevComm_HybridRailGinBarrier(ncclDevComm const* comm);
-NCCL_IR_EXTERN_C __device__ ncclGinBarrierHandle ncclDevComm_WorldGinBarrier(ncclDevComm const* comm);
-NCCL_IR_EXTERN_C __device__ ncclMultimemHandle   ncclDevComm_LsaMultimem(ncclDevComm const* comm);
+NCCL_IR_EXPORT int                  ncclDevComm_Rank(ncclDevComm const* comm);
+NCCL_IR_EXPORT int                  ncclDevComm_NRanks(ncclDevComm const* comm);
+NCCL_IR_EXPORT int                  ncclDevComm_LsaRank(ncclDevComm const* comm);
+NCCL_IR_EXPORT int                  ncclDevComm_LsaSize(ncclDevComm const* comm);
+NCCL_IR_EXPORT ncclLsaBarrierHandle ncclDevComm_LsaBarrier(ncclDevComm const* comm);
+NCCL_IR_EXPORT ncclGinBarrierHandle ncclDevComm_RailGinBarrier(ncclDevComm const* comm);
+NCCL_IR_EXPORT ncclLsaBarrierHandle ncclDevComm_HybridLsaBarrier(ncclDevComm const* comm);
+NCCL_IR_EXPORT ncclGinBarrierHandle ncclDevComm_HybridRailGinBarrier(ncclDevComm const* comm);
+NCCL_IR_EXPORT ncclGinBarrierHandle ncclDevComm_WorldGinBarrier(ncclDevComm const* comm);
+NCCL_IR_EXPORT ncclMultimemHandle   ncclDevComm_LsaMultimem(ncclDevComm const* comm);
 
 /* Peer pointer API */
 NCCL_IR_EXPORT void* ncclGetPeerPointerTeam(
@@ -268,7 +327,7 @@ struct ncclBarrierSession_C {
   ncclBarrierSession<ncclCoopAny> bar;
 };
 // Collectively finalize the placement-new object and persist its epoch. Does not free storage.
-NCCL_IR_EXTERN_C __device__
+NCCL_IR_EXPORT
 void ncclLsaBarrierSessionDestroy(ncclLsaBarrierSession_C* session);
 
 /* GIN Barrier Session APIs */
@@ -287,7 +346,7 @@ NCCL_IR_EXPORT void ncclGinBarrierSessionSync(
     ncclGinFenceLevel fence = ncclGinFenceLevel::Put | ncclGinFenceLevel::Get);
 // Finalize the placement-new object. Currently a no-op -- the underlying destructor is
 // empty -- but required for lifetime symmetry with Init. Does not free storage.
-NCCL_IR_EXTERN_C __device__
+NCCL_IR_EXPORT
 void ncclGinBarrierSessionDestroy(ncclGinBarrierSession_C* session);
 
 /* Composite (LSA + GIN) Barrier Session APIs */
@@ -309,7 +368,7 @@ NCCL_IR_EXPORT void ncclBarrierSessionSync(
     cuda::memory_order order,
     ncclGinFenceLevel fence = ncclGinFenceLevel::Put | ncclGinFenceLevel::Get);
 // Collectively finalize all nested sessions and persist the inner LSA epoch. Does not free storage.
-NCCL_IR_EXTERN_C __device__
+NCCL_IR_EXPORT
 void ncclBarrierSessionDestroy(ncclBarrierSession_C* session);
 
 /* ReduceCopy APIs */

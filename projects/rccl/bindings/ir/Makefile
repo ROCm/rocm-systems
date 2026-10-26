@@ -25,6 +25,24 @@
 #     Example: cmake --build $(BUILDDIR) --target hipify_all
 #
 
+##### LTO (deferred-inlining) bitcode artifact #####
+# Opt-in: EMIT_LTO_BC=1 additionally emits librccl_device.lto.bc, a bitcode
+# variant with no opt internalize/inline/globaldce pass applied, intended
+# for downstream AMDGPU LTO consumption (-Xoffload-linker <bc>
+# -Xoffload-linker -plugin-opt=-amdgpu-internalize-symbols=false), analogous
+# to NCCL's nvcc -dlto --ltoir artifact.
+EMIT_LTO_BC ?= 0
+
+# Asking for the variant implies the library it is a variant of: the lto_bc
+# rules live inside the EMIT_LLVM_IR block below, and $(FINAL_LTO_BC) already
+# carries an order-only dependency on $(FINAL_BC). Without this, a bare
+# `make EMIT_LTO_BC=1` reports "disabled (EMIT_LLVM_IR=0)" and silently
+# produces nothing. `override` so it also holds for an explicit
+# `EMIT_LLVM_IR=0` on the command line, which is a contradictory request.
+ifneq ($(EMIT_LTO_BC), 0)
+override EMIT_LLVM_IR := 1
+endif
+
 ifneq ($(EMIT_LLVM_IR), 0)
 
 ##### Source #####
@@ -66,6 +84,12 @@ FINAL_BC       := $(LIBDIR)/librccl_device.bc
 
 WRAPPER_HEADER := $(INCDIR)/nccl_device_wrapper.h
 
+##### LTO (deferred-inlining) bitcode artifact outputs #####
+# See the EMIT_LTO_BC knob at the top of this file.
+LTO_BC_RAW   := $(OBJDIR)/librccl_device.lto.bc.raw
+LTO_IR_FILE  := $(OBJDIR)/librccl_device.lto.ll
+FINAL_LTO_BC := $(LIBDIR)/librccl_device.lto.bc
+
 ##### Device API defines #####
 # Enable all ReduceCopy type and block-size combinations in generated IR.
 NCCL_DEVICE_DEFINES := -DNCCL_DEVICE_PERMIT_EXPERIMENTAL_CODE=1
@@ -87,19 +111,40 @@ ROCM_INCLUDES := \
 # (target-agnostic) spelling of NCCL's --cuda-device-only.
 # Clang supports extended device lambdas but does not define nvcc's feature
 # macro; the ReduceCopy device APIs require it.
-COMMON_CLANG_FLAGS := \
+BASE_CLANG_FLAGS := \
 	-std=$(BITCODE_CXX_STD) \
 	-x hip \
 	--rocm-path=$(ROCM_PATH) \
 	--offload-device-only \
 	--offload-arch=$(BITCODE_LIB_ARCH) \
 	$(RCCL_INCLUDES) $(ROCM_INCLUDES) \
-	-D__clang_llvm_bitcode_lib__ \
 	-D__CUDACC_EXTENDED_LAMBDA__ \
 	$(NCCL_DEVICE_DEFINES) \
 	-D__HIP_PLATFORM_AMD__=1
 
+# Both artifacts are the bitcode library, so both define
+# __clang_llvm_bitcode_lib__. Beyond inlining policy that macro also selects
+# the caller-owned-LDS path in nccl_device/coop.h and extern "C" linkage for
+# NCCL_IR_EXTERN_C in nccl_device/utility.h; an artifact that omits it gets a
+# function-local addrspace(3) barrier array that the AMDGPU group-segment
+# sizing pass cannot see through the vtable indirect call. See the macro
+# commentary in nccl_device_wrapper.h.
+BITCODE_LIB_DEFINE := -D__clang_llvm_bitcode_lib__
+
+# Plain (collapsed) bitcode variant: thunks' callees are always_inline, and
+# the opt internalize/inline/globaldce pass below collapses everything
+# outside RCCL_DEVICE_BC_PUBLIC_API.
+COMMON_CLANG_FLAGS := $(BASE_CLANG_FLAGS) $(BITCODE_LIB_DEFINE)
+
+# Deferred-inlining ("LTO") variant: same library, one modifier on top.
+# __RCCL_DEVICE_LTO_BC_LIB__ drops always_inline from the thunks' callees
+# (see NCCL_DEVICE_INLINE in nccl_device_wrapper.h) and NO opt pass runs, so
+# a downstream AMDGPU LTO link (lld) can inline across the real call site
+# with full visibility.
+LTO_BC_CLANG_FLAGS := $(BASE_CLANG_FLAGS) $(BITCODE_LIB_DEFINE) -D__RCCL_DEVICE_LTO_BC_LIB__
+
 CLANG_FLAGS := -c -emit-llvm -O1 $(COMMON_CLANG_FLAGS)
+LTO_BC_CLANG_COMPILE_FLAGS := -c -emit-llvm -O1 $(LTO_BC_CLANG_FLAGS)
 
 ##### opt passes #####
 # Internalize everything outside the public surface, then inline and drop
@@ -115,7 +160,7 @@ RCCL_IR_REDUCE_COPY_API := \
 RCCL_IR_EMPTY :=
 RCCL_IR_SPACE := $(RCCL_IR_EMPTY) $(RCCL_IR_EMPTY)
 RCCL_IR_COMMA := ,
-RCCL_DEVICE_BC_PUBLIC_API := ncclGetPeerPointerTeam,ncclCoopAnyInitThread,ncclCoopAnyInitWarp,ncclCoopAnyInitLanes,ncclCoopAnyInitWarpSpan,ncclCoopAnyInitCta,ncclCoopThreadRank,ncclCoopSize,ncclCoopNumThreads,ncclCoopSync,ncclLsaBarrierSessionInit,ncclLsaBarrierSessionArrive,ncclLsaBarrierSessionWait,ncclLsaBarrierSessionSync,ncclGinBarrierSessionInit,ncclGinBarrierSessionSync,ncclBarrierSessionInit,ncclBarrierSessionSync,$(subst $(RCCL_IR_SPACE),$(RCCL_IR_COMMA),$(strip $(RCCL_IR_REDUCE_COPY_API)))
+RCCL_DEVICE_BC_PUBLIC_API := ncclLsaBarrierSession_C_size,ncclGinBarrierSession_C_size,ncclBarrierSession_C_size,ncclDevComm_Rank,ncclDevComm_NRanks,ncclDevComm_LsaRank,ncclDevComm_LsaSize,ncclDevComm_LsaBarrier,ncclDevComm_RailGinBarrier,ncclDevComm_HybridLsaBarrier,ncclDevComm_HybridRailGinBarrier,ncclDevComm_WorldGinBarrier,ncclDevComm_LsaMultimem,ncclGetPeerPointerTeam,ncclCoopAnyInitThread,ncclCoopAnyInitWarp,ncclCoopAnyInitLanes,ncclCoopAnyInitWarpSpan,ncclCoopAnyInitCta,ncclCoopThreadRank,ncclCoopSize,ncclCoopNumThreads,ncclCoopSync,ncclLsaBarrierSessionInit,ncclLsaBarrierSessionArrive,ncclLsaBarrierSessionWait,ncclLsaBarrierSessionSync,ncclLsaBarrierSessionDestroy,ncclGinBarrierSessionInit,ncclGinBarrierSessionSync,ncclGinBarrierSessionDestroy,ncclBarrierSessionInit,ncclBarrierSessionSync,ncclBarrierSessionDestroy,$(subst $(RCCL_IR_SPACE),$(RCCL_IR_COMMA),$(strip $(RCCL_IR_REDUCE_COPY_API)))
 
 OPT_PASSES := --passes=internalize,inline,globaldce \
 	-internalize-public-api-list=$(RCCL_DEVICE_BC_PUBLIC_API)
@@ -137,7 +182,10 @@ $(WRAPPER_HEADER): nccl_device_wrapper.h
 	@echo "Copying nccl_device_wrapper.h -> $@"
 	cp -f $< $@
 
-$(UNOPTIMIZED_BC): $(LLVM_SRC) $(WRAPPER_HEADER) util.h check_hipify
+# check_hipify is order-only (`|`): it is .PHONY, so as a normal prerequisite
+# it is always "out of date" and forced a full clang recompile on every make.
+# Order-only still runs the check first but does not make this target stale.
+$(UNOPTIMIZED_BC): $(LLVM_SRC) $(WRAPPER_HEADER) util.h | check_hipify
 	@mkdir -p $(OBJDIR)
 	@echo "Generating unoptimized LLVM bitcode for $(BITCODE_LIB_ARCH)..."
 	$(CLANG) $(CLANG_FLAGS) $(LLVM_SRC) -o $@
@@ -168,16 +216,55 @@ llvm_ir: $(FINAL_BC) $(OPTIMIZED_BC) $(WRAPPER_HEADER)
 	@echo "  Final BC:          $(FINAL_BC)"
 	@echo "  Wrapper Header:    $(WRAPPER_HEADER)"
 
+##### LTO (deferred-inlining) bitcode rules #####
+ifneq ($(EMIT_LTO_BC), 0)
+
+# Order-only check_hipify, same reasoning as $(UNOPTIMIZED_BC) above.
+$(LTO_BC_RAW): $(LLVM_SRC) $(WRAPPER_HEADER) util.h | check_hipify
+	@mkdir -p $(OBJDIR)
+	@echo "Generating deferred-inlining (LTO) LLVM bitcode for $(BITCODE_LIB_ARCH)..."
+	$(CLANG) $(LTO_BC_CLANG_COMPILE_FLAGS) $(LLVM_SRC) -o $@
+
+# No opt pass: this is the entire point of the LTO variant. The downstream
+# AMDGPU LTO link (lld) decides inlining with the real caller visible.
+$(LTO_IR_FILE): $(LTO_BC_RAW)
+	@echo "Disassembling LTO bitcode -> textual LLVM IR..."
+	$(LLVM_DIS) $< -o $@
+
+# Order-only prerequisite on $(FINAL_BC): both rules `mkdir -p $(LIBDIR)`,
+# so under `make -j` with both artifacts requested this avoids a concurrent
+# mkdir race without forcing a rebuild when only $(FINAL_BC) is stale.
+$(FINAL_LTO_BC): $(LTO_IR_FILE) | $(FINAL_BC)
+	@mkdir -p $(LIBDIR)
+	@echo "Assembling final LTO bitcode -> $@"
+	$(LLVM_AS) $< -o $@
+
+lto_bc: $(FINAL_LTO_BC)
+	@echo "RCCL deferred-inlining (LTO) bitcode generated successfully:"
+	@echo "  Raw LTO BC:        $(LTO_BC_RAW)"
+	@echo "  LTO IR (textual):  $(LTO_IR_FILE)"
+	@echo "  Final LTO BC:      $(FINAL_LTO_BC)"
+
+else  # EMIT_LTO_BC == 0
+
+lto_bc:
+	@echo "RCCL LTO bitcode generation disabled (EMIT_LTO_BC=0)"
+
+endif
+
 else  # EMIT_LLVM_IR == 0
 
 llvm_ir:
 	@echo "RCCL LLVM IR generation disabled (EMIT_LLVM_IR=0)"
 
+lto_bc:
+	@echo "RCCL LTO bitcode generation disabled (EMIT_LLVM_IR=0)"
+
 endif
 
-build: llvm_ir
+build: llvm_ir lto_bc
 
 clean:
-	rm -rf $(OBJDIR) $(FINAL_BC) $(WRAPPER_HEADER)
+	rm -rf $(OBJDIR) $(FINAL_BC) $(FINAL_LTO_BC) $(WRAPPER_HEADER)
 
-.PHONY: llvm_ir build clean check_hipify
+.PHONY: llvm_ir lto_bc build clean check_hipify

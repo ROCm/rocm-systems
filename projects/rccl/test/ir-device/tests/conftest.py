@@ -60,6 +60,26 @@ GENERATED_INC = os.path.join(RCCL_BUILD, "include")
 HIPCC = os.path.join(ROCM_PATH, "bin", "hipcc")
 TEST_EXE = os.path.join(IR_OUTDIR, "IR_test.exe")
 
+# --- Deferred-inlining ("LTO") bitcode variant ---
+# librccl_device.lto.bc is the same library compiled without always_inline on
+# the exported thunks' callees and without the opt internalize/inline/globaldce
+# pass, so a downstream AMDGPU LTO link decides inlining with the real caller
+# visible (RCCL's analogue of NCCL's `nvcc -dlto --ltoir` artifact).
+#
+# It is exercised here because it previously shipped miscompiled and nothing
+# caught it: the build defined only __RCCL_DEVICE_LTO_BC_LIB__ and not
+# __clang_llvm_bitcode_lib__, so nccl_device/coop.h took its *native* path and
+# baked a function-local `addrspace(3)` barrier array into the artifact --
+# exactly the LDS-sizing hazard (HSA exception 0x1016) the bitcode path exists
+# to avoid. The defect was invisible purely because no test linked the
+# artifact. Both the structural check and the link/run case below exist so that
+# cannot happen again.
+LTO_BITCODE = os.path.join(RCCL_BUILD, "lib", "librccl_device.lto.bc")
+LTO_TEST_EXE = os.path.join(IR_OUTDIR, "IR_test_lto.exe")
+OBJ_IR_DIR = os.path.join(RCCL_BUILD, "obj", "llvm_ir")
+LLVM_IR_FILE = os.path.join(OBJ_IR_DIR, "librccl_device.ll")
+LTO_LLVM_IR_FILE = os.path.join(OBJ_IR_DIR, "librccl_device.lto.ll")
+
 # --- Multi-rank GIN/composite barrier functional test (separate MPI binary) ---
 # This one needs the host RCCL library + MPI in addition to the bitcode, so it
 # is gated independently and skipped (not failed) when those are absent.
@@ -125,12 +145,13 @@ def _missing_prerequisite():
     return None
 
 
-def _build_bitcode():
-    """Emit librccl_device.bc via the standalone bindings/ir Makefile.
+def _build_bitcode(lto=False):
+    """Emit librccl_device{,.lto}.bc via the standalone bindings/ir Makefile.
 
-    Equivalent to building RCCL with -DEMIT_LLVM_IR=ON, but without a full
-    rebuild: the Makefile reuses the hipify-staged headers an earlier RCCL
-    build already produced. Returns the build log path; raises on failure.
+    Equivalent to building RCCL with -DEMIT_LLVM_IR=ON (plus -DEMIT_LTO_BC=ON
+    for the deferred-inlining variant), but without a full rebuild: the
+    Makefile reuses the hipify-staged headers an earlier RCCL build already
+    produced. Returns the build log path; raises on failure.
     """
     env = os.environ.copy()
     env.update({"ROCM_PATH": ROCM_PATH})
@@ -140,23 +161,30 @@ def _build_bitcode():
         f"BITCODE_LIB_ARCH={ARCH}",
         f"BUILDDIR={RCCL_BUILD}",
         f"ROCM_PATH={ROCM_PATH}",
-        "llvm_ir",
     ]
-    build_log = os.path.join(LOGDIR, "ir_bitcode_build.log")
+    if lto:
+        # The lto_bc target carries an order-only dep on the plain artifact,
+        # so this builds both.
+        args += ["EMIT_LTO_BC=1", "lto_bc"]
+        expect, what = LTO_BITCODE, "librccl_device.lto.bc"
+        build_log = os.path.join(LOGDIR, "ir_lto_bitcode_build.log")
+    else:
+        args += ["llvm_ir"]
+        expect, what = BITCODE, "librccl_device.bc"
+        build_log = os.path.join(LOGDIR, "ir_bitcode_build.log")
     with open(build_log, "w") as log:
         proc = subprocess.run(
             args, env=env, stdout=log, stderr=subprocess.STDOUT,
             universal_newlines=True,
         )
-    assert proc.returncode == 0, (
-        f"Failed to build librccl_device.bc (see {build_log})"
-    )
-    assert os.path.isfile(BITCODE), f"Bitcode not produced at {BITCODE}"
+    assert proc.returncode == 0, f"Failed to build {what} (see {build_log})"
+    assert os.path.isfile(expect), f"Bitcode not produced at {expect}"
     return build_log
 
 
-def _build_test_binary():
-    """Compile IR_test.cpp into a GoogleTest binary linked against the bitcode.
+def _build_test_binary(bitcode=BITCODE, exe=TEST_EXE,
+                       log_name="ir_test_build.log"):
+    """Compile IR_test.cpp into a GoogleTest binary linked against `bitcode`.
 
     Ports the hipcc invocation that previously lived in run_IR_test.sh:
 
@@ -167,6 +195,9 @@ def _build_test_binary():
       * -O0 is deliberate: a ROCm 7.x AMDGPU codegen bug breaks the indirect
         (vtable) dispatch this test exercises at -O1/-O2 (hang or error 700).
         This is a correctness test, not a benchmark, so -O0 is fine.
+
+    `bitcode`/`exe`/`log_name` are parameterized so the same recipe builds
+    against either artifact; the LTO variant otherwise shares every flag.
 
     Returns the build log path; raises on failure.
     """
@@ -185,12 +216,12 @@ def _build_test_binary():
         f"-I{GENERATED_INC}",
         f"-I{gtest_inc}",
         IR_TEST_SRC,
-        "-Xoffload-linker", BITCODE,
+        "-Xoffload-linker", bitcode,
         "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
         f"-L{gtest_libdir}", "-lgtest_main", "-lgtest", "-lpthread",
-        "-o", TEST_EXE,
+        "-o", exe,
     ]
-    build_log = os.path.join(LOGDIR, "ir_test_build.log")
+    build_log = os.path.join(LOGDIR, log_name)
     with open(build_log, "w") as log:
         log.write("$ " + " ".join(args) + "\n\n")
         log.flush()
@@ -199,7 +230,7 @@ def _build_test_binary():
             stderr=subprocess.STDOUT, universal_newlines=True,
         )
     assert proc.returncode == 0, f"Failed to compile IR_test (see {build_log})"
-    assert os.path.isfile(TEST_EXE), f"Test binary not produced at {TEST_EXE}"
+    assert os.path.isfile(exe), f"Test binary not produced at {exe}"
     return build_log
 
 
@@ -388,12 +419,61 @@ def paths():
         BITCODE=BITCODE,
         TEST_EXE=TEST_EXE,
         LOGDIR=LOGDIR,
+        LTO_BITCODE=LTO_BITCODE,
+        LTO_TEST_EXE=LTO_TEST_EXE,
+        LLVM_IR_FILE=LLVM_IR_FILE,
+        LTO_LLVM_IR_FILE=LTO_LLVM_IR_FILE,
     )
 
 
 @pytest.fixture(scope="session")
-def run_gtest(ir_test_binary):
-    """Return a helper that runs the IR_test binary for a --gtest_filter.
+def lto_bitcode_ir():
+    """Build both artifacts and return their textual-IR paths.
+
+    Returns a SimpleNamespace with `plain` and `lto` .ll paths so structural
+    checks can inspect the emitted IR directly. No GPU is needed to evaluate
+    the result, only to build it.
+    """
+    reason = _missing_prerequisite()
+    if reason:
+        pytest.skip(f"IR device tests skipped: {reason}")
+
+    logger.info("Updating both bitcode artifacts (arch=%s)...", ARCH)
+    bc_log = _build_bitcode(lto=True)
+    logger.info("Both bitcode artifacts READY (log: %s)", bc_log)
+    for p in (LLVM_IR_FILE, LTO_LLVM_IR_FILE):
+        assert os.path.isfile(p), f"textual IR not produced at {p}"
+    return SimpleNamespace(plain=LLVM_IR_FILE, lto=LTO_LLVM_IR_FILE)
+
+
+@pytest.fixture(scope="session")
+def ir_lto_test_binary():
+    """Build librccl_device.lto.bc, then compile IR_test.cpp against it.
+
+    Same source and flags as `ir_test_binary`; only the linked artifact
+    differs. Returns the path to the compiled GoogleTest executable.
+    """
+    reason = _missing_prerequisite()
+    if reason:
+        pytest.skip(f"IR device tests skipped: {reason}")
+
+    logger.info("Updating librccl_device.lto.bc at %s (arch=%s)...",
+                LTO_BITCODE, ARCH)
+    bc_log = _build_bitcode(lto=True)
+    logger.info("librccl_device.lto.bc READY (log: %s)", bc_log)
+
+    logger.info("Compiling IR_test.cpp against the LTO artifact -> %s ...",
+                LTO_TEST_EXE)
+    test_log = _build_test_binary(
+        bitcode=LTO_BITCODE, exe=LTO_TEST_EXE,
+        log_name="ir_test_lto_build.log",
+    )
+    logger.info("IR_test (LTO) BUILT at %s (log: %s)", LTO_TEST_EXE, test_log)
+    return LTO_TEST_EXE
+
+
+def _make_gtest_runner(exe):
+    """Return a `_run(gtest_filter, log_name, gpu=None)` helper for `exe`.
 
     The helper returns (subprocess.CompletedProcess, log_file_path). Output is
     tee'd to a log file under logs/ for post-mortem inspection.
@@ -408,8 +488,7 @@ def run_gtest(ir_test_binary):
         elif "HIP_VISIBLE_DEVICES" not in env:
             env["HIP_VISIBLE_DEVICES"] = "0"
 
-        args = [ir_test_binary, f"--gtest_filter={gtest_filter}",
-                "--gtest_color=no"]
+        args = [exe, f"--gtest_filter={gtest_filter}", "--gtest_color=no"]
         log_file = os.path.join(LOGDIR, log_name)
         with open(log_file, "w") as log:
             proc = subprocess.run(
@@ -423,3 +502,15 @@ def run_gtest(ir_test_binary):
         return proc, log_file
 
     return _run
+
+
+@pytest.fixture(scope="session")
+def run_gtest(ir_test_binary):
+    """Run the IR_test binary linked against librccl_device.bc."""
+    return _make_gtest_runner(ir_test_binary)
+
+
+@pytest.fixture(scope="session")
+def run_lto_gtest(ir_lto_test_binary):
+    """Run the IR_test binary linked against librccl_device.lto.bc."""
+    return _make_gtest_runner(ir_lto_test_binary)

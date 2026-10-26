@@ -30,6 +30,11 @@
  *   [C2] ncclBarrierSession{Init,Sync}  (composite inner-LSA + outer-GIN)
  *          — sizeof / alignment structural check: PASS
  *          — runtime invocations: SKIP (require a live ncclDevComm + GIN net)
+ *   [D0] the three ncclXBarrierSession_C_size() getters — *called* on device
+ *          and compared against host-side sizeof
+ *   [D1] the ten ncclDevComm_* accessors + three *SessionDestroy thunks —
+ *          address-taken so each must resolve from the bitcode (they need a
+ *          live ncclDevComm / session to actually invoke)
  *
  * Build is NOT a normal CMake/GTest build: librccl_device.bc must already
  * exist (cmake -DEMIT_LLVM_IR=ON) and the translation unit must be compiled
@@ -585,4 +590,107 @@ TEST_F(IRDeviceTest, C2b_BarrierSessionRuntime) {
    * C1b need at once: a live ncclDevComm plus GIN network resources. */
   GTEST_SKIP() << "ncclBarrierSession{Init,Sync} require a live ncclDevComm "
                   "+ GIN network resources (not set up here)";
+}
+
+/* =====================================================================
+ * [D] Bucket-D export coverage for the 16 accessor / size-getter /
+ *     session-destroy thunks
+ *
+ * These 16 symbols were declared `NCCL_IR_EXTERN_C __device__` rather than
+ * `NCCL_IR_EXPORT`, so they were absent from the exact-name
+ * RCCL_DEVICE_BC_PUBLIC_API list that
+ * `opt --passes=internalize,inline,globaldce` consumes: internalize demoted
+ * them to `internal` and globaldce deleted them outright. Nothing in the
+ * suite referenced them, so the breakage was invisible.
+ *
+ * Coverage is split by what each thunk needs to run:
+ *   D0 — the three `_size()` getters take no arguments and touch no device
+ *        state, so they are *called* and checked against host-side sizeof.
+ *        This is a true end-to-end check: the symbol must link AND return
+ *        the right value.
+ *   D1 — the ten ncclDevComm_* accessors and the three *SessionDestroy
+ *        thunks need a live ncclDevComm / session, so (matching the B7b /
+ *        C1b / C2b skip rationale) they are address-taken only. Storing the
+ *        pointer value forces a real consumer -> bitcode relocation per
+ *        symbol, so an internalized export fails the device link or yields
+ *        a null address here.
+ * ==================================================================== */
+__global__ void k_bucketD_sizes(uint64_t* out) {
+  out[0] = (uint64_t)ncclLsaBarrierSession_C_size();
+  out[1] = (uint64_t)ncclGinBarrierSession_C_size();
+  out[2] = (uint64_t)ncclBarrierSession_C_size();
+}
+
+TEST_F(IRDeviceTest, D0_BucketDSizeGettersCallable) {
+  constexpr int N = 3;
+  uint64_t* d = nullptr;
+  HIP_ASSERT(hipMalloc(&d, sizeof(uint64_t) * N));
+  HIP_ASSERT(hipMemset(d, 0, sizeof(uint64_t) * N));
+  k_bucketD_sizes<<<1, 1>>>(d);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  uint64_t got[N] = {};
+  HIP_ASSERT(hipMemcpy(got, d, sizeof got, hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(d));
+
+  const char* names[N] = {"ncclLsaBarrierSession_C_size",
+                          "ncclGinBarrierSession_C_size",
+                          "ncclBarrierSession_C_size"};
+  const uint64_t want[N] = {(uint64_t)sizeof(ncclLsaBarrierSession_C),
+                            (uint64_t)sizeof(ncclGinBarrierSession_C),
+                            (uint64_t)sizeof(ncclBarrierSession_C)};
+  for (int i = 0; i < N; ++i) {
+    SCOPED_TRACE(names[i]);
+    EXPECT_EQ(got[i], want[i])
+        << names[i] << " returned " << got[i] << ", host sizeof is " << want[i];
+  }
+}
+
+__global__ void k_bucketD_symbol_addrs(uint64_t* out) {
+  out[0]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_Rank;
+  out[1]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_NRanks;
+  out[2]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_LsaRank;
+  out[3]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_LsaSize;
+  out[4]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_LsaBarrier;
+  out[5]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_RailGinBarrier;
+  out[6]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_HybridLsaBarrier;
+  out[7]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_HybridRailGinBarrier;
+  out[8]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_WorldGinBarrier;
+  out[9]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_LsaMultimem;
+  out[10] = (uint64_t)(uintptr_t)(void*)&ncclLsaBarrierSessionDestroy;
+  out[11] = (uint64_t)(uintptr_t)(void*)&ncclGinBarrierSessionDestroy;
+  out[12] = (uint64_t)(uintptr_t)(void*)&ncclBarrierSessionDestroy;
+}
+
+TEST_F(IRDeviceTest, D1_BucketDSymbolsLinkable) {
+  constexpr int N = 13;
+  uint64_t* d = nullptr;
+  HIP_ASSERT(hipMalloc(&d, sizeof(uint64_t) * N));
+  HIP_ASSERT(hipMemset(d, 0, sizeof(uint64_t) * N));
+  k_bucketD_symbol_addrs<<<1, 1>>>(d);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  uint64_t got[N] = {};
+  HIP_ASSERT(hipMemcpy(got, d, sizeof got, hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(d));
+
+  const char* names[N] = {"ncclDevComm_Rank",
+                          "ncclDevComm_NRanks",
+                          "ncclDevComm_LsaRank",
+                          "ncclDevComm_LsaSize",
+                          "ncclDevComm_LsaBarrier",
+                          "ncclDevComm_RailGinBarrier",
+                          "ncclDevComm_HybridLsaBarrier",
+                          "ncclDevComm_HybridRailGinBarrier",
+                          "ncclDevComm_WorldGinBarrier",
+                          "ncclDevComm_LsaMultimem",
+                          "ncclLsaBarrierSessionDestroy",
+                          "ncclGinBarrierSessionDestroy",
+                          "ncclBarrierSessionDestroy"};
+  for (int i = 0; i < N; ++i) {
+    SCOPED_TRACE(names[i]);
+    EXPECT_NE(got[i], 0ull) << names[i] << " did not resolve from the bitcode";
+  }
 }

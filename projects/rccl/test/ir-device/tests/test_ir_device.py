@@ -125,6 +125,89 @@ def test_composite_barrier_session(run_gtest):
 
 
 @pytest.mark.ir_device
+@pytest.mark.device_accessors
+def test_bucket_d_size_getters_callable(run_gtest):
+    """[D0] The three ncclXBarrierSession_C_size() getters link AND are correct.
+
+    They take no arguments and touch no device state, so they are actually
+    called on device and compared against host-side sizeof -- an end-to-end
+    check, not just a relocation check.
+    """
+    proc, log = run_gtest("IRDeviceTest.D0_BucketDSizeGettersCallable",
+                          "ir_bucket_d_sizes.log")
+    _summarize_gtest(proc, log, "bucket D size getters")
+
+
+@pytest.mark.ir_device
+@pytest.mark.device_accessors
+def test_bucket_d_symbols_linkable(run_gtest):
+    """[D1] The 10 ncclDevComm_* accessors + 3 *SessionDestroy thunks export.
+
+    These were declared NCCL_IR_EXTERN_C instead of NCCL_IR_EXPORT, so they
+    were missing from RCCL_DEVICE_BC_PUBLIC_API and `opt`'s
+    internalize/globaldce pass deleted them. Address-taken only, since
+    invoking them needs a live ncclDevComm / session.
+    """
+    proc, log = run_gtest("IRDeviceTest.D1_BucketDSymbolsLinkable",
+                          "ir_bucket_d_symbols.log")
+    _summarize_gtest(proc, log, "bucket D symbol link coverage")
+
+
+@pytest.mark.ir_device
+@pytest.mark.lto_bc
+def test_bitcode_artifacts_own_no_lds(lto_bitcode_ir):
+    """Neither artifact may carry an LDS (addrspace(3)) global.
+
+    The bitcode library hands barrier storage to the *caller*
+    (ncclCoopWarpSpan::slots) precisely because an LDS global reached only
+    through the ncclCoopAny vtable's indirect call is invisible to the AMDGPU
+    group-segment sizing pass -- the kernel is then launched with too little
+    LDS and the dispatch aborts with HSA exception 0x1016. coop.h gates that
+    on __clang_llvm_bitcode_lib__.
+
+    librccl_device.lto.bc shipped violating this: its build defined only
+    __RCCL_DEVICE_LTO_BC_LIB__, so coop.h took the native path and emitted
+    `@...ncclCoopNamedBarrierState...slots = internal addrspace(3) global`
+    into the artifact. Nothing linked that artifact, so nothing noticed. This
+    asserts on the emitted textual IR directly, which is where the defect is
+    unambiguous -- a consumer-side link warning is not a usable signal here,
+    since the consumer legitimately compiles its own copy of coop.h on the
+    native path and warns either way.
+    """
+    for label, path in (("plain", lto_bitcode_ir.plain),
+                        ("lto", lto_bitcode_ir.lto)):
+        with open(path) as fh:
+            offenders = [
+                f"{path}:{n}: {line.strip()}"
+                for n, line in enumerate(fh, 1)
+                if "addrspace(3)" in line
+            ]
+        assert not offenders, (
+            f"{label} bitcode artifact carries {len(offenders)} LDS "
+            "reference(s); the bitcode library must use caller-owned barrier "
+            "storage. First few:\n" + "\n".join(offenders[:5])
+        )
+
+
+@pytest.mark.ir_device
+@pytest.mark.lto_bc
+def test_lto_bitcode_links_and_runs(run_lto_gtest):
+    """The deferred-inlining artifact links and behaves like the plain one.
+
+    Runs the coop + barrier cases, which are the ones that exercise the
+    caller-owned-LDS contract and the ncclCoopAny vtable dispatch, against
+    librccl_device.lto.bc. Guards the artifact against both silent
+    export-surface loss (a missing thunk fails the device link) and the LDS
+    regression above (a mis-sized group segment aborts the dispatch).
+    """
+    proc, log = run_lto_gtest(
+        "IRDeviceTest.B*:IRDeviceTest.C*:IRDeviceTest.D*",
+        "ir_lto_bitcode.log",
+    )
+    _summarize_gtest(proc, log, "librccl_device.lto.bc link + run")
+
+
+@pytest.mark.ir_device
 @pytest.mark.gin_barrier
 @pytest.mark.mpi
 def test_gin_barrier_session_functional_mpi(run_gin_mpi_gtest):

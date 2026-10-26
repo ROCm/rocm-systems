@@ -33,6 +33,18 @@ set(FINAL_BC       ${LIBDIR}/librccl_device.bc)
 
 set(WRAPPER_HEADER ${INCLUDEDIR}/nccl_device_wrapper.h)
 
+##### LTO (deferred-inlining) bitcode artifact #####
+# Opt-in: EMIT_LTO_BC=ON additionally emits librccl_device.lto.bc, a bitcode
+# variant with no opt internalize/inline/globaldce pass applied, intended
+# for downstream AMDGPU LTO consumption (-Xoffload-linker <bc>
+# -Xoffload-linker -plugin-opt=-amdgpu-internalize-symbols=false), analogous
+# to NCCL's nvcc -dlto --ltoir artifact.
+option(EMIT_LTO_BC "Additionally emit a deferred-inlining LTO bitcode variant (librccl_device.lto.bc)" OFF)
+
+set(LTO_BC_RAW   ${OBJDIR}/librccl_device.lto.bc.raw)
+set(LTO_IR_FILE  ${OBJDIR}/librccl_device.lto.ll)
+set(FINAL_LTO_BC ${LIBDIR}/librccl_device.lto.bc)
+
 ##### Build configuration #####
 # Default GPU architecture for the bitcode artifact. Override via:
 #     cmake -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx942 ...
@@ -102,7 +114,7 @@ set(ROCM_INCLUDES
 # target-agnostic spelling of NCCL's --cuda-device-only.
 # Clang supports extended device lambdas but does not define nvcc's feature
 # macro; the ReduceCopy device APIs require it.
-set(COMMON_CLANG_FLAGS
+set(BASE_CLANG_FLAGS
   -std=${BITCODE_CXX_STD}
   -x hip
   --rocm-path=${ROCM_PATH}
@@ -110,15 +122,47 @@ set(COMMON_CLANG_FLAGS
   --offload-arch=${BITCODE_LIB_ARCH}
   ${RCCL_INCLUDES}
   ${ROCM_INCLUDES}
-  -D__clang_llvm_bitcode_lib__
   -D__CUDACC_EXTENDED_LAMBDA__
   ${NCCL_DEVICE_DEFINES}
   -D__HIP_PLATFORM_AMD__=1
 )
 
+# Both artifacts are the bitcode library, so both define
+# __clang_llvm_bitcode_lib__. Beyond inlining policy that macro also selects
+# the caller-owned-LDS path in nccl_device/coop.h and extern "C" linkage for
+# NCCL_IR_EXTERN_C in nccl_device/utility.h; an artifact that omits it gets a
+# function-local addrspace(3) barrier array that the AMDGPU group-segment
+# sizing pass cannot see through the vtable indirect call. See the macro
+# commentary in nccl_device_wrapper.h.
+set(BITCODE_LIB_DEFINE -D__clang_llvm_bitcode_lib__)
+
+# Plain (collapsed) bitcode variant: thunks' callees are always_inline, and
+# the opt internalize/inline/globaldce pass below collapses everything
+# outside RCCL_DEVICE_BC_PUBLIC_API.
+set(COMMON_CLANG_FLAGS
+  ${BASE_CLANG_FLAGS}
+  ${BITCODE_LIB_DEFINE}
+)
+
+# Deferred-inlining ("LTO") variant: same library, one modifier on top.
+# __RCCL_DEVICE_LTO_BC_LIB__ drops always_inline from the thunks' callees
+# (see NCCL_DEVICE_INLINE in nccl_device_wrapper.h) and NO opt pass runs, so
+# a downstream AMDGPU LTO link (lld) can inline across the real call site
+# with full visibility.
+set(LTO_BC_CLANG_FLAGS
+  ${BASE_CLANG_FLAGS}
+  ${BITCODE_LIB_DEFINE}
+  -D__RCCL_DEVICE_LTO_BC_LIB__
+)
+
 set(CLANG_FLAGS
   -c -emit-llvm -O1
   ${COMMON_CLANG_FLAGS}
+)
+
+set(LTO_BC_CLANG_COMPILE_FLAGS
+  -c -emit-llvm -O1
+  ${LTO_BC_CLANG_FLAGS}
 )
 
 ##### Stage the public wrapper header into build/include #####
@@ -156,6 +200,19 @@ add_custom_command(
 # entries in nccl_device_wrapper.h.
 set(RCCL_DEVICE_BC_PUBLIC_API
     # [A] Always-on
+    ncclLsaBarrierSession_C_size
+    ncclGinBarrierSession_C_size
+    ncclBarrierSession_C_size
+    ncclDevComm_Rank
+    ncclDevComm_NRanks
+    ncclDevComm_LsaRank
+    ncclDevComm_LsaSize
+    ncclDevComm_LsaBarrier
+    ncclDevComm_RailGinBarrier
+    ncclDevComm_HybridLsaBarrier
+    ncclDevComm_HybridRailGinBarrier
+    ncclDevComm_WorldGinBarrier
+    ncclDevComm_LsaMultimem
     ncclGetPeerPointerTeam
     # [B] ncclCoopAny + LSA barrier session
     ncclCoopAnyInitThread
@@ -171,11 +228,14 @@ set(RCCL_DEVICE_BC_PUBLIC_API
     ncclLsaBarrierSessionArrive
     ncclLsaBarrierSessionWait
     ncclLsaBarrierSessionSync
+    ncclLsaBarrierSessionDestroy
     # [C] GIN + composite barrier session
     ncclGinBarrierSessionInit
     ncclGinBarrierSessionSync
+    ncclGinBarrierSessionDestroy
     ncclBarrierSessionInit
     ncclBarrierSessionSync
+    ncclBarrierSessionDestroy
 )
 # [D] ReduceCopy: one thunk per op and type, matching NCCL_IR_TYPES /
 # NCCL_IR_MULTIMEM_TYPES in util.h.
@@ -231,6 +291,60 @@ add_custom_target(llvm_ir
   DEPENDS ${FINAL_BC} ${OPTIMIZED_BC} ${WRAPPER_HEADER}
   COMMENT "RCCL LLVM IR / bitcode generation"
 )
+
+##### LTO (deferred-inlining) bitcode custom commands #####
+if(EMIT_LTO_BC)
+  ##### Step 1: clang -> raw (unoptimized, no opt pass ever runs) bitcode #####
+  add_custom_command(
+    OUTPUT ${LTO_BC_RAW}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${OBJDIR}
+    COMMAND ${CLANG_EXECUTABLE} ${LTO_BC_CLANG_COMPILE_FLAGS} ${LLVM_SRC} -o ${LTO_BC_RAW}
+    DEPENDS ${LLVM_SRC} ${WRAPPER_HEADER} ${CMAKE_CURRENT_SOURCE_DIR}/util.h
+    COMMENT "Generating deferred-inlining (LTO) LLVM bitcode for ${BITCODE_LIB_ARCH}..."
+    VERBATIM
+  )
+
+  ##### Step 2: llvm-dis -> textual IR (kept for inspection; no opt step) #####
+  add_custom_command(
+    OUTPUT ${LTO_IR_FILE}
+    COMMAND ${LLVM_DIS_EXECUTABLE} ${LTO_BC_RAW} -o ${LTO_IR_FILE}
+    DEPENDS ${LTO_BC_RAW}
+    COMMENT "Disassembling LTO bitcode -> textual LLVM IR..."
+    VERBATIM
+  )
+
+  ##### Step 3: llvm-as -> final LTO bitcode artifact in build/lib #####
+  # Deliberately does NOT depend on ${FINAL_BC}. The two artifacts are
+  # independent outputs of independent inputs; the only thing they share is
+  # ${LIBDIR}, and `cmake -E make_directory` tolerates the directory already
+  # existing, so there is no race to serialize. An earlier revision listed
+  # ${FINAL_BC} here claiming build-order-only semantics, but CMake's DEPENDS
+  # has no order-only form -- it is a real file dependency, so it rebuilt
+  # librccl_device.lto.bc every time the plain .bc changed, which is exactly
+  # what that comment said it avoided. The standalone Makefile expresses the
+  # intent correctly with `| $(FINAL_BC)`.
+  add_custom_command(
+    OUTPUT ${FINAL_LTO_BC}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${LIBDIR}
+    COMMAND ${LLVM_AS_EXECUTABLE} ${LTO_IR_FILE} -o ${FINAL_LTO_BC}
+    DEPENDS ${LTO_IR_FILE}
+    COMMENT "Assembling final LTO bitcode -> librccl_device.lto.bc..."
+    VERBATIM
+  )
+
+  add_custom_target(lto_bc
+    DEPENDS ${FINAL_LTO_BC}
+    COMMENT "RCCL deferred-inlining (LTO) bitcode generation"
+  )
+
+  add_custom_command(TARGET lto_bc POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E echo "RCCL deferred-inlining (LTO) bitcode generated successfully:"
+    COMMAND ${CMAKE_COMMAND} -E echo "  Raw LTO BC:        ${LTO_BC_RAW}"
+    COMMAND ${CMAKE_COMMAND} -E echo "  LTO IR (textual):  ${LTO_IR_FILE}"
+    COMMAND ${CMAKE_COMMAND} -E echo "  Final LTO BC:      ${FINAL_LTO_BC}"
+    VERBATIM
+  )
+endif()
 
 ##### Post-build summary #####
 add_custom_command(TARGET llvm_ir POST_BUILD

@@ -7,15 +7,20 @@
 .PHONY: all clean ir-emit
 
 EMIT_LLVM_IR ?= 0
-NCCL_EMIT_LTO_IR ?= 0
+# RCCL emits plain LLVM bitcode, not NVIDIA's nvcc -dlto --ltoir container, so
+# the knob and target are named for what they produce. This replaces an
+# inherited NCCL_EMIT_LTO_IR knob that asked bindings/ir for a non-existent
+# `ltoir` target ("No rule to make target 'ltoir'"), and it matches the
+# EMIT_LTO_BC option the CMake build already uses.
+EMIT_LTO_BC ?= 0
 
 # Set up one make target to avoid race
 IR_GOALS :=
 ifneq ($(EMIT_LLVM_IR), 0)
 IR_GOALS += llvm_ir
 endif
-ifneq ($(NCCL_EMIT_LTO_IR), 0)
-IR_GOALS += ltoir
+ifneq ($(EMIT_LTO_BC), 0)
+IR_GOALS += lto_bc
 endif
 
 default: src.build
@@ -31,7 +36,7 @@ clean: ${TARGETS:%=%.clean}
 examples.build: src.build
 ir.build: src.build
 ir.llvm_ir: src.build
-ir.ltoir: src.build
+ir.lto_bc: src.build
 LICENSE_FILES := LICENSE.txt
 LICENSE_TARGETS := $(LICENSE_FILES:%=$(BUILDDIR)/%)
 lic: $(LICENSE_TARGETS)

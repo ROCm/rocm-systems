@@ -28,6 +28,19 @@ LTO link) and the run are driven by the pytest harness in `test/ir-device/`.
 | `B6_CoopSync` | `ncclCoopSync` — all five coop types |
 | `B7a_LsaBarrierSessionStructural` | `ncclLsaBarrierSession_C` sizeof / alignment |
 | `B7b_LsaBarrierSessionRuntime` | `ncclLsaBarrierSession{Init,Arrive,Wait,Sync}` — **SKIP** (require a live `ncclDevComm`) |
+| `C0_BucketCSymbolsLinkable` | `ncclGinBarrierSession{Init,Sync}` + `ncclBarrierSession{Init,Sync}` — address-taken export check |
+| `C1a_GinBarrierSessionStructural` | `ncclGinBarrierSession_C` sizeof / alignment |
+| `C1b_GinBarrierSessionRuntime` | `ncclGinBarrierSession{Init,Sync}` — **SKIP** (require a live `ncclDevComm` + GIN net) |
+| `C2a_BarrierSessionStructural` | `ncclBarrierSession_C` sizeof / alignment |
+| `C2b_BarrierSessionRuntime` | `ncclBarrierSession{Init,Sync}` — **SKIP** (require a live `ncclDevComm` + GIN net) |
+| `D0_BucketDSizeGettersCallable` | `nccl{Lsa,Gin,}BarrierSession_C_size` — *called* on device, compared against host `sizeof` |
+| `D1_BucketDSymbolsLinkable` | 10 × `ncclDevComm_*` accessors + `nccl{Lsa,Gin,}BarrierSessionDestroy` — address-taken export check |
+
+> `D0`/`D1` cover the 16 thunks that were declared `NCCL_IR_EXTERN_C` instead of
+> `NCCL_IR_EXPORT`, which left them off the `RCCL_DEVICE_BC_PUBLIC_API` list so
+> `opt --passes=internalize,inline,globaldce` deleted them from the bitcode.
+> Against a pre-fix `librccl_device.bc` the device link fails with exactly 16
+> `lld: error: undefined hidden symbol` lines.
 
 ## Prerequisites
 

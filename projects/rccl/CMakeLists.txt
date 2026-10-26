@@ -104,6 +104,7 @@ option(ENABLE_IFC                              "Enable indirect function call"  
 option(ENABLE_NET_PROFILING                    "Emit NET_IB/NET_SOCK profiler events"          OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
+option(EMIT_LTO_BC                             "Additionally emit a deferred-inlining LTO bitcode variant (librccl_device.lto.bc); requires EMIT_LLVM_IR=ON" OFF)
 option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
 option(BUILD_NCCL4PY                           "Build the nccl4py Python bindings wheel"       OFF)
 # Move .hip_fatbin to the end of librccl.so so that small-code-model host
@@ -852,7 +853,14 @@ if(EMIT_LLVM_IR)
   # aliases (hipify renames them to *_tmp.h) that the verbatim IR wrapper needs.
   add_dependencies(llvm_ir copy_nccl_device_headers nccl_device_header_symlinks)
   # Convenience aggregate target: builds librccl.so together with the bitcode.
-  add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
+  set(_rccl_with_ir_deps rccl llvm_ir)
+  if(EMIT_LTO_BC)
+    # lto_bc only exists once bindings/ir has been added above (it is defined
+    # inside bindings/ir/CMakeLists.txt, gated on the same EMIT_LTO_BC option).
+    add_dependencies(lto_bc copy_nccl_device_headers nccl_device_header_symlinks)
+    list(APPEND _rccl_with_ir_deps lto_bc)
+  endif()
+  add_custom_target(rccl_with_ir ALL DEPENDS ${_rccl_with_ir_deps})
 endif()
 
 # nccl4py Python bindings (opt-in)
@@ -906,6 +914,13 @@ if(EMIT_LLVM_IR)
                DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
   rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device
                DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
+endif()
+## Optional: install the deferred-inlining LTO bitcode variant when
+## EMIT_LTO_BC is also enabled (produced before install because lto_bc is
+## pulled into rccl_with_ir, which is part of ALL).
+if(EMIT_LLVM_IR AND EMIT_LTO_BC)
+  rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.lto.bc
+               DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
 endif()
 ## tuner/*.csv is compiled into librccl.so (see rccl_embedded_tuner_configs above),
 ## so nothing is copied to the build tree or installed. A CSV placed in
