@@ -213,7 +213,6 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     producer_data.control_packet     = std::move(control_packet);
     producer_data.copy_data_fn       = copy_data_mock;
     producer_data.shared             = worker_data;
-    producer_data.num_shader_engines = agent->get_rocp_agent()->num_shader_banks;
     producer_data.buffer_packets     = std::move(mock_buffer);
     producer_data.restart_trace      = [queue = mock_queue.get()](auto& packet) {
         return att_queue_submit_packets(*queue, packet->before_krn_pkt);

@@ -86,7 +86,7 @@ static_assert(AQL_PACKET_SIZE == 64, "KFD AQL queue assumes the standard 64-byte
 
 template <typename PredicateT, typename DiagnosticT>
 void
-wait_with_diagnostics(PredicateT&& pending, DiagnosticT&& diagnostic)
+wait_with_diagnostics(PredicateT&& pending, DiagnosticT&& diagnostic, bool spin = false)
 {
     constexpr auto interval        = std::chrono::seconds{30};
     auto           next_diagnostic = std::chrono::steady_clock::now() + interval;
@@ -98,6 +98,7 @@ wait_with_diagnostics(PredicateT&& pending, DiagnosticT&& diagnostic)
             diagnostic();
             next_diagnostic = now + interval;
         }
+        if(spin) continue;
         std::this_thread::sleep_for(std::chrono::microseconds(1));
         std::this_thread::yield();
     }
@@ -718,7 +719,7 @@ kfd_signal_t::reset(int64_t value)
 }
 
 void
-kfd_signal_t::wait() const
+kfd_signal_t::wait(bool spin) const
 {
     ROCP_TRACE << "Waiting for KFD signal";
     auto t0 = std::chrono::system_clock::now();
@@ -728,7 +729,8 @@ kfd_signal_t::wait() const
             ROCP_INFO << "Still waiting in kfd_signal_t::wait (30-second diagnostic): gpu_id="
                       << _memory->gpu_id() << ", signal=" << _signal
                       << ", value=" << load_signal_value(_signal);
-        });
+        },
+        spin);
 
     std::atomic_thread_fence(std::memory_order_acq_rel);
     auto t1 = std::chrono::system_clock::now();
@@ -1081,7 +1083,10 @@ struct sdma_queue_t
         builder.append_fence(const_cast<int64_t*>(&completion->abi()->value), 0, fence_header);
         completion->reset();
         publish(builder.data(), builder.size_bytes());
-        completion->wait();
+        // Copies are short and bounded: spin so the next copy can be enqueued right away.
+        // TODO: Enqueue copies asynchronously (a fence per copy) so the engine never idles between
+        // copies and the producer does not wait on them.
+        completion->wait(/*spin=*/true);
         return true;
     }
 
