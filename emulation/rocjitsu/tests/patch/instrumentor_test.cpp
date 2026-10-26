@@ -4147,11 +4147,10 @@ TEST_F(Cdna4ProbeSpill, SgprAndM0RestoresShareOneNop) {
   EXPECT_EQ(m0_gap->nops, 1u) << m0_gap->trace;
 }
 
-// GFX9-style s_nop padding is omitted on RDNA4, and that is all this pins. The anchor
-// reads s8 through a VALU, which falls under RDNA4's separate SGPR hazard (deferred,
-// see docs/dbi-design.md), so the missing s_nop says nothing about whether this
-// sequence is hazard-free there. RDNA4 global loads are 12 bytes and cannot be
-// anchors, hence the VALU read.
+// GFX9-style s_nop padding is omitted on RDNA4; the resume s_wait_alu covers
+// the restored SGPR before the anchor's VALU read. Separate emitted-envelope
+// tests pin the internal SALU guards and the final restore drain. RDNA4 global
+// loads are 12 bytes and cannot be anchors, hence the VALU read.
 TEST_F(Rdna4ProbeSpill, SgprRestoreAddsNoNop) {
   const Caved caved = patch_spill(
       {kMovV3S8, endpgm()}, {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), setpc()}, 64);

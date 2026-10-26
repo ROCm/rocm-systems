@@ -21,6 +21,17 @@ namespace rocjitsu {
 
 namespace {
 
+// A pair read by VALU remains subject to RDNA4's SGPR rule after later SALU
+// writes. Save destinations may have been read by earlier guest/probe code.
+// Guard the completed save batch before argument or EXEC-restore consumers.
+bool needs_rdna4_save_guard(rj_code_arch_t arch, std::span<const SpecialStateSlot> special_saves,
+                            std::span<const RegisterSave> register_saves) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+         (!special_saves.empty() ||
+          std::ranges::any_of(register_saves,
+                              [](const RegisterSave &save) { return save.cls == RegClass::SGPR; }));
+}
+
 bool validate_register_saves(const TrampolinePlan &plan, const RegisterSet &live,
                              const RegisterSet &probe_clobbers, RegisterSet &destinations,
                              std::string *error) {
@@ -555,6 +566,12 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     before_words += 1;
   }
 
+  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4) {
+    before_words += 2; // getpc -> add, and add/addc -> swappc.
+    if (needs_rdna4_save_guard(plan.arch, special_saves, plan.register_saves))
+      before_words += 1;
+  }
+
   plan.is_probe_call = true;
   plan.link_pair_base = kLinkPairBase;
   plan.arg_vgpr_base = abi.arg_vgpr_base;
@@ -689,6 +706,9 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
                       ? build_s_mov_b32(save.destination, save.source, plan.arch)
                       : build_v_mov_b32_src(save.destination, 256 + save.source, plan.arch));
 
+  if (needs_rdna4_save_guard(plan.arch, plan.special_state_saves, plan.register_saves))
+    env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe));
+
   // Capture guest operands before constants or scalar-sourced arguments can
   // overwrite them. The order implements a parallel assignment, including cycles.
   std::vector<ProbeArgumentMove> expected_moves;
@@ -782,7 +802,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
                                       scalar_positive_inline_u32(0), plan.arch));
 
   // Target-address materialization. s_getpc_b64 writes the runtime VA of the
-  // *next* instruction (the s_add_u32 below) into the target pair; the
+  // *next* instruction (the RDNA4 guard or s_add_u32 below) into the target pair; the
   // build-time delta to the probe body is then folded in via the 64-bit add
   // chain (s_add_u32 sets carry -> SCC, s_addc_u32 consumes it). Both sides are
   // .text-relative and share the load base, so the delta is a pure layout
@@ -790,6 +810,10 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // independent of the (layout-dependent) delta value (see before_word_count).
   const size_t getpc_index = env.size();
   env.push_back(build_s_getpc_b64(target_lo, plan.arch));
+  // The probe may have VALU-read this pair. Its new getpc value must be ready
+  // before either scalar add reads it, independently of boundary waits.
+  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
+    env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe));
   const uint64_t va_after_getpc =
       plan.trampoline_offset + static_cast<uint64_t>(getpc_index + 1) * sizeof(uint32_t);
   const uint64_t delta = static_cast<uint64_t>(static_cast<int64_t>(plan.probe_target_offset) -
@@ -798,6 +822,10 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   env.push_back(static_cast<uint32_t>(delta & 0xFFFFFFFFu));
   env.push_back(build_s_addc_u32(target_hi, target_hi, kLiteralConstant, plan.arch));
   env.push_back(static_cast<uint32_t>(delta >> 32));
+  // Both halves are now written; complete them before the indirect call reads
+  // the address. Neither add reads the other half's newly written value.
+  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
+    env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe));
 
   // The call: writes the return PC into the cc-derived link pair, jumps to the
   // materialized target. The probe returns here via s_setpc_b64 of the same pair.
@@ -866,8 +894,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   // Plan/emit drift guard: the planner committed to this many envelope words and
   // the orchestrator sized the layout around it. A mismatch means the two
-  // disagree about the envelope shape. before_word_count is the arch-agnostic
-  // envelope; the spill bracket, the two boundary drains and the wait-state pad
+  // disagree about the envelope shape. before_word_count includes internal
+  // RDNA4 guards; the spill bracket, the two boundary drains and the wait-state pad
   // are accounted separately since their sizes are arch- and site-specific.
   if (env.size() != plan.before_word_count + spill.prologue.size() + spill.epilogue.size() +
                         2 * boundary_drain.size() + wait_state_pad_words + restore_drain_words) {

@@ -389,30 +389,47 @@ The trampoline envelope wraps the relocated original:
     s_mov_b32    <m0_temp>,   m0        <-- M0 save   (preserve_m0)
     s_mov_b64    exec, -1               <-- widen to full mask (spill / argument / full-exec site)
     [spill prologue]                    <-- VGPR/acc direct stores; SGPR writelane + store; store wait
+    [register backups]                 <-- explicit register-growth policy
+    s_wait_alu 0xfffe                   <-- RDNA4: after scalar saves, before their consumers
     v_mov_b32    v[arg_base + i], <lit> <-- one per immediate probe_args entry, all lanes
     v_mov_b32    v[arg_base + i], <exec_temp{,+1}> <-- one per AnchorExecLo/Hi entry
     v_mov_b32    v[arg_base + i], <entry_storage{,+1}> <-- one per LogBufferPtrLo/Hi entry
     s_mov_b64    exec, <exec_temp>      <-- restore anchor mask (absent under force_full_exec)
     s_cselect_b32 <scc_temp>, 1, 0      <-- SCC save (preserve_scc)
     s_getpc_b64  s[target_pair]
+    s_wait_alu 0xfffe                   <-- RDNA4: guard the new PC value
     s_add_u32    s[target_lo], s[target_lo], (probe_target - pc)@lo
     s_addc_u32   s[target_hi], s[target_hi], (probe_target - pc)@hi
+    s_wait_alu 0xfffe                   <-- RDNA4: guard both completed address halves
     s_swappc_b64 s[30:31], s[target_pair]   <-- call: PC=body, return->s[30:31]
     <in-flight-load drain>              <-- guards restores/host against the probe's own loads
     s_cmp_lg_u32 <scc_temp>, 0          <-- SCC restore
     s_mov_b64    exec, -1               <-- re-widen to full mask for the loads
     [spill epilogue]                    <-- SGPR load + wait + readlane each; VGPR/acc direct loads; load wait
+    [register restores]                <-- explicit register-growth policy
     s_mov_b64    exec, <exec_temp>      <-- EXEC restore
     s_mov_b64    vcc,  <vcc_temp>       <-- VCC restore
     s_mov_b32    m0,   <m0_temp>        <-- M0 restore
     s_nop        <n>                    <-- GFX9 wait-state pad after an SGPR or M0 restore
+    s_wait_alu 0xf1fc                   <-- RDNA4: completed restores before guest resume
     <relocated original word(s)>
     s_branch <return>                   <-- back to anchor_offset + original_size
 ```
 
 The diagram describes the builder's conditional emissions; production probe calls request EXEC/VCC preservation as described in [Special state](#special-state-preservation). EXEC saves and restores appear when `preserve_exec || needs_full_mask`; VCC and M0 follow `preserve_vcc` and `preserve_m0`. The remaining lines are conditional: the `v_mov_b32` block is empty when the site passes no arguments; the `[spill prologue]` / `[spill epilogue]` are empty when `spill_set` is empty (leaving the plain SCC-bracketed call). The full-mask window's `exec` toggles appear whenever the site spills, passes arguments, **or** runs the probe under a full mask. A site with nothing to spill still opens the window, and still emits the re-widen over an empty epilogue so the planner and emitter count the same toggles unconditionally. Three toggles by default; two under `force_full_exec`, which drops the pre-call restore. See [TrampolineBuilder → Spill bracket](#spill-bracket) for the bracket contents. The `s_getpc_b64` + 64-bit add chain is `.text`-relative, so the materialized target is load-base-independent; the `±simm16` branch range only constrains the forward/return `s_branch`es, not the call.
 
-The `s_nop` appears only on GFX9 (CDNA1-4), which does not interlock a VALU write of an SGPR against a later vector-memory read or lane select of it, or a SALU write of M0 against a later M0 reader (LLVM `GCNHazardRecognizer::checkVMEMHazards`, `checkRWLaneHazards`, `checkReadM0Hazards`). A restored SGPR needs 5 wait states before a vector-memory read of it (resource, `soffset`, `saddr`), which also covers a `v_readlane`/`v_writelane` lane select (4) and a gfx94x VALU read (2). A restored M0 needs 1 before `s_movrel*`, `s_sendmsg`, GDS, LDS DMA or an LDS-direct read. GFX10+ interlocks these; RDNA4's own `s_wait_alu` requirement around the same restores is deferred. `emit_probe_call` counts the instructions after the last `v_readlane` (reloads, their wait, the special-state restores) and after the M0 restore (none), and tops up the larger shortfall with one `s_nop`, so a site whose reloads already fill the gap pays nothing. The pad also covers the guest instructions the return branch reaches, which are further away still. It depends on the spill sets, which are filled after planning, so it is accounted next to the bracket rather than in `before_word_count`.
+The `s_nop` appears only on GFX9 (CDNA1-4), which does not interlock a VALU write of an SGPR against a later vector-memory read or lane select of it, or a SALU write of M0 against a later M0 reader (LLVM `GCNHazardRecognizer::checkVMEMHazards`, `checkRWLaneHazards`, `checkReadM0Hazards`). A restored SGPR needs 5 wait states before a vector-memory read of it (resource, `soffset`, `saddr`), which also covers a `v_readlane`/`v_writelane` lane select (4) and a gfx94x VALU read (2). A restored M0 needs 1 before `s_movrel*`, `s_sendmsg`, GDS, LDS DMA or an LDS-direct read. GFX10+ interlocks these GFX9 wait-state cases. RDNA4 uses `s_wait_alu 0xf1fc` at the envelope boundaries and after restores, before the guest resumes. `emit_probe_call` counts the instructions after the last `v_readlane` (reloads, their wait, the special-state restores) and after the M0 restore (none), and tops up the larger shortfall with one `s_nop`, so a site whose reloads already fill the gap pays nothing. The pad also covers the guest instructions the return branch reaches, which are further away still. It depends on the spill sets, which are filled after planning, so it is accounted next to the bracket rather than in `before_word_count`.
+
+RDNA4 additionally requires `sa_sdst(0)` (`s_wait_alu 0xfffe`) between a SALU
+write and a later SALU/VALU read when the SGPR pair has previously been read by
+VALU (RDNA4 ISA §5.7). Boundary waits do not cover later envelope writes. The
+emitter guards the scalar-save batch before argument/mask consumers, the
+`s_getpc_b64` result before the adds, and both added address halves before
+`s_swappc_b64`. These internal waits are included in `before_word_count`; the
+boundary and final restore drains remain accounted separately. The PC-relative
+delta uses the instruction immediately after getpc, including its guard, so the
+inserted waits preserve the materialized call target. This handling is in the
+shared DBI envelope; it does not require an analysis-specific lowering path.
 
 ### Mask policy
 

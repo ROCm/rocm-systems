@@ -174,7 +174,7 @@ struct TrampolinePlan {
   /// The argument VGPRs are the only member not chosen dead -- the ABI fixes them
   /// -- so they are the only one that can intersect the live set.
   RegisterSet builder_clobbers;
-  /// Arch-agnostic envelope words before the relocated original. The spill
+  /// Planned envelope words, including internal RDNA4 guards. The spill
   /// bracket, the boundary drains and the GFX9 wait-state pad are accounted by
   /// emit_probe_call, not here.
   uint32_t before_word_count = 0;
