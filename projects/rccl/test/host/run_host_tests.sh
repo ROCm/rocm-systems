@@ -151,6 +151,9 @@ do_host_tests() {
   local -a binaries=(
     "rccl-HostUnitTests:$XML_FILE"
     "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
+    "rccl-UnitTestsMicroCollectives:$SCRIPT_DIR/host_tests_micro_collectives.xml"
+    "rccl-UnitTestsMicroOnerank:$SCRIPT_DIR/host_tests_micro_onerank.xml"
+    "rccl-UnitTestsMicroMgmtTaskEnq:$SCRIPT_DIR/host_tests_micro_mgmt_task_enq.xml"
     "rccl-UnitTestsMicroWarpSpeed:$SCRIPT_DIR/host_tests_micro_warpspeed.xml"
     "rccl-UnitTestsMicroCrypt:$SCRIPT_DIR/host_tests_micro_crypt.xml"
     "rccl-UnitTestsMicroStrongstream:$SCRIPT_DIR/host_tests_micro_strongstream.xml"
@@ -197,6 +200,7 @@ do_host_tests() {
     "rccl-UnitTestsMicroGraph:$SCRIPT_DIR/host_tests_micro_graph.xml"
     "rccl-UnitTestsMicroRmaProxy:$SCRIPT_DIR/host_tests_micro_rma_proxy.xml"
     "rccl-UnitTestsMicroDda:$SCRIPT_DIR/host_tests_micro_dda.xml"
+    "rccl-UnitTestsMicroNetIbCastInit:$SCRIPT_DIR/host_tests_micro_net_ib_cast_init.xml"
   )
   # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs
   # GENERATE_SYM_KERNELS, off via install.sh --disable-sym-kernels); missing is a skip, not an error.
