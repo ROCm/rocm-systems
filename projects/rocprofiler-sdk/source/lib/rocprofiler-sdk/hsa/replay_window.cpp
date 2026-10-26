@@ -140,36 +140,6 @@ replay_ring_submit(const Queue& queue, const rocprofiler_packet* packets, size_t
     return true;
 }
 
-bool
-replay_barrier_and_wait(const Queue& queue, hsa_signal_t completion)
-{
-    using namespace std::chrono_literals;
-
-    auto barrier   = hsa_barrier_and_packet_t{};
-    barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-    barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
-    barrier.completion_signal = completion;
-
-    auto packet = rocprofiler_packet{barrier};
-
-    const auto& core = queue.core_api();
-    core.hsa_signal_store_screlease_fn(completion, 1);
-
-    if(!replay_ring_submit(queue, &packet, 1)) return false;
-
-    replay_wait_or_fatal(
-        [&]() {
-            return core.hsa_signal_wait_scacquire_fn(completion,
-                                                     HSA_SIGNAL_CONDITION_EQ,
-                                                     0,
-                                                     std::chrono::nanoseconds{5s}.count(),
-                                                     HSA_WAIT_STATE_BLOCKED) == 0;
-        },
-        "this queue's prior GPU work");
-
-    return true;
-}
-
 void
 set_interceptor_passthrough(bool enabled)
 {

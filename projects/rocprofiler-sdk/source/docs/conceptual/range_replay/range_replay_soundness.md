@@ -150,9 +150,10 @@ restored after the last pass so the application resumes with its own results —
 final replayed pass left behind. Skipping it would silently hand the application the replay's
 output.
 
-A failed `restore()` is fatal rather than a decline. A partial host-to-device copy leaves device
-memory in a state that is neither the application's nor the snapshot's, and continuing would hand
-that corruption to the application. This matches kernel replay's convention for the same situation.
+A failed `restore()` is fatal rather than a decline. A partial host-to-device copy or failed device
+blit leaves device memory in a state that is neither the application's nor the snapshot's, and
+continuing would hand that corruption to the application. This matches kernel replay's convention
+for the same situation.
 
 Each dispatch in a pass has its AQL barrier bit forced on, so the passes are serialized
 dispatch-by-dispatch. This is stricter than the application, whose packets may have been free to
@@ -166,9 +167,10 @@ snapshot does not capture — unified or managed memory, fine-grained or host me
 virtual-memory-mapped allocations, or a value the host recomputed inside the range. Such a range
 passes every check and is replayed, and its passes quietly describe different inputs.
 
-Setting `ROCPROF_RANGE_REPLAY_VERIFY` turns on a check for exactly that residue. The executor hashes
-each snapshot region (FNV-1a) after the application's execution and again after the final replayed
-pass, and reports how many regions differ as the `CLOSE` callback's `divergence_count`.
+Setting `ROCPROF_RANGE_REPLAY_VERIFY` turns on a check for exactly that residue. The executor reads
+GPU-backed snapshot regions back to host memory when needed, hashes each snapshot region (FNV-1a)
+after the application's execution and again after the final replayed pass, and reports how many
+regions differ as the `CLOSE` callback's `divergence_count`.
 
 Regions are ordered by device address before hashing, because the allocation inventory itself is
 unordered and the two snapshots must compare positionally. A region-count mismatch is reported as

@@ -125,11 +125,6 @@ replay_drain_agent_or_fatal(hsa_agent_t agent);
 bool
 replay_ring_submit(const Queue& queue, const rocprofiler_packet* packets, size_t count);
 
-// Submit a barrier packet carrying `completion` and wait for it, fencing the CPU against all GPU
-// work previously submitted to `queue`. Returns false if the submission itself failed.
-bool
-replay_barrier_and_wait(const Queue& queue, hsa_signal_t completion);
-
 // While set on this thread, WriteInterceptor forwards packets untouched. Range replay's re-submit
 // path transforms the recorded packets once (via Queue::invoke_write_interceptor) and then writes
 // the result to the ring, which re-enters interception on this same thread; without this flag the

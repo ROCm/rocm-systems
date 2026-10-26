@@ -48,16 +48,14 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <cstring>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 namespace rr = rocprofiler::range_replay;
 
 namespace
 {
-using snapshot_t = rocprofiler::kernel_replay::memory_snapshot::device_snapshot_t;
+using snapshot_t = rocprofiler::kernel_replay::memory_snapshot::snapshot_t;
 
 rr::recorded_dispatch_t
 make_dispatch(size_t kernarg_size, uint64_t kernel_object = 1)
@@ -82,46 +80,11 @@ make_replayable_context()
     ctx.plan.replay_requested = true;
     ctx.plan.total_passes     = 3;
     ctx.snapshot_taken        = true;
-    ctx.snapshot.ok           = true;
+    ctx.snapshot.status =
+        rocprofiler::kernel_replay::memory_snapshot::capture_status::complete;
     return ctx;
 }
 
-// mem_block_t::host_copy is either a std::vector<char> or a pooled staging buffer that has to be
-// acquired for a size before it is written. Fill whichever the snapshot uses.
-template <typename HostCopy>
-void
-fill_host_copy(HostCopy& host_copy, const std::string& contents)
-{
-    if constexpr(std::is_same_v<HostCopy, std::vector<char>>)
-    {
-        host_copy.assign(contents.begin(), contents.end());
-    }
-    else
-    {
-        ASSERT_TRUE(host_copy.acquire(hsa_agent_t{.handle = 1}, contents.size()));
-        std::memcpy(host_copy.data(), contents.data(), contents.size());
-    }
-}
-
-snapshot_t
-make_snapshot(const std::vector<std::pair<void*, std::string>>& regions)
-{
-    auto snapshot = snapshot_t{};
-    for(const auto& [addr, contents] : regions)
-    {
-        auto block     = rocprofiler::kernel_replay::memory_snapshot::mem_block_t{};
-        block.gpu_addr = addr;
-        fill_host_copy(block.host_copy, contents);
-        snapshot.blocks.emplace_back(std::move(block));
-    }
-    return snapshot;
-}
-
-// Arbitrary distinct device addresses. Never dereferenced: the digest reads host_copy and only
-// sorts on gpu_addr.
-void* const ADDR_LOW  = reinterpret_cast<void*>(uintptr_t{0x1000});
-void* const ADDR_MID  = reinterpret_cast<void*>(uintptr_t{0x2000});
-void* const ADDR_HIGH = reinterpret_cast<void*>(uintptr_t{0x3000});
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -355,44 +318,41 @@ TEST(range_replay_executor, building_a_pass_does_not_consume_the_recording)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Snapshot digests
-// ---------------------------------------------------------------------------
-
-// The snapshot inventory is unordered, so two snapshots of the same regions can enumerate them in
-// different orders. Digests are ordered by device address so the comparison is positional; without
-// that, a reordered inventory would report every region as divergent.
-TEST(range_replay_executor, digests_are_ordered_by_device_address)
-{
-    const auto forward =
-        make_snapshot({{ADDR_LOW, "alpha"}, {ADDR_MID, "beta"}, {ADDR_HIGH, "gamma"}});
-    const auto shuffled =
-        make_snapshot({{ADDR_HIGH, "gamma"}, {ADDR_LOW, "alpha"}, {ADDR_MID, "beta"}});
-
-    const auto forward_digests  = rr::snapshot_digests(forward);
-    const auto shuffled_digests = rr::snapshot_digests(shuffled);
-
-    ASSERT_EQ(forward_digests.size(), 3u);
-    EXPECT_EQ(forward_digests, shuffled_digests);
-    EXPECT_EQ(rocprofiler::range_replay::digest::count_divergent(forward_digests, shuffled_digests),
-              0u);
-}
-
-// A region whose contents changed between the application's execution and the last replayed pass is
-// reported, and only that region: the count is what CLOSE hands the tool as divergence_count.
-TEST(range_replay_executor, only_changed_regions_are_counted_as_divergent)
-{
-    const auto before =
-        make_snapshot({{ADDR_LOW, "alpha"}, {ADDR_MID, "beta"}, {ADDR_HIGH, "gamma"}});
-    const auto after =
-        make_snapshot({{ADDR_HIGH, "gamma"}, {ADDR_MID, "BETA"}, {ADDR_LOW, "alpha"}});
-
-    EXPECT_EQ(rocprofiler::range_replay::digest::count_divergent(rr::snapshot_digests(before),
-                                                                 rr::snapshot_digests(after)),
-              1u);
-}
-
 TEST(range_replay_executor, an_empty_snapshot_digests_to_nothing)
 {
-    EXPECT_TRUE(rr::snapshot_digests(snapshot_t{}).empty());
+    auto snapshot = snapshot_t{};
+    snapshot.status = rocprofiler::kernel_replay::memory_snapshot::capture_status::complete;
+    const auto digests = rr::snapshot_digests(snapshot);
+    ASSERT_TRUE(digests);
+    EXPECT_TRUE(digests->empty());
+}
+
+TEST(range_replay_executor, digest_regions_are_address_ordered)
+{
+    const std::string alpha = "alpha";
+    const std::string beta  = "beta";
+    const auto forward = std::vector<rocprofiler::range_replay::digest::region_data_t>{
+        {reinterpret_cast<void*>(0x1000), alpha.data(), alpha.size()},
+        {reinterpret_cast<void*>(0x2000), beta.data(), beta.size()}};
+    const auto reversed = std::vector<rocprofiler::range_replay::digest::region_data_t>{
+        {reinterpret_cast<void*>(0x2000), beta.data(), beta.size()},
+        {reinterpret_cast<void*>(0x1000), alpha.data(), alpha.size()}};
+
+    EXPECT_EQ(rocprofiler::range_replay::digest::hash_regions(forward),
+              rocprofiler::range_replay::digest::hash_regions(reversed));
+}
+
+TEST(range_replay_executor, digest_regions_report_changed_content)
+{
+    const std::string before = "before";
+    const std::string after  = "after";
+    const auto lhs = std::vector<rocprofiler::range_replay::digest::region_data_t>{
+        {reinterpret_cast<void*>(0x1000), before.data(), before.size()}};
+    const auto rhs = std::vector<rocprofiler::range_replay::digest::region_data_t>{
+        {reinterpret_cast<void*>(0x1000), after.data(), after.size()}};
+
+    EXPECT_EQ(rocprofiler::range_replay::digest::count_divergent(
+                  rocprofiler::range_replay::digest::hash_regions(lhs),
+                  rocprofiler::range_replay::digest::hash_regions(rhs)),
+              1u);
 }

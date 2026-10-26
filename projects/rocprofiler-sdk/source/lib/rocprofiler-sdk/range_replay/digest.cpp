@@ -48,6 +48,21 @@ hash_bytes(const void* data, size_t size)
     return hash;
 }
 
+region_digests_t
+hash_regions(const std::vector<region_data_t>& regions)
+{
+    auto ordered = regions;
+    std::sort(ordered.begin(), ordered.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.address < rhs.address;
+    });
+
+    auto out = region_digests_t{};
+    out.reserve(ordered.size());
+    for(const auto& region : ordered)
+        out.emplace_back(hash_bytes(region.data, region.size));
+    return out;
+}
+
 size_t
 count_divergent(const region_digests_t& lhs, const region_digests_t& rhs)
 {

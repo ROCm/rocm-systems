@@ -91,8 +91,8 @@ experimental/range_replay.h           public payload struct, status enum, begin/
         +-- hsa/queue.cpp             recording hook, foreign-dispatch detection
         +-- hsa/async_copy.cpp        device-write detection
         |
-        +-- kernel_replay/            reused unchanged: memory_tracker, memory_snapshot,
-                                      local_context
+        +-- kernel_replay/            shared: memory_tracker, GPU/pinned snapshot planner,
+                                      batched blit restore, local_context
 ```
 
 `range_state.cpp` and `digest.cpp` are deliberately free of GPU dependencies. The eligibility
