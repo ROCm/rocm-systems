@@ -1257,6 +1257,17 @@ bool rejects_flat_dds(const Instruction &inst, const Wavefront &wf, uint64_t req
   return true;
 }
 
+// CDNA5 section 10.2 returns MEMVIOL for 8-byte FLAT atomics that resolve to
+// scratch: the dword interleave places a lane's two halves a wave stride apart.
+// Only FLAT translation marks private-backed lanes; BUFFER swizzling does not.
+bool rejects_private_atomic64(const VectorMemState &d, const Wavefront &wf,
+                              uint64_t request_lanes) {
+  if (d.atomic_op == AtomicOp::NONE || d.elem_size != sizeof(uint64_t) ||
+      !d.requires_scratch_backing || !(d.scratch_lane_mask & request_lanes))
+    return false;
+  return wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5;
+}
+
 } // namespace
 
 VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
@@ -1267,7 +1278,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   // instruction before global or LDS side effects rather than narrowing a
   // DDS address into another workgroup's LDS allocation.
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
-  if (rejects_flat_dds(inst, wf, request_lanes))
+  if (rejects_flat_dds(inst, wf, request_lanes) || rejects_private_atomic64(d, wf, request_lanes))
     return VmAccessOutcome::Faulted;
   const uint64_t shared_lanes = d.flat_local_lane_mask & request_lanes;
   const VmAccessOutcome outcome = initiate_global_access(d, wf, request_lanes & ~shared_lanes);
