@@ -92,6 +92,7 @@ struct AppliedSite {
   const ResolvedInstrumentationSite *site;
   uint64_t trampoline_offset;
   TrampolineBytes bytes;
+  std::optional<uint64_t> return_target = std::nullopt;
 
   // Probe-call facts for the patch record; defaulted for the inline-nop site.
   bool is_probe_call = false;
@@ -1648,6 +1649,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
 
       // Get trampoline from TrampolineBuilder
       bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+      if (plan.returns_to_kernel)
+        record.return_target = plan.return_target;
       record.is_probe_call = true;
       record.probe_target_offset = probe.output_text_offset;
       record.link_pair_base = plan.link_pair_base;
@@ -1663,6 +1666,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         continue;
       }
       bytes = TrampolineBuilder::build(plan, &err);
+      if (plan.returns_to_kernel)
+        record.return_target = plan.return_target;
     }
 
     if (!bytes) {
@@ -1812,7 +1817,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     patch.anchor_offset = a.site->anchor_offset;
     patch.original_size = a.site->original_size;
     patch.trampoline_offset = a.trampoline_offset;
-    patch.return_target = a.site->anchor_offset + a.site->original_size;
+    patch.return_target = a.return_target;
     patch.original_bytes = a.site->original_bytes;
     patch.patched_anchor_bytes = a.bytes.patched_anchor_bytes;
     patch.is_probe_call = a.is_probe_call;

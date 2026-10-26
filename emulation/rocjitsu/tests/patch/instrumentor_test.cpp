@@ -4242,6 +4242,7 @@ TEST(InstrumentorKernelBoundary, EntryAndAccessAtTheSameAnchorRunInDispatchOrder
   const AmdGpuCodeObject object(image.data(), image.size());
   const AmdGpuCodeObject probe(body.data(), body.size());
   Instrumentor instrumentor(object, kArch);
+  Instrumentor debug_instrumentor(object, kArch);
   for (const auto &[kind, offset] : {std::pair{InstrumentationKind::KernelEntry, uint64_t{0}},
                                      std::pair{InstrumentationKind::BeforeInst, uint64_t{0}},
                                      std::pair{InstrumentationKind::KernelExit, uint64_t{4}}}) {
@@ -4251,6 +4252,7 @@ TEST(InstrumentorKernelBoundary, EntryAndAccessAtTheSameAnchorRunInDispatchOrder
     point.probe_obj = &probe;
     point.probe_symbol = "boundary";
     instrumentor.add_point(point);
+    debug_instrumentor.add_point(point);
   }
   const InstrumentedCodeObject result = instrumentor.patch();
   ASSERT_TRUE(result.errors.empty()) << result.errors.front();
@@ -4270,6 +4272,15 @@ TEST(InstrumentorKernelBoundary, EntryAndAccessAtTheSameAnchorRunInDispatchOrder
   EXPECT_EQ(target_of(4), result.sites[2].instrumentation_offset);
   EXPECT_EQ(words.at(result.sites[2].guest_offset / 4), build_s_endpgm(kArch));
   EXPECT_EQ(result.sites[2].guest_offset / 4 + 1, words.size());
+
+  const InstrumentedCodeObjectDebug debug = debug_instrumentor.patch_with_debug_summaries();
+  ASSERT_TRUE(debug.errors.empty()) << debug.errors.front();
+  EXPECT_EQ(debug.elf_bytes, result.elf_bytes);
+  ASSERT_EQ(debug.patches.size(), 3u);
+  ASSERT_TRUE(debug.patches[0].return_target);
+  EXPECT_EQ(debug.patches[0].return_target, 0u);
+  EXPECT_EQ(debug.patches[1].return_target, 4u);
+  EXPECT_FALSE(debug.patches[2].return_target);
 }
 
 TEST(InstrumentorKernelBoundary, RejectsIncorrectBoundaryOffsetsAndMissingProbes) {
@@ -4318,6 +4329,9 @@ TEST(InstrumentorKernelBoundary, EntryDoesNotRelocateOrOverwriteATwelveByteInstr
   const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty()) << result.errors.front();
   ASSERT_EQ(result.sites.size(), 1u);
+  ASSERT_EQ(result.patches.size(), 1u);
+  ASSERT_TRUE(result.patches.front().return_target);
+  EXPECT_EQ(result.patches.front().return_target, 0u);
   EXPECT_EQ(result.sites.front().guest_size, 0u);
   EXPECT_TRUE(result.patches.front().patched_anchor_bytes.empty());
   const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
