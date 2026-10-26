@@ -3556,6 +3556,38 @@
         }
       ]
     },
+    "grow_mpi_tests_netbidir": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_OOB_NET_ENABLE": "1",
+        "NCCL_BOOTSTRAP_BIDIR_NET": "1"
+      },
+      "tests": [
+        {
+          "name": "Grow_SendRecv_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: ncclCommGrow with NCCL_OOB_NET_ENABLE=1 and NCCL_BOOTSTRAP_BIDIR_NET=1 (4 ranks) must not hang; net bidir reverse ring is disabled during grow",
+          "test_filter": "GrowMPITest.Grow_SendRecv"
+        },
+        {
+          "name": "DoubleGrow_AllReduce_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: two sequential grows with net bidir OOB enabled complete and AllReduce verifies on the grown communicator",
+          "test_filter": "GrowMPITest.DoubleGrow_AllReduce"
+        },
+        {
+          "name": "Grow_RankPreservation_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: rank indices preserved after grow with net bidir OOB enabled",
+          "test_filter": "GrowMPITest.Grow_RankPreservation"
+        }
+      ]
+    },
     "grow_mpi_tests": {
       "extends": "default",
       "is_gtest": true,
