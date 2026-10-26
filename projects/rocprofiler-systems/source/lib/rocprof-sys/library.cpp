@@ -132,18 +132,18 @@ get_control_session()
 }
 
 void
-set_metadata_process_start_timestamp(std::int64_t _ts)
+set_metadata_process_start_timestamp(std::uint64_t timestamp)
 {
     auto process_info  = trace_cache::get_metadata_registry().get_process_info();
-    process_info.start = _ts;
+    process_info.start = timestamp;
     trace_cache::get_metadata_registry().set_process(process_info);
 }
 
 void
-set_metadata_process_end_timestamp(std::int64_t _ts)
+set_metadata_process_end_timestamp(std::uint64_t timestamp)
 {
     auto process_info = trace_cache::get_metadata_registry().get_process_info();
-    process_info.end  = _ts;
+    process_info.end  = timestamp;
     trace_cache::get_metadata_registry().set_process(process_info);
 }
 
@@ -1038,8 +1038,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
         }
     });
 
-    set_metadata_process_start_timestamp(
-        static_cast<std::int64_t>(clocks::timeline::now_ns()));
+    set_metadata_process_start_timestamp(clocks::timeline::now_ns());
 
     if(get_debug_env() || get_verbose_env() > 2)
     {
@@ -1111,8 +1110,7 @@ rocprofsys_finalize_hidden(void)
         return;
     }
 
-    set_metadata_process_end_timestamp(
-        static_cast<std::int64_t>(clocks::timeline::now_ns()));
+    set_metadata_process_end_timestamp(clocks::timeline::now_ns());
 
     if(is_child)
     {

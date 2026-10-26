@@ -5,16 +5,12 @@
  ************************************************************************/
 
 // See recorder_fakes.h.
-//
-// NOT "recorder.h": comm.h already pulls in one copy and that header has no
-// include guard, so including it again re-declares the whole rcclCall_t
-// enumerator list ("redefinition of enumerator rrBroadcast").
 
 #include "recorder_fakes.h"
 
 #include <mutex>
 
-#include "comm.h"
+#include "recorder.h"
 
 #include "info.h"  // the collective overload reads ncclInfo fields
 
@@ -85,7 +81,7 @@ ncclResult_t Recorder::record(rcclCall_t call, int rank, int nranks, ncclUniqueI
   g_recorderLastNranks = nranks;
   return g_recorderResult;
 }
-// recorder.h:128 declares ONE overload with defaulted trailing args, which both
+// recorder.h:134 declares ONE overload with defaulted trailing args, which both
 // RedOpCreate (6 args) and RedOpDestroy (3 args) call. Defining a second 3-arg
 // version here would be a redefinition, not an overload.
 ncclResult_t Recorder::record(rcclCall_t, ncclRedOp_t, ncclComm_t, ncclDataType_t,

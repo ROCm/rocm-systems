@@ -40,6 +40,9 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAddressRange,         hipMemGetAddressRange)
 ASSERT_HOOK_MATCHES_PROD(g_hipIpcGetMemHandle,            hipIpcGetMemHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRetainAllocationHandle,  hipMemRetainAllocationHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemExportToShareableHandle, hipMemExportToShareableHandle);
+#if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
+ASSERT_HOOK_MATCHES_PROD(g_hipMemGetHandleForAddressRange, hipMemGetHandleForAddressRange);
+#endif
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,                 hipMemRelease);
 ASSERT_HOOK_MATCHES_PROD(g_hipPointerGetAttribute,        hipPointerGetAttribute);
 ASSERT_HOOK_MATCHES_PROD(g_hipDriverGetVersion,           hipDriverGetVersion);
@@ -477,6 +480,14 @@ static hipError_t DefaultHipDrvGetErrorString(hipError_t, const char** str)
 }
 std::function<hipError_t(hipError_t, const char**)> g_hipDrvGetErrorString = DefaultHipDrvGetErrorString;
 std::function<hipError_t(void*, int, size_t)> g_hipMemset = DefaultHipMemset;
+#if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
+static hipError_t DefaultHipMemGetHandleForAddressRange(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType,
+                                                        unsigned long long) {
+    return hipErrorInvalidValue;
+}
+std::function<hipError_t(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)>
+    g_hipMemGetHandleForAddressRange = DefaultHipMemGetHandleForAddressRange;
+#endif
 std::function<hipError_t(hipStream_t*, unsigned)> g_hipStreamCreateWithFlags = DefaultHipStreamCreateWithFlags;
 std::function<hipError_t(hipStream_t)> g_hipStreamSynchronize = DefaultHipStreamSynchronize;
 std::function<hipError_t(hipStream_t)> g_hipStreamDestroy = DefaultHipStreamDestroy;
@@ -750,6 +761,9 @@ void ResetHipFakes()
     g_hipStreamCreateWithPriority   = DefaultHipStreamCreateWithPriority;
     g_hipDrvGetErrorString          = DefaultHipDrvGetErrorString;
     g_hipMemset                     = DefaultHipMemset;
+#if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
+    g_hipMemGetHandleForAddressRange = DefaultHipMemGetHandleForAddressRange;
+#endif
     g_hipStreamCreateWithFlags      = DefaultHipStreamCreateWithFlags;
     g_hipStreamSynchronize          = DefaultHipStreamSynchronize;
     g_hipStreamDestroy              = DefaultHipStreamDestroy;
@@ -776,6 +790,12 @@ void ResetHipFakes()
 // ===========================================================================
 
 // --- hook-backed real symbols -------------------------------------------
+#if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
+hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t ptr, size_t size, hipMemRangeHandleType type,
+                                          unsigned long long flags) {
+    return g_hipMemGetHandleForAddressRange(handle, ptr, size, type, flags);
+}
+#endif
 hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize,
                                  hipDeviceptr_t dptr)
 {
