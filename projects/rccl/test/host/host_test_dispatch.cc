@@ -1150,16 +1150,13 @@ int main(int argc, char **argv)
     // gtest is initialised from an argv of our own, never the caller's: the flags the caller
     // passed are meant for the children, and letting gtest read --gtest_output here would have
     // the filter resolution in resolveFilter() overwrite the caller's report with an empty one.
+    // Cleared before the init, which is where gtest builds the printer: the flag is seeded from
+    // GTEST_OUTPUT at static init, and parseArgs() has already taken that as the destination for
+    // the merged report.
+    ::testing::GTEST_FLAG(output) = "";
     int gtest_argc = 1;
     char *gtest_argv[] = {argv[0], nullptr};
     ::testing::InitGoogleTest(&gtest_argc, gtest_argv);
-
-    // The private argv is not enough on its own: gtest seeds this flag from GTEST_OUTPUT at
-    // static init, so without clearing it the no-op run in resolveFilter() would write an
-    // all-pass report to the caller's file -- a green report for a run that had not happened
-    // yet, and that the merged report would never replace. parseArgs() has already taken the
-    // variable as the destination for the real one.
-    ::testing::GTEST_FLAG(output) = "";
 
     const std::vector<std::string> binaries = discoverBinaries(directory, selfPath());
     if (binaries.empty()) {
