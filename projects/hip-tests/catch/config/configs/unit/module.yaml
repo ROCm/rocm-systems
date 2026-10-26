@@ -350,8 +350,9 @@ module:
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_ExceedMaxGridDim_NonUniform:
     <<: *level_default
-    # launch_kernel_module.code is built only on non Windows, see unit/module/CMakeLists.txt
-    disabled: [amd_windows]
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2862 - unit/module/CMakeLists.txt builds launch_kernel_module.code only under if (NOT WIN32), so the module the test loads is never built on native Windows."
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_Functional:
     <<: *level_default
