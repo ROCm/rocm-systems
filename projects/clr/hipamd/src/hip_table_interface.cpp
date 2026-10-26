@@ -3383,10 +3383,14 @@ hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int nu
   return HIP_LOAD_DISPATCH_TABLE_FN(hipModuleEnumerateFunctions_fn)(functions, numFunctions, mod);
   CATCH;
 }
-
 hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget target,
                                              hipFlushGPUDirectRDMAWritesScope scope) {
   TRY;
   return HIP_LOAD_DISPATCH_TABLE_FN(hipDeviceFlushGPUDirectRDMAWrites_fn)(target, scope);
+  CATCH;
+}
+hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev) {
+  TRY;
+  return HIP_LOAD_DISPATCH_TABLE_FN(hipKernelSetCacheConfig_fn)(kernel, config, dev);
   CATCH;
 }

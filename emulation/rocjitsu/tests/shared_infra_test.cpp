@@ -113,6 +113,7 @@
 #include "util/bit.h"
 #include "util/data_types.h"
 #include "util/except.h"
+#include "util/host_target.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -848,7 +849,7 @@ TEST(MfmaExecTest, SwmmacI32K64U4VaryingSelectorsMatchSparseReference) {
   wf->set_exec((1ULL << wf->wf_size()) - 1ULL);
 
   const uint32_t vb = wf->vgpr_alloc().base;
-  const uint32_t a_base = vb, b_base = vb + 4, c_base = vb + 12;
+  const uint32_t a_base = vb, b_base = vb + 4;
   const uint32_t d_base = vb + 20, index_base = vb + 32;
   fill_vgprs(*cu, vb, 40, 32, 0);
   constexpr std::array<std::array<uint32_t, 2>, 6> pairs = {
@@ -875,9 +876,9 @@ TEST(MfmaExecTest, SwmmacI32K64U4VaryingSelectorsMatchSparseReference) {
     for (uint32_t col = 0; col < 16; ++col)
       write_nibble(b_base, amdgpu::swmmac_b_input_loc(32, 16, 64, col, k, 4), (k % 15u) + 1u);
 
-  amdgpu::exec_swmmac_i32(*cu, 16, 16, 64, 4, d_base, a_base, b_base, c_base, index_base, 16,
-                          /*index_key=*/0, amdgpu::extract_u4, amdgpu::extract_u4,
-                          /*clamp=*/false);
+  amdgpu::exec_rdna_swmmac_i32<4, 64>(*cu, 32, d_base, a_base, b_base, index_base, /*index_key=*/0,
+                                      /*a_signed=*/false,
+                                      /*b_signed=*/false, /*clamp=*/false);
   for (uint32_t row = 0; row < 16; ++row)
     for (uint32_t col = 0; col < 16; ++col) {
       uint32_t expected = 0;
@@ -8440,7 +8441,7 @@ TEST(AluExceptionTest, MultiplyExactProductCoversF32RangeAndRounding) {
   }
 }
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 TEST(AluExceptionTest, HostDazPreservesExactSubnormalOutputClassification) {
   const amdgpu::fp_mode::ScopedEnvironment environment(0);
   _mm_setcsr(_mm_getcsr() | (1u << 6));
