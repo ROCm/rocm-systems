@@ -167,6 +167,12 @@ pub(crate) enum VirtualHostMappingState {
 }
 
 impl VirtualHostMappingState {
+    pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(mapping) => mapping.set_permissions(permissions),
+        }
+    }
+
     pub(crate) fn free(&mut self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(mapping) => mapping.free(),

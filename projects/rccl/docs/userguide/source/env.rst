@@ -1765,8 +1765,9 @@ Value accepted
 NCCL_MULTI_SEGMENT_REGISTER
 ---------------------------
 
-Register one DMA-BUF memory region per physical segment. When this is off,
-registration keeps the single-region path.
+Register one DMA-BUF memory region per physical segment. When this is off, a buffer that spans several physical segments is not registered per segment.
+
+NET registration counts segments over the whole registered buffer. With this variable set to 0, a collective on any part of a buffer whose registration spans several segments skips NET registration and stages through the internal buffers.
 
 Value accepted
 ^^^^^^^^^^^^^^
@@ -1917,6 +1918,8 @@ NCCL_DMABUF_ENABLE
 Enable GPU Direct RDMA buffer registration using the Linux dma-buf subsystem.
 
 The Linux dma-buf subsystem allows GPU Direct RDMA capable NICs to read and write CUDA buffers directly without CPU involvement.
+
+GIN registration of a window that contains host VMM memory requires this variable set to 1, because that memory is registered through a DMA-BUF memory region. With 0, registration fails with ``ncclInvalidUsage``.
 
 Value accepted
 ^^^^^^^^^^^^^^
