@@ -315,6 +315,9 @@ module:
     # Below tests are failing PSDB
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [launch]
+  Unit_hipExtModuleLaunchKernel_ExceedMaxGridDim_NonUniform:
+    <<: *level_default
+    tags: [launch]
   Unit_hipExtModuleLaunchKernel_Functional:
     <<: *level_default
     # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23
