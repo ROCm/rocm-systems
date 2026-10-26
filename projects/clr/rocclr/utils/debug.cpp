@@ -192,7 +192,6 @@ class AsyncLogger {
   std::atomic<size_t> writeIndex_{0};      //!< Write position in circular buffer
   std::atomic<size_t> readIndex_{0};       //!< Read position in circular buffer
   std::atomic<size_t> claimIndex_{0};      //!< readIndex_ + 1 while an entry is being written
-  std::atomic<std::thread::id> claimHolder_{}; //!< The thread writing it, once it has claimed it
   std::atomic<bool> running_{false};       //!< Worker thread running flag
   std::atomic<bool> enabled_{false};       //!< Async logging enabled flag
 
@@ -205,7 +204,7 @@ class AsyncLogger {
       std::unique_lock<std::mutex> lock(flushMutex_);
       flushCV_.wait_for(lock, std::chrono::milliseconds(kFlushIntervalMs),
                        [this] { return !running_.load(std::memory_order_relaxed); });
-      
+
       if (running_.load(std::memory_order_relaxed)) {
         flushPending();
       }
@@ -221,13 +220,12 @@ class AsyncLogger {
   // producer or a thread holding the stream, so it never waits on them for
   // long. It writes what was logged before it started, takes turns with a
   // consumer that keeps moving readIndex_, and stops at an entry a producer has
-  // not finished, at a claim its own thread holds, and where readIndex_ or the
-  // stream stays held for kCrashWaitYields yields.
+  // not finished and where readIndex_ or the stream stays held for
+  // kCrashWaitYields yields.
   void flushPending(bool crash = false) {
     if (!crash) {
       TruncateLogFileFlushPath();
     }
-    const std::thread::id self = std::this_thread::get_id();
     const size_t end = writeIndex_.load(std::memory_order_acquire);
 
     size_t writeCount = 0;
@@ -242,9 +240,6 @@ class AsyncLogger {
       if (!claimIndex_.compare_exchange_strong(expected, currentRead + 1,
                                                std::memory_order_acq_rel)) {
         if (crash) {
-          if (claimHolder_.load(std::memory_order_relaxed) == self) {
-            break;
-          }
           if (readIndex_.load(std::memory_order_acquire) != currentRead) {
             waits = 0;
             continue;
@@ -256,7 +251,6 @@ class AsyncLogger {
         std::this_thread::yield();
         continue;
       }
-      claimHolder_.store(self, std::memory_order_relaxed);
       LogEntry& entry = buffer_[currentRead % kBufferSize];
 
       // Wait for valid flag
@@ -266,7 +260,6 @@ class AsyncLogger {
         valid = entry.valid.load(std::memory_order_acquire);
       }
       if (!valid || (crash && !tryLockOutFile())) {
-        claimHolder_.store(std::thread::id(), std::memory_order_relaxed);
         claimIndex_.store(currentRead, std::memory_order_release);
         break;
       }
@@ -280,7 +273,6 @@ class AsyncLogger {
         unlockOutFile();
       }
       entry.valid.store(false, std::memory_order_release);
-      claimHolder_.store(std::thread::id(), std::memory_order_relaxed);
       readIndex_.store(currentRead + 1, std::memory_order_release);
       waits = 0;
     }

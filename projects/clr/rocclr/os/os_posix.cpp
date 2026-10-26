@@ -144,9 +144,6 @@ static bool crashHandlersInstalled_ = false;  // Guarded by crashHandlersLock_
 
 // True for a fault that its instruction raises again when the thread retries it
 static bool faultsAgain(int sig, const siginfo_t* info) {
-  if (info == nullptr) {
-    return false;
-  }
   const int code = info->si_code;
   switch (sig) {
     case SIGSEGV:
@@ -178,11 +175,8 @@ static void crashSignalHandler(int sig, siginfo_t* info, void* context) {
   errno = savedErrno;
 
   size_t i = 0;
-  while (i < kNumCrashSignals && kCrashSignals[i] != sig) {
+  while (kCrashSignals[i] != sig) {
     ++i;
-  }
-  if (i == kNumCrashSignals) {
-    return;
   }
 
   // Chain to the earlier handler. It may recover and return, and then a later
@@ -192,12 +186,7 @@ static void crashSignalHandler(int sig, siginfo_t* info, void* context) {
       !((old.sa_flags & SA_RESETHAND) && oldCrashHandlerSpent_[i].exchange(true))) {
     // Run it with the mask the kernel would have given it: the interrupted
     // thread's mask, its sa_mask, and the signal itself unless SA_NODEFER.
-    sigset_t mask;
-    if (context != nullptr) {
-      mask = static_cast<ucontext_t*>(context)->uc_sigmask;
-    } else {
-      pthread_sigmask(SIG_BLOCK, nullptr, &mask);
-    }
+    sigset_t mask = static_cast<ucontext_t*>(context)->uc_sigmask;
     sigset_t entry;
     sigorset(&mask, &mask, &old.sa_mask);
     if ((old.sa_flags & SA_NODEFER) == 0) {
@@ -213,16 +202,10 @@ static void crashSignalHandler(int sig, siginfo_t* info, void* context) {
     return;
   }
 
-  // As without CLR's handler: a signal sent by a process to an ignored crash
-  // signal is dropped. Anything else gets the default action on this thread. A
-  // fault its instruction raises again when retried faults again on return, so
-  // the core dump records it with its own thread and address. Anything else is
-  // raised again: a sent signal, a trap the kernel reports past its instruction
-  // (SI_KERNEL), a machine check.
-  const bool sent = info == nullptr || info->si_code <= 0;
-  if (old.sa_handler == SIG_IGN && sent) {
-    return;
-  }
+  // The default action, on this thread. A fault its instruction raises again
+  // when retried faults again on return, so the core dump records it with its
+  // own thread and address. Anything else is raised again: a sent signal, a
+  // trap the kernel reports past its instruction (SI_KERNEL), a machine check.
   struct sigaction dfl;
   memset(&dfl, 0, sizeof(dfl));
   sigemptyset(&dfl.sa_mask);
@@ -237,19 +220,11 @@ bool Os::installExceptionHandlers(CrashCallback callback) {
   std::lock_guard<std::mutex> lock(crashHandlersLock_);
 
   if (callback != nullptr) {
-    bool registered = false;
     for (auto& slot : crashCallbacks_) {
-      if (slot.load() == callback) {
-        registered = true;
+      if (slot.load() == nullptr) {
+        slot.store(callback);
         break;
       }
-    }
-    for (size_t j = 0; !registered && j < kMaxCrashCallbacks; ++j) {
-      Os::CrashCallback empty = nullptr;
-      registered = crashCallbacks_[j].compare_exchange_strong(empty, callback);
-    }
-    if (!registered) {
-      return false;
     }
   }
 
@@ -270,13 +245,6 @@ bool Os::installExceptionHandlers(CrashCallback callback) {
     bool ok = sigaction(kCrashSignals[i], nullptr, &oldCrashHandlers_[i]) == 0;
     sa.sa_flags = SA_SIGINFO | (oldCrashHandlers_[i].sa_flags & (SA_RESTART | SA_ONSTACK));
     if (!ok || sigaction(kCrashSignals[i], &sa, nullptr) != 0) {
-      while (i-- > 0) {
-        sigaction(kCrashSignals[i], &oldCrashHandlers_[i], nullptr);
-      }
-      for (auto& slot : crashCallbacks_) {
-        Os::CrashCallback expected = callback;
-        slot.compare_exchange_strong(expected, nullptr);
-      }
       return false;
     }
   }
@@ -300,12 +268,7 @@ void Os::uninstallExceptionHandlers(CrashCallback callback) {
   }
 
   for (size_t i = 0; i < kNumCrashSignals; ++i) {
-    struct sigaction old = oldCrashHandlers_[i];
-    if ((old.sa_flags & SA_RESETHAND) && oldCrashHandlerSpent_[i].load()) {
-      old.sa_handler = SIG_DFL;  // It already ran once, as with the kernel's reset
-      old.sa_flags = 0;
-    }
-    sigaction(kCrashSignals[i], &old, nullptr);
+    sigaction(kCrashSignals[i], &oldCrashHandlers_[i], nullptr);
   }
   crashHandlersInstalled_ = false;
 }

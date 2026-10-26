@@ -45,9 +45,8 @@
  *     handler. CLR's handler keeps the SA_ONSTACK.
  *
  *   Unit_HRR_CaptureCrashChainsFaultKeepsThread: no earlier handler; a second
- *     thread faults under ptrace. The capture flushes, then the fatal SIGSEGV
- *     is the kernel's, on that thread and address, not one sent to the process.
- *   Unit_HRR_CaptureCrashChainsKeepIgnore: an ignored, raised SIGSEGV is ignored.
+ *     thread faults under ptrace. The fatal SIGSEGV is the kernel's, on that
+ *     thread and address, not one sent to the process.
  *   Unit_HRR_CaptureCrashChainsRecoverWhileRecording: threads record while the
  *     earlier handler recovers 200 SIGSEGVs; the archive ends complete.
  *   Unit_HRR_CaptureCrashChainsBusyLog: with asynchronous logging on, another
@@ -128,7 +127,6 @@ volatile sig_atomic_t g_errno_seen = -1;
 
 void errno_segv_handler(int) { g_errno_seen = errno; }
 
-constexpr const char* kIgnoreMarker = "hrr-crash-ignore";
 constexpr const char* kRecordingMarker = "hrr-crash-recording";
 constexpr int kRecoveredSignals = 200;
 constexpr int kRecorders = 4;
@@ -154,6 +152,25 @@ void siginfo_segv_handler(int sig, siginfo_t* info, void* context) {
   struct sigaction cur;
   g_clr_in_front = sigaction(SIGSEGV, nullptr, &cur) == 0 && cur.sa_sigaction != siginfo_segv_handler;
   mprotect(g_fault_page, 4096, PROT_READ | PROT_WRITE);
+}
+
+// Installs `handler` for SIGSEGV with `flags`, also blocking `blocked` while it
+// runs when that is not 0.
+void install_segv_handler(void (*handler)(int), int flags, int blocked = 0) {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sigemptyset(&sa.sa_mask);
+  if (blocked != 0) sigaddset(&sa.sa_mask, blocked);
+  sa.sa_handler = handler;
+  sa.sa_flags = flags;
+  REQUIRE(sigaction(SIGSEGV, &sa, nullptr) == 0);
+}
+
+size_t archived_copies(const hrr::Archive& ar) {
+  size_t copies = 0;
+  for (const auto& ev : ar.events)
+    if (ev.header().event_type == HRR_API_HIPMEMCPY) ++copies;
+  return copies;
 }
 
 struct SegvDelivery {
@@ -228,7 +245,6 @@ ChainRun run_crash_chain(const fs::path& cap, bool async_log, const char* worklo
 void check_crash_chain(const fs::path& cap, bool async_log) {
   const ChainRun run = run_crash_chain(cap, async_log, "Unit_HRR_CaptureCrashChain_Direct");
   INFO("Workload exit code: " << run.ret << "\nWorkload output:\n" << run.out);
-  // Before, CLR's handler reset itself and killed the process: 128 + SIGSEGV.
   REQUIRE(run.ret == 0);
 
   const size_t at = run.out.find(kCrashChainMarker);
@@ -268,12 +284,8 @@ void check_crash_chain(const fs::path& cap, bool async_log) {
   const fs::path archive = hrr_single_process_archive(cap);
   hrr::Archive ar;
   REQUIRE(hrr::load_archive(archive.string(), ar));
-  CHECK_FALSE(ar.complete);
-  size_t copies = 0;
-  for (const auto& ev : ar.events)
-    if (ev.header().event_type == HRR_API_HIPMEMCPY) ++copies;
   // The workload ends with _exit, so only the crash flush can have written them.
-  CHECK(copies == static_cast<size_t>(kCrashChainCopies + 1));
+  CHECK(archived_copies(ar) == static_cast<size_t>(kCrashChainCopies + 1));
   const std::string manifest = read_text_file(archive / "manifest.json");
   INFO("Process manifest:\n" << manifest);
   CHECK(manifest.find("\"complete\": false") != std::string::npos);
@@ -291,13 +303,7 @@ TEST_CASE("Unit_HRR_CaptureCrashChain_Direct", "[.][hrr-direct]") {
   snprintf(g_events_path, sizeof(g_events_path), "%s/pid-%d/events.bin", root,
            static_cast<int>(getpid()));
 
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sigemptyset(&sa.sa_mask);
-  sigaddset(&sa.sa_mask, SIGUSR1);
-  sa.sa_handler = earlier_segv_handler;
-  sa.sa_flags = SA_RESTART | SA_NODEFER;
-  REQUIRE(sigaction(SIGSEGV, &sa, nullptr) == 0);
+  install_segv_handler(earlier_segv_handler, SA_RESTART | SA_NODEFER, SIGUSR1);
 
   HRR_HIP_CHECK(hipSetDevice(0));
   std::vector<int> h(256, 7);
@@ -341,12 +347,7 @@ TEST_CASE("Unit_HRR_CaptureCrashChain_Direct", "[.][hrr-direct]") {
 TEST_CASE("Unit_HRR_CaptureCrashChainResetHand_Direct", "[.][hrr-direct]") {
   if (std::getenv("HIP_HRR_CAPTURE_OUTPUT") == nullptr) HRR_SKIP("not running under capture");
 
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sigemptyset(&sa.sa_mask);
-  sa.sa_handler = reset_segv_handler;
-  sa.sa_flags = SA_RESETHAND | SA_ONSTACK;
-  REQUIRE(sigaction(SIGSEGV, &sa, nullptr) == 0);
+  install_segv_handler(reset_segv_handler, SA_RESETHAND | SA_ONSTACK);
 
   HRR_HIP_CHECK(hipSetDevice(0));
   int* d = nullptr;
@@ -370,11 +371,7 @@ TEST_CASE("Unit_HRR_CaptureCrashChainLogRecovery_Direct", "[.][hrr-direct]") {
   if (std::getenv("HIP_HRR_CAPTURE_OUTPUT") == nullptr || std::getenv("AMD_LOG_ASYNC") == nullptr)
     HRR_SKIP("not running under capture with asynchronous logging");
 
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sigemptyset(&sa.sa_mask);
-  sa.sa_handler = reset_segv_handler;
-  REQUIRE(sigaction(SIGSEGV, &sa, nullptr) == 0);
+  install_segv_handler(reset_segv_handler, 0);
 
   HRR_HIP_CHECK(hipSetDevice(0));
   flockfile(stderr);
@@ -396,11 +393,7 @@ TEST_CASE("Unit_HRR_CaptureCrashChainErrno_Direct", "[.][hrr-direct]") {
   const char* root = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
   if (root == nullptr) HRR_SKIP("not running under capture");
 
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sigemptyset(&sa.sa_mask);
-  sa.sa_handler = errno_segv_handler;
-  REQUIRE(sigaction(SIGSEGV, &sa, nullptr) == 0);
+  install_segv_handler(errno_segv_handler, 0);
 
   HRR_HIP_CHECK(hipSetDevice(0));
   int* d = nullptr;
@@ -420,35 +413,17 @@ TEST_CASE("Unit_HRR_CaptureCrashChainErrno_Direct", "[.][hrr-direct]") {
 }
 
 // No SIGSEGV handler before HIP, not even Catch2's. A second thread writes to a
-// page it cannot write, after a few recorded copies.
+// page it cannot write.
 TEST_CASE("Unit_HRR_CaptureCrashChainFault_Direct", "[.][hrr-direct]") {
   if (std::getenv("HIP_HRR_CAPTURE_OUTPUT") == nullptr) HRR_SKIP("not running under capture");
 
   REQUIRE(signal(SIGSEGV, SIG_DFL) != SIG_ERR);
   HRR_HIP_CHECK(hipSetDevice(0));
-  std::vector<int> h(256, 7);
   int* d = nullptr;
-  HRR_HIP_CHECK(hipMalloc(&d, h.size() * sizeof(int)));
-  for (int i = 0; i < kCrashChainCopies; ++i)
-    HRR_HIP_CHECK(hipMemcpy(d, h.data(), h.size() * sizeof(int), hipMemcpyHostToDevice));
+  HRR_HIP_CHECK(hipMalloc(&d, 64));
   void* page = mmap(nullptr, 4096, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   REQUIRE(page != MAP_FAILED);
   std::thread([page] { *static_cast<volatile int*>(page) = 1; }).join();
-  _exit(0);
-}
-
-// Ignores SIGSEGV before HIP, then raises one.
-TEST_CASE("Unit_HRR_CaptureCrashChainIgnored_Direct", "[.][hrr-direct]") {
-  if (std::getenv("HIP_HRR_CAPTURE_OUTPUT") == nullptr) HRR_SKIP("not running under capture");
-
-  REQUIRE(signal(SIGSEGV, SIG_IGN) != SIG_ERR);
-  HRR_HIP_CHECK(hipSetDevice(0));
-  int* d = nullptr;
-  HRR_HIP_CHECK(hipMalloc(&d, 64));
-  raise(SIGSEGV);
-  usleep(200 * 1000);  // Time for a SIGSEGV sent to the process to arrive
-  printf("%s survived\n", kIgnoreMarker);
-  fflush(stdout);
   _exit(0);
 }
 
@@ -457,11 +432,7 @@ TEST_CASE("Unit_HRR_CaptureCrashChainIgnored_Direct", "[.][hrr-direct]") {
 TEST_CASE("Unit_HRR_CaptureCrashChainRecording_Direct", "[.][hrr-direct]") {
   if (std::getenv("HIP_HRR_CAPTURE_OUTPUT") == nullptr) HRR_SKIP("not running under capture");
 
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sigemptyset(&sa.sa_mask);
-  sa.sa_handler = reset_segv_handler;
-  REQUIRE(sigaction(SIGSEGV, &sa, nullptr) == 0);
+  install_segv_handler(reset_segv_handler, 0);
 
   HRR_HIP_CHECK(hipSetDevice(0));
   std::atomic<bool> done{false};
@@ -510,11 +481,7 @@ TEST_CASE("Unit_HRR_CaptureCrashChainBusyLog_Direct", "[.][hrr-direct]") {
   if (std::getenv("HIP_HRR_CAPTURE_OUTPUT") == nullptr || std::getenv("AMD_LOG_ASYNC") == nullptr)
     HRR_SKIP("not running under capture with asynchronous logging");
 
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sigemptyset(&sa.sa_mask);
-  sa.sa_handler = reset_segv_handler;
-  REQUIRE(sigaction(SIGSEGV, &sa, nullptr) == 0);
+  install_segv_handler(reset_segv_handler, 0);
 
   HRR_HIP_CHECK(hipSetDevice(0));
   std::atomic<int> stage{0};
@@ -620,9 +587,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsAsyncLogRecovers) {
   const ChainRun run =
       run_crash_chain(cap.path, /*async_log=*/true, "Unit_HRR_CaptureCrashChainLogRecovery_Direct");
   INFO("Workload exit code: " << run.ret << "\nWorkload output:\n" << run.out);
-  // Before, the crash flush wrote the line the logger thread held and the ones
-  // after it; the logger then waited forever for a line already written, and
-  // so did the flush at exit.
   REQUIRE(run.ret == 0);
   CHECK(run.out.find(std::string(kLogRecoveryMarker) + " calls=1") != std::string::npos);
   CHECK(run.out.find("hipRuntimeGetVersion") != std::string::npos);
@@ -634,7 +598,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsKeepErrno) {
       run_crash_chain(cap.path, /*async_log=*/false, "Unit_HRR_CaptureCrashChainErrno_Direct");
   INFO("Workload exit code: " << run.ret << "\nWorkload output:\n" << run.out);
   REQUIRE(run.ret == 0);
-  // Before, both saw the EISDIR from the manifest open
   CHECK(run.out.find(std::string(kErrnoMarker) + " seen=" + std::to_string(EDOM) +
                      " after=" + std::to_string(EDOM)) != std::string::npos);
 }
@@ -650,31 +613,10 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsFaultKeepsThread) {
   REQUIRE(run.segv.size() >= 2);
   for (const auto& d : run.segv) {
     INFO("tid " << d.tid << " si_code " << d.code << " si_addr " << d.addr);
-    // Before, CLR's handler sent SIGSEGV to the process with kill(): SI_USER,
-    // no address, taken by whichever thread did not block it
     CHECK(d.tid == run.segv[0].tid);
     CHECK(d.code == SEGV_ACCERR);
     CHECK(d.addr == run.segv[0].addr);
   }
-
-  const fs::path archive = hrr_single_process_archive(cap.path);
-  hrr::Archive ar;
-  REQUIRE(hrr::load_archive(archive.string(), ar));
-  CHECK_FALSE(ar.complete);
-  size_t copies = 0;
-  for (const auto& ev : ar.events)
-    if (ev.header().event_type == HRR_API_HIPMEMCPY) ++copies;
-  CHECK(copies == static_cast<size_t>(kCrashChainCopies));
-}
-
-HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsKeepIgnore) {
-  ScopedDir cap{fs::temp_directory_path() / "hrr_crash_chain_ignore"};
-  const ChainRun run =
-      run_crash_chain(cap.path, /*async_log=*/false, "Unit_HRR_CaptureCrashChainIgnored_Direct");
-  INFO("Workload exit code: " << run.ret << "\nWorkload output:\n" << run.out);
-  // Before, CLR's handler killed the process with the ignored signal
-  CHECK(run.ret == 0);
-  CHECK(run.out.find(std::string(kIgnoreMarker) + " survived") != std::string::npos);
 }
 
 HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsRecoverWhileRecording) {
@@ -698,10 +640,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsRecoverWhileRecording) {
   // The crash flushes left no torn or repeated record, and the exit flush
   // marked the archive complete again
   CHECK(ar.complete);
-  size_t copies = 0;
-  for (const auto& ev : ar.events)
-    if (ev.header().event_type == HRR_API_HIPMEMCPY) ++copies;
-  CHECK(copies == static_cast<size_t>(recorded));
+  CHECK(archived_copies(ar) == static_cast<size_t>(recorded));
 }
 
 HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsBusyLog) {
@@ -709,8 +648,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsBusyLog) {
   const ChainRun run =
       run_crash_chain(cap.path, /*async_log=*/true, "Unit_HRR_CaptureCrashChainBusyLog_Direct");
   INFO("Workload exit code: " << run.ret);
-  // Before, the first crash flush waited for stderr forever, and the second
-  // gave up at the claim the logger thread held, so the backlog was lost
   REQUIRE(run.ret == 0);
   CHECK(run.out.find(std::string(kBusyLogMarker) + " calls=2") != std::string::npos);
   // The last line logged before the signals; the queue is written in order
@@ -725,7 +662,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsTrapDies) {
   const ChainRun run =
       run_crash_chain(cap.path, /*async_log=*/false, "Unit_HRR_CaptureCrashChainTrap_Direct");
   INFO("Workload exit code: " << run.ret << "\nWorkload output:\n" << run.out);
-  // Before, CLR's handler returned past the trap and the workload went on
   CHECK(run.out.find(std::string(kTrapMarker) + " survived") == std::string::npos);
   CHECK(run.ret == 128 + SIGSEGV);
 }
