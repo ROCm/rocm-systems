@@ -29,6 +29,7 @@ from sqlalchemy import (
     case,
     cast,
     create_engine,
+    distinct,
     func,
     select,
     text,
@@ -860,15 +861,17 @@ class Database:
     ) -> Select[Any]:
         """Select one workload's instruction lines with their sample counts.
 
-        The first columns name the file each row belongs in; the rest are the
-        row as it is written, in CSV column order. Every disassembled line is
-        returned, so an unsampled line arrives with empty counts.
+        The first columns name the file each row belongs in, and the instruction
+        uuid follows them. The rest are the row as it is written, in CSV column
+        order. Every disassembled line is returned, so an unsampled line arrives
+        with empty counts.
         """
         source_chain_subquery = Database._source_chain_subquery()
 
         return (
             select(
                 *per_kernel_isa_file_key_columns(),
+                InstructionLine.instruction_uuid.label("instruction_uuid"),
                 InstructionLine.code_object_offset.label("offset"),
                 InstructionLine.instruction,
                 InstructionTypeLookup.text.label("instruction_type"),
@@ -937,11 +940,9 @@ class Database:
     ) -> Select[Any]:
         """Select every source line of one workload's captured source files.
 
-        Each source line has its sample state and the ISA references of the
-        instructions whose inline stack includes that source line.
+        Each source line has its sample state and the uuids of the instructions
+        whose inline stack includes that source line.
         """
-        isa_references_subquery = Database._isa_references_subquery(workload_id)
-
         return (
             select(
                 *per_source_line_file_key_columns(),
@@ -953,10 +954,12 @@ class Database:
                 PCSampleState.wave_occupancy_percent,
                 PCSampleState.active_thread_percent,
                 *Database._stall_reason_columns(stall_reasons),
-                # A source line without instructions has no ISA references.
-                func.coalesce(isa_references_subquery.c.isa_references, "[]").label(
-                    "isa_references"
-                ),
+                # DISTINCT removes the repeats that the stall-reason join adds.
+                # FILTER skips the null of a source line without instructions.
+                func
+                .json_group_array(distinct(InstructionSourceLine.instruction_uuid))
+                .filter(InstructionSourceLine.instruction_uuid.is_not(None))
+                .label("instruction_uuids"),
             )
             .select_from(SourceLine)
             .join(
@@ -980,94 +983,18 @@ class Database:
                 == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
             )
             .outerjoin(
-                isa_references_subquery,
-                SourceLine.source_line_uuid
-                == isa_references_subquery.c.source_line_uuid,
+                InstructionSourceLine,
+                SourceLine.source_line_uuid == InstructionSourceLine.source_line_uuid,
             )
             .where(SourceFile.workload_id == workload_id)
             # Only captured files are exported.
             .where(SourceFile.md5_checksum.is_not(None))
             # Skip "?" frames, which are stored without a line number.
             .where(SourceLine.line_number.is_not(None))
-            # The stall-reason join adds one row per reason, so group the rows
+            # The stall-reason and instruction joins add rows, so group them
             # back into one row per source line.
             .group_by(SourceLine.source_line_uuid)
             .order_by(SourceFile.file_path, SourceLine.line_number)
-        )
-
-    @staticmethod
-    def _isa_references_subquery(workload_id: int) -> Subquery:
-        """For each source line of a workload, list the instructions compiled from it.
-
-        Each instruction is given by its kernel, code object, process, and its
-        instruction line number, which is its position in the ISA file of its
-        kernel, counting from 1. The list is a JSON array.
-        """
-        # Number the instruction lines of each kernel ISA file, counting from 1.
-        numbered_isa_lines = (
-            select(
-                InstructionLine.instruction_uuid,
-                Kernel.kernel_uuid,
-                Kernel.short_name,
-                CodeObjectStore.code_object_id,
-                CodeObjectStore.pid,
-                func
-                .row_number()
-                .over(
-                    partition_by=(
-                        Kernel.kernel_uuid,
-                        CodeObjectStore.code_object_id,
-                        CodeObjectStore.pid,
-                    ),
-                    order_by=InstructionLine.code_object_offset,
-                )
-                .label("instruction_line_number"),
-            )
-            .select_from(InstructionLine)
-            .join(
-                KernelSymbol,
-                InstructionLine.kernel_symbol_uuid == KernelSymbol.kernel_symbol_uuid,
-            )
-            .join(
-                CodeObjectStore,
-                KernelSymbol.code_object_uuid == CodeObjectStore.code_object_uuid,
-            )
-            .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
-            .where(CodeObjectStore.workload_id == workload_id)
-            .subquery("numbered_isa_lines")
-        )
-        # Pair each source line with the instructions compiled from it. DISTINCT
-        # keeps one pair when an inline stack includes the source line twice.
-        line_references = (
-            select(InstructionSourceLine.source_line_uuid, numbered_isa_lines)
-            .join(
-                numbered_isa_lines,
-                InstructionSourceLine.instruction_uuid
-                == numbered_isa_lines.c.instruction_uuid,
-            )
-            .distinct()
-            .subquery("line_references")
-        )
-        return (
-            select(
-                line_references.c.source_line_uuid,
-                func.json_group_array(
-                    func.json_object(
-                        "kernel_uuid",
-                        line_references.c.kernel_uuid,
-                        "short_name",
-                        line_references.c.short_name,
-                        "code_object_id",
-                        line_references.c.code_object_id,
-                        "pid",
-                        line_references.c.pid,
-                        "instruction_line_number",
-                        line_references.c.instruction_line_number,
-                    )
-                ).label("isa_references"),
-            )
-            .group_by(line_references.c.source_line_uuid)
-            .subquery("isa_references")
         )
 
     @staticmethod

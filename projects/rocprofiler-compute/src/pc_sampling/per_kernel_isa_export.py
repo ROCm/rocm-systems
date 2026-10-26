@@ -14,9 +14,10 @@ counts collected on them.
 from collections.abc import Iterable, Iterator
 from functools import partial
 from pathlib import Path
-from typing import Any, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from pc_sampling.pc_sampling_csv_export import (
+    IsaLineLocation,
     Row,
     build_header,
     resolve_isa_relative_path,
@@ -61,22 +62,29 @@ class WorkloadIsaExport(NamedTuple):
     isa_rows: Iterator[Tuple[Any, ...]]
 
 
+class PerKernelIsaFiles(NamedTuple):
+    """The per-kernel ISA files that were written, and where each instruction is."""
+
+    # The folder of the files, which is also where their source is exported
+    directory: Path
+    # The location of each instruction line, keyed by its instruction uuid
+    isa_line_locations: Dict[int, IsaLineLocation]
+
+
 def export_per_kernel_isa_files(
     csv_result_directory: Path,
     workload_isa_exports: Iterable[WorkloadIsaExport],
-) -> Path:
-    """Export every workload's per-kernel ISA beneath a CSV result folder.
-
-    Returns the folder the files were written to, which is also where the
-    source they point at is exported.
-    """
+) -> PerKernelIsaFiles:
+    """Export every workload's per-kernel ISA beneath a CSV result folder."""
     per_kernel_directory = csv_result_directory / PER_KERNEL_DIRECTORY_NAME
+    isa_line_locations: Dict[int, IsaLineLocation] = {}
 
     for workload_isa_export in workload_isa_exports:
         file_count = _write_per_kernel_isa_files(
             per_kernel_directory,
             workload_isa_export.isa_rows,
             workload_isa_export.stall_reasons,
+            isa_line_locations,
         )
         console_debug(
             f"Exported {file_count} per-kernel ISA files for workload "
@@ -85,7 +93,7 @@ def export_per_kernel_isa_files(
 
     if per_kernel_directory.is_dir():
         console_warning(f"Created directory: {per_kernel_directory}")
-    return per_kernel_directory
+    return PerKernelIsaFiles(per_kernel_directory, isa_line_locations)
 
 
 def _resolve_isa_export_path(per_kernel_directory: Path, file_key: FileKey) -> Path:
@@ -103,6 +111,7 @@ def _write_per_kernel_isa_files(
     per_kernel_directory: Path,
     isa_rows: Iterator[Row],
     stall_reasons: List[str],
+    isa_line_locations: Dict[int, IsaLineLocation],
 ) -> int:
     """Write one workload's grouped ISA rows, and return the number of files."""
     return write_grouped_csv_files(
@@ -110,10 +119,22 @@ def _write_per_kernel_isa_files(
         len(per_kernel_isa_file_key_columns()),
         build_header(BASE_COLUMNS, stall_reasons, TRAILING_COLUMNS),
         partial(_resolve_isa_export_path, per_kernel_directory),
-        _number_instruction_lines,
+        partial(_number_instruction_lines, isa_line_locations),
     )
 
 
-def _number_instruction_lines(file_rows: List[Row]) -> Iterator[List[Any]]:
-    """Prefix each instruction row of one file with its line number, from 1."""
-    return ([line_number, *row] for line_number, row in enumerate(file_rows, start=1))
+def _number_instruction_lines(
+    isa_line_locations: Dict[int, IsaLineLocation],
+    file_key: FileKey,
+    file_rows: List[Row],
+) -> Iterator[List[Any]]:
+    """Prefix each instruction row of one ISA file with its line number, from 1.
+
+    Records the location of each instruction in isa_line_locations. Each row
+    starts with its instruction uuid, which is not written.
+    """
+    _, _, *kernel_key = file_key
+    isa_file = resolve_isa_relative_path(*kernel_key)
+    for line_number, (instruction_uuid, *cells) in enumerate(file_rows, start=1):
+        isa_line_locations[instruction_uuid] = IsaLineLocation(isa_file, line_number)
+        yield [line_number, *cells]

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from pc_sampling.pc_sampling_csv_export import IsaLineLocation
 from pc_sampling.per_source_line_export import (
     WorkloadSourceLineExport,
     _format_isa_references,
@@ -18,21 +19,18 @@ from pc_sampling.per_source_line_export import (
     export_per_source_line_files,
 )
 
-ISA_REFERENCE_FIELDS = (
-    "kernel_uuid",
-    "short_name",
-    "code_object_id",
-    "pid",
-    "instruction_line_number",
-)
-
-
-def make_isa_references_json(*isa_references):
-    """Encode references as the per-source-line select returns them."""
-    return json.dumps([
-        dict(zip(ISA_REFERENCE_FIELDS, isa_reference))
-        for isa_reference in isa_references
-    ])
+COPY_ISA_FILE = Path("vecCopy_uuid_7/isa_code_object_id_5_pid_42.csv")
+OTHER_PROCESS_ISA_FILE = Path("vecCopy_uuid_7/isa_code_object_id_5_pid_43.csv")
+ADD_ISA_FILE = Path("vecAdd_uuid_8/isa_code_object_id_5_pid_42.csv")
+# Where the per-kernel ISA export wrote each instruction, by instruction uuid
+ISA_LINE_LOCATIONS = {
+    100: IsaLineLocation(COPY_ISA_FILE, 1),
+    101: IsaLineLocation(COPY_ISA_FILE, 2),
+    102: IsaLineLocation(COPY_ISA_FILE, 3),
+    103: IsaLineLocation(COPY_ISA_FILE, 4),
+    104: IsaLineLocation(OTHER_PROCESS_ISA_FILE, 2),
+    105: IsaLineLocation(ADD_ISA_FILE, 3),
+}
 
 
 def make_source_line_row(
@@ -42,7 +40,7 @@ def make_source_line_row(
     issue_count=2,
     stall_count=1,
     stall_reason_counts=(),
-    isa_references=((7, "vecCopy", 5, 42, 1),),
+    instruction_uuids=(100,),
     file_path="/s/a.cpp",
     workload_name="vector_copy",
     workload_sub_name="MI300X_A1",
@@ -60,7 +58,7 @@ def make_source_line_row(
         None,
         None,
         *stall_reason_counts,
-        make_isa_references_json(*isa_references),
+        json.dumps(list(instruction_uuids)),
     )
 
 
@@ -98,34 +96,19 @@ def test_format_number_ranges(ascending_numbers, expected):
 
 
 def test_format_isa_references_lists_one_isa_file_per_line():
-    """References are grouped by ISA file, in kernel, code object and pid order."""
-    isa_references_json = make_isa_references_json(
-        (8, "vecAdd", 5, 42, 3),
-        (7, "vecCopy", 5, 43, 2),
-        (7, "vecCopy", 5, 42, 4),
-        (7, "vecCopy", 5, 42, 2),
-        (7, "vecCopy", 5, 42, 3),
-    )
+    """References are grouped by ISA file, in ISA file path order."""
+    instruction_uuids_json = json.dumps([105, 104, 103, 101, 102])
 
-    assert _format_isa_references(isa_references_json) == (
+    assert _format_isa_references(instruction_uuids_json, ISA_LINE_LOCATIONS) == (
+        "vecAdd_uuid_8/isa_code_object_id_5_pid_42.csv:3\n"
         "vecCopy_uuid_7/isa_code_object_id_5_pid_42.csv:2-4\n"
-        "vecCopy_uuid_7/isa_code_object_id_5_pid_43.csv:2\n"
-        "vecAdd_uuid_8/isa_code_object_id_5_pid_42.csv:3"
-    )
-
-
-def test_format_isa_references_names_a_kernel_without_a_short_name():
-    """A kernel without a short name is referenced by the folder its ISA uses."""
-    isa_references_json = make_isa_references_json((7, None, 5, 42, 1))
-
-    assert _format_isa_references(isa_references_json) == (
-        "kernel_uuid_7/isa_code_object_id_5_pid_42.csv:1"
+        "vecCopy_uuid_7/isa_code_object_id_5_pid_43.csv:2"
     )
 
 
 def test_format_isa_references_is_empty_for_a_line_without_instructions():
     """A source line without instructions has no ISA references."""
-    assert _format_isa_references("[]") == ""
+    assert _format_isa_references("[]", ISA_LINE_LOCATIONS) == ""
 
 
 def test_write_per_source_line_files_opens_one_file_per_source_file(tmp_path):
@@ -136,7 +119,9 @@ def test_write_per_source_line_files_opens_one_file_per_source_file(tmp_path):
         make_source_line_row(file_path="/s/b.hpp", line_number=1),
     ]
 
-    file_count = _write_per_source_line_files(tmp_path, iter(source_line_rows), [])
+    file_count = _write_per_source_line_files(
+        tmp_path, iter(source_line_rows), [], ISA_LINE_LOCATIONS
+    )
 
     assert file_count == 2
     assert sorted(
@@ -158,12 +143,14 @@ def test_write_per_source_line_files_writes_header_and_rows(tmp_path):
             issue_count=None,
             stall_count=None,
             stall_reason_counts=(None,),
-            isa_references=(),
+            instruction_uuids=(),
         ),
         make_source_line_row(line_number=2, stall_reason_counts=(4,)),
     ]
 
-    _write_per_source_line_files(tmp_path, iter(source_line_rows), ["WAITCNT"])
+    _write_per_source_line_files(
+        tmp_path, iter(source_line_rows), ["WAITCNT"], ISA_LINE_LOCATIONS
+    )
 
     exported_rows = read_exported_rows(
         tmp_path
@@ -202,7 +189,9 @@ def test_write_per_source_line_files_writes_header_and_rows(tmp_path):
 
 def test_write_per_source_line_files_writes_nothing_without_rows(tmp_path):
     """A workload without captured source files leaves no folder behind."""
-    file_count = _write_per_source_line_files(tmp_path / "per_kernel", iter([]), [])
+    file_count = _write_per_source_line_files(
+        tmp_path / "per_kernel", iter([]), [], ISA_LINE_LOCATIONS
+    )
 
     assert file_count == 0
     assert not (tmp_path / "per_kernel").exists()
@@ -212,6 +201,7 @@ def test_export_per_source_line_files_writes_each_workloads_files(tmp_path):
     """The rows of each workload land under the folder of that workload."""
     export_per_source_line_files(
         tmp_path,
+        ISA_LINE_LOCATIONS,
         [
             WorkloadSourceLineExport(
                 1, [], iter([make_source_line_row(workload_name="first")])
