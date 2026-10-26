@@ -5,6 +5,7 @@
 
 #include "async.h"
 #include "context.h"
+#include "hip.h"
 #include "hipfile.h"
 #include "hipfile-warnings.h"
 #include "io.h"
@@ -27,6 +28,7 @@
 
 using namespace hipFile;
 using ::testing::_;
+using ::testing::InSequence;
 using ::testing::NiceMock;
 using ::testing::Return;
 using ::testing::Throw;
@@ -61,346 +63,284 @@ struct InlinePool : IThreadPool {
     }
 };
 
-void
-configureStream(NiceMock<MStream> &stream, hipStream_t hip_stream, bool wait_value_capable)
-{
-    ON_CALL(stream, getHipStream).WillByDefault(Return(hip_stream));
-    ON_CALL(stream, getHipDevice).WillByDefault(Return(0));
-    ON_CALL(stream, fixedIOSize).WillByDefault(Return(false));
-    ON_CALL(stream, fixedFileOffset).WillByDefault(Return(false));
-    ON_CALL(stream, fixedBufferOffset).WillByDefault(Return(false));
-    ON_CALL(stream, isRetired).WillByDefault(Return(false));
-    ON_CALL(stream, canUseStreamWaitValue).WillByDefault(Return(wait_value_capable));
-    ON_CALL(stream, signalSlot).WillByDefault(Return(nullptr));
-    ON_CALL(stream, nextSignalTarget).WillByDefault(Return(1));
+struct AsyncTest : public ::testing::Test {
+    AsyncTest()
+    {
+        configure(nonnull_stream(), true);
+        ON_CALL(*buffer, getLength).WillByDefault(Return(4096));
+        ON_CALL(*buffer, getGpuId).WillByDefault(Return(0));
+    }
+
+    ~AsyncTest() override
+    {
+        // hipLaunchHostFunc is mocked, so a queued op whose host function never ran still owns itself.
+        if (queued) {
+            queued->self.reset();
+        }
+    }
+
+    void configure(hipStream_t hip_stream, bool wait_value_capable)
+    {
+        ON_CALL(*stream, getHipStream).WillByDefault(Return(hip_stream));
+        ON_CALL(*stream, getHipDevice).WillByDefault(Return(0));
+        ON_CALL(*stream, isManaged).WillByDefault(Return(true));
+        ON_CALL(*stream, isRetired).WillByDefault(Return(false));
+        ON_CALL(*stream, canUseStreamWaitValue).WillByDefault(Return(wait_value_capable));
+        ON_CALL(*stream, signalSlot).WillByDefault(Return(wait_value_capable ? &slot : nullptr));
+        ON_CALL(*stream, nextSignalTarget).WillByDefault(Return(1));
+    }
+
+    void captureDispatch()
+    {
+        EXPECT_CALL(mhip, hipLaunchHostFunc(nonnull_stream(), async_dispatch, _))
+            .WillOnce([this](hipStream_t, hipHostFn_t, void *userdata) {
+                queued = static_cast<AsyncOp *>(userdata)->self;
+            });
+    }
+
+    void enqueue()
+    {
+        enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset, &bytes,
+                     stream);
+    }
+
+    std::shared_ptr<AsyncOp> makeOp(std::function<void(AsyncOp *)> io_fn)
+    {
+        return std::make_shared<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
+                                         &buffer_offset, &bytes, std::move(io_fn), backend);
+    }
+
+    NiceMock<MHip>                      mhip;
+    std::shared_ptr<NiceMock<MStream>>  stream{std::make_shared<NiceMock<MStream>>()};
+    std::shared_ptr<NiceMock<MBuffer>>  buffer{std::make_shared<NiceMock<MBuffer>>()};
+    std::shared_ptr<NiceMock<MFile>>    file{std::make_shared<NiceMock<MFile>>()};
+    std::shared_ptr<NiceMock<MBackend>> backend{std::make_shared<NiceMock<MBackend>>()};
+    uint64_t                            slot{0};
+    size_t                              size{512};
+    hoff_t                              file_offset{0};
+    hoff_t                              buffer_offset{0};
+    ssize_t                             bytes{-1};
+    std::shared_ptr<AsyncOp>            queued;
+};
+
 }
 
-std::shared_ptr<AsyncOp>
-makeOp(std::shared_ptr<IStream> stream, std::shared_ptr<IBuffer> buffer, std::shared_ptr<Backend> backend,
-       size_t *size, hoff_t *file_offset, hoff_t *buffer_offset, ssize_t *bytes,
-       std::function<void(AsyncOp *)> io_fn)
+TEST_F(AsyncTest, RunIoRecordsBytes)
 {
-    return std::make_shared<AsyncOp>(IoType::Read, std::make_shared<NiceMock<MFile>>(), std::move(buffer),
-                                     std::move(stream), size, file_offset, buffer_offset, bytes,
-                                     std::move(io_fn), std::move(backend));
-}
-
-}
-
-TEST(AsyncRunIo, SuccessRecordsBytes)
-{
-    NiceMock<MHip> mhip;
-    auto           stream = std::make_shared<NiceMock<MStream>>();
-    auto           buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto           backend{std::make_shared<NiceMock<MBackend>>()};
-    size_t         size{512};
-    hoff_t         file_offset{0};
-    hoff_t         buffer_offset{0};
-    ssize_t        bytes{-1};
-    configureStream(*stream, nonnull_stream(), false);
-    ON_CALL(*buffer, getLength).WillByDefault(Return(4096));
-
-    auto op = makeOp(stream, buffer, backend, &size, &file_offset, &buffer_offset, &bytes, async_run_io);
     EXPECT_CALL(*backend, io(IoType::Read, _, _, size, file_offset, buffer_offset)).WillOnce(Return(512));
-
+    auto op = makeOp(async_run_io);
     async_run_io(op.get());
     EXPECT_EQ(bytes, 512);
 }
 
-TEST(AsyncRunIo, InvalidParamsReportsInvalidValue)
+TEST_F(AsyncTest, RunIoInvalidParamsReportsInvalidValue)
 {
-    NiceMock<MHip> mhip;
-    auto           stream = std::make_shared<NiceMock<MStream>>();
-    auto           buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto           backend{std::make_shared<NiceMock<MBackend>>()};
-    size_t         size{512};
-    hoff_t         file_offset{0};
-    hoff_t         buffer_offset{0};
-    ssize_t        bytes{0};
-    configureStream(*stream, nonnull_stream(), false);
-    ON_CALL(*buffer, getLength).WillByDefault(Return(16)); // smaller than size
-
-    auto op = makeOp(stream, buffer, backend, &size, &file_offset, &buffer_offset, &bytes, async_run_io);
+    ON_CALL(*buffer, getLength).WillByDefault(Return(16));
     EXPECT_CALL(*backend, io).Times(0);
-
+    auto op = makeOp(async_run_io);
     async_run_io(op.get());
     EXPECT_EQ(bytes, -hipFileInvalidValue);
 }
 
-TEST(AsyncRunIo, BackendThrowReportsInternalError)
+TEST_F(AsyncTest, RunIoBackendThrowReportsInternalError)
 {
-    NiceMock<MHip> mhip;
-    auto           stream = std::make_shared<NiceMock<MStream>>();
-    auto           buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto           backend{std::make_shared<NiceMock<MBackend>>()};
-    size_t         size{512};
-    hoff_t         file_offset{0};
-    hoff_t         buffer_offset{0};
-    ssize_t        bytes{0};
-    configureStream(*stream, nonnull_stream(), false);
-    ON_CALL(*buffer, getLength).WillByDefault(Return(4096));
-
-    auto op = makeOp(stream, buffer, backend, &size, &file_offset, &buffer_offset, &bytes, async_run_io);
     EXPECT_CALL(*backend, io).WillOnce(Throw(std::runtime_error("boom")));
-
+    auto op = makeOp(async_run_io);
     async_run_io(op.get());
     EXPECT_EQ(bytes, -hipFileInternalError);
 }
 
-TEST(EnqueueAsync, NullStreamRunsSynchronously)
+TEST_F(AsyncTest, NullStreamRunsSynchronously)
 {
-    NiceMock<MHip> mhip;
-    auto           stream = std::make_shared<NiceMock<MStream>>();
-    auto           buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto           backend{std::make_shared<NiceMock<MBackend>>()};
-    size_t         size{512};
-    hoff_t         file_offset{0};
-    hoff_t         buffer_offset{0};
-    ssize_t        bytes{-1};
-    configureStream(*stream, nullptr, false);
-    ON_CALL(*buffer, getLength).WillByDefault(Return(4096));
-    ON_CALL(*buffer, getGpuId).WillByDefault(Return(0));
-
+    configure(nullptr, false);
     EXPECT_CALL(mhip, hipStreamSynchronize(nullptr));
     EXPECT_CALL(mhip, hipLaunchHostFunc).Times(0);
     EXPECT_CALL(*backend, io).WillOnce(Return(512));
-
-    enqueueAsync(backend, IoType::Read, std::make_shared<NiceMock<MFile>>(), buffer, &size, &file_offset,
-                 &buffer_offset, &bytes, stream);
+    enqueue();
     EXPECT_EQ(bytes, 512);
 }
 
-TEST(EnqueueAsync, RegisteredStreamArmsWaitValue)
+TEST_F(AsyncTest, PerThreadStreamRunsSynchronously)
 {
-    NiceMock<MHip> mhip;
-    auto           stream = std::make_shared<NiceMock<MStream>>();
-    auto           buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto           backend{std::make_shared<NiceMock<MBackend>>()};
-    uint64_t       slot{0};
-    size_t         size{512};
-    hoff_t         file_offset{0};
-    hoff_t         buffer_offset{0};
-    ssize_t        bytes{-1};
-    configureStream(*stream, nonnull_stream(), true);
-    ON_CALL(*stream, signalSlot).WillByDefault(Return(&slot));
-    ON_CALL(*buffer, getLength).WillByDefault(Return(4096));
-    ON_CALL(*buffer, getGpuId).WillByDefault(Return(0));
-
-    // hipLaunchHostFunc is mocked, so the committed op is never run or freed by a real host function;
-    // capture and free it here to stand in for that ownership transfer.
-    AsyncOp *committed{nullptr};
-    EXPECT_CALL(mhip, hipLaunchHostFunc(nonnull_stream(), _, _))
-        .WillOnce([&committed](hipStream_t, hipHostFn_t, void *userdata) {
-            committed = static_cast<AsyncOp *>(userdata);
-        });
-    EXPECT_CALL(mhip, hipStreamWaitValue64(nonnull_stream(), &slot, 1u, _, _));
-
-    enqueueAsync(backend, IoType::Read, std::make_shared<NiceMock<MFile>>(), buffer, &size, &file_offset,
-                 &buffer_offset, &bytes, stream);
-    ASSERT_NE(committed, nullptr);
-    EXPECT_FALSE(committed->block); // wait value armed -> fire and forget
-    delete committed;
+    configure(hipStreamPerThread, false);
+    EXPECT_CALL(mhip, hipStreamSynchronize(hipStreamPerThread));
+    EXPECT_CALL(mhip, hipLaunchHostFunc).Times(0);
+    EXPECT_CALL(*backend, io).WillOnce(Return(512));
+    enqueue();
+    EXPECT_EQ(bytes, 512);
 }
 
-TEST(EnqueueAsync, ArmFailureStillSucceeds)
+TEST_F(AsyncTest, GatedStreamDispatchesThenArmsWait)
 {
-    NiceMock<MHip> mhip;
-    auto           stream = std::make_shared<NiceMock<MStream>>();
-    auto           buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto           backend{std::make_shared<NiceMock<MBackend>>()};
-    uint64_t       slot{0};
-    size_t         size{512};
-    hoff_t         file_offset{0};
-    hoff_t         buffer_offset{0};
-    ssize_t        bytes{-1};
-    configureStream(*stream, nonnull_stream(), true);
-    ON_CALL(*stream, signalSlot).WillByDefault(Return(&slot));
-    ON_CALL(*buffer, getLength).WillByDefault(Return(4096));
-    ON_CALL(*buffer, getGpuId).WillByDefault(Return(0));
+    {
+        InSequence seq;
+        EXPECT_CALL(*stream, addOutstanding);
+        captureDispatch();
+        EXPECT_CALL(mhip,
+                    hipStreamWaitValue64(nonnull_stream(), &slot, 1u, hipStreamWaitValueGte, UINT64_MAX));
+    }
+    EXPECT_CALL(*backend, io).Times(0);
 
-    AsyncOp *committed{nullptr};
-    EXPECT_CALL(mhip, hipLaunchHostFunc(nonnull_stream(), _, _))
-        .WillOnce([&committed](hipStream_t, hipHostFn_t, void *userdata) {
-            committed = static_cast<AsyncOp *>(userdata);
-        });
-    EXPECT_CALL(mhip, hipStreamWaitValue64).WillOnce(Throw(Hip::RuntimeError(hipErrorNotSupported)));
-
-    EXPECT_NO_THROW(enqueueAsync(backend, IoType::Read, std::make_shared<NiceMock<MFile>>(), buffer, &size,
-                                 &file_offset, &buffer_offset, &bytes, stream));
-    ASSERT_NE(committed, nullptr);
-    EXPECT_TRUE(committed->block); // arm failed -> op self-blocks
-    delete committed;
+    enqueue();
+    ASSERT_NE(queued, nullptr);
+    EXPECT_FALSE(queued->block);
+    EXPECT_EQ(queued->state.load(), AsyncOpState::Pending);
+    EXPECT_EQ(bytes, 0);
 }
 
-TEST(EnqueueAsync, LaunchFailureThrows)
+TEST_F(AsyncTest, UngatedStreamDispatchesBlockingOp)
 {
-    NiceMock<MHip> mhip;
-    auto           stream = std::make_shared<NiceMock<MStream>>();
-    auto           buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto           backend{std::make_shared<NiceMock<MBackend>>()};
-    size_t         size{512};
-    hoff_t         file_offset{0};
-    hoff_t         buffer_offset{0};
-    ssize_t        bytes{-1};
-    configureStream(*stream, nonnull_stream(), true);
-    ON_CALL(*buffer, getLength).WillByDefault(Return(4096));
-    ON_CALL(*buffer, getGpuId).WillByDefault(Return(0));
-
-    EXPECT_CALL(mhip, hipLaunchHostFunc).WillOnce(Throw(Hip::RuntimeError(hipErrorInvalidValue)));
+    configure(nonnull_stream(), false);
+    captureDispatch();
+    EXPECT_CALL(*stream, nextSignalTarget).Times(0);
     EXPECT_CALL(mhip, hipStreamWaitValue64).Times(0);
 
-    EXPECT_THROW(enqueueAsync(backend, IoType::Read, std::make_shared<NiceMock<MFile>>(), buffer, &size,
-                              &file_offset, &buffer_offset, &bytes, stream),
-                 Hip::RuntimeError);
+    enqueue();
+    ASSERT_NE(queued, nullptr);
+    EXPECT_TRUE(queued->block);
 }
 
-TEST(EnqueueAsync, RetiredStreamThrows)
+TEST_F(AsyncTest, ArmFailureBeforeStartAbandonsOp)
 {
-    NiceMock<MHip> mhip;
-    auto           stream = std::make_shared<NiceMock<MStream>>();
-    auto           buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto           backend{std::make_shared<NiceMock<MBackend>>()};
-    size_t         size{512};
-    hoff_t         file_offset{0};
-    hoff_t         buffer_offset{0};
-    ssize_t        bytes{-1};
-    configureStream(*stream, nonnull_stream(), true);
-    ON_CALL(*stream, isRetired).WillByDefault(Return(true));
-    ON_CALL(*buffer, getLength).WillByDefault(Return(4096));
-    ON_CALL(*buffer, getGpuId).WillByDefault(Return(0));
+    captureDispatch();
+    EXPECT_CALL(mhip, hipStreamWaitValue64).WillOnce(Throw(Hip::RuntimeError(hipErrorNotSupported)));
 
+    EXPECT_THROW(enqueue(), Hip::RuntimeError);
+    ASSERT_NE(queued, nullptr);
+    EXPECT_EQ(queued->state.load(), AsyncOpState::Abandoned);
+
+    // When the host function runs later, the pool skips the IO and only releases the stream signal.
+    AsyncMonitor                   monitor{std::make_unique<InlinePool>()};
+    ContextOverride<IAsyncMonitor> co{&monitor};
+    EXPECT_CALL(*backend, io).Times(0);
+    EXPECT_CALL(*stream, finishOutstanding);
+    async_dispatch(queued.get());
+    EXPECT_EQ(slot, 1u);
+    EXPECT_EQ(bytes, 0);
+}
+
+TEST_F(AsyncTest, ArmFailureAfterStartWaitsForIo)
+{
+    AsyncMonitor                   monitor{std::make_unique<InlinePool>()};
+    ContextOverride<IAsyncMonitor> co{&monitor};
+    captureDispatch();
+    EXPECT_CALL(*backend, io).WillOnce(Return(512));
+    // The host function and pool finish the op before the arm reports its failure.
+    EXPECT_CALL(mhip, hipStreamWaitValue64)
+        .WillOnce([this](hipStream_t, uint64_t *, uint64_t, unsigned int, uint64_t) {
+            async_dispatch(queued.get());
+            throw Hip::RuntimeError(hipErrorNotSupported);
+        });
+
+    EXPECT_NO_THROW(enqueue());
+    EXPECT_EQ(queued->state.load(), AsyncOpState::Done);
+    EXPECT_EQ(bytes, 512);
+}
+
+TEST_F(AsyncTest, LaunchFailureReleasesReservation)
+{
+    EXPECT_CALL(*stream, addOutstanding);
+    EXPECT_CALL(*stream, nextSignalTarget).WillOnce(Return(1));
+    EXPECT_CALL(mhip, hipLaunchHostFunc).WillOnce(Throw(Hip::RuntimeError(hipErrorInvalidValue)));
+    EXPECT_CALL(*stream, releaseSignalTarget);
+    EXPECT_CALL(*stream, finishOutstanding);
+    EXPECT_CALL(mhip, hipStreamWaitValue64).Times(0);
+
+    EXPECT_THROW(enqueue(), Hip::RuntimeError);
+}
+
+TEST_F(AsyncTest, RetiredStreamThrows)
+{
+    ON_CALL(*stream, isRetired).WillByDefault(Return(true));
+    EXPECT_CALL(*stream, addOutstanding).Times(0);
     EXPECT_CALL(mhip, hipLaunchHostFunc).Times(0);
 
-    EXPECT_THROW(enqueueAsync(backend, IoType::Read, std::make_shared<NiceMock<MFile>>(), buffer, &size,
-                              &file_offset, &buffer_offset, &bytes, stream),
-                 std::invalid_argument);
+    EXPECT_THROW(enqueue(), std::invalid_argument);
 }
 
-TEST(EnqueueAsync, GpuMismatchThrows)
+TEST_F(AsyncTest, GpuMismatchThrows)
 {
-    NiceMock<MHip> mhip;
-    auto           stream = std::make_shared<NiceMock<MStream>>();
-    auto           buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto           backend{std::make_shared<NiceMock<MBackend>>()};
-    size_t         size{512};
-    hoff_t         file_offset{0};
-    hoff_t         buffer_offset{0};
-    ssize_t        bytes{-1};
-    configureStream(*stream, nonnull_stream(), true);
-    ON_CALL(*buffer, getLength).WillByDefault(Return(4096));
-    ON_CALL(*buffer, getGpuId).WillByDefault(Return(1)); // stream device is 0
+    ON_CALL(*buffer, getGpuId).WillByDefault(Return(1));
+    EXPECT_CALL(mhip, hipLaunchHostFunc).Times(0);
 
-    EXPECT_THROW(enqueueAsync(backend, IoType::Read, std::make_shared<NiceMock<MFile>>(), buffer, &size,
-                              &file_offset, &buffer_offset, &bytes, stream),
-                 std::invalid_argument);
+    EXPECT_THROW(enqueue(), std::invalid_argument);
 }
 
-TEST(AsyncDispatch, BlockTrueSubmitsAndWaits)
+TEST_F(AsyncTest, DispatchBlockingOpSubmitsAndWaits)
 {
     MAsyncMonitor monitor;
-    auto          stream = std::make_shared<NiceMock<MStream>>();
-    auto          buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto          backend{std::make_shared<NiceMock<MBackend>>()};
-    size_t        size{512};
-    hoff_t        file_offset{0};
-    hoff_t        buffer_offset{0};
-    ssize_t       bytes{0};
-    configureStream(*stream, nonnull_stream(), false);
-
-    auto *op  = new AsyncOp(IoType::Read, std::make_shared<NiceMock<MFile>>(), buffer, stream, &size,
-                            &file_offset, &buffer_offset, &bytes, async_run_io, backend);
-    op->block = true;
+    auto          op = makeOp(async_run_io);
+    op->block        = true;
+    op->self         = op;
     EXPECT_CALL(monitor, submitIoAndWait);
     EXPECT_CALL(monitor, submitIo).Times(0);
 
-    async_dispatch(op);
+    async_dispatch(op.get());
+    EXPECT_EQ(op->self, nullptr);
 }
 
-TEST(AsyncDispatch, BlockFalseSubmits)
+TEST_F(AsyncTest, DispatchNonBlockingOpSubmits)
 {
     MAsyncMonitor monitor;
-    auto          stream = std::make_shared<NiceMock<MStream>>();
-    auto          buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto          backend{std::make_shared<NiceMock<MBackend>>()};
-    size_t        size{512};
-    hoff_t        file_offset{0};
-    hoff_t        buffer_offset{0};
-    ssize_t       bytes{0};
-    configureStream(*stream, nonnull_stream(), false);
-
-    auto *op  = new AsyncOp(IoType::Read, std::make_shared<NiceMock<MFile>>(), buffer, stream, &size,
-                            &file_offset, &buffer_offset, &bytes, async_run_io, backend);
-    op->block = false;
+    auto          op = makeOp(async_run_io);
+    op->self         = op;
     EXPECT_CALL(monitor, submitIo);
     EXPECT_CALL(monitor, submitIoAndWait).Times(0);
 
-    async_dispatch(op);
+    async_dispatch(op.get());
+    EXPECT_EQ(op->self, nullptr);
 }
 
-TEST(AsyncDispatch, SubmitFailureReportsError)
+TEST_F(AsyncTest, DispatchSubmitFailureFinishesOpWithError)
 {
     MAsyncMonitor monitor;
-    auto          stream = std::make_shared<NiceMock<MStream>>();
-    auto          buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto          backend{std::make_shared<NiceMock<MBackend>>()};
-    size_t        size{512};
-    hoff_t        file_offset{0};
-    hoff_t        buffer_offset{0};
-    ssize_t       bytes{0};
-    configureStream(*stream, nonnull_stream(), false);
+    auto          op = makeOp(async_run_io);
+    op->self         = op;
+    EXPECT_CALL(monitor, submitIo).WillOnce(Throw(std::runtime_error("no workers")));
+    EXPECT_CALL(*stream, finishOutstanding);
 
-    auto *op  = new AsyncOp(IoType::Read, std::make_shared<NiceMock<MFile>>(), buffer, stream, &size,
-                            &file_offset, &buffer_offset, &bytes, async_run_io, backend);
-    op->block = true;
-    EXPECT_CALL(monitor, submitIoAndWait).WillOnce(Throw(std::runtime_error("no workers")));
-
-    async_dispatch(op);
+    async_dispatch(op.get());
     EXPECT_EQ(bytes, -hipFileInternalError);
+    EXPECT_EQ(op->state.load(), AsyncOpState::Done);
+    EXPECT_EQ(slot, 1u);
 }
 
-TEST(AsyncMonitorReal, SubmitIoRunsIoFnAndSignalsSlot)
+TEST_F(AsyncTest, MonitorSubmitIoRunsOpAndSignals)
 {
-    NiceMock<MHip> mhip;
-    auto           stream = std::make_shared<NiceMock<MStream>>();
-    auto           buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto           backend{std::make_shared<NiceMock<MBackend>>()};
-    uint64_t       slot{0};
-    size_t         size{0};
-    hoff_t         file_offset{0};
-    hoff_t         buffer_offset{0};
-    ssize_t        bytes{0};
-    bool           ran{false};
-    configureStream(*stream, nonnull_stream(), true);
-    ON_CALL(*stream, signalSlot).WillByDefault(Return(&slot));
-
     AsyncMonitor monitor{std::make_unique<InlinePool>()};
-    auto         op = makeOp(stream, buffer, backend, &size, &file_offset, &buffer_offset, &bytes,
-                             [&ran](AsyncOp *) { ran = true; });
+    bool         ran{false};
+    auto         op = makeOp([&ran](AsyncOp *) { ran = true; });
+    EXPECT_CALL(*stream, finishOutstanding);
 
     monitor.submitIo(op);
     EXPECT_TRUE(ran);
     EXPECT_EQ(slot, 1u);
+    EXPECT_EQ(op->state.load(), AsyncOpState::Done);
 }
 
-TEST(AsyncMonitorReal, SubmitIoAndWaitRunsIoFn)
+TEST_F(AsyncTest, MonitorSubmitIoAndWaitRunsOp)
 {
-    NiceMock<MHip> mhip;
-    auto           stream = std::make_shared<NiceMock<MStream>>();
-    auto           buffer = std::make_shared<NiceMock<MBuffer>>();
-    auto           backend{std::make_shared<NiceMock<MBackend>>()};
-    size_t         size{0};
-    hoff_t         file_offset{0};
-    hoff_t         buffer_offset{0};
-    ssize_t        bytes{0};
-    bool           ran{false};
-    configureStream(*stream, nonnull_stream(), false);
-
     AsyncMonitor monitor{std::make_unique<InlinePool>()};
-    auto         op = makeOp(stream, buffer, backend, &size, &file_offset, &buffer_offset, &bytes,
-                             [&ran](AsyncOp *) { ran = true; });
+    bool         ran{false};
+    auto         op = makeOp([&ran](AsyncOp *) { ran = true; });
 
     monitor.submitIoAndWait(op);
     EXPECT_TRUE(ran);
+    EXPECT_EQ(op->state.load(), AsyncOpState::Done);
+}
+
+TEST_F(AsyncTest, MonitorSkipsAbandonedOp)
+{
+    AsyncMonitor monitor{std::make_unique<InlinePool>()};
+    bool         ran{false};
+    auto         op = makeOp([&ran](AsyncOp *) { ran = true; });
+    op->state.store(AsyncOpState::Abandoned);
+    EXPECT_CALL(*stream, finishOutstanding);
+
+    monitor.submitIo(op);
+    EXPECT_FALSE(ran);
+    EXPECT_EQ(slot, 1u);
+    EXPECT_EQ(op->state.load(), AsyncOpState::Abandoned);
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

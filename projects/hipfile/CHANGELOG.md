@@ -15,8 +15,10 @@
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now defaults to `OFF`.
 * Documented that Linux kernels built with `CONFIG_PCI_P2PDMA=y` are required for fastpath.
 * `hipFileStreamRegister()` and `hipFileStreamDeregister()` now treat the default stream (a null stream handle or `hipStreamPerThread`) as a no-op that returns success, matching cuFile. Previously, deregistering the default stream returned `hipFileInvalidValue`.
-* `hipFileReadAsync()` and `hipFileWriteAsync()` on registered streams now hand each transfer to an internal thread pool and use stream wait values to keep stream order, so on devices that support stream wait values, transfers on different registered streams can run at the same time.
-* `hipFileStreamDeregister()` now synchronizes a registered stream before freeing its resources, so it waits for all work queued on the stream, including asynchronous I/O in flight.
+* `hipFileReadAsync()` and `hipFileWriteAsync()` now hand each transfer to an internal thread pool and use stream wait values to keep stream order, so on devices that support stream wait values, transfers on different streams can run at the same time. Queuing a request no longer waits for the stream.
+* `hipFileReadAsync()` and `hipFileWriteAsync()` now register a stream implicitly on its first use, with no flags, as cuFile does, so calling `hipFileStreamRegister()` first is optional. Registering a stream that was registered implicitly applies its flags to later requests. Deregister every stream used for asynchronous I/O before destroying it.
+* `hipFileReadAsync()` and `hipFileWriteAsync()` on `hipStreamPerThread` now run synchronously, like the null stream.
+* `hipFileStreamDeregister()` now synchronizes the stream before freeing its resources, so it waits for all work queued on the stream, including asynchronous I/O in flight.
 
 ### Fixed
 
@@ -35,8 +37,8 @@
 ### Known issues
 
 * The bandwidth reported by `ais-stats` and the Stats API is derived from the sum of the per-operation latencies instead of the elapsed wall-clock time, so when several threads issue I/O concurrently, the reported bandwidth is understated by roughly the number of concurrent threads. See [issue #11919](https://github.com/ROCm/rocm-systems/issues/11919).
-* Asynchronous I/O on unregistered streams runs one transfer at a time, because the ROCm runtime runs stream host functions on a single thread, and a running transfer also delays transfers queued on other streams. Registered streams on devices that don't support stream wait values behave the same way. Register streams with `hipFileStreamRegister()` so their transfers can run at the same time.
-* Asynchronous I/O on a registered stream can hang if it uses the fallback path while the `GPU_MAX_HW_QUEUES` environment variable is set to `1`. Leave `GPU_MAX_HW_QUEUES` unset, or set it to `2` or more.
+* On devices that don't support stream wait values, asynchronous transfers run one at a time, because the ROCm runtime runs stream host functions on a single thread, and a running transfer also delays host functions queued on other streams.
+* Asynchronous I/O on a high-priority HIP stream can hang when the transfer uses the fallback path. Use default-priority or low-priority streams for asynchronous I/O.
 
 ## hipFile 0.5.0 for ROCm 10.1.0
 

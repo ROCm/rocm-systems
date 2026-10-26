@@ -850,6 +850,9 @@ void hipFileBatchIODestroy(hipFileBatchHandle_t batch_idp);
  *       holds the number of bytes read, or a negative value if the read failed.
  *       Keep `size_p`, `file_offset_p`, `buffer_offset_p`, and `bytes_read_p`
  *       valid until then. If the call returns an error, nothing was queued.
+ * @note `hipStreamPerThread` is synchronous too. Any other stream that isn't
+ *       registered is registered implicitly, with no flags; deregister it before
+ *       destroying it.
  *
  * @return \hipfile_error_return
  */
@@ -876,6 +879,9 @@ hipFileError_t hipFileReadAsync(hipFileHandle_t fh, void *buffer_base, size_t *s
  *       holds the number of bytes written, or a negative value if the write failed.
  *       Keep `size_p`, `file_offset_p`, `buffer_offset_p`, and `bytes_written_p`
  *       valid until then. If the call returns an error, nothing was queued.
+ * @note `hipStreamPerThread` is synchronous too. Any other stream that isn't
+ *       registered is registered implicitly, with no flags; deregister it before
+ *       destroying it.
  *
  * @return \hipfile_error_return
  */
@@ -891,10 +897,11 @@ hipFileError_t hipFileWriteAsync(hipFileHandle_t fh, void *buffer_base, size_t *
  * @param [in] flags Flags that can optimize stream processing if parameters
  *                   are known/are aligned at time of request submission
  *
- * @note On devices that support stream wait values, asynchronous I/O on a
- *       registered stream can run at the same time as I/O on other streams.
- *       Registering the default stream (a NULL handle or `hipStreamPerThread`)
- *       does nothing and returns success.
+ * @note Registration is optional: asynchronous I/O registers an unregistered
+ *       stream implicitly, with no flags. Registering a stream that was registered
+ *       implicitly applies `flags` to later requests. Registering the default
+ *       stream (a NULL handle or `hipStreamPerThread`) does nothing and returns
+ *       success.
  *
  * @return \hipfile_error_return
  */
@@ -907,11 +914,12 @@ hipFileError_t hipFileStreamRegister(hipStream_t stream, unsigned flags);
  *
  * @param [in] stream \hipstream_param
  *
- * @note Deregistering a registered stream synchronizes it, so the call waits for
- *       all work queued on the stream, including asynchronous I/O in flight. Don't
- *       submit I/O to a stream while it is being deregistered. Deregistering the
- *       default stream (a NULL handle or `hipStreamPerThread`) does nothing and
- *       returns success.
+ * @note Deregister every stream used for asynchronous I/O, including one that was
+ *       registered implicitly, before destroying it. Deregistering synchronizes the
+ *       stream, so the call waits for all work queued on it, including asynchronous
+ *       I/O in flight. Don't submit I/O to a stream while it is being deregistered.
+ *       Deregistering the default stream (a NULL handle or `hipStreamPerThread`)
+ *       does nothing and returns success.
  *
  * @return \hipfile_error_return
  */

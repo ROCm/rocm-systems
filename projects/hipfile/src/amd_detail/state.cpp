@@ -217,13 +217,35 @@ DriverState::getFileAndBuffer(hipFileHandle_t fh, const void *buf)
 file_buffer_stream_tuple
 DriverState::getFileBufferAndStream(hipFileHandle_t fh, const void *buf, hipStream_t hipStream)
 {
-    shared_lock<shared_mutex> slock{state_mutex};
+    shared_ptr<IFile>   file;
+    shared_ptr<IBuffer> buffer;
+    shared_ptr<IStream> stream;
+    {
+        shared_lock<shared_mutex> slock{state_mutex};
 
-    if (ref_count == 0) {
-        throw DriverNotInitialized();
+        if (ref_count == 0) {
+            throw DriverNotInitialized();
+        }
+
+        file   = file_map->getFile(fh);
+        buffer = buffer_map->getBuffer(buf);
+        stream =
+            isDefaultStream(hipStream) ? stream_map->getStream(hipStream) : stream_map->findStream(hipStream);
     }
 
-    return {file_map->getFile(fh), buffer_map->getBuffer(buf), stream_map->getStream(hipStream)};
+    if (!stream) {
+        // Implicit registration on first async use, as cuFile does. Built outside state_mutex: it makes HIP
+        // calls. A candidate that loses the race is dropped after the lock is released.
+        auto candidate = StreamMap::makeImplicitStream(hipStream);
+
+        unique_lock<shared_mutex> ulock{state_mutex};
+        if (ref_count == 0) {
+            throw DriverNotInitialized();
+        }
+        stream = stream_map->adoptImplicitStream(hipStream, candidate);
+    }
+
+    return {std::move(file), std::move(buffer), std::move(stream)};
 }
 
 //

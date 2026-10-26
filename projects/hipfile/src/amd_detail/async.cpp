@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <exception>
 #include <future>
 #include <hip/hip_runtime_api.h>
 #include <memory>
@@ -32,6 +33,28 @@ signalOffloadComplete(AsyncOp *op)
     if (uint64_t *slot = op->stream->signalSlot()) {
         std::atomic_ref<uint64_t>{*slot}.fetch_add(1, std::memory_order_release);
     }
+    op->stream->finishOutstanding();
+}
+
+// Finishes an op exactly once. An abandoned op only releases its stream signal and touches no caller memory.
+static void
+runOp(AsyncOp *op, bool run_io)
+{
+    auto expected = AsyncOpState::Pending;
+    if (!op->state.compare_exchange_strong(expected, AsyncOpState::Started, std::memory_order_acq_rel)) {
+        signalOffloadComplete(op);
+        return;
+    }
+
+    if (run_io) {
+        op->io_fn(op);
+    }
+    else {
+        *op->bytes_transferred = -hipFileInternalError;
+    }
+    signalOffloadComplete(op);
+    op->state.store(AsyncOpState::Done, std::memory_order_release);
+    op->state.notify_all();
 }
 
 AsyncOp::AsyncOp(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<IBuffer> _buffer,
@@ -62,10 +85,7 @@ AsyncMonitor::~AsyncMonitor()
 void
 AsyncMonitor::submitIo(std::shared_ptr<AsyncOp> op)
 {
-    task_group->run([task_op = std::move(op)]() {
-        task_op->io_fn(task_op.get());
-        signalOffloadComplete(task_op.get());
-    });
+    task_group->run([task_op = std::move(op)]() { runOp(task_op.get(), true); });
 }
 
 void
@@ -74,8 +94,7 @@ AsyncMonitor::submitIoAndWait(std::shared_ptr<AsyncOp> op)
     std::promise<void> done;
     std::future<void>  ready{done.get_future()};
     task_group->run([&op, &done]() {
-        op->io_fn(op.get());
-        signalOffloadComplete(op.get());
+        runOp(op.get(), true);
         done.set_value();
     });
     ready.wait();
@@ -118,36 +137,67 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType io_type, std::shared_ptr<I
 
     *bytes_transferred = 0;
 
-    auto op = std::make_unique<AsyncOp>(io_type, std::move(file), buffer, stream, size, file_offset,
-                                        buffer_offset, bytes_transferred, async_run_io, std::move(backend));
-
-    if (stream->getHipStream() == nullptr) {
-        Context<Hip>::get()->hipStreamSynchronize(nullptr);
-        op->io_fn(op.get());
-        signalOffloadComplete(op.get());
+    if (isDefaultStream(stream->getHipStream())) {
+        AsyncOp op(io_type, std::move(file), std::move(buffer), stream, size, file_offset, buffer_offset,
+                   bytes_transferred, async_run_io, std::move(backend));
+        Context<Hip>::get()->hipStreamSynchronize(stream->getHipStream());
+        op.io_fn(&op);
         return;
     }
 
-    AsyncOp *raw         = op.get();
-    auto     stream_lock = stream->getLock();
+    const bool               gated = stream->canUseStreamWaitValue();
+    std::shared_ptr<AsyncOp> op;
+    std::exception_ptr       arm_error;
+    {
+        // Held across the HIP calls below so each op's dispatch and wait reach the stream in target order.
+        // Host functions never take it.
+        auto stream_lock = stream->getLock();
+        if (stream->isRetired()) {
+            throw std::invalid_argument("Stream is being deregistered");
+        }
 
-    if (stream->isRetired()) {
-        throw std::invalid_argument("Stream is being deregistered");
-    }
+        op = std::make_shared<AsyncOp>(io_type, std::move(file), std::move(buffer), stream, size, file_offset,
+                                       buffer_offset, bytes_transferred, async_run_io, std::move(backend));
+        op->block       = !gated;
+        uint64_t target = gated ? stream->nextSignalTarget() : 0;
+        stream->addOutstanding();
 
-    Context<Hip>::get()->hipLaunchHostFunc(stream->getHipStream(), async_dispatch, raw);
-    op.release();
-
-    if (stream->canUseStreamWaitValue()) {
-        uint64_t target = stream->nextSignalTarget();
+        op->self = op;
         try {
-            Context<Hip>::get()->hipStreamWaitValue64(stream->getHipStream(), stream->signalSlot(), target,
-                                                      hipStreamWaitValueGte, UINT64_MAX);
-            raw->block = false;
+            Context<Hip>::get()->hipLaunchHostFunc(stream->getHipStream(), async_dispatch, op.get());
         }
         catch (...) {
+            op->self.reset();
+            if (gated) {
+                stream->releaseSignalTarget();
+            }
+            stream->finishOutstanding();
+            throw;
+        }
+
+        if (gated) {
+            try {
+                Context<Hip>::get()->hipStreamWaitValue64(stream->getHipStream(), stream->signalSlot(),
+                                                          target, hipStreamWaitValueGte, UINT64_MAX);
+            }
+            catch (...) {
+                arm_error = std::current_exception();
+            }
         }
     }
+
+    if (!arm_error) {
+        return;
+    }
+
+    // The stream won't wait for this op. If the pool hasn't started it, abandon it and report the failure.
+    // Otherwise the stream has already passed the dispatch, so the IO can't depend on stream progress and
+    // it's safe to wait for it here.
+    auto expected = AsyncOpState::Pending;
+    if (op->state.compare_exchange_strong(expected, AsyncOpState::Abandoned, std::memory_order_acq_rel)) {
+        std::rethrow_exception(arm_error);
+    }
+    op->state.wait(AsyncOpState::Started, std::memory_order_acquire);
 }
 
 }
@@ -157,14 +207,9 @@ void
 async_dispatch(void *userargs)
 {
     using namespace hipFile;
-    std::shared_ptr<AsyncOp> op{static_cast<AsyncOp *>(userargs)};
+    std::shared_ptr<AsyncOp> op = std::move(static_cast<AsyncOp *>(userargs)->self);
     try {
-        bool block;
-        {
-            auto lock = op->stream->getLock();
-            block     = op->block;
-        }
-        if (block) {
+        if (op->block) {
             Context<IAsyncMonitor>::get()->submitIoAndWait(op);
         }
         else {
@@ -172,8 +217,7 @@ async_dispatch(void *userargs)
         }
     }
     catch (...) {
-        *op->bytes_transferred = -hipFileInternalError;
-        signalOffloadComplete(op.get());
+        runOp(op.get(), false);
     }
 }
 }

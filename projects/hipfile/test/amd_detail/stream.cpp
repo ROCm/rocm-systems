@@ -3,20 +3,26 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "context.h"
 #include "hipfile.h"
 #include "hipfile-test.h"
 #include "hipfile-warnings.h"
 #include "mconfiguration.h"
 #include "mhip.h"
+#include "mmountinfo.h"
 #include "msys.h"
+#include "state.h"
 #include "stream.h"
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 #include <tuple>
 
 using namespace hipFile;
@@ -242,6 +248,175 @@ TEST_F(HipFileStream, drain_and_release_retires_syncs_and_frees)
     stream->drainAndRelease();
     EXPECT_TRUE(stream->isRetired());
     EXPECT_EQ(stream->signalSlot(), nullptr);
+}
+
+TEST_F(HipFileStream, drain_and_release_waits_for_outstanding_ops)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto stream = stream_map.getStream(nonnull_stream);
+    EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
+    {
+        auto lock = stream->getLock();
+        stream->addOutstanding();
+    }
+
+    std::atomic<bool> drained{false};
+    std::thread       drainer{[&] {
+        stream->drainAndRelease();
+        drained = true;
+    }};
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_FALSE(drained);
+    stream->finishOutstanding();
+    drainer.join();
+    EXPECT_TRUE(drained);
+    EXPECT_EQ(stream->signalSlot(), nullptr);
+}
+
+TEST_F(HipFileStream, registered_stream_without_wait_value_support_has_no_signal_slot)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    EXPECT_CALL(mhip, hipDeviceGetAttribute).WillOnce(::testing::Return(0));
+    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto stream = stream_map.getStream(nonnull_stream);
+    EXPECT_TRUE(stream->isManaged());
+    EXPECT_FALSE(stream->canUseStreamWaitValue());
+    EXPECT_EQ(stream->signalSlot(), nullptr);
+}
+
+TEST_F(HipFileStream, apply_flags_updates_and_validates_flags)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto stream = stream_map.getStream(nonnull_stream);
+    stream->applyFlags(HIPFILE_STREAM_FIXED_FILE_SIZE);
+    EXPECT_TRUE(stream->fixedIOSize());
+    EXPECT_FALSE(stream->fixedFileOffset());
+    EXPECT_THROW(stream->applyFlags(HIPFILE_STREAM_FLAGS_MASK + 1), std::invalid_argument);
+    EXPECT_TRUE(stream->fixedIOSize());
+}
+
+TEST_F(HipFileStream, find_stream_returns_only_registered_streams)
+{
+    EXPECT_EQ(stream_map.findStream(nonnull_stream), nullptr);
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+    EXPECT_NE(stream_map.findStream(nonnull_stream), nullptr);
+}
+
+TEST_F(HipFileStream, adopt_registers_implicit_stream)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    auto candidate = StreamMap::makeImplicitStream(nonnull_stream);
+    EXPECT_TRUE(candidate->isManaged());
+    EXPECT_EQ(stream_map.adoptImplicitStream(nonnull_stream, candidate), candidate);
+    EXPECT_EQ(stream_map.findStream(nonnull_stream), candidate);
+}
+
+TEST_F(HipFileStream, adopt_keeps_existing_registration)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice).Times(2);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto registered = stream_map.findStream(nonnull_stream);
+    auto candidate  = StreamMap::makeImplicitStream(nonnull_stream);
+    EXPECT_EQ(stream_map.adoptImplicitStream(nonnull_stream, candidate), registered);
+}
+
+TEST_F(HipFileStream, register_after_implicit_registration_applies_flags)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    auto stream =
+        stream_map.adoptImplicitStream(nonnull_stream, StreamMap::makeImplicitStream(nonnull_stream));
+    EXPECT_FALSE(stream->fixedIOSize());
+    stream_map.registerStream(nonnull_stream, HIPFILE_STREAM_FIXED_FILE_SIZE);
+    EXPECT_TRUE(stream->fixedIOSize());
+    EXPECT_EQ(stream_map.findStream(nonnull_stream), stream);
+    EXPECT_THROW(stream_map.registerStream(nonnull_stream, 0), std::invalid_argument);
+}
+
+TEST_F(HipFileStream, register_after_implicit_registration_rejects_invalid_flags)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.adoptImplicitStream(nonnull_stream, StreamMap::makeImplicitStream(nonnull_stream));
+    EXPECT_THROW(stream_map.registerStream(nonnull_stream, HIPFILE_STREAM_FLAGS_MASK + 1),
+                 std::invalid_argument);
+    // Still implicitly registered, so a valid explicit registration succeeds.
+    stream_map.registerStream(nonnull_stream, 0);
+}
+
+// Implicit registration through the real DriverState, as hipFileReadAsync/hipFileWriteAsync use it.
+struct HipFileStreamImplicit : public HipFileOpened {
+    HipFileStreamImplicit()
+    {
+        ON_CALL(mhip, hipDeviceGetAttribute).WillByDefault(::testing::Return(1));
+        ON_CALL(mhip, hipExtMallocWithFlags)
+            .WillByDefault(::testing::Return(static_cast<void *>(&signal_storage)));
+
+        hipFileDescr_t descr{};
+        descr.handle.fd = 1234;
+        descr.type      = hipFileHandleTypeOpaqueFD;
+        expect_file_registration(msys, mlibmounthelper);
+        EXPECT_EQ(hipFileHandleRegister(&fh, &descr), HIPFILE_SUCCESS);
+        expect_buffer_registration(mhip, hipMemoryTypeDevice);
+        EXPECT_EQ(hipFileBufRegister(buf, 4096, 0), HIPFILE_SUCCESS);
+    }
+
+    ~HipFileStreamImplicit() override
+    {
+        // Release everything while the mocks are still installed.
+        (void)hipFileStreamDeregister(nonnull_stream);
+        (void)hipFileBufDeregister(buf);
+        hipFileHandleDeregister(fh);
+    }
+
+    file_buffer_stream_tuple lookup(hipStream_t hip_stream)
+    {
+        return Context<DriverState>::get()->getFileBufferAndStream(fh, buf, hip_stream);
+    }
+
+    ::testing::NiceMock<MHip>   mhip;
+    StrictMock<MSys>            msys;
+    StrictMock<MLibMountHelper> mlibmounthelper;
+    uint64_t                    signal_storage{};
+    hipFileHandle_t             fh{};
+    void                       *buf{reinterpret_cast<void *>(0x1)};
+    hipStream_t                 nonnull_stream{reinterpret_cast<hipStream_t>(1)};
+};
+
+TEST_F(HipFileStreamImplicit, first_async_lookup_registers_stream_implicitly)
+{
+    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(1);
+    auto first  = lookup(nonnull_stream);
+    auto second = lookup(nonnull_stream);
+    ASSERT_NE(first.stream, nullptr);
+    EXPECT_TRUE(first.stream->isManaged());
+    EXPECT_EQ(first.stream, second.stream);
+}
+
+TEST_F(HipFileStreamImplicit, default_streams_are_not_registered_implicitly)
+{
+    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
+    EXPECT_FALSE(lookup(nullptr).stream->isManaged());
+    EXPECT_FALSE(lookup(hipStreamPerThread).stream->isManaged());
+}
+
+TEST_F(HipFileStreamImplicit, register_after_implicit_registration_succeeds)
+{
+    auto implicit = lookup(nonnull_stream).stream;
+    EXPECT_EQ(hipFileStreamRegister(nonnull_stream, HIPFILE_STREAM_FIXED_FILE_SIZE), HIPFILE_SUCCESS);
+    EXPECT_TRUE(implicit->fixedIOSize());
+    EXPECT_EQ(lookup(nonnull_stream).stream, implicit);
+    EXPECT_EQ(hipFileStreamRegister(nonnull_stream, 0), HipFileOpError(hipFileInvalidValue));
+}
+
+TEST_F(HipFileStreamImplicit, implicitly_registered_stream_deregisters)
+{
+    (void)lookup(nonnull_stream);
+    EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
+    EXPECT_EQ(hipFileStreamDeregister(nonnull_stream), HIPFILE_SUCCESS);
+    EXPECT_EQ(hipFileStreamDeregister(nonnull_stream), HipFileOpError(hipFileInvalidValue));
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

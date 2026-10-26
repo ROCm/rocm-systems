@@ -678,6 +678,76 @@ INSTANTIATE_TEST_SUITE_P(
         return param_info.param.name;
     });
 
+// Async IO on a stream that was never registered; hipFile registers it implicitly on first use.
+class HipAsyncUnregisteredStream : public HipAsync, public ::testing::WithParamInterface<AsyncIoFunction> {
+public:
+    void SetUp() override
+    {
+        HipAsync::SetUp();
+        io_op = GetParam().function;
+        name  = GetParam().name;
+        if (name == "hipFileReadAsync") {
+            HipFileDataOps::zeroMemoryRegion(dev_ptr, 0, buffer_size);
+            HipFileDataOps::randomizeFileRegion(tf.fd, file_size);
+        }
+        else {
+            HipFileDataOps::zeroFileRegion(tf.fd, file_size);
+            HipFileDataOps::randomizeMemoryRegion(dev_ptr, 0, buffer_size);
+        }
+        ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
+    }
+    void TearDown() override
+    {
+        // A stream used for async IO must be deregistered before it's destroyed, even if it was only
+        // registered implicitly.
+        ASSERT_EQ(hipFileStreamDeregister(stream), HIPFILE_SUCCESS);
+        ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+        HipAsync::TearDown();
+    }
+    hipFileError_t (*io_op)(hipFileHandle_t, void *, size_t *, hoff_t *, hoff_t *, ssize_t *, hipStream_t);
+    std::string name;
+    hipStream_t stream;
+};
+
+TEST_P(HipAsyncUnregisteredStream, roundTrip)
+{
+    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+              HIPFILE_SUCCESS);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(bytes_transferred, io_size);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
+}
+
+// The app holds the stream on its own wait value while it queues work, then releases it. Submitting
+// must not wait for the stream, or the app would never get to release it.
+TEST_P(HipAsyncUnregisteredStream, submitWhileStreamIsHeld)
+{
+    int attr = 0;
+    ASSERT_EQ(hipDeviceGetAttribute(&attr, hipDeviceAttributeCanUseStreamWaitValue, 0), hipSuccess);
+    ASSERT_EQ(attr, 1);
+    uint64_t *gate{};
+    uint64_t  value{0};
+    ASSERT_EQ(
+        hipExtMallocWithFlags(reinterpret_cast<void **>(&gate), sizeof(uint64_t), hipMallocSignalMemory),
+        hipSuccess);
+    ASSERT_EQ(hipMemcpy(gate, &value, sizeof(uint64_t), hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipStreamWaitValue64(stream, gate, 1, hipStreamWaitValueEq), hipSuccess);
+
+    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+              HIPFILE_SUCCESS);
+    value = 1;
+    ASSERT_EQ(hipMemcpy(gate, &value, sizeof(uint64_t), hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(bytes_transferred, io_size);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
+    ASSERT_EQ(hipFree(gate), hipSuccess);
+}
+
+INSTANTIATE_TEST_SUITE_P(HipAsyncUnregistered, HipAsyncUnregisteredStream, ::testing::ValuesIn(asyncIOFns),
+                         [](const testing::TestParamInfo<HipAsyncUnregisteredStream::ParamType> &param_info) {
+                             return param_info.param.name;
+                         });
+
 // Overrides only the fastpath AIS entry points to throw, so a fastpath async IO that is otherwise
 // selected fails at stream-execution time. Every other HIP call inherits the real implementation, so
 // the fallback path runs for real.

@@ -23,33 +23,40 @@ of bytes transferred, or a negative value if the transfer failed. Synchronize
 the stream before you read the result, and keep the pointer arguments valid
 until then. If a call returns an error, nothing was queued.
 
-How a transfer runs depends on the stream:
+Registering a stream with ``hipFileStreamRegister()`` is optional. The first
+asynchronous request on a stream that isn't registered registers it implicitly,
+with no flags. Registering a stream that was registered implicitly applies the
+new flags to later requests.
 
-Registered streams
-   On devices that support stream wait values, hipFile hands the transfer to an
-   internal thread pool and makes the stream wait for it to finish, so later
-   work on the stream still runs after the transfer. Transfers on different
-   registered streams can run at the same time.
+How a transfer runs depends on the stream and the device:
 
-Unregistered streams
-   The transfer runs in stream order, but the ROCm runtime runs stream host
-   functions on a single thread, so transfers on unregistered streams run one
-   at a time. While one runs, it also delays transfers queued on other streams.
-   Registered streams on devices that don't support stream wait values behave
-   the same way.
+Streams on devices that support stream wait values
+   hipFile hands the transfer to an internal thread pool and makes the stream
+   wait for it to finish, so later work on the stream still runs after the
+   transfer. Transfers on different streams can run at the same time, and
+   queuing a request never waits for the stream, so you can hold a stream with
+   your own wait value, queue requests, and release it afterward.
 
-The null stream
-   The call synchronizes the null stream, runs the transfer, and returns after
-   the transfer finishes.
+Streams on devices that don't support stream wait values
+   The transfer runs in stream order inside a stream host function that waits
+   for it to finish. The ROCm runtime runs host functions on a single thread, so
+   these transfers run one at a time and delay host functions queued on other
+   streams.
 
-``hipFileStreamDeregister()`` synchronizes a registered stream before it frees
-the stream's resources, so it waits for the stream's transfers in flight.
+The null stream and ``hipStreamPerThread``
+   The call synchronizes the stream, runs the transfer, and returns after the
+   transfer finishes.
+
+Deregister every stream you use for asynchronous I/O, including streams that
+were registered implicitly, before you destroy it. Otherwise a new stream that
+reuses the handle could pick up the old stream's state.
+``hipFileStreamDeregister()`` synchronizes the stream before it frees the
+stream's resources, so it waits for the stream's transfers in flight.
 
 .. note::
 
-   If the ``GPU_MAX_HW_QUEUES`` environment variable is set to ``1``, a transfer
-   on a registered stream that uses the fallback path can hang. See
-   :ref:`hipfile-gpu-max-hw-queues`.
+   If you use high-priority HIP streams for asynchronous I/O, a transfer that
+   uses the fallback path can hang. See :ref:`hipfile-async-high-priority-streams`.
 
 Stream registration flags
 ===========================

@@ -8,19 +8,21 @@ Known issues
 
 This page documents known issues with hipFile.
 
-.. _hipfile-gpu-max-hw-queues:
+.. _hipfile-async-high-priority-streams:
 
-Asynchronous I/O on registered streams can hang with one GPU hardware queue
-===========================================================================
+Asynchronous I/O on high-priority streams can hang
+==================================================
 
-If the ``GPU_MAX_HW_QUEUES`` environment variable is set to ``1``, an
-asynchronous transfer on a registered stream that uses the fallback path can
-hang. The registered stream waits on the GPU for the transfer to finish, and
-the fallback path copies the data through the GPU. With a single hardware
-queue, the copy can end up queued behind the stream's wait and never run.
+An asynchronous transfer that uses the fallback path can hang if you issue it
+on a high-priority HIP stream. The stream waits on the GPU for the transfer to
+finish, and the fallback path copies the data through the GPU on its own
+streams. hipFile creates those streams at the highest priority, which gives
+them hardware queues that streams of other priorities don't use. A
+high-priority stream can share those queues, so the copy can end up queued
+behind the stream's wait and never run.
 
-To work around this issue, leave ``GPU_MAX_HW_QUEUES`` unset, or set it to
-``2`` or more when you use registered streams.
+To work around this issue, use default-priority or low-priority streams for
+asynchronous I/O.
 
 Poor performance with GPU Virtual Functions
 ===========================================
