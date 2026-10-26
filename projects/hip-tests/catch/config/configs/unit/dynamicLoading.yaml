@@ -12,24 +12,18 @@ dynamicLoading:
   Unit_hipGetProcAddress_Positive:
     <<: *level_default
     tags: [module]
-    disabled: [amd_wsl]
   Unit_hipGetProcAddress_Negative:
     <<: *level_default
     tags: [module]
-    disabled: [amd_wsl]
   Unit_hipGetProcAddress_spt_Positive:
     <<: *level_default
     tags: [module]
-    disabled: [amd_wsl]
   Unit_hipGetProcAddress_spt_Negative:
     <<: *level_default
     tags: [module]
-    disabled: [amd_wsl]
   Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress:
     <<: *level_default
     tags: [module]
-    disabled: [amd_wsl]
   Unit_hipGetProcAddress_With_spt_CompilerOption:
     <<: *level_default
     tags: [module]
-    disabled: [amd_wsl]

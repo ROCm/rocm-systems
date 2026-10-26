@@ -52,6 +52,7 @@ class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
 class BatchCopyMemoryCommand;
+class BatchCopyMemoryRectCommand;
 class BatchWriteMemoryCommand;
 class BatchReadMemoryCommand;
 class MapMemoryCommand;
@@ -1333,6 +1334,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
   virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd) = 0;
   virtual void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) = 0;
   virtual void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;
@@ -1340,6 +1342,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitKernel(amd::NDRangeKernelCommand& command) = 0;
   virtual void submitNativeFn(amd::NativeFnCommand& cmd) = 0;
   virtual void submitMarker(amd::Marker& cmd) = 0;
+  //! Waits for a marker with CPU wait, after Command::enqueue() released the lock (ROCm specific)
+  virtual void CompleteCpuWait(amd::Command& cmd) {}
   virtual void submitAccumulate(amd::AccumulateCommand& cmd) = 0;
   virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) = 0;
   virtual void submitFillMemory(amd::FillMemoryCommand& cmd) = 0;
@@ -1876,7 +1880,8 @@ class Device : public RuntimeObject {
   virtual device::Program* createProgram(amd::Program& owner, option::Options* options = NULL) = 0;
 
   //! Allocate a chunk of device memory as a cache for a CL memory object
-  virtual device::Memory* createMemory(Memory& owner) const = 0;
+  virtual device::Memory* createMemory(
+      Memory& owner, Memory::ErrorCode* errorCode = nullptr) const = 0;
 
   //! Allocate a chunk of device memory with address alignment
   virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const = 0;
@@ -2196,6 +2201,20 @@ class Device : public RuntimeObject {
   }
 
   /**
+   * Recovers the location and size of a VMM allocation.
+   *
+   * @param amd_mem_obj physical memory object of the allocation
+   * @param location_type [out] where the allocation resides
+   * @param device_id [out] owning device for device memory, InvalidDeviceId otherwise
+   * @param size [out] allocation size in bytes
+   * @return True when the backend reported them; false leaves the caller on its default.
+   */
+  virtual bool getVmmAllocInfo(amd::Memory& amd_mem_obj, VmmLocationType* location_type,
+                               int* device_id, size_t* size) const {
+    return false;
+  }
+
+  /**
    * @return True if the device successfully applied the SVM attributes in HMM for device memory
    */
   virtual bool SetSvmAttributes(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
@@ -2250,7 +2269,11 @@ class Device : public RuntimeObject {
   virtual void ReleaseGlobalSignal(void* signal) const {}
   virtual void RetainGlobalSignal(void* signal) const {}
 
-  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const { return false; }
+  //! batched allocates all events together, which is slower to create; use it for sets that are
+  //! pooled and reused. Only a batched set may be placed in device memory.
+  virtual bool CreateHwEvents(int count, bool batched, std::vector<void*>& hw_events) const {
+    return false;
+  }
   virtual void DestroyHwEvent(void* hw_event) const {}
 
   //! Re-arm already-allocated HW event signals so they can be reused by a new

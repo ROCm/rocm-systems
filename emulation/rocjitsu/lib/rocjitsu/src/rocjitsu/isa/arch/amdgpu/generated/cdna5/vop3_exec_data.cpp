@@ -922,6 +922,9 @@ void VPermlaneBcastB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
   uint32_t selector = amdgpu::RegisterAccess(wf).read_scalar(src1);
   uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar(src2);
+  if (exec && inst_.src2 < 256 &&
+      (!lane_group_width || (lane_group_width & (lane_group_width - 1))))
+    wf.report_undefined_behavior("permlane group width is not a power of two");
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -943,6 +946,9 @@ void VPermlaneUpB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
   uint32_t selector = amdgpu::RegisterAccess(wf).read_scalar(src1);
   uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar(src2);
+  if (exec && inst_.src2 < 256 &&
+      (!lane_group_width || (lane_group_width & (lane_group_width - 1))))
+    wf.report_undefined_behavior("permlane group width is not a power of two");
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -964,6 +970,9 @@ void VPermlaneDownB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
   uint32_t selector = amdgpu::RegisterAccess(wf).read_scalar(src1);
   uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar(src2);
+  if (exec && inst_.src2 < 256 &&
+      (!lane_group_width || (lane_group_width & (lane_group_width - 1))))
+    wf.report_undefined_behavior("permlane group width is not a power of two");
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -985,6 +994,9 @@ void VPermlaneXorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
   uint32_t selector = amdgpu::RegisterAccess(wf).read_scalar(src1);
   uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar(src2);
+  if (exec && inst_.src2 < 256 &&
+      (!lane_group_width || (lane_group_width & (lane_group_width - 1))))
+    wf.report_undefined_behavior("permlane group width is not a power of two");
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;

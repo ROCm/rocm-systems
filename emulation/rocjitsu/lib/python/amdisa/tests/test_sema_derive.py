@@ -313,6 +313,31 @@ class TestDeriveScalarBinop:
         assert 'wf.write_scc((s0 > s1))' in cpp
         assert 'wf.write_scc((s0 >= s1))' not in cpp
 
+    @pytest.mark.parametrize(
+        ('op', 'dtype', 'selection', 'mode'),
+        [
+            ('min_num', 'f32', 'MinNum', 'fp_denorm_mode_f32'),
+            ('maximum', 'f32', 'Maximum', 'fp_denorm_mode_f32'),
+            ('max_num', 'f16', 'MaxNum', 'fp_denorm_mode_f16_f64'),
+            ('minimum', 'f16', 'Minimum', 'fp_denorm_mode_f16_f64'),
+        ],
+    )
+    def test_float_minmax_uses_shared_selection(self, op, dtype, selection, mode):
+        sem = _FakeSem(
+            f'S_{op.upper()}_{dtype.upper()}', 'scalar_binop', op, dtype, 'none'
+        )
+        cpp = lower_sema_block(derive_sema_block(sem))
+
+        assert f'amdgpu::input_denormal::Policy::make(wf.{mode}())' in cpp
+        fmt = dtype.upper()
+        assert (
+            f'amdgpu::minmax::evaluate<amdgpu::fp_format::{fmt}, '
+            f'amdgpu::minmax::{selection}>(' in cpp
+        )
+        # The selected encoding is written as is, without a float round trip.
+        assert 'std::fmin' not in cpp and 'std::fmax' not in cpp
+        assert 'f32_to_f16' not in cpp and 'bit_cast<float>' not in cpp
+
     def test_signed_mul_uses_unsigned_result_slot(self):
         sem = _FakeSem('S_MUL_I32', 'scalar_binop', 'mul', 'i32')
         block = derive_sema_block(sem)
@@ -412,14 +437,14 @@ class TestDeriveScalarBinop:
         'name,operation,dtype,expected_cpp',
         [
             ('S_PACK_HL_B32_B16', 'pack_hl', 'b32', '0xFFFFu) << 16'),
-            ('S_MIN_NUM_F32', 'min_num', 'f32', 'std::fmin'),
-            ('S_MAX_NUM_F32', 'max_num', 'f32', 'std::fmax'),
-            ('S_MIN_NUM_F16', 'min_num', 'f16', 'std::fmin'),
-            ('S_MAX_NUM_F16', 'max_num', 'f16', 'std::fmax'),
-            ('S_MINIMUM_F32', 'minimum', 'f32', 'quiet_NaN'),
-            ('S_MAXIMUM_F32', 'maximum', 'f32', 'quiet_NaN'),
-            ('S_MINIMUM_F16', 'minimum', 'f16', 'quiet_NaN'),
-            ('S_MAXIMUM_F16', 'maximum', 'f16', 'quiet_NaN'),
+            ('S_MIN_NUM_F32', 'min_num', 'f32', 'amdgpu::minmax::MinNum>'),
+            ('S_MAX_NUM_F32', 'max_num', 'f32', 'amdgpu::minmax::MaxNum>'),
+            ('S_MIN_NUM_F16', 'min_num', 'f16', 'amdgpu::minmax::MinNum>'),
+            ('S_MAX_NUM_F16', 'max_num', 'f16', 'amdgpu::minmax::MaxNum>'),
+            ('S_MINIMUM_F32', 'minimum', 'f32', 'amdgpu::minmax::Minimum>'),
+            ('S_MAXIMUM_F32', 'maximum', 'f32', 'amdgpu::minmax::Maximum>'),
+            ('S_MINIMUM_F16', 'minimum', 'f16', 'amdgpu::minmax::Minimum>'),
+            ('S_MAXIMUM_F16', 'maximum', 'f16', 'amdgpu::minmax::Maximum>'),
         ],
     )
     def test_gfx1250_scalar_float_and_pack_ops_derive(
@@ -810,6 +835,66 @@ class TestDeriveVectorUnary:
             assert len(cpp) > 0
 
     @pytest.mark.parametrize(
+        ('dtype', 'mode'), [('F16', 'f16_f64'), ('F32', 'f32'), ('F64', 'f16_f64')]
+    )
+    def test_fract_writes_the_shared_raw_result(self, dtype, mode):
+        sem = derive_semantics(f'V_FRACT_{dtype}', 'ENC_VOP1')
+        cpp = lower_sema_block(derive_sema_block(sem))
+        policy = (
+            f'amdgpu::fract::Policy::make(wf.fp_denorm_mode_{mode}(), '
+            f'wf.fp_round_mode_{mode}())'
+        )
+        assert f'const auto fract_policy = {policy};' in cpp
+        assert 'std::floor' not in cpp and 'f32_to_f16' not in cpp
+        # Result bits are written directly; an SDWA store applies OMOD to them.
+        assert f'amdgpu::fract::evaluate<amdgpu::fp_format::{dtype}>(' in cpp
+        assert 'sdwa::output_modifier' not in cpp
+
+    @pytest.mark.parametrize('dtype', ['F16', 'F32', 'F64'])
+    def test_fract_vop3_applies_shared_modifiers(self, dtype):
+        sem = derive_semantics(f'V_FRACT_{dtype}', 'ENC_VOP3')
+        fields = frozenset({'abs', 'neg', 'clamp', 'omod'})
+        cpp = lower_sema_block(
+            enrich_block(derive_sema_block(sem), enc_field_names=fields)
+        )
+        assert f'amdgpu::floating_operation::apply<amdgpu::fp_format::{dtype}>(' in cpp
+        assert (
+            'amdgpu::floating_operation::SourceModifiers{inst_.abs & 1u, inst_.neg & 1u}'
+            in cpp
+        )
+        assert (
+            f'amdgpu::output_modifier_policy<amdgpu::fp_format::{dtype}>'
+            '(wf, inst_.omod, inst_.clamp)' in cpp
+        )
+        assert 'apply_omod' not in cpp and 'clamp_floating_result' not in cpp
+
+    @pytest.mark.parametrize(
+        ('dtype', 'operation'),
+        [
+            ('F16', 'Operation<amdgpu::fp_format::F16>'),
+            ('F32', 'Operation<amdgpu::fp_format::F32>'),
+            ('F64', 'Operation<amdgpu::fp_format::F64, 32>'),
+        ],
+    )
+    def test_ldexp_vop3_modifies_only_the_value(self, dtype, operation):
+        sem = derive_semantics(f'V_LDEXP_{dtype}', 'ENC_VOP3')
+        fields = frozenset({'abs', 'neg', 'clamp', 'omod'})
+        cpp = lower_sema_block(
+            enrich_block(derive_sema_block(sem), enc_field_names=fields)
+        )
+        assert f'amdgpu::floating_operation::apply<amdgpu::fp_format::{dtype}>(' in cpp
+        assert f'amdgpu::ldexp::{operation}{{ldexp_policy}}' in cpp
+        assert (
+            'amdgpu::floating_operation::SourceModifiers{inst_.abs & 1u, inst_.neg & 1u}'
+            in cpp
+        )
+        assert (
+            f'amdgpu::output_modifier_policy<amdgpu::fp_format::{dtype}>'
+            '(wf, inst_.omod, inst_.clamp)' in cpp
+        )
+        assert 'ldexp_float' not in cpp and 'div_apply_omod' not in cpp
+
+    @pytest.mark.parametrize(
         ('name', 'enc', 'op', 'scale'),
         [
             ('V_CVT_NORM_I16_F16', 'ENC_VOP1', 'cvt_norm_i16_f16', '32767.0'),
@@ -842,18 +927,20 @@ class TestDeriveVectorUnary:
     @pytest.mark.parametrize('has_abs', [False, True])
     def test_cvt_norm_i16_u16_f16_modifiers_precede_rounding(self, suffix, has_abs):
         sem = derive_semantics(f'V_CVT_NORM_{suffix}_F16', 'ENC_VOP3')
-        fields = {'neg', 'clamp', 'omod'}
+        # The generator withholds CLAMP/OMOD from integer results.
+        fields = {'neg'}
         if has_abs:
             fields.add('abs')
         block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
         cpp = lower_sema_block(block)
-        assert cpp.index('util::f16_to_f32') < cpp.index('sv = -sv')
-        assert cpp.index('sv = -sv') < cpp.index('util::rndne_scalar')
-        assert ('std::fabs(sv)' in cpp) == has_abs
-        if has_abs:
-            assert cpp.index('std::fabs(sv)') < cpp.index('sv = -sv')
-        assert 'inst_.omod' not in cpp
-        assert 'inst_.clamp' not in cpp
+        assert cpp.index('util::f16_to_f32') < cpp.index(
+            'source_modifier::apply_to_float(sv'
+        )
+        assert cpp.index('source_modifier::apply_to_float(sv') < cpp.index(
+            'util::rndne_scalar'
+        )
+        assert ('inst_.abs' in cpp) == has_abs
+        assert 'inst_.neg' in cpp
 
     @pytest.mark.parametrize('suffix', ['I16', 'U16', 'F32'])
     @pytest.mark.parametrize('has_abs', [False, True])
@@ -864,10 +951,20 @@ class TestDeriveVectorUnary:
             fields.add('abs')
         block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
         cpp = lower_sema_block(block)
-        assert cpp.index('util::f16_to_f32') < cpp.index('sv = -sv')
-        assert ('std::fabs(sv)' in cpp) == has_abs
-        if has_abs:
-            assert cpp.index('std::fabs(sv)') < cpp.index('sv = -sv')
+        # F32_F16 flushes the raw half before widening it; the modifiers apply
+        # to the widened value. The integer forms keep their own source read.
+        modifier = (
+            'source_modifier::apply_to_float('
+            if suffix == 'F32'
+            else 'source_modifier::apply_to_float(sv'
+        )
+        if suffix == 'F32':
+            assert cpp.index(modifier) < cpp.index('util::f16_to_f32')
+            assert 'input_denormal::flush_input<amdgpu::fp_format::F16>(' in cpp
+        else:
+            assert cpp.index('util::f16_to_f32') < cpp.index(modifier)
+        assert ('inst_.abs' in cpp) == has_abs
+        assert 'inst_.neg' in cpp
         if suffix == 'F32':
             assert 'inst_.omod' in cpp
             assert 'inst_.clamp' in cpp
@@ -877,7 +974,24 @@ class TestDeriveVectorUnary:
         else:
             assert 'inst_.omod' not in cpp
             assert 'inst_.clamp' not in cpp
-            assert cpp.index('sv = -sv') < cpp.index('std::isnan(s)')
+            assert cpp.index(modifier) < cpp.index('std::isnan(s)')
+
+    def test_cvt_f64_f32_modifiers_wrap_the_typed_conversion(self):
+        sem = derive_semantics('V_CVT_F64_F32', 'ENC_VOP3')
+        block = enrich_block(
+            derive_sema_block(sem),
+            enc_field_names=frozenset({'abs', 'neg', 'omod', 'clamp'}),
+        )
+        cpp = lower_sema_block(block)
+
+        source_modifier = 'source_modifier::apply_to_float'
+        conversion = 'static_cast<double>'
+        # The modifier call is nested inside the widening conversion.
+        assert cpp.index(conversion) < cpp.index(source_modifier)
+        assert 'inst_.abs' in cpp
+        assert 'inst_.neg' in cpp
+        assert 'output_modifier_policy<amdgpu::fp_format::F64>' in cpp
+        assert 'output_modifier::apply<amdgpu::fp_format::F64>' in cpp
 
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
     def test_cos_bf16_lowers_through_shared_transcendental(self, enc):
@@ -1705,7 +1819,7 @@ class TestDeriveVectorBinop:
             call_names = [
                 n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
             ]
-            assert f'std::f{op}' in call_names
+            assert f'float_minmax_legacy_{op}' in call_names
         for op in ['min', 'max']:
             sem = _FakeSem(f'V_{op.upper()}_I32', 'vector_binop', op, 'i32')
             block = derive_sema_block(sem)
@@ -2141,6 +2255,79 @@ class TestDeriveSmemHints:
         assert block.is_empty
 
 
+_SCALAR_ATOMIC_OPS = (
+    'SWAP',
+    'CMPSWAP',
+    'ADD',
+    'SUB',
+    'SMIN',
+    'UMIN',
+    'SMAX',
+    'UMAX',
+    'AND',
+    'OR',
+    'XOR',
+    'INC',
+    'DEC',
+)
+
+
+# Compare-swap carries its compare value after the source, doubling its data.
+_IMPLEMENTED_SCALAR_ATOMICS = {
+    f'S_ATOMIC_{op}{width}': (
+        op.lower(),
+        elem_size,
+        2 * num_elems if op == 'CMPSWAP' else num_elems,
+    )
+    for op in _SCALAR_ATOMIC_OPS
+    for width, elem_size, num_elems in (('', 4, 1), ('_X2', 8, 2))
+}
+
+
+class TestDeriveSmemAtomic:
+    @pytest.mark.parametrize('name', sorted(_IMPLEMENTED_SCALAR_ATOMICS))
+    def test_implemented_scalar_atomics_derive_operation_and_widths(self, name):
+        operation, elem_size, num_elems = _IMPLEMENTED_SCALAR_ATOMICS[name]
+        sem = derive_semantics(name, 'ENC_SMEM')
+        assert sem is not None
+        assert sem.semantic_class == 'smem_atomic'
+        assert sem.operation == operation
+        assert sem.elem_size == elem_size
+        assert sem.num_elems == num_elems
+
+    @pytest.mark.parametrize(
+        'name',
+        [
+            f'{prefix}{op}{width}'
+            for prefix in ('S_ATOMIC_', 'S_BUFFER_ATOMIC_')
+            for op in _SCALAR_ATOMIC_OPS
+            for width in ('', '_X2')
+            if f'{prefix}{op}{width}' not in _IMPLEMENTED_SCALAR_ATOMICS
+        ],
+    )
+    def test_unimplemented_scalar_atomics_stay_nop(self, name):
+        sem = derive_semantics(name, 'ENC_SMEM')
+        assert sem is not None
+        assert sem.semantic_class == 'nop'
+
+    # No CDNA ISA defines these. The flat atomic tables know their operations,
+    # so they pin that scalar support comes from the allowlist, not that table.
+    @pytest.mark.parametrize(
+        'name',
+        [
+            'S_ATOMIC_ADD_F32',
+            'S_ATOMIC_FMIN',
+            'S_ATOMIC_PK_ADD_F16',
+            'S_ATOMIC_CSUB',
+            'S_ATOMIC_COND_SUB_U32',
+        ],
+    )
+    def test_scalar_atomic_operations_outside_allowlist_stay_nop(self, name):
+        sem = derive_semantics(name, 'ENC_SMEM')
+        assert sem is not None
+        assert sem.semantic_class == 'nop'
+
+
 class TestDeriveBufferLoad:
     def test_buffer_load(self):
         sem = _FakeSem('BUFFER_LOAD_B32', 'buffer_load')
@@ -2493,6 +2680,54 @@ class TestDeriveDsSwizzle:
         sem.sign_extend = False
         block = derive_sema_block(sem)
         assert block is not None
+
+
+class TestDeriveDsGws:
+    @pytest.mark.parametrize(
+        ('name', 'operation'),
+        [
+            ('DS_GWS_INIT', 'init'),
+            ('DS_GWS_SEMA_V', 'sema_v'),
+            ('DS_GWS_SEMA_P', 'sema_p'),
+            ('DS_GWS_SEMA_BR', 'sema_br'),
+            ('DS_GWS_SEMA_RELEASE_ALL', 'sema_release_all'),
+            ('DS_GWS_BARRIER', 'barrier'),
+        ],
+    )
+    def test_classifies_each_gws_opcode(self, name, operation):
+        sem = derive_semantics(name, 'ENC_DS')
+        assert sem is not None
+        assert sem.semantic_class == 'ds_gws'
+        assert sem.operation == operation
+        # GWS publishes a zero-payload 4-byte store for wait accounting.
+        assert sem.elem_size == 4
+        assert sem.num_elems == 0
+
+    @pytest.mark.parametrize(
+        'name',
+        [
+            'DS_GWS_FUTURE_VARIANT',
+            # Counterexample: the generic DS-atomic fallback keys off substrings
+            # like '_ADD'/'_SUB', so an unrecognized GWS name containing one must
+            # still be stopped as a GWS opcode (classified nop) and not mis-decoded
+            # as a read-modify-write atomic.
+            'DS_GWS_ADD_VARIANT',
+            'DS_GWS_SUB_FOO',
+            'DS_GWS_MIN_BAR',
+        ],
+    )
+    def test_unknown_gws_mnemonic_is_unsupported(self, name):
+        # An unrecognized DS_GWS_* name must not be assigned synchronization or
+        # memory-atomic behavior; it is classified as an unsimulated nop.
+        sem = derive_semantics(name, 'ENC_DS')
+        assert sem is not None
+        assert sem.semantic_class == 'nop'
+
+
+def test_ds_ordered_count_stays_unimplemented():
+    sem = derive_semantics('DS_ORDERED_COUNT', 'ENC_DS')
+    assert sem is not None
+    assert sem.semantic_class == 'nop'
 
 
 @pytest.mark.parametrize('dtype', ['f16', 'bf16'])

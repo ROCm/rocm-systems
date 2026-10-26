@@ -225,13 +225,19 @@ void Runtime::RegisterAgent(Agent* agent, bool Enabled) {
       // Default system pool must support kernarg
       for (auto pool : system_regions_fine_) {
         if (pool->kernarg()) {
-          system_allocator_ = [pool](size_t size, size_t alignment,
-                                     MemoryRegion::AllocateFlags alloc_flags,
-                                     int agent_node_id) -> void* {
+          // Capture a raw pointer (not the shared_ptr) so the closure state is
+          // trivially destructible and stored inline in std::function.  The
+          // region outlives the closure via system_regions_fine_ and the owning
+          // CPU agent, and this avoids a heap-buffer-overflow when the closure
+          // copy held by BaseShared is torn down during Unload().
+          const core::MemoryRegion* pool_ptr = pool.get();
+          system_allocator_ = [pool_ptr](size_t size, size_t alignment,
+                                         MemoryRegion::AllocateFlags alloc_flags,
+                                         int agent_node_id) -> void* {
             assert(alignment <= 4096);
             void* ptr = NULL;
             return (HSA_STATUS_SUCCESS ==
-                    core::Runtime::runtime_singleton_->AllocateMemory(pool.get(), size, alloc_flags,
+                    core::Runtime::runtime_singleton_->AllocateMemory(pool_ptr, size, alloc_flags,
                                                                       &ptr, agent_node_id))
                 ? ptr
                 : NULL;
@@ -889,10 +895,7 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
       break;
     }
     case HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT: {
-      bool ret = true;
-      for (auto agent : gpu_agents_)
-        ret &= (agent->supported_isas()[0]->GetXnack() == IsaFeature::Enabled);
-      *(bool*)value = ret;
+      *(bool*)value = core::Runtime::runtime_singleton_->XnackEnabled();
       break;
     }
     case HSA_AMD_SYSTEM_INFO_MWAITX_ENABLED: {
@@ -1117,7 +1120,9 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
       // owning agent and the allocation's memory flags belong to the exporter. Report those as
       // unset instead of resolving them through MemoryHandle::region, which is NULL here.
       const AMD::MemoryRegion* memRegion =
-          static_cast<const AMD::MemoryRegion*>(mappedHandleIt->second.mem_handle->region);
+          mappedHandleIt->second.mem_handle->imported
+              ? nullptr
+              : static_cast<const AMD::MemoryRegion*>(mappedHandleIt->second.mem_handle->region);
       info->agentOwner = {};
       info->global_flags = 0;
       info->alloc_flags = 0;
@@ -2170,17 +2175,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // once per outer-loop iteration (one per new wait batch), so the backoff
       // only compounds within a single idle wait and every new wait starts
       // again at the floor -- the escalated value cannot carry across waits.
-      // The ceiling depends on why we would be polling: with interrupts
-      // unavailable globally (WSL/dxg, DTIF, KFD 1.0, HSA_ENABLE_INTERRUPT=0)
-      // every signal is polling-only and a long nap costs only the napping
-      // wait's own observation latency. With interrupts available, polling can
-      // still be forced by a single EopEvent-less signal in the batch (an IPC
-      // signal or an internal DefaultSignal such as gang-copy signals); the
-      // nap then delays unrelated interrupt-backed handlers on this shared
-      // thread, so it is capped at the interrupt path's 200us active-poll
-      // window instead.
-      const int poll_nap_ceiling_us =
-          g_use_interrupt_wait ? kPollNapCeilingMixedUs : kPollNapCeilingUs;
       int poll_nap_us = kPollNapFloorUs;
 
       while (!finish) {
@@ -2271,7 +2265,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             break;
           }
-        } else if (polling && !finish) {
+        } else if (polling && !finish && !g_use_interrupt_wait) {
           // No interrupt-backed event is available for at least one pending
           // signal (PrepareInterrupt forced polling) -- on the WSL/dxg thunk
           // that is every signal, since it implements no KFD events at all.
@@ -2281,15 +2275,13 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // process that has merely touched the GPU
           // (https://github.com/ROCm/librocdxg/issues/60). Nap between scans,
           // doubling from 20us up to poll_nap_ceiling_us (2ms when the whole
-          // runtime is polling-only, 200us when a mixed batch also carries
-          // interrupt-backed handlers this nap would delay -- see the ceiling
-          // selection above), so a wait that completes quickly keeps low
+          // runtime is polling-only, so a wait that completes quickly keeps low
           // observation latency while a long-lived idle wait costs almost no
           // CPU. The nap is re-initialized at the outer-loop boundary (see
           // poll_nap_us above), so the escalation only compounds within a
           // single idle wait batch.
           os::uSleep(poll_nap_us);
-          poll_nap_us = NextPollNapUs(poll_nap_us, poll_nap_ceiling_us);
+          poll_nap_us = NextPollNapUs(poll_nap_us, kPollNapCeilingUs);
         }
       }
     }
@@ -2948,6 +2940,13 @@ void Runtime::Unload() {
   SharedSignalPool.clear();
   EventPool.clear();
 
+  // Release static allocators while agents and the thunk are still valid so
+  // system memory regions kept alive by the allocator closures can run
+  // fragment heap teardown safely.
+  system_allocator_ = {};
+  system_deallocator_ = {};
+  BaseShared::SetAllocateAndFree({}, {});
+
   // Clear system regions before destroying agents to prevent use-after-free
   // when agent destructors access region memory.
   system_regions_fine_.clear();
@@ -3113,6 +3112,11 @@ void Runtime::LoadTools() {
   typedef Agent* (*tool_wrap_t)(Agent*);
   typedef void (*tool_add_t)(Runtime*);
 
+  // Set when a v3 tool owns the API table. Tools named in HSA_TOOLS_LIB are an
+  // explicit request and still load; tools that are merely loaded in the
+  // process are not picked up, since they would wrap the table a second time.
+  bool skip_loaded_tools = false;
+
 #if defined(HSA_ROCPROFILER_REGISTER) && HSA_ROCPROFILER_REGISTER > 0
   if (!flag().disable_tool_register()) {
     auto* profiler_api_table_ = static_cast<void*>(&hsa_api_table());
@@ -3143,9 +3147,7 @@ void Runtime::LoadTools() {
       }
     }
 
-    // if rocprofiler library supports registration and v1 support not explicitly requested,
-    // do not use old method
-    if (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration) return;
+    skip_loaded_tools = (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration);
   }
 #endif
 
@@ -3190,7 +3192,8 @@ void Runtime::LoadTools() {
   }
 
   // Discover loaded tools.
-  std::vector<os::LibHandle> loaded_hds = os::GetLoadedToolsLib();
+  std::vector<os::LibHandle> loaded_hds;
+  if (!skip_loaded_tools) loaded_hds = os::GetLoadedToolsLib();
   for (auto& handle : loaded_hds) {
     const uint32_t* order = (const uint32_t*)os::GetExportAddress(handle, "HSA_AMD_TOOL_PRIORITY");
     if (order) {
@@ -4641,7 +4644,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 
     // For imported handles, we don't have a region/drm_owner 
     // we can import into first enabled gpu agent for getting an mmap_offset
-    if (!memHandle->drm_owner && !memHandle->region) {
+    if (!memHandle->drm_owner && memHandle->imported) {
       const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
       if (gpus.empty()) return HSA_STATUS_ERROR;
       core::Agent* defaultDrm = gpus[0];
@@ -4730,7 +4733,8 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, uint64_t flags_u
       imported(false),
       is_fabric_handle(false),
       alloc_flag(alloc_flag),
-      drm_owner(nullptr) {
+      drm_owner(nullptr),
+      import_info_queried(false) {
   assert(driver_handle.handle != 0);
 }
 
@@ -4742,7 +4746,8 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
       imported(true),
       is_fabric_handle(false),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr) {}
+      drm_owner(nullptr),
+      import_info_queried(false) {}
 
 Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
     : region(nullptr),
@@ -4752,7 +4757,8 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
       imported(true),
       is_fabric_handle(true),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr) {}
+      drm_owner(nullptr),
+      import_info_queried(false) {}
 
 Runtime::MemoryHandle::~MemoryHandle() {
   if (driver_handle.handle != 0) {
@@ -4995,6 +5001,51 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
                                                  ShareType::DMABUF_FD, dmabuf_fd);
 }
 
+/* Map a driver-reported placement onto a region ROCr can name. Returns nullptr
+ * when no suitable region exists, leaving the handle's properties unresolved. */
+const core::MemoryRegion* Runtime::ResolveImportedRegion(const core::DmaBufInfo& info) {
+  if (info.is_device_memory) {
+    core::Agent* owner = agent_by_gpuid(info.node_id);
+    if (owner == nullptr) return nullptr;
+
+    /* Device VMM allocations come from the coarse-grained local pool. */
+    for (const auto& region : owner->regions()) {
+      const auto* amd_region = static_cast<const AMD::MemoryRegion*>(region.get());
+      if (amd_region->IsLocalMemory() && !region->fine_grain()) return region.get();
+    }
+    return nullptr;
+  }
+
+  /* Host memory. The driver query reports no NUMA node, so the default
+   * fine-grained system region is used. */
+  if (system_regions_fine_.empty()) return nullptr;
+  return system_regions_fine_[0].get();
+}
+
+/* Recover an imported handle's placement and size from its dmabuf and cache it in
+ * the handle's own fields. Ask each agent driver in turn and take the first that
+ * recognizes the fd; AgentDriver(KFD) is not used because it throws when no KFD
+ * driver is present. A buffer the driver cannot describe is marked queried so the
+ * ioctl is not repeated. Caller must hold memory_lock_. */
+void Runtime::EnsureImportInfo(MemoryHandle* memoryHandle) {
+  if (!memoryHandle->imported || memoryHandle->import_info_queried) return;
+  memoryHandle->import_info_queried = true;
+
+  if (memoryHandle->driver_handle.dmabuf_fd < 0) return;
+
+  core::DmaBufInfo info = {};
+  for (auto& driver : AgentDrivers()) {
+    if (driver->QueryDmaBufInfo(memoryHandle->driver_handle.dmabuf_fd, &info) ==
+        HSA_STATUS_SUCCESS) {
+      memoryHandle->region = ResolveImportedRegion(info);
+      memoryHandle->driver_handle.size = info.size;
+      /* alloc_flag stays AllocateNoFlags: the dmabuf carries no memory-type
+       * metadata, and the exporter may legitimately have used MEMORY_TYPE_NONE. */
+      return;
+    }
+  }
+}
+
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   /* The per-GPU import of this dmabuf is deferred until hsa_amd_vmem_set_access is called, but the
@@ -5004,6 +5055,8 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   int owned_fd = os::DmaBufDup(dmabuf_fd);
   if (owned_fd < 0) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
+  /* Placement is not recovered here: importers that never query it should not pay
+   * for an ioctl. EnsureImportInfo does it on the first query that needs it. */
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd);
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
@@ -5068,14 +5121,52 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  if (!memoryHandle->imported) {
-    *mem_region = memoryHandle->region;
-    *type = (memoryHandle->alloc_flag & core::MemoryRegion::AllocatePinned) ? MEMORY_TYPE_PINNED
-                                                                            : MEMORY_TYPE_NONE;
-  } else {
-    *mem_region = nullptr;
-    *type = MEMORY_TYPE_NONE;
-  }
+  EnsureImportInfo(memoryHandle);
+
+  const MemoryRegion* region = memoryHandle->region;
+  *mem_region = region;
+  *type = (region != nullptr && (memoryHandle->alloc_flag & core::MemoryRegion::AllocatePinned))
+              ? MEMORY_TYPE_PINNED
+              : MEMORY_TYPE_NONE;
+  return HSA_STATUS_SUCCESS;
+}
+
+/* fits() below compares the caller's byte count against member end offsets, which
+ * only holds while every member starts where the previous one ended. */
+static_assert(offsetof(hsa_amd_vmem_handle_info_t, alloc_size) ==
+                  offsetof(hsa_amd_vmem_handle_info_t, size) +
+                      sizeof(hsa_amd_vmem_handle_info_t::size),
+              "padding before hsa_amd_vmem_handle_info_t::alloc_size");
+static_assert(offsetof(hsa_amd_vmem_handle_info_t, agent) ==
+                  offsetof(hsa_amd_vmem_handle_info_t, alloc_size) +
+                      sizeof(hsa_amd_vmem_handle_info_t::alloc_size),
+              "padding before hsa_amd_vmem_handle_info_t::agent");
+static_assert(sizeof(hsa_amd_vmem_handle_info_t) ==
+                  offsetof(hsa_amd_vmem_handle_info_t, agent) +
+                      sizeof(hsa_amd_vmem_handle_info_t::agent),
+              "trailing padding in hsa_amd_vmem_handle_info_t");
+
+hsa_status_t Runtime::VMemoryGetHandleInfo(hsa_amd_vmem_alloc_handle_t allocHandle,
+                                           hsa_amd_vmem_handle_info_t* info) {
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
+  if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+
+  EnsureImportInfo(memoryHandle);
+  const MemoryRegion* region = memoryHandle->region;
+
+  /* An unresolved import has no agent to report, and succeeding would hand back a
+   * null one the caller cannot tell apart from a real agent. */
+  if (memoryHandle->imported && region == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  
+  // Fill in the handle info structure with the allocation size and agent.
+  const size_t caller_size = info->size;
+  info->size = Min(caller_size, sizeof(hsa_amd_vmem_handle_info_t));
+  info->alloc_size = memoryHandle->driver_handle.size;
+  info->agent = (region != nullptr && region->owner() != nullptr)
+      ? core::Agent::Convert(region->owner())
+      : hsa_agent_t{0};
   return HSA_STATUS_SUCCESS;
 }
 

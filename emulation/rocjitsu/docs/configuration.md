@@ -18,6 +18,7 @@ Pre-built simulator configs are in `configs/`:
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four MI455X GPUs (multi-GPU daemon mode) |
+| `gfx1250_mi455x_kmd_2node_net.json` | Schematic two-node, one-GPU-per-node RCCL NET fixture |
 | `gfx1251_synthetic.json` | Minimal synthetic gfx1251 topology for functional simulation; not a product model |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
@@ -36,6 +37,19 @@ The generic `scripts/run-vfio-guest.py` launcher requires externally prepared
 guest kernel and initramfs artifacts. See
 [QEMU VFIO-user compute](qemu-vfio.md) for the supported guest contract, the
 complete launch command, GEMM qualification criteria, and troubleshooting.
+
+For a two-node launch recipe with reference and NET-channel checks, see
+[Two-node RCCL NET smoke](rccl-scaleout.md). That gfx1250 daemon control is
+currently unqualified. A manifest's network or local fabric edges describe
+reachability; they do not grant peer memory access. Legacy replicated-GPU
+configs retain their XGMI links, hive ID, and XGMI SDMA count for
+compatibility. A manifest with those same GPUs suppresses the advertisement
+until its local peer routes can execute, so converting a legacy config to a
+manifest changes what ROCr discovers. Legacy single-GPU drivers also keep the
+old render-node routing: they claim any render minor even when their config
+advertises a different one. Manifest drivers select only their configured
+render minors. The daemon handshake carries this policy to remote clients, so
+an unmatched manifest render node can never be claimed as a synthetic GPU.
 
 ## DBT guest configs
 
@@ -299,6 +313,16 @@ loader warns once per GPU and leaves the shader-array width unknown. Reads
 with unknown or unrepresentable geometry issue an `s_getreg_b32` warning and
 write zero.
 
+CDNA3/4 `HW_ID` exposes resident WAVE_ID/SIMD_ID and backed CU_ID/SE_ID
+fields; SH_ID reads zero as specified by the ISA. CU_ID requires a known,
+single-array geometry with 1–16 CUs per shader engine. SE_ID must fit in
+three bits. `XCC_ID` reads the XCD index within its SoC after topology
+initialization and requires an index in 0–15. Other HW_ID fields remain
+unsupported. Any HW_ID slice touching an unsupported bit rejects the entire
+read; the default 32-bit HW_ID read therefore still warns and writes zero.
+Unknown or unrepresentable identity fields likewise issue an `s_getreg_b32`
+warning and write zero.
+
 Omitted geometry fields inherit defaults selected by `gfx_target_version`.
 For a smaller topology, set both `num_cu_per_sh` and
 `num_shader_arrays_per_engine` to match its CU groups; for example, two arrays
@@ -350,6 +374,10 @@ global override. Checkpoints preserve each CU's effective diagnostic settings;
 older checkpoints without these fields use the defaults. See
 [memory wait diagnostics](memory-wait-diagnostics.md) for coverage and limitations.
 
+Qualified [ISA diagnostics](isa-diagnostics.md) are always enabled, independently
+of memory-wait checking. The checks use decoded fields and existing operands;
+the coverage and legal exceptions are documented separately.
+
 ### KFD device sections
 
 KFD device identity can be defined by `vm.gpu.device` for a simulated GPU and
@@ -374,6 +402,10 @@ them issue an `s_getreg_b32` warning and write zero; the simulator cannot infer 
 shader-array-local ID from the shader-engine CU count alone. Saving such a restored
 checkpoint again preserves that unknown geometry.
 
+CDNA3/4 identity reads reuse restored resident slots and CU geometry. XCC_ID
+becomes readable after the restored SoC initializes its topology. Older
+checkpoints without shader-array geometry keep CU_ID unsupported.
+
 ## Multi-GPU
 
 Multi-GPU configs define multiple SoCs with distinct GPU IDs and
@@ -384,3 +416,33 @@ to the correct device based on `gpu_id`.
 `configs/gfx950_mi355x_kmd_2gpu.json` is the default multi-GPU
 configuration for RCCL tests. `configs/gfx1250_mi455x_kmd_4gpu.json`
 provides a four-GPU daemon topology for explicit multi-GPU runs.
+When the selected ROCm compiler parses `gfx1250`, its HIP runtime advertises
+that target, and its RCCL library exists, the build also produces
+`tests/hip_rccl_gfx1250_test`. This is a compilation gate for the numerically
+checked CDNA5 rank workload; its runtime payload and data checks need separate
+qualification. The registered daemon RCCL CTests still use the `gfx950`
+binary and configuration.
+
+## GWS wait budget
+
+The compute-unit option `gws_wait_limit` defaults to 1,000,000 unpaused CU
+steps without instruction progress from the waiting process. Executing an
+instruction on any CU for that process resets its waits' inactivity budgets
+(progress is published once per functional quantum);
+other processes do not. Set it to `0` to allow unbounded waits,
+or increase it for workloads that intentionally wait for later host submissions.
+It measures execution work, not GPU cycles or elapsed wall time. Debugger and
+runtime queue suspension do not consume this budget. CUs containing only GWS
+waiters poll once per normal quantum, including when the execution quantum is
+unlimited; parked waits do not shorten a co-resident producer's quantum.
+
+A wait exceeding the budget emits the process, queue, dispatch, CU, wave,
+resource and PC, faults the dispatch without publishing successful completion,
+reports a wave-abort exception to the queue, cancels its replicas on every XCD,
+and delivers failed native PM4 callbacks before stopping the VM with an error.
+This is an inactivity timeout policy, not a deadlock diagnosis: a process that
+keeps executing instructions can keep its waits alive indefinitely. Quiescence or insufficient
+residency never releases a GWS wait. Barriers require an explicit GWS INIT;
+unsupported residency can exhaust the budget but cannot produce a successful
+rendezvous. Checkpoints containing GWS resource state are rejected because the
+format does not serialize the shared table.
