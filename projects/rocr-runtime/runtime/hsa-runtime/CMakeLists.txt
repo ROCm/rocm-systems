@@ -118,22 +118,15 @@ if(UNIX)
         set(NUMA_FOUND TRUE)
         message(STATUS "Found NUMA via pkg-config (SHARED): ${NUMA_LIBRARY_FILE}")
       else()
-        # Fallback to INTERFACE target if we only have link flags.
-        # Prefix with -l so CMake treats these as link flags; a bare "numa"
-        # item resolves back to this target and is silently dropped.
-        set(_numa_link_items "")
-        foreach(_numa_lib IN LISTS NUMA_PC_LIBRARIES)
-          list(APPEND _numa_link_items "-l${_numa_lib}")
-        endforeach()
-        add_library(numa INTERFACE IMPORTED GLOBAL)
-        set_target_properties(numa PROPERTIES
-          INTERFACE_INCLUDE_DIRECTORIES "${NUMA_PC_INCLUDE_DIRS}"
-          INTERFACE_LINK_LIBRARIES "${_numa_link_items}"
-          INTERFACE_LINK_DIRECTORIES "${NUMA_PC_LIBRARY_DIRS}"
-        )
-        unset(_numa_link_items)
-        set(NUMA_FOUND TRUE)
-        message(STATUS "Found NUMA via pkg-config (INTERFACE): ${NUMA_PC_LIBRARIES}")
+        # pkg-config reported numa but no actual library file resolved under its
+        # LIBRARY_DIRS. Do NOT accept a link-flags-only INTERFACE target here: a
+        # bare "numa" item resolves back to this target and CMake silently drops
+        # it, leaving NUMA_FOUND=TRUE while nothing is linked -> unresolved
+        # numa_* symbols at link time. Leave NUMA_FOUND FALSE so the
+        # find_package / manual-search tiers below can resolve a real library
+        # file, or we degrade to the all-CPU path if none exists.
+        message(STATUS "NUMA via pkg-config: no library file resolved under "
+                       "'${NUMA_PC_LIBRARY_DIRS}'; trying find_package/manual search")
       endif()
     endif()
   endif()
