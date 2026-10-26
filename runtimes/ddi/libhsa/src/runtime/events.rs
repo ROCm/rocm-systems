@@ -39,6 +39,9 @@ impl HsaState {
         callback: SystemEventHandler,
         data: CallbackArg,
     ) -> Status {
+        if self.stop_workers.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         if self.system_event_handlers.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }

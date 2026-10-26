@@ -1027,6 +1027,20 @@ pub(crate) unsafe fn with_signal<R>(
     Some(operation(unsafe { pointer.as_ref() }))
 }
 
+/// Applies a public raw-handle operation only while HSA owns live storage.
+///
+/// # Safety
+/// The caller must keep the signal storage live and synchronize destruction
+/// for the complete callback, as required by `with_signal`.
+pub(crate) unsafe fn with_public_signal<R>(
+    signal: HsaSignal,
+    operation: impl for<'a> FnOnce(&'a AmdSignal) -> R,
+) -> Option<R> {
+    let _admission = crate::runtime::enter_public_raw_handle()?;
+    // SAFETY: The caller supplies the same ownership guarantee as with_signal.
+    unsafe { with_signal(signal, operation) }
+}
+
 /// Evaluates an HSA signal wait condition against the observed value.
 fn condition_met(condition: u32, observed: SignalValue, compare: SignalValue) -> bool {
     match condition {

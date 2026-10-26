@@ -872,24 +872,25 @@ fn scratch_owner_metadata_failure_does_not_acquire_a_native_range() {
         false,
         0x12345,
     );
-    let _scope = unsafe { allocator_state.allocator() }.scope();
-    let before = allocator_state.allocations.load(Ordering::Relaxed);
-    allocator_state.fail_at.store(before + 2, Ordering::Relaxed);
-    let result = KfdAllocation::create_scratch(
-        &fixture.vm,
-        AllocationDesc {
-            size: desc().size,
-            alignment: 4096,
-        },
-    );
-    assert_eq!(result.err().unwrap().kind(), ErrorKind::ResourceExhausted);
-    assert_eq!(
-        allocator_state.allocations.load(Ordering::Relaxed),
-        before + 2
-    );
-    assert_eq!(allocator_state.frees.load(Ordering::Relaxed), 1);
-    assert!(fixture.vm.scratch.lock().unwrap().reservation.is_none());
-    fixture.exhausted();
+    unsafe { allocator_state.allocator() }.with_scope(|| {
+        let before = allocator_state.allocations.load(Ordering::Relaxed);
+        allocator_state.fail_at.store(before + 2, Ordering::Relaxed);
+        let result = KfdAllocation::create_scratch(
+            &fixture.vm,
+            AllocationDesc {
+                size: desc().size,
+                alignment: 4096,
+            },
+        );
+        assert_eq!(result.err().unwrap().kind(), ErrorKind::ResourceExhausted);
+        assert_eq!(
+            allocator_state.allocations.load(Ordering::Relaxed),
+            before + 2
+        );
+        assert_eq!(allocator_state.frees.load(Ordering::Relaxed), 1);
+        assert!(fixture.vm.scratch.lock().unwrap().reservation.is_none());
+        fixture.exhausted();
+    });
 }
 
 #[test]

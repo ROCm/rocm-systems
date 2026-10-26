@@ -9,6 +9,8 @@ use super::*;
 pub(crate) struct InFlightTracker {
     /// Number of native operations currently holding a token.
     active: Mutex<usize>,
+    /// Final shutdown has stopped admitting new native operations.
+    closing: AtomicBool,
     /// Wakes shutdown when the final token is dropped.
     idle: Condvar,
     /// Native cleanup failed after the generation was detached for shutdown.
@@ -20,6 +22,7 @@ impl InFlightTracker {
     pub(crate) fn new() -> Self {
         Self {
             active: Mutex::new(0),
+            closing: AtomicBool::new(false),
             idle: Condvar::new(),
             cleanup_uncertain: AtomicBool::new(false),
         }
@@ -31,10 +34,22 @@ impl InFlightTracker {
             .active
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.closing.load(Ordering::Acquire) {
+            return None;
+        }
         *active = active.checked_add(1)?;
         Some(InFlightToken {
             tracker: self.clone(),
         })
+    }
+
+    /// Excludes new native work before shutdown waits for existing tokens.
+    pub(crate) fn close(&self) {
+        let _active = self
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.closing.store(true, Ordering::Release);
     }
 
     /// Waits for idle to complete.
@@ -122,6 +137,8 @@ enum LifecyclePhase {
     LoadingTools(u64),
     /// The generation is available to HSA callers.
     Active(u64),
+    /// Final shutdown is waiting for registrar setters with state still live.
+    Preparing(u64),
     /// Final shutdown is retiring the generation.
     Stopping(u64),
     /// Failed native cleanup prevents a safe new generation.
@@ -136,8 +153,8 @@ enum LifecyclePhase {
 pub(crate) enum ShutdownWork {
     /// An initialization reference was released; the generation remains live.
     Reference,
-    /// The final reference must retire all HSA and native state.
-    Runtime(HsaState, u64),
+    /// The final reference must first quiesce registered tools.
+    Prepare(u64),
     /// An earlier native shutdown failed after HSA state was retired.
     NativeRetry(SessionRetirement, u64),
 }
@@ -170,19 +187,31 @@ impl HsaLifecycle {
 
     /// Returns this value as ref.
     pub(crate) fn as_ref(&self) -> Option<&HsaState> {
-        self.state.as_ref()
+        match self.phase {
+            LifecyclePhase::LoadingTools(_)
+            | LifecyclePhase::Active(_)
+            | LifecyclePhase::Preparing(_) => self.state.as_ref(),
+            _ => None,
+        }
     }
 
     /// Returns this value as mut.
     pub(crate) fn as_mut(&mut self) -> Option<&mut HsaState> {
-        self.state.as_mut()
+        match self.phase {
+            LifecyclePhase::LoadingTools(_)
+            | LifecyclePhase::Active(_)
+            | LifecyclePhase::Preparing(_) => self.state.as_mut(),
+            _ => None,
+        }
     }
 
     /// Returns the generation of the currently published runtime.
     pub(crate) fn active_generation(&self) -> Option<u64> {
         match (self.phase, self.state.as_ref()) {
             (
-                LifecyclePhase::LoadingTools(generation) | LifecyclePhase::Active(generation),
+                LifecyclePhase::LoadingTools(generation)
+                | LifecyclePhase::Active(generation)
+                | LifecyclePhase::Preparing(generation),
                 Some(_),
             ) => Some(generation),
             _ => None,
@@ -209,6 +238,7 @@ impl HsaLifecycle {
             }
             LifecyclePhase::Starting(_)
             | LifecyclePhase::LoadingTools(_)
+            | LifecyclePhase::Preparing(_)
             | LifecyclePhase::Stopping(_)
             | LifecyclePhase::Quarantined => Err(INVALID_RUNTIME_STATE),
         }
@@ -225,6 +255,7 @@ impl HsaLifecycle {
         }
         self.state = Some(runtime);
         self.references = 1;
+        PUBLIC_RAW_HANDLES.open();
         // HSA queries may run from a tool's OnLoad, but recursive init and
         // shutdown must remain rejected until the tool table is published.
         self.phase = LifecyclePhase::LoadingTools(generation);
@@ -254,6 +285,7 @@ impl HsaLifecycle {
         } else {
             LifecyclePhase::Inactive
         };
+        PUBLIC_RAW_HANDLES.close();
         self.references = 0;
         Ok(())
     }
@@ -269,10 +301,9 @@ impl HsaLifecycle {
                     self.references -= 1;
                     return Ok(ShutdownWork::Reference);
                 }
-                let runtime = self.state.take().ok_or(ERROR)?;
                 self.references = 0;
-                self.phase = LifecyclePhase::Stopping(generation);
-                Ok(ShutdownWork::Runtime(runtime, generation))
+                self.phase = LifecyclePhase::Preparing(generation);
+                Ok(ShutdownWork::Prepare(generation))
             }
             LifecyclePhase::Quarantined => {
                 let session = self.retired_session.take().ok_or(INVALID_RUNTIME_STATE)?;
@@ -282,8 +313,33 @@ impl HsaLifecycle {
             LifecyclePhase::Inactive => Err(NOT_INITIALIZED),
             LifecyclePhase::Starting(_)
             | LifecyclePhase::LoadingTools(_)
+            | LifecyclePhase::Preparing(_)
             | LifecyclePhase::Stopping(_) => Err(INVALID_RUNTIME_STATE),
         }
+    }
+
+    /// Restores the active generation if tool suspension cannot finish.
+    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) fn cancel_shutdown(&mut self, generation: u64) -> Result<(), Status> {
+        if self.phase != LifecyclePhase::Preparing(generation) || self.state.is_none() {
+            return Err(ERROR);
+        }
+        self.references = 1;
+        self.phase = LifecyclePhase::Active(generation);
+        Ok(())
+    }
+
+    /// Detaches a prepared generation after all tool setters have quiesced.
+    pub(crate) fn finish_prepare_shutdown(&mut self, generation: u64) -> Result<HsaState, Status> {
+        if self.phase != LifecyclePhase::Preparing(generation) {
+            return Err(ERROR);
+        }
+        // The caller closed and drained raw-handle entry before detaching
+        // the generation. Keep that ordering outside the lifecycle mutex.
+        debug_assert!(PUBLIC_RAW_HANDLES.is_closed_and_idle());
+        let runtime = self.state.take().ok_or(ERROR)?;
+        self.phase = LifecyclePhase::Stopping(generation);
+        Ok(runtime)
     }
 
     /// Completes shutdown after its pending work has retired.
@@ -334,6 +390,19 @@ impl LifecycleTransition {
         }
     }
 
+    /// Guards the preparation phase before native state is detached.
+    pub(crate) fn preparing(generation: u64) -> Self {
+        Self {
+            phase: LifecyclePhase::Preparing(generation),
+            armed: true,
+        }
+    }
+
+    /// Advances an armed shutdown guard after the state is detached.
+    pub(crate) fn advance_to_stopping(&mut self, generation: u64) {
+        self.phase = LifecyclePhase::Stopping(generation);
+    }
+
     /// Prevents a completed transition guard from rolling back state.
     pub(crate) fn disarm(&mut self) {
         self.armed = false;
@@ -356,8 +425,148 @@ impl Drop for LifecycleTransition {
                     if expected == current
             )
         {
+            // Some handle APIs intentionally bypass the registry mutex. Fence
+            // those entry points when a failed transition retains live state.
+            PUBLIC_RAW_HANDLES.close();
             registry.phase = LifecyclePhase::Quarantined;
         }
+    }
+}
+
+/// The high bit rejects new raw-handle calls; the remaining bits count calls
+/// that may still be reading signal or queue storage during final shutdown.
+const RAW_HANDLES_CLOSED: usize = 1 << (usize::BITS - 1);
+
+/// Atomic admission state for raw public operations in one process generation.
+struct RawHandleGate {
+    /// Closing bit and number of admitted readers.
+    state: AtomicUsize,
+}
+
+impl RawHandleGate {
+    /// Initializes a closed gate with no admitted readers.
+    const fn new() -> Self {
+        Self {
+            state: AtomicUsize::new(RAW_HANDLES_CLOSED),
+        }
+    }
+
+    /// Opens admission after a fully initialized generation is published.
+    fn open(&self) {
+        debug_assert!(self.is_closed_and_idle());
+        self.state.store(0, Ordering::Release);
+    }
+
+    /// Holds one reader through its entire operation if admission is open.
+    fn enter(&self) -> Option<RawHandleAdmission<'_>> {
+        self.state
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                (state < RAW_HANDLES_CLOSED - 1).then_some(state + 1)
+            })
+            .ok()
+            .map(|_| RawHandleAdmission { gate: self })
+    }
+
+    /// Rejects new readers while allowing admitted operations to finish.
+    fn close(&self) {
+        self.state.fetch_or(RAW_HANDLES_CLOSED, Ordering::AcqRel);
+    }
+
+    /// Waits for all admitted operations after closing admission.
+    fn wait_idle(&self) {
+        while !self.is_closed_and_idle() {
+            // This runs only at final shutdown. A signal wait observes the
+            // closing bit and returns so it cannot hold the gate forever.
+            std::thread::yield_now();
+        }
+    }
+
+    /// Checks that storage can be safely detached.
+    fn is_closed_and_idle(&self) -> bool {
+        self.state.load(Ordering::Acquire) == RAW_HANDLES_CLOSED
+    }
+
+    #[cfg(not(test))]
+    /// Checks whether a signal wait may continue using its admitted handle.
+    fn is_open(&self) -> bool {
+        self.state.load(Ordering::Acquire) < RAW_HANDLES_CLOSED
+    }
+}
+
+/// Keeps public signal and queue storage alive for a complete raw operation.
+pub(crate) struct RawHandleAdmission<'a> {
+    /// Gate whose reader count this token releases.
+    gate: &'a RawHandleGate,
+}
+
+impl Drop for RawHandleAdmission<'_> {
+    fn drop(&mut self) {
+        self.gate.state.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Process gate used by signal and queue index C entry points.
+static PUBLIC_RAW_HANDLES: RawHandleGate = RawHandleGate::new();
+
+/// Closes raw entry before the prepared generation can be detached.
+pub(crate) fn close_public_raw_handles() {
+    PUBLIC_RAW_HANDLES.close();
+}
+
+/// Waits without the lifecycle mutex for admitted raw operations to finish.
+pub(crate) fn wait_public_raw_handles_idle() {
+    PUBLIC_RAW_HANDLES.wait_idle();
+}
+
+/// Admits one raw-handle operation for its full callback duration.
+pub(crate) fn enter_public_raw_handle() -> Option<RawHandleAdmission<'static>> {
+    #[cfg(test)]
+    return TEST_RAW_HANDLES.enter();
+    #[cfg(not(test))]
+    PUBLIC_RAW_HANDLES.enter()
+}
+
+#[cfg(test)]
+static TEST_RAW_HANDLES: RawHandleGate = RawHandleGate {
+    state: AtomicUsize::new(0),
+};
+
+/// Admits raw-handle calls only while HSA owns live public storage.
+pub(crate) fn public_raw_handle_access_allowed() -> bool {
+    // Unit tests construct isolated signal and queue fixtures without
+    // publishing a process HSA generation. Integration tests exercise the
+    // production gate through the exported C ABI.
+    #[cfg(test)]
+    return true;
+    #[cfg(not(test))]
+    PUBLIC_RAW_HANDLES.is_open()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod raw_handle_tests {
+    use super::*;
+
+    #[test]
+    fn shutdown_waits_for_admitted_raw_calls() {
+        let gate = Arc::new(RawHandleGate::new());
+        gate.open();
+        let admitted = gate.enter().unwrap();
+        let (closed_tx, closed_rx) = std::sync::mpsc::channel();
+        let (idle_tx, idle_rx) = std::sync::mpsc::channel();
+        let shutting_down = gate.clone();
+        let worker = std::thread::spawn(move || {
+            shutting_down.close();
+            closed_tx.send(()).unwrap();
+            shutting_down.wait_idle();
+            idle_tx.send(()).unwrap();
+        });
+        closed_rx.recv().unwrap();
+        assert!(gate.enter().is_none());
+        assert!(idle_rx.try_recv().is_err());
+        drop(admitted);
+        idle_rx.recv().unwrap();
+        worker.join().unwrap();
     }
 }
 
