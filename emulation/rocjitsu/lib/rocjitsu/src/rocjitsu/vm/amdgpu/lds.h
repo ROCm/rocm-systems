@@ -4,9 +4,12 @@
 #ifndef ROCJITSU_VM_AMDGPU_LDS_H_
 #define ROCJITSU_VM_AMDGPU_LDS_H_
 
+#include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/vm/amdgpu/coalesced_lane_runs.h"
 #include "simdojo/components/memory_interface.h"
 
 #include <algorithm>
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -158,37 +161,42 @@ public:
   ///        to enable per-workgroup LDS partitioning. Defaults to 0.
   void vector_load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                    uint32_t num_elems, uint8_t *dst, uint32_t base_offset = 0) {
-    uint32_t stride = num_elems * elem_size;
-    for (uint32_t lane = 0; lane < 64; ++lane) {
-      if (!(lane_mask & (1ULL << lane)))
-        continue;
-      uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
-      for (uint32_t e = 0; e < num_elems; ++e) {
-        uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
-        if (ea + elem_size > capacity_bytes_) {
-          std::memset(dst + lane * stride + e * elem_size, 0, elem_size);
-          continue;
-        }
-        read_backing(static_cast<uint32_t>(ea), dst + lane * stride + e * elem_size, elem_size);
-      }
+    const uint32_t stride = num_elems * elem_size;
+    if (base_offset != 0 || stride == 0) {
+      load_lanes(addrs, lane_mask, elem_size, num_elems, dst, base_offset);
+      return;
     }
+    // Copy lane-ordered contiguous runs as one block. Sorting permuted lanes
+    // costs more than the per-lane copies it would merge. Runs reaching past
+    // capacity keep the per-element path, which zero-fills each such element.
+    const auto load_run = [&](const CoalescedLaneRun &run) __attribute__((always_inline)) {
+      if (fits(run))
+        read_backing(static_cast<uint32_t>(run.address), dst + run.first_lane * stride, run.size);
+      else
+        load_lanes(addrs, run.lane_mask, elem_size, num_elems, dst, 0);
+      return true;
+    };
+    for_each_adjacent_lane_run(addrs, lane_mask, 64, stride, load_run);
   }
 
   /// @brief Per-lane vector store to LDS. OOB writes are dropped.
+  /// @details Overlapping lanes are stored in lane order, so the highest lane
+  /// supplies any byte that several lanes write.
   void vector_store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                     uint32_t num_elems, const uint8_t *src, uint32_t base_offset = 0) {
-    uint32_t stride = num_elems * elem_size;
-    for (uint32_t lane = 0; lane < 64; ++lane) {
-      if (!(lane_mask & (1ULL << lane)))
-        continue;
-      uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
-      for (uint32_t e = 0; e < num_elems; ++e) {
-        uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
-        if (ea + elem_size > capacity_bytes_)
-          continue;
-        write_backing(static_cast<size_t>(ea), src + lane * stride + e * elem_size, elem_size);
-      }
+    const uint32_t stride = num_elems * elem_size;
+    if (base_offset != 0 || stride == 0) {
+      store_lanes(addrs, lane_mask, elem_size, num_elems, src, base_offset);
+      return;
     }
+    const auto store_run = [&](const CoalescedLaneRun &run) __attribute__((always_inline)) {
+      if (fits(run))
+        write_backing(static_cast<size_t>(run.address), src + run.first_lane * stride, run.size);
+      else
+        store_lanes(addrs, run.lane_mask, elem_size, num_elems, src, 0);
+      return true;
+    };
+    for_each_adjacent_lane_run(addrs, lane_mask, 64, stride, store_run);
   }
 
   /// @brief Zero all LDS contents.
@@ -217,6 +225,42 @@ public:
 private:
   bool contains(uint32_t addr, uint32_t size) const {
     return static_cast<uint64_t>(addr) + size <= capacity_bytes_;
+  }
+
+  bool fits(const CoalescedLaneRun &run) const {
+    return run.address <= capacity_bytes_ && run.size <= capacity_bytes_ - run.address;
+  }
+
+  RJ_NOINLINE void load_lanes(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
+                              uint32_t num_elems, uint8_t *dst, uint32_t base_offset) const {
+    const uint32_t stride = num_elems * elem_size;
+    for (uint64_t lanes = lane_mask; lanes; lanes &= lanes - 1) {
+      const uint32_t lane = std::countr_zero(lanes);
+      uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
+      for (uint32_t e = 0; e < num_elems; ++e) {
+        uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
+        if (ea + elem_size > capacity_bytes_) {
+          std::memset(dst + lane * stride + e * elem_size, 0, elem_size);
+          continue;
+        }
+        read_backing(static_cast<uint32_t>(ea), dst + lane * stride + e * elem_size, elem_size);
+      }
+    }
+  }
+
+  RJ_NOINLINE void store_lanes(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
+                               uint32_t num_elems, const uint8_t *src, uint32_t base_offset) {
+    const uint32_t stride = num_elems * elem_size;
+    for (uint64_t lanes = lane_mask; lanes; lanes &= lanes - 1) {
+      const uint32_t lane = std::countr_zero(lanes);
+      uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
+      for (uint32_t e = 0; e < num_elems; ++e) {
+        uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
+        if (ea + elem_size > capacity_bytes_)
+          continue;
+        write_backing(static_cast<size_t>(ea), src + lane * stride + e * elem_size, elem_size);
+      }
+    }
   }
 
   void read_backing(uint32_t addr, uint8_t *dst, uint32_t size) const {

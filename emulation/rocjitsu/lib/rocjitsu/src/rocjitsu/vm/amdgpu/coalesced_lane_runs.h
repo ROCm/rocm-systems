@@ -249,6 +249,17 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
 
 } // namespace detail
 
+/// @brief Visit maximal runs of adjacent active lanes whose addresses are contiguous.
+/// @details Runs follow lane order and never sort, so lanes contiguous only out of lane
+/// order remain separate runs. Use this where a per-lane access costs less than sorting
+/// the operands. The callback returns false to stop.
+template <typename F>
+bool for_each_adjacent_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
+                                uint32_t stride, F &&fn) {
+  assert(wf_size <= 64 && stride != 0);
+  return detail::for_each_lane_ordered_run(addrs, lane_mask, wf_size, stride, fn);
+}
+
 /// @brief Visit contiguous lane runs independently of the lanes' address order.
 /// @details Lane-ordered runs may span transaction boundaries; their caller must
 /// split them using the policy. Reordered multi-lane runs fit one transaction.
