@@ -13,8 +13,8 @@
  * fallback path.
  *
  * Build: make
- * Run:   ./amdsmi_wrap_test
- *        RCCL_USE_AMD_SMI_LIB=1 ./amdsmi_wrap_test  # to test AMD SMI path
+ * Run:   ./amdsmi_wrap_test                        # AMD SMI path (default)
+ *        RCCL_USE_AMD_SMI_LIB=0 ./amdsmi_wrap_test # sysfs fallback path
  */
 
 #include <cstdio>
@@ -228,7 +228,7 @@ bool test_getFirmwareVersion() {
 
     std::cout << "  Device 0 Firmware Version: " << fwVersion;
     if (fwVersion == 0) {
-        std::cout << " (unavailable - RCCL_USE_AMD_SMI_LIB may not be set)";
+        std::cout << " (unavailable or unsupported on this device)";
     }
     std::cout << std::endl;
 
