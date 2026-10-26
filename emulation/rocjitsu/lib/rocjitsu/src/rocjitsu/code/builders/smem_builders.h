@@ -97,6 +97,7 @@ max_smem_byte_offset(rj_code_arch_t arch, const util::DiagnosticEmitter *error =
 ///        carries the index halved and has no bit for the low one.
 /// @param byte_offset Forward immediate byte offset from the base address. Must
 ///        be a multiple of 4 and not exceed @ref max_smem_byte_offset for @p arch.
+/// @param arch Target ISA architecture.
 /// @param error Optional caller-owned diagnostic emitter, used only on failure.
 ///
 /// @details Three things the caller should not have to know. SBASE is the
