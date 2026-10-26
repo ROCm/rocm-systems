@@ -149,7 +149,7 @@ constexpr uint32_t carveoutPercentToFuncCache(int8_t percent) {
 
 //! AQL group_mem_carveout encoding: 0 = no preference, [1, 127] = 0%..100% group memory.
 constexpr uint8_t encodeGroupMemCarveout(int percent) {
-  return percent < 0 ? 0 : static_cast<uint8_t>(1 + (percent * 126 + 50) / 100);
+  return percent < 0 ? 0 : static_cast<uint8_t>((percent + 1) * 126 / 100);
 }
 static_assert(encodeGroupMemCarveout(-1) == 0 && encodeGroupMemCarveout(0) == 1 &&
                   encodeGroupMemCarveout(50) == 64 && encodeGroupMemCarveout(100) == 127,
