@@ -23,8 +23,7 @@ concept metadata_registry_policy =
     requires(Registry& registry, const Registry& const_registry, const Process& process,
              const Pmc& pmc_info, const Thread& thread_info, const Track& track_info,
              const std::uint64_t& handle, const std::string_view& name,
-             const std::uint32_t& thread_id, const std::string& filepath,
-             std::vector<std::shared_ptr<Agent>>& agents) {
+             const std::string& filepath, std::vector<std::shared_ptr<Agent>>& agents) {
         { Registry() };
 
         { registry.set_process(process) };
@@ -37,9 +36,6 @@ concept metadata_registry_policy =
 
         { const_registry.get_process_info() } -> std::convertible_to<Process>;
         { const_registry.get_pmc_info(name) } -> std::convertible_to<std::optional<Pmc>>;
-        {
-            const_registry.get_thread_info(thread_id)
-        } -> std::convertible_to<std::optional<Thread>>;
         {
             const_registry.get_track_info(name)
         } -> std::convertible_to<std::optional<Track>>;

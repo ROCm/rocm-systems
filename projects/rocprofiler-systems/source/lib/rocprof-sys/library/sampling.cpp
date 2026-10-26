@@ -220,8 +220,8 @@ metadata_initialize_thread_info(size_t tid)
         { .parent_process_id = getppid(),
           .process_id        = getpid(),
           .thread_id = static_cast<size_t>(_thread_info->index_data->system_value),
-          .start     = static_cast<std::uint32_t>(_thread_info->get_start()),
-          .end       = static_cast<std::uint32_t>(_thread_info->get_stop()),
+          .start     = _thread_info->get_start(),
+          .end       = _thread_info->get_stop(),
           .extdata   = "{}" });
 }
 
