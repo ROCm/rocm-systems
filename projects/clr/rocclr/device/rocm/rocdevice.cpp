@@ -1724,6 +1724,7 @@ bool Device::populateOCLDeviceConstants() {
     info_.asicRevision_ = asic_revision;
 
     info_.l2CacheSize_ = cache_sizes[1];
+    info_.persistingL2CacheMaxSize_ = PersistingL2CacheSizeMax();
     info_.timeStampFrequency_ = 1000000;
     info_.globalMemChannelBanks_ = 4;
     info_.globalMemChannelBankWidth_ = isa().memChannelBankWidth();
@@ -2489,21 +2490,28 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
     return 0;
   }
 
-  // numaNode < 0 (HostNumaCurrent) resolves to the calling thread's current node.
+  // Resolve the backing CPU agent.
+  //   -2 (Host)            -> default CPU agent.
+  //   -1 (HostNumaCurrent) -> current node
+  //   >= 0 (HostNuma)      -> that node
+  const AgentInfo* agentInfo = cpu_agent_info_;
   int node = numaNode;
-  if (node < 0) {
+  if (numaNode == -1) {
     node = static_cast<int>(numa::getCurrentNumaNode());
   }
-  if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
-    LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", numaNode,
+  if (node >= static_cast<int>(cpu_agents_.size())) {
+    LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", node,
                    cpu_agents_.size());
     return 0;
+  }
+  if (node >= 0) {
+    agentInfo = &cpu_agents_[node];
   }
 
   // PHYMEM: ROCCLR_MEM_HSA_UNCACHED is passed as HSA_AMD_MEMORY_POOL_UNCACHED_FLAG in |flags|.
   const bool uncached = (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG) != 0;
   const MemorySegment mem_seg = uncached ? kUncachedAtomics : kAtomics;
-  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, &cpu_agents_[node]);
+  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, agentInfo);
   if (pool.handle == 0) {
     LogPrintfError("hostVmemAlloc: no host memory pool for NUMA node %d", node);
     return 0;
@@ -3260,6 +3268,51 @@ bool Device::UpdateScratchLimitCurrent(size_t limit) const {
   hsa_status_t ret = Hsa::agent_set_async_scratch_limit(bkendDevice_, limit);
   if (HSA_STATUS_SUCCESS != ret) {
     LogPrintfError("hsa_amd_agent_set_async_scratch_limit(%zu) failed with err 0x%xh", limit, ret);
+    return false;
+  }
+  return true;
+};
+
+// ================================================================================================
+size_t Device::PersistingL2CacheSizeCurrent() const {
+  size_t persistingL2CacheSize = 0;
+  hsa_status_t ret =
+      Hsa::agent_get_info(bkendDevice_, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE,
+                         &persistingL2CacheSize);
+  if (HSA_STATUS_SUCCESS != ret) {
+    LogPrintfError("HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE cannot be queried! Err: 0x%xh", ret);
+    return 0;
+  }
+  return persistingL2CacheSize;
+};
+
+// ================================================================================================
+size_t Device::PersistingL2CacheSizeMax() const {
+  size_t persistingL2CacheSizeMax = 0;
+  hsa_status_t ret =
+      Hsa::agent_get_info(bkendDevice_, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE,
+                         &persistingL2CacheSizeMax);
+  if (HSA_STATUS_SUCCESS != ret) {
+    LogPrintfError("HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE cannot be queried! Err: 0x%xh", ret);
+    return 0;
+  }
+  return persistingL2CacheSizeMax;
+};
+
+// ================================================================================================
+bool Device::UpdatePersistingL2CacheSizeCurrent(size_t size) const {
+  const size_t max_size = PersistingL2CacheSizeMax();
+  if (size > max_size) {
+    LogPrintfError("Persisting L2 cache size %zu exceeds device max %zu", size, max_size);
+    return false;
+  }
+  // HSA API expects size_t* (not uint32_t*) per hsa_ext_amd.h documentation
+  // Make a mutable copy since HSA API takes non-const void*
+  size_t cache_size = size;
+  hsa_status_t ret = Hsa::agent_set_attribute(bkendDevice_,
+      HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE, &cache_size);
+  if (HSA_STATUS_SUCCESS != ret) {
+    LogPrintfError("hsa_amd_agent_set_attribute(PERSISTING_L2_CACHE_SIZE, %zu) failed with err 0x%xh", size, ret);
     return false;
   }
   return true;
@@ -4163,8 +4216,13 @@ bool Device::CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uin
   // Device memory is only reachable through a batch
   if (batched || device_memory) {
     std::vector<hsa_signal_value_t> initial_values(count, initial_value);
-    const hsa_amd_memory_pool_t pool =
-        device_memory ? device_signal_pool_ : getHostMemoryPool(kAtomics);
+    // Host signals go to the kernarg pool, which ROCr allocates uncached, as it does for
+    // hsa_signal_create. The plain fine-grained pool is mapped MTYPE_NC on gfx950, where a CP
+    // polling the signal may not see another queue's update.
+    const hsa_amd_memory_pool_t host_pool = (cpu_agent_info_->kern_arg_pool.handle != 0)
+                                                ? cpu_agent_info_->kern_arg_pool
+                                                : getHostMemoryPool(kAtomics);
+    const hsa_amd_memory_pool_t pool = device_memory ? device_signal_pool_ : host_pool;
     hsa_amd_signal_batch_t batch;
     if (HSA_STATUS_SUCCESS == Hsa::signal_batch_create(count, initial_values.data(), 0, nullptr,
                                                        attributes, pool, &batch, signals)) {

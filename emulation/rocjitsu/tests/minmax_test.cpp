@@ -8,6 +8,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
+#include "util/host_target.h"
 #include "util/simd.h"
 
 #include <gtest/gtest.h>
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <random>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -24,6 +26,26 @@ namespace denorm = rocjitsu::amdgpu::input_denormal;
 namespace fmt = rocjitsu::amdgpu::fp_format;
 namespace mm = rocjitsu::amdgpu::minmax;
 using mm::Nan;
+
+// Legacy selection must not silently use a default CDNA/non-IEEE policy, and
+// modern operations must not accept a legacy policy they would ignore.
+template <typename Op>
+concept HasModernOperation = requires { typename mm::Operation<fmt::F32, Op>; };
+template <typename Op>
+concept HasLegacyOperation = requires { typename mm::LegacyOperation<fmt::F32, Op>; };
+template <typename Op>
+concept HasModernBinaryEvaluation =
+    requires { mm::evaluate<fmt::F32, Op>(denorm::Policy{}, uint32_t{}, uint32_t{}); };
+static_assert(HasModernOperation<mm::MinNum> && HasModernOperation<mm::Med3Num>);
+static_assert(!HasModernOperation<mm::LegacyMin> && !HasModernOperation<mm::LegacyMin3> &&
+              !HasModernOperation<mm::LegacyMed3>);
+static_assert(HasLegacyOperation<mm::LegacyMin> && HasLegacyOperation<mm::LegacyMin3> &&
+              HasLegacyOperation<mm::LegacyMed3>);
+static_assert(!HasLegacyOperation<mm::MinNum> && !HasLegacyOperation<mm::Min3Num> &&
+              !HasLegacyOperation<mm::Med3Num>);
+static_assert(HasModernBinaryEvaluation<mm::MinNum> && !HasModernBinaryEvaluation<mm::LegacyMin>);
+static_assert(
+    !std::is_constructible_v<mm::LegacyOperation<fmt::F32, mm::LegacyMin>, denorm::Policy>);
 
 constexpr denorm::Policy kKeep{false};
 constexpr denorm::Policy kFlush{true};
@@ -271,7 +293,7 @@ TEST(MinmaxTest, MatchesGfx1201NumForms) {
 // SIMD lanes select the same source as the scalar path.
 // ---------------------------------------------------------------------------
 
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
 template <typename Fmt, typename V> void expect_simd_matches_scalar() {
   using L = typename Fmt::Lane;
   constexpr std::size_t W = V::size();
@@ -309,10 +331,10 @@ TEST(MinmaxTest, SimdMatchesScalar) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
   } else {
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
     expect_simd_matches_scalar<fmt::F16, util::native<uint32_t>>();
     expect_simd_matches_scalar<fmt::F32, util::native<uint32_t>>();
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
     expect_simd_matches_scalar<fmt::F64, util::stdx::fixed_size_simd<uint64_t, 1>>();
 #else
     expect_simd_matches_scalar<fmt::F64, util::native<uint64_t>>();

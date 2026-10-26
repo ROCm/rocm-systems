@@ -41,9 +41,13 @@ template <typename Op> inline Op e32_word_operand(const Op &op) {
 /// Common observed word access for local true16 and packed conversion paths.
 /// The callback always sees unsigned words; it owns arithmetic and narrowing.
 /// Partial-byte stores preserve the other half without reporting a false read.
-template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, typename Inst, typename Op>
+/// `Scoped` takes one guest FP environment for the instruction, for callbacks
+/// built on the unscoped arithmetic cores; see run_instruction_chunks.
+template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scoped = false,
+          typename Inst, typename Op>
   requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_words_simd(Inst &inst, Wavefront &wf, Op op) {
+[[nodiscard]] inline bool try_execute_words_simd(Inst &inst, Wavefront &wf, Op op,
+                                                 uint32_t round_mode = 0) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst))
     return false;
   auto canonical = [](const auto &operand) {
@@ -100,36 +104,40 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, typename 
   const bool zero_high = HalfDst && !E32 && !high_dst && cdna_vop3_low_dst_zeroes_high(wf);
   auto dst =
       regs.write_operand(destination, exec, HalfDst && !zero_high ? (high_dst ? 0xc : 3) : 0xf);
-  for (uint32_t base = 0; base < wf.wf_size(); base += W) {
-    const uint64_t chunk = (exec >> base) & util::mask<uint64_t>(W);
-    if (!chunk)
-      continue;
-    auto load = [&](const auto &view, unsigned i) {
-      U v = view.template load_native<uint32_t>(base);
-      if (HalfInputs & (1u << i))
-        v = (v >> ((selectors & (1u << i)) ? 16 : 0)) & U(0xffffu);
-      return v;
-    };
-    U result;
-    if constexpr (Arity == 1)
-      result = op(load(a, 0));
-    else if constexpr (Arity == 2) {
-      if constexpr (requires { op(load(a, 0), load(*b, 1), base); })
-        result = op(load(a, 0), load(*b, 1), base);
-      else
-        result = op(load(a, 0), load(*b, 1));
-    } else
-      result = op(load(a, 0), load(*b, 1), load(*c, 2));
-    if constexpr (HalfDst)
-      result = (result & U(0xffffu)) << (high_dst ? 16 : 0);
-    dst.template store_native<uint32_t>(base, result, chunk);
-  }
+  if (!run_instruction_chunks<Scoped>(dst, round_mode, [&] {
+        for (uint32_t base = 0; base < wf.wf_size(); base += W) {
+          const uint64_t chunk = (exec >> base) & util::mask<uint64_t>(W);
+          if (!chunk)
+            continue;
+          auto load = [&](const auto &view, unsigned i) {
+            U v = view.template load_native<uint32_t>(base);
+            if (HalfInputs & (1u << i))
+              v = (v >> ((selectors & (1u << i)) ? 16 : 0)) & U(0xffffu);
+            return v;
+          };
+          U result;
+          if constexpr (Arity == 1)
+            result = op(load(a, 0));
+          else if constexpr (Arity == 2) {
+            if constexpr (requires { op(load(a, 0), load(*b, 1), base); })
+              result = op(load(a, 0), load(*b, 1), base);
+            else
+              result = op(load(a, 0), load(*b, 1));
+          } else
+            result = op(load(a, 0), load(*b, 1), load(*c, 2));
+          if constexpr (HalfDst)
+            result = (result & U(0xffffu)) << (high_dst ? 16 : 0);
+          dst.template store_native<uint32_t>(base, result, chunk);
+        }
+      }))
+    return false;
   detail::record_simd_fast_path(SimdFastPath::VOP_WORDS);
   return true;
 }
 
-template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, typename Inst, typename Op>
-[[nodiscard]] bool try_execute_words_simd(Inst &, Wavefront &, Op) {
+template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scoped = false,
+          typename Inst, typename Op>
+[[nodiscard]] bool try_execute_words_simd(Inst &, Wavefront &, Op, uint32_t = 0) {
   return false;
 }
 
@@ -137,7 +145,7 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, typename 
 /// requiring subnormal rounding, overflow or exceptional-value handling use
 /// the scalar architectural primitive.
 template <typename Float>
-  requires(!(UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && sizeof(Float) == 8))
+  requires(!(RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS && sizeof(Float) == 8))
 inline auto div_scale_simd(util::native<Float> value, util::native<Float> denominator,
                            util::native<Float> numerator, uint32_t rounding, uint32_t denorm) {
   using F = DivisionFormat<Float>;
@@ -187,7 +195,7 @@ inline auto div_scale_simd(util::native<Float> value, util::native<Float> denomi
   return std::pair{std::bit_cast<util::native<Float>>(result), post_bits};
 }
 
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 template <typename Float>
   requires(sizeof(Float) == 8)
 inline auto div_scale_simd(util::native<Float> value, util::native<Float> denominator,
@@ -287,11 +295,12 @@ template <bool Extended, typename Slot>
   };
   if (!matches_mode(x) || !matches_mode(y))
     return false;
-  // Matching controls still permit arithmetic to raise host exception flags.
-  // Preserve the caller's environment just as the scalar arithmetic path does.
-  std::optional<fp_mode::ScopedEnvironment> environment;
-  if (is_arithmetic(x) || is_arithmetic(y))
-    environment.emplace(0);
+  // Matching controls still permit host computation to raise exception flags, so
+  // each slot that computes on host floats takes one environment for the whole
+  // wavefront, after its own operand reads and around its chunk loop, and uses
+  // the unscoped arithmetic cores inside it. Raw-bit routes, including the F32
+  // MIN/MAX selections, need none, and register access, which can run callbacks,
+  // stays outside every scope.
   struct Results {
     alignas(util::native<uint32_t>) uint32_t words[64]{};
     alignas(util::native<uint64_t>) uint64_t pairs[64]{};
@@ -309,6 +318,9 @@ template <bool Extended, typename Slot>
         std::optional<RegisterAccess::OperandRead64View> c;
         if (slot.op == 32)
           c.emplace(regs.read_operand64(*slot.src2, exec));
+        // Every F64 slot computes on the host: 32-34 arithmetically, and MIN/MAX
+        // through fmax/fmin, which signal on a NaN input under no MODE gate.
+        fp_mode::ScopedEnvironment environment(0);
         for (uint32_t base = 0; base < wf.wf_size(); base += W) {
           if (!((exec >> base) & util::mask<uint64_t>(W)))
             continue;
@@ -359,6 +371,11 @@ template <bool Extended, typename Slot>
       acc.emplace(regs.read_operand(*slot.dst, exec));
     const uint64_t condition =
         slot.op == 9 ? (slot.uses_vcc ? wf.vcc_mask() : read_wave_mask_scalar(*slot.src2, wf)) : 0;
+    // One environment per arithmetic slot, after that slot's reads. The gate
+    // above leaves MODE.FP_ROUND nearest-even, the rounding the cores below expect.
+    std::optional<fp_mode::ScopedEnvironment> environment;
+    if (is_arithmetic(slot))
+      environment.emplace(wf.fp_round_mode_f32());
     for (uint32_t base = 0; base < wf.wf_size(); base += W) {
       if (!((exec >> base) & util::mask<uint64_t>(W)))
         continue;
@@ -377,26 +394,30 @@ template <bool Extended, typename Slot>
       U result;
       switch (slot.op) {
       case 0:
-        result = std::bit_cast<U>(fma_f32_simd(af, bf, acc->template load_native<float>(base), wf));
+        result = std::bit_cast<U>(
+            fma_f32_simd_unscoped(af, bf, acc->template load_native<float>(base), wf));
         break;
       case 1:
       case 19:
-        result = std::bit_cast<U>(fma_f32_simd(af, bf, cf, wf));
+        result = std::bit_cast<U>(fma_f32_simd_unscoped(af, bf, cf, wf));
         break;
       case 2:
-        result = std::bit_cast<U>(fma_f32_simd(af, cf, bf, wf));
+        result = std::bit_cast<U>(fma_f32_simd_unscoped(af, cf, bf, wf));
         break;
       case 3:
-        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::MUL>(af, bf, wf));
+        result = std::bit_cast<U>(binary_f32_simd_unscoped<fp_mode::Arithmetic::MUL>(af, bf, wf));
         break;
       case 4:
-        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::ADD>(af, bf, wf));
+        result = std::bit_cast<U>(binary_f32_simd_unscoped<fp_mode::Arithmetic::ADD>(af, bf, wf));
         break;
       case 5:
-        result = std::bit_cast<U>(af - bf);
+        // SUB/SUBREV add the negated subtrahend in operand order, as VOP2 does.
+        result = std::bit_cast<U>(binary_f32_simd_unscoped<fp_mode::Arithmetic::ADD>(
+            af, std::bit_cast<F>(bv ^ U(0x80000000u)), wf));
         break;
       case 6:
-        result = std::bit_cast<U>(bf - af);
+        result = std::bit_cast<U>(binary_f32_simd_unscoped<fp_mode::Arithmetic::ADD>(
+            std::bit_cast<F>(av ^ U(0x80000000u)), bf, wf));
         break;
       case 7:
         result = std::bit_cast<U>(af * bf);
@@ -422,16 +443,14 @@ template <bool Extended, typename Slot>
                                  : minmax::evaluate<fp_format::F32, minmax::MinNum>(policy, av, bv);
           break;
         }
-        F selected = bf;
-        if (slot.op == 10)
-          util::stdx::where(af > bf, selected) = af;
-        else
-          util::stdx::where(af < bf, selected) = af;
-        for (uint32_t i = 0; i < W; ++i)
-          if (std::isnan(af[i]) || std::isnan(bf[i]) || (af[i] == 0 && bf[i] == 0))
-            selected[i] = slot.op == 10 ? std::fmax(float(af[i]), float(bf[i]))
-                                        : std::fmin(float(af[i]), float(bf[i]));
-        result = std::bit_cast<U>(selected);
+        const auto input_policy = input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+        const auto nan_policy = fp_mode::legacy_minmax_policy(arch, wf.ieee_mode());
+        result =
+            slot.op == 10
+                ? minmax::LegacyOperation<fp_format::F32, minmax::LegacyMax>{input_policy,
+                                                                             nan_policy}(av, bv)
+                : minmax::LegacyOperation<fp_format::F32, minmax::LegacyMin>{input_policy,
+                                                                             nan_policy}(av, bv);
         break;
       }
       case 16:
@@ -492,6 +511,7 @@ template <bool Extended, typename Slot>
   };
   store(x, xr);
   store(y, yr);
+  detail::record_simd_fast_path(SimdFastPath::VOPD);
   return true;
 }
 
