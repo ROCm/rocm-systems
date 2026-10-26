@@ -930,6 +930,30 @@ HRR_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
   CHECK(d2h_fail == 0);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - CPU-only check of hrr_d2h_mismatch_exit, the rule under which a Windows
+ *     roundtrip accepts a non-zero hrr-playback exit: D2H mismatches explain
+ *     it, nothing else does.  A fatal HIP error aborts before the summary
+ *     line, so its exit 1 must not pass, or a replay handler that stopped
+ *     working would go unnoticed on Windows while Linux catches it.
+ */
+HRR_TEST_CASE(Unit_HRR_D2HMismatchExit) {
+  const std::string mismatch =
+      "[HRR]   D2H checks     : 3 pass (3 exact, 0 within tol), 1 fail, 0 skipped\n";
+  const std::string clean =
+      "[HRR]   D2H checks     : 4 pass (4 exact, 0 within tol), 0 fail, 0 skipped\n";
+
+  CHECK(hrr_d2h_mismatch_exit(1, mismatch));
+  CHECK(hrr_d2h_mismatch_exit(2, ""));  // divergence guard, no summary
+
+  CHECK_FALSE(hrr_d2h_mismatch_exit(1, ""));     // fatal HIP error
+  CHECK_FALSE(hrr_d2h_mismatch_exit(1, clean));  // failed for another reason
+  CHECK_FALSE(hrr_d2h_mismatch_exit(0, clean));
+  CHECK_FALSE(hrr_d2h_mismatch_exit(134, mismatch));  // crash
+}
+
 // The expected blobs of the hipMemcpy readbacks in `cap`. Playback reads blobs
 // by name without re-hashing them, so replay compares against an edited one.
 static std::vector<fs::path> hrr_memcpy_d2h_blobs(const fs::path& cap) {
@@ -1800,6 +1824,44 @@ HRR_TEST_CASE(Unit_HRR_TextureRoundtrip) {
 HRR_TEST_CASE(Unit_HRR_GraphExplicitRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_graphexplicit"};
   hrr_run_roundtrip("Unit_HRR_GraphExplicit_Direct", cap.path);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_FailedEndCapture_Direct: a stream capture forked onto a
+ *     second stream and never joined, so hipStreamEndCapture fails with
+ *     hipErrorStreamCaptureUnjoined, then a direct H2D restore, kernel and D2H
+ *     on the stream that was capturing.
+ *   - The archive must hold the failed hipStreamEndCapture: it ended the
+ *     capture, so replay needs it to end its own.
+ *   - Replay with byte-exact D2H must match: the restore and launch run
+ *     directly instead of into a capture replay forgot to close.
+ */
+HRR_TEST_CASE(Unit_HRR_FailedEndCaptureRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_failedendcapture"};
+  hrr_run_exact_roundtrip("Unit_HRR_FailedEndCapture_Direct", cap.path,
+                          {HRR_API_HIPSTREAMBEGINCAPTURE,
+                           HRR_API_HIPSTREAMENDCAPTURE,
+                           HRR_API_HIPMEMCPYASYNC});
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_FailedEndCaptureInvalidated_Direct: a hipMalloc during a
+ *     global-mode capture invalidates it, so hipStreamEndCapture fails with
+ *     hipErrorStreamCaptureInvalidated, then the same direct work as above.
+ *   - The failed hipMalloc is not recorded, so replay's capture is valid and
+ *     its EndCapture returns a graph, which replay must destroy.
+ *   - Replay with byte-exact D2H must match.
+ */
+HRR_TEST_CASE(Unit_HRR_FailedEndCaptureInvalidatedRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_failedendcaptureinval"};
+  hrr_run_exact_roundtrip("Unit_HRR_FailedEndCaptureInvalidated_Direct", cap.path,
+                          {HRR_API_HIPSTREAMBEGINCAPTURE,
+                           HRR_API_HIPSTREAMENDCAPTURE,
+                           HRR_API_HIPMEMCPYASYNC});
 }
 
 HRR_TEST_CASE(Unit_HRR_HostRegLaunchRoundtrip) {

@@ -4563,10 +4563,11 @@ static hipError_t capture_hipStreamDestroy(hipStream_t stream) {
   return r;
 }
 
-// Generated shim
+// Generated shim (custom: also record the failures that end the capture)
 static hipError_t capture_hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
   hipError_t r = g_real_table.hipStreamEndCapture_fn(stream, pGraph);
-  if (r == hipSuccess) {
+  if (r == hipSuccess || r == hipErrorStreamCaptureInvalidated ||
+      r == hipErrorStreamCaptureUnjoined) {
     hrr_args_hipStreamEndCapture a{};
     a.ret         = static_cast<int32_t>(r);
     a.stream = reinterpret_cast<uint64_t>(stream);

@@ -49,6 +49,16 @@ pub(super) fn populate_endpoint(endpoint: &mut Endpoint) {
 }
 
 impl GpuDriver for LinuxKfdDriver {
+    fn xnack_enabled(&self, device: &DeviceState) -> Result<bool, Error> {
+        self.ensure_open()?;
+        device.vm.check()?;
+        device
+            .vm
+            .kfd()
+            .xnack_enabled()
+            .map_err(|source| native_error("KFD XNACK mode query", source))
+    }
+
     fn available_memory(&self, device: &DeviceState) -> Result<u64, Error> {
         self.ensure_open()?;
         device
@@ -155,6 +165,16 @@ impl GpuKernelQueueOperations for LinuxKfdDriver {
 
     fn available_sdma_engines(&self, device: &DeviceState) -> Result<u32, Error> {
         self.ensure_open()?;
+        if cfg!(target_arch = "x86_64")
+            && matches!(
+                device.native.queues.gfx_target,
+                90008 | 90010 | 90402 | 90500
+            )
+            && device.native.queues.sdma_qualified
+        {
+            let count = device.native.queues.sdma_engines.min(u32::BITS);
+            return Ok(u32::MAX >> (u32::BITS - count));
+        }
         if !cfg!(target_arch = "x86_64")
             || !matches!(device.native.queues.gfx_target, 120_000 | 120_001 | 120_500)
             || !device.native.queues.sdma_qualified
@@ -491,12 +511,26 @@ impl AllocationOperations for LinuxKfdDriver {
                 "secondary KFD contexts cannot bind host-owned pages",
             ));
         }
+        if let MemoryKind::DeviceLocal {
+            coherent,
+            extended_coherent: true,
+            uncached,
+            ..
+        } = kind
+            && (!coherent || uncached)
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "extended local coherence requires a cached coherent mapping",
+            ));
+        }
         let native_kind = match kind {
             MemoryKind::System => memory::BufferKind::Gtt,
             MemoryKind::OwnedHost { policy } => memory::BufferKind::OwnedUserptr { cache: policy },
             MemoryKind::DeviceLocal {
                 host_visible,
                 coherent,
+                extended_coherent,
                 uncached,
                 contiguous,
             } => {
@@ -520,6 +554,7 @@ impl AllocationOperations for LinuxKfdDriver {
                 memory::BufferKind::Vram {
                     public: host_visible,
                     coherent,
+                    extended_coherent,
                     uncached,
                     contiguous,
                 }
@@ -675,6 +710,12 @@ impl VirtualMemoryOperations for LinuxKfdDriver {
         permissions: DeviceAccess,
     ) -> Result<Owned<KfdVirtualHostMapping>, Error> {
         KfdVirtualHostMapping::create(memory, reservation, address, offset, size, permissions)
+    }
+    fn set_virtual_host_mapping_permissions(
+        mapping: &mut KfdVirtualHostMapping,
+        permissions: DeviceAccess,
+    ) -> Result<(), Error> {
+        mapping.set_permissions(permissions)
     }
     fn free_virtual_host_mapping(mapping: &mut KfdVirtualHostMapping) -> Result<(), Error> {
         mapping.free()
