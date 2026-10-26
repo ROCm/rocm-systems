@@ -26,33 +26,33 @@ extern "C" {
 
 // DOT FUNCTIONS
 #if defined(__clang__) && defined(__HIP__)
-__device__ __attribute__((const)) int __ockl_sdot2(HIP_vector_base<short, 2>::Native_vec_,
-                                                   HIP_vector_base<short, 2>::Native_vec_, int,
-                                                   bool);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) int __ockl_sdot2(
+    HIP_vector_base<short, 2>::Native_vec_, HIP_vector_base<short, 2>::Native_vec_, int, bool);
 
-__device__ __attribute__((const)) unsigned int __ockl_udot2(
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) unsigned int __ockl_udot2(
     HIP_vector_base<unsigned short, 2>::Native_vec_,
     HIP_vector_base<unsigned short, 2>::Native_vec_, unsigned int, bool);
 
-__device__ __attribute__((const)) int __ockl_sdot4(HIP_vector_base<char, 4>::Native_vec_,
-                                                   HIP_vector_base<char, 4>::Native_vec_, int,
-                                                   bool);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) int __ockl_sdot4(
+    HIP_vector_base<char, 4>::Native_vec_, HIP_vector_base<char, 4>::Native_vec_, int, bool);
 
-__device__ __attribute__((const)) unsigned int __ockl_udot4(
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) unsigned int __ockl_udot4(
     HIP_vector_base<unsigned char, 4>::Native_vec_, HIP_vector_base<unsigned char, 4>::Native_vec_,
     unsigned int, bool);
 
-__device__ __attribute__((const)) int __ockl_sdot8(int, int, int, bool);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) int __ockl_sdot8(int, int, int, bool);
 
-__device__ __attribute__((const)) unsigned int __ockl_udot8(unsigned int, unsigned int,
-                                                            unsigned int, bool);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) unsigned int __ockl_udot8(unsigned int,
+                                                                                  unsigned int,
+                                                                                  unsigned int,
+                                                                                  bool);
 #endif
 
 // BEGIN FLOAT
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_ceil_f32(float);
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) __device__ float __ocml_copysign_f32(float,
                                                                                              float);
-__device__ float __ocml_cos_f32(float);
+__device__ __HIP_DEPRECATED_OCML float __ocml_cos_f32(float);
 __device__ __HIP_DEPRECATED_OCML __attribute__((pure)) float __ocml_exp10_f32(float);
 __device__ __HIP_DEPRECATED_OCML __attribute__((pure)) float __ocml_native_exp10_f32(float);
 __device__ __HIP_DEPRECATED_OCML __attribute__((pure)) float __ocml_native_exp_f32(float);
@@ -81,7 +81,7 @@ __device__ __HIP_DEPRECATED_OCML float __ocml_remquo_f32(float, float,
                                                          __attribute__((address_space(5))) int*);
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_rint_f32(float);
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_round_f32(float);
-__device__ __attribute__((pure)) float __ocml_rsqrt_f32(float);
+__device__ __HIP_DEPRECATED_OCML __attribute__((pure)) float __ocml_rsqrt_f32(float);
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_scalb_f32(float, float);
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_scalbn_f32(float, int);
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) int __ocml_signbit_f32(float);
@@ -89,7 +89,7 @@ __device__ __HIP_DEPRECATED_OCML float __ocml_sincos_f32(float,
                                                          __attribute__((address_space(5))) float*);
 __device__ __HIP_DEPRECATED_OCML float __ocml_sincospi_f32(
     float, __attribute__((address_space(5))) float*);
-__device__ float __ocml_sin_f32(float);
+__device__ __HIP_DEPRECATED_OCML float __ocml_sin_f32(float);
 __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_trunc_f32(float);
 
 // END FLOAT
