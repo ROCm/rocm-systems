@@ -60,6 +60,16 @@ __device__ __forceinline__ uint64_t ddaLL128LoadWord(const uint64_t* p) {
   return __scoped_atomic_load_n((u64_gptr) const_cast<uint64_t*>(p), __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
 }
 
+// Poll the LL128 flag word until it matches, or the comm abort flag is set.
+// Returns false if the wait was aborted so the kernel can exit.
+__device__ __forceinline__ bool ddaLL128WaitFlag(const uint64_t* flagAddr, uint64_t flag, DdaKernelParams params) {
+  int spins = 0;
+  while (ddaLL128LoadWord(flagAddr) != flag) {
+    if (params.abortSpinTick(spins)) return false;
+  }
+  return true;
+}
+
 // Element-wise add of the T-elements packed into two 8B payload words. An 8B
 // word holds 2 x fp32, 4 x fp16/bf16 or 8 x fp8. fp8 adds the whole word at
 // once; other types fold each 4B half with the shared vecElementAdd<T> (which
@@ -209,11 +219,14 @@ __device__ __forceinline__ void ddaLL128StoreWire(
 }
 
 // Poll until every line this lane reads has landed, then read the payload once.
-__device__ __forceinline__ void ddaLL128PollWire(
-  const uint64_t* wire, uint64_t (&vr)[kDdaLL128WordsPerThread], uint64_t flag, int wid) {
+// Returns false if the comm abort flag is set so the kernel can leave the wait.
+__device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t (&vr)[kDdaLL128WordsPerThread],
+                                                 uint64_t flag, int wid, DdaKernelParams params) {
   const bool flagLane = ddaLL128IsFlagLane(wid);
+  int spins = 0;
   bool needReload;
   do {
+    if (params.abortSpinTick(spins)) return false;
     needReload = false;
 #pragma unroll
     for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
@@ -224,6 +237,7 @@ __device__ __forceinline__ void ddaLL128PollWire(
 #pragma unroll
   for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
     ddaLL128LoadAtomic16B(wire + u * kDdaLL128Warp, vr[u], vr[u + 1]);
+  return true;
 }
 
 // Flag-lane un-shuffle then store of registers into `dst`

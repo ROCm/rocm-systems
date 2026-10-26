@@ -16,7 +16,6 @@
 
 #include "nccl.h"
 #include "os.h"  // ncclAffinity
-#include "socket.h"
 
 // ncclOsCpuCount is load-bearing: initTransportsRank's exit: block calls it on EVERY path, so nothing in
 // the function was testable until it was seamed, and its counter is the only way to see that :1488 skips exit:.
@@ -32,13 +31,13 @@ extern ncclResult_t g_ncclOsSetAffinityResult;
 // the exit: write masks whatever :1610 forwarded.
 extern std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
 extern std::function<ncclResult_t(ncclAffinity*)> g_ncclOsGetAffinity;
-
-// src/os/{linux,windows}.cc socket teardown. Fail-loud by default.
-extern std::function<ncclResult_t(struct ncclSocket*, bool)> g_ncclSocketClose;
+extern int g_ncclOsMutexCondSharedCalls;
+extern int g_ncclOsMutexCondUnsharedCalls;
 
 // ncclInit() NCCLCHECKs this before its own call_once, so it is the one per-call way to fail ncclInit().
 extern ncclResult_t g_ncclOsTopoGetStrFromSysResult;
 extern int g_ncclOsTopoGetStrFromSysCalls;
+extern std::function<ncclResult_t(const char*, const char*, char*, int)> g_ncclOsTopoGetStrFromSys;
 
 // fillInfo's MLOPart PCI-function fallback (init.cc:1092) probes sysfs for the class of its own BDF.
 // The default is an accelerator class, i.e. what sysfs reports for a real GPU's own BDF; a test that

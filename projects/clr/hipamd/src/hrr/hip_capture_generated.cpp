@@ -46,6 +46,7 @@
 #include "utils/debug.hpp"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -207,6 +208,11 @@ static hipError_t capture_hipChooseDevice(int* device, const hipDeviceProp_tR060
     a.prop = reinterpret_cast<uint64_t>(prop);
     if (prop) {
       std::memcpy(a.prop_bytes, prop, sizeof(hipDeviceProp_t));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, uuid), 0, sizeof(prop->uuid));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, luid), 0, sizeof(prop->luid));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, pciDomainID), 0, sizeof(prop->pciDomainID));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, pciBusID), 0, sizeof(prop->pciBusID));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, pciDeviceID), 0, sizeof(prop->pciDeviceID));
       a.prop_present = 1;
     }
     hrr_cap::writer::write_event_raw(HRR_API_HIPCHOOSEDEVICE, &a.hdr, sizeof(a));
@@ -224,6 +230,9 @@ static hipError_t capture_hipChooseDeviceR0000(int* device, const hipDeviceProp_
     a.properties = reinterpret_cast<uint64_t>(properties);
     if (properties) {
       std::memcpy(a.properties_bytes, properties, sizeof(hipDeviceProp_tR0000));
+      std::memset(a.properties_bytes + offsetof(hipDeviceProp_tR0000, pciDomainID), 0, sizeof(properties->pciDomainID));
+      std::memset(a.properties_bytes + offsetof(hipDeviceProp_tR0000, pciBusID), 0, sizeof(properties->pciBusID));
+      std::memset(a.properties_bytes + offsetof(hipDeviceProp_tR0000, pciDeviceID), 0, sizeof(properties->pciDeviceID));
       a.properties_present = 1;
     }
     hrr_cap::writer::write_event_raw(HRR_API_HIPCHOOSEDEVICER0000, &a.hdr, sizeof(a));
@@ -4552,10 +4561,11 @@ static hipError_t capture_hipStreamDestroy(hipStream_t stream) {
   return r;
 }
 
-// Generated shim
+// Generated shim (custom: also record the failures that end the capture)
 static hipError_t capture_hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
   hipError_t r = g_real_table.hipStreamEndCapture_fn(stream, pGraph);
-  if (r == hipSuccess) {
+  if (r == hipSuccess || r == hipErrorStreamCaptureInvalidated ||
+      r == hipErrorStreamCaptureUnjoined) {
     hrr_args_hipStreamEndCapture a{};
     a.ret         = static_cast<int32_t>(r);
     a.stream = reinterpret_cast<uint64_t>(stream);
