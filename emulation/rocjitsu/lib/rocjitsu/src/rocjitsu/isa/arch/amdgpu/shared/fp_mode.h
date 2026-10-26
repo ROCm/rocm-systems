@@ -644,9 +644,9 @@ enum class ScalarAtomicOp { FADD, FMIN, FMAX, FCMPSWAP };
 /// @details FCMPSWAP flushes only comparison inputs and selects the original source or memory
 /// bits. RDNA3/3.5 ISA 13.2 and CDNA2 ISA 9.5.2 / CDNA3/4 ISA 9.2.2 instead specify flushing
 /// the CompareStore result. Captures on gfx1010/gfx1030/gfx1100 LDS (F32/F64) and gfx1100
-/// global F32 contradict that rule on those paths. CDNA1-4 LDS, RDNA1/2 cache F32/F64, and
-/// RDNA3.5 LDS/cache F32 inherit this policy without equivalent captures; gfx1100 FLAT/BUFFER F32
-/// is also unmeasured. CDNA5/RDNA4 expose no FCMPSWAP instructions in this tree.
+/// global F32 contradict that rule on those paths. CDNA1-4 and RDNA3.5 LDS F32/F64,
+/// RDNA1/2 cache F32/F64, RDNA3.5 cache F32, and gfx1100 FLAT/BUFFER F32 inherit this policy
+/// without equivalent captures. CDNA5/RDNA4 expose no FCMPSWAP instructions in this tree.
 template <typename Bits>
 Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bits compare_bits,
                    uint32_t denorm_mode, bool legacy_minmax, bool source_nan_first = false) {
