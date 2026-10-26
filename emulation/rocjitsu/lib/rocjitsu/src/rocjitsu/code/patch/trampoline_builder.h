@@ -131,9 +131,11 @@ struct TrampolinePlan {
   bool preserve_scc = true;      ///< Preserve SCC across target materialization.
   uint16_t scc_temp = 0;         ///< Dead SGPR holding saved SCC across the call.
 
-  // Special-state preservation: set by the orchestrator when the probe body
-  // clobbers the register; plan_probe_call allocates a dead SGPR temp for each
-  // and records it in special_state_saves (one plan/emit loop, not a branch each).
+  // Special-state preservation: the orchestrator always preserves EXEC/VCC,
+  // independent of per-opcode implicit-def coverage, and preserves M0 only when
+  // the probe clobbers it. plan_probe_call allocates a dead SGPR temp for each
+  // preserved register and records it in special_state_saves (one plan/emit loop,
+  // not a branch each).
   bool preserve_exec = false;
   bool preserve_vcc = false;
   bool preserve_m0 = false;
