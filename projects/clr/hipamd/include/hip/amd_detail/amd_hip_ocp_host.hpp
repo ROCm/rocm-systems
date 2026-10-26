@@ -617,19 +617,19 @@ __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t from_float_sr(T f, __hip_uint32_t s
 
   auto srcMan = mantissa<srcE, false>(srcU32);
   auto srcExp = exponent<srcE, false>(srcU32);
-  if (enc.MxScale) {
-    if (issubnorm<srcE, false>(srcU32)) {
-      auto leadbit = (__hip_uint32_t)1 << srcEnc.ManBits;
-      while ((srcMan & leadbit) == 0) {
-        srcMan <<= 1;
-        srcExp -= 1;
-      }
-
-      srcMan &= srcEnc.ManMask;
+  // exponent() reports a subnormal source as 1 - bias, but its mantissa has no implicit leading 1.
+  // Normalize it for every destination: fp16 subnormals are in the range of E5M2's normals.
+  if (issubnorm<srcE, false>(srcU32)) {
+    auto leadbit = (__hip_uint32_t)1 << srcEnc.ManBits;
+    while ((srcMan & leadbit) == 0) {
+      srcMan <<= 1;
+      srcExp -= 1;
     }
 
-    srcExp -= scale_exp;
+    srcMan &= srcEnc.ManMask;
   }
+
+  if (enc.MxScale) srcExp -= scale_exp;
 
   auto exp = srcExp;
   auto man = srcMan;
@@ -726,19 +726,19 @@ __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t from_float(T f, __hip_int8_t scale_
 
   auto srcMan = mantissa<srcE, false>(srcU32);
   auto srcExp = exponent<srcE, false>(srcU32);
-  if (enc.MxScale) {
-    if (issubnorm<srcE, false>(srcU32)) {
-      auto leadbit = (__hip_uint32_t)1 << srcEnc.ManBits;
-      while ((srcMan & leadbit) == 0) {
-        srcMan <<= 1;
-        srcExp -= 1;
-      }
-
-      srcMan &= srcEnc.ManMask;
+  // exponent() reports a subnormal source as 1 - bias, but its mantissa has no implicit leading 1.
+  // Normalize it for every destination: fp16 subnormals are in the range of E5M2's normals.
+  if (issubnorm<srcE, false>(srcU32)) {
+    auto leadbit = (__hip_uint32_t)1 << srcEnc.ManBits;
+    while ((srcMan & leadbit) == 0) {
+      srcMan <<= 1;
+      srcExp -= 1;
     }
 
-    srcExp -= scale_exp;
+    srcMan &= srcEnc.ManMask;
   }
+
+  if (enc.MxScale) srcExp -= scale_exp;
 
   auto exp = srcExp;
   auto man = srcMan;

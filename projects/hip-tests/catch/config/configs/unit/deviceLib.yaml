@@ -462,6 +462,12 @@ deviceLib:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - OCP host-reference packed-bitfield ABI differs on Windows; unit/deviceLib/CMakeLists.txt compiles ext_ocp_fp4/fp6/fp8 only if(NOT WIN32), so this is never built or run on native Windows"
     tags: [types]
+  Unit_ext_ocp_fp8_fp16_subnormal_source_host:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - OCP host-reference packed-bitfield ABI differs on Windows; unit/deviceLib/CMakeLists.txt compiles ext_ocp_fp4/fp6/fp8 only if(NOT WIN32), so this is never built or run on native Windows"
+    tags: [types]
   Unit_ext_ocp_fp8_device_matches_host:
     <<: *level_default
     unsupported:
