@@ -312,9 +312,12 @@ public:
   /// @brief WG completion notification from CU refcount reaching zero.
   void notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id);
 
-  /// @brief Cancel all replicas of a failed queue before reporting VM failure.
+  /// @brief Cancel all replicas of a failed queue, then request engine exit.
   /// @details Thread-safe publication; callbacks and cancellation execute on
   /// each CP's engine partition after its current worker batch rejoins.
+  /// Used by GWS failures: this method requests failure exit only after every
+  /// replica acknowledges cancellation. Callers rely on this method to request
+  /// exit instead of requesting it earlier.
   void notify_execution_failure(uint32_t queue_id, uint32_t process_id, std::string reason);
 
   /// @brief Terminate a dispatch after a CU observes a non-retryable VM fault.
@@ -327,6 +330,11 @@ public:
   /// @brief Fault a dispatch's queue without publishing successful completion.
   /// @details Called outside the CU wave-state lock. Cancels all outstanding
   /// dispatches, including earlier admitted work, and every fan-out replica.
+  /// This method does not request engine exit or wait for peer cancellation.
+  /// A fatal instruction caller requests exit before this notification;
+  /// shutdown() then drains any peer cancellations still pending. Failure
+  /// sources that require engine termination must request it themselves, or
+  /// use notify_execution_failure() to wait for all replica acknowledgements.
   void notify_dispatch_failure(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id);
 
   void set_workgroup_id_offset(uint32_t offset) { workgroup_id_offset_ = offset; }
