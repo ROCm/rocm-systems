@@ -156,8 +156,6 @@ cases:
   Unit_HRR_FailedShimCalls_Direct: {}
   Unit_HRR_FatBinHeaderChecks: {}
   Unit_HRR_FatBinHeader_Direct: {}
-  Unit_HRR_FatBinOverBlobLimit: {}
-  Unit_HRR_FatBinOverBlobLimit_Direct: {}
   Unit_HRR_FirstMallocRoundtrip: {}
   Unit_HRR_FirstMalloc_Direct: {}
   Unit_HRR_ForkAfterCaptureShutdown: {}

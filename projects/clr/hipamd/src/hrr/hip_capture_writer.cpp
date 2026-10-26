@@ -1800,8 +1800,7 @@ class BlobClaim {
 // write_blob
 // ---------------------------------------------------------------------------
 
-// `capped`: held to HIP_HRR_CAPTURE_MAX_BLOB_MB.
-static Hash128 store_blob(const void* data, size_t len, bool capped) {
+Hash128 write_blob(const void* data, size_t len, bool capped) {
   reopen_after_fork();
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
@@ -1861,10 +1860,6 @@ static Hash128 store_blob(const void* data, size_t len, bool capped) {
   claim.done(ok);
   return h;
 }
-
-Hash128 write_blob(const void* data, size_t len) { return store_blob(data, len, true); }
-
-Hash128 write_fat_binary(const void* data, size_t len) { return store_blob(data, len, false); }
 
 // ---------------------------------------------------------------------------
 // write_code_object

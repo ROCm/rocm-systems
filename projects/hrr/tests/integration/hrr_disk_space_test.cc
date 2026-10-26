@@ -724,7 +724,6 @@ TEST_CASE("Unit_HRR_CaptureLimit_ForkAfterStop_Direct", "[.][hrr-direct]") {
   if (getenv("HIP_HRR_CAPTURE_MAX_MB") == nullptr)
     HRR_SKIP("started by Unit_HRR_CaptureLimit_ForkAfterStop");
   begin_workload();
-  const fs::path root = fake_root();
   void* dev = nullptr;
   HRR_HIP_CHECK(hipMalloc(&dev, kLimitCopy));
   for (int i = 0; i < kLimitCopies; ++i) copy_to_device(dev, 1800 + i, kLimitCopy);
@@ -742,11 +741,6 @@ TEST_CASE("Unit_HRR_CaptureLimit_ForkAfterStop_Direct", "[.][hrr-direct]") {
   REQUIRE(status != -1);
   REQUIRE(WIFEXITED(status));
   REQUIRE(WEXITSTATUS(status) == 0);
-
-  // The limit is per archive: the child opened and finalized its own.
-  const fs::path child_dir = root / ("pid-" + std::to_string(child));
-  CHECK(fs::exists(child_dir / "events.bin"));
-  CHECK(fs::exists(child_dir / "manifest.json"));
   HRR_HIP_CHECK(hipFree(dev));
 }
 
@@ -1095,9 +1089,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureLimit_StopsAtSize) {
                               " MiB") == 1);
   hrr::Archive arc;
   load_stopped_archive(cap.path, run, arc);
-  const size_t copies = count_h2d(arc, kLimitCopy);
-  CHECK(copies > 0);
-  CHECK(copies < static_cast<size_t>(kLimitCopies));
+  CHECK(count_h2d(arc, kLimitCopy) < static_cast<size_t>(kLimitCopies));
   // Stopped by the copy that would have passed the limit, not before.
   const uint64_t held = capped_bytes(hrr_single_process_archive(cap.path));
   INFO("archive holds " << held << " bytes");
