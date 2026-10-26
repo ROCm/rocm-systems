@@ -5935,6 +5935,17 @@ TEST(SdwaTest, DstMerge) {
 // Scratch address calculation tests
 // ---------------------------------------------------------------------------
 
+TEST(ScratchAddrCalcTest, InterleavesPrivateDwordsAcrossTheWave) {
+  EXPECT_EQ(amdgpu::scratch_unit_stride(32), 0x80u);
+  EXPECT_EQ(amdgpu::scratch_unit_stride(64), 0x100u);
+  // Wave32 lane 0 offsets 0x20 and 0x24 are 0x80 bytes apart; lane 1 sits between them.
+  EXPECT_EQ(amdgpu::scratch_lane_address(0x1000, 0x20, 0, 32), 0x1400u);
+  EXPECT_EQ(amdgpu::scratch_lane_address(0x1000, 0x24, 0, 32), 0x1480u);
+  EXPECT_EQ(amdgpu::scratch_lane_address(0x1000, 0x20, 1, 32), 0x1404u);
+  EXPECT_EQ(amdgpu::scratch_lane_address(0x1000, 0x23, 1, 32), 0x1407u);
+  EXPECT_EQ(amdgpu::scratch_lane_address(0x1000, 0x24, 63, 64), 0x19FCu);
+}
+
 TEST(ScratchAddrCalcTest, FlatScratchUsesWavefrontBase) {
   // Verify that FLAT with seg==1 (SCRATCH) computes:
   //   address = scratch_base + VGPR[lane] + offset
