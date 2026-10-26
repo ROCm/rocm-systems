@@ -211,6 +211,8 @@ constexpr EncodingTable init() {
       .HasInf = true,
   };
 
+  // FNUZ: no Inf, 0x7f/0xff are +-57344. Not reachable from any public __amd_cvt_* entry point
+  // (only E4M3 and E5M2 interpretations exist), so it has no host test.
   a[(size_t)Encoding::E5M2Nanoo] = {
       .ExpBias = 16,
       .ExpBits = 5,
@@ -221,7 +223,7 @@ constexpr EncodingTable init() {
       .MinExp = -15,
       .MxScale = false,
       .HasNaN = true,
-      .HasInf = true,
+      .HasInf = false,
   };
 
   a[(size_t)Encoding::E5M10] = {
@@ -408,7 +410,10 @@ template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool isinf(__hip_u
   const auto& enc = encodings[(size_t)E];
   if (!enc.HasInf) return false;
 
-  if constexpr (E == Encoding::E5M10 || E == Encoding::E8M7) {
+  // Infinity is a property of the bit pattern; inf<E, sat>() is the overflow result of a
+  // conversion and for sat == true it is the largest finite value, not Infinity.
+  if constexpr (E == Encoding::E5M10 || E == Encoding::E8M7 || E == Encoding::E5M2 ||
+                E == Encoding::E5M2Mx) {
     return exponentbits<E, sat>(val) == enc.ExpMask && mantissa<E, sat>(val) == 0;
   }
 
