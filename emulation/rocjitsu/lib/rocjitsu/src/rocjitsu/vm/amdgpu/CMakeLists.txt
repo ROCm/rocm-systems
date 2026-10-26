@@ -18,6 +18,7 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     gpu_vm.cpp
     gws_device.cpp
     hwreg.cpp
+    instruction_timing.cpp
     iod.cpp
     l1_scalar_cache.cpp
     l1_vector_cache.cpp
@@ -33,6 +34,7 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     sdma_queue_scheduler.cpp
     sdma_ring_consumer.cpp
     shader_engine.cpp
+    wave_slot.cpp
     wavefront.cpp
     xcd.cpp
 )
