@@ -5,7 +5,9 @@
  * Default: gfx950 messages >= 256 MiB take GIN two-shot (LSA reduce-scatter +
  * GIN all-gather). gfx1250 GinScatter is opt-in
  * (NCCL_GIN_ALLREDUCE_GFX1250_ENABLE=1) for messages in [64 MiB, 4 GiB].
- * Smaller messages fall through to DDA AllReduce.
+ * Smaller messages yield to DDA. On gfx1250 that yield has no lower bound:
+ * below symMinR2 (8 MiB) DDA already won, and from there up to 64 MiB DDA
+ * LL/LL128 can claim the sum.
  * RCCL_GIN_ALLREDUCE_FORCE_ENABLE=1 also enables the LSA bands:
  *   <= 4 MiB   — LSA one-shot
  *   (4 MiB, GIN floor) — LSA two-shot
@@ -93,32 +95,43 @@ static ncclResult_t ginAllReduceScratchInitOnce(ncclComm* comm) {
   }
   const size_t allocBytes = static_cast<size_t>(requested);
 
+  // The first GinScatter may be the first collective inside a capture.
+  // ncclMemAlloc issues cuMemCreate / cuMemMap, which are illegal in global
+  // capture mode. ncclDevrWindowRegisterInGroup relaxes only around its own
+  // body, so enter relaxed mode before the allocation. The register call
+  // nests another exchange and restores relaxed before it returns. Free on
+  // the failure path stays inside this region for the same reason.
+  cudaStreamCaptureMode captureMode = cudaStreamCaptureModeRelaxed;
+  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&captureMode));
+
   void* scratch = nullptr;
   ncclWindow_t scratchWinDev = nullptr;
   ncclResult_t ret = ncclMemAlloc(&scratch, allocBytes);
-  if (ret != ncclSuccess) return ret;
-
-  ret = ncclDevrWindowRegisterInGroup(comm, scratch, allocBytes, NCCL_WIN_COLL_SYMMETRIC, &scratchWinDev);
-  if (ret != ncclSuccess) {
-    (void)ncclMemFree(scratch);
-    return ret;
-  }
-
-  ret = ncclDevrFindWindow(comm, scratch, &state->scratchWin);
-  if (ret != ncclSuccess || scratchWinDev == nullptr || !ginAllReduceScratchWinReady(comm)) {
-    if (scratchWinDev != nullptr) {
-      (void)ncclCommWindowDeregister(comm, scratchWinDev);
-    } else if (state->scratchWin != nullptr && state->scratchWin->vidmem != nullptr) {
-      (void)ncclCommWindowDeregister(comm, state->scratchWin->vidmem);
+  if (ret == ncclSuccess) {
+    ret = ncclDevrWindowRegisterInGroup(comm, scratch, allocBytes, NCCL_WIN_COLL_SYMMETRIC, &scratchWinDev);
+    if (ret != ncclSuccess) {
+      (void)ncclMemFree(scratch);
+    } else {
+      ret = ncclDevrFindWindow(comm, scratch, &state->scratchWin);
+      if (ret != ncclSuccess || scratchWinDev == nullptr || !ginAllReduceScratchWinReady(comm)) {
+        if (scratchWinDev != nullptr) {
+          (void)ncclCommWindowDeregister(comm, scratchWinDev);
+        } else if (state->scratchWin != nullptr && state->scratchWin->vidmem != nullptr) {
+          (void)ncclCommWindowDeregister(comm, state->scratchWin->vidmem);
+        }
+        state->scratchWin = nullptr;
+        (void)ncclMemFree(scratch);
+        if (ret == ncclSuccess) ret = ncclInternalError;
+      } else {
+        state->scratch = scratch;
+        state->scratchBytes = allocBytes;
+        INFO(NCCL_INIT, "GIN AllReduce GinScatter scratch: %zu bytes", allocBytes);
+      }
     }
-    state->scratchWin = nullptr;
-    (void)ncclMemFree(scratch);
-    return ret != ncclSuccess ? ret : ncclInternalError;
   }
-  state->scratch = scratch;
-  state->scratchBytes = allocBytes;
-  INFO(NCCL_INIT, "GIN AllReduce GinScatter scratch: %zu bytes", allocBytes);
-  return ncclSuccess;
+
+  CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
+  return ret;
 }
 
 // Runs on the first eligible AllReduce, which may itself be inside a graph capture. Everything

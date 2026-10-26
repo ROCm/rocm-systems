@@ -694,8 +694,9 @@ if(BUILD_TESTS)
   set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
 
   # GinScatter local reduce on one GPU. Runs ginScatterReduceChunk against a fake
-  # scratch and a host sum, for staged and full-column layouts. No librccl.
-  # Skips when no GPU is visible.
+  # scratch and a host sum, for staged and full-column layouts, including
+  # multi-rank sums at 64 MiB and 1 GiB. No librccl. Skips when no GPU is visible.
+  # Registered in the test-runner configs so CI runs it with the other unit tests.
   add_executable(rccl-UnitTestsGinScatterReduceGpu gin/gin_scatter_reduce_gpu_test.cpp)
   set_source_files_properties(gin/gin_scatter_reduce_gpu_test.cpp PROPERTIES LANGUAGE CXX)
   target_include_directories(rccl-UnitTestsGinScatterReduceGpu PRIVATE

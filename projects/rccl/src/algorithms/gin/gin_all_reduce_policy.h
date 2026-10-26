@@ -215,6 +215,9 @@ inline bool ginAllReduceSizePolicyEligible(size_t count, size_t typeSize, int nR
 }
 
 // Smaller-than-ginMinBytes GIN candidates yield to DDA unless FORCE_ENABLE=1.
+// No lower bound. On gfx1250 (ginMinBytes == 64 MiB) every eligible sum below
+// the GinScatter band yields, including (8 MiB, 64 MiB), where DDA LL/LL128
+// can run. Below 8 MiB, symMinR2 already selects DDA.
 inline bool ginAllReduceYieldToDdaBySize(size_t count, size_t typeSize, bool forceEnable,
                                          size_t ginMinBytes = kGinAllReduceGinTwoShotMinBytes) {
   if (forceEnable) return false;

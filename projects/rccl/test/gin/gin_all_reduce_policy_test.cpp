@@ -126,8 +126,13 @@ TEST(GinAllReducePolicy, Gfx1250ScatterMinBytesFrom64MiB) {
 }
 
 TEST(GinAllReducePolicy, YieldToDdaBySizeGfx1250) {
+  // No lower bound. Below 8 MiB, symMinR2 already selects DDA. From 8 MiB to
+  // 64 MiB the same yield lets DDA LL/LL128 take the sum.
+  EXPECT_TRUE(ginAllReduceYieldToDdaBySize(countForBytes(4 * kMiB), kFloat, false, kGinAllReduceGinScatterMinBytes));
+  EXPECT_TRUE(ginAllReduceYieldToDdaBySize(countForBytes(32 * kMiB), kFloat, false, kGinAllReduceGinScatterMinBytes));
   EXPECT_TRUE(ginAllReduceYieldToDdaBySize(countForBytes(63 * kMiB), kFloat, false, kGinAllReduceGinScatterMinBytes));
   EXPECT_FALSE(ginAllReduceYieldToDdaBySize(countForBytes(64 * kMiB), kFloat, false, kGinAllReduceGinScatterMinBytes));
+  EXPECT_FALSE(ginAllReduceYieldToDdaBySize(countForBytes(32 * kMiB), kFloat, true, kGinAllReduceGinScatterMinBytes));
 }
 
 TEST(GinAllReducePolicy, GinScatterDispatchGfx1250From64MiB) {

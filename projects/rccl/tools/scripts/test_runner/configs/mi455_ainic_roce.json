@@ -2273,6 +2273,21 @@
         }
       ]
     },
+    "unit_tests_gin_scatter_reduce_gpu": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinScatterReduceGpu",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "GinScatterReduceGpu_AllTests",
+          "description": "GinScatter local reduce, including 64 MiB and 1 GiB multi-rank sums",
+          "test_filter": "*"
+        }
+      ]
+    },
     "unit_tests_gin_sdma_allgather_policy": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsGinSdmaAllGatherPolicy",
@@ -7023,6 +7038,12 @@
       "name": "Unit Tests - GIN-SDMA policy",
       "description": "All rccl-UnitTestsGinSdmaPolicy cases",
       "config": "unit_tests_gin_sdma_policy",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GinScatter reduce GPU",
+      "description": "All rccl-UnitTestsGinScatterReduceGpu cases",
+      "config": "unit_tests_gin_scatter_reduce_gpu",
       "enabled": true
     },
     {

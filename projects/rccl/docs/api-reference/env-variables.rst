@@ -695,6 +695,8 @@ in the following table.
       - | ``0``: gfx1250 keeps the pre-existing AllReduce selectors (default)
         | ``1``: symmetric ``ncclSum`` fp32/fp16/bf16 messages from 64 MiB
           through 4 GiB use GinScatter when scratch can hold them
+        | Eligible sums below 64 MiB yield to DDA. Sums below 8 MiB already
+          used DDA. From 8 MiB to 64 MiB, DDA LL/LL128 can take those sums
 
     * - | ``NCCL_GIN_ALLREDUCE_SCRATCH_BYTES``
         | GinScatter incoming scratch size, in bytes.

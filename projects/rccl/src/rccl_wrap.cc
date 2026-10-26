@@ -1667,10 +1667,11 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // GIN AllReduce is selected first in this function and requires symmetric
     // windows. By default gfx950 claims messages >= 256 MiB. gfx1250 claims
     // [64 MiB, 4 GiB] only when NCCL_GIN_ALLREDUCE_GFX1250_ENABLE=1, so DDA must
-    // still be allowed for smaller
-    // symmetric AllReduces (otherwise they would hit the symmetric kernel
-    // instead of DDA). FORCE_ENABLE=1 keeps the original
-    // !symEligible gate because GIN already returned above for those sizes.
+    // still be allowed for smaller symmetric AllReduces (otherwise they would
+    // hit the symmetric kernel instead of DDA). The yield has no lower bound.
+    // Below symMinR2 (8 MiB) DDA already won. From there up to 64 MiB, clearing
+    // ddaSymEligible lets DDA LL/LL128 claim the sum. FORCE_ENABLE=1 keeps the
+    // original gate because GIN already returned above for those sizes.
     // symSuppressedByMin: DDA wins below symMinR2[AR]; do not block it with symkRequested.
     bool ddaSymEligible = symkRequested && !symSuppressedByMin;
   #if defined(ENABLE_ROCSHMEM_GIN)

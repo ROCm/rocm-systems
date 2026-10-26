@@ -4,7 +4,8 @@
  * Host entry points for the GIN-SDMA AllReduce path selected by rcclSelectAllReduce
  * when symmetric windows are used. By default gfx950 takes GIN two-shot for
  * messages >= 256 MiB. gfx1250 GinScatter (64 MiB to 4 GiB) is opt-in via
- * NCCL_GIN_ALLREDUCE_GFX1250_ENABLE. Smaller messages use DDA AllReduce.
+ * NCCL_GIN_ALLREDUCE_GFX1250_ENABLE. Smaller messages yield to DDA. On gfx1250
+ * that includes sums from 8 MiB up to 64 MiB, which DDA LL/LL128 can claim.
  * RCCL_GIN_ALLREDUCE_FORCE_ENABLE=1 also enables LSA one-shot (<= 4 MiB) and
  * LSA two-shot ((4 MiB, GIN floor)).
  * See LICENSE.txt for license information.
@@ -61,8 +62,10 @@ int64_t rcclParamGinAllReduceForceEnable();
 bool ncclAllReduceGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                   ncclDataType_t datatype, ncclRedOp_t op);
 
-// True when this AllReduce is a GIN-SDMA candidate that the default size policy
-// left for DDA (message below the GIN floor and RCCL_GIN_ALLREDUCE_FORCE_ENABLE is not 1).
+// True when this AllReduce is a GIN-SDMA candidate below the GIN floor and
+// RCCL_GIN_ALLREDUCE_FORCE_ENABLE is not 1. The floor is 256 MiB on gfx950 and
+// 64 MiB on gfx1250, with no lower bound. On gfx1250, sums from symMinR2
+// (8 MiB) up to 64 MiB yield too, so DDA LL/LL128 can claim them.
 bool ncclAllReduceGinSdmaYieldToDda(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                     ncclDataType_t datatype, ncclRedOp_t op);
 
