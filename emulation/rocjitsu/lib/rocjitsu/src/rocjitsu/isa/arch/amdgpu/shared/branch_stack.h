@@ -25,7 +25,7 @@ struct BranchStackEntry {
 /// @details Entry n occupies the wave's s[4n..4n+3]:
 ///   s[4n:4n+1]   BranchStackEntry::lanes
 ///   s[4n+2:4n+3] BranchStackEntry::resume_pc
-inline uint32_t branch_stack_entry_sgpr(const Wavefront &wf, uint32_t csp) {
+inline uint32_t branch_stack_entry_physical_sgpr(const Wavefront &wf, uint32_t csp) {
   return wf.sgpr_alloc().base + csp * 4;
 }
 
@@ -33,11 +33,11 @@ inline uint32_t branch_stack_entry_sgpr(const Wavefront &wf, uint32_t csp) {
 /// any valid program within it, so a deeper push means a malformed program.
 inline constexpr uint32_t kBranchStackDepth = 6;
 
-/// @brief Warn when the entry at @p sgpr does not fit in the wave's SGPRs.
+/// @brief Warn when the entry at @p physical_sgpr does not fit in the wave's SGPRs.
 /// @details Out-of-allocation SGPR writes are dropped and reads return zero, so
 /// the matching join would resume at address 0 with EXEC cleared.
-inline void check_branch_stack_entry_allocated(const Wavefront &wf, uint32_t sgpr) {
-  if (!wf.sgpr_alloc().contains(sgpr, 4))
+inline void check_branch_stack_entry_allocated(const Wavefront &wf, uint32_t physical_sgpr) {
+  if (!wf.sgpr_alloc().contains(physical_sgpr, 4))
     wf.report_undefined_behavior("branch stack entry lies outside the wave's SGPR allocation");
 }
 
@@ -46,11 +46,11 @@ inline void push_branch_stack(Wavefront &wf, BranchStackEntry entry) {
   const uint32_t csp = wf.cond_stack_ptr();
   if (csp >= kBranchStackDepth)
     wf.report_undefined_behavior("fork pushes past the six-entry branch stack");
-  const uint32_t sgpr = branch_stack_entry_sgpr(wf, csp);
-  check_branch_stack_entry_allocated(wf, sgpr);
+  const uint32_t physical_sgpr = branch_stack_entry_physical_sgpr(wf, csp);
+  check_branch_stack_entry_allocated(wf, physical_sgpr);
   RegisterAccess regs(wf);
-  regs.write_sgpr64(sgpr, entry.lanes);
-  regs.write_sgpr64(sgpr + 2, entry.resume_pc);
+  regs.write_sgpr64(physical_sgpr, entry.lanes);
+  regs.write_sgpr64(physical_sgpr + 2, entry.resume_pc);
   wf.set_cond_stack_ptr(csp + 1);
 }
 
@@ -58,10 +58,10 @@ inline void push_branch_stack(Wavefront &wf, BranchStackEntry entry) {
 inline BranchStackEntry pop_branch_stack(Wavefront &wf) {
   // Read CSP back after the decrement so it wraps as a 3-bit field.
   wf.set_cond_stack_ptr(wf.cond_stack_ptr() - 1);
-  const uint32_t sgpr = branch_stack_entry_sgpr(wf, wf.cond_stack_ptr());
-  check_branch_stack_entry_allocated(wf, sgpr);
+  const uint32_t physical_sgpr = branch_stack_entry_physical_sgpr(wf, wf.cond_stack_ptr());
+  check_branch_stack_entry_allocated(wf, physical_sgpr);
   RegisterAccess regs(wf);
-  return {regs.read_sgpr64(sgpr), regs.read_sgpr64(sgpr + 2)};
+  return {regs.read_sgpr64(physical_sgpr), regs.read_sgpr64(physical_sgpr + 2)};
 }
 
 /// @brief Whether every active lane takes the same side of a fork on @p compare.
@@ -71,8 +71,8 @@ inline BranchStackEntry pop_branch_stack(Wavefront &wf) {
 
 /// A branch stack entry a fork or join is about to access.
 struct BranchStackAccess {
-  uint32_t first_sgpr; ///< Wave-relative first SGPR of the entry.
-  bool write;          ///< True for a fork's push, false for a join's pop.
+  uint32_t first_wave_sgpr; ///< Wave-relative first SGPR of the entry.
+  bool write;               ///< True for a fork's push, false for a join's pop.
 };
 
 /// @brief The entry a fork on @p compare will push, or none if it is uniform.

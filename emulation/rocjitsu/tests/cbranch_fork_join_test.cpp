@@ -244,7 +244,7 @@ TEST_P(CbranchForkJoinTest, ReusedSlotStartsWithEmptyForkStack) {
 
 TEST_P(CbranchForkJoinTest, BranchStackEntriesStartAtTheWavesFirstSgpr) {
   for (uint32_t n = 0; n <= 7; ++n)
-    EXPECT_EQ(branch_stack_entry_sgpr(*wf, n), wf->sgpr_alloc().base + 4 * n);
+    EXPECT_EQ(branch_stack_entry_physical_sgpr(*wf, n), wf->sgpr_alloc().base + 4 * n);
 }
 
 TEST_P(CbranchForkJoinTest, ForkWithEveryActiveLanePassingJumpsWithoutPushing) {

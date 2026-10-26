@@ -633,7 +633,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                                             : fork_stack_access(wf, registers.read_scalar64(src0));
   }
   const auto stack_entry = [&]() {
-    return RegisterRef{RegClass::SGPR, static_cast<uint16_t>(stack_access->first_sgpr), 4};
+    return RegisterRef{RegClass::SGPR, static_cast<uint16_t>(stack_access->first_wave_sgpr), 4};
   };
   RegisterSet implicit;
   if (!preserves_destination && !branch_stack)
