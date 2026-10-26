@@ -2716,10 +2716,18 @@ TEST_F(GraphCapture_AllReduce, MultiNode)
  * legacy-fallback scheduler path.
  *
  * Requires NCCL_CUMEM_ENABLE=1 and NCCL_WIN_ENABLE!=0.
+ *
+ * coco UnitTestsMPI defaults NCCL_CUMEM_ENABLE=0 and splits this suite without
+ * a per-filter env. Opt in here the same way as GdrFlush_CuMem. NCCL_PARAM
+ * caches per process on first read; MpiEnvGuard restores getenv but cannot
+ * un-latch the library.
  */
 class GraphCapture_WindowRegister : public RegistrationTestBase
 {
 protected:
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> cuMemGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> dmaBufGuard_;
+
     enum class Collective
     {
         AllReduce,
@@ -2738,6 +2746,20 @@ protected:
         return "Unknown";
     }
 
+    void SetUp() override
+    {
+        cuMemGuard_  = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_CUMEM_ENABLE", "1");
+        dmaBufGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DMABUF_ENABLE", "1");
+        RegistrationTestBase::SetUp();
+    }
+
+    void TearDown() override
+    {
+        RegistrationTestBase::TearDown();
+        dmaBufGuard_.reset();
+        cuMemGuard_.reset();
+    }
+
     void runSymmetricCollective(Collective collective)
     {
         if(!validateTestPrerequisites(RegTestConfig::MIN_RANKS_DEFAULT))
@@ -2750,7 +2772,21 @@ protected:
 
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-        ASSERT_MPI_TRUE(isCuMemEnabled());
+        // Gate on the library, not getenv: SetUp always writes NCCL_CUMEM_ENABLE=1.
+        const bool cuMemEnabled = ncclCuMemEnable();
+        const char* cuMemSkipWhy =
+            cuMemEnabled ? nullptr
+                         : (ncclCuMemRuntimeSupported()
+                                ? "NCCL_CUMEM_ENABLE was already cached as 0 by an earlier "
+                                  "communicator in this process; run with "
+                                  "--gtest_filter=GraphCapture_WindowRegister.* or launch with "
+                                  "NCCL_CUMEM_ENABLE=1"
+                                : "Requires a kernel/runtime that can enable cuMem "
+                                  "(dma-buf, kernel >= 6.8)");
+        if (auto reason = mpiCoordinatedSkipReason(!cuMemEnabled, cuMemSkipWhy); !reason.empty()) {
+            GTEST_SKIP() << reason;
+        }
+
         ASSERT_MPI_TRUE(isWinEnabled());
 
         using T = RegTestConfig::DefaultType;
