@@ -88,12 +88,6 @@ using RcclUnitTesting::SetPsk;
   return ::testing::AssertionSuccess();
 }
 
-bool AllRanksTrue(bool local) {
-  int v = local ? 1 : 0, all = 0;
-  MPI_Allreduce(&v, &all, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
-  return all != 0;
-}
-
 } // namespace
 
 class BootstrapTlsMPITest : public MPITestBase {
@@ -127,7 +121,7 @@ TEST_F(BootstrapTlsMPITest, EncryptedInitCollectivesSplitSendRecv) {
     EXPECT_TRUE(RingSendRecv(sub, stream));
   }
   EXPECT_EQ(ncclSuccess, ncclCommDestroy(sub));
-  EXPECT_TRUE(AllRanksTrue(!HasFailure())) << "failure on another rank";
+  EXPECT_TRUE(mpiAllRanks(!HasFailure())) << "failure on another rank";
 }
 
 // Encryption can be enabled between communicators: a plaintext communicator created
@@ -155,7 +149,7 @@ TEST_F(BootstrapTlsMPITest, EnablingEncryptionBetweenCommunicators) {
   EXPECT_TRUE(AllReduceRankSum(plain, stream));
   EXPECT_TRUE(RingSendRecv(encrypted, stream));
   EXPECT_EQ(ncclSuccess, ncclCommDestroy(encrypted));
-  EXPECT_TRUE(AllRanksTrue(!HasFailure())) << "failure on another rank";
+  EXPECT_TRUE(mpiAllRanks(!HasFailure())) << "failure on another rank";
 }
 
 // Without TLS support, a configured key makes communicator creation fail on every rank
