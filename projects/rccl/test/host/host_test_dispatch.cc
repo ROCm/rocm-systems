@@ -1239,9 +1239,11 @@ int main(int argc, char **argv)
             std::fflush(stdout);
             const int status = runChild(selection.path, childArgs);
 
+            bool cleanReport = false;
             if (std::optional<SuiteFragment> fragment =
                     parseChildReport(readFile(reportPath), selection.qualifier,
                                      options.outputFormat)) {
+                cleanReport = fragment->failures == 0 && fragment->errors == 0;
                 fragments.push_back(std::move(*fragment));
             } else {
                 // No report: the binary died or never started. Its cases are unaccounted for, so
@@ -1252,6 +1254,11 @@ int main(int argc, char **argv)
                 ++failures;
             }
             if (status != 0) {
+                if (cleanReport) {
+                    fragments.push_back(crashFragment(
+                        selection.qualifier,
+                        fmt::format("binary exited {} after writing a passing report", status)));
+                }
                 ++failures;
             }
             std::error_code ec;
