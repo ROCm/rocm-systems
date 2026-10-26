@@ -1096,6 +1096,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // in on the doomed reply is dropped here — nothing downstream runs to adopt
   // it.
   auto poison_reply = [&] {
+    ScopedCancellationDisable cancellation;
     if (num_fds > 0 && received_fds[0] >= 0)
       libc_passthrough().close(received_fds[0]);
     return poison_stream();
@@ -1596,6 +1597,7 @@ int RemoteDriver::send_mmap(void *addr, size_t length, int prot, int flags, off_
   // truncated reply is dropped: the caller sees rc != 0 with *memfd_out still
   // -1, so nothing downstream would ever close it.
   auto poison_reply = [&] {
+    ScopedCancellationDisable cancellation;
     if (num_fds > 0 && received_fds[0] >= 0)
       libc_passthrough().close(received_fds[0]);
     return poison_stream();

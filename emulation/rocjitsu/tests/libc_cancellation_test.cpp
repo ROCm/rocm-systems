@@ -260,6 +260,72 @@ protected:
     EXPECT_EQ(close(sockets[1]), 0);
   }
 
+  void check_malformed_reply_cancellation(bool mmap_reply) {
+    int sockets[2];
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
+    rocjitsu::RemoteDriver driver(sockets[0]);
+    rocjitsu::UniqueDriverFd server(sockets[1]);
+    rocjitsu::UniqueDriverFd descriptor(memfd_create("malformed-reply", MFD_CLOEXEC));
+    ASSERT_TRUE(descriptor);
+    rocjitsu::RpcHeader reply{};
+    reply.opcode = mmap_reply ? rocjitsu::RPC_MMAP : rocjitsu::RPC_IOCTL;
+    reply.payload_bytes =
+        mmap_reply ? sizeof(rocjitsu::RpcMmapResponse) : rocjitsu::kMaxPayloadBytes + 1;
+    const int sent_fd = descriptor.get();
+    ASSERT_EQ(rocjitsu::rpc_send_msg(server.get(), &reply, sizeof(reply), &sent_fd, 1),
+              sizeof(reply));
+    if (!mmap_reply) {
+      // An unpoisoned stream would accept these leftover bytes as the next reply.
+      rocjitsu::RpcHeader stale{};
+      stale.opcode = rocjitsu::RPC_IOCTL;
+      ASSERT_TRUE(rocjitsu::rpc_send_exact(server.get(), &stale, sizeof(stale)));
+    }
+    // End the mmap reply before its payload, while keeping the request side open
+    // so an incorrect subsequent send remains observable without hanging.
+    ASSERT_EQ(shutdown(server.get(), SHUT_WR), 0);
+    descriptor.reset();
+    arm_close_cancellation(1);
+    int result = 0;
+    bool survived_cancel = false;
+    std::thread worker([&] {
+      if (mmap_reply) {
+        void *mapping = driver.mmap(nullptr, 4096, PROT_READ, MAP_SHARED, 0);
+        result = mapping == MAP_FAILED ? -errno : 0;
+        if (mapping != MAP_FAILED)
+          munmap(mapping, 4096);
+      } else {
+        kfd_ioctl_get_version_args version{};
+        result = driver.ioctl(AMDKFD_IOC_GET_VERSION, &version);
+      }
+      pthread_testcancel();
+      survived_cancel = true;
+    });
+    worker.join();
+    rocjitsu::libc_passthrough() = saved_;
+    EXPECT_EQ(result, -EPROTO);
+    EXPECT_FALSE(survived_cancel);
+    ASSERT_EQ(close_count_, 1u);
+    ASSERT_GE(closed_fds_[0], 0);
+    const int descriptor_flags = fcntl(closed_fds_[0], F_GETFD);
+    EXPECT_EQ(descriptor_flags, -1);
+    EXPECT_EQ(errno, EBADF);
+    if (descriptor_flags >= 0)
+      close(closed_fds_[0]);
+
+    std::array<uint8_t, 128> requests{};
+    const size_t request_bytes =
+        sizeof(rocjitsu::RpcHeader) +
+        (mmap_reply ? sizeof(rocjitsu::RpcMmapRequest)
+                    : sizeof(rocjitsu::RpcIoctlRequest) + sizeof(kfd_ioctl_get_version_args));
+    EXPECT_EQ(recv(server.get(), requests.data(), requests.size(), MSG_DONTWAIT), request_bytes);
+    kfd_ioctl_get_version_args version{};
+    EXPECT_EQ(driver.ioctl(AMDKFD_IOC_GET_VERSION, &version), -EPROTO);
+    EXPECT_EQ(driver.mmap(nullptr, 4096, PROT_READ, MAP_SHARED, 0), MAP_FAILED);
+    EXPECT_EQ(errno, EPROTO);
+    EXPECT_EQ(driver.munmap(nullptr, 4096), -EPROTO);
+    EXPECT_EQ(recv(server.get(), requests.data(), requests.size(), MSG_DONTWAIT), 0);
+  }
+
   static inline std::array<int, 4> closed_fds_;
   static inline unsigned close_count_, cancel_at_;
   static inline int (*forward_close_)(int);
@@ -297,4 +363,12 @@ TEST_F(LibcCancellationTest, SyntheticCreationDefersMarkerCloseCancellation) {
 
 TEST_F(LibcCancellationTest, SyntheticCreationDefersEventfdCloseCancellation) {
   check_synthetic_creation(2);
+}
+
+TEST_F(LibcCancellationTest, MalformedIoctlReplyPoisonsStreamBeforeCancellation) {
+  check_malformed_reply_cancellation(false);
+}
+
+TEST_F(LibcCancellationTest, MalformedMmapReplyPoisonsStreamBeforeCancellation) {
+  check_malformed_reply_cancellation(true);
 }
