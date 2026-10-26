@@ -1119,6 +1119,31 @@ def test_resolve_attach_tool_library_uses_target_install(tmp_path, monkeypatch):
     ) == ("/container/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so.2")
 
 
+def test_resolve_attach_tool_library_skips_install_without_tool(tmp_path, monkeypatch):
+    """A later mapped ROCm install supplies the tool when an earlier one lacks it."""
+    procfs_root = tmp_path / "proc"
+    maps_path = procfs_root / "42/maps"
+    maps_path.parent.mkdir(parents=True)
+    maps_path.write_text(
+        "7f00-7f10 r-xp 00000000 08:01 1 "
+        "/first/rocm/lib/librocprofiler-register.so.1\n"
+        "7f10-7f20 r-xp 00000000 08:01 1 "
+        "/second/rocm/lib/librocprofiler-register.so.1\n",
+        encoding="utf-8",
+    )
+    target_tool = (
+        procfs_root
+        / "42/root/second/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
+    target_tool.parent.mkdir(parents=True)
+    target_tool.touch()
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
+
+    assert utils_common.resolve_attach_tool_library(
+        42, "/host/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    ) == ("/second/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so")
+
+
 # =============================================================================
 # BUILD METRIC LIST TESTS
 # =============================================================================

@@ -222,25 +222,32 @@ def is_library_missing_in_target(pid: Union[int, str], library_path: str) -> boo
     return not stat.S_ISREG(target_status.st_mode)
 
 
-def find_loaded_library_directory(
+def find_loaded_library_directories(
     pid: Union[int, str], library_name: str
-) -> Optional[str]:
-    """Find a mapped library's directory as seen by the target process."""
+) -> list[str]:
+    """Return mapped library directories as seen by the target process."""
     maps_path = PROCFS_ROOT / _pid_component(pid) / "maps"
+    directories: list[str] = []
     try:
         with maps_path.open(encoding="utf-8", errors="replace") as maps_file:
             for line in maps_file:
-                path_start = line.find("/")
-                if path_start < 0:
+                directory = _mapped_library_directory(line, library_name)
+                if directory is None or directory in directories:
                     continue
-                mapped_path = line[path_start:].rstrip("\n")
-                if mapped_path.endswith(" (deleted)"):
-                    continue
-                if Path(mapped_path).name.startswith(library_name):
-                    return str(Path(mapped_path).parent)
+                directories.append(directory)
     except OSError:
+        return []
+    return directories
+
+
+def find_loaded_library_directory(
+    pid: Union[int, str], library_name: str
+) -> Optional[str]:
+    """Find the first mapped library directory as seen by the target process."""
+    directories = find_loaded_library_directories(pid, library_name)
+    if not directories:
         return None
-    return None
+    return directories[0]
 
 
 def find_target_library_from_loaded_library(
@@ -249,10 +256,29 @@ def find_target_library_from_loaded_library(
     loaded_library_name: str,
 ) -> Optional[str]:
     """Find a target library relative to another library mapped by the target."""
-    loaded_directory = find_loaded_library_directory(pid, loaded_library_name)
-    if loaded_directory is None:
-        return None
+    for loaded_directory in find_loaded_library_directories(pid, loaded_library_name):
+        target_library = _target_visible_library(pid, library_name, loaded_directory)
+        if target_library is not None:
+            return target_library
+    return None
 
+
+def _mapped_library_directory(maps_line: str, library_name: str) -> Optional[str]:
+    path_start = maps_line.find("/")
+    if path_start < 0:
+        return None
+    mapped_path = maps_line[path_start:].rstrip("\n")
+    if mapped_path.endswith(" (deleted)"):
+        return None
+    mapped_library = Path(mapped_path)
+    if not mapped_library.name.startswith(library_name):
+        return None
+    return str(mapped_library.parent)
+
+
+def _target_visible_library(
+    pid: Union[int, str], library_name: str, loaded_directory: str
+) -> Optional[str]:
     target_root = _target_root(pid)
     target_directory = Path(loaded_directory)
     candidate_paths = (
@@ -260,7 +286,8 @@ def find_target_library_from_loaded_library(
         target_directory / library_name,
     )
     for candidate_path in candidate_paths:
-        host_candidate = target_root / candidate_path.relative_to(candidate_path.anchor)
+        relative_path = candidate_path.relative_to(candidate_path.anchor)
+        host_candidate = target_root / relative_path
         resolved_candidate = resolve_rocm_library_path(str(host_candidate))
         if resolved_candidate is None or not Path(resolved_candidate).is_file():
             continue
