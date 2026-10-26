@@ -22,10 +22,6 @@
 #include <memory>
 #include <new>
 #include <string>
-#if defined(__linux__)
-#include <sys/prctl.h>
-#endif
-#include <sys/resource.h>
 #include <tuple>
 #include <utility>
 #include <atomic>
@@ -87,6 +83,7 @@ static inline int __get_cpuid(unsigned int __leaf, unsigned int* __eax,
 #include "kernel_config.h"
 #include "os.h"
 
+#include "ExpectedCrash.h"
 #include "ScopedHook.h"
 
 // Each default forwards to what the UUT would otherwise call, so an uninstalled redirect is a no-op.
@@ -209,33 +206,6 @@ class DeleteWatch {
   bool armed() const { return g_deleteWatchPtr != nullptr; }
   int hits() const { return g_deleteWatchHits; }
 };
-
-// ASan turns a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under it; match the exit instead.
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-#define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
-#else
-#define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
-#endif
-
-// These tests deliberately raise fatal signals. Some CI environments enable core dumps, and a
-// shuffled death test can inherit a large address space from an earlier test. Dumping that address
-// space turns a millisecond assertion into a multi-second test. PR_SET_DUMPABLE covers both regular
-// core files and piped collectors (for which Linux ignores RLIMIT_CORE); retain the limit as defense
-// in depth. Apply both inside the death statement so only gtest's child is affected and unexpected
-// parent-process crashes remain dumpable.
-static void DisableCoreDumpsForExpectedCrash() {
-#if defined(__linux__)
-  if (prctl(PR_SET_DUMPABLE, 0) != 0) {
-    std::perror("prctl(PR_SET_DUMPABLE) failed");
-    _exit(1);
-  }
-#endif
-  const struct rlimit noCore = {0, 0};
-  if (setrlimit(RLIMIT_CORE, &noCore) != 0) {
-    std::perror("setrlimit(RLIMIT_CORE) failed");
-    _exit(1);
-  }
-}
 
 class InitMicrotest : public ::testing::Test {
  protected:
@@ -4985,6 +4955,27 @@ TEST_F(InitMicrotest, ChildCommCleanupJob_NoExcludeList_FreesNothing) {
   EXPECT_EQ(1, watch.hits()) << "the job was not deleted";
 }
 
+// ncclCommGrow hands its job (with a heap commId) to this destructor, so it must release the commId too.
+TEST_F(InitMicrotest, ChildCommCleanupJob_GrowCommIdPresent_FreesExactlyThatId) {
+  auto* job = new ncclCommInitRankAsyncJob{};
+  job->commId = static_cast<ncclUniqueId*>(std::calloc(1, sizeof(ncclUniqueId)));
+  ASSERT_NE(nullptr, job->commId);
+  void* commId = job->commId;
+
+  void* freed = nullptr;
+  DeleteWatch watch(job);
+  int hits = 0;
+  {
+    ScopedHook microFree(g_microFree, [&](void* p) { freed = p; });
+    childCommCleanupJob(job);
+    hits = watch.hits();
+    EXPECT_EQ(1, microFree.calls);
+  }
+  EXPECT_EQ(commId, freed);
+  std::free(commId);
+  EXPECT_EQ(1, hits) << "the job was not deleted";
+}
+
 TEST_F(InitMicrotest, GetLastError_ReturnsTheGlobalErrorBuffer_AndRecordsTheCall) {
   Dtor_LastErrorGuard guard;
   const char* kMessage = "Dtor microtest last error";
@@ -8697,6 +8688,7 @@ struct Grow_LaunchRecord {
 };
 
 // Suppresses ncclCommInitRankFunc and snapshots the job, so every field the caller computed stays observable.
+// Like the real ncclAsyncLaunch, it runs the job's destructor on both success and failure.
 class Grow_LaunchSpy {
  public:
   explicit Grow_LaunchSpy(ncclResult_t result = ncclSuccess,
@@ -8706,8 +8698,6 @@ class Grow_LaunchSpy {
                                                 void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*),
                                                 ncclComm* comm) {
           Capture(raw, func, undo, destructor, comm);
-          if (result != ncclSuccess) return result;
-          ReleaseCommId(raw);
           if (destructor) destructor(raw);
           return result;
         }) {}
@@ -8746,14 +8736,6 @@ class Grow_LaunchSpy {
     }
     if (onCapture_) onCapture_(job);
   }
-
-  // Only the launched job's destructor releases commId; on a failed launch the unit's own fail path must do it.
-  static void ReleaseCommId(struct ncclAsyncJob* raw) {
-    auto* job = reinterpret_cast<ncclCommInitRankAsyncJob*>(raw);
-    ::free(job->commId);
-    job->commId = nullptr;
-  }
-
   Grow_LaunchRecord rec_;
   std::function<void(ncclCommInitRankAsyncJob*)> onCapture_;
   ScopedHook<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
@@ -9261,6 +9243,26 @@ TEST_F(InitMicrotest, CommGrow_NewRankNullConfig_UsesDefaultConfig) {
   Rank_ReleaseComm(out, /*ownsAbortResources=*/true);
 }
 
+// The joining rank's device query runs after the job and comm exist, so its failure must unwind
+// both (LSan reports the comm and commId otherwise) instead of returning past fail:.
+TEST_F(InitMicrotest, CommGrow_NewRankGetDeviceFails_ReleasesTheJobAndClearsNewcomm) {
+  Grow_AllowHostAlloc();
+  const ncclUniqueId id = Grow_MakeUniqueId(0x2E);
+  Grow_LaunchSpy spy;
+  DeleteWatch watch(nullptr);
+  watch.ArmOnNextNothrowNew(sizeof(ncclCommInitRankAsyncJob));
+  ScopedHook getDevice(g_hipGetDevice, [](int*) { return hipErrorInvalidValue; });
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  EXPECT_EQ(ncclUnhandledCudaError, ncclCommGrow_impl(nullptr, /*nRanks=*/8, &id, /*rank=*/0, &out, nullptr));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  EXPECT_EQ(1, getDevice.calls);
+  ASSERT_TRUE(watch.armed()) << "the job was never allocated";
+  EXPECT_EQ(1, watch.hits());
+}
+
 TEST_F(InitMicrotest, CommGrow_CommIdAllocFails_ReturnsSystemErrorAndClearsNewcomm) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
@@ -9273,7 +9275,9 @@ TEST_F(InitMicrotest, CommGrow_CommIdAllocFails_ReturnsSystemErrorAndClearsNewco
   EXPECT_EQ(0, spy.calls());
 }
 
-TEST_F(InitMicrotest, CommGrow_AsyncLaunchFails_PropagatesClearsNewcommAndReleasesTheJobAndCommId) {
+// The launch's destructor owns the job and its commId once ncclAsyncLaunch is called, so
+// fail: must neither read nor delete the job again.
+TEST_F(InitMicrotest, CommGrow_AsyncLaunchFails_PropagatesClearsNewcommAndReleasesTheJobAndCommIdOnce) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
   const ncclUniqueId id = Grow_MakeUniqueId(0x7E);
@@ -9290,10 +9294,10 @@ TEST_F(InitMicrotest, CommGrow_AsyncLaunchFails_PropagatesClearsNewcommAndReleas
 
   EXPECT_EQ(1, spy.calls());
   EXPECT_EQ(nullptr, out) << "a failed launch must not publish a half-built comm";
-  EXPECT_EQ(1, watch.hits()) << "init.cc:4416 must delete the job it owns on this arrival";
+  EXPECT_EQ(1, watch.hits()) << "only the launch's destructor deletes the job";
   ASSERT_NE(nullptr, commId);
   EXPECT_EQ(1, std::count(frees.freed().begin(), frees.freed().end(), commId))
-      << "init.cc:4413 releases the commId before deleting the job";
+      << "the destructor releases the commId exactly once";
   for (void* p : frees.freed()) {
     ::free(p);
   }
@@ -9618,7 +9622,7 @@ TEST_F(InitMicrotest, InitChildComm_ExcludeListAllocFails_ReturnsSystemErrorAndS
   }
 }
 
-TEST_F(InitMicrotest, InitChildComm_AsyncLaunchFails_ClearsNewcommRestoresDeviceAndLeavesTheJobAllocated) {
+TEST_F(InitMicrotest, InitChildComm_AsyncLaunchFails_ClearsNewcommRestoresDeviceAndReleasesTheJobOnce) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
   constexpr int kOldDevice = 1;
@@ -9634,11 +9638,7 @@ TEST_F(InitMicrotest, InitChildComm_AsyncLaunchFails_ClearsNewcommRestoresDevice
   EXPECT_EQ(kOldDevice, g_currentDevice);
 
   ASSERT_NE(nullptr, spy.rec().job);
-  // ncclAsyncLaunch owns the job from :4192 on, so init.cc:4203's fail: must not delete it; the spy suppresses it.
-  EXPECT_EQ(0, watch.hits());
-  if (watch.hits() == 0) {
-    delete spy.rec().job;
-  }
+  EXPECT_EQ(1, watch.hits()) << "ncclAsyncLaunch's destructor owns the job; fail: must not delete it again";
 }
 
 // initTransportsRank (:1786-2213), rung 4: arming ncclTopoComputeP2pChannelsPerPeer opens it, ncclTopoPostset ends it.

@@ -44,15 +44,16 @@ NCCL_PARAM(DevApiJit, "DEV_API_JIT", 0);
 // registration honors the same opt-out (see ncclCommWindowRegister_impl).
 extern int64_t ncclParamWinEnable();
 
-// Elastic buffers back a symmetric window with CPU memory. Upstream uses the
-// host-NUMA VMM location type, but HIP/CLR has no host-NUMA member and rejects
-// it; RCCL allocates host segments as CU_MEM_LOCATION_TYPE_HOST on AMD (see
-// alloc.h). Treat both as a CPU-backed (sysmem) segment so the elastic-buffer
-// consumer paths recognize AMD host segments.
+// Elastic buffers use host-NUMA VMM on CUDA. HIP has no host-NUMA member, so AMD
+// host segments are hipMemLocationTypeHost (alloc.h). Each platform treats only
+// its own host location type as CPU-backed sysmem.
 static inline bool ncclSymIsHostSegment(CUmemLocationType type) {
+#if defined(__HIP_PLATFORM_AMD__)
+#if NCCL_CUMEM_HOST_GATE
+  if (type == hipMemLocationTypeHost) return true;
+#endif
+#else
   if (type == CU_MEM_LOCATION_TYPE_HOST_NUMA) return true;
-#if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION >= 71200
-  if (type == CU_MEM_LOCATION_TYPE_HOST) return true;
 #endif
   return false;
 }
@@ -449,16 +450,29 @@ fail:
   return ret;
 }
 
+// RCCL: a peer can own a later host segment, so reuse the local handle only
+// when that segment exists on this rank.
 static ncclResult_t symMemoryImportAndMapSegmentsForRank(struct ncclComm* comm, int r, symLsaMessage* messages,
                                                          int maxSegments, int numSegments,
-                                                         CUmemGenericAllocationHandle* memHandles, size_t bigOffset) {
+                                                         CUmemGenericAllocationHandle* memHandles, int nLocalHandles,
+                                                         size_t bigOffset) {
   ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
   uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
   uintptr_t addr = base + r * devr->bigSize + bigOffset;
   for (int segment = 0; segment < numSegments; segment++) {
     symLsaMessage* msg = messages + r * maxSegments + segment;
-    bool reuseLocal = (r == devr->lsaSelf) || (ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type));
+    // memHandles is this rank's array. A peer can own a later host segment.
+    bool reuseLocal = r == devr->lsaSelf ||
+                      (segment < nLocalHandles && ncclParamSymReuseSysmemHandles() &&
+                       ncclSymIsHostSegment(msg->type));
+    if (reuseLocal && segment >= nLocalHandles) {
+      ret = ncclInternalError;
+      goto fail;
+    }
+    if (r != devr->lsaSelf && reuseLocal) {
+      INFO(NCCL_REG, "Symmetric window reusing system-memory handle rank %d segment %d", r, segment);
+    }
     CUmemGenericAllocationHandle handle = reuseLocal ? memHandles[segment] : (CUmemGenericAllocationHandle)0ULL;
     NCCLCHECKGOTO(symMemoryImportAndMapSegmentHandle(comm, r, reinterpret_cast<CUdeviceptr>(addr), msg, handle,
                                                      reuseLocal),
@@ -505,6 +519,37 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
                   ret, fail);
   }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // TODO(ROCM-29810): Remove when the runtime preserves imported VMM location metadata.
+  // RCCL: imported host VMM reads as device, so propagate the one host owner's type; scan maxSegments so all ranks agree.
+  if (ncclParamSymReuseSysmemHandles()) {
+    for (int segment = 0; segment < maxSegments; segment++) {
+      int nHost = 0, nDevice = 0;
+      CUmemLocationType hostType = CU_MEM_LOCATION_TYPE_DEVICE;
+      for (int r = 0; r < devr->lsaSize; r++) {
+        if (segment >= segmentCounts[r]) continue;
+        CUmemLocationType type = messages[r * maxSegments + segment].type;
+        if (ncclSymIsHostSegment(type)) {
+          nHost++;
+          hostType = type;
+        } else {
+          nDevice++;
+        }
+      }
+      if (nHost > 1 && nDevice > 0) {
+        WARN("Symmetric LSA segment %d mixes host and device owners", segment);
+        ret = ncclInvalidUsage;
+        goto fail;
+      }
+      if (nHost == 1) {
+        for (int r = 0; r < devr->lsaSize; r++) {
+          if (segment < segmentCounts[r]) messages[r * maxSegments + segment].type = hostType;
+        }
+      }
+    }
+  }
+#endif
+
   if (devr->lsaFlatBase == nullptr) {
     // Create on first need.
     CUdeviceptr addr;
@@ -514,12 +559,12 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
 
   if (!registerLsa) {
     NCCLCHECKGOTO(symMemoryImportAndMapSegmentsForRank(comm, devr->lsaSelf, messages, maxSegments, numSegments,
-                                                       mem->memHandles, mem->bigOffset),
+                                                       mem->memHandles, mem->numSegments, mem->bigOffset),
                   ret, fail);
   } else {
     for (int r = 0; r < devr->lsaSize; r++) {
       NCCLCHECKGOTO(symMemoryImportAndMapSegmentsForRank(comm, r, messages, maxSegments, segmentCounts[r],
-                                                         mem->memHandles, mem->bigOffset),
+                                                         mem->memHandles, mem->numSegments, mem->bigOffset),
                     ret, fail);
     }
     // Ensure everyone has imported my mem handles.
@@ -765,17 +810,42 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     mem->numGinSegments = 1;
     return ncclSuccess;
   }
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // RCCL: one HIP DMA-BUF covers only the first segment; fail closed instead of registering a partial MR.
+  if (mem->maxGlobalNumSegments > 1 && !mem->globalHasSysmemSegment) {
+    WARN("Window %p spans %d device-memory segments; GIN cannot register it on HIP", mem->primaryAddr,
+         mem->maxGlobalNumSegments);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+#endif
 
   NCCLCHECKGOTO(ncclDevrVerifySegmentLayouts(mem, comm), ret, fail);
   NCCLCHECKGOTO(ncclDevrBuildGinSegmentInfos(mem), ret, fail);
 
   for (int segment = 0; segment < mem->numGinSegments; segment++) {
     CUmemLocationType cuMemLocType = (CUmemLocationType)mem->ginSegmentInfos[segment].memType;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    int ptrType;
+    bool needDmabuf;
+    NCCLCHECKGOTO(
+        rcclDevrGinSegmentRegType(mem->globalHasSysmemSegment, mem->maxGlobalNumSegments, &ptrType, &needDmabuf),
+        ret, fail);
+#else
+    // CUDA HOST_NUMA is pin-able CPU pages (NCCL_PTR_HOST); device VMM is NCCL_PTR_CUDA.
     int ptrType = ncclSymIsHostSegment(cuMemLocType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
+    bool needDmabuf = mem->maxGlobalNumSegments > 1;
+#endif
+    // Device put-fence checks HOST_NUMA. Below 7.12 that enumerator is an int
+    // #define, so a ternary with locType would not assign to hipMemLocationType.
+    if (ncclSymIsHostSegment(cuMemLocType)) {
+      cuMemLocType = static_cast<CUmemLocationType>(CU_MEM_LOCATION_TYPE_HOST_NUMA);
+      mem->ginSegmentInfos[segment].memType = cuMemLocType;
+    }
     NCCLCHECKGOTO(ncclGinRegister(comm, (char*)mem->primaryAddr + offset, mem->ginSegmentInfos[segment].segmentSize,
                                   mem->ginSegmentInfos[segment].ginHostWins, mem->ginSegmentInfos[segment].ginDevWins,
                                   mem->ginSegmentInfos[segment].ginWinGenerations,
-                                  mem->winFlags, mem->maxGlobalNumSegments > 1, ptrType),
+                                  mem->winFlags, needDmabuf, ptrType),
                   ret, fail);
     numSegmentsRegistered++;
     offset += mem->ginSegmentInfos[segment].segmentSize;
@@ -1689,6 +1759,8 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
   // RCCL: when sym VMM is unavailable (no cuMem), route through the non-sym
   // helper which lays out IPC for intra-node and proxy/GIN MR for inter-node
   if (!comm->symmetricSupport) {
+    // Host VMM cannot use the non-symmetric IPC fallback; reject it before cudaIpcGetMemHandle.
+    NCCLCHECKGOTO(rcclDevrProbeNonSymWindow(comm, userPtr, userSize, winFlags), ret, fail_locReg);
     NCCLCHECKGOTO(windowRegisterNonSym(comm, userPtr, userSize, winFlags, localRegHandle, outWinDev), ret, fail_locReg);
     CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
     return ncclSuccess;
@@ -1706,31 +1778,8 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
                 ret, fail_locReg);
   NCCLCHECKGOTO(ncclCalloc(&memHandles, numSegments), ret, fail_locReg);
 
-  if (hasSysmemSegment) {
-    if (!ncclParamElasticBufferRegister()) {
-      WARN("VA represented by {userPtr = %p, size = %zu} contains CPU-backed physical segments, but "
-           "NCCL_ELASTIC_BUFFER_REGISTER is set to 0. Please set NCCL_ELASTIC_BUFFER_REGISTER=1 and retry window "
-           "registration",
-           userPtr, userSize);
-      ret = ncclInvalidArgument;
-      goto fail_locReg_memHandle;
-    }
-#if CUDART_VERSION >= 12080
-    else if (comm->MNNVL && ncclDevrWinRegEnabled(winFlags, ncclDevrRegisterLsa)) {
-      int multiNodeLsaSupported = 0;
-      CUCHECKGOTO(cuDeviceGetAttribute(&multiNodeLsaSupported, CU_DEVICE_ATTRIBUTE_HOST_NUMA_MULTINODE_IPC_SUPPORTED,
-                                       comm->cudaDev),
-                  ret, fail_locReg_memHandle);
-      if (!multiNodeLsaSupported) {
-        WARN("VA represented by {userPtr = %p, size = %zu} contains CPU-backed physical segments, but the LSA team "
-             "does not support multi-node IPC on CPU-backed buffers. Please retry by setting NCCL_MNNVL_ENABLE=0",
-             userPtr, userSize);
-        ret = ncclInvalidArgument;
-        goto fail_locReg_memHandle;
-      }
-    }
-#endif
-  }
+  NCCLCHECKGOTO(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment, winFlags), ret,
+                fail_locReg_memHandle);
 
   memOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(memAddr);
   if (memOffset % NCCL_WIN_REQUIRED_ALIGNMENT != 0) {
@@ -1956,6 +2005,19 @@ void ncclDevCommDump(struct ncclDevComm* devComm) {
   printf(" GIN World Barrier signal0 %d\n", devComm->worldGinBarrier.signal0);
 }
 
+// The devComm's ginContextCount is ncclGinContextCount() for whichever backend
+// ncclGinDevCommSetup picks, and per-context resource regions are indexed by it.
+// Size for the worst case over every active backend: rounding to the widest
+// ginCommCount alone is not enough (ROUNDUP(4, 4) < ROUNDUP(4, 3)).
+static int devrGinContextsTotal(const struct ncclGinState* ginState, int nGinContextsRequested) {
+  int total = nGinContextsRequested;
+  for (int b = 0; b < ginState->numActiveBackends; b++) {
+    int ginCommCount = std::max(ginState->backends[b].ginCommCount, 1);
+    total = std::max(total, ncclGinContextCount(nGinContextsRequested, ginCommCount));
+  }
+  return total;
+}
+
 ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCommRequirements* reqs,
                                         struct ncclDevComm* outDevComm, bool isInternal, uint32_t deviceCodeVersion) {
   ncclResult_t ret = ncclSuccess;
@@ -1968,7 +2030,7 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   struct ncclDevrTeam* tmLsa;
   ncclTeam_t ucTeam, mcTeam;
   size_t bufSizeTotal;
-  int nGinContexts = reqs->ginContextCount;
+  int nGinContextsRequested = reqs->ginContextCount;
   int ginSignalTotal = 0, ginCounterTotal = 0;
   struct ncclDevResourceRequirements* resReqsHead = reqs->resourceRequirementsList;
   struct ncclDevResourceRequirements lsaBarReq;
@@ -1989,6 +2051,7 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   size_t ginSignalShadowsOffset = 0;
   size_t ginAnvilNetSignalsOffset = 0;
   int nGinContextsTotal = 0;
+  bool ginDevCommSetupDone = false;
   void* outDevCommPreserve = nullptr;
   struct ncclDevComm outDevCommTmp;
   cudaStreamCaptureMode captureMode = cudaStreamCaptureModeRelaxed;
@@ -2192,21 +2255,14 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
       rr = rr->next;
     }
     bufSizeTotal = alignUp(bufSizeTotal, 128);
+    nGinContextsTotal =
+      devr->ginEnabled ? devrGinContextsTotal(&comm->sharedRes->ginState, nGinContextsRequested)
+                       : nGinContextsRequested;
     ginSignalShadowsOffset = bufSizeTotal;
-    bufSizeTotal += nGinContexts * ginSignalTotal * sizeof(uint64_t); // include signal shadows
+    bufSizeTotal += (size_t)nGinContextsTotal * ginSignalTotal * sizeof(uint64_t); // include signal shadows
     ginAnvilNetSignalsOffset = bufSizeTotal;
     if (devr->ginEnabled && ginSignalTotal > 0) {
-      // 2.31 moved ginCommCount into per-backend state; round up to the widest
-      // active backend so every backend's signal shadows stay in range.
-      struct ncclGinState* gs = &comm->sharedRes->ginState;
-      int ginCommCount = 1;
-      for (int b = 0; b < gs->numActiveBackends; b++) {
-        if (gs->backends[b].ginCommCount > ginCommCount) ginCommCount = gs->backends[b].ginCommCount;
-      }
-      nGinContextsTotal = ROUNDUP(nGinContexts, ginCommCount);
       bufSizeTotal += (size_t)nGinContextsTotal * ginSignalTotal * sizeof(uint64_t);
-    } else {
-      nGinContextsTotal = nGinContexts;
     }
     bufSizeTotal = alignUp(bufSizeTotal, devr->granularity);
   }
@@ -2215,6 +2271,7 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
     reqs->ginSignalCount = ginSignalTotal;
     reqs->ginCounterCount = ginCounterTotal;
     NCCLCHECKGOTO(ncclGinDevCommSetup(comm, reqs, outDevComm, deviceCodeVersion), ret, fail);
+    ginDevCommSetupDone = true;
     // SDMA signal binding is deferred until the resource window is created
     // (see ncclGinAnvilBindResourceWindowSignals call below).
   }
@@ -2325,6 +2382,13 @@ fail_stream_mem:
 fail_stream:
   CUDACHECKIGNORE(cudaStreamDestroy(stream));
 fail:
+  // Destroy the GIN contexts this call created. Without this, a failure between
+  // ncclGinDevCommSetup and the signal bind leaves them registered with the
+  // backend (Anvil keeps them pending), and a retried create binds the stale
+  // contexts alongside the new ones.
+  if (ginDevCommSetupDone && ncclGinDevCommFree(comm, outDevComm) == ncclSuccess) {
+    ncclGinDevCommClearFields(outDevComm);
+  }
   CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
   return ret;
 }

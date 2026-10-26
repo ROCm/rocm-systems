@@ -4807,6 +4807,7 @@ fail:
 static void childCommCleanupJob(void* job) {
   struct ncclCommInitRankAsyncJob* initJob = (struct ncclCommInitRankAsyncJob*)job;
   if (initJob->excludeRanksList) free(initJob->excludeRanksList);
+  if (initJob->commId) free(initJob->commId); // set only by ncclCommGrow
   delete initJob;
 }
 
@@ -5107,7 +5108,7 @@ ncclResult_t ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* 
   } else {
     // New rank: new comm, no parent
     int device;
-    CUDACHECK(cudaGetDevice(&device));
+    CUDACHECKGOTO(cudaGetDevice(&device), res, fail);
     job->parent = NULL;
     job->cudaDev = device;
     job->myrank = rank;
@@ -5123,11 +5124,13 @@ ncclResult_t ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* 
   job->color = 0;
   job->key = job->myrank;
   if (ncclParamEnqueueRearchEnable()) {
-    NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)job, ncclCommInitRankFunc, childCommCleanupJob, newComm),
-                  res, fail);
+    res = ncclMgmtTaskEnqueue((struct ncclAsyncJob*)job, ncclCommInitRankFunc, childCommCleanupJob, newComm);
+    job = NULL; // enqueue owns and destroys the job on both success and failure
+    NCCLCHECKGOTO(res, res, fail);
   } else {
-    NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, ncclCommInitRankFunc, NULL, childCommCleanupJob, newComm),
-                  res, fail);
+    res = ncclAsyncLaunch((struct ncclAsyncJob*)job, ncclCommInitRankFunc, NULL, childCommCleanupJob, newComm);
+    job = NULL; // launch owns and destroys the job on both success and failure
+    NCCLCHECKGOTO(res, res, fail);
   }
 
 exit:

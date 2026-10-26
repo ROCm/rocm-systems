@@ -9,6 +9,7 @@
 #define _NCCL_GIN_HOST_H_
 
 #include "allocator.h"
+#include "bitops.h"
 #include "nccl.h"
 #include "nccl_gin.h"
 #include "nccl_device/core_tmp.h"
@@ -77,6 +78,13 @@ struct ncclGinState {
   struct ncclGinBackendState backends[NCCL_GIN_MAX_ACTIVE_BACKENDS];
 };
 
+// The ginContextCount a devComm gets from a backend with ginCommCount connections.
+// ncclDevrCommCreateInternal sizes per-context resource regions with it (via
+// devrGinContextsTotal), so the two must not diverge.
+static inline int ncclGinContextCount(int nGinContextsRequested, int ginCommCount) {
+  return ROUNDUP(nGinContextsRequested, ginCommCount);
+}
+
 extern int64_t ncclParamGinType();
 
 // Get the GIN type from comm. ginType is set to the GIN type that can be used
@@ -90,6 +98,10 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm);
 ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
                                  struct ncclDevComm* devComm, uint32_t deviceCodeVersion);
 ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const* devComm);
+// Zero the GIN fields ncclGinDevCommSetup filled in. ncclGinDevCommFree matches a
+// devComm by ginHandles[0], so a devComm whose contexts were freed must be cleared
+// before anything can pass it to ncclGinDevCommFree again.
+void ncclGinDevCommClearFields(struct ncclDevComm* devComm);
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
                              void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
                              ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
