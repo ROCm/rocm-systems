@@ -1,3 +1,11 @@
+# DEPRECATED: retained solely for media-libs-ci.yml.
+#
+# Sibling of the TheRock single-arch test workflows removed in b7ae4f90d3a.
+# media-libs-ci.yml is now its only consumer.
+#
+# Do not add new callers. Slated for removal once media libs CI moves to
+# TheRock's multi-arch pipeline (therock-multi-arch-ci.yml).
+
 # TBD: Add customer test cases
 name: TheRock Test Packages for media libs
 
