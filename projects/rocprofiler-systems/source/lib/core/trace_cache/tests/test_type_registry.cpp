@@ -6,6 +6,39 @@
 #include <cstdint>
 
 #include <gtest/gtest.h>
+#include <optional>
+#include <stdexcept>
+#include <type_traits>
+#include <vector>
+
+static_assert(rocprofsys::trace_cache::detail::are_unique<1, 2, 3>());
+static_assert(!rocprofsys::trace_cache::detail::are_unique<1, 2, 1>());
+
+namespace
+{
+// Serializes `value`, dispatches it under `type_id` and calls `check` with the record
+// the visitor received, while the serialized buffer is still alive (string_view members
+// point into it). Returns whether the visitor saw a `Sample`.
+template <typename Sample, typename Registry, typename Check>
+bool
+dispatch_round_trip(const Registry& registry, test_type_identifier_t type_id,
+                    const Sample& value, Check&& check)
+{
+    std::vector<std::uint8_t> buffer(rocprofsys::trace_cache::get_size(value));
+    rocprofsys::trace_cache::serialize(buffer.data(), value);
+
+    auto* data     = buffer.data();
+    bool  received = false;
+    registry.dispatch(type_id, data, [&](const auto& sample) {
+        if constexpr(std::is_same_v<Sample, std::decay_t<decltype(sample)>>)
+        {
+            received = true;
+            check(sample);
+        }
+    });
+    return received;
+}
+}  // namespace
 
 class type_registry_test : public ::testing::Test
 {
@@ -15,97 +48,66 @@ protected:
         type_registry;
 };
 
-TEST_F(type_registry_test, test_get_type_sample_1)
+TEST_F(type_registry_test, test_dispatch_sample_1)
 {
-    const test_sample_1       test_value{ 42, "hello" };
-    const size_t              buffer_size = rocprofsys::trace_cache::get_size(test_value);
-    std::vector<std::uint8_t> buffer(buffer_size);
-    rocprofsys::trace_cache::serialize(buffer.data(), test_value);
-
-    auto* buffer_data = buffer.data();
-    auto  result =
-        type_registry.get_type(test_type_identifier_t::sample_type_1, buffer_data);
-
-    ASSERT_TRUE(result.has_value());
-    ASSERT_TRUE(std::holds_alternative<test_sample_1>(result.value()));
-
-    auto const sample_1 = std::get<test_sample_1>(result.value());
-    EXPECT_EQ(sample_1.value, 42);
-    EXPECT_EQ(sample_1.text, "hello");
+    EXPECT_TRUE(dispatch_round_trip(type_registry, test_type_identifier_t::sample_type_1,
+                                    test_sample_1{ 42, "hello" },
+                                    [](const test_sample_1& sample) {
+                                        EXPECT_EQ(sample.value, 42);
+                                        EXPECT_EQ(sample.text, "hello");
+                                    }));
 }
 
-TEST_F(type_registry_test, test_get_type_sample_2)
+TEST_F(type_registry_test, test_dispatch_sample_2)
+{
+    EXPECT_TRUE(dispatch_round_trip(type_registry, test_type_identifier_t::sample_type_2,
+                                    test_sample_2{ 3.14, 123 },
+                                    [](const test_sample_2& sample) {
+                                        EXPECT_DOUBLE_EQ(sample.data, 3.14);
+                                        EXPECT_EQ(sample.sample_id, 123);
+                                    }));
+}
+
+TEST_F(type_registry_test, test_dispatch_calls_visitor_once)
 {
     const test_sample_2       test_value{ 3.14, 123 };
-    const size_t              buffer_size = rocprofsys::trace_cache::get_size(test_value);
-    std::vector<std::uint8_t> buffer(buffer_size);
+    std::vector<std::uint8_t> buffer(rocprofsys::trace_cache::get_size(test_value));
     rocprofsys::trace_cache::serialize(buffer.data(), test_value);
 
-    auto* buffer_data = buffer.data();
-    auto  result =
-        type_registry.get_type(test_type_identifier_t::sample_type_2, buffer_data);
+    auto* data  = buffer.data();
+    int   calls = 0;
+    type_registry.dispatch(test_type_identifier_t::sample_type_2, data,
+                           [&](const auto&) { ++calls; });
 
-    ASSERT_TRUE(result.has_value());
-    ASSERT_TRUE(std::holds_alternative<test_sample_2>(result.value()));
-
-    auto const sample_2 = std::get<test_sample_2>(result.value());
-    EXPECT_DOUBLE_EQ(sample_2.data, 3.14);
-    EXPECT_EQ(sample_2.sample_id, 123);
+    EXPECT_EQ(calls, 1);
 }
 
-TEST_F(type_registry_test, test_get_type_unknown_id)
+TEST_F(type_registry_test, test_dispatch_unknown_id_throws_without_calling_visitor)
 {
     std::uint8_t  dummy_data = 0;
     std::uint8_t* data       = &dummy_data;
+    int           calls      = 0;
 
-    auto const result =
-        type_registry.get_type(test_type_identifier_t::fragmented_space, data);
-
-    EXPECT_FALSE(result.has_value());
+    EXPECT_THROW(type_registry.dispatch(test_type_identifier_t::fragmented_space, data,
+                                        [&](const auto&) { ++calls; }),
+                 std::runtime_error);
+    EXPECT_EQ(calls, 0);
 }
 
-TEST_F(type_registry_test, test_variant_type_definition)
+TEST_F(type_registry_test, test_dispatch_multiple_calls_same_type)
 {
-    using expected_variant = std::variant<test_sample_1, test_sample_2>;
-    using actual_variant =
-        rocprofsys::trace_cache::type_registry<test_type_identifier_t, test_sample_1,
-                                               test_sample_2>::variant_t;
-
-    EXPECT_TRUE((std::is_same_v<expected_variant, actual_variant>) );
-}
-
-TEST_F(type_registry_test, test_multiple_calls_same_type)
-{
-    const test_sample_1 test_value1{ 100, "first" };
-    const test_sample_1 test_value2{ 200, "second" };
-
-    const size_t buffer_size1 = rocprofsys::trace_cache::get_size(test_value1);
-    const size_t buffer_size2 = rocprofsys::trace_cache::get_size(test_value2);
-
-    std::vector<std::uint8_t> buffer1(buffer_size1);
-    std::vector<std::uint8_t> buffer2(buffer_size2);
-
-    rocprofsys::trace_cache::serialize(buffer1.data(), test_value1);
-    rocprofsys::trace_cache::serialize(buffer2.data(), test_value2);
-
-    auto* buffer1_data = buffer1.data();
-    auto* buffer2_data = buffer2.data();
-
-    auto result1 =
-        type_registry.get_type(test_type_identifier_t::sample_type_1, buffer1_data);
-    auto result2 =
-        type_registry.get_type(test_type_identifier_t::sample_type_1, buffer2_data);
-
-    ASSERT_TRUE(result1.has_value());
-    ASSERT_TRUE(result2.has_value());
-
-    auto const sample_1_1 = std::get<test_sample_1>(result1.value());
-    auto const sample_1_2 = std::get<test_sample_1>(result2.value());
-
-    EXPECT_EQ(sample_1_1.value, 100);
-    EXPECT_EQ(sample_1_1.text, "first");
-    EXPECT_EQ(sample_1_2.value, 200);
-    EXPECT_EQ(sample_1_2.text, "second");
+    EXPECT_TRUE(dispatch_round_trip(type_registry, test_type_identifier_t::sample_type_1,
+                                    test_sample_1{ 100, "first" },
+                                    [](const test_sample_1& sample) {
+                                        EXPECT_EQ(sample.value, 100);
+                                        EXPECT_EQ(sample.text, "first");
+                                    }));
+    EXPECT_TRUE(dispatch_round_trip(type_registry, test_type_identifier_t::sample_type_1,
+                                    test_sample_1{ 200, "second" },
+                                    [](const test_sample_1& sample) {
+                                        EXPECT_EQ(sample.value, 200);
+                                        EXPECT_EQ(sample.text, "second");
+                                    }));
 }
 
 class type_registry_optional_test : public ::testing::Test
@@ -116,40 +118,20 @@ protected:
         type_registry;
 };
 
-TEST_F(type_registry_optional_test, test_get_type_sample_5_with_value)
+TEST_F(type_registry_optional_test, test_dispatch_sample_5_with_value)
 {
-    const test_sample_5       test_value{ std::optional<std::uint32_t>{ 42 } };
-    const size_t              buffer_size = rocprofsys::trace_cache::get_size(test_value);
-    std::vector<std::uint8_t> buffer(buffer_size);
-    rocprofsys::trace_cache::serialize(buffer.data(), test_value);
-
-    auto* buffer_data = buffer.data();
-    auto  result =
-        type_registry.get_type(test_type_identifier_t::sample_type_5, buffer_data);
-
-    ASSERT_TRUE(result.has_value());
-    ASSERT_TRUE(std::holds_alternative<test_sample_5>(result.value()));
-
-    auto sample_5 = std::get<test_sample_5>(result.value());
-    ASSERT_TRUE(sample_5.data.has_value());
-    EXPECT_EQ(sample_5.data.value(), 42);
+    EXPECT_TRUE(dispatch_round_trip(type_registry, test_type_identifier_t::sample_type_5,
+                                    test_sample_5{ std::optional<std::uint32_t>{ 42 } },
+                                    [](const test_sample_5& sample) {
+                                        ASSERT_TRUE(sample.data.has_value());
+                                        EXPECT_EQ(sample.data.value(), 42);
+                                    }));
 }
 
-TEST_F(type_registry_optional_test, test_get_type_sample_5_nullopt)
+TEST_F(type_registry_optional_test, test_dispatch_sample_5_nullopt)
 {
-    const test_sample_5       test_value{ std::nullopt };
-    const size_t              buffer_size = rocprofsys::trace_cache::get_size(test_value);
-    std::vector<std::uint8_t> buffer(buffer_size);
-    rocprofsys::trace_cache::serialize(buffer.data(), test_value);
-
-    auto* buffer_data = buffer.data();
-    auto  result =
-        type_registry.get_type(test_type_identifier_t::sample_type_5, buffer_data);
-
-    ASSERT_TRUE(result.has_value());
-    ASSERT_TRUE(std::holds_alternative<test_sample_5>(result.value()));
-
-    auto const sample_5 = std::get<test_sample_5>(result.value());
-    EXPECT_FALSE(sample_5.data.has_value());
-    EXPECT_EQ(sample_5.data, std::nullopt);
+    EXPECT_TRUE(dispatch_round_trip(
+        type_registry, test_type_identifier_t::sample_type_5,
+        test_sample_5{ std::nullopt },
+        [](const test_sample_5& sample) { EXPECT_EQ(sample.data, std::nullopt); }));
 }
