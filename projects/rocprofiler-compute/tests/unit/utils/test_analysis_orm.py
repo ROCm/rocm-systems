@@ -1093,14 +1093,14 @@ def test_per_kernel_isa_select_leads_with_the_file_key_columns():
 
 
 def test_per_source_line_rows_read_each_lines_state_and_references(db_session):
-    """Each line of a captured file shows its stored state and its ISA rows."""
+    """Each source line of a captured file has its sample state and ISA references."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     source_file = add_captured_source_file(db_session, workload, "/s/a.cpp", 3)
     add_captured_source_file(db_session, workload, "/s/hip.h", 2)
     for code_object_id, source in (
         (5, "/s/hip.h:2 -> /s/a.cpp:2"),
-        # A line that appears twice in one stack is referenced once.
+        # A source line that appears twice in one inline stack is referenced once.
         (6, "/s/a.cpp:2 -> /s/a.cpp:2"),
         (7, "/s/a.cpp:?"),
         (8, "/s/absent.cpp:1"),
@@ -1113,7 +1113,7 @@ def test_per_source_line_rows_read_each_lines_state_and_references(db_session):
             code_object_id=code_object_id,
             source=source,
         )
-    # Only a.cpp:2 has a state, so hip.h:2 shows references without counts.
+    # Only a.cpp:2 has a sample state, so hip.h:2 has ISA references but no counts.
     line_state = PCSampleState(
         source_line=source_file.source_lines[1],
         total_count=8,
@@ -1137,10 +1137,7 @@ def test_per_source_line_rows_read_each_lines_state_and_references(db_session):
     rows = [
         (
             *row[:-1],
-            [
-                isa_reference["code_object_id"]
-                for isa_reference in json.loads(row[-1] or "[]")
-            ],
+            [isa_reference["code_object_id"] for isa_reference in json.loads(row[-1])],
         )
         for row in Database.stream_per_source_line_rows(
             workload.workload_id, ["NONE", "WAITCNT"]

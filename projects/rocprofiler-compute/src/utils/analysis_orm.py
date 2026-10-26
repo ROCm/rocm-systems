@@ -320,7 +320,7 @@ class SourceLine(Base):
     instruction_source_lines = relationship(
         "InstructionSourceLine", back_populates="source_line"
     )
-    # Line has at most one sampled state
+    # Source line has at most one sample state
     pc_sample_state = relationship(
         "PCSampleState", back_populates="source_line", uselist=False
     )
@@ -355,9 +355,10 @@ class InstructionSourceLine(Base):
 
 
 class PCSampleState(Base):
-    """The PC sampling counts of one instruction line or of one source line.
+    """Holds the PC sampling counts of one instruction line or one source line.
 
-    A source line's counts add up the instructions whose inline stack names it.
+    The counts of a source line are the sums over all instructions whose inline
+    stack includes that source line.
     """
 
     __tablename__ = f"{PREFIX}pc_sample_state"
@@ -707,7 +708,7 @@ class Database:
         workload_id: int,
         stall_reasons: List[str],
     ) -> Iterator[Tuple[Any, ...]]:
-        """Yield every line of one workload's captured source files, file by file.
+        """Yield every source line of one workload's captured source files.
 
         The rows arrive in the order the exporter writes them, through the raw
         sqlite3 cursor, so the full result set is never held in memory.
@@ -865,7 +866,7 @@ class Database:
         """
         source_chain_subquery = Database._source_chain_subquery()
 
-        statement = (
+        return (
             select(
                 *per_kernel_isa_file_key_columns(),
                 InstructionLine.code_object_offset.label("offset"),
@@ -903,10 +904,16 @@ class Database:
                 PCSampleState,
                 InstructionLine.instruction_uuid == PCSampleState.instruction_uuid,
             )
-        )
-        return (
-            Database
-            ._outerjoin_stall_reasons(statement)
+            .outerjoin(
+                PCSampleStallReason,
+                PCSampleState.pc_sample_state_uuid
+                == PCSampleStallReason.pc_sample_state_uuid,
+            )
+            .outerjoin(
+                PCSampleStallReasonLookup,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
+                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
+            )
             .outerjoin(
                 source_chain_subquery,
                 InstructionLine.instruction_uuid
@@ -928,14 +935,14 @@ class Database:
         workload_id: int,
         stall_reasons: List[str],
     ) -> Select[Any]:
-        """Select every line of one workload's captured source files.
+        """Select every source line of one workload's captured source files.
 
-        Each line carries its sample state and references the per-kernel ISA
-        rows of the instructions whose inline stack names that line.
+        Each source line has its sample state and the ISA references of the
+        instructions whose inline stack includes that source line.
         """
         isa_references_subquery = Database._isa_references_subquery(workload_id)
 
-        statement = (
+        return (
             select(
                 *per_source_line_file_key_columns(),
                 SourceLine.line_number,
@@ -946,7 +953,10 @@ class Database:
                 PCSampleState.wave_occupancy_percent,
                 PCSampleState.active_thread_percent,
                 *Database._stall_reason_columns(stall_reasons),
-                isa_references_subquery.c.isa_references,
+                # A source line without instructions has no ISA references.
+                func.coalesce(isa_references_subquery.c.isa_references, "[]").label(
+                    "isa_references"
+                ),
             )
             .select_from(SourceLine)
             .join(
@@ -954,15 +964,21 @@ class Database:
                 SourceLine.source_file_uuid == SourceFile.source_file_uuid,
             )
             .join(Workload, SourceFile.workload_id == Workload.workload_id)
-            # A line no sample landed on leaves the counts empty.
+            # A source line without samples has empty counts.
             .outerjoin(
                 PCSampleState,
                 SourceLine.source_line_uuid == PCSampleState.source_line_uuid,
             )
-        )
-        return (
-            Database
-            ._outerjoin_stall_reasons(statement)
+            .outerjoin(
+                PCSampleStallReason,
+                PCSampleState.pc_sample_state_uuid
+                == PCSampleStallReason.pc_sample_state_uuid,
+            )
+            .outerjoin(
+                PCSampleStallReasonLookup,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
+                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
+            )
             .outerjoin(
                 isa_references_subquery,
                 SourceLine.source_line_uuid
@@ -973,18 +989,21 @@ class Database:
             .where(SourceFile.md5_checksum.is_not(None))
             # Skip "?" frames, which are stored without a line number.
             .where(SourceLine.line_number.is_not(None))
-            # One row per line: the stall-reason join multiplies them otherwise.
+            # The stall-reason join adds one row per reason, so group the rows
+            # back into one row per source line.
             .group_by(SourceLine.source_line_uuid)
             .order_by(SourceFile.file_path, SourceLine.line_number)
         )
 
     @staticmethod
     def _isa_references_subquery(workload_id: int) -> Subquery:
-        """Select the per-kernel ISA rows that each source line of a workload names.
+        """For each source line of a workload, list the instructions compiled from it.
 
-        Each source line gets one JSON array, with one object per ISA row. The
-        rows are numbered the same way as in the per-kernel ISA files.
+        Each instruction is given by its kernel, code object, process, and its
+        instruction line number, which is its position in the ISA file of its
+        kernel, counting from 1. The list is a JSON array.
         """
+        # Number the instruction lines of each kernel ISA file, counting from 1.
         numbered_isa_lines = (
             select(
                 InstructionLine.instruction_uuid,
@@ -1017,8 +1036,8 @@ class Database:
             .where(CodeObjectStore.workload_id == workload_id)
             .subquery("numbered_isa_lines")
         )
-        # Reference an instruction once per line, even if its stack names the
-        # line twice.
+        # Pair each source line with the instructions compiled from it. DISTINCT
+        # keeps one pair when an inline stack includes the source line twice.
         line_references = (
             select(InstructionSourceLine.source_line_uuid, numbered_isa_lines)
             .join(
@@ -1053,11 +1072,9 @@ class Database:
 
     @staticmethod
     def _stall_reason_columns(stall_reasons: List[str]) -> List[Any]:
-        """Return one column per stall reason, holding its count.
-
-        The statement must group the rows of each sample state back into one.
-        In each group the CASE is non-null on one row, and MAX skips the nulls.
-        """
+        """Return one column per stall reason, holding its count."""
+        # Joining stall reasons gives one row per reason; MAX picks the count of
+        # the matching reason.
         return [
             func.max(
                 case((
@@ -1067,19 +1084,6 @@ class Database:
             ).label(stall_reason)
             for stall_reason in stall_reasons
         ]
-
-    @staticmethod
-    def _outerjoin_stall_reasons(statement: Select[Any]) -> Select[Any]:
-        """Join the sample states of a statement to their stall reasons and names."""
-        return statement.outerjoin(
-            PCSampleStallReason,
-            PCSampleState.pc_sample_state_uuid
-            == PCSampleStallReason.pc_sample_state_uuid,
-        ).outerjoin(
-            PCSampleStallReasonLookup,
-            PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
-            == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
-        )
 
     @staticmethod
     def _compile_view_sql() -> dict[str, str]:
