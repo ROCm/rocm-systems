@@ -631,6 +631,65 @@ TEST_F(MemoryWaitScoreboardTest, Rdna4CompatibilityWaitDrainsAllCountersForEvery
   }
 }
 
+TEST(MemoryWaitExecutionTest, NsaImageChecksOnlyItsDecodedCoordinateRegisters) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    GpuMemory memory("nsa_image_wait_memory");
+    L2Cache l2("nsa_image_wait_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    auto cu = ComputeUnitCore::create("nsa_image_wait_cu", config, &memory, &l2);
+    auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+
+    std::array<uint32_t, 3> words{};
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      const auto base =
+          rdna3::build_mimg(rdna3::kImageLoadMimg,
+                            {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .vaddr = 2, .vdata = 8});
+      words = {base[0], base[1], 6};
+    } else {
+      const auto base =
+          rdna3_5::build_mimg(rdna3_5::kImageLoadMimg,
+                              {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .vaddr = 2, .vdata = 8});
+      words = {base[0], base[1], 6};
+    }
+    auto decoder = Decoder::create(arch);
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(words, 0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    std::vector<MemoryWaitScoreboard::Hazard> hazards;
+    state.bind(0x200, &hazards, [](void *context, const auto &hazard) {
+      static_cast<decltype(hazards) *>(context)->push_back(hazard);
+    });
+    for (const uint16_t pending : {0, 2, 3, 6}) {
+      SCOPED_TRACE(pending);
+      state.clear();
+      hazards.clear();
+      state.add({state.issue(WaitCounterKind::Load),
+                 0x100,
+                 1,
+                 {RegClass::VGPR, pending, 1},
+                 WaitCounterKind::Load,
+                 0xf});
+      state.check_instruction(*decoded.value(), *wf);
+      EXPECT_EQ(hazards.size(), pending == 2 || pending == 6 ? 1u : 0u);
+      if (pending == 3) {
+        state.access({RegClass::VGPR, 3, 1}, 1, 0xf, false);
+        ASSERT_EQ(hazards.size(), 1u);
+        EXPECT_EQ(hazards.front().reg.index, 3u);
+      }
+    }
+  }
+}
+
 TEST(MemoryWaitExecutionTest, WaitIdleAndRdna4CompatibilityWaitDrainEveryFunctionalCounter) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     for (uint32_t word : {0xbf890000u, 0xbf89fc07u, 0xbf89ffffu, 0xbf8a0000u}) {
