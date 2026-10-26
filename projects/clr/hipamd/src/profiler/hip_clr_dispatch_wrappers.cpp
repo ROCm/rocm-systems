@@ -1522,11 +1522,11 @@ static HipCopyKindExt GraphMemcpyKindToExt(hipMemcpyKind kind,
 // Called after a successful hipGraphInstantiate* — pGraphExec is already set.
 // Uses internal C++ graph APIs directly to avoid calling public HIP functions
 // from within a wrapper (which would clobber hipGetLastError and risk reentrancy).
-// Nothing is stored with profiling off: a tool slot can keep an instantiate
-// wrapper reachable after disable put back hipGraphExecDestroy, whose wrapper
-// would erase the entry.
+// Nothing is stored while the wrappers are out: a tool slot can keep an
+// instantiate wrapper reachable after Remove put back hipGraphExecDestroy,
+// whose wrapper would erase the entry.
 static void CaptureGraphExecNodes(hipGraphExec_t exec, hipGraph_t graph) {
-  if (!exec || !graph || !HipProfilerActiveExt()) return;
+  if (!exec || !graph || !g_wrapped.load()) return;
   auto* g = reinterpret_cast<hip::Graph*>(graph);
   if (!hip::Graph::isGraphValid(g)) return;
   const auto& nodes = g->GetNodes();
@@ -6105,12 +6105,8 @@ void HipProfilerBuildWrapperTableExt(HipDispatchTable* tbl) {
   // g_wrapper_tbl is fully written before any Install call stores its slots.
 }
 
-// Install and Remove leave alone a slot that another component changed since
-// the snapshot. A tool that chained to a wrapper while the profiler was on keeps
-// its slot across later enables and disables. Remove does put back a hook that
-// sat under a wrapper, even after its owner tried to take it out and found the
-// wrapper there: HRR's capture shims come back after hip_capture_shutdown(),
-// and the capture writer drops what reaches it after the trailer.
+// A tool that chained to a wrapper while the profiler was on keeps its slot
+// across later enables and disables.
 void HipProfilerInstallWrappersExt(HipDispatchTable* tbl) {
   if (g_wrapped.exchange(true)) return;
   hip::ReplaceDispatchSlots(tbl, g_next, g_wrapper_tbl);

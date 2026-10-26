@@ -2800,7 +2800,7 @@ hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(
 
 namespace {
 // The getters hand out the live tables read-only, but the tables themselves are
-// mutable statics in hip_api_trace.cpp. Only install and uninstall write them.
+// mutable statics in hip_api_trace.cpp.
 HipDispatchTable* live_table() {
   return const_cast<HipDispatchTable*>(hip::GetHipDispatchTable());
 }
