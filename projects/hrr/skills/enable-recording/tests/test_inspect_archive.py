@@ -740,19 +740,19 @@ def test_only_blobs_registered_as_fat_binaries_are_checked(tmp_path, capsys):
 
 
 def test_fat_binaries_are_found_by_the_id_of_the_archive_version(tmp_path, capsys):
-    """`__hipRegisterFatBinary` was id 549 in format v8 and is 550 in v9 and
-    v10. A v7 archive may hold either, so `verify` says it did not look rather
+    """`__hipRegisterFatBinary` was id 549 in format v8, 550 in v9 and v10, and
+    551 in v11. A v7 archive may hold either, so `verify` says it did not look rather
     than report no build information.
     """
     leaky = make_bundle(make_elf({".text": b"\1" * 8, ".debug_str": b"/app/build\0"}))
-    cases = {40: (8, 549), 41: (8, 550), 42: (9, 550), 43: (10, 550), 39: (7, 549)}
+    cases = {40: (8, 549), 41: (8, 550), 42: (9, 550), 43: (10, 550), 39: (7, 549), 44: (11, 551)}
     for pid, (version, event_id) in cases.items():
         register_fat_binary(make_process(tmp_path, pid, format_version=version), pid, 1, leaky, event_id)
 
     inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
     procs = {p["pid"]: p for p in json.loads(capsys.readouterr().out)["processes"]}
-    assert [procs[pid]["debug_info_files"] for pid in cases] == [1, 0, 1, 1, 0]
-    assert [procs[pid]["fat_binaries_scanned"] for pid in cases] == [True, True, True, True, False]
+    assert [procs[pid]["debug_info_files"] for pid in cases] == [1, 0, 1, 1, 0, 1]
+    assert [procs[pid]["fat_binaries_scanned"] for pid in cases] == [True, True, True, True, False, True]
     inspect_archive.main(["--archive", str(tmp_path), "--no-playback"])
     assert "fat binaries not checked (archive format v7)" in capsys.readouterr().out
 

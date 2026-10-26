@@ -1666,6 +1666,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
         (void)hipKernelGetParamInfo(kernels[0], 0, &param_offset, &param_size);
         (void)hipKernelSetAttribute(HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
                                     0, kernels[0], 0);
+        (void)hipKernelSetCacheConfig(kernels[0], hipFuncCachePreferNone, 0);
       }
       (void)hipLibraryUnload(lib);
     }
