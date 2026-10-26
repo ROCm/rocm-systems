@@ -47,11 +47,12 @@ struct WaveDebugFixture {
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit WaveDebugFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+  explicit WaveDebugFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4,
+                            uint32_t num_wf_slots = 1)
       : gpu_mem("wave_debug_mem"), l2("wave_debug_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
-    cfg.num_wf_slots = 1;
+    cfg.num_wf_slots = num_wf_slots;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
@@ -65,6 +66,36 @@ struct WaveDebugFixture {
     return wf;
   }
 };
+
+TEST(WaveDebugTest, DebuggerReadsPreserveValuesAndBounds) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    WaveDebugFixture fx(arch, 2);
+    auto *first_wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(first_wave, nullptr);
+    auto *wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_GT(wave->sgpr_alloc().base, first_wave->sgpr_alloc().base);
+    ASSERT_GT(wave->vgpr_alloc().base, first_wave->vgpr_alloc().base);
+    const auto last_sgpr = wave->num_sgprs() - 1;
+    const auto last_vgpr = wave->num_vgprs() - 1;
+    const auto last_lane = wave->wf_size() - 1;
+    fx.cu->write_sgpr(wave->sgpr_alloc().base + last_sgpr, 42);
+    fx.cu->write_vgpr(wave->vgpr_alloc().base + last_vgpr, last_lane, 43);
+
+    EXPECT_EQ(wave->debug_read_sgpr(last_sgpr), 42u);
+    EXPECT_EQ(wave->debug_read_vgpr(last_vgpr, last_lane), 43u);
+    EXPECT_EQ(wave->debug_read_sgpr(wave->num_sgprs()), 0u);
+    EXPECT_EQ(wave->debug_read_vgpr(wave->num_vgprs(), 0), 0u);
+    EXPECT_EQ(wave->debug_read_vgpr(0, wave->wf_size()), 0u);
+    EXPECT_EQ(first_wave->debug_read_sgpr(wave->sgpr_alloc().base - first_wave->sgpr_alloc().base +
+                                          last_sgpr),
+              0u);
+    EXPECT_EQ(first_wave->debug_read_vgpr(
+                  wave->vgpr_alloc().base - first_wave->vgpr_alloc().base + last_vgpr, last_lane),
+              0u);
+  }
+}
 
 TEST(WaveDebugTest, STrapExecutesConfiguredTrapHandlerInstructions) {
   WaveDebugFixture fx;

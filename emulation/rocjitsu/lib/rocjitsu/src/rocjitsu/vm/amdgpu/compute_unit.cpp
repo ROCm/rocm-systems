@@ -61,11 +61,15 @@ bool InstructionComputeUnitView::signal_queue_exception(
 }
 
 uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
-  return cu_.read_sgpr(sgpr_alloc_.base + reg);
+  if (reg >= num_sgprs())
+    return 0;
+  return cu_.read_sgpr_storage(sgpr_alloc_.base + reg);
 }
 
 uint32_t Wavefront::debug_read_vgpr(uint32_t reg, uint32_t lane) const {
-  return cu_.read_vgpr(vgpr_alloc_.base + reg, lane);
+  if (reg >= num_vgprs() || lane >= wf_size())
+    return 0;
+  return cu_.read_vgpr_storage(vgpr_alloc_.base + reg, lane);
 }
 
 void Wavefront::debug_write_sgpr(uint32_t reg, uint32_t value) {
