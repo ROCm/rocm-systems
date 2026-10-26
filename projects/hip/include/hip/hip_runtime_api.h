@@ -30,8 +30,8 @@
 #include <hip/hip_common.h>
 #include <hip/linker_types.h>
 
-#if HIP_FORCE_API_VERSION > HIP_API_VERSION
-#  error "HIP_FORCE_API_VERSION is newer than the installed HIP headers"
+#if HIP_TARGET_API_VERSION > HIP_API_VERSION
+#  error "HIP_TARGET_API_VERSION is newer than the installed HIP headers"
 #endif
 
 enum {
@@ -243,7 +243,7 @@ typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
  ensure ABI compatibility, we must typedef the actual struct name here.
 */
 
-#if HIP_FORCE_API_VERSION < 600
+#if HIP_TARGET_API_VERSION < 600
 
 #include <hip/hip_deprecated.h>
 // Legacy version, HIP_ABI_IMPL is on the latest version, so it must not see this.
@@ -253,7 +253,7 @@ typedef struct hipDeviceProp_tR0600 {} hipDeviceProp_tR0600;
 
 #endif
 
-#if HIP_FORCE_API_VERSION >= 600
+#if HIP_TARGET_API_VERSION >= 600
 // Latest version.
 
 /**
@@ -2616,9 +2616,9 @@ hipError_t hipDeviceSetMemPool(int device, hipMemPool_t mem_pool);
 hipError_t hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device);
 
 // hipDeviceProp_t and hipGetDeviceProperties/hipChooseDevice are versioned.
-// See HIP_FORCE_API_VERSION in hip_common.h.
+// See HIP_TARGET_API_VERSION in hip_common.h.
 
-#if HIP_FORCE_API_VERSION >= 600
+#if HIP_TARGET_API_VERSION >= 600
 
 hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600* prop, int deviceId);
 
@@ -2782,7 +2782,7 @@ hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config);
  */
 hipError_t hipSetDeviceFlags(unsigned flags);
 
-#if HIP_FORCE_API_VERSION >= 600
+#if HIP_TARGET_API_VERSION >= 600
 hipError_t hipChooseDeviceR0600(int* device, const hipDeviceProp_tR0600* prop);
 
 /**
@@ -4471,7 +4471,7 @@ hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* 
                                                  unsigned long long flags, hipStream_t stream);
 
 // Deprecated since 800. Introduced in 700.
-#if (HIP_FORCE_API_VERSION >= 700 && HIP_FORCE_API_VERSION < 800) || defined(HIP_ABI_IMPL)
+#if (HIP_TARGET_API_VERSION >= 700 && HIP_TARGET_API_VERSION < 800) || defined(HIP_ABI_IMPL)
 
 /**
  * @brief Advise about the usage of a given memory range to HIP.
@@ -4498,7 +4498,7 @@ hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise ad
 #endif
 
 // Deprecated since 800.
-#if HIP_FORCE_API_VERSION < 800 || defined(HIP_ABI_IMPL)
+#if HIP_TARGET_API_VERSION < 800 || defined(HIP_ABI_IMPL)
 
 /**
  * @brief Advise about the usage of a given memory range to HIP.
@@ -4524,7 +4524,7 @@ hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advic
 #endif
 
 // Latest
-#if HIP_FORCE_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)
+#if HIP_TARGET_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)
 
 hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                            hipMemLocation location);
