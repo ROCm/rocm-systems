@@ -240,7 +240,7 @@ impl DrmRegisteredHost {
             }
             if mappings
                 .iter()
-                .any(|mapping| mapping.vm.gpu_id() == peer.gpu_id())
+                .any(|mapping| mapping.vm.gpu_id == peer.gpu_id)
             {
                 return Err(error(
                     ErrorKind::InvalidArgument,
@@ -336,7 +336,7 @@ impl DrmRegisteredHost {
     }
 
     pub(crate) fn is_owned_by(&self, device: &Shared<DeviceVm>) -> bool {
-        self.owner.shares_kfd(device) && self.owner.gpu_id() == device.gpu_id()
+        self.owner.shares_kfd(device) && self.owner.gpu_id == device.gpu_id
     }
 
     pub(crate) fn free(&mut self) -> Result<(), Error> {
@@ -366,7 +366,8 @@ impl DrmRegisteredHost {
 
 impl Drop for DrmRegisteredHost {
     fn drop(&mut self) {
-        if self.free().is_err() {
+        if let Err(error) = self.free() {
+            crate::memory::device::record_rollback(error, 0);
             if self.mappings.iter().any(|mapping| {
                 mapping.handle != 0
                     || mapping.uncertain
