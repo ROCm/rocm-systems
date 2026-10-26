@@ -527,8 +527,12 @@ hsa_status_t SignalBatch::Create(uint32_t count, const hsa_signal_value_t* initi
   assert(IsMultipleOf(arena, alignof(SharedSignal)) && "Pool allocations are page aligned.");
   memset(arena, 0, arena_bytes);
 
-  SignalBatch* new_batch = new SignalBatch(arena, host_access_via_hdp);
+  SignalBatch* new_batch = new SignalBatch(arena, count, host_access_via_hdp);
   arenaGuard.Dismiss();
+  if (host_access_via_hdp) {
+    new_batch->shadow_members_.reset(new std::atomic<Signal*>[count]());
+    new_batch->RegisterShadow();
+  }
 
   uint32_t num_created = 0;
   MAKE_NAMED_SCOPE_GUARD(batchGuard, [&]() {
@@ -547,6 +551,8 @@ hsa_status_t SignalBatch::Create(uint32_t count, const hsa_signal_value_t* initi
       member = new DefaultSignal(initial_values[slot_index], new_batch, slot);
 
     signals[slot_index] = Signal::Convert(member);
+    if (new_batch->shadow_members_ != nullptr)
+      new_batch->shadow_members_[slot_index].store(member, std::memory_order_relaxed);
     num_created++;
   }
   batchGuard.Dismiss();
@@ -563,6 +569,8 @@ void SignalBatch::ReleaseHandle() {
 }
 
 void SignalBatch::ReleaseSlot(SharedSignal* slot) {
+  if (shadow_members_ != nullptr)
+    shadow_members_[slot - Slot(0)].store(nullptr, std::memory_order_release);
   slot->~SharedSignal();
   DropReference();
 }
@@ -571,7 +579,100 @@ void SignalBatch::DropReference() {
   if (--references_ == 0) delete this;
 }
 
-SignalBatch::~SignalBatch() { Runtime::runtime_singleton_->FreeMemory(arena_); }
+SignalBatch::~SignalBatch() {
+  if (shadow_members_ != nullptr) UnregisterShadow();
+  Runtime::runtime_singleton_->FreeMemory(arena_);
+}
+
+namespace {
+/// Maps each page of a shadowed arena to its batch: a three-level radix tree on the page
+/// number, as in tcmalloc's PageMap. Arenas are page aligned and own their pages, so a page
+/// belongs to at most one batch. Readers never lock; nodes are created on first use and never
+/// freed, so a walk can always complete.
+constexpr uint32_t kShadowPageShift = 12;
+constexpr uint32_t kShadowLevelBits = 12;
+constexpr uintptr_t kShadowLevelEntries = uintptr_t(1) << kShadowLevelBits;
+constexpr uint32_t kShadowPageNumberBits = 3 * kShadowLevelBits;
+
+struct ShadowLeaf {
+  std::atomic<SignalBatch*> batches[kShadowLevelEntries];
+};
+
+struct ShadowMid {
+  std::atomic<ShadowLeaf*> leaves[kShadowLevelEntries];
+};
+
+std::mutex shadow_page_lock;
+std::atomic<ShadowMid*> shadow_page_root[kShadowLevelEntries];
+
+/// Returns nullptr when @p page_number is beyond the map, or when its leaf does not exist and
+/// @p create is false. Creating requires shadow_page_lock.
+std::atomic<SignalBatch*>* ShadowPageEntry(uintptr_t page_number, bool create) {
+  if ((page_number >> kShadowPageNumberBits) != 0) return nullptr;
+  std::atomic<ShadowMid*>& root_entry = shadow_page_root[page_number >> (2 * kShadowLevelBits)];
+  ShadowMid* mid = root_entry.load(std::memory_order_acquire);
+  if (mid == nullptr) {
+    if (!create) return nullptr;
+    mid = new ShadowMid();
+    root_entry.store(mid, std::memory_order_release);
+  }
+  std::atomic<ShadowLeaf*>& mid_entry =
+      mid->leaves[(page_number >> kShadowLevelBits) & (kShadowLevelEntries - 1)];
+  ShadowLeaf* leaf = mid_entry.load(std::memory_order_acquire);
+  if (leaf == nullptr) {
+    if (!create) return nullptr;
+    leaf = new ShadowLeaf();
+    mid_entry.store(leaf, std::memory_order_release);
+  }
+  return &leaf->batches[page_number & (kShadowLevelEntries - 1)];
+}
+}  // namespace
+
+std::atomic<uint32_t> SignalBatch::num_shadowed_arenas_{0};
+
+void SignalBatch::RegisterShadow() {
+  const uintptr_t arena_begin = reinterpret_cast<uintptr_t>(arena_);
+  const uintptr_t first_page = arena_begin >> kShadowPageShift;
+  const uintptr_t last_page =
+      (arena_begin + size_t(count_) * sizeof(SharedSignal) - 1) >> kShadowPageShift;
+  std::lock_guard<std::mutex> lock(shadow_page_lock);
+  if ((last_page >> kShadowPageNumberBits) != 0) {
+    shadow_members_.reset();
+    return;
+  }
+  for (uintptr_t page_number = first_page; page_number <= last_page; page_number++)
+    ShadowPageEntry(page_number, true)->store(this, std::memory_order_release);
+  num_shadowed_arenas_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void SignalBatch::UnregisterShadow() {
+  const uintptr_t arena_begin = reinterpret_cast<uintptr_t>(arena_);
+  const uintptr_t first_page = arena_begin >> kShadowPageShift;
+  const uintptr_t last_page =
+      (arena_begin + size_t(count_) * sizeof(SharedSignal) - 1) >> kShadowPageShift;
+  std::lock_guard<std::mutex> lock(shadow_page_lock);
+  for (uintptr_t page_number = first_page; page_number <= last_page; page_number++)
+    ShadowPageEntry(page_number, false)->store(nullptr, std::memory_order_release);
+  num_shadowed_arenas_.fetch_sub(1, std::memory_order_relaxed);
+}
+
+bool SignalBatch::FindShadowedMember(uint64_t handle, Signal** member) {
+  const uintptr_t address = static_cast<uintptr_t>(handle);
+  const std::atomic<SignalBatch*>* page_entry = ShadowPageEntry(address >> kShadowPageShift, false);
+  if (page_entry == nullptr) return false;
+  const SignalBatch* owner = page_entry->load(std::memory_order_acquire);
+  if (owner == nullptr) return false;
+
+  // owner outlives every live member: each member holds a batch reference until it is destroyed,
+  // and a handle must not be used concurrently with or after its destruction.
+  const uintptr_t slot_offset = address - reinterpret_cast<uintptr_t>(owner->arena_);
+  const uintptr_t slot_index = slot_offset / sizeof(SharedSignal);
+  if ((slot_offset % sizeof(SharedSignal) != offsetof(SharedSignal, amd_signal)) ||
+      (slot_index >= owner->count_))
+    return false;
+  *member = owner->shadow_members_[slot_index].load(std::memory_order_acquire);
+  return true;
+}
 
 }  // namespace core
 }  // namespace rocr

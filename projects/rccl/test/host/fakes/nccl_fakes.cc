@@ -39,6 +39,7 @@
 // Signature-drift watchdog: assert each hook still matches the production
 // symbol it shadows (templates + macro live in fakes/signature-drift.h).
 #include "signature-drift.h"
+#include "fail_loud.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_proxyConnect,              ncclProxyConnect);
 ASSERT_HOOK_MATCHES_PROD(g_proxyCallBlocking,         ncclProxyCallBlocking);
@@ -253,6 +254,12 @@ ncclResult_t ncclShmImportShareableBuffer(struct ncclComm*  /*comm*/,
 ncclResult_t ncclShmIpcClose(ncclShmIpcDesc_t* /*desc*/)
 {
     return ncclSuccess;
+}
+
+// src/plugin/profiler.cc, which has no fakes file yet. plugin/net.cc only hands its address to a plugin's init.
+ncclResult_t ncclProfilerCallback(void**, int, void*, int64_t, void*)
+{
+    FailLoudUnfaked("nccl_fakes", "ncclProfilerCallback");
 }
 
 // ---------------------------------------------------------------------------
@@ -591,10 +598,10 @@ ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm*           comm
                                              numSegments);
 }
 
-// NCCL_PARAM(MultiSegmentRegister, ...) generated symbol. Return 0 so the
+// NCCL_PARAM(MultiSegmentRegister, ...) generated symbol. Defaults to 0 so the
 // `multiSegment && ... ncclParamMultiSegmentRegister()` guard in p2p.cc
-// keeps the single-segment path the microtests exercise.
-int64_t ncclParamMultiSegmentRegister() { return 0; }
+// keeps the single-segment path the microtests exercise; g_loadParam can flip it.
+int64_t ncclParamMultiSegmentRegister() { return g_loadParam("MULTI_SEGMENT_REGISTER", 0); }
 
 // ---------------------------------------------------------------------------
 // Reset
