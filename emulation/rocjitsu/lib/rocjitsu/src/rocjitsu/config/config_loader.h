@@ -11,6 +11,7 @@
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/config/pci_device_config.h"
+#include "rocjitsu/config/system_graph.h"
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
@@ -21,6 +22,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -122,6 +124,16 @@ util::FailureOr<ExecutionThreadSettings>
 load_execution_thread_settings_from_string(const std::string &json, const std::string &schema_text,
                                            util::DiagnosticEmitter emit_error);
 
+/// Read thread dimensions for one selected node. An empty selector uses the
+/// config's local_node field or defaults only when the graph has one node.
+util::FailureOr<ExecutionThreadSettings>
+load_execution_thread_settings_for_node(const std::string &json_path,
+                                        const std::string &schema_text, std::string_view node_id,
+                                        util::DiagnosticEmitter emit_error);
+util::FailureOr<ExecutionThreadSettings> load_execution_thread_settings_from_string_for_node(
+    const std::string &json, const std::string &schema_text, std::string_view node_id,
+    util::DiagnosticEmitter emit_error);
+
 /// @brief Check whether the ISA supports asynchronous MMA execution.
 bool configured_async_mma_supported(rj_code_arch_t arch);
 /// @brief Create lazy VM-owned resources for the requested helper count.
@@ -215,6 +227,10 @@ struct LoadedConfig {
   DbtGuestConfig dbt_guest;             ///< Optional DBT guest-GPU discovery config.
   uint32_t num_gpus = 1;                ///< Number of simulated GPU instances.
   std::vector<KfdDeviceConfig> devices; ///< Per-GPU configs (populated when num_gpus > 1).
+  SystemGraph system_graph;             ///< Validated graph, including remote descriptions.
+  std::string local_node_id;            ///< Node used for this VM's local projection.
+  std::unordered_map<std::string, uint32_t>
+      global_to_local_ordinals; ///< Global instance ID to local gpuN ordinal.
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
   /// Requested dispatch width. Omitted/zero selects from thread_allocations;
   /// each SoC's upper bound is one plus the sum of CUs-1 across nonempty XCDs.
@@ -351,6 +367,45 @@ util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
                                                       const std::string &schema_text,
                                                       util::DiagnosticEmitter emit_error,
                                                       uint32_t host_threads);
+
+/// @brief Load simulation config text with caller-owned asynchronous execution resources.
+/// @details This overload takes its helper allocation from the caller. A null resource explicitly
+/// disables asynchronous helpers. The loaded CUs share the supplied resource, which is useful
+/// when several independently loaded topologies must use one bounded helper pool.
+/// @param json JSON configuration string.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @param emit_error Destination for failure diagnostics.
+/// @param host_threads Affinity width for automatic selection; zero gives a budget of one.
+/// @param async_resources Shared asynchronous execution resources, or null to disable helpers.
+/// @returns LoadedConfig with engine parameters and built topology, or failure.
+util::FailureOr<LoadedConfig> load_config_from_string(
+    const std::string &json, const std::string &schema_text, util::DiagnosticEmitter emit_error,
+    uint32_t host_threads,
+    std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> async_resources);
+
+/// Build only the selected local node. A nonempty node_id must agree with a
+/// local_node field in the JSON, if one exists. An empty node_id uses local_node;
+/// if neither selects a node, the graph must contain exactly one node. This
+/// contract applies to both path and string overloads below. The graph remains
+/// owned in the result for later topology and route projections.
+util::FailureOr<LoadedConfig> load_config_for_node(const std::string &json_path,
+                                                   const std::string &schema_text,
+                                                   std::string_view node_id,
+                                                   util::DiagnosticEmitter emit_error,
+                                                   uint32_t host_threads);
+util::FailureOr<LoadedConfig> load_config_for_node(const std::string &json_path,
+                                                   const std::string &schema_text,
+                                                   std::string_view node_id,
+                                                   util::DiagnosticEmitter emit_error);
+util::FailureOr<LoadedConfig> load_config_from_string_for_node(const std::string &json,
+                                                               const std::string &schema_text,
+                                                               std::string_view node_id,
+                                                               util::DiagnosticEmitter emit_error,
+                                                               uint32_t host_threads);
+util::FailureOr<LoadedConfig> load_config_from_string_for_node(const std::string &json,
+                                                               const std::string &schema_text,
+                                                               std::string_view node_id,
+                                                               util::DiagnosticEmitter emit_error);
 
 } // namespace config
 } // namespace rocjitsu

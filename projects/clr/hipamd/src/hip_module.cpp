@@ -198,6 +198,8 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
       *value = static_cast<int>(wrkGrpInfo->maxDynamicSharedSizeBytes_);
       break;
     case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
+      // note: this intentionally ignores coarseMemCarveout_; i.e. it is not returning an
+      // "effective" carveout; instead behaves just like a getter
       *value = wrkGrpInfo->groupMemCarveout_;
       break;
     default:

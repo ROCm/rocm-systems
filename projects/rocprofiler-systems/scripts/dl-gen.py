@@ -22,9 +22,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import glob
 import os
 import sys
-import glob
 
 """
 This script reads in function prototypes can generates the implementation pieces
@@ -96,7 +96,9 @@ class function:
         )
 
     def dlsym_function(self):
-        return '    ROCPROFSYS_DLSYM({0}_f, m_omnihandle, "{0}");'.format(self.func_name)
+        return (
+            f'    ROCPROFSYS_DLSYM({self.func_name}_f, m_omnihandle, "{self.func_name}");'
+        )
 
     def call_dlsym_function(self):
         _param_names = ", ".join(self.param_names)
@@ -142,24 +144,24 @@ if __name__ == "__main__":
                 if os.path.exists(itr):
                     funcs += run(itr)
                 else:
-                    printf(f"No file matched {itr}")
+                    print(f"No file matched {itr}", file=sys.stderr)
 
     if funcs:
-        print(f"\n##### declaration:\n")
+        print("\n##### declaration:\n")
         for itr in funcs:
-            print("{}".format(itr.function_decl()))
+            print(f"{itr.function_decl()}")
 
-        print(f"\n##### dlsym:\n")
+        print("\n##### dlsym:\n")
         for itr in funcs:
-            print("{}".format(itr.dlsym_function()))
+            print(f"{itr.dlsym_function()}")
 
-        print(f"\n##### member variables:\n")
+        print("\n##### member variables:\n")
         for itr in funcs:
-            print("{}".format(itr.member_variables()))
+            print(f"{itr.member_variables()}")
 
-        print(f"\n##### callers:")
+        print("\n##### callers:")
         for itr in funcs:
-            print("")
-            print("{}".format(itr.call_dlsym_function()))
+            print()
+            print(f"{itr.call_dlsym_function()}")
 
-        print("")
+        print()
