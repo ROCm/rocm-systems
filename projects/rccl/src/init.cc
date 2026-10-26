@@ -4903,6 +4903,10 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
                   res, exit);
   }
   NCCLCHECKGOTO(ncclCommEnsureReady(comm), res, exit);
+  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), res, exit);
+
+  /* *newcomm should be NCCL_COMM_NULL until comm split fully complete. */
+  *newcomm = NCCL_COMM_NULL;
   if (isShrink) {
     if (excludeRanksList[0] < 0 || excludeRanksList[excludeRanksCount - 1] >= comm->nRanks) {
       WARN("%s: excludeRanksList entries must be in [0, %d)", caller, comm->nRanks);
@@ -4917,10 +4921,6 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
       }
     }
   }
-  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), res, exit);
-
-  /* *newcomm should be NCCL_COMM_NULL until comm split fully complete. */
-  *newcomm = NCCL_COMM_NULL;
   if (!isShrink && color == NCCL_SPLIT_NOCOLOR) {
     INFO(NCCL_INIT, "Rank %d has color with NCCL_SPLIT_NOCOLOR, not creating a new communicator", comm->rank);
   } else {

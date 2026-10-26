@@ -8820,6 +8820,7 @@ ncclResult_t Shrink_RejectedWithoutLaunching(std::vector<int> exclude, const cha
                               /*shrinkFlags=*/0);
   });
   EXPECT_EQ(0, rec.calls) << "a rejected exclusion list must not launch the child init";
+  EXPECT_EQ(nullptr, out) << "a rejected exclusion list must clear *newcomm";
   EXPECT_TRUE(RcclUnitTesting::LogHas(log, expectWarn)) << log;
   rec.Release();
   return res;
