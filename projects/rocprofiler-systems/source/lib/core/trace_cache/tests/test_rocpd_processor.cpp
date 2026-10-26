@@ -363,14 +363,15 @@ expect_stored_json_matches(const std::string& stored, const std::string& expecte
 class rocpd_write_read_test_interface : public ::testing::Test
 {
 protected:
-    static constexpr size_t k_node_id       = 1;
-    static constexpr size_t k_pid           = 200;
-    static constexpr size_t k_ppid          = 100;
-    static constexpr size_t k_thread_id     = 300;
-    static constexpr size_t k_queue_id      = 10;
-    static constexpr size_t k_stream_id     = 20;
-    static constexpr size_t k_process_start = 1000;
-    static constexpr size_t k_process_end   = 9000;
+    static constexpr size_t k_node_id   = 1;
+    static constexpr size_t k_pid       = 200;
+    static constexpr size_t k_ppid      = 100;
+    static constexpr size_t k_thread_id = 300;
+    static constexpr size_t k_queue_id  = 10;
+    static constexpr size_t k_stream_id = 20;
+    // Above UINT32_MAX, so 32-bit truncation is caught.
+    static constexpr size_t k_process_start = 1'000'000'000'001'000;
+    static constexpr size_t k_process_end   = 1'000'000'000'009'000;
 
     void SetUp() override
     {
