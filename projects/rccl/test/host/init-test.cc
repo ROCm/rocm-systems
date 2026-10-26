@@ -5596,34 +5596,71 @@ TEST_F(InitMicrotest, ComputeBuffSizes_UserLl128BuffSize_SkipsTheScaling) {
   EXPECT_EQ(1 << 20, s.comm()->buffSizes[NCCL_PROTO_LL128]);
   EXPECT_EQ(1 << 20, s.comm()->p2pLl128BuffSize);
 }
-TEST_F(InitMicrotest, ComputeBuffSizes_SharingParent_ChildTakesTheParentLl128Sizes) {
-  // The child reuses the parent's proxy, which sized and strides its LL128 net buffers with the parent's sizes.
-  for (int childFactor : {1, 4}) {
-    for (int parentFactor : {1, 4}) {
-      ScopedLl128ScaleFake scale(childFactor);
-      auto parent = std::make_unique<ncclComm>();
-      parent->shareResources = true;
-      parent->p2pLl128BuffSize = 448 << 10;
-      parent->buffSizes[NCCL_PROTO_LL128] = parentFactor * (448 << 10);
+namespace {
+// peerInfo for nRanks ranks; shared[r] is rank r's sharedLl128BuffSize (send/recv size: 448 KiB when nonzero).
+std::vector<ncclPeerInfo> SharedLl128Peers(const std::vector<int>& shared) {
+  std::vector<ncclPeerInfo> peers(shared.size() + 1);  // + the CollNet root slot, as in initTransportsRank
+  for (size_t r = 0; r < shared.size(); r++) {
+    peers[r].sharedLl128BuffSize = shared[r];
+    peers[r].sharedP2pLl128BuffSize = shared[r] > 0 ? 448 << 10 : 0;
+  }
+  return peers;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, ComputeBuffSizes_RankSharingAProxy_TakesItsLl128Sizes) {
+  // The rank's proxy, shared with its parent, sized and strides its LL128 net buffers with the parent's sizes.
+  for (int ownFactor : {1, 4}) {
+    for (int sharedFactor : {1, 4}) {
+      ScopedLl128ScaleFake scale(ownFactor);
       BuffSizes_Scene s;
       s.comm()->nNodes = 2;
-      EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm(), parent.get()));
-      EXPECT_EQ(parentFactor * (448 << 10), s.comm()->buffSizes[NCCL_PROTO_LL128])
-          << "parent x" << parentFactor << ", child x" << childFactor;
-      EXPECT_EQ(448 << 10, s.comm()->p2pLl128BuffSize) << "parent x" << parentFactor << ", child x" << childFactor;
+      s.comm()->nRanks = 2;
+      s.comm()->rank = 0;
+      auto peers = SharedLl128Peers({sharedFactor * (448 << 10), sharedFactor * (448 << 10)});
+      s.comm()->peerInfo = peers.data();
+      EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+      EXPECT_EQ(sharedFactor * (448 << 10), s.comm()->buffSizes[NCCL_PROTO_LL128])
+          << "shared x" << sharedFactor << ", own x" << ownFactor;
+      EXPECT_EQ(448 << 10, s.comm()->p2pLl128BuffSize) << "shared x" << sharedFactor << ", own x" << ownFactor;
     }
   }
 }
-TEST_F(InitMicrotest, ComputeBuffSizes_NonSharingParent_ChildKeepsItsOwnLl128Sizes) {
+TEST_F(InitMicrotest, ComputeBuffSizes_GrowNewRank_AdoptsTheExistingRanksLl128Sizes) {
+  // ncclCommGrow 1x8 -> 2x8: existing ranks share the old comm's unscaled proxy, new ranks have no parent and would
+  // scale; they must match or the ranks pick different algorithms (rcclUpdateRemoteFlushAlgoProto reads buffSizes).
   ScopedLl128ScaleFake scale(4);
-  auto parent = std::make_unique<ncclComm>();
-  parent->shareResources = false;
-  parent->p2pLl128BuffSize = 1 << 10;
-  parent->buffSizes[NCCL_PROTO_LL128] = 1 << 10;
   BuffSizes_Scene s;
   s.comm()->nNodes = 2;
-  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm(), parent.get()));
-  ASSERT_GT(s.comm()->p2pLl128BuffSize, 1 << 10);
+  s.comm()->nRanks = 4;
+  s.comm()->rank = 3;
+  auto peers = SharedLl128Peers({0, 448 << 10, 448 << 10, 0});
+  s.comm()->peerInfo = peers.data();
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(448 << 10, s.comm()->buffSizes[NCCL_PROTO_LL128]);
+  EXPECT_EQ(448 << 10, s.comm()->p2pLl128BuffSize);
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_OwnSharedSizeWinsOverLowerRanks) {
+  ScopedLl128ScaleFake scale(1);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  s.comm()->nRanks = 2;
+  s.comm()->rank = 1;
+  auto peers = SharedLl128Peers({448 << 10, 4 * (448 << 10)});
+  s.comm()->peerInfo = peers.data();
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(4 * (448 << 10), s.comm()->buffSizes[NCCL_PROTO_LL128]) << "this rank's own proxy sizes";
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_NoRankShares_KeepsItsOwnLl128Sizes) {
+  ScopedLl128ScaleFake scale(4);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  s.comm()->nRanks = 2;
+  s.comm()->rank = 0;
+  auto peers = SharedLl128Peers({0, 0});
+  s.comm()->peerInfo = peers.data();
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  ASSERT_GT(s.comm()->p2pLl128BuffSize, 0);
   EXPECT_EQ(4 * s.comm()->p2pLl128BuffSize, s.comm()->buffSizes[NCCL_PROTO_LL128]);
 }
 

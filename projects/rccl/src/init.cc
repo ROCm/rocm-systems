@@ -1593,7 +1593,7 @@ NCCL_PARAM(P2pNetChunkSize, "P2P_NET_CHUNKSIZE", (1 << 17)); /* 128 kB */
 NCCL_PARAM(P2pPciChunkSize, "P2P_PCI_CHUNKSIZE", (1 << 17)); /* 128 kB */
 NCCL_PARAM(P2pNvlChunkSize, "P2P_NVL_CHUNKSIZE", (1 << 19)); /* 512 kB */
 
-static ncclResult_t computeBuffSizes(struct ncclComm* comm, struct ncclComm* parent = nullptr) {
+static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
   int64_t envs[NCCL_NUM_PROTOCOLS] = {ncclParamLlBuffSize(), ncclParamLl128BuffSize(), ncclParamBuffSize()};
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   int defaults[NCCL_NUM_PROTOCOLS];
@@ -1608,10 +1608,19 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm, struct ncclComm* par
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (envs[NCCL_PROTO_LL128] == -2) rcclScaleCollLl128BuffSize(comm);
 #endif
-  // A child sharing its parent's proxy must use the LL128 sizes that proxy sized and strides its net buffers with.
-  if (parent && parent->shareResources) {
-    comm->buffSizes[NCCL_PROTO_LL128] = parent->buffSizes[NCCL_PROTO_LL128];
-    comm->p2pLl128BuffSize = parent->p2pLl128BuffSize;
+  // A rank sharing its parent's proxy must use the LL128 sizes that proxy sized and strides its net buffers with,
+  // and every other rank must match them: the sizes set connection strides and algorithm choices (an ncclCommGrow
+  // mixes such ranks with new ranks that have no parent). Take this rank's own, else the lowest rank's.
+  if (comm->peerInfo) {
+    const ncclPeerInfo* self = comm->peerInfo + comm->rank;
+    const ncclPeerInfo* shared = self->sharedLl128BuffSize > 0 ? self : nullptr;
+    for (int r = 0; shared == nullptr && r < comm->nRanks; r++) {
+      if (comm->peerInfo[r].sharedLl128BuffSize > 0) shared = comm->peerInfo + r;
+    }
+    if (shared) {
+      comm->buffSizes[NCCL_PROTO_LL128] = shared->sharedLl128BuffSize;
+      comm->p2pLl128BuffSize = shared->sharedP2pLl128BuffSize;
+    }
   }
 
 #if ENABLE_TDM_SIMPLE
@@ -1874,6 +1883,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // AllGather1 - begin
   NCCLCHECKGOTO(ncclCalloc(&comm->peerInfo, nranks + 1), ret, fail); // Extra rank to represent CollNet root
   NCCLCHECKGOTO(fillInfo(comm, comm->peerInfo + rank, comm->commHash), ret, fail);
+  if (parent && parent->shareResources) {
+    comm->peerInfo[rank].sharedLl128BuffSize = parent->buffSizes[NCCL_PROTO_LL128];
+    comm->peerInfo[rank].sharedP2pLl128BuffSize = parent->p2pLl128BuffSize;
+  }
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, comm->peerInfo, sizeof(struct ncclPeerInfo)), ret, fail);
   COMPILER_ATOMIC_STORE(&comm->peerInfoValid, true, std::memory_order_release);
 
@@ -2685,7 +2698,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   line[4095] = '\0';
   INFO(NCCL_INIT, "Trees%s comm %p nRanks %02d busId %lx", line, comm, comm->nRanks, comm->busId);
 
-  NCCLCHECKGOTO(computeBuffSizes(comm, parent), ret, fail);
+  NCCLCHECKGOTO(computeBuffSizes(comm), ret, fail);
 
   // Compute nChannels per peer for p2p
   NCCLCHECKGOTO(ncclTopoComputeP2pChannels(comm), ret, fail);

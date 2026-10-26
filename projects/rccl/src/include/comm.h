@@ -650,8 +650,11 @@ struct ncclPeerInfo {
   // uses DPX only when every rank asks for it.
   int tuningPartition;
   // [RCCL] This rank can use RCCL_IB_GDR_FLUSH_FLAG; the comm uses it only when every rank can.
-  // Append later fields after this one.
   bool ibGdrFlushFlag;
+  // [RCCL] Collective and send/recv LL128 buffer sizes of the proxy this rank shares with its parent, 0 if it shares
+  // none. Every rank of the comm adopts them (computeBuffSizes). Append later fields after these.
+  int sharedLl128BuffSize;
+  int sharedP2pLl128BuffSize;
 };
 
 typedef enum ncclGroupTaskType {
