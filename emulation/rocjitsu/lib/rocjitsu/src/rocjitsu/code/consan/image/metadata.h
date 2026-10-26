@@ -12,8 +12,6 @@
 namespace rocjitsu::consan {
 
 struct MetadataResources {
-  uint32_t kernarg_bytes = 0;
-  uint32_t kernarg_alignment = 0;
   uint32_t sgprs = 0;
   uint32_t vgprs = 0;
   uint32_t maximum_workgroup_size = 0;

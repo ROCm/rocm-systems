@@ -102,7 +102,7 @@ bool parse(std::span<const uint8_t> image, const KernelDescriptorInfo &kernel,
       return false;
     previous_end = uint64_t{*offset} + *size;
   }
-  resources = {*kernarg, *alignment, *sgprs, *vgprs, *maximum};
+  resources = {.sgprs = *sgprs, .vgprs = *vgprs, .maximum_workgroup_size = *maximum};
   return true;
 }
 
