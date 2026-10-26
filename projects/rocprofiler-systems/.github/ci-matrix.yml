@@ -19,3 +19,4 @@ matrix-nightly:
 matrix-ci:
   # MI355
   - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950' }
+  - { os-release: '26.04', gpu: 'mi355', arch: 'gfx950' }
