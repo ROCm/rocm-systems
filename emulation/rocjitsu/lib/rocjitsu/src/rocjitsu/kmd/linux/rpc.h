@@ -49,7 +49,7 @@ struct RpcHeader {
 };
 
 /// @brief RPC protocol version. Increment when making breaking changes.
-inline constexpr uint32_t kRpcProtocolVersion = 3;
+inline constexpr uint32_t kRpcProtocolVersion = 5;
 
 /// @brief Largest payload the daemon accepts after an RpcHeader.
 /// @details The daemon rejects — and disconnects — any client whose header
@@ -63,11 +63,13 @@ using RpcGpuInfo = ::rj_vm_gpu_info_t;
 
 /// @brief Handshake response payload (sent after RPC_HANDSHAKE).
 struct RpcHandshakeResponse {
-  uint32_t version;           ///< Protocol version (kRpcProtocolVersion).
-  uint32_t gpu_id;            ///< KFD gpu_id for the simulated device.
-  uint32_t topology_path_len; ///< Length of the topology path string that follows.
-  uint32_t drm_path_len;      ///< Length of the DRM sysfs path string that follows.
-  RpcGpuInfo gpu_info;        ///< Device metadata for client-side DRM/libdrm emulation.
+  uint32_t version;             ///< Protocol version (kRpcProtocolVersion).
+  uint32_t gpu_id;              ///< KFD gpu_id for the simulated device.
+  uint32_t topology_path_len;   ///< Length of the topology path string that follows.
+  uint32_t drm_path_len;        ///< Length of the DRM sysfs path string that follows.
+  uint32_t extra_gpu_infos;     ///< Additional RpcGpuInfo records after both paths.
+  uint32_t strict_render_minor; ///< 1 for manifest selection; 0 for legacy routing.
+  RpcGpuInfo gpu_info;          ///< First node-local GPU's metadata.
 };
 
 /// @brief Ioctl request payload (when opcode == RPC_IOCTL).
@@ -100,7 +102,7 @@ struct RpcMunmapRequest {
 
 static_assert(sizeof(RpcHeader) == 16);
 static_assert(sizeof(RpcGpuInfo) == 312);
-static_assert(sizeof(RpcHandshakeResponse) == 328);
+static_assert(sizeof(RpcHandshakeResponse) == 336);
 static_assert(sizeof(RpcIoctlRequest) == 8);
 static_assert(sizeof(RpcMmapRequest) == 32);
 static_assert(sizeof(RpcMmapResponse) == 8);

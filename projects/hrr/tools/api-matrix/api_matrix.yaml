@@ -243,7 +243,10 @@ tiers:
       - hipStreamWriteValue64
       - hipStreamWaitValue32
       - hipStreamWaitValue64
-      # Allocates nothing at replay; cudaHostAlloc hipifies to this spelling.
+      # Pinned host allocation. hipHostAlloc and hipMemAllocHost allocate
+      # nothing at replay (cudaHostAlloc hipifies to the former);
+      # hipMallocHost and hipFreeHost have real handlers charged to the host
+      # budget.
       - hipHostAlloc
       - hipFreeHost
       - hipMallocHost
@@ -574,6 +577,7 @@ unreachable:
       - hipMemGetDefaultMemPool
       - hipLibraryGetGlobal
       - hipLibraryGetManaged
+      - hipKernelSetAttributeForDevice
       - hipOccupancyMaxActiveClusters
       - hipOccupancyMaxPotentialClusterSize
       - hipDeviceFlushGPUDirectRDMAWrites
