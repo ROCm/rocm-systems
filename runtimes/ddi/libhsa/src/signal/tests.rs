@@ -4,6 +4,7 @@
 //! Signal lifetime, callback, wait, IPC, and ABI regression tests.
 
 use super::*;
+use crate::api::signal::asynchronous::*;
 
 /// Creates a signal batch and returns its live members.
 fn batch_fixture(count: usize) -> (SignalState, HsaAmdSignalBatch, Vec<HsaSignal>) {
