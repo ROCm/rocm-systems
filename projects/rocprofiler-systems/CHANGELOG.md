@@ -4,6 +4,14 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.11.0 for ROCm 10.3 (unreleased)
+
+### Resolved issues
+
+- Fixed the default `ROCPROFSYS_AMD_SMI_METRICS` value (`busy, temp, power, mem_usage`) failing
+  validation because of the spaces after the commas, which enabled all 17 GPU metrics instead of
+  the four defaults. Whitespace around `,` and `;` separators is now accepted.
+
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 
 ### Added
@@ -34,9 +42,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   exceptions from instrumentation setup are now caught in `main`, reported as
   `[rocprof-sys] error: ...`, and the process exits with status 1 instead of
   terminating.
-- Fixed the default `ROCPROFSYS_AMD_SMI_METRICS` value (`busy, temp, power, mem_usage`) failing
-  validation because of the spaces after the commas, which enabled all 17 GPU metrics instead of
-  the four defaults. Whitespace around `,` and `;` separators is now accepted.
 - Fixed a crash (`SIGSEGV`) in `rocprof-sys-instrument` when instrumenting Fortran+HIP
   programs compiled with `gfortran -g` or `-g -O0`. gfortran encodes assumed-shape and
   allocatable array bounds as DWARF location expression blocks rather than integer
