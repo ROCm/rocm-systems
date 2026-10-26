@@ -84,9 +84,12 @@ struct RegAllocation {
 /// cycles. Dynamic dispatch state (wg_id, pc, register allocations,
 /// execution masks) is set when the slot is activated and reset by reset().
 ///
-/// Plugin state (plugin_states_) is NOT cleared by reset(). Plugins must
-/// set their per-wavefront state in onAmdgpuWorkgroupDispatched, which
-/// fires before the wavefront's first instruction.
+/// Plugin state (plugin_states_) is not cleared by reset(). Plugins initialize
+/// it in onAmdgpuWorkgroupDispatched or onAmdgpuWavefrontDispatched, before the
+/// first instruction of each wave incarnation. onAmdgpuWavefrontHalted or
+/// onAmdgpuWavefrontCancelled ends that incarnation, including a cluster
+/// placement rolled back before retry in the same slot. See the cancellation
+/// contract in execution_plugin.h for terminal-hook and retry semantics.
 ///
 /// A slot is considered dispatched (active) when it has a nonzero register
 /// allocation (sgpr_alloc_.count > 0). After clear(), the slot is idle.
