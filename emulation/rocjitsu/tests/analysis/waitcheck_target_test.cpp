@@ -138,7 +138,7 @@ TEST(WaitcheckTarget, Rdna3LdsDirectLoadsProduceExportEvents) {
 TEST(WaitcheckTarget, LdsDirectEmbeddedWaitFieldsFollowTheirEncodingGeneration) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
-    const bool legacy = uses_legacy_waitcnt(waitcnt_model(arch).value());
+    const bool legacy = amdgpu::uses_legacy_waitcnt(amdgpu::waitcnt_model(arch).value());
     for (uint32_t opcode : {0xce000000u, 0xce100000u}) {
       for (uint32_t count : {0u, 3u, 15u}) {
         // WAITVDST/WAIT_VA_VDST occupies bits 16-19 on both generations.
@@ -177,7 +177,7 @@ TEST(WaitcheckTarget, DependencyBoundsExcludeTheNoWaitEncoding) {
       const auto sentinel = std::move(sentinel_result).value();
       if (sentinel) {
         EXPECT_EQ(Target::maximum_dependency_wait(arch, counter).value() + 1, *sentinel)
-            << static_cast<int>(arch) << ' ' << wait_counter_name(counter);
+            << static_cast<int>(arch) << ' ' << amdgpu::wait_counter_name(counter);
       }
     }
   }
@@ -265,7 +265,7 @@ TEST(WaitcheckTarget, UnsupportedArchitecturesDoNotInheritSplitCounters) {
   NamedInstruction inst("s_nop");
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID}) {
-    EXPECT_TRUE(waitcnt_model(arch).failed());
+    EXPECT_TRUE(amdgpu::waitcnt_model(arch).failed());
     EXPECT_TRUE(Target::maximum_dependency_wait(arch, WaitCounterKind::Load).failed());
     EXPECT_TRUE(wait_expression(WaitCounterKind::Load, 0, arch).failed());
     EXPECT_TRUE(Target::classify_events(inst, arch).failed());
@@ -299,8 +299,9 @@ TEST(WaitcheckTarget, AtomicsDistinguishRegisterResultsFromMemoryDestinations) {
       ASSERT_TRUE(events_result.succeeded());
       const auto events = std::move(events_result).value();
       ASSERT_FALSE(events.empty()) << static_cast<int>(arch);
-      EXPECT_EQ(events[0].counter, returns ? WaitCounterKind::Load
-                                           : vmem_store_wait_counter(waitcnt_model(arch).value()));
+      EXPECT_EQ(events[0].counter,
+                returns ? WaitCounterKind::Load
+                        : amdgpu::vmem_store_wait_counter(amdgpu::waitcnt_model(arch).value()));
       EXPECT_EQ(events[0].kind,
                 returns ? WaitEventKind::VmemNoSamplerLoad : WaitEventKind::VmemStore);
       EXPECT_EQ(events[0].registers,
@@ -336,9 +337,9 @@ TEST(WaitcheckTarget, ImageAtomicsUseTheEncodedReturnControl) {
       ASSERT_TRUE(events_result.succeeded());
       const auto events = std::move(events_result).value();
       ASSERT_FALSE(events.empty());
-      EXPECT_EQ(events[0].counter, returns
-                                       ? WaitCounterKind::Load
-                                       : vmem_store_wait_counter(waitcnt_model(c.arch).value()));
+      EXPECT_EQ(events[0].counter,
+                returns ? WaitCounterKind::Load
+                        : amdgpu::vmem_store_wait_counter(amdgpu::waitcnt_model(c.arch).value()));
       EXPECT_EQ(events[0].check_uses, returns);
       EXPECT_TRUE(std::ranges::none_of(
           events, [](const auto &event) { return event.counter == WaitCounterKind::Exp; }));
@@ -359,7 +360,7 @@ TEST(WaitcheckTarget, ScalarMemoryFamiliesAccountForCounterOnlyOperations) {
       ASSERT_TRUE(events_result.succeeded());
       const auto events = std::move(events_result).value();
       ASSERT_FALSE(events.empty()) << name;
-      EXPECT_EQ(events[0].counter, smem_wait_counter(waitcnt_model(arch).value()));
+      EXPECT_EQ(events[0].counter, amdgpu::smem_wait_counter(amdgpu::waitcnt_model(arch).value()));
       EXPECT_EQ(events[0].kind, WaitEventKind::Smem);
       EXPECT_EQ(events[0].registers, TrackedRegisterSource::None);
     }

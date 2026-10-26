@@ -9,6 +9,7 @@
 #define NCCL_ENQUEUE_H_
 
 #include "comm.h"
+#include "info.h"
 #include "group.h"
 #include "collectives.h"
 #include "utils.h"
@@ -79,6 +80,20 @@ inline ncclResult_t rcclAddonLaunch(struct ncclComm* comm, cudaStream_t stream, 
   return rcclAddonLaunchEnd(comm, stream, state, launch());
 }
 
+// An addon collective that returns before ncclEnqueueCheck must still print its per-collective COLL line and
+// advance comm->opCount on the user's comm. Hierarchical addons use this too: their sub-collectives run on the
+// separate intra/inter comms (and log there under their own names), so the parent comm is counted here exactly
+// once, matching the native path.
+void rcclLogCollInfo(const struct ncclInfo& info);
+
+template <typename LaunchFn>
+inline ncclResult_t rcclAddonLaunch(const struct ncclInfo& info, LaunchFn&& launch) {
+  rcclLogCollInfo(info);
+  ncclResult_t result = rcclAddonLaunch(info.comm, info.stream, std::forward<LaunchFn>(launch));
+  if (result == ncclSuccess) info.comm->opCount++;
+  return result;
+}
+
 ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t* simInfo);
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm);
 
@@ -98,6 +113,27 @@ rccl_static inline size_t ncclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, 
 // its own slice of the aggregate receive buffer.
 static inline bool ncclAllGatherIsInPlace(const void* sendbuff, const void* recvbuff, int rank, size_t perRankBytes) {
   return (uintptr_t)sendbuff == (uintptr_t)recvbuff + size_t(rank) * perRankBytes;
+}
+
+// [RCCL] Whether the Tma symmetric kernels may run: input and output must sit at the same offset
+// modulo 16 within their windows. The answer must be the same on every rank, or ranks pick
+// different symmetric kernels and launch grids that never meet at the LSA barrier. Both windows
+// must therefore be symmetric: an unregistered buffer's raw address differs by rank. In-place
+// AllGather and ReduceScatter shift one side by rank * perRankBytes, so there the per-rank slice
+// must itself be 16 B aligned.
+static inline bool ncclSymAligned16B(ncclFunc_t func, int rank, const void* sendbuff, const void* recvbuff,
+                                     struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin,
+                                     size_t perRankBytes) {
+  if (sendWin == nullptr || recvWin == nullptr || !(sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) ||
+      !(recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
+    return false;
+  }
+  size_t inputOff = (uintptr_t)sendbuff - (uintptr_t)sendWin->userPtr;
+  size_t outputOff = (uintptr_t)recvbuff - (uintptr_t)recvWin->userPtr;
+  if (uint32_t(inputOff - outputOff) % 16 != 0) return false;
+  bool inPlace = (func == ncclFuncAllGather && ncclAllGatherIsInPlace(sendbuff, recvbuff, rank, perRankBytes)) ||
+                 (func == ncclFuncReduceScatter && ncclAllGatherIsInPlace(recvbuff, sendbuff, rank, perRankBytes));
+  return !inPlace || perRankBytes % 16 == 0;
 }
 
 ncclResult_t ncclGetCollNetSupport(struct ncclComm* comm, struct ncclTaskColl* task, int* collNetSupport);

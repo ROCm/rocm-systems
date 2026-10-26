@@ -1,28 +1,23 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Fallible system allocation and test-only callback injection.
+//! Fallible owner allocation with an optional scoped callback policy.
 
 use core::alloc::Layout;
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 use core::cell::Cell;
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 use core::ffi::c_void;
 use core::fmt;
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 use core::marker::PhantomData;
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 use core::ptr;
 use core::ptr::NonNull;
 use std::alloc::GlobalAlloc;
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 use std::rc::Rc;
 
 /// C callback allocating a nonzero, suitably aligned uninitialized range.
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 pub type AllocateFn = unsafe extern "C" fn(*mut c_void, u64, u64) -> *mut c_void;
+/// C callback that preserves bytes while replacing a host metadata block.
+pub type ResizeFn = unsafe extern "C" fn(*mut c_void, *mut c_void, u64, u64, u64) -> *mut c_void;
 /// Infallible C callback releasing storage returned by the same allocator.
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 pub type FreeFn = unsafe extern "C" fn(*mut c_void, *mut c_void);
 
 /// Allocation failed or the requested capacity cannot be represented.
@@ -53,48 +48,46 @@ impl From<std::collections::TryReserveError> for crate::Error {
     }
 }
 
-/// Callback fields do not describe either a complete test allocator or all zeros.
-#[cfg(any(test, feature = "allocator-test-hooks"))]
+/// Callback fields do not describe either a complete allocator or all zeros.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InvalidAllocator;
 
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 impl fmt::Display for InvalidAllocator {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("host allocator requires allocate and free callbacks")
     }
 }
 
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 impl std::error::Error for InvalidAllocator {}
 
-/// Test-only allocator for fallible internal metadata storage.
+/// Scoped allocator for fallible owner metadata storage.
 ///
-/// Production builds use [`std::alloc::System`] directly. Test builds can
-/// inject allocation callbacks to verify failure cleanup paths.
+/// Owners retain the allocator that created them, including after the scope
+/// exits or the owner moves to another thread. Standard Rust vectors still use
+/// the system allocator; [`super::OwnerVec`] uses an explicit allocator value.
 #[derive(Clone, Copy, Debug)]
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 pub struct Allocator {
+    /// Opaque state passed back to allocation callbacks.
     user_data: *mut c_void,
+    /// Optional callback replacing the system allocator.
     allocate: Option<AllocateFn>,
+    /// Optional callback used when a vector grows.
+    resize: Option<ResizeFn>,
+    /// Callback paired with `allocate` for deallocation.
     free: Option<FreeFn>,
 }
 
 // SAFETY: Callback construction requires thread-safe callbacks and shared state.
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 unsafe impl Send for Allocator {}
 // SAFETY: The same construction contract permits concurrent calls with user_data.
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 unsafe impl Sync for Allocator {}
 
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 impl Default for Allocator {
     fn default() -> Self {
         Self::system()
     }
 }
 
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 impl Allocator {
     /// Returns the default host allocator without performing any allocation.
     #[must_use]
@@ -102,6 +95,7 @@ impl Allocator {
         Self {
             user_data: ptr::null_mut(),
             allocate: None,
+            resize: None,
             free: None,
         }
     }
@@ -110,7 +104,7 @@ impl Allocator {
         CURRENT.with(Cell::get)
     }
 
-    /// Installs this test allocator for allocations on the current thread.
+    /// Installs this allocator for owner allocations on the current thread.
     /// Existing owners retain their own allocator for release.
     #[must_use]
     pub fn scope(self) -> AllocatorScope {
@@ -120,6 +114,7 @@ impl Allocator {
         }
     }
 
+    #[cfg(any(test, feature = "allocator-test-hooks"))]
     pub(super) fn probe(self, layout: Layout) -> Result<(), AllocationError> {
         if !self.is_system() && layout.size() != 0 {
             drop(RawBlock::new_with_allocator(layout, self)?);
@@ -127,7 +122,7 @@ impl Allocator {
         Ok(())
     }
 
-    /// Copies callbacks for metadata failure injection in tests.
+    /// Copies callbacks for owner metadata allocation.
     ///
     /// Null data and absent callbacks select the default allocator. Otherwise
     /// both `allocate` and `free` are required.
@@ -147,17 +142,62 @@ impl Allocator {
         allocate: Option<AllocateFn>,
         free: Option<FreeFn>,
     ) -> Result<Self, InvalidAllocator> {
+        // SAFETY: The same callback obligations apply without a resize hook.
+        unsafe { Self::from_callbacks_with_resize(user_data, allocate, None, free) }
+    }
+
+    /// Copies allocate, resize, and release callbacks for frontend metadata.
+    ///
+    /// # Errors
+    /// Rejects incomplete callback combinations.
+    ///
+    /// # Safety
+    /// The callback state and code must remain valid through final owner
+    /// release. Resize preserves the old allocation on failure, and all
+    /// callbacks are thread-safe, aligned, and do not unwind.
+    pub unsafe fn from_callbacks_with_resize(
+        user_data: *mut c_void,
+        allocate: Option<AllocateFn>,
+        resize: Option<ResizeFn>,
+        free: Option<FreeFn>,
+    ) -> Result<Self, InvalidAllocator> {
         if allocate.is_some() && free.is_some() {
             Ok(Self {
                 user_data,
                 allocate,
+                resize,
                 free,
             })
-        } else if user_data.is_null() && allocate.is_none() && free.is_none() {
+        } else if user_data.is_null() && allocate.is_none() && resize.is_none() && free.is_none() {
             Ok(Self::system())
         } else {
             Err(InvalidAllocator)
         }
+    }
+
+    pub(super) fn resize(
+        self,
+        pointer: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<Option<NonNull<u8>>, AllocationError> {
+        let Some(resize) = self.resize else {
+            return Ok(None);
+        };
+        // SAFETY: The callback owns this block and promises to leave it live
+        // and unchanged on null return.
+        let resized = unsafe {
+            resize(
+                self.user_data,
+                pointer.as_ptr().cast(),
+                old_layout.size() as u64,
+                new_layout.size() as u64,
+                new_layout.align() as u64,
+            )
+        };
+        NonNull::new(resized.cast())
+            .map(Some)
+            .ok_or(AllocationError)
     }
 
     /// Returns whether this value selects the default host allocator.
@@ -175,7 +215,14 @@ impl Allocator {
             // SAFETY: Normalized layouts always have a nonzero size.
             unsafe { std::alloc::System.alloc(layout) }
         };
-        NonNull::new(pointer).ok_or(AllocationError)
+        let pointer = NonNull::new(pointer).ok_or(AllocationError)?;
+        if pointer.as_ptr().addr() % layout.align() != 0 {
+            // SAFETY: Even a misaligned callback result belongs to the
+            // callback allocator and must be returned to its matching free.
+            unsafe { self.deallocate(pointer, layout) };
+            return Err(AllocationError);
+        }
+        Ok(pointer)
     }
 
     unsafe fn deallocate(self, pointer: NonNull<u8>, layout: Layout) {
@@ -189,20 +236,18 @@ impl Allocator {
     }
 }
 
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 thread_local! {
     static CURRENT: Cell<Allocator> = const { Cell::new(Allocator::system()) };
 }
 
-/// Restores the previous allocation fault hook when the current scope ends.
-#[cfg(any(test, feature = "allocator-test-hooks"))]
+/// Restores the previous owner allocator when the current scope ends.
 pub struct AllocatorScope {
+    /// Prior thread-local policy restored when this guard drops.
     previous: Allocator,
-    // A scope must be dropped on the thread whose CURRENT slot it replaced.
+    /// Keeps the guard on the thread whose allocator slot it replaced.
     _not_send: PhantomData<Rc<()>>,
 }
 
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 impl Drop for AllocatorScope {
     fn drop(&mut self) {
         CURRENT.with(|current| current.set(self.previous));
@@ -221,31 +266,25 @@ fn normalized_layout(layout: Layout) -> Result<Layout, AllocationError> {
         .map_err(|_| AllocationError)
 }
 
+/// One fallibly allocated metadata block and the policy used to release it.
 pub(super) struct RawBlock {
+    /// Start of the aligned allocation.
     pub(super) pointer: NonNull<u8>,
+    /// Exact layout required for deallocation.
     pub(super) layout: Layout,
-    #[cfg(any(test, feature = "allocator-test-hooks"))]
+    /// Allocator retained across changes to the thread-local scope.
     pub(super) allocator: Allocator,
 }
 
 impl RawBlock {
     pub(super) fn new(layout: Layout) -> Result<Self, AllocationError> {
-        #[cfg(any(test, feature = "allocator-test-hooks"))]
-        {
-            Self::new_with_allocator(layout, Allocator::current())
-        }
-        #[cfg(not(any(test, feature = "allocator-test-hooks")))]
-        {
-            let layout = normalized_layout(layout)?;
-            // SAFETY: Normalized layouts always have a nonzero size.
-            let pointer =
-                NonNull::new(unsafe { std::alloc::System.alloc(layout) }).ok_or(AllocationError)?;
-            Ok(Self { pointer, layout })
-        }
+        Self::new_with_allocator(layout, Allocator::current())
     }
 
-    #[cfg(any(test, feature = "allocator-test-hooks"))]
-    fn new_with_allocator(layout: Layout, allocator: Allocator) -> Result<Self, AllocationError> {
+    pub(super) fn new_with_allocator(
+        layout: Layout,
+        allocator: Allocator,
+    ) -> Result<Self, AllocationError> {
         let layout = normalized_layout(layout)?;
         let pointer = allocator.allocate(layout)?;
         Ok(Self {
@@ -254,18 +293,23 @@ impl RawBlock {
             allocator,
         })
     }
+
+    pub(super) fn try_resize(&mut self, requested: Layout) -> Result<bool, AllocationError> {
+        let layout = normalized_layout(requested)?;
+        let Some(pointer) = self.allocator.resize(self.pointer, self.layout, layout)? else {
+            return Ok(false);
+        };
+        self.pointer = pointer;
+        self.layout = layout;
+        Ok(true)
+    }
 }
 
 impl Drop for RawBlock {
     fn drop(&mut self) {
         // SAFETY: The block exclusively owns this allocation and original layout.
-        #[cfg(any(test, feature = "allocator-test-hooks"))]
         unsafe {
             self.allocator.deallocate(self.pointer, self.layout);
-        }
-        #[cfg(not(any(test, feature = "allocator-test-hooks")))]
-        unsafe {
-            std::alloc::System.dealloc(self.pointer.as_ptr(), self.layout);
         }
     }
 }

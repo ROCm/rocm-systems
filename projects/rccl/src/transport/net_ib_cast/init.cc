@@ -10,6 +10,7 @@
 #include "capability_cast.h"
 #include "net_telemetry.h"
 #include "qp_sharing.h"
+#include "net_ib_cast_inspect.h"
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
@@ -121,6 +122,7 @@ static int ibvSpeeds[] = {
   2500,  /* SDR */
   5000,  /* DDR */
   10000, /* QDR */
+  10000, /* FDR10 */
   14000, /* FDR */
   25000, /* EDR */
   50000, /* HDR */
@@ -139,6 +141,16 @@ static int IbCastWidth(int width) {
 static int IbCastSpeed(int speed) {
   return ibvSpeeds[firstBitSet(speed, sizeof(ibvSpeeds) / sizeof(int) - 1)];
 }
+
+extern "C" int ncclIbCastTestSpeed(int speed) { return IbCastSpeed(speed); }
+
+extern "C" ncclResult_t ncclIbCastTestSpeedSource(int dev, int* fromQuery) {
+  if (fromQuery == NULL || dev < 0 || dev >= IbCastNDevs) return ncclInvalidArgument;
+  *fromQuery = IbCastDevs[dev].speedFromQuery ? 1 : 0;
+  return ncclSuccess;
+}
+
+extern "C" int ncclIbCastTestGetNDevs(void) { return IbCastNDevs; }
 
 // Determine whether RELAXED_ORDERING is enabled and possible
 static int IbCastRelaxedOrderingCapable(void) {
@@ -502,14 +514,22 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             IbCastDevs[IbCastNDevs].portAttr = portAttr;
             IbCastDevs[IbCastNDevs].portNum = port_num;
             IbCastDevs[IbCastNDevs].link = portAttr.link_layer;
-            if (portAttr.active_speed_ex) {
-              // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
-              IbCastDevs[IbCastNDevs].speed =
-                IbCastSpeed(portAttr.active_speed_ex) * IbCastWidth(portAttr.active_width);
+            uint64_t querySpeed = 0;
+            if (wrap_ibv_query_port_speed(context, port_num, &querySpeed) == ncclSuccess && querySpeed != 0) {
+              // ibv_query_port_speed returns speed in granularity of 100 Mbps
+              IbCastDevs[IbCastNDevs].speed = querySpeed * 100;
+              IbCastDevs[IbCastNDevs].speedFromQuery = true;
             } else {
-              IbCastDevs[IbCastNDevs].speed = IbCastSpeed(portAttr.active_speed) * IbCastWidth(portAttr.active_width);
+              // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
+              int portSpeed = portAttr.active_speed_ex ? portAttr.active_speed_ex : portAttr.active_speed;
+              IbCastDevs[IbCastNDevs].speed = IbCastSpeed(portSpeed) * IbCastWidth(portAttr.active_width);
+              IbCastDevs[IbCastNDevs].speedFromQuery = false;
             }
             IbCastDevs[IbCastNDevs].context = context;
+            if (IbCastAinicRoce) {
+              uint8_t raw = wrap_ionicdv_ctx_get_udma_count(context);
+              IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount = ncclIbCastNormalizeUdmaCount(raw);
+            }
             IbCastDevs[IbCastNDevs].pdRefs = 0;
             IbCastDevs[IbCastNDevs].pd = NULL;
             // for dev==1 (data direct device), pciPath is given by mlx5
@@ -546,11 +566,13 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             NCCLCHECKGOTO(IbCastGidInfoQuery(context, port_num, &portAttr, &IbCastDevs[IbCastNDevs].gidInfo), ret,
                           fail);
 
-            INFO(NCCL_NET, "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d", d,
-                 devices[d]->name, devices[d]->dev_name, IbCastDevs[IbCastNDevs].portNum,
+            INFO(NCCL_NET,
+                 "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d udmaCount=%u",
+                 d, devices[d]->name, devices[d]->dev_name, IbCastDevs[IbCastNDevs].portNum,
                  NCCL_IB_LLSTR(portAttr.link_layer), ibCastProviderName[IbCastDevs[IbCastNDevs].ibProvider],
                  IbCastDevs[IbCastNDevs].speed, context, IbCastDevs[IbCastNDevs].pciPath, IbCastDevs[IbCastNDevs].ar,
-                 IbCastDevs[IbCastNDevs].oooRqSize);
+                 IbCastDevs[IbCastNDevs].oooRqSize,
+                 IbCastAinicRoce ? IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount : 0u);
 
             IbCastAsyncThread = std::thread(IbCastAsyncThreadMain, IbCastDevs + IbCastNDevs);
             ncclSetThreadName(IbCastAsyncThread.native_handle(), "NCCL IbAsync %2d", IbCastNDevs);
@@ -726,11 +748,24 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
   ncclResult_t ret = ncclSuccess;
   ncclNetCommConfig_t* netCommConfig = nullptr;
   // Telemetry is initialized and reported by IbCastInitDevices below.
+  // init()/finalize() is a strict pair in the net plugin contract, so any step below that fails
+  // must unwind itself via IbCastFinalizeDevices() rather than rely on a caller's finalize().
   NCCLCHECK(IbCastInitDevices(logFunction, profFunction));
-  // After IbCastInitDevices: the probe QPs must use the final IbCastUseInline, like the resiliency QPs.
-  NCCLCHECK(IbCastCapProbeDevices());
-  NCCLCHECK(IbCastPortRecoveryThreadStart());
-  NCCLCHECK(ncclCalloc(&netCommConfig, 1));
+  // Probe QPs must use the final IbCastUseInline, like the resiliency QPs. Each probe self-cleans its
+  // own QP/MR/CQ/PD on failure, so finalize here is defensive, not unwinding a half-built device.
+  if ((ret = IbCastCapProbeDevices()) != ncclSuccess) {
+    IbCastFinalizeDevices();
+    return ret;
+  }
+  if ((ret = IbCastPortRecoveryThreadStart()) != ncclSuccess) {
+    IbCastFinalizeDevices();
+    return ret;
+  }
+  if ((ret = ncclCalloc(&netCommConfig, 1)) != ncclSuccess) {
+    IbCastPortRecoveryThreadStop();
+    IbCastFinalizeDevices();
+    return ret;
+  }
   netCommConfig->trafficClass = config->trafficClass;
   *ctx = (void*)netCommConfig;
   return ret;
@@ -757,7 +792,7 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
     props->ptrSupport |= NCCL_PTR_DMABUF; // GDR support via DMA-BUF
   }
   props->forceFlush = 0;
-  if (ibDev->capsProvider.mlx5.dataDirect) {
+  if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ibDev->capsProvider.mlx5.dataDirect) {
     props->forceFlush = 1;
   }
   props->latency = 0; // Not set
