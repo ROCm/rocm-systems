@@ -7,7 +7,6 @@
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
 #include <resource_guards.hh>
-#include <utils.hh>
 
 
 /**
@@ -68,13 +67,21 @@ template <unsigned int tileSize> static void TiledGroupMetaRankTest(dim3 threads
     kernel_tiledgrp_meta_rank<tileSize><<<1, threads>>>(ranksDev.ptr(), divergent);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(ranksHost.ptr(), ranksDev.ptr(), allocSize, hipMemcpyDeviceToHost));
-    ArrayAllOf(ranksHost.ptr(), rankCount, [divergent](unsigned int index) {
+    constexpr const char* streamNames[]{"typed", "erased", "nested"};
+    for (unsigned int index = 0; index < rankCount; ++index) {
       const auto rank = index / 3;
-      if (divergent && rank % 2 == 0) {
-        return ~0u;
+      // meta_group_rank() is the parent thread rank divided by the child tile size.
+      // The nested tile's parent thread rank is rank % tileSize.
+      const bool nested = index % 3 == 2;
+      const auto parentRank = nested ? rank % tileSize : rank;
+      const auto childSize = nested ? tileSize / 2 : tileSize;
+      const auto expected = divergent && rank % 2 == 0 ? ~0u : parentRank / childSize;
+      if (ranksHost.ptr()[index] != expected) {
+        INFO("Rank stream: " << streamNames[index % 3]);
+        INFO("Block thread rank: " << rank);
+        REQUIRE(ranksHost.ptr()[index] == expected);
       }
-      return index % 3 == 2 ? (rank % tileSize) / (tileSize / 2) : rank / tileSize;
-    });
+    }
   }
 }
 
