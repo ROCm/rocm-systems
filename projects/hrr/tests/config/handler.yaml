@@ -26,6 +26,7 @@ cases:
   Unit_HRR_AccessPolicyWindow_StreamAttributeTranslatesBasePtr: {}
   Unit_HRR_Blob_AbsentBlobDoesNotEndTheReplay: {}
   Unit_HRR_Blob_CapRefusalEndsTheReplay: {}
+  Unit_HRR_CaptureState_EndCaptureClearsFlag: {}
   Unit_HRR_GraphDeps_InlineCapacity: {}
   Unit_HRR_GraphDeps_MemAllocNodeRefusesOversizeCount: {}
   Unit_HRR_GraphDeps_SymbolCopyNodesRefuseOversizeCount: {}
