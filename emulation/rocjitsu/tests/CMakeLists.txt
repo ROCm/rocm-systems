@@ -597,6 +597,19 @@ add_executable(
     pci/ip_discovery_test.cpp
     pci/ip_block_model_test.cpp
 )
+
+if(
+    CMAKE_SYSTEM_NAME STREQUAL "Linux"
+    AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"
+)
+    # The associated header is included first: missing capability dependencies
+    # must fail compilation instead of silently removing architecture spin hints.
+    set_source_files_properties(
+        util_conditional_wake_spinlock_test.cpp
+        PROPERTIES COMPILE_OPTIONS "-Werror=undef"
+    )
+endif()
+
 if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
     target_sources(rocjitsu_tests PRIVATE perfsim_plugin_test.cpp)
 endif()
