@@ -5879,6 +5879,12 @@
       "enabled": true
     },
     {
+      "name": "Grow MPI Tests - Net Bidir Regression (4-rank, single-node)",
+      "description": "AICOMRCCL-3004: ncclCommGrow over the network bootstrap with NCCL_BOOTSTRAP_BIDIR_NET=1 at 4 ranks on one node, guarding against the bidirectional-net reverse-ring hang during grow (Grow_SendRecv, DoubleGrow_AllReduce, Grow_RankPreservation).",
+      "config": "grow_mpi_tests_netbidir",
+      "enabled": true
+    },
+    {
       "name": "Grow MPI Tests (8-rank, single-node)",
       "description": "ncclCommGrow scenarios requiring 3-8 ranks on one node: coordinator-only uniqueId (NCCL convention), elastic grow/shrink cycles, double/triple grow with magic chain verification, multi-rank jump (4 ranks at once), and coordinator-at-last-rank bootstrap path",
       "config": "grow_mpi_tests_8rank",
