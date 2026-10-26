@@ -158,19 +158,6 @@ public:
                                             std::optional<uint32_t> vgprs,
                                             std::string *error = nullptr);
 
-  /// @brief Overwrite one kernel descriptor's `private_segment_fixed_size`.
-  ///
-  /// @details Low-level descriptor-only edit. Resource-changing DBI clients use
-  /// patch_kernel_resources() to keep the metadata consistent. Reads @p
-  /// descriptor_file_offset, sets the scratch-size field to @p bytes, and writes
-  /// it back. Returns false if the descriptor does not fit in the image.
-  ///
-  /// Deliberately narrower than DBT's apply_kernel_descriptor_translation: a
-  /// same-arch instrument-only pass must re-encode no other descriptor field
-  /// (VGPR/SGPR granules, mode bits, USER_SGPR_COUNT, kernarg size).
-  [[nodiscard]] bool set_private_segment_fixed_size(uint64_t descriptor_file_offset,
-                                                    uint32_t bytes);
-
   /// @brief Apply a descriptor translation plan to the in-memory ELF image.
   ///
   /// KernelDescriptorTranslator owns the resource/ABI decision. BinaryTranslator

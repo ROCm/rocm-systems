@@ -1519,16 +1519,6 @@ bool CodeObjectPatcher::patch_kernel_resources(const KernelDescriptorInfo &kerne
                                  {reinterpret_cast<const uint8_t *>(&updated), sizeof(updated)});
 }
 
-bool CodeObjectPatcher::set_private_segment_fixed_size(uint64_t descriptor_file_offset,
-                                                       uint32_t bytes) {
-  auto desc = read_kernel_descriptor(image_, descriptor_file_offset);
-  if (!desc)
-    return false;
-
-  desc->private_segment_fixed_size = bytes;
-  return write_kernel_descriptor(image_, descriptor_file_offset, *desc);
-}
-
 bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,
                                                             rj_code_arch_t target_arch) {
   auto desc = read_kernel_descriptor(image_, translation.descriptor_file_offset);
