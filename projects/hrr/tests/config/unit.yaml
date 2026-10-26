@@ -26,6 +26,9 @@ cases:
   Unit_HRR_Format_SmallPayloadForType: {}
   Unit_HRR_Format_TruncatedEvent: {}
   Unit_HRR_Format_UnknownEventType: {}
+  Unit_HRR_HostRect_Overflow: {}
+  Unit_HRR_HostRect_PitchedPadded3D: {}
+  Unit_HRR_HostRect_RuntimeDefaults: {}
   Unit_HRR_Playback_PlacementHeldRanges: {}
   Unit_HRR_Playback_PlacementPlan: {}
   Unit_HRR_Playback_ReplayedH2DDrainGraphGuard: {}
