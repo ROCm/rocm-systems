@@ -1228,6 +1228,52 @@ TEST(RdnaMimgDecodeTest, NsaStorePreservesExtensionAndNextInstruction) {
   }
 }
 
+TEST(RdnaMimgDecodeTest, BvhWidthsAndDependenciesIgnoreDimSizing) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const bool bvh64 : {false, true}) {
+      for (const bool a16 : {false, true}) {
+        for (const bool nsa : {false, true}) {
+          SCOPED_TRACE(testing::Message() << "bvh64=" << bvh64 << " a16=" << a16 << " nsa=" << nsa);
+          const uint8_t vaddr_words = bvh64 ? (a16 ? 9 : 12) : (a16 ? 8 : 11);
+          std::array<uint32_t, 3> words{};
+          if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+            const auto base = rdna3::build_mimg(
+                bvh64 ? rdna3::kImageBvh64IntersectRayMimg : rdna3::kImageBvhIntersectRayMimg,
+                {.nsa = nsa, .a16 = a16, .vaddr = 9, .vdata = 4, .srsrc = 1});
+            words[0] = base[0];
+            words[1] = base[1];
+          } else {
+            const auto base = rdna3_5::build_mimg(
+                bvh64 ? rdna3_5::kImageBvh64IntersectRayMimg : rdna3_5::kImageBvhIntersectRayMimg,
+                {.nsa = nsa, .a16 = a16, .vaddr = 9, .vdata = 4, .srsrc = 1});
+            words[0] = base[0];
+            words[1] = base[1];
+          }
+          if (nsa) {
+            // Canonical groups that collectively name the same contiguous
+            // v[9:9+vaddr_words-1] control used by the non-NSA form.
+            words[2] = bvh64 ? (a16 ? 0x000f0c0b : 0x120f0c0b) : (a16 ? 0x000e0b0a : 0x110e0b0a);
+          }
+
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+          EXPECT_EQ(inst->size(), nsa ? 12 : 8);
+          ASSERT_EQ(inst->num_src_operands(), 2);
+          EXPECT_EQ(inst->src_operand(0)->size_bits(), vaddr_words * 32);
+
+          InstDefUse def_use(*inst);
+          EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 9, vaddr_words}));
+          EXPECT_FALSE(
+              def_use.uses.contains({RegClass::VGPR, static_cast<uint16_t>(9 + vaddr_words), 1}));
+        }
+      }
+    }
+  }
+}
+
 TEST(Rdna35MimgDecodeTest, PartialNsaUsesOneExtensionDword) {
   struct TestCase {
     std::array<uint32_t, 6> words;

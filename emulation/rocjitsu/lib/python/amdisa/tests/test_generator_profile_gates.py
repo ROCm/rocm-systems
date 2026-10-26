@@ -4721,10 +4721,12 @@ def test_rdna3_5_disassembly_overrides_do_not_change_rdna3():
         'IMAGE_BVH_INTERSECT_RAY': 4,
         'IMAGE_BVH64_INTERSECT_RAY': 4,
     }
-    assert rdna3_5.gfx11_mimg_fixed_vaddr_words == {
+    fixed_bvh_vaddr_words = {
         'IMAGE_BVH_INTERSECT_RAY': (11, 8),
         'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
     }
+    assert rdna3.gfx11_mimg_fixed_vaddr_words == fixed_bvh_vaddr_words
+    assert rdna3_5.gfx11_mimg_fixed_vaddr_words == fixed_bvh_vaddr_words
     assert rdna3_5.gfx11_mimg_nsa_group_words == {
         'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
         'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
@@ -4789,7 +4791,7 @@ def test_generated_rdna3_5_fuzz_disassembly_rules(amdgpu_generated_root: Path):
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna3_5'])
-def test_generated_gfx11_image_address_width_uses_dim(
+def test_generated_gfx11_image_address_width_uses_dim_and_preserves_fixed_bvh(
     amdgpu_generated_root: Path, arch: str
 ):
     mimg = (amdgpu_generated_root / _generated_dir_name(arch) / 'mimg.cpp').read_text()
@@ -4801,6 +4803,12 @@ def test_generated_gfx11_image_address_width_uses_dim(
         assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)' not in (
             constructor
         )
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 256 : 352)' in (
+        _generated_constructor_body(mimg, 'ImageBvhIntersectRayMimg')
+    )
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 288 : 384)' in (
+        _generated_constructor_body(mimg, 'ImageBvh64IntersectRayMimg')
+    )
 
 
 def test_gfx1250_compact_literal_policy_precedes_extension_sizing(

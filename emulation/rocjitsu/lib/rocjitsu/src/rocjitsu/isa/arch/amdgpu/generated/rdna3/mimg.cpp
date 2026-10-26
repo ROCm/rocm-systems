@@ -951,8 +951,8 @@ ImageBvhIntersectRayMimg::ImageBvhIntersectRayMimg(const MachineInst *inst)
     : Mimg("image_bvh_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageBvhIntersectRayMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_bvh_intersect_ray"),
-            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->a16 ? 256 : 352), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
@@ -978,9 +978,8 @@ ImageBvh64IntersectRayMimg::ImageBvh64IntersectRayMimg(const MachineInst *inst)
     : Mimg("image_bvh64_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageBvh64IntersectRayMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(
-          mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_bvh64_intersect_ray"),
-          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->a16 ? 288 : 384), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;

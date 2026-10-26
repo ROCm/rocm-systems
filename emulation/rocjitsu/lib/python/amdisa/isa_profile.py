@@ -2300,6 +2300,13 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
+            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
+        }
+
+    @property
     def vmem_writes_use_expcnt(self) -> bool:
         return True
 
@@ -2554,13 +2561,6 @@ class Rdna3_5Profile(Rdna3Profile):
         return {
             'IMAGE_BVH_INTERSECT_RAY': 4,
             'IMAGE_BVH64_INTERSECT_RAY': 4,
-        }
-
-    @property
-    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
-            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
         }
 
     @property
