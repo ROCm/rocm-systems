@@ -5,6 +5,8 @@
 #
 # This workflow runs TheRock's multi-arch CI pipeline on a nightly schedule.
 # It builds and tests for gfx94X, gfx950, gfx125X (Linux) and gfx1151 (Windows).
+# An instrumented code coverage build + report on gfx94X-dcgpu (Linux) is wired
+# up but disabled until TheRock's coverage workflow can build comm-libs.
 #
 # For manual triggering with custom GPU families, use therock-multi-arch-ci.yml.
 
@@ -108,6 +110,44 @@ jobs:
       changed_projects: ''
       repository: ROCm/TheRock
       ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
+    permissions:
+      contents: read
+      id-token: write
+
+  linux_code_coverage_build_and_test:
+    name: Linux::CodeCoverage::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
+    needs: [setup]
+    # Disabled: rocm_systems_all resolves to rccl and rocshmem (comm-libs stage),
+    # and TheRock's coverage workflow only builds compiler-runtime and math-libs,
+    # so configure_coverage_ci.py rejects the selection at matrix setup. Both are
+    # also blocked upstream (rccl requires a Debug build for coverage; rocshmem
+    # fails with coverage + HIP RDC).
+    # TODO: Restore the linux_build_and_test condition once TheRock restores the
+    # comm-libs coverage build and wait_for_baseline_stage.py waits on comm-libs.
+    if: false
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_coverage_linux.yml@users/jainprad/codecoverage-workflows-therock
+    secrets: inherit
+    with:
+      # Baseline is this run's own linux_build_and_test stack; the coverage
+      # workflow waits for it before testing and overlays only the project under test.
+      baseline_run_id: ${{ github.run_id }}
+      baseline_repository: ${{ github.repository }}
+      baseline_release_type: "ci"
+      amdgpu_families: "gfx94X-dcgpu"
+      # Alias expanding to every measurable rocm-systems project in TheRock's
+      # coverage allowlist (configure_coverage_ci.py), so newly onboarded
+      # projects are picked up without edits here.
+      projects_to_test: "rocm_systems_all"
+      # Registry paths (projects/<name>/test_categories_coverage.yaml) are relative to this repo.
+      # TODO: Add projects/{rccl,rocshmem}/test_categories_coverage.yaml before enabling.
+      coverage_config_source: "${{ github.repository }}@${{ github.sha }}"
+      # Instrument this rocm-systems commit rather than TheRock's pinned submodule.
+      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
+      test_type: "standard"
+      # Cross-repo call: pin the reusable workflow's own repo/ref so its
+      # checkout finds TheRock scripts (defaults to the caller otherwise).
+      repository: ROCm/TheRock
+      ref: users/jainprad/codecoverage-workflows-therock
     permissions:
       contents: read
       id-token: write
