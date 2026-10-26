@@ -364,6 +364,7 @@ add_executable(
     amdgpu_vm_test.cpp
     gpu_queue_registry_test.cpp
     gpu_vm_pipeline_test.cpp
+    coalesced_lane_runs_test.cpp
     gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
     legacy_page_table_cache_test.cpp
@@ -430,6 +431,7 @@ add_executable(
     scalar_cache_discard_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
+    conversion_test.cpp
     denormal_test.cpp
     floating_operation_test.cpp
     input_denormal_test.cpp
@@ -510,6 +512,7 @@ add_executable(
     scoped_temp_test.cpp
     wave_debug_test.cpp
     decode_execute_benchmark.cpp
+    util_conditional_wake_spinlock_test.cpp
     util_distributed_shared_mutex_test.cpp
     util_observable_shared_mutex_test.cpp
     host_mapping_lock_test.cpp

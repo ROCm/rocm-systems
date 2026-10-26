@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <vector>
 
+#include "AsanCheck.h"
 #include "fakes/graph_fakes.h"
 
 #include "comm.h"
@@ -29,21 +30,9 @@
 // Defined in topo-test.cc, which owns topo.cc's NCCL_NETDEVS_POLICY statics.
 void TopoSetNetDevsPolicy(enum netDevsPolicy policy, int num);
 
-#define TOPO_SCENE_ASAN 0
-#if defined(__SANITIZE_ADDRESS__)
-#undef TOPO_SCENE_ASAN
-#define TOPO_SCENE_ASAN 1
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#undef TOPO_SCENE_ASAN
-#define TOPO_SCENE_ASAN 1
-#endif
-#endif
-
 namespace topo_scene {
 
 constexpr int kXmlNodes = 512;
-constexpr bool kAsan = TOPO_SCENE_ASAN;  // tests that pin a production leak or overflow skip under ASan
 
 struct FreeDeleter {
   void operator()(void* p) const { free(p); }

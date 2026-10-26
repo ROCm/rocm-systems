@@ -5,9 +5,16 @@
 
 pub(crate) mod agent;
 pub(crate) mod amd;
+pub(crate) mod finalizer;
+pub(crate) mod image;
 pub(crate) mod isa;
 pub(crate) mod lifecycle;
+pub(crate) mod loader;
+pub(crate) mod memory;
 mod output;
+pub(crate) mod pc_sampling;
+pub(crate) mod queue;
+pub(crate) mod signal;
 pub(crate) mod system;
 
 /// Host DMA-BUF exposure requires an activated GPU in this HSA generation.
