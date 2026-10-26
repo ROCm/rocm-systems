@@ -129,10 +129,16 @@ class GinAnvilPluginTest : public ::testing::Test {
   // A refused bind must leave nothing behind: no signals on the device context,
   // no IPC table entry, and no conn-check traffic.
   void expectSignalsUnbound(ncclNetDeviceHandle_v11_t* devHandle) {
-    ncclGinAnvilSdmaGPUContext hostCtx{};
-    ASSERT_EQ(hipMemcpy(&hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
-    EXPECT_EQ(hostCtx.signals, nullptr);
-    EXPECT_EQ(hostCtx.signal_remote_addrs, nullptr);
+    const size_t nContexts = devHandle->size / sizeof(ncclGinAnvilSdmaGPUContext);
+    ASSERT_GE(nContexts, 1u);
+    std::vector<ncclGinAnvilSdmaGPUContext> hostCtx(nContexts);
+    ASSERT_EQ(hipMemcpy(hostCtx.data(), devHandle->handle, nContexts * sizeof(ncclGinAnvilSdmaGPUContext),
+                        hipMemcpyDeviceToHost),
+              hipSuccess);
+    for (size_t c = 0; c < nContexts; c++) {
+      EXPECT_EQ(hostCtx[c].signals, nullptr) << "context " << c;
+      EXPECT_EQ(hostCtx[c].signal_remote_addrs, nullptr) << "context " << c;
+    }
     const ncclGinAnvilIpcBufEntry* table = nullptr;
     int ipcCount = -1;
     ncclGinAnvilIpcTableGetDevice(&table, &ipcCount);
@@ -846,19 +852,20 @@ TEST_F(GinAnvilPluginTest, BindSignals_RailGinTeamFailsRegistration) {
 
 // The span-base probe allgathers over comm->bootstrap, which writes one slot per
 // world rank. Under NCCL_GIN_CONNECTION_RAIL the world is wider than the GIN team,
-// so a buffer sized by the GIN team would be overrun.
+// so a buffer sized by the GIN team would be overrun. A wider rail team would fail
+// registration, so this uses one host of 8 ranks, where the rail team is this rank.
 TEST_F(GinAnvilPluginTest, BindSignals_SpanBaseProbeSizedForWorldRanks) {
   constexpr int kWorldRanks = 8;
-  GinAnvilPluginStubs::SetBootstrapNranks(2);
   mockComm_.get()->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+  mockComm_.get()->contiguousRanksPerHost = kWorldRanks;
   mockComm_.get()->nRanks = kWorldRanks;
   mockComm_.get()->rank = 5;
-  mockComm_.get()->devrState.lsaSize = 2;
-  mockComm_.get()->devrState.lsaSelf = 0;
+  mockComm_.get()->devrState.lsaSize = kWorldRanks;
+  mockComm_.get()->devrState.lsaSelf = 5;
   void* ictx = nullptr;
   initCtx(&ictx);
   void* coll = nullptr;
-  connectColl(ictx, &coll, 2);
+  connectColl(ictx, &coll);
   ncclGinConfig_t cfg{};
   cfg.nSignals = 2;
   void* ginCtx = nullptr;
