@@ -309,6 +309,51 @@ HIP_TEST_CASE(Unit_ext_ocp_fp8_fp16_subnormal_source_host) {
   REQUIRE(encode_fp16(0x8300, __AMD_OCP_E5M2) == 0x83);
 }
 
+/**
+ * Test Description
+ * ------------------------
+ *  - The host conversion saturates: a value that rounds past the largest finite
+ *    value, and +-Inf, give +-max (E4M3: 448 = 0x7e, since 0x7f is NaN; E5M2:
+ *    57344 = 0x7b), with round-to-nearest-even and with stochastic rounding.
+ *    NaN stays NaN.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/ext_ocp_fp8.cc
+ */
+HIP_TEST_CASE(Unit_ext_ocp_fp8_overflow_saturates_host) {
+  SECTION("e4m3") {
+    // 464 is the tie between 448 and 480 and rounds to the even 448; anything above overflows
+    for (float v : {448.0f, 449.0f, 464.0f, 465.0f, 500.0f, 1e5f, 3.0e38f, INFINITY}) {
+      INFO("v " << v);
+      REQUIRE(__hipext_ocp_fp8_e4m3(v).__x == 0x7e);
+      REQUIRE(__hipext_ocp_fp8_e4m3(-v).__x == 0xfe);
+      for (unsigned seed : {0u, 0x12345678u, 0xffffffffu}) {
+        REQUIRE(__hipext_ocp_fp8_e4m3(v, seed).__x == 0x7e);
+        REQUIRE(__hipext_ocp_fp8_e4m3(-v, seed).__x == 0xfe);
+      }
+    }
+    REQUIRE((__hipext_ocp_fp8_e4m3(NAN).__x & 0x7f) == 0x7f);
+
+    __amd_fp8x2_storage_t packed =
+        __amd_cvt_floatx2_to_fp8x2(__amd_floatx2_storage_t{500.0f, INFINITY}, __AMD_OCP_E4M3);
+    REQUIRE((packed & 0xff) == 0x7e);
+    REQUIRE((packed >> 8) == 0x7e);
+  }
+  SECTION("e5m2") {
+    // 61440 is the tie between 57344 and 65536 and rounds up, so it overflows
+    for (float v : {57344.0f, 60000.0f, 61440.0f, 1e5f, 3.0e38f, INFINITY}) {
+      INFO("v " << v);
+      REQUIRE(__hipext_ocp_fp8_e5m2(v).__x == 0x7b);
+      REQUIRE(__hipext_ocp_fp8_e5m2(-v).__x == 0xfb);
+      for (unsigned seed : {0u, 0x12345678u, 0xffffffffu}) {
+        REQUIRE(__hipext_ocp_fp8_e5m2(v, seed).__x == 0x7b);
+        REQUIRE(__hipext_ocp_fp8_e5m2(-v, seed).__x == 0xfb);
+      }
+    }
+    REQUIRE((__hipext_ocp_fp8_e5m2(NAN).__x & 0x7f) > 0x7c);
+  }
+}
+
 // ---- Device consistency -----------------------------------------------------
 
 __global__ void fp8_e4m3_roundtrip_kernel(const float* in, float* out, size_t n) {

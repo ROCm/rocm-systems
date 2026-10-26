@@ -367,8 +367,16 @@ template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t inf
       return nan<E, sat>(sign);
     case Encoding::E4M3:
     case Encoding::E4M3Mx:
+      // 0x7f is the NaN encoding; the largest finite value is 0x7e (448).
+      if constexpr (sat) {
+        sign <<= enc.ExpBits + enc.ManBits;
+        return sign | 0b01111110;
+      }
+
+      return nan<E, sat>(sign);
     case Encoding::E4M3Nanoo:
     case Encoding::E5M2Nanoo:
+      // FNUZ: 0x7f is the largest finite value.
       if constexpr (sat) {
         sign <<= enc.ExpBits + enc.ManBits;
         return sign | 0b01111111;
