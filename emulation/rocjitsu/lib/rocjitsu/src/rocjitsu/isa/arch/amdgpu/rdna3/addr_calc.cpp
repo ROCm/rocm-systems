@@ -89,10 +89,7 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
       uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
       vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
     }
-    d.scratch_swizzle = true;
-    d.requires_scratch_backing = true;
-    d.scratch_lane_mask = exec;
-    d.scratch_addr_stride = amdgpu::scratch_unit_stride(wf.wf_size());
+    amdgpu::add_private_scratch_lanes(d, wf.wf_size(), exec);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
@@ -135,10 +132,7 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
           amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::Interleaved);
       if (translated.private_address) {
         addr = translated.value;
-        d.scratch_swizzle = true;
-        d.requires_scratch_backing = true;
-        d.scratch_addr_stride = amdgpu::scratch_unit_stride(wf.wf_size());
-        d.scratch_lane_mask |= uint64_t{1} << lane;
+        amdgpu::add_private_scratch_lanes(d, wf.wf_size(), uint64_t{1} << lane);
       }
     }
     d.per_lane_addr[lane] = addr;
