@@ -31,6 +31,7 @@ use std::mem::{align_of, size_of};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::thread;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::platform::memory as linux_interop;
@@ -222,9 +223,14 @@ impl MemoryState {
 
     /// Joins memory workers after the shared stop request is published.
     pub(crate) fn join_workers(&mut self) {
-        for worker in self.workers.drain(..) {
+        for worker in self.take_workers() {
             let _ = worker.join();
         }
+    }
+
+    /// Detaches workers so shutdown can join them outside the lifecycle lock.
+    pub(crate) fn take_workers(&mut self) -> Vec<JoinHandle<()>> {
+        std::mem::take(&mut self.workers)
     }
 
     /// Reports whether an unfinished native copy still retains memory borrows.

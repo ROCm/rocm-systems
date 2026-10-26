@@ -18,7 +18,7 @@ use std::ffi::c_void;
 use std::fmt::Arguments;
 use std::io::Write;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -44,7 +44,9 @@ use crate::isa::isa_name;
 use crate::loader::LoaderState;
 use crate::memory::{CpuPoolKind, GpuPoolKind, MemoryState, POOL_HANDLE_STRIDE};
 use crate::pc_sampling::PcSamplingState;
+use crate::pc_sampling::session::SessionHandle;
 use crate::queue::QueueState;
+use crate::queue_intercept::InterceptQueue;
 use crate::signal::SignalState;
 
 mod agent;
@@ -71,7 +73,8 @@ mod logging;
 pub(crate) use lifecycle::{HsaLifecycle, LIFECYCLE};
 pub(crate) use lifecycle::{
     InFlightGeneration, InFlightToken, InFlightTracker, LifecycleTransition, ShutdownWork,
-    VM_FAULT_CONDVAR, boundary, initialized_mut, lock, map_error,
+    VM_FAULT_CONDVAR, boundary, close_public_raw_handles, enter_public_raw_handle, initialized_mut,
+    lock, map_error, public_raw_handle_access_allowed, wait_public_raw_handles_idle,
 };
 #[cfg(test)]
 use logging::logging_flag_enabled;
@@ -202,6 +205,57 @@ pub(crate) struct HsaState {
     pub(crate) lifetime: DriverContextLifetime,
 }
 
+/// Callback work detached while HSA storage remains published for `OnUnload`.
+pub(crate) struct ToolShutdownWork {
+    /// Native operations admitted before the stop request.
+    inflight: Arc<InFlightTracker>,
+    /// Final event callbacks retained until synchronous notification.
+    system_handlers: Vec<(SystemEventHandler, CallbackArg)>,
+    /// Native system event callback worker.
+    system_worker: Option<JoinHandle<()>>,
+    /// Asynchronous memory operation workers.
+    memory_workers: Vec<JoinHandle<()>>,
+    /// Serialized signal callback worker.
+    signal_worker: Option<JoinHandle<()>>,
+    /// Per-queue error callback workers.
+    queue_workers: Vec<JoinHandle<()>>,
+    /// Proxy queues whose interception callbacks must stop.
+    intercept_queues: Vec<Arc<InterceptQueue>>,
+    /// Sampling sessions whose callbacks must finish before tool unload.
+    pc_sampling_sessions: Vec<Arc<SessionHandle>>,
+}
+
+impl ToolShutdownWork {
+    /// Joins every callback producer, then delivers the final system event.
+    pub(crate) fn quiesce(self) -> Status {
+        self.inflight.wait_idle();
+        let mut failed = false;
+        for queue in &self.intercept_queues {
+            failed |= queue.stop().is_err();
+        }
+        for worker in self.queue_workers {
+            failed |= worker.join().is_err();
+        }
+        if let Some(worker) = self.system_worker {
+            failed |= worker.join().is_err();
+        }
+        for worker in self.memory_workers {
+            failed |= worker.join().is_err();
+        }
+        if let Some(worker) = self.signal_worker {
+            failed |= worker.join().is_err();
+        }
+        for session in self.pc_sampling_sessions {
+            failed |= session.quiesce_for_tool_unload() != SUCCESS;
+        }
+        if failed {
+            return ERROR;
+        }
+        notify_system_shutdown(&self.system_handlers);
+        SUCCESS
+    }
+}
+
 /// Result of retiring one HSA generation. An unfinished native session stays
 /// owned while the process lifecycle is quarantined and can be retried.
 pub(crate) struct ShutdownOutcome {
@@ -263,6 +317,12 @@ pub(crate) fn defer_cleanup<T: Send + 'static>(
     Ok(())
 }
 
+/// Publishes a shutdown request without waiting for the worker that called it.
+pub(crate) fn publish_stop_request(stop_workers: &AtomicBool, inflight: &InFlightTracker) {
+    stop_workers.store(true, Ordering::Release);
+    inflight.close();
+}
+
 impl HsaState {
     /// Borrows the native session while this HSA generation is published.
     pub(crate) fn session(&self) -> Option<&Session> {
@@ -281,8 +341,24 @@ impl HsaState {
 
     /// Requests all runtime workers to stop before teardown.
     pub(crate) fn request_stop(&self) {
-        self.logging.stop();
-        self.stop_workers.store(true, Ordering::Release);
+        publish_stop_request(&self.stop_workers, &self.inflight);
+    }
+
+    /// Detaches callback workers under the lifecycle lock. Their joins and
+    /// the final event run after that lock is released, before tool `OnUnload`.
+    pub(crate) fn begin_tool_shutdown(&mut self) -> ToolShutdownWork {
+        self.request_stop();
+        let (queue_workers, intercept_queues) = self.queue_state.take_callback_workers();
+        ToolShutdownWork {
+            inflight: self.inflight.clone(),
+            system_handlers: std::mem::take(&mut self.system_event_handlers),
+            system_worker: self.system_event_worker.take(),
+            memory_workers: self.memory_state.take_workers(),
+            signal_worker: self.signal_state.take_worker(),
+            queue_workers,
+            intercept_queues,
+            pc_sampling_sessions: self.pc_sampling_state.sessions_for_tool_unload(),
+        }
     }
 
     /// Discovers host and GPU agents and constructs process HSA state.
@@ -764,6 +840,7 @@ impl HsaState {
 
     /// Stops this session.
     pub(crate) fn stop(mut self) -> ShutdownOutcome {
+        self.logging.stop();
         if self.running_on_worker() || CallbackScope::active() {
             // Releasing signal storage from its own callback worker is unsafe.
             self.request_stop();

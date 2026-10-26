@@ -604,10 +604,9 @@ pub(crate) unsafe extern "C" fn map(
             }
             Some(producer)
         };
-        let slot = {
-            let _scope = queue.host_allocator.scope();
-            Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED)?
-        };
+        let slot = queue
+            .host_allocator
+            .with_scope(|| Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED))?;
         let info = if host {
             queue.host_mapping
         } else if peer.is_none() {
