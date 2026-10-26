@@ -124,14 +124,13 @@ jobs:
     # fails with coverage + HIP RDC).
     # TODO: Restore the linux_build_and_test condition once TheRock restores the
     # comm-libs coverage build and wait_for_baseline_stage.py waits on comm-libs.
-    if: false
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_coverage_linux.yml@users/jainprad/codecoverage-workflows-therock
     secrets: inherit
     with:
       # Baseline is this run's own linux_build_and_test stack; the coverage
       # workflow waits for it before testing and overlays only the project under test.
-      baseline_run_id: ${{ github.run_id }}
-      baseline_repository: ${{ github.repository }}
+      baseline_run_id: "40332353542" # ${{ github.run_id }}
+      baseline_repository: "ROCm/rocm-systems" # ${{ github.repository }}
       baseline_release_type: "ci"
       amdgpu_families: "gfx94X-dcgpu"
       # Alias expanding to every measurable rocm-systems project in TheRock's
