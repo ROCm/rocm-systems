@@ -3854,6 +3854,11 @@
           "test_filter": "DdaMPI_AllReduce.StreamAlternationUngrouped"
         },
         {
+          "name": "DDA_BitIdenticalAcrossRanks_8Ranks",
+          "description": "Float and bf16 AllReduce at 256 KiB to 4 MiB returns bit-identical output on every rank; order-sensitive input catches a rank-dependent summation order",
+          "test_filter": "DdaMPI_AllReduce.BitIdenticalAcrossRanksDefaultSelection"
+        },
+        {
           "name": "DDA_CapturedForkJoin_8Ranks",
           "description": "A captured AllReduce keeps its done event inside the graph: a copy forked off comm->doneEvent and joined back adds exactly one node and one edge",
           "test_filter": "DdaMPI_AllReduce.CapturedForkJoinStaysInsideGraph"
@@ -5406,6 +5411,11 @@
           "name": "Symk_AllGatherStoreData",
           "description": "Forced AllGather_ST with position-dependent data across its byte, 4-byte and 16-byte tiers and in-place",
           "test_filter": "SymmetricKernelCorruptionTest.AllGatherST_PositionDependentData"
+        },
+        {
+          "name": "Symk_GroupedAllGatherVaryingSizes",
+          "description": "Four AllGathers of different sizes fused in one group, exercising the work-range split; skips without cuMem",
+          "test_filter": "SymmetricKernelCorruptionTest.GroupedAllGather_VaryingSizes"
         }
       ]
     }

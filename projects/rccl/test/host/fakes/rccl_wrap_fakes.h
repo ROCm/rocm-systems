@@ -20,6 +20,7 @@
 
 struct ncclComm;
 struct ncclTaskColl;
+struct rcclCollDecision;
 
 // -------------------------------------------------------------------------
 // Tuning-override seams (rccl_wrap.cc:109-1751). All default to no-ops so a test
@@ -115,6 +116,27 @@ extern int64_t g_rcclParamCeArStagingBytes;
 extern bool g_validHsaScratch;
 extern const char* g_lastHsaScratchEnv;
 extern int g_firmwareVersion;
+
+// The backend selectors and DDA gates collectives.cc dispatches on. Fail loud until a test installs them.
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                  hipStream_t, bool, bool, struct rcclCollDecision*)>
+    g_rcclSelectAllReduce;
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool,
+                                  bool, struct rcclCollDecision*)>
+    g_rcclSelectAllGather;
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, bool,
+                                  struct rcclCollDecision*)>
+    g_rcclSelectReduceScatter;
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool,
+                                  bool, struct rcclCollDecision*)>
+    g_rcclSelectAlltoAll;
+extern std::function<bool(const struct ncclComm*, size_t, size_t, bool, const char*)> g_rcclDdaEnabled;
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaEntryThreshold;
+extern std::function<ncclResult_t(int, const char**)> g_rcclGetAlgoName;
+extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseAllGatherDirect;
+extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseReduceScatterDirect;
+// RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1).
+extern int64_t g_rcclParamDdaEnable;
 
 void ResetRcclWrapFakes();
 

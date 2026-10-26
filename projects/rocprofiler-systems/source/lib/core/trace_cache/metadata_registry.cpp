@@ -77,8 +77,8 @@ from_json_process(const nlohmann::json& _json)
     p.pid     = _json["pid"].get<pid_t>();
     p.ppid    = _json["ppid"].get<pid_t>();
     p.command = _json["command"].get<std::string>();
-    p.start   = _json["start"].get<std::int32_t>();
-    p.end     = _json["end"].get<std::int32_t>();
+    p.start   = _json["start"].get<std::uint64_t>();
+    p.end     = _json["end"].get<std::uint64_t>();
     return p;
 }
 
@@ -136,7 +136,7 @@ to_json(const info::thread& thread)
     nlohmann::json result;
     result["parent_process_id"] = thread.parent_process_id;
     result["process_id"]        = thread.process_id;
-    result["thread_id"]         = static_cast<std::int32_t>(thread.thread_id);
+    result["thread_id"]         = thread.thread_id;
     result["start"]             = thread.start;
     result["end"]               = thread.end;
     result["extdata"]           = thread.extdata;
@@ -149,9 +149,9 @@ from_json_thread(const nlohmann::json& _json)
     info::thread t;
     t.parent_process_id = _json["parent_process_id"].get<std::int32_t>();
     t.process_id        = _json["process_id"].get<std::int32_t>();
-    t.thread_id         = _json["thread_id"].get<std::int32_t>();
-    t.start             = _json["start"].get<std::int32_t>();
-    t.end               = _json["end"].get<std::int32_t>();
+    t.thread_id         = _json["thread_id"].get<std::uint64_t>();
+    t.start             = _json["start"].get<std::uint64_t>();
+    t.end               = _json["end"].get<std::uint64_t>();
     t.extdata           = _json["extdata"].get<std::string>();
     return t;
 }
@@ -163,7 +163,7 @@ to_json(const info::track& track)
     result["track_name"] = track.track_name;
     if(track.thread_id.has_value())
     {
-        result["thread_id"] = static_cast<std::int32_t>(track.thread_id.value());
+        result["thread_id"] = track.thread_id.value();
     }
     else
     {
@@ -184,7 +184,7 @@ from_json_track(const nlohmann::json& _json)
     }
     else
     {
-        t.thread_id = _json["thread_id"].get<std::int32_t>();
+        t.thread_id = _json["thread_id"].get<std::uint64_t>();
     }
     t.extdata = _json["extdata"].get<std::string>();
     return t;
@@ -545,14 +545,6 @@ metadata_registry::get_pmc_info(const std::string_view& unique_name) const
 {
     return get_type_info<info::pmc>(m_pmc_infos, [&unique_name](const info::pmc& val) {
         return val.name == unique_name;
-    });
-}
-
-std::optional<info::thread>
-metadata_registry::get_thread_info(const std::uint32_t& thread_id) const
-{
-    return get_type_info<info::thread>(m_threads, [&thread_id](const info::thread& val) {
-        return val.thread_id == thread_id;
     });
 }
 
