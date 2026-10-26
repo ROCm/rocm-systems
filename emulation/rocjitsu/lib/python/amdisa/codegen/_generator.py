@@ -11135,7 +11135,7 @@ class CodeGenerator:
                             )
                             if (
                                 (
-                                    profile.renders_gfx11_image_syntax
+                                    profile.has_gfx11_image_address_extension
                                     or self.isa_spec.arch_name == 'cdna2'
                                 )
                                 and enc.enc_name.upper() == 'ENC_MIMG'

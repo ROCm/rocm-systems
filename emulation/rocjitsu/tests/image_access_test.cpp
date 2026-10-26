@@ -574,6 +574,7 @@ TEST(ImageAccessTest, RdnaLinearR32DescriptorsPrepareTheExpectedMemoryAccess) {
 
 class RdnaDecodedImageAccessTest : public testing::TestWithParam<rj_code_arch_t> {
 protected:
+  static constexpr uint32_t kResourceBase = 8;
   amdgpu::GpuMemory memory{"rdna_image_memory"};
   amdgpu::L2Cache l2{"rdna_image_l2"};
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
@@ -596,7 +597,7 @@ protected:
 
     const auto resource = rdna_r32_descriptor(GetParam());
     for (uint32_t i = 0; i < resource.size(); ++i)
-      cu->write_sgpr(wf->sgpr_alloc().base + i, resource[i]);
+      cu->write_sgpr(wf->sgpr_alloc().base + kResourceBase + i, resource[i]);
   }
 
   void TearDown() override {
@@ -616,7 +617,8 @@ protected:
                                                                                     .a16 = a16,
                                                                                     .d16 = d16,
                                                                                     .vaddr = 2,
-                                                                                    .vdata = 8});
+                                                                                    .vdata = 8,
+                                                                                    .srsrc = 2});
       if (!nsa)
         return decoder->decode(base.data());
       const std::array<uint32_t, 3> words{base[0], base[1], 6};
@@ -632,7 +634,8 @@ protected:
                                                                       .a16 = a16,
                                                                       .d16 = d16,
                                                                       .vaddr = 2,
-                                                                      .vdata = 8});
+                                                                      .vdata = 8,
+                                                                      .srsrc = 2});
       if (!nsa)
         return decoder->decode(base.data());
       const std::array<uint32_t, 3> words{base[0], base[1], 6};
@@ -645,6 +648,7 @@ protected:
                                                                     .a16 = a16,
                                                                     .dmask = dmask,
                                                                     .vdata = 8,
+                                                                    .rsrc = kResourceBase,
                                                                     .vaddr0 = 2,
                                                                     .vaddr1 = 6});
     return decoder->decode(words.data());
@@ -660,6 +664,8 @@ protected:
     EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 2, 1}));
     EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 6, 1}));
     EXPECT_FALSE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 3, 1}));
+    EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::SGPR, kResourceBase, 8}));
+    EXPECT_FALSE(def_use.uses.contains(RegisterRef{RegClass::SGPR, 2, 1}));
 
     ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
@@ -777,7 +783,7 @@ TEST_P(RdnaDecodedImageAccessTest, NonNsaAddressWidthFollowsDimAndA16) {
 TEST_P(RdnaDecodedImageAccessTest, R128LoadAndStoreReportUnimplemented) {
   const uint32_t sb = wf->sgpr_alloc().base;
   const uint32_t vb = wf->vgpr_alloc().base;
-  for (uint32_t reg = 4; reg < 8; ++reg)
+  for (uint32_t reg = kResourceBase + 4; reg < kResourceBase + 8; ++reg)
     cu->write_sgpr(sb + reg, 0xffffffffu);
   memory.write32(kBase, 0x12345678u);
   cu->write_vgpr(vb + 8, 0, 0xdeadbeefu);

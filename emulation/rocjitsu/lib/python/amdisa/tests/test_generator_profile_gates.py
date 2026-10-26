@@ -4800,9 +4800,13 @@ def test_generated_gfx11_image_address_width_uses_dim_and_preserves_fixed_bvh(
         assert (
             'mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)' in constructor
         )
+        assert '(reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)' in constructor
         assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)' not in (
             constructor
         )
+    image_sample = _generated_constructor_body(mimg, 'ImageSampleMimg')
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)' in image_sample
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)' in image_sample
     assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 256 : 352)' in (
         _generated_constructor_body(mimg, 'ImageBvhIntersectRayMimg')
     )
