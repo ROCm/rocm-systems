@@ -2040,29 +2040,31 @@ TEST_F(GinMPIDeviceTests, WaitCounterAndSignal_MultiContext) {
   runWaitCounterAndSignal(n);
 }
 
+// Fill and check byte for BarrierFence visibility: 0x20 + rank + (i & 0x3f).
+__host__ __device__ inline uint8_t barrierFencePattern(int rank, size_t i) {
+  return static_cast<uint8_t>(0x20 + rank + (i & 0x3f));
+}
+
+template <typename Coop, typename GinOrAllContexts>
+__device__ void syncFenceVisibilityBarrierWith(Coop coop, GinOrAllContexts ginOrAllContexts,
+                                               BarrierFenceOperation operation, bool defaultFence) {
+  ncclGinBarrierSession<Coop> bar{coop, ginOrAllContexts, ncclTeamTagWorld{}, /*barrierIndex=*/0};
+  if (defaultFence) {
+    bar.sync(coop, cuda::memory_order_acq_rel);
+  } else {
+    ncclGinFenceLevel fence =
+      operation == BarrierFenceOperation::Get ? ncclGinFenceLevel::Get : ncclGinFenceLevel::Put;
+    bar.sync(coop, cuda::memory_order_acq_rel, fence);
+  }
+}
+
 template <typename GinOrAllContexts>
 __device__ void syncFenceVisibilityBarrier(GinOrAllContexts ginOrAllContexts, BarrierFenceOperation operation,
                                            bool defaultFence, bool coopAny) {
   if (coopAny) {
-    ncclCoopAny coop{ncclCoopCta()};
-    ncclGinBarrierSession<ncclCoopAny> bar{coop, ginOrAllContexts, ncclTeamTagWorld{}, /*barrierIndex=*/0};
-    if (defaultFence) {
-      bar.sync(coop, cuda::memory_order_acq_rel);
-    } else {
-      ncclGinFenceLevel fence =
-        operation == BarrierFenceOperation::Get ? ncclGinFenceLevel::Get : ncclGinFenceLevel::Put;
-      bar.sync(coop, cuda::memory_order_acq_rel, fence);
-    }
+    syncFenceVisibilityBarrierWith(ncclCoopAny{ncclCoopCta()}, ginOrAllContexts, operation, defaultFence);
   } else {
-    ncclGinBarrierSession<ncclCoopCta> bar{
-      ncclCoopCta(), ginOrAllContexts, ncclTeamTagWorld{}, /*barrierIndex=*/0};
-    if (defaultFence) {
-      bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
-    } else {
-      ncclGinFenceLevel fence =
-        operation == BarrierFenceOperation::Get ? ncclGinFenceLevel::Get : ncclGinFenceLevel::Put;
-      bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel, fence);
-    }
+    syncFenceVisibilityBarrierWith(ncclCoopCta(), ginOrAllContexts, operation, defaultFence);
   }
 }
 
@@ -2093,8 +2095,7 @@ __global__ void barrierFenceVisibilityKernel(
 
   int sourceRank = operation == BarrierFenceOperation::Put ? (rank + devComm.nRanks - 1) % devComm.nRanks : peer;
   for (size_t i = threadIdx.x; i < bytes; i += blockDim.x) {
-    uint8_t expected = static_cast<uint8_t>(0x20 + sourceRank + (i & 0x3f));
-    if (dst[i] != expected) atomicCAS(error, 0, static_cast<int>(i + 1));
+    if (dst[i] != barrierFencePattern(sourceRank, i)) atomicCAS(error, 0, static_cast<int>(i + 1));
   }
 }
 
@@ -2117,8 +2118,7 @@ __global__ void barrierFenceIpcSignalIncKernel(
   }
   gin.waitSignal(ncclCoopCta(), kSigIdx, /*least=*/1);
   for (size_t i = threadIdx.x; i < bytes; i += blockDim.x) {
-    uint8_t expected = static_cast<uint8_t>(0x20 + /*sourceRank=*/0 + (i & 0x3f));
-    if (dst[i] != expected) atomicCAS(error, 0, static_cast<int>(i + 1));
+    if (dst[i] != barrierFencePattern(/*sourceRank=*/0, i)) atomicCAS(error, 0, static_cast<int>(i + 1));
   }
 }
 
@@ -2182,6 +2182,9 @@ GinSymmetricSetupStatus prepareGinSymmetricBuffers(GinSymmetricBuffers* b, ncclC
   return st;
 }
 
+// ASSERT_MPI_EQ runs in the caller, so a peer-skip GTEST_SKIP returns from the
+// test body. Checking IsSkipped() after a helper that asserted internally would
+// miss ranks that already have an EXPECT failure (IsSkipped() is then false).
 #define ASSERT_GIN_SYMMETRIC_SETUP(st)     \
   do {                                     \
     SCOPED_TRACE((st).step);               \
@@ -2214,8 +2217,9 @@ void GinMPIDeviceTests::runBarrierFenceVisibility(
   // exercises a real SDMA copy rather than the small-transfer IPC fallback.
   constexpr size_t kBytes = 4096;
   std::vector<uint8_t> hostSrc(kBytes);
-  for (size_t i = 0; i < kBytes; ++i)
-    hostSrc[i] = static_cast<uint8_t>(0x20 + rank + (i & 0x3f));
+  for (size_t i = 0; i < kBytes; ++i) {
+    hostSrc[i] = barrierFencePattern(rank, i);
+  }
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.worldGinBarrierCount = 1;
@@ -2298,8 +2302,9 @@ TEST_F(GinMPIDeviceTests, BarrierFence_IpcSignalIncMakesPutVisible_SingleNode) {
 
   constexpr size_t kBytes = 64;
   std::vector<uint8_t> hostSrc(kBytes);
-  for (size_t i = 0; i < kBytes; ++i)
-    hostSrc[i] = static_cast<uint8_t>(0x20 + /*rank0 pattern*/0 + (i & 0x3f));
+  for (size_t i = 0; i < kBytes; ++i) {
+    hostSrc[i] = barrierFencePattern(/*rank0 pattern*/ 0, i);
+  }
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.worldGinBarrierCount = 1;
