@@ -27,6 +27,9 @@ get_property(HSA_RUNTIME_INCLUDE_DIRECTORIES TARGET hsa-runtime64::hsa-runtime64
 # configure time would fail in environments without a GPU and produce an
 # unexpected target list.
 set(CMAKE_HIP_ARCHITECTURES OFF)
+if(GPU_TARGETS)
+  set(CMAKE_HIP_ARCHITECTURES "${GPU_TARGETS}")
+endif()
 enable_language(HIP)
 
 find_package(Clang REQUIRED CONFIG

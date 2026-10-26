@@ -1,6 +1,9 @@
 set(CMAKE_INSTALL_TESTDIR test/${PROJECT_NAME})
 find_package(hip CONFIG REQUIRED PATHS "${ROCM_PATH}")
 set(CMAKE_HIP_ARCHITECTURES OFF)
+if(GPU_TARGETS)
+  set(CMAKE_HIP_ARCHITECTURES "${GPU_TARGETS}")
+endif()
 enable_language(HIP)
 
 # ########################################################################################
