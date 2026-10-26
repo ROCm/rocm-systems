@@ -99,7 +99,14 @@ std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::initGranularities() {
             {"64M", 64 * 1024 * 1024},
             {"128M", 128 * 1024 * 1024},
             {"256M", 256 * 1024 * 1024},
-            {"512M", 512 * 1024 * 1024}};
+            {"512M", 512 * 1024 * 1024},
+            // 256 MiB completes. 384 MiB and above are submitted as one SDMA
+            // linear copy when the runtime cap is 0x3fffffff, and that packet
+            // times out. 0x3fffffff is the largest 30-bit copy. 1 GiB is one
+            // byte past that cap, so the runtime emits the full packet plus a
+            // remainder.
+            {"0x3fffffff", (1ull << 30) - 1},
+            {"1G", 1024ull * 1024ull * 1024ull}};
   }
 }
 
