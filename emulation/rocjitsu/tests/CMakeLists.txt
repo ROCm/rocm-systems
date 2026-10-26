@@ -4173,14 +4173,40 @@ if(RJ_ENABLE_HIP_TESTS)
                 DaemonTest.HipMemcpyRoundTripPageableAbovePinThreshold
             )
         endif()
+        # The harness passes these options to HIP clients without applying
+        # runtime suppressions to the daemon's simulator threads.
+        string(
+            REPLACE
+            "TSAN_OPTIONS="
+            "ROCJITSU_TEST_HIP_TSAN_OPTIONS="
+            _daemon_hip_tsan_env
+            "${RJ_HIP_TSAN_ENV}"
+        )
+        string(
+            REPLACE
+            "TSAN_OPTIONS="
+            "ROCJITSU_TEST_HIP_TSAN_OPTIONS="
+            _daemon_hip_tsan_install_env
+            "${RJ_HIP_TSAN_INSTALL_ENV}"
+        )
         foreach(TC IN LISTS RJ_DAEMON_TESTS)
             set(_daemon_test_env)
+            set(_daemon_test_install_env)
             set(_daemon_test_timeout 120)
             if(TC IN_LIST RJ_DAEMON_FAILURE_TESTS)
                 set(_daemon_test_timeout 20)
             endif()
             if(TC IN_LIST RJ_DAEMON_HSA_TESTS)
-                list(APPEND _daemon_test_env ${RJ_HIP_ASAN_ENV})
+                list(
+                    APPEND _daemon_test_env
+                    ${RJ_HIP_ASAN_ENV}
+                    ${_daemon_hip_tsan_env}
+                )
+                list(
+                    APPEND _daemon_test_install_env
+                    ${RJ_HIP_ASAN_ENV}
+                    ${_daemon_hip_tsan_install_env}
+                )
             endif()
             rj_add_test(
                 NAME ${TC}
@@ -4189,7 +4215,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 LABELS daemon
                 ENVIRONMENT ${_daemon_test_env}
                 INSTALL_COMMAND "bin/daemon_test" "--gtest_filter=${TC}"
-                INSTALL_ENVIRONMENT ${_daemon_test_env}
+                INSTALL_ENVIRONMENT ${_daemon_test_install_env}
             )
         endforeach()
 
@@ -4200,11 +4226,11 @@ if(RJ_ENABLE_HIP_TESTS)
                 --gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged
             TIMEOUT 120
             LABELS daemon
-            ENVIRONMENT ${RJ_HIP_ASAN_ENV}
+            ENVIRONMENT ${RJ_HIP_ASAN_ENV} ${_daemon_hip_tsan_env}
             INSTALL_COMMAND
                 "bin/daemon_test"
                 "--gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged"
-            INSTALL_ENVIRONMENT ${RJ_HIP_ASAN_ENV}
+            INSTALL_ENVIRONMENT ${RJ_HIP_ASAN_ENV} ${_daemon_hip_tsan_install_env}
         )
 
         # --- RCCL collective test ---
