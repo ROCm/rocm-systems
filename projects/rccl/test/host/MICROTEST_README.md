@@ -434,6 +434,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   because the tests define the logging, env, plugin-open and dlsym seams the shared fakes also
   define. See `test_categories_micro_profiler.yaml`.
 
+- **`rccl-UnitTestsMicroProxy`**: `proxy.cc` (via `PROXY_CC_PATH`, from
+  `proxy-test.cc`); suites `Proxy*`. Its externals are in
+  `fakes/proxy_micro_fakes.cc` (sockets are socketpair-backed). Its own binary:
+  it compiles the real `proxy.cc`, which `fakes/proxy_fakes.cc` fakes for the
+  other binaries. See `test_categories_micro_proxy.yaml`.
+
 - **`rccl-UnitTestsMicroRmaProxy`** — `src/rma/rma_proxy.cc` (via
   `RMA_PROXY_CC_PATH`, from `rma-proxy-test.cc`); suite
   `RmaProxyAllocGraphTest.*`. Its own binary, not sharing `rccl-UnitTestsMicro`:
@@ -707,6 +713,7 @@ symbol.
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` (targets that do not compile the real file) | `fakes/gin_fakes.cc` |
 | `src/plugin/profiler.cc` (`ncclProfilerCallback`, until it has its own fakes file) | `fakes/nccl_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
+| externals `src/proxy.cc` reaches (`rccl-UnitTestsMicroProxy`, which compiles it) | `fakes/proxy_micro_fakes.cc` |
 | `src/ras/ras_param.cc` (seconds and nanoseconds timeout scaling) | `fakes/ras_param_fakes.{h,cc}` (the direct `ras-param-test.cc` inclusion uses renamed symbols) |
 | `src/rccl_arch_thresholds.cc` | `fakes/rccl_arch_thresholds_fakes.cc` |
 | `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
@@ -1138,6 +1145,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-UnitTestsMicroProfiler           # src/plugin/profiler.cc + profiler_v1..v7.cc
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
+./build/rccl-UnitTestsMicroProxy              # src/proxy.cc tests
 ./build/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests
 ./build/rccl-UnitTestsMicroNetIbCastDataPath  # net_ib_cast p2p/scheduler/ops-fault tests
 ./build/rccl-HostUnitTests
