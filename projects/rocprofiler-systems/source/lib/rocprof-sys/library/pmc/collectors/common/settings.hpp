@@ -433,6 +433,7 @@ private:
         return metrics;
     }
 
+public:
     static gpu::enabled_metrics parse_enabled_metrics(const std::string& input)
     {
         auto trimmed = utility::string::to_lower(utility::string::trim(input));
@@ -453,7 +454,7 @@ private:
 
         const std::regex validator{
             R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock)"
-            R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock))*$)"
+            R"()(?:\s*[,;]\s*(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock))*$)"
         };
 
         if(!std::regex_match(trimmed, validator))
@@ -508,6 +509,7 @@ private:
         return metrics;
     }
 
+private:
     /**
      * @brief Parse comma or semicolon-separated list of names.
      */

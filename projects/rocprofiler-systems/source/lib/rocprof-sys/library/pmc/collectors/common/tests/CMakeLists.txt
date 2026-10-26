@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-set(pmc_common_tests_sources test_collector_slice.cpp)
+set(pmc_common_tests_sources test_collector_slice.cpp test_settings.cpp)
 
 add_library(pmc-common-tests OBJECT ${pmc_common_tests_sources})
 
