@@ -1,7 +1,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -51,8 +51,6 @@ __all__ = [
     "read_processes",
     "read_threads",
     "write_perfetto",
-    "write_csv",
-    "write_otf2",
     "RocpdImportData",
     "version_info",
 ]
@@ -125,51 +123,3 @@ def write_perfetto(connection, config=None, **kwargs):
     )
 
     return bindings.write_perfetto(connection, config)
-
-
-def write_csv(connection, config=None, **kwargs):
-    """
-    Write CSV output file(s)
-
-    Args:
-        connection (rocpd.RocpdImportData):
-            rocPD instance of database connection(s)
-        config (rocpd.output_config.output_config):
-            Output specification
-
-    Returns:
-        bool: returns True if successful
-    """
-    from . import output_config
-
-    config = (
-        output_config.output_config(**kwargs)
-        if config is None
-        else config.update(**kwargs)
-    )
-
-    return bindings.write_csv(connection, config)
-
-
-def write_otf2(connection, config=None, **kwargs):
-    """
-    Write OTF@ output file
-
-    Args:
-        connection (rocpd.RocpdImportData):
-            rocPD instance of database connection(s)
-        config (rocpd.output_config.output_config):
-            Output specification
-
-    Returns:
-        bool: returns True if successful
-    """
-    from . import output_config
-
-    config = (
-        output_config.output_config(**kwargs)
-        if config is None
-        else config.update(**kwargs)
-    )
-
-    return bindings.write_otf2(connection, config)
