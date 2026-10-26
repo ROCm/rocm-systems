@@ -472,11 +472,11 @@ pub(crate) struct DeviceVm {
     /// Exact render descriptor acquired for this KFD VM.
     render: Option<File>,
     /// Whether the render VM can import system-memory DMA-BUFs.
-    system_dma_buf_import: bool,
+    pub(super) system_dma_buf_import: bool,
     /// Native GPU identifier for KFD requests.
-    gpu_id: u32,
+    pub(super) gpu_id: u32,
     /// DRM render node minor number for this GPU.
-    render_minor: u32,
+    pub(super) render_minor: u32,
     /// Stable endpoint identity captured during activation.
     identity: [u8; 16],
     /// Hardware identifier when reported by KFD.
@@ -502,13 +502,6 @@ pub(crate) struct DeviceVm {
 }
 
 impl DeviceVm {
-    pub(super) fn render_minor(&self) -> u32 {
-        self.render_minor
-    }
-
-    pub(super) fn supports_system_dma_buf_import(&self) -> bool {
-        self.system_dma_buf_import
-    }
     pub(super) fn render(&self) -> Result<&File, Error> {
         self.render
             .as_ref()
@@ -554,10 +547,6 @@ impl DeviceVm {
 
     pub(super) fn address_range(&self) -> (u64, u64) {
         (self.base, self.limit)
-    }
-
-    pub(super) fn gpu_id(&self) -> u32 {
-        self.gpu_id
     }
 
     pub(super) fn next_sdma_engine_id(&self, count: u32) -> u32 {
@@ -1102,6 +1091,7 @@ pub(super) enum BufferKind {
     Vram {
         public: bool,
         coherent: bool,
+        extended_coherent: bool,
         uncached: bool,
         contiguous: bool,
     },
@@ -1148,6 +1138,8 @@ pub(crate) struct KfdAllocation {
     host_address: Option<usize>,
     /// Keeps registered runtime-owned host pages mapped.
     backing: Option<HostBackingLease>,
+    /// Whether this allocation owns payload rather than borrowed or imported backing.
+    owns_payload: bool,
     /// Offset from the native base to the public device address.
     device_byte_offset: usize,
     /// Requested public byte extent.
@@ -1315,6 +1307,10 @@ impl KfdAllocation {
             allocation_source(kind, native_size)?;
         vm.check()?;
         let owned_userptr = matches!(kind, BufferKind::OwnedUserptr { .. });
+        let owns_payload = matches!(
+            kind,
+            BufferKind::Vram { .. } | BufferKind::Gtt | BufferKind::OwnedUserptr { .. }
+        );
         let reservation = if owned_userptr {
             os_memory::Reservation::new_shared_host(native_size, alignment, bounds)
         } else {
@@ -1337,6 +1333,7 @@ impl KfdAllocation {
             handle: None,
             host_address,
             backing,
+            owns_payload,
             device_byte_offset,
             logical_size: desc.size,
             origin_gpu_id,
@@ -1359,6 +1356,7 @@ impl KfdAllocation {
                     BufferKind::Vram {
                         public,
                         coherent,
+                        extended_coherent,
                         uncached,
                         contiguous,
                     } => {
@@ -1366,6 +1364,11 @@ impl KfdAllocation {
                             | uapi::NO_SUBSTITUTE
                             | if public { uapi::PUBLIC } else { 0 }
                             | if coherent { uapi::COHERENT } else { 0 }
+                            | if extended_coherent {
+                                uapi::EXT_COHERENT
+                            } else {
+                                0
+                            }
                             | if uncached { uapi::UNCACHED } else { 0 }
                             | if contiguous { uapi::CONTIGUOUS } else { 0 }
                     }
@@ -1497,6 +1500,7 @@ impl KfdAllocation {
             handle: None,
             host_address: None,
             backing: None,
+            owns_payload: true,
             device_byte_offset: 0,
             logical_size: desc.size,
             origin_gpu_id,
@@ -1644,6 +1648,7 @@ impl KfdAllocation {
             handle: None,
             host_address: None,
             backing: None,
+            owns_payload: false,
             device_byte_offset,
             logical_size: byte_length,
             origin_gpu_id: native_info.gpu_id,
@@ -1803,6 +1808,7 @@ impl KfdAllocation {
             handle: None,
             host_address: None,
             backing: None,
+            owns_payload: false,
             device_byte_offset: 0,
             logical_size: native_info.size,
             origin_gpu_id: native_info.gpu_id,
@@ -1948,6 +1954,7 @@ impl KfdAllocation {
             handle: None,
             host_address: None,
             backing: None,
+            owns_payload: false,
             device_byte_offset: 0,
             logical_size,
             origin_gpu_id: words[7],
@@ -2571,16 +2578,18 @@ impl KfdAllocation {
             .kfd
             .export_ipc_handle(handle, self.origin_gpu_id, self.native_flags)
             .map_err(|source| native_error("AMDKFD_IOC_IPC_EXPORT_HANDLE", source))?;
-        Ok(KfdIpcMemoryHandle::from_words([
-            share_handle[0],
-            share_handle[1],
-            share_handle[2],
-            share_handle[3],
-            IPC_APERTURE_DGPU,
-            0,
-            pages,
-            self.origin_gpu_id,
-        ]))
+        Ok(KfdIpcMemoryHandle {
+            words: [
+                share_handle[0],
+                share_handle[1],
+                share_handle[2],
+                share_handle[3],
+                IPC_APERTURE_DGPU,
+                0,
+                pages,
+                self.origin_gpu_id,
+            ],
+        })
     }
 
     pub(crate) fn free(&mut self) -> Result<(), Error> {
@@ -2635,11 +2644,25 @@ impl KfdAllocation {
         self.backing = None;
         Ok(())
     }
+
+    /// Owned payload retained by a native KFD handle or a live CPU mapping.
+    pub(crate) fn remaining_backing_byte_length(&self) -> u64 {
+        let cpu_mapping = self
+            .reservation
+            .as_ref()
+            .is_some_and(os_memory::Reservation::has_writable_mapping);
+        if self.owns_payload && (self.handle.is_some() || self.uncertain || cpu_mapping) {
+            self.cached_info().native_size
+        } else {
+            0
+        }
+    }
 }
 
 impl Drop for KfdAllocation {
     fn drop(&mut self) {
-        if self.free().is_err() {
+        if let Err(error) = self.free() {
+            crate::memory::device::record_rollback(error, self.remaining_backing_byte_length());
             if self.handle.is_some() || self.uncertain {
                 if let Some(backing) = self.backing.take() {
                     // Native state may still address caller pages after teardown.
