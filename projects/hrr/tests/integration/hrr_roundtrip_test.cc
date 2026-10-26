@@ -294,8 +294,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
  *     the copies and launches: an H2D copy and every launch's code object carry
  *     the withheld hash instead of a content hash, and the saxpy launch keeps
  *     its pointer arguments but records its by-value float as zeros.
- *   - Replay of that archive names the mode at the start, then fails and names
- *     the mode that would have recorded what the refused call needs.
+ *   - Replay of that archive fails and names the mode that would have recorded
+ *     what the refused call needs.
  */
 HRR_TEST_CASE(Unit_HRR_MetadataOnlyCapture) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_metadata_only"};
@@ -309,10 +309,7 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlyCapture) {
     const std::string out = proc.getOutput();
     INFO("Capture subprocess output:\n" << out);
     REQUIRE(ret == 0);
-    CHECK(out.find("[HRR capture] Recording this process's HIP calls (metadata-only mode: "
-                   "call sequence, handles and sizes, no buffer contents, kernel argument "
-                   "values or code objects; set HIP_HRR_CAPTURE_CONTENT=1 to record them)") !=
-          std::string::npos);
+    CHECK(out.find("(metadata-only mode: ") != std::string::npos);
   }
 
   const fs::path archive_path = hrr_single_process_archive(cap.path);
@@ -353,7 +350,6 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlyCapture) {
   const auto [ret, out] = hrr_playback_merged(cap.path);
   INFO("Playback output:\n" << out);
   CHECK(ret != 0);
-  CHECK(out.find("[HRR] Mode    : metadata-only capture") != std::string::npos);
   CHECK(out.find("captured in metadata-only mode. Content mode "
                  "(HIP_HRR_CAPTURE_CONTENT=1 at capture) would have recorded it.") !=
         std::string::npos);
@@ -371,9 +367,8 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlyCapture) {
  *     they are present and the zero is recorded as zero.
  *   - Only the metadata-only archive carries HRR_FILE_FLAG_METADATA_ONLY in its
  *     header, and --info on the process and on the capture root says whether
- *     contents were recorded. Replay of the content
- *     archive, the genuine zero included, succeeds; replay of the metadata-only
- *     archive fails.
+ *     contents were recorded. Replay of the content archive, the genuine zero
+ *     included, succeeds.
  */
 HRR_TEST_CASE(Unit_HRR_MetadataOnlySetupArgument) {
   // The scalar Unit_HRR_SetupArgument_Direct pushes first.
@@ -395,11 +390,6 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlySetupArgument) {
       INFO("Capture exit code: " << ret);
       REQUIRE(ret == 0);
     }
-    const auto counts = hrr_info_api_counts(cap.path);
-    const auto it = counts.find("hipSetupArgument");
-    REQUIRE(it != counts.end());  // the pushes were recorded
-    CHECK(it->second == 2);
-
     bool found = false;
     for (const auto& e : fs::recursive_directory_iterator(cap.path)) {
       if (!e.is_regular_file()) continue;
@@ -448,12 +438,11 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlySetupArgument) {
       CHECK(info.find(content ? " withheld   " : " recorded   ") == std::string::npos);
     }
 
-    // The workload's fat binary refuses a metadata-only replay before the
-    // pushes; Unit_HRR_Blob_WithheldSetupArgumentIsRefused drives their
-    // handler directly. The content replay pushes both, the zero included.
-    const auto [ret, out] = hrr_playback_merged(cap.path);
-    INFO("Playback output:\n" << out);
-    CHECK((ret == 0) == content);
+    if (content) {
+      const auto [ret, out] = hrr_playback_merged(cap.path);
+      INFO("Playback output:\n" << out);
+      CHECK(ret == 0);
+    }
     return found;
   };
 

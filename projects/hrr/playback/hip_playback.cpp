@@ -381,9 +381,7 @@ hipModule_t PlaybackContext::load_module(uint64_t hash_lo, uint64_t hash_hi) {
     size_t sz = 0;
     const void* data = load_code_object(hash_lo, hash_hi, &sz);
     if (!data || sz == 0) {
-        // A refusal is reported already and ends the replay.
-        if (!fatal_error.load(std::memory_order_acquire))
-            fprintf(stderr, "[HRR] Code object %s not found in archive\n", hex.c_str());
+        fprintf(stderr, "[HRR] Code object %s not found in archive\n", hex.c_str());
         return nullptr;
     }
     hipModule_t mod = nullptr;
@@ -1650,9 +1648,7 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
     size_t sz = 0;
     const void* blob = ctx.load_blob(blob_hash_lo, blob_hash_hi, &sz, "fat binary");
     if (!blob || sz == 0) {
-        // A refused blob has been reported already and ends the replay.
-        if (!ctx.fatal_error.load(std::memory_order_acquire))
-            fprintf(stderr, "[HRR] __hipRegisterFatBinary: blob not found in archive\n");
+        fprintf(stderr, "[HRR] __hipRegisterFatBinary: blob not found in archive\n");
         return hipSuccess;  // non-fatal — kernels will fail at launch but don't abort
     }
 
@@ -1879,10 +1875,9 @@ hipError_t playback_hipGraphAddMemcpyNodeToSymbol(PlaybackContext& ctx,
         size_t blob_sz = 0;
         src = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
         if (!src || blob_sz < a->count) {
-            if (!ctx.fatal_error.load(std::memory_order_acquire))
-                fprintf(stderr,
-                        "[HRR] hipGraphAddMemcpyNodeToSymbol: host source blob "
-                        "missing from the archive.\n");
+            fprintf(stderr,
+                    "[HRR] hipGraphAddMemcpyNodeToSymbol: host source blob "
+                    "missing from the archive.\n");
             return hipErrorInvalidValue;
         }
     } else {
@@ -1983,9 +1978,8 @@ static const void* to_symbol_source(PlaybackContext& ctx, const A* a,
         const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi,
                                          &blob_sz);
         if (!blob || blob_sz < a->count) {
-            if (!ctx.fatal_error.load(std::memory_order_acquire))
-                fprintf(stderr, "[HRR] %s: host source blob missing from the "
-                        "archive.\n", api);
+            fprintf(stderr, "[HRR] %s: host source blob missing from the "
+                    "archive.\n", api);
             return nullptr;
         }
         return blob;
@@ -2131,10 +2125,9 @@ hipError_t playback_hipLinkAddData(PlaybackContext& ctx,
                                             &blob_sz, "linker input image")
                             : nullptr;
     if (!image) {
-        if (!ctx.fatal_error.load(std::memory_order_acquire))
-            fprintf(stderr,
-                    "[HRR] hipLinkAddData: the linker input image is not in this "
-                    "archive, so the link cannot be reproduced.\n");
+        fprintf(stderr,
+                "[HRR] hipLinkAddData: the linker input image is not in this "
+                "archive, so the link cannot be reproduced.\n");
         return hipErrorInvalidValue;
     }
 
@@ -2990,6 +2983,9 @@ static size_t hrr_divergence_min_samples() {
 }
 
 void PlaybackContext::note_d2h_fail(uint64_t seq) {
+    // Once the replay has ended (fatal_error) nothing more is counted, so a blob
+    // missing after a refusal cannot turn exit 1 into a divergence.
+    if (fatal_error.load(std::memory_order_acquire)) return;
     size_t fail = d2h_fail.fetch_add(1, std::memory_order_relaxed) + 1;
     double frac = hrr_divergence_abort_frac();
     if (frac <= 0.0)
@@ -3692,9 +3688,8 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
         size_t blob_sz = 0;
         const void* blob = ctx.load_blob(hash_lo, hash_hi, &blob_sz);
         if (!blob) {
-            if (!ctx.fatal_error.load(std::memory_order_acquire))
-                fprintf(stderr, "[HRR] H2D blob %016llx%016llx not found\n",
-                        (unsigned long long)hash_lo, (unsigned long long)hash_hi);
+            fprintf(stderr, "[HRR] H2D blob %016llx%016llx not found\n",
+                    (unsigned long long)hash_lo, (unsigned long long)hash_hi);
             return hipErrorNotFound;
         }
         if (!dst) { fprintf(stderr, "[HRR] H2D dst 0x%llx not mapped (size=%llu blob_sz=%zu)\n",
@@ -3759,12 +3754,8 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
             const void* expected =
                 ctx.load_blob(hash_lo, hash_hi, &blob_sz, "device-to-host result to validate against");
             if (!expected) {
-                // A refusal is reported already and ends the replay.
-                if (!ctx.fatal_error.load(std::memory_order_acquire)) {
-                    fprintf(stderr,
-                            "[HRR] D2H validate FAIL: expected blob not found in archive\n");
-                    ctx.note_d2h_fail(hrr_dispatch_seq);
-                }
+                fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
+                ctx.note_d2h_fail(hrr_dispatch_seq);
             } else if (!hrr_d2h_blob_short("kernarg", copy_sz, blob_sz)) {
                 hrr::ScopedCharge readback(ctx.host_budget, copy_sz);
                 if (!readback.ok()) {
@@ -3878,11 +3869,8 @@ hipError_t playback_hipMemcpyDtoH(PlaybackContext& ctx,
         const void* expected =
             ctx.load_blob(hash_lo, hash_hi, &blob_sz, "device-to-host result to validate against");
         if (!expected) {
-            // A refusal is reported already and ends the replay.
-            if (!ctx.fatal_error.load(std::memory_order_acquire)) {
-                fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
-                ctx.note_d2h_fail(hrr_dispatch_seq);
-            }
+            fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
+            ctx.note_d2h_fail(hrr_dispatch_seq);
         } else if (!hrr_d2h_blob_short("DtoH", sz, blob_sz)) {
             hrr_d2h_validate(ctx, "DtoH", hrr_dispatch_seq, actual.data(),
                              static_cast<const uint8_t*>(expected), sz);
@@ -3925,11 +3913,8 @@ hipError_t playback_hipMemcpyDtoHAsync(PlaybackContext& ctx,
         const void* expected =
             ctx.load_blob(hash_lo, hash_hi, &blob_sz, "device-to-host result to validate against");
         if (!expected) {
-            // A refusal is reported already and ends the replay.
-            if (!ctx.fatal_error.load(std::memory_order_acquire)) {
-                fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
-                ctx.note_d2h_fail(hrr_dispatch_seq);
-            }
+            fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
+            ctx.note_d2h_fail(hrr_dispatch_seq);
         } else if (!hrr_d2h_blob_short("DtoHAsync", sz, blob_sz)) {
             hrr_d2h_validate(ctx, "DtoHAsync", hrr_dispatch_seq, actual.data(),
                              static_cast<const uint8_t*>(expected), sz);
@@ -4472,8 +4457,6 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
         return hipSuccess;
     }
     if (!expected) {
-        // A refusal is reported already and ends the replay.
-        if (ctx.fatal_error.load(std::memory_order_acquire)) return hipSuccess;
         fprintf(stderr, "[HRR] %s D2H validate FAIL: expected blob not found in archive\n", api);
         ctx.note_d2h_fail(hrr_dispatch_seq);
         return hipSuccess;
@@ -4676,8 +4659,7 @@ static const void* drvmemcpy_h2d_src_blob(PlaybackContext& ctx, const char* api,
                            ? ctx.load_blob(hash_lo, hash_hi, &blob_sz)
                            : nullptr;
     if (!blob) {
-        if (!ctx.fatal_error.load(std::memory_order_acquire))
-            fprintf(stderr, "[HRR] %s H2D: no blob to substitute, skipped\n", api);
+        fprintf(stderr, "[HRR] %s H2D: no blob to substitute, skipped\n", api);
         return nullptr;
     }
     if (blob_sz < need) {

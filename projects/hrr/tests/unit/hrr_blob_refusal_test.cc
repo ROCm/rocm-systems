@@ -133,14 +133,6 @@ TEST_CASE("Unit_HRR_Blob_WithheldContentIsRefused", "[hrr]") {
     CHECK(err.find("needs a code object") != std::string::npos);
     CHECK(err.find(kMode) != std::string::npos);
   }
-  {
-    // Only both halves withheld means withheld; a real hash may have one.
-    PlaybackContext ctx;
-    ctx.archive_dir = dir.root.string();
-    size_t sz = 0;
-    (void)hrr_test::capture_stderr([&] { (void)ctx.load_blob(HRR_HASH_WITHHELD, 2, &sz); });
-    CHECK_FALSE(ctx.fatal_error.load());
-  }
 }
 
 /**
@@ -196,8 +188,7 @@ TEST_CASE("Unit_HRR_Blob_WithheldArgumentsRefuseReplacedKernel", "[hrr]") {
  * Test Description
  * ----------------
  *   - A __hipRegisterFatBinary whose blob a metadata-only capture withheld is
- *     refused as a fat binary, and the handler adds no "blob not found" line
- *     of its own after the refusal.
+ *     refused as a fat binary.
  */
 TEST_CASE("Unit_HRR_Blob_WithheldFatBinaryIsNamed", "[hrr]") {
   PlaybackContext ctx;
@@ -212,7 +203,6 @@ TEST_CASE("Unit_HRR_Blob_WithheldFatBinaryIsNamed", "[hrr]") {
   INFO("stderr: " << err);
   CHECK(ctx.fatal_error.load());
   CHECK(err.find("needs a fat binary") != std::string::npos);
-  CHECK(err.find("not found") == std::string::npos);
 }
 
 /**

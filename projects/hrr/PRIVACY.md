@@ -33,9 +33,8 @@ needs no GPU.
 ## Capture modes
 
 Capture is disabled by default on AMD platforms at present (see the [README](README.md));
-where it is built in, `HIP_HRR_CAPTURE_OUTPUT` arms it. Since
-[AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) it runs in one of two
-modes, and the notice it prints on stderr names the one it runs in:
+where it is built in, `HIP_HRR_CAPTURE_OUTPUT` arms it. It runs in one of two modes, and
+the notice it prints on stderr names the one it runs in:
 
 - **metadata-only**, the default: the rows marked "both" below. No host buffer, no by-value
   kernel argument and no code object is written, and none is hashed either. The

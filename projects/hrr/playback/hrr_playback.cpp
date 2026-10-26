@@ -1790,11 +1790,6 @@ int main(int argc, char** argv) {
 
   ctx.archive_dir = archive.path;
   ctx.packed_host_rects = (archive.flags & HRR_FILE_FLAG_PACKED_HOST_RECTS) != 0;
-  // Not refused up front: a run with no copies from the host and no kernels
-  // replays faithfully. Each call that needs a withheld content refuses.
-  if (archive.flags & HRR_FILE_FLAG_METADATA_ONLY)
-    printf("[HRR] Mode    : metadata-only capture; replay stops at the first call that needs "
-           "contents\n");
 
   printf("[HRR] Archive : %zu events, %zu kernels, %zu blobs, %zu code objects\n",
          archive.event_count, archive.kernel_count,

@@ -1140,8 +1140,8 @@ class Deref:
     # the bytes field zero and records only whether the pointer was non-null.
     # The field keeps its size, so archives from before still read.
     capability: bool = False
-    # For a pointee that is application data, such as a kernel argument value,
-    # what it is: capture copies the bytes only when HIP_HRR_CAPTURE_CONTENT is
+    # For an array pointee that is application data, such as a kernel argument
+    # value, what it is: capture copies the bytes only when HIP_HRR_CAPTURE_CONTENT is
     # set. In metadata-only mode the bytes field stays zero, the count is
     # recorded and the present flag of a non-null pointer is
     # HRR_PRESENT_WITHHELD, which replay refuses, naming this, rather than
@@ -2532,32 +2532,6 @@ def _fill_param(lines: List[str], p: Param, name: str, ft: str) -> None:
         lines.append(f"    a.{name} = static_cast<decltype(a.{name})>({name});")
 
 
-def _emit_copy(lines: List[str], d: Deref, stmt: str) -> None:
-    """Emit the copy of a dereferenced pointee into its bytes field.
-
-    A content pointee (Deref.content) is application data, so the copy runs
-    only when HIP_HRR_CAPTURE_CONTENT is set. In metadata-only mode the field
-    keeps the zeros of the value-initialised event.
-    """
-    if d.content:
-        lines.append("      // Application data: withheld in metadata-only capture.")
-        lines.append("      if (HIP_HRR_CAPTURE_CONTENT)")
-        lines.append(f"        {stmt}")
-    else:
-        lines.append(f"      {stmt}")
-
-
-def _present_value(d: Deref) -> str:
-    """The present flag capture records for a non-null pointee.
-
-    A content pointee whose bytes metadata-only capture did not copy is marked
-    HRR_PRESENT_WITHHELD, so that replay refuses it instead of passing zeros.
-    """
-    if d.content:
-        return "HIP_HRR_CAPTURE_CONTENT ? 1 : HRR_PRESENT_WITHHELD"
-    return "1"
-
-
 def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
     """Emit the memcpy that carries each dereferenced pointee into the event.
 
@@ -2597,9 +2571,9 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"            \"time; replay would pass a shortened string\");")
             lines.append(f"        _n = {d.max_count - 1}u;")
             lines.append(f"      }}")
-            _emit_copy(lines, d, f"std::memcpy(a.{d.bytes_field}, {d.param}, _n);")
+            lines.append(f"      std::memcpy(a.{d.bytes_field}, {d.param}, _n);")
             lines.append(f"      a.{d.bytes_field}[_n] = 0;")
-            lines.append(f"      a.{d.present_field} = {_present_value(d)};")
+            lines.append(f"      a.{d.present_field} = 1;")
             lines.append(f"    }}")
         elif d.is_array:
             lines.append(f"    if ({d.param} && {d.count} > 0) {{")
@@ -2618,21 +2592,28 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"            \"capture time; replay would pass a partial array\");")
             lines.append(f"        _n = {d.max_count}u;")
             lines.append(f"      }}")
-            _emit_copy(lines, d, f"std::memcpy(a.{d.bytes_field}, {d.param},"
-                                 f" static_cast<size_t>(_n) * sizeof({d.ctype}));")
+            copy = (f"std::memcpy(a.{d.bytes_field}, {d.param},"
+                    f" static_cast<size_t>(_n) * sizeof({d.ctype}));")
+            if d.content:
+                lines.append("      // Application data: withheld in metadata-only capture.")
+                lines.append("      if (HIP_HRR_CAPTURE_CONTENT)")
+                lines.append(f"        {copy}")
+            else:
+                lines.append(f"      {copy}")
             lines.append(f"      a.{d.count_field}   = _n;")
-            lines.append(f"      a.{d.present_field} = {_present_value(d)};")
+            present = "HIP_HRR_CAPTURE_CONTENT ? 1 : HRR_PRESENT_WITHHELD" if d.content else "1"
+            lines.append(f"      a.{d.present_field} = {present};")
             lines.append(f"    }}")
         elif d.capability:
             lines.append(f"    // *{d.param} is a capability and is not recorded.")
             lines.append(f"    if ({d.param}) a.{d.present_field} = 1;")
         else:
             lines.append(f"    if ({d.param}) {{")
-            _emit_copy(lines, d, f"std::memcpy(a.{d.bytes_field}, {d.param}, sizeof({d.ctype}));")
+            lines.append(f"      std::memcpy(a.{d.bytes_field}, {d.param}, sizeof({d.ctype}));")
             for m in d.blank_members:
                 lines.append(f"      std::memset(a.{d.bytes_field} + offsetof({d.ctype}, {m}), 0,"
                              f" sizeof({d.param}->{m}));")
-            lines.append(f"      a.{d.present_field} = {_present_value(d)};")
+            lines.append(f"      a.{d.present_field} = 1;")
             lines.append(f"    }}")
 
 

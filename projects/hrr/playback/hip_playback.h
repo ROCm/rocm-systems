@@ -406,6 +406,7 @@ struct PlaybackContext {
     // running failure fraction exceeds HIP_HRR_REPLAY_DIVERGENCE_ABORT (after a
     // minimum sample count), sets `diverged` + `fatal_error` so the replay stops
     // cleanly before a downstream GPU fault instead of dying unrecoverably.
+    // Counts nothing once fatal_error is set.
     // `seq` is the recorded event sequence id (hrr_dispatch_seq) for diagnostics.
     void note_d2h_fail(uint64_t seq);
 
