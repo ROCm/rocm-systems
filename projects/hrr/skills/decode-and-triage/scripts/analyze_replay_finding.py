@@ -29,12 +29,12 @@ RE_MAF = re.compile(
     r"Memory access fault by GPU node-(\d+).*on address (0x[0-9a-fA-F]+)\.\s*"
     r"Reason:\s*([^.\n]+)"
 )
-# The leading fields of this bracket vary by ROCm build -- some emit `host:`,
-# some start at `GPU index:` -- so anchor on the two fields actually consumed
-# rather than on the whole prefix. Requiring `host:` dropped the kernel name on
-# every build that omits it, which is the one field the report exists to give.
+# CLR prints "Memory Fault Error" and this bracket with separate log calls, and
+# the first only at AMD_LOG_LEVEL>=1, so the bracket is matched on its own. Its
+# leading fields vary (`host:` is omitted without a hostname), so anchor on the
+# two fields actually consumed.
 RE_MEM_FAULT_ERR = re.compile(
-    r"Memory Fault Error \[[^\]]*?faulting addr: (0x[0-9a-fA-F]+), kernel: ([^\]]+)\]"
+    r"\[[^\]\n]*?faulting addr: (0x[0-9a-fA-F]+), kernel: ([^\]]+)\]"
 )
 RE_HSA_STATUS = re.compile(r"HSA_STATUS_ERROR_(MEMORY_FAULT|ABORTED|EXCEPTION)")
 # The runner bounds the replay and records the fact when it had to stop it.
@@ -102,7 +102,11 @@ RE_KERNARG = re.compile(r"kernarg_address=(0x[0-9a-fA-F]+)")
 RE_GRID = re.compile(r"grid=\[([^\]]+)\], workgroup=\[([^\]]+)\]")
 RE_CIJK = re.compile(r"(Cijk_[A-Za-z0-9_]+)")
 RE_CAPTURE_HIP = re.compile(r"\[capture\] HIP_SO=(\S+)")
-RE_VERSION_MISMATCH = re.compile(r"\[HRR\] Version mismatch: file=(\d+) reader=(\d+)")
+RE_VERSION_MISMATCH = re.compile(
+    r"\[HRR\] Version mismatch(?: in [^\n]*)?: file=(\d+) reader=(\d+)"
+)
+# `--sync-after-launch` names the kernel it synchronized after when the sync fails.
+RE_SYNC_GPU_ERROR = re.compile(r"\[HRR\] GPU error after '([^'\n]+)'")
 
 
 @dataclass
@@ -324,6 +328,11 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
     if m:
         finding.fault_address = finding.fault_address or m.group(1)
         finding.kernel_name = m.group(2).strip()
+
+    if not finding.kernel_name:
+        m = RE_SYNC_GPU_ERROR.search(text)
+        if m:
+            finding.kernel_name = m.group(1)
 
     if not finding.kernel_name:
         m = RE_QUEUE_ABORT_KERNEL.search(text)
