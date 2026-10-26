@@ -2530,7 +2530,8 @@ TEST(GpuMemoryThreadingTest, OrdinaryLineTransfersShareAtomicExclusionAcrossMapp
     for (size_t host_offset : {0u, 4u, 64u}) {
       rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
       KfdProcess process(kPid);
-      alignas(amdgpu::kMaxMemoryTransactionBytes)
+      // Keep the contiguous-copy paths within one host page at every host offset.
+      alignas(KfdProcess::kPageSize)
           std::array<uint8_t, KfdProcess::kPageSize + amdgpu::kMaxMemoryTransactionBytes>
               backing{};
       auto *host = backing.data() + host_offset;
@@ -2593,9 +2594,11 @@ TEST(GpuMemoryThreadingTest, NarrowTransactionPolicyPublishesSeparateHalvesOfOne
       SCOPED_TRACE(policy.bytes());
       rocjitsu::test::LegacyGpuMemoryFixture memory("memory", policy);
       KfdProcess process(kPid);
-      // A GPU-aligned 128-byte record crosses two host lock stripes. Holding
-      // the second stripe exposes whether the first 64 bytes publish alone.
-      alignas(128) std::array<uint8_t, 256> backing{};
+      // The GPU-aligned 128-byte record starts 64 bytes into a host page,
+      // crossing two lock stripes while fitting try_copy_contiguous's
+      // single-page limit. Holding the second stripe exposes whether the
+      // first 64 bytes publish alone.
+      alignas(KfdProcess::kPageSize) std::array<uint8_t, 256> backing{};
       auto *host = backing.data() + 64;
       auto *first_mutex = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(host);
       auto *second_mutex = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(host + 64);
