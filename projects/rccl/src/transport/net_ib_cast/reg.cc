@@ -10,8 +10,6 @@
 #include "net_ib/multiseg.h"
 #include "rccl_ib_multiseg.h"
 
-ncclResult_t IbCastDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle);
-
 // File-local helper. IB-CAST is a self-contained fork of net_ib; mark static so
 // it does not collide with net_ib/reg.cc's identically-named definition at link time.
 static ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, size_t size, int type,
@@ -85,26 +83,24 @@ ncclResult_t IbCastRegMrDmaBufInternal(void* comm, void* data, size_t size, int 
     return ncclInvalidArgument;
   }
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
-  struct ncclIbMrHandle* mhandleWrapper = NULL;
-  int registered = 0;
+  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)malloc(sizeof(struct ncclIbMrHandle));
   *mhandle = NULL;
-  NCCLCHECK(ncclCalloc(&mhandleWrapper, 1));
+  if (mhandleWrapper == nullptr) {
+    WARN("Failed to allocate IB MR handle wrapper");
+    return ncclSystemError;
+  }
+  memset(mhandleWrapper, 0, sizeof(*mhandleWrapper));
   mhandleWrapper->nSegments = 1;
   for (int i = 0; i < base->vProps.ndevs; i++) {
     // Each ncclIbNetCommDevBase is at different offset in send and recv netComms
     struct ncclIbNetCommDevBase* devComm = IbCastGetNetCommDevBase(base, i);
     NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal2(devComm, data, size, type, offset, fd, mrFlags, mhandleWrapper->mrs + i),
                   ret, fail);
-    registered++;
   }
   *mhandle = (void*)mhandleWrapper;
 exit:
   return ret;
 fail:
-  for (int i = 0; i < registered; i++) {
-    struct ncclIbNetCommDevBase* devComm = IbCastGetNetCommDevBase(base, i);
-    (void)IbCastDeregMrInternal(devComm, mhandleWrapper->mrs[i]);
-  }
   free(mhandleWrapper);
   goto exit;
 }
