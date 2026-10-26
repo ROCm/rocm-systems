@@ -106,4 +106,27 @@ inline std::vector<uint8_t> with_resource_metadata(const std::vector<uint8_t> &i
   return with_metadata_note(image, resource_metadata_payload(kernels, narrow));
 }
 
+// Synthetic simulation kernels need a real resource note when DBI grows their
+// scratch. Derive it from the same descriptor rather than duplicating sizes.
+inline std::vector<uint8_t> with_descriptor_metadata(const std::vector<uint8_t> &image,
+                                                     rj_code_arch_t arch) {
+  const AmdGpuCodeObject object(image.data(), image.size());
+  if (!object.is_valid() || object.text_sections().size() != 1)
+    return {};
+  const Section &text = *object.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(image, text.sectionOffset(), text.size());
+  const std::optional<uint32_t> sgprs = object.min_kernel_sgpr_count(arch);
+  if (kernels.size() != 1 || !sgprs)
+    return {};
+  const KernelDescriptorInfo &kernel = kernels.front();
+  const amdhsa::kernel_descriptor_t &descriptor = kernel.descriptor;
+  const uint32_t granule =
+      descriptor_vgpr_granularity_for_wavefront(arch, kernel_wavefront_size(arch, descriptor));
+  const uint32_t vgprs = (1 + (descriptor.compute_pgm_rsrc1 & 63)) * granule;
+  return with_resource_metadata(
+      image, {{kernel.kernel_name, descriptor.kernarg_size, ordinary_sgpr_bound(arch, *sgprs),
+               vgprs, descriptor.private_segment_fixed_size}});
+}
+
 } // namespace rocjitsu::test

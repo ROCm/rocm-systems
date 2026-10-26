@@ -3492,8 +3492,7 @@ protected:
         a_.make_kernel(kernel_body, private_bytes, /*granulated_sgpr_count=*/3,
                        granulated_vgpr_count, accum_offset);
     if (private_bytes != 0)
-      target = test::with_resource_metadata(
-          target, {{"test_kernel", 0, 32, 4 * (granulated_vgpr_count + 1), private_bytes}});
+      target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = a_.make_probe("rj_test_probe", probe_body);
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
