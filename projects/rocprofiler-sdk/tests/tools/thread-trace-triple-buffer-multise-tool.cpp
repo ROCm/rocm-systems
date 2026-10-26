@@ -27,6 +27,7 @@
 
 #include <array>
 #include <atomic>
+#include <bitset>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -39,10 +40,11 @@ namespace ATTTest
 {
 namespace MultiSE
 {
-constexpr size_t   GPU_BYTES_PER_SE    = 4ul << 20;
+constexpr size_t   GPU_BYTES_PER_SE    = 16ul << 20;
 constexpr size_t   MAX_CAPTURE_BYTES   = 1ul << 30;
 constexpr size_t   MAX_CHUNKS_PER_SE   = 1024;
 constexpr size_t   MIN_SWAPS_PER_SE    = 2;
+constexpr uint64_t SHADER_ENGINE_MASK  = 0x11111113;
 constexpr uint32_t SHADER_ENGINE_SHIFT = 20;
 constexpr uint32_t DISPATCH_MASK       = (1u << SHADER_ENGINE_SHIFT) - 1;
 
@@ -78,6 +80,7 @@ struct engine_trace_t
 struct agent_trace_t
 {
     rocprofiler_agent_id_t                       id{};
+    uint64_t                                     se_mask{};
     std::vector<std::unique_ptr<engine_trace_t>> engines{};
 };
 
@@ -88,8 +91,8 @@ struct capture_t
     rocprofiler_thread_trace_decoder_id_t       decoder{};
     std::vector<std::unique_ptr<agent_trace_t>> agents{};
     // Zero-filled up front so callbacks copy into resident memory.
-    std::vector<char>   arena = std::vector<char>(MAX_CAPTURE_BYTES);
-    std::atomic<size_t> byte_count{0};
+    std::vector<char>                           arena = std::vector<char>(MAX_CAPTURE_BYTES);
+    std::atomic<size_t>                         byte_count{0};
     bool                                        started{};
     bool                                        validated{};
 };
@@ -103,7 +106,8 @@ collect(rocprofiler_thread_trace_shader_data_t data, rocprofiler_user_data_t use
     auto& agent = *static_cast<agent_trace_t*>(userdata.ptr);
     require(data.agent.handle == agent.id.handle, "chunk belongs to the wrong GPU");
     require(data.shader_engine_id >= 0 &&
-                static_cast<uint64_t>(data.shader_engine_id) < agent.engines.size(),
+                static_cast<uint64_t>(data.shader_engine_id) < agent.engines.size() &&
+                ((agent.se_mask >> data.shader_engine_id) & 1) != 0,
             "unexpected shader engine");
     constexpr auto full_flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL |
                                 ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
@@ -132,8 +136,7 @@ collect(rocprofiler_thread_trace_shader_data_t data, rocprofiler_user_data_t use
     auto& engine = *agent.engines.at(data.shader_engine_id);
     auto  lock   = std::lock_guard{engine.mutex};
     require(engine.chunks.size() < MAX_CHUNKS_PER_SE, "too many chunks for one engine");
-    require(engine.chunks.emplace(data.chunk_index, std::move(chunk)).second,
-            "duplicate chunk index");
+    require(engine.chunks.emplace(data.chunk_index, chunk).second, "duplicate chunk index");
     engine.byte_count += size;
 }
 
@@ -217,9 +220,10 @@ validate()
                       << " shaderdata records, " << swaps << " buffer swaps\n";
             if(state.records > 0 && swaps >= MIN_SWAPS_PER_SE) ++complete_engines;
         }
-        complete_gpu |= agent->engines.size() >= 2 && complete_engines == agent->engines.size();
+        const auto traced_engines = std::bitset<64>(agent->se_mask).count();
+        complete_gpu |= traced_engines >= 2 && complete_engines == traced_engines;
     }
-    require(complete_gpu, "no GPU has shaderdata and at least two swaps on every engine");
+    require(complete_gpu, "no GPU has shaderdata and at least two swaps on every traced engine");
 }
 
 void
@@ -252,18 +256,18 @@ configure_agents(rocprofiler_agent_version_t, const void** agents, size_t count,
         if(info.type != ROCPROFILER_AGENT_TYPE_GPU || !info.runtime_visibility.hsa) continue;
         require(info.num_shader_banks > 0 && info.num_shader_banks <= 32,
                 "shader-engine count is outside the supported mask width");
-        auto agent = std::make_unique<agent_trace_t>();
-        agent->id  = info.id;
+        auto agent     = std::make_unique<agent_trace_t>();
+        agent->id      = info.id;
+        agent->se_mask = SHADER_ENGINE_MASK & ((uint64_t{1} << info.num_shader_banks) - 1);
         for(size_t se = 0; se < info.num_shader_banks; ++se)
             agent->engines.emplace_back(std::make_unique<engine_trace_t>());
 
-        const auto engines = agent->engines.size();
+        const auto engines = std::bitset<64>(agent->se_mask).count();
         // NUM_BUFFERS controls CPU staging slots; the SDK uses three GPU buffers per SE.
         auto parameters = std::array<rocprofiler_thread_trace_parameter_t, 5>{
             {{ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {0}},
              {ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {GPU_BYTES_PER_SE * engines}},
-             {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK,
-              {(uint64_t{1} << engines) - 1}},
+             {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {agent->se_mask}},
              {ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {4 + engines}},
              {ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, {1}}}};
         check(rocprofiler_configure_device_thread_trace_service(capture->trace_context,
