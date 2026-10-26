@@ -3953,8 +3953,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         const bool target_is_relocated_by_construction =
             (object_produces_code_addresses && code_addresses_fully_accounted) ||
             kernarg_supplied_targets().contains(offset);
-        // A join resumes at a PC popped from SGPRs, so its block has no CFG successors and the
-        // liveness this translation relies on sees every register live after it as dead before it.
+        // A join keeps its fallthrough edge, but its SGPR-held resume edge to the waiting side
+        // is unknown. G_FORK also has an unknown SGPR-held target. Liveness can miss registers
+        // needed on those paths, allowing scratch allocation to clobber them.
         // Refuse before the relocated-by-construction permission can admit the join verbatim.
         if ((inst.flags() & BRANCH_STACK) != 0) {
           auto failure = make_kernel_failure(

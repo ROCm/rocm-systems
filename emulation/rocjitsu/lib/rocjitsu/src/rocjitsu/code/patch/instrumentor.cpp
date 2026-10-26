@@ -875,9 +875,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     out.errors.emplace_back("code object has multiple .text sections; currently supports only one");
     return out;
   }
-  // A join resumes at a PC popped from SGPRs, so its block has no CFG successors and liveness
-  // would report every register live after it as dead before it. Scratch registers chosen from
-  // that liveness could overwrite the stack entries or the values the program restores.
+  // A join keeps its fallthrough edge, but its SGPR-held resume edge to the waiting side
+  // is unknown. G_FORK also has an unknown SGPR-held target. Liveness can miss registers
+  // needed on those paths, allowing scratch allocation to clobber them.
   for (const auto &block : blocks_) {
     for (const Instruction &inst : block->instructions()) {
       if (inst.flags() & BRANCH_STACK) {
