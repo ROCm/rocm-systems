@@ -231,9 +231,12 @@ public:
       return Tok{TokType::OP1, 0, "", c};
     }
     if (std::isdigit(static_cast<unsigned char>(c))) {
-      int32_t v = 0;
+      const size_t start = pos_;
       while (pos_ < e_.size() && std::isdigit(static_cast<unsigned char>(e_[pos_])))
-        v = v * 10 + (e_[pos_++] - '0');
+        ++pos_;
+      int32_t v = 0;
+      if (std::from_chars(e_.data() + start, e_.data() + pos_, v).ec != std::errc{})
+        return emit_error.emit() << "Integer literal out of range in: " << e_;
       return Tok{TokType::NUMBER, v, "", '\0'};
     }
     if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
@@ -350,7 +353,11 @@ private:
       if (maybe_r.failed())
         return util::Result::failure();
       auto r = maybe_r.value();
-      l = (o == '+') ? l + r : l - r;
+      const int64_t result = (o == '+') ? int64_t{l} + r : int64_t{l} - r;
+      if (result < std::numeric_limits<int32_t>::min() ||
+          result > std::numeric_limits<int32_t>::max())
+        return emit_error_.emit() << "Arithmetic result out of range in: " << e_;
+      l = static_cast<int32_t>(result);
     }
     return l;
   }
@@ -367,8 +374,14 @@ private:
       if (maybe_r.failed())
         return util::Result::failure();
       auto r = maybe_r.value();
-      if (o == '*')
-        l = l * r;
+      if (o == '*') {
+        const int64_t result = int64_t{l} * r;
+        if (result < std::numeric_limits<int32_t>::min() ||
+            result > std::numeric_limits<int32_t>::max())
+          return emit_error_.emit() << "Arithmetic result out of range in: " << e_;
+        l = static_cast<int32_t>(result);
+      } else if (l == std::numeric_limits<int32_t>::min() && r == -1)
+        return emit_error_.emit() << "Arithmetic result out of range in: " << e_;
       else if (o == '/')
         l = r ? l / r : 0;
       else
@@ -380,10 +393,13 @@ private:
     if (is1('-')) {
       if (adv().failed())
         return util::Result::failure();
-      auto v = p_atom();
-      if (v.failed())
+      auto maybe_v = p_atom();
+      if (maybe_v.failed())
         return util::Result::failure();
-      return -v.value();
+      auto v = maybe_v.value();
+      if (v == std::numeric_limits<int32_t>::min())
+        return emit_error_.emit() << "Arithmetic result out of range in: " << e_;
+      return -v;
     }
     return p_atom();
   }

@@ -358,7 +358,7 @@ util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
                                                       util::DiagnosticEmitter emit_error);
 
 /// @brief Load simulation config from a JSON string against a stated host width.
-/// @details See the four-argument @ref load_config overload.
+/// @details For host-thread budget behavior, see the four-argument @ref load_config overload.
 /// Failure diagnostics and exceptions follow the three-argument @ref load_config_from_string
 /// overload.
 /// @param json JSON configuration string.

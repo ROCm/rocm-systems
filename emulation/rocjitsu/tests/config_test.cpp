@@ -242,6 +242,24 @@ TEST(ConfigExpressionTest, MalformedLinksReturnDiagnostics) {
        "Unknown var 'missing' in: 1 || missing"},
       {R"json({"pattern":"src -> dst","where_expr":"0 && missing"})json",
        "Unknown var 'missing' in: 0 && missing"},
+      {R"json({"pattern":"src -> dst","where_expr":"2147483648"})json",
+       "Integer literal out of range in: 2147483648"},
+      {R"json({"pattern":"src -> dst","where_expr":"999999999999999999999999999999"})json",
+       "Integer literal out of range"},
+      {R"json({"pattern":"src -> dst","where_expr":"2147483647 + 1"})json",
+       "Arithmetic result out of range in: 2147483647 + 1"},
+      {R"json({"pattern":"src -> dst","where_expr":"0 - 2147483647 - 2"})json",
+       "Arithmetic result out of range"},
+      {R"json({"pattern":"src -> dst","where_expr":"65536 * 65536"})json",
+       "Arithmetic result out of range"},
+      {R"json({"pattern":"src -> dst","where_expr":"(0 - 2147483647 - 1) / (0 - 1)"})json",
+       "Arithmetic result out of range"},
+      {R"json({"pattern":"src -> dst","where_expr":"(0 - 2147483647 - 1) % (0 - 1)"})json",
+       "Arithmetic result out of range"},
+      {R"json({"pattern":"src -> dst","where_expr":"-(0 - 2147483647 - 1)"})json",
+       "Arithmetic result out of range"},
+      {R"json({"pattern":"src -> dst","where_expr":"0 && ((0 - 2147483647 - 1) / (0 - 1))"})json",
+       "Arithmetic result out of range"},
       {R"json({"pattern":"src[i -> dst"})json", "Unmatched '[' in: src[i"},
       {R"json({"pattern":"src[missing] -> dst"})json", "Unknown var 'missing'"},
       {R"json({"pattern":"src -> dst[1 +]"})json", "Unexpected token in: 1 +"},
@@ -284,7 +302,18 @@ TEST(ConfigExpressionTest, ValidExpressionsExpandLinks) {
   const struct {
     const char *expression;
     size_t link_count;
-  } cases[] = {{"1 || 0", 4u}, {"0 && 1", 0u}, {"i == 0 || i == 3", 2u}};
+  } cases[] = {
+      {"1 || 0", 4u},
+      {"0 && 1", 0u},
+      {"i == 0 || i == 3", 2u},
+      {"2147483647 + 0 == 2147483647", 4u},
+      {"0 - 2147483647 - 1 < 0", 4u},
+      {"(0 - 2147483647 - 1) * 1 < 0", 4u},
+      {"(0 - 2147483647 - 1) / 1 < 0", 4u},
+      {"(0 - 2147483647 - 1) % 1 == 0", 4u},
+      {"-2147483647 < 0", 4u},
+      {"1 / 0 == 0 && 1 % 0 == 0", 4u},
+  };
   for (const auto &test : cases) {
     SCOPED_TRACE(test.expression);
     const auto filtered_json =
