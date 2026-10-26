@@ -314,6 +314,8 @@ struct GridCompletion {
 struct DispatchEntry {
   uint32_t dispatch_id = 0;
   uint32_t queue_id = 0;
+  /// Queue doorbell byte offset captured when this dispatch was admitted.
+  uint32_t doorbell_offset = 0;
   /// Wrapped AQL ring slot exposed in saved wave context.
   uint32_t queue_packet_id = 0;
   AddressSpaceHandle address_space;

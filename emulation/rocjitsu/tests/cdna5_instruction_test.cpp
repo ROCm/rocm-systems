@@ -353,7 +353,7 @@ TEST(Gfx1250SimulationTest, SGetShaderCyclesU64ReadsSimulationTime) {
   EXPECT_LE(observed_time, sim.engine->global_time());
 }
 
-TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsRealtimeAndB32UsesPlaceholder) {
+TEST(Gfx1250SimulationTest, SSendmsgRtnReadsRealtimeAndDefaultQueueDoorbell) {
   const uint32_t code[] = {
       0xBE844D83u, // s_sendmsg_rtn_b64 s[4:5], sendmsg(MSG_RTN_GET_REALTIME)
       0xBE864C80u, // s_sendmsg_rtn_b32 s6, sendmsg(MSG_RTN_GET_DOORBELL)
@@ -372,6 +372,30 @@ TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsRealtimeAndB32UsesPlaceholder) {
   EXPECT_GE(observed_time, 23u);
   EXPECT_LE(observed_time, sim.engine->global_time());
   EXPECT_EQ(wf->sgpr(6), 0u);
+}
+
+TEST(Gfx1250SimulationTest, DoorbellQueriesFollowTheDispatchQueue) {
+  const uint32_t code[] = {
+      0xbe844d80, // s_sendmsg_rtn_b64 s[4:5], GET_DOORBELL
+      0xbe864c80, // s_sendmsg_rtn_b32 s6, GET_DOORBELL
+      S_ENDPGM_GFX12,
+  };
+  for (const uint32_t offset : {0x4008u, 0x4018u}) {
+    SCOPED_TRACE(offset);
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
+    const uint64_t kernel = sim.write_kernel(0x10000, code, std::size(code));
+    test::AqlQueue queue(sim.memory, sim.cp(), test::AqlQueue::DEFAULT_RING_ADDR,
+                         test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                         test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                         test::AqlQueue::DEFAULT_DOORBELL_ADDR, false, 1, {}, 0, offset);
+    queue.dispatch(kernel, 32, 32);
+    step_until_halted(*sim.engine, *sim.cu());
+    ASSERT_FALSE(sim.snapshot->snapshots().empty());
+    const auto &wave = sim.snapshot->snapshots().back();
+    EXPECT_EQ(wave.sgpr64(4), offset == 0x4008 ? 1u : 3u);
+    EXPECT_EQ(wave.sgpr(6), offset == 0x4008 ? 1u : 3u);
+  }
 }
 
 TEST(Gfx1250SimulationTest, SMovrelsReadsM0IndexedScalarSources) {

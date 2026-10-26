@@ -4563,14 +4563,9 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
     return false;
 
   if (message_id == kMessageGetDoorbell) {
-    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
-    auto doorbell = proc->queue_doorbell_map_.find(wave.queue_id());
-    if (doorbell == proc->queue_doorbell_map_.end())
-      return false;
-    const uint32_t doorbell_id = (doorbell->second.doorbell_offset / sizeof(uint64_t)) & 0x3FFu;
     // The handler sets EXEC_LO[31] before issuing MSG_GET_DOORBELL and polls
     // until hardware clears it. Return the 10-bit ID with the pending bit clear.
-    wave.set_exec((wave.exec() & 0xFFFFFFFF00000000ULL) | doorbell_id);
+    wave.set_exec((wave.exec() & 0xFFFFFFFF00000000ULL) | wave.doorbell_id());
     return true;
   }
 
