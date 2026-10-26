@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/soc.h"
 
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 
 #include "simdojo/sim/simulation.h"
@@ -12,6 +13,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -283,6 +285,143 @@ std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_pm4(uint32_t /*queue_or
   return amdgpu::ComputeQueueBindingPlan{
       .factory = amdgpu::make_compute_queue_binding_factory(*owner, std::move(callbacks)),
       .xcd_fanout = false};
+}
+
+amdgpu::VmAccessOutcome SoC::save_context(const amdgpu::QueueIdentity &identity, uint64_t address,
+                                          uint32_t size, uint32_t control_stack_size) {
+  using amdgpu::VmAccessOutcome;
+  const auto access = gpu_vm_.snapshot(identity.address_space);
+  if (!access || !kmd::cwsr_layout_modelled(arch_))
+    return VmAccessOutcome::Faulted;
+
+  std::vector<kmd::CwsrWaveState> states;
+  std::unordered_set<amdgpu::L2Cache *> caches;
+  bool pending = false;
+  for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    cp->set_queue_debug_suspended(identity.queue_id, identity.process_id, true);
+    for (auto *cu : cp->compute_units()) {
+      cu->with_wave_state_locked([&] {
+        for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+          auto *wave = cu->wf(slot);
+          if (!wave || wave->is_halted() || wave->process_id() != identity.process_id ||
+              wave->queue_id() != identity.queue_id ||
+              wave->address_space() != identity.address_space)
+            continue;
+          // Let the handler finish its return before freezing the architectural PC.
+          if (wave->in_trap_handler()) {
+            pending = true;
+            continue;
+          }
+          wave->set_debug_suspended(true);
+          if (!wave->wait_counters().empty()) {
+            pending = true;
+            continue;
+          }
+          states.push_back(kmd::build_cwsr_wave_state(*wave, arch_));
+        }
+      });
+      if (cu->l2())
+        caches.insert(cu->l2());
+    }
+  });
+  if (pending)
+    return VmAccessOutcome::Unavailable;
+  for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    for (auto *cu : cp->compute_units())
+      cu->with_wave_state_locked([&] { cu->flush_l1(identity.process_id); });
+  });
+  for (auto *cache : caches) {
+    const auto status = cache->flush_all(identity.process_id);
+    if (status != VmAccessOutcome::Complete)
+      return status;
+  }
+  for (auto *iod : iods_) {
+    const auto status = iod->msc()->flush_all();
+    if (status != VmAccessOutcome::Complete)
+      return status;
+  }
+  if (states.empty()) {
+    const std::array<std::byte, 16> header{};
+    return access->write(address, header);
+  }
+  std::array<uint32_t, 2> debug_region{};
+  const auto read = access->read(address + 16, std::as_writable_bytes(std::span(debug_region)));
+  if (read != VmAccessOutcome::Complete)
+    return read;
+  kmd::prepare_cwsr_wave_states(states);
+  VmAccessOutcome status = VmAccessOutcome::Complete;
+  auto write = [&](uint64_t target, std::span<const uint8_t> bytes) {
+    if (status == VmAccessOutcome::Complete)
+      status = access->write(target, std::as_bytes(bytes));
+  };
+  const auto layout =
+      kmd::serialize_queue_cwsr_bulk(address, size, states, write, arch_, control_stack_size,
+                                     kmd::CwsrDebugRegion{debug_region[0], debug_region[1]});
+  return layout.ok ? status : VmAccessOutcome::Faulted;
+}
+
+amdgpu::VmAccessOutcome SoC::restore_context(const amdgpu::QueueIdentity &identity,
+                                             uint64_t address, uint32_t size,
+                                             uint32_t control_stack_size) {
+  using amdgpu::VmAccessOutcome;
+  const auto access = gpu_vm_.snapshot(identity.address_space);
+  if (!access || !kmd::cwsr_layout_modelled(arch_))
+    return VmAccessOutcome::Faulted;
+  std::vector<std::pair<amdgpu::ComputeUnitCore *, amdgpu::Wavefront *>> waves;
+  std::vector<kmd::CwsrWaveState> states;
+  for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    for (auto *cu : cp->compute_units())
+      cu->with_wave_state_locked([&] {
+        for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+          auto *wave = cu->wf(slot);
+          if (wave && !wave->is_halted() && wave->process_id() == identity.process_id &&
+              wave->queue_id() == identity.queue_id &&
+              wave->address_space() == identity.address_space) {
+            waves.emplace_back(cu, wave);
+            states.push_back(kmd::build_cwsr_wave_state(*wave, arch_));
+          }
+        }
+      });
+  });
+  if (!states.empty()) {
+    kmd::prepare_cwsr_wave_states(states);
+    VmAccessOutcome status = VmAccessOutcome::Complete;
+    const bool decoded = kmd::deserialize_queue_cwsr_bulk(
+        address, size, states,
+        [&](uint64_t source, std::span<uint8_t> bytes) {
+          if (status == VmAccessOutcome::Complete)
+            status = access->read(source, std::as_writable_bytes(bytes));
+        },
+        arch_, control_stack_size);
+    if (status != VmAccessOutcome::Complete)
+      return status;
+    if (!decoded)
+      return VmAccessOutcome::Faulted;
+    std::vector<size_t> matches;
+    for (const auto &state : states) {
+      const auto match = std::ranges::find_if(waves, [&](const auto &entry) {
+        return entry.second->queue_packet_id() == state.queue_packet_id &&
+               entry.second->wg_coord() == state.group_ids &&
+               entry.second->wave_in_group() == state.wave_in_group;
+      });
+      if (match == waves.end())
+        return VmAccessOutcome::Faulted;
+      matches.push_back(static_cast<size_t>(match - waves.begin()));
+    }
+    for (size_t index = 0; index < states.size(); ++index) {
+      auto &[cu, wave] = waves[matches[index]];
+      cu->with_wave_state_locked([&] { kmd::apply_cwsr_to_wave(*wave, states[index], arch_); });
+    }
+  }
+  // Publish every restored register image before making any wave runnable.
+  for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    cp->set_queue_debug_suspended(identity.queue_id, identity.process_id, false);
+  });
+  for (auto &[cu, wave] : waves) {
+    cu->with_wave_state_locked([&] { wave->set_debug_suspended(false); });
+    cu->schedule_work_async();
+  }
+  return VmAccessOutcome::Complete;
 }
 
 void SoC::set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group) {

@@ -93,6 +93,13 @@ constexpr uint32_t kMqdWritePointerAddressLowDword = 141;
 constexpr uint32_t kMqdWritePointerAddressHighDword = 142;
 constexpr uint32_t kMqdDoorbellControlDword = 143;
 constexpr uint32_t kMqdQueueControlDword = 145;
+// v12_1_compute_mqd context-save fields (v12_structs.h).
+constexpr uint32_t kMqdContextBaseLowDword = 171;
+constexpr uint32_t kMqdContextBaseHighDword = 172;
+constexpr uint32_t kMqdControlStackOffsetDword = 174;
+constexpr uint32_t kMqdControlStackSizeDword = 175;
+constexpr uint32_t kMqdWaveStateOffsetDword = 176;
+constexpr uint32_t kMqdContextSizeDword = 177;
 constexpr uint32_t kMqdAqlControlDword = 181;
 constexpr uint32_t kMqdNoUpdateReadPointer = 0x08000000;
 constexpr uint32_t kMqdLastDword = kMqdAqlControlDword;
@@ -364,6 +371,11 @@ MesEngine::QueueLookup MesEngine::queue_from_mqd(uint64_t mqd_address, QueueKind
                                            field(kMqdReadPointerAddressHighDword)),
               .write_pointer_address = join(field(kMqdWritePointerAddressLowDword),
                                             field(kMqdWritePointerAddressHighDword)),
+              .mqd_address = mqd_address,
+              .context_save_address =
+                  join(field(kMqdContextBaseLowDword), field(kMqdContextBaseHighDword)),
+              .context_save_size = field(kMqdContextSizeDword),
+              .control_stack_size = field(kMqdControlStackSizeDword),
               .ring_dwords = uint64_t{1} << (queue_size + 1),
               .doorbell_offset = field(kMqdDoorbellControlDword) & kDoorbellOffsetMask,
               .process_id = field(kMqdVmidDword),
@@ -640,7 +652,9 @@ VmAccessOutcome MesEngine::commit_queue(Queue queue, bool created_address_space)
   const Queue replaced = *existing;
   QueueCloseResult detached{.found = true, .status = QueueCloseStatus::Closed};
   if (replaced.queue_handle)
-    detached = queue_registry_.unregister_queue(replaced.queue_handle);
+    detached = queue_registry_.unregister_queue(replaced.queue_handle,
+                                                replaced.active ? QueueCloseMode::Graceful
+                                                                : QueueCloseMode::ForceCancel);
   if (!detached) {
     if (queue.queue_handle)
       (void)queue_registry_.unregister_queue(queue.queue_handle, QueueCloseMode::ForceCancel);
@@ -662,7 +676,7 @@ VmAccessOutcome MesEngine::commit_queue(Queue queue, bool created_address_space)
   return VmAccessOutcome::Complete;
 }
 
-VmAccessOutcome MesEngine::remove_queue(uint64_t doorbell_offset) {
+VmAccessOutcome MesEngine::remove_queue(uint64_t doorbell_offset, const GpuVmAccess &gart_access) {
   // Destruction of the queue that owns a pending frame would remove the only
   // route by which its completion/read-pointer publication can resume.
   if (pending_mes_frames_.contains(doorbell_offset))
@@ -672,6 +686,40 @@ VmAccessOutcome MesEngine::remove_queue(uint64_t doorbell_offset) {
       std::ranges::find(mapped_queues_, doorbell_offset, &Queue::doorbell_offset);
   if (queue == mapped_queues_.end())
     return VmAccessOutcome::Malformed;
+
+  if (queue->kind == QueueKind::Compute && queue->context_save_address != 0 &&
+      queue->context_save_size != 0) {
+    if (!queue->active)
+      return VmAccessOutcome::Complete;
+    const QueueIdentity identity{.address_space = queue->address_space,
+                                 .process_id = queue->process_id,
+                                 .queue_id = queue->queue_id};
+    const auto saved = compute_bindings_.save_context(
+        identity, queue->context_save_address, queue->context_save_size, queue->control_stack_size);
+    if (saved != VmAccessOutcome::Complete)
+      return saved;
+    const auto access = gpu_vm_.snapshot(queue->address_space);
+    if (!access)
+      return VmAccessOutcome::Unavailable;
+    std::array<uint32_t, 4> header{};
+    const auto read =
+        access->read(queue->context_save_address, std::as_writable_bytes(std::span(header)));
+    if (read != VmAccessOutcome::Complete)
+      return read;
+    // KFD derives its user header from these two firmware-updated MQD fields.
+    for (const auto &[field, value] :
+         {std::pair{kMqdControlStackOffsetDword,
+                    header[1] == 0 ? queue->control_stack_size : header[0]},
+          std::pair{kMqdWaveStateOffsetDword,
+                    header[3] == 0 ? queue->control_stack_size : header[2]}}) {
+      const auto status = gart_access.write(queue->mqd_address + field * sizeof(uint32_t),
+                                            std::as_bytes(std::span(&value, 1)));
+      if (status != VmAccessOutcome::Complete)
+        return status;
+    }
+    queue->active = false;
+    return VmAccessOutcome::Complete;
+  }
 
   const uint32_t process_id = queue->process_id;
   if (queue->queue_handle) {
@@ -762,6 +810,39 @@ amdgpu::VmAccessOutcome MesEngine::execute_mes_semantic(std::span<const std::byt
       }
     }
     if (mapped.kind == QueueKind::Compute) {
+      const auto previous =
+          std::ranges::find(mapped_queues_, mapped.doorbell_offset, &Queue::doorbell_offset);
+      if (previous != mapped_queues_.end() && !previous->active &&
+          previous->kind == QueueKind::Compute && previous->mqd_address == mapped.mqd_address &&
+          previous->address_space == mapped.address_space &&
+          previous->process_id == mapped.process_id && previous->ring_base == mapped.ring_base &&
+          previous->context_save_address == mapped.context_save_address &&
+          previous->context_save_size == mapped.context_save_size) {
+        mapped.queue_id = previous->queue_id;
+        mapped.queue_handle = previous->queue_handle;
+        const auto access = gpu_vm_.snapshot(mapped.address_space);
+        if (!access)
+          return VmAccessOutcome::Unavailable;
+        uint64_t producer = 0;
+        const auto read = access->read(mapped.write_pointer_address,
+                                       std::as_writable_bytes(std::span(&producer, 1)));
+        if (read != VmAccessOutcome::Complete)
+          return read;
+        const auto submitted = queue_registry_.submit_producer(mapped.queue_handle, producer);
+        if (submitted.status != QueueSubmissionStatus::Accepted)
+          return submitted.status == QueueSubmissionStatus::Retry ? VmAccessOutcome::Unavailable
+                                                                  : VmAccessOutcome::Faulted;
+        const QueueIdentity identity{.address_space = mapped.address_space,
+                                     .process_id = mapped.process_id,
+                                     .queue_id = mapped.queue_id};
+        const auto restored =
+            compute_bindings_.restore_context(identity, mapped.context_save_address,
+                                              mapped.context_save_size, mapped.control_stack_size);
+        if (restored != VmAccessOutcome::Complete)
+          return restored;
+        *previous = mapped;
+        return VmAccessOutcome::Complete;
+      }
       const bool registered = mapped.aql ? register_aql_queue(mapped) : register_pm4_queue(mapped);
       if (!registered) {
         rollback_created_address_space(mapped, created_address_space);
@@ -791,10 +872,24 @@ amdgpu::VmAccessOutcome MesEngine::execute_mes_semantic(std::span<const std::byt
       debug_enabled_contexts_.insert(process_context);
     else
       debug_enabled_contexts_.erase(process_context);
+    if (flush) {
+      for (auto queue = mapped_queues_.begin(); queue != mapped_queues_.end();) {
+        if (queue->active || queue->process_context_address != process_context) {
+          ++queue;
+          continue;
+        }
+        if (queue->queue_handle &&
+            !queue_registry_.unregister_queue(queue->queue_handle, QueueCloseMode::ForceCancel))
+          return VmAccessOutcome::Unavailable;
+        const uint32_t process_id = queue->process_id;
+        queue = mapped_queues_.erase(queue);
+        release_unused_address_space(process_id);
+      }
+    }
   } else if (opcode == kMesApiRemoveQueue) {
     const uint64_t doorbell_offset =
         static_cast<uint64_t>(dword(frame, kRemoveQueueDoorbellDword)) * sizeof(uint32_t);
-    const amdgpu::VmAccessOutcome removed = remove_queue(doorbell_offset);
+    const amdgpu::VmAccessOutcome removed = remove_queue(doorbell_offset, gart_access);
     if (removed != amdgpu::VmAccessOutcome::Complete) {
       util::Logger::warn(std::format("{}: cannot remove queue at doorbell {:#x}", diagnostic_name_,
                                      doorbell_offset));
@@ -1023,6 +1118,8 @@ MesDoorbellDisposition MesEngine::notify_doorbell(uint64_t byte_offset, uint64_t
   const std::vector<Queue>::iterator mapped =
       std::ranges::find(mapped_queues_, byte_offset, &Queue::doorbell_offset);
   if (mapped != mapped_queues_.end()) {
+    if (!mapped->active)
+      return MesDoorbellDisposition::Ignored;
     if (mapped->queue_handle) {
       const amdgpu::QueueSubmissionResult result =
           queue_registry_.submit_producer(mapped->queue_handle, write_pointer);

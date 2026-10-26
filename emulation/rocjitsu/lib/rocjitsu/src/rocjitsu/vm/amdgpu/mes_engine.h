@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -48,6 +49,15 @@ public:
   [[nodiscard]] virtual std::optional<ComputeQueueBindingPlan> make_aql(uint32_t queue_ordinal) = 0;
   [[nodiscard]] virtual std::optional<ComputeQueueBindingPlan>
   make_pm4(uint32_t queue_ordinal, Pm4PacketCallbacks callbacks) = 0;
+
+  /// Save live queue state into its CWSR area; Unavailable keeps the operation pending.
+  virtual VmAccessOutcome save_context(const QueueIdentity &, uint64_t, uint32_t, uint32_t) {
+    return VmAccessOutcome::Faulted;
+  }
+  /// Apply CWSR edits before allowing the saved queue to execute again.
+  virtual VmAccessOutcome restore_context(const QueueIdentity &, uint64_t, uint32_t, uint32_t) {
+    return VmAccessOutcome::Faulted;
+  }
 };
 
 /// @brief Result of servicing one MES or MES-created queue doorbell.
@@ -179,7 +189,9 @@ public:
                   const MesDoorbellContext &context);
 
   /// @brief Return the number of queues currently mapped by MES.
-  [[nodiscard]] std::size_t active_queues() const { return mapped_queues_.size(); }
+  [[nodiscard]] std::size_t active_queues() const {
+    return std::ranges::count_if(mapped_queues_, [](const auto &queue) { return queue.active; });
+  }
   /// @brief Return the number of process address spaces currently tracked by MES.
   [[nodiscard]] std::size_t active_address_spaces() const { return address_spaces_.size(); }
   /// @brief Return the MES-owned handle for one process, for focused integration tests.
@@ -204,11 +216,16 @@ private:
     uint64_t process_context_address = 0;
     uint64_t trap_handler_address = 0;
     uint64_t trap_memory_address = 0;
+    uint64_t mqd_address = 0;
+    uint64_t context_save_address = 0;
+    uint32_t context_save_size = 0;
+    uint32_t control_stack_size = 0;
     uint64_t ring_dwords = 0;
     uint64_t doorbell_offset = 0;
     uint32_t process_id = 0;
     uint32_t queue_id = 0;
     uint32_t engine_id = 0;
+    // A preempted compute queue retains its binding until re-add or process-context flush.
     bool active = false;
     bool aql = false;
     bool trap_enabled = false;
@@ -272,7 +289,8 @@ private:
                                                      const MesDoorbellContext &context,
                                                      const GpuVmAccess &gart_access);
   [[nodiscard]] VmAccessOutcome publish_mes_frame(PendingMesFrame &pending);
-  [[nodiscard]] VmAccessOutcome remove_queue(uint64_t doorbell_offset);
+  [[nodiscard]] VmAccessOutcome remove_queue(uint64_t doorbell_offset,
+                                             const GpuVmAccess &gart_access);
   [[nodiscard]] VmAccessOutcome commit_queue(Queue queue, bool created_address_space);
   void release_unused_address_space(uint32_t process_id);
   void reap_orphaned_address_spaces();

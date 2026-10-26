@@ -278,6 +278,10 @@ private:
   make_aql(uint32_t queue_ordinal) override;
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
   make_pm4(uint32_t queue_ordinal, amdgpu::Pm4PacketCallbacks callbacks) override;
+  amdgpu::VmAccessOutcome save_context(const amdgpu::QueueIdentity &identity, uint64_t address,
+                                       uint32_t size, uint32_t control_stack_size) override;
+  amdgpu::VmAccessOutcome restore_context(const amdgpu::QueueIdentity &identity, uint64_t address,
+                                          uint32_t size, uint32_t control_stack_size) override;
 
   static inline std::atomic<uint32_t> next_gpu_id_{0};
   uint32_t gpu_id_ = next_gpu_id_++;

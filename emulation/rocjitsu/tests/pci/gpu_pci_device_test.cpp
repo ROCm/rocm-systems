@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
@@ -1339,6 +1340,109 @@ TEST_F(GpuDeviceMes, MesTrapConfigurationReachesTheComputeUnit) {
     EXPECT_EQ(wave->pc, kKernel + 4);
     EXPECT_EQ(wave->status_raw() & (1u << 5), 0u);
     EXPECT_EQ(wave->exec(), 0x1234u);
+    compute_unit_->free_wavefront_resources(*wave);
+    device_.reset(simdojo::ResetKind::FunctionLevel);
+    configure_gart();
+  }
+}
+
+TEST_F(GpuDeviceMes, RemoveAndReaddSaveAndRestoreAnUnfinishedWave) {
+  constexpr uint64_t kContext = 0x20000;
+  constexpr uint64_t kContextPhysical = 0x300000;
+  constexpr uint32_t kContextSize = 0x20000;
+  constexpr uint32_t kControlStack = 0x1000;
+  configure_compute_unit();
+  for (const bool pending_dispatch : {true, false}) {
+    SCOPED_TRACE(pending_dispatch);
+    store_dword(kSchedulerMqdPhysical + 171 * 4, kContext);
+    store_dword(kSchedulerMqdPhysical + 175 * 4, kControlStack);
+    store_dword(kSchedulerMqdPhysical + 177 * 4, kContextSize);
+    store_dword(kDefaultComputeSecondPagePhysical + 0xff8 -
+                    offsetof(amd_queue_t, write_dispatch_id) + offsetof(amd_queue_v2_t, caps),
+                AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM);
+    submit_default_compute_queue(true);
+    for (uint64_t offset = 0; offset < kContextSize; offset += 0x1000)
+      store_vram_qword(kDefaultProcessPtb + ((kContext + offset) >> 12) * sizeof(uint64_t),
+                       (kContextPhysical + offset) | kGfx12SystemLeafPteFlags);
+    const auto address_space = soc_.mes_engine().process_address_space_for_test(3);
+    ASSERT_TRUE(address_space);
+    ASSERT_TRUE(soc_.gpu_vm().invalidate(*address_space));
+    auto *wave = compute_unit_->dispatch_wf(0, 0x10080, 106, 64);
+    ASSERT_NE(wave, nullptr);
+    wave->set_address_space(*address_space);
+    wave->set_process_id(3);
+    wave->set_queue_id(uint32_t{1} << 31);
+    wave->set_exec(1);
+    wave->set_trap_id(2);
+    wave->set_debug_halted(true);
+    wave->set_status_halt(true);
+    wave->debug_write_sgpr(0, 0x12345678);
+    wave->debug_write_vgpr(0, 0, 0xabcdef01);
+
+    if (pending_dispatch) {
+      rocjitsu::amdgpu::DispatchEntry entry{};
+      entry.kind = rocjitsu::amdgpu::DispatchPacketKind::Kernel;
+      entry.dispatch_id = 1;
+      entry.queue_id = wave->queue_id();
+      entry.process_id = wave->process_id();
+      entry.address_space = wave->address_space();
+      entry.total_wgs = 1;
+      entry.dispatched_wgs = 1;
+      wave->set_dispatch_id(entry.dispatch_id);
+      command_processor_.accept_fanout_shard(std::move(entry));
+      command_processor_.drain_fanout_inbox_for_test();
+      ASSERT_EQ(command_processor_.accepted_entry_count_for_test(wave->queue_id(), 3), 1u);
+    }
+
+    constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+    store_dword(kRemove, 0x00040031);
+    store_dword(kRemove + 4, kDefaultComputeDoorbell / sizeof(uint32_t));
+    store_qword(kRemove + 6 * 4, kApiStatusGpu);
+    store_qword(kRemove + 8 * 4, 2);
+    transport_.fail_next_write(kContextPhysical, simdojo::DmaAccessOutcome::Unavailable);
+    auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+    ring_doorbell(0x60, doorbell);
+    EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+    EXPECT_FALSE(wave->is_halted());
+    device_.drain_doorbell_inbox_for_test();
+    ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+    ASSERT_FALSE(wave->is_halted());
+
+    std::vector<rocjitsu::kmd::CwsrWaveState> states(1);
+    states[0].num_sgprs = 106;
+    states[0].num_vgprs = 64;
+    auto read = [&](uint64_t address) {
+      return transport_.dword_at(kContextPhysical + address - kContext);
+    };
+    ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(kContext, kContextSize, states, read,
+                                                      ROCJITSU_CODE_ARCH_CDNA5, kControlStack));
+    EXPECT_EQ(states[0].pc, 0x10080u);
+    EXPECT_EQ(states[0].exec, 1u);
+    EXPECT_EQ(states[0].sgprs[0], 0x12345678u);
+    EXPECT_EQ(states[0].vgprs[0], 0xabcdef01u);
+    EXPECT_EQ(states[0].trap_id, 2u);
+    states[0].sgprs[0] = 0x44444444;
+    states[0].vgprs[0] = 0x88888888;
+    states[0].wave_stopped = false;
+    auto write = [&](uint64_t address, uint32_t value) {
+      store_dword(kContextPhysical + address - kContext, value);
+    };
+    ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(kContext, kContextSize, states, write,
+                                                    ROCJITSU_CODE_ARCH_CDNA5, kControlStack,
+                                                    rocjitsu::kmd::CwsrDebugRegion{})
+                    .ok);
+    for (uint64_t word = 0; word < 64; ++word)
+      store_dword(kRingPhysical + 128 * 4 + word * 4,
+                  transport_.dword_at(kRingPhysical + word * 4));
+    store_qword(kRingPhysical + 128 * 4 + 40 * 4, 3);
+    doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{192});
+    ring_doorbell(0x60, doorbell);
+    EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 3u);
+    EXPECT_FALSE(wave->debug_stopped());
+    EXPECT_EQ(wave->debug_read_sgpr(0), 0x44444444u);
+    EXPECT_EQ(wave->debug_read_vgpr(0, 0), 0x88888888u);
+    if (pending_dispatch)
+      EXPECT_EQ(command_processor_.accepted_entry_count_for_test(wave->queue_id(), 3), 1u);
     compute_unit_->free_wavefront_resources(*wave);
     device_.reset(simdojo::ResetKind::FunctionLevel);
     configure_gart();
