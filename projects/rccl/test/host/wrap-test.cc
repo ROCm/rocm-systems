@@ -1638,13 +1638,23 @@ TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_ScaledBufferRaisesReduceS
         EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 16 * k7M, ncclFuncReduceScatter, kRingLL128));
         EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, 16 * (k7M + 1), ncclFuncReduceScatter, kRingLL128));
         DeleteCommWithArch(comm);
+
+        comm = MakeRemoteFlushTuneComm(16, 128);
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 128 * (k7M + 1), ncclFuncReduceScatter, kRingLL128))
+            << "16 nodes with the default buffer keep the tuning model's limit";
+        comm->buffSizes[NCCL_PROTO_LL128] = 4 * kLl128BuffSize;
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 128 * k7M, ncclFuncReduceScatter, kRingLL128))
+            << "16 nodes";
+        EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, 128 * (8 << 20), ncclFuncReduceScatter, kRingLL128))
+            << "16 nodes, 8 MiB per rank";
+        DeleteCommWithArch(comm);
       });
 }
 
 #if defined(ENABLE_LL128)
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_ScaledLl128BufferReduceScatterTo7MiB) {
   // rcclUpdateCollectiveProtocol picks LL128 up to 7 MiB per rank once the collective LL128 buffer is scaled,
-  // on any node count (here 16, which rcclUpdateRemoteFlushAlgoProto leaves to it).
+  // on any node count (here 16).
   RUN_ISOLATED_TEST(
       "Wrap_UpdateCollectiveProtocol_ScaledLl128BufferReduceScatterTo7MiB",
       []() {

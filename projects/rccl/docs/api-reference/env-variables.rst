@@ -646,7 +646,8 @@ in the following table.
           larger buffer), Tree/Simple up to 64 MB per node, and Ring/Simple on
           48 channels from 64 to 128 MB per node. On 16 nodes it selects
           Tree/Simple from 8 to 64 MB per node.
-        | ``ncclReduceScatter`` keeps LL128 up to 7 MB per rank instead of 6 MB.
+        | ``ncclReduceScatter`` keeps LL128 up to 7 MB per rank instead of 6 MB,
+          and switches to Simple above that on 16 nodes too.
         | Tree/LL128, and Ring/LL128 ``ncclBroadcast`` and ``ncclReduce`` below
           about ``nRanks / 2`` chunks per channel, keep the default chunk size.
         | The algorithm and protocol choices do not apply when ``NCCL_ALGO``

@@ -372,7 +372,8 @@ extern int64_t ncclParamMaxNchannels();
 // gfx950 multi-node choices with the remote GDR flush flag, 8 GPUs per node, all choices measured.
 //
 // reduce_scatter (2-8 nodes): from 6 MB per rank, Simple beats LL128 (by 15-30% at 8 MB per rank), so LL128
-// stops there instead of at the 8 MB per rank of tuning_model_6; 7 MiB with the scaled LL128 buffer.
+// stops there instead of at the 8 MB per rank of tuning_model_6; 7 MiB with the scaled LL128 buffer, also on
+// 16 nodes, where Ring/Simple wins at 8 MiB per rank.
 //
 // all_reduce, 2-8 nodes: Ring/LL128 from 16 MB per node (12 with RCCL_IB_GDR_FLUSH_FLAG_TUNE) to 32 MB per node,
 // Tree/Simple to 64 MB per node, then Ring/Simple, where the cost model goes from Ring/LL128 straight to
@@ -391,7 +392,8 @@ int rcclUpdateRemoteFlushAlgoProto(struct ncclComm* comm, size_t nBytes, struct 
   const bool ll128Scaled = comm->buffSizes[NCCL_PROTO_LL128] > comm->p2pLl128BuffSize;
   if (info->func == ncclFuncReduceScatter) {
     const size_t ll128MaxPerRank = (size_t)(ll128Scaled ? 7 : 6) << 20;
-    if (comm->nNodes <= 8 && info->protocol == NCCL_PROTO_LL128 && info->algorithm < NCCL_NUM_ALGORITHMS &&
+    if ((comm->nNodes <= 8 || (ll128Scaled && comm->nNodes == 16)) && info->protocol == NCCL_PROTO_LL128 &&
+        info->algorithm < NCCL_NUM_ALGORITHMS &&
         rcclGetSizePerRank(info->func, nBytes, comm->nRanks) > ll128MaxPerRank &&
         table[info->algorithm][NCCL_PROTO_SIMPLE] >= 0.0)
       info->protocol = NCCL_PROTO_SIMPLE;
