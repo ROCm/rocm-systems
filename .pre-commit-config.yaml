@@ -45,7 +45,7 @@ repos:
         exclude: ^emulation/rocjitsu/
 
   - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v20.1.8
+    rev: v18.1.4
     hooks:
       - id: clang-format
         name: clang-format (C/C++/ObjC)
