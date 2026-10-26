@@ -369,7 +369,7 @@ ncclResult_t ncclStreamWaitStream(cudaStream_t a, cudaStream_t b, cudaEvent_t sc
 
 ncclResult_t ncclStreamAdvanceToStream(cudaStream_t s, cudaStream_t source) {
   cudaStreamCaptureStatus status;
-  cudaGraphNode_t const* nodes;
+  cudaGraphNode_t const* nodes = nullptr;
   size_t count = 0;
 #if CUDART_VERSION >= 13000
   cudaError_t res = hipStreamGetCaptureInfo_v3(source, &status, nullptr, nullptr, &nodes, nullptr, &count);

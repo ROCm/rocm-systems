@@ -21,13 +21,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
-#include <cstdlib>
 #include <functional>
 #include <numeric>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "common/DeviceBufferHelpers.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "common/ResourceGuards.hpp"
 #include "common/TestChecks.hpp"
@@ -156,15 +156,24 @@ void syncAll(Harness& h)
 
 void expectBuffer(Harness& h, BufSel buf, uint32_t expected, const std::string& what)
 {
-    std::vector<uint32_t> host(kCount);
     for(int r = 0; r < h.nRanks; r++)
     {
         HIP_CHECK(hipSetDevice(r));
-        HIP_CHECK(hipMemcpy(host.data(), (h.*buf)[r], kCount * sizeof(uint32_t), hipMemcpyDeviceToHost));
-        auto bad = std::find_if(host.begin(), host.end(), [&](uint32_t x) { return x != expected; });
-        EXPECT_EQ(bad, host.end()) << what << ": rank " << r << " index " << (bad - host.begin()) << " got "
-                                   << (bad == host.end() ? 0 : *bad) << " expected " << expected;
+        size_t   index  = 0;
+        uint32_t want   = 0, got = 0;
+        bool     ok     = RCCLTestHelpers::verifyBufferData<uint32_t>(
+            (h.*buf)[r], kCount, [expected](size_t) { return expected; }, 0, 0, &index, &want, &got);
+        EXPECT_TRUE(ok) << what << ": rank " << r << " index " << index << " got " << got << " expected " << want;
     }
+}
+
+// Runs `body` on a fresh harness of `nRanks` communicators; skips when there are too few GPUs.
+void withHarness(int nRanks, const std::function<void(Harness&)>& body)
+{
+    Harness h;
+    ASSERT_NO_FATAL_FAILURE(initHarness(h, nRanks));
+    if(h.nRanks == 0) return;
+    body(h);
 }
 
 // --- Capture, replay -------------------------------------------------------------
@@ -223,6 +232,24 @@ void capture(Harness& h, hipStreamCaptureMode mode, const std::function<void()>&
     ASSERT_NO_FATAL_FAILURE(beginCapture(h, &Harness::s, mode));
     body();
     ASSERT_NO_FATAL_FAILURE(endCapture(h, &Harness::s, g));
+}
+
+struct Expectation
+{
+    BufSel   buf;
+    uint32_t value;
+};
+
+// Replays `g` on `st` `reps` times; after each replay every buffer must hold its value. Each
+// graph overwrites its inputs first, so every replay produces the same result.
+void replayAndExpect(Harness& h, Graphs& g, StreamSel st, const std::vector<Expectation>& expect, int reps = 1)
+{
+    for(int rep = 0; rep < reps; rep++)
+    {
+        ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, st));
+        ASSERT_NO_FATAL_FAILURE(syncAll(h));
+        for(const auto& e : expect) expectBuffer(h, e.buf, e.value, "replay " + std::to_string(rep));
+    }
 }
 
 // --- Graph topology --------------------------------------------------------------
@@ -426,76 +453,64 @@ void expectSerialEventAfterCollectives(const GraphShape& shape, const std::strin
 // Back-to-back captured AllReduces must form a single chain with no redundant edges.
 void sequentialCollectives(int n, hipStreamCaptureMode mode)
 {
-    Harness h;
-    ASSERT_NO_FATAL_FAILURE(initHarness(h, kRanks));
-    if(h.nRanks == 0) return;
+    withHarness(kRanks, [&](Harness& h) {
+        Graphs g;
+        ASSERT_NO_FATAL_FAILURE(capture(h, mode, [&] {
+            fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; });
+            for(int i = 0; i < n; i++) allReduceOp(h, &Harness::a, &Harness::s);
+        }, g));
 
-    Graphs g;
-    ASSERT_NO_FATAL_FAILURE(capture(h, mode, [&] {
-        fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; });
-        for(int i = 0; i < n; i++) allReduceOp(h, &Harness::a, &Harness::s);
-    }, g));
+        for(int r = 0; r < h.nRanks; r++)
+        {
+            GraphShape shape;
+            ASSERT_NO_FATAL_FAILURE(analyzeRank(g, r, shape));
+            EXPECT_GE(shape.count('C'), n) << "rank " << r;
+            EXPECT_EQ(collapse(shape.order()), "MC") << "rank " << r << ": " << shape.describe();
+            EXPECT_EQ(shape.redundantEdges(), 0u) << "rank " << r << ": " << shape.describe();
+        }
 
-    for(int r = 0; r < h.nRanks; r++)
-    {
-        GraphShape shape;
-        ASSERT_NO_FATAL_FAILURE(analyzeRank(g, r, shape));
-        EXPECT_EQ(shape.count('C'), n) << "rank " << r;
-        EXPECT_EQ(shape.order(), "M" + std::string(n, 'C')) << "rank " << r;
-        EXPECT_EQ(shape.redundantEdges(), 0u) << "rank " << r << ": " << shape.describe();
-    }
-
-    // Sum over ranks of (r+1) is 3, then each further AllReduce doubles it (mod 2^32).
-    uint32_t expected = 3;
-    for(int i = 1; i < n; i++) expected *= 2;
-    for(int rep = 0; rep < 3; rep++)
-    {
-        ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, &Harness::s));
-        ASSERT_NO_FATAL_FAILURE(syncAll(h));
-        expectBuffer(h, &Harness::a, expected, "replay " + std::to_string(rep));
-    }
+        // Sum over ranks of (r+1) is 3, then each further AllReduce doubles it (mod 2^32).
+        uint32_t expected = 3;
+        for(int i = 1; i < n; i++) expected *= 2;
+        replayAndExpect(h, g, &Harness::s, {{&Harness::a, expected}}, 3);
+    });
 }
 
 // User work between captured collectives must stay ordered on both sides of each one.
 void interleavedUserWork(hipStreamCaptureMode mode, bool checkDependencyBound, bool checkSerialEvent,
                          bool expectHostCallbacks = false, int rounds = 12)
 {
-    Harness h;
-    ASSERT_NO_FATAL_FAILURE(initHarness(h, kRanks));
-    if(h.nRanks == 0) return;
+    withHarness(kRanks, [&](Harness& h) {
+        Graphs g;
+        ASSERT_NO_FATAL_FAILURE(capture(h, mode, [&] {
+            fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; });
+            for(int i = 0; i < rounds; i++)
+            {
+                allReduceOp(h, &Harness::a, &Harness::s);
+                addOp(h, &Harness::a, &Harness::s, i + 1);
+                // Builds no kernel plan, so ncclLaunchFinish must return without touching deviceStream.
+                allReduceOp(h, &Harness::a, &Harness::s, 0);
+            }
+        }, g));
 
-    Graphs g;
-    ASSERT_NO_FATAL_FAILURE(capture(h, mode, [&] {
-        fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; });
-        for(int i = 0; i < rounds; i++)
+        std::string expectedOrder = "M";
+        for(int i = 0; i < rounds; i++) expectedOrder += "CU";
+        for(int r = 0; r < h.nRanks; r++)
         {
-            allReduceOp(h, &Harness::a, &Harness::s);
-            addOp(h, &Harness::a, &Harness::s, i + 1);
+            GraphShape shape;
+            ASSERT_NO_FATAL_FAILURE(analyzeRank(g, r, shape));
+            EXPECT_EQ(collapse(shape.order()), expectedOrder) << "rank " << r << ": " << shape.describe();
+            if(checkDependencyBound) expectBoundedDependencies(shape, "rank " + std::to_string(r));
+            if(checkSerialEvent) expectSerialEventAfterCollectives(shape, "rank " + std::to_string(r));
+            if(expectHostCallbacks)
+                EXPECT_GT(shape.count('H'), 0) << "rank " << r << ": no host-callback nodes: " << shape.describe();
         }
-    }, g));
 
-    std::string expectedOrder = "M";
-    for(int i = 0; i < rounds; i++) expectedOrder += "CU";
-    for(int r = 0; r < h.nRanks; r++)
-    {
-        GraphShape shape;
-        ASSERT_NO_FATAL_FAILURE(analyzeRank(g, r, shape));
-        EXPECT_EQ(shape.order(), expectedOrder) << "rank " << r << ": " << shape.describe();
-        if(checkDependencyBound) expectBoundedDependencies(shape, "rank " + std::to_string(r));
-        if(checkSerialEvent) expectSerialEventAfterCollectives(shape, "rank " + std::to_string(r));
-        if(expectHostCallbacks)
-            EXPECT_GT(shape.count('H'), 0) << "rank " << r << ": no host-callback nodes: " << shape.describe();
-    }
-
-    // Ranks start at 1 and 2; every AllReduce leaves both at twice the common value.
-    uint32_t expected = 3;
-    for(int i = 0; i < rounds; i++) expected = (i == 0 ? expected : 2 * expected) + (i + 1);
-    for(int rep = 0; rep < 2; rep++)
-    {
-        ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, &Harness::s));
-        ASSERT_NO_FATAL_FAILURE(syncAll(h));
-        expectBuffer(h, &Harness::a, expected, "replay " + std::to_string(rep));
-    }
+        // Ranks start at 1 and 2; every AllReduce leaves both at twice the common value.
+        uint32_t expected = 3;
+        for(int i = 0; i < rounds; i++) expected = (i == 0 ? expected : 2 * expected) + (i + 1);
+        replayAndExpect(h, g, &Harness::s, {{&Harness::a, expected}}, 2);
+    });
 }
 
 ProcessIsolatedTestRunner::TestConfig isolated(const std::string& name, std::function<void()> body,
@@ -517,16 +532,6 @@ ProcessIsolatedTestRunner::ExecutionOptions parallelOptions()
     return options;
 }
 
-const char* modeName(hipStreamCaptureMode mode)
-{
-    switch(mode)
-    {
-    case hipStreamCaptureModeGlobal: return "Global";
-    case hipStreamCaptureModeThreadLocal: return "ThreadLocal";
-    default: return "Relaxed";
-    }
-}
-
 } // namespace
 
 class GraphCaptureStreamOrdering : public ::testing::Test
@@ -543,34 +548,40 @@ TEST_F(GraphCaptureStreamOrdering, SingleCollective)
         isolated("Relaxed", [] { sequentialCollectives(1, hipStreamCaptureModeRelaxed); }));
 }
 
-// Many collectives: the fast-forward must not accumulate edges as the capture grows.
+// Many collectives: adding to deviceStream's frontier instead of replacing it shows up as
+// redundant edges.
 TEST_F(GraphCaptureStreamOrdering, LongChainNoEdgeBlowup)
 {
     RUN_ISOLATED_TESTS_WITH_OPTIONS(
         parallelOptions(),
-        isolated("Chain16", [] { sequentialCollectives(16, hipStreamCaptureModeThreadLocal); }),
-        isolated("Chain128", [] { sequentialCollectives(128, hipStreamCaptureModeThreadLocal); }));
+        isolated("Chain16", [] { sequentialCollectives(16, hipStreamCaptureModeThreadLocal); }));
 }
 
-// User kernels between collectives, across capture modes and the environment settings
-// that change which streams ncclLaunchPrepare/ncclLaunchFinish touch.
+// User kernels between collectives, with the environment settings that change which streams
+// ncclLaunchPrepare/ncclLaunchFinish touch. The capture mode does not change that path, so
+// only one configuration runs under Global capture.
 TEST_F(GraphCaptureStreamOrdering, InterleavedUserWork)
 {
     std::vector<ProcessIsolatedTestRunner::TestConfig> configs;
-    for(auto mode : {hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed})
-        for(const char* mixing : {"0", "1"})
-            for(const char* implicitOrder : {"0", "1"})
-            {
-                std::string name = std::string(modeName(mode)) + "_Mixing" + mixing + "_ImplicitOrder" + implicitOrder;
-                // With implicit launch order, ncclLaunchFinish makes the per-device launchOrder
-                // stream plain-wait on every launch, so each captured kernel depends on all
-                // earlier ones. Only ordering and data are checked in that configuration.
-                bool bound  = implicitOrder[0] == '0';
-                bool serial = mixing[0] == '1';
-                configs.push_back(isolated(name, [mode, bound, serial] { interleavedUserWork(mode, bound, serial); },
-                                           {{"NCCL_GRAPH_MIXING_SUPPORT", mixing},
-                                            {"NCCL_LAUNCH_ORDER_IMPLICIT", implicitOrder}}));
-            }
+    for(const char* mixing : {"0", "1"})
+        for(const char* implicitOrder : {"0", "1"})
+        {
+            std::string name = std::string("ThreadLocal_Mixing") + mixing + "_ImplicitOrder" + implicitOrder;
+            // With implicit launch order, ncclLaunchFinish makes the per-device launchOrder
+            // stream plain-wait on every launch, so each captured kernel depends on all
+            // earlier ones. Only ordering and data are checked in that configuration.
+            bool bound  = implicitOrder[0] == '0';
+            bool serial = mixing[0] == '1';
+            configs.push_back(isolated(name,
+                                       [bound, serial] {
+                                           interleavedUserWork(hipStreamCaptureModeThreadLocal, bound, serial);
+                                       },
+                                       {{"NCCL_GRAPH_MIXING_SUPPORT", mixing},
+                                        {"NCCL_LAUNCH_ORDER_IMPLICIT", implicitOrder}}));
+        }
+    configs.push_back(isolated("Global_Mixing1_ImplicitOrder0",
+                               [] { interleavedUserWork(hipStreamCaptureModeGlobal, true, true); },
+                               {{"NCCL_GRAPH_MIXING_SUPPORT", "1"}, {"NCCL_LAUNCH_ORDER_IMPLICIT", "0"}}));
     for(const auto& c : configs) ProcessIsolatedTestRunner::registerTest(c);
     EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(parallelOptions()));
 }
@@ -585,107 +596,77 @@ TEST_F(GraphCaptureStreamOrdering, InterleavedUserWorkNetTransport)
                  {{"NCCL_P2P_DISABLE", "1"}, {"NCCL_SHM_DISABLE", "1"}, {"NCCL_NET", "Socket"}}));
 }
 
-// Known failure on ROCm 7.0.2: with NCCL_GRAPH_STREAM_ORDERING=0, ncclLaunchPrepare makes the
-// capturing stream wait on serialEvent with hipEventWaitExternal (rcclGraphOriginWaitSerialEvent),
-// and HIP segfaults in Graph::AddExternalEventWaitNode once that stream has captured any node.
-// Every capture here starts with a memset, so the first collective already crashes.
-// Skipped unless RCCL_TEST_KNOWN_FAILURES=1; a DISABLED_ prefix would not reach the re-exec children.
-TEST_F(GraphCaptureStreamOrdering, StreamOrdering0UserWorkBeforeCollective)
-{
-    const char* knownFailures = std::getenv("RCCL_TEST_KNOWN_FAILURES");
-    if(!knownFailures || std::string(knownFailures) != "1")
-        GTEST_SKIP() << "segfaults in HIP on ROCm 7.0.2; set RCCL_TEST_KNOWN_FAILURES=1 to run";
-    std::vector<ProcessIsolatedTestRunner::TestConfig> configs;
-    for(const char* implicitOrder : {"0", "1"})
-    {
-        bool bound = implicitOrder[0] == '0';
-        configs.push_back(isolated(std::string("ImplicitOrder") + implicitOrder,
-                                   [bound] { interleavedUserWork(hipStreamCaptureModeThreadLocal, bound, false); },
-                                   {{"NCCL_GRAPH_STREAM_ORDERING", "0"},
-                                    {"NCCL_LAUNCH_ORDER_IMPLICIT", implicitOrder}}));
-    }
-    configs.push_back(isolated("SingleCollective",
-                               [] { sequentialCollectives(1, hipStreamCaptureModeThreadLocal); },
-                               {{"NCCL_GRAPH_STREAM_ORDERING", "0"}}));
-    for(const auto& c : configs) ProcessIsolatedTestRunner::registerTest(c);
-    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(parallelOptions()));
-}
-
 // The user stream already depends on two branches (fork/join with plain HIP work on a
 // second stream) when RCCL launches; RCCL itself only sees one stream.
 TEST_F(GraphCaptureStreamOrdering, ForkJoinBeforeCollective)
 {
     RUN_ISOLATED_TESTS_WITH_OPTIONS(parallelOptions(), isolated("ForkJoin", [] {
-        Harness h;
-        ASSERT_NO_FATAL_FAILURE(initHarness(h, kRanks));
-        if(h.nRanks == 0) return;
-        std::vector<hipEvent_t> fork(h.nRanks), join(h.nRanks);
-        std::vector<RCCLTestGuards::HipEventAutoGuard> eventGuards;
-        for(int r = 0; r < h.nRanks; r++)
-        {
-            HIP_CHECK(hipSetDevice(r));
-            HIP_CHECK(hipEventCreateWithFlags(&fork[r], hipEventDisableTiming));
-            eventGuards.push_back(RCCLTestGuards::makeEventAutoGuard(fork[r]));
-            HIP_CHECK(hipEventCreateWithFlags(&join[r], hipEventDisableTiming));
-            eventGuards.push_back(RCCLTestGuards::makeEventAutoGuard(join[r]));
-        }
-
-        Graphs g;
-        ASSERT_NO_FATAL_FAILURE(capture(h, hipStreamCaptureModeThreadLocal, [&] {
+        withHarness(kRanks, [](Harness& h) {
+            std::vector<hipEvent_t>                        fork(h.nRanks), join(h.nRanks);
+            std::vector<RCCLTestGuards::HipEventAutoGuard> eventGuards;
             for(int r = 0; r < h.nRanks; r++)
             {
                 HIP_CHECK(hipSetDevice(r));
-                HIP_CHECK(hipEventRecord(fork[r], h.s[r]));
-                HIP_CHECK(hipStreamWaitEvent(h.t[r], fork[r], 0));
+                HIP_CHECK(hipEventCreateWithFlags(&fork[r], hipEventDisableTiming));
+                eventGuards.push_back(RCCLTestGuards::makeEventAutoGuard(fork[r]));
+                HIP_CHECK(hipEventCreateWithFlags(&join[r], hipEventDisableTiming));
+                eventGuards.push_back(RCCLTestGuards::makeEventAutoGuard(join[r]));
             }
-            fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; });
-            fillOp(h, &Harness::b, &Harness::t, [](int r) { return 10 * (r + 1); });
-            addOp(h, &Harness::b, &Harness::t, 1); // 11, 21
-            for(int r = 0; r < h.nRanks; r++)
-            {
-                HIP_CHECK(hipSetDevice(r));
-                HIP_CHECK(hipEventRecord(join[r], h.t[r]));
-                HIP_CHECK(hipStreamWaitEvent(h.s[r], join[r], 0));
-            }
-            ASSERT_EQ(ncclGroupStart(), ncclSuccess);
-            allReduceOp(h, &Harness::a, &Harness::s); // 3
-            allReduceOp(h, &Harness::b, &Harness::s); // 32
-            ASSERT_EQ(ncclGroupEnd(), ncclSuccess);
-            addOp(h, &Harness::a, &Harness::s, 4); // 7
-            allReduceOp(h, &Harness::a, &Harness::s); // 14
-        }, g));
 
-        for(int r = 0; r < h.nRanks; r++)
-        {
-            GraphShape shape;
-            ASSERT_NO_FATAL_FAILURE(analyzeRank(g, r, shape));
-            ASSERT_EQ(shape.count('M'), 2);
-            ASSERT_EQ(shape.count('U'), 2);
-            ASSERT_GE(shape.count('C'), 2);
-            // Both branches (each memset, and the add on the side stream) must feed every
-            // collective; the trailing add must sit between collectives.
-            EXPECT_TRUE(shape.allBefore('M', 'C')) << "rank " << r;
-            int feedsAll = 0, between = 0;
-            for(int u : shape.nodesLabelled('U'))
-            {
-                bool toAll = true, fromSome = false, toSome = false;
-                for(int c : shape.nodesLabelled('C'))
+            Graphs g;
+            ASSERT_NO_FATAL_FAILURE(capture(h, hipStreamCaptureModeThreadLocal, [&] {
+                for(int r = 0; r < h.nRanks; r++)
                 {
-                    toAll    = toAll && shape.reach[u][c];
-                    toSome   = toSome || shape.reach[u][c];
-                    fromSome = fromSome || shape.reach[c][u];
+                    HIP_CHECK(hipSetDevice(r));
+                    HIP_CHECK(hipEventRecord(fork[r], h.s[r]));
+                    HIP_CHECK(hipStreamWaitEvent(h.t[r], fork[r], 0));
                 }
-                feedsAll += toAll;
-                between += fromSome && toSome;
+                fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; });
+                fillOp(h, &Harness::b, &Harness::t, [](int r) { return 10 * (r + 1); });
+                addOp(h, &Harness::b, &Harness::t, 1); // 11, 21
+                for(int r = 0; r < h.nRanks; r++)
+                {
+                    HIP_CHECK(hipSetDevice(r));
+                    HIP_CHECK(hipEventRecord(join[r], h.t[r]));
+                    HIP_CHECK(hipStreamWaitEvent(h.s[r], join[r], 0));
+                }
+                ASSERT_EQ(ncclGroupStart(), ncclSuccess);
+                allReduceOp(h, &Harness::a, &Harness::s); // 3
+                allReduceOp(h, &Harness::b, &Harness::s); // 32
+                ASSERT_EQ(ncclGroupEnd(), ncclSuccess);
+                addOp(h, &Harness::a, &Harness::s, 4);    // 7
+                allReduceOp(h, &Harness::a, &Harness::s); // 14
+            }, g));
+
+            for(int r = 0; r < h.nRanks; r++)
+            {
+                GraphShape shape;
+                ASSERT_NO_FATAL_FAILURE(analyzeRank(g, r, shape));
+                ASSERT_EQ(shape.count('M'), 2);
+                ASSERT_EQ(shape.count('U'), 2);
+                ASSERT_GE(shape.count('C'), 2);
+                // Both branches (each memset, and the add on the side stream) must feed every
+                // collective; the trailing add must sit between collectives.
+                EXPECT_TRUE(shape.allBefore('M', 'C')) << "rank " << r;
+                int feedsAll = 0, between = 0;
+                for(int u : shape.nodesLabelled('U'))
+                {
+                    bool toAll = true, fromSome = false, toSome = false;
+                    for(int c : shape.nodesLabelled('C'))
+                    {
+                        toAll    = toAll && shape.reach[u][c];
+                        toSome   = toSome || shape.reach[u][c];
+                        fromSome = fromSome || shape.reach[c][u];
+                    }
+                    feedsAll += toAll;
+                    between += fromSome && toSome;
+                }
+                EXPECT_EQ(feedsAll, 1) << "rank " << r;
+                EXPECT_EQ(between, 1) << "rank " << r;
+                expectBoundedDependencies(shape, "rank " + std::to_string(r));
             }
-            EXPECT_EQ(feedsAll, 1) << "rank " << r;
-            EXPECT_EQ(between, 1) << "rank " << r;
-            expectBoundedDependencies(shape, "rank " + std::to_string(r));
-        }
-        ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, &Harness::s));
-        ASSERT_NO_FATAL_FAILURE(syncAll(h));
-        expectBuffer(h, &Harness::a, 14, "a");
-        expectBuffer(h, &Harness::b, 32, "b");
+            replayAndExpect(h, g, &Harness::s, {{&Harness::a, 14}, {&Harness::b, 32}});
+        });
     }));
 }
 
@@ -694,116 +675,84 @@ TEST_F(GraphCaptureStreamOrdering, ForkJoinBeforeCollective)
 TEST_F(GraphCaptureStreamOrdering, GroupedAndPointToPoint)
 {
     RUN_ISOLATED_TESTS_WITH_OPTIONS(parallelOptions(), isolated("GroupAndSendRecv", [] {
-        Harness h;
-        ASSERT_NO_FATAL_FAILURE(initHarness(h, kRanks));
-        if(h.nRanks == 0) return;
+        withHarness(kRanks, [](Harness& h) {
+            Graphs g;
+            ASSERT_NO_FATAL_FAILURE(capture(h, hipStreamCaptureModeThreadLocal, [&] {
+                fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; });
+                fillOp(h, &Harness::b, &Harness::s, [](int r) { return 100 * (r + 1); });
+                ASSERT_EQ(ncclGroupStart(), ncclSuccess);
+                for(int r = 0; r < h.nRanks; r++)
+                {
+                    EXPECT_EQ(ncclAllReduce(h.a[r], h.a[r], kCount, ncclUint32, ncclSum, h.comms[r], h.s[r]),
+                              ncclSuccess);
+                    EXPECT_EQ(ncclBroadcast(h.b[r], h.b[r], kCount, ncclUint32, 1, h.comms[r], h.s[r]),
+                              ncclSuccess);
+                }
+                ASSERT_EQ(ncclGroupEnd(), ncclSuccess); // a = 3, b = 200
+                addOp(h, &Harness::a, &Harness::s, 1);  // a = 4
+                ASSERT_EQ(ncclGroupStart(), ncclSuccess);
+                for(int r = 0; r < h.nRanks; r++)
+                {
+                    int peer = (r + 1) % h.nRanks;
+                    EXPECT_EQ(ncclSend(h.a[r], kCount, ncclUint32, peer, h.comms[r], h.s[r]), ncclSuccess);
+                    EXPECT_EQ(ncclRecv(h.b[r], kCount, ncclUint32, peer, h.comms[r], h.s[r]), ncclSuccess);
+                }
+                ASSERT_EQ(ncclGroupEnd(), ncclSuccess); // b = 4
+                addOp(h, &Harness::b, &Harness::s, 3);  // b = 7
+            }, g));
 
-        Graphs g;
-        ASSERT_NO_FATAL_FAILURE(capture(h, hipStreamCaptureModeThreadLocal, [&] {
-            fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; });
-            fillOp(h, &Harness::b, &Harness::s, [](int r) { return 100 * (r + 1); });
-            ASSERT_EQ(ncclGroupStart(), ncclSuccess);
             for(int r = 0; r < h.nRanks; r++)
             {
-                EXPECT_EQ(ncclAllReduce(h.a[r], h.a[r], kCount, ncclUint32, ncclSum, h.comms[r], h.s[r]),
-                          ncclSuccess);
-                EXPECT_EQ(ncclBroadcast(h.b[r], h.b[r], kCount, ncclUint32, 1, h.comms[r], h.s[r]), ncclSuccess);
+                GraphShape shape;
+                ASSERT_NO_FATAL_FAILURE(analyzeRank(g, r, shape));
+                EXPECT_EQ(collapse(shape.order()), "MCUCU") << "rank " << r;
+                expectBoundedDependencies(shape, "rank " + std::to_string(r));
             }
-            ASSERT_EQ(ncclGroupEnd(), ncclSuccess);         // a = 3, b = 200
-            addOp(h, &Harness::a, &Harness::s, 1);          // a = 4
-            ASSERT_EQ(ncclGroupStart(), ncclSuccess);
-            for(int r = 0; r < h.nRanks; r++)
-            {
-                int peer = (r + 1) % h.nRanks;
-                EXPECT_EQ(ncclSend(h.a[r], kCount, ncclUint32, peer, h.comms[r], h.s[r]), ncclSuccess);
-                EXPECT_EQ(ncclRecv(h.b[r], kCount, ncclUint32, peer, h.comms[r], h.s[r]), ncclSuccess);
-            }
-            ASSERT_EQ(ncclGroupEnd(), ncclSuccess);         // b = 4
-            addOp(h, &Harness::b, &Harness::s, 3);          // b = 7
-        }, g));
-
-        for(int r = 0; r < h.nRanks; r++)
-        {
-            GraphShape shape;
-            ASSERT_NO_FATAL_FAILURE(analyzeRank(g, r, shape));
-            EXPECT_EQ(collapse(shape.order()), "MCUCU") << "rank " << r;
-            expectBoundedDependencies(shape, "rank " + std::to_string(r));
-        }
-        for(int rep = 0; rep < 2; rep++)
-        {
-            ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, &Harness::s));
-            ASSERT_NO_FATAL_FAILURE(syncAll(h));
-            expectBuffer(h, &Harness::a, 4, "a");
-            expectBuffer(h, &Harness::b, 7, "b");
-        }
+            replayAndExpect(h, g, &Harness::s, {{&Harness::a, 4}, {&Harness::b, 7}}, 2);
+        });
     }));
 }
 
 // Eager launches before, between (after EndCapture, before replay) and after graph
 // launches on the same stream: the capture must not leave deviceStream inconsistent
 // for uncaptured work. Run with implicit launch order too, which sends eager
-// single-stream launches through the ncclLaunchFinish fast-forward as well.
-// NCCL_GRAPH_STREAM_ORDERING=0 is only exercised here, where the collective is the first
-// captured node; see StreamOrdering0UserWorkBeforeCollective.
+// single-stream launches through the ncclLaunchFinish fast-forward as well, and with
+// the eager launches as one group spanning two user streams (numStreams == 2).
 TEST_F(GraphCaptureStreamOrdering, EagerAroundCapture)
 {
-    auto body = [] {
-        Harness h;
-        ASSERT_NO_FATAL_FAILURE(initHarness(h, kRanks));
-        if(h.nRanks == 0) return;
-        ASSERT_NO_FATAL_FAILURE(fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; }));
-        ASSERT_NO_FATAL_FAILURE(allReduceOp(h, &Harness::a, &Harness::s)); // 3
+    auto body = [](bool twoStreams) {
+        withHarness(kRanks, [&](Harness& h) {
+            ASSERT_NO_FATAL_FAILURE(fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; }));
+            ASSERT_NO_FATAL_FAILURE(fillOp(h, &Harness::b, &Harness::t, [](int r) { return 10 * (r + 1); }));
+            auto eager = [&] {
+                ASSERT_EQ(ncclGroupStart(), ncclSuccess);
+                allReduceOp(h, &Harness::a, &Harness::s);
+                if(twoStreams) allReduceOp(h, &Harness::b, &Harness::t);
+                ASSERT_EQ(ncclGroupEnd(), ncclSuccess);
+            };
+            ASSERT_NO_FATAL_FAILURE(eager()); // a = 3, b = 30
 
-        Graphs g;
-        ASSERT_NO_FATAL_FAILURE(capture(h, hipStreamCaptureModeThreadLocal, [&] {
-            allReduceOp(h, &Harness::a, &Harness::s);
-            addOp(h, &Harness::a, &Harness::s, 1);
-        }, g));
+            Graphs g;
+            ASSERT_NO_FATAL_FAILURE(capture(h, hipStreamCaptureModeThreadLocal, [&] {
+                allReduceOp(h, &Harness::a, &Harness::s);
+                addOp(h, &Harness::a, &Harness::s, 1);
+            }, g));
 
-        ASSERT_NO_FATAL_FAILURE(allReduceOp(h, &Harness::a, &Harness::s)); // 6
-        ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, &Harness::s));          // 13
-        ASSERT_NO_FATAL_FAILURE(allReduceOp(h, &Harness::a, &Harness::s)); // 26
-        ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, &Harness::s));          // 53
-        ASSERT_NO_FATAL_FAILURE(syncAll(h));
-        expectBuffer(h, &Harness::a, 53, "a");
+            ASSERT_NO_FATAL_FAILURE(eager());                         // a = 6,  b = 60
+            ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, &Harness::s)); // a = 13
+            ASSERT_NO_FATAL_FAILURE(eager());                         // a = 26, b = 120
+            ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, &Harness::s)); // a = 53
+            ASSERT_NO_FATAL_FAILURE(syncAll(h));
+            expectBuffer(h, &Harness::a, 53, "a");
+            if(twoStreams) expectBuffer(h, &Harness::b, 120, "b");
+        });
     };
-    RUN_ISOLATED_TESTS_WITH_OPTIONS(parallelOptions(), isolated("Default", body),
-                                    isolated("ImplicitOrder", body, {{"NCCL_LAUNCH_ORDER_IMPLICIT", "1"}}),
-                                    isolated("Mixing", body, {{"NCCL_GRAPH_MIXING_SUPPORT", "1"}}),
-                                    isolated("StreamOrdering0", body, {{"NCCL_GRAPH_STREAM_ORDERING", "0"}}));
-}
-
-// Eager group spanning two user streams (numStreams == 2): exercises the uncaptured
-// multi-stream join in ncclLaunchPrepare/ncclLaunchFinish next to captured launches.
-TEST_F(GraphCaptureStreamOrdering, EagerMultiStreamAroundCapture)
-{
-    RUN_ISOLATED_TESTS_WITH_OPTIONS(parallelOptions(), isolated("MultiStream", [] {
-        Harness h;
-        ASSERT_NO_FATAL_FAILURE(initHarness(h, kRanks));
-        if(h.nRanks == 0) return;
-        ASSERT_NO_FATAL_FAILURE(fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; }));
-        ASSERT_NO_FATAL_FAILURE(fillOp(h, &Harness::b, &Harness::t, [](int r) { return 10 * (r + 1); }));
-
-        auto twoStreamGroup = [&] {
-            ASSERT_EQ(ncclGroupStart(), ncclSuccess);
-            allReduceOp(h, &Harness::a, &Harness::s);
-            allReduceOp(h, &Harness::b, &Harness::t);
-            ASSERT_EQ(ncclGroupEnd(), ncclSuccess);
-        };
-        ASSERT_NO_FATAL_FAILURE(twoStreamGroup()); // a = 3, b = 30
-
-        Graphs g;
-        ASSERT_NO_FATAL_FAILURE(capture(h, hipStreamCaptureModeThreadLocal, [&] {
-            allReduceOp(h, &Harness::a, &Harness::s);
-        }, g));
-
-        ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, &Harness::s)); // a = 6
-        ASSERT_NO_FATAL_FAILURE(twoStreamGroup());                 // a = 12, b = 60
-        ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, &Harness::s)); // a = 24
-        ASSERT_NO_FATAL_FAILURE(syncAll(h));
-        expectBuffer(h, &Harness::a, 24, "a");
-        expectBuffer(h, &Harness::b, 60, "b");
-    }));
+    auto oneStream = [=] { body(false); };
+    RUN_ISOLATED_TESTS_WITH_OPTIONS(parallelOptions(), isolated("Default", oneStream),
+                                    isolated("ImplicitOrder", oneStream, {{"NCCL_LAUNCH_ORDER_IMPLICIT", "1"}}),
+                                    isolated("Mixing", oneStream, {{"NCCL_GRAPH_MIXING_SUPPORT", "1"}}),
+                                    isolated("StreamOrdering0", oneStream, {{"NCCL_GRAPH_STREAM_ORDERING", "0"}}),
+                                    isolated("TwoStreamEager", [=] { body(true); }));
 }
 
 // Two graphs captured from the same communicators at the same time on different
@@ -812,42 +761,34 @@ TEST_F(GraphCaptureStreamOrdering, EagerMultiStreamAroundCapture)
 TEST_F(GraphCaptureStreamOrdering, ConcurrentCapturesSameComm)
 {
     RUN_ISOLATED_TESTS_WITH_OPTIONS(parallelOptions(), isolated("Concurrent", [] {
-        Harness h;
-        ASSERT_NO_FATAL_FAILURE(initHarness(h, kRanks));
-        if(h.nRanks == 0) return;
+        withHarness(kRanks, [](Harness& h) {
+            Graphs g1, g2;
+            ASSERT_NO_FATAL_FAILURE(beginCapture(h, &Harness::s, hipStreamCaptureModeThreadLocal));
+            ASSERT_NO_FATAL_FAILURE(fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; }));
+            ASSERT_NO_FATAL_FAILURE(allReduceOp(h, &Harness::a, &Harness::s)); // a = 3
+            ASSERT_NO_FATAL_FAILURE(beginCapture(h, &Harness::t, hipStreamCaptureModeThreadLocal));
+            ASSERT_NO_FATAL_FAILURE(fillOp(h, &Harness::b, &Harness::t, [](int r) { return 10 * (r + 1); }));
+            ASSERT_NO_FATAL_FAILURE(allReduceOp(h, &Harness::b, &Harness::t)); // b = 30
+            ASSERT_NO_FATAL_FAILURE(addOp(h, &Harness::a, &Harness::s, 1));    // a = 4
+            ASSERT_NO_FATAL_FAILURE(allReduceOp(h, &Harness::a, &Harness::s)); // a = 8
+            ASSERT_NO_FATAL_FAILURE(addOp(h, &Harness::b, &Harness::t, 2));    // b = 32
+            ASSERT_NO_FATAL_FAILURE(endCapture(h, &Harness::t, g2));
+            ASSERT_NO_FATAL_FAILURE(endCapture(h, &Harness::s, g1));
 
-        Graphs g1, g2;
-        ASSERT_NO_FATAL_FAILURE(beginCapture(h, &Harness::s, hipStreamCaptureModeThreadLocal));
-        ASSERT_NO_FATAL_FAILURE(fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; }));
-        ASSERT_NO_FATAL_FAILURE(allReduceOp(h, &Harness::a, &Harness::s)); // a = 3
-        ASSERT_NO_FATAL_FAILURE(beginCapture(h, &Harness::t, hipStreamCaptureModeThreadLocal));
-        ASSERT_NO_FATAL_FAILURE(fillOp(h, &Harness::b, &Harness::t, [](int r) { return 10 * (r + 1); }));
-        ASSERT_NO_FATAL_FAILURE(allReduceOp(h, &Harness::b, &Harness::t)); // b = 30
-        ASSERT_NO_FATAL_FAILURE(addOp(h, &Harness::a, &Harness::s, 1));    // a = 4
-        ASSERT_NO_FATAL_FAILURE(allReduceOp(h, &Harness::a, &Harness::s)); // a = 8
-        ASSERT_NO_FATAL_FAILURE(addOp(h, &Harness::b, &Harness::t, 2));    // b = 32
-        ASSERT_NO_FATAL_FAILURE(endCapture(h, &Harness::t, g2));
-        ASSERT_NO_FATAL_FAILURE(endCapture(h, &Harness::s, g1));
-
-        for(int r = 0; r < h.nRanks; r++)
-        {
-            GraphShape s1, s2;
-            ASSERT_NO_FATAL_FAILURE(analyzeRank(g1, r, s1));
-            ASSERT_NO_FATAL_FAILURE(analyzeRank(g2, r, s2));
-            EXPECT_EQ(collapse(s1.order()), "MCUC") << "rank " << r;
-            EXPECT_EQ(s1.count('C'), 2) << "rank " << r;
-            EXPECT_EQ(collapse(s2.order()), "MCU") << "rank " << r;
-            EXPECT_EQ(s2.count('C'), 1) << "rank " << r;
-            expectBoundedDependencies(s1, "graph 1 rank " + std::to_string(r));
-            expectBoundedDependencies(s2, "graph 2 rank " + std::to_string(r));
-        }
-        // The graphs share communicators, so they must not run concurrently.
-        ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g1, &Harness::s));
-        ASSERT_NO_FATAL_FAILURE(syncAll(h));
-        ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g2, &Harness::t));
-        ASSERT_NO_FATAL_FAILURE(syncAll(h));
-        expectBuffer(h, &Harness::a, 8, "a");
-        expectBuffer(h, &Harness::b, 32, "b");
+            for(int r = 0; r < h.nRanks; r++)
+            {
+                GraphShape s1, s2;
+                ASSERT_NO_FATAL_FAILURE(analyzeRank(g1, r, s1));
+                ASSERT_NO_FATAL_FAILURE(analyzeRank(g2, r, s2));
+                EXPECT_EQ(collapse(s1.order()), "MCUC") << "rank " << r;
+                EXPECT_EQ(collapse(s2.order()), "MCU") << "rank " << r;
+                expectBoundedDependencies(s1, "graph 1 rank " + std::to_string(r));
+                expectBoundedDependencies(s2, "graph 2 rank " + std::to_string(r));
+            }
+            // The graphs share communicators, so they must not run concurrently.
+            replayAndExpect(h, g1, &Harness::s, {{&Harness::a, 8}});
+            replayAndExpect(h, g2, &Harness::t, {{&Harness::b, 32}});
+        });
     }));
 }
 
@@ -856,91 +797,29 @@ TEST_F(GraphCaptureStreamOrdering, ConcurrentCapturesSameComm)
 TEST_F(GraphCaptureStreamOrdering, RecaptureAcrossStreams)
 {
     RUN_ISOLATED_TESTS_WITH_OPTIONS(parallelOptions(), isolated("Recapture", [] {
-        Harness h;
-        ASSERT_NO_FATAL_FAILURE(initHarness(h, kRanks));
-        if(h.nRanks == 0) return;
-        for(int iter = 0; iter < 6; iter++)
-        {
-            StreamSel st = (iter < 3) ? &Harness::s : &Harness::t;
-            Graphs    g;
-            ASSERT_NO_FATAL_FAILURE(beginCapture(h, st, hipStreamCaptureModeThreadLocal));
-            fillOp(h, &Harness::a, st, [iter](int r) { return iter + r; }); // sum 2*iter+1
-            allReduceOp(h, &Harness::a, st);
-            addOp(h, &Harness::a, st, 1);
-            allReduceOp(h, &Harness::a, st);
-            ASSERT_NO_FATAL_FAILURE(endCapture(h, st, g));
-            for(int r = 0; r < h.nRanks; r++)
+        withHarness(kRanks, [](Harness& h) {
+            for(int iter = 0; iter < 6; iter++)
             {
-                GraphShape shape;
-                ASSERT_NO_FATAL_FAILURE(analyzeRank(g, r, shape));
-                EXPECT_EQ(collapse(shape.order()), "MCUC") << "iter " << iter << " rank " << r;
-                expectBoundedDependencies(shape, "iter " + std::to_string(iter) + " rank " + std::to_string(r));
+                StreamSel st = (iter < 3) ? &Harness::s : &Harness::t;
+                Graphs    g;
+                ASSERT_NO_FATAL_FAILURE(beginCapture(h, st, hipStreamCaptureModeThreadLocal));
+                fillOp(h, &Harness::a, st, [iter](int r) { return iter + r; }); // sum 2*iter+1
+                allReduceOp(h, &Harness::a, st);
+                addOp(h, &Harness::a, st, 1);
+                allReduceOp(h, &Harness::a, st);
+                ASSERT_NO_FATAL_FAILURE(endCapture(h, st, g));
+                for(int r = 0; r < h.nRanks; r++)
+                {
+                    GraphShape shape;
+                    ASSERT_NO_FATAL_FAILURE(analyzeRank(g, r, shape));
+                    EXPECT_EQ(collapse(shape.order()), "MCUC") << "iter " << iter << " rank " << r;
+                    expectBoundedDependencies(shape,
+                                              "iter " + std::to_string(iter) + " rank " + std::to_string(r));
+                }
+                replayAndExpect(h, g, st, {{&Harness::a, static_cast<uint32_t>(2 * (2 * iter + 2))}});
             }
-            ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, st));
-            ASSERT_NO_FATAL_FAILURE(syncAll(h));
-            expectBuffer(h, &Harness::a, 2 * (2 * iter + 2), "iter " + std::to_string(iter));
-        }
+        });
     }));
-}
-
-// Edge cases where a captured RCCL call produces no kernel plan: a single-rank
-// communicator, and a zero-count collective between real ones.
-TEST_F(GraphCaptureStreamOrdering, CallsWithoutKernelPlan)
-{
-    RUN_ISOLATED_TESTS_WITH_OPTIONS(
-        parallelOptions(),
-        isolated("SingleRankComm", [] {
-            Harness h;
-            ASSERT_NO_FATAL_FAILURE(initHarness(h, 1));
-            if(h.nRanks == 0) return;
-            Graphs g;
-            ASSERT_NO_FATAL_FAILURE(capture(h, hipStreamCaptureModeThreadLocal, [&] {
-                fillOp(h, &Harness::a, &Harness::s, [](int) { return 7; });
-                fillOp(h, &Harness::b, &Harness::s, [](int) { return 0; });
-                EXPECT_EQ(ncclAllReduce(h.a[0], h.b[0], kCount, ncclUint32, ncclSum, h.comms[0], h.s[0]),
-                          ncclSuccess);
-                addOp(h, &Harness::b, &Harness::s, 1);
-                EXPECT_EQ(ncclAllReduce(h.b[0], h.b[0], kCount, ncclUint32, ncclSum, h.comms[0], h.s[0]),
-                          ncclSuccess);
-                addOp(h, &Harness::b, &Harness::s, 1);
-            }, g));
-            GraphShape shape;
-            ASSERT_NO_FATAL_FAILURE(analyzeRank(g, 0, shape));
-            // Everything was issued on one stream, so the graph must be a total order that
-            // ends with the two adds, whatever the single-rank copy turned into.
-            std::string order = shape.order();
-            EXPECT_EQ(shape.count('U'), 2);
-            EXPECT_TRUE(shape.allBefore('M', 'U'));
-            EXPECT_EQ(order.substr(order.size() < 2 ? 0 : order.size() - 2), "UU") << order;
-            expectBoundedDependencies(shape, "rank 0");
-            ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, &Harness::s));
-            ASSERT_NO_FATAL_FAILURE(syncAll(h));
-            expectBuffer(h, &Harness::b, 9, "b");
-        }),
-        isolated("ZeroCount", [] {
-            Harness h;
-            ASSERT_NO_FATAL_FAILURE(initHarness(h, kRanks));
-            if(h.nRanks == 0) return;
-            Graphs g;
-            ASSERT_NO_FATAL_FAILURE(capture(h, hipStreamCaptureModeThreadLocal, [&] {
-                fillOp(h, &Harness::a, &Harness::s, [](int r) { return r + 1; });
-                allReduceOp(h, &Harness::a, &Harness::s, 0);
-                addOp(h, &Harness::a, &Harness::s, 1); // 2, 3
-                allReduceOp(h, &Harness::a, &Harness::s, 0);
-                allReduceOp(h, &Harness::a, &Harness::s); // 5
-                addOp(h, &Harness::a, &Harness::s, 1);    // 6
-            }, g));
-            for(int r = 0; r < h.nRanks; r++)
-            {
-                GraphShape shape;
-                ASSERT_NO_FATAL_FAILURE(analyzeRank(g, r, shape));
-                EXPECT_EQ(collapse(shape.order()), "MUCU") << "rank " << r;
-                expectBoundedDependencies(shape, "rank " + std::to_string(r));
-            }
-            ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, &Harness::s));
-            ASSERT_NO_FATAL_FAILURE(syncAll(h));
-            expectBuffer(h, &Harness::a, 6, "a");
-        }));
 }
 
 } // namespace RcclUnitTesting

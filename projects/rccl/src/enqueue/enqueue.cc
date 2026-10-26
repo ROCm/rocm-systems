@@ -2313,9 +2313,7 @@ static ncclResult_t rcclAddonCaptureOrderEnd(struct ncclComm* comm, cudaStream_t
   if (!ncclGraphStreamOrderingSerialize(comm)) {
     return ncclCudaGraphRecordEvent(state.graph, ss->serialEvent, stream);
   }
-  cudaEvent_t finishedEvent = comm->sharedRes->scratchEvent;
-  CUDACHECK(cudaEventRecord(finishedEvent, stream));
-  NCCLCHECK(ncclStreamAdvanceToEvent(state.graph, state.deviceStream, finishedEvent));
+  NCCLCHECK(ncclStreamAdvanceToStream(state.deviceStream, stream));
   return ncclSuccess;
 }
 
