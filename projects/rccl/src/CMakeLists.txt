@@ -141,6 +141,7 @@ set(SRC_FILES
   include/BfdBacktrace.hpp
   algorithms/dda/device/CollCommon.h
   algorithms/dda/device/CollCommon_ll128.h
+  algorithms/dda/device/dda_kernel_params.h
   algorithms/dda/all_gather/all_gather_dda.h
   algorithms/dda/all_gather/all_gather_dda_fabric.h
   algorithms/dda/all_gather/all_gather_dda_fabric_ll.h
@@ -545,6 +546,7 @@ set(SRC_FILES
   ras/ras_param.h
   ras/rasnet.cc
   rccl_arch_thresholds.cc
+  rccl_dev_runtime.cc
   rccl_wrap.cc
   register/coll_reg.cc
   register/register.cc
@@ -1341,6 +1343,10 @@ endif()
 if(CUMEM_DMABUF_EXPORT_ENABLED)
   target_compile_definitions(rccl PRIVATE RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
   message(STATUS "RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED compile definition enabled")
+endif()
+if(HIP_MEM_LOCATION_TYPE_HOST)
+  target_compile_definitions(rccl PRIVATE RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED)
+  message(STATUS "RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED compile definition enabled")
 endif()
 
 ## Set RCCL compile options

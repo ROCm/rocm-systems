@@ -17,6 +17,8 @@
 
 ASSERT_HOOK_MATCHES_PROD(g_ncclCollPreconnect, ncclCollPreconnect);
 ASSERT_HOOK_MATCHES_PROD(g_doLaunches, doLaunches);
+ASSERT_HOOK_MATCHES_PROD(g_ncclGroupStart, ncclGroupStart);
+ASSERT_HOOK_MATCHES_PROD(g_ncclGroupEnd, ncclGroupEnd);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // group.cc's thread-local group state. ncclGroupCommJoin is inline in group.h,
@@ -25,6 +27,7 @@ ASSERT_HOOK_MATCHES_PROD(g_doLaunches, doLaunches);
 // fail-loud floor already needed them.
 thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {nullptr};
 thread_local int ncclGroupBlocking = -1;  // group.cc's "default mode" sentinel
+thread_local struct ncclComm* ncclGroupCommPreconnectHead = nullptr;
 
 ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
 ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
@@ -51,6 +54,14 @@ static ncclResult_t DefaultDoLaunches(struct ncclComm*, int) {
 std::function<ncclResult_t(struct ncclComm*, int)> g_doLaunches = DefaultDoLaunches;
 ncclResult_t doLaunches(struct ncclComm* head, int taskType) { return g_doLaunches(head, taskType); }
 
+static ncclResult_t DefaultGroupStart() { FailLoudUnfaked("group_fakes", "ncclGroupStart"); }
+std::function<ncclResult_t()> g_ncclGroupStart = DefaultGroupStart;
+ncclResult_t ncclGroupStart() { return g_ncclGroupStart(); }
+
+static ncclResult_t DefaultGroupEnd() { FailLoudUnfaked("group_fakes", "ncclGroupEnd"); }
+std::function<ncclResult_t()> g_ncclGroupEnd = DefaultGroupEnd;
+ncclResult_t ncclGroupEnd() { return g_ncclGroupEnd(); }
+
 // Referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not cover it.
 int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 0); }  // group.cc:628
 
@@ -59,4 +70,6 @@ void ResetGroupFakes() {
   g_ncclGroupJobComplete = DefaultNcclGroupJobComplete;
   g_ncclCollPreconnect = DefaultCollPreconnect;
   g_doLaunches = DefaultDoLaunches;
+  g_ncclGroupStart = DefaultGroupStart;
+  g_ncclGroupEnd = DefaultGroupEnd;
 }

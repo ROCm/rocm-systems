@@ -508,8 +508,19 @@ namespace hip {
       return detached_.load(std::memory_order_acquire);
     }
 
+    // --- Null-stream blocking tracker ---
+
+    /// True if this stream already waits on null-stream HW signal \p signal.
+    [[nodiscard]] bool IsBlockedOn(void* signal) const;
+
+    /// Records the null-stream signal this stream waits on. Call after the wait is enqueued.
+    void SetBlockedOn(void* signal);
+
   private:
     ~Stream();
+
+    //! Null-stream signal this stream waits on; retained so HwQueueTracker won't re-arm it.
+    std::atomic<void*> blocked_on_signal_{nullptr};
 
     /// Generate ID for stream capture unique over the lifetime of the process
     static uint64_t GenerateCaptureID() {
