@@ -410,6 +410,7 @@ impl Fixture {
             BufferKind::Vram {
                 public: false,
                 coherent: false,
+                extended_coherent: false,
                 uncached: false,
                 contiguous: false,
             },
@@ -436,11 +437,13 @@ impl Fixture {
             FixtureMemoryKind::Owned(MemoryKind::DeviceLocal {
                 host_visible,
                 coherent,
+                extended_coherent,
                 uncached,
                 contiguous,
             }) => BufferKind::Vram {
                 public: host_visible,
                 coherent,
+                extended_coherent,
                 uncached,
                 contiguous,
             },
@@ -460,10 +463,9 @@ impl Fixture {
                 public_memory_bytes: 1 << 28,
                 ..node()
             },
-            lifetime,
             gpu_counter_frequency_hz: 0,
         };
-        super::super::LinuxKfdDriver::new().allocate_owned(
+        super::super::LinuxKfdDriver::with_context_lifetime(lifetime).allocate_owned(
             &device,
             &[],
             kind,
@@ -634,6 +636,7 @@ fn ais_file_read_rejects_read_only_vram_before_native_transfer() {
             MemoryKind::DeviceLocal {
                 host_visible: false,
                 coherent: false,
+                extended_coherent: false,
                 uncached: false,
                 contiguous: false,
             },
@@ -685,7 +688,6 @@ fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
             },
             ..node()
         },
-        lifetime: crate::session::DriverContextLifetime::Session,
         gpu_counter_frequency_hz: 0,
     };
     let driver = super::super::LinuxKfdDriver::new();
@@ -768,7 +770,7 @@ fn ipc_export_encodes_the_native_share_handle_and_full_backing_extent() {
     );
     let mut allocation = fixture.create().unwrap();
     assert_eq!(
-        allocation.export_ipc_memory().unwrap().words(),
+        allocation.export_ipc_memory().unwrap().words,
         [1, 2, 3, 4, IPC_APERTURE_DGPU, 0, 16, 42]
     );
     allocation.free().unwrap();
@@ -813,6 +815,18 @@ fn ipc_import_maps_requested_devices_and_owns_cpu_visible_backing() {
         allocation.device_address(&peer).unwrap(),
         info.device_address
     );
+    assert_eq!(allocation.remaining_backing_byte_length(), 0);
+    allocation
+        .reservation
+        .as_mut()
+        .unwrap()
+        .fail_release_once(errno::ENOMEM);
+    assert_eq!(
+        allocation.free().unwrap_err().kind(),
+        ErrorKind::ResourceExhausted
+    );
+    assert!(allocation.handle.is_none());
+    assert_eq!(allocation.remaining_backing_byte_length(), 0);
     allocation.free().unwrap();
     drop(allocation);
     fixture.exhausted();
@@ -1060,6 +1074,7 @@ fn local_allocation_maps_every_qualified_peer_vm() {
         BufferKind::Vram {
             public: false,
             coherent: false,
+            extended_coherent: false,
             uncached: false,
             contiguous: false,
         },
@@ -1419,6 +1434,7 @@ fn allocation_permissions_reach_kfd_without_widening_access() {
                 MemoryKind::DeviceLocal {
                     host_visible: false,
                     coherent: false,
+                    extended_coherent: false,
                     uncached: false,
                     contiguous: false,
                 },
@@ -1463,6 +1479,7 @@ fn allocation_permissions_reach_kfd_without_widening_access() {
                 MemoryKind::DeviceLocal {
                     host_visible: true,
                     coherent: false,
+                    extended_coherent: false,
                     uncached: false,
                     contiguous: false,
                 },
@@ -1832,6 +1849,7 @@ fn registered_host_cache_policies_reach_kfd() {
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )
             .unwrap();
+        assert_eq!(allocation.remaining_backing_byte_length(), 0);
         allocation.free().unwrap();
         drop(allocation);
         fixture.exhausted();
@@ -1868,6 +1886,50 @@ fn owned_system_pages_use_one_cpu_and_gpu_address() {
     drop(allocation);
     fixture.exhausted();
     assert_eq!(Shared::strong_count(&fixture.vm), 1);
+}
+
+#[test]
+fn owned_host_pages_remain_accounted_after_kfd_free_when_cpu_unmap_fails() {
+    let fixture = Fixture::with_owned_userptr(
+        [
+            Reply::Allocate(17, None),
+            Reply::Map(0, 1, None),
+            Reply::Unmap(0, 1, None),
+            Reply::Free(None),
+        ],
+        uapi::USERPTR | uapi::COHERENT | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+    );
+    let mut allocation = fixture
+        .allocate(
+            MemoryKind::OwnedHost {
+                policy: HostMappingPolicy::Fine,
+            },
+            DeviceAccess::READ | DeviceAccess::WRITE,
+        )
+        .unwrap();
+    assert_eq!(allocation.remaining_backing_byte_length(), desc().size);
+    allocation
+        .reservation
+        .as_mut()
+        .unwrap()
+        .fail_release_once(errno::ENOMEM);
+    assert_eq!(
+        allocation.free().unwrap_err().kind(),
+        ErrorKind::ResourceExhausted
+    );
+    assert!(allocation.handle.is_none());
+    assert!(
+        allocation
+            .reservation
+            .as_ref()
+            .unwrap()
+            .has_writable_mapping()
+    );
+    assert_eq!(allocation.remaining_backing_byte_length(), desc().size);
+    allocation.free().unwrap();
+    assert_eq!(allocation.remaining_backing_byte_length(), 0);
+    drop(allocation);
+    fixture.exhausted();
 }
 
 #[test]
@@ -1959,6 +2021,7 @@ fn failed_free_retries_completion_then_only_the_remaining_native_work() {
         assert_eq!(allocation.free().unwrap_err().kind(), ErrorKind::Busy);
         assert!(allocation.reservation.is_some());
         assert_eq!(allocation.handle, Some(17));
+        assert_eq!(allocation.remaining_backing_byte_length(), desc().size);
         allocation
             .reservation
             .as_mut()
@@ -1972,6 +2035,7 @@ fn failed_free_retries_completion_then_only_the_remaining_native_work() {
             allocation.handle.is_none(),
             "successful FREE must not be replayed"
         );
+        assert_eq!(allocation.remaining_backing_byte_length(), 0);
         allocation.free().unwrap();
         allocation.free().unwrap();
         drop(allocation);
@@ -2028,13 +2092,21 @@ fn malformed_or_copy_fault_mapping_outputs_are_not_replayed() {
 
 #[test]
 fn local_allocation_properties_reach_kfd_exactly() {
-    for (coherent, uncached, contiguous, expected) in [
-        (false, false, false, 0),
-        (true, false, false, uapi::COHERENT),
-        (false, true, false, uapi::UNCACHED),
-        (false, false, true, uapi::CONTIGUOUS),
+    for (coherent, extended_coherent, uncached, contiguous, expected) in [
+        (false, false, false, false, 0),
+        (true, false, false, false, uapi::COHERENT),
         (
             true,
+            true,
+            false,
+            false,
+            uapi::COHERENT | uapi::EXT_COHERENT,
+        ),
+        (false, false, true, false, uapi::UNCACHED),
+        (false, false, false, true, uapi::CONTIGUOUS),
+        (
+            true,
+            false,
             true,
             true,
             uapi::COHERENT | uapi::UNCACHED | uapi::CONTIGUOUS,
@@ -2048,6 +2120,7 @@ fn local_allocation_properties_reach_kfd_exactly() {
             MemoryKind::DeviceLocal {
                 host_visible: true,
                 coherent,
+                extended_coherent,
                 uncached,
                 contiguous,
             },
@@ -2073,6 +2146,7 @@ fn failed_public_vram_cpu_mapping_releases_the_buffer_before_its_reservation() {
         BufferKind::Vram {
             public: true,
             coherent: false,
+            extended_coherent: false,
             uncached: false,
             contiguous: false,
         },
@@ -2611,8 +2685,8 @@ fn runtime_enable_allows_recreation_and_late_distinct_device_activation() {
         .unwrap();
     assert!(Shared::ptr_eq(&first, &recreated));
     assert!(!Shared::ptr_eq(&first, &second));
-    assert_eq!(first.gpu_id(), 42);
-    assert_eq!(second.gpu_id(), 43);
+    assert_eq!(first.gpu_id, 42);
+    assert_eq!(second.gpu_id, 43);
     assert_eq!(acquisitions.load(Ordering::Relaxed), 2);
     drop(first);
     drop(recreated);

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -21,10 +22,6 @@
 #include <memory>
 #include <new>
 #include <string>
-#if defined(__linux__)
-#include <sys/prctl.h>
-#endif
-#include <sys/resource.h>
 #include <tuple>
 #include <utility>
 #include <atomic>
@@ -86,6 +83,7 @@ static inline int __get_cpuid(unsigned int __leaf, unsigned int* __eax,
 #include "kernel_config.h"
 #include "os.h"
 
+#include "ExpectedCrash.h"
 #include "ScopedHook.h"
 
 // Each default forwards to what the UUT would otherwise call, so an uninstalled redirect is a no-op.
@@ -190,33 +188,6 @@ class DeleteWatch {
   }
   int hits() const { return g_deleteWatchHits; }
 };
-
-// ASan turns a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under it; match the exit instead.
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-#define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
-#else
-#define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
-#endif
-
-// These tests deliberately raise fatal signals. Some CI environments enable core dumps, and a
-// shuffled death test can inherit a large address space from an earlier test. Dumping that address
-// space turns a millisecond assertion into a multi-second test. PR_SET_DUMPABLE covers both regular
-// core files and piped collectors (for which Linux ignores RLIMIT_CORE); retain the limit as defense
-// in depth. Apply both inside the death statement so only gtest's child is affected and unexpected
-// parent-process crashes remain dumpable.
-static void DisableCoreDumpsForExpectedCrash() {
-#if defined(__linux__)
-  if (prctl(PR_SET_DUMPABLE, 0) != 0) {
-    std::perror("prctl(PR_SET_DUMPABLE) failed");
-    _exit(1);
-  }
-#endif
-  const struct rlimit noCore = {0, 0};
-  if (setrlimit(RLIMIT_CORE, &noCore) != 0) {
-    std::perror("setrlimit(RLIMIT_CORE) failed");
-    _exit(1);
-  }
-}
 
 class InitMicrotest : public ::testing::Test {
  protected:
@@ -1649,6 +1620,65 @@ TEST_F(InitMicrotest, GetAsyncError_GroupJobCompletes_AndClears) {
   EXPECT_EQ(nullptr, rc.get()->groupJob);  // completed -> cleared
 }
 
+// The shape that hung under NCCL_COMM_BLOCKING=0: a PyTorch watchdog and the application thread
+// both polling the same comm. Reading comm->groupJob and clearing it afterwards let both see the
+// same pointer and both reap it -- a second std::thread::join plus a second reference drop, which
+// freed the job under the thread still inside the first join. Claiming it with one exchange makes
+// the reap single-owner, so a link published N times is completed exactly N times. The link is
+// republished per round rather than once so a single run covers many interleavings.
+TEST_F(InitMicrotest, GetAsyncError_ConcurrentPollers_CompleteEachGroupJobLinkExactlyOnce) {
+  constexpr int kRounds = 2000;
+  ReadyComm rc;
+  auto gj = std::make_unique<ncclGroupJob>();
+
+  std::atomic<int> completions{0};
+  ScopedHook complete(g_ncclGroupJobComplete, [&](struct ncclGroupJob*) {
+    completions.fetch_add(1, std::memory_order_relaxed);
+    return ncclSuccess;
+  });
+
+  // Both pollers are released by the same round bump, so they enter the claim together. One call
+  // per release rather than a free-running loop keeps the recorder's label log bounded.
+  std::atomic<int> round{0};
+  std::atomic<bool> publishing{true};
+  auto poll = [&] {
+    int seen = 0;
+    while (true) {
+      while (round.load(std::memory_order_acquire) == seen) {
+        if (!publishing.load(std::memory_order_acquire)) return;
+      }
+      seen = round.load(std::memory_order_acquire);
+      ncclResult_t e = ncclInProgress;
+      (void)ncclCommGetAsyncError_impl(rc.get(), &e);
+    }
+  };
+  std::thread watchdog(poll);
+  std::thread application(poll);
+
+  // A lost claim shows up as a completion count above kRounds, not as a stall, but bound the wait
+  // anyway so a regression that stops clearing the link reports instead of hanging the suite.
+  int published = 0;
+  for (; published < kRounds; ++published) {
+    COMPILER_ATOMIC_STORE(&rc.get()->groupJob, gj.get(), std::memory_order_release);
+    round.fetch_add(1, std::memory_order_acq_rel);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (COMPILER_ATOMIC_LOAD(&rc.get()->groupJob, std::memory_order_acquire) != nullptr &&
+           std::chrono::steady_clock::now() < deadline) {
+    }
+    if (COMPILER_ATOMIC_LOAD(&rc.get()->groupJob, std::memory_order_acquire) != nullptr) break;
+  }
+  publishing.store(false, std::memory_order_release);
+  round.fetch_add(1, std::memory_order_acq_rel);  // release a poller parked on the round check
+  watchdog.join();
+  application.join();
+
+  ASSERT_EQ(kRounds, published) << "a published link was never claimed";
+  EXPECT_EQ(kRounds, completions.load(std::memory_order_acquire))
+    << "every published link must be reaped by exactly one poller";
+  EXPECT_EQ(nullptr, rc.get()->groupJob);
+  g_recorderLabels.clear();  // this test records thousands of labels; don't carry them forward
+}
+
 TEST_F(InitMicrotest, CheckHsaEnvSetting_AllSucceed_ReturnsSuccess) {
   ncclResult_t res = ncclUnhandledCudaError;
   const std::string log = RcclUnitTesting::CaptureLog([&] { res = checkHsaEnvSetting(); });
@@ -1762,6 +1792,32 @@ TEST_F(InitMicrotest, FillInfo_AllocOk_DmaBufSupported_EnablesGdrDirectly) {
   EXPECT_TRUE(info.hasFineGrain);
   EXPECT_EQ(1, info.gdrSupport);
   EXPECT_EQ(0, g_gdrSupportCalls);   // GDR fallback NOT called
+}
+
+// supportedGinTypeBitMask is what a new split's AllGather ANDs into
+// globalGinTypeBitMask, so it decides whether ncclGinSetDefaultBackend runs.
+TEST_F(InitMicrotest, FillInfo_LiveGinBackend_AdvertisesItsType) {
+  FillInfoComm c;
+  struct ncclGinState* ginState = &c.get()->sharedRes->ginState;
+  ginState->numActiveBackends = 1;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(info.supportedGinTypeBitMask, BIT(NCCL_GIN_TYPE_PROXY));
+}
+
+// AICOMRCCL-2739: a sibling's host finalize keeps the backend records for
+// ncclGinFinalize. Advertising them would let a new shared split reconnect
+// through a ginInstance whose owning comm may already be freed.
+TEST_F(InitMicrotest, FillInfo_FinalizedGinBackends_AdvertiseNoType) {
+  FillInfoComm c;
+  struct ncclGinState* ginState = &c.get()->sharedRes->ginState;
+  ginState->numActiveBackends = 1;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  ginState->finalized = true;
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(info.supportedGinTypeBitMask, 0u);
 }
 
 // MLOPart detection in fillInfo(). It exists for DPX/XCP/CPX, where HIP exposes each logical GPU as
@@ -4679,7 +4735,9 @@ TEST_F(InitMicrotest, CommEnsureReady_AbortFlagSet_AbortsAndSkipsTheAsyncErrorQu
   EXPECT_EQ(ncclSuccess, ncclCommEnsureReady(rc.get()));
   EXPECT_EQ(1, abort.calls);
   EXPECT_EQ(gj.get(), aborted);
-  EXPECT_EQ(gj.get(), rc.get()->groupJob);
+  // The link is claimed, not merely read: abort consumes the reference it carries, so leaving the
+  // pointer behind would let a concurrent GetAsyncError reap the same link a second time.
+  EXPECT_EQ(nullptr, rc.get()->groupJob);
   // asyncResult is only ever read out (init.cc:4497), so it holds on both arms; the label is the discriminator.
   EXPECT_EQ(0, std::count(g_recorderLabels.begin(), g_recorderLabels.end(), "GetAsyncError"));
 }
@@ -6720,6 +6778,58 @@ TEST_F(InitMicrotest, CommFree_NoSymmetricSupport_SkipsSymmetricFinalize) {
 
   EXPECT_EQ(ncclSuccess, commFree(comm));
   EXPECT_EQ(0, symk.calls);
+}
+
+// AICOMRCCL-2739: a plugin finalize error is returned after the sharedRes frees.
+// Host finalize's error wins when both fail. RMA proxy finalize still aborts.
+TEST_F(InitMicrotest, CommFree_GinPluginFinalizeError_ReturnedAfterTeardown) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  g_ncclGinFinalizeResult = ncclSystemError;
+
+  std::vector<int> ran;
+  Teardown_DtorNode node{};
+  node.base.fn = Teardown_RecordingDtor;
+  node.id = 1;
+  node.log = &ran;
+  node.result = ncclSuccess;
+  comm->destructorHead = &node.base;
+
+  EXPECT_EQ(ncclSystemError, commFree(comm));
+  EXPECT_EQ(1, g_ncclGinHostFinalizeCalls);
+  EXPECT_EQ(1, g_ncclGinFinalizeCalls);
+  EXPECT_EQ(std::vector<int>({1}), ran);
+}
+
+TEST_F(InitMicrotest, CommFree_GinHostFinalizeError_WinsOverPluginFinalizeError) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  g_ncclGinHostFinalizeResult = ncclSystemError;
+  g_ncclGinFinalizeResult = ncclInternalError;
+
+  EXPECT_EQ(ncclSystemError, commFree(comm));
+  EXPECT_EQ(1, g_ncclGinHostFinalizeCalls);
+  EXPECT_EQ(1, g_ncclGinFinalizeCalls);
+}
+
+TEST_F(InitMicrotest, CommFree_RmaProxyFinalizeError_AbortsBeforePluginFinalize) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  g_ncclGinHostFinalizeResult = ncclSystemError;
+  g_ncclRmaProxyFinalizeResult = ncclInternalError;
+
+  EXPECT_EQ(ncclInternalError, commFree(comm));
+  EXPECT_EQ(1, g_ncclGinHostFinalizeCalls);
+  EXPECT_EQ(1, g_ncclRmaProxyFinalizeCalls);
+  EXPECT_EQ(0, g_ncclGinFinalizeCalls);
+  EXPECT_EQ(2, abortRef);
+  free(comm);
 }
 
 TEST_F(InitMicrotest, CommFree_SymmetricFinalizeFails_PropagatesAndStopsTeardown) {

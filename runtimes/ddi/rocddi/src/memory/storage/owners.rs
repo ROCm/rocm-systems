@@ -3,7 +3,6 @@
 
 //! Allocator-backed unique and shared value owners.
 
-#[cfg(any(test, feature = "allocator-test-hooks"))]
 use super::allocator::Allocator;
 use super::allocator::{AllocationError, RawBlock};
 use core::alloc::Layout;
@@ -14,16 +13,20 @@ use core::ops::{Deref, DerefMut};
 use core::ptr::{self, NonNull};
 use core::sync::atomic::{AtomicUsize, Ordering, fence};
 
+/// Allocation layout shared by initialized and uninitialized unique owners.
 #[repr(C)]
 struct OwnerSlot<T> {
-    #[cfg(any(test, feature = "allocator-test-hooks"))]
+    /// Allocator that must also release this slot.
     allocator: Allocator,
+    /// Value storage that becomes initialized when the guard is published.
     value: MaybeUninit<T>,
 }
 
 /// Unique ownership of one value in fallible metadata storage.
 pub struct Owned<T> {
+    /// Non-null pointer to the unique initialized slot.
     slot: NonNull<OwnerSlot<T>>,
+    /// Carries the contained type's ownership and auto-trait behavior.
     owns: PhantomData<T>,
 }
 
@@ -53,7 +56,6 @@ impl<T> Owned<T> {
         // SAFETY: The allocation has sufficient size/alignment for OwnerSlot<T>.
         unsafe {
             slot.as_ptr().write(OwnerSlot {
-                #[cfg(any(test, feature = "allocator-test-hooks"))]
                 allocator: block.allocator,
                 value: MaybeUninit::uninit(),
             });
@@ -122,14 +124,13 @@ impl<T> Owned<T> {
         RawBlock {
             pointer: self.slot.cast(),
             // Reconstruct the same normalized layout used by RawBlock::new.
-            // OwnerSlot<()> has zero size outside allocator-hook builds.
+            // OwnerSlot<()> still retains its allocator policy.
             layout: unsafe {
                 Layout::from_size_align_unchecked(
                     size_of::<OwnerSlot<T>>().max(1),
                     align_of::<OwnerSlot<T>>().max(16),
                 )
             },
-            #[cfg(any(test, feature = "allocator-test-hooks"))]
             allocator: unsafe { self.slot.as_ref().allocator },
         }
     }
@@ -169,7 +170,9 @@ impl<T> Drop for Owned<T> {
 
 /// Preallocated unique-owner storage with no live contained value yet.
 pub struct UninitOwned<T> {
+    /// Non-null pointer to storage awaiting its value.
     slot: NonNull<OwnerSlot<T>>,
+    /// Releases uninitialized storage if publication never occurs.
     #[allow(dead_code, reason = "the guard owns storage until publication or drop")]
     block: RawBlock,
 }
@@ -193,11 +196,14 @@ impl<T> UninitOwned<T> {
     }
 }
 
+/// Allocation layout for a strong-counted owner without weak references.
 #[repr(C)]
 struct SharedSlot<T> {
+    /// Number of live [`Shared`] handles.
     strong: AtomicUsize,
-    #[cfg(any(test, feature = "allocator-test-hooks"))]
+    /// Allocator that must also release this slot.
     allocator: Allocator,
+    /// Value destroyed by the final strong owner.
     value: T,
 }
 
@@ -205,7 +211,9 @@ struct SharedSlot<T> {
 ///
 /// Cloning increments a count without allocation. This type has no weak handles.
 pub struct Shared<T> {
+    /// Non-null pointer to the counted initialized slot.
     slot: NonNull<SharedSlot<T>>,
+    /// Carries the contained type's ownership and auto-trait behavior.
     owns: PhantomData<T>,
 }
 
@@ -266,7 +274,9 @@ impl<T> Shared<T> {
 
 /// Preallocated shared-owner storage with no live contained value yet.
 pub struct UninitShared<T> {
+    /// Non-null pointer to storage awaiting its first value.
     slot: NonNull<SharedSlot<T>>,
+    /// Releases uninitialized storage if publication never occurs.
     #[allow(dead_code, reason = "the guard owns storage until publication or drop")]
     block: RawBlock,
 }
@@ -285,7 +295,6 @@ impl<T> UninitShared<T> {
         unsafe {
             guard.slot.as_ptr().write(SharedSlot {
                 strong: AtomicUsize::new(1),
-                #[cfg(any(test, feature = "allocator-test-hooks"))]
                 allocator: guard.block.allocator,
                 value,
             });
@@ -352,7 +361,6 @@ impl<T> Drop for Shared<T> {
                     size_of::<SharedSlot<T>>(),
                     align_of::<SharedSlot<T>>().max(16),
                 ),
-                #[cfg(any(test, feature = "allocator-test-hooks"))]
                 allocator: self.slot.as_ref().allocator,
             };
             ptr::drop_in_place(ptr::addr_of_mut!((*self.slot.as_ptr()).value));
