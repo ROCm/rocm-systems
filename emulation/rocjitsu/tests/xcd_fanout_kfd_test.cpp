@@ -195,12 +195,12 @@ struct HostImageLoader {
 
 /// Register a host buffer with the driver so the GPU can reach it.
 ///
-/// USERPTR with a caller-supplied address maps the process page table 1:1, so
-/// the GPU VA and the host pointer are the same number and the test can seed and
-/// read back memory directly.
+/// This fixture chooses the host pointer as its GPU VA so the test can seed
+/// and read back memory directly. USERPTR does not require equal addresses.
 bool map_userptr(SimulatedKfd *driver, uint32_t pid, void *host, size_t size) {
   kfd_ioctl_alloc_memory_of_gpu_args alloc{};
   alloc.va_addr = reinterpret_cast<uint64_t>(host);
+  alloc.mmap_offset = reinterpret_cast<uint64_t>(host);
   alloc.size = size;
   alloc.gpu_id = kGpuId;
   alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;

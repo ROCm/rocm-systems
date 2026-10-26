@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from amdisa.codegen.execute.fp8_formats import FNUZ_FP8_ARCHES, fp8_helper_name
+from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_fnuz_fp8
 from amdisa.isa_profile import MatrixLayout, SwmmacLayout
 
 if TYPE_CHECKING:
@@ -907,7 +907,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             s1b = src1_base_expr
             if N % 16 == 0 and input_type in _F8_FIXED and has_blgp:
                 a_fp8, b_fp8 = _f8_bools(input_type)
-                fnuz = ', true' if arch in FNUZ_FP8_ARCHES else ''
+                fnuz = ', true' if uses_fnuz_fp8(arch) else ''
                 L.append(
                     f'  amdgpu::exec_f32_mfma_f8_spec<{M}, {N}, {K}, {a_fp8}, {b_fp8}{fnuz}>('
                     f'cu, dst, {s0b}, {s1b}, s2, const_acc, {cbsz}, {abid}, {blgp});'

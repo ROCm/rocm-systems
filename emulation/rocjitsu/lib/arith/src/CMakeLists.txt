@@ -9,8 +9,10 @@ add_library(
     STATIC
     common/cpu.cpp
     common/cpu_decode.cpp
+    fp/fma.cpp
     fp/half_fma.cpp
     wmma/wmma.cpp
+    wmma/wmma_replicated.cpp
 )
 
 target_include_directories(

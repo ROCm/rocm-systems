@@ -15,11 +15,28 @@
 
 namespace rocjitsu::arith {
 
+// EXEC has one bit per lane in the instruction wave.
+template <int Lanes>
+  requires(Lanes == 32 || Lanes == 64)
+using ExecMask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+
 // Reinterpret FP32 bits as float without conversion or aliasing violations.
 inline float as_float(uint32_t v) { return std::bit_cast<float>(v); }
 
 // Return the FP32 bit pattern without numeric conversion.
 inline uint32_t as_bits(float f) { return std::bit_cast<uint32_t>(f); }
+
+// These queries operate on resolved semantics; validation rejects reserved values.
+inline bool is_exact(uint64_t flags) {
+  const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  return semantics >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE &&
+         semantics <= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
+}
+
+// Return whether resolved semantics require guest FP status reporting.
+inline bool reports_fp_status(uint64_t flags) {
+  return (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
+}
 
 // Accept ordinary semantics modes 0..3; reject reserved modes, including mode 7.
 inline int validate_semantics(uint64_t flags) {
@@ -35,9 +52,6 @@ inline int validate(uint64_t flags) {
   if ((flags & ~known) || (flags & RJ_ARITH_CPU_MASK) > RJ_ARITH_CPU_X86_64_ZEN4 ||
       validate_semantics(flags)) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   return RJ_ARITH_SUCCESS;
 }
