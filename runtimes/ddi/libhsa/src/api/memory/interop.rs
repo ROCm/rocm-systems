@@ -139,8 +139,11 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
                 .iter()
                 .map(|index| &runtime.gpus[*index].device)
                 .collect::<Vec<_>>();
+            let Some(session) = runtime.session() else {
+                return ERROR;
+            };
             match linux_interop::import_kfd_ipc_memory(
-                &runtime.session,
+                session,
                 &devices,
                 &mapping_devices,
                 IpcMemoryHandle { words },
