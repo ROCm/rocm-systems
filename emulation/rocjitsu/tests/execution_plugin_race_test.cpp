@@ -2214,16 +2214,45 @@ TEST(RaceDetectorPluginOutputTest, ExecutedInstructionsHaveExactPcsIncludingExpi
     f.run_kernel(code.data(), code.size());
 
     const auto &report = sink.str();
-    EXPECT_NE(report.find("  ==>        -  0x1044  ds_read_b32 v8, v0"), std::string::npos)
-        << report;
-    EXPECT_NE(report.find(std::format("  ==>       +4  0x{:x}  v_mov_b32_e32 v9, v8",
-                                      0x104c + 4 * padding)),
+    EXPECT_NE(report.find("  ==>  0x1044  ds_read_b32 v8, v0"), std::string::npos) << report;
+    EXPECT_NE(report.find(std::format("  ==>  0x{:x}  v_mov_b32_e32 v9, v8", 0x104c + 4 * padding)),
               std::string::npos)
         << report;
     EXPECT_EQ(report.find("before trace window") != std::string::npos, padding > 256);
     EXPECT_EQ(report.find("0x1040"), std::string::npos);
     EXPECT_NE(report.find("; <-- wave 0 lane 0"), std::string::npos);
   }
+}
+
+TEST(RaceDetectorPluginOutputTest, ExecutedJumpsHaveSeparatorsAtTheirDestinations) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1));
+  PluginSinkConfig sink_config;
+  auto &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+  const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 264, .vdst = 9});
+  const auto forward = cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = 2});
+  const auto backward =
+      cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = static_cast<uint16_t>(-3)});
+  const std::array code{S_NOP, load[0], load[1], forward[0], read[0], S_ENDPGM, backward[0]};
+  f.run_kernel(code.data(), code.size());
+  const auto report = sink.str();
+  EXPECT_EQ(report.find("PC diff"), std::string::npos);
+  EXPECT_NE(report.find("0x104c  s_branch 2\n       --- jump forward ---\n       0x1058"),
+            std::string::npos)
+      << report;
+  EXPECT_NE(report.find("       --- jump backward ---\n  ==>  0x1050  v_mov_b32_e32 v9, v8"),
+            std::string::npos)
+      << report;
+  EXPECT_NE(report.find("4 recorded instructions, 4 shown, 0 elided; 2 nonsequential PC "
+                        "transitions (1 backward)"),
+            std::string::npos)
+      << report;
+  RecordProperty("race_report", report);
 }
 
 class RewriteRaceCode : public ExecutionPlugin {
@@ -2371,12 +2400,10 @@ TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveR
     EXPECT_NE(report.find("Conflict: load from LDS into VGPRs at PC 0x1000, wave 0."),
               std::string::npos)
         << report;
-    EXPECT_NE(
-        report.find("  ==>        -  0x1000  ds_read_b32 v8, v0  (outside this wave's trace)"),
-        std::string::npos)
+    EXPECT_NE(report.find("  ==>  0x1000  ds_read_b32 v8, v0  (outside this wave's trace)"),
+              std::string::npos)
         << report;
-    EXPECT_NE(report.find("  ==>        -  0x1000  ds_write_b32 v0, v1"), std::string::npos)
-        << report;
+    EXPECT_NE(report.find("  ==>  0x1000  ds_write_b32 v0, v1"), std::string::npos) << report;
     EXPECT_EQ(report.find("instruction steps"), std::string::npos);
     if (complete) {
       EXPECT_NE(report.find("Completed for wave 0, but not synchronized with wave 1."),
@@ -2481,7 +2508,7 @@ TEST(FormatTraceTest, NoLineBeforeFirstMarker) {
   auto result = formatTrace(
       trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc); },
       conflict, read);
-  EXPECT_NE(result.find("  ==>        -  0x108"), std::string::npos);
+  EXPECT_NE(result.find("  ==>  0x108"), std::string::npos);
   EXPECT_EQ(result.find("0x100"), std::string::npos);
   EXPECT_EQ(result.find("0x104"), std::string::npos);
 }

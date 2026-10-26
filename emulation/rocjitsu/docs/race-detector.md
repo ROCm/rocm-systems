@@ -101,11 +101,11 @@ Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RA
   Current access: read at PC 0x1018.
   Conflict: store from VGPRs into LDS at PC 0x1010, wave 1.
   Completed for wave 1, but not synchronized with wave 0.
-       PC diff  PC  Instruction
-  ==>        -  0x1010  ds_write_b32 v0, v1  (outside this wave's trace)  ; <-- wave 1
+       PC  Instruction
+  ==>  0x1010  ds_write_b32 v0, v1  (outside this wave's trace)  ; <-- wave 1
        Execution trace below is for wave 0.
-             -  0x1014  v_sub_u32_e32 v1, 0, v0
-  ==>       +4  0x1018  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
+       0x1014  v_sub_u32_e32 v1, 0, v0
+  ==>  0x1018  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
 END_RACE
 ```
 
@@ -155,18 +155,19 @@ the other wave with which it has not been synchronized. Completion and
 inter-wave synchronization are separate conditions; one wait instruction is not
 a universal fix for every reported hazard.
 
-The instruction table follows the reporting wave's execution order. `PC diff`
-is the signed decimal byte difference from the previous recorded instruction in
-that wave. It uses the immediate predecessor even when that instruction is
-elided from the output. The first instruction has no difference. An event from
-another wave, or one older than the trace window, is shown separately; the
-report does not present the gap as a control-flow transition.
+The instruction table follows the reporting wave's execution order. A separate
+`--- jump forward ---` or `--- jump backward ---` line highlights a
+nonsequential transition immediately before its destination. A transition back
+to the same PC uses `--- same PC executed again ---`. These markers describe
+ordinary control flow; they do not imply a race. An event from another wave, or
+one older than the trace window, is shown separately without a jump marker
+across that boundary.
 
-Instruction lengths vary. A difference of `+8` may be ordinary sequential
-execution. The report marks a nonsequential transition only when the next PC
-differs from the end of the previous captured instruction. Its transition counts
-cover the recorded window, including elided instructions. Same-wave instruction
-distance counts instruction steps, not execution time or memory latency.
+Instruction lengths vary. A transition is nonsequential only when the next PC
+differs from the end of the previous captured instruction. Sequential progress
+by 4, 8, 12 or 16 bytes does not introduce a marker. Transition counts cover the
+recorded window, including elided instructions. Same-wave instruction distance
+counts instruction steps, not execution time or memory latency.
 
 Each wave retains 256 instruction records. By default, a long excerpt shows the
 first 64 and last 64 records. Synchronization and control-flow instructions, and

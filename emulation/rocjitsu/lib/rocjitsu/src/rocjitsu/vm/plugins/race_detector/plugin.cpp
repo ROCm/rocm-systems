@@ -22,7 +22,6 @@
 #include <cassert>
 #include <cstring>
 #include <format>
-#include <iomanip>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -198,7 +197,7 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
     }
   }
   std::ostringstream oss;
-  oss << "       PC diff  PC  Instruction\n";
+  oss << "       PC  Instruction\n";
   auto annotation = [&](const MarkedInstruction &mark) {
     oss << "  ; <-- wave " << mark.wave;
     if (mark.lane >= 0)
@@ -206,8 +205,8 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
   };
   auto external = [&](const MarkedInstruction &mark, std::string_view note) {
     const auto &instruction = mark.instruction.snapshot;
-    oss << "  ==>  " << std::setw(7) << "-" << "  0x" << std::hex << instruction.pc << std::dec
-        << "  " << disassemble(instruction) << note;
+    oss << "  ==>  0x" << std::hex << instruction.pc << std::dec << "  " << disassemble(instruction)
+        << note;
     annotation(mark);
     oss << '\n';
   };
@@ -230,20 +229,20 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
     const auto instruction = is_conflict ? conflict->instruction.snapshot
                              : is_read   ? read.instruction.snapshot
                                          : trace[i];
-    std::string delta = "-";
-    if (i > first) {
-      const uint64_t previous = trace[i - 1].pc;
-      delta = instruction.pc >= previous ? "+" + std::to_string(instruction.pc - previous)
-                                         : "-" + std::to_string(previous - instruction.pc);
+    if (nonsequential(i)) {
+      const auto previous_pc = trace[i - 1].pc;
+      oss << "       --- "
+          << (instruction.pc < previous_pc   ? "jump backward"
+              : instruction.pc > previous_pc ? "jump forward"
+                                             : "same PC executed again")
+          << " ---\n";
     }
-    oss << ((is_conflict || is_read) ? "  ==>  " : "       ") << std::setw(7) << delta << "  0x"
-        << std::hex << instruction.pc << std::dec << "  " << disassemble(instruction);
+    oss << ((is_conflict || is_read) ? "  ==>  " : "       ") << "0x" << std::hex << instruction.pc
+        << std::dec << "  " << disassemble(instruction);
     if (is_conflict)
       annotation(*conflict);
     if (is_read)
       annotation(read);
-    if (nonsequential(i))
-      oss << "  ; nonsequential PC";
     oss << '\n';
   };
   size_t shown_count = 0;
@@ -263,8 +262,6 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
   oss << "  Trace window: " << span << " recorded instructions, " << shown_count << " shown, "
       << span - shown_count << " elided; " << nonsequential_count
       << " nonsequential PC transitions (" << backward_count << " backward).\n";
-  oss << "  PC diffs are signed decimal bytes from the previous executed instruction in wave "
-      << read.wave << ", including elided instructions.\n";
   if (conflict && conflict->wave == read.wave && conflict->instruction.sequence != UINT64_MAX &&
       read.instruction.sequence != UINT64_MAX &&
       read.instruction.sequence >= conflict->instruction.sequence)
