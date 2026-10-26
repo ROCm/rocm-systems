@@ -91,14 +91,21 @@ Run it under the emulator:
 $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
-You should see output:
+A report identifies the conflicting instructions and their owning waves. This
+excerpt illustrates the layout; PCs and register assignments depend on the
+compiled kernel:
 
 ```
 RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
-Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
-  ==>  ds_write_b32 v0, v1  ; <-- wave 1
-       v_sub_u32_e32 v1, 0, v0
-  ==>  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
+Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RAW).
+  Current access: read at PC 0x1018.
+  Conflict: store from VGPRs into LDS at PC 0x1010, wave 1.
+  Completed for wave 1, but not synchronized with wave 0.
+       PC diff  PC  Instruction
+  ==>        -  0x1010  ds_write_b32 v0, v1  (outside this wave's trace)  ; <-- wave 1
+       Execution trace below is for wave 0.
+             -  0x1014  v_sub_u32_e32 v1, 0, v0
+  ==>       +4  0x1018  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
 END_RACE
 ```
 
@@ -134,6 +141,56 @@ scripted workflows), add a `sinks` section to your config:
 $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
+
+## Reading a report
+
+The human-readable heading names the affected register or LDS byte and identifies
+read-after-write (RAW), write-after-read (WAR), or write-after-write (WAW). The
+next lines identify the current access and the exact conflicting memory event.
+For a pending event, the report lists the completion counters that remain
+unsatisfied, using the architectural wait names for the target. Internal GFX11
+subsets are displayed as their covering `vmcnt`, `vscnt`, or `lgkmcnt` domains.
+For an event completed by its owning wave, the report identifies
+the other wave with which it has not been synchronized. Completion and
+inter-wave synchronization are separate conditions; one wait instruction is not
+a universal fix for every reported hazard.
+
+The instruction table follows the reporting wave's execution order. `PC diff`
+is the signed decimal byte difference from the previous recorded instruction in
+that wave. It uses the immediate predecessor even when that instruction is
+elided from the output. The first instruction has no difference. An event from
+another wave, or one older than the trace window, is shown separately; the
+report does not present the gap as a control-flow transition.
+
+Instruction lengths vary. A difference of `+8` may be ordinary sequential
+execution. The report marks a nonsequential transition only when the next PC
+differs from the end of the previous captured instruction. Its transition counts
+cover the recorded window, including elided instructions. Same-wave instruction
+distance counts instruction steps, not execution time or memory latency.
+
+Each wave retains 256 instruction records. By default, a long excerpt shows the
+first 64 and last 64 records. Synchronization and control-flow instructions, and
+both sides of nonsequential transitions, remain visible in the middle. The
+window summary reports recorded, shown and elided counts. Older unrecorded
+history is identified separately.
+
+Set `trace_context_instructions` in the race plugin's configuration to change
+the excerpt size. It accepts an integer from 2 through 256; synchronization and
+control-flow context can add rows beyond this setting. A value of 256 shows the
+entire retained window without changing how much history the detector records.
+
+```json
+{ "plugins": { "race": { "trace_context_instructions": 256 } } }
+```
+
+The final summary counts emitted reports and observations suppressed by the
+existing PC-based deduplication. These counts are not the number of affected
+lanes or independent bugs. The structured `RACE` header and `END_RACE` delimiter
+remain available for tools that consume reports.
+
+The separate memory-wait warning states the threshold required immediately
+before its reported access. That threshold need not be sufficient at an earlier
+wait instruction, because more operations may have been issued in between.
 
 ## What is a race?
 

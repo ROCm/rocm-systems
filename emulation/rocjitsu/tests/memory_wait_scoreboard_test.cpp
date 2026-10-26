@@ -5417,6 +5417,7 @@ TEST(MemoryWaitExecutionTest, DiagnosticBudgetsAndCountersAreIndependentAcrossCU
       ++lines;
     EXPECT_EQ(lines, 17u);
     EXPECT_NE(output.find("further diagnostics on this CU are suppressed"), std::string::npos);
+    EXPECT_NE(output.find("required immediately before this access"), std::string::npos);
     EXPECT_EQ(cu->memory_wait_diagnostic_count(), 20u);
     EXPECT_EQ(cu->xcnt_diagnostic_count(), 0u);
     units.push_back(std::move(cu));

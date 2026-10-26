@@ -16,6 +16,8 @@ struct InstructionSnapshot {
   uint64_t pc = 0;
   std::array<uint32_t, kMaxWords> words{};
   uint32_t word_count = 0;
+  // Preserve synchronization and control flow when the middle of a trace is elided.
+  bool keep_in_trace = false;
 
   std::span<const uint32_t> encoding() const { return std::span(words).first(word_count); }
 };

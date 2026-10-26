@@ -581,6 +581,7 @@ add_executable(
     execution_plugin_register_test.cpp
     execution_plugin_memory_test.cpp
     execution_plugin_race_test.cpp
+    race_report_test.cpp
     plugin_config_resolver_test.cpp
     plugin_loader_test.cpp
     race-detector/race_detector_counter_capacity_tests.cpp

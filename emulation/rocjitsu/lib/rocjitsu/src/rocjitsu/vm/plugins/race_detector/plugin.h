@@ -53,7 +53,12 @@ MarkedInstruction findConflict(const RaceViolation &, RaceDetector &);
 /// Format a trace with ==> markers and wave/lane annotations.
 std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                         const std::function<std::string(const InstructionSnapshot &)> &disassemble,
-                        std::optional<MarkedInstruction> conflict, MarkedInstruction read);
+                        std::optional<MarkedInstruction> conflict, MarkedInstruction read,
+                        size_t trace_context_instructions = 128);
+
+/// Explain the exact conflicting event and its synchronization state.
+std::string formatRaceDescription(const RaceViolation &violation, const EventRegistry &events,
+                                  uint64_t access_pc, rj_code_arch_t arch);
 
 struct RaceWavefrontState : WavefrontState {
   RingBuffer<InstructionSnapshot, 256> trace;
@@ -62,8 +67,7 @@ struct RaceWavefrontState : WavefrontState {
 
 class RaceDetectorPlugin : public ExecutionPlugin {
 public:
-  /// @param config_json Plugin configuration object as a JSON string (unused;
-  ///        this plugin takes no configuration). May be null.
+  /// @param config_json Optional JSON object with trace_context_instructions (2..256).
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
@@ -124,8 +128,11 @@ private:
   std::mutex dispatch_mutex_;
   std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
 
-  std::mutex report_mutex_;
+  mutable std::mutex report_mutex_;
   std::set<std::pair<uint32_t, uint64_t>> observed_races_;
+  size_t trace_context_instructions_ = 128;
+  uint64_t reports_emitted_ = 0;
+  uint64_t observations_suppressed_ = 0;
   std::unordered_map<uint32_t, KernelNames> dispatch_kernel_names_;
 };
 
