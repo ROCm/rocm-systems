@@ -40,8 +40,7 @@ public:
     {}
 
     template <typename TypeProcessing>
-        requires type_traits::sample_processor<TypeProcessing, TypeIdentifierEnum,
-                                               cacheable_t>
+        requires type_traits::sample_processor<TypeProcessing, SupportedTypes...>
     void load(std::shared_ptr<TypeProcessing> _type_processing,
               progress::progress_callback     _progress_cb = {})
     {
@@ -124,21 +123,9 @@ public:
 
             auto* data = sample.data();
 
-            auto sample_value = m_registry.get_type(header.type, data);
-            if(sample_value.has_value())
-            {
-                _type_processing->execute_sample_processing(
-                    header.type, std::visit(
-                                     [](auto& arg) -> cacheable_t& {
-                                         return static_cast<cacheable_t&>(arg);
-                                     },
-                                     sample_value.value()));
-            }
-            else
-            {
-                LOG_TRACE("Unknown sample type encountered, skipping");
-                continue;
-            }
+            m_registry.dispatch(header.type, data, [&](const auto& record) {
+                _type_processing->handle_sample(record);
+            });
         }
 
         ifs.close();

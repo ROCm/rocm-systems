@@ -48,53 +48,39 @@ public:
         m_expected_samples_5 = samples;
     }
 
-    void execute_sample_processing(test_type_identifier_t type_identifier,
-                                   const rocprofsys::trace_cache::cacheable_t& value)
+    void handle_sample(const test_sample_1& sample)
     {
-        switch(type_identifier)
-        {
-            case test_type_identifier_t::sample_type_1:
-            {
-                const auto& sample = static_cast<const test_sample_1&>(value);
-                const std::lock_guard<std::mutex> lock(m_data_mutex);
-                const size_t                      idx = m_sample_1_count++;
-                check_sample_1(idx, sample);
-                break;
-            }
-            case test_type_identifier_t::sample_type_2:
-            {
-                const auto& sample = static_cast<const test_sample_2&>(value);
-                const std::lock_guard<std::mutex> lock(m_data_mutex);
-                const size_t                      idx = m_sample_2_count++;
-                check_sample_2(idx, sample);
-                break;
-            }
-            case test_type_identifier_t::sample_type_3:
-            {
-                const auto& sample = static_cast<const test_sample_3&>(value);
-                const std::lock_guard<std::mutex> lock(m_data_mutex);
-                const size_t                      idx = m_sample_3_count++;
-                check_sample_3(idx, sample);
-                break;
-            }
-            case test_type_identifier_t::sample_type_4:
-            {
-                const auto& sample = static_cast<const test_sample_4&>(value);
-                const std::lock_guard<std::mutex> lock(m_data_mutex);
-                const size_t                      idx = m_sample_4_count++;
-                check_sample_4(idx, sample);
-                break;
-            }
-            case test_type_identifier_t::sample_type_5:
-            {
-                const auto& sample = static_cast<const test_sample_5&>(value);
-                const std::lock_guard<std::mutex> lock(m_data_mutex);
-                const size_t                      idx = m_sample_5_count++;
-                check_sample_5(idx, sample);
-                break;
-            }
-            default: m_unknown_count++; break;
-        }
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
+        const size_t                      idx = m_sample_1_count++;
+        check_sample_1(idx, sample);
+    }
+
+    void handle_sample(const test_sample_2& sample)
+    {
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
+        const size_t                      idx = m_sample_2_count++;
+        check_sample_2(idx, sample);
+    }
+
+    void handle_sample(const test_sample_3& sample)
+    {
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
+        const size_t                      idx = m_sample_3_count++;
+        check_sample_3(idx, sample);
+    }
+
+    void handle_sample(const test_sample_4& sample)
+    {
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
+        const size_t                      idx = m_sample_4_count++;
+        check_sample_4(idx, sample);
+    }
+
+    void handle_sample(const test_sample_5& sample)
+    {
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
+        const size_t                      idx = m_sample_5_count++;
+        check_sample_5(idx, sample);
     }
 
     int get_sample_1_count() const { return m_sample_1_count.load(); }
@@ -102,7 +88,6 @@ public:
     int get_sample_3_count() const { return m_sample_3_count.load(); }
     int get_sample_4_count() const { return m_sample_4_count.load(); }
     int get_sample_5_count() const { return m_sample_5_count.load(); }
-    int get_unknown_count() const { return m_unknown_count.load(); }
 
 private:
     void check_sample_1(size_t index, const test_sample_1& sample)
@@ -150,7 +135,6 @@ private:
     std::atomic<int>           m_sample_3_count{ 0 };
     std::atomic<int>           m_sample_4_count{ 0 };
     std::atomic<int>           m_sample_5_count{ 0 };
-    std::atomic<int>           m_unknown_count{ 0 };
     std::vector<test_sample_1> m_expected_samples_1;
     std::vector<test_sample_2> m_expected_samples_2;
     std::vector<test_sample_3> m_expected_samples_3;
@@ -290,7 +274,7 @@ TEST_F(storage_parser_test, load_multiple_sample_types)
     EXPECT_EQ(std::remove(test_file_path.c_str()), 0);
 }
 
-TEST_F(storage_parser_test, load_unsupported_sample_type)
+TEST_F(storage_parser_test, load_unsupported_sample_type_throws)
 {
     const std::vector<test_sample_1> samples_1 = { test_sample_1(123, "mixed_test") };
     const std::vector<test_sample_2> samples_2 = { test_sample_2(3.14159, 555),
@@ -307,7 +291,7 @@ TEST_F(storage_parser_test, load_unsupported_sample_type)
                                             test_sample_2>
         parser(test_file_path);
 
-    EXPECT_NO_THROW(parser.load(processor));
+    EXPECT_THROW(parser.load(processor), std::runtime_error);
 
     EXPECT_EQ(processor->get_sample_1_count(), 1);
     EXPECT_EQ(processor->get_sample_2_count(), 2);

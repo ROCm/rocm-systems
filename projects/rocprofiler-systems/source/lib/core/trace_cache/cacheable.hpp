@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include "common/units/data_size.hpp"
 #include "core/trace_cache/cache_type_traits.hpp"
 #include <cstdint>
 
@@ -20,33 +21,29 @@ using namespace std::chrono_literals;
 namespace rocprofsys::trace_cache
 {
 
-struct cacheable_t
-{
-    cacheable_t() = default;
-};
+using namespace common::units::literals;
 
-constexpr size_t MByte                    = 1024 * 1024;
-constexpr size_t buffer_size              = 100 * MByte;
-constexpr size_t flush_threshold          = 80 * MByte;
-constexpr auto   CACHE_FILE_FLUSH_TIMEOUT = 10ms;
+constexpr size_t k_buffer_size              = static_cast<size_t>((100_mib).to_bytes());
+constexpr size_t k_flush_threshold          = static_cast<size_t>((80_mib).to_bytes());
+constexpr auto   k_cache_file_flush_timeout = 10ms;
 
-constexpr auto ABSOLUTE   = "ABS";
-constexpr auto PERCENTAGE = "%";
+constexpr auto k_absolute   = "ABS";
+constexpr auto k_percentage = "%";
 
-using buffer_array_t = std::array<std::uint8_t, buffer_size>;
+using buffer_array_t = std::array<std::uint8_t, k_buffer_size>;
 
-const auto tmp_directory = std::string{ "/tmp/" };
+const auto k_tmp_directory = std::string{ "/tmp/" };
 
 namespace utility
 {
 
-const auto get_buffered_storage_filename = [](const int& ppid, const int& pid) {
-    return std::string{ tmp_directory + "buffered_storage_" + std::to_string(ppid) + "_" +
-                        std::to_string(pid) + ".bin" };
+const auto k_get_buffered_storage_filename = [](const int& ppid, const int& pid) {
+    return std::string{ k_tmp_directory + "buffered_storage_" + std::to_string(ppid) +
+                        "_" + std::to_string(pid) + ".bin" };
 };
 
 const auto get_metadata_filepath = [](const int& ppid, const int& pid) {
-    return std::string{ tmp_directory + "metadata_" + std::to_string(ppid) + "_" +
+    return std::string{ k_tmp_directory + "metadata_" + std::to_string(ppid) + "_" +
                         std::to_string(pid) + ".json" };
 };
 

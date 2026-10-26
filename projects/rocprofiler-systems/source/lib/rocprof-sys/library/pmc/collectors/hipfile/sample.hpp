@@ -23,7 +23,7 @@ namespace rocprofsys::pmc::collectors::hipfile
  * the sampling thread that all the other collectors share. Here the names are resolved
  * once during post-processing, from METRIC_TABLE, so the sampling path stores a POD.
  */
-struct sample : trace_cache::cacheable_t
+struct sample
 {
     static constexpr trace_cache::type_identifier_t type_identifier{
         trace_cache::type_identifier_t::hipfile_pmc_sample

@@ -19,7 +19,7 @@ enum class test_type_identifier_t : std::uint32_t
     sample_type_5    = 5,
     fragmented_space = 0xFFFF
 };
-struct test_sample_1 : public rocprofsys::trace_cache::cacheable_t
+struct test_sample_1
 {
     static constexpr test_type_identifier_t type_identifier =
         test_type_identifier_t::sample_type_1;
@@ -45,7 +45,7 @@ struct test_sample_1 : public rocprofsys::trace_cache::cacheable_t
     }
 };
 
-struct test_sample_2 : public rocprofsys::trace_cache::cacheable_t
+struct test_sample_2
 {
     static constexpr test_type_identifier_t type_identifier =
         test_type_identifier_t::sample_type_2;
@@ -86,7 +86,7 @@ struct test_sample_2 : public rocprofsys::trace_cache::cacheable_t
     }
 };
 
-struct test_sample_3 : public rocprofsys::trace_cache::cacheable_t
+struct test_sample_3
 {
     static constexpr test_type_identifier_t type_identifier =
         test_type_identifier_t::sample_type_3;
@@ -107,7 +107,7 @@ struct test_sample_3 : public rocprofsys::trace_cache::cacheable_t
     }
 };
 
-struct test_sample_4 : public rocprofsys::trace_cache::cacheable_t
+struct test_sample_4
 {
     static constexpr test_type_identifier_t type_identifier =
         test_type_identifier_t::sample_type_4;
@@ -128,7 +128,7 @@ struct test_sample_4 : public rocprofsys::trace_cache::cacheable_t
     }
 };
 
-struct test_sample_5 : public rocprofsys::trace_cache::cacheable_t
+struct test_sample_5
 {
     static constexpr test_type_identifier_t type_identifier =
         test_type_identifier_t::sample_type_5;

@@ -19,7 +19,7 @@ namespace rocprofsys::pmc::collectors::gpu
  *
  * This struct represents a sample of GPU performance metrics collected by the PMC.
  */
-struct sample : trace_cache::cacheable_t
+struct sample
 {
     static constexpr trace_cache::type_identifier_t type_identifier{
         trace_cache::type_identifier_t::gpu_pmc_sample

@@ -113,10 +113,16 @@ concept has_type_identifier = is_enum_class_v<TypeIdentifierEnum> && requires {
     { T::type_identifier } -> std::convertible_to<TypeIdentifierEnum>;
 };
 
-template <typename T, typename TypeIdentifierEnum, typename CacheableType>
-concept sample_processor = requires(T t, TypeIdentifierEnum e, const CacheableType& c) {
-    { t.execute_sample_processing(e, c) } -> std::same_as<void>;
+template <typename T, typename SampleType>
+concept sample_handler = requires(T& t, const SampleType& sample) {
+    { t.handle_sample(sample) } -> std::same_as<void>;
 };
+
+template <typename T, typename... SampleTypes>
+concept sample_processor = (sample_handler<T, SampleTypes> && ...);
+
+template <typename Visitor, typename... SampleTypes>
+concept sample_visitor = (std::invocable<Visitor&, const SampleTypes&> && ...);
 
 }  // namespace type_traits
 }  // namespace rocprofsys::trace_cache

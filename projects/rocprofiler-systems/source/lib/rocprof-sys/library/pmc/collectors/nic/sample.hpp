@@ -16,9 +16,8 @@ namespace rocprofsys::pmc::collectors::nic
  * @brief NIC RDMA sample type for trace cache.
  *
  * This struct represents a sample of NIC RDMA metrics collected by the PMC.
- * It inherits from cacheable_t to support serialization to the trace cache.
  */
-struct sample : trace_cache::cacheable_t
+struct sample
 {
     static constexpr trace_cache::type_identifier_t type_identifier{
         trace_cache::type_identifier_t::ainic_pmc_sample

@@ -23,7 +23,7 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter
  * rocprofiler_sample_device_counting_service(). Each entry carries its
  * own qualified counter name including dimension positions.
  */
-struct sample : trace_cache::cacheable_t
+struct sample
 {
     static constexpr trace_cache::type_identifier_t type_identifier{
         trace_cache::type_identifier_t::gpu_perf_counter_sample

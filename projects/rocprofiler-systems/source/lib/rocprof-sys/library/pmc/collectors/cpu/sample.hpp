@@ -19,7 +19,7 @@ namespace rocprofsys::pmc::collectors::cpu
  * Stores enabled metrics, timestamp, process-level data, and serialized
  * per-CPU frequency/load data as byte vectors.
  */
-struct sample : trace_cache::cacheable_t
+struct sample
 {
     static constexpr trace_cache::type_identifier_t type_identifier{
         trace_cache::type_identifier_t::cpu_pmc_sample

@@ -34,7 +34,7 @@ enum class type_identifier_t : std::uint32_t
     fragmented_space        = 0xFFFF
 };
 
-struct kernel_dispatch_sample : cacheable_t
+struct kernel_dispatch_sample
 {
     static constexpr type_identifier_t type_identifier =
         type_identifier_t::kernel_dispatch;
@@ -100,7 +100,7 @@ struct kernel_dispatch_sample : cacheable_t
     }
 };
 
-struct scratch_memory_sample : cacheable_t
+struct scratch_memory_sample
 {
     static constexpr type_identifier_t type_identifier =
         type_identifier_t::scratch_memory;
@@ -149,7 +149,7 @@ struct scratch_memory_sample : cacheable_t
     }
 };
 
-struct memory_copy_sample : cacheable_t
+struct memory_copy_sample
 {
     static constexpr type_identifier_t type_identifier = type_identifier_t::memory_copy;
 
@@ -198,7 +198,7 @@ struct memory_copy_sample : cacheable_t
     }
 };
 
-struct memory_allocate_sample : cacheable_t
+struct memory_allocate_sample
 {
     static constexpr type_identifier_t type_identifier = type_identifier_t::memory_alloc;
 
@@ -244,7 +244,7 @@ struct memory_allocate_sample : cacheable_t
     }
 };
 
-struct region_sample : cacheable_t
+struct region_sample
 {
     static constexpr type_identifier_t type_identifier = type_identifier_t::region;
 
@@ -284,7 +284,7 @@ struct region_sample : cacheable_t
     }
 };
 
-struct in_time_sample : cacheable_t
+struct in_time_sample
 {
     static constexpr type_identifier_t type_identifier =
         type_identifier_t::in_time_sample;
@@ -362,7 +362,7 @@ struct pmc_event_with_sample : in_time_sample
     }
 };
 
-struct backtrace_region_sample : cacheable_t
+struct backtrace_region_sample
 {
     static constexpr type_identifier_t type_identifier =
         type_identifier_t::backtrace_region_sample;
@@ -405,7 +405,7 @@ struct backtrace_region_sample : cacheable_t
     }
 };
 
-struct kfd_sample : cacheable_t
+struct kfd_sample
 {
     static constexpr type_identifier_t type_identifier = type_identifier_t::kfd_sample;
 
