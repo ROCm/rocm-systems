@@ -80,7 +80,7 @@ protected:
     ComputeUnitCore::Config config{};
     config.arch = GetParam();
     // Common configuration for all tests.
-    config.num_wf_slots = 1;
+    config.num_wf_slots = 2;
     config.sgprs_per_wf = 104;
     config.vgprs_per_wf = 256;
     config.functional_quantum = 1;
@@ -245,6 +245,44 @@ TEST_P(CbranchForkJoinTest, ReusedSlotStartsWithEmptyForkStack) {
 TEST_P(CbranchForkJoinTest, BranchStackEntriesStartAtTheWavesFirstSgpr) {
   for (uint32_t n = 0; n <= 7; ++n)
     EXPECT_EQ(branch_stack_entry_physical_sgpr(*wf, n), wf->sgpr_alloc().base + 4 * n);
+}
+
+TEST_P(CbranchForkJoinTest, ForkAndJoinUseTheSecondWavesPhysicalStack) {
+  Wavefront *first_wave = wf;
+  for (uint32_t index = 0; index < 32; ++index)
+    set_sgpr(index, 0x12340000u + index);
+
+  wf = cu->dispatch_wf(1, kCodeBase, 104, 256);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_NE(wf->sgpr_alloc().base, 0u);
+  for (uint32_t index = 0; index < 32; ++index)
+    set_sgpr(index, 0x56780000u + index);
+  wf->set_cond_stack_ptr(3);
+
+  const auto push = fork_stack_access(*wf, 0x15);
+  ASSERT_TRUE(push);
+  EXPECT_EQ(push->first_wave_sgpr, 12u);
+  EXPECT_TRUE(push->write);
+  EXPECT_EQ(branch_stack_entry_physical_sgpr(*wf, 3), wf->sgpr_alloc().base + 12);
+  EXPECT_EQ(cbranch_fork(*wf, 0x15, kTarget, kNextPc), kTarget);
+  EXPECT_EQ(wf->cond_stack_ptr(), 4u);
+  EXPECT_EQ(sgpr64(12), ~uint64_t{0x15});
+  EXPECT_EQ(sgpr64(14), kNextPc);
+
+  const auto pop = join_stack_access(*wf, 3);
+  ASSERT_TRUE(pop);
+  EXPECT_EQ(pop->first_wave_sgpr, 12u);
+  EXPECT_FALSE(pop->write);
+  EXPECT_EQ(cbranch_join(*wf, 3, kTarget), kNextPc);
+  EXPECT_EQ(wf->exec(), ~uint64_t{0x15});
+  EXPECT_EQ(wf->cond_stack_ptr(), 3u);
+  for (uint32_t index = 0; index < 32; ++index) {
+    EXPECT_EQ(cu->read_sgpr(first_wave->sgpr_alloc().base + index), 0x12340000u + index);
+    if (index < 12 || index >= 16)
+      EXPECT_EQ(sgpr(index), 0x56780000u + index);
+  }
+  EXPECT_EQ(cu->isa_diagnostic_count(), 0u);
+  first_wave->halt();
 }
 
 TEST_P(CbranchForkJoinTest, ForkWithEveryActiveLanePassingJumpsWithoutPushing) {
@@ -581,6 +619,8 @@ TEST_P(CbranchForkJoinTest, StackEntryOutsideSgprAllocationReportsUndefinedBehav
 // Each program below is: a scalar load whose result is still pending, the fork
 // or join at 0x08, then (where present) a read of the load's destination at 0x0C.
 constexpr uint32_t kLoadS20 = 0xC0020514u;     // s_load_dword s20, s[40:41], 0x0
+constexpr uint32_t kLoadS14 = 0xC0020394u;     // s_load_dword s14, s[40:41], 0x0
+constexpr uint32_t kReadS2 = 0xBE950002u;      // s_mov_b32 s21, s2
 constexpr uint32_t kLoadS2 = 0xC0020094u;      // s_load_dword s2, s[40:41], 0x0
 constexpr uint32_t kReadS20 = 0xBE950014u;     // s_mov_b32 s21, s20
 constexpr uint32_t kForkVccNext = 0xB86A0000u; // s_cbranch_i_fork vcc, 0 (both sides at 0x0C)
@@ -658,6 +698,56 @@ TEST_P(CbranchForkJoinTest, WaitScoreboardReportsAJoinReadingAPendingEntry) {
   set_sgpr64(2, kAfterStackOp);
 
   (void)cu->step();
+  (void)cu->step();
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+}
+
+TEST_P(CbranchForkJoinTest, WaitScoreboardReportsAForkOverwritingADeeperPendingEntry) {
+  // CSP 3 selects s[12:15], including the pending s14 result.
+  write_program({kLoadS14, 0u, kForkVccNext});
+  ASSERT_NO_FATAL_FAILURE(enable_scalar_loads());
+  set_sgpr64(40, kLoadAddress);
+  wf->set_cond_stack_ptr(3);
+  wf->set_vcc(0x15);
+
+  (void)cu->step();
+  (void)cu->step();
+  EXPECT_EQ(wf->pc, kAfterStackOp);
+  EXPECT_EQ(wf->cond_stack_ptr(), 4u);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+}
+
+TEST_P(CbranchForkJoinTest, WaitScoreboardReportsAJoinReadingADeeperPendingEntry) {
+  // CSP 4 pops s[12:15], including the pending resume PC in s14.
+  write_program({kLoadS14, 0u, kJoinS34});
+  ASSERT_NO_FATAL_FAILURE(enable_scalar_loads());
+  set_sgpr64(40, kLoadAddress);
+  memory.write32(kLoadAddress, static_cast<uint32_t>(kAfterStackOp));
+  wf->set_cond_stack_ptr(4);
+  set_sgpr(34, 3);
+  set_sgpr64(12, ~uint64_t{0});
+  set_sgpr64(14, kAfterStackOp);
+
+  (void)cu->step();
+  (void)cu->step();
+  EXPECT_EQ(wf->pc, kAfterStackOp);
+  EXPECT_EQ(wf->cond_stack_ptr(), 3u);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+}
+
+TEST_P(CbranchForkJoinTest, WaitScoreboardSeesNoStackAccessForAFallthroughJoin) {
+  // Entry 0 contains a pending s2 result, but equal CSPs mean there is no pop.
+  write_program({kLoadS2, 0u, kJoinS34, kReadS2});
+  ASSERT_NO_FATAL_FAILURE(enable_scalar_loads());
+  set_sgpr64(40, kLoadAddress);
+  wf->set_cond_stack_ptr(1);
+  set_sgpr(34, 1);
+
+  (void)cu->step();
+  (void)cu->step();
+  EXPECT_EQ(wf->pc, kAfterStackOp);
+  EXPECT_EQ(wf->cond_stack_ptr(), 1u);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
   (void)cu->step();
   EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
 }
