@@ -8,6 +8,7 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <chrono>
