@@ -67,6 +67,9 @@ RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): va_video_deco
         FunctionExitLog(g_rocdec_logger);
         return rocdec_status;
     }
+#ifndef _WIN32
+    rocdec_status = ImportAllSurfaces();
+#endif
     FunctionExitLog(g_rocdec_logger);
     return rocdec_status;
  }
@@ -118,6 +121,9 @@ rocDecStatus RocDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconf
         FunctionExitLog(g_rocdec_logger);
         return rocdec_status;
     }
+#ifndef _WIN32
+    rocdec_status = ImportAllSurfaces();
+#endif
     FunctionExitLog(g_rocdec_logger);
     return rocdec_status;
 }
@@ -141,47 +147,12 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
     }
 
 #ifndef _WIN32
-    // do the VA-API/HIP interop once per surface and save it for reusing
+    // The interop is normally set up for all surfaces at decoder creation/reconfiguration
     if (hip_interop_[pic_idx].hip_mapped_device_mem == nullptr) {
-        hipExternalMemoryHandleDesc external_mem_handle_desc = {};
-        hipExternalMemoryBufferDesc external_mem_buffer_desc = {};
-        // Linux path: export as DRM PRIME FD
-        VADRMPRIMESurfaceDescriptor va_drm_prime_surface_desc = {};
-
-        rocdec_status = va_video_decoder_.ExportSurface(pic_idx, va_drm_prime_surface_desc);
+        rocdec_status = ImportSurface(pic_idx);
         if (rocdec_status != ROCDEC_SUCCESS) {
-            ErrorLog(g_rocdec_logger, "Failed to export surface for picture idx = " + ROCDEC_TOSTR(pic_idx));
             FunctionExitLog(g_rocdec_logger);
             return rocdec_status;
-        }
-
-        if (va_drm_prime_surface_desc.num_layers == 0 || va_drm_prime_surface_desc.num_layers > 3) {
-            ErrorLog(g_rocdec_logger, "VA-API returned an unsupported value for num_layers. num_layers = " + ROCDEC_TOSTR(va_drm_prime_surface_desc.num_layers));
-            FunctionExitLog(g_rocdec_logger);
-            return ROCDEC_RUNTIME_ERROR;
-        }
-
-        external_mem_handle_desc.type = hipExternalMemoryHandleTypeOpaqueFd;
-        external_mem_handle_desc.handle.fd = va_drm_prime_surface_desc.objects[0].fd;
-        external_mem_handle_desc.size = va_drm_prime_surface_desc.objects[0].size;
-
-        CHECK_HIP(hipImportExternalMemory(&hip_interop_[pic_idx].hip_ext_mem, &external_mem_handle_desc));
-
-        external_mem_buffer_desc.size = va_drm_prime_surface_desc.objects[0].size;
-        CHECK_HIP(hipExternalMemoryGetMappedBuffer((void**)&hip_interop_[pic_idx].hip_mapped_device_mem, hip_interop_[pic_idx].hip_ext_mem, &external_mem_buffer_desc));
-
-        hip_interop_[pic_idx].width = va_drm_prime_surface_desc.width;
-        hip_interop_[pic_idx].height = va_drm_prime_surface_desc.height;
-
-        for (int i = 0; i < va_drm_prime_surface_desc.num_layers; i++) {
-            hip_interop_[pic_idx].offset[i] = va_drm_prime_surface_desc.layers[i].offset[0];
-            hip_interop_[pic_idx].pitch[i] = va_drm_prime_surface_desc.layers[i].pitch[0];
-        }
-
-        hip_interop_[pic_idx].num_layers = va_drm_prime_surface_desc.num_layers;
-
-        for (auto i = 0; i < va_drm_prime_surface_desc.num_objects; ++i) {
-            close(va_drm_prime_surface_desc.objects[i].fd);
         }
     }
 #else
@@ -252,6 +223,73 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
     FunctionExitLog(g_rocdec_logger);
     return rocdec_status;
 }
+
+#ifndef _WIN32
+rocDecStatus RocDecoder::ImportSurface(int pic_idx) {
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
+    hipExternalMemoryHandleDesc external_mem_handle_desc = {};
+    hipExternalMemoryBufferDesc external_mem_buffer_desc = {};
+    VADRMPRIMESurfaceDescriptor va_drm_prime_surface_desc = {};
+
+    rocDecStatus rocdec_status = va_video_decoder_.ExportSurface(pic_idx, va_drm_prime_surface_desc);
+    if (rocdec_status != ROCDEC_SUCCESS) {
+        ErrorLog(g_rocdec_logger, "Failed to export surface for picture idx = " + ROCDEC_TOSTR(pic_idx));
+        FunctionExitLog(g_rocdec_logger);
+        return rocdec_status;
+    }
+
+    if (va_drm_prime_surface_desc.num_layers == 0 || va_drm_prime_surface_desc.num_layers > 3) {
+        ErrorLog(g_rocdec_logger, "VA-API returned an unsupported value for num_layers. num_layers = " + ROCDEC_TOSTR(va_drm_prime_surface_desc.num_layers));
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
+
+    external_mem_handle_desc.type = hipExternalMemoryHandleTypeOpaqueFd;
+    external_mem_handle_desc.handle.fd = va_drm_prime_surface_desc.objects[0].fd;
+    external_mem_handle_desc.size = va_drm_prime_surface_desc.objects[0].size;
+
+    CHECK_HIP(hipImportExternalMemory(&hip_interop_[pic_idx].hip_ext_mem, &external_mem_handle_desc));
+
+    external_mem_buffer_desc.size = va_drm_prime_surface_desc.objects[0].size;
+    CHECK_HIP(hipExternalMemoryGetMappedBuffer((void**)&hip_interop_[pic_idx].hip_mapped_device_mem, hip_interop_[pic_idx].hip_ext_mem, &external_mem_buffer_desc));
+
+    hip_interop_[pic_idx].width = va_drm_prime_surface_desc.width;
+    hip_interop_[pic_idx].height = va_drm_prime_surface_desc.height;
+
+    for (int i = 0; i < va_drm_prime_surface_desc.num_layers; i++) {
+        hip_interop_[pic_idx].offset[i] = va_drm_prime_surface_desc.layers[i].offset[0];
+        hip_interop_[pic_idx].pitch[i] = va_drm_prime_surface_desc.layers[i].pitch[0];
+    }
+
+    hip_interop_[pic_idx].num_layers = va_drm_prime_surface_desc.num_layers;
+
+    for (auto i = 0; i < va_drm_prime_surface_desc.num_objects; ++i) {
+        close(va_drm_prime_surface_desc.objects[i].fd);
+    }
+    FunctionExitLog(g_rocdec_logger);
+    return ROCDEC_SUCCESS;
+}
+
+// Export and map all surfaces before anything is decoded into them. The VA driver may
+// move a surface to a new buffer when it is first exported, and the decoded content
+// already in the surface is not carried over (seen with small surfaces on radeonsi).
+rocDecStatus RocDecoder::ImportAllSurfaces() {
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
+    for (int pic_idx = 0; pic_idx < hip_interop_.size(); pic_idx++) {
+        if (hip_interop_[pic_idx].hip_mapped_device_mem != nullptr) {
+            continue;
+        }
+        rocDecStatus rocdec_status = ImportSurface(pic_idx);
+        if (rocdec_status != ROCDEC_SUCCESS) {
+            CriticalLog(g_rocdec_logger, "Failed to set up the VA-API/HIP interop for picture idx = " + ROCDEC_TOSTR(pic_idx));
+            FunctionExitLog(g_rocdec_logger);
+            return rocdec_status;
+        }
+    }
+    FunctionExitLog(g_rocdec_logger);
+    return ROCDEC_SUCCESS;
+}
+#endif
 
 rocDecStatus RocDecoder::FreeVideoFrame(int pic_idx) {
     FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));

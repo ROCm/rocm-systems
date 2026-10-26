@@ -2,6 +2,12 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
+## (Unreleased) rocDecode 1.13.0
+
+### Resolved issues
+
+* Fixed blank (all-zero, green) output frames for small-resolution streams (832x480 and smaller) on some VA-API driver versions. The first picture decoded into each decode surface was output as blank, and streams with fewer frames than decode surfaces came out entirely blank.
+
 ## rocDecode 1.12.0 for ROCm 10.2.0
 
 ### Added
