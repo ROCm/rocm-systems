@@ -1146,7 +1146,7 @@ bool rejects_flat_dds(const Instruction &inst, const Wavefront &wf, uint64_t req
   return true;
 }
 
-// RDNA3/3.5/4 section 11.1 and CDNA5 section 10.2 return MEMVIOL for 8-byte
+// RDNA3/3.5/4 section 11.1 and CDNA5 section 10.1.1 return MEMVIOL for 8-byte
 // FLAT atomics that resolve to scratch: the dword interleave places a lane's two
 // halves a wave stride apart. Among atomics, only FLAT translation marks
 // private-backed lanes; BUFFER swizzling does not. Older architectures sharing
