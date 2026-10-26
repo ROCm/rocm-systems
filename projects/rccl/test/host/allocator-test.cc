@@ -25,6 +25,7 @@
 #include "comm.h"
 #include "allocator.h"
 #include "debug.h"
+#include "ExpectedCrash.h"
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
@@ -778,18 +779,6 @@ TEST_F(AllocatorShadowPoolMicrotest, UnknownObjectsAreRejected) {
   EXPECT_EQ(pool_.count, 1);
 }
 
-// ASan and UBSan turn a SIGSEGV into a report plus exit(1), so match the exit under them.
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer) || __has_feature(undefined_behavior_sanitizer)
-#define RCCL_MICRO_SANITIZED 1
-#endif
-#endif
-#if defined(__SANITIZE_ADDRESS__) || defined(RCCL_MICRO_SANITIZED)
-#define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
-#else
-#define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
-#endif
-
 // With no table yet, an unknown object crashes the lookup instead of being rejected. The pool is
 // hidden from the optimizer so it can't see the null table and drop the load.
 // Pins AICOMRCCL-3041; a fix flips this pin.
@@ -798,11 +787,9 @@ TEST_F(AllocatorShadowPoolMicrotest, FreeAndToHost_KnownBug_UnknownObjectOnAnEmp
   void* h = nullptr;
   ncclShadowPool* pool = &pool_;
   asm volatile("" : "+r"(pool) : : "memory");
-  const std::string style = ::testing::GTEST_FLAG(death_test_style);
-  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+  ScopedDeathTestStyle style("threadsafe");
   EXPECT_EXIT(ncclShadowPoolToHost(pool, &other, &h), DEATH_BY_SEGV, "");
   EXPECT_EXIT(ncclShadowPoolFree(pool, &other, kStream), DEATH_BY_SEGV, "");
-  ::testing::GTEST_FLAG(death_test_style) = style;
 }
 
 TEST_F(AllocatorShadowPoolMicrotest, Destruct_FreesObjectsPagesAndPool) {
