@@ -3995,7 +3995,9 @@ hipError_t playback_hipStreamBeginCapture(PlaybackContext& ctx,
 hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
                                         const uint8_t* payload) {
     const auto* a = reinterpret_cast<const hrr_args_hipStreamEndCapture*>(payload);
-    if (a->ret != hipSuccess) return hipSuccess;  // original call failed — skip
+    // Capture records a failed EndCapture only when the failure ended the
+    // capture (invalidated or unjoined); every recorded EndCapture ends ours.
+    ctx.in_graph_capture = false;
 
     hipStream_t stream = ctx.translate_stream(a->stream);
     if (!stream) {
@@ -4003,9 +4005,14 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
                 (unsigned long long)a->stream);
         return hipSuccess;  // non-fatal
     }
-    ctx.in_graph_capture = false;
     hipGraph_t live_graph = nullptr;
     hipError_t r = hipStreamEndCapture(stream, &live_graph);
+    if (a->ret != hipSuccess) {
+        // The application got no graph, so nothing later refers to this one.
+        if (live_graph) (void)hipGraphDestroy(live_graph);
+        (void)hipGetLastError();
+        return hipSuccess;
+    }
     if (r == hipSuccess && live_graph) {
         ctx.record_graph(a->pGraph, live_graph);
         if (ctx.verbose)

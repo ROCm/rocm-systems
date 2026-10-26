@@ -2627,6 +2627,24 @@ CUSTOM_CAPTURE_SHIMS: Dict[str, str] = {
         "  return r;\n"
         "}\n"
     ),
+    # hipStreamEndCapture on an invalidated or unjoined capture fails, yields no
+    # graph, and still ends the capture. Record those failures too, or replay
+    # never ends its own capture and treats every later call as captured.
+    "hipStreamEndCapture": (
+        "// Generated shim (custom: also record the failures that end the capture)\n"
+        "static hipError_t capture_hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {\n"
+        "  hipError_t r = g_real_table.hipStreamEndCapture_fn(stream, pGraph);\n"
+        "  if (r == hipSuccess || r == hipErrorStreamCaptureInvalidated ||\n"
+        "      r == hipErrorStreamCaptureUnjoined) {\n"
+        "    hrr_args_hipStreamEndCapture a{};\n"
+        "    a.ret         = static_cast<int32_t>(r);\n"
+        "    a.stream = reinterpret_cast<uint64_t>(stream);\n"
+        "    if (pGraph) a.pGraph = reinterpret_cast<uint64_t>(*pGraph);\n"
+        "    hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMENDCAPTURE, &a.hdr, sizeof(a));\n"
+        "  }\n"
+        "  return r;\n"
+        "}\n"
+    ),
 }
 
 CUSTOM_PLAYBACK_BODIES: Dict[str, str] = {
