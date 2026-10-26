@@ -123,20 +123,32 @@ creates from the base directory down are 0700 and its files 0600, and an existin
 above the base directory get 0777 minus the umask. The writer refuses a `pid-<pid>/`,
 `blobs/` or `code_objects/` that is a symbolic link or belongs to another user, and an
 existing `events.bin` that is not a regular file with a single link owned by that user.
-These directory checks run when the archive is opened and each later open resolves the
-path again, so every directory on the path to the archive should belong to the capturing
-user or to root, and any that other users can write to should have the sticky bit. When
+These directory checks run when the archive is opened, and the writer keeps a descriptor
+(`O_CLOEXEC`) for each directory it checked, `pid-<pid>/`, `blobs/` and `code_objects/`,
+until the capture closes; a `blobs/<xx>/` is opened and checked relative to `blobs/` for
+each blob write and closed after it. Every file inside the archive is created, opened, renamed
+and removed relative to those descriptors with `openat`, `renameat` and `unlinkat`, the
+crash-path manifest included, so a directory renamed on the path after the check cannot
+redirect a write. Only finding `pid-<pid>/` when the archive opens, and the root
+`manifest.json` in the base directory, go by path, so every directory on the path to
+the base should still belong to the capturing user or to root, and any that other users
+can write to should have the sticky bit. When
 the archive cannot be set up, capture is disabled with a
 `[HRR capture] Capture disabled` line on stderr and the application runs on without the
 runtime capture shims. Reading an archive needs the capturing user or root, so a capture
-taken as root in a container needs `chown` before another user can replay it.
+taken as root in a container needs `chown` before another user can replay it. On Windows
+none of this applies: the writer opens every file by path, checks no directory and sets
+no permissions, so the archive gets the access its base directory passes on.
 
 `writer::open()` (`hip_capture_writer.cpp`) always selects the current process's
 PID directory. A `fork()` child re-opens from the base dir on its first record,
 blob or code object after the fork, so it switches to its own `pid-<childpid>/`
-sub-archive. `atfork_child` only drops the parent's events fd and paths: the
+sub-archive. `atfork_child` only drops the parent's events fd, directory descriptors
+and paths, and the child's `writer::open()` opens its own: the
 child of a multithreaded process may make only async-signal-safe calls until it
-execs, and a child that execs or exits without recording leaves no archive. The root
+execs, and a child that execs or exits without recording leaves no archive. `fork()`
+waits for the blob and code object writes in flight, so the child inherits no
+`blobs/<xx>/` descriptor of theirs. The root
 `manifest.json` is a common aggregate index with the schema fields
 `version`, `capture_mode`, `owner_pid`, and `processes[]`; each process rewrites
 it best-effort on clean shutdown by scanning existing `pid-<pid>/manifest.json`
@@ -168,7 +180,7 @@ the parent that exited cleanly needs no repair. A sub-archive is skipped when
 payloads, finds it complete in the sense `load_archive` uses. `--info` on a
 root applies the same check before it shows a process as complete.
 
-### Archive Format (v9)
+### Archive Format (v10)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -286,7 +298,7 @@ projects/hrr/                     — standalone HRR project (portable layer)
                                     Not used by capture — it is the format an
                                     out-of-tree producer writes and playback reads
   playback/
-    hrr_reader.h/.cpp             — archive loader, v7 format; record framing
+    hrr_reader.h/.cpp             — archive loader, v10 format; record framing
                                     (read_raw_record / open_record_stream) shared
                                     with the region sidecars
     hrr_region_map.h/.cpp         — region timeline: merge, cursor, live block set,
@@ -371,13 +383,13 @@ The generator classifies each API:
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 When adding HIP API support, update this script to classify the API in the appropriate capture and playback policy sets. APIs requiring non-trivial serialization or replay belong in `MANUAL_CAPTURE_APIS` and/or `MANUAL_PLAYBACK_APIS`; intentionally unsupported replay APIs belong in `NOOP_PLAYBACK_APIS`.
 
-## Archive Format (v9)
+## Archive Format (v10)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 9
+HRR_VERSION = 10
 ```
 
 Version history, so an archive written by an older runtime can be placed:
@@ -414,12 +426,15 @@ Version history, so an archive written by an older runtime can be placed:
 - **v9** records `hipKernelSetAttributeForDevice`, appended to
   `HipDispatchTable`, which shifts the compiler API IDs up by one again. A v8
   reader would decode those events as the wrong API.
+- **v10** puts pinned host snapshot records after a kernel launch's arguments
+  (`num_snapshots` was always 0). A v9 reader would not restore them. See
+  Pinned Host Snapshots below.
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 9)
+                      events.bin HRR_VERSION = 10)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     active             one line naming the process instance (boot id and
@@ -537,41 +552,56 @@ At playback:
 - `playback_hipHostUnregister` translates the pointer, calls `hipHostUnregister`, frees the
   backing buffer, and removes both map entries.
 
-### Sysmem Update Tracking (planned — not yet implemented)
+### Pinned Host Snapshots
 
-**Problem:** `hipHostRegister` captures the buffer contents at registration time only.
-After that, the CPU may modify the buffer without going through any HIP API:
+A kernel can read pinned host memory that the host filled with plain stores, which no HIP
+call records; replay would run it on whatever its fresh buffer holds. Capture tracks the
+ranges of `hipHostMalloc`, `hipMallocHost` and `hipHostRegister` (dropped on `hipHostFree`, `hipFreeHost`,
+`hipFree` and `hipHostUnregister`). Before each launch it reads the 8-byte-aligned words of
+the arguments, by-value structs included; for each tracked allocation a word points into,
+it copies the whole allocation under the tracking lock, writes the copy as a blob and adds a
+record (base, offset 0, length, blob hash, direction 0) to the launch event, unless the hash
+and the launch stream equal those of the allocation's last record. Struct words pointing into such an allocation
+are flagged for translation like
+embedded device pointers, and replay translates them without the device-address shape
+check. Replay checks each record names the base of a pinned host
+allocation it made, lies inside it and matches its blob's length, refusing and counting it
+otherwise; then it queues a host function that copies the blobs in on the launch stream,
+ahead of the kernel, without waiting for the stream. `hipHostFree` and `hipHostUnregister`
+wait for every stream, so the allocation outlives a queued copy. The summary prints
+restored, refused and skipped counts.
 
-```
-hipHostRegister(ptr, sz)   ← blob captured (initial state)
-// CPU writes to ptr[]     ← invisible to capture layer
-hipMemcpyAsync(d, ptr, sz, H2D, stream)   ← H2D blob captures current contents ✓
-// CPU writes to ptr[] again
-hipModuleLaunchKernel(...)  ← kernel reads ptr directly via mapped flag ✗ stale
-```
+Kept deliberately simple:
 
-H2D memcpy is already handled — the src buffer is re-snapshotted at each call regardless
-of registration. The gap is direct GPU reads from registered host memory (mapped flag)
-after a CPU write that was not routed through a memcpy.
+- Capture does not wait for the stream: the bytes are those at enqueue time, the host's
+  stores up to the launch. Queued work that writes the allocation (a kernel, an async copy
+  into it) and has not finished by then is not in them, and replay, which restores right
+  before the kernel, puts the older bytes back over its output. A kernel reading device
+  writes to pinned memory that the host did not wait for replays wrong. Waiting for the
+  stream would deadlock a stream that waits on work the host submits later, and a
+  stream-ordered copy would stall the stream on every such launch and put a host node in
+  the application's graphs.
+- `HIP_HRR_HOST_SNAPSHOTS=0` turns snapshots off; an allocation larger than
+  `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64) is not snapshotted and is listed under
+  `unreplayable_apis`.
+- Replay restores nothing for a launch replayed into a capturing stream, and capture does
+  not snapshot at graph launch. A record for a launch into a capturing stream does not
+  become the allocation's last, so the next launch outside the capture records again.
+- `hipHostAlloc` and `hipMemAllocHost` are not tracked, since replay makes
+  no buffer for them, nor is a `hipHostRegister` device alias that differs from the host
+  address.
+- An unchanged allocation gets no record, so device writes into it between two launches
+  stay in replay's buffer as they did at capture; a host store that puts back exactly the
+  last recorded bytes after such a device write is missed.
+- A restore is ordered on the launch stream only; work on other streams reading the buffer
+  is not waited for, which is why a launch on another stream records again.
 
-**Planned design:**
-
-1. New synthetic event `HRR_SYSMEM_UPDATE` (not a real HIP API):
-   fields: `hostPtr u64`, `sizeBytes u64`, `blob_hash_lo u64`, `blob_hash_hi u64`.
-
-2. Per-region `last_hash` stored alongside `g_pinned_reg_map`. Before each H2D memcpy src
-   check and before each kernel launch for pointer args in registered ranges: hash the
-   current contents, compare with `last_hash`. Emit `HRR_SYSMEM_UPDATE` + write blob only
-   if hash changed. Content-addressed storage deduplicates unchanged regions automatically.
-
-3. Optional sync-gated dirty flag: set `dirty=true` for all registered regions after any
-   `hipStreamSynchronize` / `hipDeviceSynchronize` / `hipEventSynchronize`. Only hash
-   (step 2) if `dirty==true`. Avoids hashing in pure-GPU loops where the CPU never
-   touches the buffer between launches. Falls back to always-hash if sync events are
-   not captured.
-
-4. At replay: `HRR_SYSMEM_UPDATE` handler `memcpy`s the blob into the live registered
-   buffer, ordered by sequence ID like all other events.
+**Threat model.** The snapshots put into the archive host memory the application never
+handed to a HIP call: for a serving stack, token IDs, sampling state and request metadata,
+including stale bytes from earlier requests in a reused buffer. The archive must be
+handled as at least as sensitive as the workload's data. Replay treats every record as
+untrusted input and writes only inside a pinned host allocation it made itself, never
+through a recorded address.
 
 ## Kernel Argument Capture
 
@@ -659,10 +689,9 @@ This detector is a value-based heuristic with three deliberate properties:
   previously caused occasional replay faults on ATen elementwise kernels.
   `HIP_HRR_PTR_RELAX=1` disables the replay-side guard for debugging.
 
-**Scope:** only `hipMemoryTypeDevice`/`Unified` words are flagged. A pinned/host
-(`hipMemoryTypeHost`) pointer embedded by value keeps its capture-time host VA at
-replay (invalid in the replay process); translating embedded host pointers is
-intentionally out of scope.
+**Scope:** `hipMemoryTypeDevice`/`Unified` words are flagged, and so are words
+pointing into a pinned allocation the launch snapshots (see Pinned Host Snapshots).
+Any other embedded host pointer keeps its capture-time VA at replay.
 
 A per-launch `co_hash` (the FNV-1a-128 hash of the owning code object) **is** recorded
 in kernel launch events. Playback resolves kernels by `(co_hash, name)`: it first looks
@@ -722,7 +751,10 @@ missing stream handles by creating a temporary stream.
 The full `hipStreamBeginCapture` → `hipStreamEndCapture` → `hipGraphInstantiate` →
 `hipGraphLaunch` chain is supported. All four are `MANUAL_PLAYBACK_APIS`. `BeginCapture`
 falls back to `hipStreamCaptureModeGlobal` if `ThreadLocal` fails. `EndCapture` records
-the returned `hipGraph_t` into `graph_map`. `GraphInstantiate` uses
+the returned `hipGraph_t` into `graph_map`. Capture also records an `EndCapture` that
+failed with `hipErrorStreamCaptureInvalidated` or `hipErrorStreamCaptureUnjoined`, since
+both still end the capture; replay ends its own capture and discards the graph.
+`GraphInstantiate` uses
 `hipGraphInstantiateWithFlags(..., 0)` and records the exec into `graph_exec_map`.
 `GraphLaunch` translates both handles and, when `--timing` is active, wraps the call
 with `hipEventRecord` to accumulate elapsed time into `total_graph_ms`.
@@ -799,16 +831,20 @@ For each D2H memcpy event that has a captured expected-data blob:
 4. Increments `ctx.d2h_pass` (byte-exact), `ctx.d2h_pass_tol` (within tolerance),
    or `ctx.d2h_fail`
 
-**Tolerance-based validation.** A byte-exact `memcmp` is tried first as a fast path.
-On mismatch, the validator interprets both buffers as each candidate float encoding
-(fp32, bf16, fp16, fp64) and passes when every element satisfies
-`|live − expected| ≤ atol + rtol·|expected|`. Thresholds: see README D2H table.
+**Byte-exact by default.** A buffer passes when it matches its blob byte for byte.
+Blobs carry no dtype, and reading integers as floats lets any int32 below about
+9.8e8 match zero within 1e-3, so a guessed tolerance would let a no-op handler pass
+its round-trip. A replay whose outputs really are nondeterministic floats opts in
+with `HIP_HRR_D2H_TOL=<type>:<atol>:<rtol>`, with `<type>` one of `f32`, `bf16`, `f16`, `f64` (no other spelling, `fp32` included, is accepted):
+a mismatching buffer then passes when every element, read as that type, satisfies
+`|live − expected| ≤ atol + rtol·|expected|`. A linear copy whose blob is shorter
+than the copy is skipped, not compared on the prefix.
 
 On failure the validator reports element counts, max absolute/relative error, and
 64-bit FNV-1a content hashes (useful for replay-vs-replay determinism comparison).
 The summary distinguishes exact passes, within-tolerance passes, and failures.
 
-**Exit codes:** `0` if all checks pass or are within tolerance (or no D2H blobs);
+**Exit codes:** `0` if all checks pass or are within an opted-in tolerance (or no D2H blobs);
 `1` on any unexplained D2H failure; `2` for an early "replay diverged" abort triggered
 once accumulated failures cross `HIP_HRR_REPLAY_DIVERGENCE_ABORT` (`note_d2h_fail`).
 
@@ -1136,6 +1172,21 @@ passes many sub-pointers as kernel arguments, this scan becomes O(N) per pointer
 kernel dispatch. For archives with thousands of allocations and tight kernel launch
 loops this can make replay significantly slower than the original.
 
+### Unmapped Pointer Arguments
+
+A recorded pointer argument in no allocation, VMM reservation or region (memory
+a framework carved out of its own pool, or a destination from a playback no-op
+such as `hipMemAllocPitch`) is handled the same way by every handler, generated
+or manual: `translate_ptr` notes the miss and `dispatch_event` applies one
+policy. By default the event's result is discarded, the event is reported as
+`[HRR] Unmapped: T<tid> Event <index> (<API>): recorded pointer 0x<addr> ...`,
+and the summary shows `Unmapped : N event(s) not replayed as recorded`; the
+count alone does not fail the run. `--strict-unmapped` ends the replay at the
+first such event instead. The rationale and the resulting fidelity guarantee
+are written above `HrrUnmappedNote` in `playback/hip_playback.h`. Kernel
+arguments (pointers only by shape, counted as `Untranslated`) and releases such
+as `hipFree` use `lookup_ptr` and are outside the policy.
+
 ### GPU Allocator Address Non-Determinism
 
 Recorded device pointers are the GPU virtual addresses from the original run. At
@@ -1273,7 +1324,8 @@ Sysmem capture is a fundamentally hard problem. Two approaches exist:
   and emit `HRR_SYSMEM_UPDATE` synthetic events only when content changes. This is
   significantly more complex to implement and may not be fully feasible on all platforms.
 
-Neither approach is currently implemented.
+Pinned host memory a kernel reads is now snapshotted before each launch; see Pinned Host
+Snapshots above.
 
 ### Partial-Replay APIs — H2D and D2H Work, Kernel Launches Do Not
 
@@ -1491,7 +1543,7 @@ The event wire format (finding H5):
   shrinking `reserved` to 2 bytes), so kernel launches with large serialized payloads
   (many args / long mangled names / large by-value structs) up to ~4 GiB are recorded
   normally instead of being dropped at 65535 bytes. This is the change that bumped
-  `HRR_VERSION` to 4; the current version is 9, see Archive Format above. The
+  `HRR_VERSION` to 4; the current version is 10, see Archive Format above. The
   writer's single-record buffer path now writes any oversized record straight through.
 - **Per-argument size limit (64 KiB) now fails loudly.** Each kernel arg's size is still
   a `uint16_t`. A by-value struct argument ≥ 64 KiB cannot be represented, so the launch
@@ -1540,11 +1592,12 @@ dispatch before the create populates the translation map and silently
 
 D2H validation can pass when replay actually diverged:
 
-- **Length clamp.** Linear copies compare `min(copy_size, blob_size)`; a truncated or crash-recovered blob validates only a prefix (the corrupted tail is unchecked) and still counts as PASS. A zero-length compare counts as pass. The 2D, 3D and driver copies do not clamp: a blob shorter than the host rect replay reads it as is not validated.
-- **Float-dtype guessing.** Blobs carry no dtype. On a byte mismatch the validator
-  tries `{fp32, bf16, fp16, fp64}` and passes on the first encoding within tolerance,
-  so integer/index/pointer output buffers can silently false-pass; both-NaN counts as
-  equal.
+- **Short blobs.** A blob shorter than its copy (linear) or host rect (2D, 3D and
+  driver copies) is not validated; the check counts as skipped, and a replay whose
+  every check is skipped fails. A zero-length compare counts as pass.
+- **Opted-in tolerance.** `HIP_HRR_D2H_TOL` applies its type to every read-back in
+  the replay, so an integer/index/pointer buffer in the same archive can false-pass
+  against a near-zero float reading; both-NaN counts as equal.
 - **Zero-init masks OOB.** Replay zero-initialises each (possibly over-allocated)
   device allocation, so an out-of-bounds-reading kernel reads deterministic zeros
   instead of faulting and may still validate. It also diverges from non-zero original

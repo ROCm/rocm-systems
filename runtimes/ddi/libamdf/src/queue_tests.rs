@@ -105,10 +105,10 @@ fn fixture_queue(environment: &Environment) -> (Owned<Queue>, Arc<Fixture>) {
     let id = amdf_queue_id_t { words: [11, 13] };
     let owner = Owned::new(Queue {
         native: NativeQueue::Fixture(fixture.clone()),
+        host_allocator: Allocator::system(),
         device: ptr::NonNull::<Device>::dangling().as_ptr(),
         device_queues: &raw const environment.queues,
         device_reset_epoch: &raw const environment.epoch,
-        _scratch_borrow: None,
         info: amdf_user_queue_info_t {
             queue_id: id,
             reset_epoch: 7,
@@ -300,6 +300,7 @@ fn native_transport() -> queue::QueueTransport {
         ring_host_address: 0x1000,
         ring_device_address: 0x1000,
         ring_size_bytes: 4096,
+        aql_control: None,
         sdma_engine_id: None,
         read_index_host_address: 0x2000,
         read_index_device_address: 0x4000,
@@ -416,6 +417,44 @@ fn pm4_transport_requires_dword_units_and_a_wrapping_read_index() {
 }
 
 #[test]
+fn invalid_native_transport_rolls_back_and_reports_cleanup_failure() {
+    let family = family(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+    let mut native = native_transport();
+    native.doorbell_host_address = 0;
+    assert!(matches!(
+        creation_transports(native, &family),
+        Err(INTERNAL)
+    ));
+    let invalid = INTERNAL;
+
+    let queues = AtomicU64::new(1);
+    let mapped_error = std::cell::Cell::new(false);
+    assert_eq!(
+        rollback_creation_result(&queues, invalid, Ok(()), |_| {
+            mapped_error.set(true);
+            BUSY
+        }),
+        INTERNAL
+    );
+    assert!(!mapped_error.get());
+    assert_eq!(queues.load(Ordering::Acquire), 0);
+
+    let queues = AtomicU64::new(1);
+    let failure = Error::Operation {
+        kind: ErrorKind::Busy,
+        detail: "injected rollback failure with live backing",
+    };
+    assert_eq!(
+        rollback_creation_result(&queues, invalid, Err(failure), |error| {
+            assert_eq!(error.kind(), ErrorKind::Busy);
+            BUSY
+        }),
+        BUSY
+    );
+    assert_eq!(queues.load(Ordering::Acquire), 0);
+}
+
+#[test]
 fn cached_queries_do_not_observe_native_loss_and_mapping_blocks_teardown() {
     #[repr(C)]
     struct Extended {
@@ -501,8 +540,8 @@ fn failed_mapping_preserves_output_and_does_not_add_a_borrow() {
         Allocator::from_callbacks(ptr::null_mut(), Some(reject_allocation), Some(empty_free))
     }
     .unwrap();
-    let (queue, _) = fixture_queue(&environment);
-    let _scope = allocator.scope();
+    let (mut queue, _) = fixture_queue(&environment);
+    queue.host_allocator = allocator;
     let pointer = queue.into_raw().cast();
     let sentinel = ptr::NonNull::<amdf_user_queue_mapping_t>::dangling().as_ptr();
     let mut mapping = sentinel;

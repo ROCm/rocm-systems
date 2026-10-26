@@ -158,6 +158,7 @@ struct rocshmem_gin_qp_set {
   struct ibv_mr* fetch_atomic_dummy_mr = nullptr;
 
   uint32_t sq_size = envvar::gda::sq_size;
+  uint8_t traffic_class = 0;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -420,7 +421,7 @@ static int gin_load_dv_library(rocshmem_gin_qp_set* set) {
       DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, pd_set_sqcmb);
       DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, pd_set_rqcmb);
       DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, pd_set_udma_mask);
-      DLSYM_OPT_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, create_cq_ex);
+      DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, create_cq_ex);
       return 0;
     }
 #endif
@@ -541,16 +542,12 @@ static int gin_create_cqs(rocshmem_gin_qp_set* set) {
       cq_attr.comp_mask = IBV_CQ_INIT_ATTR_MASK_PD;
 
       memset(&ionic_cq_attr, 0, sizeof(ionic_cq_attr));
-      if (set->ionic_dv.create_cq_ex) {
-        ionic_cq_attr.comp_mask = IONIC_CQ_INIT_ATTR_MASK_FLAGS;
-        ionic_cq_attr.flags = IONIC_CQ_INIT_ATTR_CCQE;
-      }
+      ionic_cq_attr.comp_mask = IONIC_CQ_INIT_ATTR_MASK_FLAGS;
+      ionic_cq_attr.flags = IONIC_CQ_INIT_ATTR_CCQE;
 
       for (int i = 0; i < n; i++) {
         cq_attr.parent_domain = set->nic.pd_uxdma[i & 1];
-        struct ibv_cq_ex* cq_ex = nullptr;
-        if (set->ionic_dv.create_cq_ex) cq_ex = set->ionic_dv.create_cq_ex(set->nic.context, &cq_attr, &ionic_cq_attr);
-        if (!cq_ex) cq_ex = ibv.create_cq_ex(set->nic.context, &cq_attr);
+        struct ibv_cq_ex* cq_ex = set->ionic_dv.create_cq_ex(set->nic.context, &cq_attr, &ionic_cq_attr);
         if (!cq_ex) return -1;
         set->ibv_cqs[i] = ibv.cq_ex_to_cq(cq_ex);
         if (!set->ibv_cqs[i]) return -1;
@@ -868,7 +865,7 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
       attr.ah_attr.is_global = 1;
       attr.ah_attr.grh.hop_limit = 255;
       attr.ah_attr.sl = 1;
-      attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
+      attr.ah_attr.grh.traffic_class = set->traffic_class;
       memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
     } else {
       attr.ah_attr.is_global = 0;
@@ -1084,7 +1081,8 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
 ///////////////////////////////////////////////////////////////////////////////
 
 int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, void* buf, size_t size),
-                            void* allgather_ctx, rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps) {
+                            void* allgather_ctx, int traffic_class, rocshmem_gin_qp_set_t* out_qp_set,
+                            void*** out_gpu_qps) {
   // Note: log_pe_number and device-side logd_constants must be initialized
   // by the consumer binary (e.g. rccl-tests) which links rocshmem's device
   // bitcode and can resolve HIP_SYMBOL(logd_constants).
@@ -1092,6 +1090,7 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
   auto* set = new rocshmem_gin_qp_set();
   set->nRanks = nRanks;
   set->myRank = myRank;
+  set->traffic_class = static_cast<uint8_t>(traffic_class);
 
   // 1. Open IB device and detect provider
   if (gin_open_ib_device(set) != 0) {
@@ -1237,7 +1236,8 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
     *out_gpu_qps = gpu_ptr_array;
   }
 
-  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d)", nRanks, set->nic.nic_name.c_str(), myRank, nRanks);
+  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d, tc=%d)", nRanks, set->nic.nic_name.c_str(), myRank,
+            nRanks, set->traffic_class);
   *out_qp_set = set;
   return 0;
 

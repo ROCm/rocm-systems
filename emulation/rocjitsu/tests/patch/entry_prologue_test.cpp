@@ -24,7 +24,7 @@
 namespace rocjitsu {
 namespace {
 
-namespace kd = rocr::llvm::amdhsa;
+namespace kd = rocjitsu::amdhsa;
 using KD = kd::kernel_descriptor_t;
 
 constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
@@ -89,8 +89,8 @@ private:
 [[nodiscard]] KD kernarg_descriptor(uint32_t kernarg_size = 0) {
   KD desc{};
   set_kernel_descriptor_user_sgpr_count(kArch, desc, 2);
-  AMDHSA_BITS_SET(desc.kernel_code_properties,
-                  kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(desc.kernel_code_properties,
+                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
   desc.kernarg_size = kernarg_size;
   return desc;
 }
@@ -99,8 +99,8 @@ private:
 /// the pair lands above s[0:1].
 [[nodiscard]] KD kernarg_descriptor_at_slot(uint16_t expected_slot) {
   KD desc = kernarg_descriptor();
-  AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
-                  1);
+  RJ_AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
+                     1);
   set_kernel_descriptor_user_sgpr_count(kArch, desc, 4);
   EXPECT_EQ(kernarg_segment_ptr_sgpr(desc).value_or(0xFFFF), expected_slot);
   return desc;
@@ -110,18 +110,15 @@ private:
                             bool workgroup_id_y = false, bool workgroup_id_z = false) {
   KD desc{};
   set_kernel_descriptor_user_sgpr_count(kArch, desc, user_sgpr_count);
-  // Braces are load-bearing: AMDHSA_BITS_SET expands to two statements with no
-  // do-while wrapper, so an unbraced `if` would set the bit unconditionally. The
-  // field also has to be named literally at each call, since the macro pastes
-  // _SHIFT onto its argument.
+  // Name each field literally because RJ_AMDHSA_BITS_SET pastes _SHIFT onto it.
   if (workgroup_id_x) {
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
   }
   if (workgroup_id_y) {
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1);
   }
   if (workgroup_id_z) {
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1);
   }
   return desc;
 }
@@ -320,16 +317,22 @@ TEST(BuildDbiEntryPrologue, EmitsLoadsThenWaitThenRestore) {
   const auto prologue = build_dbi_entry_prologue(desc, kArch, kStorage, &error);
   ASSERT_TRUE(prologue.has_value()) << error;
 
-  const auto payload =
+  const auto payload_result =
       build_s_load_dwordx2(kStorage.persistent_base, 0, prologue->payload_byte_offset, kArch);
-  const auto original = build_s_load_dwordx2(kStorage.entry_temp_base, 0,
-                                             prologue->original_kernarg_pointer_offset, kArch);
+  ASSERT_TRUE(payload_result.succeeded());
+  const auto payload = payload_result.value();
+  const auto original_result = build_s_load_dwordx2(
+      kStorage.entry_temp_base, 0, prologue->original_kernarg_pointer_offset, kArch);
+  ASSERT_TRUE(original_result.succeeded());
+  const auto original = original_result.value();
+  const auto wait = build_wait_scalar_loads_complete(kArch);
+  ASSERT_TRUE(wait.succeeded());
   const std::vector<uint32_t> expected{
       payload[0],
       payload[1],
       original[0],
       original[1],
-      build_wait_scalar_loads_complete(kArch),
+      wait.value(),
       build_s_mov_b32(0, kStorage.entry_temp_base, kArch),
       build_s_mov_b32(1, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch),
   };
@@ -349,16 +352,22 @@ TEST(BuildDbiEntryPrologue, AddressesThroughTheKernargPairWhereverTheAbiPutsIt) 
   const auto prologue = build_dbi_entry_prologue(desc, kArch, kStorage, &error);
   ASSERT_TRUE(prologue.has_value()) << error;
 
-  const auto payload = build_s_load_dwordx2(kStorage.persistent_base, /*sbase=*/2,
-                                            prologue->payload_byte_offset, kArch);
-  const auto original = build_s_load_dwordx2(kStorage.entry_temp_base, /*sbase=*/2,
-                                             prologue->original_kernarg_pointer_offset, kArch);
+  const auto payload_result = build_s_load_dwordx2(kStorage.persistent_base, /*sbase=*/2,
+                                                   prologue->payload_byte_offset, kArch);
+  ASSERT_TRUE(payload_result.succeeded());
+  const auto payload = payload_result.value();
+  const auto original_result = build_s_load_dwordx2(
+      kStorage.entry_temp_base, /*sbase=*/2, prologue->original_kernarg_pointer_offset, kArch);
+  ASSERT_TRUE(original_result.succeeded());
+  const auto original = original_result.value();
+  const auto wait = build_wait_scalar_loads_complete(kArch);
+  ASSERT_TRUE(wait.succeeded());
   const std::vector<uint32_t> expected{
       payload[0],
       payload[1],
       original[0],
       original[1],
-      build_wait_scalar_loads_complete(kArch),
+      wait.value(),
       build_s_mov_b32(2, kStorage.entry_temp_base, kArch),
       build_s_mov_b32(3, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch),
   };
@@ -466,6 +475,17 @@ TEST(BuildDbiEntryPrologue, FailsClosedOnAKernargSizeThatOverflowsTheWrapper) {
   EXPECT_FALSE(error.empty());
 }
 
+TEST(BuildDbiEntryPrologue, UnsupportedArchReturnsNoPrologueAndReportsTheError) {
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID}) {
+    std::string error;
+    const auto prologue = build_dbi_entry_prologue(
+        kernarg_descriptor(), arch, {.persistent_base = 26, .entry_temp_base = 28}, &error);
+    EXPECT_FALSE(prologue.has_value());
+    EXPECT_EQ(error, "unsupported target architecture for the SMEM offset range");
+  }
+}
+
 TEST(BuildDbiEntryPrologue, FailsClosedOnAnOddStoragePair) {
   std::string error;
   EXPECT_FALSE(build_dbi_entry_prologue(kernarg_descriptor(), kArch,
@@ -479,8 +499,10 @@ TEST(BuildDbiEntryPrologue, FailsClosedOnAnOddStoragePair) {
 // field width.
 TEST(BuildDbiEntryPrologue, FailsClosedOnAWrapperPastTheSmemImmediateRange) {
   std::string error;
+  const auto offset_max = max_smem_byte_offset(kArch);
+  ASSERT_TRUE(offset_max.succeeded());
   const auto prologue =
-      build_dbi_entry_prologue(kernarg_descriptor(max_smem_byte_offset(kArch)), kArch,
+      build_dbi_entry_prologue(kernarg_descriptor(offset_max.value()), kArch,
                                {.persistent_base = 26, .entry_temp_base = 28}, &error);
   EXPECT_FALSE(prologue.has_value());
   EXPECT_FALSE(error.empty());
@@ -514,7 +536,7 @@ TEST(PlanDbiEntryPrologue, ReturnsTheStorageAndTheWordsItEncoded) {
 TEST(PlanDbiEntryPrologue, FailsClosedOnAKernargPreloadingKernel) {
   const Kernel kernel(kernel_naming_sgpr(4));
   KD desc = kernarg_descriptor(/*kernarg_size=*/16);
-  AMDHSA_BITS_SET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  RJ_AMDHSA_BITS_SET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1);
 
   std::string error;
   const auto plan = plan_dbi_entry_prologue(kernel.scope(), desc, kArch,

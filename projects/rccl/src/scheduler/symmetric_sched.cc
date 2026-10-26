@@ -72,11 +72,13 @@ void convertSymTaskDevOp(struct ncclComm* comm, struct ncclTaskColl* task) {
 }
 
 // Match device deep-tier gate: uint32_t(input.offset - output.offset) % 16 == 0.
-static bool symBatchAligned16B(struct ncclTaskColl* headTask) {
+// [RCCL] ncclSymAligned16B keeps the answer rank-uniform for in-place AllGather/ReduceScatter.
+static bool symBatchAligned16B(struct ncclComm* comm, struct ncclTaskColl* headTask) {
   for (struct ncclTaskColl* t = headTask; t != nullptr; t = t->isSymLast ? nullptr : t->next) {
-    size_t inputOff = t->sendWin ? (uintptr_t)t->sendbuff - (uintptr_t)t->sendWin->userPtr : (uintptr_t)t->sendbuff;
-    size_t outputOff = t->recvWin ? (uintptr_t)t->recvbuff - (uintptr_t)t->recvWin->userPtr : (uintptr_t)t->recvbuff;
-    if (uint32_t(inputOff - outputOff) % 16 != 0) return false;
+    if (!ncclSymAligned16B(t->func, comm->rank, t->sendbuff, t->recvbuff, t->sendWin, t->recvWin,
+                           t->count * ncclTypeSize(t->datatype))) {
+      return false;
+    }
     if (t->isSymLast) break;
   }
   return true;
@@ -209,7 +211,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       input.inPlace = nWorks == 1 && headTask->func == ncclFuncAllGather &&
                       ncclAllGatherIsInPlace(headTask->sendbuff, headTask->recvbuff, comm->rank,
                                              headTask->count * ncclTypeSize(headTask->datatype));
-      input.symAligned16B = symBatchAligned16B(headTask);
+      input.symAligned16B = symBatchAligned16B(comm, headTask);
       input.minCTAs = headTask->minCTAs;
       input.maxCTAs = headTask->maxCTAs;
       input.CTAPolicy = headTask->CTAPolicy;

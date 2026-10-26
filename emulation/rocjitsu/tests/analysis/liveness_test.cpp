@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/smem.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
@@ -29,6 +30,7 @@
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/host_target.h"
 
 #include <gtest/gtest.h>
 
@@ -387,7 +389,7 @@ uint32_t build_s_call_b64(uint16_t sdst, int16_t simm16) {
 
 // Exercise the scalar fallback even when the production type uses AVX2.
 template <typename Set> class RegisterSetTyped : public testing::Test {};
-#if defined(__AVX2__)
+#if RJ_HOST_HAS_AVX2
 using RegisterSetTypes = testing::Types<RegisterSetT<RegisterSetWordType::StandardUint64>,
                                         RegisterSetT<RegisterSetWordType::Avx2M256>>;
 #else
@@ -962,6 +964,26 @@ TEST(GeneratedInstDefUse, MubufCmpswapReturnUsesElementWidthAndTargetGate) {
     EXPECT_EQ(def_use.defs.contains({RegClass::VGPR, 8, 1}), glc != 0);
     EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 8, 2}));
   }
+}
+
+template <typename AtomicInst>
+void expect_smem_cmpswap_def_use(uint8_t payload_width, uint8_t return_width) {
+  cdna3::SmemMachineInst raw{};
+  raw.sdata = 4;
+  for (uint8_t glc : {uint8_t{0}, uint8_t{1}}) {
+    raw.glc = glc;
+    AtomicInst inst(reinterpret_cast<const cdna3::MachineInst *>(&raw));
+
+    InstDefUse def_use(inst);
+    EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 4, payload_width}));
+    EXPECT_EQ(def_use.defs.contains({RegClass::SGPR, 4, return_width}), glc != 0);
+    EXPECT_FALSE(def_use.defs.contains({RegClass::SGPR, 4, payload_width}));
+  }
+}
+
+TEST(GeneratedInstDefUse, SmemCmpswapReturnUsesElementWidth) {
+  expect_smem_cmpswap_def_use<cdna3::SAtomicCmpswapSmem>(2, 1);
+  expect_smem_cmpswap_def_use<cdna3::SAtomicCmpswapX2Smem>(4, 2);
 }
 
 TYPED_TEST(RegisterSetTyped, SpecialClassesAreHeldButCarryNoOrdinaryLanes) {
@@ -7164,6 +7186,17 @@ TEST(GeneratedInstDefUse, DppBoundCtrlZeroRotateDoesNotReadDestination) {
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, DppBoundCtrlZeroBroadcastDoesNotReadDestination) {
+  for (uint32_t control : {0x142u, 0x143u}) {
+    SCOPED_TRACE(control);
+    auto inst = decode_cdna4({kVop1MovWord0Dpp, kDppFullMasks | (control << 8) | 2u});
+    ASSERT_NE(inst, nullptr);
+    InstDefUse idu(*inst);
+    EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+    EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+  }
 }
 
 TEST(GeneratedInstDefUse, Vop1DppPartialMaskReadsFullWidthDestination) {

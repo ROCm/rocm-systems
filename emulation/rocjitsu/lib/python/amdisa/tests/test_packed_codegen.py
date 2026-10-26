@@ -31,8 +31,8 @@ def test_dot4_iu8_uses_operand_signedness_modifiers():
 
     assert 'src0_signed = (inst_.neg & 0x1u) != 0' in cpp
     assert 'src1_signed = (inst_.neg & 0x2u) != 0' in cpp
-    assert 'static_cast<int8_t>(raw_a)' in cpp
-    assert 'static_cast<int8_t>(raw_b)' in cpp
+    assert 'static_cast<int8_t>(src0_bits)' in cpp
+    assert 'static_cast<int8_t>(src1_bits)' in cpp
     assert 'int64_t sum' in cpp
     assert 'std::numeric_limits<int32_t>::min()' in cpp
     assert 'std::numeric_limits<int32_t>::max()' in cpp
@@ -165,8 +165,8 @@ def test_dot8_iu4_uses_operand_signedness_modifiers():
 
     assert 'src0_signed = (inst_.neg & 0x1u) != 0' in cpp
     assert 'src1_signed = (inst_.neg & 0x2u) != 0' in cpp
-    assert 'raw_a | ~0xF' in cpp
-    assert 'raw_b | ~0xF' in cpp
+    assert 'src0_bits | ~0xF' in cpp
+    assert 'src1_bits | ~0xF' in cpp
     assert 'int64_t sum' in cpp
     assert 'std::numeric_limits<int32_t>::min()' in cpp
     assert 'std::numeric_limits<int32_t>::max()' in cpp
@@ -277,6 +277,29 @@ def test_dot2_half_forms_narrow_inline_float_constants():
                 )
 
 
+def test_float_dot2_accumulator_takes_neg_hi_as_abs():
+    for accumulation in (FloatDotAccumulation.GFX11, FloatDotAccumulation.GFX12):
+        for cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
+            cpp = gen_dot2(
+                ['vdst'],
+                ['src0', 'src1', 'src2'],
+                cls,
+                opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+                dot_accumulation=accumulation,
+            )
+            assert (
+                'acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, '
+                'inst_.neg_hi, inst_.neg);' in cpp
+            )
+            assert 'acc ^= 0x80000000u' not in cpp
+            if accumulation is FloatDotAccumulation.GFX11:
+                # The host-float fallback for other targets follows the same rule.
+                assert (
+                    'acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.neg_hi, inst_.neg);'
+                    in cpp
+                )
+
+
 def test_rdna4_dot2_uses_exact_policy_and_encoding_specific_inline_halves():
     for cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
         cpp = gen_dot2(
@@ -288,7 +311,7 @@ def test_rdna4_dot2_uses_exact_policy_and_encoding_specific_inline_halves():
         )
         assert 'amdgpu::gfx12_dot2_f32<' in cpp
         assert 'gfx11_dot2_f32' not in cpp
-        assert 'float result = a0 * b0' not in cpp
+        assert 'float result = src0_lo * src1_lo' not in cpp
         for index in range(2):
             if cls == 'dot2_f32_f16':
                 assert f'dot2_src_needs_half_replication(inst_.src{index})' not in cpp
@@ -308,7 +331,9 @@ def test_dot2_true16_narrows_inline_float_constants():
         ('dot2_f16_f16', 'f32_to_f16'),
         ('dot2_bf16_bf16', 'f32_to_bf16'),
     ):
-        cpp = gen_dot2_true16(['vdst'], ['src0', 'src1', 'src2'], cls)
+        cpp = gen_dot2_true16(
+            ['vdst'], ['src0', 'src1', 'src2'], cls, FloatDotAccumulation.GFX12
+        )
 
         assert (
             'if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))' in cpp
@@ -320,6 +345,120 @@ def test_dot2_true16_narrows_inline_float_constants():
         assert f'raw1 = util::{narrow}(std::bit_cast<float>(raw1));' in cpp
         # src2 is read at 16 bits by read_vop3_true16_src, so it is left alone.
         assert 'inst_.src2, src2.size_bits()' not in cpp
+
+
+def test_dot2_true16_uses_the_architecture_packed_dot_step():
+    """V_DOT2_{F16,BF16} run one packed DOT/WMMA step on raw bits, with
+    ABS/NEG applied to the 16-bit halves and no host FP or MODE policy."""
+    for accumulation, arch in (
+        (FloatDotAccumulation.GFX11, 'gfx11'),
+        (FloatDotAccumulation.GFX12, 'gfx12'),
+    ):
+        for cls, bf16, fmt in (
+            ('dot2_f16_f16', 'false', 'F16'),
+            ('dot2_bf16_bf16', 'true', 'BF16'),
+        ):
+            cpp = gen_dot2_true16(['vdst'], ['src0', 'src1', 'src2'], cls, accumulation)
+            assert (
+                f'amdgpu::{arch}_dot2_packed16<{bf16}>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl())'
+                in cpp
+            )
+            assert (
+                f'source_modifier::apply<amdgpu::fp_format::{fmt}>(bits & 0xffffu, source, '
+                'inst_.abs, inst_.neg)' in cpp
+            )
+            assert 'src0_lo = half(raw0, 0), src0_hi = half(raw0 >> 16, 0);' in cpp
+            assert 'src1_lo = half(raw1, 1), src1_hi = half(raw1 >> 16, 1);' in cpp
+            assert 'acc = half(acc_bits, 2);' in cpp
+            # Only an inline constant is converted through a host float.
+            assert '_to_f32' not in cpp
+            assert 'float src0_lo' not in cpp
+            assert 'fp_mode::' not in cpp
+
+
+def test_dot2_true16_rejects_host_float_accumulation():
+    import pytest
+
+    with pytest.raises(ValueError, match='characterized DOT accumulation model'):
+        gen_dot2_true16(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            'dot2_f16_f16',
+            FloatDotAccumulation.HOST_F32,
+        )
+
+
+def test_rdna4_fp8_dot4_uses_the_gfx12_dot_model():
+    from amdisa.semantics import derive_semantics
+
+    for instruction, src0_fp8, src1_fp8 in (
+        ('V_DOT4_F32_FP8_FP8', 'true', 'true'),
+        ('V_DOT4_F32_FP8_BF8', 'true', 'false'),
+        ('V_DOT4_F32_BF8_FP8', 'false', 'true'),
+        ('V_DOT4_F32_BF8_BF8', 'false', 'false'),
+    ):
+        sem = derive_semantics(instruction, 'ENC_VOP3P')
+        assert sem.semantic_class == 'dot4_f32_fp8'
+        cpp = gen_dot4(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            sem.semantic_class,
+            operation=sem.operation,
+            dot_accumulation=FloatDotAccumulation.GFX12,
+        )
+        assert (
+            f'amdgpu::gfx12_dot4_f32_fp8<{src0_fp8}, {src1_fp8}>(raw0, raw1, acc)'
+            in cpp
+        )
+        assert (
+            'acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, '
+            'inst_.neg_hi, inst_.neg);' in cpp
+        )
+        assert 'fp8_e4m3_to_f32' not in cpp
+
+
+def test_fp8_dot4_rejects_other_accumulation_models():
+    import pytest
+
+    with pytest.raises(ValueError, match='GFX12 DOT accumulation model'):
+        gen_dot4(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            'dot4_f32_fp8',
+            operation='fp8_fp8',
+            dot_accumulation=FloatDotAccumulation.HOST_F32,
+        )
+
+
+def test_dot4_dot8_select_source_halves():
+    """Every DOT4/DOT8 form selects halves, including the FP8/BF8 floats."""
+    fp8 = {
+        'operation': 'fp8_fp8',
+        'dot_accumulation': FloatDotAccumulation.GFX12,
+    }
+    for gen, cls, extra in (
+        (gen_dot4, 'dot4_i32_iu8', {}),
+        (gen_dot4, 'dot4_u32_u8', {}),
+        (gen_dot4, 'dot4_i32_i8', {}),
+        (gen_dot4, 'dot4_f32_fp8', fp8),
+        (gen_dot8, 'dot8_i32_iu4', {}),
+        (gen_dot8, 'dot8_u32_u4', {}),
+        (gen_dot8, 'dot8_i32_i4', {}),
+    ):
+        cpp = gen(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            cls,
+            opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+            **extra,
+        )
+        for i in range(2):
+            assert (
+                f'raw{i} = amdgpu::select_packed_halves(raw{i}, inst_.opsel, inst_.opsel_hi, {i});'
+                in cpp
+            )
+        # The accumulator is a full 32-bit operand.
+        assert 'select_packed_halves(raw2' not in cpp
 
 
 def test_dot2_integer_forms_leave_inline_constants_alone():
@@ -657,3 +796,48 @@ def test_renamed_packed_float_routes_use_exact_helpers():
             probe
             == f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({operation}, {str(bf16).lower()});'
         )
+
+
+def test_dot_dispatch_covers_every_semantic_class():
+    """The DOT semantic classes and their DISPATCH handlers must agree exactly.
+
+    The generator keeps no dot2_/dot4_/dot8_ prefix fallback, so a class with
+    no entry would generate a body that throws ``UnimplementedInst``. Checking
+    the other direction too rejects handlers for classes no ISA defines,
+    including bare ``dot2``/``dot4``/``dot8`` routes.
+    """
+    import os
+    from pathlib import Path
+
+    from amdisa.__main__ import _PROFILES
+    from amdisa.codegen.execute import DISPATCH
+    from amdisa.parser import Parser
+    from amdisa.semantics import derive_all_semantics
+
+    mrisa = Path(
+        os.environ.get(
+            'MRISA_PATH',
+            Path(__file__).resolve().parents[6]
+            / 'shared'
+            / 'machine-readable-isa'
+            / 'isa',
+        )
+    )
+    prefixes = ('dot2_', 'dot4_', 'dot8_')
+    found = set()
+    # Taken from the generator's own profile table, minus the bare 'cdna' alias
+    # that has no ISA XML of its own, so a newly supported ISA is covered here
+    # the moment it is registered.
+    for name, profile in _PROFILES.items():
+        if name == 'cdna':
+            continue
+        spec = Parser(
+            str(mrisa / f'amdgpu_isa_{name.replace(".", "_")}.xml'), profile()
+        ).parse()
+        for sem in derive_all_semantics(spec).instructions.values():
+            if sem.semantic_class.startswith(prefixes):
+                found.add(sem.semantic_class)
+
+    assert found, 'no DOT semantic classes found; the ISA specs did not load'
+    routes = ('dot2', 'dot4', 'dot8')
+    assert found == {cls for cls in DISPATCH if cls.startswith(routes)}

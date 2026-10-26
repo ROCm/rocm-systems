@@ -891,9 +891,11 @@ uint16_t decode_sop1_ssrc0(uint32_t word) { return static_cast<uint16_t>(word & 
 
 // A valid probe-call plan over a gfx90a/CDNA2 layout. Resources are planned with
 // only s4 live so the envelope picks low, dead SGPRs.
-TrampolinePlan make_probe_plan(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA2) {
+TrampolinePlan make_probe_plan(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA2,
+                               bool preserve_m0 = false) {
   TrampolinePlan plan;
   plan.arch = arch;
+  plan.preserve_m0 = preserve_m0;
   plan.anchor_offset = 0x1000;
   plan.original_size = 4;
   plan.original_words.assign(1, 0xDEADBEEFu);
@@ -1172,6 +1174,25 @@ TEST(TrampolineBuilderEmit, OriginalAppearsOnceAfterCall) {
   const size_t d = build_wait_all_loads_complete(plan.arch).size();
   const size_t original_index = static_cast<size_t>(first - w.begin());
   EXPECT_EQ(original_index, plan.before_word_count + 2 * d);
+}
+
+// CDNA2 is GFX9 too, so a restored M0 is spaced from the relocated original by the
+// s_nop 0 an M0 reader there needs. The pad sits between the M0 restore, the
+// envelope's last instruction, and the original.
+TEST(TrampolineBuilderEmit, Cdna2M0RestoreIsPaddedBeforeTheOriginal) {
+  const TrampolinePlan plan = make_probe_plan(ROCJITSU_CODE_ARCH_CDNA2, /*preserve_m0=*/true);
+  std::string err;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+  ASSERT_TRUE(bytes.has_value()) << err;
+
+  const std::vector<uint32_t> &w = bytes->trampoline_words;
+  const auto original = std::ranges::find(w, plan.original_words[0]);
+  ASSERT_NE(original, w.end());
+  const size_t index = static_cast<size_t>(original - w.begin());
+  ASSERT_GE(index, 2u);
+  EXPECT_EQ(w[index - 1], build_s_nop(0, plan.arch));
+  EXPECT_EQ(decode_sop1_op(w[index - 2]), sop1_op_mov_b32(plan.arch));
+  EXPECT_EQ(decode_sop1_sdst(w[index - 2]), scalar_operand_m0(plan.arch));
 }
 
 // The return branch (trailing word) targets anchor + original_size.

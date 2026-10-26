@@ -193,7 +193,7 @@ pub struct RjVmUnmap {
     pub length: u64,
 }
 
-/// Simulated GPU metadata (`rj_vm_gpu_info_t`, 312 bytes).
+/// Simulated GPU metadata (`rj_vm_gpu_info_t`, 328 bytes).
 ///
 /// Sent verbatim inside the daemon handshake response so a workload's
 /// interposer can emulate libdrm/DRM device queries client-side. The
@@ -225,6 +225,9 @@ pub struct RjVmGpuInfo {
     pub num_xcc: u32,
     pub max_slots_scratch_cu: u32,
     pub local_mem_size: u64,
+    pub visible_vram_size: u64,
+    pub control_stack_size: u32,
+    pub context_save_size: u32,
     pub vram_type: u32,
     pub lds_size_kb: u32,
     pub mem_width: u32,
@@ -327,25 +330,28 @@ const _: () = {
     assert!(offset_of!(RjVmUnmap, addr) == 0);
     assert!(offset_of!(RjVmUnmap, length) == 8);
 
-    // rj_vm_gpu_info_t — 312 bytes, which is also the size of the
+    // rj_vm_gpu_info_t — 328 bytes, which is also the size of the
     // `RpcGpuInfo` the daemon handshake embeds verbatim (there is a
     // matching static_assert in the C++ `rpc.h`), so this number is load
     // bearing for the wire protocol as well as for the FFI call.
     //
-    // The u32 runs in this struct are interrupted by four u64s; those are
+    // The u32 runs in this struct are interrupted by five u64s; those are
     // the only places padding can appear, so they are the offsets worth
     // pinning. Each one below sits at a position that is already 8-byte
     // aligned, i.e. the C struct happens to have no padding holes at all
     // — if an edit inserts or removes a u32 anywhere before one of them,
     // the anchor moves and this block fails.
-    assert!(size_of::<RjVmGpuInfo>() == 312);
+    assert!(size_of::<RjVmGpuInfo>() == 328);
     assert!(align_of::<RjVmGpuInfo>() == 8);
     assert!(offset_of!(RjVmGpuInfo, present) == 0);
     assert!(offset_of!(RjVmGpuInfo, unique_id) == 24);
     assert!(offset_of!(RjVmGpuInfo, hive_id) == 40);
     assert!(offset_of!(RjVmGpuInfo, local_mem_size) == 96);
-    assert!(offset_of!(RjVmGpuInfo, debug_prop) == 168);
-    assert!(offset_of!(RjVmGpuInfo, marketing_name) == 184);
+    assert!(offset_of!(RjVmGpuInfo, visible_vram_size) == 104);
+    assert!(offset_of!(RjVmGpuInfo, control_stack_size) == 112);
+    assert!(offset_of!(RjVmGpuInfo, context_save_size) == 116);
+    assert!(offset_of!(RjVmGpuInfo, debug_prop) == 184);
+    assert!(offset_of!(RjVmGpuInfo, marketing_name) == 200);
 
     // Scalar widths the signatures below depend on: rj_status_t and
     // rj_vm_mode_t are C enums (4 bytes on every target rocjitsu builds

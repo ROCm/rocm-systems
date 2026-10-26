@@ -235,6 +235,15 @@ namespace envvar {
         false);
   }  // namespace sdma
 
+  namespace tdm {
+    const var<uint32_t> tile_bytes("TILE_BYTES",
+        "TDM tile size in bytes for LDS-staged IPC transfers. 0 (default) "
+        "auto-sets the tile to use all LDS available per block", 0);
+    const var<size_t> threshold("THRESHOLD",
+        "TDM transfer size threshold in bytes; transfers smaller than this use "
+        "the normal (non-TDM) copy path instead", 16384);
+  }  // namespace tdm
+
   namespace _detail {
     std::tuple<var_map_t&, std::mutex&> get_var_map() {
       // construct on first use idiom
