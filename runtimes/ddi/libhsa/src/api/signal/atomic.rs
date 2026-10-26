@@ -9,7 +9,7 @@ use crate::ffi::*;
 use crate::runtime::{boundary, lock};
 use crate::signal::{
     AmdSignal, batch_needs_flush, flush_device_store, flush_signal_store, signal_value_pointer,
-    with_signal,
+    with_public_signal,
 };
 
 #[cfg_attr(
@@ -20,7 +20,8 @@ use crate::signal::{
 /// Loads an HSA signal value with relaxed memory ordering.
 pub unsafe extern "C" fn hsa_signal_load_relaxed(signal: HsaSignal) -> SignalValue {
     // SAFETY: Callers must supply a live HSA signal handle.
-    unsafe { with_signal(signal, |signal| signal.value.load(Ordering::Relaxed)) }.unwrap_or(0)
+    unsafe { with_public_signal(signal, |signal| signal.value.load(Ordering::Relaxed)) }
+        .unwrap_or(0)
 }
 
 #[cfg_attr(
@@ -31,7 +32,8 @@ pub unsafe extern "C" fn hsa_signal_load_relaxed(signal: HsaSignal) -> SignalVal
 /// Loads a signal value with the HSA SC-acquire contract.
 pub unsafe extern "C" fn hsa_signal_load_scacquire(signal: HsaSignal) -> SignalValue {
     // SAFETY: Callers must supply a live HSA signal handle.
-    unsafe { with_signal(signal, |signal| signal.value.load(Ordering::Acquire)) }.unwrap_or(0)
+    unsafe { with_public_signal(signal, |signal| signal.value.load(Ordering::Acquire)) }
+        .unwrap_or(0)
 }
 
 #[cfg_attr(
@@ -55,7 +57,7 @@ pub unsafe extern "C" fn hsa_signal_load_acquire(signal: HsaSignal) -> SignalVal
 pub unsafe extern "C" fn hsa_signal_store_relaxed(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Callers must supply a live HSA signal handle.
     let _ = unsafe {
-        with_signal(signal, |signal| {
+        with_public_signal(signal, |signal| {
             match signal.kind.load(Ordering::Acquire) {
                 AMD_SIGNAL_KIND_DOORBELL => {
                     let address = signal.value.load(Ordering::Relaxed) as usize;
@@ -108,7 +110,7 @@ pub unsafe extern "C" fn hsa_signal_silent_store_screlease(signal: HsaSignal, va
 pub unsafe extern "C" fn hsa_signal_store_screlease(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Callers must supply a live HSA signal handle.
     let _ = unsafe {
-        with_signal(signal, |signal| {
+        with_public_signal(signal, |signal| {
             match signal.kind.load(Ordering::Acquire) {
                 AMD_SIGNAL_KIND_DOORBELL => {
                     fence(Ordering::Release);
@@ -147,7 +149,7 @@ pub unsafe extern "C" fn hsa_signal_store_release(signal: HsaSignal, value: Sign
 unsafe fn signal_exchange(signal: HsaSignal, value: SignalValue, order: Ordering) -> SignalValue {
     // SAFETY: Callers must supply a live HSA user signal.
     unsafe {
-        with_signal(signal, |signal| {
+        with_public_signal(signal, |signal| {
             if batch_needs_flush(std::ptr::from_ref(signal) as usize) {
                 let previous = signal.value.load(Ordering::Acquire);
                 flush_device_store(&signal.value, value);
@@ -170,7 +172,7 @@ unsafe fn signal_compare_exchange(
 ) -> SignalValue {
     // SAFETY: Callers must supply a live HSA user signal.
     unsafe {
-        with_signal(signal, |signal| {
+        with_public_signal(signal, |signal| {
             if batch_needs_flush(std::ptr::from_ref(signal) as usize) {
                 let observed = signal.value.load(Ordering::Acquire);
                 if observed == expected {
@@ -198,7 +200,7 @@ unsafe fn signal_fetch_update(
 ) {
     // SAFETY: Callers must supply a live HSA user signal.
     let _ = unsafe {
-        with_signal(signal, |signal| {
+        with_public_signal(signal, |signal| {
             if batch_needs_flush(std::ptr::from_ref(signal) as usize) {
                 let previous = signal.value.load(Ordering::Acquire);
                 flush_device_store(&signal.value, plain(previous, value));
@@ -419,9 +421,9 @@ pub unsafe extern "C" fn hsa_amd_signal_value_pointer(
         let interrupt = runtime.signal_state.is_interrupt_signal(signal);
         // SAFETY: owns_signal validated the handle while the runtime lock
         // prevents destruction of its backing storage.
-        let Some(pointer) =
-            (unsafe { with_signal(signal, |signal| signal_value_pointer(signal, interrupt)) })
-        else {
+        let Some(pointer) = (unsafe {
+            with_public_signal(signal, |signal| signal_value_pointer(signal, interrupt))
+        }) else {
             return INVALID_SIGNAL;
         };
         let pointer = match pointer {
