@@ -7,6 +7,8 @@
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 
 #include <gtest/gtest.h>
@@ -141,8 +143,19 @@ protected:
     return trace;
   }
 
+  /// Let the wave execute scalar loads from identity-mapped memory.
+  void enable_scalar_loads() {
+    l2.set_backing_memory(&memory);
+    cu->set_gpu_vm(&vm);
+    auto space = vm.register_address_space(0, std::make_shared<IdentityAddressSpaceTranslator>(),
+                                           std::make_shared<GpuMemoryPhysicalAccess>(memory));
+    ASSERT_TRUE(space);
+    wf->set_address_space(space);
+  }
+
   GpuMemory memory{"cbranch_fork_join_memory"};
   L2Cache l2{"cbranch_fork_join_l2"};
+  GpuVm vm;
   std::unique_ptr<ComputeUnitCore> cu;
   Wavefront *wf = nullptr;
 };
@@ -563,6 +576,90 @@ TEST_P(CbranchForkJoinTest, StackEntryOutsideSgprAllocationReportsUndefinedBehav
   EXPECT_EQ(cu->isa_diagnostic_count(), 1u);
   (void)cbranch_join(*wf, /*saved_csp=*/4, kNextPc);
   EXPECT_EQ(cu->isa_diagnostic_count(), 2u);
+}
+
+// Each program below is: a scalar load whose result is still pending, the fork
+// or join at 0x08, then (where present) a read of the load's destination at 0x0C.
+constexpr uint32_t kLoadS20 = 0xC0020514u;     // s_load_dword s20, s[40:41], 0x0
+constexpr uint32_t kLoadS2 = 0xC0020094u;      // s_load_dword s2, s[40:41], 0x0
+constexpr uint32_t kReadS20 = 0xBE950014u;     // s_mov_b32 s21, s20
+constexpr uint32_t kForkVccNext = 0xB86A0000u; // s_cbranch_i_fork vcc, 0 (both sides at 0x0C)
+constexpr uint32_t kJoinS34 = 0xBE802E22u;     // s_cbranch_join s34
+constexpr uint64_t kLoadAddress = 0x300000;
+constexpr uint64_t kAfterStackOp = kCodeBase + 0x0C;
+
+TEST_P(CbranchForkJoinTest, WaitScoreboardSeesOnlyThePoppedJoinEntry) {
+  // The join pops entry 0, s[0:3]; s20 is not part of it.
+  write_program({kLoadS20, 0u, kJoinS34, kReadS20});
+  ASSERT_NO_FATAL_FAILURE(enable_scalar_loads());
+  set_sgpr64(40, kLoadAddress);
+  wf->set_cond_stack_ptr(1);
+  set_sgpr(34, 0);
+  set_sgpr64(0, ~uint64_t{0});
+  set_sgpr64(2, kAfterStackOp);
+
+  (void)cu->step();
+  (void)cu->step();
+  EXPECT_EQ(wf->pc, kAfterStackOp);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+  // The pending s20 result was not consumed, so the real unwaited read reports.
+  (void)cu->step();
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+}
+
+TEST_P(CbranchForkJoinTest, WaitScoreboardSeesNoStackAccessForAUniformFork) {
+  write_program({kLoadS20, 0u, kForkVccNext, kReadS20});
+  ASSERT_NO_FATAL_FAILURE(enable_scalar_loads());
+  set_sgpr64(40, kLoadAddress);
+  wf->set_vcc(~uint64_t{0});
+
+  (void)cu->step();
+  (void)cu->step();
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+  (void)cu->step();
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+}
+
+TEST_P(CbranchForkJoinTest, WaitScoreboardSeesOnlyTheEntryADivergentForkPushes) {
+  // The fork pushes entry 0, s[0:3]; s20 is not part of it.
+  write_program({kLoadS20, 0u, kForkVccNext, kReadS20});
+  ASSERT_NO_FATAL_FAILURE(enable_scalar_loads());
+  set_sgpr64(40, kLoadAddress);
+  wf->set_vcc(0x15);
+
+  (void)cu->step();
+  (void)cu->step();
+  EXPECT_EQ(wf->cond_stack_ptr(), 1u);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+  (void)cu->step();
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+}
+
+TEST_P(CbranchForkJoinTest, WaitScoreboardReportsAForkOverwritingAPendingEntry) {
+  write_program({kLoadS2, 0u, kForkVccNext});
+  ASSERT_NO_FATAL_FAILURE(enable_scalar_loads());
+  set_sgpr64(40, kLoadAddress);
+  wf->set_vcc(0x15);
+
+  (void)cu->step();
+  (void)cu->step();
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+}
+
+TEST_P(CbranchForkJoinTest, WaitScoreboardReportsAJoinReadingAPendingEntry) {
+  write_program({kLoadS2, 0u, kJoinS34});
+  ASSERT_NO_FATAL_FAILURE(enable_scalar_loads());
+  set_sgpr64(40, kLoadAddress);
+  // s2 holds the low half of the resume PC, so give the load the same value.
+  memory.write32(kLoadAddress, static_cast<uint32_t>(kAfterStackOp));
+  wf->set_cond_stack_ptr(1);
+  set_sgpr(34, 0);
+  set_sgpr64(0, ~uint64_t{0});
+  set_sgpr64(2, kAfterStackOp);
+
+  (void)cu->step();
+  (void)cu->step();
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
 }
 
 // MODE.CSP and the fork/join instructions exist only on CDNA1-4.

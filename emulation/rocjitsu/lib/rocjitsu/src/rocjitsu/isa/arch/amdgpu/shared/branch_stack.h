@@ -11,6 +11,7 @@
 
 #include <bit>
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu::amdgpu {
 
@@ -63,6 +64,37 @@ inline BranchStackEntry pop_branch_stack(Wavefront &wf) {
   return {regs.read_sgpr64(sgpr), regs.read_sgpr64(sgpr + 2)};
 }
 
+/// @brief Whether every active lane takes the same side of a fork on @p compare.
+[[nodiscard]] inline bool fork_is_uniform(uint64_t exec, uint64_t compare) {
+  return (compare & exec) == exec || (~compare & exec) == exec;
+}
+
+/// A branch stack entry a fork or join is about to access.
+struct BranchStackAccess {
+  uint32_t first_sgpr; ///< Wave-relative first SGPR of the entry.
+  bool write;          ///< True for a fork's push, false for a join's pop.
+};
+
+/// @brief The entry a fork on @p compare will push, or none if it is uniform.
+/// @details Uses the wave state before the fork executes.
+[[nodiscard]] inline std::optional<BranchStackAccess> fork_stack_access(const Wavefront &wf,
+                                                                        uint64_t compare) {
+  if (fork_is_uniform(wf.exec_raw(), compare))
+    return std::nullopt;
+  return BranchStackAccess{wf.cond_stack_ptr() * 4, /*write=*/true};
+}
+
+/// @brief The entry a join against @p saved_csp will pop, or none if it falls through.
+/// @details Uses the wave state before the join executes.
+[[nodiscard]] inline std::optional<BranchStackAccess> join_stack_access(const Wavefront &wf,
+                                                                        uint32_t saved_csp) {
+  const uint32_t csp = wf.cond_stack_ptr();
+  if (csp == saved_csp)
+    return std::nullopt;
+  constexpr uint32_t kCspValues = Wavefront::CSP_MASK >> Wavefront::CSP_SHIFT;
+  return BranchStackAccess{((csp - 1) & kCspValues) * 4, /*write=*/false};
+}
+
 /// @brief Execute S_CBRANCH_G_FORK or S_CBRANCH_I_FORK.
 /// @details Updates EXEC and the branch stack; the caller must still set the PC
 /// to the returned address to complete the instruction.
@@ -78,10 +110,8 @@ inline BranchStackEntry pop_branch_stack(Wavefront &wf) {
   const uint64_t fail = ~compare & exec;
 
   // Case 1: Every lane takes the same route
-  if (pass == exec)
-    return target;
-  if (fail == exec)
-    return next_pc;
+  if (fork_is_uniform(exec, compare))
+    return pass == exec ? target : next_pc;
 
   // Case 2: Run the side with fewer active lanes first (tie is broken by the pass side)
   const bool fail_runs_first = std::popcount(fail) < std::popcount(pass);
