@@ -1486,16 +1486,7 @@ TEST_F(RasMicrotest, MsgRecvCompletesLengthThenBodyAndResetsSocketState) {
   std::free(msg);
 }
 
-// The length prefix is the first thing a peer sends on a RAS socket, before the
-// RAS_MSG_CONNINIT handshake is processed, so it is wholly attacker-controlled.
-// rasMsgRecv must therefore bound it before handing it to ncclCallocQuiet: a
-// length that cannot describe a real rasMsg has to be rejected rather than
-// allocated, and the caller (rasNetHandleSocket) turns any error into a
-// termination of that one socket, which is the desired response to a peer
-// speaking garbage.
-//
-// Drives rasMsgRecv with a peer-supplied length and asserts it never reaches the
-// body-receive stage: one socketProgress call (the length), no allocation.
+// Feeds rasMsgRecv a peer length prefix and expects rejection before the body is allocated.
 void ExpectMsgRecvRejectsPeerLength(int peerLength) {
   rasSocket sock{};
   int calls = 0;
@@ -1503,10 +1494,7 @@ void ExpectMsgRecvRejectsPeerLength(int peerLength) {
     EXPECT_EQ(NCCL_SOCKET_RECV, op);
     ++calls;
     EXPECT_EQ(1, calls) << "rasMsgRecv proceeded to the body with length " << peerLength;
-    // Only the length prefix is ever written. If rasMsgRecv reaches the body
-    // stage we deliberately touch nothing: with a zero-length allocation `ptr`
-    // is `nullptr - sizeof(int)`, and writing through it would segfault the
-    // whole binary and mask the other cases.
+    // Writing on the body call would segfault: a zero-length allocation makes `ptr` `nullptr - sizeof(int)`.
     if (calls == 1) {
       *static_cast<int*>(ptr) = peerLength;
       *offset = size;
@@ -1527,8 +1515,7 @@ void ExpectMsgRecvRejectsPeerLength(int peerLength) {
 }
 
 TEST_F(RasMicrotest, MsgRecvRejectsNegativeLengthWithoutAllocating) {
-  // A negative int sign-extends to a huge size_t inside ncclCallocQuiet, and
-  // recvLength + sizeof(recvLength) overflows in the body-receive arithmetic.
+  // Sign-extends to a huge size_t in ncclCallocQuiet, and overflows the body-receive arithmetic.
   ExpectMsgRecvRejectsPeerLength(-1);
 }
 
@@ -1542,21 +1529,13 @@ TEST_F(RasMicrotest, MsgRecvRejectsZeroLengthWithoutAllocating) {
 }
 
 TEST_F(RasMicrotest, MsgRecvRejectsLengthTooShortToHoldMessageTypeWithoutAllocating) {
-  // The heap over-read in its crudest form: the allocation used to succeed and
-  // rasMsgRecv handed back a one-byte message, after which rasMsgHandle read
-  // msg->type -- never mind the union member -- off the end of it. A length
-  // that cannot even hold the type field is refused from the prefix alone.
-  // Lengths that can hold it are the body-stage check's problem, below.
+  // rasMsgHandle reads msg->type, so a body too short to hold it is refused from the prefix alone.
   ExpectMsgRecvRejectsPeerLength(1);
   ExpectMsgRecvRejectsPeerLength(RAS_MSG_MINLEN - 1);
 }
 
-// The second half of the over-read defence, and the half that carries the
-// weight: the prefix check only proves the type field is present, so every
-// length from RAS_MSG_MINLEN up to the type's real length must be caught here.
-// The type is not knowable until the body arrives, so rasMsgRecv is expected to
-// reach the body stage -- it must then reject the message rather than hand a
-// truncated one to rasMsgHandle.
+// The type is only knowable once the body arrives, so lengths between RAS_MSG_MINLEN and the type's own
+// length must be rejected at the body stage rather than handed to rasMsgHandle.
 void ExpectMsgRecvRejectsBodyTooShortForType(rasMsgType type, int shortLength) {
   ASSERT_GE(shortLength, RAS_MSG_MINLEN);
   ASSERT_LT(shortLength, static_cast<int>(rasMsgLength(type)));
@@ -1580,20 +1559,14 @@ void ExpectMsgRecvRejectsBodyTooShortForType(rasMsgType type, int shortLength) {
   EXPECT_EQ(nullptr, msg) << "returned a message of type " << type << " truncated to " << shortLength;
   EXPECT_EQ(2, calls);
   EXPECT_FALSE(closed);
-  // The truncated body must be released and the socket state reset, so that the
-  // socket teardown that follows the error does not double-free it.
+  // The socket state must be reset so the teardown that follows the error does not double-free the body.
   EXPECT_EQ(nullptr, sock.recvMsg);
   EXPECT_EQ(0, sock.recvOffset);
   EXPECT_EQ(0, sock.recvLength);
 }
 
-// Every message type the body-length check must cover. rasMsgType carries no
-// count or sentinel to iterate, and adding one would break the no-default
-// switches that -Wswitch relies on in ras_internal.h, so the list is written
-// out -- but only once, and with the compiler made responsible for keeping it
-// complete. RAS_TEST_MSG_TYPE_CASE expands it into a switch with no default
-// compiled as a hard error, so adding a rasMsgType without adding it here fails
-// the build instead of silently dropping the new type out of this test.
+// Every message type the body-length check must cover. rasMsgType has no count or sentinel to iterate, so the
+// list is written out here and AssertRasMsgTypesCoverTheEnum turns a missing entry into a build failure.
 #define RAS_TEST_MSG_TYPES(X)                                                           \
   X(RAS_MSG_CONNINIT) X(RAS_MSG_CONNINITACK) X(RAS_MSG_KEEPALIVE)                       \
   X(RAS_MSG_PEERSUPDATE) X(RAS_MSG_COLLREQ) X(RAS_MSG_COLLRESP)
@@ -1612,18 +1585,15 @@ inline void AssertRasMsgTypesCoverTheEnum(rasMsgType type) {
 TEST_F(RasMicrotest, MsgRecvRejectsBodyTooShortForItsMessageType) {
   for (rasMsgType type : kRasMsgTypes) {
     AssertRasMsgTypesCoverTheEnum(type);
-    // One byte short of correct, and the shortest length the prefix check lets
-    // through -- the two ends of the window this check alone has to cover.
+    // The two ends of the window: one byte short, and the shortest length the prefix check lets through.
     ExpectMsgRecvRejectsBodyTooShortForType(type, static_cast<int>(rasMsgLength(type)) - 1);
     ExpectMsgRecvRejectsBodyTooShortForType(type, RAS_MSG_MINLEN);
   }
 }
 
 TEST_F(RasMicrotest, MsgRecvRejectsCollReqTooShortToHoldItsCollectiveType) {
-  // The collective type is what tells rasMsgRecv how long a RAS_MSG_COLLREQ has
-  // to be, so it must be read before the length is known -- and reading it is
-  // itself an over-read unless the body is long enough to contain it. One byte
-  // short of the end of the type field is the case that proves the point.
+  // The collective type must be read before the required length is known, so reading it is itself an over-read
+  // unless the body is long enough to contain it.
   const int shortLength =
     static_cast<int>(offsetof(rasMsg, collReq) + offsetof(rasCollRequest, type) + sizeof(rasCollectiveType)) - 1;
   rasSocket sock{};
@@ -1645,8 +1615,7 @@ TEST_F(RasMicrotest, MsgRecvRejectsCollReqTooShortToHoldItsCollectiveType) {
 }
 
 TEST_F(RasMicrotest, MsgRecvRejectsCollReqBodyTooShortForItsCollectiveType) {
-  // RAS_MSG_COLLREQ's required length depends on a second peer-supplied field,
-  // the collective type, nested inside the body.
+  // RAS_MSG_COLLREQ's required length depends on the collective type nested inside the body.
   const auto collType = RAS_COLL_COMMS;
   const int shortLength = static_cast<int>(rasMsgLength(RAS_MSG_COLLREQ, collType)) - 1;
   rasSocket sock{};
@@ -1670,15 +1639,10 @@ TEST_F(RasMicrotest, MsgRecvRejectsCollReqBodyTooShortForItsCollectiveType) {
   EXPECT_EQ(nullptr, sock.recvMsg);
 }
 
-// The fixed part of a message carries element counts for the variable-length
-// arrays that follow it (peers, dead peers, skipped comms, collective data).
-// Those counts are peer-supplied too, so a message whose fixed part is complete
-// can still claim a million peers in forty bytes; the handlers then index into
-// memory past the end of the allocation. rasMsgRecv must size the tails from
-// the counts and reject anything that does not fit.
+// The element counts in the fixed part are peer-supplied too, so a complete fixed part can still claim a
+// million peers in forty bytes and send the handlers indexing past the end of the allocation.
 //
-// Drives rasMsgRecv with a peer-supplied length and a body written by `fill`,
-// and returns the result. Anything allocated on the way is released.
+// Drives rasMsgRecv with a peer length prefix and a body written by `fill`, releasing anything allocated.
 ncclResult_t MsgRecvWithBody(int peerLength, const std::function<void(rasMsg*)>& fill) {
   rasSocket sock{};
   int calls = 0;
@@ -1701,8 +1665,7 @@ ncclResult_t MsgRecvWithBody(int peerLength, const std::function<void(rasMsg*)>&
 
 TEST_F(RasMicrotest, MsgRecvRejectsPeersUpdateClaimingMorePeersThanItCarries) {
   const int msgLen = static_cast<int>(rasMsgLength(RAS_MSG_PEERSUPDATE));
-  // One peer entry announced, none transmitted: rasMsgHandlePeersUpdate would
-  // read a whole rasPeerInfo past the end of the body.
+  // One peer announced, none transmitted: rasMsgHandlePeersUpdate reads a rasPeerInfo past the body.
   EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
     msg->type = RAS_MSG_PEERSUPDATE;
     msg->peersUpdate.nPeers = 1;
@@ -1725,8 +1688,7 @@ TEST_F(RasMicrotest, MsgRecvRejectsPeersUpdateClaimingMorePeersThanItCarries) {
 }
 
 TEST_F(RasMicrotest, MsgRecvRejectsPeersUpdateClaimingMoreDeadPeersThanItCarries) {
-  // The dead peers follow the peers array, so the check has to account for both
-  // tails: a message long enough for its one peer is still short by one address.
+  // Both tails count: a message long enough for its one peer is still short by one dead-peer address.
   const int msgLen = static_cast<int>(rasMsgLength(RAS_MSG_PEERSUPDATE) + sizeof(rasPeerInfo));
   EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
     msg->type = RAS_MSG_PEERSUPDATE;
@@ -1796,8 +1758,7 @@ TEST_F(RasMicrotest, MsgRecvRejectsCollRespClaimingMoreThanItCarries) {
 }
 
 TEST_F(RasMicrotest, MsgRecvAcceptsCollRespThatCarriesTheTailsItClaims) {
-  // The sender aligns the data to int64_t, so the accepted length must include
-  // that padding -- a check that ignored it would reject a legitimate response.
+  // The sender aligns the data to int64_t, so a check that ignored the padding would reject this.
   size_t msgLen = rasMsgLength(RAS_MSG_COLLRESP) + 2 * sizeof(ncclSocketAddress);
   ALIGN_SIZE(msgLen, alignof(int64_t));
   msgLen += 16;
