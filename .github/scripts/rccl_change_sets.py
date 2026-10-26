@@ -53,7 +53,20 @@ COVERAGE_RULES = (
         name="host-only unit tests",
         workflow=".github/workflows/rccl-host-unit-tests.yml",
         branches=("develop",),
-        patterns=("projects/rccl/test/host/*",),
+        patterns=(
+            "projects/rccl/test/host/*",
+            # CTest categories of the micro host binaries. Only test/host's in-tree
+            # CMake reads them; the GPU suites' test_categories*.yaml do not match.
+            "projects/rccl/test/test_categories_micro*.yaml",
+        ),
+    ),
+    # Runs the test_runner unit tests. coco's PR suites are harness-owned YAML
+    # and never run the test runner; math-ci precheckin runs its configs.
+    CoverageRule(
+        name="test runner",
+        workflow=".github/workflows/rccl-host-unit-tests.yml",
+        branches=("develop",),
+        patterns=("projects/rccl/tools/scripts/test_runner/*",),
     ),
 )
 
