@@ -982,8 +982,8 @@ struct thread_info_data_t
     std::int32_t  parent_process_id = 0;
     std::int32_t  process_id        = 0;
     std::uint64_t thread_id         = 0;
-    std::uint32_t start             = 0;
-    std::uint32_t end               = 0;
+    std::uint64_t start             = 0;
+    std::uint64_t end               = 0;
     std::string   extdata;
 
     bool operator==(const thread_info_data_t&) const = default;
@@ -1007,8 +1007,8 @@ struct process_data_t
     std::string   command;
     std::string   environment;
     std::string   extdata;
-    std::uint32_t start = 0;
-    std::uint32_t end   = 0;
+    std::uint64_t start = 0;
+    std::uint64_t end   = 0;
 };
 
 // Mirrors the field layout of trace_cache::kernel_dispatch_sample's constructor
@@ -1535,11 +1535,6 @@ struct externals
         [[nodiscard]] process_data_t            get_process_info() const { return {}; }
         [[nodiscard]] std::optional<pmc_info_t> get_pmc_info(
             std::string_view /*unique_name*/) const
-        {
-            return std::nullopt;
-        }
-        [[nodiscard]] std::optional<thread_info_t> get_thread_info(
-            std::uint32_t /*thread_id*/) const
         {
             return std::nullopt;
         }
