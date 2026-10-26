@@ -22,6 +22,7 @@ namespace rocjitsu::amdgpu {
 /// @brief Instruction fields controlling linear image access.
 struct ImageFields {
   uint32_t dmask = 0;
+  uint32_t dim = 0;
   bool a16 = false;
   bool d16 = false;
   bool r128 = false;
@@ -69,7 +70,8 @@ inline ImageAddressRegisters gfx12_image_address_registers(const VimageMachineIn
 /// half registers. DA=0 accesses layer zero without a layer coordinate.
 /// @returns Failure after reporting an unsupported operand (empty DMASK,
 /// UNORM=0 store) or an unimplemented feature (tiling, mips, cube, MSAA,
-/// nonzero base array, format outside the buffer table, TFE, or LWE).
+/// nonzero base array, incompatible RDNA DIM, format outside the buffer table,
+/// TFE, or LWE).
 inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
                                          uint32_t resource_reg,
                                          const ImageAddressRegisters &address_registers,
@@ -164,6 +166,29 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   const bool has_y = resource.type != kImage1d && resource.type != kImage1dArray;
   const bool has_slice = resource.type == kImage3d || (layered && fields.da);
   const uint32_t coordinates = 1 + (has_y ? 1 : 0) + (has_slice ? 1 : 0);
+  if (!gfx9) {
+    const uint32_t dim = fields.dim & 7u;
+    uint32_t dim_spatial_coordinates = 0;
+    switch (dim) {
+    case 0: // 1D
+    case 4: // 1D_ARRAY
+      dim_spatial_coordinates = 1;
+      break;
+    case 1: // 2D
+    case 5: // 2D_ARRAY
+      dim_spatial_coordinates = 2;
+      break;
+    case 2: // 3D
+      dim_spatial_coordinates = 3;
+      break;
+    default: // CUBE and MSAA dimensions are not implemented.
+      return fail(InstructionExecutionError::UnimplementedInstruction);
+    }
+    const uint32_t resource_spatial_coordinates = resource.type == kImage3d ? 3 : has_y ? 2 : 1;
+    const uint32_t dim_coordinates = image_coordinate_register_count(dim, false);
+    if (dim_spatial_coordinates < resource_spatial_coordinates || dim_coordinates < coordinates)
+      return fail(InstructionExecutionError::UnimplementedInstruction);
+  }
   const uint32_t address_words = fields.a16 ? (coordinates + 1) / 2 : coordinates;
   const uint32_t slice_rows = has_y ? resource.height : 1;
   RegisterAccess regs(wf);

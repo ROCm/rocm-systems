@@ -4849,7 +4849,7 @@ def test_generated_rdna_image_load_tracks_d16_destination_preservation(
         ('rdna4', 'vimage', 'Vimage'),
     ],
 )
-def test_generated_rdna_image_execution_passes_tfe(
+def test_generated_rdna_image_execution_passes_dim_and_tfe(
     amdgpu_generated_root: Path, arch: str, stem: str, suffix: str
 ):
     execution = (
@@ -4858,6 +4858,7 @@ def test_generated_rdna_image_execution_passes_tfe(
     image_load = _generated_function_body(
         execution, f'void ImageLoad{suffix}::execute_impl'
     )
+    assert '.dim = inst_.dim' in image_load
     assert '.tfe = bool(inst_.tfe)' in image_load
 
 

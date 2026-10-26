@@ -559,11 +559,16 @@ TEST(ImageAccessTest, RdnaLinearR32DescriptorsPrepareTheExpectedMemoryAccess) {
 
     amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
     state.is_load = true;
-    ASSERT_TRUE(
-        amdgpu::prepare_image_access(
-            *wf, state, 0, amdgpu::contiguous_image_address_registers(0),
-            {.dmask = 15, .a16 = false, .d16 = false, .lwe = false, .da = true, .unorm = true})
-            .succeeded());
+    ASSERT_TRUE(amdgpu::prepare_image_access(*wf, state, 0,
+                                             amdgpu::contiguous_image_address_registers(0),
+                                             {.dmask = 15,
+                                              .dim = 1,
+                                              .a16 = false,
+                                              .d16 = false,
+                                              .lwe = false,
+                                              .da = true,
+                                              .unorm = true})
+                    .succeeded());
     EXPECT_EQ(state.lane_mask, 1u);
     EXPECT_EQ(state.per_lane_addr[0], kBase);
     EXPECT_EQ(state.elem_size, 4u);
@@ -778,6 +783,72 @@ TEST_P(RdnaDecodedImageAccessTest, TfeLoadReportsUnimplementedBeforeProducingDat
   EXPECT_EQ(inst->data(), nullptr);
   EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0xaaaaaaaau);
   EXPECT_EQ(cu->read_vgpr(vb + 9, 0), 0xdeadbeefu);
+}
+
+TEST_P(RdnaDecodedImageAccessTest, OneDimensionalDimRejectsTwoDimensionalResource) {
+  for (const uint8_t dim : {0, 4}) {
+    for (const bool load : {false, true}) {
+      for (const bool a16 : {false, true}) {
+        for (const bool nsa : {false, true}) {
+          if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4 && nsa)
+            continue;
+          SCOPED_TRACE(testing::Message() << "dim=" << unsigned{dim} << " load=" << load
+                                          << " a16=" << a16 << " nsa=" << nsa);
+          auto decoded = decode(load, false, dim, a16, nsa);
+          ASSERT_TRUE(decoded.succeeded());
+          std::unique_ptr<Instruction> inst = std::move(decoded).value();
+          ASSERT_NE(inst, nullptr);
+          EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
+          EXPECT_EQ(wf->instruction_execution_error(),
+                    amdgpu::InstructionExecutionError::UnimplementedInstruction);
+          EXPECT_EQ(inst->data(), nullptr);
+        }
+      }
+    }
+  }
+}
+
+TEST_P(RdnaDecodedImageAccessTest, TwoDimensionalArrayDimUsesTwoDimensionalResourcePrefix) {
+  const uint32_t vb = wf->vgpr_alloc().base;
+  wf->set_exec(1);
+  for (const bool a16 : {false, true}) {
+    for (const bool nsa : {false, true}) {
+      if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4 && nsa)
+        continue;
+      SCOPED_TRACE(testing::Message() << "a16=" << a16 << " nsa=" << nsa);
+      const bool noncontiguous = GetParam() == ROCJITSU_CODE_ARCH_RDNA4 || nsa;
+      cu->write_vgpr(vb + 2, 0, a16 ? 2u | (1u << 16) : 2u);
+      cu->write_vgpr(vb + 3, 0, noncontiguous ? 0xdeadbeef : 1u);
+      cu->write_vgpr(vb + 6, 0, noncontiguous ? 1u : 0xdeadbeef);
+      const uint32_t value = 0x12340000u | (uint32_t{a16} << 1) | uint32_t{nsa};
+      cu->write_vgpr(vb + 8, 0, value);
+
+      for (const bool load : {false, true}) {
+        auto decoded = decode(load, false, 5, a16, nsa);
+        ASSERT_TRUE(decoded.succeeded());
+        std::unique_ptr<Instruction> inst = std::move(decoded).value();
+        ASSERT_NE(inst, nullptr);
+        const InstDefUse def_use(*inst);
+        EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 2, 1}));
+        if (!a16) {
+          EXPECT_TRUE(def_use.uses.contains(
+              {RegClass::VGPR, static_cast<uint16_t>(noncontiguous ? 6 : 3), 1}));
+        }
+
+        ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+        amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+        ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+        cu->l1_vector().flush_all();
+        l2.flush_all();
+        if (!load) {
+          EXPECT_EQ(memory.read32(kBase + 264), value);
+          cu->write_vgpr(vb + 8, 0, 0xdeadbeef);
+        } else {
+          EXPECT_EQ(cu->read_vgpr(vb + 8, 0), value);
+        }
+      }
+    }
+  }
 }
 
 TEST_P(RdnaDecodedImageAccessTest, NonNsaAddressWidthFollowsDimAndA16) {
