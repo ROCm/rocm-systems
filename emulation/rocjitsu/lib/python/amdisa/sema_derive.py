@@ -2913,9 +2913,23 @@ class _Cbranch(_ScalarDeriver):
         return SemaBlock(sem.name, ExecModel.BRANCH, body)
 
 
+# The fork/join blocks below only feed property derivation; branch classes are
+# never lowered to C++. Their `cbranch_fork`/`cbranch_join` calls are
+# placeholders, distinct from the C++ helpers of the same names in
+# shared/branch_stack.h, which take a fall-through PC, return the next PC and
+# update EXEC as a side effect. ExecModel.BRANCH supplies IS_BRANCH and
+# IGNORES_EXEC, and the synthetic EXEC_RAW assignment supplies WRITES_EXEC.
+
+
 @_register('cbranch_fork')
 class _CbranchFork(_ScalarDeriver):
-    """S_CBRANCH_{G,I}_FORK: EXEC = cbranch_fork(compare, target, EXEC)."""
+    """S_CBRANCH_{G,I}_FORK: split EXEC on a lane mask.
+
+    If every active lane agrees, branch to the target or fall through like an
+    ordinary branch. Otherwise run the side with fewer active lanes (the taken
+    side on a tie) and push the other side's EXEC mask and resume PC onto the
+    MODE.CSP branch stack.
+    """
 
     @staticmethod
     def derive(sem: InstructionSemantics) -> SemaBlock:
@@ -2930,13 +2944,19 @@ class _CbranchFork(_ScalarDeriver):
                 _id('EXEC_RAW', SemaType.U64),
             ),
         )
+        # Synthetic: makes the block report WRITES_EXEC.
         body = _assign(_id('EXEC_RAW', SemaType.U64), result)
         return SemaBlock(sem.name, ExecModel.BRANCH, body)
 
 
 @_register('cbranch_join')
 class _CbranchJoin(_ScalarDeriver):
-    """S_CBRANCH_JOIN: EXEC = cbranch_join(saved_csp, EXEC)."""
+    """S_CBRANCH_JOIN: resume the path its fork left waiting.
+
+    If MODE.CSP still differs from the value saved before the matching fork,
+    pop the waiting path's EXEC mask and resume PC and jump there. Otherwise
+    both paths have run and execution falls through.
+    """
 
     @staticmethod
     def derive(sem: InstructionSemantics) -> SemaBlock:
@@ -2950,6 +2970,7 @@ class _CbranchJoin(_ScalarDeriver):
                 _id('EXEC_RAW', SemaType.U64),
             ),
         )
+        # Synthetic: makes the block report WRITES_EXEC.
         body = _assign(_id('EXEC_RAW', SemaType.U64), result)
         return SemaBlock(sem.name, ExecModel.BRANCH, body)
 
