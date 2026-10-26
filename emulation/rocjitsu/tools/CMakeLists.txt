@@ -28,19 +28,37 @@ target_include_directories(
     rocjitsu_translate_cli
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 )
-target_link_libraries(rocjitsu_translate_cli PUBLIC rocjitsu_tooling)
+target_link_libraries(rocjitsu_translate_cli PUBLIC rocjitsu_tooling util_cli)
 rj_configure_target(rocjitsu_translate_cli TOOL)
 
 add_executable(rj_dbt_translate rj_dbt_translate_main.cpp)
 target_link_libraries(rj_dbt_translate PRIVATE rocjitsu_translate_cli)
 rj_configure_target(rj_dbt_translate TOOL)
 
-add_executable(rj_decode_benchmark rj_decode_benchmark.cpp)
+add_executable(
+    rj_decode_benchmark
+    rj_decode_benchmark.cpp
+    decode_benchmark_cli.cpp
+)
 target_link_libraries(
     rj_decode_benchmark
-    PRIVATE rocjitsu_analysis_internal rocjitsu_amdgpu_isa_model_registry
+    PRIVATE
+        util_cli
+        rocjitsu_analysis_internal
+        rocjitsu_amdgpu_isa_model_registry
 )
 rj_configure_target(rj_decode_benchmark PRIVATE_INCLUDES WARNINGS)
+
+if(BUILD_TESTING)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(
+        NAME cli.decode_benchmark_process
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_decode_benchmark_cli.py
+            $<TARGET_FILE:rj_decode_benchmark>
+    )
+endif()
 
 # Ahead-of-time population of the shared translation tier.
 #
@@ -62,7 +80,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_link_libraries(
         rj_pretranslate
-        PRIVATE rocjitsu_gfx1250_b0_to_a0 Threads::Threads ${CMAKE_DL_LIBS}
+        PRIVATE
+            util_cli
+            rocjitsu_gfx1250_b0_to_a0
+            Threads::Threads
+            ${CMAKE_DL_LIBS}
     )
     rj_configure_target(rj_pretranslate PRIVATE_INCLUDES WARNINGS)
     # Bind to the translator installed beside us. Two copies would carry two
@@ -71,5 +93,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set_target_properties(
         rj_pretranslate
         PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()
+
+if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME cli.tools_process
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_shared_cli_tools.py
+            $<TARGET_FILE:rj_dbt_translate> $<TARGET_FILE:rj_pretranslate>
+            $<TARGET_FILE:rj_ip_discovery> $<TARGET_FILE:rj_decode_fuzz>
+            $<TARGET_FILE:rocjitsu_bin>
     )
 endif()

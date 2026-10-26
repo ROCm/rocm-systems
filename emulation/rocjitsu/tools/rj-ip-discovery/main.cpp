@@ -10,6 +10,8 @@
 /// `/lib/firmware/amdgpu/ip_discovery.bin` in a guest and boot with
 /// `amdgpu.discovery=2`.
 
+#include "util/cli.h"
+
 #include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
 #include "rocjitsu/vm/amdgpu/pci/ip_discovery.h"
 
@@ -26,20 +28,33 @@ int main(int argc, char **argv) {
               << *generations.error() << "\n";
     return EXIT_FAILURE;
   }
-  if (argc != 3) {
-    std::cerr << "usage: rj-ip-discovery <generation> <output-path>\n"
-              << "  known generations: " << generations.known_ids() << "\n";
+  using namespace util::cli;
+  Command command{"rj-ip-discovery"};
+  auto help =
+      std::make_shared<BoolFlag>(FlagInfo{"--help", {"-h"}, "Show help", ValueMode::Switch});
+  auto report = [](std::string_view message) { std::cerr << message << '\n'; };
+  DiagnosticEmitter diagnostic(report);
+  if (command.add_flag(help, diagnostic).failed())
     return EXIT_FAILURE;
+  std::vector<std::string_view> arguments(argv + 1, argv + argc);
+  auto parsed = parse(command, arguments, diagnostic);
+  if (parsed.failed())
+    return EXIT_FAILURE;
+  if (help->value() || parsed.value().positional.size() != 2) {
+    std::cerr << format_help(command) << "\nRequired arguments: <generation> <output-path>\n"
+              << "  known generations: " << generations.known_ids() << "\n";
+    return help->value() ? EXIT_SUCCESS : EXIT_FAILURE;
   }
+  const auto &inputs = parsed.value().positional;
 
   // Resolved through the registry the device uses, so a table written here and
   // a table the device publishes come from one factory. A guest that saw
   // different hardware depending on which path delivered its table would be
   // worse off than with either alone, and naming the part is what makes those
   // two the same question.
-  const rocjitsu::GpuGenerationDescriptor *generation = generations.find(std::string_view(argv[1]));
+  const rocjitsu::GpuGenerationDescriptor *generation = generations.find(inputs[0]);
   if (generation == nullptr) {
-    std::cerr << "rj-ip-discovery: no generation named " << argv[1] << "; known generations are "
+    std::cerr << "rj-ip-discovery: no generation named " << inputs[0] << "; known generations are "
               << generations.known_ids() << "\n";
     return EXIT_FAILURE;
   }
@@ -65,14 +80,14 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  std::ofstream out(argv[2], std::ios::binary);
+  std::ofstream out(inputs[1], std::ios::binary);
   out.write(reinterpret_cast<const char *>(table.data()),
             static_cast<std::streamsize>(table.size()));
   if (!out) {
-    std::cerr << "rj-ip-discovery: cannot write " << argv[2] << "\n";
+    std::cerr << "rj-ip-discovery: cannot write " << inputs[1] << "\n";
     return EXIT_FAILURE;
   }
 
-  std::cerr << "rj-ip-discovery: wrote " << table.size() << " bytes to " << argv[2] << "\n";
+  std::cerr << "rj-ip-discovery: wrote " << table.size() << " bytes to " << inputs[1] << "\n";
   return EXIT_SUCCESS;
 }

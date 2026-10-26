@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "dbt_translate_cli.h"
+#include "util/cli.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -19,6 +20,7 @@
 
 using namespace rocjitsu;
 using namespace rocjitsu::tools;
+namespace cli = util::cli;
 
 namespace {
 
@@ -39,6 +41,7 @@ struct TargetInfo {
   rj_code_arch_t arch;
   uint32_t mach;
   rj_code_target_id_t code_object_target;
+  bool operator==(const TargetInfo &) const = default;
 };
 
 // \NPI new GPU: add a {"gfxNNNN", ARCH, EF_MACH, TARGET} row here
@@ -81,33 +84,9 @@ void print_supported_targets(std::ostream &os) {
   }
 }
 
-void print_help() {
-  std::cout
-      << "Usage: rj_dbt_translate INPUT --input-target TARGET --output-target TARGET "
-         "[options]\n\n"
-      << "Options:\n"
-      << "  --input-target TARGET           Input LLVM machine, e.g. gfx950\n"
-      << "  --output-target TARGET          Output LLVM machine, e.g. gfx1200\n"
-      << "  --input-revision REVISION       Input revision: a0 or b0 (gfx1250 only)\n"
-      << "  --output-revision REVISION      Output revision: a0 or b0 (gfx1250 only)\n"
-      << "  --code-object-index N           Code-object index for executable input (default: 0)\n"
-      << "  --output-mode MODE              disasm, code-object, or diff (default: disasm)\n"
-      << "  --debug-conservative-liveness N Only allocate free VGPR scratch at or above N\n"
-      << "  --debug-continue-after-failure Continue collecting diagnostics after failures\n"
-      << "  --skip-failed-kernels          Preserve failed kernels and continue other kernels\n"
-      << "  --verify-idempotence           Require a same-architecture second pass to be "
-         "unchanged\n"
-      << "  --verify-rewrite-discharge     Require no registered rewrite trigger in final output\n"
-      << "  --show-all-translations         Include unchanged identity mappings in diff output\n"
-      << "  --list-code-objects             List extractable code objects and exit\n"
-      << "  --help                          Show this help\n\n"
-      << "Note: gfx1250 b0-to-a0 selects its translation profile; equal revisions are identity.\n\n"
-      << "Supported target names: ";
-  print_supported_targets(std::cout);
-  std::cout << ".\n";
-}
-
 [[nodiscard]] bool parse_u32(std::string_view text, uint32_t &value) {
+  if (text.empty())
+    return false;
   int base = 10;
   if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
     text.remove_prefix(2);
@@ -117,32 +96,6 @@ void print_help() {
   auto *end = text.data() + text.size();
   auto [ptr, ec] = std::from_chars(begin, end, value, base);
   return ec == std::errc{} && ptr == end;
-}
-
-[[nodiscard]] std::optional<TargetInfo> parse_target_info(std::string_view value) {
-  for (const TargetInfo &target : kTargetInfos) {
-    if (value == target.name)
-      return target;
-  }
-  return std::nullopt;
-}
-
-[[nodiscard]] std::optional<OutputMode> parse_output_mode(std::string_view value) {
-  if (value == "disasm")
-    return OutputMode::Disasm;
-  if (value == "code-object")
-    return OutputMode::CodeObject;
-  if (value == "diff")
-    return OutputMode::Diff;
-  return std::nullopt;
-}
-
-[[nodiscard]] std::optional<ProcessorRevision> parse_revision(std::string_view value) {
-  if (value == "a0")
-    return ProcessorRevision::Gfx1250A0;
-  if (value == "b0")
-    return ProcessorRevision::Gfx1250B0;
-  return std::nullopt;
 }
 
 [[nodiscard]] std::string_view revision_name(ProcessorRevision revision) {
@@ -157,135 +110,212 @@ void print_help() {
   return "unspecified";
 }
 
-[[nodiscard]] bool require_value(int argc, char **argv, int &index, std::string_view flag,
-                                 std::string_view &value) {
-  if (index + 1 >= argc) {
-    std::cerr << "missing value for " << flag << "\n";
-    return false;
+// The DBT interface needs optional typed choices and hexadecimal bounded numbers.
+// Keep these small adapters local until another tool needs the same contracts.
+template <typename T> class ChoiceFlag final : public cli::Flag {
+public:
+  ChoiceFlag(cli::FlagInfo info, std::vector<std::pair<std::string, T>> choices,
+             std::optional<T> initial = {})
+      : Flag(std::move(info)), choices_(std::move(choices)), value_(std::move(initial)) {}
+  const std::optional<T> &value() const { return value_; }
+  util::Result set_value(std::optional<T> value, util::DiagnosticEmitter diagnostic) {
+    if (value) {
+      bool valid = false;
+      for (const auto &[name, candidate] : choices_)
+        valid |= candidate == *value;
+      if (!valid)
+        return diagnostic.emit() << "unsupported choice";
+    }
+    value_ = std::move(value);
+    return util::Result::success();
   }
-  ++index;
-  value = argv[index];
-  return true;
+  std::string format_value() const override {
+    for (const auto &[name, candidate] : choices_)
+      if (value_ && candidate == *value_)
+        return name;
+    return "unset";
+  }
+
+private:
+  util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override {
+    for (const auto &[name, candidate] : choices_)
+      if (text == name)
+        return set_value(candidate, diagnostic);
+    return diagnostic.emit() << "unsupported value '" << text << "'";
+  }
+  std::vector<std::pair<std::string, T>> choices_;
+  std::optional<T> value_;
+};
+
+class DbtUIntFlag final : public cli::Flag {
+public:
+  DbtUIntFlag(cli::FlagInfo info, uint32_t maximum = UINT32_MAX,
+              std::optional<uint32_t> initial = 0)
+      : Flag(std::move(info)), value_(initial), maximum_(maximum) {}
+  std::optional<uint32_t> value() const { return value_; }
+  util::Result set_value(std::optional<uint32_t> value, util::DiagnosticEmitter diagnostic) {
+    if (value && *value > maximum_)
+      return diagnostic.emit() << "expected an integer at most " << maximum_;
+    value_ = value;
+    return util::Result::success();
+  }
+  std::string format_value() const override { return value_ ? std::to_string(*value_) : "unset"; }
+
+private:
+  util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override {
+    uint32_t parsed = 0;
+    if (!parse_u32(text, parsed))
+      return diagnostic.emit() << "expected a decimal or hexadecimal uint32";
+    return set_value(parsed, diagnostic);
+  }
+  std::optional<uint32_t> value_;
+  uint32_t maximum_;
+};
+
+struct DbtFlags {
+  std::shared_ptr<ChoiceFlag<TargetInfo>> input_target;
+  std::shared_ptr<ChoiceFlag<TargetInfo>> output_target;
+  std::shared_ptr<ChoiceFlag<ProcessorRevision>> input_revision;
+  std::shared_ptr<ChoiceFlag<ProcessorRevision>> output_revision;
+  std::shared_ptr<ChoiceFlag<OutputMode>> output_mode;
+  std::shared_ptr<DbtUIntFlag> index = std::make_shared<DbtUIntFlag>(cli::FlagInfo{
+      "--code-object-index", {}, "Code-object index for executable input (default: 0)"});
+  std::shared_ptr<DbtUIntFlag> vgpr = std::make_shared<DbtUIntFlag>(
+      cli::FlagInfo{"--debug-conservative-liveness",
+                    {},
+                    "Only allocate free VGPR scratch at or above this index"},
+      UINT16_MAX, std::nullopt);
+  std::shared_ptr<cli::BoolFlag> keep_going = std::make_shared<cli::BoolFlag>(
+      cli::FlagInfo{"--debug-continue-after-failure",
+                    {},
+                    "Continue collecting diagnostics after failures",
+                    cli::ValueMode::Switch});
+  std::shared_ptr<cli::BoolFlag> skip_failed = std::make_shared<cli::BoolFlag>(
+      cli::FlagInfo{"--skip-failed-kernels",
+                    {},
+                    "Preserve failed kernels and continue other kernels",
+                    cli::ValueMode::Switch});
+  std::shared_ptr<cli::BoolFlag> idempotence = std::make_shared<cli::BoolFlag>(
+      cli::FlagInfo{"--verify-idempotence",
+                    {},
+                    "Require a same-architecture second pass to be unchanged",
+                    cli::ValueMode::Switch});
+  std::shared_ptr<cli::BoolFlag> discharge = std::make_shared<cli::BoolFlag>(
+      cli::FlagInfo{"--verify-rewrite-discharge",
+                    {},
+                    "Require no registered rewrite trigger in final output",
+                    cli::ValueMode::Switch});
+  std::shared_ptr<cli::BoolFlag> all = std::make_shared<cli::BoolFlag>(
+      cli::FlagInfo{"--show-all-translations",
+                    {},
+                    "Include unchanged identity mappings in diff output",
+                    cli::ValueMode::Switch});
+  std::shared_ptr<cli::BoolFlag> list = std::make_shared<cli::BoolFlag>(cli::FlagInfo{
+      "--list-code-objects", {}, "List extractable code objects and exit", cli::ValueMode::Switch});
+  std::shared_ptr<cli::BoolFlag> help = std::make_shared<cli::BoolFlag>(
+      cli::FlagInfo{"--help", {"-h"}, "Show help", cli::ValueMode::Switch});
+
+  DbtFlags() {
+    std::vector<std::pair<std::string, TargetInfo>> targets;
+    for (const auto &target : kTargetInfos)
+      targets.emplace_back(target.name, target);
+    input_target = std::make_shared<ChoiceFlag<TargetInfo>>(
+        cli::FlagInfo{"--input-target", {}, "Input LLVM machine, e.g. gfx950"}, targets);
+    output_target = std::make_shared<ChoiceFlag<TargetInfo>>(
+        cli::FlagInfo{"--output-target", {}, "Output LLVM machine, e.g. gfx1200"}, targets);
+    const std::vector<std::pair<std::string, ProcessorRevision>> revisions{
+        {"a0", ProcessorRevision::Gfx1250A0}, {"b0", ProcessorRevision::Gfx1250B0}};
+    input_revision = std::make_shared<ChoiceFlag<ProcessorRevision>>(
+        cli::FlagInfo{"--input-revision", {}, "Input revision: a0 or b0 (gfx1250 only)"},
+        revisions);
+    output_revision = std::make_shared<ChoiceFlag<ProcessorRevision>>(
+        cli::FlagInfo{"--output-revision", {}, "Output revision: a0 or b0 (gfx1250 only)"},
+        revisions);
+    const std::vector<std::pair<std::string, OutputMode>> modes{
+        {"disasm", OutputMode::Disasm},
+        {"code-object", OutputMode::CodeObject},
+        {"diff", OutputMode::Diff}};
+    output_mode = std::make_shared<ChoiceFlag<OutputMode>>(
+        cli::FlagInfo{"--output-mode", {}, "disasm, code-object, or diff (default: disasm)"}, modes,
+        OutputMode::Disasm);
+  }
+
+  util::Result register_flags(cli::Command &command, util::DiagnosticEmitter diagnostic) const {
+    if (command
+            .add_flags(
+                "Translation",
+                {input_target, output_target, input_revision, output_revision, index, output_mode},
+                diagnostic)
+            .failed() ||
+        command
+            .add_flags("Validation and diagnostics",
+                       {vgpr, keep_going, skip_failed, idempotence, discharge, all}, diagnostic)
+            .failed())
+      return util::Result::failure();
+    return command.add_flags("Information", {list, help}, diagnostic);
+  }
+};
+
+void print_help(const cli::Command &command) {
+  std::cout << cli::format_help(command)
+            << "\nINPUT, --input-target and --output-target are required for translation.\n"
+            << "gfx1250 b0-to-a0 selects its translation profile; equal revisions are identity.\n"
+            << "Supported target names: ";
+  print_supported_targets(std::cout);
+  std::cout << ".\n";
 }
 
-[[nodiscard]] bool parse_args(int argc, char **argv, CliOptions &options) {
-  for (int i = 1; i < argc; ++i) {
-    std::string_view arg = argv[i];
-    std::string_view value;
-
-    if (arg == "--help" || arg == "-h") {
-      options.show_help = true;
-      return true;
-    }
-    if (arg == "--list-code-objects") {
-      options.list_code_objects = true;
-      continue;
-    }
-    if (arg == "--debug-conservative-liveness") {
-      if (!require_value(argc, argv, i, arg, value))
-        return false;
-      uint32_t min_free_vgpr = 0;
-      if (!parse_u32(value, min_free_vgpr) || min_free_vgpr > UINT16_MAX) {
-        std::cerr << "invalid minimum free VGPR for " << arg << ": " << value << "\n";
-        return false;
-      }
-      options.translate.debug_min_free_vgpr = static_cast<uint16_t>(min_free_vgpr);
-      continue;
-    }
-    if (arg == "--debug-continue-after-failure") {
-      options.translate.debug_continue_after_failure = true;
-      continue;
-    }
-    if (arg == "--skip-failed-kernels") {
-      options.translate.skip_failed_kernels = true;
-      continue;
-    }
-    if (arg == "--verify-idempotence") {
-      options.translate.verify_idempotence = true;
-      continue;
-    }
-    if (arg == "--verify-rewrite-discharge") {
-      options.translate.verify_rewrite_discharge = true;
-      continue;
-    }
-
-    if (arg == "--input-target") {
-      if (!require_value(argc, argv, i, arg, value))
-        return false;
-      auto target = parse_target_info(value);
-      if (!target) {
-        std::cerr << "invalid input target: " << value << "\n";
-        return false;
-      }
-      options.translate.guest_arch = target->arch;
-      options.translate.input_target = target->code_object_target;
-      options.input_target_name = std::string(target->name);
-      options.saw_input_target = true;
-    } else if (arg == "--output-target") {
-      if (!require_value(argc, argv, i, arg, value))
-        return false;
-      auto target = parse_target_info(value);
-      if (!target) {
-        std::cerr << "invalid output target: " << value << "\n";
-        return false;
-      }
-      options.translate.host_arch = target->arch;
-      options.translate.target_mach = target->mach;
-      options.output_target_name = std::string(target->name);
-      options.saw_output_target = true;
-    } else if (arg == "--input-revision") {
-      if (!require_value(argc, argv, i, arg, value))
-        return false;
-      const auto revision = parse_revision(value);
-      if (!revision) {
-        std::cerr << "invalid input revision: " << value << " (expected a0 or b0)\n";
-        return false;
-      }
-      options.translate.input_revision = *revision;
-      options.saw_input_revision = true;
-    } else if (arg == "--output-revision") {
-      if (!require_value(argc, argv, i, arg, value))
-        return false;
-      const auto revision = parse_revision(value);
-      if (!revision) {
-        std::cerr << "invalid output revision: " << value << " (expected a0 or b0)\n";
-        return false;
-      }
-      options.translate.output_revision = *revision;
-      options.saw_output_revision = true;
-    } else if (arg == "--code-object-index") {
-      if (!require_value(argc, argv, i, arg, value))
-        return false;
-      if (!parse_u32(value, options.translate.code_object_index)) {
-        std::cerr << "invalid code-object index: " << value << "\n";
-        return false;
-      }
-    } else if (arg == "--output-mode") {
-      if (!require_value(argc, argv, i, arg, value))
-        return false;
-      auto mode = parse_output_mode(value);
-      if (!mode) {
-        std::cerr << "invalid output mode: " << value << "\n";
-        return false;
-      }
-      options.output_mode = *mode;
-    } else if (arg == "--show-all-translations") {
-      options.show_all_translations = true;
-    } else {
-      if (!arg.empty() && arg.front() != '-') {
-        if (options.saw_input) {
-          std::cerr << "unexpected positional argument: " << arg << "\n";
-          return false;
-        }
-        options.translate.input_path = std::string(arg);
-        options.saw_input = true;
-        continue;
-      }
-      std::cerr << "unknown option: " << arg << "\n";
-      return false;
-    }
+// Build the translator's existing domain request from typed values at dispatch.
+// The registered flag objects remain alive throughout the invocation.
+[[nodiscard]] bool parse_args(int argc, char **argv, cli::Command &command, const DbtFlags &flags,
+                              CliOptions &options) {
+  auto report = [](std::string_view message) { std::cerr << message << '\n'; };
+  util::DiagnosticEmitter diagnostic(report);
+  if (flags.register_flags(command, diagnostic).failed())
+    return false;
+  const std::vector<std::string_view> arguments(argv + 1, argv + argc);
+  auto parsed = cli::parse(command, arguments, diagnostic);
+  if (parsed.failed())
+    return false;
+  options.show_help = flags.help->value();
+  if (options.show_help)
+    return true;
+  if (parsed.value().positional.size() > 1) {
+    std::cerr << "unexpected positional argument: " << parsed.value().positional[1] << '\n';
+    return false;
   }
-
+  options.saw_input =
+      !parsed.value().positional.empty() && !parsed.value().positional.front().empty();
+  if (options.saw_input)
+    options.translate.input_path = parsed.value().positional.front();
+  if (const auto &target = flags.input_target->value()) {
+    options.translate.guest_arch = target->arch;
+    options.translate.input_target = target->code_object_target;
+    options.input_target_name = target->name;
+    options.saw_input_target = true;
+  }
+  if (const auto &target = flags.output_target->value()) {
+    options.translate.host_arch = target->arch;
+    options.translate.target_mach = target->mach;
+    options.output_target_name = target->name;
+    options.saw_output_target = true;
+  }
+  options.saw_input_revision = flags.input_revision->value().has_value();
+  options.saw_output_revision = flags.output_revision->value().has_value();
+  options.translate.input_revision =
+      flags.input_revision->value().value_or(ProcessorRevision::Unspecified);
+  options.translate.output_revision =
+      flags.output_revision->value().value_or(ProcessorRevision::Unspecified);
+  options.translate.code_object_index = flags.index->value().value_or(0);
+  if (flags.vgpr->value())
+    options.translate.debug_min_free_vgpr = static_cast<uint16_t>(*flags.vgpr->value());
+  options.translate.debug_continue_after_failure = flags.keep_going->value();
+  options.translate.skip_failed_kernels = flags.skip_failed->value();
+  options.translate.verify_idempotence = flags.idempotence->value();
+  options.translate.verify_rewrite_discharge = flags.discharge->value();
+  options.output_mode = *flags.output_mode->value();
+  options.show_all_translations = flags.all->value();
+  options.list_code_objects = flags.list->value();
   return true;
 }
 
@@ -605,14 +635,16 @@ int list_code_objects(const CliOptions &options) {
 
 int rocjitsu::tools::detail::run_dbt_translate_cli(int argc, char **argv,
                                                    TranslateCodeObjectFn translate) {
+  cli::Command command{"rj_dbt_translate"};
+  DbtFlags flags;
   CliOptions options;
-  if (!parse_args(argc, argv, options)) {
-    print_help();
+  if (!parse_args(argc, argv, command, flags, options)) {
+    print_help(command);
     return kUsageError;
   }
 
   if (options.show_help) {
-    print_help();
+    print_help(command);
     return 0;
   }
 
@@ -630,7 +662,7 @@ int rocjitsu::tools::detail::run_dbt_translate_cli(int argc, char **argv,
 
   if (!options.saw_input || !options.saw_input_target || !options.saw_output_target) {
     std::cerr << "input path, --input-target, and --output-target are required\n";
-    print_help();
+    print_help(command);
     return kUsageError;
   }
 

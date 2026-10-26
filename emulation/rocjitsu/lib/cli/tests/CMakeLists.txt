@@ -6,6 +6,21 @@ target_link_libraries(rocjitsu_cli_test PRIVATE util_cli GTest::gtest_main)
 include(GoogleTest)
 gtest_discover_tests(rocjitsu_cli_test TEST_PREFIX "cli.")
 
+add_executable(
+    rocjitsu_benchmark_cli_test
+    benchmark_cli_test.cpp
+    ../../../tools/decode_benchmark_cli.cpp
+)
+target_include_directories(
+    rocjitsu_benchmark_cli_test
+    PRIVATE ../../../tools ../../rocjitsu/include
+)
+target_link_libraries(
+    rocjitsu_benchmark_cli_test
+    PRIVATE util_cli GTest::gtest_main
+)
+gtest_discover_tests(rocjitsu_benchmark_cli_test TEST_PREFIX "cli.")
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_library(rocjitsu_cli_plugin_fixture MODULE plugin.cpp)
     target_link_libraries(rocjitsu_cli_plugin_fixture PRIVATE util_cli)

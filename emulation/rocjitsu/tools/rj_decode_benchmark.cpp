@@ -4,13 +4,14 @@
 /// @file rj_decode_benchmark.cpp
 /// @brief Measure decoder throughput over the text of a real code object.
 
+#include "decode_benchmark_cli.h"
+
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
 
 #include <array>
-#include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -30,7 +31,6 @@ using namespace rocjitsu;
 using Clock = std::chrono::steady_clock;
 
 constexpr std::size_t kLookaheadWords = 4;
-constexpr std::size_t kDefaultInvalidLimit = 65536;
 
 struct TextRange {
   std::size_t begin;
@@ -46,90 +46,12 @@ struct DecodeCorpus {
   std::size_t scan_rejections = 0;
 };
 
-struct Options {
-  std::string input;
-  std::optional<rj_code_target_id_t> target;
-  std::size_t iterations = 1;
-  std::size_t invalid_limit = kDefaultInvalidLimit;
-};
-
 struct Measurement {
   std::size_t attempts = 0;
   std::size_t unexpected = 0;
   uint64_t checksum = 0;
   std::chrono::nanoseconds elapsed{};
 };
-
-void print_usage(std::ostream &os) {
-  os << "Usage: rj_decode_benchmark INPUT [--target TARGET] [--iterations N] "
-        "[--invalid-limit N]\n"
-        "Targets: gfx942, gfx950, gfx1200, gfx1201, gfx1250, gfx1251\n";
-}
-
-[[nodiscard]] std::optional<rj_code_target_id_t> parse_target(std::string_view value) {
-  if (value == "gfx942")
-    return ROCJITSU_CODE_TARGET_GFX942;
-  if (value == "gfx950")
-    return ROCJITSU_CODE_TARGET_GFX950;
-  if (value == "gfx1200")
-    return ROCJITSU_CODE_TARGET_GFX1200;
-  if (value == "gfx1201")
-    return ROCJITSU_CODE_TARGET_GFX1201;
-  if (value == "gfx1250")
-    return ROCJITSU_CODE_TARGET_GFX1250;
-  if (value == "gfx1251")
-    return ROCJITSU_CODE_TARGET_GFX1251;
-  return std::nullopt;
-}
-
-[[nodiscard]] bool parse_size(std::string_view text, std::size_t &value) {
-  auto [ptr, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-  return error == std::errc{} && ptr == text.data() + text.size();
-}
-
-[[nodiscard]] std::optional<Options> parse_options(int argc, char **argv) {
-  Options options;
-  for (int index = 1; index < argc; ++index) {
-    const std::string_view arg(argv[index]);
-    if (arg == "--help") {
-      print_usage(std::cout);
-      return std::nullopt;
-    }
-    if (arg == "--target" && index + 1 < argc) {
-      options.target = parse_target(argv[++index]);
-      if (!options.target) {
-        std::cerr << "Unsupported target: " << argv[index] << '\n';
-        return std::nullopt;
-      }
-      continue;
-    }
-    if (arg == "--iterations" && index + 1 < argc) {
-      if (!parse_size(argv[++index], options.iterations) || options.iterations == 0) {
-        std::cerr << "Iterations must be a positive integer\n";
-        return std::nullopt;
-      }
-      continue;
-    }
-    if (arg == "--invalid-limit" && index + 1 < argc) {
-      if (!parse_size(argv[++index], options.invalid_limit)) {
-        std::cerr << "Invalid limit must be a non-negative integer\n";
-        return std::nullopt;
-      }
-      continue;
-    }
-    if (!arg.starts_with("--") && options.input.empty()) {
-      options.input = arg;
-      continue;
-    }
-    std::cerr << "Unexpected argument: " << arg << '\n';
-    return std::nullopt;
-  }
-  if (options.input.empty()) {
-    print_usage(std::cerr);
-    return std::nullopt;
-  }
-  return options;
-}
 
 void copy_encoding(std::span<const uint32_t> words, std::size_t offset,
                    std::array<uint32_t, kLookaheadWords> &copy) {
@@ -249,23 +171,41 @@ void print_measurement(std::string_view name, const Measurement &measurement) {
 } // namespace
 
 int main(int argc, char **argv) {
-  const std::optional<Options> options = parse_options(argc, argv);
-  if (!options)
-    return argc > 1 && std::string_view(argv[1]) == "--help" ? 0 : 1;
-
+  std::vector<std::string_view> arguments;
+  for (int i = 1; i < argc; ++i)
+    arguments.emplace_back(argv[i]);
+  auto report = [](std::string_view message) { std::cerr << message << '\n'; };
+  util::DiagnosticEmitter diagnostic(report);
+  util::cli::Command command{"rj_decode_benchmark"};
+  rocjitsu::tools::DecodeBenchmarkFlags flags;
+  if (rocjitsu::tools::register_decode_benchmark_flags(command, flags, diagnostic).failed())
+    return 1;
+  auto parsed = util::cli::parse(command, arguments, diagnostic);
+  if (parsed.failed())
+    return 1;
+  if (flags.help->value()) {
+    std::cout << util::cli::format_help(command)
+              << "\nExactly one INPUT code object is required.\n";
+    return 0;
+  }
+  if (parsed.value().positional.size() != 1 || parsed.value().positional.front().empty()) {
+    (void)(diagnostic.emit() << "rj_decode_benchmark: exactly one nonempty INPUT is required")
+        .emit();
+    return 1;
+  }
   try {
-    AmdGpuCodeObject object(options->input);
+    AmdGpuCodeObject object(parsed.value().positional.front());
     if (!object.is_valid()) {
       std::cerr << "Failed to parse input code object\n";
       return 2;
     }
     const rj_code_target_id_t object_target = object.target_id();
-    if (options->target && object_target != ROCJITSU_CODE_TARGET_INVALID &&
-        *options->target != object_target) {
+    if (flags.target->value() && object_target != ROCJITSU_CODE_TARGET_INVALID &&
+        *flags.target->value() != object_target) {
       std::cerr << "Selected target does not match code-object target metadata\n";
       return 2;
     }
-    const rj_code_target_id_t target = options->target.value_or(object_target);
+    const rj_code_target_id_t target = flags.target->value().value_or(object_target);
     if (target == ROCJITSU_CODE_TARGET_INVALID) {
       std::cerr << "Cannot infer decoder target; pass --target\n";
       return 2;
@@ -278,7 +218,7 @@ int main(int argc, char **argv) {
 
     DecodeCorpus corpus;
     std::string error;
-    if (!collect_corpus(object, *decoder, options->invalid_limit, corpus, error)) {
+    if (!collect_corpus(object, *decoder, flags.invalid_limit->value(), corpus, error)) {
       std::cerr << error << '\n';
       return 2;
     }
@@ -290,10 +230,10 @@ int main(int argc, char **argv) {
     std::cout << "text: " << corpus.text_bytes << " bytes, " << corpus.valid_offsets.size()
               << " valid instructions, " << corpus.scan_rejections << " rejected words, "
               << corpus.invalid_encodings.size() << " invalid samples\n";
-    const Measurement valid = measure_valid(corpus, *decoder, options->iterations);
+    const Measurement valid = measure_valid(corpus, *decoder, flags.iterations->value());
     print_measurement("valid", valid);
     if (!corpus.invalid_encodings.empty()) {
-      const Measurement invalid = measure_invalid(corpus, *decoder, options->iterations);
+      const Measurement invalid = measure_invalid(corpus, *decoder, flags.iterations->value());
       print_measurement("invalid", invalid);
     }
     return valid.unexpected == 0 ? 0 : 3;
