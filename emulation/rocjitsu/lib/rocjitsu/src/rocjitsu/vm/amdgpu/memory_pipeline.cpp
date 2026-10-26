@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <cstring>
 #include <format>
+#include <optional>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -773,28 +774,31 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
 
 namespace {
 
+// One mapping selects both scalar-FP dispatch and its evaluator operation.
+// Packed 16-bit additions have their own evaluator and are excluded.
+std::optional<fp_mode::ScalarAtomicOp> scalar_fp_atomic_operation(AtomicOp op) {
+  switch (op) {
+  case AtomicOp::FADD:
+    return fp_mode::ScalarAtomicOp::FADD;
+  case AtomicOp::FMIN:
+    return fp_mode::ScalarAtomicOp::FMIN;
+  case AtomicOp::FMAX:
+    return fp_mode::ScalarAtomicOp::FMAX;
+  case AtomicOp::FCMPSWAP:
+    return fp_mode::ScalarAtomicOp::FCMPSWAP;
+  default:
+    return std::nullopt;
+  }
+}
+
 // Translate the deferred request into the shared ISA floating-point contract.
 template <typename Bits>
 Bits apply_fp_atomic(const VectorMemState &state, Bits old_bits, Bits source_bits,
                      Bits compare_bits, uint32_t denorm_mode, bool local = false) {
-  fp_mode::ScalarAtomicOp operation;
-  switch (state.atomic_op) {
-  case AtomicOp::FADD:
-    operation = fp_mode::ScalarAtomicOp::FADD;
-    break;
-  case AtomicOp::FMIN:
-    operation = fp_mode::ScalarAtomicOp::FMIN;
-    break;
-  case AtomicOp::FMAX:
-    operation = fp_mode::ScalarAtomicOp::FMAX;
-    break;
-  case AtomicOp::FCMPSWAP:
-    operation = fp_mode::ScalarAtomicOp::FCMPSWAP;
-    break;
-  default:
-    return old_bits;
-  }
-  return fp_mode::atomic_scalar(operation, old_bits, source_bits, compare_bits, denorm_mode,
+  const auto operation = scalar_fp_atomic_operation(state.atomic_op);
+  if (!operation)
+    throw std::invalid_argument("unsupported floating-point atomic operation");
+  return fp_mode::atomic_scalar(*operation, old_bits, source_bits, compare_bits, denorm_mode,
                                 state.atomic_legacy_minmax, local || state.atomic_source_nan_first);
 }
 
@@ -962,7 +966,7 @@ VmAccessOutcome execute_translated_atomic_rmw(VectorMemState &d, uint64_t lane_m
   d.response_data.resize(d.wf_size * width);
   const bool uses_two_sources = atomic_uses_two_sources(d.atomic_op);
   const uint32_t source_stride = atomic_source_stride(d, d.store_data);
-  const bool is_fp = atomic_uses_scalar_fp(d.atomic_op);
+  const bool is_fp = scalar_fp_atomic_operation(d.atomic_op).has_value();
 
   assert(d.translated.access.has_value());
   for (uint32_t lane = d.translated.atomic_lane; lane < d.wf_size; ++lane) {
@@ -1048,7 +1052,7 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
   d.response_data.resize(d.wf_size * esz);
   const bool uses_two_sources = atomic_uses_two_sources(d.atomic_op);
   const uint32_t src_stride = atomic_source_stride(d, d.store_data);
-  const bool is_fp = atomic_uses_scalar_fp(d.atomic_op);
+  const bool is_fp = scalar_fp_atomic_operation(d.atomic_op).has_value();
 
   if (lane_mask == 0)
     return VmAccessOutcome::Complete;
@@ -1127,7 +1131,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
   response_data.resize(d.wf_size * esz);
   const bool uses_two_sources = atomic_uses_two_sources(d.atomic_op);
   const uint32_t src_stride = atomic_source_stride(d, store_data);
-  const bool is_fp = atomic_uses_scalar_fp(d.atomic_op);
+  const bool is_fp = scalar_fp_atomic_operation(d.atomic_op).has_value();
 
   if (d.atomic_op == AtomicOp::APPEND || d.atomic_op == AtomicOp::CONSUME) {
     uint32_t addr = 0;

@@ -2145,6 +2145,78 @@ TEST(GpuVmPipeline, TranslatedAtomicsUseStrongBackingOperationsForBothWidths) {
   EXPECT_EQ(context.external->compare_exchange_calls, kCases.size());
 }
 
+// Synthetic requests exercise both backends on a CDNA5 fixture, which has no decoded
+// FCMPSWAP instruction. Expected bits come from gfx1100 global F32 and gfx1010/gfx1030/gfx1100
+// LDS F32/F64 captures; this is pipeline coverage, not a hardware capture of cache F64 atomics.
+template <typename Float, typename Bits>
+void check_float_compare_swap(bool legacy_cache_compatible, bool flush_denormals) {
+  SCOPED_TRACE(testing::Message() << "legacy_cache_compatible=" << legacy_cache_compatible
+                                  << " width=" << sizeof(Bits) << " flush=" << flush_denormals);
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize(legacy_cache_compatible));
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+  auto &wf = *context.wf;
+  constexpr uint32_t lanes = 7;
+  wf.set_exec((1u << lanes) - 1);
+  const Bits nan = std::bit_cast<Bits>(std::numeric_limits<Float>::quiet_NaN());
+  const Bits denorm = std::bit_cast<Bits>(std::numeric_limits<Float>::denorm_min());
+  const auto bits = [](Float value) { return std::bit_cast<Bits>(value); };
+  // Equal, unequal, signed zeros that compare equal, and NaNs that never do.
+  // Flushing makes a denormal equal +0 but never changes the bits written or
+  // kept: a mismatch leaves memory alone and a denormal source is stored as is.
+  const std::array<Bits, lanes> initial = {bits(1.0), bits(1.0), bits(-0.0), nan,
+                                           denorm,    denorm,    bits(1.0)};
+  const std::array<Bits, lanes> source = {bits(2.0), bits(2.0), bits(4.0), bits(5.0),
+                                          bits(6.0), bits(8.0), denorm};
+  const std::array<Bits, lanes> compare = {bits(1.0), bits(3.0), bits(0.0), nan,
+                                           bits(0.0), bits(3.0), bits(1.0)};
+  const std::array<Bits, lanes> expected = {
+      bits(2.0), bits(1.0), bits(4.0), nan, flush_denormals ? bits(6.0) : denorm, denorm, denorm};
+  const auto address = [](uint32_t lane) { return uint64_t{0x100} + lane * 0x40; };
+  for (uint32_t lane = 0; lane < lanes; ++lane)
+    context.external->store(address(lane), initial[lane]);
+
+  auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  state->elem_size = sizeof(Bits);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->atomic_op = amdgpu::AtomicOp::FCMPSWAP;
+  state->atomic_denorm_mode = flush_denormals ? 0 : 3;
+  state->wf_size = wf.wf_size();
+  state->exec_mask = state->lane_mask = (1u << lanes) - 1;
+  state->dst_reg_base = wf.vgpr_alloc().base + 4;
+  state->store_data.resize(wf.wf_size() * 2 * sizeof(Bits));
+  for (uint32_t lane = 0; lane < lanes; ++lane) {
+    state->per_lane_addr[lane] = address(lane);
+    std::memcpy(&state->store_data[lane * 2 * sizeof(Bits)], &source[lane], sizeof(Bits));
+    std::memcpy(&state->store_data[(lane * 2 + 1) * sizeof(Bits)], &compare[lane], sizeof(Bits));
+  }
+
+  amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+  ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), wf),
+            amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(wf.state(), amdgpu::WfState::RUNNING);
+  EXPECT_TRUE(wf.wait_counters().empty());
+  for (uint32_t lane = 0; lane < lanes; ++lane) {
+    SCOPED_TRACE(lane);
+    EXPECT_EQ(context.external->load<Bits>(address(lane)), expected[lane]);
+    uint64_t returned = context.cu->read_vgpr(wf.vgpr_alloc().base + 4, lane);
+    if constexpr (sizeof(Bits) == 8)
+      returned |= uint64_t{context.cu->read_vgpr(wf.vgpr_alloc().base + 5, lane)} << 32;
+    EXPECT_EQ(returned, initial[lane]);
+  }
+}
+
+TEST(GpuVmPipeline, FloatCompareSwapMatchesAcrossBackends) {
+  for (bool legacy_cache_compatible : {false, true}) {
+    for (bool flush : {false, true}) {
+      check_float_compare_swap<float, uint32_t>(legacy_cache_compatible, flush);
+      check_float_compare_swap<double, uint64_t>(legacy_cache_compatible, flush);
+    }
+  }
+}
+
 TEST(GpuVmPipeline, UnavailableAtomicDoesNotCompleteArchitecturalState) {
   TranslatedPipelineContext context;
   ASSERT_NO_FATAL_FAILURE(context.initialize());
@@ -2346,75 +2418,6 @@ TEST(GpuVmPipeline, MixedFlatAtomicRetryPreservesLdsAndCompletedGlobalLanes) {
     EXPECT_EQ(context.cu->read_vgpr(wf.vgpr_alloc().base + 4, lane), initial[lane]);
   EXPECT_EQ(context.external->atomic_load_calls, 3u);
   EXPECT_EQ(context.external->compare_exchange_calls, 2u);
-}
-
-template <typename Float, typename Bits>
-void check_float_compare_swap(bool legacy, bool flush_denormals) {
-  SCOPED_TRACE(testing::Message() << "legacy=" << legacy << " width=" << sizeof(Bits)
-                                  << " flush=" << flush_denormals);
-  TranslatedPipelineContext context;
-  ASSERT_NO_FATAL_FAILURE(context.initialize(legacy));
-  ASSERT_TRUE(context.address_space);
-  ASSERT_NE(context.wf, nullptr);
-  auto &wf = *context.wf;
-  constexpr uint32_t lanes = 7;
-  wf.set_exec((1u << lanes) - 1);
-  const Bits nan = std::bit_cast<Bits>(std::numeric_limits<Float>::quiet_NaN());
-  const Bits denorm = std::bit_cast<Bits>(std::numeric_limits<Float>::denorm_min());
-  const auto bits = [](Float value) { return std::bit_cast<Bits>(value); };
-  // Equal, unequal, signed zeros that compare equal, and NaNs that never do.
-  // Flushing makes a denormal equal +0 but never changes the bits written or
-  // kept: a mismatch leaves memory alone and a denormal source is stored as is.
-  const std::array<Bits, lanes> initial = {bits(1.0), bits(1.0), bits(-0.0), nan,
-                                           denorm,    denorm,    bits(1.0)};
-  const std::array<Bits, lanes> source = {bits(2.0), bits(2.0), bits(4.0), bits(5.0),
-                                          bits(6.0), bits(8.0), denorm};
-  const std::array<Bits, lanes> compare = {bits(1.0), bits(3.0), bits(0.0), nan,
-                                           bits(0.0), bits(3.0), bits(1.0)};
-  const std::array<Bits, lanes> expected = {
-      bits(2.0), bits(1.0), bits(4.0), nan, flush_denormals ? bits(6.0) : denorm, denorm, denorm};
-  const auto address = [](uint32_t lane) { return uint64_t{0x100} + lane * 0x40; };
-  for (uint32_t lane = 0; lane < lanes; ++lane)
-    context.external->store(address(lane), initial[lane]);
-
-  auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  state->elem_size = sizeof(Bits);
-  state->num_elems = 1;
-  state->is_load = true;
-  state->atomic_op = amdgpu::AtomicOp::FCMPSWAP;
-  state->atomic_denorm_mode = flush_denormals ? 0 : 3;
-  state->wf_size = wf.wf_size();
-  state->exec_mask = state->lane_mask = (1u << lanes) - 1;
-  state->dst_reg_base = wf.vgpr_alloc().base + 4;
-  state->store_data.resize(wf.wf_size() * 2 * sizeof(Bits));
-  for (uint32_t lane = 0; lane < lanes; ++lane) {
-    state->per_lane_addr[lane] = address(lane);
-    std::memcpy(&state->store_data[lane * 2 * sizeof(Bits)], &source[lane], sizeof(Bits));
-    std::memcpy(&state->store_data[(lane * 2 + 1) * sizeof(Bits)], &compare[lane], sizeof(Bits));
-  }
-
-  amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
-  ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), wf),
-            amdgpu::VmAccessOutcome::Complete);
-  EXPECT_EQ(wf.state(), amdgpu::WfState::RUNNING);
-  EXPECT_TRUE(wf.wait_counters().empty());
-  for (uint32_t lane = 0; lane < lanes; ++lane) {
-    SCOPED_TRACE(lane);
-    EXPECT_EQ(context.external->load<Bits>(address(lane)), expected[lane]);
-    uint64_t returned = context.cu->read_vgpr(wf.vgpr_alloc().base + 4, lane);
-    if constexpr (sizeof(Bits) == 8)
-      returned |= uint64_t{context.cu->read_vgpr(wf.vgpr_alloc().base + 5, lane)} << 32;
-    EXPECT_EQ(returned, initial[lane]);
-  }
-}
-
-TEST(GpuVmPipeline, FloatCompareSwapMatchesAcrossBackends) {
-  for (bool legacy : {false, true}) {
-    for (bool flush : {false, true}) {
-      check_float_compare_swap<float, uint32_t>(legacy, flush);
-      check_float_compare_swap<double, uint64_t>(legacy, flush);
-    }
-  }
 }
 
 TEST(GpuVmPipeline, MixedFlatLegacyAtomicRetryRefreshesVmSnapshot) {

@@ -34,6 +34,7 @@
 #include <memory>
 #include <optional>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -6564,8 +6565,9 @@ struct FloatCompareSwapCase {
   uint64_t preserved, flushed; ///< Final memory with MODE denormals preserved / flushed.
 };
 
-// Captured on a W7900 (gfx1100) with global_atomic_cmpswap_f32 and
-// ds_cmpstore_rtn_f32/f64: MODE flushing changes only the comparison.
+// Captured on gfx1100 global F32 and gfx1010/gfx1030/gfx1100 LDS F32/F64:
+// MODE flushing changes only the comparison. F64 rows are LDS evidence, not cache captures.
+// See atomic_scalar's manual discrepancy and unmeasured-target qualification.
 template <typename Bits>
 void check_float_compare_swap_policy(std::initializer_list<FloatCompareSwapCase> cases) {
   for (const auto &test : cases) {
@@ -6574,11 +6576,23 @@ void check_float_compare_swap_policy(std::initializer_list<FloatCompareSwapCase>
     const auto run = [&](uint32_t denorm_mode) {
       return amdgpu::fp_mode::atomic_scalar<Bits>(
           amdgpu::fp_mode::ScalarAtomicOp::FCMPSWAP, static_cast<Bits>(test.memory),
-          static_cast<Bits>(test.source), static_cast<Bits>(test.compare), denorm_mode, true);
+          static_cast<Bits>(test.source), static_cast<Bits>(test.compare), denorm_mode,
+          /*legacy_minmax=*/true);
     };
     EXPECT_EQ(run(3), static_cast<Bits>(test.preserved));
     EXPECT_EQ(run(0), static_cast<Bits>(test.flushed));
   }
+}
+
+TEST(FpModePolicyTest, ScalarAtomicRejectsUnsupportedOperations) {
+  const auto invalid = static_cast<amdgpu::fp_mode::ScalarAtomicOp>(0xff);
+  EXPECT_THROW(amdgpu::fp_mode::atomic_scalar<uint32_t>(invalid, 0x3f800000, 0x40000000, 0, 3,
+                                                        /*legacy_minmax=*/true),
+               std::invalid_argument);
+  EXPECT_THROW(amdgpu::fp_mode::atomic_scalar<uint64_t>(invalid, 0x3ff0000000000000,
+                                                        0x4000000000000000, 0, 3,
+                                                        /*legacy_minmax=*/true),
+               std::invalid_argument);
 }
 
 TEST(FpModePolicyTest, FloatCompareSwapFlushesOnlyTheComparison) {
@@ -6605,19 +6619,22 @@ TEST(FpModePolicyTest, FloatCompareSwapFlushesOnlyTheComparison) {
   constexpr uint64_t kOne = 0x3ff0000000000000, kThree = 0x4008000000000000;
   constexpr uint64_t kSix = 0x4018000000000000, kDenorm = 0x0000000000000001;
   check_float_compare_swap_policy<uint64_t>({
-      {kOne, kOne, kSix, kSix, kSix},
-      {kOne, kThree, kSix, kOne, kOne},
-      {0x8000000000000000, 0, kSix, kSix, kSix},
-      {0x7ff8000000000000, 0x7ff8000000000000, kSix, 0x7ff8000000000000, 0x7ff8000000000000},
-      {0x7ff0000000000001, 0x7ff0000000000001, kSix, 0x7ff0000000000001, 0x7ff0000000000001},
-      {kDenorm, kDenorm, kSix, kSix, kSix},
-      {kDenorm, 0, kSix, kDenorm, kSix},
-      {kDenorm, 0x0000000000000002, kSix, kDenorm, kSix},
-      {0x8000000000000001, kDenorm, kSix, 0x8000000000000001, kSix},
-      {kOne, kOne, kDenorm, kDenorm, kDenorm},
-      {kOne, kOne, 0x7ff0000000000001, 0x7ff0000000000001, 0x7ff0000000000001},
-      {kDenorm, kThree, kSix, kDenorm, kDenorm},
-      {0x8000000000000001, kOne, kSix, 0x8000000000000001, 0x8000000000000001},
+      {kOne, kOne, kSix, kSix, kSix},            // 1.0 == 1.0
+      {kOne, kThree, kSix, kOne, kOne},          // 1.0 != 3.0
+      {0x8000000000000000, 0, kSix, kSix, kSix}, // -0 == +0
+      {0x7ff8000000000000, 0x7ff8000000000000, kSix, 0x7ff8000000000000,
+       0x7ff8000000000000}, // equal qNaN bits
+      {0x7ff0000000000001, 0x7ff0000000000001, kSix, 0x7ff0000000000001,
+       0x7ff0000000000001},                                          // equal sNaN bits
+      {kDenorm, kDenorm, kSix, kSix, kSix},                          // equal denormals
+      {kDenorm, 0, kSix, kDenorm, kSix},                             // denormal vs +0
+      {kDenorm, 0x0000000000000002, kSix, kDenorm, kSix},            // two denormals
+      {0x8000000000000001, kDenorm, kSix, 0x8000000000000001, kSix}, // -denormal vs +denormal
+      {kOne, kOne, kDenorm, kDenorm, kDenorm},                       // denormal source
+      {kOne, kOne, 0x7ff0000000000001, 0x7ff0000000000001, 0x7ff0000000000001}, // sNaN source
+      {kDenorm, kThree, kSix, kDenorm, kDenorm}, // denormal, mismatch
+      {0x8000000000000001, kOne, kSix, 0x8000000000000001,
+       0x8000000000000001}, // -denormal, mismatch
   });
 }
 

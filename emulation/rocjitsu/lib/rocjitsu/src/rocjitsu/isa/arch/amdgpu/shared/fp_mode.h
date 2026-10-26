@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <stdexcept>
 #include <type_traits>
 
 #if RJ_HOST_ARCH_X86
@@ -640,10 +641,25 @@ inline uint16_t packed_mul_bf16(float a, float b, bool fp16_ovfl) {
 enum class ScalarAtomicOp { FADD, FMIN, FMAX, FCMPSWAP };
 
 /// @brief Execute scalar floating atomics with explicit ISA policy and bit-preserving selection.
+/// @details FCMPSWAP flushes only comparison inputs and selects the original source or memory
+/// bits. RDNA3/3.5 ISA 13.2 and CDNA2 ISA 9.5.2 / CDNA3/4 ISA 9.2.2 instead specify flushing
+/// the CompareStore result. Captures on gfx1010/gfx1030/gfx1100 LDS (F32/F64) and gfx1100
+/// global F32 contradict that rule on those paths. CDNA1-4 LDS, RDNA1/2 cache F32/F64, and
+/// RDNA3.5 LDS/cache F32 inherit this policy without equivalent captures; gfx1100 FLAT/BUFFER F32
+/// is also unmeasured. CDNA5/RDNA4 expose no FCMPSWAP instructions in this tree.
 template <typename Bits>
 Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bits compare_bits,
                    uint32_t denorm_mode, bool legacy_minmax, bool source_nan_first = false) {
   static_assert(std::is_same_v<Bits, uint32_t> || std::is_same_v<Bits, uint64_t>);
+  switch (operation) {
+  case ScalarAtomicOp::FADD:
+  case ScalarAtomicOp::FMIN:
+  case ScalarAtomicOp::FMAX:
+  case ScalarAtomicOp::FCMPSWAP:
+    break;
+  default:
+    throw std::invalid_argument("unsupported scalar floating-point atomic operation");
+  }
   using Float = std::conditional_t<sizeof(Bits) == 4, float, double>;
   constexpr Bits kSign = Bits{1} << (sizeof(Bits) * 8 - 1);
   constexpr Bits kExponent =
@@ -661,8 +677,8 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
   if (operation == ScalarAtomicOp::FCMPSWAP) {
     // Integer equality implements finite IEEE equality except for signed zero;
     // classify NaNs explicitly so equal payloads never cause a swap. Denormal
-    // flushing applies only to the comparison: gfx1100 global and LDS stores a
-    // matching source unchanged and leaves memory untouched on a mismatch.
+    // flushing applies only to the comparison; selection preserves the original
+    // source bits on a match and original memory bits on a mismatch.
     const bool equal =
         old_input == compare_input || ((old_input & ~kSign) == 0 && (compare_input & ~kSign) == 0);
     return !is_nan(old_input) && !is_nan(compare_input) && equal ? source_bits : old_bits;

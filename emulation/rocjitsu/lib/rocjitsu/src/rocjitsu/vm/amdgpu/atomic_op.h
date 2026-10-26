@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <stdexcept>
 #include <type_traits>
 
 namespace rocjitsu {
@@ -51,13 +52,6 @@ enum class AtomicOp : uint8_t {
 constexpr bool atomic_uses_two_sources(AtomicOp op) {
   return op == AtomicOp::CMPSWAP || op == AtomicOp::FCMPSWAP || op == AtomicOp::MSKOR ||
          op == AtomicOp::WRAP;
-}
-
-/// @brief Whether the operation follows the scalar floating-point atomic contract.
-/// @details Packed 16-bit additions have their own evaluator and are excluded.
-constexpr bool atomic_uses_scalar_fp(AtomicOp op) {
-  return op == AtomicOp::FADD || op == AtomicOp::FMIN || op == AtomicOp::FMAX ||
-         op == AtomicOp::FCMPSWAP;
 }
 
 /// @brief Apply an integer atomic RMW operation (32-bit or 64-bit).
@@ -112,7 +106,7 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
   case AtomicOp::DEC:
     return (old_val == 0 || old_val > src_val) ? src_val : old_val - 1;
   default:
-    return old_val;
+    throw std::invalid_argument("unsupported integer atomic operation");
   }
 }
 
