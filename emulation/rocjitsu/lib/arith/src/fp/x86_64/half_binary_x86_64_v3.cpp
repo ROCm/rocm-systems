@@ -25,7 +25,7 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, ui
       Op == Binary::Add || Op == Binary::Sub || Op == Binary::Subrev || Op == Binary::Mul;
   constexpr bool legacy = Op == Binary::MinLegacy || Op == Binary::MaxLegacy;
   constexpr bool preserve_nan_inputs = legacy || Op == Binary::Minimum || Op == Binary::Maximum;
-  constexpr bool selection = preserve_nan_inputs || Op == Binary::MinNum || Op == Binary::MaxNum;
+  constexpr bool selection = binary_is_selection(Op);
   uint32_t modes[] = {Packed ? packed_half_mode(mode, false) : mode, packed_half_mode(mode, true)};
   int d_shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
   auto keep = _mm256_set1_epi32(d_shift ? 65535 : -65536);

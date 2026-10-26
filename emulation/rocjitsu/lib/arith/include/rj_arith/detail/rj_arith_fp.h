@@ -917,7 +917,8 @@ int rj_arith_v_frexp_exp_i16_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // to preserve NaNs under CLAMP, including in SIMD paths.
 //
 // These selection APIs remain loose-only. The rules above describe the numeric
-// operation; NaN payload/priority and zero-sign ties need not match the GPU.
+// operation; MINIMUM/MAXIMUM quiet the first NaN in source order rather than
+// preferring a signaling NaN. NaN payloads need not match the GPU.
 // Mode 2 returns UNSUPPORTED_SEMANTICS;
 // mode 3 returns UNSUPPORTED_FP_STATUS. Modes 0 and 1 leave FP status unchanged. Binary F64 and
 // packed forms reject DPP; the other forms route A with DPP8/DPP16.
@@ -1068,8 +1069,8 @@ int rj_arith_v_med3_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruc
 // after the final selection. Preserves the other D half and inactive lanes;
 // any whole-VGPR aliases are allowed. MINMAX/MAXMIN select A/B first, then C.
 // Number variants ignore lone NaNs; MINIMUM/MAXIMUM propagate NaNs. MED3 uses
-// minimumNumber(A,B,C) if any input is NaN. Loose semantics require host
-// nearest-even arithmetic with denormals enabled.
+// minimumNumber(A,B,C) if any input is NaN, and otherwise orders -0 below +0.
+// Loose semantics require host nearest-even arithmetic with denormals enabled.
 int rj_arith_v_min3_num_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                 uint32_t *const *d, const uint32_t *const *a,
                                 const uint32_t *const *b, const uint32_t *const *c,
@@ -1358,8 +1359,7 @@ int rj_arith_v_maximumminimum_f32_w32(uint64_t flags, uint32_t exec_mask,
 
 // FP32 median: one VGPR per operand; all A/B/C ABS/NEG, OMOD and CLAMP, loose
 // semantics. Any NaN selects minimumNumber across all three inputs. Otherwise
-// remove the first input numerically equal to the maximum and select the maximum
-// of the remaining two inputs. Loose semantics do not promise the GPU zero-sign tie choice.
+// select the median of the three inputs, ordering -0 below +0.
 int rj_arith_v_med3_num_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                 uint32_t *const *d, const uint32_t *const *a,
                                 const uint32_t *const *b, const uint32_t *const *c,

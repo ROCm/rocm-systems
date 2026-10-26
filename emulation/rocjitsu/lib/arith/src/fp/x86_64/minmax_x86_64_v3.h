@@ -24,11 +24,7 @@ template <bool Maximum, bool Propagate> __m256 minmax(__m256 x, __m256 y) {
   auto tie = Maximum ? _mm256_and_si256(a, b) : _mm256_or_si256(a, b);
   value = _mm256_blendv_ps(value, _mm256_castsi256_ps(tie), equal);
   if constexpr (Propagate) {
-    auto snb = _mm256_andnot_si256(_mm256_cmpeq_epi32(_mm256_and_si256(b, quiet), quiet), bn);
-    auto sna = _mm256_andnot_si256(_mm256_cmpeq_epi32(_mm256_and_si256(a, quiet), quiet), an);
     auto selected = _mm256_blendv_epi8(b, a, an);
-    selected = _mm256_blendv_epi8(selected, b, snb);
-    selected = _mm256_blendv_epi8(selected, a, sna);
     value = _mm256_blendv_ps(value, _mm256_castsi256_ps(_mm256_or_si256(selected, quiet)),
                              _mm256_castsi256_ps(_mm256_or_si256(an, bn)));
   } else {
@@ -53,11 +49,7 @@ template <bool Maximum, bool Propagate> __m256d minmax(__m256d x, __m256d y) {
   auto tie = Maximum ? _mm256_and_si256(a, b) : _mm256_or_si256(a, b);
   value = _mm256_blendv_pd(value, _mm256_castsi256_pd(tie), equal);
   if constexpr (Propagate) {
-    auto snb = _mm256_andnot_si256(_mm256_cmpeq_epi64(_mm256_and_si256(b, quiet), quiet), bn);
-    auto sna = _mm256_andnot_si256(_mm256_cmpeq_epi64(_mm256_and_si256(a, quiet), quiet), an);
     auto selected = _mm256_blendv_epi8(b, a, an);
-    selected = _mm256_blendv_epi8(selected, b, snb);
-    selected = _mm256_blendv_epi8(selected, a, sna);
     value = _mm256_blendv_pd(value, _mm256_castsi256_pd(_mm256_or_si256(selected, quiet)),
                              _mm256_castsi256_pd(_mm256_or_si256(an, bn)));
   } else {
@@ -116,22 +108,12 @@ template <bool Maximum> __m256d minmax_rdna3(__m256d x, __m256d y, bool ieee) {
 // Select A/B first and then C, including the median's NaN and signed-zero rules.
 // Return the selected three-input minimum, maximum, median, or combined selection with GPU NaN
 // rules.
-template <bool FirstMaximum, bool SecondMaximum, bool Propagate, bool Median = false,
-          bool OrderedMedian = false>
+template <bool FirstMaximum, bool SecondMaximum, bool Propagate, bool Median = false>
 __m256 minmax3_value(__m256 x, __m256 y, __m256 z) {
   __m256 value;
   if constexpr (Median) {
-    if constexpr (OrderedMedian) {
-      value = minmax<true, false>(minmax<false, false>(x, y),
-                                  minmax<false, false>(minmax<true, false>(x, y), z));
-    } else {
-      auto ab = minmax<true, false>(x, y);
-      auto maximum = minmax<true, false>(ab, z);
-      value =
-          _mm256_blendv_ps(ab, minmax<true, false>(x, z), _mm256_cmp_ps(maximum, y, _CMP_EQ_OQ));
-      value =
-          _mm256_blendv_ps(value, minmax<true, false>(y, z), _mm256_cmp_ps(maximum, x, _CMP_EQ_OQ));
-    }
+    value = minmax<true, false>(minmax<false, false>(x, y),
+                                minmax<false, false>(minmax<true, false>(x, y), z));
     auto has_nan =
         _mm256_or_ps(_mm256_cmp_ps(x, y, _CMP_UNORD_Q), _mm256_cmp_ps(z, z, _CMP_UNORD_Q));
     auto minimum = minmax<false, false>(minmax<false, false>(x, y), z);

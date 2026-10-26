@@ -14,18 +14,13 @@
 namespace rocjitsu::arith {
 
 // IEEE selection orders -0 below +0. Number variants ignore even signaling NaNs
-// when the other operand is numeric; propagating variants prefer signaling NaNs.
+// when the other operand is numeric; propagating variants quiet the first NaN in
+// source order, as gfx1201 does rather than preferring signaling NaNs.
 template <bool Maximum, bool Propagate, typename Float> Float minmax(Float x, Float y) {
   using Bits = FloatBits<Float>;
   typename Bits::UInt a = Bits::bits(x), b = Bits::bits(y);
   bool an = (a & Bits::magnitude) > Bits::infinity, bn = (b & Bits::magnitude) > Bits::infinity;
   if constexpr (Propagate) {
-    if (an && !(a & Bits::quiet)) {
-      return Bits::value(a | Bits::quiet);
-    }
-    if (bn && !(b & Bits::quiet)) {
-      return Bits::value(b | Bits::quiet);
-    }
     if (an || bn) {
       return Bits::value((an ? a : b) | Bits::quiet);
     }
@@ -63,13 +58,12 @@ template <bool Maximum, typename Float> Float minmax_rdna3(Float x, Float y, boo
   return minmax<Maximum, false>(x, y);
 }
 
-// Select A/B first and then C; median follows the ISA's first-maximum removal
-// rule by default. OrderedMedian orders -0 below +0 for FP16. Either median
-// returns minimumNumber(A,B,C) if any input is NaN.
+// Select A/B first and then C. The median orders -0 below +0, as gfx1201 does
+// rather than the ISA's first-maximum removal, and returns minimumNumber(A,B,C)
+// if any input is NaN.
 // Return the selected three-input minimum, maximum, median, or combined selection with GPU NaN
 // rules.
-template <bool FirstMaximum, bool SecondMaximum, bool Propagate, bool Median = false,
-          bool OrderedMedian = false>
+template <bool FirstMaximum, bool SecondMaximum, bool Propagate, bool Median = false>
 float minmax3_value(float x, float y, float z) {
   float value;
   if constexpr (Median) {
@@ -79,16 +73,10 @@ float minmax3_value(float x, float y, float z) {
         (FloatBits<float>::bits(z) & FloatBits<float>::magnitude) > FloatBits<float>::infinity;
     if (has_nan) {
       value = rocjitsu::arith::minmax<false, false>(rocjitsu::arith::minmax<false, false>(x, y), z);
-    } else if constexpr (OrderedMedian) {
+    } else {
       value = rocjitsu::arith::minmax<true, false>(
           rocjitsu::arith::minmax<false, false>(x, y),
           rocjitsu::arith::minmax<false, false>(rocjitsu::arith::minmax<true, false>(x, y), z));
-    } else {
-      float maximum =
-          rocjitsu::arith::minmax<true, false>(rocjitsu::arith::minmax<true, false>(x, y), z);
-      value = maximum == x   ? rocjitsu::arith::minmax<true, false>(y, z)
-              : maximum == y ? rocjitsu::arith::minmax<true, false>(x, z)
-                             : rocjitsu::arith::minmax<true, false>(x, y);
     }
   } else {
     float ab = rocjitsu::arith::minmax<FirstMaximum, Propagate>(x, y);

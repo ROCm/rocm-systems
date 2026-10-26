@@ -132,11 +132,7 @@ int arithmetic(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *cons
         (rocjitsu::arith::double_bits(value) & 0x7fffffffffffffffULL) > 0x7ff0000000000000ULL;
     value = rocjitsu::arith::fp64_output(value, preserve_nan ? mode & ~RJ_ARITH_ALU_CLAMP : mode);
     // Selection preserves a selected subnormal; arithmetic/unary outputs flush.
-    constexpr bool selection =
-        Op == rocjitsu::arith::Fp64::MinLegacy || Op == rocjitsu::arith::Fp64::MaxLegacy ||
-        Op == rocjitsu::arith::Fp64::MinNum || Op == rocjitsu::arith::Fp64::MaxNum ||
-        Op == rocjitsu::arith::Fp64::Minimum || Op == rocjitsu::arith::Fp64::Maximum;
-    if (!selection && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+    if (!rocjitsu::arith::fp64_is_selection(Op) && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
       value = rocjitsu::arith::fp64_flush_denorm(value);
     }
     uint64_t bits = rocjitsu::arith::double_bits(value);

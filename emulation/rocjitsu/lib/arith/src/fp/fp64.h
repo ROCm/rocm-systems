@@ -53,6 +53,22 @@ constexpr int fp64_sources(Fp64 op) {
   }
 }
 
+// Whether the operation returns a source unchanged rather than computing a
+// result, so guest output-denormal flushing does not apply to it.
+constexpr bool fp64_is_selection(Fp64 op) {
+  switch (op) {
+  case Fp64::MinLegacy:
+  case Fp64::MaxLegacy:
+  case Fp64::MinNum:
+  case Fp64::MaxNum:
+  case Fp64::Minimum:
+  case Fp64::Maximum:
+    return true;
+  default:
+    return false;
+  }
+}
+
 // Flush FP64 subnormals to zero of the same sign without touching host FP state.
 inline double fp64_flush_denorm(double value) {
   uint64_t raw = double_bits(value);

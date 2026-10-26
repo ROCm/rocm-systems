@@ -129,10 +129,7 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
       value = clamped;
     }
     // Selection preserves a selected subnormal; arithmetic/unary outputs flush.
-    constexpr bool selection = Op == Fp64::MinLegacy || Op == Fp64::MaxLegacy ||
-                               Op == Fp64::MinNum || Op == Fp64::MaxNum || Op == Fp64::Minimum ||
-                               Op == Fp64::Maximum;
-    if (!selection && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+    if (!fp64_is_selection(Op) && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
       value = flush_denorm_f64(value);
     }
 

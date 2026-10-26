@@ -89,9 +89,8 @@ int minmax3(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
                                              Op == rocjitsu::arith::Minmax3::MedianLegacy>(
           x, y, z, flags & RJ_ARITH_FP_IEEE_MODE);
     } else {
-      value =
-          rocjitsu::arith::minmax3_value<FirstMaximum, SecondMaximum, Propagate,
-                                         Op == rocjitsu::arith::Minmax3::MedianNum, true>(x, y, z);
+      value = rocjitsu::arith::minmax3_value<FirstMaximum, SecondMaximum, Propagate,
+                                             Op == rocjitsu::arith::Minmax3::MedianNum>(x, y, z);
     }
     value = rocjitsu::arith::alu_output_f16(value, Rdna3 && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF) &&
                                                            std::isnan(value)

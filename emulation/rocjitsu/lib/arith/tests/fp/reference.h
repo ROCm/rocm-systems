@@ -102,15 +102,12 @@ inline double select_fp(double x, double y, bool maximum, bool propagate = false
   return maximum ? std::max(x, y) : std::min(x, y);
 }
 
-// Return the test reference's three-value median.
+// Return the test reference's three-value median, ordering -0 below +0.
 inline double median_fp(double x, double y, double z) {
   if (std::isnan(x) || std::isnan(y) || std::isnan(z)) {
     return select_fp(select_fp(x, y, false), z, false);
   }
-  double maximum = std::max({x, y, z});
-  return maximum == x   ? select_fp(y, z, true)
-         : maximum == y ? select_fp(x, z, true)
-                        : select_fp(x, y, true);
+  return select_fp(select_fp(x, y, false), select_fp(select_fp(x, y, true), z, false), true);
 }
 
 // Apply source sign modifiers; selection of packed halves stays in each test.

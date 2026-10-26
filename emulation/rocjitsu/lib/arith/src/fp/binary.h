@@ -24,6 +24,22 @@ enum class Binary {
   MaxLegacy
 };
 
+// Whether the operation returns a source unchanged rather than computing a
+// result, so guest output-denormal flushing does not apply to it.
+constexpr bool binary_is_selection(Binary op) {
+  switch (op) {
+  case Binary::MinNum:
+  case Binary::MaxNum:
+  case Binary::Minimum:
+  case Binary::Maximum:
+  case Binary::MinLegacy:
+  case Binary::MaxLegacy:
+    return true;
+  default:
+    return false;
+  }
+}
+
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
 // Evaluate FP32 binary arithmetic. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.

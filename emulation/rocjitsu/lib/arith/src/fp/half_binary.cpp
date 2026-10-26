@@ -208,10 +208,7 @@ template <rocjitsu::arith::Binary Op, bool Packed, bool GuestDenormals, bool Rdn
   constexpr bool arithmetic =
       Op == rocjitsu::arith::Binary::Add || Op == rocjitsu::arith::Binary::Sub ||
       Op == rocjitsu::arith::Binary::Subrev || Op == rocjitsu::arith::Binary::Mul;
-  constexpr bool selection =
-      Op == rocjitsu::arith::Binary::MinLegacy || Op == rocjitsu::arith::Binary::MaxLegacy ||
-      Op == rocjitsu::arith::Binary::MinNum || Op == rocjitsu::arith::Binary::MaxNum ||
-      Op == rocjitsu::arith::Binary::Minimum || Op == rocjitsu::arith::Binary::Maximum;
+  constexpr bool selection = rocjitsu::arith::binary_is_selection(Op);
   // Each packed result half has independent source-half selectors and sign modifiers.
   uint32_t modes[] = {Packed ? rocjitsu::arith::packed_half_mode(mode, false) : uint32_t(mode),
                       rocjitsu::arith::packed_half_mode(mode, true)};
@@ -339,10 +336,7 @@ int binary(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d
   constexpr bool arithmetic =
       Op == rocjitsu::arith::Binary::Add || Op == rocjitsu::arith::Binary::Sub ||
       Op == rocjitsu::arith::Binary::Subrev || Op == rocjitsu::arith::Binary::Mul;
-  constexpr bool selection =
-      Op == rocjitsu::arith::Binary::MinLegacy || Op == rocjitsu::arith::Binary::MaxLegacy ||
-      Op == rocjitsu::arith::Binary::MinNum || Op == rocjitsu::arith::Binary::MaxNum ||
-      Op == rocjitsu::arith::Binary::Minimum || Op == rocjitsu::arith::Binary::Maximum;
+  constexpr bool selection = rocjitsu::arith::binary_is_selection(Op);
   constexpr uint64_t fp_flags = (arithmetic || selection)
                                     ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                           RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_IEEE_MODE

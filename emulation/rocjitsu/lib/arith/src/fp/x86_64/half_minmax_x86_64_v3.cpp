@@ -59,7 +59,7 @@ void half_minmax3_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, u
       value = minmax3_rdna3<FirstMaximum, SecondMaximum, Median>(x, y, z,
                                                                  flags & RJ_ARITH_FP_IEEE_MODE);
     } else {
-      value = minmax3_value<FirstMaximum, SecondMaximum, Propagate, Median, true>(x, y, z);
+      value = minmax3_value<FirstMaximum, SecondMaximum, Propagate, Median>(x, y, z);
     }
     if (mode & RJ_ARITH_ALU_OMOD_HALF) {
       value = _mm256_mul_ps(prepare_omod_f16(value, mode), scale);
