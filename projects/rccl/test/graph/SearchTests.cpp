@@ -4,22 +4,13 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Regression test for the NCCL_CROSS_NIC=0 rail-matching rule fixed in NCCL
-// v2.28.7-1 ("large performance issue ... where NCCL cannot find a viable
-// ring"), synced into RCCL by the v2.28.9-1 sync.
-//
-// The rule lives in ncclTopoSearchCheckNet() (src/graph/search.cc), which
-// decides whether a candidate NIC is a valid "back-to-NIC" choice during ring
-// search. Before the fix, crossNic=0 matched rails by (asic, port) only -- and
-// `asic` is the NIC GUID, which is unique per host. So across hosts no NIC ever
-// matched and the search could not close a ring. The fix adds a per-NIC `pciId`
-// and NCCL_MNNVL_RAIL_PER_HOST: when set, cross-host NICs match by (pciId, port)
-// instead, while same-host pairs keep using (asic, port).
-//
-// These cases pin that crossNic=0 truth table. The test requires net.pciId
-// (added by the sync) so it cannot even compile on pre-2.28.7 trees, and the
-// MNNVL_RAIL_PER_HOST accept case below fails on the pre-fix (asic-only) logic
-// -- so it discriminates fixed-vs-unfixed code.
+// The NCCL_CROSS_NIC=0 rail-matching rule in ncclTopoSearchCheckNet()
+// (src/graph/search.cc), which decides whether a candidate NIC is a valid
+// "back-to-NIC" choice during ring search. Two NICs match only when they share a
+// rail and a plane. When the net plugin reports none, NCCL generates them: each
+// host numbers its distinct NIC ASICs in order of appearance, and the plane is
+// the port. Generated rails line up across hosts only with
+// NCCL_MNNVL_RAIL_PER_HOST; otherwise a NIC on another host never matches.
 //
 // ncclTopoSearchCheckNet() is internal: it has external linkage only in debug
 // builds (this file is built into rccl-UnitTestsFixturesDebug), so we just
@@ -34,6 +25,7 @@
 #include "../common/ProcessIsolatedTestRunner.hpp"
 
 #include <cstdint>
+#include <map>
 #include <vector>
 
 // Pull the hipified search.cc directly into this translation unit so we can
@@ -63,6 +55,9 @@ ncclTopoSystem* makeSystemWithNets(const std::vector<NetSpec>& nics)
 {
     auto* sys             = new ncclTopoSystem{};
     sys->nodes[NET].count = static_cast<int>(nics.size());
+    // Rails/planes as NCCL generates them when the plugin reports none: each host numbers its
+    // distinct NIC ASICs in order of appearance, and the plane comes from the port.
+    std::map<int, std::map<uint64_t, int>> railOfAsic;
     for(size_t i = 0; i < nics.size(); ++i)
     {
         auto& node     = sys->nodes[NET].nodes[i];
@@ -72,7 +67,9 @@ ncclTopoSystem* makeSystemWithNets(const std::vector<NetSpec>& nics)
         node.net.asic  = nics[i].asic;
         node.net.port  = nics[i].port;
         node.net.pciId = nics[i].pciId;
-        node.net.railId = NCCL_TOPO_UNDEF;
+        auto& rails    = railOfAsic[nics[i].systemId];
+        node.net.railId  = NCCL_TOPO_UNDEF_BIT | rails.emplace(nics[i].asic, static_cast<int>(rails.size())).first->second;
+        node.net.planeId = NCCL_TOPO_UNDEF_BIT | nics[i].port;
     }
     return sys;
 }
@@ -127,39 +124,36 @@ TEST(SearchCheckNet, SameHost_DifferentAsic_Rejects)
 }
 
 // ---------------------------------------------------------------------------
-// Cross host, MNNVL_RAIL_PER_HOST off (default): only (asic, port) is tried.
-// With realistic unique-per-NIC GUIDs the asic never matches across hosts, so
-// the helper rejects -- this is the "cannot find a viable ring" condition the
-// fix targets.
+// Cross host, MNNVL_RAIL_PER_HOST off: generated rails never match across hosts.
 // ---------------------------------------------------------------------------
 TEST(SearchCheckNet, CrossHost_MnnvlRailOff_UniqueGuids_Rejects)
 {
-    RUN_ISOLATED_TEST("CrossHost_MnnvlRailOff_UniqueGuids_Rejects",
-                      []()
-                      {
-                          auto* sys      = makeSystemWithNets({
-                              {0, 0, 0xAA01, 1, 0xCAFE},
-                              {1, 0, 0xAA02, 1, 0xCAFE}, // unique GUID per host; pciId would match
-                          });
-                          auto* g        = makeRingCrossNic0();
-                          auto* startNet = &sys->nodes[NET].nodes[0];
-                          EXPECT_FALSE(
-                              ncclTopoSearchCheckNet(sys, g, startNet, /*n=*/1, /*step=*/0));
-                          delete g;
-                          delete sys;
-                      });
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "CrossHost_MnnvlRailOff_UniqueGuids_Rejects",
+        []()
+        {
+            auto* sys      = makeSystemWithNets({
+                {0, 0, 0xAA01, 1, 0xCAFE},
+                {1, 0, 0xAA02, 1, 0xCAFE}, // same generated rail index, different host
+            });
+            auto* g        = makeRingCrossNic0();
+            auto* startNet = &sys->nodes[NET].nodes[0];
+            EXPECT_FALSE(ncclTopoSearchCheckNet(sys, g, startNet, /*n=*/1, /*step=*/0));
+            delete g;
+            delete sys;
+        },
+        {{"NCCL_MNNVL_RAIL_PER_HOST", "0"}});
 }
 
 // ---------------------------------------------------------------------------
-// Cross host, MNNVL_RAIL_PER_HOST on (the fix): cross-host matching falls back
-// to (pciId, port). NCCL_PARAM caches the env value, so each case forks.
+// Cross host, MNNVL_RAIL_PER_HOST on: generated rails match by index across
+// hosts. NCCL_PARAM caches the env value, so each case forks.
 // ---------------------------------------------------------------------------
-TEST(SearchCheckNet, CrossHost_MnnvlRailOn_PciIdAndPortMatch_Accepts)
+TEST(SearchCheckNet, CrossHost_MnnvlRailOn_SameRailAndPort_Accepts)
 {
-    // The discriminating case: same (pciId, port) but distinct GUIDs across
-    // hosts. Accept-on-the-fixed-tree; the pre-fix asic-only logic rejects.
+    // Distinct GUIDs, but each is its host's first NIC, so both are rail 0.
     RUN_ISOLATED_TEST_WITH_ENV(
-        "CrossHost_MnnvlRailOn_PciIdAndPortMatch_Accepts",
+        "CrossHost_MnnvlRailOn_SameRailAndPort_Accepts",
         []()
         {
             auto* sys      = makeSystemWithNets({
@@ -176,20 +170,21 @@ TEST(SearchCheckNet, CrossHost_MnnvlRailOn_PciIdAndPortMatch_Accepts)
         {{"NCCL_MNNVL_RAIL_PER_HOST", "1"}});
 }
 
-TEST(SearchCheckNet, CrossHost_MnnvlRailOn_PciIdMismatch_Rejects)
+TEST(SearchCheckNet, CrossHost_MnnvlRailOn_DifferentRailIndex_Rejects)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
-        "CrossHost_MnnvlRailOn_PciIdMismatch_Rejects",
+        "CrossHost_MnnvlRailOn_DifferentRailIndex_Rejects",
         []()
         {
             auto* sys      = makeSystemWithNets({
                 {0, 0, 0xAA01, 1, 0xCAFE},
-                {1, 0, 0xAA02, 1, 0xBABE}, // different pciId => different rail
+                {1, 0, 0xBB01, 1, 0xCAFE},
+                {1, 1, 0xBB02, 1, 0xBABE}, // this host's second NIC => rail 1, not rail 0
             }
                     );
             auto* g        = makeRingCrossNic0();
             auto* startNet = &sys->nodes[NET].nodes[0];
-            EXPECT_FALSE(ncclTopoSearchCheckNet(sys, g, startNet, /*n=*/1, /*step=*/0));
+            EXPECT_FALSE(ncclTopoSearchCheckNet(sys, g, startNet, /*n=*/2, /*step=*/0));
             delete g;
             delete sys;
     },
@@ -216,13 +211,12 @@ TEST(SearchCheckNet, CrossHost_MnnvlRailOn_PortMismatch_Rejects)
         {{"NCCL_MNNVL_RAIL_PER_HOST", "1"}});
 }
 
-TEST(SearchCheckNet, SameHost_MnnvlRailOn_StillUsesAsicMatch_Rejects)
+TEST(SearchCheckNet, SameHost_MnnvlRailOn_DifferentAsic_Rejects)
 {
-    // MNNVL_RAIL_PER_HOST only switches the key for NICs on *different* system
-    // ids. Same-host pairs still match on (asic, port), so a same-host pair with
-    // matching pciId but different asic is still rejected.
+    // MNNVL_RAIL_PER_HOST only relaxes the cross-host check. Two ASICs on the same
+    // host are two rails, so the pair is still rejected.
     RUN_ISOLATED_TEST_WITH_ENV(
-        "SameHost_MnnvlRailOn_StillUsesAsicMatch_Rejects",
+        "SameHost_MnnvlRailOn_DifferentAsic_Rejects",
         []()
         {
             auto* sys      = makeSystemWithNets({

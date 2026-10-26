@@ -304,14 +304,13 @@ __device__ __forceinline__ bool is_last_active_lane() {
   __threadfence();
   __syncthreads();
   if (threadIdx.x == 0) {
-    __hip_atomic_fetch_add(&global_counter[0], 1,
-                           __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    atomic::fetch_add<atomic::memory_scope::device,
+                      atomic::memory_order::relaxed>(&global_counter[0], 1);
   }
   __syncthreads();
   if (threadIdx.x == 0) {
-    while (__hip_atomic_load(global_counter,
-                             __ATOMIC_RELAXED,
-                             __HIP_MEMORY_SCOPE_AGENT) != num_blocks);
+    while (atomic::load<atomic::memory_scope::device,
+           atomic::memory_order::relaxed>(global_counter) != num_blocks);
   }
   __syncthreads();
 }
@@ -326,9 +325,10 @@ __device__ __forceinline__ bool is_last_active_lane() {
 [[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_unique(uint32_t *lock) {
   uint32_t lock_val = SPIN_LOCK_UNLOCKED;
 
-  __hip_atomic_compare_exchange_strong(lock, &lock_val, SPIN_LOCK_LOCKED,
-                                       __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
-                                       __HIP_MEMORY_SCOPE_AGENT);
+  atomic::compare_exchange_strong<
+    atomic::memory_scope::device,
+    atomic::memory_order::acquire,
+    atomic::memory_order::acquire>(lock, lock_val, SPIN_LOCK_LOCKED);
 
   return lock_val == SPIN_LOCK_UNLOCKED;
 }
@@ -347,8 +347,8 @@ __device__ __forceinline__ bool is_last_active_lane() {
  * Each thread in wave releases a different lock.
  */
 [[maybe_unused]] __device__ __forceinline__ void spin_lock_release_unique(uint32_t *lock) {
-  __hip_atomic_store(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE,
-                     __HIP_MEMORY_SCOPE_AGENT);
+  atomic::store<atomic::memory_scope::device,
+                atomic::memory_order::release>(lock, SPIN_LOCK_UNLOCKED);
 }
 
 /*
@@ -359,9 +359,10 @@ __device__ __forceinline__ bool is_last_active_lane() {
 
   if (is_first_active_lane(activemask)) {
     lock_val = SPIN_LOCK_UNLOCKED;
-    __hip_atomic_compare_exchange_strong(lock, &lock_val, SPIN_LOCK_LOCKED,
-                                         __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
-                                         __HIP_MEMORY_SCOPE_AGENT);
+    atomic::compare_exchange_strong<
+      atomic::memory_scope::device,
+      atomic::memory_order::acquire,
+      atomic::memory_order::acquire>(lock, lock_val, SPIN_LOCK_LOCKED);
   }
   lock_val = __shfl(lock_val, get_first_active_lane_id(activemask));
 
@@ -382,8 +383,8 @@ __device__ __forceinline__ bool is_last_active_lane() {
  */
 [[maybe_unused]] __device__ __forceinline__ void spin_lock_release_shared(uint32_t *lock, uint64_t activemask) {
   if (is_first_active_lane(activemask)) {
-    __hip_atomic_store(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE,
-                       __HIP_MEMORY_SCOPE_AGENT);
+    atomic::store<atomic::memory_scope::device,
+                  atomic::memory_order::release>(lock, SPIN_LOCK_UNLOCKED);
   }
 }
 
@@ -401,6 +402,9 @@ constexpr bool is_blocking(MemcpyKind k) {
   return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
 }
 
+// Whenever LoadPolicy/StorePolicy isn't Standard, the tail loop's
+// AsmAccess::load/store (assembly.hpp) require dst/src to be genuine global
+// addresses (symmetric heap, or an IPC/RDMA-mapped remote of it).
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
 __device__ __noinline__ void copy_bulk(void* dst, void* src,
                                           int n_chunks, int tid, int stride) {
@@ -437,10 +441,9 @@ __device__ __noinline__ void copy_bulk(void* dst, void* src,
 // ==============================================================================
 // REMAINDER COPY (< 16 Bytes Fast Path)
 // ==============================================================================
+// Whenever LP/SP isn't Standard, dst/src must be genuine global addresses;
 template <CachePolicy LP, CachePolicy SP>
-__device__ __forceinline__ void copy_remainder(uint8_t* dst,
-                                               uint8_t* src,
-                                               int remainder) {
+__device__ __forceinline__ void copy_remainder(uint8_t* dst, uint8_t* src, int remainder) {
   if (remainder == 0) return;
 
   if (remainder & 1) {
@@ -489,7 +492,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   constexpr int ChunkSize = 16;
   constexpr int Unroll    = 8;
   // Compile-time bypass policy: cache-bypass in the direction of the remote side.
-  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard    : CachePolicy::SystemScope;
+  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   int n_chunks  = static_cast<int>(size / ChunkSize);
@@ -499,8 +502,8 @@ template <MemcpyKind Kind = MemcpyKind::Put>
     // Many threads, large transfer: use cached Standard policy.
     // Fences are direction-specific to maintain system-scope coherence.
     if constexpr (!is_put(Kind)) {
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                  detail::atomic::memory_order_acquire>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acquire>();
     }
 
     if (n_chunks > 0) {
@@ -512,8 +515,8 @@ template <MemcpyKind Kind = MemcpyKind::Put>
         static_cast<uint8_t*>(src) + n_chunks * ChunkSize, remainder);
 
     if constexpr (is_put(Kind)) {
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                  detail::atomic::memory_order_release>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::release>();
     }
   } else {
     // Small transfer or single-lane: cache-bypass policy provides direct

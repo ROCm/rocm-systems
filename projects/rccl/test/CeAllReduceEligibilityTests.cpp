@@ -9,10 +9,18 @@
  
 #include "ce_coll.h"
 #include "collectives.h"
+#include "dev_runtime.h"
+#include "dev_runtime_internal.h"
+#include "bitops.h"
 #include "gtest/gtest.h"
 #include "nccl.h"
 #include "rccl_common.h"
+#include "graph.h"
+#include "rccl_decision.h"
+#include "rocmwrap.h"
 
+#include <chrono>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -46,6 +54,19 @@ TEST_F(CeAllReduceEligibilityTest, CeImplementedReturnsTrueForAllReduceOnSupport
                         "(need ROCm >= 7.12 or 7.0.2.x backport [70051831, 70060000))";
 
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat32));
+}
+
+TEST_F(CeAllReduceEligibilityTest, CeImplementedRejectsFp8AllReduceOnly)
+{
+    if(!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    EXPECT_FALSE(ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat8e4m3));
+    EXPECT_FALSE(ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat8e5m2));
+    EXPECT_FALSE(ncclCeAvailable(mockComm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat8e4m3,
+                                 ncclSymSendRegRecvReg, nullptr, nullptr));
+    EXPECT_TRUE(ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclBfloat16));
+    EXPECT_TRUE(ncclCeImplemented(ncclFuncAllGather, ncclDevSum, ncclFloat8e4m3));
 }
 
 TEST_F(CeAllReduceEligibilityTest, CeAvailable_EligibleWithSymmetricSingleNode)
@@ -116,12 +137,12 @@ TEST_F(CeAllReduceEligibilityTest, ChunkLayout_SmallMessageSingleChunk)
     // ncclCeAllReduce() only ever sees counts the eligibility gate accepted: an
     // exact multiple of nRanks, and no larger than the staging buffer.
     ASSERT_EQ(count % static_cast<size_t>(nRanks), 0u);
-    ASSERT_LE(count * sizeof(float), static_cast<size_t>(NCCL_CE_AR_MAX_MSG_BYTES));
+    ASSERT_LE(count * sizeof(float), kCeArMaxMsgBytesDefault);
 
     const size_t shardElems = count / nRanks;
     const size_t shardBytes = shardElems * sizeof(float);
     const size_t slotChunkBytes =
-        ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(nRanks));
+        ncclCeAllReduceSlotChunkBytes(ceAllReduceMaxChunkBytes(nRanks));
 
     // A shard this small fits one slot, so ncclCeAllReduce() sends it as a single
     // chunk and never enters the pipelined path.
@@ -132,7 +153,7 @@ TEST_F(CeAllReduceEligibilityTest, ChunkLayout_SmallMessageSingleChunk)
 // The host scatter addresses staging slots in bytes (rank * slotChunkBytes) while
 // the reduce kernel addresses them in elements (rank * slotChunkElems). If those
 // two strides disagree by even one byte, every rank but rank 0 reduces shifted
-// data. NCCL_CE_AR_MAX_MSG_BYTES / nRanks only divides evenly for power-of-2 rank
+// data. kCeArMaxMsgBytesDefault / nRanks only divides evenly for power-of-2 rank
 // counts, so those were the only ones that used to work.
 TEST_F(CeAllReduceEligibilityTest, ChunkLayout_SlotStridesAgreeForAnyRankCount)
 {
@@ -142,13 +163,13 @@ TEST_F(CeAllReduceEligibilityTest, ChunkLayout_SlotStridesAgreeForAnyRankCount)
     for(int nRanks : rankCounts)
     {
         const size_t slotChunkBytes =
-            ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(nRanks));
+            ncclCeAllReduceSlotChunkBytes(ceAllReduceMaxChunkBytes(nRanks));
         SCOPED_TRACE("nRanks=" + std::to_string(nRanks));
 
         // Rank boundaries stay aligned for the kernel's 16B vector loads, and the
         // slots stay inside the buffer ncclCeInit() sized from the raw capacity.
         EXPECT_EQ(slotChunkBytes % 16, 0u);
-        EXPECT_LE(slotChunkBytes, ncclCeAllReduceMaxChunkBytes(nRanks));
+        EXPECT_LE(slotChunkBytes, ceAllReduceMaxChunkBytes(nRanks));
 
         for(size_t eltSize : elementSizes)
         {
@@ -162,18 +183,18 @@ TEST_F(CeAllReduceEligibilityTest, ChunkLayout_SlotStridesAgreeForAnyRankCount)
 
 TEST_F(CeAllReduceEligibilityTest, ChunkLayout_LargeMessagePipelined)
 {
-    // A shard only spills past one slot when NCCL_CE_AR_MAX_MSG_BYTES / nRanks is
+    // A shard only spills past one slot when kCeArMaxMsgBytesDefault / nRanks is
     // not 16B-aligned, i.e. for a non-power-of-2 rank count at the message cap.
     constexpr int nRanks     = 6;
-    const size_t  shardElems = ncclCeAllReduceMaxChunkBytes(nRanks) / sizeof(float);
+    const size_t  shardElems = ceAllReduceMaxChunkBytes(nRanks) / sizeof(float);
     const size_t  count      = shardElems * nRanks;  // divisible by nRanks by construction
 
     // The gate would still accept this count, so the layout below is reachable.
-    ASSERT_LE(count * sizeof(float), static_cast<size_t>(NCCL_CE_AR_MAX_MSG_BYTES));
+    ASSERT_LE(count * sizeof(float), kCeArMaxMsgBytesDefault);
 
     const size_t shardBytes = shardElems * sizeof(float);
     const size_t slotChunkBytes =
-        ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(nRanks));
+        ncclCeAllReduceSlotChunkBytes(ceAllReduceMaxChunkBytes(nRanks));
     ASSERT_GT(shardBytes, slotChunkBytes);
 
     // Same bookkeeping ncclCeAllReduce() does once it has picked a chunk size.
@@ -195,14 +216,95 @@ TEST_F(CeAllReduceEligibilityTest, ChunkLayout_LargeMessagePipelined)
     EXPECT_EQ((chunksPerShard - 1) * chunkBytes + lastChunkElems * sizeof(float), shardBytes);
 }
 
+TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_PointerInWindowIsNotEnough)
+{
+    ncclDevrWindow win{};
+    alignas(16) uint8_t storage[128];
+    win.userPtr = storage;
+    win.size = sizeof(storage);
+    win.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+
+    EXPECT_NE(ncclCeRecvRangeContainedInWindow(&win, storage, sizeof(storage)), 0);
+    EXPECT_NE(ncclCeRecvRangeContainedInWindow(&win, storage + 32, 32), 0);
+    // Degenerate size/2 == size-totalBytes still contained; the MPI tests use a
+    // non-degenerate offset so reverting to pointer-only fails those, not this.
+    EXPECT_NE(ncclCeRecvRangeContainedInWindow(&win, storage + 64, 64), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 64, 80), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 128, 1), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(nullptr, storage, 8), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, nullptr, 8), 0);
+}
+
+TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_UsesPeerMinimumSize)
+{
+    ncclDevrMemory memory{};
+    memory.lsaMinSize = 96;
+
+    ncclDevrWindow win{};
+    alignas(16) uint8_t storage[128];
+    win.memory = &memory;
+    win.userPtr = storage;
+    win.size = sizeof(storage);
+    win.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+
+    EXPECT_NE(ncclCeRecvRangeContainedInWindow(&win, storage + 32, 64), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 64, 64), 0);
+}
+
+TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_SubtractsAllocationOffset)
+{
+    ncclDevrMemory memory{};
+    memory.lsaMinSize = 96;
+    memory.bigOffset = 1000;
+
+    ncclDevrWindow win{};
+    alignas(16) uint8_t storage[128];
+    win.memory = &memory;
+    win.userPtr = storage;
+    win.size = sizeof(storage);
+    win.bigOffset = memory.bigOffset + 32;
+    win.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+
+    // min(win->size, lsaMinSize - memOffset) = min(128, 64).
+    EXPECT_NE(ncclCeRecvRangeContainedInWindow(&win, storage, 64), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage, 80), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 32, 64), 0);
+
+    win.bigOffset = memory.bigOffset + memory.lsaMinSize;
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage, 1), 0);
+
+    memory.lsaMinSize = 256;
+    win.bigOffset = memory.bigOffset;
+    EXPECT_NE(ncclCeRecvRangeContainedInWindow(&win, storage, sizeof(storage)), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 64, 80), 0);
+}
+
+TEST_F(CeAllReduceEligibilityTest, StagingBufBytesMatchesInitFormula)
+{
+    for (size_t stagingBytes :
+         {static_cast<size_t>(NCCL_CE_AR_STAGING_BYTES), static_cast<size_t>(33) * 1024 * 1024}) {
+        for (int nRanks : {2, 3, 4, 5, 6, 7, 8, 12, 16, 24}) {
+            SCOPED_TRACE("stagingBytes=" + std::to_string(stagingBytes) +
+                         " nRanks=" + std::to_string(nRanks));
+            const size_t expected = alignUp(
+                static_cast<size_t>(NCCL_CE_NUM_SLOTS) * static_cast<size_t>(nRanks) *
+                    ncclCeAllReduceMaxChunkBytes(nRanks, stagingBytes),
+                static_cast<size_t>(16));
+            EXPECT_EQ(ncclCeAllReduceStagingBufBytes(nRanks, stagingBytes), expected);
+        }
+    }
+    EXPECT_EQ(ncclCeAllReduceStagingBufBytes(0, NCCL_CE_AR_STAGING_BYTES), 0u);
+    EXPECT_EQ(ncclCeAllReduceStagingBufBytes(-1, NCCL_CE_AR_STAGING_BYTES), 0u);
+}
+
 TEST_F(CeAllReduceEligibilityTest, MaxStagingBytesPerRank)
 {
     // The whole message has to fit the per-rank staging capacity ncclCeInit uses.
     for(int nRanks : {2, 3, 4, 5, 6, 7, 8, 12, 16, 24})
     {
         SCOPED_TRACE("nRanks=" + std::to_string(nRanks));
-        EXPECT_LE(ncclCeAllReduceMaxChunkBytes(nRanks) * static_cast<size_t>(nRanks),
-                  static_cast<size_t>(NCCL_CE_AR_MAX_MSG_BYTES));
+        EXPECT_LE(ceAllReduceMaxChunkBytes(nRanks) * static_cast<size_t>(nRanks),
+                  kCeArMaxMsgBytesDefault);
     }
 }
 
@@ -220,13 +322,25 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         ncclDataType_t                               datatype;
         bool                                         expected;
         std::unordered_map<std::string, std::string> extraEnv;
+        std::string                                  archName;
+        int                                          lsaSize = 0; // 0: the team spans nRanks
     };
+
+
+
 
     const std::unordered_map<std::string, std::string> baseEnv = {
         {"RCCL_CE_ALLREDUCE", "1"},
+        {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
     };
 
     const std::vector<UseCeArCase> cases = {
+        // RCCL_CE_ALLREDUCE=-1 (default) is auto-on for gfx1250; overriding
+        // RCCL_CE_AR_2SHOT_MAX_BYTES lifts the ceNonRegMax=0 cap so rcclUseCeAr2Shot
+        // returns true, confirming the default-on wiring.
+        {"DefaultOn_2Shot_Gfx1250_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, true, {{"RCCL_CE_AR_2SHOT_MAX_BYTES", "1048576"}}, "gfx1250"},
+        {"DefaultOff_Gfx950_Isolated",  4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}, "gfx950"},
+        // Null archName (zero-initialised mock) also falls through to off.
         {"DisabledByDefault_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}},
         {"EligibleFloat32Sum_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, true, baseEnv},
         {"MultiNodeRejected_Isolated", 4, 2, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, baseEnv},
@@ -240,37 +354,316 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         {"ZeroCountRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 0, ncclSum, ncclFloat32, false, baseEnv},
         {"UnsupportedOpRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclAvg, ncclFloat32, false, baseEnv},
         {"Float8Rejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat8e4m3, false, baseEnv},
-        {"MessageTooLargeRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO,
-         (NCCL_CE_AR_MAX_MSG_BYTES / sizeof(float)) + 4, ncclSum, ncclFloat32, false, baseEnv},
+        // One node, but the LSA team is narrower than the comm.
+        {"SplitLsaTeamRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, baseEnv, "", 2},
+        {"SplitLsaTeamSixRanksRejected_Isolated", 6, 1, true, NCCL_CTA_POLICY_ZERO, 4098, ncclSum, ncclFloat32, false, baseEnv, "", 3},
     };
 
     for(const auto& tc : cases)
     {
         auto env = tc.extraEnv;
-        ProcessIsolatedTestRunner::registerTest(
+        auto cfg =
             ProcessIsolatedTestRunner::TestConfig(
                 tc.name,
                 [tc]()
                 {
                     CeAllReduceMockComm mock;
+                    mock.reset(tc.archName.empty() ? nullptr : tc.archName.c_str());
                     mock.comm.nRanks           = tc.nRanks;
+                    mock.comm.devrState.lsaSize = tc.lsaSize ? tc.lsaSize : tc.nRanks;
                     mock.comm.nNodes           = tc.nNodes;
                     mock.comm.symmetricSupport = tc.symmetricSupport;
                     mock.comm.config.CTAPolicy = tc.ctaPolicy;
 
+                    // No eligible case survives a driver outside the CE range.
+                    const bool expected = tc.expected && isCeRuntimeDriverSupported();
                     const bool result =
-                        rcclUseCeAllReduce(mock.get(), tc.count, tc.datatype, tc.op, /*acc=*/nullptr);
-                    EXPECT_EQ(result, tc.expected) << tc.name;
+                        rcclUseCeAr2Shot(mock.get(), tc.count, tc.datatype, tc.op, /*acc=*/nullptr);
+                    EXPECT_EQ(result, expected) << tc.name;
                 })
                 .withEnvironment(env)
                 .withTimeout(std::chrono::seconds(30))
-                .withNumGpus(0));
+                .withNumGpus(0);
+        // Isolated children inherit the parent env. A case that does not set the
+        // cap must not see a suite or shell override, or gfx1250's table default
+        // (off) becomes on. RCCL_CE_ALLREDUCE is env-first, so an inherited 0
+        // fails DefaultOn, which expects the gfx1250 default (unset).
+        if (env.find("RCCL_CE_AR_2SHOT_MAX_BYTES") == env.end())
+            cfg.clearVariable("RCCL_CE_AR_2SHOT_MAX_BYTES");
+        if (env.find("RCCL_CE_AR_2SHOT_MIN_BYTES") == env.end())
+            cfg.clearVariable("RCCL_CE_AR_2SHOT_MIN_BYTES");
+        if (env.find("RCCL_CE_ALLREDUCE") == env.end())
+            cfg.clearVariable("RCCL_CE_ALLREDUCE");
+        ProcessIsolatedTestRunner::registerTest(cfg);
     }
 
     ProcessIsolatedTestRunner::ExecutionOptions options;
     options.stopOnFirstFailure = false;
     options.verboseLogging     = true;
     EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
+}
+
+// query=true so the mock never probes a stream. ncclProd skips ncclSymkInitOnce
+// (symEligible requires Sum). Empty winSorted is a safe FindWindow miss.
+TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredSelectsCe_Isolated)
+{
+    if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
+
+    ProcessIsolatedTestRunner::registerTest(
+        ProcessIsolatedTestRunner::TestConfig(
+            "ForceUnregisteredSelectsCe_Isolated",
+            []()
+            {
+                CeAllReduceMockComm mock;
+                mock.comm.nRanks = 4;
+                mock.comm.nNodes = 1;
+                mock.comm.symmetricSupport = true;
+                mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+                mock.comm.ceColl.ceARTmpBuf = nullptr;
+
+                alignas(16) float send[1024];
+                alignas(16) float recv[1024];
+                rcclCollDecision decision{};
+                ncclResult_t res = rcclSelectAllReduce(
+                    mock.get(), send, recv, 1024, ncclFloat32, ncclProd,
+                    /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                    &decision);
+                EXPECT_EQ(res, ncclSuccess);
+                EXPECT_EQ(decision.algo, RCCL_CE_REGISTERED)
+                    << "FORCE + unregistered buffers must enqueue CE before staging is allocated";
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
+                              {"RCCL_FORCE_CE_ALLREDUCE", "1"},
+                              {"RCCL_DDA_ENABLE", "0"}})
+            .withTimeout(std::chrono::seconds(30))
+            .withNumGpus(0));
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging = true;
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
+}
+
+// One slot per rank is the default 2-shot cap. The first forced call still
+// selects registered CE; a message past that cap does not.
+TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingSelectsCe_Isolated)
+{
+    if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
+
+    ProcessIsolatedTestRunner::registerTest(
+        ProcessIsolatedTestRunner::TestConfig(
+            "ForceUnregisteredOverStagingSelectsCe_Isolated",
+            []()
+            {
+                CeAllReduceMockComm mock;
+                mock.comm.nRanks = 8;
+                mock.comm.devrState.lsaSize = mock.comm.nRanks;
+                mock.comm.nNodes = 1;
+                mock.comm.symmetricSupport = true;
+                mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+                mock.comm.ceColl.ceARTmpBuf = nullptr;
+
+                const size_t slotBytes =
+                    ncclCeAllReduceMaxChunkBytes(mock.comm.nRanks, NCCL_CE_AR_STAGING_BYTES);
+                ASSERT_GT(slotBytes, 0u);
+                const size_t totalBytes = slotBytes * static_cast<size_t>(mock.comm.nRanks);
+                ASSERT_LE(totalBytes, static_cast<size_t>(NCCL_CE_AR_TMPBUF_DEFAULT_BYTES));
+                ASSERT_EQ(totalBytes % sizeof(float), 0u);
+                const size_t count = totalBytes / sizeof(float);
+                ASSERT_EQ(count % static_cast<size_t>(mock.comm.nRanks), 0u);
+                ASSERT_EQ((count / static_cast<size_t>(mock.comm.nRanks)) * sizeof(float), slotBytes);
+
+                rcclCollDecision decision{};
+                ncclResult_t res = rcclSelectAllReduce(
+                    mock.get(), reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000), count, ncclFloat32,
+                    ncclProd, /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision);
+                EXPECT_EQ(res, ncclSuccess);
+                EXPECT_EQ(decision.algo, RCCL_CE_REGISTERED)
+                    << "FORCE unregistered at one full slot still enqueues CE";
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
+                              {"RCCL_FORCE_CE_ALLREDUCE", "1"},
+                              {"RCCL_DDA_ENABLE", "0"}})
+            .withTimeout(std::chrono::seconds(30))
+            .withNumGpus(0));
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging = true;
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
+}
+
+// The 2-shot cap is enforced by rcclSelectAllReduce. rcclUseCeAr2Shot has no size check.
+// query stays false so the ring fallback does not run getAlgoInfo on this mock.
+TEST(RcclCeAllReduceEligibility, SelectAllReduce_MessageTooLargeDeclinesCe_Isolated)
+{
+    if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
+
+    ProcessIsolatedTestRunner::registerTest(
+        ProcessIsolatedTestRunner::TestConfig(
+            "MessageTooLargeDeclinesCe_Isolated",
+            []()
+            {
+                CeAllReduceMockComm mock;
+                mock.comm.nRanks = 4;
+                mock.comm.devrState.lsaSize = mock.comm.nRanks;
+                mock.comm.nNodes = 1;
+                mock.comm.symmetricSupport = true;
+                mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+                mock.comm.ceColl.ceARTmpBuf = nullptr;
+
+                const size_t count =
+                    (kCeArMaxMsgBytesDefault / sizeof(float)) + static_cast<size_t>(mock.comm.nRanks);
+                ASSERT_EQ(count % static_cast<size_t>(mock.comm.nRanks), 0u);
+                ASSERT_GT(count * sizeof(float), kCeArMaxMsgBytesDefault);
+
+                rcclCollDecision decision{};
+                ncclResult_t res = rcclSelectAllReduce(
+                    mock.get(), reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000), count, ncclFloat32,
+                    ncclProd, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision);
+                EXPECT_EQ(res, ncclSuccess);
+                EXPECT_NE(decision.algo, RCCL_CE_REGISTERED);
+                EXPECT_NE(decision.algo, RCCL_CE_2SHOT);
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
+                              {"RCCL_FORCE_CE_ALLREDUCE", "1"},
+                              {"RCCL_DDA_ENABLE", "0"}})
+            .withTimeout(std::chrono::seconds(30))
+            .withNumGpus(0));
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging = true;
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
+}
+
+// ---------------------------------------------------------------------------
+// rcclCeAr2ShotMax(comm) / ncclCeInit staging-buffer growth.
+//
+// ncclCeInit (ce_coll.cc:111-114) grows ceArMaxBytes past
+// NCCL_CE_AR_TMPBUF_DEFAULT_BYTES when rcclCeAr2ShotMax returns a larger
+// value.  Two sources can produce that:
+//   (a) table->ceNonRegMax[ncclFuncAllReduce] > default, read via archThresholds
+//   (b) RCCL_CE_AR_2SHOT_MAX_BYTES env var (rcclParamCeArMaxMsgBytes() >= 0)
+//
+// The tests below verify that the chunk-layout functions
+// (ncclCeAllReduceSlotChunkBytes, ncclCeAllReduceChooseChunkBytes) remain
+// correct when ceArMaxBytes is grown, and that rcclCeAr2ShotMax resolves each
+// source correctly.
+
+static rcclArchThresholds MakeTableWithArMax(size_t arMax)
+{
+    rcclArchThresholds t{};
+    t.ceNonRegMax[ncclFuncAllReduce] = arMax;
+    return t;
+}
+
+// Table path: ceNonRegMax[AR] = 512 MiB -> rcclCeAr2ShotMax must return 512 MiB.
+TEST(RcclCeAr2ShotMax, TablePathReturnsGrownValue)
+{
+    constexpr size_t kGrownMax = 512ull * 1024 * 1024;
+    rcclArchThresholds tbl = MakeTableWithArMax(kGrownMax);
+
+    CeAllReduceMockComm mock;
+    mock.comm.archThresholds = &tbl;
+
+    EXPECT_EQ(rcclCeAr2ShotMax(mock.get()), kGrownMax);
+}
+
+// Table path at the default value: no spurious growth.
+TEST(RcclCeAr2ShotMax, TablePathAtDefaultNoGrowth)
+{
+    rcclArchThresholds tbl = MakeTableWithArMax(NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
+
+    CeAllReduceMockComm mock;
+    mock.comm.archThresholds = &tbl;
+
+    EXPECT_EQ(rcclCeAr2ShotMax(mock.get()), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
+}
+
+// Null table: falls back to NCCL_CE_AR_TMPBUF_DEFAULT_BYTES.
+TEST(RcclCeAr2ShotMax, NullTableFallsBackToDefault)
+{
+    CeAllReduceMockComm mock;
+    mock.comm.archThresholds = nullptr;
+
+    EXPECT_EQ(rcclCeAr2ShotMax(mock.get()), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
+}
+
+// Slot-stride invariants must hold when ceArMaxBytes is grown to 512 MiB.
+// Mirrors ChunkLayout_SlotStridesAgreeForAnyRankCount with the grown buffer.
+TEST(RcclCeArGrownBuffer, SlotStridesAgreeForGrownCapacity)
+{
+    constexpr size_t kGrownMax = 512ull * 1024 * 1024;
+
+    const std::vector<int>    rankCounts   = {2, 3, 4, 5, 6, 7, 8, 12, 16, 24};
+    const std::vector<size_t> elementSizes = {1, 2, 4, 8};
+
+    for (int nRanks : rankCounts)
+    {
+        SCOPED_TRACE("nRanks=" + std::to_string(nRanks));
+        const size_t slotChunkBytes =
+            ncclCeAllReduceSlotChunkBytes(ceAllReduceMaxChunkBytes(nRanks, kGrownMax));
+
+        EXPECT_EQ(slotChunkBytes % 16, 0u);
+        EXPECT_LE(slotChunkBytes, ceAllReduceMaxChunkBytes(nRanks, kGrownMax));
+
+        for (size_t eltSize : elementSizes)
+        {
+            EXPECT_EQ((slotChunkBytes / eltSize) * eltSize, slotChunkBytes)
+                << "eltSize=" << eltSize;
+        }
+    }
+}
+
+// Total staging footprint (nRanks * per-rank cap) must not exceed the grown
+// ceArMaxBytes -- the physical buffer ncclCeInit allocates.
+TEST(RcclCeArGrownBuffer, MaxStagingBytesWithinGrownCapacity)
+{
+    constexpr size_t kGrownMax = 512ull * 1024 * 1024;
+
+    for (int nRanks : {2, 3, 4, 5, 6, 7, 8, 12, 16, 24})
+    {
+        SCOPED_TRACE("nRanks=" + std::to_string(nRanks));
+        EXPECT_LE(ceAllReduceMaxChunkBytes(nRanks, kGrownMax) * static_cast<size_t>(nRanks),
+                  kGrownMax);
+    }
+}
+
+// At 512 MiB a max-size message for a non-power-of-2 rank count (which stresses
+// alignment) must still produce a valid pipeline layout: chunks cover the shard
+// exactly and every chunk is 16-byte aligned.
+// Mirrors ChunkLayout_LargeMessagePipelined with ceArMaxBytes = 512 MiB.
+TEST(RcclCeArGrownBuffer, LargeMessagePipelinedWithGrownCapacity)
+{
+    constexpr size_t kGrownMax = 512ull * 1024 * 1024;
+    constexpr int    nRanks    = 6;
+
+    const size_t shardElems = ceAllReduceMaxChunkBytes(nRanks, kGrownMax) / sizeof(float);
+    const size_t count      = shardElems * nRanks;
+    const size_t shardBytes = shardElems * sizeof(float);
+
+    ASSERT_LE(count * sizeof(float), kGrownMax);
+
+    const size_t slotChunkBytes =
+        ncclCeAllReduceSlotChunkBytes(ceAllReduceMaxChunkBytes(nRanks, kGrownMax));
+
+    // Must spill past a single slot to actually exercise the pipelined path.
+    ASSERT_GT(shardBytes, slotChunkBytes);
+
+    const size_t chunkBytes     = ncclCeAllReduceChooseChunkBytes(shardBytes, slotChunkBytes);
+    const size_t baseChunkElems = chunkBytes / sizeof(float);
+    const size_t tailChunkElems = shardElems % baseChunkElems;
+    const size_t chunksPerShard = shardElems / baseChunkElems + (tailChunkElems != 0 ? 1 : 0);
+    const size_t lastChunkElems = tailChunkElems != 0 ? tailChunkElems : baseChunkElems;
+
+    ASSERT_GT(chunksPerShard, 1u);
+    EXPECT_EQ(chunkBytes % 16, 0u);
+    EXPECT_LE(chunkBytes, slotChunkBytes);
+
+    // Byte and element views of the pipeline must cover the shard exactly.
+    EXPECT_EQ((chunksPerShard - 1) * baseChunkElems + lastChunkElems, shardElems);
+    EXPECT_EQ((chunksPerShard - 1) * chunkBytes + lastChunkElems * sizeof(float), shardBytes);
 }
 
 } // namespace RcclUnitTesting

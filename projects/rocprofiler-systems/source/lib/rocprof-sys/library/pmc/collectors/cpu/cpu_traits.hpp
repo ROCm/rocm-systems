@@ -39,7 +39,7 @@ struct cpu_traits
     using device_t          = device<typename BackendProvider::backend_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
-    using backend_t         = typename BackendProvider::backend_t;
+    using backend_t         = BackendProvider::backend_t;
 
     static constexpr const char* device_name = "CPU";
 
@@ -69,31 +69,6 @@ struct cpu_traits
         first_socket_registered             = true;
         Cache::initialize_pmc_metadata(dev->get_index(), dev->get_monitored_cpus(),
                                        is_first);
-    }
-
-    template <typename Perfetto, typename DeviceVector>
-    static void init_perfetto_storage(const DeviceVector& /*device_entries*/)
-    {
-        Perfetto::init_storage();
-    }
-
-    template <typename Perfetto>
-    static void setup_counter_tracks(const device_ptr_t&      dev,
-                                     const enabled_metrics_t& enabled)
-    {
-        Perfetto::setup_counter_tracks(dev->get_index(), dev->get_monitored_cpus(),
-                                       enabled);
-    }
-
-    template <typename Perfetto, typename DeviceEntries>
-    static void post_process_perfetto(const DeviceEntries&     entries,
-                                      const enabled_metrics_t& enabled)
-    {
-        for(const auto& entry : entries)
-        {
-            Perfetto::post_process(entry.device->get_index(),
-                                   entry.device->get_monitored_cpus(), enabled);
-        }
     }
 
     [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&            dev,

@@ -36,8 +36,9 @@
 //! The low 32 bits hold the existing CL_MEM_*/ROCCLR_MEM_* flags; host-NUMA VMM
 //! allocations pack a marker plus the target NUMA node here so the node reaches
 //! roc::Memory::create without changing the svmAlloc/malloc signatures.
-//! Bit 32 set => host-NUMA VMM allocation. Bits 33..47 hold (node + 1); a stored
-//! value of 0 means "resolve current node" (HostNumaCurrent).
+//! Bit 32 set => host-NUMA VMM allocation. Bits 33..47 hold (node + 2); a stored
+//! value of 1 means "resolve current node" (HostNumaCurrent); 0 means use default 
+//! ROCr CPU agent (Host).
 #define ROCCLR_MEM_HOST_NUMA (1ull << 32)
 #define ROCCLR_MEM_HOST_NUMA_NODE_SHIFT 33
 #define ROCCLR_MEM_HOST_NUMA_NODE_MASK (0x7FFFull << ROCCLR_MEM_HOST_NUMA_NODE_SHIFT)
@@ -149,6 +150,14 @@ class Memory : public amd::RuntimeObject {
       kHandleWin32     = 0x2,
       kHandleWin32Kmt  = 0x4,
       kHandleFabric    = 0x8
+  };
+
+  //! Backend-neutral error code the device layer reports to HIP via an
+  //! out-param on the create path (not stored on UserData).
+  enum ErrorCode : uint32_t {
+    kErrorNone                  = 0,  //!< No device-create failure recorded (default).
+    kErrorImagePitchUnsupported = 1,  //!< Image row pitch rejected by the backend.
+    kErrorUnknown               = 2,  //!< Generic/unspecified device-create failure.
   };
 
   struct UserData {
@@ -315,11 +324,13 @@ class Memory : public amd::RuntimeObject {
   virtual bool create(void* initFrom = NULL,     //!< Pointer to the initialization data
                       bool sysMemAlloc = false,  //!< Allocate device memory in system memory
                       bool skipAlloc = false,    //!< Skip device memory allocation
-                      bool forceAlloc = false    //!< Force device memory allocation
+                      bool forceAlloc = false,   //!< Force device memory allocation
+                      ErrorCode* errorCode = nullptr  //!< Backend device-create error code
   );
 
   //! Allocates device (cache) memory for a specific device
-  bool addDeviceMemory(const Device* dev  //!< Device object
+  bool addDeviceMemory(const Device* dev,  //!< Device object
+                       ErrorCode* errorCode = nullptr  //!< Backend device-create error code
   );
 
   //! Replaces device (cache) memory for a specific device
@@ -329,7 +340,8 @@ class Memory : public amd::RuntimeObject {
 
   //! Find the section for the given device. Return NULL if not found.
   device::Memory* getDeviceMemory(const Device& dev,  //!< Device object
-                                  bool alloc = true   //!< Allocates memory
+                                  bool alloc = true,  //!< Allocates memory
+                                  ErrorCode* errorCode = nullptr  //!< Backend device-create error code
   );
 
   //! Get origianl device memory
@@ -471,7 +483,8 @@ class Buffer : public Memory {
   bool create(void* initFrom = NULL,     //!< Pointer to the initialization data
               bool sysMemAlloc = false,  //!< Allocate device memory in system memory
               bool skipAlloc = false,    //!< Skip device memory allocation
-              bool forceAlloc = false    //!< Force device memory allocation
+              bool forceAlloc = false,   //!< Force device memory allocation
+              ErrorCode* errorCode = nullptr  //!< Backend device-create error code
   );
 
   //! static_cast to Buffer with sanity check
@@ -693,8 +706,8 @@ class SvmBuffer : AllStatic {
   //! Allocate a shared buffer that is accessible by all devices in the context
   static void* malloc(Context& context, cl_svm_mem_flags flags, size_t size, size_t alignment,
                       const amd::Device* curDev = nullptr, void* hostptr = nullptr);
-  //! Release shared buffer
-  static void free(const Context& context, void* ptr);
+  //! Release shared buffer.  Returns false if ptr was not in the SVM map.
+  static bool free(const Context& context, void* ptr);
 
   //! Fill the destination buffer \a dst with the contents of the source
   //! buffer \a src \times times.
@@ -706,7 +719,7 @@ class SvmBuffer : AllStatic {
 
  private:
   static void Add(uintptr_t k, uintptr_t v);
-  static void Remove(uintptr_t k);
+  static bool Remove(uintptr_t ptr, uintptr_t* base_ptr);
   static bool Contains(uintptr_t ptr);
 
   static std::map<uintptr_t, uintptr_t> Allocated_;  // !< Allocated buffers

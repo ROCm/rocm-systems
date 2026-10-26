@@ -75,6 +75,13 @@
       - | 0: Disable
         | 1: Enable
 
+    * - | ``HSA_ENABLE_SDMA_GPU_POLL``
+        | Windows only, and only meaningful on a native SDMA user queue, which the device capability decides. Selects who executes the dependency ``POLL_REGMEM`` packets the copy writes into the ring: the SDMA engine, or a host thread in the thunk that waits the signals out, strips the packets, and only then submits the span.
+        | Defaults to host-thread emulation. Set to 1 once the driver supports GPU-side polling.
+      - ``0``
+      - | 0: Emulate the polls on a host thread.
+        | 1: Let the SDMA engine execute the polls.
+
     * - | ``HSA_ENABLE_MWAITX``
         | When mwaitx is enabled, on AMD CPUs, runtime will hint to the CPU to go into lower power-states when doing busy loops by using the mwaitx instruction.
       - ``1``
@@ -93,11 +100,11 @@
       - | 0: Disable debug mode.
         | 1: Enable debug mode with additional validation and logging.
 
-    * - | ``HSA_HOTSWAP_DISABLE``
-        | Stops the runtime from loading the HotSwap tool, which retargets code objects for ``gfx1250`` A0 agents. The tool loads by default whenever such an agent is present.
+    * - | ``HSA_HOTSWAP_ENABLE``
+        | Enables automatic loading of the HotSwap tool, which retargets code objects for ``gfx1250`` A0 agents. Automatic loading is disabled by default and only occurs when explicitly enabled and a supported agent is present. This variable does not prevent explicit loading through ``HSA_TOOLS_LIB``.
       - ``0``
-      - | Unset, empty, 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Load the HotSwap tool when a supported agent is present.
-        | Any other value: Never load the HotSwap tool.
+      - | Unset, empty, 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Skip automatic loading of the HotSwap tool.
+        | Any other value: Automatically load the HotSwap tool when a supported agent is present.
 
     * - | ``HSA_DISABLE_GFX12_STRICT``
         | Controls reporting of the "strict" ISA variant on A0 silicon. Disabled by default, so the agent keeps the base target. Set to 0 to opt in and have the agent report the strict variant instead.

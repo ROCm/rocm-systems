@@ -89,6 +89,9 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
+#endif
       reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
       {
@@ -115,6 +118,9 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
+#endif
       // barrierCount provisions per-CTA hybrid world barriers (LSA+rail+world) used
       // by HybridAlltoAllTimedKernel to join CTA 0 (GIN) with LSA CTAs each iter.
       // The production body still uses barrier index 0 on CTA 0 and lsaBarrier on
@@ -376,7 +382,7 @@ __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWin
     gin.put(ncclTeamWorld(devComm), r,
         recvwin, recvoffset + devComm.rank * size,
         sendwin, sendoffset + r * size,
-        size, ncclGin_SignalInc{signalIndex});
+        size, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
   }
 
   int receivingCta = (devComm.rank % nthreads) / blockDim.x;
@@ -415,7 +421,7 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
     // epoch counter with host DDA LL.
     const size_t slotPkts = gin::fabric::ginFabricLlA2ASlotPkts(devComm.nRanks, ctx->fabricA2AScratchBytes);
     const size_t nPk = perChunkBytes >> 3;
-    // Compact GIN tail is 2*nRanks*slotPkts packets. Indexing the 16 MiB host
+    // Compact GIN tail is 2*nRanks*slotPkts packets. Indexing the kDdaLLMaxBytes host
     // DDA stride into that mapping is a GPU page fault (Test#5 hang).
     if (slotPkts != 0 && nPk <= slotPkts) {
       int bpp = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
@@ -433,7 +439,7 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
       T* recvPtr = static_cast<T*>(ncclGetLsaPointer(recvwin, recvoffset, devComm.lsaRank));
       dda::common::ddaAllToAllFabricLLBody<T, NRANKS_CT>(
           reinterpret_cast<T**>(ctx->fabricA2APeerScratch), recvPtr, sendPtr, perChunkBytes, devComm.rank,
-          devComm.nRanks, ctx->fabricA2ALlEpoch, ctx->fabricA2ALlEpochLen, bpp, slotPkts);
+          devComm.nRanks, ctx->fabricA2ALlEpoch, ctx->fabricA2ALlEpochLen, dda::common::ddaLLNoAbort{}, bpp, slotPkts);
       dda::common::ginFabricLlBusyRelease(ctx, llLaunchId);
       return;
     }
@@ -525,13 +531,13 @@ __device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, nccl
       gin.put(world, r,
           recvwin, recvoffset + world.rank * size,
           sendwin, sendoffset + r * size,
-          size, ncclGin_SignalInc{signalIndex});
+          size, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
     }
     for (int r = startLsa + lsaSize + tid; r < world.nRanks; r += nthreads) {
       gin.put(world, r,
           recvwin, recvoffset + world.rank * size,
           sendwin, sendoffset + r * size,
-          size, ncclGin_SignalInc{signalIndex});
+          size, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
     }
 
     if (numRemotePeers > 0)
@@ -793,15 +799,30 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
 }
 #endif
 
+testResult_t AlltoAllGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclDataType_t type, int* algo, int* proto, int* nchannels) {
+  if (rcclTestsGetAlgoInfo == NULL) return testInternalError;
+  NCCLCHECK(rcclTestsGetAlgoInfo(comm, ncclFuncAlltoAll, count, type, 0, 0, 1, algo, proto, nchannels));
+  return testSuccess;
+}
+
+testResult_t AlltoAllGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
+    const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels) {
+  if (rcclTestsGetCollImplInfo == NULL) return testInternalError;
+  NCCLCHECK(rcclTestsGetCollImplInfo(comm, ncclFuncAlltoAll, count, type, op, sendbuff, recvbuff, graphCapturing, algo, proto, nchannels));
+  return testSuccess;
+}
+
 struct testColl alltoAllTest = {
   "AlltoAll",
   AlltoAllGetCollByteCount,
   AlltoAllInitData,
   AlltoAllGetBw,
   AlltoAllRunColl,
+  AlltoAllGetAlgoProtoChannels,
+  // No symk hook: the symmetric kernels cover AllReduce/AllGather/ReduceScatter
+  // only, so rcclSymKGetInfo can never describe an AllToAll.
   NULL,
-  NULL,
-  NULL,
+  AlltoAllGetCollImplInfo,
   AlltoAllDeviceTime
 };
 

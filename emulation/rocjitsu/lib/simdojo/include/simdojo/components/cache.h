@@ -10,13 +10,17 @@
 #include "util/bit.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <new>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace simdojo {
@@ -31,33 +35,36 @@ namespace simdojo {
 /// @tparam Associativity Number of ways per set.
 template <uint32_t NumSets, uint32_t Associativity> class LRUPolicy {
 public:
-  LRUPolicy() : order_(NumSets * Associativity) {
+  LRUPolicy() : order_(static_cast<size_t>(NumSets) * Associativity) {
     for (uint32_t s = 0; s < NumSets; ++s)
       for (uint32_t w = 0; w < Associativity; ++w)
-        order_[s * Associativity + w] = w;
+        order_[static_cast<size_t>(s) * Associativity + w] = static_cast<WayIndex>(w);
   }
 
   /// @brief Promote a way to MRU position within a set.
   /// @param set Set index.
   /// @param way Way index within the set.
   void access(uint32_t set, uint32_t way) {
-    uint32_t *o = &order_[set * Associativity];
+    WayIndex *o = &order_[static_cast<size_t>(set) * Associativity];
     uint32_t pos = 0;
     for (; pos < Associativity; ++pos)
       if (o[pos] == way)
         break;
     for (uint32_t i = pos; i + 1 < Associativity; ++i)
       o[i] = o[i + 1];
-    o[Associativity - 1] = way;
+    o[Associativity - 1] = static_cast<WayIndex>(way);
   }
 
   /// @brief Return the LRU way index for a set (eviction candidate).
   /// @param set Set index.
   /// @returns Way index of the least recently used entry.
-  uint32_t victim(uint32_t set) const { return order_[set * Associativity]; }
+  uint32_t victim(uint32_t set) const { return order_[static_cast<size_t>(set) * Associativity]; }
 
 private:
-  std::vector<uint32_t> order_;
+  // Compact indices reduce construction traffic; larger ways retain 32-bit indices.
+  using WayIndex = std::conditional_t<(Associativity <= std::numeric_limits<uint8_t>::max() + 1u),
+                                      uint8_t, uint32_t>;
+  std::vector<WayIndex> order_;
 };
 
 /// @brief Coherence state for a cache line (MOESI protocol).
@@ -77,6 +84,9 @@ enum class CoherenceState : uint8_t {
 struct CacheTag {
   uint64_t tag = 0;
   uint64_t coherence_epoch = 0; ///< Controller-defined lazy-invalidation generation.
+  /// Byte-validity mask for partial-line fills. Current cache geometries use
+  /// at most 128-byte lines, so two words cover every byte.
+  std::array<uint64_t, 2> valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
   uint32_t vmid = 0;
   bool valid = false;
   bool dirty = false;
@@ -95,11 +105,15 @@ struct CacheTag {
 /// @tparam NumSets Number of sets in the cache.
 /// @tparam Associativity Number of ways per set.
 /// @tparam Policy Replacement policy (default: LRU).
+/// @tparam LazyStorage Whether backing allocation is deferred for private caches with exclusive
+/// access. Shared caches with concurrent per-set access must keep the default.
 template <uint32_t LineSizeBits, uint32_t NumSets, uint32_t Associativity,
-          typename Policy = LRUPolicy<NumSets, Associativity>>
+          typename Policy = LRUPolicy<NumSets, Associativity>, bool LazyStorage = false>
 class Cache {
 public:
   static constexpr uint32_t LINE_SIZE = 1u << LineSizeBits;
+  // Range masks below specialize the two-word byte-validity geometry.
+  static_assert(LINE_SIZE <= 128, "Cache byte-validity mask supports lines up to 128 bytes");
   static constexpr uint32_t LINE_MASK = LINE_SIZE - 1;
   static constexpr uint64_t TAG_SHIFT = LineSizeBits;
   static constexpr uint64_t SET_MASK = NumSets - 1;
@@ -110,8 +124,62 @@ public:
     uint8_t *data = nullptr;
   };
 
-  Cache() : tags_(static_cast<size_t>(NumSets) * Associativity), touched_sets_(NumSets, 0) {
+  Cache() : touched_sets_(NumSets, 0) {
     static_assert(util::is_power_of_2(NumSets), "NumSets must be a power of 2");
+  }
+
+  Cache(const Cache &) = default;
+  Cache &operator=(const Cache &)
+    requires(!LazyStorage)
+  = default;
+  Cache &operator=(const Cache &other)
+    requires(LazyStorage)
+  {
+    if (this != &other) {
+      // Finish every allocation before changing tags, bytes or touched markers.
+      Cache replacement(other);
+      *this = std::move(replacement);
+    }
+    return *this;
+  }
+
+  Cache(Cache &&) = default;
+  Cache &operator=(Cache &&) = default;
+
+  /// @brief Return whether every byte in one line-relative range is present.
+  static bool bytes_valid(const CacheTag &tag, uint32_t offset, uint32_t size) {
+    assert(offset <= LINE_SIZE && size <= LINE_SIZE - offset);
+    if (size == 0)
+      return true;
+    // Missing-byte fills probe individual bytes; retain their single-bit test.
+    if (size == 1)
+      return (tag.valid_bytes[offset / 64] & (uint64_t{1} << (offset % 64))) != 0;
+    const uint32_t word = offset / 64;
+    const uint32_t shift = offset % 64;
+    const uint32_t first_size = std::min(size, 64u - shift);
+    const uint64_t first_mask = util::mask<uint64_t>(first_size) << shift;
+    if ((tag.valid_bytes[word] & first_mask) != first_mask)
+      return false;
+    if (first_size == size)
+      return true;
+    const uint64_t second_mask = util::mask<uint64_t>(size - first_size);
+    return (tag.valid_bytes[word + 1] & second_mask) == second_mask;
+  }
+
+  /// @brief Mark every byte of a newly allocated line absent.
+  static void clear_valid_bytes(CacheTag &tag) { tag.valid_bytes = {}; }
+
+  /// @brief Mark one line-relative byte range present.
+  static void mark_valid_bytes(CacheTag &tag, uint32_t offset, uint32_t size) {
+    assert(offset <= LINE_SIZE && size <= LINE_SIZE - offset);
+    if (size == 0)
+      return;
+    const uint32_t word = offset / 64;
+    const uint32_t shift = offset % 64;
+    const uint32_t first_size = std::min(size, 64u - shift);
+    tag.valid_bytes[word] |= util::mask<uint64_t>(first_size) << shift;
+    if (first_size != size)
+      tag.valid_bytes[word + 1] |= util::mask<uint64_t>(size - first_size);
   }
 
   /// @brief Look up an address in the cache.
@@ -123,6 +191,9 @@ public:
   /// @retval false Cache miss.
   bool lookup(uint64_t addr, CacheTag **tag_out = nullptr, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set])
+        return false;
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -134,6 +205,21 @@ public:
       }
     }
     return false;
+  }
+
+  /// Inspect residency without changing replacement order or cache contents.
+  const CacheTag *peek(uint64_t addr, uint32_t vmid = 0) const {
+    const uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set])
+        return nullptr;
+    const uint64_t tag = tag_bits(addr);
+    for (uint32_t way = 0; way < Associativity; ++way) {
+      const auto &entry = tag_at(set, way);
+      if (entry.valid && entry.tag == tag && entry.vmid == vmid)
+        return &entry;
+    }
+    return nullptr;
   }
 
   /// @brief Allocate a cache line for an address, evicting the LRU victim if needed.
@@ -155,6 +241,10 @@ public:
   /// directly from a backing level, avoiding a second tag scan in fill_line().
   Allocation allocate_with_data(uint64_t addr, uint32_t vmid = 0, CacheTag *evicted_tag = nullptr,
                                 uint8_t *evicted_data = nullptr) {
+    // Complete deferred allocations before publishing a resident tag. A failing
+    // new_handler must leave the cache empty and safe to retry.
+    tags_.materialize();
+    data_.materialize();
     uint32_t set = set_index(addr);
     uint64_t tag = tag_bits(addr);
 
@@ -167,6 +257,7 @@ public:
           touched_sets_[set] = 1;
         t.tag = tag;
         t.coherence_epoch = 0;
+        t.valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
         t.vmid = vmid;
         t.valid = true;
         t.dirty = false;
@@ -188,6 +279,7 @@ public:
 
     vt.tag = tag;
     vt.coherence_epoch = 0;
+    vt.valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
     vt.vmid = vmid;
     vt.valid = true;
     vt.dirty = false;
@@ -201,6 +293,9 @@ public:
   /// @param vmid Owning process address space.
   void invalidate(uint64_t addr, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set])
+        return;
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -218,6 +313,9 @@ public:
   /// @param addr The memory address whose cache line to invalidate.
   void invalidate_all_vmids(uint64_t addr) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set])
+        return;
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -232,17 +330,26 @@ public:
 
   /// @brief Invalidate all cache lines.
   void invalidate_all() {
-    for (uint32_t s = 0; s < NumSets; ++s) {
-      if (!touched_sets_[s])
+    for (uint32_t first = 0; first < NumSets; first += sizeof(uint64_t)) {
+      const uint32_t end = std::min<uint32_t>(first + sizeof(uint64_t), NumSets);
+      uint64_t touched = 0;
+      // Full-cache maintenance already excludes concurrent set accesses.
+      // Scan empty marker groups together without changing fill-side writes.
+      std::memcpy(&touched, touched_sets_.data() + first, end - first);
+      if (touched == 0)
         continue;
-      for (uint32_t w = 0; w < Associativity; ++w) {
-        auto &t = tag_at(s, w);
-        t.coherence_epoch = 0;
-        t.valid = false;
-        t.dirty = false;
-        t.coherence = CoherenceState::INVALID;
+      for (uint32_t s = first; s < end; ++s) {
+        if (!touched_sets_[s])
+          continue;
+        for (uint32_t w = 0; w < Associativity; ++w) {
+          auto &t = tag_at(s, w);
+          t.coherence_epoch = 0;
+          t.valid = false;
+          t.dirty = false;
+          t.coherence = CoherenceState::INVALID;
+        }
+        touched_sets_[s] = 0;
       }
-      touched_sets_[s] = 0;
     }
   }
 
@@ -254,11 +361,17 @@ public:
   void read_line(uint64_t addr, uint8_t *dst, uint32_t offset, uint32_t size,
                  uint32_t vmid = 0) const {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set]) {
+        assert(false && "read_line called on a miss");
+        return;
+      }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       const auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid) {
         assert(offset + size <= LINE_SIZE);
+        assert(bytes_valid(t, offset, size) && "read_line called for absent bytes");
         std::memcpy(dst, line_data(set, w) + offset, size);
         return;
       }
@@ -272,6 +385,9 @@ public:
   /// @returns Pointer to the line data, or nullptr if not found.
   const uint8_t *line_data_for_read(uint64_t addr, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set])
+        return nullptr;
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -291,12 +407,18 @@ public:
   void write_line(uint64_t addr, const uint8_t *src, uint32_t offset, uint32_t size,
                   uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set]) {
+        assert(false && "write_line called on a miss");
+        return;
+      }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid) {
         assert(offset + size <= LINE_SIZE);
         std::memcpy(line_data(set, w) + offset, src, size);
+        mark_valid_bytes(t, offset, size);
         return;
       }
     }
@@ -308,15 +430,46 @@ public:
   /// @param data Source buffer containing a full cache line of data.
   void fill_line(uint64_t addr, const uint8_t *data, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set]) {
+        assert(false && "fill_line called on a miss");
+        return;
+      }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid) {
         std::memcpy(line_data(set, w), data, LINE_SIZE);
+        t.valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
         return;
       }
     }
     assert(false && "fill_line called on a miss");
+  }
+
+  /// @brief Fill only bytes that are absent from a resident partial line.
+  /// @details Preserves bytes already supplied by stores or earlier partial
+  /// reads while completing the line from a backing-level snapshot.
+  void fill_missing_bytes(uint64_t addr, const uint8_t *data, uint32_t vmid = 0) {
+    uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set]) {
+        assert(false && "fill_missing_bytes called on a miss");
+        return;
+      }
+    uint64_t tag = tag_bits(addr);
+    for (uint32_t w = 0; w < Associativity; ++w) {
+      auto &t = tag_at(set, w);
+      if (t.valid && t.tag == tag && t.vmid == vmid) {
+        uint8_t *line = line_data(set, w);
+        for (uint32_t byte = 0; byte < LINE_SIZE; ++byte)
+          if (!bytes_valid(t, byte, 1))
+            line[byte] = data[byte];
+        t.valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
+        return;
+      }
+    }
+    assert(false && "fill_missing_bytes called on a miss");
   }
 
   /// @brief Return a mutable pointer to the data for a cache line (must be a hit).
@@ -326,6 +479,9 @@ public:
   /// @returns Pointer to the line data, or nullptr if not found.
   uint8_t *line_data_for_write(uint64_t addr, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set])
+        return nullptr;
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -378,44 +534,74 @@ public:
   static uint64_t tag_bits(uint64_t addr) { return addr >> (LineSizeBits + log2_sets()); }
 
 private:
-  // calloc preserves zero-initialized data while allowing the allocator and OS
-  // to provide untouched zero pages for large caches. A vector's explicit fill
-  // writes every page before any cache line is used.
-  class DataStorage {
+  // Zero bytes represent unused data and invalid tags. Allocation initializes
+  // valid_bytes before making a tag valid, so its nonzero default is unnecessary
+  // for unused tags. Keep calloc storage restricted to these types.
+  template <typename T, size_t Count> class ZeroStorage {
   public:
-    DataStorage() : bytes_(allocate()) {}
-    DataStorage(const DataStorage &other) : bytes_(other.bytes_ ? allocate() : nullptr) {
-      if (bytes_)
-        std::memcpy(bytes_.get(), other.bytes_.get(), size());
+    static_assert(std::is_trivially_copyable_v<T>, "Cache storage requires trivial copies");
+    static_assert(std::is_trivially_destructible_v<T>,
+                  "Cache storage requires trivial destruction");
+    static_assert(std::is_same_v<T, uint8_t> || std::is_same_v<T, CacheTag>,
+                  "Cache storage only supports byte data and CacheTag");
+    // Bind every field so additions require checking the unused-tag representation.
+    static_assert(
+        [] {
+          const auto [tag, coherence_epoch, valid_bytes, vmid, valid, dirty, coherence] =
+              CacheTag{};
+          return tag == 0 && coherence_epoch == 0 && vmid == 0 && !valid && !dirty &&
+                 static_cast<uint8_t>(coherence) == 0 &&
+                 valid_bytes == std::array<uint64_t, 2>{~uint64_t{0}, ~uint64_t{0}};
+        }(),
+        "CacheTag fields must permit zero-initialized invalid entries");
+
+    // Private controller caches need no backing until their first access. Keep
+    // shared caches eager: their separate set locks do not serialize a first
+    // allocation of the whole store.
+    ZeroStorage() : elements_(LazyStorage ? nullptr : allocate()) {}
+    ZeroStorage(const ZeroStorage &other) : elements_(other.elements_ ? allocate() : nullptr) {
+      if (elements_)
+        std::memcpy(elements_.get(), other.elements_.get(), Count * sizeof(T));
     }
-    DataStorage &operator=(const DataStorage &other) {
+    ZeroStorage &operator=(const ZeroStorage &other) {
       if (this != &other) {
-        if (other.bytes_) {
-          if (!bytes_)
-            bytes_.reset(allocate());
-          std::memcpy(bytes_.get(), other.bytes_.get(), size());
+        if (other.elements_) {
+          if (!elements_)
+            elements_.reset(allocate());
+          std::memcpy(elements_.get(), other.elements_.get(), Count * sizeof(T));
         } else {
-          bytes_.reset();
+          elements_.reset();
         }
       }
       return *this;
     }
-    DataStorage(DataStorage &&) noexcept = default;
-    DataStorage &operator=(DataStorage &&) noexcept = default;
+    ZeroStorage(ZeroStorage &&) noexcept = default;
+    ZeroStorage &operator=(ZeroStorage &&) noexcept = default;
 
-    uint8_t &operator[](size_t index) { return bytes_[index]; }
-    const uint8_t &operator[](size_t index) const { return bytes_[index]; }
+    T &operator[](size_t index) {
+      assert(elements_);
+      return elements_[index];
+    }
+    const T &operator[](size_t index) const {
+      assert(elements_);
+      return elements_[index];
+    }
+
+    void materialize() {
+      if constexpr (LazyStorage)
+        if (!elements_)
+          elements_.reset(allocate());
+    }
 
   private:
     class Free {
     public:
-      void operator()(uint8_t *ptr) const { std::free(ptr); }
+      void operator()(T *ptr) const { std::free(ptr); }
     };
-    static constexpr size_t size() { return TOTAL_SIZE; }
-    static uint8_t *allocate() {
+    static T *allocate() {
       while (true) {
-        auto *ptr = static_cast<uint8_t *>(std::calloc(size(), sizeof(uint8_t)));
-        if (ptr || size() == 0)
+        auto *ptr = static_cast<T *>(std::calloc(Count, sizeof(T)));
+        if (ptr || Count == 0)
           return ptr;
         std::new_handler handler = std::get_new_handler();
         if (!handler)
@@ -423,7 +609,7 @@ private:
         handler();
       }
     }
-    std::unique_ptr<uint8_t[], Free> bytes_;
+    std::unique_ptr<T[], Free> elements_;
   };
 
   static constexpr uint32_t log2_sets() {
@@ -451,8 +637,8 @@ private:
     return &data_[(static_cast<size_t>(set) * Associativity + way) * LINE_SIZE];
   }
 
-  std::vector<CacheTag> tags_;
-  DataStorage data_;
+  ZeroStorage<CacheTag, static_cast<size_t>(NumSets) * Associativity> tags_;
+  ZeroStorage<uint8_t, TOTAL_SIZE> data_;
   Policy policy_;
   // Keep this allocation after existing storage to preserve its allocator layout.
   // Track sets allocated since full invalidation, even if their individual lines

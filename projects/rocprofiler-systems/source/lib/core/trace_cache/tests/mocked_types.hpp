@@ -55,12 +55,20 @@ struct test_sample_2 : public rocprofsys::trace_cache::cacheable_t
 
     bool operator==(const test_sample_2& other) const
     {
-        if(sample_id != other.sample_id) return false;
+        if(sample_id != other.sample_id)
+        {
+            return false;
+        }
 
-        if(std::isnan(data) && std::isnan(other.data)) return true;
+        if(std::isnan(data) && std::isnan(other.data))
+        {
+            return true;
+        }
 
         if(std::isinf(data) && std::isinf(other.data))
+        {
             return std::signbit(data) == std::signbit(other.data);
+        }
 
         return std::abs(data - other.data) < 1e-9;
     }

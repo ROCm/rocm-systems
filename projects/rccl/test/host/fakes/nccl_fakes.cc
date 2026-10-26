@@ -13,10 +13,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <unistd.h>
 
 #include "nccl.h"
 #include "alloc.h"        // ncclCuMemEnable
-#include "debug.h"        // ncclDebugLog, ncclDebugLevel, ...
+#include "debug.h"        // ncclDebugLog, ncclDebugLevelMask, ...
 #include "param.h"        // ncclLoadParam
 #include "rocmwrap.h"     // ncclCuMemHandleType
 #include "utils.h"        // busIdToInt64
@@ -27,6 +28,7 @@
 #include "comm.h"         // ncclCommGraphRegister / Deregister
 #include "strongstream.h" // ncclStrongStream*
 #include "mem_manager.h"  // ncclMemTrack / ncclMemUntrack / ncclDynMemMarkExportToPeer
+#include "ipcsocket.h"    // ncclIpcFd
 
 #include <functional>
 
@@ -41,9 +43,19 @@
 ASSERT_HOOK_MATCHES_PROD(g_proxyConnect,              ncclProxyConnect);
 ASSERT_HOOK_MATCHES_PROD(g_proxyCallBlocking,         ncclProxyCallBlocking);
 ASSERT_HOOK_MATCHES_PROD(g_proxyClientQueryFdBlocking, ncclProxyClientQueryFdBlocking);
+ASSERT_HOOK_MATCHES_PROD(g_proxyClientBatchQueryFdBlocking, ncclProxyClientBatchQueryFdBlocking);
 ASSERT_HOOK_MATCHES_PROD(g_strongStreamAcquire,       ncclStrongStreamAcquire);
+ASSERT_HOOK_MATCHES_PROD(g_strongStreamRelease,       ncclStrongStreamRelease);
+ASSERT_HOOK_MATCHES_PROD(g_ncclStreamWaitStream,      ncclStreamWaitStream);
 // ncclCuMemEnable: header declares `int ncclCuMemEnable()` (rocmwrap.h).
 ASSERT_HOOK_MATCHES_PROD(g_cuMemEnable,               ncclCuMemEnable);
+ASSERT_HOOK_MATCHES_PROD(g_regLocalIsValid,           ncclRegLocalIsValid);
+ASSERT_HOOK_MATCHES_PROD(g_commGraphRegister,         ncclCommGraphRegister);
+ASSERT_HOOK_MATCHES_PROD(g_commGraphDeregister,       ncclCommGraphDeregister);
+ASSERT_HOOK_MATCHES_PROD(g_memTrackImportFromPeer,    ncclMemTrackImportFromPeer);
+ASSERT_HOOK_MATCHES_PROD(g_memTrack,                  ncclMemTrack);
+ASSERT_HOOK_MATCHES_PROD(g_memUntrackDynamic,         ncclMemUntrackDynamic);
+ASSERT_HOOK_MATCHES_PROD(g_dynMemMarkExportToPeer,    ncclDynMemMarkExportToPeer);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -58,7 +70,7 @@ hipMemAllocationHandleType ncclCuMemHandleType =
 // Logging / param infrastructure
 // ---------------------------------------------------------------------------
 
-int                 ncclDebugLevel   = 0;   // NCCL_LOG_NONE
+uint32_t            ncclDebugLevelMask = 0; // NCCL_LOG_NONE
 uint64_t            ncclDebugMask    = 0;
 thread_local int    ncclDebugNoWarn  = 0;
 
@@ -77,14 +89,28 @@ void ncclDebugLog(ncclDebugLogLevel /*level*/,
     std::fputc('\n', stderr);
 }
 
-void ncclLoadParam(char const* /*env*/,
-                   int64_t     /*deftVal*/,
-                   int64_t     /*uninitialized*/,
-                   int64_t*    /*cache*/)
-{
-    // No-op: leaves cache untouched so NCCL_PARAM callers in non-shimmed
-    // TUs see the default. The NCCL_PARAM bodies that p2p-test.cc
-    // redirects through g_loadParam bypass this entirely.
+// src/debug.cc's pthread_t overload; the hook gets the name as production would set it. Default: no-op,
+// like production at its NCCL_SET_THREAD_NAME=0 default. Weak so a suite with its own copy still links.
+static void DefaultSetThreadName(pthread_t, const char*) {}
+std::function<void(pthread_t, const char*)> g_ncclSetThreadName = DefaultSetThreadName;
+__attribute__((weak)) void ncclSetThreadName(pthread_t thread, const char* fmt, ...) {
+    char name[NCCL_THREAD_NAMELEN];
+    std::va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(name, sizeof(name), fmt, ap);
+    va_end(ap);
+    g_ncclSetThreadName(thread, name);
+}
+
+// Every param sits at its default. The NCCL_PARAM bodies that p2p-test.cc redirects through g_loadParam bypass this.
+int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
+  if (cache) {
+    *cache = deftVal;
+  }
+  if (noCache) {
+    *noCache = 0;
+  }
+  return deftVal;
 }
 
 // Default returns deftVal verbatim -- preserves the pre-hook contract that
@@ -192,10 +218,26 @@ ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm*           comm,
     return g_proxyClientQueryFdBlocking(comm, proxyConn, localFd, rmtFd);
 }
 
-ncclResult_t ncclRegLocalIsValid(struct ncclReg* /*reg*/, bool* isValid)
+// src/os/linux_ipcsocket.cc (NCCL 2.32): p2p.cc and dev_runtime.cc close
+// imported fds through this instead of close(2). A real close, as production
+// does, so suites that hand back a dup'd fd can still prove it was closed.
+int ncclIpcFdClose(ncclIpcFd fd) { return ::close(fd); }
+
+// --- Controllable seam: ncclRegLocalIsValid -----------------------------
+// Default preserves the old stub: report the record as not locally valid
+// (so the register-family no-op arm is the default). Tests that drive the
+// delegate-when-valid arm install a hook returning true.
+static ncclResult_t DefaultRegLocalIsValid(struct ncclReg*, bool* isValid)
 {
     if (isValid) *isValid = false;
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclReg*, bool*)>
+    g_regLocalIsValid = DefaultRegLocalIsValid;
+
+ncclResult_t ncclRegLocalIsValid(struct ncclReg* reg, bool* isValid)
+{
+    return g_regLocalIsValid(reg, isValid);
 }
 
 ncclResult_t ncclShmImportShareableBuffer(struct ncclComm*  /*comm*/,
@@ -217,55 +259,120 @@ ncclResult_t ncclShmIpcClose(ncclShmIpcDesc_t* /*desc*/)
 // Topology / graph helpers
 // ---------------------------------------------------------------------------
 
+// --- Controllable seam: ncclTopoCheckP2p ----------------------------------
+// Default preserves the old stub: report no p2p, no read, no intermediate
+// hop, no cuda-p2p, and success. Tests exercising p2pCanConnect's topology
+// branches install a hook to report p2p-capable / an intermediate rank / etc.
+static ncclResult_t DefaultTopoCheckP2p(int /*rank1*/, int /*rank2*/, int* p2p,
+                                 int* read, int* intermediateRank, int* cudaP2p,
+                                 int* /*isCrossClique*/)
+{
+    if (p2p)              *p2p              = 0;
+    if (read)             *read             = 0;
+    if (intermediateRank) *intermediateRank = -1;
+    if (cudaP2p)          *cudaP2p          = 0;
+    return ncclSuccess;
+}
+std::function<ncclResult_t(int, int, int*, int*, int*, int*, int*)>
+    g_ncclTopoCheckP2p = DefaultTopoCheckP2p;
+
+// rccl-UnitTestsMicroGraph links the real src/graph/paths.cc and search.cc, which define these.
+#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
 ncclResult_t ncclTopoCheckP2p(struct ncclComm*       /*comm*/,
                               struct ncclTopoSystem* /*system*/,
-                              int                    /*rank1*/,
-                              int                    /*rank2*/,
+                              int                    rank1,
+                              int                    rank2,
                               int*                   p2p,
                               int*                   read,
                               int*                   intermediateRank,
                               int*                   cudaP2p,
                               int*                   isCrossClique)
 {
-    if (p2p)              *p2p              = 0;
-    if (read)             *read             = 0;
-    if (intermediateRank) *intermediateRank = -1;
-    if (cudaP2p)          *cudaP2p          = 0;
-    if (isCrossClique)    *isCrossClique    = 0;
-    return ncclSuccess;
+    // Default the cross-clique flag to 0 before the hook runs, so hooks that do
+    // not care leave it 0 (production reads an otherwise-uninitialised local);
+    // a hook that drives the cross-clique arm overwrites it.
+    if (isCrossClique) *isCrossClique = 0;
+    return g_ncclTopoCheckP2p(rank1, rank2, p2p, read, intermediateRank, cudaP2p, isCrossClique);
 }
+#endif
 
-ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* /*system*/,
-                              int                    /*rank1*/,
-                              int                    /*rank2*/,
-                              int*                   net)
+// --- Controllable seam: ncclTopoCheckNet ----------------------------------
+// Default preserves the old stub: report NET is not better (net = 0).
+static ncclResult_t DefaultTopoCheckNet(int /*rank1*/, int /*rank2*/, int* net)
 {
     if (net) *net = 0;
     return ncclSuccess;
 }
+std::function<ncclResult_t(int, int, int*)>
+    g_ncclTopoCheckNet = DefaultTopoCheckNet;
 
-ncclResult_t ncclCommGraphRegister(struct ncclComm* /*comm*/,
-                                   void*            /*buff*/,
-                                   size_t           /*size*/,
-                                   void**           handle)
+#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
+ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* /*system*/,
+                              int                    rank1,
+                              int                    rank2,
+                              int*                   net)
+{
+    return g_ncclTopoCheckNet(rank1, rank2, net);
+}
+#endif
+
+// --- Controllable seam: ncclCommGraphRegister ---------------------------
+// Default preserves the old stub: fail with a null handle. Graph-register
+// tests install a hook that succeeds and hands back a canned ncclReg*.
+static ncclResult_t DefaultCommGraphRegister(struct ncclComm*, void*, size_t,
+                                             void** handle)
 {
     if (handle) *handle = nullptr;
     return ncclSystemError;
 }
+std::function<ncclResult_t(struct ncclComm*, void*, size_t, void**)>
+    g_commGraphRegister = DefaultCommGraphRegister;
 
-ncclResult_t ncclCommGraphDeregister(struct ncclComm* /*comm*/,
-                                     struct ncclReg*  /*reg*/)
+ncclResult_t ncclCommGraphRegister(struct ncclComm* comm,
+                                   void*            buff,
+                                   size_t           size,
+                                   void**           handle)
+{
+    return g_commGraphRegister(comm, buff, size, handle);
+}
+
+// --- Controllable seam: ncclCommGraphDeregister -------------------------
+// Default preserves the old stub: succeed. The graph-register-failure and
+// cleanup-callback tests install a hook to observe that the deregister ran
+// against the expected comm/record.
+static ncclResult_t DefaultCommGraphDeregister(struct ncclComm*, struct ncclReg*)
 {
     return ncclSuccess;
 }
+std::function<ncclResult_t(struct ncclComm*, struct ncclReg*)>
+    g_commGraphDeregister = DefaultCommGraphDeregister;
 
-ncclResult_t ncclShmAllocateShareableBuffer(size_t            /*size*/,
-                                            bool              /*legacy*/,
-                                            ncclShmIpcDesc_t* /*desc*/,
-                                            void**            /*hptr*/,
-                                            void**            /*dptr*/)
+ncclResult_t ncclCommGraphDeregister(struct ncclComm* comm,
+                                     struct ncclReg*  reg)
+{
+    return g_commGraphDeregister(comm, reg);
+}
+
+// --- Controllable seam: ncclShmAllocateShareableBuffer ------------------
+// The CE-memcpy arm of p2pSendProxySetup allocates its peer SHM segment
+// through this. Default fails so unexpected call sites surface loudly; the
+// CE proxy-setup test installs a hook that succeeds and hands back backing
+// storage for the host/device SHM pointers.
+static ncclResult_t DefaultShmAllocateShareableBuffer(size_t, bool, void*,
+                                                      void**, void**)
 {
     return ncclSystemError;
+}
+std::function<ncclResult_t(size_t, bool, void*, void**, void**)>
+    g_shmAllocateShareableBuffer = DefaultShmAllocateShareableBuffer;
+
+ncclResult_t ncclShmAllocateShareableBuffer(size_t            size,
+                                            bool              legacy,
+                                            ncclShmIpcDesc_t* desc,
+                                            void**            hptr,
+                                            void**            dptr)
+{
+    return g_shmAllocateShareableBuffer(size, legacy, desc, hptr, dptr);
 }
 
 // --- Controllable seam: ncclStrongStreamAcquire ---------------------------
@@ -296,18 +403,32 @@ ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph graph,
     return g_strongStreamAcquire(graph, ss, concurrent, stream);
 }
 
-ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph     /*graph*/,
-                                     struct ncclStrongStream* /*ss*/,
-                                     bool                     /*concurrent*/)
+static ncclResult_t DefaultStrongStreamRelease(struct ncclCudaGraph, struct ncclStrongStream*, bool)
 {
     return ncclSuccess;
 }
 
-ncclResult_t ncclStreamWaitStream(hipStream_t /*a*/,
-                                  hipStream_t /*b*/,
-                                  hipEvent_t  /*ev*/)
+std::function<ncclResult_t(struct ncclCudaGraph, struct ncclStrongStream*, bool)>
+    g_strongStreamRelease = DefaultStrongStreamRelease;
+
+ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph     graph,
+                                     struct ncclStrongStream* ss,
+                                     bool                     concurrent)
+{
+    return g_strongStreamRelease(graph, ss, concurrent);
+}
+
+static ncclResult_t DefaultStreamWaitStream(hipStream_t, hipStream_t, hipEvent_t)
 {
     return ncclSuccess;
+}
+
+std::function<ncclResult_t(hipStream_t, hipStream_t, hipEvent_t)> g_ncclStreamWaitStream =
+    DefaultStreamWaitStream;
+
+ncclResult_t ncclStreamWaitStream(hipStream_t a, hipStream_t b, hipEvent_t ev)
+{
+    return g_ncclStreamWaitStream(a, b, ev);
 }
 
 ncclResult_t DefaultTopoGetLinkType(int, int, bool* isXGMI, int)
@@ -318,17 +439,19 @@ ncclResult_t DefaultTopoGetLinkType(int, int, bool* isXGMI, int)
 std::function<ncclResult_t(int, int, bool*, int)> g_ncclTopoGetLinkType = DefaultTopoGetLinkType;
 int g_ncclTopoGetLinkTypeCalls = 0;
 
+#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
 ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
-                                 int                    cudaDev1,
-                                 int                    cudaDev2,
+                                 int                    dev1,
+                                 int                    dev2,
                                  bool*                  isXGMI,
                                  int                    maxInter,
                                  int                    /*nInter*/,
                                  int*                   /*inter*/)
 {
     g_ncclTopoGetLinkTypeCalls++;
-    return g_ncclTopoGetLinkType(cudaDev1, cudaDev2, isXGMI, maxInter);
+    return g_ncclTopoGetLinkType(dev1, dev2, isXGMI, maxInter);
 }
+#endif
 
 // ---------------------------------------------------------------------------
 // Memory-manager tracking stubs.
@@ -337,30 +460,58 @@ ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
 // import/export paths in alloc.h, which now route allocations through the
 // ncclMemManager tracking layer. None of the microtests exercise real HIP
 // allocation (the ncclCudaCallocAsync macro is shimmed away), so these are
-// pure no-ops that satisfy the linker and report success.
+// pure no-ops, except ncclMemTrack / ncclMemUntrackDynamic, which the DDA tests drive as seams.
 // ---------------------------------------------------------------------------
 
-ncclResult_t ncclMemTrack(struct ncclMemManager* /*manager*/,
-                          void*                            /*ptr*/,
-                          size_t                           /*size*/,
-                          hipMemGenericAllocationHandle_t  /*handle*/,
-                          hipMemAllocationHandleType       /*handleType*/,
-                          ncclMemType_t                    /*memType*/)
+// --- Controllable seam: ncclMemTrack ------------------------------------
+static ncclResult_t DefaultMemTrack(struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+                                    hipMemAllocationHandleType, ncclMemType_t)
 {
     return ncclSuccess;
 }
+std::function<ncclResult_t(struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+                           hipMemAllocationHandleType, ncclMemType_t)>
+    g_memTrack = DefaultMemTrack;
 
-ncclResult_t ncclMemTrackImportFromPeer(struct ncclMemManager* /*manager*/,
-                                        void*                           /*ptr*/,
-                                        size_t                          /*size*/,
-                                        hipMemGenericAllocationHandle_t /*handle*/,
-                                        hipMemAllocationHandleType      /*handleType*/,
-                                        ncclMemType_t                   /*memType*/,
-                                        int                             /*ownerRank*/,
-                                        int                             /*ownerDev*/,
-                                        void*                           /*ownerPtr*/)
+ncclResult_t ncclMemTrack(struct ncclMemManager*          manager,
+                          void*                           ptr,
+                          size_t                          size,
+                          hipMemGenericAllocationHandle_t handle,
+                          hipMemAllocationHandleType      handleType,
+                          ncclMemType_t                   memType)
+{
+    return g_memTrack(manager, ptr, size, handle, handleType, memType);
+}
+
+// --- Controllable seam: ncclMemTrackImportFromPeer ----------------------
+// ncclP2pImportShareableBuffer's cuMem arm records the mapped remote buffer
+// through this before returning success. Default succeeds; the import test
+// installs a hook to observe that the cuMem arm reached the tracking call
+// (mock-style: no public state carries the record).
+static ncclResult_t DefaultMemTrackImportFromPeer(
+    struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+    hipMemAllocationHandleType, ncclMemType_t, int, int, void*)
 {
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclMemManager*, void*, size_t,
+                           hipMemGenericAllocationHandle_t,
+                           hipMemAllocationHandleType, ncclMemType_t, int, int,
+                           void*)>
+    g_memTrackImportFromPeer = DefaultMemTrackImportFromPeer;
+
+ncclResult_t ncclMemTrackImportFromPeer(struct ncclMemManager* manager,
+                                        void*                           ptr,
+                                        size_t                          size,
+                                        hipMemGenericAllocationHandle_t handle,
+                                        hipMemAllocationHandleType      handleType,
+                                        ncclMemType_t                   memType,
+                                        int                             ownerRank,
+                                        int                             ownerDev,
+                                        void*                           ownerPtr)
+{
+    return g_memTrackImportFromPeer(manager, ptr, size, handle, handleType,
+                                    memType, ownerRank, ownerDev, ownerPtr);
 }
 
 ncclResult_t ncclMemUntrack(struct ncclMemManager* /*manager*/,
@@ -370,9 +521,8 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* /*manager*/,
     return ncclSuccess;
 }
 
-ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* /*manager*/,
-                                   void*                  /*ptr*/,
-                                   struct ncclMemUntrackInfo* info)
+// --- Controllable seam: ncclMemUntrackDynamic ---------------------------
+static ncclResult_t DefaultMemUntrackDynamic(struct ncclMemManager*, void*, struct ncclMemUntrackInfo* info)
 {
     if (info) {
         info->memType = ncclMemPersist;
@@ -380,6 +530,13 @@ ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* /*manager*/,
         info->dynMemSize = 0;
     }
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclMemManager*, void*, struct ncclMemUntrackInfo*)> g_memUntrackDynamic =
+    DefaultMemUntrackDynamic;
+
+ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* manager, void* ptr, struct ncclMemUntrackInfo* info)
+{
+    return g_memUntrackDynamic(manager, ptr, info);
 }
 
 ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* /*manager*/,
@@ -389,29 +546,55 @@ ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* /*manager*/,
     return ncclSuccess;
 }
 
-ncclResult_t ncclDynMemMarkExportToPeer(struct ncclMemManager* /*manager*/,
-                                        void*                  /*ptr*/,
-                                        int                    /*peerRank*/)
+// --- Controllable seam: ncclDynMemMarkExportToPeer ----------------------
+// ncclP2pAllocateShareableBuffer's cuMem arm marks a freshly-allocated
+// buffer for export only when it has a manager, a real peer, and a
+// non-persistent memtype. Default succeeds; the alloc tests install a hook
+// to observe whether that gating decision fired (mock-style).
+static ncclResult_t DefaultDynMemMarkExportToPeer(struct ncclMemManager*,
+                                                  void*, int)
 {
     return ncclSuccess;
 }
+std::function<ncclResult_t(struct ncclMemManager*, void*, int)>
+    g_dynMemMarkExportToPeer = DefaultDynMemMarkExportToPeer;
+
+ncclResult_t ncclDynMemMarkExportToPeer(struct ncclMemManager* manager,
+                                        void*                  ptr,
+                                        int                    peerRank)
+{
+    return g_dynMemMarkExportToPeer(manager, ptr, peerRank);
+}
 
 // Batch fd-query variant added upstream for multi-segment registration.
-// Returns failure by default -- no microtest drives the multi-segment
-// path (ncclParamMultiSegmentRegister is stubbed to 0 below).
-ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm*           /*comm*/,
-                                                 struct ncclProxyConnector* /*proxyConn*/,
-                                                 int*                       /*localFds*/,
-                                                 int*                       /*rmtFds*/,
-                                                 int                        /*numSegments*/)
+// The POSIX_FD, cross-process arm of ipcHandleMultiSegmentRegistration ships
+// every exported segment fd to the remote proxy and gets an imported-fd
+// handle per segment back. Default returns ncclSystemError so unexpected
+// call sites fail loudly; tests driving that arm install a hook that
+// succeeds and fills the imported-fd array.
+static ncclResult_t DefaultProxyClientBatchQueryFdBlocking(
+    struct ncclComm*, struct ncclProxyConnector*, int*, int*, int)
 {
     return ncclSystemError;
 }
+std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*,
+                           int*, int*, int)>
+    g_proxyClientBatchQueryFdBlocking = DefaultProxyClientBatchQueryFdBlocking;
 
-// NCCL_PARAM(MultiSegmentRegister, ...) generated symbol. Return 0 so the
+ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm*           comm,
+                                                 struct ncclProxyConnector* proxyConn,
+                                                 int*                       localFds,
+                                                 int*                       rmtFds,
+                                                 int                        numSegments)
+{
+    return g_proxyClientBatchQueryFdBlocking(comm, proxyConn, localFds, rmtFds,
+                                             numSegments);
+}
+
+// NCCL_PARAM(MultiSegmentRegister, ...) generated symbol. Defaults to 0 so the
 // `multiSegment && ... ncclParamMultiSegmentRegister()` guard in p2p.cc
-// keeps the single-segment path the microtests exercise.
-int64_t ncclParamMultiSegmentRegister() { return 0; }
+// keeps the single-segment path the microtests exercise; g_loadParam can flip it.
+int64_t ncclParamMultiSegmentRegister() { return g_loadParam("MULTI_SEGMENT_REGISTER", 0); }
 
 // ---------------------------------------------------------------------------
 // Reset
@@ -421,11 +604,25 @@ void ResetNcclFakes()
 {
     g_ncclProxyClientGetFdBlocking = DefaultNcclProxyClientGetFdBlocking;
     g_strongStreamAcquire          = DefaultStrongStreamAcquire;
+    g_strongStreamRelease          = DefaultStrongStreamRelease;
+    g_ncclStreamWaitStream         = DefaultStreamWaitStream;
     g_proxyConnect                 = DefaultProxyConnect;
     g_proxyCallBlocking            = DefaultProxyCallBlocking;
     g_loadParam                    = DefaultLoadParam;
     g_cuMemEnable                  = DefaultCuMemEnable;
     g_proxyClientQueryFdBlocking   = DefaultProxyClientQueryFdBlocking;
+    g_proxyClientBatchQueryFdBlocking = DefaultProxyClientBatchQueryFdBlocking;
+    g_memTrackImportFromPeer       = DefaultMemTrackImportFromPeer;
+    g_memTrack                     = DefaultMemTrack;
+    g_memUntrackDynamic            = DefaultMemUntrackDynamic;
+    g_dynMemMarkExportToPeer       = DefaultDynMemMarkExportToPeer;
     g_ncclTopoGetLinkType          = DefaultTopoGetLinkType;
     g_ncclTopoGetLinkTypeCalls     = 0;
+    g_ncclTopoCheckP2p             = DefaultTopoCheckP2p;
+    g_ncclTopoCheckNet             = DefaultTopoCheckNet;
+    g_regLocalIsValid              = DefaultRegLocalIsValid;
+    g_shmAllocateShareableBuffer   = DefaultShmAllocateShareableBuffer;
+    g_commGraphRegister            = DefaultCommGraphRegister;
+    g_commGraphDeregister          = DefaultCommGraphDeregister;
+    g_ncclSetThreadName            = DefaultSetThreadName;
 }

@@ -59,6 +59,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
+#include "lib/rocprofiler-sdk/registration/attach.hpp"
 #include "lib/rocprofiler-sdk/registration/iterate.hpp"
 #include "lib/rocprofiler-sdk/registration/late.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
@@ -411,6 +412,8 @@ emplace_client(Tp&                                 data,
                rocprofiler_configure_func_t        _cfg_func,
                rocprofiler_configure_attach_func_t _attach_func)
 {
+    _attach_func = resolve_attach_for_configure(_cfg_func, _attach_func);
+
     constexpr auto client_id_size = sizeof(rocprofiler_client_id_t);
     uint32_t       _prio          = get_client_offset() + data.size();
     auto           _client_v      = client_library{std::string{_name},
@@ -1182,11 +1185,12 @@ finalize()
         // completion monitor that runs these completions, and correlation_id_finalize
         // consults the loss ledger this populates. Its drain waits on the in-flight counter,
         // so it still works when an application hsa_shut_down stopped the monitor first.
-        // No-op unless signal-less is active.
+        // No-op in a process that never brought the dispatch log up.
         kfd::signal_less_teardown();
 
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();
+        SPM::spm_device_counting_service_finalize();
         hsa::queue_controller_fini();
         thread_trace::finalize();
         ompt::finalize_ompt();
@@ -1566,6 +1570,13 @@ rocprofiler_set_api_table(const char* name,
             rocprofiler::hsa::copy_table(hsa_api_table->pc_sampling_ext_, lib_instance);
 #endif
 
+        // Enable before profiling resources take clock samples. ROCr keeps this mode enabled
+        // for the process lifetime; API-only tools do not need the additional sampling.
+        if(!rocprofiler::context::get_registered_contexts(
+                rocprofiler::hsa::needs_high_precision_timestamps)
+                .empty())
+            rocprofiler::hsa::enable_high_precision_timestamps(hsa_api_table->amd_ext_);
+
         rocprofiler::aqlprofile::hsa_rsrc_factory_init(hsa_api_table);
 
         // need to construct agent mappings before initializing the queue controller
@@ -1588,6 +1599,7 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::queue_controller_init(hsa_api_table);
         // Process agent ctx's that were started prior to HSA init
         rocprofiler::counters::device_counting_service_hsa_registration();
+        rocprofiler::SPM::spm_device_counting_service_hsa_registration();
 
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->core_, lib_instance);

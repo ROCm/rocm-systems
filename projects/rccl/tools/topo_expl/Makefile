@@ -108,6 +108,9 @@ CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION)
 
 TOPO_EXPL_FILES = src/$(EXE).cpp src/topo_expl_api.cpp src/model.cpp src/topo_expl_impl.cpp src/utils.cpp src/stubs.cc test/topo_expl_tests.cpp
 
+# rccl_wrap.cc's rcclRingTreeTable() calls rcclGetArchThresholds(), and
+# enqueue.cc keeps that function live. The definition is in
+# rccl_arch_thresholds.cc; without it the gfx90a topo_expl link fails.
 RCCL_FILES = hipify_rccl/graph/topo.cc \
 			hipify_rccl/graph/rings.cc \
 			hipify_rccl/graph/paths.cc \
@@ -122,37 +125,20 @@ RCCL_FILES = hipify_rccl/graph/topo.cc \
 			../../src/misc/param.cc \
 			../../src/misc/nvmlwrap_stub.cc \
 			hipify_rccl/rccl_wrap.cc \
+			hipify_rccl/rccl_arch_thresholds.cc \
 			hipify_rccl/collectives.cc \
 			hipify_rccl/register.cc \
 			hipify_rccl/enqueue.cc
 
 files = $(TOPO_EXPL_FILES) $(RCCL_FILES)
 
-FMT_DIR     := third_party/fmt
-FMT_INCLUDE := $(FMT_DIR)/include
-FMT_HEADER  := $(FMT_INCLUDE)/fmt/format.h
-FMT_GIT     := https://github.com/fmtlib/fmt.git
+# hipify stages all of src/include, so a header imported here can reach
+# <fmt/format.h> (hip_rocm_version_info.h does, even though nothing topo_expl
+# compiles includes it today). Point at the vendored header-only copy the CMake
+# build uses: no fmt package, no network, and nothing to link.
+CXXFLAGS += -I../../external/fmt/include -DFMT_HEADER_ONLY=1
 
-# Probe for <fmt/format.h> using a portable pipe (no <<< here-string)
-HAVE_FMT := $(shell echo '#include <fmt/format.h>' | \
-               $(HIPCC) -xc++ -std=c++17 -E - >/dev/null 2>&1 && echo yes || echo no)
-
-ifeq ($(HAVE_FMT),no)
-  CXXFLAGS += -I$(FMT_INCLUDE)
-  NEED_FMT  := 1
-endif
-
-ifeq ($(NEED_FMT),1)
-$(FMT_HEADER):
-	rm -rf third_party/fmt
-	@echo ">>> fmt not found; cloning $(FMT_GIT) ..."
-	@mkdir -p $(dir $(FMT_DIR))
-	@git clone --depth=1  $(FMT_GIT) $(FMT_DIR)
-else
-$(FMT_HEADER):
-endif
-
-all: $(FMT_HEADER) hipify $(EXE)
+all: hipify $(EXE)
 	@echo "Built with ROCm version: $(ROCM_MAJOR).$(ROCM_MINOR).$(ROCM_PATCH) (ROCM_VERSION=$(ROCM_VERSION))"
 
 $(EXE): $(files)
@@ -179,6 +165,7 @@ hipify:
 	cp -a ../../src/register/register.cc hipify_rccl/
 	cp -a ../../src/collectives.cc hipify_rccl/
 	cp -a ../../src/rccl_wrap.cc hipify_rccl/
+	cp -a ../../src/rccl_arch_thresholds.cc hipify_rccl/
 	cp -a ../../src/misc/archinfo.cc hipify_rccl/graph/
 	# Hipify all header and source files (CUDA -> HIP).
 	# Walk every subdirectory under hipify_rccl/include/ recursively so that

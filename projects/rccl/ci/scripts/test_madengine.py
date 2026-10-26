@@ -326,8 +326,9 @@ def patch_madengine_for_cluster(
                 '    MADENGINE_SRC="$SUBMISSION_DIR/madengine"\n'
                 '    if [ -d "$MADENGINE_SRC" ] && [ -f "$MADENGINE_SRC/pyproject.toml" ]; then\n'
                 '        source "$WORKSPACE/node_venv/bin/activate"\n'
-                '        pip install --upgrade pip setuptools wheel 2>&1 | tail -3\n'
-                '        pip install "$MADENGINE_SRC" 2>&1 | tail -20\n'
+                # ~/.cache/pip is on a small NFS home quota.
+                '        pip install --no-cache-dir --upgrade pip setuptools wheel 2>&1 | tail -3\n'
+                '        pip install --no-cache-dir "$MADENGINE_SRC" 2>&1 | tail -20\n'
                 '        if madengine --version >/dev/null 2>&1; then\n'
                 '            MAD_CLI_COMMAND="madengine"\n'
                 '            echo "  ✓ madengine installed: '
@@ -356,6 +357,72 @@ def patch_madengine_for_cluster(
             content = content.replace(old_nfs_pattern, new_nfs_pattern)
             template.write_text(content)
             log.info("Patched SLURM template: NFS detection now matches nfs4")
+
+    # /var/tmp is persistent and shared, so job-scope the workspace and delete
+    # it after use. Anchor-guarded: a no-op once ROCm/madengine#190 is pinned.
+    template = src / "deployment" / "templates" / "slurm" / "job.sh.j2"
+    if template.exists():
+        content = template.read_text()
+        original = content
+        patches = [
+            (
+                # Matches the /tmp branch below, job-scoped all along.
+                "multi-node workspace scoping",
+                "    WORKSPACE=$SLURM_TMPDIR/madengine_node_${SLURM_PROCID}\n",
+                "    WORKSPACE=$SLURM_TMPDIR"
+                "/madengine_job_${SLURM_JOB_ID}_node_${SLURM_PROCID}\n",
+            ),
+            (
+                # Bare SLURM_TMPDIR would rsync the project into /var/tmp.
+                "single-node workspace scoping",
+                '        WORKSPACE=$SLURM_TMPDIR\n'
+                '        WORKSPACE_TYPE="local-slurm"\n',
+                '        WORKSPACE=$SLURM_TMPDIR/madengine_job_${SLURM_JOB_ID:-$$}\n'
+                '        mkdir -p $WORKSPACE\n'
+                '        WORKSPACE_TYPE="local-slurm"\n',
+            ),
+        ]
+        # Any upstream removal of the workspace wins: #190 keeps it when the
+        # task failed or artifacts did not all copy out, and a second
+        # unconditional delete here would undo that.
+        if 'rm -rf "$WORKSPACE"' not in content:
+            patches.append(
+                (
+                    # Last in the per-node task script, so artifacts are in
+                    # $NODE_COLLECTION_DIR on shared storage by now. Only the
+                    # node-local workspace: shared-nfs is the submission dir.
+                    "node-local workspace cleanup",
+                    "\nexit $TASK_EXIT\nTASK_SCRIPT_EOF\n",
+                    "\n"
+                    "# Nothing else reclaims this on a persistent"
+                    " SLURM_TMPDIR; a failed task keeps it for the"
+                    " post-mortem.\n"
+                    'if [ $TASK_EXIT -eq 0 ] && '
+                    '[ "$WORKSPACE_TYPE" = "local-multinode" ] && '
+                    '[ -n "$WORKSPACE" ]; then\n'
+                    '    echo "Node ${SLURM_PROCID}: removing local workspace '
+                    '$WORKSPACE"\n'
+                    '    cd / && rm -rf "$WORKSPACE" || true\n'
+                    "fi\n"
+                    "\n"
+                    "exit $TASK_EXIT\n"
+                    "TASK_SCRIPT_EOF\n",
+                )
+            )
+
+        for label, old, new in patches:
+            if old not in content:
+                log.warning(
+                    "SLURM template: %s anchor not found — already patched "
+                    "upstream, or the template drifted",
+                    label,
+                )
+                continue
+            content = content.replace(old, new)
+            log.info("Patched SLURM template: %s", label)
+
+        if content != original:
+            template.write_text(content)
 
     run_orch = src / "orchestration" / "run_orchestrator.py"
     if run_orch.exists():

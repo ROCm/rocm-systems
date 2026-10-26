@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <sys/utsname.h>
 #include <fstream>
+#include <mutex>
 
 #define DECLARE_ROCM_PFN(symbol) PFN_##symbol pfn_##symbol = nullptr
 
@@ -150,7 +151,7 @@ static int ncclCuMemCapabilityCheck(int requireGfx1250ForAutoEnable) {
     // Block scope prevents the goto in CUDACHECKGOTO from jumping over the bool initialization.
     bool cuMemSupported = NCCL_CUMEM_VERSION_SUPPORTED(cudaDriverVersion);
     if (!cuMemSupported) {
-      WARN("cuMem support requires HIP_VERSION >= 7.2.0 (or ROCm 7.0.2.x backport)");
+      WARN("cuMem support requires ROCm >= 7.12 or the 7.0.2.x backport (found %d)", cudaDriverVersion);
       supported = 0;
     }
   }
@@ -179,18 +180,17 @@ int ncclIsCuMemSupported() {
 
 // Runtime cuMem capability without the gfx1250 auto-enable gate. Used when
 // NCCL_CUMEM_ENABLE=1 forces the VMM path on non-gfx1250 platforms.
-// rccl-tests device-API / symmetric paths call this by name; keep it exported
-// even when librccl is built with -fvisibility=hidden (hipify can drop a
-// trailing attribute on the declaration).
+// Memoized because ncclCuMemEnable() calls this on every allocation and the
+// check runs a full VMM create/map/unmap cycle.
 #if defined(__GNUC__)
-#pragma GCC visibility push(default)
+__attribute__((visibility("default")))
 #endif
 int ncclCuMemRuntimeSupported() {
-  return ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/0);
+  static std::once_flag once;
+  static int supported = 0;
+  std::call_once(once, []() { supported = ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/0); });
+  return supported;
 }
-#if defined(__GNUC__)
-#pragma GCC visibility pop
-#endif
 
 int ncclCuMemEnable() {
 #if NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
@@ -214,10 +214,7 @@ int ncclCuMemEnable() {
 static int ncclCumemHostEnable = -1;
 int ncclCuMemHostEnable() {
   if (ncclCumemHostEnable != -1) return ncclCumemHostEnable;
-  // NOTE: the cuMem *host* allocation path is NOT part of the ROCm 7.0.2.x
-  // backport (it relies on hipDeviceAttributeHostNumaId, which is absent there),
-  // so it has its own native-only gate rather than NCCL_CUMEM_VERSION_SUPPORTED().
-#if !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if !NCCL_CUMEM_HOST_GATE
   ncclCumemHostEnable = 0;
   return ncclCumemHostEnable;
 #else
@@ -235,17 +232,12 @@ int ncclCuMemHostEnable() {
     if (ncclCumemHostEnable) {
       // Verify that host allocations actually work.  Docker in particular is known to disable "get_mempolicy",
       // causing such allocations to fail (this can be fixed by invoking Docker with "--cap-add SYS_NICE").
-      CUdevice currentDev;
-      int cpuNumaNodeId = -1;
       CUmemAllocationProp prop = {};
       size_t granularity = 0;
       size_t size;
       CUmemGenericAllocationHandle handle;
       CUDACHECK(cudaGetDevice(&cudaDev));
-      CUCHECK(cuDeviceGet(&currentDev, cudaDev));
-      CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, hipDeviceAttributeHostNumaId, currentDev));
-      if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
-      // CLR rejects HostNuma; probe with Host to match alloc.h's ncclCuMemHostAlloc.
+      // HIP rejects HostNuma; probe with Host to match alloc.h's ncclCuMemHostAlloc.
       prop.location.type = hipMemLocationTypeHost;
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       prop.requestedHandleTypes = ncclCuMemHandleType;

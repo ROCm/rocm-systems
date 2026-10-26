@@ -10,7 +10,24 @@
 
 #include <cstdint>
 
+#include "fail_loud.h"
+#include "group.h"       // the real declarations of the thread-locals defined below
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM default this stands in for
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_ncclCollPreconnect, ncclCollPreconnect);
+ASSERT_HOOK_MATCHES_PROD(g_doLaunches, doLaunches);
+ASSERT_HOOK_MATCHES_PROD(g_ncclGroupStart, ncclGroupStart);
+ASSERT_HOOK_MATCHES_PROD(g_ncclGroupEnd, ncclGroupEnd);
+#undef ASSERT_HOOK_MATCHES_PROD
+
+// group.cc's thread-local group state. ncclGroupCommJoin is inline in group.h,
+// so any TU that joins a comm to a group needs these even though it never calls
+// into group.cc. ncclGroupDepth/ncclGroupError sit in nccl_stubs.cc because the
+// fail-loud floor already needed them.
+thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {nullptr};
+thread_local int ncclGroupBlocking = -1;  // group.cc's "default mode" sentinel
+thread_local struct ncclComm* ncclGroupCommPreconnectHead = nullptr;
 
 ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
 ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
@@ -18,9 +35,41 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
 static ncclResult_t DefaultNcclGroupJobAbort(struct ncclGroupJob*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobAbort = DefaultNcclGroupJobAbort;
 ncclResult_t ncclGroupJobAbort(struct ncclGroupJob* job) { return g_ncclGroupJobAbort(job); }
-ncclResult_t ncclGroupJobComplete(struct ncclGroupJob*) { return ncclSuccess; }
+
+static ncclResult_t DefaultNcclGroupJobComplete(struct ncclGroupJob*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobComplete = DefaultNcclGroupJobComplete;
+ncclResult_t ncclGroupJobComplete(struct ncclGroupJob* job) { return g_ncclGroupJobComplete(job); }
+
+static ncclResult_t DefaultCollPreconnect(struct ncclComm*, bool*) {
+  FailLoudUnfaked("group_fakes", "ncclCollPreconnect");
+}
+std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclCollPreconnect = DefaultCollPreconnect;
+ncclResult_t ncclCollPreconnect(struct ncclComm* comm, bool* algoNeedConnect) {
+  return g_ncclCollPreconnect(comm, algoNeedConnect);
+}
+
+static ncclResult_t DefaultDoLaunches(struct ncclComm*, int) {
+  FailLoudUnfaked("group_fakes", "doLaunches");
+}
+std::function<ncclResult_t(struct ncclComm*, int)> g_doLaunches = DefaultDoLaunches;
+ncclResult_t doLaunches(struct ncclComm* head, int taskType) { return g_doLaunches(head, taskType); }
+
+static ncclResult_t DefaultGroupStart() { FailLoudUnfaked("group_fakes", "ncclGroupStart"); }
+std::function<ncclResult_t()> g_ncclGroupStart = DefaultGroupStart;
+ncclResult_t ncclGroupStart() { return g_ncclGroupStart(); }
+
+static ncclResult_t DefaultGroupEnd() { FailLoudUnfaked("group_fakes", "ncclGroupEnd"); }
+std::function<ncclResult_t()> g_ncclGroupEnd = DefaultGroupEnd;
+ncclResult_t ncclGroupEnd() { return g_ncclGroupEnd(); }
 
 // Referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not cover it.
 int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 0); }  // group.cc:628
 
-void ResetGroupFakes() { g_ncclGroupJobAbort = DefaultNcclGroupJobAbort; }
+void ResetGroupFakes() {
+  g_ncclGroupJobAbort = DefaultNcclGroupJobAbort;
+  g_ncclGroupJobComplete = DefaultNcclGroupJobComplete;
+  g_ncclCollPreconnect = DefaultCollPreconnect;
+  g_doLaunches = DefaultDoLaunches;
+  g_ncclGroupStart = DefaultGroupStart;
+  g_ncclGroupEnd = DefaultGroupEnd;
+}

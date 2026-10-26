@@ -99,8 +99,12 @@ public:
 
   /// @brief Get GPU metadata received from the daemon handshake.
   [[nodiscard]] const Sysfs::GpuInfo *gpu_info() const {
-    return has_gpu_info_ ? &gpu_info_ : nullptr;
+    return gpu_infos_.empty() ? nullptr : &gpu_infos_.front();
   }
+  /// @brief Match a configured minor, except for legacy one-GPU compatibility.
+  /// @details Manifest sessions never claim an unrelated host render node.
+  [[nodiscard]] const Sysfs::GpuInfo *gpu_info_for_render_minor(uint32_t minor) const;
+  [[nodiscard]] bool handles_drm_render_minor(uint32_t minor) const;
 
   /// @brief What the last open() decided about authorizing its peer.
   /// @details Reported because the decision is otherwise invisible: a refusal
@@ -139,7 +143,7 @@ public:
 
   /// @brief Perform the RPC handshake with the daemon.
   /// @details Sends RPC_HANDSHAKE, receives the topology path and gpu_id,
-  /// and creates a synthetic memfd to use as the KFD fd.
+  /// and creates a synthetic pollable eventfd to use as the KFD fd.
   /// @retval >=0 Synthetic KFD fd on success.
   /// @retval -1 Handshake failed (socket error or daemon rejected).
   int open() override;
@@ -149,7 +153,7 @@ public:
   /// dup2 overwrote it) but the RPC connection is still live and must keep a
   /// valid primary fd number to hand back to open("/dev/kfd"). Unlike open(),
   /// this performs no RPC and does not disturb the connection/metadata.
-  /// @retval >=0 A new synthetic KFD fd. @retval -1 memfd creation failed.
+  /// @retval >=0 A new synthetic KFD fd. @retval -1 eventfd creation failed.
   [[nodiscard]] int reissue_synthetic_kfd_fd();
 
   /// @brief Send RPC_CLOSE to the daemon.
@@ -206,12 +210,12 @@ private:
   /// @note Must be called with rpc_mutex_ held.
   int poison_stream();
 
-  int sock_ = -1;             ///< Unix socket connection to the daemon.
-  uint32_t next_id_ = 0;      ///< Monotonic request ID counter (for debugging).
-  std::string topology_path_; ///< Daemon's sysfs topology directory path.
-  std::string drm_path_;      ///< Daemon's DRM sysfs directory path.
-  Sysfs::GpuInfo gpu_info_{}; ///< GPU metadata received from daemon handshake.
-  bool has_gpu_info_ = false; ///< True when gpu_info_ is valid.
+  int sock_ = -1;                         ///< Unix socket connection to the daemon.
+  uint32_t next_id_ = 0;                  ///< Monotonic request ID counter (for debugging).
+  std::string topology_path_;             ///< Daemon's sysfs topology directory path.
+  std::string drm_path_;                  ///< Daemon's DRM sysfs directory path.
+  std::vector<Sysfs::GpuInfo> gpu_infos_; ///< Node-local metadata from the daemon handshake.
+  bool strict_render_minor_ = false;      ///< Manifest minors must match exactly.
   std::optional<PtracerGrantVerdict> ptracer_verdict_; ///< Last open()'s trust decision.
   std::atomic<bool> closing_{false}; ///< Set by close() to break WAIT_EVENTS loops.
   /// @brief Set when the RPC stream is known to be unusable.

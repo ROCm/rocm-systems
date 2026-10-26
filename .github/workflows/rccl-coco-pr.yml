@@ -1,26 +1,36 @@
-name: RCCL coco PR smoke
+name: RCCL coco PR
 
-# PR smoke via `coco pr` on Ruby and OCI.
+# PR build/smoke via `coco pr` on Ruby and OCI.
+# Fork PRs get no secrets, so a maintainer must dispatch this with pr_number and pr_sha.
 #
-# Same-repo PRs auto-run on pull_request. Fork PRs are skipped (no secrets on
-# fork-triggered runs); a maintainer must run this workflow manually via
-# workflow_dispatch, supplying pr_number and pr_sha from the fork PR.
+# One job per cluster: `needs` on a matrix waits for every leg, so sharing a
+# job would let a slow cluster hold up the others.
 #
-# ruby-smoke/oci-smoke are gating: a coco failure fails the PR check.
+# tRCCL config validation requires coco job keys of the form
+# <prefix>-rccl-pr-{build,smoke}. Adding a cluster is one entry in
+# .github/scripts/rccl_coco_matrix.py.
 on:
+  # No `paths:` filter: a path-skipped workflow reports no checks, so a required check would never pass.
   pull_request:
-    branches: [develop, main, rccl-develop, rccl_develop]
-    paths:
-      - 'projects/rccl/**'
-      - '.github/workflows/rccl-coco-pr.yml'
+    branches: [develop, main, rccl-develop, rccl_develop, rocprofiler-compute-develop]
   workflow_dispatch:
     inputs:
+      coco_ref:
+        description: 'ROCm/tRCCL ref for the coco harness.'
+        type: string
+        required: false
+        default: '1.3.x'
+      dry_run:
+        description: 'Resolve stacks and submissions without building or running anything.'
+        type: boolean
+        required: false
+        default: false
       pr_number:
-        description: 'Pull request number.'
+        description: 'Pull request number. Required for a manual fork rerun.'
         type: number
         required: true
       pr_sha:
-        description: 'Full 40-hex PR head SHA.'
+        description: 'Full 40-hex PR head SHA. Required when pr_number is set.'
         type: string
         required: true
       pr_repo:
@@ -28,163 +38,189 @@ on:
         type: string
         required: false
         default: 'ROCm/rocm-systems'
-      coco_ref:
-        description: 'ROCm/tRCCL harness ref.'
-        type: string
-        required: false
-        default: 'main'
-      dry_run:
-        description: 'Pass --dry-run to coco.'
-        type: boolean
-        required: false
-        default: false
 
 permissions:
   contents: read
 
+# Cancelling is safe: coco traps SIGINT/SIGTERM and releases its allocations.
+concurrency:
+  # inputs.pr_number covers workflow_dispatch, where there is no pull_request context.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
-  ruby-setup:
-    name: Ruby Setup
-    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
-    runs-on: ruby-linux-slurm-scale-runner
+  changes:
+    name: Detect RCCL changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      # The filter step is skipped on non-PR events, leaving no output; default to running.
+      rccl: ${{ steps.filter.outputs.rccl || 'true' }}
+    steps:
+      - name: Checkout scripts
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: .github/scripts
+          # HEAD^ on a PR merge commit is the base branch tip.
+          fetch-depth: 2
+
+      - name: Check for RCCL changes
+        id: filter
+        if: github.event_name == 'pull_request'
+        run: python3 .github/scripts/rccl_detect_coco_changes.py --base-ref HEAD^
+
+  # Must resolve once for all clusters, or a moving coco_ref pins a different commit per cluster.
+  setup:
+    name: Setup
+    needs: changes
+    if: needs.changes.outputs.rccl == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       coco_ref: ${{ steps.resolve.outputs.coco_ref }}
       coco_args: ${{ steps.resolve.outputs.coco_args }}
+      trigger_kind: ${{ steps.resolve.outputs.trigger_kind }}
       pr_number: ${{ steps.resolve.outputs.pr_number }}
       pr_sha: ${{ steps.resolve.outputs.pr_sha }}
       pr_repo: ${{ steps.resolve.outputs.pr_repo }}
+      clusters: ${{ steps.clusters.outputs.matrix }}
     steps:
       - name: Checkout rocm-systems
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          sparse-checkout: .github/actions/checkout-coco-harness
+          sparse-checkout: |
+            .github/actions/rccl-checkout-coco-harness
+            .github/actions/rccl-resolve-coco-run
+            .github/scripts
 
-      - name: Checkout the coco harness
-        uses: ./.github/actions/checkout-coco-harness
+      - name: Cluster list
+        id: clusters
+        run: python3 .github/scripts/rccl_coco_matrix.py pr-clusters
+
+      - name: Resolve coco run parameters
+        id: resolve
+        uses: ./.github/actions/rccl-resolve-coco-run
         with:
-          ref: ${{ inputs.coco_ref || 'main' }}
-          path: _coco
+          coco_ref: ${{ inputs.coco_ref || '1.3.x' }}
+          dry_run: ${{ inputs.dry_run || false }}
+          pr_number: ${{ inputs.pr_number }}
+          pr_sha: ${{ inputs.pr_sha }}
+          pr_repo: ${{ inputs.pr_repo }}
           client-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      - name: Resolve run parameters
-        id: resolve
-        working-directory: _coco
-        env:
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
-          PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || inputs.pr_number }}
-          PR_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.pr_sha }}
-          PR_REPO: ${{ github.event_name == 'pull_request' && github.repository || inputs.pr_repo }}
-        run: |
-          set -euo pipefail
-          args='-vv --prune-build --skip-failed-builds --skip-baselines'
-          [[ "${DRY_RUN}" == "true" ]] && args="${args} --dry-run"
-          {
-            echo "coco_ref=$(git rev-parse HEAD)"
-            echo "coco_args=${args}"
-            echo "pr_number=${PR_NUMBER}"
-            echo "pr_sha=${PR_SHA}"
-            echo "pr_repo=${PR_REPO}"
-          } >> "${GITHUB_OUTPUT}"
+  gate:
+    name: ${{ matrix.name }}
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.clusters) }}
+    uses: ./.github/workflows/rccl-coco-run.yml
+    secrets: inherit
+    with:
+      mode: pr
+      build_job: ${{ matrix.prefix }}-rccl-pr-build
+      job: ${{ matrix.prefix }}-rccl-pr-smoke
+      runs_on: ${{ matrix.runner }}
+      pr_number: ${{ needs.setup.outputs.pr_number }}
+      pr_sha: ${{ needs.setup.outputs.pr_sha }}
+      pr_repo: ${{ needs.setup.outputs.pr_repo }}
+      software: rccl
+      trigger_kind: ${{ needs.setup.outputs.trigger_kind }}
+      coco_ref: ${{ needs.setup.outputs.coco_ref }}
+      coco_args: ${{ needs.setup.outputs.coco_args }}
+      timeout_minutes: 100
+      concurrency_group: rccl-coco-pr-${{ needs.setup.outputs.pr_number }}-${{ matrix.prefix }}
 
-      - name: Clean up harness checkout
-        if: always()
-        run: rm -rf _coco
-
-  oci-setup:
-    name: OCI Setup
-    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
-    runs-on: oci-linux-slurm-scale-runner
-    outputs:
-      coco_ref: ${{ steps.resolve.outputs.coco_ref }}
-      coco_args: ${{ steps.resolve.outputs.coco_args }}
-      pr_number: ${{ steps.resolve.outputs.pr_number }}
-      pr_sha: ${{ steps.resolve.outputs.pr_sha }}
-      pr_repo: ${{ steps.resolve.outputs.pr_repo }}
+  # Commenting on a pull request is authorized by pull-requests: write, not
+  # issues: write, even though the endpoint path is /issues/.../comments --
+  # issues: write only covers a standalone issue (see rdc-dme-sync-check.yml
+  # for that case; aqlprofile-deprecation-warning.yml for this one). This job
+  # never checks out PR code -- it only downloads the Markdown each cluster
+  # leg already rendered -- so it is the only place in this workflow that
+  # holds a write token.
+  comment:
+    name: Post coco summaries
+    needs: [setup, gate]
+    if: always() && needs.setup.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ needs.setup.outputs.pr_number }}
+      PR_REPO: ${{ needs.setup.outputs.pr_repo }}
     steps:
-      - name: Checkout rocm-systems
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Download coco PR summaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
         with:
-          sparse-checkout: .github/actions/checkout-coco-harness
+          pattern: coco-pr-*-summary
+          path: summaries
 
-      - name: Checkout the coco harness
-        uses: ./.github/actions/checkout-coco-harness
-        with:
-          ref: ${{ inputs.coco_ref || 'main' }}
-          path: _coco
-          client-id: ${{ secrets.APP_ID }}
-          app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
+      - name: Post each cluster summary
+        run: |
+          set -uo pipefail
+          # curl + python3 only: a self-hosted runner is not guaranteed the gh CLI.
+          # Always posts a new comment per file: one per cluster leg, matching
+          # the one-artifact-per-leg upload this step downloads.
+          shopt -s nullglob
+          for f in summaries/*/reports.md; do
+            [[ -s "${f}" ]] || continue
+            api="https://api.github.com/repos/${PR_REPO}/issues/${PR_NUMBER}/comments"
+            auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json")
+            # GitHub rejects a comment body over 65536 chars; stay well clear of
+            # that rather than let an unusually large report (many stacks, or
+            # many failing cases) silently fail to post.
+            body=$(python3 -c '
+          import json, sys
+          LIMIT = 60000
+          text = sys.stdin.read()
+          if len(text) > LIMIT:
+              text = text[:LIMIT] + "\n\n*(truncated — see this run'"'"'s Job Summary for the full report.)*"
+          print(json.dumps({"body": text}))' < "${f}")
+            curl --fail-with-body -sS -X POST "${auth[@]}" "${api}" -d "${body}"
+          done
 
-      - name: Resolve run parameters
-        id: resolve
-        working-directory: _coco
+  # The check to mark required on protected branches. The cluster jobs cannot be
+  # required directly: a skipped `uses:` job never publishes its "<caller> / <callee>" name.
+  pr-gate:
+    name: RCCL PR gate
+    if: always() && github.event_name == 'pull_request'
+    needs: [changes, setup, gate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Require every cluster to have passed
         env:
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
-          PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || inputs.pr_number }}
-          PR_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.pr_sha }}
-          PR_REPO: ${{ github.event_name == 'pull_request' && github.repository || inputs.pr_repo }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          SETUP_RESULT: ${{ needs.setup.result }}
+          RCCL_CHANGED: ${{ needs.changes.outputs.rccl }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          GATE_RESULT: ${{ needs.gate.result }}
         run: |
           set -euo pipefail
-          args='-vv --prune-build --skip-failed-builds --skip-baselines'
-          [[ "${DRY_RUN}" == "true" ]] && args="${args} --dry-run"
-          {
-            echo "coco_ref=$(git rev-parse HEAD)"
-            echo "coco_args=${args}"
-            echo "pr_number=${PR_NUMBER}"
-            echo "pr_sha=${PR_SHA}"
-            echo "pr_repo=${PR_REPO}"
-          } >> "${GITHUB_OUTPUT}"
-
-      - name: Clean up harness checkout
-        if: always()
-        run: rm -rf _coco
-
-  ruby-smoke:
-    name: Ruby smoke (ruby64-rccl-pr-smoke)
-    needs: ruby-setup
-    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
-    uses: ./.github/workflows/rccl-coco-run.yml
-    permissions:
-      contents: read
-    secrets:
-      APP_ID: ${{ secrets.APP_ID }}
-      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
-      RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
-    with:
-      mode: pr
-      job: ruby64-rccl-pr-smoke
-      runs_on: ruby-linux-slurm-scale-runner
-      pr_number: ${{ needs.ruby-setup.outputs.pr_number }}
-      pr_sha: ${{ needs.ruby-setup.outputs.pr_sha }}
-      pr_repo: ${{ needs.ruby-setup.outputs.pr_repo }}
-      software: rccl
-      trigger_kind: ci
-      coco_ref: ${{ needs.ruby-setup.outputs.coco_ref }}
-      coco_args: ${{ needs.ruby-setup.outputs.coco_args }}
-      timeout_minutes: 360
-      concurrency_group: rccl-coco-pr-${{ needs.ruby-setup.outputs.pr_number }}-ruby
-
-  oci-smoke:
-    name: OCI smoke (oci-rccl-pr-smoke)
-    needs: oci-setup
-    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
-    uses: ./.github/workflows/rccl-coco-run.yml
-    permissions:
-      contents: read
-    secrets:
-      APP_ID: ${{ secrets.APP_ID }}
-      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
-      RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
-    with:
-      mode: pr
-      job: oci-rccl-pr-smoke
-      runs_on: oci-linux-slurm-scale-runner
-      pr_number: ${{ needs.oci-setup.outputs.pr_number }}
-      pr_sha: ${{ needs.oci-setup.outputs.pr_sha }}
-      pr_repo: ${{ needs.oci-setup.outputs.pr_repo }}
-      software: rccl
-      trigger_kind: ci
-      coco_ref: ${{ needs.oci-setup.outputs.coco_ref }}
-      coco_args: ${{ needs.oci-setup.outputs.coco_args }}
-      timeout_minutes: 360
-      concurrency_group: rccl-coco-pr-${{ needs.oci-setup.outputs.pr_number }}-oci
+          if [[ "${CHANGES_RESULT}" != "success" ]]; then
+            echo "::error::Change detection did not complete (${CHANGES_RESULT}); cannot confirm whether RCCL was touched."
+            exit 1
+          fi
+          if [[ "${RCCL_CHANGED}" != "true" ]]; then
+            echo "No RCCL changes in this PR; coco smoke not required."
+            exit 0
+          fi
+          if [[ "${IS_FORK}" == "true" ]]; then
+            echo "::error::Fork PRs do not run coco smoke automatically. A maintainer must dispatch the 'RCCL coco PR' workflow with this PR's pr_number and pr_sha, confirm it passes, then override this check."
+            exit 1
+          fi
+          if [[ "${SETUP_RESULT}" != "success" ]]; then
+            echo "::error::Setup did not complete (${SETUP_RESULT}); no coco run was dispatched."
+            exit 1
+          fi
+          echo "clusters: ${GATE_RESULT}"
+          if [[ "${GATE_RESULT}" != "success" ]]; then
+            echo "::error::coco did not pass on every cluster. See the per-cluster checks for which."
+            exit 1
+          fi

@@ -98,9 +98,11 @@ hsa_status_t SdmaQueue::AllocateQueueBuffer() {
         queue_size_,
         core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached));
   } else {
+    // NonPaged: queue buffer, resolved via amdgpu_vm_bo_lookup_mapping().
     queue_start_addr_ = reinterpret_cast<char*>(gpu_agent()->system_allocator()(
         queue_size_, 0x1000,
-        core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached));
+        core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached |
+            core::MemoryRegion::AllocateNonPaged));
   }
   if (queue_start_addr_ == nullptr) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;

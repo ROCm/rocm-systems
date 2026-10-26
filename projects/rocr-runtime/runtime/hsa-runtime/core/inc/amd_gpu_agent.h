@@ -325,9 +325,9 @@ class GpuAgent : public GpuAgentInt {
                             std::vector<core::Signal*>& dep_signals) override;
 
   // @brief Override from core::Agent.
-  hsa_status_t DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
-                           const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
-                           const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
+  hsa_status_t DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
+                           const hsa_amd_memory_copy_rect_ptr_t* dsts, const hsa_dim3_t* ranges,
+                           uint16_t num_rects, hsa_amd_copy_direction_t dir,
                            std::vector<core::Signal*>& dep_signals, core::Signal& out_signal);
 
   // @brief Override from core::Agent.
@@ -342,6 +342,7 @@ class GpuAgent : public GpuAgentInt {
                            uint32_t private_segment_size, uint32_t group_segment_size,
                            bool metadata_queue, core::Queue** queue) override;
 
+  hsa_status_t SetAgentAttribute(hsa_agent_info_t attribute, void* value);
   // @brief Decrement GWS ref count.
   void GWSRelease();
 
@@ -402,6 +403,9 @@ class GpuAgent : public GpuAgentInt {
     return properties_;
   }
 
+  // @brief True when this node supports the native SDMA user queue AND it is enabled.
+  __forceinline bool sdma_native() const { return sdma_native_; }
+
   // @brief set rec_sdma_eng_override_
   __forceinline void SetRecSdmaEngOverride(bool flag) override { rec_sdma_eng_override_ = flag; }
 
@@ -443,6 +447,11 @@ class GpuAgent : public GpuAgentInt {
   // @brief returns true if agent uses MES scheduler
   __forceinline const bool isMES() const { return (supported_isas()[0]->GetMajorVersion() >= 11) ? true : false; };
 
+  // @brief returns true for gfx12.5+ parts (used by the PC sampling drain path)
+  __forceinline bool is_gfx1250() const {
+    return supported_isas()[0]->GetMajorVersion() == 12 && supported_isas()[0]->GetMinorVersion() >= 5;
+  }
+
   // @brief returns the libdrm device handle
   __forceinline amdgpu_device_handle libDrmDev() const { return ldrm_dev_; }
   __forceinline HsaAMDGPUDeviceHandle libThunkDev() const { return libthunk_dev_; }
@@ -456,6 +465,13 @@ class GpuAgent : public GpuAgentInt {
 
   /// @brief Override from AMD::GpuAgentInt.
   __forceinline bool is_xgmi_cpu_gpu() const { return xgmi_cpu_gpu_; }
+  /// @brief This GPU's memory is reached over PCIe, so stores to it pass through HDP and need
+  /// a flush.
+  __forceinline bool PcieStoresNeedFlush() const { return !xgmi_cpu_gpu_; }
+  /// @brief Host atomics on this GPU's memory are atomic with respect to the GPU.
+  __forceinline bool HostAtomicsSupported() const { return xgmi_cpu_gpu_; }
+  /// @brief The CP firmware consumes completion signal handle hints.
+  bool SignalHintsSupported() const;
   /// @brief Is large BAR support enabled for this GPU.
   __forceinline bool LargeBarEnabled() const { return large_bar_enabled_; }
 
@@ -474,9 +490,9 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Force a WC flush on PCIe devices by doing a write and then read-back
   __forceinline void PcieWcFlush(void *ptr, size_t size) const {
     if (!xgmi_cpu_gpu_) {
-      _mm_sfence();
+      store_fence();
       *((uint8_t*)ptr + size - 1) = *((uint8_t*)ptr + size - 1);
-      _mm_mfence();
+      memory_fence();
       auto readback = *(reinterpret_cast<volatile uint8_t*>(ptr) + size - 1);
       UNUSED(readback);
     }
@@ -696,6 +712,10 @@ class GpuAgent : public GpuAgentInt {
 
   lazy_ptr<core::Queue> queues_[QueueCount];
 
+  // @brief Hint support is read from the utility queue's caps once, on first query.
+  mutable std::once_flag signal_hints_once_;
+  mutable bool signal_hints_supported_ = false;
+
   // @brief Mutex to protect the update to coherency type.
   std::mutex coherency_lock_;
 
@@ -775,6 +795,10 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Query the driver to get the cache properties.
   void InitCacheList();
+
+  // @brief Get the maximum persisting L2 cache size supported by this GPU.
+  // @return Maximum size in bytes, or 0 if not supported.
+  size_t GetMaxPersistingL2CacheSize() const;
 
   // @brief Create internal queues and blits.
   void InitDma();
@@ -1076,6 +1100,9 @@ class GpuAgent : public GpuAgentInt {
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
 
+  //!< True when SDMA copies go through the native WDDM SDMA user queue.
+  bool sdma_native_;
+
   // Round-robin index for assigning engines to user-created SDMA queues
   // (hsa_amd_queue_create) that request automatic engine selection.
   std::atomic<uint32_t> sdma_user_queue_rr_index_{0};
@@ -1107,6 +1134,8 @@ class GpuAgent : public GpuAgentInt {
   hsa_amd_dim3_t cluster_max_dim_;
 
   size_t max_wave_scratch_;
+
+  size_t persisting_l2_cache_size_;
 
   std::atomic<bool> accelerator_ready_{false};
 

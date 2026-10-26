@@ -19,7 +19,10 @@
 #include "sym_kernels.h"
 #include "allocator.h"
 #include "utils.h"
+#include "ipcsocket.h"
 #include "cudawrap.h"
+#include "alloc.h"
+#include "p2p.h"
 #include "dev_runtime_internal.h"
 #include "enqueue.h"
 #include "enqueue/mgmt_task_enq.h"
@@ -40,21 +43,28 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <sys/mman.h>
+#include <unistd.h>
 
 // Count hipMemAddressFree for skip-on vs skip-off finalize tests.
 int rcclTestHipMemAddressFreeCount = 0;
+int rcclTestHipMemMapCount = 0;
+int rcclTestHipMemUnmapCount = 0;
 
 // ---------------------------------------------------------------------------
 // Globals the translation unit references.
 // ---------------------------------------------------------------------------
-int                          ncclDebugLevel = 0;
+uint32_t                     ncclDebugLevelMask = 0;
 uint64_t                     ncclDebugMask  = 0;
 thread_local int             ncclDebugNoWarn = 0;
 // Use POSIX-FD handles so the single-rank success path takes the no-export /
 // reuse-local branch in symMemory{Export,ImportAndMap}SegmentHandle (no real
 // shareable-handle export/import needed).
 hipMemAllocationHandleType   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+
+// This host-only binary always exercises the fake VMM implementation below.
+int ncclCuMemEnable() { return 1; }
 
 thread_local int             ncclGroupDepth = 0;
 thread_local ncclResult_t    ncclGroupError = ncclSuccess;
@@ -104,17 +114,33 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
 // ---------------------------------------------------------------------------
 // Param loader / enqueue rearch gate.
 // ---------------------------------------------------------------------------
-int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
-  if (cache) *cache = deftVal;
+int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
+  const char* value = env == nullptr ? nullptr : getenv(env);
+  int64_t loaded = value == nullptr ? deftVal : strtoll(value, nullptr, 0);
+  if (cache) *cache = loaded;
   if (noCache) *noCache = 0;
-  return deftVal;
+  return loaded;
 }
 int64_t ncclParamEnqueueRearchEnable() { return 0; }
+
+// Emitted by init.cc in the real build; dev_runtime.cc only declares it extern.
+// Returns the NCCL_PARAM default so window registration is not opted out.
+int64_t ncclParamWinEnable() { return 1; }
+// Emitted by rocmwrap.cc; NCCL_PARAM default, so host VMM GIN is not failed closed.
+int64_t ncclParamDmaBufEnable() { return 1; }
+// Emitted by transport/generic.cc; NCCL_PARAM default, so multi-segment GIN windows register.
+int64_t ncclParamMultiSegmentRegister() { return 1; }
+
+// Defined in rocmwrap.cc in the real build; referenced by common/EnvVars.cpp's
+// GPU probe. This binary never needs cuMem, so report it unsupported.
+int ncclCuMemRuntimeSupported() { return 0; }
 
 // ---------------------------------------------------------------------------
 // Proxy / mgmt task enqueue.
 // ---------------------------------------------------------------------------
 ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm*, int, void*, int*) { return ncclSuccess; }
+// NCCL 2.32: dev_runtime.cc closes imported fds through ncclIpcFdClose (os/linux_ipcsocket.cc).
+int ncclIpcFdClose(ncclIpcFd fd) { return close(fd); }
 ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
                                  struct ncclComm*) {
   return ncclSuccess;
@@ -125,6 +151,7 @@ ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct n
 // ---------------------------------------------------------------------------
 ncclResult_t ncclSymkInitOnce(struct ncclComm*) { return ncclSuccess; }
 bool ncclRmaProxyEnabled(struct ncclComm*) { return false; }
+int64_t ncclParamRMADisable() { return 0; }
 ncclResult_t ncclRmaCeInit(struct ncclComm*) { return ncclSuccess; }
 
 // ---------------------------------------------------------------------------
@@ -139,13 +166,35 @@ ncclResult_t ncclSpaceAlloc(struct ncclSpace*, int64_t, int64_t, int, int64_t* o
 ncclResult_t ncclSpaceFree(struct ncclSpace*, int64_t, int64_t) { return ncclSuccess; }
 
 // ---------------------------------------------------------------------------
+// cuMem allocation tracking / peer import. windowRegisterNonSym's cuMem branch
+// reaches these helpers. ncclCuMemEnable() above stays on for the fake VMM path.
+// ---------------------------------------------------------------------------
+struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
+ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager*, void*, struct ncclMemUntrackInfo*) { return ncclSuccess; }
+ncclResult_t ncclMemUntrackPersist(struct ncclMemManager*, void*, size_t) { return ncclSuccess; }
+ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm*, int, size_t, ncclIpcDesc*, void** devMemPtr, void*,
+                                          ncclMemType_t) {
+  if (devMemPtr) *devMemPtr = nullptr;
+  return ncclInternalError;
+}
+
+// ---------------------------------------------------------------------------
 // Shadow pool.
 // ---------------------------------------------------------------------------
 void         ncclShadowPoolConstruct(struct ncclShadowPool*) {}
 ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool*, hipStream_t) { return ncclSuccess; }
-ncclResult_t ncclShadowPoolAlloc(struct ncclShadowPool*, size_t, void** outDevObj, void** outHostObj, hipStream_t) {
-  if (outDevObj) *outDevObj = nullptr;
-  if (outHostObj) *outHostObj = nullptr;
+ncclResult_t ncclShadowPoolAlloc(struct ncclShadowPool*, size_t size, void** outDevObj, void** outHostObj, hipStream_t) {
+  // One buffer for both views, leaked like allocateSpilled. A null host header
+  // is what windowRegisterNonSym memsets; this binary does not link a real pool.
+  if (size == 0) {
+    if (outDevObj) *outDevObj = nullptr;
+    if (outHostObj) *outHostObj = nullptr;
+    return ncclSuccess;
+  }
+  void* p = calloc(1, size);
+  if (p == nullptr) return ncclSystemError;
+  if (outDevObj) *outDevObj = p;
+  if (outHostObj) *outHostObj = p;
   return ncclSuccess;
 }
 ncclResult_t ncclShadowPoolFree(struct ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; }
@@ -181,6 +230,14 @@ void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack*, size_t size, siz
 // ---------------------------------------------------------------------------
 // GIN host.
 // ---------------------------------------------------------------------------
+static int devRuntimeTestGinRegisterFail = 0;
+static struct ncclDevrMemory* ginRegisterMemHeadAtCall = nullptr;
+
+extern "C" void DevRuntimeTests_SetGinRegisterFail(int fail) {
+  devRuntimeTestGinRegisterFail = fail;
+  ginRegisterMemHeadAtCall = nullptr;
+}
+extern "C" struct ncclDevrMemory* DevRuntimeTests_GinRegisterMemHeadAtCall() { return ginRegisterMemHeadAtCall; }
 ncclResult_t ncclGetGinType(struct ncclComm*, ncclGinType_t* ginType) {
   if (ginType) *ginType = NCCL_GIN_TYPE_NONE;
   return ncclSuccess;
@@ -195,11 +252,18 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirement
   return ncclSuccess;
 }
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
-ncclResult_t ncclGinRegister(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
-                             ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int) {
+void ncclGinDevCommClearFields(struct ncclDevComm*) {}
+ncclResult_t ncclGinRegister(struct ncclComm* comm, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
+                             ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
+                             uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int) {
+  ginRegisterMemHeadAtCall = comm ? comm->devrState.memHead : nullptr;
+  if (devRuntimeTestGinRegisterFail) return ncclInternalError;
   return ncclSuccess;
 }
-ncclResult_t ncclGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
+ncclResult_t ncclGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS],
+                               uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
+  return ncclSuccess;
+}
 #ifdef ENABLE_ROCSHMEM_GIN
 ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm*, void*, size_t, int, int) {
   return ncclSuccess;
@@ -216,29 +280,19 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm*, void*, size_t, void*[NCCL_GI
 ncclResult_t ncclRmaProxyDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
 
 // ---------------------------------------------------------------------------
-// devr internal helpers (defined elsewhere in the real build).
-// ---------------------------------------------------------------------------
-ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory*, int) { return ncclSuccess; }
-ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState*, struct ncclDevrMemory*, hipStream_t,
-                                                    struct ncclSegmentWindow** out) {
-  if (out) *out = nullptr;
-  return ncclSuccess;
-}
-ncclResult_t ncclDevrVerifySegmentLayouts(struct ncclDevrMemory*, struct ncclComm*) { return ncclSuccess; }
-ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory*) { return ncclSuccess; }
-
-// ---------------------------------------------------------------------------
 // CFT / LE helpers pulled in via #include of hipified dev_runtime.cc.
 // ---------------------------------------------------------------------------
 int computeCftSize(struct ncclComm*) { return 1; }
 int computeCftMcSize(struct ncclComm*) { return 1; }
 ncclResult_t symBindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
 ncclResult_t symUnbindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
-ncclResult_t symTeamObtainUcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier) {
+ncclResult_t symTeamObtainUcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier,
+                               bool /*counted*/) {
   if (needBarrier) *needBarrier = false;
   return ncclSuccess;
 }
-ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier) {
+ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier,
+                               bool /*counted*/) {
   if (needBarrier) *needBarrier = false;
   return ncclSuccess;
 }
@@ -328,6 +382,14 @@ HIP_FAKE hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp
   if (prop) {
     *prop = hipMemAllocationProp{};
     prop->location.type = hipMemLocationTypeDevice;
+    const char* loc = std::getenv("RCCL_TEST_VMM_LOCATION");
+    if (loc != nullptr && std::strcmp(loc, "host") == 0) {
+#if !defined(__HIP_PLATFORM_AMD__) || NCCL_CUMEM_HOST_GATE
+      prop->location.type = hipMemLocationTypeHost;
+#else
+      prop->location.type = static_cast<hipMemLocationType>(2);
+#endif
+    }
   }
   return hipSuccess;
 }
@@ -341,18 +403,42 @@ HIP_FAKE hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandl
   return hipSuccess;
 }
 HIP_FAKE hipError_t hipMemMap(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+  rcclTestHipMemMapCount++;
   return hipSuccess;
 }
 HIP_FAKE hipError_t hipMemSetAccess(void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; }
-HIP_FAKE hipError_t hipMemUnmap(void*, size_t) { return hipSuccess; }
+HIP_FAKE hipError_t hipMemUnmap(void*, size_t) {
+  rcclTestHipMemUnmapCount++;
+  return hipSuccess;
+}
 HIP_FAKE hipError_t hipMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
 HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void*) {
   if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   return hipSuccess;
 }
+HIP_FAKE hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute, hipDeviceptr_t) {
+  if (data == nullptr) return hipErrorInvalidValue;
+  if (attribute == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
+    hipMemoryType memType = hipMemoryTypeDevice;
+    const char* loc = std::getenv("RCCL_TEST_VMM_LOCATION");
+    if (loc != nullptr && std::strcmp(loc, "host") == 0) memType = hipMemoryTypeHost;
+    *static_cast<hipMemoryType*>(data) = memType;
+    return hipSuccess;
+  }
+  if (attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) {
+    *static_cast<int*>(data) = 1;
+    return hipSuccess;
+  }
+  return hipErrorInvalidValue;
+}
 HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
   if (pbase) *pbase = dptr;
-  if (psize) *psize = 0;
+  if (psize) {
+    const char* sz = std::getenv("RCCL_TEST_VMM_SEGMENT_SIZE");
+    // Host tests map one 4096-byte segment per LSA rank unless a test overrides
+    // the reported VMM range size explicitly.
+    *psize = (sz != nullptr && sz[0] != '\0') ? static_cast<size_t>(std::strtoull(sz, nullptr, 0)) : 4096;
+  }
   return hipSuccess;
 }
 
@@ -361,6 +447,12 @@ HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, 
 // throwaway streams for its teardown bookkeeping; none carry real work on the
 // host, so a non-null opaque handle and success returns are sufficient.
 // ---------------------------------------------------------------------------
+HIP_FAKE hipError_t hipMemcpyAsync(void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+  // The shadow stub uses one buffer for host and device, so this is a no-op
+  // copy. The real entry faults on the fake stream this binary creates.
+  if (dst != nullptr && src != nullptr && dst != src && size > 0) std::memcpy(dst, src, size);
+  return hipSuccess;
+}
 HIP_FAKE hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int) {
   if (stream) *stream = reinterpret_cast<hipStream_t>(0x1);
   return hipSuccess;

@@ -24,7 +24,12 @@
 namespace dda {
 namespace common {
 
-constexpr size_t kDdaLLMaxBytes = (size_t)16 * 1024 * 1024;
+// Per-rank staging slot size in scratch bytes, fixed at compile time so the
+// double-buffered layout is identical on every rank and call. The eligibility
+// checks derive their per-message caps from it.
+// Footprint = 2 banks * nRanks * (kDdaLLMaxBytes)
+// example: 256 MiB at 32 MiB for 4 ranks
+constexpr size_t kDdaLLMaxBytes = (size_t)32 * 1024 * 1024;
 
 union LLPacket16 {
   struct {
@@ -76,6 +81,27 @@ __device__ __forceinline__ void ddaLLLoadLineB128(const uint32_t* src, uint32_t&
   o2 = __builtin_nontemporal_load((u32_gptr)src + 2);
   o3 = __builtin_nontemporal_load((u32_gptr)src + 3);
 #endif
+}
+
+// Never reports an abort. For callers with no communicator abort flag, such as
+// the GIN device-API AllToAll.
+struct ddaLLNoAbort {
+  __device__ __forceinline__ bool abortSpinTick(int&) const { return false; }
+};
+
+// Poll one 16B LL line until both flags match, or `abort` reports an abort.
+// Abort is any type with `bool abortSpinTick(int&) const`, such as
+// DdaKernelParams. Returns false if the wait was aborted so the kernel can exit.
+template <typename Abort>
+__device__ __forceinline__ bool ddaLLWaitLine(const volatile LLPacket16* src, uint32_t flag, Abort const& abort,
+                                              uint32_t& d0, uint32_t& f0, uint32_t& d1, uint32_t& f1) {
+  const uint32_t* line = reinterpret_cast<const uint32_t*>(const_cast<const LLPacket16*>(src));
+  int spins = 0;
+  do {
+    ddaLLLoadLineB128(line, d0, f0, d1, f1);
+    if (f0 == flag && f1 == flag) return true;
+  } while (!abort.abortSpinTick(spins));
+  return false;
 }
 
 // Non-atomic epoch bump. GIN fabric-LL A2A must pass a GIN-private buffer

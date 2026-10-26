@@ -59,7 +59,24 @@ public:
   std::optional<uint64_t> inspect(Decoder &decoder, InstructionCache &icache,
                                   const GpuMemory &memory, uint64_t pc, uint32_t vmid,
                                   uint32_t num_vgprs, bool has_accvgprs, const Words &first) {
-    const Key key{pc, vmid, num_vgprs, has_accvgprs};
+    return inspect(decoder, icache, memory, nullptr, pc, vmid, num_vgprs, has_accvgprs, first);
+  }
+
+  /// @brief Inspect through the same retained VM snapshot as ordinary issue.
+  std::optional<uint64_t> inspect(Decoder &decoder, InstructionCache &icache,
+                                  const GpuMemory &memory, const GpuVmAccess *vm_access,
+                                  uint64_t pc, uint32_t vmid, uint32_t num_vgprs, bool has_accvgprs,
+                                  const Words &first) {
+    const VmCacheNamespace cache_namespace =
+        vm_access ? vm_access->cache_namespace() : VmCacheNamespace{};
+    const Key key{pc, vmid, num_vgprs, has_accvgprs, cache_namespace};
+    const auto fetch_words = [&](uint64_t address, Words &words) {
+      if (vm_access)
+        return icache.fetch(*vm_access, address, reinterpret_cast<uint8_t *>(words.data())) ==
+               VmAccessOutcome::Complete;
+      icache.fetch(memory, address, reinterpret_cast<uint8_t *>(words.data()));
+      return true;
+    };
     auto it = plans_.find(key);
     bool valid = it != plans_.end() && it->second.first == first;
     if (valid && it->second.epoch != icache.epoch()) {
@@ -69,8 +86,7 @@ public:
       // rejected plans across dispatches without decoding again.
       for (const auto &snapshot : plan.lookahead) {
         Words words;
-        icache.fetch(memory, pc + snapshot.offset, vmid, reinterpret_cast<uint8_t *>(words.data()));
-        if (words != snapshot.words) {
+        if (!fetch_words(pc + snapshot.offset, words) || words != snapshot.words) {
           valid = false;
           break;
         }
@@ -103,7 +119,8 @@ public:
           if ((pc % GpuMemory::PAGE_SIZE) + offset + sizeof(Words) > GpuMemory::PAGE_SIZE)
             break;
           Words words;
-          icache.fetch(memory, pc + offset, vmid, reinterpret_cast<uint8_t *>(words.data()));
+          if (!fetch_words(pc + offset, words))
+            break;
           plan.lookahead.push_back({offset, words});
           auto next = decode(decoder, words);
           if (!next || !async_execution::safe_inline(*next))
@@ -139,12 +156,18 @@ private:
     uint64_t pc;
     uint32_t vmid, vgprs;
     bool acc;
+    VmCacheNamespace cache_namespace;
     bool operator==(const Key &) const = default;
   };
   struct Hash {
     size_t operator()(const Key &key) const {
-      return std::hash<uint64_t>{}(key.pc ^ (uint64_t{key.vmid} << 32)) ^ (size_t{key.vgprs} << 1) ^
-             key.acc;
+      size_t hash = std::hash<uint64_t>{}(key.pc ^ (uint64_t{key.vmid} << 32));
+      hash ^= size_t{key.vgprs} << 1;
+      hash ^= key.acc;
+      hash ^= std::hash<uint64_t>{}(key.cache_namespace.address_space.generation);
+      hash ^= size_t{key.cache_namespace.address_space.slot} << 2;
+      hash ^= std::hash<uint64_t>{}(key.cache_namespace.translation_epoch);
+      return hash;
     }
   };
   struct Snapshot {

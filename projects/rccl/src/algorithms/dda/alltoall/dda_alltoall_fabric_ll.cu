@@ -18,9 +18,11 @@
 #include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 namespace {
 
@@ -51,6 +53,14 @@ static_assert(gin::fabric::kGinFabricLlA2ASlotStridePkts == dda::common::kDdaLLA
 using gin::fabric::ginFabricLlA2AScratchBytes;
 using gin::fabric::ginFabricLlAlltoAllBlocksPerPeer;
 
+// Single source of the launch geometry: grid.x = peer (nRanks), grid.y = the
+// per-peer packet split; 256 threads/block.
+static inline std::pair<dim3, dim3> ddaAllToAllFabricLLGeom(ncclComm* comm, size_t perChunkBytes) {
+  const unsigned threads = 256;
+  const int blocksPerPeer = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
+  return std::make_pair(dim3((unsigned)comm->nRanks, (unsigned)blocksPerPeer), dim3(threads));
+}
+
 template <typename T>
 static ncclResult_t ncclAllToAllDdaFabricLLTyped(
   const void* sendbuff, void* recvbuff,
@@ -59,10 +69,10 @@ static ncclResult_t ncclAllToAllDdaFabricLLTyped(
   const int nRanks = comm->nRanks;
   const size_t perChunkBytes = count * sizeof(T);
 
-  const unsigned threads = 256;
-  const int blocksPerPeer = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
-  dim3 block(threads);
-  dim3 grid((unsigned)nRanks, (unsigned)blocksPerPeer);
+  auto gridBlock = ddaAllToAllFabricLLGeom(comm, perChunkBytes);
+  const dim3 grid = gridBlock.first;
+  const dim3 block = gridBlock.second;
+  const int blocksPerPeer = (int)grid.y;
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
@@ -71,21 +81,23 @@ static ncclResult_t ncclAllToAllDdaFabricLLTyped(
   INFO(NCCL_COLL, "DDA fabric AllToAll LL: nRanks=%d perChunkBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
        nRanks, perChunkBytes, grid.x, grid.y, block.x, blocksPerPeer);
 
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   switch (nRanks) {
   case 4:
-    dda::common::ddaAllToAllFabricLL<T, 4><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
-                                                                       static_cast<const T*>(sendbuff), perChunkBytes,
-                                                                       comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, params);
     break;
   case 8:
-    dda::common::ddaAllToAllFabricLL<T, 8><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
-                                                                       static_cast<const T*>(sendbuff), perChunkBytes,
-                                                                       comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, params);
     break;
   default:
-    dda::common::ddaAllToAllFabricLL<T, 0><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
-                                                                       static_cast<const T*>(sendbuff), perChunkBytes,
-                                                                       comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, params);
     break;
   }
 
@@ -112,7 +124,7 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -132,9 +144,14 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
   return true;
 }
 
+uint32_t ncclAllToAllDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  const auto grid = ddaAllToAllFabricLLGeom(comm, count * ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
+}
+
 ncclResult_t ncclAllToAllDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                      ncclComm* comm, cudaStream_t stream) {
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return ncclInvalidArgument;
   }
   // All-to-all moves raw bytes, so instantiate once for int8_t and scale the

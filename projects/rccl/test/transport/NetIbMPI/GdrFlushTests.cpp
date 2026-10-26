@@ -93,7 +93,7 @@ protected:
 
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(0, pair, connGuard);
+        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
         const size_t bufferSize = kSmallBufferSize;
         void* buffer = nullptr;
@@ -166,7 +166,8 @@ TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
     if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true, &flush);
+    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
+                                              &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "write+read flush over dma-buf scratchpad must not fault";
 }
@@ -182,7 +183,8 @@ TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
         GTEST_SKIP() << "peermem (NCCL_PTR_CUDA) not available for the reg_mr scratchpad";
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true, &flush);
+    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
+                                              &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "peermem RO=0 scratchpad flush must succeed";
 }
@@ -198,7 +200,8 @@ TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
     if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true, &flush);
+    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
+                                              &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "fallback flush (read recv buffer) must succeed";
 }
@@ -212,39 +215,18 @@ TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
     if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/50, /*verifyData=*/false, &flush);
+    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/50, /*verifyData=*/false,
+                                              &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "no flush in the burst may raise a QP async-fatal";
 }
 
-// Regression guard - force the removed scratchpad RDMA_WRITE back. On a dma-buf
-// scratchpad this must reproduce the fault (flush no longer succeeds), proving
-// the WRITE is the culprit and that removing it is the fix.
-//
-// Disabled: the NCCL v2.31.2-1 sync (#10785) added this case but not the two
-// things it calls. RunRecvFlushBurst has no forceWrite parameter and there is no
-// gdrSupported(), so a --debug --tests_build --enable-mpi-tests build of develop
-// does not compile once ENABLE_FAULT_INJECTION is on. Restoring the forceWrite
-// hook is a decision for whoever owns the GDR flush fence, not something to
-// guess at here, so the case is guarded off rather than half-fixed.
-#if 0
-TEST_F(GdrFlushTest, ForcedScratchpadWrite_ReproducesFault) {
-    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit);
-    if (!cuMemEnabledEnv()) GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=1 (dma-buf scratchpad target)";
-    if (!scratchpadFlushEnabled())
-        GTEST_SKIP() << "Requires the scratchpad flush enabled (RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=1)";
-    AssertInitAndGetDevices(nullptr);
-    if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
-
-    ncclResult_t forced = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/1, /*verifyData=*/false,
-                      /*forceWrite=*/true, &forced);
-    if (MPIEnvironment::world_rank == 0)
-        EXPECT_NE(forced, ncclSuccess)
-            << "forced scratchpad RDMA_WRITE on a dma-buf buffer should fault the flush QP";
-}
-#endif  // disabled pending the forceWrite hook
+// The NCCL v2.31.2-1 sync added ForcedScratchpadWrite_ReproducesFault: force the
+// removed scratchpad RDMA_WRITE on a dma-buf flush QP and expect the flush to
+// fault. That case never compiled: gdrSupported() does not exist, and
+// RunRecvFlushBurst has no forceWrite parameter. If a production forceWrite
+// hook is added, restore the case (skip with gdrPtrSupport(), three-arg burst
+// ForcedScratchpadWrite_ReproducesFault removed: forcing the flush fault needs a production hook that does not exist.
 
 }  // namespace
 

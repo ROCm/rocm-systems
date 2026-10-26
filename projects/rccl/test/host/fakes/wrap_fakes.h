@@ -19,6 +19,7 @@
 // ncclComm, task, datatype, and algorithm types used below.
 #include "ce_fakes.h"
 #include "comm.h"
+#include "comm_fakes.h"  // g_commCount
 #include "dda_fakes.h"
 #include "enqueue.h"
 #include "nccl.h"
@@ -55,11 +56,12 @@ extern std::function<int64_t()> g_paramP2pDisable;
 
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*, bool)>
     g_isSymmetricKernelRequested;
-extern std::function<bool(const struct ncclComm*, size_t, ncclDataType_t, bool, bool)> g_allReduceShouldTakeDdaPath;
+extern std::function<bool(const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool)> g_allReduceShouldTakeDdaPath;
 
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*)>
     g_getAlgoInfo;
 extern std::function<int(struct ncclComm*, ncclFunc_t, size_t, ncclDataType_t, int, int)> g_kernelPackedChannels;
-extern std::function<ncclResult_t(const ncclComm_t, int*)> g_commCount;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ensureHierarchicalComms;
+extern std::function<ncclResult_t(struct ncclComm*)> g_reserveHierarchicalTempBuffer;
 
 #endif  // RCCL_TEST_HOST_WRAP_FAKES_H_

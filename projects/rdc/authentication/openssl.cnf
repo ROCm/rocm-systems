@@ -19,11 +19,17 @@ default_days		= 365
 default_md		= sha512
 preserve		= no
 email_in_dn		= no
-nameopt			= default_ca
-certopt			= default_ca
+# Show the whole certificate, extensions included, before asking whether to
+# sign it. OpenSSL ignores "nameopt"/"certopt" and then shows no extensions.
+name_opt		= ca_default
+cert_opt		= ca_default
 policy			= policy_match
 unique_subject		= no
-copy_extensions = copyall
+# 'copy' only copies request extensions the CA has not already set, so the
+# x509_extensions below win. With 'copyall' a request can overwrite them
+# and have itself issued as a signing certificate.
+copy_extensions = copy
+x509_extensions = usr_cert
 
 [ policy_match ]
 countryName		= match
@@ -69,6 +75,15 @@ stateOrProvinceName_default	= MyStateProvince
 countryName_default		= MC
 # wildcards are acceptable for domain; e.g., *.amd.com
 commonName_default              = Mydomain
+
+[ usr_cert ]
+# Applied by the CA to every certificate it issues. These are set here rather
+# than taken from the request so a requester cannot choose them for itself.
+basicConstraints        = critical, CA:FALSE
+keyUsage                = critical, digitalSignature, keyEncipherment
+extendedKeyUsage        = serverAuth, clientAuth
+subjectKeyIdentifier    = hash
+authorityKeyIdentifier  = keyid,issuer
 
 [ v3_ca ]
 basicConstraints	= CA:TRUE

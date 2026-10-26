@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "algorithms/dda/device/dda_kernel_params.h"
 #include "nccl_device/gin/anvil_sdma/gin_fabric_ll_a2a_device.h"
 
 namespace dda::common {
@@ -33,9 +34,10 @@ __global__ void ddaAllToAllFabricLL(T* const* __restrict__ peerScratch,
                                     size_t perChunkBytes,
                                     int selfRank, int nRanksRt,
                                     uint32_t* __restrict__ epochDev,
-                                    int epochLen) {
+                                    int epochLen,
+                                    DdaKernelParams params) {
   ddaAllToAllFabricLLBody<T, NRANKS_CT>(peerScratch, recvbuff, sendbuff, perChunkBytes,
-                                        selfRank, nRanksRt, epochDev, epochLen);
+                                        selfRank, nRanksRt, epochDev, epochLen, params);
 }
 
 } // namespace dda::common

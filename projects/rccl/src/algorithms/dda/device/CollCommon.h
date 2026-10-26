@@ -23,6 +23,7 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hip/amd_detail/amd_hip_bf16.h>
+#include "rccl_float8.h"
 using bf16 = __hip_bfloat16;
 #else
 #include <cuda.h>
@@ -32,22 +33,61 @@ using bf16 = __nv_bfloat16;
 using bf162 = __nv_bfloat162;
 #endif
 
+#include "algorithms/dda/device/dda_kernel_params.h"
 #include "nccl_device/rccl_ptr.h"
 #include "nccl_device/gin/anvil_sdma/gin_fabric_ll_device_prims.h"
 
 namespace dda::common {
 
+// fp8 element tags. rccl_float8 / rccl_bfloat8 are different types in the host
+// pass and the gfx942 device pass (FNUZ vs OCP), so a kernel templated on them
+// would be registered under a name the gfx942 code object does not contain. The
+// kernels are instantiated on these instead, and vecElementAdd resolves the
+// device's encoding.
+struct fp8e4m3 {
+  uint8_t bits;
+};
+struct fp8e5m2 {
+  uint8_t bits;
+};
+static_assert(sizeof(fp8e4m3) == 1 && sizeof(fp8e5m2) == 1, "fp8 tags must be one byte");
+
+template <typename T>
+inline constexpr bool is_fp8_v = std::is_same<T, fp8e4m3>::value || std::is_same<T, fp8e5m2>::value;
+
 template <typename T>
 inline constexpr bool is_supported_type_v = (std::is_same<T, float>::value || std::is_same<T, half>::value ||
                                              std::is_same<T, int8_t>::value || std::is_same<T, bf16>::value
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
-                                             || std::is_same<T, __hip_bfloat16>::value
+                                             || std::is_same<T, __hip_bfloat16>::value ||
+                                             std::is_same<T, fp8e4m3>::value || std::is_same<T, fp8e5m2>::value
 #endif
 );
+
+// Adds the eight fp8 lanes of an 8-byte word with the pk8 add the core reduce
+// kernels use (hadd8 / hadd8_b), so DDA rounds as they do. Only gfx1250 admits
+// fp8 to DDA; other arches compile these kernels but never launch them.
+template <typename T>
+static inline __device__ uint64_t vecElementAddFp8x8(uint64_t a, uint64_t b) {
+  static_assert(is_fp8_v<T>, "dda: vecElementAddFp8x8 takes an fp8 tag");
+#if defined(RCCL_FP8_HAS_PK8)
+  const auto x = __builtin_bit_cast(fp8x8_storage_t, a);
+  const auto y = __builtin_bit_cast(fp8x8_storage_t, b);
+  if constexpr (std::is_same<T, fp8e4m3>::value) {
+    return __builtin_bit_cast(uint64_t, hadd8(x, y));
+  } else {
+    return __builtin_bit_cast(uint64_t, hadd8_b(x, y));
+  }
+#else
+  __builtin_trap();
+  return 0;
+#endif
+}
 
 template <typename T>
 static inline __device__ uint32_t vecElementAdd(const uint32_t& a, const uint32_t& b) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
+  static_assert(!is_fp8_v<T>, "dda: fp8 adds eight lanes at a time; use vecElementAddFp8x8");
   if constexpr (std::is_same<T, float>::value) {
     const float* x = reinterpret_cast<const float*>(&a);
     const float* y = reinterpret_cast<const float*>(&b);
@@ -83,10 +123,19 @@ template <typename T>
 static inline __device__ uint4 vecElementAdd(const uint4& a, const uint4& b) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
   uint4 res{0, 0, 0, 0};
-  res.x = vecElementAdd<T>(a.x, b.x);
-  res.y = vecElementAdd<T>(a.y, b.y);
-  res.z = vecElementAdd<T>(a.z, b.z);
-  res.w = vecElementAdd<T>(a.w, b.w);
+  if constexpr (is_fp8_v<T>) {
+    const uint64_t lo = vecElementAddFp8x8<T>(((uint64_t)a.y << 32) | a.x, ((uint64_t)b.y << 32) | b.x);
+    const uint64_t hi = vecElementAddFp8x8<T>(((uint64_t)a.w << 32) | a.z, ((uint64_t)b.w << 32) | b.z);
+    res.x = (uint32_t)lo;
+    res.y = (uint32_t)(lo >> 32);
+    res.z = (uint32_t)hi;
+    res.w = (uint32_t)(hi >> 32);
+  } else {
+    res.x = vecElementAdd<T>(a.x, b.x);
+    res.y = vecElementAdd<T>(a.y, b.y);
+    res.z = vecElementAdd<T>(a.z, b.z);
+    res.w = vecElementAdd<T>(a.w, b.w);
+  }
   return res;
 }
 
@@ -117,8 +166,8 @@ static inline __device__ void reduceScatter(T* const* __restrict__ ipcbuffs, T* 
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
     // pattern = 2 performs reduce (one-shot)
     // pattern = 1 performs reduce-scatter (two-shot)
-    size_t srcIdx = (pattern == 2) ? idx : (idx + selfRank * idxEnd);
-    size_t destIdx = (pattern == 1) ? (idx + selfRank * idxEnd) : idx;
+    size_t srcIdx = (pattern == 2) ? idx : (idx + static_cast<size_t>(selfRank) * idxEnd);
+    size_t destIdx = (pattern == 1) ? (idx + static_cast<size_t>(selfRank) * idxEnd) : idx;
 
     uint4 sum{0, 0, 0, 0};
     if constexpr (hasAcc) {
@@ -151,12 +200,12 @@ static inline __device__ void allGather(T* const* __restrict__ ipcbuffs, T* __re
 #pragma unroll kUnroll
     for (int r = 0; r < nRanks; ++r) {
       int srcRank = (selfRank + r) % nRanks;
-      int destIdx = idx + srcRank * idxEnd;
-      int srcIdx;
+      size_t destIdx = idx + static_cast<size_t>(srcRank) * idxEnd;
+      size_t srcIdx;
       if (enable_offset) {
         srcIdx = destIdx;
       } else {
-        srcIdx = static_cast<int>(idx);
+        srcIdx = idx;
       }
       *reinterpret_cast<uint4*>(&destbuff[destIdx]) = reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
     }
@@ -178,6 +227,31 @@ inline bool ddaAlltoAllSingleBlockGrid(size_t count, int typeSize) {
   constexpr uint32_t kThreadsPerBlock = 512;
   const uint32_t elementsPerThread = 16 / typeSize;
   return count < elementsPerThread * kThreadsPerBlock;
+}
+
+// copyFromSrcToDest loads user buffers as uint4, so both pointers have to be
+// 16-byte aligned. Shared by the IPC eligibility checks.
+inline bool ddaUserBuffers16ByteAligned(const void* sendbuff, const void* recvbuff) {
+  return (reinterpret_cast<uintptr_t>(sendbuff) % 16) == 0 &&
+         (reinterpret_cast<uintptr_t>(recvbuff) % 16) == 0;
+}
+
+// Reduce-scatter IPC copies each shard inside the kernel at or below this size.
+// Above it the host pre-copies the whole input into scratch. The cutoff is per
+// shard, so a multi-rank total cannot stage twice, and it lives only here: the
+// kernel takes a single copy-in-kernel flag and does not re-derive the size.
+constexpr size_t kDdaRsIpcKernelCopyMaxBytes = 1ULL * 1024 * 1024;
+
+enum class DdaRsIpcStaging {
+  InKernel,    // kernel copies each shard from sendbuff
+  HostPreCopy, // host cudaMemcpyAsync before launch
+};
+
+inline DdaRsIpcStaging ddaReduceScatterIpcStaging(size_t recvcount, int typeSize) {
+  if (recvcount * static_cast<size_t>(typeSize) <= kDdaRsIpcKernelCopyMaxBytes) {
+    return DdaRsIpcStaging::InKernel;
+  }
+  return DdaRsIpcStaging::HostPreCopy;
 }
 
 constexpr uint32_t calcBlockCount(size_t numThreads, size_t threadsPerBlock, size_t maxBlocks) {
@@ -240,6 +314,31 @@ constexpr size_t ddaBankSize(size_t bytes) {
 constexpr size_t ddaLLSlotPkts(size_t bankSize, size_t div, size_t align) {
   const size_t slotUnits = bankSize / div;
   return (slotUnits / align) * align;
+}
+
+// Peers staged in one pass. A runtime-sized array, or a runtime index into
+// one, is placed in scratch. 8 covers rank counts 4 and 8 in a single pass.
+constexpr int kDdaLLPeerBatch = 8;
+
+// Folds one packet's 8B payload (d0, d1) into the accumulator (acc0, acc1).
+template <typename T>
+__device__ __forceinline__ void ddaLLAddPayload(uint32_t& acc0, uint32_t& acc1, uint32_t d0, uint32_t d1) {
+  if constexpr (is_fp8_v<T>) {
+    const uint64_t sum = vecElementAddFp8x8<T>(((uint64_t)acc1 << 32) | acc0, ((uint64_t)d1 << 32) | d0);
+    acc0 = (uint32_t)sum;
+    acc1 = (uint32_t)(sum >> 32);
+  } else {
+    acc0 = vecElementAdd<T>(acc0, d0);
+    acc1 = vecElementAdd<T>(acc1, d1);
+  }
+}
+
+// Poll one 16B LL line until both flags match, or the comm abort flag is set.
+// Returns false if the wait was aborted so the kernel can exit.
+__device__ __forceinline__ bool ddaLLWaitLineFlags(const volatile LLPacket16* src, uint32_t flag,
+                                                   DdaKernelParams params, uint32_t& d0, uint32_t& f0, uint32_t& d1,
+                                                   uint32_t& f1) {
+  return ddaLLWaitLine(src, flag, params, d0, f0, d1, f1);
 }
 
 } // namespace dda::common

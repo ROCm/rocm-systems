@@ -30,15 +30,6 @@ target_include_directories(
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-# Vendored DRM/amdgpu UAPI headers. kfd_ioctl.h includes <libdrm/drm.h>, so
-# attach this target privately at the HSA include chokepoints.
-add_library(rocjitsu_drm_headers INTERFACE)
-target_include_directories(
-    rocjitsu_drm_headers
-    SYSTEM
-    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external_headers/drm_headers
-)
-
 add_subdirectory(src/rocjitsu/code/analysis)
 add_subdirectory(src/rocjitsu/code)
 add_subdirectory(src/rocjitsu/isa)
@@ -75,12 +66,32 @@ set_target_properties(
     PROPERTIES POSITION_INDEPENDENT_CODE ON
 )
 
+# The checker archive owns target policies and stream analysis, and leaves ISA
+# registry selection to its final consumer just like the analysis archive.
+add_library(
+    rocjitsu_waitcheck_internal
+    STATIC
+    $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+    $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
+    $<TARGET_OBJECTS:rocjitsu_waitcheck_state>
+    $<TARGET_OBJECTS:rocjitsu_waitcheck_stream>
+)
+target_link_libraries(
+    rocjitsu_waitcheck_internal
+    PUBLIC rocjitsu_analysis_internal
+)
+set_target_properties(
+    rocjitsu_waitcheck_internal
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
+
 # Private base archive for code-object translation frontends. Architecture
 # models and decoder factories are supplied by each frontend, so this target
 # does not pull in the simulator implementation or the all-ISA registry.
 set(ROCJITSU_DBT_BASE_OBJECT_LIBS
     ${ROCJITSU_ANALYSIS_OBJECT_LIBS}
     rocjitsu_code
+    rocjitsu_executable
 )
 add_library(rocjitsu_dbt_internal STATIC)
 foreach(_object_lib IN LISTS ROCJITSU_DBT_BASE_OBJECT_LIBS)

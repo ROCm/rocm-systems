@@ -301,7 +301,6 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
             pm4_builder::TraceConfig trace_config{};
             const uint64_t           se_number_total = pm4_factory->GetShaderEnginesNumber();
 
-            trace_config.spm_sq_32bit_mode = true;
             trace_config.spm_has_core1 = (pm4_factory->GetGpuId() == aql_profile::MI100_GPU_ID) ||
                                          (pm4_factory->GetGpuId() == aql_profile::MI200_GPU_ID);
             trace_config.spm_sample_delay_max = pm4_factory->GetSpmSampleDelayMax();
@@ -889,7 +888,9 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                         (control_ptr[se_index].wptr & sqttbuilder->GetWritePtrMask()) *
                         sqttbuilder->GetWritePtrBlk();
 
-                    if(pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID)
+                    // Applies to the whole GFX11 family, including the gfx11.5x and
+                    // gfx11.7x derived factories.
+                    if(pm4_factory->IsGFX11())
                     {
                         sample_size = sample_size - reinterpret_cast<uint64_t>(sample_ptr);
                         sample_size &= (1ull << 29) - 1;

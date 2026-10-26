@@ -67,9 +67,9 @@
 #endif
 
 // Test seam for the system-scope fence issued by the HIP GIN Put/PutValue
-// templates. Expands to the real fence in production (zero cost); unit tests may
-// override it (before including a backend header) to observe that the fence
-// branch actually executed.
+// templates. Expands to the real fence in production (zero cost); unit tests
+// may override it (before including a backend header) to observe that the
+// fence branch ran.
 #ifndef NCCL_GIN_THREADFENCE_SYSTEM
 #define NCCL_GIN_THREADFENCE_SYSTEM() __threadfence_system()
 #endif
@@ -114,7 +114,7 @@ template <unsigned backendMask>
 struct ncclGinCtx_M : ncclGinCtx {};
 
 struct ncclGinDescriptorSmem {
-  alignas(16) char space[64];
+  alignas(64) char space[128];
 };
 
 enum ncclGinSignalType {
@@ -224,6 +224,13 @@ struct ncclGinApi_Flush {
 // as strong signals (required by the barrier implementation)
 template <ncclNetDeviceType backend>
 struct ncclGinApi_SupportsStrongSignal {
+  NCCL_DEVICE_INLINE static bool call(ncclGinCtx);
+};
+
+// Reports whether the backend flushes all previously-received puts on any received signal. Dispatched
+// per backend so each backend owns the answer.
+template <ncclNetDeviceType backend>
+struct ncclGinApi_FlushesAllPutsOnAnySignal {
   NCCL_DEVICE_INLINE static bool call(ncclGinCtx);
 };
 #endif

@@ -36,6 +36,7 @@
 // ResetDevRuntimeMicroFakes() cannot see them.
 #include "alloc.h"
 
+#include <cstddef>
 #include <utility>  // std::forward, used by MicroCalloc below
 
 static int g_devrCallocCallIndex = 0;
@@ -70,6 +71,23 @@ private:
 #undef ncclCalloc
 #define ncclCalloc(...) MicroCalloc(__FILE__, __LINE__, __func__, __VA_ARGS__)
 
+// windowCloseIpcPeers releases a cross-process cuMem import with ncclCudaFree,
+// which early-returns at alloc.h:1106 when rcclShutdownFlag() is set -- before
+// the cuMem split that makes the release the right call. A test that sets that
+// flag to keep the real free inert therefore cannot tell the call from a bare
+// `continue`. Record the pointer before delegating, the same shim p2p-test.cc
+// uses for the same reason. Defined while the real name is still callable, so
+// the wrapper body does not recurse.
+#include <vector>
+static std::vector<const void*> g_devrCudaFreeCalls;
+
+template <typename T>
+static inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* manager, int numSegments = 1) {
+  g_devrCudaFreeCalls.push_back(static_cast<const void*>(ptr));
+  return ncclCudaFree(ptr, manager, numSegments);
+}
+#define ncclCudaFree(...) RecordCudaFree(__VA_ARGS__)
+
 #include DEV_RUNTIME_CC_PATH
 
 // NCCL 2.31 moved the segment helpers out of dev_runtime.cc into
@@ -94,6 +112,9 @@ private:
 #undef ncclDevrCheckRegistrationSupport
 #undef ncclDevrValidateHandleLocationType
 
+// The non-sym host VMM probe moved to rccl_dev_runtime.cc; same TU so its seams match.
+#include RCCL_DEV_RUNTIME_CC_PATH
+
 #include <gtest/gtest.h>
 
 #include "ScopedHook.h"
@@ -111,21 +132,9 @@ private:
 
 #include "fakes/sym_kernels_fakes.h"
 
-// The host location types, chosen per ROCm version.
-//
-// hipMemLocationTypeHost / ...HostNuma only exist from ROCm 7.12
-// (hip/driver_types.h); below that the enum stops at Device. hip_compat.h
-// supplies CU_MEM_LOCATION_TYPE_HOST_NUMA as a plain 3, but only on the
-// versions where the enumerator is missing. So neither spelling compiles on
-// both, and one has to be picked per version.
-//
-// Production does not need this: hipify rewrites CU_MEM_LOCATION_TYPE_HOST_NUMA
-// to the enumerator only where the enumerator exists, and leaves the macro
-// alone otherwise. This file is compiled as-is, not hipified, so it gets no
-// such rewrite.
-//
-// static const, not constexpr: below 7.12 these values fall outside the enum's
-// range, which makes them ill-formed as constant expressions.
+// hipMemLocationTypeHost and HostNuma follow NCCL_CUMEM_HOST_GATE: native
+// 7.12.60540 and the probed 7.0.2.x backport. Outside that, hip_compat.h
+// supplies CUDA enumerator 3. This file is not hipified.
 // ---------------------------------------------------------------------------
 // Shared fixture teardown for suites that leave windows registered.
 //
@@ -145,6 +154,7 @@ static void ReclaimDevrWindows(ncclComm* comm) {
     if (w == nullptr) continue;
     free(w->ipcPeerPtrs);
     free(w->ipcPeerPtrsAllocBase);
+    free(w->ipcPeerIsCuMem);
     free(w);
   }
   free(devr->winSorted);
@@ -153,38 +163,41 @@ static void ReclaimDevrWindows(ncclComm* comm) {
   while (devr->memHead != nullptr) symMemoryDestroy(comm, devr->memHead);
 }
 
-#if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION < 71200
+#if defined(__HIP_PLATFORM_AMD__) && !NCCL_CUMEM_HOST_GATE
 static const hipMemLocationType kLocHostNuma =
     static_cast<hipMemLocationType>(CU_MEM_LOCATION_TYPE_HOST_NUMA);
-static const hipMemLocationType kLocHost = static_cast<hipMemLocationType>(2);
 #else
 static const hipMemLocationType kLocHostNuma = hipMemLocationTypeHostNuma;
+#endif
+#if !defined(__HIP_PLATFORM_AMD__) || NCCL_CUMEM_HOST_GATE
 static const hipMemLocationType kLocHost = hipMemLocationTypeHost;
+#else
+// The enumerator arrives with the 7.0.2.2 backport. This arm only needs a
+// value ncclSymIsHostSegment rejects.
+static const hipMemLocationType kLocHost = static_cast<hipMemLocationType>(2);
 #endif
 
 // ---------------------------------------------------------------------------
-// ncclSymIsHostSegment: true for host-NUMA, and on AMD from ROCm 7.12 also for
-// plain host. The second arm is #if-gated, so the guard is mirrored below to
-// keep the suite passing on either toolchain.
+// ncclSymIsHostSegment: host-NUMA on CUDA; on AMD, also plain host inside
+// NCCL_CUMEM_HOST_VERSION_SUPPORTED. HOST_NUMA is not sysmem on AMD yet.
 
-// Branch: the unconditional host-NUMA check.
+#if defined(__HIP_PLATFORM_AMD__)
+TEST(SymIsHostSegment, HostNuma_ReturnsFalse) {
+  EXPECT_FALSE(ncclSymIsHostSegment(kLocHostNuma));
+}
+#else
 TEST(SymIsHostSegment, HostNuma_ReturnsTrue) {
   EXPECT_TRUE(ncclSymIsHostSegment(kLocHostNuma));
 }
+#endif
 
-#if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION >= 71200
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
 // Branch: AMD allocates host segments as plain host, so they count as sysmem.
 TEST(SymIsHostSegment, Host_ReturnsTrue) {
   EXPECT_TRUE(ncclSymIsHostSegment(kLocHost));
 }
 #else
-// Without the AMD arm compiled in, plain host is not a sysmem segment.
-//
-// Spelled as its numeric value: hipMemLocationTypeHost only exists from ROCm
-// 7.12 (hip/driver_types.h), which is exactly why production names it only
-// inside this same guard (ncclSymIsHostSegment's ROCM_VERSION >= 71200 arm).
-// The 7.0.2 compatibility build
-// compiles this arm, so the enumerator cannot appear here.
+// Without the AMD host-VMM arm compiled in, plain host is not a sysmem segment.
 TEST(SymIsHostSegment, Host_ReturnsFalse) {
   EXPECT_FALSE(ncclSymIsHostSegment(kLocHost));
 }
@@ -232,6 +245,16 @@ protected:
   static void InstallRealSegmentHelpers() {
     g_devrVerifySegmentLayouts = RealDevrVerifySegmentLayouts;
     g_devrBuildGinSegmentInfos = RealDevrBuildGinSegmentInfos;
+    g_devrCheckRegistrationSupport = RealDevrCheckRegistrationSupport;
+  }
+
+  // Move nRanks, not lsaSize: lsaSize indexes the fixture's two-element
+  // lsaRankList, so growing it reads off the end.
+  static void RmaProxyTerms(ncclComm* c, bool enabled) {
+    c->nRanks = enabled ? 4 : 2;
+    c->devrState.lsaSize = 2;  // == nRanks when disabled, so one LSA team
+    c->config.numRmaCtx = enabled ? 1 : 0;
+    c->globalRmaProxySupport = enabled;
   }
 
   void SetUp() override {
@@ -1087,7 +1110,8 @@ TEST_F(SymImportAndMapForRankTest, LocalRank_ReusesCallerHandles) {
   ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
 
-  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(), 0),
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(),
+                                                 kMaxSegments, 0),
             ncclSuccess);
   EXPECT_EQ(import.calls, 0);
   ASSERT_EQ(mapped.size(), 2u);
@@ -1103,23 +1127,47 @@ TEST_F(SymImportAndMapForRankTest, RemoteRank_ImportsInsteadOfReusing) {
                       return hipSuccess;
                     });
 
-  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(), 0),
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(),
+                                                 kMaxSegments, 0),
             ncclSuccess);
   EXPECT_EQ(import.calls, 1);
 }
 
+// Off the host-VMM window ncclSymIsHostSegment is false for every AMD value,
+// so the reuse branch cannot fire. Same gate as MixedHostAndDeviceOwners.
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
 // Branch: the second clause of reuseLocal -- remote rank, param on, CPU-backed
 // segment -- so the caller's handle is reused without an import.
 TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentWithReuseParam_ReusesHandles) {
-  messages[1 * kMaxSegments].type = kLocHostNuma;
+  messages[1 * kMaxSegments].type = kLocHost;
   ScopedHook loadParam(g_loadParam, ReuseSysmemHandlesOn());
   ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
 
-  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(), 0),
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(),
+                                                 kMaxSegments, 0),
             ncclSuccess);
   EXPECT_EQ(import.calls, 0);
 }
+
+// A peer host segment past this rank's handle array must be imported. Reusing
+// memHandles[segment] there reads off the end of the local allocation.
+TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentPastLocalHandles_Imports) {
+  messages[1 * kMaxSegments].type = kLocHost;
+  messages[1 * kMaxSegments + 1].type = kLocHost;
+  ScopedHook loadParam(g_loadParam, ReuseSysmemHandlesOn());
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) {
+                      if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+                      return hipSuccess;
+                    });
+
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 2, memHandles.data(),
+                                                 /*nLocalHandles=*/1, 0),
+            ncclSuccess);
+  EXPECT_EQ(import.calls, 1);
+}
+#endif
 
 // Branch: param on but the segment is device-backed, so reuse does not apply.
 TEST_F(SymImportAndMapForRankTest, RemoteDeviceSegmentWithReuseParam_StillImports) {
@@ -1130,7 +1178,8 @@ TEST_F(SymImportAndMapForRankTest, RemoteDeviceSegmentWithReuseParam_StillImport
                       return hipSuccess;
                     });
 
-  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(), 0),
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(),
+                                                 kMaxSegments, 0),
             ncclSuccess);
   EXPECT_EQ(import.calls, 1);
 }
@@ -1148,7 +1197,8 @@ TEST_F(SymImportAndMapForRankTest, MultipleSegments_AdvanceAddressBySegmentSize)
 
   const size_t bigOffset = 512;
   EXPECT_EQ(
-      symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(), bigOffset),
+      symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(),
+                                             kMaxSegments, bigOffset),
       ncclSuccess);
   ASSERT_EQ(addrs.size(), 2u);
   EXPECT_EQ(addrs[0], kBase + bigOffset);
@@ -1160,7 +1210,8 @@ TEST_F(SymImportAndMapForRankTest, ZeroSegments_MapsNothing) {
   ScopedHook map(g_hipMemMap,
                  [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) { return hipSuccess; });
 
-  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 0, memHandles.data(), 0),
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 0, memHandles.data(),
+                                                 kMaxSegments, 0),
             ncclSuccess);
   EXPECT_EQ(map.calls, 0);
 }
@@ -1172,7 +1223,8 @@ TEST_F(SymImportAndMapForRankTest, SegmentFails_StopsWithoutMappingTheRest) {
                    return hipErrorInvalidValue;
                  });
 
-  EXPECT_NE(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(), 0),
+  EXPECT_NE(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(),
+                                                 kMaxSegments, 0),
             ncclSuccess);
   EXPECT_EQ(map.calls, 1);  // stopped after the first, did not attempt the second
 }
@@ -1342,6 +1394,99 @@ TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
   EXPECT_EQ(barrier.calls, 1);
 }
 
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
+// ROCM-29810: HIP reports an imported host VMM handle as device, so one host owner
+// beside device peers is the owner's segment imported everywhere else; it maps.
+// Off the host-VMM compile gate ncclSymIsHostSegment(kLocHost) is false.
+TEST_F(SymMemoryMapLsaTeamTest, SingleHostOwnerBesideImportedDevice_Succeeds) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = hipMemLocationTypeDevice;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(barrier.calls, 1);
+  // The peer now reads as host, so it reuses the local system-memory handle.
+  EXPECT_EQ(import.calls, 0);
+}
+
+// Two host owners beside a device owner is a genuine mix. The reject must fire on
+// a segment index this rank does not own, otherwise the wider ranks fail while
+// this one waits at the closing barrier.
+TEST_F(SymMemoryMapLsaTeamTest, MixedOwnersOnPeerOnlySegment_ReturnsInvalidUsage) {
+  lsaRankList.assign({0, 1, 2, 3});
+  comm->devrState.lsaRankList = lsaRankList.data();
+  comm->devrState.lsaSize = 4;
+  lsaNumSegments.assign({1, 2, 2, 2});
+  mem.lsaNumSegments = lsaNumSegments.data();
+  mem.numSegments = 1;
+
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      const int maxSegments = 2;
+                      msgs[1 * maxSegments + 1].type = kLocHost;
+                      msgs[1 * maxSegments + 1].segmentSize = 4096;
+                      msgs[2 * maxSegments + 1].type = kLocHost;
+                      msgs[2 * maxSegments + 1].segmentSize = 4096;
+                      msgs[3 * maxSegments + 1].type = hipMemLocationTypeDevice;
+                      msgs[3 * maxSegments + 1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(barrier.calls, 0);
+}
+
+// All-host LSA with the reuse param on is accepted; mixed-owner reject must
+// not fire when every exported type is host.
+TEST_F(SymMemoryMapLsaTeamTest, AllHostOwnersWithReuseParam_Succeeds) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(barrier.calls, 1);
+}
+#endif
+
 
 // ---------------------------------------------------------------------------
 // symBindTeamMemory binds memory into a team's multicast handle, guarded by
@@ -1461,8 +1606,10 @@ protected:
   // symTeamObtainMcLe, which need the CFT device APIs this binary does not
   // provide, so this suite drives the non-CFT path only: both flags stay
   // false, which is also how every non-CFT production call site invokes it.
+  // 2.32 added the CFT `counted` flag ahead of them; it is likewise false.
   static ncclResult_t Obtain(ncclComm* comm, ncclTeam team, bool multimem, ncclDevrTeam** out) {
-    return symTeamObtain(comm, team, multimem, /*cftUc=*/false, /*cftMc=*/false, out, /*needBarrier=*/nullptr);
+    return symTeamObtain(comm, team, multimem, /*counted=*/false, /*cftUc=*/false, /*cftMc=*/false, out,
+                         /*needBarrier=*/nullptr);
   }
 };
 
@@ -1720,6 +1867,13 @@ protected:
     mem.ginSegmentInfos = nullptr;
     ResetDevRuntimeMicroFakes();
   }
+
+  // The host fake defaults NCCL_MULTI_SEGMENT_REGISTER to 0; production defaults to 1.
+  static std::function<int64_t(const char*, int64_t)> MultiSegRegisterOn() {
+    return [](const char* env, int64_t deftVal) -> int64_t {
+      return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 1 : deftVal;
+    };
+  }
 };
 
 // Branch: no sysmem segment anywhere, so one device window covers the whole
@@ -1728,7 +1882,7 @@ TEST_F(SymMemoryRegisterGinTest, NoSysmemSegment_RegistersOneDeviceWindow) {
   size_t registeredSize = 0;
   int registeredType = -1;
   bool registeredMultiSegment = true;
-  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void* addr, size_t size, void*[], ncclGinWindow_t[], int, bool multi,
+  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void* addr, size_t size, void*[], ncclGinWindow_t[], uint32_t[], int, bool multi,
                                     int memType) {
     EXPECT_EQ(addr, mem.primaryAddr);
     registeredSize = size;
@@ -1748,19 +1902,27 @@ TEST_F(SymMemoryRegisterGinTest, NoSysmemSegment_RegistersOneDeviceWindow) {
   EXPECT_EQ(mem.ginSegmentInfos[0].memType, hipMemLocationTypeDevice);
 }
 
-// The multiSegment flag passed to GIN comes from the communicator-wide segment
-// count, not this rank's.
-TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSegment) {
-  mem.maxGlobalNumSegments = 2;
-  bool registeredMultiSegment = false;
+// A device-only multi-segment window is rejected before any GIN registration
+// whatever NCCL_MULTI_SEGMENT_REGISTER says; a single-segment window still registers.
+TEST_F(SymMemoryRegisterGinTest, MultiSegmentDeviceWindow_RejectedBeforeRegistering) {
+  // RCCL: the register seam includes the generation array.
   ScopedHook reg(g_devrGinRegister,
-                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool multi, int) {
-                   registeredMultiSegment = multi;
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
                    return ncclSuccess;
                  });
 
-  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
-  EXPECT_TRUE(registeredMultiSegment);
+  mem.maxGlobalNumSegments = 2;
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  {
+    ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());
+    EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  }
+  EXPECT_EQ(reg.calls, 0);
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+
+  mem.maxGlobalNumSegments = 1;
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
 }
 
 // Branch: the GIN registration fails, so the segment infos built for it are
@@ -1768,7 +1930,7 @@ TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSe
 // built from stays behind -- only the array is given back.
 TEST_F(SymMemoryRegisterGinTest, RegisterFails_ReturnsErrorWithoutSegmentInfo) {
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) {
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
                    return ncclSystemError;
                  });
 
@@ -1781,7 +1943,7 @@ TEST_F(SymMemoryRegisterGinTest, RegisterFails_ReturnsErrorWithoutSegmentInfo) {
 // registration rather than after it -- so nothing is registered at all.
 TEST_F(SymMemoryRegisterGinTest, SegmentInfoAllocFails_ReturnsError) {
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSuccess; });
   ScopedCallocFailure callocFail;  // fail the next ncclCalloc
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
@@ -1808,6 +1970,7 @@ protected:
     mem.globalHasSysmemSegment = true;
     mem.numSegments = 2;
     mem.maxGlobalNumSegments = 2;
+    g_loadParam = MultiSegRegisterOn();
     segmentSizes.assign({4096, 8192});
     memHandles.assign(2, reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55));
     mem.segmentSizes = segmentSizes.data();
@@ -1846,7 +2009,11 @@ TEST_F(SymMemoryRegisterGinElasticTest, AgreeingRanks_RegistersOneWindowPerSegme
                    [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
                      if (prop) {
                        *prop = hipMemAllocationProp{};
-                       prop->location.type = kLocHostNuma;  // CPU-backed
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
+                       prop->location.type = kLocHost;
+#else
+                       prop->location.type = kLocHostNuma;
+#endif
                      }
                      return hipSuccess;
                    });
@@ -1854,7 +2021,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, AgreeingRanks_RegistersOneWindowPerSegme
   std::vector<size_t> sizes;
   std::vector<int> types;
   ScopedHook reg(g_devrGinRegister,
-                 [&](ncclComm*, void* addr, size_t size, void*[], ncclGinWindow_t[], int, bool, int memType) {
+                 [&](ncclComm*, void* addr, size_t size, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int memType) {
                    addrs.push_back(reinterpret_cast<uintptr_t>(addr));
                    sizes.push_back(size);
                    types.push_back(memType);
@@ -1868,8 +2035,14 @@ TEST_F(SymMemoryRegisterGinElasticTest, AgreeingRanks_RegistersOneWindowPerSegme
   EXPECT_EQ(addrs[1], base + 4096);  // advanced by the first segment's size
   EXPECT_EQ(sizes[0], 4096u);
   EXPECT_EQ(sizes[1], 8192u);
-  EXPECT_EQ(types[0], NCCL_PTR_HOST);  // host-NUMA segments register as host
+  EXPECT_EQ(types[0],
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+            NCCL_PTR_CUDA);  // DMA-BUF MR; NCCL_PTR_HOST would ibv_reg_mr and EFAULT
+  EXPECT_EQ(types[1], NCCL_PTR_CUDA);
+#else
+            NCCL_PTR_HOST);  // host-NUMA segments register as host
   EXPECT_EQ(types[1], NCCL_PTR_HOST);
+#endif
   EXPECT_EQ(mem.numGinSegments, 2);
 }
 
@@ -1879,7 +2052,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, DeviceSegment_RegistersAsCudaPointer) {
   ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
   std::vector<int> types;
   ScopedHook reg(g_devrGinRegister,
-                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int memType) {
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int memType) {
                    types.push_back(memType);
                    return ncclSuccess;
                  });
@@ -1888,6 +2061,114 @@ TEST_F(SymMemoryRegisterGinElasticTest, DeviceSegment_RegistersAsCudaPointer) {
   ASSERT_EQ(types.size(), 2u);
   EXPECT_EQ(types[0], NCCL_PTR_CUDA);
 }
+
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
+// One host segment is not maxGlobalNumSegments > 1. needDmabuf still has to
+// be true or ncclGinRegister falls through to ibv_reg_mr on the host VMM pointer.
+TEST_F(SymMemoryRegisterGinElasticTest, SingleHostSegment_RequiresDmabuf) {
+  mem.numSegments = 1;
+  mem.maxGlobalNumSegments = 1;
+  segmentSizes.assign({4096});
+  mem.segmentSizes = segmentSizes.data();
+  memHandles.assign(1, reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55));
+  mem.memHandles = memHandles.data();
+
+  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  std::vector<bool> needDmabuf;
+  // RCCL: the register seam includes the generation array.
+  ScopedHook reg(g_devrGinRegister,
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool dmabuf, int) {
+                   needDmabuf.push_back(dmabuf);
+                   return ncclSuccess;
+                 });
+
+  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  ASSERT_EQ(needDmabuf.size(), 1u);
+  EXPECT_TRUE(needDmabuf[0]);
+  // ptrType and needDmabuf are decided before this write. The put-fence
+  // compares memType to HOST_NUMA, so the recorded type is the contract.
+  EXPECT_EQ(mem.ginSegmentInfos[0].memType, kLocHostNuma);
+}
+
+// Host VMM has no ibv_reg_mr fallback, so NCCL_DMABUF_ENABLE=0 must fail before any GIN registration.
+TEST_F(SymMemoryRegisterGinElasticTest, HostSegment_DmabufDisabled_FailsClosed) {
+  mem.numSegments = 1;
+  mem.maxGlobalNumSegments = 1;
+  segmentSizes.assign({4096});
+  mem.segmentSizes = segmentSizes.data();
+  memHandles.assign(1, reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55));
+  mem.memHandles = memHandles.data();
+
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "DMABUF_ENABLE" ? 0 : deftVal;
+  });
+  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  // RCCL: the register seam includes the generation array.
+  ScopedHook reg(g_devrGinRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
+                   return ncclSuccess;
+                 });
+
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(reg.calls, 0);
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+}
+
+// A peer's imported host segment reads as device here, but the window holds host VMM,
+// so this rank must reject too rather than enter the collective register alone.
+TEST_F(SymMemoryRegisterGinElasticTest, ImportedHostSegment_DmabufDisabled_FailsClosed) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "DMABUF_ENABLE" ? 0 : deftVal;
+  });
+  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
+  // RCCL: the register seam includes the generation array.
+  ScopedHook reg(g_devrGinRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
+                   return ncclSuccess;
+                 });
+
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(reg.calls, 0);
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+}
+
+// The host owner asks for DMA-BUF, so a peer that sees the imported segment as device must
+// ask too, or only the owner fails the DMA-BUF support check before the collective register.
+TEST_F(SymMemoryRegisterGinElasticTest, ImportedHostSegment_RequestsDmabufLikeTheOwner) {
+  mem.numSegments = 1;
+  mem.maxGlobalNumSegments = 1;
+  segmentSizes.assign({4096});
+  mem.segmentSizes = segmentSizes.data();
+  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
+  std::vector<bool> needDmabuf;
+  // RCCL: the register seam includes the generation array.
+  ScopedHook reg(g_devrGinRegister,
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool dmabuf, int) {
+                   needDmabuf.push_back(dmabuf);
+                   return ncclSuccess;
+                 });
+
+  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);  // props fake reports device
+  ASSERT_EQ(needDmabuf.size(), 1u);
+  EXPECT_TRUE(needDmabuf[0]);
+}
+#endif
 
 // Branch: another rank reports a different segment size, so the layout check
 // rejects it after the gather.
@@ -1903,7 +2184,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, SizeMismatchAcrossRanks_ReturnsInvalidUs
     return ncclSuccess;
   });
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSuccess; });
 
   EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
   EXPECT_EQ(reg.calls, 0);
@@ -1917,7 +2198,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, PropertiesFail_ReturnsErrorAfterGatherin
                    [](hipMemAllocationProp*, hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
   ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSuccess; });
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(gather.calls, 1);
@@ -1928,7 +2209,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, PropertiesFail_ReturnsErrorAfterGatherin
 TEST_F(SymMemoryRegisterGinElasticTest, AllGatherFails_ReturnsError) {
   ScopedHook gather(g_devrBootstrapAllGather, [](void*, void*, int) { return ncclSystemError; });
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSuccess; });
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(reg.calls, 0);
@@ -1940,15 +2221,37 @@ TEST_F(SymMemoryRegisterGinElasticTest, SecondSegmentFails_DeregistersTheFirst) 
   ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
   int registered = 0;
   ScopedHook reg(g_devrGinRegister,
-                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) {
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
                    return ++registered == 2 ? ncclSystemError : ncclSuccess;
                  });
-  ScopedHook dereg(g_devrGinDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+  ScopedHook dereg(g_devrGinDeregister, [](ncclComm*, void*[], uint32_t const[]) { return ncclSuccess; });
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(reg.calls, 2);
-  EXPECT_EQ(dereg.calls, 1);  // exactly the one that succeeded
+  EXPECT_EQ(dereg.calls, 2);  // first segment plus the part-way failing one
   EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+}
+
+// The rollback must hand each segment's deregister the generation stamps its
+// register wrote, or ncclGinDeregister skips (or wrongly releases) the window.
+TEST_F(SymMemoryRegisterGinElasticTest, SecondSegmentFails_DeregisterSeesRegisterStamps) {
+  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
+  uint32_t nextStamp = 7;
+  ScopedHook reg(g_devrGinRegister,
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t gens[], int, bool, int) {
+                   gens[0] = nextStamp++;
+                   return nextStamp == 9 ? ncclSystemError : ncclSuccess;  // the second segment fails
+                 });
+  std::vector<uint32_t> deregStamps;
+  ScopedHook dereg(g_devrGinDeregister, [&](ncclComm*, void*[], uint32_t const gens[]) {
+    deregStamps.push_back(gens[0]);
+    return ncclSuccess;
+  });
+
+  EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  ASSERT_EQ(deregStamps.size(), 2u);
+  EXPECT_EQ(deregStamps[0], 7u);
+  EXPECT_EQ(deregStamps[1], 8u);
 }
 
 
@@ -2052,16 +2355,27 @@ protected:
   std::vector<hipMemGenericAllocationHandle_t> memHandles;
   ncclDevrMemory* obtained = nullptr;
 
-  // Mirrors the anonymous struct symMemoryObtain all-gathers. Layout must match
-  // for the hook to populate what the function then reads back. 2.31 appended
-  // hostCftMode, which the function then requires every rank to agree on; the
-  // per-rank literals below leave it zero-initialised, matching the value a
-  // value-initialised comm reports.
+  // Per-rank values a test chooses; GatherReporting fills in the rest.
   struct SegmentInfo {
     int numSegments;
     bool hasSysmemSegment;
     size_t totalSize;
+  };
+
+  // Mirrors the struct symMemoryObtain all-gathers. Layout must match for the
+  // hook to populate what the function then reads back. 2.31 appended
+  // hostCftMode and 2.32 added registerMask and candidateRegistryId, all of
+  // which every rank must agree on (or, for the registry id, which only gates
+  // reuse). They are filled with what this rank itself reports: a
+  // value-initialised comm's hostCftMode, winFlags=0's register mask, and "no
+  // existing registration".
+  struct GatheredSegmentInfo {
+    int numSegments;
+    bool hasSysmemSegment;
+    int registerMask;
+    size_t totalSize;
     int hostCftMode;
+    uint64_t candidateRegistryId;
   };
 
   void SetUp() override {
@@ -2100,10 +2414,18 @@ protected:
   // buffer is sized by comm->nRanks, so clamp: a table longer than the comm
   // overflows it and corrupts the heap for whatever runs next.
   std::function<ncclResult_t(void*, void*, int)> GatherReporting(std::vector<SegmentInfo> perRank) {
-    return [this, perRank](void*, void* buf, int) {
-      auto* info = static_cast<SegmentInfo*>(buf);
+    return [this, perRank](void*, void* buf, int size) {
+      EXPECT_EQ(size, static_cast<int>(sizeof(GatheredSegmentInfo))) << "SegmentInfo mirror drifted from dev_runtime.cc";
+      auto* info = static_cast<GatheredSegmentInfo*>(buf);
       const int n = std::min(static_cast<int>(perRank.size()), comm->nRanks);
-      for (int r = 0; r < n; r++) info[r] = perRank[r];
+      // Ranks past the table keep zero segments/size, as before 2.32; the agreed-on
+      // fields are published for every rank, since any disagreement is fatal.
+      for (int r = 0; r < comm->nRanks; r++) {
+        const SegmentInfo mine = r < n ? perRank[r] : SegmentInfo{};
+        info[r] = GatheredSegmentInfo{mine.numSegments, mine.hasSysmemSegment,
+                                      ncclDevrRegisterMaskFromWinFlags(/*winFlags=*/0), mine.totalSize,
+                                      /*hostCftMode=*/0, /*candidateRegistryId=*/UINT64_MAX};
+      }
       return ncclSuccess;
     };
   }
@@ -2153,6 +2475,10 @@ TEST_F(SymMemoryObtainSetupTest, AsymmetricPeerSizes_TrackMinAndMax) {
   EXPECT_EQ(obtained->lsaMaxSize, 16384u);
   EXPECT_EQ(obtained->lsaNumSegments[1], 2);  // the peer's count, from its slice
   EXPECT_EQ(allocSize, 16384);                // reserved for the largest LSA rank
+  ncclDevrWindow win{};
+  win.memory = obtained;
+  win.size = 16384;
+  EXPECT_EQ(ncclDevrWindowLsaMinSize(&win), 4096u);
 }
 
 // Branch: the space allocation fails, so nothing is mapped or linked.
@@ -2174,13 +2500,16 @@ TEST_F(SymMemoryObtainSetupTest, AllGatherFails_ReturnsErrorWithoutLinking) {
 }
 
 // Branch: populating our own segment sizes fails.
+// NCCL 2.32 moved segment-size population after the all-gather (a rank must first learn whether every
+// rank can reuse an existing registration), so the gather now runs once before the failure.
 TEST_F(SymMemoryObtainSetupTest, PopulateSegmentSizesFails_ReturnsError) {
   ScopedHook populate(g_devrPopulateSegmentSizes,
                       [](ncclDevrMemory*, int) { return ncclSystemError; });
-  ScopedHook gather(g_devrBootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
+  ScopedHook gather(g_devrBootstrapAllGather, GatherReporting({{1, false, 4096}, {1, false, 4096}}));
 
   EXPECT_NE(Obtain(), ncclSuccess);
-  EXPECT_EQ(gather.calls, 0);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_EQ(populate.calls, 1);
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
 
@@ -2240,7 +2569,7 @@ TEST_F(SymMemoryObtainRegisterTest, GinEnabled_RegistersWithGin) {
   comm->devrState.ginEnabled = true;
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSuccess; });
 
   ASSERT_EQ(Obtain(), ncclSuccess);
   EXPECT_EQ(reg.calls, 1);
@@ -2251,7 +2580,7 @@ TEST_F(SymMemoryObtainRegisterTest, GinEnabled_RegistersWithGin) {
 TEST_F(SymMemoryObtainRegisterTest, GinDisabled_DefaultsToOneSegment) {
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSuccess; });
 
   ASSERT_EQ(Obtain(), ncclSuccess);
   EXPECT_EQ(reg.calls, 0);
@@ -2259,11 +2588,11 @@ TEST_F(SymMemoryObtainRegisterTest, GinDisabled_DefaultsToOneSegment) {
 }
 
 // Branch: the proxy is available and the layout is single segment, so RMA
-// registration runs. 2.31 asks rma.cc's ncclRmaProxyEnabled rather than
-// deriving the conditions here, so that answer is what the test supplies --
-// the conditions themselves belong to rma.cc, which this binary does not build.
+// registration runs. 2.31 asks rma.cc's ncclRmaProxyEnabled, which this binary
+// now compiles in (see rma-test.cc), so the test drives that predicate's terms
+// rather than stubbing its answer.
 TEST_F(SymMemoryObtainRegisterTest, RmaProxyAvailable_RegistersWithRma) {
-  ScopedHook proxyEnabled(g_devrRmaProxyEnabled, [](ncclComm*) { return true; });
+  RmaProxyTerms(comm, true);
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
   ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
 
@@ -2274,7 +2603,7 @@ TEST_F(SymMemoryObtainRegisterTest, RmaProxyAvailable_RegistersWithRma) {
 
 // Branch: the proxy is unavailable, so the whole arm is skipped.
 TEST_F(SymMemoryObtainRegisterTest, RmaProxyUnavailable_LeavesRmaProxyDisabled) {
-  ScopedHook proxyEnabled(g_devrRmaProxyEnabled, [](ncclComm*) { return false; });
+  RmaProxyTerms(comm, false);
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
   ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
 
@@ -2286,7 +2615,7 @@ TEST_F(SymMemoryObtainRegisterTest, RmaProxyUnavailable_LeavesRmaProxyDisabled) 
 // Branch: the proxy is enabled but the layout is multi-segment, which RMA does
 // not handle -- so the flag is set while registration is skipped.
 TEST_F(SymMemoryObtainRegisterTest, RmaEnabledButMultiSegment_SkipsRegistration) {
-  ScopedHook proxyEnabled(g_devrRmaProxyEnabled, [](ncclComm*) { return true; });
+  RmaProxyTerms(comm, true);
   ScopedHook gather(g_devrBootstrapAllGather,
                     GatherReporting({{1, false, 4096}, {2, false, 4096}, {1, false, 4096}, {1, false, 4096}}));
   ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
@@ -2307,8 +2636,8 @@ TEST_F(SymMemoryObtainRegisterTest, LinksOntoMemHeadAndReportsOut) {
   EXPECT_EQ(comm->devrState.memHead, obtained);
   EXPECT_EQ(obtained->next, &existing);
   // `existing` is a stack object, so drop it from the chain before TearDown.
-  // memHead must keep pointing at `obtained`: symMemoryDestroy walks the list
-  // to unlink and dereferences null if its argument is not on it.
+  // memHead must keep pointing at `obtained` so TearDown destroys that object;
+  // a missing entry is left alone, not dereferenced.
   obtained->next = nullptr;
 }
 
@@ -2388,7 +2717,7 @@ TEST_F(SymMemoryObtainRollbackTest, GinRegisterFails_UnbindsTeamsAndReturnsSpace
   ScopedHook alloc(g_devrSpaceAlloc, AllocAt(4096));
   ScopedHook spaceFree(g_devrSpaceFree, [](ncclSpace*, int64_t, int64_t) { return ncclSuccess; });
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSystemError; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSystemError; });
 
   EXPECT_NE(Obtain(), ncclSuccess);
   EXPECT_EQ(reg.calls, 1);
@@ -2399,7 +2728,7 @@ TEST_F(SymMemoryObtainRollbackTest, GinRegisterFails_UnbindsTeamsAndReturnsSpace
 // Same label, reached from the RMA branch instead.
 TEST_F(SymMemoryObtainRollbackTest, RmaRegisterFails_ReturnsSpaceWithoutLinking) {
   PushTeam();
-  ScopedHook proxyEnabled(g_devrRmaProxyEnabled, [](ncclComm*) { return true; });
+  RmaProxyTerms(comm, true);
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
   ScopedHook alloc(g_devrSpaceAlloc, AllocAt(0));
   ScopedHook spaceFree(g_devrSpaceFree, [](ncclSpace*, int64_t, int64_t) { return ncclSuccess; });
@@ -2407,6 +2736,33 @@ TEST_F(SymMemoryObtainRollbackTest, RmaRegisterFails_ReturnsSpaceWithoutLinking)
 
   EXPECT_NE(Obtain(), ncclSuccess);
   EXPECT_EQ(reg.calls, 1);
+  EXPECT_EQ(spaceFree.calls, 1);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+// Label fail_mem: AICOMRCCL-2428. GIN succeeding then RMA failing is the only way to reach
+// free(mem->ginSegmentInfos) with a live array; the sibling cases never build one that survives.
+// ginDereg is the witness that symMemoryUnregister saw it, since mem is gone before Obtain returns.
+TEST_F(SymMemoryObtainRollbackTest, GinSucceedsThenRmaFails_UnregistersGinAndUnlinks) {
+  PushTeam();
+  comm->devrState.ginEnabled = true;
+  RmaProxyTerms(comm, true);
+  ScopedHook gather(g_devrBootstrapAllGather, agreeing);
+  ScopedHook alloc(g_devrSpaceAlloc, AllocAt(0));
+  ScopedHook spaceFree(g_devrSpaceFree, [](ncclSpace*, int64_t, int64_t) { return ncclSuccess; });
+  ScopedHook ginReg(g_devrGinRegister,
+                    [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
+                      return ncclSuccess;
+                    });
+  ScopedHook ginDereg(g_devrGinDeregister, [](ncclComm*, void*[], uint32_t const[]) { return ncclSuccess; });
+  ScopedHook rmaReg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSystemError; });
+  ScopedHook rmaDereg(g_devrRmaProxyDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+
+  EXPECT_NE(Obtain(), ncclSuccess);
+  EXPECT_EQ(ginReg.calls, 1);
+  EXPECT_EQ(rmaReg.calls, 1);
+  EXPECT_EQ(ginDereg.calls, 1);   // symMemoryUnregister GIN arm
+  EXPECT_EQ(rmaDereg.calls, 0);  // rmaHostWins[0] witness never set
   EXPECT_EQ(spaceFree.calls, 1);
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
@@ -2475,6 +2831,65 @@ TEST_F(SymMemoryObtainTest, DestroyFreesMemory) {
 
   symMemoryDestroy(comm, mem);
 
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+TEST_F(SymMemoryObtainTest, DestroyIsIdempotent) {
+  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  void* userAddr = reinterpret_cast<void*>(0x100000);
+
+  struct ncclDevrMemory* mem = nullptr;
+  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, userAddr, /*size=*/4096, /*winFlags=*/0, &mem),
+            ncclSuccess);
+  ASSERT_NE(mem, nullptr);
+  // Unmap is skipped while lsaFlatBase is null. Point it at a sentinel so the
+  // single LSA rank (one segment) is actually unmapped.
+  comm->devrState.lsaFlatBase = reinterpret_cast<void*>(0x40000000);
+
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+
+  symMemoryDestroy(comm, mem);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  const int releases = release.calls;
+  const int unmaps = unmap.calls;
+  EXPECT_EQ(releases, 1);  // one cuMemRelease, numSegments == 1
+  EXPECT_EQ(unmaps, 1);    // lsaSize == 1 and lsaNumSegments[0] == 1
+
+  // Second destroy must not walk off memHead or repeat unmap/release/free.
+  symMemoryDestroy(comm, mem);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  EXPECT_EQ(release.calls, releases);
+  EXPECT_EQ(unmap.calls, unmaps);
+}
+
+TEST_F(SymMemoryObtainTest, DestroyIsIdempotentWhileAnotherMemoryIsLinked) {
+  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  struct ncclDevrMemory* first = nullptr;
+  struct ncclDevrMemory* second = nullptr;
+  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, reinterpret_cast<void*>(0x100000),
+                            /*size=*/4096, /*winFlags=*/0, &first),
+            ncclSuccess);
+  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, reinterpret_cast<void*>(0x200000),
+                            /*size=*/4096, /*winFlags=*/0, &second),
+            ncclSuccess);
+  ASSERT_EQ(comm->devrState.memHead, second);
+  ASSERT_EQ(second->next, first);
+
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+
+  symMemoryDestroy(comm, first);
+  EXPECT_EQ(comm->devrState.memHead, second);
+  EXPECT_EQ(second->next, nullptr);
+  const int releases = release.calls;
+  EXPECT_EQ(releases, 1);  // one cuMemRelease for the destroyed memory's single segment
+
+  symMemoryDestroy(comm, first);
+  EXPECT_EQ(comm->devrState.memHead, second);
+  EXPECT_EQ(second->next, nullptr);
+  EXPECT_EQ(release.calls, releases);
+
+  symMemoryDestroy(comm, second);
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
 
@@ -2819,8 +3234,9 @@ TEST_F(SymWindowCreateTest, TablePublishCopyFails_ReturnsErrorWithoutPublishing)
 // allocations, drop it from the sorted list and the global window map.
 //
 // The fixture drives the real lifecycle -- obtain memory, create a window --
-// rather than hand-building state, because symMemoryDestroy walks memHead to
-// unlink and faults if its argument is not on the list.
+// rather than hand-building state. symMemoryDestroy returns without touching
+// a pointer that is not on memHead, so a hand-built window would not exercise
+// the free path.
 
 class SymWindowDestroyTest : public DevRuntimeMicroTest {
 protected:
@@ -2863,7 +3279,10 @@ protected:
   }
 
   // A window over freshly obtained memory, so the whole teardown chain is valid.
-  ncclWindow_vidmem* MakeWindow(void* userPtr) {
+  // localReg is the registration the window owns. Pass a non-null handle when
+  // the test needs to see destroy release it, including on an early jump to
+  // remove_winSorted.
+  ncclWindow_vidmem* MakeWindow(void* userPtr, void* localReg = nullptr) {
     ncclDevrMemory* mem = nullptr;
     EXPECT_EQ(symMemoryObtain(comm, memHandles.data(), 1, userPtr, 4096, 0, &mem, false), ncclSuccess);
     // EXPECT_ does not return, and symWindowCreate dereferences mem
@@ -2871,7 +3290,7 @@ protected:
     // obtain would turn a reported failure into a segfault with no gtest output.
     if (mem == nullptr) return nullptr;
     ncclWindow_vidmem* winDev = nullptr;
-    EXPECT_EQ(symWindowCreate(comm, mem, 0, userPtr, 4096, 0, nullptr, &winDev, nullptr, nullptr), ncclSuccess);
+    EXPECT_EQ(symWindowCreate(comm, mem, 0, userPtr, 4096, 0, localReg, &winDev, nullptr, nullptr), ncclSuccess);
     return winDev;
   }
 };
@@ -2953,22 +3372,31 @@ TEST_F(SymWindowDestroyTest, TeardownFailure_StillRemovesFromSortedList) {
 }
 
 // Branch: clearing the window's slot in the device-side table fails. That jumps
-// straight to remove_winSorted, so the later shadow frees and the deregister
-// are all skipped -- but the sorted list is still tidied up. As with
-// TeardownFailure above, the returned code is not asserted: the same
+// straight to remove_winSorted, so the later shadow frees are skipped. The
+// deregister is the first statement at that label, so a registration handed
+// off with the window is still released. The sorted list is still tidied up.
+// As with TeardownFailure above, the returned code is not asserted: the same
 // overwrite-with-success at the cleanup label applies here.
 TEST_F(SymWindowDestroyTest, TableClearFails_StillRemovesFromSortedList) {
-  ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000));
+  void* localReg = reinterpret_cast<void*>(0xD0);
+  ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000), localReg);
   ASSERT_EQ(comm->devrState.winSortedCount, 1);
 
   ScopedHook clear(g_hipMemsetAsync,
                    [](void*, int, size_t, hipStream_t) { return hipErrorInvalidValue; });
   ScopedHook poolFree(g_devrShadowPoolFree,
                       [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
+  void* deregHandle = nullptr;
+  ScopedHook dereg(g_devrNcclCommDeregister, [&](const ncclComm_t, void* handle) {
+    deregHandle = handle;
+    return ncclSuccess;
+  });
 
   symWindowDestroy(comm, winDev, nullptr);
   EXPECT_EQ(clear.calls, 1);
   EXPECT_EQ(poolFree.calls, 0);  // jumped past the frees
+  EXPECT_EQ(dereg.calls, 1);     // early jump still releases the handed-off registration
+  EXPECT_EQ(deregHandle, localReg);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
@@ -3044,6 +3472,36 @@ TEST_F(WindowCloseIpcPeersTest, CloseFails_StillClosesRemainingPeers) {
 
   windowCloseIpcPeers(comm, &win);
   EXPECT_EQ(close.calls, 2);
+}
+
+// Branch: ipcPeerIsCuMem selects ncclCudaFree per peer; legacy peers still use
+// cudaIpcCloseMemHandle. Peer 0 is cuMem, peer 2 is legacy (self at index 1 is
+// skipped). Shutdown short-circuits ncclCudaFree so the fake pointer is not
+// handed to HIP.
+TEST_F(WindowCloseIpcPeersTest, MixedCuMemAndLegacy_TakesMatchingRelease) {
+  uint8_t isCuMem[3] = {1, 0, 0};
+  win.ipcPeerIsCuMem = isCuMem;
+
+  std::vector<void*> ipcClosed;
+  ScopedHook close(g_hipIpcCloseMemHandle, [&](void* p) {
+    ipcClosed.push_back(p);
+    return hipSuccess;
+  });
+
+  // The flag keeps the real free inert; the shim above is what makes the call
+  // itself observable, since ncclCudaFree early-returns on it.
+  g_devrCudaFreeCalls.clear();
+  rcclShutdownFlag().store(true, std::memory_order_release);
+  windowCloseIpcPeers(comm, &win);
+  rcclShutdownFlag().store(false, std::memory_order_release);
+
+  // Index 1 is lsaSelf and skipped. Peer 0 is cuMem and peer 2 is legacy, so
+  // each arm takes its own release and neither takes the other's.
+  ASSERT_EQ(ipcClosed.size(), 1u);
+  EXPECT_EQ(ipcClosed[0], allocBase[2]);
+  ASSERT_EQ(g_devrCudaFreeCalls.size(), 1u);
+  EXPECT_EQ(g_devrCudaFreeCalls[0], allocBase[0]);
+  g_devrCudaFreeCalls.clear();
 }
 
 
@@ -3189,15 +3647,8 @@ TEST_F(WindowRegisterNonSymTest, HeaderCopyFails_ClearsOutput) {
 
 class WindowRegisterNonSymIpcTest : public WindowRegisterNonSymTest {
 protected:
-  // Mirrors the ExchangeEntry symMemory's caller all-gathers. Layout must match
-  // for the hook to publish values the function then reads back.
-  struct ExchangeEntry {
-    hipIpcMemHandle_t handle;
-    uint64_t hostHash;
-    uint64_t pidHash;
-    size_t userOffset;
-    size_t userSize;
-  };
+  // The record windowRegisterNonSym all-gathers. Same type as production.
+  using ExchangeEntry = ncclDevrNonSymExchangeEntry;
 
   void SetUp() override {
     DevRuntimeMicroTest::SetUp();
@@ -3217,13 +3668,25 @@ protected:
   // Publish the team's exchange entries, as the all-gather would. Each peer
   // reports a distinct process unless told to impersonate ours.
   std::function<ncclResult_t(void*, int*, int, int, void*, int)> GatherPeers(int sameProcRank = -1) {
-    return [this, sameProcRank](void*, int*, int self, int size, void* buf, int) {
+    return GatherPeersWith([](ExchangeEntry&, int, int) {}, sameProcRank);
+  }
+
+  // The same record, with a hook to rewrite each entry once the defaults are
+  // in. The refusal cases differ from the baseline in one or two fields, and
+  // restating the whole record in each of them means a field added later gets
+  // set in one place and stays silently zero in the rest.
+  std::function<ncclResult_t(void*, int*, int, int, void*, int)> GatherPeersWith(
+      std::function<void(ExchangeEntry& e, int r, int self)> mutate, int sameProcRank = -1) {
+    return [this, mutate, sameProcRank](void*, int*, int self, int size, void* buf, int) {
       auto* e = static_cast<ExchangeEntry*>(buf);
       for (int r = 0; r < size; r++) {
         e[r].hostHash = (r == self || r == sameProcRank) ? peers[0].hostHash : 500 + r;
         e[r].pidHash = (r == self || r == sameProcRank) ? peers[0].pidHash : 600 + r;
         e[r].userOffset = 64 * r;
         e[r].userSize = 4096;
+        e[r].allocSize = 8192;  // covers userOffset + userSize for this team
+        e[r].isCuMem = 0;
+        mutate(e[r], r, self);
       }
       return ncclSuccess;
     };
@@ -3267,6 +3730,101 @@ TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_IsLeftUnmapped) {
   ncclDevrWindow* win = comm->devrState.winSorted[0].win;
   EXPECT_EQ(win->ipcPeerPtrs[1], nullptr);
   EXPECT_EQ(win->ipcPeerPtrsAllocBase[1], nullptr);
+}
+
+// Branch: a peer exported a cuMem handle and this rank has cuMem disabled. The
+// import must fail rather than feed those bytes to the legacy IPC opener.
+// ncclCuMemEnable() is stubbed to 0 for this suite. The opener hook is what
+// distinguishes this refusal from a deleted guard falling into the fail-loud
+// cudaIpcOpenMemHandle stub: without it, both paths produce the same
+// (not ncclSuccess, out == nullptr, winSortedCount == 0).
+TEST_F(WindowRegisterNonSymIpcTest, CuMemPeerWhileDisabled_Fails) {
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    GatherPeersWith([](ExchangeEntry& e, int r, int self) { e.isCuMem = (r == self) ? 0 : 1; }));
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void**, hipIpcMemHandle_t, unsigned int) {
+    ADD_FAILURE() << "a cuMem peer must be refused before the legacy IPC opener";
+    return hipErrorInvalidValue;
+  });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(open.calls, 0);
+}
+
+// Branch: a peer's user range does not fit in the allocation it published.
+// The offset is near SIZE_MAX so userOffset + userSize would wrap and the old
+// sum comparison would accept it.
+TEST_F(WindowRegisterNonSymIpcTest, UserRangeExceedsAlloc_Fails) {
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    GatherPeersWith([](ExchangeEntry& e, int r, int self) {
+                      if (r == self) return;
+                      e.userOffset = static_cast<size_t>(-1) - 16;
+                      e.userSize = 64;  // userOffset + userSize wraps past 0
+                      e.allocSize = 4096;
+                    }));
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void**, hipIpcMemHandle_t, unsigned int) {
+    ADD_FAILURE() << "a peer whose published range does not fit must not be mapped";
+    return hipErrorInvalidValue;
+  });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(open.calls, 0);
+}
+
+// The same refusal without the wrap: the offset is inside the allocation, so
+// the first clause passes and only `userSize > allocSize - userOffset` can
+// reject it. Without this the anti-wrap clause is deletable, since the case
+// above short-circuits before reaching it.
+TEST_F(WindowRegisterNonSymIpcTest, UserRangeOverrunsAllocWithoutWrapping_Fails) {
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    GatherPeersWith([](ExchangeEntry& e, int r, int self) {
+                      if (r == self) return;
+                      // 2048 + 4096 overruns 4096 by exactly one window, and
+                      // the sum does not wrap, so the second clause decides.
+                      e.userOffset = 2048;
+                      e.allocSize = 4096;
+                    }));
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void**, hipIpcMemHandle_t, unsigned int) {
+    ADD_FAILURE() << "a peer whose published range overruns its allocation must not be mapped";
+    return hipErrorInvalidValue;
+  });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(open.calls, 0);
+}
+
+// The bound is the local window size, not the size the peer published. A peer
+// reporting userSize 0 at the very end of its allocation is self-consistent, so
+// a check against its own size accepts it, but ncclDevrGetLsaRankPtr still
+// admits every offset below the local 4096 and adds it to a pointer already at
+// the end of the mapping. Comparing peers[r].userSize here passes this case.
+TEST_F(WindowRegisterNonSymIpcTest, PeerRangeTooSmallForLocalWindow_Fails) {
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    GatherPeersWith([](ExchangeEntry& e, int r, int self) {
+                      if (r == self) return;
+                      // Nothing left after the offset, and the peer claims to
+                      // want nothing, so both clauses pass against its size.
+                      e.userOffset = 4096;
+                      e.userSize = 0;
+                      e.allocSize = 4096;
+                    }));
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void**, hipIpcMemHandle_t, unsigned int) {
+    ADD_FAILURE() << "a peer whose allocation cannot hold the local window must not be mapped";
+    return hipErrorInvalidValue;
+  });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
 // Branch: the address-range lookup fails, so the exchange never happens.
@@ -3365,6 +3923,28 @@ TEST_F(WindowRegisterNonSymIpcTest, HostRmaButTeamSpansComm_SkipsMr) {
   EXPECT_EQ(reg.calls, 0);
 }
 
+// Branch: NCCL_RMA_DISABLE turns the proxy off, so neither the connect nor the
+// MR happens even with host RMA and remote ranks -- the same outcome the
+// symmetric path gets from ncclRmaProxyEnabled.
+TEST_F(WindowRegisterNonSymIpcTest, HostRmaButRmaDisabled_SkipsConnectAndMr) {
+  comm->hostRmaSupport = true;  // lsaSize 3 < nRanks 4
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "RMA_DISABLE" ? 1 : deftVal;
+  });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+  ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_EQ(connect.calls, 0);
+  EXPECT_EQ(reg.calls, 0);
+}
+
 // Branch: the MR registration fails.
 TEST_F(WindowRegisterNonSymIpcTest, RmaRegisterFails_ReturnsError) {
   comm->hostRmaSupport = true;
@@ -3380,6 +3960,438 @@ TEST_F(WindowRegisterNonSymIpcTest, RmaRegisterFails_ReturnsError) {
   ncclWindow_t out = nullptr;
   EXPECT_NE(Register(&out), ncclSuccess);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+
+// ---------------------------------------------------------------------------
+// windowRegisterNonSym stage 1, cuMem arm. cudaIpcGetMemHandle rejects a VMM
+// allocation, so the exporter retains its allocation handle and the importer
+// resolves it through the owner's proxy -- the same exchange
+// ncclP2pImportShareableBuffer performs for registered buffers. GIN windows
+// always take this arm, because GIN requires NCCL_CUMEM_ENABLE=1.
+//
+// ncclCuMemEnable() is a controllable seam here (fakes/nccl_fakes.cc), so this
+// suite arms it rather than inheriting the suite above, whose default of 0
+// reaches only the refusals.
+
+class WindowRegisterNonSymCuMemTest : public WindowRegisterNonSymIpcTest {
+protected:
+  // The retained local handle, and the base the importer maps each peer at.
+  const hipMemGenericAllocationHandle_t kRetained =
+      reinterpret_cast<hipMemGenericAllocationHandle_t>(0x5150);
+  void* const kPeerBase = reinterpret_cast<void*>(0x900000);
+  hipMemAllocationHandleType savedHandleType = ncclCuMemHandleType;
+
+  void SetUp() override {
+    WindowRegisterNonSymIpcTest::SetUp();
+    // Only POSIX-FD exports the raw handle through the owner's proxy; the arm
+    // is gated on it, so pin it rather than relying on the fake's default.
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+  }
+  void TearDown() override {
+    ncclCuMemHandleType = savedHandleType;
+    WindowRegisterNonSymIpcTest::TearDown();
+  }
+
+  // Report the queried pointer as its own allocation base, with segments of
+  // segSize. The walk inside ncclCuMemGetAddressRange advances by the size each
+  // query reports, so a zero size -- the seam's default -- spins forever.
+  std::function<hipError_t(hipDeviceptr_t*, size_t*, hipDeviceptr_t)> AddressRangeOf(size_t segSize) {
+    return [segSize](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+      if (pbase) *pbase = dptr;
+      if (psize) *psize = segSize;
+      return hipSuccess;
+    };
+  }
+
+  // Same, but with the queried pointer sitting `below` bytes inside its
+  // allocation. AddressRangeOf puts the base on the pointer, which makes
+  // userOffset 0 and allocSize equal to the window size, so the three fields a
+  // rank publishes about itself all carry the same value and swapping any of
+  // them for another still passes. Separating the base gives each one a
+  // distinct value. Keep below + window <= segSize or the walk sees a second
+  // segment and registration is refused.
+  std::function<hipError_t(hipDeviceptr_t*, size_t*, hipDeviceptr_t)> AddressRangeBelow(size_t below,
+                                                                                        size_t segSize) {
+    return [below, segSize](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+      if (pbase) *pbase = static_cast<hipDeviceptr_t>(static_cast<char*>(dptr) - below);
+      if (psize) *psize = segSize;
+      return hipSuccess;
+    };
+  }
+
+  // What this rank wrote into its own slot, captured before the hook overwrites
+  // the buffer with synthetic peers. A gather hook that overwrites every entry
+  // hides the published record completely, so nothing can check that a rank
+  // broadcasts something its own importer would accept.
+  ExchangeEntry publishedSelf{};
+  bool capturedSelf = false;
+
+  // Publish every peer as a cuMem exporter over an allocSize-byte allocation.
+  std::function<ncclResult_t(void*, int*, int, int, void*, int)> GatherCuMemPeers(size_t allocSize) {
+    return [this, allocSize](void*, int*, int self, int size, void* buf, int) {
+      auto* e = static_cast<ExchangeEntry*>(buf);
+      publishedSelf = e[self];
+      capturedSelf = true;
+      for (int r = 0; r < size; r++) {
+        e[r].hostHash = (r == self) ? peers[0].hostHash : 500 + r;
+        e[r].pidHash = (r == self) ? peers[0].pidHash : 600 + r;
+        e[r].userOffset = 64 * r;
+        e[r].userSize = 4096;
+        e[r].allocSize = allocSize;
+        e[r].isCuMem = 1;
+        e[r].cuMemHandle = 0xAB00 + r;  // the exporter's handle, opaque to us
+      }
+      return ncclSuccess;
+    };
+  }
+
+  // Shared cuMem export + import seams for the VMM registration path. Only the
+  // address-range hook and the proxy-fd behaviour differ between the happy path
+  // and the peer-import failure case; a seam added to the import path later
+  // lands here once. ScopedHook is immovable, so this is a local aggregate
+  // constructed in place rather than returned from a factory. Members spell the
+  // signature: CTAD is not allowed on a non-static data member.
+  struct CuMemImportBaseline {
+    ScopedHook<int()> cuMem;
+    ScopedHook<hipError_t(hipMemGenericAllocationHandle_t*, void*)> retain;
+    ScopedHook<hipError_t(hipMemGenericAllocationHandle_t)> release;
+    ScopedHook<ncclResult_t(void*, int*, int, int, void*, int)> gather;
+    ScopedHook<hipError_t(size_t*, const hipMemAllocationProp*, hipMemAllocationGranularity_flags)>
+        granularity;
+    ScopedHook<hipError_t(hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType)> import;
+    ScopedHook<hipError_t(void**, size_t, size_t, void*, unsigned long long)> reserve;
+    ScopedHook<hipError_t(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long)> map;
+    ScopedHook<hipError_t(void*, size_t, const hipMemAccessDesc*, size_t)> setAccess;
+
+    CuMemImportBaseline(hipMemGenericAllocationHandle_t retained, void* peerBase,
+                        std::function<ncclResult_t(void*, int*, int, int, void*, int)> gatherFn)
+        : cuMem(g_cuMemEnable, [] { return 1; }),
+          retain(g_hipMemRetainAllocationHandle,
+                 [retained](hipMemGenericAllocationHandle_t* h, void*) {
+                   if (h) *h = retained;
+                   return hipSuccess;
+                 }),
+          release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; }),
+          gather(g_devrBootstrapIntraNodeAllGather, std::move(gatherFn)),
+          granularity(g_hipMemGetAllocationGranularity,
+                      [](size_t* g, const hipMemAllocationProp*, hipMemAllocationGranularity_flags) {
+                        if (g) *g = 4096;
+                        return hipSuccess;
+                      }),
+          import(g_hipMemImportFromShareableHandle,
+                 [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) {
+                   if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x6060);
+                   return hipSuccess;
+                 }),
+          reserve(g_hipMemAddressReserve,
+                  [peerBase](void** p, size_t, size_t, void*, unsigned long long) {
+                    if (p) *p = peerBase;
+                    return hipSuccess;
+                  }),
+          map(g_hipMemMap,
+              [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+                return hipSuccess;
+              }),
+          setAccess(g_hipMemSetAccess,
+                    [](void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; }) {}
+  };
+};
+
+// The happy path: a VMM window is exported by handle and every out-of-process
+// peer is imported through the proxy rather than through cudaIpcOpenMemHandle.
+TEST_F(WindowRegisterNonSymCuMemTest, VmmWindow_ExportsHandleAndImportsPeers) {
+  CuMemImportBaseline base(kRetained, kPeerBase, GatherCuMemPeers(8192));
+  // The window starts 1 KiB into an 8 KiB allocation, so the three fields this
+  // rank publishes about itself -- allocSize 8192, userOffset 1024, userSize
+  // 4096 -- are all different and each assertion below pins one expression.
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeBelow(/*below=*/1024, /*segSize=*/8192));
+  // The exporter must not reach the legacy handle for a VMM buffer, and the
+  // importer must not reach the legacy opener. Both seams default to failing,
+  // so a regression surfaces as a failed Register as well as these counts.
+  ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipSuccess; });
+  ScopedHook ipcOpen(g_hipIpcOpenMemHandle, [](void**, hipIpcMemHandle_t, unsigned int) {
+    ADD_FAILURE() << "a cuMem peer must not be opened as a legacy IPC handle";
+    return hipErrorInvalidValue;
+  });
+
+  std::vector<int> handedOutFds;
+  ScopedHook proxyFd(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int, void*, int* fd) {
+    const int dup3d = dup(STDERR_FILENO);
+    handedOutFds.push_back(dup3d);
+    if (fd) *fd = dup3d;
+    return dup3d < 0 ? ncclSystemError : ncclSuccess;
+  });
+  // The import must be tracked as persist memory with no owner, like
+  // transport/net.cc's call: there is no owner entry for a user buffer the
+  // exporter never allocated, so a resumable import could not be re-matched.
+  std::vector<ncclMemType_t> trackedTypes;
+  std::vector<size_t> trackedSizes;
+  std::vector<void*> trackedOwners;
+  ScopedHook track(g_memTrackImportFromPeer,
+                   [&](ncclMemManager*, void*, size_t size, hipMemGenericAllocationHandle_t,
+                       hipMemAllocationHandleType, ncclMemType_t memType, int, int, void* ownerPtr) {
+                     trackedTypes.push_back(memType);
+                     trackedSizes.push_back(size);
+                     trackedOwners.push_back(ownerPtr);
+                     return ncclSuccess;
+                   });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_NE(out, nullptr);
+
+  // Ranks 1 and 2 are imported; our own slot reuses the caller's pointer.
+  EXPECT_EQ(proxyFd.calls, 2);
+  EXPECT_EQ(base.import.calls, 2);
+  EXPECT_EQ(ipcOpen.calls, 0);
+  EXPECT_EQ(ipcGet.calls, 0);  // VMM buffers never take the legacy export
+
+  ASSERT_EQ(trackedTypes.size(), 2u);
+  EXPECT_EQ(trackedTypes[0], ncclMemPersist);
+  EXPECT_EQ(trackedTypes[1], ncclMemPersist);
+  // The whole published allocation is mapped, not just the user's slice.
+  EXPECT_EQ(trackedSizes[0], 8192u);
+
+  // What this rank broadcast about itself: the retained handle, flagged cuMem,
+  // over the segment the handle actually covers. The three sizes are distinct,
+  // so publishing userPtr for allocBase or userSize for allocSize is caught.
+  ASSERT_TRUE(capturedSelf);
+  EXPECT_EQ(publishedSelf.isCuMem, 1);
+  EXPECT_EQ(publishedSelf.cuMemHandle, reinterpret_cast<uint64_t>(kRetained));
+  EXPECT_EQ(publishedSelf.allocSize, 8192u);  // the whole segment, not the window
+  EXPECT_EQ(publishedSelf.userOffset, 1024u);  // where the window starts in it
+  EXPECT_EQ(publishedSelf.userSize, 4096u);   // Register()'s default window size
+
+  // No owner is published for either import, so ncclCommSuspend leaves the
+  // mapping in place instead of releasing something resume cannot re-match.
+  ASSERT_EQ(trackedOwners.size(), 2u);
+  EXPECT_EQ(trackedOwners[0], nullptr);
+  EXPECT_EQ(trackedOwners[1], nullptr);
+
+  ncclDevrWindow* win = comm->devrState.winSorted[0].win;
+  ASSERT_EQ(win->ipcPeerCount, 3);
+  EXPECT_EQ(win->ipcPeerPtrs[0], kUserPtr);
+  // Each peer is its mapped base advanced by the offset it published, and is
+  // recorded as cuMem so teardown takes the matching release.
+  EXPECT_EQ(win->ipcPeerPtrs[1], static_cast<char*>(kPeerBase) + 64);
+  EXPECT_EQ(win->ipcPeerPtrs[2], static_cast<char*>(kPeerBase) + 128);
+  EXPECT_EQ(win->ipcPeerIsCuMem[1], 1);
+  EXPECT_EQ(win->ipcPeerIsCuMem[2], 1);
+  // The retained handle is held only until every peer has imported.
+  EXPECT_EQ(base.release.calls, 1);
+
+  // Production closed each converted fd, so a second close must fail.
+  ASSERT_EQ(handedOutFds.size(), 2u);
+  for (int fd : handedOutFds) {
+    ASSERT_GE(fd, 0);
+    EXPECT_EQ(::close(fd), -1);
+    EXPECT_EQ(errno, EBADF);
+  }
+}
+
+// Branch: retain failing is how a plain hipMalloc buffer leaves the cuMem arm
+// under NCCL_CUMEM_ENABLE=1. CuMemImportBaseline's retain always succeeds, so
+// deleting the `== CUDA_SUCCESS` check on cuMemRetainAllocationHandle would
+// still leave that suite green and publish isCuMem with a zero handle. hipErrorInvalidValue
+// is nonzero, so that deletion takes the success arm; this case must stay on
+// legacy IPC and publish isCuMem == 0.
+TEST_F(WindowRegisterNonSymCuMemTest, RetainFails_FallsBackToLegacyIpc) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(8192));
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t*, void*) {
+    return hipErrorInvalidValue;
+  });
+  ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipSuccess; });
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) {
+                      ADD_FAILURE() << "a failed retain must not import peers as cuMem";
+                      return hipErrorInvalidValue;
+                    });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [this](void*, int*, int self, int size, void* buf, int) {
+                      auto* e = static_cast<ExchangeEntry*>(buf);
+                      publishedSelf = e[self];
+                      capturedSelf = true;
+                      for (int r = 0; r < size; r++) {
+                        e[r].hostHash = (r == self) ? peers[0].hostHash : 500 + r;
+                        e[r].pidHash = (r == self) ? peers[0].pidHash : 600 + r;
+                        e[r].userOffset = 0;
+                        e[r].userSize = 4096;
+                        e[r].allocSize = 8192;
+                        e[r].isCuMem = 0;
+                      }
+                      return ncclSuccess;
+                    });
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    if (ptr) *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  ASSERT_TRUE(capturedSelf);
+  EXPECT_EQ(retain.calls, 1);
+  EXPECT_EQ(ipcGet.calls, 1);
+  EXPECT_EQ(import.calls, 0);
+  EXPECT_EQ(publishedSelf.isCuMem, 0);
+
+  ncclDevrWindow* win = comm->devrState.winSorted[0].win;
+  ASSERT_EQ(win->ipcPeerCount, 3);
+  EXPECT_EQ(win->ipcPeerIsCuMem[1], 0);
+  EXPECT_EQ(win->ipcPeerIsCuMem[2], 0);
+  EXPECT_EQ(open.calls, 2);
+}
+
+// Branch: a cuMem peer is already mapped when a later one fails, so cleanup has
+// to pick the release that matches how each peer was opened. windowCloseIpcPeers
+// reads ipcPeerIsCuMem[r] to choose, and the refusal cases above all stop at the
+// first non-self peer or earlier, so no test has reached it with that flag set.
+// Rank 1 imports, rank 2 fails on the proxy fd, and rank 1's mapping must be
+// released with ncclCudaFree -- cudaIpcCloseMemHandle would leave the imported
+// handle pinned.
+TEST_F(WindowRegisterNonSymCuMemTest, PeerImportFailsAfterCuMemPeerMapped_ReleasesAsCuMem) {
+  CuMemImportBaseline base(kRetained, kPeerBase, GatherCuMemPeers(8192));
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  // Rank 1 gets a real fd and imports; rank 2 is refused, which is what drops
+  // the registration while rank 1 is already mapped.
+  int fdCalls = 0;
+  ScopedHook proxyFd(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int, void*, int* fd) {
+    if (++fdCalls == 2) return ncclSystemError;
+    const int dup3d = dup(STDERR_FILENO);
+    if (fd) *fd = dup3d;
+    return dup3d < 0 ? ncclSystemError : ncclSuccess;
+  });
+  // The two halves of the cuMem release. Taking the legacy close instead would
+  // leave both of these at zero.
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+  ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipSuccess; });
+  ScopedHook ipcClose(g_hipIpcCloseMemHandle, [](void*) {
+    ADD_FAILURE() << "a cuMem import must not be released with the legacy IPC close";
+    return hipSuccess;
+  });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+
+  EXPECT_EQ(proxyFd.calls, 2);
+  EXPECT_EQ(base.import.calls, 1);  // only rank 1 got far enough to import
+  // Rank 1's mapping went back through the cuMem path exactly once. Rank 2 never
+  // recorded an alloc base, so it contributes nothing to either count.
+  EXPECT_EQ(unmap.calls, 1);
+  EXPECT_EQ(addrFree.calls, 1);
+  EXPECT_EQ(ipcClose.calls, 0);
+}
+
+// Branch: the handle-type term on the exporter and the importer. SetUp pins
+// POSIX-FD for the rest of this suite, so without a NonPosix case the term is
+// deletable: the importer already refuses on !ncclCuMemEnable() alone, and the
+// exporter's retain never runs under a NonPosix type. kMemHandleTypeNonPosix is
+// the same constant the segment suites use.
+TEST_F(WindowRegisterNonSymCuMemTest, NonPosixHandleType_RefusesCuMemPeerImport) {
+  ncclCuMemHandleType = kMemHandleTypeNonPosix;
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t*, void*) {
+    ADD_FAILURE() << "NonPosix handle type must not enter the retain arm";
+    return hipSuccess;
+  });
+  // Own export falls through to legacy IPC; give it a handle so gather runs.
+  ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipSuccess; });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    GatherPeersWith([](ExchangeEntry& e, int r, int self) {
+                      e.isCuMem = (r == self) ? 0 : 1;
+                      if (r != self) e.cuMemHandle = 0xAB00 + r;
+                    }));
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void**, hipIpcMemHandle_t, unsigned int) {
+    ADD_FAILURE() << "a cuMem peer under a NonPosix handle type must be refused before legacy open";
+    return hipErrorInvalidValue;
+  });
+  ScopedHook proxyFd(g_ncclProxyClientGetFdBlocking, [](ncclComm*, int, void*, int*) {
+    ADD_FAILURE() << "NonPosix must not reach the POSIX-FD proxy import";
+    return ncclSystemError;
+  });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(retain.calls, 0);
+  EXPECT_EQ(open.calls, 0);
+  EXPECT_EQ(proxyFd.calls, 0);
+  EXPECT_EQ(ipcGet.calls, 1);
+}
+
+// Branch: the retained handle covers one VMM segment but the window spans more
+// than one, so ExchangeEntry's single handle and size cannot describe it.
+// Registration is refused here rather than at every importing peer.
+//
+// Legacy IPC is not an alternative for this case. cudaIpcGetMemHandle would
+// export the first segment while userOffset + userSize still runs past it, so
+// the entry fails the importer's bound check on every remote rank -- a success
+// locally and a failure everywhere else. The exchange never happens at all now,
+// which is what the gather assertion pins.
+TEST_F(WindowRegisterNonSymCuMemTest, MultiSegmentWindow_FailsRegistrationWithoutGathering) {
+  CuMemImportBaseline base(kRetained, kPeerBase, GatherCuMemPeers(4096));
+  // 2 KiB segments under a 4 KiB window: the first query sizes the retained
+  // segment, the walk then totals two of them.
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(2048));
+  ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) {
+    ADD_FAILURE() << "a multi-segment window must not fall back to the legacy export";
+    return hipSuccess;
+  });
+  ScopedHook proxyFd(g_ncclProxyClientGetFdBlocking, [](ncclComm*, int, void*, int*) {
+    ADD_FAILURE() << "nothing may be imported once the window is refused";
+    return ncclSystemError;
+  });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+
+  EXPECT_EQ(ipcGet.calls, 0);
+  EXPECT_EQ(proxyFd.calls, 0);
+  EXPECT_FALSE(capturedSelf) << "the refusal must precede the all-gather";
+  // The retained handle is still released on the failure path.
+  EXPECT_EQ(base.release.calls, 1);
+}
+
+// Branch: the address-range walk fails on a later segment. The first query at
+// the retain path already succeeded, so a failure inside ncclCuMemGetAddressRange
+// means the window ran past its first segment -- the same refusal as a
+// rangeSize > retainedSize result, not a fall-through that exports the first
+// segment alone.
+TEST_F(WindowRegisterNonSymCuMemTest, LaterSegmentAddressRangeFails_FailsRegistrationWithoutGathering) {
+  CuMemImportBaseline base(kRetained, kPeerBase, GatherCuMemPeers(4096));
+  int rangeCalls = 0;
+  ScopedHook range(g_hipMemGetAddressRange, [&](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+    // Call 1: cuMemGetAddressRange before retain. Call 2: first walk iteration
+    // (same segment). Call 3: second segment -- refuse here.
+    if (++rangeCalls >= 3) return hipErrorInvalidValue;
+    if (pbase) *pbase = dptr;
+    if (psize) *psize = 2048;
+    return hipSuccess;
+  });
+  ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) {
+    ADD_FAILURE() << "a multi-segment window must not fall back to the legacy export";
+    return hipSuccess;
+  });
+  ScopedHook proxyFd(g_ncclProxyClientGetFdBlocking, [](ncclComm*, int, void*, int*) {
+    ADD_FAILURE() << "nothing may be imported once the window is refused";
+    return ncclSystemError;
+  });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_GE(rangeCalls, 3);
+  EXPECT_EQ(ipcGet.calls, 0);
+  EXPECT_EQ(proxyFd.calls, 0);
+  EXPECT_FALSE(capturedSelf);
+  EXPECT_EQ(base.release.calls, 1);
 }
 
 
@@ -3437,6 +4449,29 @@ TEST_F(DevrWindowRegisterInGroupTest, NoSymmetricSupport_RoutesToNonSymHelper) {
   EXPECT_EQ(comm->devrState.winSorted[0].win->memory, nullptr);
 }
 
+// Default cuMemSupport is 0. The retain probe faults on ROCm 7.0.2.2, so
+// that guard has to keep g_hipMemRetainAllocationHandle from running. The
+// address-range hook only exists so a missing guard fails this assertion
+// instead of spinning on the zero-size default. Local cuMem stays on: a peer
+// without cuMem must skip the probe on every rank alike.
+TEST_F(DevrWindowRegisterInGroupTest, CuMemDisabled_SkipsRetainProbe) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t* h, void*) {
+    if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+    return hipSuccess;
+  });
+  ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+    if (pbase) *pbase = dptr;
+    if (psize) *psize = 4096;
+    return hipSuccess;
+  });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(retain.calls, 0);
+  EXPECT_EQ(range.calls, 0);
+}
+
 // The local registration handle is threaded through to the helper, which stores
 // it on the window for its own teardown to release.
 TEST_F(DevrWindowRegisterInGroupTest, PassesLocalRegHandleToHelper) {
@@ -3479,6 +4514,224 @@ TEST_F(DevrWindowRegisterInGroupTest, NonSymHelperFails_ReleasesLocalRegistratio
   EXPECT_EQ(out, nullptr);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
+
+// A host-VMM rank used to return at fail_locReg before the IPC allgather, so a
+// device peer hung in windowRegisterNonSym. Allgather a host/device bit first.
+TEST_F(DevrWindowRegisterInGroupTest, HostVmmLsaTeam_AllgathersThenRejects) {
+  comm->nRanks = 2;
+  comm->localRanks = 2;
+  comm->devrState.lsaSize = 2;
+  comm->devrState.lsaSelf = 0;
+  lsaRankList.assign({0, 1});
+  comm->devrState.lsaRankList = lsaRankList.data();
+  peers.assign(2, ncclPeerInfo{});
+  comm->peerInfo = peers.data();
+
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  comm->cuMemSupport = 1;
+  ScopedHook memType(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute attr, hipDeviceptr_t) {
+    if (data && attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
+      *static_cast<hipMemoryType*>(data) = hipMemoryTypeHost;
+    }
+    return hipSuccess;
+  });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, [](void*, int*, int, int, void*, int) { return ncclSuccess; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// Device rank must wait for the host peer's bit instead of entering the IPC
+// exchange alone.
+TEST_F(DevrWindowRegisterInGroupTest, DevicePeerHostVmm_AllgathersThenRejects) {
+  comm->nRanks = 2;
+  comm->localRanks = 2;
+  comm->devrState.lsaSize = 2;
+  comm->devrState.lsaSelf = 0;
+  lsaRankList.assign({0, 1});
+  comm->devrState.lsaRankList = lsaRankList.data();
+  peers.assign(2, ncclPeerInfo{});
+  comm->peerInfo = peers.data();
+
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  comm->cuMemSupport = 1;
+  ScopedHook ptrAttr(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute attr, hipDeviceptr_t) {
+    if (data && attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
+      *static_cast<hipMemoryType*>(data) = hipMemoryTypeDevice;
+    }
+    if (data && attr == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) {
+      *static_cast<int*>(data) = 1;  // skip the retain walk; this rank is not host VMM
+    }
+    return hipSuccess;
+  });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, [](void*, int*, int self, int, void* buf, int) {
+    auto* kinds = static_cast<int*>(buf);
+    kinds[self] = 0;
+    kinds[1] = 1;
+    return ncclSuccess;
+  });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// A classify failure used to return before the allgather, so the other rank
+// waited in it forever. Kind 2 is how the team agrees the probe failed.
+TEST_F(DevrWindowRegisterInGroupTest, ProbeFailure_AllgathersBeforeReturning) {
+  comm->nRanks = 2;
+  comm->localRanks = 2;
+  comm->devrState.lsaSize = 2;
+  comm->devrState.lsaSelf = 0;
+  lsaRankList.assign({0, 1});
+  comm->devrState.lsaRankList = lsaRankList.data();
+  peers.assign(2, ncclPeerInfo{});
+  comm->peerInfo = peers.data();
+
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  comm->cuMemSupport = 1;
+  ScopedHook memType(g_hipPointerGetAttribute,
+                     [](void*, hipPointer_attribute, hipDeviceptr_t) { return hipErrorInvalidValue; });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, [](void*, int*, int self, int, void* buf, int) {
+    static_cast<int*>(buf)[self] = 2;
+    return ncclSuccess;
+  });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_EQ(out, nullptr);
+}
+
+#if NCCL_VER_GE(HIP_VERSION, ROCM_VER_7_12_60540)
+// An address range can report base 0; the IPC-capability query must then use userPtr, not address 0.
+TEST_F(DevrWindowRegisterInGroupTest, ProbeZeroBase_QueriesUserPtr) {
+  comm->devrState.lsaSize = 2;
+  comm->devrState.lsaSelf = 0;
+  lsaRankList.assign({0, 1});
+  comm->devrState.lsaRankList = lsaRankList.data();
+  comm->cuMemSupport = 1;
+
+  ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t) {
+    if (pbase) *pbase = 0;
+    if (psize) *psize = 4096;
+    return hipSuccess;
+  });
+  ScopedHook ptrAttr(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute attr, hipDeviceptr_t ptr) {
+    if (data && attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) *static_cast<hipMemoryType*>(data) = hipMemoryTypeDevice;
+    if (attr == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) {
+      if (ptr == 0) return hipErrorInvalidValue;
+      if (data) *static_cast<int*>(data) = 1;
+    }
+    return hipSuccess;
+  });
+  int localKind = -1;
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, [&](void*, int*, int self, int, void* buf, int) {
+    localKind = static_cast<int*>(buf)[self];
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(rcclDevrProbeNonSymWindow(comm, kUserPtr, 4096, 0), ncclSuccess);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_EQ(localKind, 0);
+}
+#endif
+
+#if NCCL_VER_GE(HIP_VERSION, ROCM_VER_7_12_60540) && NCCL_CUMEM_HOST_GATE
+// The retain walk, not the first page, decides a mixed window. A device page
+// followed by a host page must still reject before cudaIpcGetMemHandle.
+TEST_F(DevrWindowRegisterInGroupTest, DeviceFirstPageHostTail_AllgathersThenRejects) {
+  comm->nRanks = 2;
+  comm->localRanks = 2;
+  comm->devrState.lsaSize = 2;
+  comm->devrState.lsaSelf = 0;
+  lsaRankList.assign({0, 1});
+  comm->devrState.lsaRankList = lsaRankList.data();
+  peers.assign(2, ncclPeerInfo{});
+  comm->peerInfo = peers.data();
+
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  comm->cuMemSupport = 1;
+  ScopedHook ptrAttr(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute attr, hipDeviceptr_t) {
+    if (data && attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
+      *static_cast<hipMemoryType*>(data) = hipMemoryTypeDevice;
+    }
+    if (data && attr == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) {
+      *static_cast<int*>(data) = 0;
+    }
+    return hipSuccess;
+  });
+  ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+    if (pbase) *pbase = dptr;
+    if (psize) *psize = 4096;
+    return hipSuccess;
+  });
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t* h, void*) {
+    if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
+    return hipSuccess;
+  });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  int propCalls = 0;
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [&](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = propCalls == 0 ? hipMemLocationTypeDevice : kLocHost;
+                     }
+                     propCalls++;
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, [](void*, int*, int, int, void*, int) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 8192, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_EQ(out, nullptr);
+}
+#elif !NCCL_VER_GE(HIP_VERSION, ROCM_VER_7_12_60540)
+// 7.0.2.x cannot retain. The same mixed window is classified by MEMORY_TYPE
+// on each mapping, not by the first page alone.
+TEST_F(DevrWindowRegisterInGroupTest, DeviceFirstPageHostTail_AllgathersThenRejects) {
+  comm->nRanks = 2;
+  comm->localRanks = 2;
+  comm->devrState.lsaSize = 2;
+  comm->devrState.lsaSelf = 0;
+  lsaRankList.assign({0, 1});
+  comm->devrState.lsaRankList = lsaRankList.data();
+  peers.assign(2, ncclPeerInfo{});
+  comm->peerInfo = peers.data();
+
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  comm->cuMemSupport = 1;
+  ScopedHook ptrAttr(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute attr, hipDeviceptr_t ptr) {
+    if (data && attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
+      *static_cast<hipMemoryType*>(data) =
+          ptr == reinterpret_cast<hipDeviceptr_t>(0x100000) ? hipMemoryTypeDevice : hipMemoryTypeHost;
+    }
+    return hipSuccess;
+  });
+  ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+    if (pbase) *pbase = dptr;
+    if (psize) *psize = 4096;
+    return hipSuccess;
+  });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, [](void*, int*, int, int, void*, int) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 8192, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_EQ(out, nullptr);
+}
+#endif
 
 
 // ---------------------------------------------------------------------------
@@ -3574,24 +4827,49 @@ TEST_F(DevrWindowRegisterInGroupSymTest, WithoutCollSymmetricFlag_SkipsSymKernel
   EXPECT_EQ(symk.calls, 0);
 }
 
+// Branch: stream creation fails after symMemoryObtain. The fail label must
+// destroy that memory and release the local registration, and must not
+// destroy a stream that was never created.
+TEST_F(DevrWindowRegisterInGroupSymTest, StreamCreateFails_UnwindsObtainedMemory) {
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook create(g_hipStreamCreateWithFlags,
+                    [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipSuccess; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  EXPECT_EQ(create.calls, 1);
+  EXPECT_EQ(destroy.calls, 0);
+  EXPECT_EQ(dereg.calls, 1);
+  // One cuMemRelease from ncclCuMemGetAddressRange's sysmem probe, plus one
+  // from symMemoryDestroy for this memory's single segment.
+  EXPECT_EQ(release.calls, 2);
+}
+
 // Branch: the deepest rollback. cudaStreamSynchronize is the only checked call
 // that jumps to fail_locReg_memHandle_mem_stream_win, so failing it is what
-// drives symWindowDestroy and the labels below it.
+// drives symWindowDestroy and the labels below it. Window destroy already
+// frees the backing memory; fallthrough must not unmap/release it again.
 TEST_F(DevrWindowRegisterInGroupSymTest, StreamSyncFails_UnwindsTheCreatedWindow) {
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook sync(g_hipStreamSynchronize, [](hipStream_t) { return hipErrorInvalidValue; });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
   EXPECT_EQ(out, nullptr);                          // the caller's handle is cleared
   EXPECT_EQ(comm->devrState.winSortedCount, 0);     // and the window left no trace
-
-  // dereg.calls is deliberately not asserted. This label deregisters the local
-  // registration twice: symWindowDestroy releases win->localRegHandle, which
-  // symWindowCreate set to the very handle this function then releases again at
-  // fail_locReg. See AICOMRCCL-2180 finding 17. Pinning either count would lock
-  // that in, so only the unwind's observable outcome is checked.
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  EXPECT_EQ(dereg.calls, 1);  // localReg transferred to the window; not deregistered twice
+  // One cuMemRelease from ncclCuMemGetAddressRange's sysmem probe, plus one from
+  // the window's backing-memory destroy. A second destroy of that memory would
+  // make this 3.
+  EXPECT_EQ(release.calls, 2);
 }
 
 // Branch: the closing barrier is NCCLCHECKGOTO'd at the same depth, so its
@@ -3600,12 +4878,15 @@ TEST_F(DevrWindowRegisterInGroupSymTest, ClosingBarrierFails_UnwindsTheCreatedWi
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook barrier(g_devrBootstrapBarrier, [](void*, int, int, int) { return ncclSystemError; });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
   EXPECT_EQ(out, nullptr);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
-  // Same double-deregister as above (AICOMRCCL-2180 finding 17); not asserted.
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(release.calls, 2);
 }
 
 // Branch: the window-map insert is the last checked call before success.
@@ -3614,12 +4895,16 @@ TEST_F(DevrWindowRegisterInGroupSymTest, MapInsertFails_UnwindsTheCreatedWindow)
   ScopedHook insert(g_devrIntruAddressMapInsert,
                     [](ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*) { return ncclSystemError; });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
   EXPECT_EQ(out, nullptr);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
   EXPECT_EQ(insert.calls, 1);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(release.calls, 2);
 }
 
 // Branch: resolving the allocation fails, so nothing is registered.
@@ -3657,20 +4942,10 @@ TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgument
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
-// Branch: CPU-backed segments need the elastic-buffer param, and are rejected
-// with a specific code when it is off rather than failing later.
-//
-// Both this and the accepting case below depend on hipMemLocationTypeHost being
-// recognised as CPU-backed, which ncclSymIsHostSegment only does at
-// ROCM_VERSION >= 71200 (ncclSymIsHostSegment). Below that the segment is instead
-// rejected as an unsupported location type -- which for this test is the same
-// return code for an entirely different reason, so it would pass without
-// exercising the elastic-buffer gate at all.
-//
-// Compiled out rather than skipped at run time: below 7.12 the enumerator
-// itself does not exist (hip/driver_types.h stops at Device), so naming it
-// would not compile on the ROCm 7.0.2 backwards-compatibility build.
-#if ROCM_VERSION >= 71200
+// CPU-backed segments need the elastic-buffer param. Compiled only inside
+// NCCL_CUMEM_HOST_VERSION_SUPPORTED so the reject is that gate, not an
+// unsupported location type.
+#if NCCL_CUMEM_HOST_GATE
 TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithoutElasticParam_ReturnsInvalidArgument) {
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, SegmentsOfType(kLocHost));
@@ -3686,8 +4961,8 @@ TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithoutElasticParam_Return
 }
 
 // Branch: with the param on, the same CPU-backed layout is accepted.
-// Same ROCM_VERSION dependency as the case above -- here it is load-bearing
-// rather than masked: below 7.12 the registration is rejected outright.
+// Same host-VMM window as the case above -- here it is load-bearing rather
+// than masked: outside the window the registration is rejected outright.
 TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithElasticParam_Registers) {
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, SegmentsOfType(kLocHost));
@@ -3696,7 +4971,20 @@ TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithElasticParam_Registers
   ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
   EXPECT_EQ(comm->devrState.winSortedCount, 1);
 }
-#endif  // ROCM_VERSION >= 71200
+#endif  // NCCL_CUMEM_HOST_GATE
+
+// Device windows must still register when elastic is off. g_loadParam avoids
+// NCCL_PARAM's first-read cache. An always-invalid helper would fail this.
+TEST_F(DevrWindowRegisterInGroupSymTest, DeviceSegmentWithoutElasticParam_Registers) {
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "ELASTIC_BUFFER_REGISTER" ? 0 : deftVal;
+  });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 1);
+}
 
 // Branch: a segment that is neither host nor device is rejected -- symmetric
 // memory has no mapping strategy for anything else.
@@ -4058,6 +5346,10 @@ protected:
     g_ncclTeamLsa   = [](ncclComm_t) { return ncclTeam_t{4, 0, 1}; };
   }
   void TearDown() override {
+    // g_ncclTeamLsa lives in devcomm_fakes, which ResetDevRuntimeMicroFakes
+    // does not own; without this it stays a 4-rank team for the rest of the
+    // binary and any later test relying on the default spanning the comm fails.
+    ResetDevcommFakes();
     ResetDevRuntimeMicroFakes();
     DevrWorldToLsaRankTest::TearDown();
   }
@@ -4204,6 +5496,13 @@ TEST_F(DevrGetLsaRankPtrTest, RankPastTeam_ReturnsInvalidArgument) {
   EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, comm->devrState.lsaSize, &out), ncclInvalidArgument);
 }
 
+// Boundary: a negative rank; a missing check would resolve below the flat base, outside every rank's slot.
+TEST_F(DevrGetLsaRankPtrTest, NegativeRank_ReturnsInvalidArgument) {
+  void* out = nullptr;
+  EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, -1, &out), ncclInvalidArgument);
+  EXPECT_EQ(out, nullptr);
+}
+
 // Branch: a non-symmetric window targeting ourselves resolves against the local
 // window base, not the flat space -- which does not apply to it.
 TEST_F(DevrGetLsaRankPtrTest, NonSymmetricSelfTarget_UsesLocalBase) {
@@ -4249,6 +5548,19 @@ TEST_F(DevrGetLsaRankPtrTest, IpcWindowRankPastTable_ReturnsInvalidArgument) {
 
   void* out = nullptr;
   EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, 5, &out), ncclInvalidArgument);
+}
+
+// Boundary: a negative rank must not index the IPC table; a mapped sentinel at [-1] makes a missing check succeed.
+TEST_F(DevrGetLsaRankPtrTest, IpcWindowNegativeRank_ReturnsInvalidArgument) {
+  comm->symmetricSupport = 0;
+  peerPtrs = {reinterpret_cast<void*>(0x5000), reinterpret_cast<void*>(0xA000), reinterpret_cast<void*>(0xB000),
+              reinterpret_cast<void*>(0xC000)};
+  win.ipcPeerPtrs = peerPtrs.data() + 1;
+  win.ipcPeerCount = 3;
+
+  void* out = nullptr;
+  EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, -1, &out), ncclInvalidArgument);
+  EXPECT_EQ(out, nullptr);
 }
 
 
@@ -4709,6 +6021,38 @@ TEST_F(DeepCopyDevCommRequirementsTest, DuplicatesResourceListNodes) {
   EXPECT_EQ(dst->resourceRequirementsList->next->next, nullptr);  // list terminated
 }
 
+// Each node's GIN signal and counter requests, and the pointers that receive
+// their start indices, survive the copy: the deferred create sizes the devComm
+// and writes those start indices from the copy alone.
+TEST_F(DeepCopyDevCommRequirementsTest, CopiesResourceNodeGinFields) {
+  ncclGinSignal_t signalStart1 = 0, signalStart2 = 0;
+  ncclGinCounter_t counterStart1 = 0, counterStart2 = 0;
+  res1.ginSignalCount = 8;
+  res1.ginCounterCount = 2;
+  res1.outGinSignalStart = &signalStart1;
+  res1.outGinCounterStart = &counterStart1;
+  res2.ginSignalCount = 4;
+  res2.ginCounterCount = 1;
+  res2.outGinSignalStart = &signalStart2;
+  res2.outGinCounterStart = &counterStart2;
+  res1.next = &res2;
+  src.resourceRequirementsList = &res1;
+
+  ASSERT_EQ(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  ncclDevResourceRequirements* copy1 = dst->resourceRequirementsList;
+  ASSERT_NE(copy1, nullptr);
+  EXPECT_EQ(copy1->ginSignalCount, 8);
+  EXPECT_EQ(copy1->ginCounterCount, 2);
+  EXPECT_EQ(copy1->outGinSignalStart, &signalStart1);
+  EXPECT_EQ(copy1->outGinCounterStart, &counterStart1);
+  ncclDevResourceRequirements* copy2 = copy1->next;
+  ASSERT_NE(copy2, nullptr);
+  EXPECT_EQ(copy2->ginSignalCount, 4);
+  EXPECT_EQ(copy2->ginCounterCount, 1);
+  EXPECT_EQ(copy2->outGinSignalStart, &signalStart2);
+  EXPECT_EQ(copy2->outGinCounterStart, &counterStart2);
+}
+
 // The team list likewise.
 TEST_F(DeepCopyDevCommRequirementsTest, DuplicatesTeamListNodes) {
   team1.multimem = true;
@@ -4928,6 +6272,33 @@ TEST_F(CommQueryPropertiesTest, SingleClique_ReportsMultimemSupport) {
 
   ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
   EXPECT_NE(props.multimemSupport, 0);
+}
+
+// ginSupport[] lists the backends this communicator can create a devComm on.
+TEST_F(CommQueryPropertiesTest, LiveGinBackend_ReportsGinSupport) {
+  auto sharedRes = std::make_unique<ncclSharedResources>();
+  comm->sharedRes = sharedRes.get();
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  sharedRes->ginState.numActiveBackends = 1;
+  sharedRes->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_TRUE(props.ginSupport[NCCL_GIN_TYPE_PROXY]);
+}
+
+// AICOMRCCL-2739: after a splitShare sibling's host finalize, the surviving
+// comm keeps globalGinSupport and the backend records, but every GIN devComm
+// create on it fails, so it must not advertise them.
+TEST_F(CommQueryPropertiesTest, FinalizedGinBackend_ReportsNoGinSupport) {
+  auto sharedRes = std::make_unique<ncclSharedResources>();
+  comm->sharedRes = sharedRes.get();
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  sharedRes->ginState.numActiveBackends = 1;
+  sharedRes->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  sharedRes->ginState.finalized = true;
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_FALSE(props.ginSupport[NCCL_GIN_TYPE_PROXY]);
 }
 
 // Branch: an uninitialised properties struct is rejected, since its version and

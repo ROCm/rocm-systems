@@ -59,13 +59,14 @@ constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
 // that peer's packets. The self column copies locally; other columns scatter
 // then poll.
 // slotPkts is the packet stride between rank columns. 0 means the host-DDA
-// default (kDdaLLA2ASlotStridePkts, 16 MiB). GIN's carved tail is much smaller
-// and must pass ginFabricLlA2ASlotPkts(nRanks, fabricA2AScratchBytes).
-template <typename T, int NRANKS_CT>
+// default (kDdaLLA2ASlotStridePkts, kDdaLLMaxBytes). GIN's carved tail is much
+// smaller and must pass ginFabricLlA2ASlotPkts(nRanks, fabricA2AScratchBytes).
+// `abort` ends the poll early (see ddaLLWaitLine); the epoch is still published.
+template <typename T, int NRANKS_CT, typename Abort>
 __device__ __forceinline__ void ddaAllToAllFabricLLBody(
     T* const* __restrict__ peerScratch, T* __restrict__ recvbuff, const T* __restrict__ sendbuff,
     size_t perChunkBytes, int selfRank, int nRanksRt, uint32_t* __restrict__ epochDev, int epochLen,
-    int nChunksRt = 0, size_t slotPkts = 0) {
+    Abort const& abort, int nChunksRt = 0, size_t slotPkts = 0) {
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;
   if (peer >= nRanks) return;
@@ -122,9 +123,9 @@ __device__ __forceinline__ void ddaAllToAllFabricLLBody(
     uint32_t* out = reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(recvbuff) + (size_t)peer * perChunkBytes);
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
-      do {
-        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
+      if (!ddaLLWaitLine(&src[pk], flag, abort, d0, f0, d1, f1)) {
+        break; // poll is the outermost loop; the ddaSetLLEpoch below still runs
+      }
       out[2 * pk] = d0;
       out[2 * pk + 1] = d1;
     }

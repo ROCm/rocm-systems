@@ -7,12 +7,9 @@
 # section with the bundled AMDGPU device code. The code object loader
 # (Executable) extracts and parses the device ELF from this section.
 #
-# Requires an ROCm installation with amdclang++. When the compiler is not
-# found the kernel targets are silently skipped and tests that depend on them
-# are disabled at runtime via the HAS_DEVICE_KERNELS compile definition.
-
-include(rj_find_amdcxx)
-rj_find_amdcxx(AMDCXX)
+# Requires a working ROCm HIP toolchain. When it is unavailable, the kernel
+# targets are skipped and tests that depend on them are disabled at runtime
+# via the HAS_DEVICE_KERNELS compile definition.
 
 if(NOT AMDCXX)
     message(
@@ -27,6 +24,10 @@ if(DEFINED SKIP_DEVICE_KERNELS AND SKIP_DEVICE_KERNELS)
         STATUS
         "SKIP_DEVICE_KERNELS set - device kernel tests will be disabled"
     )
+    return()
+endif()
+
+if(NOT RJ_HAS_HIP_KERNEL_TOOLCHAIN)
     return()
 endif()
 
@@ -50,21 +51,12 @@ rj_add_device_kernel(multikernel_indirect_branch gfx950)
 rj_add_device_kernel(multikernel_indirect_branch_part0 gfx950)
 rj_add_device_kernel(multikernel_indirect_branch_part1 gfx950)
 
-# gfx1250 was added after older installed ROCm compilers. Probe the selected
-# compiler before registering this fixture so a checkout remains buildable with
-# an otherwise supported toolchain. `-nogpulib` keeps the probe independent of
-# device-library packaging; the real custom command still uses ROCM_PATH.
-execute_process(
-    COMMAND
-        ${AMDCXX} -x hip --offload-arch=gfx1250 -nogpulib --cuda-device-only -c
-        /dev/null -o /dev/null
-    RESULT_VARIABLE RJ_AMDCXX_SUPPORTS_GFX1250
-    OUTPUT_QUIET
-    ERROR_QUIET
-)
+# gfx1250 was added after older installed ROCm compilers. Keep the fixture
+# optional for toolchains that cannot parse it.
+rj_amdcxx_supports_arch(RJ_AMDCXX_SUPPORTS_GFX1250 "${AMDCXX}" gfx1250)
 set(HAS_GFX1250_DEVICE_KERNELS FALSE)
 set(RJ_GFX1250_DEVICE_KERNEL_TARGET)
-if(RJ_AMDCXX_SUPPORTS_GFX1250 EQUAL 0)
+if(RJ_AMDCXX_SUPPORTS_GFX1250)
     rj_add_device_kernel(relocation_function_table_dispatch gfx1250)
     set(HAS_GFX1250_DEVICE_KERNELS TRUE)
     set(RJ_GFX1250_DEVICE_KERNEL_TARGET
@@ -74,6 +66,41 @@ else()
     message(
         STATUS
         "gfx1250 device kernel tests disabled (selected amdclang++ does not support gfx1250)"
+    )
+endif()
+
+# Probe the selected device compiler before registering gfx1251 fixtures so a
+# toolchain that predates the target can still build the rest of the suite.
+execute_process(
+    COMMAND
+        ${AMDCXX} -x hip --offload-arch=gfx1251 -nogpulib --cuda-device-only -c
+        /dev/null -o /dev/null
+    RESULT_VARIABLE RJ_AMDCXX_SUPPORTS_GFX1251
+    OUTPUT_QUIET
+    ERROR_QUIET
+)
+set(HAS_GFX1251_DEVICE_KERNELS FALSE)
+set(RJ_GFX1251_DEVICE_KERNEL_TARGETS)
+if(RJ_AMDCXX_SUPPORTS_GFX1251 EQUAL 0)
+    rj_add_device_kernel(
+        vector_add
+        gfx1251
+        OUTPUT_NAME vector_add_gfx1251
+    )
+    rj_add_device_kernel(
+        matmul_naive
+        gfx1251
+        OUTPUT_NAME matmul_naive_gfx1251
+    )
+    set(HAS_GFX1251_DEVICE_KERNELS TRUE)
+    set(RJ_GFX1251_DEVICE_KERNEL_TARGETS
+        kernel_vector_add_gfx1251
+        kernel_matmul_naive_gfx1251
+    )
+else()
+    message(
+        STATUS
+        "gfx1251 device kernel tests disabled (selected amdclang++ does not support gfx1251)"
     )
 endif()
 
@@ -169,6 +196,13 @@ if(RJ_INSTALL_TESTS)
         list(
             APPEND RJ_DEVICE_KERNEL_FIXTURES
             ${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch.o
+        )
+    endif()
+    if(HAS_GFX1251_DEVICE_KERNELS)
+        list(
+            APPEND RJ_DEVICE_KERNEL_FIXTURES
+            ${KERNEL_OUTPUT_DIR}/vector_add_gfx1251.o
+            ${KERNEL_OUTPUT_DIR}/matmul_naive_gfx1251.o
         )
     endif()
     install(
@@ -269,6 +303,7 @@ add_custom_target(
         kernel_multikernel_indirect_branch_part1
         ${RJ_GFX1250_DEVICE_KERNEL_TARGET}
         ${RJ_GFX1250_DBT_FIXTURE_TARGET}
+        ${RJ_GFX1251_DEVICE_KERNEL_TARGETS}
         kernel_triton_cdna4_matmul_dynamic_32x32x64
         kernel_triton_cdna4_matmul_buffer_async_1024
         kernel_triton_cdna4_flash_attention_no_async_1024
@@ -293,6 +328,7 @@ endif()
 # Export variables to the parent scope so the test executable can use them.
 set(HAS_DEVICE_KERNELS TRUE PARENT_SCOPE)
 set(HAS_GFX1250_DEVICE_KERNELS ${HAS_GFX1250_DEVICE_KERNELS} PARENT_SCOPE)
+set(HAS_GFX1251_DEVICE_KERNELS ${HAS_GFX1251_DEVICE_KERNELS} PARENT_SCOPE)
 set(HAS_GFX1250_DBT_FIXTURE ${HAS_GFX1250_DBT_FIXTURE} PARENT_SCOPE)
 set(HAS_PROBE_FIXTURES ${HAS_PROBE_FIXTURES} PARENT_SCOPE)
 set(KERNEL_OUTPUT_DIR ${KERNEL_OUTPUT_DIR} PARENT_SCOPE)

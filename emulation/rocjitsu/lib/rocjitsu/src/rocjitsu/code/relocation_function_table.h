@@ -57,6 +57,16 @@ struct RelocationFunctionTable {
   std::vector<RelocationFunctionPointer> entries;
 };
 
+/// @brief Exact extent of one sized `STT_FUNC` symbol in `.text`.
+///
+/// @details Both fields are byte offsets relative to the code object's single `.text` section.
+/// The size comes from the symbol's `st_size`; it is not inferred from the next symbol, because
+/// linkers may place non-code alignment padding between function symbols.
+struct TextFunctionSymbolRange {
+  uint64_t start_offset = 0;
+  uint64_t size = 0;
+};
+
 /// @brief One dynamically indexed table load feeding a call-like scalar PC swap.
 ///
 /// @details This record connects source CFG recovery with final text patching.
@@ -143,6 +153,19 @@ analyze_relocation_pairs(std::span<const std::unique_ptr<BasicBlock>> blocks,
 /// not returned.
 [[nodiscard]] std::vector<RelocationFunctionTable>
 discover_relocation_function_tables(const AmdGpuCodeObject &object);
+
+/// @brief Exact `.text`-relative extents of every valid sized `STT_FUNC` symbol.
+///
+/// @details A returned range is nonempty, instruction-word aligned, and wholly contained in the
+/// code object's single `.text` section. Its size is the ELF symbol's `st_size`, so gaps between
+/// symbols remain excluded. Unlike discover_text_function_symbol_offsets(), this function
+/// validates the complete symbol extent rather than only its entry offset. Invalid or duplicate
+/// ranges are ignored.
+///
+/// @returns Ranges sorted by `(start_offset, size)`. Empty when the object has no symbol table,
+/// more than one `.text`, or no qualifying symbol.
+[[nodiscard]] std::vector<TextFunctionSymbolRange>
+discover_text_function_symbol_ranges(const AmdGpuCodeObject &object);
 
 /// @brief `.text`-relative offsets of every sized `STT_FUNC` symbol in the code object.
 ///

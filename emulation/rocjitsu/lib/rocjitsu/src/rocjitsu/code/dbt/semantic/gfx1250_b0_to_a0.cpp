@@ -1674,13 +1674,14 @@ void append_gfx1250_f32_to_e5m3(std::vector<uint32_t> &words, uint16_t source, u
       0x380u);
 
   // E5M3 subnormals have a constant 2^-17 quantum. Scaling by 2^17 is exact
-  // in F32, so a direct nearest-integer conversion implements RNE without an
-  // intermediate-format rounding step.
+  // in F32. Round to an integral F32 with ties to even before converting to
+  // integer; V_CVT_NEAREST_I32_F32 instead rounds ties toward positive infinity.
   append_literal(cdna5::kVMulF32Vop3,
                  {.vdst = static_cast<uint8_t>(temp), .src0 = 255, .src1 = gfx1250_vgpr_src(out)},
                  0x48000000u);
-  append_words(words,
-               cdna5::build_vop3(cdna5::kVCvtNearestI32F32Vop3, {.vdst = static_cast<uint8_t>(temp),
+  append_words(words, cdna5::build_vop3(cdna5::kVRndneF32Vop3, {.vdst = static_cast<uint8_t>(temp),
+                                                                .src0 = gfx1250_vgpr_src(temp)}));
+  append_words(words, cdna5::build_vop3(cdna5::kVCvtU32F32Vop3, {.vdst = static_cast<uint8_t>(temp),
                                                                  .src0 = gfx1250_vgpr_src(temp)}));
   append_words(words,
                cdna5::build_vop3(cdna5::kVCndmaskB32Vop3, {.vdst = static_cast<uint8_t>(out),
@@ -2535,10 +2536,10 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
     // giving +infinity when the mode is clear and 65504.0 when it is set.
     // Do this in the low scratch bank before selecting each destination bank.
     //
-    // V_MAXIMUM_F32 and V_MINIMUM_F32 return the canonical quiet NaN, so a NaN
-    // result keeps its NaN class but loses the sign and payload the source
-    // instruction would have produced. IEEE 754 leaves both uninterpreted and
-    // the ISA promises only that a NaN input yields a NaN output.
+    // The emulator's V_MAXIMUM_F32 and V_MINIMUM_F32 return the first NaN
+    // quieted, keeping its sign and payload, so a NaN result keeps its NaN
+    // class. That is the current model, not verified on CDNA5 hardware; the ISA
+    // promises only that a NaN input yields a NaN output.
     append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
     const uint16_t limit = static_cast<uint16_t>(scratch.lease->base + 8u);
     append_words(words, cdna5::build_vop3(cdna5::kVMulLoU32Vop3,

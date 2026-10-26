@@ -35,6 +35,13 @@ void FlatLoadUbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>((inst_.offset | (inst_.pad_12 << 12)) << 19) >> 19;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -49,6 +56,13 @@ void FlatLoadSbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>((inst_.offset | (inst_.pad_12 << 12)) << 19) >> 19;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -62,6 +76,13 @@ void FlatLoadUshortFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>((inst_.offset | (inst_.pad_12 << 12)) << 19) >> 19;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -76,6 +97,13 @@ void FlatLoadSshortFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>((inst_.offset | (inst_.pad_12 << 12)) << 19) >> 19;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -89,6 +117,13 @@ void FlatLoadDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>((inst_.offset | (inst_.pad_12 << 12)) << 19) >> 19;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -142,13 +177,12 @@ void FlatStoreByteFlat::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0x1);
   d->store_data.resize(wf.wf_size() * 1);
-  const auto data0 = data.lanes(0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = data0[lane];
+    uint32_t val0 = data.lane(0, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -165,13 +199,12 @@ void FlatStoreByteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0x4);
   d->store_data.resize(wf.wf_size() * 1);
-  const auto data0 = data.lanes(0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = data0[lane];
+    uint32_t val0 = data.lane(0, lane);
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
@@ -189,13 +222,12 @@ void FlatStoreShortFlat::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0x3);
   d->store_data.resize(wf.wf_size() * 2);
-  const auto data0 = data.lanes(0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = data0[lane];
+    uint32_t val0 = data.lane(0, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
@@ -212,13 +244,12 @@ void FlatStoreShortD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0xc);
   d->store_data.resize(wf.wf_size() * 2);
-  const auto data0 = data.lanes(0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = data0[lane];
+    uint32_t val0 = data.lane(0, lane);
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }

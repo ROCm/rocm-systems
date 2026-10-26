@@ -1,0 +1,255 @@
+# dynolog <-> RDC Integration CI
+#
+# dynolog embeds RDC in-process through the shim in dynolog/src/gpumon/amd (no
+# rdcd). Compiling and linking that shim against a freshly-built RDC is the
+# primary signal: it catches RDC API/ABI/build changes that would break the
+# downstream integration. Running the example on a GPU is an extra check that
+# soft-passes when no GPU metrics are available.
+#
+# Embedded mode needs librdc.so and its bootstrap/modules, but not rdcd, rdci or
+# librdc_client.so -- the only RDC components that link gRPC. So RDC is built
+# with BUILD_STANDALONE=OFF and this workflow never builds gRPC at all; RDC's
+# standalone/gRPC surface is rdc-ci.yml's job.
+#
+# The heavy lifting lives in projects/rdc/tests/dynolog_integration/, runnable
+# locally with `python3 -m dynolog_integration <subcommand>`. See its README.
+name: RDC dynolog Integration CI
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/rdc/include/**'
+      - 'projects/rdc/rdc_libs/**'
+      - 'projects/rdc/common/**'
+      - 'projects/rdc/CMakeLists.txt'
+      - 'projects/rdc/cmake_modules/**'
+      - 'projects/rdc/tests/dynolog_integration/**'
+      - '.github/workflows/rdc-dynolog-ci.yml'
+  workflow_dispatch:
+    inputs:
+      dynolog_ref:
+        description: 'dynolog ref to build (branch, tag, or commit SHA)'
+        default: 'b301ce05b3b25e2f48e4525bfc52a0ba6fe77446'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rdc-dynolog-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+# Force bash for every `run:` step. The default container shell on
+# Debian/Ubuntu images is /bin/sh (dash), which does not support
+# `set -o pipefail` or other bashisms used below.
+defaults:
+  run:
+    shell: bash
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DEBCONF_NONINTERACTIVE_SEEN: true
+  BUILD_TYPE: RelWithDebInfo
+  ROCM_DIR: /opt/rocm
+  GPU_TARGETS: ${{ vars.GPU_TARGETS || 'gfx942' }}
+  DYNOLOG_REPO: https://github.com/facebookincubator/dynolog.git
+  # Automatic runs pin an immutable SHA so a re-tagged upstream cannot silently
+  # change what CI builds. Manual runs may override via workflow_dispatch.
+  DYNOLOG_REF: ${{ inputs.dynolog_ref || 'b301ce05b3b25e2f48e4525bfc52a0ba6fe77446' }}
+  DYNOLOG_DIR: /tmp/dynolog
+  EXAMPLE_RUN_SECONDS: '30'
+
+jobs:
+  integration-test:
+    name: RDC dynolog Integration
+    # Privileged self-hosted GPU runner: never auto-run untrusted fork-PR code on it.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      # vars.RUNNER_TYPE must be set to a self-hosted AMD GPU runner label;
+      # with it unset the job silently never schedules.
+      - ${{ vars.RUNNER_TYPE }}
+    timeout-minutes: 60
+    container:
+      image: ${{ vars.RDC_DOCKER_IMAGE || 'rocm/dev-ubuntu-22.04:7.2' }}
+      options: >-
+        --rm --privileged
+        --device=/dev/kfd
+        --device=/dev/dri
+        --group-add video
+
+    steps:
+      - name: Checkout Super-repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/amdsmi
+            projects/rdc
+
+      - name: Build metadata
+        run: echo "TODAY=$(date +%Y_%m_%d)" >> "$GITHUB_ENV"
+
+      - name: Install build tools
+        run: |
+          set -euo pipefail
+          ok=0
+          for _ in 1 2 3; do
+            if apt-get update; then ok=1; break; fi
+            sleep 5
+          done
+          if [ "${ok}" -ne 1 ]; then
+            echo "::error::apt-get update failed after 3 attempts"
+            exit 1
+          fi
+          # RDC build deps mirror rdc-ci.yml, minus gRPC's autotools submodules.
+          # ninja-build is for the dynolog shim's CMake project; glog is not
+          # installable here and is built from source below.
+          apt-get install -y --no-install-recommends \
+            build-essential ccache clang cmake curl git gzip \
+            hip-dev hip-runtime-amd hipcc hsa-rocr-dev \
+            libcap-dev libc++-dev libdrm-dev libgflags-dev \
+            libmnl-dev libnl-3-dev libnl-genl-3-dev \
+            ninja-build pkg-config python3 \
+            rocm-core rocm-developer-tools rocm-device-libs rocm-smi-lib \
+            rocprofiler-dev rocprofiler-plugins rocprofiler-register rocprofiler-sdk \
+            tar zstd
+
+      # Gate the CI helper logic (rocm_version_code / evaluate) before the long
+      # build so regressions in the helpers are caught fast and never merge
+      # unexercised.
+      - name: Run helper unit tests
+        working-directory: projects/rdc/tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest \
+            dynolog_integration.test_build \
+            dynolog_integration.test_run_example -v
+
+      # dynolog's shim links glog. The ROCm dev image cannot install
+      # libgoogle-glog-dev (its libunwind-dev dependency is unavailable there),
+      # so build a minimal shared glog from source with stack unwinding and the
+      # optional gflags integration disabled.
+      - name: Build and install glog
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v0.6.0 https://github.com/google/glog.git /tmp/glog
+          cmake -S /tmp/glog -B /tmp/glog/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DBUILD_TESTING=OFF \
+            -DWITH_GFLAGS=OFF \
+            -DWITH_UNWIND=OFF \
+            -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build /tmp/glog/build --parallel "$(nproc)"
+          cmake --install /tmp/glog/build
+          ldconfig
+
+      - name: Cache ccache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ccache
+          key: ${{ runner.os }}-rdc-dynolog-ccache-${{ github.ref_name }}-${{ env.TODAY }}
+          restore-keys: |
+            ${{ runner.os }}-rdc-dynolog-ccache-${{ github.ref_name }}-
+            ${{ runner.os }}-rdc-dynolog-ccache-
+
+      - name: Build and install amd-smi
+        working-directory: projects/amdsmi
+        run: |
+          set -euo pipefail
+          # RDC's metric fetcher links amdsmi_get_cpu_* (ESMI/CPU), so amd-smi
+          # must be built with the E-SMI library enabled or librdc fails to link.
+          cmake -B build \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DCMAKE_INSTALL_PREFIX="${ROCM_DIR}" \
+            -DENABLE_ESMI_LIB=ON \
+            -DBUILD_TESTS=OFF
+          make -C build -j "$(nproc)"
+          make -C build install
+          ldconfig
+
+      - name: Build and install RDC
+        working-directory: projects/rdc
+        run: |
+          set -euo pipefail
+          # BUILD_STANDALONE=OFF drops rdcd/rdci/librdc_client.so, the only RDC
+          # components that link gRPC. dynolog embeds RDC in-process and links
+          # the `rdc` target, whose interface is rdc_bootstrap/pthread/amd_smi/cap
+          # -- so nothing here needs gRPC, and librdc.so is unchanged either way.
+          cmake -B build \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DBUILD_STANDALONE=OFF \
+            -DBUILD_RUNTIME=ON \
+            -DBUILD_PROFILER=ON \
+            -DBUILD_RVS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DGPU_TARGETS="${GPU_TARGETS}" \
+            -DCMAKE_INSTALL_PREFIX="${ROCM_DIR}"
+          make -C build -j "$(nproc)"
+          make -C build install
+          ldconfig
+          # librdc_rocp.so is dlopened at runtime, so find_package(rdc) would not
+          # catch it going missing. Assert the whole set the shim needs up front.
+          missing=0
+          for f in \
+            "${ROCM_DIR}/lib/librdc.so" \
+            "${ROCM_DIR}/lib/librdc_bootstrap.so" \
+            "${ROCM_DIR}/lib/rdc/librdc_rocp.so" \
+            "${ROCM_DIR}/lib/cmake/rdc/rdc-config.cmake" \
+            "${ROCM_DIR}/include/rdc/rdc.h"; do
+            [ -e "$f" ] || { echo "::error::missing expected RDC artifact: $f"; missing=1; }
+          done
+          [ "$missing" -eq 0 ]
+
+      - name: Clone dynolog
+        working-directory: projects/rdc/tests
+        run: |
+          python3 -m dynolog_integration clone \
+            --repo "${DYNOLOG_REPO}" \
+            --ref "${DYNOLOG_REF}" \
+            --dest "${DYNOLOG_DIR}"
+
+      - name: Build dynolog RDC wrapper and example
+        working-directory: projects/rdc/tests
+        run: |
+          python3 -m dynolog_integration build-wrapper \
+            --dynolog-dir "${DYNOLOG_DIR}" \
+            --rocm-dir "${ROCM_DIR}"
+
+      - name: Run RdcWrapperExample
+        working-directory: projects/rdc/tests
+        run: |
+          python3 -m dynolog_integration run-example \
+            --binary "${DYNOLOG_DIR}/dynolog/src/gpumon/amd/build/examples/RdcWrapperExample" \
+            --rocm-dir "${ROCM_DIR}" \
+            --duration "${EXAMPLE_RUN_SECONDS}" \
+            --ld-library-path "${ROCM_DIR}/lib:${ROCM_DIR}/lib/rdc" \
+            --log-file /tmp/rdc-dynolog-example.log
+
+      - name: Collect logs
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/integration-logs
+          cp -f /tmp/rdc-dynolog-example.log /tmp/integration-logs/ 2>/dev/null || true
+          {
+            echo "=== System ==="
+            uname -a
+            echo "=== GPU devices ==="
+            ls -la /dev/kfd /dev/dri/ 2>&1 || true
+            echo "=== RDC / AMDSMI libs ==="
+            ldconfig -p | grep -E 'rdc|amd_smi' || true
+          } > /tmp/integration-logs/system-info.txt 2>&1
+
+      - name: Upload integration logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rdc-dynolog-integration-logs
+          path: /tmp/integration-logs/
+          retention-days: 7

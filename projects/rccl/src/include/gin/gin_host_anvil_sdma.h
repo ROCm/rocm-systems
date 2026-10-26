@@ -15,7 +15,7 @@ extern ncclGin_t ncclGinAnvilSdmaPlugin;
 
 struct ncclComm;
 ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* resourceUserPtr, size_t arenaByteOffset,
-                                                   int nContexts, int nSignalsPerContext);
+                                                   int nSignalSlots, int nSignalsPerContext);
 
 void ncclGinAnvilSetInitContext(void* initCtx, struct ncclComm* comm);
 
@@ -31,5 +31,8 @@ struct ncclGinAnvilFabricTestState {
   int refcount;
 };
 void ncclGinAnvilPluginTestFabricState(void* collComm, void* data, struct ncclGinAnvilFabricTestState* out);
+
+/** Live per-comm init contexts, one per init() the plugin has not seen finalize() for. For tests. */
+int ncclGinAnvilPluginTestLiveInitCtxCount(void);
 
 #endif
