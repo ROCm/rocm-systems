@@ -169,23 +169,6 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   CUDACHECKGOTO(cudaMemcpy(peerHost, h_ptrs.data(), nRanks * sizeof(void*), cudaMemcpyHostToHost), res, fail);
 
   {
-    auto barrierPair =
-      dda::common::FabricGpuBarrier::mallocAndInit(nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager,
-                                                   dda::common::DdaKernelParams{comm->abortFlagDev});
-    if (!barrierPair.first) {
-      WARN("ncclDdaFabricCommInit: FabricGpuBarrier malloc/init failed");
-      goto fail;
-    }
-    barrierState = new (std::nothrow) DdaFabricBarrierState();
-    if (barrierState == nullptr) {
-      WARN("ncclDdaFabricCommInit: OOM allocating DdaFabricBarrierState");
-      goto fail;
-    }
-    barrierState->resources = std::move(barrierPair.first);
-    barrierState->barrierHost = barrierPair.second;
-  }
-
-  {
     auto cudaOk = [](cudaError_t err, const char* what) {
       if (err != cudaSuccess) {
         WARN("ncclDdaFabricCommInit: %s failed: %s", what, cudaGetErrorString(err));
@@ -193,21 +176,40 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
       }
       return true;
     };
+    // The barrier's pointer exchange is the last collective before the allgather below, so every
+    // rank-local failure from here on records !ready instead of leaving peers blocked in the allgather.
+    bool ready = true;
+    auto barrierPair =
+      dda::common::FabricGpuBarrier::mallocAndInit(nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager,
+                                                   dda::common::DdaKernelParams{comm->abortFlagDev});
+    if (!barrierPair.first) {
+      WARN("ncclDdaFabricCommInit: FabricGpuBarrier malloc/init failed");
+      ready = false;
+    } else if ((barrierState = new (std::nothrow) DdaFabricBarrierState()) == nullptr) {
+      WARN("ncclDdaFabricCommInit: OOM allocating DdaFabricBarrierState");
+      ready = false;
+    } else {
+      barrierState->resources = std::move(barrierPair.first);
+      barrierState->barrierHost = barrierPair.second;
+    }
+
     // Zero the scratch once so the first epoch (>= 1) across all LL operations
     // never false-matches leftover flag words. Subsequent LL calls rely on
     // monotonic epochs + the 2-bank layout rather than re-zeroing.
     // Device epoch cells for the LL collectives: zero-initialised
     // so the first device-derived flag is 1. Bumped on the device every LL launch.
     // Null-stream memsets don't order with non-blocking streams; sync, then agree before any rank's first LL kernel.
-    std::vector<int> zeroed(nRanks, 0);
-    zeroed[comm->rank] = cudaOk(cudaMemset(scratch, 0, bytes), "scratch memset") &&
-                         cudaOk(cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), "epoch alloc") &&
-                         cudaOk(cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)), "epoch memset") &&
-                         cudaOk(cudaStreamSynchronize(nullptr), "zero-fill sync");
-    NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, zeroed.data(), sizeof(int)), res, fail);
+    ready = ready && cudaOk(cudaMemset(scratch, 0, bytes), "scratch memset") &&
+            cudaOk(cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), "epoch alloc") &&
+            cudaOk(cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)), "epoch memset") &&
+            cudaOk(cudaStreamSynchronize(nullptr), "zero-fill sync");
+
+    std::vector<int> allReady(nRanks, 0);
+    allReady[comm->rank] = ready ? 1 : 0;
+    NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allReady.data(), sizeof(int)), res, fail);
     for (int r = 0; r < nRanks; ++r) {
-      if (!zeroed[r]) {
-        INFO(NCCL_INIT, "ncclDdaFabricCommInit: rank %d failed to zero its LL buffers; skipping fabric DDA path", r);
+      if (!allReady[r]) {
+        INFO(NCCL_INIT, "ncclDdaFabricCommInit: rank %d failed to set up its LL buffers; skipping fabric DDA path", r);
         goto fail;
       }
     }
