@@ -313,7 +313,8 @@ static bool print_root_info(const std::string& archive_path) {
   return true;
 }
 
-static void print_info(const hrr::Archive& archive, bool show_events) {
+// False when the archive check no longer holds for a file read here (a region stream).
+static bool print_info(const hrr::Archive& archive, bool show_events) {
   printf("HRR Archive: %s\n", archive.path.c_str());
   printf("========================================\n");
   if (archive.trailer && !archive.complete)
@@ -340,7 +341,8 @@ static void print_info(const hrr::Archive& archive, bool show_events) {
   // replay that passes while the recorded run faulted.
   {
     hrr::RegionMap regions;
-    const size_t n = regions.load(archive.path);
+    const size_t n = regions.load(archive.path, archive.checked ? &archive.verified : nullptr);
+    if (regions.refused()) return false;
     if (n > 0)
       printf("Regions:      %zu records from %zu stream(s)\n", n, regions.streams());
   }
@@ -394,7 +396,7 @@ static void print_info(const hrr::Archive& archive, bool show_events) {
     printf("\n");
   }
 
-  if (!show_events) return;
+  if (!show_events) return true;
 
   printf("Event Log:\n");
   printf("  %-6s %-10s %-16s %-22s %s\n", "Seq", "Thread", "Timestamp(ns)", "Type", "Details");
@@ -478,6 +480,7 @@ static void print_info(const hrr::Archive& archive, bool show_events) {
     }
     printf("\n");
   }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1216,8 +1219,36 @@ static uint8_t g_trusted_key[hrr_sign::kPublicKeySize];
 
 // hrr::ArchiveCheck for --trusted-key: an archive without a signature is refused
 // too, since the user asked for one. See DESIGN.md, "Archive signing".
-static bool check_signature(const std::string& dir, std::string* err) {
-  return hrr_sign::verify_archive(dir, g_trusted_key, err) == hrr_sign::VerifyResult::kOk;
+static bool check_signature(const std::string& dir, hrr::VerifiedFiles* files,
+                            std::string* err) {
+  return hrr_sign::verify_archive(dir, g_trusted_key, err, files) ==
+         hrr_sign::VerifyResult::kOk;
+}
+
+// --repair --signing-key signs whatever is in the directory, so a signed archive
+// that was altered would leave signed by the user's key. A signature that is
+// present must therefore verify under the seed's own public key before anything
+// is rewritten. An archive with no signature (a crash, or captured unsigned) is
+// the case --signing-key is for, and passes.
+static bool check_existing_signature(const fs::path& dir) {
+  std::string err;
+  uint8_t seed[hrr_sign::kSeedSize], pub[hrr_sign::kPublicKeySize];
+  const bool have_pub = hrr_sign::read_key_file(g_signing_key_path, true, seed, &err) &&
+                        hrr_sign::public_key_from_seed(seed, pub);
+  rocm::sha2::secure_zero(seed, sizeof(seed));
+  if (!have_pub) {
+    fprintf(stderr, "[HRR] repair: not signed: %s\n", err.c_str());
+    return false;
+  }
+  if (hrr_sign::verify_archive(dir.string(), pub, &err) == hrr_sign::VerifyResult::kRefused) {
+    fprintf(stderr, "[HRR] repair: refusing to sign %s: it holds a signature that does not "
+                    "verify under this key (%s); it may have been altered. To sign it anyway, "
+                    "delete %s and %s first\n",
+            dir.string().c_str(), err.c_str(), hrr_sign::kSignatureName,
+            hrr_sign::kManifestName);
+    return false;
+  }
+  return true;
 }
 
 // After --repair rewrote events.bin and manifest.json the old signature, if any,
@@ -1226,8 +1257,18 @@ static bool resign_repaired(const fs::path& dir) {
   std::string err;
   if (!g_signing_key_path.empty()) {
     uint8_t seed[hrr_sign::kSeedSize];
-    const bool signed_ok = hrr_sign::read_key_file(g_signing_key_path, true, seed, &err) &&
-                           hrr_sign::sign_archive(dir.string(), seed, &err);
+    // Through the descriptor of the directory just rewritten, as capture does, so
+    // a directory renamed or swapped on the path cannot redirect the signing.
+    int dir_fd = -1;
+#ifndef _WIN32
+    hrr::safefs::Fd d = hrr::safefs::open_dir_nofollow_leaf(dir.string(), &err);
+    if (d.valid()) dir_fd = d.get();
+    const bool dir_ok = d.valid();
+#else
+    const bool dir_ok = true;
+#endif
+    const bool signed_ok = dir_ok && hrr_sign::read_key_file(g_signing_key_path, true, seed, &err) &&
+                           hrr_sign::sign_archive(dir.string(), seed, &err, dir_fd);
     rocm::sha2::secure_zero(seed, sizeof(seed));  // on failure too
     if (!signed_ok) {
       fprintf(stderr, "[HRR] repair: not signed: %s\n", err.c_str());
@@ -1247,6 +1288,9 @@ static bool resign_repaired(const fs::path& dir) {
 
 static int repair_archive(const hrr::Archive& archive) {
   const fs::path archive_dir(archive.path);
+#ifdef HRR_HAVE_ARCHIVE_SIGN
+  if (!g_signing_key_path.empty() && !check_existing_signature(archive_dir)) return 1;
+#endif
 
   if (archive.complete) {
     printf("[HRR] Archive already complete (%zu events); nothing to repair\n",
@@ -1502,7 +1546,8 @@ static void print_usage(const char* argv0) {
     "                        under it and rebuilds the root index.\n"
     "  --trusted-key FILE    Replay only an archive signed by the Ed25519 public key in FILE\n"
     "                        (64 hex digits); refuse it, naming the file, if any file differs\n"
-    "                        or it is unsigned. Also HIP_HRR_TRUSTED_KEY. Required for an\n"
+    "                        or it is unsigned. Also HIP_HRR_TRUSTED_KEY (not read with\n"
+    "                        --repair, which checks no signature). Required for an\n"
     "                        archive from another machine.\n"
     "  --signing-key FILE    With --repair: sign the repaired archive with the seed in FILE\n"
     "  --gen-signing-key SEED PUB  Create a signing key pair and exit\n"
@@ -1817,7 +1862,10 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  if (trusted_key_path.empty())
+  // The variable is for replay and --info. --repair does not check a signature,
+  // so an exported variable must not stop it (--repair --signing-key is the
+  // documented way to sign a crashed archive); only the flag is refused below.
+  if (trusted_key_path.empty() && !do_repair)
     if (const char* k = std::getenv("HIP_HRR_TRUSTED_KEY")) {
       if (k[0] == '\0') {
         fprintf(stderr, "[HRR] HIP_HRR_TRUSTED_KEY is set but empty\n");
@@ -1872,8 +1920,7 @@ int main(int argc, char** argv) {
 
   // --info: print summary and exit without touching the GPU
   if (show_info) {
-    print_info(archive, show_events);
-    return 0;
+    return print_info(archive, show_events) ? 0 : 1;
   }
 
   // --repair: rewrite an incomplete archive as a clean one and exit
@@ -1890,6 +1937,7 @@ int main(int argc, char** argv) {
   }
 
   ctx.archive_dir = archive.path;
+  ctx.verified = archive.checked ? &archive.verified : nullptr;
   ctx.packed_host_rects = (archive.flags & HRR_FILE_FLAG_PACKED_HOST_RECTS) != 0;
 
   printf("[HRR] Archive : %zu events, %zu kernels, %zu blobs, %zu code objects\n",
@@ -1986,7 +2034,8 @@ int main(int argc, char** argv) {
   // interleave, so the live set at a given instant only exists once every
   // stream has been merged.
   if (!no_regions) {
-    const size_t n = ctx.regions.load(archive.path);
+    const size_t n = ctx.regions.load(archive.path, ctx.verified);
+    if (ctx.regions.refused()) return 1;
     if (n > 0) {
       // The classification walks one totally ordered stream, which a
       // multi-threaded replay does not have: two threads dispatch events whose

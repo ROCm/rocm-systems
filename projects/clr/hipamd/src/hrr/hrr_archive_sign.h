@@ -21,6 +21,7 @@
 // shared/sha256 and the vendored Monocypher; it never links libcrypto.
 
 #include <cstdint>
+#include <map>
 #include <string>
 
 namespace hrr_sign {
@@ -30,6 +31,12 @@ constexpr const char* kSignatureName = "hrr.sig";
 constexpr size_t kSeedSize = 32;
 constexpr size_t kPublicKeySize = 32;
 
+// A manifest line is 64 + 2 + path. Verification reads the manifest whole before
+// it checks the signature, so it refuses one over this size rather than allocate
+// without limit for a forged file; signing refuses to write one, so an archive
+// that is signed can always be verified.
+constexpr uintmax_t kMaxManifestBytes = 256u << 20;
+
 // Signs the finished archive in `dir`: writes hrr.manifest and hrr.sig, replacing
 // any earlier pair, so a rewriter (repair, scrub) can sign again. Refuses an
 // archive holding a link, a file that is not regular, or a name with a newline.
@@ -37,9 +44,9 @@ constexpr size_t kPublicKeySize = 32;
 // `dir_fd` when it is >= 0 (the capture writer's checked descriptor for `dir`),
 // else one opened from `dir`; a directory renamed or replaced on the path
 // afterwards cannot redirect the signing to other files. `dir` is then only used
-// in messages.
+// in messages. Refuses when the manifest would exceed `max_manifest_bytes`.
 bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::string* err,
-                  int dir_fd = -1);
+                  int dir_fd = -1, uintmax_t max_manifest_bytes = kMaxManifestBytes);
 
 enum class VerifyResult {
   kOk,        // signature is valid under the key and every file matches
@@ -49,9 +56,16 @@ enum class VerifyResult {
 
 // Checks `dir` against its signature under `public_key`. Every file in the
 // archive must be listed and match, and every listed file must exist. `err` names
-// the first offending file, in path order.
+// the first offending file, in path order. On kOk `*verified` (when given) holds
+// the SHA-256 (lowercase hex) of each file as checked, by path below `dir`, for a
+// reader that opens the files again later and must compare what it reads.
 VerifyResult verify_archive(const std::string& dir, const uint8_t public_key[kPublicKeySize],
-                            std::string* err);
+                            std::string* err, std::map<std::string, std::string>* verified = nullptr,
+                            uintmax_t max_manifest_bytes = kMaxManifestBytes);
+
+// The public key for a seed (what a replaying site is given). The seed is not
+// modified. Always true; the bool leaves room to refuse a key that is not valid.
+bool public_key_from_seed(const uint8_t seed[kSeedSize], uint8_t public_key[kPublicKeySize]);
 
 // A key file holds 64 hex digits and an optional newline. A seed file is refused
 // when group or others can read it (POSIX), as ssh does for a private key.

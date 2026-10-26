@@ -204,17 +204,15 @@ static std::string compact_kernel_name(const std::string& name) {
     return name.substr(0, 96) + "..." + name.substr(name.size() - 21);
 }
 
-// Build path: archive_dir/blobs/<2-char-prefix>/<hex>.blob
-static std::string blob_path(const std::string& archive_dir,
-                             uint64_t hash_lo, uint64_t hash_hi) {
+// Path below the archive directory: blobs/<2-char-prefix>/<hex>.blob
+static std::string blob_rel(uint64_t hash_lo, uint64_t hash_hi) {
     std::string hex = hrr::hash_hex(hash_lo, hash_hi);
-    return archive_dir + "/blobs/" + hex.substr(0, 2) + "/" + hex + ".blob";
+    return "blobs/" + hex.substr(0, 2) + "/" + hex + ".blob";
 }
 
-// Build path: archive_dir/code_objects/<hex>.hsaco
-static std::string co_path(const std::string& archive_dir,
-                            uint64_t hash_lo, uint64_t hash_hi) {
-    return archive_dir + "/code_objects/" + hrr::hash_hex(hash_lo, hash_hi) + ".hsaco";
+// Path below the archive directory: code_objects/<hex>.hsaco
+static std::string co_rel(uint64_t hash_lo, uint64_t hash_hi) {
+    return "code_objects/" + hrr::hash_hex(hash_lo, hash_hi) + ".hsaco";
 }
 
 // *refused is set when the file was not read because of the file cap or an
@@ -292,22 +290,28 @@ const void* PlaybackContext::load_blob(uint64_t hash_lo, uint64_t hash_hi,
             return it->second.data();
         }
     }
-    return cache_file(key, blob_path(archive_dir, hash_lo, hash_hi), sz_out, "blob cache");
+    return cache_file(key, blob_rel(hash_lo, hash_hi), sz_out, "blob cache");
 }
 
 // Read a file into blob_cache_ under `key`, charging its size to the host
 // budget before the read so the cap is checked before the bytes are held. The
 // cache is never evicted, so each entry stays charged for the run. Two threads
 // can miss on the same key; the one that loses the insert gives its charge back.
-const void* PlaybackContext::cache_file(const std::string& key, const std::string& path,
+const void* PlaybackContext::cache_file(const std::string& key, const std::string& rel,
                                         size_t* sz_out, const char* what) const {
     auto* self = const_cast<PlaybackContext*>(this);
+    const std::string path = archive_dir + "/" + rel;
     std::error_code ec;
     const uintmax_t size = std::filesystem::file_size(path, ec);
     const uint64_t charge = ec ? 0 : static_cast<uint64_t>(size);
     if (!self->charge_host(charge, what)) return nullptr;
     bool refused = false;
-    auto data = read_file(path, &refused);
+    std::vector<uint8_t> data;
+    std::string err;
+    if (!hrr::read_archive_file(archive_dir, rel, verified, data, &err, &refused)) {
+        fprintf(stderr, "[HRR] %s\n", err.c_str());
+        data.clear();
+    }
     if (refused) {
         // Not a missing file: the replay cannot continue faithfully, so end it
         // now rather than after the consuming handler reaches its HIP call.
@@ -337,7 +341,7 @@ const void* PlaybackContext::load_code_object(uint64_t hash_lo, uint64_t hash_hi
             return it->second.data();
         }
     }
-    return cache_file(key, co_path(archive_dir, hash_lo, hash_hi), sz_out, "code object cache");
+    return cache_file(key, co_rel(hash_lo, hash_hi), sz_out, "code object cache");
 }
 
 hipModule_t PlaybackContext::load_module(uint64_t hash_lo, uint64_t hash_hi) {

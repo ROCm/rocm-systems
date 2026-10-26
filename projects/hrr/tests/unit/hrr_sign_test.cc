@@ -9,7 +9,7 @@
  * @{
  * @ingroup HRRTest
  * GPU-free tests of archive signing (CLR's hrr_archive_sign.cpp, compiled in on
- * its own): the Ed25519 primitive against an RFC 8032 vector, the manifest, and
+ * its own): sign_archive against an RFC 8032 vector, the manifest, and
  * that verification refuses every kind of change to a signed archive, naming the
  * file. Two cases run `hrr-playback` to show replay and --repair honour it.
  */
@@ -19,12 +19,13 @@
 #ifdef HRR_HAVE_ARCHIVE_SIGN
 #include "hrr_archive_sign.h"
 #include "hrr/hrr_api_args.h"
-#include "monocypher-ed25519.h"
+#include "hrr_reader.h"
 
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -87,9 +88,7 @@ struct Archive {
     write_bytes(dir / "blobs/ab/abcdef.blob", "blob contents");
     write_bytes(dir / "code_objects/0123.hsaco", "code object");
     for (int i = 0; i < 32; ++i) seed[i] = static_cast<uint8_t>(i + 1);
-    uint8_t s[32], secret[64];
-    std::memcpy(s, seed, 32);
-    crypto_ed25519_key_pair(secret, pub, s);
+    hrr_sign::public_key_from_seed(seed, pub);
     if (sign) {
       std::string err;
       REQUIRE(hrr_sign::sign_archive(dir.string(), seed, &err));
@@ -98,6 +97,16 @@ struct Archive {
 
   VerifyResult verify(std::string* err, const uint8_t* key = nullptr) const {
     return hrr_sign::verify_archive(dir.string(), key ? key : pub, err);
+  }
+  // The seed as a 0600 key file under root, for --signing-key.
+  fs::path write_seed_file(const std::string& name = "seed") const {
+    std::string hexseed;
+    for (uint8_t b : seed) { char t[3]; snprintf(t, sizeof(t), "%02x", b); hexseed += t; }
+    write_bytes(root / name, hexseed + "\n");
+#ifndef _WIN32
+    REQUIRE(::chmod((root / name).c_str(), 0600) == 0);
+#endif
+    return root / name;
   }
   std::string hex_pub() const {
     static const char* d = "0123456789abcdef";
@@ -112,22 +121,28 @@ struct Archive {
 /**
  * Test Description
  * ----------------
- *   - The vendored Ed25519 is the RFC 8032 one (SHA-512), not Monocypher's
- *     BLAKE2b variant: section 7.1 test 1 (empty message) yields the published
- *     public key and signature, so a signature from another Ed25519 tool verifies.
+ *   - sign_archive signs with the RFC 8032 Ed25519 (SHA-512), not Monocypher's
+ *     BLAKE2b variant: an archive with no files has an empty manifest, so section
+ *     7.1 test 1 (empty message) gives the published public key and hrr.sig, and a
+ *     signature from another Ed25519 tool verifies. Through sign_archive, so a
+ *     switch of the call there to the other variant fails here.
  */
 HRR_TEST_CASE(Unit_HRR_Sign_Rfc8032Vector) {
+  ScopedDir scope(fs::temp_directory_path() / "hrr_sign_rfc8032");
+  fs::create_directories(scope.path);
   auto seed = unhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
-  uint8_t secret[64], pub[32];
-  crypto_ed25519_key_pair(secret, pub, seed.data());
+  uint8_t pub[32];
+  hrr_sign::public_key_from_seed(seed.data(), pub);
   REQUIRE(std::vector<uint8_t>(pub, pub + 32) ==
           unhex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"));
-  uint8_t sig[64];
-  crypto_ed25519_sign(sig, secret, nullptr, 0);
-  REQUIRE(std::vector<uint8_t>(sig, sig + 64) ==
-          unhex("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
-                "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"));
-  REQUIRE(crypto_ed25519_check(sig, pub, nullptr, 0) == 0);
+  std::string err;
+  REQUIRE(hrr_sign::sign_archive(scope.path.string(), seed.data(), &err));
+  const std::string sig = read_text_file(scope.path / "hrr.sig");
+  const auto want = unhex("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
+                          "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b");
+  REQUIRE(sig.size() == 64);
+  REQUIRE(std::vector<uint8_t>(sig.begin(), sig.end()) == want);
+  CHECK(hrr_sign::verify_archive(scope.path.string(), pub, &err) == VerifyResult::kOk);
 }
 
 /**
@@ -236,9 +251,9 @@ HRR_TEST_CASE(Unit_HRR_Sign_UnsignedAndWrongKey) {
     CHECK(a.verify(&err) == VerifyResult::kUnsigned);
   }
   Archive a("wrongkey");
-  uint8_t other[32], secret[64], s[32];
+  uint8_t other[32], s[32];
   for (int i = 0; i < 32; ++i) s[i] = static_cast<uint8_t>(100 + i);
-  crypto_ed25519_key_pair(secret, other, s);
+  hrr_sign::public_key_from_seed(s, other);
   CHECK(a.verify(&err, other) == VerifyResult::kRefused);
 }
 
@@ -415,39 +430,266 @@ HRR_TEST_CASE(Unit_HRR_Sign_KeyOptionsAreNotIgnored) {
  *   --repair rewrites events.bin and manifest.json, so a signature over the old
  *   ones is stale:
  *   - without --signing-key, the stale hrr.sig and hrr.manifest are removed;
- *   - with --signing-key, the repaired archive is signed and verifies.
+ *   - with --signing-key, a crashed (never signed) archive is repaired and signed,
+ *     and the result verifies.
  */
 HRR_TEST_CASE(Unit_HRR_Sign_RepairSignsOrDropsStaleSignature) {
-  auto torn = [](Archive& a) {  // drop the trailer: the archive now needs repair
+  auto torn = [](Archive& a, bool stale_signature) {  // drop the trailer: needs repair
     std::string e = read_text_file(a.dir / "events.bin");
     write_bytes(a.dir / "events.bin", e.substr(0, e.size() - sizeof(hrr_eof_record)));
     std::string err;
-    REQUIRE(hrr_sign::sign_archive(a.dir.string(), a.seed, &err));  // signed, then torn: stale
+    if (stale_signature)
+      REQUIRE(hrr_sign::sign_archive(a.dir.string(), a.seed, &err));  // signed, then torn: stale
     write_bytes(a.dir / "manifest.json", "{\n  \"pid\": 4242,\n  \"complete\": false\n}\n");
   };
   std::string err;
   {
     Archive a("repair_drop");
-    torn(a);
+    torn(a, /*stale_signature=*/true);
     auto [ret, out] = hrr_playback_merged(a.dir, "--repair");
     INFO(out);
     REQUIRE(ret == 0);
     CHECK(a.verify(&err) == VerifyResult::kUnsigned);
   }
   {
-    Archive a("repair_sign");
-    torn(a);
-    std::string hexseed;
-    for (uint8_t b : a.seed) { char t[3]; snprintf(t, sizeof(t), "%02x", b); hexseed += t; }
-    write_bytes(a.root / "seed", hexseed + "\n");
-#ifndef _WIN32
-    REQUIRE(::chmod((a.root / "seed").c_str(), 0600) == 0);
-#endif
-    auto [ret, out] = hrr_playback_merged(a.dir, "--repair --signing-key " + (a.root / "seed").string());
+    Archive a("repair_sign", /*sign=*/false);  // what a crash leaves: no signature
+    torn(a, /*stale_signature=*/false);
+    auto [ret, out] = hrr_playback_merged(a.dir, "--repair --signing-key " + a.write_seed_file().string());
     INFO(out);
     REQUIRE(ret == 0);
     CHECK(a.verify(&err) == VerifyResult::kOk);
     INFO(err);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   --repair --signing-key signs whatever is in the directory, so it must not turn
+ *   a signed archive that was altered into one signed by the user's key:
+ *   - a signed archive with a blob changed is refused, naming the blob, before
+ *     anything is rewritten: hrr.sig, hrr.manifest and the blob are as they were;
+ *   - the same when the signature is under another key;
+ *   - the same archive unaltered (a signature that verifies) is signed again, and
+ *     an unsigned one is signed, so the refusal is the altered signature, not the flag.
+ */
+HRR_TEST_CASE(Unit_HRR_Sign_RepairRefusesToSignAnAlteredSignedArchive) {
+  std::string err;
+  {
+    Archive a("repair_altered");
+    const fs::path seedfile = a.write_seed_file();
+    const std::string sig_before = read_text_file(a.dir / "hrr.sig");
+    const std::string manifest_before = read_text_file(a.dir / "hrr.manifest");
+
+    // Negative control: nothing altered, so the signature verifies and repair signs it again.
+    auto [okret, okout] = hrr_playback_merged(a.dir, "--repair --signing-key " + seedfile.string());
+    INFO(okout);
+    CHECK(okret == 0);
+    CHECK(a.verify(&err) == VerifyResult::kOk);
+
+    flip_first_byte(a.dir / "blobs/ab/abcdef.blob");
+    const std::string blob_after = read_text_file(a.dir / "blobs/ab/abcdef.blob");
+    auto [ret, out] = hrr_playback_merged(a.dir, "--repair --signing-key " + seedfile.string());
+    INFO(out);
+    CHECK(ret != 0);
+    CHECK(out.find("blobs/ab/abcdef.blob") != std::string::npos);
+    CHECK(read_text_file(a.dir / "hrr.sig") == sig_before);  // deterministic Ed25519, same key
+    CHECK(read_text_file(a.dir / "hrr.manifest") == manifest_before);
+    CHECK(read_text_file(a.dir / "blobs/ab/abcdef.blob") == blob_after);  // not re-signed over
+    CHECK(a.verify(&err) == VerifyResult::kRefused);
+  }
+  {
+    Archive a("repair_other_key");
+    Archive other("repair_other_key_owner");
+    other.seed[0] ^= 0x55;  // another user's seed
+    const fs::path seedfile = other.write_seed_file();
+    const std::string sig_before = read_text_file(a.dir / "hrr.sig");
+    auto [ret, out] = hrr_playback_merged(a.dir, "--repair --signing-key " + seedfile.string());
+    INFO(out);
+    CHECK(ret != 0);
+    CHECK(read_text_file(a.dir / "hrr.sig") == sig_before);
+  }
+  {
+    Archive a("repair_unsigned", /*sign=*/false);
+    auto [ret, out] = hrr_playback_merged(a.dir, "--repair --signing-key " + a.write_seed_file().string());
+    INFO(out);
+    CHECK(ret == 0);
+    CHECK(a.verify(&err) == VerifyResult::kOk);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   HIP_HRR_TRUSTED_KEY is for replay, as --help says; --repair checks no signature:
+ *   - with it exported, --repair --signing-key still signs a crashed archive (the
+ *     documented path), and a plain --repair still repairs;
+ *   - the flag --repair --trusted-key is still refused (Unit_HRR_Sign_KeyOptionsAreNotIgnored);
+ *   - negative control: the same variable on --info still verifies, so it was not dropped.
+ */
+HRR_TEST_CASE(Unit_HRR_Sign_TrustedKeyVariableDoesNotBlockRepair) {
+  Archive a("repair_env", /*sign=*/false);
+  write_bytes(a.root / "trusted.pub", a.hex_pub());
+  const std::vector<std::pair<std::string, std::string>> env = {
+      {"HIP_HRR_TRUSTED_KEY", (a.root / "trusted.pub").string()}};
+  std::string e = read_text_file(a.dir / "events.bin");
+  write_bytes(a.dir / "events.bin", e.substr(0, e.size() - sizeof(hrr_eof_record)));  // crashed
+
+  // The variable still applies to --info: this unsigned archive is refused.
+  auto [info_ret, info_out] = hrr_playback_merged(a.dir, "--info", env);
+  INFO(info_out);
+  CHECK(info_ret != 0);
+
+  auto [ret, out] = hrr_playback_merged(
+      a.dir, "--repair --signing-key " + a.write_seed_file().string(), env);
+  INFO(out);
+  CHECK(ret == 0);
+  std::string err;
+  CHECK(a.verify(&err) == VerifyResult::kOk);
+  CHECK(hrr_playback_merged(a.dir, "--info", env).first == 0);  // now signed: --info accepts it
+
+  Archive b("repair_env_plain", /*sign=*/false);
+  e = read_text_file(b.dir / "events.bin");
+  write_bytes(b.dir / "events.bin", e.substr(0, e.size() - sizeof(hrr_eof_record)));
+  CHECK(hrr_playback_merged(b.dir, "--repair", env).first == 0);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   The manifest limit is one number for both sides, so an archive that is signed
+ *   can be verified:
+ *   - sign_archive refuses a manifest over the limit, saying so and why, and
+ *     leaves no hrr.sig or hrr.manifest;
+ *   - verify_archive refuses a manifest over the limit it is given;
+ *   - negative control: under the default limit the same archive signs and verifies.
+ */
+HRR_TEST_CASE(Unit_HRR_Sign_ManifestLimitAppliesToSigningToo) {
+  Archive a("manifest_cap", /*sign=*/false);
+  std::string err;
+  const uintmax_t small = 100;  // the manifest here is 4 lines of 66+ bytes
+  CHECK_FALSE(hrr_sign::sign_archive(a.dir.string(), a.seed, &err, -1, small));
+  INFO(err);
+  CHECK(err.find("limit") != std::string::npos);
+  CHECK(err.find("cannot be signed") != std::string::npos);
+  CHECK_FALSE(fs::exists(a.dir / "hrr.sig"));
+  CHECK_FALSE(fs::exists(a.dir / "hrr.manifest"));
+
+  REQUIRE(hrr_sign::sign_archive(a.dir.string(), a.seed, &err));
+  CHECK(fs::file_size(a.dir / "hrr.manifest") > small);
+  CHECK(a.verify(&err) == VerifyResult::kOk);
+  CHECK(hrr_sign::verify_archive(a.dir.string(), a.pub, &err, nullptr, small) ==
+        VerifyResult::kRefused);
+  CHECK(err.find("hrr.manifest") != std::string::npos);
+}
+
+namespace {
+// An hrr::ArchiveCheck that verifies like hrr-playback's, then runs `after_check`,
+// standing in for whoever can write the archive between the check and the reads.
+uint8_t g_check_key[32];
+std::function<void(const std::string&)> g_after_check;
+bool test_check(const std::string& dir, hrr::VerifiedFiles* files, std::string* err) {
+  if (hrr_sign::verify_archive(dir, g_check_key, err, files) != VerifyResult::kOk) return false;
+  if (g_after_check) g_after_check(dir);
+  return true;
+}
+struct CheckGuard {  // the check is process-wide: leave none installed for other cases
+  explicit CheckGuard(const Archive& a, std::function<void(const std::string&)> after = {}) {
+    std::memcpy(g_check_key, a.pub, 32);
+    g_after_check = std::move(after);
+    hrr::set_archive_check(test_check);
+  }
+  ~CheckGuard() {
+    hrr::set_archive_check(nullptr);
+    g_after_check = nullptr;
+  }
+};
+}  // namespace
+
+/**
+ * Test Description
+ * ----------------
+ *   The archive is checked once and its files are opened again later (events.bin,
+ *   then code objects at each module's first launch and blobs at each use, then
+ *   region streams), so a file swapped after the check must not be used:
+ *   - negative control: an archive nobody touches loads, keeps the digest of every
+ *     file in Archive::verified, and its files read back through them;
+ *   - events.bin replaced between the check and the load: load_archive refuses it;
+ *   - a code object added between the check and the load: refused, naming it;
+ *   - after a load, a code object or blob replaced: read_archive_file refuses it
+ *     (*refused set, no bytes), as does a file the check never listed.
+ */
+HRR_TEST_CASE(Unit_HRR_Sign_FilesAreHeldToTheVerifiedDigestsWhenRead) {
+  {
+    Archive a("toctou_ok");
+    CheckGuard guard(a);
+    hrr::Archive loaded;
+    REQUIRE(hrr::load_archive(a.dir.string(), loaded));
+    CHECK(loaded.checked);
+    CHECK(loaded.verified.count("events.bin") == 1);
+    CHECK(loaded.verified.count("blobs/ab/abcdef.blob") == 1);
+    CHECK(loaded.verified.count("code_objects/0123.hsaco") == 1);
+    CHECK(loaded.verified.count("hrr.sig") == 0);
+    std::vector<uint8_t> data;
+    std::string err;
+    bool refused = true;
+    REQUIRE(hrr::read_archive_file(a.dir.string(), "code_objects/0123.hsaco", &loaded.verified,
+                                   data, &err, &refused));
+    CHECK_FALSE(refused);
+    CHECK(std::string(data.begin(), data.end()) == "code object");
+  }
+  {
+    Archive a("toctou_events");
+    CheckGuard guard(a, [&](const std::string& dir) {
+      std::ofstream f(fs::path(dir) / "events.bin", std::ios::binary | std::ios::app);
+      f << "x";  // a byte past the trailer: parsing alone would not notice
+    });
+    hrr::Archive loaded;
+    CHECK_FALSE(hrr::load_archive(a.dir.string(), loaded));
+  }
+  {
+    Archive a("toctou_events_swap");
+    CheckGuard guard(a, [&](const std::string& dir) {
+      // Same size, one byte different, in the middle of the trailer's payload.
+      const fs::path p = fs::path(dir) / "events.bin";
+      std::string e = read_text_file(p);
+      e[e.size() - 4] = static_cast<char>(e[e.size() - 4] ^ 0x01);
+      write_bytes(p, e);
+    });
+    hrr::Archive loaded;
+    CHECK_FALSE(hrr::load_archive(a.dir.string(), loaded));
+  }
+  {
+    Archive a("toctou_added");
+    CheckGuard guard(a, [&](const std::string& dir) {
+      write_bytes(fs::path(dir) / "code_objects/evil.hsaco", "unsigned gpu code");
+    });
+    hrr::Archive loaded;
+    CHECK_FALSE(hrr::load_archive(a.dir.string(), loaded));
+  }
+  {
+    Archive a("toctou_after_load");
+    CheckGuard guard(a);
+    hrr::Archive loaded;
+    REQUIRE(hrr::load_archive(a.dir.string(), loaded));
+    write_bytes(a.dir / "code_objects/0123.hsaco", "code objecT");  // same size, one byte
+    write_bytes(a.dir / "blobs/ab/abcdef.blob", "something else");
+    write_bytes(a.dir / "code_objects/new.hsaco", "never listed");
+    for (const char* rel : {"code_objects/0123.hsaco", "blobs/ab/abcdef.blob",
+                            "code_objects/new.hsaco"}) {
+      std::vector<uint8_t> data;
+      std::string err;
+      bool refused = false;
+      INFO(rel);
+      CHECK_FALSE(hrr::read_archive_file(a.dir.string(), rel, &loaded.verified, data, &err,
+                                         &refused));
+      CHECK(refused);
+      CHECK(data.empty());
+      CHECK(err.find(rel) != std::string::npos);
+    }
+    // Without the digests the same swapped file is read: the check is what refuses it.
+    std::vector<uint8_t> data;
+    CHECK(hrr::read_archive_file(a.dir.string(), "code_objects/0123.hsaco", nullptr, data));
   }
 }
 
@@ -465,6 +707,10 @@ HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_PlaybackRefusesTamperedArchive)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_RepairSignsOrDropsStaleSignature)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_KeyOptionsAreNotIgnored)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_SigningFollowsTheDirectoryDescriptor)
+HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_RepairRefusesToSignAnAlteredSignedArchive)
+HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_TrustedKeyVariableDoesNotBlockRepair)
+HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_ManifestLimitAppliesToSigningToo)
+HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_FilesAreHeldToTheVerifiedDigestsWhenRead)
 #endif
 
 /**

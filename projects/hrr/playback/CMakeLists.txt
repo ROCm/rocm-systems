@@ -14,30 +14,6 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# hrr_reader — archive loader (STATIC)
-#
-# CPU-only: depends solely on the header-only wire format (hrr::api_args) and the
-# C++ standard library. It is defined unconditionally so the unit tests can link
-# it even when the HIP-dependent playback tool is not built
-# (HRR_BUILD_PLAYBACK=OFF); it must not gain a HIP dependency.
-# ---------------------------------------------------------------------------
-add_library(hrr_reader STATIC hrr_reader.cpp)
-add_library(hrr::reader ALIAS hrr_reader)
-set_target_properties(hrr_reader PROPERTIES
-  CXX_STANDARD ${HRR_CXX_STANDARD}
-  CXX_STANDARD_REQUIRED ON)
-target_link_libraries(hrr_reader PUBLIC hrr::api_args)
-target_include_directories(hrr_reader PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-  $<INSTALL_INTERFACE:include/hrr/playback>
-)
-target_compile_definitions(hrr_reader PRIVATE HIP_ABI_IMPL)
-target_compile_definitions(hrr_reader PRIVATE
-  HRR_API_ARGS_IMPLEMENTATION
-  $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
-)
-
-# ---------------------------------------------------------------------------
 # hrr_sign — archive signature check and re-signing (STATIC, CPU-only)
 #
 # The source is capture's (clr/hipamd/src/hrr), so both sides write and read the
@@ -67,6 +43,36 @@ if(EXISTS ${HRR_CAPTURE_SRC}/hrr_archive_sign.cpp AND EXISTS ${HRR_SHA256_SRC}/s
     ${HRR_SHA256_SRC}/include)
   target_compile_definitions(hrr_sign PUBLIC HRR_HAVE_ARCHIVE_SIGN=1)
 endif()
+
+# ---------------------------------------------------------------------------
+# hrr_reader — archive loader (STATIC)
+#
+# CPU-only: depends solely on the header-only wire format (hrr::api_args) and the
+# C++ standard library. It is defined unconditionally so the unit tests can link
+# it even when the HIP-dependent playback tool is not built
+# (HRR_BUILD_PLAYBACK=OFF); it must not gain a HIP dependency.
+# ---------------------------------------------------------------------------
+add_library(hrr_reader STATIC hrr_reader.cpp)
+add_library(hrr::reader ALIAS hrr_reader)
+set_target_properties(hrr_reader PROPERTIES
+  CXX_STANDARD ${HRR_CXX_STANDARD}
+  CXX_STANDARD_REQUIRED ON)
+target_link_libraries(hrr_reader PUBLIC hrr::api_args)
+# The reader compares the files it reads to the digests of a checked archive
+# (hrr::StreamHash), which needs hrr_sign's SHA-256. Without it nothing is
+# compared, and nothing can have been checked either.
+if(TARGET hrr_sign)
+  target_link_libraries(hrr_reader PUBLIC hrr_sign)
+endif()
+target_include_directories(hrr_reader PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+  $<INSTALL_INTERFACE:include/hrr/playback>
+)
+target_compile_definitions(hrr_reader PRIVATE HIP_ABI_IMPL)
+target_compile_definitions(hrr_reader PRIVATE
+  HRR_API_ARGS_IMPLEMENTATION
+  $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
+)
 
 # ---------------------------------------------------------------------------
 # hrr-playback — full replay tool (requires HIP)

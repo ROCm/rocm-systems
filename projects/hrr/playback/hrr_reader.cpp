@@ -8,6 +8,10 @@
 
 #include "hrr/hrr_regions.h"
 
+#ifdef HRR_HAVE_ARCHIVE_SIGN
+#include "rocm/sha2/sha256.h"
+#endif
+
 #include <algorithm>
 #include <atomic>
 #include <new>
@@ -99,6 +103,35 @@ static std::vector<fs::path> find_pid_subarchives(const fs::path& root) {
 }
 
 // ---------------------------------------------------------------------------
+// StreamHash
+// ---------------------------------------------------------------------------
+
+#ifdef HRR_HAVE_ARCHIVE_SIGN
+struct StreamHash::Impl {
+  rocm::sha2::sha256 h;
+};
+StreamHash::StreamHash() : impl_(new Impl) {}
+StreamHash::~StreamHash() = default;
+void StreamHash::update(const void* data, size_t n) {
+  impl_->h.update(static_cast<const uint8_t*>(data), n);
+}
+std::string StreamHash::hex() { return impl_->h.hexdigest(); }
+#else
+struct StreamHash::Impl {};
+StreamHash::StreamHash() = default;
+StreamHash::~StreamHash() = default;
+void StreamHash::update(const void*, size_t) {}
+std::string StreamHash::hex() { return {}; }
+#endif
+
+std::string StreamHash::finish(FILE* f) {
+  std::vector<uint8_t> buf(1u << 20);
+  size_t n;
+  while ((n = fread(buf.data(), 1, buf.size(), f)) > 0) update(buf.data(), n);
+  return hex();
+}
+
+// ---------------------------------------------------------------------------
 // Shared record framing
 //
 // Crash resilience: a record stream is an append-only log of self-delimiting
@@ -107,11 +140,12 @@ static std::vector<fs::path> find_pid_subarchives(const fs::path& root) {
 // already parsed is kept — rather than a reason to reject the whole file.
 // ---------------------------------------------------------------------------
 
-RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out) {
+RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out, StreamHash* hash) {
   const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
   out.resize(hdr_size);
 
   size_t got = fread(out.data(), 1, hdr_size, f);
+  if (hash) hash->update(out.data(), got);
   if (got == 0) return RecordStatus::EndOfStream;
   if (got < hdr_size) {
     fprintf(stderr, "[HRR] Truncated event header (%zu/%u bytes) at tail\n",
@@ -135,7 +169,9 @@ RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out) {
   if (total > hdr_size) {
     out.resize(total);
     const uint32_t pl_size = total - hdr_size;
-    if (fread(out.data() + hdr_size, 1, pl_size, f) != pl_size) {
+    const size_t pl_got = fread(out.data() + hdr_size, 1, pl_size, f);
+    if (hash) hash->update(out.data() + hdr_size, pl_got);
+    if (pl_got != pl_size) {
       fprintf(stderr, "[HRR] Truncated event payload (expected %u bytes) at tail\n",
               pl_size);
       return RecordStatus::Torn;
@@ -146,14 +182,16 @@ RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out) {
 
 FILE* open_record_stream(const std::string& file_path, uint32_t expected_magic,
                          uint16_t expected_version, uint16_t* version,
-                         uint16_t* flags) {
+                         uint16_t* flags, StreamHash* hash) {
   FILE* f = fopen(file_path.c_str(), "rb");
   if (!f) {
     fprintf(stderr, "[HRR] Cannot open %s\n", file_path.c_str());
     return nullptr;
   }
   hrr_file_header fh{};
-  if (fread(&fh, sizeof(fh), 1, f) != 1) {
+  const size_t fh_got = fread(&fh, 1, sizeof(fh), f);
+  if (hash) hash->update(&fh, fh_got);
+  if (fh_got != sizeof(fh)) {
     fprintf(stderr, "[HRR] %s too short (missing file header)\n", file_path.c_str());
     fclose(f);
     return nullptr;
@@ -322,17 +360,21 @@ bool load_archive(const std::string& path, Archive& archive) {
     return false;
   if (g_archive_check) {
     std::string err;
-    if (!g_archive_check(archive_dir, &err)) {
+    if (!g_archive_check(archive_dir, &archive.verified, &err)) {
       fprintf(stderr, "[HRR] Refusing archive %s: %s\n", archive_dir.c_str(), err.c_str());
       return false;
     }
+    archive.checked = true;
   }
   archive.path = archive_dir;
 
   std::string events_path = archive_dir + "/events.bin";
   uint16_t file_version = 0, file_flags = 0;
+  // Checked archive: hash events.bin as it is parsed and compare at the end.
+  StreamHash events_hash;
+  StreamHash* const hp = archive.checked ? &events_hash : nullptr;
   FILE* f = open_record_stream(events_path, HRR_MAGIC, HRR_VERSION, &file_version,
-                               &file_flags);
+                               &file_flags, hp);
   if (!f) return false;
   archive.version = file_version;
   archive.flags = file_flags;
@@ -349,7 +391,7 @@ bool load_archive(const std::string& path, Archive& archive) {
   const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
   while (true) {
     Event ev;
-    const RecordStatus st = read_raw_record(f, ev.raw_payload);
+    const RecordStatus st = read_raw_record(f, ev.raw_payload, hp);
     if (st == RecordStatus::EndOfStream) break;
     if (st == RecordStatus::Torn) {
       fprintf(stderr, "[HRR] Recovered %zu events before the torn record\n",
@@ -632,7 +674,7 @@ bool load_archive(const std::string& path, Archive& archive) {
   // the trailer's count, so they are counted and left out of the replay.
   if (trailer) {
     std::vector<uint8_t> rest;
-    while (read_raw_record(f, rest) == RecordStatus::Ok)
+    while (read_raw_record(f, rest, hp) == RecordStatus::Ok)
       ++archive.skipped_after_trailer;
     if (archive.skipped_after_trailer)
       fprintf(stderr,
@@ -640,6 +682,18 @@ bool load_archive(const std::string& path, Archive& archive) {
               archive.skipped_after_trailer);
   }
 
+  if (hp) {
+    // The bytes parsed above are the bytes hashed; the unread tail (after a torn
+    // record or the trailer) is hashed too, so the digest covers the whole file.
+    const std::string got = hp->finish(f);
+    const auto want = archive.verified.find("events.bin");
+    if (want == archive.verified.end() || got != want->second) {
+      fprintf(stderr, "[HRR] Refusing archive %s: events.bin changed after it was verified\n",
+              archive_dir.c_str());
+      fclose(f);
+      return false;
+    }
+  }
   fclose(f);
 
   if (trailer) {
@@ -684,10 +738,20 @@ bool load_archive(const std::string& path, Archive& archive) {
   }
 
   // Enumerate blobs
+  // A file the check did not list was added after it: refuse the archive.
+  const auto unlisted = [&](const fs::path& p) {
+    if (!archive.checked) return false;
+    const std::string rel = p.lexically_relative(archive_dir).generic_string();
+    if (archive.verified.count(rel)) return false;
+    fprintf(stderr, "[HRR] Refusing archive %s: %s is not in the signed manifest\n",
+            archive_dir.c_str(), rel.c_str());
+    return true;
+  };
   std::string blobs_dir = archive_dir + "/blobs";
   if (fs::exists(blobs_dir)) {
     for (auto& entry : fs::recursive_directory_iterator(blobs_dir)) {
       if (entry.is_regular_file() && entry.path().extension() == ".blob") {
+        if (unlisted(entry.path())) return false;
         archive.blobs[entry.path().stem().string()] = entry.path().string();
         archive.blob_count++;
       }
@@ -699,6 +763,7 @@ bool load_archive(const std::string& path, Archive& archive) {
   if (fs::exists(co_dir)) {
     for (auto& entry : fs::directory_iterator(co_dir)) {
       if (entry.is_regular_file() && entry.path().extension() == ".hsaco") {
+        if (unlisted(entry.path())) return false;
         archive.code_objects[entry.path().stem().string()] = entry.path().string();
         archive.code_object_count++;
       }
@@ -801,9 +866,40 @@ bool read_file_capped(const std::string& file_path, std::vector<uint8_t>& data,
   return true;
 }
 
-static bool read_file(const std::string& file_path, std::vector<uint8_t>& data) {
+bool read_archive_file(const std::string& dir, const std::string& rel,
+                       const VerifiedFiles* verified, std::vector<uint8_t>& data,
+                       std::string* error, bool* refused) {
+  const std::string path = dir + "/" + rel;
+  const auto want = verified ? verified->find(rel) : VerifiedFiles::const_iterator();
+  if (verified && want == verified->end()) {
+    if (refused) *refused = true;
+    if (error) *error = "refusing " + path + ": not in the signed manifest";
+    return false;
+  }
+  if (!read_file_capped(path, data, error, refused)) return false;
+  if (verified) {
+    StreamHash h;
+    h.update(data.data(), data.size());
+    if (h.hex() != want->second) {
+      data.clear();
+      if (refused) *refused = true;
+      if (error) *error = "refusing " + path + ": changed after the archive was verified";
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool read_file(const Archive& archive, const std::string& file_path,
+                      std::vector<uint8_t>& data) {
   std::string err;
-  if (read_file_capped(file_path, data, &err)) return true;
+  if (!archive.checked) {
+    if (read_file_capped(file_path, data, &err)) return true;
+  } else {
+    const std::string rel =
+        fs::path(file_path).lexically_relative(archive.path).generic_string();
+    if (read_archive_file(archive.path, rel, &archive.verified, data, &err)) return true;
+  }
   fprintf(stderr, "[HRR] %s\n", err.c_str());
   return false;
 }
@@ -811,13 +907,13 @@ static bool read_file(const std::string& file_path, std::vector<uint8_t>& data) 
 bool read_blob(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,
                std::vector<uint8_t>& data) {
   auto it = archive.blobs.find(hash_hex(hash_lo, hash_hi));
-  return it != archive.blobs.end() && read_file(it->second, data);
+  return it != archive.blobs.end() && read_file(archive, it->second, data);
 }
 
 bool read_code_object(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,
                       std::vector<uint8_t>& data) {
   auto it = archive.code_objects.find(hash_hex(hash_lo, hash_hi));
-  return it != archive.code_objects.end() && read_file(it->second, data);
+  return it != archive.code_objects.end() && read_file(archive, it->second, data);
 }
 
 }  // namespace hrr

@@ -28,10 +28,6 @@ namespace fs = std::filesystem;
 namespace hrr_sign {
 namespace {
 
-// A manifest line is 64 + 2 + path; bound the file so a forged one cannot make
-// the verifier allocate without limit before the signature is checked.
-constexpr uintmax_t kMaxManifestBytes = 256u << 20;
-
 std::string hex(const uint8_t* p, size_t n) {
   static const char* d = "0123456789abcdef";
   std::string s;
@@ -60,6 +56,7 @@ bool unhex(const std::string& s, uint8_t* out, size_t n) {
   return true;
 }
 
+#if defined(_WIN32)
 bool sha256_file(const fs::path& p, std::string* hex_out) {
   FILE* f = fopen(p.string().c_str(), "rb");
   if (!f) return false;
@@ -73,6 +70,7 @@ bool sha256_file(const fs::path& p, std::string* hex_out) {
   *hex_out = h.hexdigest();
   return true;
 }
+#endif
 
 bool read_all(const fs::path& p, uintmax_t max, std::string* out) {
   std::error_code ec;
@@ -88,6 +86,7 @@ bool read_all(const fs::path& p, uintmax_t max, std::string* out) {
 
 bool is_sign_file(const std::string& rel) { return rel == kManifestName || rel == kSignatureName; }
 
+#if defined(_WIN32)
 // Relative paths (generic form) of the files in the archive, sorted. Fails on
 // anything that is not a regular file or directory, naming it.
 bool list_files(const fs::path& dir, std::vector<std::string>* out, std::string* err) {
@@ -103,10 +102,6 @@ bool list_files(const fs::path& dir, std::vector<std::string>* out, std::string*
       return false;
     }
     if (is_sign_file(rel)) continue;
-    if (rel.find('\n') != std::string::npos) {
-      *err = rel + ": file name holds a newline";
-      return false;
-    }
     out->push_back(rel);
   }
   if (ec) {
@@ -116,6 +111,7 @@ bool list_files(const fs::path& dir, std::vector<std::string>* out, std::string*
   std::sort(out->begin(), out->end());
   return true;
 }
+#endif
 
 bool write_file(const fs::path& p, const std::string& data, std::string* err,
                 unsigned mode = 0600) {
@@ -195,10 +191,7 @@ bool hash_tree_at(int dir, const std::string& prefix, std::map<std::string, std:
       ok = false;
     } else if (!is_sign_file(rel)) {
       std::string h;
-      if (rel.find('\n') != std::string::npos) {
-        *err = rel + ": file name holds a newline";
-        ok = false;
-      } else if (!sha256_at(dirfd(dp), name.c_str(), &h)) {
+      if (!sha256_at(dirfd(dp), name.c_str(), &h)) {
         *err = rel + ": cannot read";
         ok = false;
       } else {
@@ -225,36 +218,73 @@ bool write_at(int dir, const char* name, const std::string& data, std::string* e
 }
 #endif
 
-}  // namespace
-
-bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::string* err,
-                  int dir_fd) {
-  [[maybe_unused]] const fs::path d(dir);
-  std::map<std::string, std::string> hashes;  // sorted by path, as the manifest is
 #if !defined(_WIN32)
-  // The caller's descriptor when it has one; otherwise one opened here, so the
-  // walk and the writes below still share a single directory.
-  const int own = dir_fd >= 0 ? -1 : open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-  const int fd = dir_fd >= 0 ? dir_fd : own;
-  if (fd < 0) {
-    *err = dir + ": cannot open";
-    return false;
-  }
-  struct Closer { int fd; ~Closer() { if (fd >= 0) close(fd); } } closer{own};
-  if (!hash_tree_at(fd, "", &hashes, err)) return false;
+// The caller's descriptor when it has one; otherwise one opened here. The walk
+// and any writes then share a single directory.
+struct DirFd {
+  int fd;
+  int own;
+  DirFd(const std::string& dir, int borrowed)
+      : fd(borrowed >= 0 ? borrowed : open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC)),
+        own(borrowed >= 0 ? -1 : fd) {}
+  ~DirFd() { if (own >= 0) close(own); }
+};
+#endif
+
+// The one walk and hash of an archive, for signing and verifying alike: every
+// file but the signature pair, keyed by its '/'-separated path.
+bool hash_tree(const std::string& dir, [[maybe_unused]] int fd,
+               std::map<std::string, std::string>* out, std::string* err) {
+#if !defined(_WIN32)
+  return hash_tree_at(fd, "", out, err);
 #else
-  (void)dir_fd;
+  const fs::path d(dir);
   std::vector<std::string> files;
   if (!list_files(d, &files, err)) return false;
   for (const std::string& rel : files) {
-    if (!sha256_file(d / rel, &hashes[rel])) {
+    if (!sha256_file(d / rel, &(*out)[rel])) {
       *err = rel + ": cannot read";
       return false;
     }
   }
+  return true;
 #endif
+}
+
+}  // namespace
+
+bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::string* err,
+                  int dir_fd, uintmax_t max_manifest_bytes) {
+  [[maybe_unused]] const fs::path d(dir);
+  std::map<std::string, std::string> hashes;  // sorted by path, as the manifest is
+#if !defined(_WIN32)
+  const DirFd dfd(dir, dir_fd);
+  const int fd = dfd.fd;
+  if (fd < 0) {
+    *err = dir + ": cannot open";
+    return false;
+  }
+#else
+  (void)dir_fd;
+  const int fd = -1;
+#endif
+  if (!hash_tree(dir, fd, &hashes, err)) return false;
   std::string manifest;
-  for (const auto& kv : hashes) manifest += kv.second + "  " + kv.first + "\n";
+  for (const auto& kv : hashes) {
+    // A name with a newline would split into lines that never verify.
+    if (kv.first.find('\n') != std::string::npos) {
+      *err = kv.first + ": file name holds a newline";
+      return false;
+    }
+    manifest += kv.second + "  " + kv.first + "\n";
+  }
+  if (manifest.size() > max_manifest_bytes) {
+    *err = std::string(kManifestName) + " would be " + std::to_string(manifest.size()) +
+           " bytes (" + std::to_string(hashes.size()) + " files), over the " +
+           std::to_string(max_manifest_bytes) +
+           "-byte limit verification accepts; the archive cannot be signed";
+    return false;
+  }
 
   uint8_t secret[64], pub[32], s[32];
   memcpy(s, seed, 32);
@@ -279,7 +309,8 @@ bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::st
 }
 
 VerifyResult verify_archive(const std::string& dir, const uint8_t public_key[kPublicKeySize],
-                            std::string* err) {
+                            std::string* err, std::map<std::string, std::string>* verified,
+                            uintmax_t max_manifest_bytes) {
   const fs::path d(dir);
   std::error_code ec;
   if (!fs::exists(fs::symlink_status(d / kSignatureName, ec))) {
@@ -291,7 +322,7 @@ VerifyResult verify_archive(const std::string& dir, const uint8_t public_key[kPu
     *err = std::string(kSignatureName) + ": not a 64-byte Ed25519 signature";
     return VerifyResult::kRefused;
   }
-  if (!read_all(d / kManifestName, kMaxManifestBytes, &manifest)) {
+  if (!read_all(d / kManifestName, max_manifest_bytes, &manifest)) {
     *err = std::string(kManifestName) + ": missing or unreadable";
     return VerifyResult::kRefused;
   }
@@ -302,37 +333,41 @@ VerifyResult verify_archive(const std::string& dir, const uint8_t public_key[kPu
     return VerifyResult::kRefused;
   }
 
-  // The manifest is authentic. Parse it, then hold the tree to it.
+  // The manifest is authentic. Parse it, then hold the tree to it. A digest that
+  // is not hex cannot equal one we compute, so it fails the comparison below.
   std::map<std::string, std::string> expected;
   size_t pos = 0;
   while (pos < manifest.size()) {
     const size_t nl = manifest.find('\n', pos);
     const std::string line = manifest.substr(pos, nl == std::string::npos ? nl : nl - pos);
     pos = nl == std::string::npos ? manifest.size() : nl + 1;
-    uint8_t raw[32];
-    if (line.size() < 67 || line[64] != ' ' || line[65] != ' ' ||
-        !unhex(line.substr(0, 64), raw, 32)) {
+    if (line.size() < 67 || line[64] != ' ' || line[65] != ' ') {
       *err = std::string(kManifestName) + ": malformed line \"" + line.substr(0, 80) + "\"";
       return VerifyResult::kRefused;
     }
     expected[line.substr(66)] = line.substr(0, 64);
   }
 
-  std::vector<std::string> files;
-  if (!list_files(d, &files, err)) return VerifyResult::kRefused;
-  for (const std::string& rel : files) {
-    const auto it = expected.find(rel);
+#if !defined(_WIN32)
+  const DirFd dfd(dir, -1);
+  if (dfd.fd < 0) {
+    *err = dir + ": cannot open";
+    return VerifyResult::kRefused;
+  }
+  const int fd = dfd.fd;
+#else
+  const int fd = -1;
+#endif
+  std::map<std::string, std::string> actual;
+  if (!hash_tree(dir, fd, &actual, err)) return VerifyResult::kRefused;
+  for (const auto& kv : actual) {
+    const auto it = expected.find(kv.first);
     if (it == expected.end()) {
-      *err = rel + ": not in the signed manifest";
+      *err = kv.first + ": not in the signed manifest";
       return VerifyResult::kRefused;
     }
-    std::string h;
-    if (!sha256_file(d / rel, &h)) {
-      *err = rel + ": cannot read";
-      return VerifyResult::kRefused;
-    }
-    if (h != it->second) {
-      *err = rel + ": SHA-256 differs from the signed manifest";
+    if (kv.second != it->second) {
+      *err = kv.first + ": SHA-256 differs from the signed manifest";
       return VerifyResult::kRefused;
     }
     expected.erase(it);
@@ -341,7 +376,16 @@ VerifyResult verify_archive(const std::string& dir, const uint8_t public_key[kPu
     *err = expected.begin()->first + ": listed in the signed manifest but missing";
     return VerifyResult::kRefused;
   }
+  if (verified) *verified = std::move(actual);
   return VerifyResult::kOk;
+}
+
+bool public_key_from_seed(const uint8_t seed[kSeedSize], uint8_t public_key[kPublicKeySize]) {
+  uint8_t secret[64], s[32];
+  memcpy(s, seed, 32);
+  crypto_ed25519_key_pair(secret, public_key, s);  // wipes s
+  crypto_wipe(secret, sizeof(secret));
+  return true;
 }
 
 bool read_key_file(const std::string& path, bool is_seed, uint8_t out[32], std::string* err) {
