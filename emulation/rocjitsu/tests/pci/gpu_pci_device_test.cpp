@@ -3434,6 +3434,21 @@ TEST_F(GpuDeviceDelivery, PutsTheEntryInTheRingThenPointsAtItThenRaises) {
   EXPECT_EQ(transport_.triggered()[0], 0u) << "the one vector the device advertises";
 }
 
+TEST_F(GpuDeviceDelivery, TrapHandlerMessageReachesTheGuestSqInterruptRing) {
+  ASSERT_TRUE(soc_.mes_engine().deliver_trap_interrupt(7, 0xff000401));
+  EXPECT_EQ(transport_.dword_at(kWptrAddress), 0u);
+
+  device_.drain_doorbell_inbox_for_test();
+
+  EXPECT_EQ(transport_.dword_at(kRingBase), 0x0100ef14u);
+  EXPECT_EQ(transport_.dword_at(kRingBase + 12), 0x00020007u);
+  EXPECT_EQ(transport_.dword_at(kRingBase + 16), 0x04000401u);
+  EXPECT_EQ(transport_.dword_at(kRingBase + 20), 0x40u);
+  EXPECT_EQ(transport_.dword_at(kWptrAddress), 32u);
+  ASSERT_EQ(transport_.triggered().size(), 1u);
+  EXPECT_EQ(transport_.triggered()[0], 0u);
+}
+
 TEST_F(GpuDeviceDelivery, MarshalsCommandProcessorInterruptsOntoThePciOwnerThread) {
   const std::thread::id owner_thread = std::this_thread::get_id();
   std::thread::id producer_thread;

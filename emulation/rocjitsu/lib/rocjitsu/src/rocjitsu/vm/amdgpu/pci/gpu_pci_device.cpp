@@ -159,6 +159,11 @@ constexpr uint8_t kModelledInstance = 0;
 /// @brief GFX CP end-of-pipe interrupt identifiers consumed by KFD.
 constexpr uint8_t kGraphicsInterruptClient = 0x14;
 constexpr uint8_t kCpEndOfPipeSource = 181;
+constexpr uint8_t kSqInterruptSource = 239;
+// GFX12.1 SQ wave-message encoding consumed by kfd_int_process_v12_1.c.
+constexpr uint32_t kSqMessageDataMask = 0x00ffffff;
+constexpr uint32_t kSqMessagePrivileged = 1u << 26;
+constexpr uint32_t kSqMessageWaveEncoding = 1u << 6;
 constexpr uint8_t kSdmaInterruptClient = 0x0a;
 constexpr uint8_t kSdmaTrapSource = 49;
 constexpr uint8_t kFirstComputeVmid = 1;
@@ -259,6 +264,19 @@ GpuPciDevice::GpuPciDevice(std::string name, const GpuPciDeviceSpec &spec, BarAc
     interrupt_subscription_ =
         amdgpu::InterruptSubscription([this](uint32_t process_id, uint32_t event_id) {
           enqueue_cp_interrupt(process_id, event_id);
+        });
+    trap_interrupt_subscription_ =
+        amdgpu::InterruptSubscription([this](uint32_t process_id, uint32_t data) {
+          if (process_id == 0 || process_id > std::numeric_limits<uint16_t>::max())
+            return;
+          (void)enqueue_interrupt({.client_id = kGraphicsInterruptClient,
+                                   .source_id = kSqInterruptSource,
+                                   .vmid = kFirstComputeVmid,
+                                   .pasid = static_cast<uint16_t>(process_id),
+                                   .node_id = kFirstXccInterruptNode,
+                                   .data = {(data & kSqMessageDataMask) | kSqMessagePrivileged,
+                                            kSqMessageWaveEncoding}},
+                                  InterruptRequestKind::Completion);
         });
   }
 
@@ -366,6 +384,7 @@ bool GpuPciDevice::shutdown_frontend() {
   // interrupt route, or backing storage it may still be using.
   shutdown_transport();
   interrupt_subscription_.reset();
+  trap_interrupt_subscription_.reset();
   const bool queues_released = teardown_frontend_queues();
   const bool gart_cleared = soc_ == nullptr || soc_->gpu_vm().clear_gart_binding();
   if (!queues_released || !gart_cleared) {
@@ -556,7 +575,8 @@ void GpuPciDevice::build_block_models() {
     }
     if (auto *mes = dynamic_cast<MesBlockModel *>(model.get()); mes != nullptr) {
       if (soc_ != nullptr && !mes->attach_engine(soc_->mes_engine(), sdma_queue_binding_factory_,
-                                                 interrupt_subscription_.sink())) {
+                                                 interrupt_subscription_.sink(),
+                                                 trap_interrupt_subscription_.sink())) {
         util::Logger::warn(std::format("{}: cannot attach the MES core engine", name()));
         models_complete_ = false;
       }
@@ -710,15 +730,17 @@ void GpuPciDevice::drain_interrupts() {
     FrontendOperationLease frontend = acquire_frontend_operation(request.reset_epoch);
     if (!lease || transport_session() != session || !frontend)
       continue;
-    if (request.kind == InterruptRequestKind::Completion) {
+    if (request.kind == InterruptRequestKind::Completion &&
+        request.entry.source_id == kCpEndOfPipeSource) {
       const std::lock_guard lock(sdma_effect_mutex_);
       last_cp_interrupt_thread_ = std::this_thread::get_id();
     }
     const bool delivered = deliver_interrupt(request.entry);
     if (request.kind == InterruptRequestKind::Completion) {
       if (!delivered) {
-        util::Logger::warn(std::format("{}: could not deliver CP event {} for PASID {}", name(),
-                                       request.entry.data[0], request.entry.pasid));
+        util::Logger::warn(
+            std::format("{}: could not deliver interrupt source {} data {:#x} for PASID {}", name(),
+                        request.entry.source_id, request.entry.data[0], request.entry.pasid));
       }
     } else if (delivered) {
       util::Logger::warn(interrupt_ring().raises_messages

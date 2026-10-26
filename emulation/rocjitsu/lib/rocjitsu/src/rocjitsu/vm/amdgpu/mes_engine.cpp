@@ -192,7 +192,8 @@ std::optional<MesTrapConfig> MesEngine::resolve_trap_config(const QueueIdentity 
 
 bool MesEngine::attach_frontend(std::string diagnostic_name,
                                 std::shared_ptr<SdmaQueueBindingFactory> sdma_queue_binding_factory,
-                                InterruptSink interrupt_sink, MesFrontendCallbacks callbacks) {
+                                InterruptSink interrupt_sink, MesFrontendCallbacks callbacks,
+                                InterruptSink trap_interrupt_sink) {
   reap_orphaned_address_spaces();
   if (frontend_attached_ || !mapped_queues_.empty() || !pending_mes_frames_.empty()) {
     return false;
@@ -200,6 +201,7 @@ bool MesEngine::attach_frontend(std::string diagnostic_name,
   diagnostic_name_ = std::move(diagnostic_name);
   sdma_queue_binding_factory_ = std::move(sdma_queue_binding_factory);
   interrupt_sink_ = std::move(interrupt_sink);
+  trap_interrupt_sink_ = std::move(trap_interrupt_sink);
   callbacks_ = std::move(callbacks);
   frontend_attached_ = true;
   return true;
@@ -222,9 +224,17 @@ bool MesEngine::detach_frontend() {
   debug_enabled_contexts_.clear();
   sdma_queue_binding_factory_ = nullptr;
   interrupt_sink_ = {};
+  trap_interrupt_sink_ = {};
   callbacks_ = {};
   diagnostic_name_ = "MES";
   frontend_attached_ = false;
+  return true;
+}
+
+bool MesEngine::deliver_trap_interrupt(uint32_t process_id, uint32_t data) const {
+  if (!trap_interrupt_sink_)
+    return false;
+  trap_interrupt_sink_.deliver(process_id, data);
   return true;
 }
 
