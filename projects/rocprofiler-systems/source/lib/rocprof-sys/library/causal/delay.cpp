@@ -49,10 +49,10 @@ compute_sleep_for_overhead()
     auto         _stats   = tim::statistics<double>{};
     for(size_t i = 0; i < _ntot; ++i)
     {
-        auto               _val = _dist(_engine);
-        const std::int64_t _beg = tracing::now();
+        auto       _val = _dist(_engine);
+        const auto _beg = static_cast<std::int64_t>(tracing::now());
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _val });
-        const std::int64_t _end = tracing::now();
+        const auto _end = static_cast<std::int64_t>(tracing::now());
         if(i < _nwarm)
         {
             continue;
@@ -109,10 +109,10 @@ delay::process()
         else if(get_global() > get_local())
         {
             ::rocprofsys::causal::sampling::pause();
-            auto _beg = tracing::now();
+            auto const _beg = tracing::now();
             std::this_thread::sleep_for(
                 std::chrono::nanoseconds{ get_global() - get_local() });
-            get_local() += (tracing::now() - _beg);
+            get_local() += static_cast<std::int64_t>(tracing::now() - _beg);
             ::rocprofsys::causal::sampling::resume();
         }
     }
@@ -130,7 +130,7 @@ delay::credit()
         return;
     }
 
-    auto _diff = get_global() - get_local();
+    auto const _diff = get_global() - get_local();
     if(_diff > 0)
     {
         get_local() += _diff;
@@ -145,7 +145,7 @@ delay::preblock()
         return;
     }
 
-    auto _diff = get_global() - get_local();
+    auto const _diff = get_global() - get_local();
     if(_diff > 0)
     {
         get_local() += _diff;
@@ -165,7 +165,7 @@ delay::postblock(std::int64_t _preblock_global_delay_value)
 std::int64_t
 delay::sync()
 {
-    auto _v = get_global().load(std::memory_order_seq_cst);
+    auto const _v = get_global().load(std::memory_order_seq_cst);
     if(get_delay_data())
     {
         get_delay_data()->fill(_v);
@@ -183,7 +183,7 @@ delay::get_global()
 static void
 thr_init()
 {
-    static thread_local auto _thr_init = []() {
+    static thread_local auto const _thr_init = []() {
         using thread_data_t = thread_data<identity<std::int64_t>, delay>;
         thread_data_t::construct(construct_on_thread{ threading::get_id() },
                                  delay::get_global().load());
@@ -196,7 +196,7 @@ bool
 delay::is_local_available()
 {
     thr_init();
-    auto& _data = get_delay_data();
+    auto const& _data = get_delay_data();
     return _data != nullptr;
 }
 

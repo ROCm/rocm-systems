@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
-#include "rocjitsu/vm/amdgpu/aql/aql_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/pci/bar_access_trace.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
@@ -2474,7 +2474,7 @@ TEST_F(GpuDeviceMes, LostConnectionReleasesOnlyPciQueuesAndAllowsPasidReuse) {
                .consumer_pointer_address = 0x2000,
                .producer_pointer_address = 0x3000},
       .doorbell = {},
-      .binding_factory = rocjitsu::amdgpu::make_aql_queue_binding_factory(legacy_cp),
+      .binding_factory = rocjitsu::amdgpu::make_compute_queue_binding_factory(legacy_cp),
       .type = rocjitsu::amdgpu::QueueType::Compute,
       .packet_format = rocjitsu::amdgpu::QueuePacketFormat::Aql,
   });
@@ -3010,6 +3010,10 @@ TEST_F(GpuDeviceSdma, TerminalFaultSurvivesUnavailableReadPointerPublication) {
 
   auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{48});
   ring_doorbell(0x800, doorbell);
+  // Wait for the terminal scheduler turn, including its retried publication.
+  // The doorbell drain's idle window can end before that asynchronous work.
+  EXPECT_FALSE(device_.synchronize_sdma_queue_for_test(/*engine=*/0));
+  device_.drain_doorbell_inbox_for_test();
   EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 28u);
   EXPECT_EQ(transport_.dword_at(kSchedulerRingFencePhysical), 0u);
 
@@ -3116,6 +3120,9 @@ TEST_F(GpuDeviceSdma, ExecutesAnIndirectBufferAndSignalsItsFence) {
 
   auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
   ring_doorbell(0x800, doorbell);
+  // The inbox drain can return between asynchronous SDMA service turns.
+  // Wait for the submitted work before checking fences and the trap.
+  ASSERT_TRUE(device_.synchronize_sdma_queue_for_test(/*engine=*/0));
 
   EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0xdeadbeefu);
   EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 7u);
@@ -3205,6 +3212,8 @@ TEST_F(GpuDeviceSdma, CompletesSatisfiedRegisterAndMemoryPolls) {
   auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
   ring_doorbell(0x800, doorbell);
 
+  // Satisfied polls still complete asynchronously after the inbox drain.
+  ASSERT_TRUE(device_.synchronize_sdma_queue_for_test(/*engine=*/0));
   EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 64u);
 }
 

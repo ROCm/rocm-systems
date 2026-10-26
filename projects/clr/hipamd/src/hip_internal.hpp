@@ -433,8 +433,8 @@ namespace hip {
     }
     /// Returns last captured graph node
     const std::vector<hip::GraphNode*>& GetLastCapturedNodes() const { return lastCapturedNodes_; }
-    /// Set last captured graph node
-    void SetLastCapturedNode(hip::GraphNode* graphNode) { lastCapturedNodes_ = {graphNode}; }
+    /// Set last captured graph node; copies stream priority onto kernel nodes.
+    void SetLastCapturedNode(hip::GraphNode* graphNode);
     /// Returns dependencies removed during capture
     const std::vector<hip::GraphNode*>& GetRemovedDependencies() const {
       return removedDependencies_;
@@ -497,8 +497,19 @@ namespace hip {
       return detached_.load(std::memory_order_acquire);
     }
 
+    // --- Null-stream blocking tracker ---
+
+    /// True if this stream already waits on null-stream HW signal \p signal.
+    [[nodiscard]] bool IsBlockedOn(void* signal) const;
+
+    /// Records the null-stream signal this stream waits on. Call after the wait is enqueued.
+    void SetBlockedOn(void* signal);
+
   private:
     ~Stream();
+
+    //! Null-stream signal this stream waits on; retained so HwQueueTracker won't re-arm it.
+    std::atomic<void*> blocked_on_signal_{nullptr};
 
     /// Generate ID for stream capture unique over the lifetime of the process
     static uint64_t GenerateCaptureID() {
@@ -762,6 +773,18 @@ namespace hip {
   extern Device* getCurrentDevice();
 
   extern void setCurrentDevice(unsigned int index);
+
+  /// If we have the flush register set, we return the option
+  inline unsigned int ihipRdmaFlushWritesOptions(const uint32_t* hdpMemFlushCntl) {
+    return (hdpMemFlushCntl != nullptr)
+        ? static_cast<unsigned int>(hipFlushGPUDirectRDMAWritesOptionHost)
+        : 0u;
+  }
+
+  /// The hardware does not make the writes visible on its own. Hence it's none here
+  inline int ihipRdmaWritesOrdering() {
+    return static_cast<int>(hipGPUDirectRDMAWritesOrderingNone);  // i.e. 0
+  }
 
   /// Get ROCclr queue associated with hipStream
   /// Note: This follows the CUDA spec to sync with default streams

@@ -5,6 +5,7 @@
 
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/perfetto/engine.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -56,35 +57,50 @@ sum_storage_bytes(const std::vector<std::shared_ptr<data::processor_config_t>>& 
     return total;
 }
 
+void
+publish_process_metadata(const std::shared_ptr<data::processor_config_t>& config)
+{
+    if(!config->_metadata_registry)
+    {
+        return;
+    }
+
+    auto process_info = config->_metadata_registry->get_process_info();
+    output::registry::instance().record_process(
+        output::process_metadata{ .pid     = process_info.pid,
+                                  .ppid    = process_info.ppid,
+                                  .command = std::move(process_info.command) });
+}
+
 [[nodiscard]] data::processor_storage_t
 configure_processors(
-    const std::shared_ptr<sample_processor_t>&       _coordinator,
-    const std::shared_ptr<data::processor_config_t>& _config,
-    const data::enabled_formats_t& _formats, output_file_registry& _registry,
+    const std::shared_ptr<sample_processor_t>&                          _coordinator,
+    const std::shared_ptr<data::processor_config_t>&                    _config,
+    const data::enabled_formats_t&                                      _formats,
     std::optional<std::reference_wrapper<core::cached_perfetto_engine>> _engine,
-    std::optional<std::reference_wrapper<rocprofsys::track_registry>>   _tracks)
+    std::optional<std::reference_wrapper<track_registry>>               _tracks)
 {
     data::processor_storage_t storage;
     if(_formats.is_rocpd_enabled())
     {
         storage.rocpd_processor = std::make_shared<rocpd_processor_t>(
             _config->_metadata_registry, _config->_agent_manager, _config->_pid,
-            _config->_ppid, _registry);
-        _coordinator->add_handler(*storage.rocpd_processor);
+            _config->_ppid);
+        _coordinator->add_handler(storage.rocpd_processor);
     }
     if(_formats.is_perfetto_enabled() && _engine.has_value() && _tracks.has_value())
     {
         storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
             _config->_metadata_registry, _config->_agent_manager, _config->_pid,
-            _config->_ppid, _registry, _tracks->get());
-        _coordinator->add_handler(*storage.perfetto_processor);
+            _config->_ppid, _tracks->get());
+        _coordinator->add_handler(storage.perfetto_processor);
     }
 
     if(_formats.is_unified_memory_enabled())
     {
         storage.unified_memory_processor = std::make_shared<unified_memory_processor_t>(
-            _config->_agent_manager, _config->_pid, output_file_sink_view{ _registry });
-        _coordinator->add_handler(*storage.unified_memory_processor);
+            _config->_agent_manager, _config->_pid);
+        _coordinator->add_handler(storage.unified_memory_processor);
         LOG_DEBUG("Unified memory processor enabled for PID {}", _config->_pid);
     }
 
@@ -95,20 +111,21 @@ void
 process_buffered_storage(
     const std::shared_ptr<data::processor_config_t>& _config,
     const std::string& _storage_filename, const data::enabled_formats_t& _formats,
-    output_file_registry& _registry, progress::progress_callback _progress_cb,
+    progress::progress_callback                                         _progress_cb,
     std::optional<std::reference_wrapper<core::cached_perfetto_engine>> _engine,
-    std::optional<std::reference_wrapper<rocprofsys::track_registry>>   _tracks)
+    std::optional<std::reference_wrapper<track_registry>>               _tracks)
 {
     LOG_DEBUG("Processing buffered storage: {} for pid={}", _storage_filename,
               _config->_pid);
 
-    auto _coordinator = std::make_shared<sample_processor_t>();
-    // RAII lifetime guard: configure_processors registers raw references to the
-    // returned processors as handlers on _coordinator. Holding _storage in scope
-    // keeps those processors alive until the parse + finalize is done.
-    [[maybe_unused]] auto _storage = configure_processors(_coordinator, _config, _formats,
-                                                          _registry, _engine, _tracks);
-    storage_parser_t      _parser(_storage_filename);
+    publish_process_metadata(_config);
+
+    auto const _coordinator = std::make_shared<sample_processor_t>();
+    // storage keeps the concrete processors reachable (the coordinator shares
+    // ownership of them as sample_processor_interface).
+    [[maybe_unused]] auto const storage =
+        configure_processors(_coordinator, _config, _formats, _engine, _tracks);
+    storage_parser_t _parser(_storage_filename);
 
     // perfetto_processor_t::prepare_for_processing primes two thread_local
     // values on this parser thread (active track_registry + emitting pid).
@@ -119,8 +136,8 @@ process_buffered_storage(
     {
         ~tls_reset_guard()
         {
-            ::rocprofsys::set_active_track_registry(nullptr);
-            ::rocprofsys::core::set_emitting_pid(-1);
+            set_active_track_registry(nullptr);
+            core::set_emitting_pid(-1);
         }
     } _tls_guard;
 
@@ -140,15 +157,13 @@ process_buffered_storage(
 }
 }  // namespace
 
-post_processor::post_processor(progress::tracker&    tracker,
-                               output_file_registry& registry) noexcept
+post_processor::post_processor(progress::tracker& tracker) noexcept
 : m_tracker(tracker)
-, m_registry(registry)
 {}
 
 void
 post_processor::set_cached_perfetto_context(core::cached_perfetto_engine& engine,
-                                            rocprofsys::track_registry&   tracks) noexcept
+                                            track_registry&               tracks) noexcept
 {
     m_engine = engine;
     m_tracks = tracks;
@@ -180,11 +195,11 @@ post_processor::run_sequential(
         LOG_TRACE("Processing config for pid={}", cfg->_pid);
         const auto _filename =
             utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
-        auto _progress_cb = m_tracker.begin(
+        auto const _progress_cb = m_tracker.begin(
             fmt::format("Generating trace-cache output for process [{}]", cfg->_pid),
             file_size_or_zero(_filename));
-        process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb,
-                                 m_engine, m_tracks);
+        process_buffered_storage(cfg, _filename, formats, _progress_cb, m_engine,
+                                 m_tracks);
     }
     LOG_DEBUG("Sequential processing completed");
 }
@@ -206,16 +221,17 @@ post_processor::run_multithreaded(
     const auto hw         = std::thread::hardware_concurrency();
     const auto max_active = (hw > 0) ? static_cast<std::size_t>(hw) : std::size_t{ 1 };
 
-    auto spawn_for_config = [this, &formats, &_progress_cb](
-                                const std::shared_ptr<data::processor_config_t>& cfg) {
-        LOG_TRACE("Spawning processing thread for pid={}", cfg->_pid);
-        return std::thread{ [this, cfg, &formats, _progress_cb] {
-            const auto _filename =
-                utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
-            process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb,
-                                     m_engine, m_tracks);
-        } };
-    };
+    auto const spawn_for_config =
+        [this, &formats,
+         &_progress_cb](const std::shared_ptr<data::processor_config_t>& cfg) {
+            LOG_TRACE("Spawning processing thread for pid={}", cfg->_pid);
+            return std::thread{ [this, cfg, &formats, _progress_cb] {
+                const auto _filename =
+                    utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
+                process_buffered_storage(cfg, _filename, formats, _progress_cb, m_engine,
+                                         m_tracks);
+            } };
+        };
 
     for(std::size_t batch_start = 0; batch_start < configs.size();
         batch_start += max_active)
@@ -252,10 +268,10 @@ post_processor::make_configs(const data::mapped_cache_files_t& cache_files,
         }
 
         std::vector<std::shared_ptr<agent>> _agents;
-        auto _metadata = std::make_shared<metadata_registry>();
+        auto const _metadata = std::make_shared<metadata_registry>();
         _metadata->load_from_file(files.metadata, _agents);
 
-        auto _agent_manager = std::make_shared<agent_manager>(_agents);
+        auto const _agent_manager = std::make_shared<agent_manager>(_agents);
 
         configs.push_back(std::make_shared<data::processor_config_t>(
             pid, root_pid, _metadata, _agent_manager));

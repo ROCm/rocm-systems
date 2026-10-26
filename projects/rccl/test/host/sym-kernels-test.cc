@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <ostream>
 #include <string>
@@ -32,6 +33,8 @@
 #undef __global__
 
 #include SYM_KERNELS_CC_PATH
+
+#include "SymTdmTestHelpers.h"
 
 namespace {
 
@@ -111,12 +114,7 @@ TEST_F(SymKernelMicrotest, MaxChunkElts_UnhandledCombination_ReturnsZeroRegardle
 // ---- ncclSymkMask: kmask assembly (2GB/64GB thresholds, Tma gating, Gin gating; hasLsaMultimem false throughout) ----
 
 // Factory lambdas (see ForceLegacyCudaRegister/ReuseSysmemHandlesOn): every other param keeps its default.
-std::function<int64_t(const char*, int64_t)> SymTmaEnable(int64_t value) {
-  return [value](const char* env, int64_t deftVal) -> int64_t {
-    return std::string(env) == "SYM_TMA_ENABLE" ? value : deftVal;
-  };
-}
-
+// SymTmaEnable is in SymTdmTestHelpers.h.
 std::function<int64_t(const char*, int64_t)> SymGinKernelsEnable(int64_t value) {
   return [value](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "SYM_GIN_KERNELS_ENABLE" ? value : deftVal;
@@ -127,28 +125,19 @@ class SymKernelMaskTest : public SymKernelMicrotest {
  protected:
   static constexpr ncclDataType_t kTy = ncclFloat32;
 
+  // NCCL 2.32's ncclSymkTmaAvailable also requires enough opt-in shared memory for 16 warps of TMA
+  // scratch. Report exactly that, so the TMA cases below are still gated only by compute capability,
+  // SYM_TMA_ENABLE and alignment.
+  void SetUp() override {
+    SymKernelMicrotest::SetUp();
+    comm_->maxSharedMemOptin = ncclTmaShmemScratchWarpSize() * 16;
+  }
+
   // AllReduce's nBusBytes multiplier is 1, so nElts*4 (f32) controls the byte count exactly, cell-aligned.
   static size_t NEltsForBytes(size_t bytes) { return bytes / ncclTypeSize(kTy); }
 
-  // ncclSymkTmaAvailable() keys on archName under __HIP_PLATFORM_AMD__ and minCompCap otherwise;
-  // set both so a case reads the same either way.
-  void MakeTmaCapableComm() {
-    comm_->minCompCap = 100;
-    comm_->archName = const_cast<char*>("gfx1250");
-  }
-  void MakeTmaIncapableComm() {
-    comm_->minCompCap = 99;
-    comm_->archName = const_cast<char*>("gfx950");
-  }
-
-  // ROCm also needs the SDK's TDM header, so only cases asserting a kernel SURVIVES need this.
-  static bool TmaReachableOnThisBuild() {
-#if defined(__HIP_PLATFORM_AMD__)
-    return TDM_TOOLCHAIN_AVAILABLE;
-#else
-    return true;
-#endif
-  }
+  void MakeTmaCapableComm() { SetTdmCapableArch(comm_.get()); }
+  void MakeTmaIncapableComm() { SetSymkArch(comm_.get(), "gfx950", 95, /*warpSize=*/64); }
 };
 
 TEST_F(SymKernelMaskTest, JustBelow2GB_LLKernelSurvives) {
@@ -218,6 +207,40 @@ TEST_F(SymKernelMaskTest, NotSymAligned16B_TmaKernelCleared) {
   uint32_t kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/false);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+}
+
+// ---- NCCL_SYM_TMA_ENABLE left at its compile-time default (no loadParam hook): on, not forced ----
+
+TEST_F(SymKernelMaskTest, DefaultParam_ArchCapableAndAligned_TmaKernelOfferedAlongsideOthers) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  MakeTmaCapableComm();
+  uint32_t kmask =
+      ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
+  EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+  for (ncclSymkKernelId id : {ncclSymkKernelId_AllReduce_AGxLL_R, ncclSymkKernelId_AllReduce_RSxLD_AGxST}) {
+    EXPECT_TRUE(KernelBitSet(kmask, id)) << "the default must leave the tuner a choice: " << (int)id;
+  }
+}
+
+TEST_F(SymKernelMaskTest, DefaultParam_EachCollectiveOffersItsTmaKernel) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  MakeTmaCapableComm();
+  EXPECT_TRUE(KernelBitSet(
+      ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true),
+      ncclSymkKernelId_AllGather_TmaST));
+  EXPECT_TRUE(KernelBitSet(
+      ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true),
+      ncclSymkKernelId_ReduceScatter_TmaLD));
+  EXPECT_TRUE(KernelBitSet(
+      ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSumPostDiv, kTy, /*nElts=*/1024, /*symAligned16B=*/true),
+      ncclSymkKernelId_ReduceScatter_TmaLD));
+}
+
+// Pins the default itself. Unlike the mask cases above, this runs on builds whose SDK lacks the TDM header.
+TEST_F(SymKernelMaskTest, DefaultParam_OffersButDoesNotForce) {
+  EXPECT_EQ(ncclParamSymTmaEnable(), 1);
+  MakeTmaCapableComm();
+  EXPECT_FALSE(ncclSymkTmaForced(comm_.get()));
 }
 
 // ---- NCCL_SYM_TMA_ENABLE=2: force by leaving nothing else in the mask ----
@@ -458,6 +481,25 @@ TEST_F(SymKernelMaskTest, ReduceScatterNRanksMultiplier_AtPerRank2GB_LLKernelCle
   size_t nElts = NEltsForBytes((size_t(2) << 30) / comm_->nRanks);
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, nElts);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
+}
+
+// rcclSymkKernelIdIsTma drives the SymTDM label, rcclSymkKernelIdIsLL the LL protocol label; the names are the oracle.
+TEST_F(SymKernelMicrotest, KernelIdIsTma_OnlyTheTdmKernels) {
+  for (int id = 0; id < ncclSymkKernelId_Count; id++) {
+    const char* name = ncclSymkKernelIdToString(id);
+    EXPECT_EQ(std::strstr(name, "Tma") != nullptr, rcclSymkKernelIdIsTma(id)) << name;
+  }
+  EXPECT_FALSE(rcclSymkKernelIdIsTma(-1));
+  EXPECT_FALSE(rcclSymkKernelIdIsTma(ncclSymkKernelId_Count));
+}
+
+TEST_F(SymKernelMicrotest, KernelIdIsLL_OnlyTheLLKernels) {
+  for (int id = 0; id < ncclSymkKernelId_Count; id++) {
+    const char* name = ncclSymkKernelIdToString(id);
+    EXPECT_EQ(std::strstr(name, "LL") != nullptr, rcclSymkKernelIdIsLL(id)) << name;
+  }
+  EXPECT_FALSE(rcclSymkKernelIdIsLL(-1));
+  EXPECT_FALSE(rcclSymkKernelIdIsLL(ncclSymkKernelId_Count));
 }
 
 // ---- ncclSymkAvailable/ncclSymkImplemented: the (coll,red,ty) support set independent of the generated switch ----

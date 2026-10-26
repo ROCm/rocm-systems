@@ -42,6 +42,12 @@ static bool isLsaAccessible(struct ncclComm* comm, int rank) {
 
 static ncclResult_t ensureRmaProxyReady(struct ncclComm* comm, int nProxyTasks) {
   if (nProxyTasks <= 0) return ncclSuccess;
+  // Don't connect lazily when disabled: the connect is collective and would hang.
+  if (!comm->rmaState.rmaProxyState.connected && ncclParamRMADisable()) {
+    WARN("One-sided RMA: invalid usage, a peer outside the LSA team needs the RMA proxy but NCCL_RMA_DISABLE is set. "
+         "Unset NCCL_RMA_DISABLE to reach this peer.");
+    return ncclInvalidUsage;
+  }
   NCCLCHECK(ncclRmaProxyConnectOnce(comm));
   if (!comm->rmaState.rmaProxyState.connected || comm->rmaState.rmaProxyState.ncclRma == NULL) {
     WARN("One-sided RMA: proxy path required but the RMA proxy is not connected");

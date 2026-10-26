@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "simdojo/components/cache.h"
 
 #include <cstdint>
@@ -13,9 +13,7 @@ namespace rocjitsu {
 namespace amdgpu {
 
 class GpuMemory;
-class GpuVm;
 class L2Cache;
-enum class VmAccessOutcome : uint8_t;
 
 /// @brief L1 Scalar Cache (K$) controller for SMEM instructions.
 ///
@@ -23,7 +21,8 @@ enum class VmAccessOutcome : uint8_t;
 /// scalar loads and stores. Cacheable scalar stores allocate in K$, update the
 /// resident bytes, and write those bytes through to L2. K$ lines remain clean,
 /// so eviction and `s_dcache_wb` never publish a cached full line.
-/// `s_dcache_inv` invalidates all resident lines.
+/// `s_dcache_inv` invalidates all resident lines; `s_dcache_discard`
+/// invalidates only the addressed line(s) for one VMID.
 ///
 /// CDNA3 K$ geometry: 64B lines, 64 sets, 4-way = 16KB.
 class L1ScalarCache {
@@ -32,7 +31,9 @@ public:
   static constexpr uint32_t NUM_SETS = 64;
   static constexpr uint32_t ASSOCIATIVITY = 4;
 
-  using CacheStore = simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY>;
+  using CacheStore =
+      simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY,
+                     simdojo::LRUPolicy<NUM_SETS, ASSOCIATIVITY>, /*LazyStorage=*/true>;
 
   explicit L1ScalarCache(L2Cache *l2 = nullptr);
   ~L1ScalarCache();
@@ -52,17 +53,23 @@ public:
   /// @brief Scalar load: read num_dwords contiguous dwords from addr.
   ///
   /// Fetches from K$ on hit, or fills from L2 on miss. Handles requests
-  /// that span multiple cache lines.
-  VmAccessOutcome load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint32_t vmid = 0);
+  /// that span multiple cache lines. Instruction MTYPE is combined with page
+  /// restrictions; CC/UC loads bypass resident K$ data and refetch through L2.
+  /// Private RAM batching must be enabled only for unobserved functional requests.
+  VmAccessOutcome load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint32_t vmid = 0,
+                       bool allow_private_batch = false, Mtype instruction_mtype = Mtype::RW);
 
   /// @brief Scalar load: read num_bytes contiguous bytes from addr.
-  VmAccessOutcome load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, uint32_t vmid = 0);
+  VmAccessOutcome load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, uint32_t vmid = 0,
+                             Mtype instruction_mtype = Mtype::RW);
 
   /// @brief Scalar store: write num_dwords contiguous dwords to addr.
   ///
   /// Cacheable stores allocate without reading untouched bytes and write through
-  /// each modified byte range to L2. UC and CC stores bypass K$.
-  VmAccessOutcome store(uint64_t addr, uint32_t num_dwords, const uint32_t *src, uint32_t vmid = 0);
+  /// each modified byte range to L2. UC and CC stores bypass K$, whether the
+  /// restriction comes from the instruction or the page.
+  VmAccessOutcome store(uint64_t addr, uint32_t num_dwords, const uint32_t *src, uint32_t vmid = 0,
+                        Mtype instruction_mtype = Mtype::RW);
 
   /// @brief Handle s_dcache_wb; a no-op because K$ is write-through.
   /// @param vmid Ignored. Retained only for call-site signature symmetry.
@@ -70,6 +77,10 @@ public:
 
   /// @brief Invalidate all clean K$ lines (s_dcache_inv).
   void invalidate_all();
+
+  /// @brief Handle s_dcache_discard[_x2] without fetching or writing data.
+  /// @param num_lines Number of consecutive 64-byte lines to invalidate (one or two).
+  void discard(uint64_t addr, uint32_t num_lines, uint32_t vmid = 0);
 
 private:
   void cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid);
@@ -81,6 +92,7 @@ private:
   CacheStore cache_;
   L2Cache *l2_;
   GpuVm *gpu_vm_ = nullptr;
+  VmMtypeCache mtype_cache_;
   uint64_t coherence_epoch_ = 0;
 };
 

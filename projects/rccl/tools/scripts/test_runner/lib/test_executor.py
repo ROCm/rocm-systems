@@ -1945,11 +1945,16 @@ class TestExecutor:
         perf_nthreads = int(_t_match.group(1)) if _t_match else 1
         exec_mode = "mpi" if num_ranks > 1 else ("threaded" if perf_nthreads > 1 else "single")
 
-        # Merge environment variables
+        # Merge environment variables.  Expand ${VAR:-default} references so
+        # config values like "${RCCL_MULTIPLANE_MAP_FILE:-}" resolve from the
+        # caller's environment instead of being passed as literal strings.
         merged_env = {
-            **self.global_env,
-            **suite_config.get("env_variables", {}),
-            **env_vars
+            k: expand_env_vars(str(v))
+            for k, v in {
+                **self.global_env,
+                **suite_config.get("env_variables", {}),
+                **env_vars,
+            }.items()
         }
 
         mpi_extra = " ".join(
@@ -3283,10 +3288,48 @@ class TestExecutor:
         # llvm-cov to attribute that coverage.
         host_test_dir = os.path.join(test_dir, "host")
         for binary in ["rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit",
+                       "rccl-UnitTestsMicroAlloc",
+                       "rccl-UnitTestsMicroAllocator",
+                       "rccl-UnitTestsMicroAmdsmiWrap",
+                       "rccl-UnitTestsMicroApiTrace",
+                       "rccl-UnitTestsMicroArgcheck",
+                       "rccl-UnitTestsMicroBootstrap",
+                       "rccl-UnitTestsMicroCftDevRuntime",
+                       "rccl-UnitTestsMicroCollTrace",
+                       "rccl-UnitTestsMicroCollectives",
+                       "rccl-UnitTestsMicroCore",
+                       "rccl-UnitTestsMicroCpuset",
+                       "rccl-UnitTestsMicroCrypt",
+                       "rccl-UnitTestsMicroDdaColl",
+                       "rccl-UnitTestsMicroDebug",
+                       "rccl-UnitTestsMicroGinHostProxy",
+                       "rccl-UnitTestsMicroLinux",
+                       "rccl-UnitTestsMicroMemManager",
+                       "rccl-UnitTestsMicroMgmtTaskEnq",
+                       "rccl-UnitTestsMicroMnnvl",
+                       "rccl-UnitTestsMicroNcclDevice",
+                       "rccl-UnitTestsMicroOnerank",
+                       "rccl-UnitTestsMicroParam",
+                       "rccl-UnitTestsMicroPlugin",
+                       "rccl-UnitTestsMicroProfiler",
+                       "rccl-UnitTestsMicroProxy",
+                       "rccl-UnitTestsMicroRecorder",
+                       "rccl-UnitTestsMicroRocmwrap",
+                       "rccl-UnitTestsMicroRoctxNvml",
+                       "rccl-UnitTestsMicroRomeModels",
+                       "rccl-UnitTestsMicroStrongstream",
+                       "rccl-UnitTestsMicroTopo",
+                       "rccl-UnitTestsMicroUtils",
                        "rccl-UnitTestsMicroInit-uncached",
                        "rccl-UnitTestsMicroInit-faultinj",
                        "rccl-UnitTestsMicroEnqueue",
-                       "rccl-UnitTestsMicroSymKernels"]:
+                       "rccl-UnitTestsMicroSymKernels",
+                       "rccl-UnitTestsMicroGinHost",
+                       "rccl-UnitTestsMicroRomeModels",
+                       "rccl-UnitTestsMicroDda",
+                       "rccl-UnitTestsMicroTopo",
+                       "rccl-UnitTestsMicroNetIbCastInit",
+                       "rccl-UnitTestsMicroNetIbCastDataPath"]:
             binary_path = os.path.join(host_test_dir, binary)
             if os.path.isfile(binary_path):
                 object_files.extend(["--object", binary_path])

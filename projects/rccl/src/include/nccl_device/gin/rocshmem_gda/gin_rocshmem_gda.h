@@ -11,6 +11,19 @@
 #include "gin_rocshmem_device_host_common_gda.h"
 #include "gda/queue_pair_provider.hpp"
 
+
+namespace nccl {
+namespace gin {
+namespace rocshmem_gda {
+namespace detail {
+NCCL_DEVICE_INLINE ncclGinRocshmemGdaGPUContext* gdaGpuCtx(ncclGinCtx ctx) {
+  return &reinterpret_cast<ncclGinRocshmemGdaGPUContext*>(ctx.handle)[ctx.contextId];
+}
+}  // namespace detail
+}  // namespace rocshmem_gda
+}  // namespace gin
+}  // namespace nccl
+
 template <>
 struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   template <typename Coop>
@@ -26,7 +39,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
     coop.sync();
     if (coop.thread_rank() == 0) {
-      ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
+      ncclGinRocshmemGdaGPUContext* rsCtx = nccl::gin::rocshmem_gda::detail::gdaGpuCtx(ctx);
       rocshmem::QueuePair* qp = loadConst(loadConst(&rsCtx->qps) + peer);
       rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
 
@@ -86,7 +99,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
     coop.sync();
     if (coop.thread_rank() == 0) {
-      ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
+      ncclGinRocshmemGdaGPUContext* rsCtx = nccl::gin::rocshmem_gda::detail::gdaGpuCtx(ctx);
       rocshmem::QueuePair* qp = loadConst(loadConst(&rsCtx->qps) + peer);
       rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
 
@@ -127,7 +140,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 template <>
 struct ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   NCCL_DEVICE_INLINE static ncclGinOffsetPtr call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
-    ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
+    ncclGinRocshmemGdaGPUContext* rsCtx = nccl::gin::rocshmem_gda::detail::gdaGpuCtx(ctx);
     return {nccl::utility::loadConst(&rsCtx->counters) + counterId, 0};
   }
 };
@@ -135,7 +148,7 @@ struct ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 template <>
 struct ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
-    ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
+    ncclGinRocshmemGdaGPUContext* rsCtx = nccl::gin::rocshmem_gda::detail::gdaGpuCtx(ctx);
     nccl::utility::loadConst(&rsCtx->counters)[counterId] = 0;
   }
 };
@@ -143,7 +156,7 @@ struct ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 template <>
 struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   NCCL_DEVICE_INLINE static ncclGinOffsetPtr call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
-    ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
+    ncclGinRocshmemGdaGPUContext* rsCtx = nccl::gin::rocshmem_gda::detail::gdaGpuCtx(ctx);
     return {nccl::utility::loadConst(&rsCtx->signals) + signalId, 0};
   }
 };
@@ -151,7 +164,7 @@ struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 template <>
 struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinSignalDescriptor signal) {
-    ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
+    ncclGinRocshmemGdaGPUContext* rsCtx = nccl::gin::rocshmem_gda::detail::gdaGpuCtx(ctx);
     if (signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED)
       nccl::utility::loadConst(&rsCtx->signals)[signal.indexedSignal.signalId] = 0;
   }
@@ -167,13 +180,22 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     (void)ord;
     (void)abortFlag;
     using nccl::utility::loadConst;
-    ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
+    ncclGinRocshmemGdaGPUContext* rsCtx = nccl::gin::rocshmem_gda::detail::gdaGpuCtx(ctx);
     rocshmem::QueuePair** qps = loadConst(&rsCtx->qps);
 #pragma unroll 1
     for (int peer = coop.thread_rank(); peer < ctx.nRanks; peer += coop.size()) {
       rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
       loadConst(qps + peer)->quiet(wf_info);
     }
+  }
+  // quiet() blocks until drained; nothing to time out.
+  template <typename Coop>
+  NCCL_DEVICE_INLINE static ncclResult_t call(ncclGinCtx ctx, Coop coop, bool hasDescriptor,
+                                              ncclGinDescriptorSmem* descriptor, cuda::memory_order ord,
+                                              uint32_t* abortFlag, uint64_t timeoutCycles) {
+    (void)timeoutCycles;
+    call(ctx, coop, hasDescriptor, descriptor, ord, abortFlag);
+    return ncclSuccess;
   }
 };
 
@@ -198,6 +220,19 @@ struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinRequest_t&, bool, ncclGinDescriptorSmem*, cuda::memory_order,
                                       uint32_t*) {
     __builtin_trap();
+  }
+  NCCL_DEVICE_INLINE static ncclResult_t call(ncclGinCtx, ncclGinRequest_t&, bool, ncclGinDescriptorSmem*,
+                                              cuda::memory_order, uint32_t*, uint64_t) {
+    __builtin_trap();
+    return ncclInternalError;
+  }
+};
+
+// A signal does not order earlier Puts; keep the per-peer flush.
+template <>
+struct ncclGinApi_FlushesAllPutsOnAnySignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
+  NCCL_DEVICE_INLINE static bool call(ncclGinCtx) {
+    return false;
   }
 };
 

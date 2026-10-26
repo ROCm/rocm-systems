@@ -88,19 +88,21 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   Fan fan;
   T* userBufs[3];
   bool userRegUsed = false; // runtime: user buffers registered (cacheable) -> need cache-bypass
+  // No two NULL-initialized members may be adjacent. MemCpyOpt merges adjacent null stores
+  // into a memset on this scratch-resident object, and the LL128 loops then reload these
+  // pointers from scratch.
   struct ncclConnInfo* recvConn = NULL;
-  volatile uint64_t* recvConnHeadPtr = NULL;
   uint64_t recvConnHead;
-
-  struct ncclConnInfo* sendConn = NULL;
-  volatile struct ncclConnFifo* sendConnFifo = NULL;
-  volatile uint64_t* sendConnTailPtr = NULL;
+  volatile uint64_t* recvConnHeadPtr = NULL;
   uint64_t sendConnTail;
-  volatile uint64_t* sendConnHeadPtr = NULL;
+  struct ncclConnInfo* sendConn = NULL;
   uint64_t sendConnHead;
+  volatile struct ncclConnFifo* sendConnFifo = NULL;
   uint64_t sendConnHeadCache; // Cache last seen value
-
+  volatile uint64_t* sendConnTailPtr = NULL;
   uint64_t recvStep[MaxRecv];
+  volatile uint64_t* sendConnHeadPtr = NULL;
+
   uint64_t sendStep[MaxSend];
   uint64_t* recvBuff[MaxRecv];
   uint64_t* sendBuff[MaxSend];
@@ -131,7 +133,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   inline __device__ void barrier() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     if (nthreads != WARP_SIZE)
-#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
+#if defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
       barrier_generic(__threadfence_block(), nthreads, barrier_next, barriers);
 #else
       barrier_generic(__threadfence(), nthreads, barrier_next, barriers);
@@ -177,7 +179,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     if (sendConnTailPtr) {
       if (skip_fence) {
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
-#if defined(__gfx1250__)
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__))
         // To be revisited for correctness and performance on gfx1250
         asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0");
 #else

@@ -19,9 +19,9 @@ include_process_id_in_filename(std::string_view filename)
         return std::string{};
     }
 
-    auto       last_sep       = filename.find_last_of('/');
-    auto       filename_start = (last_sep == std::string_view::npos) ? 0 : last_sep + 1;
-    auto       dot_pos        = filename.find_last_of('.');
+    auto const last_sep       = filename.find_last_of('/');
+    auto const filename_start = (last_sep == std::string_view::npos) ? 0 : last_sep + 1;
+    auto const dot_pos        = filename.find_last_of('.');
     const bool has_extension =
         (dot_pos != std::string_view::npos) && (dot_pos > filename_start);
 

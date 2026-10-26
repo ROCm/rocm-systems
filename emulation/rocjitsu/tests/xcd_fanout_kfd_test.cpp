@@ -8,7 +8,7 @@
 /// Every other fan-out regression registers an AqlQueue straight against a
 /// command processor: vmid 0, no process page table, and a kernel that touches
 /// no private memory. This brings the driver up instead, creates a compute queue
-/// through CREATE_QUEUE -- the path that sets AqlQueueConfig::xcd_fanout -- and
+/// through CREATE_QUEUE -- the path that sets ComputeQueueConfig::xcd_fanout -- and
 /// dispatches a kernel that really does spill, behind a real process page table.
 ///
 /// What that reaches, and what it does not: the scratch *addressing* contract is
@@ -22,10 +22,11 @@
 /// guest's addresses are not the daemon's and passthrough stays off. Covering it
 /// needs a daemon-mode regression, not this fixture.
 
+#include "config_test_util.h"
 #include "test_paths.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
@@ -41,7 +42,6 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/amd_hsa_queue.h"
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
@@ -90,7 +90,8 @@ struct KfdFanoutFixture {
   SimulatedKfd *driver = nullptr;
   std::thread sim_thread;
 
-  KfdFanoutFixture() : loaded(config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema)) {
+  void initialize() {
+    ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
     // Both taken before take_root(): the loader owns the tree until then, and
     // its accessors stop resolving once ownership has moved out.
     soc = loaded.soc();
@@ -225,6 +226,7 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
   ASSERT_NE(co, nullptr);
 
   KfdFanoutFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   ASSERT_NE(fx.soc, nullptr);
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
   fx.driver->setup_topology(fx.loaded.device, kTotalXcds);
@@ -273,7 +275,7 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
 
   // The premise of the whole test: without a private segment the dispatch never
   // reaches the scratch path at all.
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   std::memcpy(&kd, reinterpret_cast<const void *>(kernel_object), sizeof(kd));
   ASSERT_GT(kd.private_segment_fixed_size, 0u)

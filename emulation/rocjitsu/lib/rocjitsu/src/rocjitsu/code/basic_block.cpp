@@ -10,8 +10,6 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
-#include "util/except.h"
-
 #include <algorithm>
 #include <cassert>
 #include <iterator>
@@ -380,9 +378,10 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
                                   .targets = {}});
       } else {
         DeferredCallSite &site = deferred_calls[map_it->second];
-        if (site.continuation != &continuation || site.return_sreg != return_sreg)
-          throw util::Exception(
-              std::string_view("inconsistent deferred call metadata for one terminator"));
+        // A source has one continuation, and discovery derives every target's
+        // return SGPR from the same decoded call instruction.
+        assert(site.continuation == &continuation && site.return_sreg == return_sreg &&
+               "inconsistent deferred call metadata for one terminator");
         site.target_set_incomplete |= target_set_incomplete;
       }
 
@@ -733,14 +732,17 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
       section_end > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
     return emit_error.emit() << "invalid text section for reachable CFG";
 
-  std::vector<CodeRange> ranges(permitted_ranges.begin(), permitted_ranges.end());
-  for (const CodeRange &range : ranges) {
+  for (const CodeRange &range : permitted_ranges) {
     if (range.start_offset % sizeof(uint32_t) || range.size % sizeof(uint32_t) || range.size == 0 ||
         range.start_offset >= section_end || range.size > section_end - range.start_offset)
       return emit_error.emit() << "invalid reachable CFG code range at byte " << range.start_offset;
   }
-  if (ranges.empty())
-    ranges.push_back({0, section_end});
+  // Built in one step: a push_back onto a range-constructed vector trips a GCC 15
+  // -Wfree-nonheap-object false positive.
+  std::vector<CodeRange> ranges =
+      permitted_ranges.empty()
+          ? std::vector<CodeRange>{{0, section_end}}
+          : std::vector<CodeRange>(permitted_ranges.begin(), permitted_ranges.end());
   std::ranges::sort(ranges, {}, &CodeRange::start_offset);
   std::vector<CodeRange> merged_ranges;
   for (const CodeRange &range : ranges) {

@@ -25,7 +25,3 @@ class TestVramTypeHbm(unittest.TestCase):
             amdsmi.amdsmi_wrapper.amdsmi_vram_type_t__enumvalues[6], "AMDSMI_VRAM_TYPE_HBM4"
         )
         self.assertEqual(amdsmi.amdsmi_interface.AmdSmiVramType.HBM4, 6)
-
-
-if __name__ == "__main__":
-    unittest.main()

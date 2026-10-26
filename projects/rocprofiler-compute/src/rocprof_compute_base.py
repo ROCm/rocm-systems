@@ -140,8 +140,16 @@ class RocProfCompute:
 
     def detect_analyze(self) -> None:
         if self.__args.gui:
+            console_warning(
+                "--gui is deprecated and will be removed in a future release. "
+                "Use the default CLI analysis instead."
+            )
             self.__analyze_mode = "web_ui"
         elif self.__args.tui:
+            console_warning(
+                "--tui is deprecated and will be removed in a future release. "
+                "Use the default CLI analysis instead."
+            )
             self.__analyze_mode = "tui"
         elif self.__args.output_format in ("db", "csv"):
             self.__analyze_mode = "db"

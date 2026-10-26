@@ -5,6 +5,7 @@
 /// @brief Exact SIMD coverage for packed, true16, compare and dual-slot paths.
 
 #include "decode_test_util.h"
+#include "util/host_target.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
@@ -227,10 +228,10 @@ template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
             expected = fp_mode::packed_select_bf16(af, bf, Op == PackedFloatOp::MIN);
           expected = fp_mode::clamp_bf16(expected, iteration & 1, floating_clamp_nan_to_zero(wf));
         } else if constexpr (Op == PackedFloatOp::FMA) {
-          expected =
-              fp_mode::fma_f16(a[i], b[i], c[i], false, false, false, false, false, false,
-                               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0,
-                               iteration & 1, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf));
+          expected = fp_mode::fma_f16(a[i], b[i], c[i], false, false, false, false, false, false,
+                                      wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0,
+                                      iteration & 1, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
+                                      fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
         } else {
           constexpr auto operation = Op == PackedFloatOp::ADD   ? fp_mode::PackedBinaryOp::ADD
                                      : Op == PackedFloatOp::MUL ? fp_mode::PackedBinaryOp::MUL
@@ -241,7 +242,8 @@ template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
                                          : fp_mode::PackedBinaryOp::MAXIMUM;
           expected = fp_mode::packed_binary_f16(operation, a[i], b[i], wf.fp_round_mode_f16_f64(),
                                                 wf.fp_denorm_mode_f16_f64(), iteration & 1,
-                                                wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf));
+                                                wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
+                                                wf.cu().arch(), wf.ieee_mode());
         }
         ASSERT_EQ(actual[i], expected)
             << mode << ":" << iteration << " inputs=" << a[i] << "," << b[i] << "," << c[i];
@@ -591,7 +593,7 @@ TEST_F(SimdCoverage, MixedFmaUsesProfileSemanticsAndCompilerGuard) {
     put(2, lane, 0xbf800000u);
     put(3, lane, sentinel);
   }
-#if defined(__FMA__)
+#if RJ_HOST_HAS_FMA
   ASSERT_FALSE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, false>(inst, *wf)));
   for (uint32_t lane = 0; lane < 32; ++lane)
     EXPECT_EQ(get(3, lane), sentinel);

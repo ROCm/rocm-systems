@@ -1,3 +1,12 @@
+# DEPRECATED: retained solely for media-libs-ci.yml.
+#
+# This was a shared component-test workflow for TheRock single-arch CI, which
+# was removed in b7ae4f90d3a. Its only remaining caller is
+# therock-media-test-packages.yml, itself reachable only from media-libs-ci.yml.
+#
+# Do not add new callers. Slated for removal once media libs CI moves to
+# TheRock's multi-arch pipeline (therock-multi-arch-ci.yml).
+
 name: Test component
 
 on:
@@ -61,7 +70,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
+          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
           sparse-checkout: build_tools
           path: "prejob"
 
@@ -79,7 +88,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
+          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'

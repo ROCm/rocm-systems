@@ -191,7 +191,9 @@ parse_proc_stat(std::string_view content)
             return;
         }
 
-        cpu_jiffies    jiffies;
+        cpu_jiffies jiffies;
+        // NOLINTNEXTLINE(misc-const-correctness) - each pointee is written via
+        // from_chars() below
         std::uint64_t* fields[]  = { &jiffies.user,   &jiffies.nice,   &jiffies.system,
                                      &jiffies.idle,   &jiffies.iowait, &jiffies.irq,
                                      &jiffies.softirq };
@@ -211,7 +213,7 @@ parse_proc_stat(std::string_view content)
         result[cpu_id] = jiffies;
     };
 
-    std::for_each(lines.begin(), lines.end(), parse_cpu_line);
+    std::ranges::for_each(lines, parse_cpu_line);
 
     return result;
 }

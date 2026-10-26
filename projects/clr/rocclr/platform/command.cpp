@@ -411,25 +411,32 @@ void Command::enqueue() {
 
     // The batch update must be lock protected to avoid a race condition
     // when multiple threads submit/flush/update the batch at the same time
-    std::scoped_lock sl(queue_->vdev()->execution());
-    queue_->FormSubmissionBatch(this);
+    {
+      std::scoped_lock sl(queue_->vdev()->execution());
+      queue_->FormSubmissionBatch(this);
 
-    // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
-    if (((type() == 0) && profilingInfo().batch_flush_) || (type() == CL_COMMAND_MARKER) ||
-        (type() == CL_COMMAND_TASK)) {
-      // The current HSA signal tracking logic requires profiling enabled for the markers
-      EnableProfiling();
-      // Update batch head for the current marker. Hence the status of all commands can be
-      // updated upon the marker completion
-      SetBatchHead(queue_->GetSubmissionBatch());
+      // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
+      if (((type() == 0) && profilingInfo().batch_flush_) || (type() == CL_COMMAND_MARKER) ||
+          (type() == CL_COMMAND_TASK)) {
+        // The current HSA signal tracking logic requires profiling enabled for the markers
+        EnableProfiling();
+        // Update batch head for the current marker. Hence the status of all commands can be
+        // updated upon the marker completion
+        SetBatchHead(queue_->GetSubmissionBatch());
 
-      submit(*queue_->vdev());
+        submit(*queue_->vdev());
 
-      // The batch will be tracked with the marker now
-      queue_->ResetSubmissionBatch();
-    } else {
-      submit(*queue_->vdev());
-      queue_->FlushSubmissionBatch();
+        // The batch will be tracked with the marker now
+        queue_->ResetSubmissionBatch();
+      } else {
+        submit(*queue_->vdev());
+        queue_->FlushSubmissionBatch();
+      }
+    }
+    // A marker with CPU wait only submits the fence under the lock. The wait and the batch
+    // update occur here, without the lock, so the other threads can use the queue meanwhile
+    if (((type() == CL_COMMAND_MARKER) || (type() == 0)) && CpuWaitRequested()) {
+      queue_->vdev()->CompleteCpuWait(*this);
     }
   } else {
     queue_->append(*this);

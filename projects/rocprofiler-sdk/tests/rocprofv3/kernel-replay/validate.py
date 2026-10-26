@@ -45,11 +45,14 @@ import sys
 # Python 3.6 compatibility: dataclasses added in 3.7
 try:
     from dataclasses import dataclass
+
     _HAVE_DATACLASS = True
 except ImportError:
     _HAVE_DATACLASS = False
 
 import pytest
+
+from rocprofiler_sdk.pytest_utils import gpu_uses_auto_perf_level
 
 # Tolerate the in-flight rename of the per-pass index field (replay_pass <-> n).
 _PASS_KEYS = ("replay_pass", "n")
@@ -102,6 +105,7 @@ EXACT_ACROSS_PASSES = frozenset(
 
 
 if _HAVE_DATACLASS:
+
     @dataclass(frozen=True)
     class PassTolerance:
         """Tolerance specification for counter variance across replay passes.
@@ -112,8 +116,10 @@ if _HAVE_DATACLASS:
         - Relative: for counters that scale with workload (most counters)
         - Absolute: for counters with hardware jitter independent of value (SQ_WAVES)
         """
+
         relative: float  # Relative tolerance as a fraction (e.g., 0.10 = 10%)
         absolute: float  # Absolute tolerance in counter units (e.g., 8.0 waves)
+
 else:
     # Python 3.6 fallback: simple immutable-by-convention class
     class PassTolerance:
@@ -125,11 +131,12 @@ else:
         - Relative: for counters that scale with workload (most counters)
         - Absolute: for counters with hardware jitter independent of value (SQ_WAVES)
         """
-        __slots__ = ('relative', 'absolute')
+
+        __slots__ = ("relative", "absolute")
 
         def __init__(self, relative, absolute):
-            object.__setattr__(self, 'relative', float(relative))
-            object.__setattr__(self, 'absolute', float(absolute))
+            object.__setattr__(self, "relative", float(relative))
+            object.__setattr__(self, "absolute", float(absolute))
 
         def __repr__(self):
             return f"PassTolerance(relative={self.relative}, absolute={self.absolute})"
@@ -325,6 +332,17 @@ def test_dispatch_id_constant_across_replay_passes(json_data, expected_passes):
         )
 
 
+def test_expected_logical_dispatch_count(json_data, expected_dispatch_count):
+    if expected_dispatch_count is None:
+        pytest.skip("--expected-dispatch-count was not specified")
+
+    table = _dispatch_passes(_sdk(json_data))
+    assert len(table) == expected_dispatch_count, (
+        f"expected {expected_dispatch_count} selected logical dispatches, found {len(table)}: "
+        f"dispatch_ids={sorted(table)}"
+    )
+
+
 def test_dispatch_ids_increment_sequentially(json_data):
     # Across distinct dispatches the dispatch_id increments sequentially -- one fresh id per logical
     # dispatch, none skipped, none reused. Replay passes reuse their dispatch's reserved id (they
@@ -353,37 +371,48 @@ def test_dispatch_id_nonzero_every_pass(json_data):
     ), f"{len(zero)} pass record(s) carry dispatch_id==0 (replay_pass indices {zero})"
 
 
-def test_common_counters_constant_across_passes(json_data, common_counters):
-    # Metric 2: the shared sanity counters appear in every pass and are constant for a kernel.
-    table = _records_by_dispatch(_sdk(json_data))
+def test_common_counters_constant_across_passes(json_data, common_counter):
+    # Check each shared counter separately so unavailable instruction counters do not
+    # skip the wave-count check or replay-structure validation.
+    sdk = _sdk(json_data)
+    table = _records_by_dispatch(sdk)
+    counter = common_counter
+    if counter.startswith("SQ_INSTS_") and all(
+        batch.get(counter) == 0
+        for entry in table.values()
+        for batch in entry["passes"].values()
+    ):
+        first_gpu = next((agent for agent in sdk["agents"] if agent["type"] == 2), None)
+        if first_gpu is not None and gpu_uses_auto_perf_level(first_gpu):
+            pytest.skip(f"{counter} is zero on gfx11/gfx12 with AUTO performance level")
+
     for dispatch_id, entry in table.items():
         passes = entry["passes"]
-        for counter in common_counters:
-            values = [batch[counter] for batch in passes.values() if counter in batch]
-            assert len(values) == len(passes), (
-                f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} missing in "
-                f"some passes: present in {len(values)}/{len(passes)}"
-            )
-            # A counter stuck at zero is constant, so the spread check below cannot see it.
-            assert min(values) > 0, (
-                f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} is not > 0 "
-                f"in every replay pass: {values}"
-            )
-            # Apply tolerance check with both relative and absolute components.
-            # For SQ_WAVES, this allows up to 8-wave spread regardless of magnitude.
-            # This works across all GPU architectures (gfx90a, gfx908, gfx942, etc.)
-            # since the absolute tolerance handles the spread independent of baseline value.
-            tolerance = _pass_tolerance(counter)
-            assert _approx_equal(
-                min(values),
-                max(values),
-                relative=tolerance.relative,
-                absolute=tolerance.absolute,
-            ), (
-                f"dispatch {dispatch_id} ({entry['kernel']}) counter {counter} varies across "
-                f"replay passes (allowed relative {tolerance.relative:.0%}, "
-                f"absolute {tolerance.absolute:g}): {values}"
-            )
+        values = [batch[counter] for batch in passes.values() if counter in batch]
+        assert len(values) == len(passes), (
+            f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} missing in "
+            f"some passes: present in {len(values)}/{len(passes)}"
+        )
+        # A counter stuck at zero is constant, so the spread check below cannot see it.
+        assert min(values) > 0, (
+            f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} is not > 0 "
+            f"in every replay pass: {values}"
+        )
+        # Apply tolerance check with both relative and absolute components.
+        # For SQ_WAVES, this allows up to 8-wave spread regardless of magnitude.
+        # This works across all GPU architectures (gfx90a, gfx908, gfx942, etc.)
+        # since the absolute tolerance handles the spread independent of baseline value.
+        tolerance = _pass_tolerance(counter)
+        assert _approx_equal(
+            min(values),
+            max(values),
+            relative=tolerance.relative,
+            absolute=tolerance.absolute,
+        ), (
+            f"dispatch {dispatch_id} ({entry['kernel']}) counter {counter} varies across "
+            f"replay passes (allowed relative {tolerance.relative:.0%}, "
+            f"absolute {tolerance.absolute:g}): {values}"
+        )
 
 
 def test_each_pass_collects_distinct_batch(json_data, expected_passes, common_counters):

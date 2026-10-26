@@ -38,10 +38,10 @@ struct dynamic_library
     template <typename RetT, typename... Args>
     RetT invoke(std::string_view, RetT (*&_func)(Args...), Args...);
 
-    std::string envname  = {};
-    std::string filename = {};
-    int         flags    = 0;
-    void*       handle   = nullptr;
+    std::string envname;
+    std::string filename;
+    int         flags  = 0;
+    void*       handle = nullptr;
 };
 
 template <typename RetT, typename... Args>
