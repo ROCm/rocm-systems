@@ -2308,8 +2308,9 @@ memory:
   Unit_hipMemcpyMmapPressure_UnderPressure:
     <<: *level_2
     tags: [transfer]
-    # Allocates most of host RAM to create memory pressure
-    disabled: [asan]
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2744 - allocates most of host RAM to create memory pressure, no point enabling it with ASAN; needs to be re-triaged."
   Unit_hipMemcpySync:
     <<: *level_default
     tags: [transfer, P1]
