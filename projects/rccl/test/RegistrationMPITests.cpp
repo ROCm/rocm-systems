@@ -34,6 +34,8 @@
 #include "ce_coll.h"
 #include "comm.h"
 #include "rccl_common.h"
+#include "register.h"
+#include "register_inline.h"
 #ifdef ENABLE_FAULT_INJECTION
 #include "ce_fault_inject.h"
 #endif
@@ -43,15 +45,6 @@
 #include <string>
 
 #ifdef MPI_TESTS_ENABLED
-
-// Portability shim: hipMemLocationTypeHost was added after ROCm 7.0.x. On older
-// headers the enum only defines Invalid/Device, so provide the CUDA-equivalent
-// value (CU_MEM_LOCATION_TYPE_HOST == 2) to keep this file compiling there. A
-// macro (not a constexpr) is used because the enum's declared value range is
-// [0,1], which makes a constexpr cast of 2 an invalid constant expression.
-#if !defined(ROCM_VERSION) || ROCM_VERSION < 70100
-#define hipMemLocationTypeHost (static_cast<hipMemLocationType>(2))
-#endif
 
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
@@ -944,22 +937,6 @@ class UBR_MultiSegment : public RegistrationTestBase
 protected:
     using T = RegTestConfig::DefaultType;
 
-    // Multi-segment registration currently relies on dmabuf support from the
-    // runtime/HSA layer for the inter-node (NET/GIN) path. Until that lands,
-    // restrict every UBR_MultiSegment test to a single node so the multi-node
-    // tests are not exercised.
-    void SetUp() override
-    {
-        RegistrationTestBase::SetUp();
-        if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) {
-            return;
-        }
-        if (MPITestConstants::detectNodeCount() != 1) {
-            GTEST_SKIP() << "UBR_MultiSegment is limited to single node until "
-                            "dmabuf support is available from the HIP/HSA layer";
-        }
-    }
-
     // Rank-local GTEST_SKIP after alloc failure hangs peers. Callers must
     // GTEST_SKIP from the TEST body with the returned reason.
     std::string skipUnlessAllRanksAllocated(bool allocated, const char* msg)
@@ -1212,9 +1189,9 @@ protected:
      *        mixed device/host "elastic" buffer.
      *
      * HIP/CLR has no host-NUMA VMM type and only accepts a plain Host location
-     * (id must be 0). Host VMM is only available on recent runtimes (ROCm >=
-     * 7.12); if it is unsupported, buf.totalSize is left 0 so the caller can
-     * GTEST_SKIP() instead of failing.
+     * (id must be 0). Host VMM follows NCCL_CUMEM_HOST_VERSION_SUPPORTED
+     * (native 7.12 or the 7.0.2.x backport); if it is unsupported,
+     * buf.totalSize is left 0 so the caller can GTEST_SKIP() instead of failing.
      */
     void createMixedMultiSegmentBuffer(int dev,
                                        size_t requestedSegmentSize,
@@ -1223,16 +1200,10 @@ protected:
                                        MultiSegmentBuffer& buf)
     {
         buf = MultiSegmentBuffer{};
-#if ROCM_VERSION >= 71200
+#if NCCL_CUMEM_HOST_GATE
         ASSERT_GE(numSegments, 1);
         ASSERT_GE(numHostSegments, 0);
         ASSERT_LE(numHostSegments, numSegments);
-
-#if ROCM_VERSION < 71200
-        // hipMemLocationTypeHost is unavailable before ROCm 7.12; leave buf.totalSize 0
-        // so callers GTEST_SKIP() instead of failing at compile or runtime.
-        if (numHostSegments > 0) return;
-#endif
 
         hipMemAllocationProp devProp = {};
         devProp.type                = hipMemAllocationTypePinned;
@@ -1242,11 +1213,7 @@ protected:
 
         hipMemAllocationProp hostProp = {};
         hostProp.type                = hipMemAllocationTypePinned;
-#if ROCM_VERSION >= 71200
         hostProp.location.type       = hipMemLocationTypeHost;
-#else
-        hostProp.location.type       = hipMemLocationTypeDevice; // unused (numHostSegments == 0)
-#endif
         hostProp.location.id         = 0;
         hostProp.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
 
@@ -1306,7 +1273,7 @@ protected:
         buf.totalSize   = totalSize;
         buf.handles     = std::move(handles);
 #else
-        // Host VMM (hipMemLocationTypeHost) is only available on ROCm >= 7.12.
+        // Host VMM is compiled only inside NCCL_CUMEM_HOST_VERSION_SUPPORTED.
         // Leave buf.totalSize == 0 so callers GTEST_SKIP().
         (void)dev;
         (void)requestedSegmentSize;
@@ -1326,20 +1293,25 @@ protected:
  *   sendbuff = [0,                  N * kSegmentSize)  covers first N segments
  *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
  *
- * Confirmation in the logs (NCCL_DEBUG=TRACE NCCL_DEBUG_SUBSYS=REG):
- *   "... numSegments 4"
+ * The collective operates on four segments per half, while ncclCommRegister
+ * covers the complete eight-segment allocation. Skip unless some rank set
+ * NET_REG_COMPLETE. The all-peer flag and the count of 8 are cache writes
+ * asserted after that gate, so a missing write fails instead of skipping.
+ * Without per-segment NET MRs (classic NET/IB multi-segment), the gate skips.
  */
 TEST_F(UBR_MultiSegment, Generic)
 {
-    if (!validateTestPrerequisites(/*min_processes=*/2)) {
-        GTEST_SKIP() << "Requires 2+ ranks";
+    if (!validateTestPrerequisites(
+            /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/2, /*max_nodes=*/kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires 2+ ranks across at least 2 nodes";
     }
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
     ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
     ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
     ASSERT_TRUE(isMultiSegmentRegisterEnabled()) << "NCCL_MULTI_SEGMENT_REGISTER must be set to 1";
-    ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
 
     int dev = 0;
     ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
@@ -1382,16 +1354,309 @@ TEST_F(UBR_MultiSegment, Generic)
 
     ncclResult_t result = ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream());
     ASSERT_MPI_EQ(ncclSuccess, result);
-    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
-    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+    ASSERT_MPI_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
 
-    REGLogChecker checker = getLogChecker();
-    TEST_INFO("SpansMultipleSegments: %s (log size: %zu bytes)",
-              checker.getSummary().c_str(), checker.getContentLength());
-    ASSERT_TRUE(checker.hasNumSegments(kNumSegments / 2))
-        << "Expected 'numSegments " << (kNumSegments / 2)
-        << "' in log - the multi-segment registration branch did not fire";
+    struct ncclReg* reg = nullptr;
+    ncclRegFind(reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), buf.vaBase, buf.totalSize, &reg);
+    // ncclCommRegister must publish a cache entry for the multi-segment buffer.
+    ASSERT_MPI_NE(reg, nullptr);
+    const bool netRegistered = (reg->state & NET_REG_COMPLETE) != 0;
+    {
+        const std::string why = mpiCoordinatedSkipReason(
+            !MPIHelpers::anyRankTrue(netRegistered),
+            "NET registration did not happen on any rank");
+        if (!why.empty()) GTEST_SKIP() << why;
+    }
+    if (netRegistered) {
+        ASSERT_TRUE(reg->rcclNet.allPeers) << "NET registration did not record all-peer completion";
+        ASSERT_EQ(reg->rcclNet.nSegments, kNumSegments)
+            << "NET registration walked a prefix of the ncclCommRegister range, not the full 8-segment allocation";
+    }
+}
+
+/**
+ * @brief Graph-captured AllReduce whose graph registration reuses a wider record.
+ *
+ * An 8-segment graph record exists before capture. Each half spans four
+ * segments, so ncclRegister reuses that record and NET registers all eight.
+ * The NET segment count must cover the reused record, not the collective's half.
+ */
+TEST_F(UBR_MultiSegment, GenericGraph)
+{
+    if (!validateTestPrerequisites(
+            /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/2, /*max_nodes=*/kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires 2+ ranks across at least 2 nodes";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ASSERT_TRUE(isGraphRegisterEnabled()) << "NCCL_GRAPH_REGISTER must be set to 1";
+    ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+    ASSERT_TRUE(isMultiSegmentRegisterEnabled()) << "NCCL_MULTI_SEGMENT_REGISTER must be set to 1";
+
+    int dev = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+
+    constexpr size_t kSegmentSize = 32 * 1024 * 1024;
+    constexpr int    kNumSegments = 8;
+
+    int rank   = 0;
+    int nRanks = 0;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    MultiSegmentBuffer buf;
+    ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, buf));
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+    {
+        const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
+            "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
+        if (!why.empty()) GTEST_SKIP() << why;
+    }
+
+    const size_t halfSize = buf.totalSize / 2;
+    ASSERT_EQ(halfSize % sizeof(T), 0u);
+    char*  base    = reinterpret_cast<char*>(buf.vaBase);
+    void*  sendBuf = base;
+    void*  recvBuf = base + halfSize;
+    size_t count   = halfSize / sizeof(T);
+
+    auto* comm = reinterpret_cast<struct ncclComm*>(getActiveCommunicator());
+    struct ncclReg* wide = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommGraphRegister(comm, buf.vaBase, buf.totalSize, (void**)&wide));
+    auto wideCleanup = makeScopeGuard([&]() {
+        if (wide) EXPECT_EQ(ncclSuccess, ncclCommGraphDeregister(comm, wide));
+    });
+    ASSERT_MPI_NE(wide, nullptr);
+
+    initSendBuffer<T>(sendBuf, count, rank);
+
+    hipGraph_t     graph     = nullptr;
+    hipGraphExec_t graphExec = nullptr;
+    auto graphCleanup = makeScopeGuard([&]() {
+        if (graphExec) (void)hipGraphExecDestroy(graphExec);
+        if (graph) (void)hipGraphDestroy(graph);
+    });
+    ASSERT_MPI_EQ(hipSuccess, hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal));
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+                                             getActiveCommunicator(), getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamEndCapture(getActiveStream(), &graph));
+    ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExec, getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    ASSERT_MPI_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+
+    // Gate on NET_REG_COMPLETE, not allPeers: a graph path that never commits must fail here.
+    const bool netRegistered = (wide->state & NET_REG_COMPLETE) != 0;
+    {
+        const std::string why = mpiCoordinatedSkipReason(
+            !MPIHelpers::anyRankTrue(netRegistered),
+            "Graph NET registration did not happen on any rank");
+        if (!why.empty()) GTEST_SKIP() << why;
+    }
+    if (netRegistered) {
+        ASSERT_TRUE(wide->rcclNet.allPeers) << "Graph NET registration did not record all-peer completion";
+        ASSERT_EQ(wide->rcclNet.nSegments, kNumSegments)
+            << "Graph NET registration counted the collective's half, not the reused 8-segment record";
+    }
+}
+
+/**
+ * @brief NCCL_MULTI_SEGMENT_REGISTER=0 skips NET for a slice of a multi-segment record (local path).
+ *
+ * The whole 8-segment buffer is registered, but the AllReduce runs inside
+ * segment 0. The gate counts the record, not the slice, so NET registration
+ * is skipped and the collective uses copies. The record count is cached.
+ */
+TEST_F(UBR_MultiSegment, MultiSegmentRegisterOff_SliceSkipsNet)
+{
+    if (!validateTestPrerequisites(
+            /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/2, /*max_nodes=*/kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires 2+ ranks across at least 2 nodes";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+    ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+    ASSERT_FALSE(isMultiSegmentRegisterEnabled()) << "NCCL_MULTI_SEGMENT_REGISTER must be set to 0";
+
+    int dev = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+
+    constexpr size_t kSegmentSize = 32 * 1024 * 1024;
+    constexpr int    kNumSegments = 8;
+
+    int rank   = 0;
+    int nRanks = 0;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    MultiSegmentBuffer buf;
+    ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, buf));
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+    {
+        const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
+            "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
+        if (!why.empty()) GTEST_SKIP() << why;
+    }
+
+    const size_t sliceSize = kSegmentSize / 2;
+    char*  base    = reinterpret_cast<char*>(buf.vaBase);
+    void*  sendBuf = base;
+    void*  recvBuf = base + sliceSize;
+    size_t count   = sliceSize / sizeof(T);
+
+    void* regHandle = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
+    auto regCleanup = makeScopeGuard([&]() {
+        if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
+    });
+    ASSERT_MPI_NE(regHandle, nullptr);
+
+    initSendBuffer<T>(sendBuf, count, rank);
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+                                             getActiveCommunicator(), getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    ASSERT_MPI_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+
+    struct ncclReg* reg = nullptr;
+    ncclRegFind(reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), buf.vaBase, buf.totalSize, &reg);
+    ASSERT_MPI_NE(reg, nullptr);
+    // Ranks without NET peers never reach the count.
+    ASSERT_MPI_TRUE(reg->rcclNet.nSegments == 0 || reg->rcclNet.nSegments == kNumSegments);
+    ASSERT_MPI_TRUE(MPIHelpers::anyRankTrue(reg->rcclNet.nSegments == kNumSegments));
+    ASSERT_MPI_EQ(0u, reg->state & NET_REG_COMPLETE);
+}
+
+/**
+ * @brief NCCL_MULTI_SEGMENT_REGISTER=0 skips NET for a slice of a multi-segment record (graph path).
+ *
+ * Graph registration of a slice inside segment 0 reuses the wider 8-segment
+ * record. The gate counts that record, so NET is skipped, the graph reference
+ * taken during capture is dropped, and the captured AllReduce must be correct.
+ */
+TEST_F(UBR_MultiSegment, MultiSegmentRegisterOff_GraphSliceSkipsNet)
+{
+    if (!validateTestPrerequisites(
+            /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/2, /*max_nodes=*/kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires 2+ ranks across at least 2 nodes";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ASSERT_TRUE(isGraphRegisterEnabled()) << "NCCL_GRAPH_REGISTER must be set to 1";
+    ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+    ASSERT_FALSE(isMultiSegmentRegisterEnabled()) << "NCCL_MULTI_SEGMENT_REGISTER must be set to 0";
+
+    int dev = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+
+    constexpr size_t kSegmentSize = 32 * 1024 * 1024;
+    constexpr int    kNumSegments = 8;
+
+    int rank   = 0;
+    int nRanks = 0;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    MultiSegmentBuffer buf;
+    ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, buf));
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+    {
+        const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
+            "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
+        if (!why.empty()) GTEST_SKIP() << why;
+    }
+
+    const size_t sliceSize = kSegmentSize / 2;
+    char*  base    = reinterpret_cast<char*>(buf.vaBase);
+    void*  sendBuf = base;
+    void*  recvBuf = base + sliceSize;
+    size_t count   = sliceSize / sizeof(T);
+
+    auto* comm = reinterpret_cast<struct ncclComm*>(getActiveCommunicator());
+    struct ncclReg* wide = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommGraphRegister(comm, buf.vaBase, buf.totalSize, (void**)&wide));
+    auto wideCleanup = makeScopeGuard([&]() {
+        if (wide) EXPECT_EQ(ncclSuccess, ncclCommGraphDeregister(comm, wide));
+    });
+    ASSERT_MPI_NE(wide, nullptr);
+
+    initSendBuffer<T>(sendBuf, count, rank);
+
+    hipGraph_t     graph     = nullptr;
+    hipGraphExec_t graphExec = nullptr;
+    auto graphCleanup = makeScopeGuard([&]() {
+        if (graphExec) (void)hipGraphExecDestroy(graphExec);
+        if (graph) (void)hipGraphDestroy(graph);
+    });
+    ASSERT_MPI_EQ(hipSuccess, hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal));
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+                                             getActiveCommunicator(), getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamEndCapture(getActiveStream(), &graph));
+    ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExec, getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    ASSERT_MPI_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+
+    // Ranks without NET peers never reach the count.
+    ASSERT_MPI_TRUE(wide->rcclNet.nSegments == 0 || wide->rcclNet.nSegments == kNumSegments);
+    ASSERT_MPI_TRUE(MPIHelpers::anyRankTrue(wide->rcclNet.nSegments == kNumSegments));
+    ASSERT_MPI_EQ(0u, wide->state & NET_REG_COMPLETE);
+    // Only the test's own ncclCommGraphRegister reference remains.
+    ASSERT_MPI_EQ(1, wide->graphRefs);
+}
+
+/**
+ * @brief NET segment count for an odd-sized hipMalloc registration.
+ *
+ * The registration cache rounds endAddr up to a page, but HIP reports a
+ * hipMalloc extent at its requested size. A walk to endAddr queries past the
+ * allocation and fails, and coll_reg.cc drops that error, so the buffer
+ * silently loses NET registration. The count must succeed with one segment.
+ */
+TEST_F(UBR_MultiSegment, NetSegmentCountOddSizedHipMalloc)
+{
+    if (!validateTestPrerequisites(
+            /*min_processes=*/1, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/1, /*max_nodes=*/kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires at least one rank";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+    ASSERT_TRUE(isMultiSegmentRegisterEnabled()) << "NCCL_MULTI_SEGMENT_REGISTER must not be 0";
+
+    auto* comm = reinterpret_cast<struct ncclComm*>(getActiveCommunicator());
+    for (const size_t size : {size_t{1000001}, size_t{2 * 1024 * 1024 + 1}}) {
+        SCOPED_TRACE("size=" + std::to_string(size));
+        void* buf = nullptr;
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&buf, size));
+        auto bufCleanup = makeScopeGuard([&]() { HIP_EXPECT(hipFree(buf)); });
+
+        void* regHandle = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommRegister(getActiveCommunicator(), buf, size, &regHandle));
+        auto regCleanup = makeScopeGuard([&]() {
+            if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
+        });
+
+        struct ncclReg* reg = nullptr;
+        ncclRegFind(comm, buf, size, &reg);
+        ASSERT_MPI_NE(reg, nullptr);
+        // The rounded end must lie past the allocation, or this geometry cannot reach the bug.
+        ASSERT_MPI_TRUE(reg->endAddr > reinterpret_cast<uintptr_t>(buf) + size);
+
+        int numSegments = 0;
+        ASSERT_MPI_EQ(ncclSuccess, rcclNetRegSegmentCount(comm, reg, &numSegments));
+        ASSERT_MPI_EQ(1, numSegments);
+    }
 }
 
 /**
@@ -1410,8 +1675,11 @@ TEST_F(UBR_MultiSegment, Generic)
  */
  TEST_F(UBR_MultiSegment, Generic_Reuse)
  {
-     if (!validateTestPrerequisites(/*min_processes=*/2)) {
-         GTEST_SKIP() << "Requires 2+ ranks";
+     if (!validateTestPrerequisites(
+             /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+             /*require_power_of_two=*/kNoPowerOfTwoRequired,
+             /*min_nodes=*/1, /*max_nodes=*/1)) {
+         GTEST_SKIP() << "Requires 2+ ranks on a single node";
      }
      ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
  
@@ -1668,6 +1936,9 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowChunkedFallback)
  */
 TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
 {
+    // The GIN IB backend registers the window as one DMA-BUF MR, and a HIP
+    // DMA-BUF export covers only the first physical segment (EINVAL).
+    GTEST_SKIP() << "Requires per-segment GIN DMA-BUF registration";
     const int nodeCount = MPITestConstants::detectNodeCount();
     if (!validateTestPrerequisites(/*min_processes=*/2)) {
         GTEST_SKIP() << "Requires 2+ ranks";
@@ -1771,8 +2042,11 @@ TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
  */
 TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
 {
-    if (!validateTestPrerequisites(/*min_processes=*/2)) {
-        GTEST_SKIP() << "Requires 2+ ranks";
+    if (!validateTestPrerequisites(
+            /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/1, /*max_nodes=*/1)) {
+        GTEST_SKIP() << "Requires 2+ ranks on a single node";
     }
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
@@ -1848,8 +2122,11 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
   */
 TEST_F(UBR_MultiSegment, Symmetric_Elastic_Gating)
 {
-    if (!validateTestPrerequisites(/*min_processes=*/2)) {
-        GTEST_SKIP() << "Requires 2+ ranks";
+    if (!validateTestPrerequisites(
+            /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/1, /*max_nodes=*/1)) {
+        GTEST_SKIP() << "Requires 2+ ranks on a single node";
     }
     if (isElasticBufferRegisterEnabled()) {
          GTEST_SKIP() << "Run with NCCL_ELASTIC_BUFFER_REGISTER=0 to exercise the rejection path";
