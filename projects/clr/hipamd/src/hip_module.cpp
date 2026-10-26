@@ -36,8 +36,7 @@ static bool multiplyOverflow(__hip_uint32_t operand,
 }
 
 // Returns true if the launch needs more workgroups in any dimension than the device allows.
-// Counts with ceiling division so a non-uniform launch (global not a multiple of local) still
-// counts its final partial workgroup, which the floored LaunchParams::grid_ would drop.
+// Counts with ceiling division so a non-uniform launch still counts its partial final workgroup.
 static bool exceedsMaxGridDim(const amd::LaunchParams& launchParams, const amd::Device& device) {
   const auto& info = device.info();
   for (size_t i = 0; i < 3; ++i) {
@@ -839,8 +838,6 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
 
   amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
                                      sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
-  // The shared validator reports an oversized grid as hipErrorInvalidConfiguration, but this
-  // driver API's contract is hipErrorInvalidValue, so catch it here first.
   if (!launch_params.IsValidConfig() ||
        launch_params.local_.product() > device->info().maxWorkGroupSize_ ||
        exceedsMaxGridDim(launch_params, *device)) {
