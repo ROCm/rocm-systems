@@ -35,26 +35,16 @@ static bool multiplyOverflow(__hip_uint32_t operand,
 #endif
 }
 
-// returns true if the launch config is empty or exceeds device limits
-static bool exceedsLaunchLimits(const amd::LaunchParams& launchParams,
-                                const amd::Device& device) {
+// Returns true if the launch needs more workgroups in any dimension than the device allows.
+// Counts with ceiling division so a non-uniform launch (global not a multiple of local) still
+// counts its final partial workgroup, which the floored LaunchParams::grid_ would drop.
+static bool exceedsMaxGridDim(const amd::LaunchParams& launchParams, const amd::Device& device) {
   const auto& info = device.info();
-
-  // Reject an empty configuration (zero global or local extent in any dimension).
-  if (launchParams.global_[0] == 0 || launchParams.global_[1] == 0 ||
-      launchParams.global_[2] == 0 || launchParams.local_[0] == 0 ||
-      launchParams.local_[1] == 0 || launchParams.local_[2] == 0) {
-    return true;
-  }
-
-  if (launchParams.local_.product() > info.maxWorkGroupSize_) {
-    return true;
-  }
-
-  // Count workgroups per dimension with ceiling division so a non-uniform launch
-  // (global not a multiple of local) still counts its final partial workgroup toward
-  // the grid limit instead of dropping it via the floored grid_ computed in LaunchParams.
   for (size_t i = 0; i < 3; ++i) {
+    // A zero local size is rejected by the existing config checks; skip to avoid dividing by zero.
+    if (launchParams.local_[i] == 0) {
+      continue;
+    }
     const size_t numWorkgroups =
         (static_cast<size_t>(launchParams.global_[i]) + launchParams.local_[i] - 1) /
         launchParams.local_[i];
@@ -62,7 +52,6 @@ static bool exceedsLaunchLimits(const amd::LaunchParams& launchParams,
       return true;
     }
   }
-
   return false;
 }
 
@@ -380,13 +369,30 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     return hipErrorInvalidValue;
   }
 
-  const amd::Device* device = g_devices[deviceId]->devices()[0];
-  const auto& info = device->info();
-  if (exceedsLaunchLimits(launch_params, *device)) {
+  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0 ||
+      launch_params.global_[2] == 0) {
     return hipErrorInvalidConfiguration;
   }
+
+  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0 ||
+      launch_params.local_[2] == 0) {
+    return hipErrorInvalidConfiguration;
+  }
+
+  const amd::Device* device = g_devices[deviceId]->devices()[0];
+  const auto& info = device->info();
   if (launch_params.sharedMemBytes_ > info.localMemSizePerCU_) {  // sharedMemPerBlock
     return hipErrorInvalidValue;
+  }
+
+  // Make sure dispatch doesn't exceed max workgroup size limit
+  if (launch_params.local_.product() > info.maxWorkGroupSize_) {
+    return hipErrorInvalidConfiguration;
+  }
+
+  // Make sure dispatch doesn't exceed max grid dimensions
+  if (exceedsMaxGridDim(launch_params, *device)) {
+    return hipErrorInvalidConfiguration;
   }
 
   amd::Kernel* kernel = hip::asKernel(f);
@@ -831,11 +837,25 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
 
   amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
                                      sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
-  if (!launch_params.IsValidConfig() || exceedsLaunchLimits(launch_params, *device)) {
+  // The shared validator reports an oversized grid as hipErrorInvalidConfiguration, but this
+  // driver API's contract is hipErrorInvalidValue, so catch it here first.
+  if (!launch_params.IsValidConfig() ||
+       launch_params.local_.product() > device->info().maxWorkGroupSize_ ||
+       exceedsMaxGridDim(launch_params, *device)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (sharedMemBytes > device->info().localMemSizePerCU_) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0
+      || launch_params.global_[2] == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0
+                                    || launch_params.local_[2] == 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -936,11 +956,22 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
   amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
                                      sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
 
-  if (!launch_params.IsValidConfig() || exceedsLaunchLimits(launch_params, *device)) {
+  if (!launch_params.IsValidConfig() ||
+      launch_params.local_.product() > device->info().maxWorkGroupSize_) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (sharedMemBytes > device->info().localMemSizePerCU_) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0 ||
+      launch_params.global_[2] == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0 ||
+      launch_params.local_[2] == 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -1651,8 +1682,8 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
                                      config->blockDimX, config->blockDimY, config->blockDimZ,
                                      config->sharedMemBytes, *drvDevice, 0, 0, 0, 1, 1, 1);
 
-  if (!launch_params.IsValidConfig() || exceedsLaunchLimits(launch_params, *drvDevice)) {
-    HIP_RETURN(hipErrorInvalidValue);
+  if (!launch_params.IsValidConfig()) {
+    HIP_RETURN(hipErrorInvalidConfiguration);
   }
 
   if (config->numAttrs == 0) {
@@ -1702,7 +1733,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   }
 
   if (clusterDim.x == 0 || clusterDim.y == 0 || clusterDim.z == 0) {
-    HIP_RETURN(hipErrorInvalidValue);
+    HIP_RETURN(hipErrorInvalidConfiguration);
   }
 
   amd::HIPLaunchParams launch_params_cluster(
