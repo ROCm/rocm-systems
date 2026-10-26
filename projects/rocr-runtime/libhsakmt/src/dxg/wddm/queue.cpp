@@ -1172,16 +1172,25 @@ hsa_status_t ComputeQueue::Process(void) {
 
     // CPU wait for GPU fence, and cpu update the signal.
     if (!platform_atomic_support_ && signal_addr_) {
-      constexpr int kFaultTimeoutMs = 30000;
-      auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kFaultTimeoutMs);
-      while (*sync_addr < sync_point) {
-        if (!dxg_runtime->disable_wait_timeout_ &&
-            std::chrono::steady_clock::now() >= deadline) {
-          pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
-                 " expected=%" PRIu64 ")\n", kFaultTimeoutMs, *sync_addr, sync_point);
-          return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+      if (error_event_id_ == 0) {
+        // WSL: no KMD fault events, poll with timeout so GPU faults don't hang forever.
+        constexpr int kFaultTimeoutMs = 30000;
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kFaultTimeoutMs);
+        while (*sync_addr < sync_point) {
+          if (!dxg_runtime->disable_wait_timeout_ &&
+              std::chrono::steady_clock::now() >= deadline) {
+            pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
+                   " expected=%" PRIu64 ")\n", kFaultTimeoutMs, *sync_addr, sync_point);
+            return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+          }
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      } else {
+        // Native Windows: KMD delivers fault events via error_event_id_, so use
+        // blocking CpuWait. A polling timeout here would misfire on legitimate
+        // long-running GPU work (e.g. hipStreamWaitValue blit kernels).
+        uint64_t fence_value = sync_point;
+        if (!device->CpuWait(&syncobj, &fence_value, 1, false)) return HSA_STATUS_ERROR;
       }
       // CPU update completional signal
       rocr::atomic::Decrement(signal_addr_);
