@@ -196,12 +196,15 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   static int64_t paramMax     = rcclParamCeArMaxMsgBytes();
   static int64_t paramStaging = rcclParamCeArStagingBytes();
   static constexpr size_t kCeArMaxDefault = 256ULL * 1024 * 1024;
-  // A table entry of 0 means "disabled by default" not "zero bytes"; fall back to
-  // kCeArMaxDefault (256 MiB, the staging buffer size) so ZERO CU policy can use CE
-  // 2-shot on arches that have ceNonRegMax[AR]=0 as a placeholder.
+  // A table entry of 0 means 2-shot disabled by default (e.g. gfx1250 placeholder).
+  // Under ZERO CU policy, fall back to kCeArMaxDefault so CE 2-shot is usable.
+  // This is the single place ZERO policy overrides a zero table entry; both the
+  // selector (ceZeroStagedWindow) and enqueue (twoShotMax) derive from this value.
+  const bool zeroPolicyActive = (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
+  const size_t tableNonRegMax = (comm->archThresholds != nullptr)
+      ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : 0;
   comm->ceColl.ceArMaxBytes     = (paramMax >= 0) ? (size_t)paramMax
-      : (comm->archThresholds != nullptr && comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] != 0
-         ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : kCeArMaxDefault);
+      : (tableNonRegMax != 0 ? tableNonRegMax : (zeroPolicyActive ? kCeArMaxDefault : 0));
   comm->ceColl.ceArStagingBytes = (paramStaging >= 0) ? (size_t)paramStaging : (size_t)NCCL_CE_AR_STAGING_BYTES;
 
   int i = 0;

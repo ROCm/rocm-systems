@@ -4750,12 +4750,12 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
             (info->count % (size_t)comm->nRanks != 0) || !rcclCeAllReduceEnabled(comm)) {
           ceAvailable = false;
         } else if (ceAllReduceOpSupported) {
-          // Unregistered 2-shot: table/env cap of 0 disables it; otherwise the
-          // message must fit the 2-shot window and the allocated buffer.
+          // Unregistered 2-shot: ceArMaxBytes=0 disables it (ZERO policy sets it to 256 MiB
+          // for placeholder arches); otherwise message must fit within [twoShotMin, ceArMaxBytes].
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          const size_t twoShotMax = rcclCeNonRegMax(comm, ncclFuncAllReduce);
+          const size_t twoShotMax = comm->ceColl.ceArMaxBytes;
           const size_t twoShotMin = rcclCeAr2ShotMin(comm);
-          if (!rcclWindowFits(totalBytes, twoShotMin, twoShotMax) || totalBytes > comm->ceColl.ceArMaxBytes ||
+          if (!rcclWindowFits(totalBytes, twoShotMin, twoShotMax) ||
               !rcclForceCeAllReduceEnabled(comm) || !comm->symmetricSupport || comm->nNodes > 1 ||
               !ncclCeImplemented(info->coll, info->op, info->datatype) || !ncclDevrIsOneLsaTeam(comm)) {
             ceAllReduceFits = false;
