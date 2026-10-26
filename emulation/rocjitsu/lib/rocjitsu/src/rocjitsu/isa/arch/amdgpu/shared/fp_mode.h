@@ -660,10 +660,12 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
   const Bits compare_input = (denorm_mode & 1u) ? compare_bits : flush(compare_bits);
   if (operation == ScalarAtomicOp::FCMPSWAP) {
     // Integer equality implements finite IEEE equality except for signed zero;
-    // classify NaNs explicitly so equal payloads never cause a swap.
+    // classify NaNs explicitly so equal payloads never cause a swap. Denormal
+    // flushing applies only to the comparison: gfx1100 global and LDS stores a
+    // matching source unchanged and leaves memory untouched on a mismatch.
     const bool equal =
         old_input == compare_input || ((old_input & ~kSign) == 0 && (compare_input & ~kSign) == 0);
-    return !is_nan(old_input) && !is_nan(compare_input) && equal ? source_input : old_input;
+    return !is_nan(old_input) && !is_nan(compare_input) && equal ? source_bits : old_bits;
   }
   if (operation == ScalarAtomicOp::FADD) {
     // DS and cache ADD use fixed RNE, independent of both MODE.round and the host.

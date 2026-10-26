@@ -6559,4 +6559,66 @@ INSTANTIATE_TEST_SUITE_P(SaluMinmax, SaluMinmaxTest, testing::ValuesIn(kSaluMinm
                            return info.param.name;
                          });
 
+struct FloatCompareSwapCase {
+  uint64_t memory, compare, source;
+  uint64_t preserved, flushed; ///< Final memory with MODE denormals preserved / flushed.
+};
+
+// Captured on a W7900 (gfx1100) with global_atomic_cmpswap_f32 and
+// ds_cmpstore_rtn_f32/f64: MODE flushing changes only the comparison.
+template <typename Bits>
+void check_float_compare_swap_policy(std::initializer_list<FloatCompareSwapCase> cases) {
+  for (const auto &test : cases) {
+    SCOPED_TRACE(testing::Message() << std::hex << "memory=" << test.memory
+                                    << " compare=" << test.compare << " source=" << test.source);
+    const auto run = [&](uint32_t denorm_mode) {
+      return amdgpu::fp_mode::atomic_scalar<Bits>(
+          amdgpu::fp_mode::ScalarAtomicOp::FCMPSWAP, static_cast<Bits>(test.memory),
+          static_cast<Bits>(test.source), static_cast<Bits>(test.compare), denorm_mode, true);
+    };
+    EXPECT_EQ(run(3), static_cast<Bits>(test.preserved));
+    EXPECT_EQ(run(0), static_cast<Bits>(test.flushed));
+  }
+}
+
+TEST(FpModePolicyTest, FloatCompareSwapFlushesOnlyTheComparison) {
+  check_float_compare_swap_policy<uint32_t>({
+      {0x3f800000, 0x3f800000, 0x40000000, 0x40000000, 0x40000000}, // 1.0 == 1.0
+      {0x3f800000, 0x40400000, 0x40000000, 0x3f800000, 0x3f800000}, // 1.0 != 3.0
+      {0x80000000, 0x00000000, 0x40800000, 0x40800000, 0x40800000}, // -0 == +0
+      {0x00000000, 0x80000000, 0x40800000, 0x40800000, 0x40800000}, // +0 == -0
+      {0x7fc00000, 0x7fc00000, 0x40a00000, 0x7fc00000, 0x7fc00000}, // equal qNaN bits
+      {0x7f800001, 0x7f800001, 0x40a00000, 0x7f800001, 0x7f800001}, // equal sNaN bits
+      {0xffc00000, 0xffc00000, 0x40a00000, 0xffc00000, 0xffc00000}, // equal -qNaN bits
+      {0x00000001, 0x00000001, 0x40c00000, 0x40c00000, 0x40c00000}, // equal denormals
+      {0x00000001, 0x00000000, 0x40c00000, 0x00000001, 0x40c00000}, // denormal vs +0
+      {0x00000000, 0x00000001, 0x40c00000, 0x00000000, 0x40c00000}, // +0 vs denormal
+      {0x00000001, 0x00000002, 0x40c00000, 0x00000001, 0x40c00000}, // two denormals
+      {0x80000001, 0x00000001, 0x41000000, 0x80000001, 0x41000000}, // -denormal vs +denormal
+      {0x3f800000, 0x3f800000, 0x00000001, 0x00000001, 0x00000001}, // denormal source
+      {0x3f800000, 0x3f800000, 0x7f800001, 0x7f800001, 0x7f800001}, // sNaN source
+      {0x00000001, 0x40400000, 0x41000000, 0x00000001, 0x00000001}, // denormal, mismatch
+      {0x80000001, 0x3f800000, 0x41000000, 0x80000001, 0x80000001}, // -denormal, mismatch
+      {0x7f800000, 0x7f800000, 0x40e00000, 0x40e00000, 0x40e00000}, // +inf == +inf
+      {0x7f800000, 0xff800000, 0x40e00000, 0x7f800000, 0x7f800000}, // +inf != -inf
+  });
+  constexpr uint64_t kOne = 0x3ff0000000000000, kThree = 0x4008000000000000;
+  constexpr uint64_t kSix = 0x4018000000000000, kDenorm = 0x0000000000000001;
+  check_float_compare_swap_policy<uint64_t>({
+      {kOne, kOne, kSix, kSix, kSix},
+      {kOne, kThree, kSix, kOne, kOne},
+      {0x8000000000000000, 0, kSix, kSix, kSix},
+      {0x7ff8000000000000, 0x7ff8000000000000, kSix, 0x7ff8000000000000, 0x7ff8000000000000},
+      {0x7ff0000000000001, 0x7ff0000000000001, kSix, 0x7ff0000000000001, 0x7ff0000000000001},
+      {kDenorm, kDenorm, kSix, kSix, kSix},
+      {kDenorm, 0, kSix, kDenorm, kSix},
+      {kDenorm, 0x0000000000000002, kSix, kDenorm, kSix},
+      {0x8000000000000001, kDenorm, kSix, 0x8000000000000001, kSix},
+      {kOne, kOne, kDenorm, kDenorm, kDenorm},
+      {kOne, kOne, 0x7ff0000000000001, 0x7ff0000000000001, 0x7ff0000000000001},
+      {kDenorm, kThree, kSix, kDenorm, kDenorm},
+      {0x8000000000000001, kOne, kSix, 0x8000000000000001, 0x8000000000000001},
+  });
+}
+
 } // namespace

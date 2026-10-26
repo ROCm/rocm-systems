@@ -974,10 +974,12 @@ TEST_P(AtomicPolicyExecutionTest, DsFloatCompareStoreEqualityAndDenormals) {
     EXPECT_EQ(execute_ds(opcode, nan, one, nan, 0xf0, width), nan);
     EXPECT_EQ(execute_ds(opcode, 1, one, 0, 0, width), one);
     EXPECT_EQ(execute_ds(opcode, 1, one, 0, 0xf0, width), 1u);
-    EXPECT_EQ(execute_ds(opcode, one, 1, one, 0, width), 0u);
-    // Compare-store flushes its result using the input control, including a failed comparison.
-    EXPECT_EQ(execute_ds(opcode, 1, one, one, 0, width), 0u);
-    EXPECT_EQ(execute_ds(opcode, negative_zero | 1, one, one, 0, width), negative_zero);
+    // Flushing applies only to the comparison: RDNA1, RDNA2 and RDNA3 hardware
+    // stores a matching denormal source unchanged and leaves memory untouched
+    // on a mismatch.
+    EXPECT_EQ(execute_ds(opcode, one, 1, one, 0, width), 1u);
+    EXPECT_EQ(execute_ds(opcode, 1, one, one, 0, width), 1u);
+    EXPECT_EQ(execute_ds(opcode, negative_zero | 1, one, one, 0, width), negative_zero | 1);
     EXPECT_EQ(execute_ds(opcode, 1, one, one, 0x50, width), 1u);
   }
 }
