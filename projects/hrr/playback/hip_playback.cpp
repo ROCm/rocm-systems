@@ -13,6 +13,7 @@
 
 #include "hip_playback.h"
 #include "hrr/hrr_api_args.h"
+#include "hrr/hrr_host_rect.h"
 #include "hrr_reader.h"   // hrr::hash_hex, hrr::read_file_capped
 #include "hrr_payload_bounds.h"
 #include "hrr_replay_limits.h"
@@ -4011,7 +4012,9 @@ hipError_t playback_hipStreamBeginCapture(PlaybackContext& ctx,
 hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
                                         const uint8_t* payload) {
     const auto* a = reinterpret_cast<const hrr_args_hipStreamEndCapture*>(payload);
-    if (a->ret != hipSuccess) return hipSuccess;  // original call failed — skip
+    // Capture records a failed EndCapture only when the failure ended the
+    // capture (invalidated or unjoined); every recorded EndCapture ends ours.
+    ctx.in_graph_capture = false;
 
     hipStream_t stream = ctx.translate_stream(a->stream);
     if (!stream) {
@@ -4019,9 +4022,14 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
                 (unsigned long long)a->stream);
         return hipSuccess;  // non-fatal
     }
-    ctx.in_graph_capture = false;
     hipGraph_t live_graph = nullptr;
     hipError_t r = hipStreamEndCapture(stream, &live_graph);
+    if (a->ret != hipSuccess) {
+        // The application got no graph, so nothing later refers to this one.
+        if (live_graph) (void)hipGraphDestroy(live_graph);
+        (void)hipGetLastError();
+        return hipSuccess;
+    }
     if (r == hipSuccess && live_graph) {
         ctx.record_graph(a->pGraph, live_graph);
         if (ctx.verbose)
@@ -4293,13 +4301,9 @@ hipError_t playback_hipStreamQuery_spt(PlaybackContext& ctx, const uint8_t* pl) 
 // Pitched host rects: hipMemcpy2D, hipMemcpy3D and the driver copies
 //
 // The runtime widens all of these to a HIP_MEMCPY3D and addresses the host
-// side as a pitched rect, as amd::BufferRect::create() does:
-//   row   = pitch ? pitch : width
-//   slice = pitch*pitch_height ? pitch*pitch_height : row*height
-//   first = z*slice + y*row + x
-// The copy touches `height` rows of `width` bytes in each of `depth` slices and
-// nothing in between. The span from the host base pointer through the last
-// copied byte is `extent`.
+// side as a pitched rect. hrr/hrr_host_rect.h measures it (HrrHostRect,
+// hrr_host_rect()), and capture includes the same header, so both sides agree
+// on where the copied rows are and on the `extent` they span.
 //
 // What the host blob holds, for the H2D source and the D2H expected output
 // alike, depends on the archive:
@@ -4313,57 +4317,6 @@ hipError_t playback_hipStreamQuery_spt(PlaybackContext& ctx, const uint8_t* pl) 
 //     hipMemcpy3D H2D source, the flat first width*height*depth bytes. Replay
 //     keeps the recorded layout and skips a blob short of `extent`.
 // ---------------------------------------------------------------------------
-
-struct HrrHostRect {
-    size_t first = 0;   // offset of the first copied byte from the host base
-    size_t row = 0;     // bytes from the start of one row to the next
-    size_t slice = 0;   // bytes from the start of one slice to the next
-    size_t width = 0, height = 0, depth = 0;
-    size_t extent = 0;  // bytes from the host base through the last copied byte
-    bool ok = false;    // false when the extent does not fit in size_t
-};
-
-// a*b + c, refusing to wrap. The geometry comes from the archive, and a wrapped
-// extent would size a buffer below what the runtime then writes into it.
-static bool hrr_size_mad(size_t a, size_t b, size_t c, size_t& out) {
-    if (a != 0 && b > (SIZE_MAX - c) / a) return false;
-    out = a * b + c;
-    return true;
-}
-
-static HrrHostRect hrr_host_rect(size_t pitch, size_t pitch_height,
-                                 size_t x, size_t y, size_t z,
-                                 size_t width, size_t height, size_t depth) {
-    HrrHostRect r;
-    r.width = width;
-    r.height = height;
-    r.depth = depth;
-    if (width == 0 || height == 0 || depth == 0) {
-        r.ok = true;  // an empty copy touches nothing
-        return r;
-    }
-    r.row = (pitch != 0) ? pitch : width;
-    if (r.row < width) r.row = width;
-    size_t dense = 0, yx = 0, last = 0;
-    if (!hrr_size_mad(r.row, height, 0, dense) ||
-        !hrr_size_mad(pitch, pitch_height, 0, r.slice))
-        return r;
-    if (r.slice < dense) r.slice = dense;  // 0 => runtime default
-    if (!hrr_size_mad(y, r.row, x, yx) ||
-        !hrr_size_mad(z, r.slice, yx, r.first) ||
-        !hrr_size_mad(height - 1, r.row, width, last) ||
-        !hrr_size_mad(depth - 1, r.slice, last, last) ||
-        !hrr_size_mad(1, last, r.first, r.extent))
-        return r;
-    r.ok = true;
-    return r;
-}
-
-// True when the copied bytes of `rect` are one contiguous run from `first`.
-static bool hrr_host_rect_dense(const HrrHostRect& rect) {
-    return (rect.height == 1 || rect.row == rect.width) &&
-           (rect.depth == 1 || rect.slice == rect.width * rect.height);
-}
 
 // The host side of each descriptor, given the dense layout of a packed blob.
 static void hrr_pack_host_side(hipPitchedPtr& ptr, hipPos& pos, const hipExtent& extent) {
@@ -4497,7 +4450,7 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
     // dense copy compares in place and a pitched one packs its own rows inside
     // the scratch buffer: only its expected rows take a buffer of their own.
     const size_t n = dst.width * dst.height * dst.depth;
-    if (hrr_host_rect_dense(dst)) {
+    if (hrr_host_rect_dense(&dst)) {
         hrr_d2h_validate(ctx, api, hrr_dispatch_seq, host.get() + dst.first,
                          expected + dst.first, n);
         return hipSuccess;
@@ -4551,9 +4504,6 @@ static HrrHostRect memcpy3d_host_dst(const hipMemcpy3DParms& p) {
 }
 
 // Defined with the driver-copy helpers below.
-static size_t drvmemcpy_host_bytes(size_t pitch, size_t pitch_height,
-                                   size_t x, size_t y, size_t z,
-                                   size_t width, size_t height, size_t depth);
 static const void* drvmemcpy_h2d_src_blob(PlaybackContext& ctx, const char* api,
                                           uint64_t hash_lo, uint64_t hash_hi,
                                           size_t need);
@@ -4566,7 +4516,7 @@ static const void* drvmemcpy_h2d_src_blob(PlaybackContext& ctx, const char* api,
 static bool memcpy3d_h2d_src(PlaybackContext& ctx, const char* api, uint64_t hash_lo,
                              uint64_t hash_hi, hipMemcpy3DParms& p) {
     if (ctx.packed_host_rects) hrr_pack_host_side(p.srcPtr, p.srcPos, p.extent);
-    size_t need = drvmemcpy_host_bytes(p.srcPtr.pitch, p.srcPtr.ysize, p.srcPos.x, p.srcPos.y,
+    size_t need = hrr_host_rect_extent(p.srcPtr.pitch, p.srcPtr.ysize, p.srcPos.x, p.srcPos.y,
                                        p.srcPos.z, p.extent.width, p.extent.height,
                                        p.extent.depth);
     const void* blob = drvmemcpy_h2d_src_blob(ctx, api, hash_lo, hash_hi, need);
@@ -4679,19 +4629,6 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
 // types are in scope; array-typed rects are declined (see below).
 // ---------------------------------------------------------------------------
 
-// Host-side byte footprint of a driver-copy rect, measured from the host base
-// pointer: hrr_host_rect()'s extent, which mirrors capture's
-// drvmemcpy_host_byte_count(). Replay substitutes the captured blob for srcHost
-// while keeping the recorded pitches and offsets, so the blob must be at least
-// this large or the runtime strides past its end. SIZE_MAX, which no blob
-// covers, when the recorded rect overflows.
-static size_t drvmemcpy_host_bytes(size_t pitch, size_t pitch_height,
-                                   size_t x, size_t y, size_t z,
-                                   size_t width, size_t height, size_t depth) {
-    const HrrHostRect r = hrr_host_rect(pitch, pitch_height, x, y, z, width, height, depth);
-    return r.ok ? r.extent : SIZE_MAX;
-}
-
 // Resolve the H2D source blob for a driver copy, a hipMemcpy3D or a hipMemcpy2D.
 // Returns nullptr when there is nothing faithful to substitute: no blob
 // recorded, or a blob smaller than the recorded source rect (an archive captured
@@ -4752,7 +4689,7 @@ static hipError_t replay_drvmemcpy3d(PlaybackContext& ctx, HIP_MEMCPY3D& parms,
             return hipSuccess;
         }
         if (ctx.packed_host_rects) hrr_pack_host_src(parms);
-        size_t need = drvmemcpy_host_bytes(parms.srcPitch, parms.srcHeight,
+        size_t need = hrr_host_rect_extent(parms.srcPitch, parms.srcHeight,
                                            parms.srcXInBytes, parms.srcY, parms.srcZ,
                                            parms.WidthInBytes, parms.Height, parms.Depth);
         const void* blob = drvmemcpy_h2d_src_blob(ctx, api, blob_hash_lo, blob_hash_hi, need);
@@ -4848,7 +4785,7 @@ static hipError_t replay_drvmemcpy2d(PlaybackContext& ctx, const T* a,
         if (ctx.packed_host_rects) hrr_pack_host_src(parms);
         size_t pitch = parms.srcPitch ? parms.srcPitch
                                       : parms.srcXInBytes + parms.WidthInBytes;
-        size_t need = drvmemcpy_host_bytes(pitch, /*pitch_height=*/0, parms.srcXInBytes,
+        size_t need = hrr_host_rect_extent(pitch, /*pitch_height=*/0, parms.srcXInBytes,
                                            parms.srcY, /*z=*/0, parms.WidthInBytes,
                                            parms.Height, /*depth=*/1);
         const void* blob = drvmemcpy_h2d_src_blob(ctx, api, a->blob_hash_lo,
@@ -4984,7 +4921,7 @@ static hipError_t replay_memcpy2d(PlaybackContext& ctx, const T* a,
     if (kind == hipMemcpyHostToDevice) {
         // The runtime reads `height` rows `spitch` apart from the blob, so it
         // must reach spitch * (height - 1) + width bytes.
-        const size_t need = drvmemcpy_host_bytes(spitch, /*pitch_height=*/0, 0, 0, 0,
+        const size_t need = hrr_host_rect_extent(spitch, /*pitch_height=*/0, 0, 0, 0,
                                                  width, height, /*depth=*/1);
         const void* blob = drvmemcpy_h2d_src_blob(
             ctx, is_async ? "hipMemcpy2DAsync" : "hipMemcpy2D", a->blob_hash_lo,
