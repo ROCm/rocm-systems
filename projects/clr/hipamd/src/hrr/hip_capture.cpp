@@ -2954,15 +2954,9 @@ static void record_registered_var(const void* host_var, const char* name,
 // HIP API through capture shims from the moment the DSO loaded, and pulled host
 // stacks (e.g. Python import torch → multiprocessing spawn) into ordering where
 // the GPU runtime appeared "already initialized" before child processes start.
-// Events before writer::open() were dropped anyway (write_event_raw no-ops when
-// g_events_fd < 0), so deferring install loses no recorded events for that
-// window while restoring a normal pre-init load path.
-//
-// Installing from hip_capture_init() alone loses the call that runs hip::init():
-// its exported entry point read the real slot before init installed the shim.
-// The bootstrap installs before that read, so the first hipMalloc goes through
-// its shim, which records it once init has opened the writer. Until then a shim
-// only forwards, as the writer drops what it is given.
+// The bootstrap installs before the call that runs hip::init() reads its slot,
+// so that call is recorded once init has opened the writer. Until then the
+// shims record nothing: write_event_raw drops events while g_events_fd < 0.
 std::atomic<bool> g_capture_bootstrapped{false};
 
 namespace {
@@ -3038,9 +3032,7 @@ void hip_capture_init() {
                 "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: the program was started in "
                 "secure-execution mode (set-user-ID, set-group-ID, file capabilities or an "
                 "LSM transition).\n");
-      // Only the bootstrap can have installed shims by now. Without them the
-      // dispatch table is left as it is.
-      if (g_installed.load(std::memory_order_acquire)) hip_capture_uninstall();
+      hip_capture_uninstall();
       return;
     }
 

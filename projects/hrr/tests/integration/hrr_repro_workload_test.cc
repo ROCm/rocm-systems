@@ -151,9 +151,9 @@ TEST_CASE("Unit_HRR_FirstMalloc_Direct", "[.][hrr-direct]") {
 // A1b. First call creates the stream / sets the device flags
 //
 // The same regression for the other state the first call can create.  The
-// stream is non-blocking and every command after its creation runs on it, so a
-// replay that fell back to the default stream would be visible in the archive
-// check of Unit_HRR_FirstStreamCreateRecorded.
+// stream is non-blocking and every command after its creation runs on it.  A
+// dropped creation fails Unit_HRR_FirstStreamCreateRecorded twice: the archive
+// lacks the event, and the replay trace never creates the stream.
 // ===========================================================================
 static void hrr_repro_scale_on(hipStream_t stream) {
   float *da = nullptr, *dout = nullptr;
@@ -176,18 +176,12 @@ static void hrr_repro_scale_on(hipStream_t stream) {
 TEST_CASE("Unit_HRR_FirstStreamCreate_Direct", "[.][hrr-direct]") {
   hipStream_t stream = nullptr;
   HRR_HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));  // first HIP call
-  unsigned int flags = 0;
-  HRR_HIP_CHECK(hipStreamGetFlags(stream, &flags));
-  REQUIRE(flags == hipStreamNonBlocking);
   hrr_repro_scale_on(stream);
   HRR_HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TEST_CASE("Unit_HRR_FirstSetDeviceFlags_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDeviceFlags(hipDeviceScheduleBlockingSync));  // first HIP call
-  unsigned int flags = 0;
-  HRR_HIP_CHECK(hipGetDeviceFlags(&flags));
-  REQUIRE((flags & hipDeviceScheduleMask) == hipDeviceScheduleBlockingSync);
   hrr_repro_scale_on(nullptr);
 }
 

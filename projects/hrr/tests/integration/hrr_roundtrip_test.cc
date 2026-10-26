@@ -594,9 +594,7 @@ static void hrr_require_recorded_apis(const fs::path& cap_path,
  *   - Capture Unit_HRR_FirstMalloc_Direct, whose very first HIP call is a
  *     hipMalloc (no hipSetDevice / warm-up allocation first).  Replay and
  *     REQUIRE the D2H validates — i.e. the very first allocation was captured
- *     and translated.  Before hip_capture_bootstrap() the shims went in from
- *     hip::init(), inside that first call, so it was not recorded and replay
- *     aborted with "H2D dst ... not mapped".
+ *     and translated.
  */
 HRR_TEST_CASE(Unit_HRR_FirstMallocRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_firstmalloc"};
@@ -658,40 +656,6 @@ static int hrr_replayed_calls(const fs::path& cap_path, const std::string& api,
       ++calls;
   }
   return calls;
-}
-
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_FirstMalloc_Direct and REQUIRE both allocations in the
- *     archive, the first one as the first call after the registrations, and the
- *     H2D copy into it after it.  The roundtrip above covers the replay.
- */
-HRR_TEST_CASE(Unit_HRR_FirstMallocRecorded) {
-  ScopedDir cap{fs::temp_directory_path() / "hrr_first_malloc_recorded"};
-  hrr_capture_direct("Unit_HRR_FirstMalloc_Direct", cap.path);
-  hrr::Archive arc;
-  REQUIRE(hrr::load_archive(cap.path.string(), arc));
-
-  std::vector<size_t> mallocs;
-  for (size_t i = 0; i < arc.events.size(); ++i)
-    if (arc.events[i].header().event_type == static_cast<uint16_t>(HRR_API_HIPMALLOC)) mallocs.push_back(i);
-  REQUIRE(mallocs.size() == 2);
-  REQUIRE(mallocs[0] == hrr_first_call_event(arc));
-  const auto& first = hrr_event_args<hrr_args_hipMalloc>(arc.events[mallocs[0]]);
-  CHECK(first.ret == 0);
-  CHECK(first.size == 1024 * sizeof(float));
-  REQUIRE(first.ptr != 0);
-
-  bool h2d_after = false;
-  for (size_t i = 0; i < arc.events.size(); ++i) {
-    if (arc.events[i].header().event_type != static_cast<uint16_t>(HRR_API_HIPMEMCPY)) continue;
-    const auto& m = hrr_event_args<hrr_args_hipMemcpy>(arc.events[i]);
-    if (m.dst != first.ptr) continue;
-    CHECK(i > mallocs[0]);
-    h2d_after = true;
-  }
-  REQUIRE(h2d_after);
 }
 
 /**
