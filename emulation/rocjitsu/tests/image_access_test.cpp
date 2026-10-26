@@ -167,7 +167,7 @@ TEST_F(Cdna2ImageAccessTest, StoreThenLoadRoundTripsActiveLanesOfAnR32Image) {
   EXPECT_EQ(cu->read_vgpr(vb + 8, 1), 0xdeadbeef);
 }
 
-TEST_F(Cdna2ImageAccessTest, ZeroSelectorsDoNotUseTheBufferStoreSourceXRule) {
+TEST_F(Cdna2ImageAccessTest, ZeroSelectorsDoNotUseBufferStoreA8Routing) {
   wf->set_exec(1);
   write_coordinates(0, {0, 0, 0});
   for (uint32_t format : {kDfmt32, kDfmt8888}) {
