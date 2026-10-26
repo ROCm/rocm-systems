@@ -1,7 +1,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -134,8 +134,8 @@ def add_args(parser):
     io_options.add_argument(
         "-d",
         "--output-path",
-        help="Sets the output path where the output files will be saved (default path: `.`)",
-        default=os.environ.get("ROCPD_OUTPUT_PATH", "."),
+        help="Sets the output path where the output files will be saved (default path: `./rocpd-output-data`)",
+        default=os.environ.get("ROCPD_OUTPUT_PATH", "./rocpd-output-data"),
         type=str,
         required=False,
     )
