@@ -274,6 +274,11 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   if (!symk->initialized) {
     symk->initialized = true;
     symk->kcomm.hierScaleInSize = computeHierScaleInSize(comm);
+    if (ncclSymkAgHierAvailable(comm) && symk->kcomm.hierScaleInSize == 0)
+      INFO(NCCL_INIT,
+           "Symmetric hierarchical AllGather off: ranks do not form two or more consecutive, equal-size groups "
+           "per physical device (nRanks %d)",
+           comm->nRanks);
     struct ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     // Disable LSA multicast for cross-clique since NVLS isn't available across cliques
     symk->hasLsaMultimem =

@@ -378,10 +378,12 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
         size_t lo = (size_t(i) * nGroupBlocks + groupBlock) * chunkBytes;
         bcast<char, false>(handler, tn, t, 1, false, bar, input + lo, mySlot + lo, min(chunkBytes, nElts - lo), scaleIn,
                            toSlot);
-        // As the LSA barrier's arrive orders a block's stores, but toward the one peer that reads them.
+        // half.sync() orders every pusher warp's stores before this system-scope fence
         half.sync();
-        cuda::atomic_thread_fence(cuda::memory_order_release);
-        if (t == 0) flag.store(seq + i + 1, cuda::memory_order_release);
+        if (t == 0) {
+          cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+          flag.store(seq + i + 1, cuda::memory_order_relaxed);
+        }
       }
     } else if (forwarder) {
       uint64_t* flags = (uint64_t*)ncclGetResourceBufferLocalPointer(handler.comm, flagsBuf);
@@ -389,9 +391,10 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
       for (int i = 0; i < nBlockChunks; i++) {
         if (t == 0) {
           uint32_t steps = 0;
-          while (flag.load(cuda::memory_order_acquire) < seq + i + 1) {
+          while (flag.load(cuda::memory_order_relaxed) < seq + i + 1) {
             if (nccl::utility::testAbort(handler.comm.abortFlag, steps)) break;
           }
+          cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
         }
         half.sync();
         size_t lo = (size_t(i) * nGroupBlocks + groupBlock) * chunkBytes;
