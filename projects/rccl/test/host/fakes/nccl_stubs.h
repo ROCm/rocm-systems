@@ -35,6 +35,15 @@ extern std::function<ncclResult_t(int /*cudaArch*/, int /*maxSharedMem*/, size_t
 // src/misc/coll_trace.cc: comm teardown tears the trace ring down through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_collTraceDestroy;
 
+// src/algorithms/dda: commFree and the init setup decision. Defaults match a
+// non-fabric host: the fabric path is off, fini succeeds, and init aborts so a
+// test that reaches setup without installing a hook fails loud.
+extern std::function<bool(struct ncclComm*)> g_ncclDdaUseFabricPath;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaIpcCommInit;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaIpcCommFini;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaFabricCommInit;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaFabricCommFini;
+
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerThreadDestroy;
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinalize;
 
