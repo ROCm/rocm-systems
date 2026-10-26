@@ -148,11 +148,9 @@ static std::string hrr_consent_file() {
 #endif
 }
 
-// The consent file or variable as ASCII text, after the byte order mark that
-// Windows PowerShell writes, UTF-8 or, with its `>`, UTF-16LE. UTF-16LE is
-// decoded unit by unit before anyone looks for a line end, so that neither a
-// unit such as U+6579 nor U+010A can pass for letters or a newline; a unit
-// outside ASCII, or an odd byte, yields "\x7F", which is never an answer.
+// The consent file as ASCII after the UTF-8 or UTF-16LE byte order mark that Windows
+// PowerShell writes. UTF-16LE is decoded before the line end is looked for; a unit
+// outside ASCII, or an odd byte, yields "\x7F", which is never a yes.
 static std::string hrr_consent_text(const std::string& s) {
   if (s.rfind("\xEF\xBB\xBF", 0) == 0) return s.substr(3);
   if (s.rfind("\xFF\xFE", 0) != 0) return s;
@@ -183,12 +181,10 @@ struct HrrConsent {
 // alone does not start capture: the user also has to say yes, once in the
 // consent file or per run in HIP_HRR_CAPTURE_CONSENT for CI and containers.
 static HrrConsent hrr_capture_consent() {
-  // A set variable decides this run either way: yes consents, and any other
-  // value, such as no, withholds consent even when the file says yes. A blank
-  // value, which is what the flag parser keeps of an exported empty variable,
-  // counts as unset.
+  // A set variable decides the run: yes consents, any other value withholds consent.
+  // A blank one (the flag parser's form of an exported empty variable) counts as unset.
   if (!flagIsDefault(HIP_HRR_CAPTURE_CONSENT)) {
-    const std::string answer = hrr_consent_trim(hrr_consent_text(HIP_HRR_CAPTURE_CONSENT));
+    const std::string answer = hrr_consent_trim(HIP_HRR_CAPTURE_CONSENT);
     if (answer == "yes") return {"HIP_HRR_CAPTURE_CONSENT", ""};
     if (!answer.empty()) {
       return {"", std::string("HIP_HRR_CAPTURE_CONSENT is set to '") + HIP_HRR_CAPTURE_CONSENT +
@@ -252,17 +248,15 @@ static const HrrConsent& hrr_consent() {
   return consent;
 }
 
-static const std::string& hrr_consent_source() { return hrr_consent().source; }
-
 // Consent is part of the predicate, so no caller sees capture on after
 // hip_capture_init() refused it. Short-circuits so that the consent file is
 // read only when capture was asked for.
 bool hip_capture_enabled() {
-  return hrr_capture_requested() && !hrr_secure_exec() && !hrr_consent_source().empty();
+  return hrr_capture_requested() && !hrr_secure_exec() && !hrr_consent().source.empty();
 }
 
 const char* hip_capture_output_dir() {
-  return hip_capture_enabled() ? HIP_HRR_CAPTURE_OUTPUT : "";
+  return HIP_HRR_CAPTURE_OUTPUT;
 }
 
 // HIP_HRR_DEBUG_ARGS also enables provenance tracing: every H2D memcpy
@@ -3189,7 +3183,7 @@ void hip_capture_init() {
 #endif
 
     hrr_cap::writer::set_capture_metadata_json(
-        hrr_cap::metadata::collect_json(hrr_consent_source()));
+        hrr_cap::metadata::collect_json(hrr_consent().source));
 
     hrr_install_clr_exception_handler();
 

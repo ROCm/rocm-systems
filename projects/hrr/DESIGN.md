@@ -800,21 +800,16 @@ privileges that whoever set its environment does not, so it ignores the variable
 The check is `hrr_cap::metadata::secure_exec()` in `hip_capture_metadata.cpp`, and it is
 always false off Linux.
 
-Consent comes from `HIP_HRR_CAPTURE_CONSENT` or, when that is unset or blank, from the
-per-user file `${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent`
-(`%APPDATA%\hrr\capture-consent` on Windows); see [README.md](README.md#capture). The
-variable decides the run when set: `yes` consents and any other value withholds consent.
-The file consents when its first line is `yes`, after any UTF-8 or UTF-16LE byte order
-mark and before trailing blanks. UTF-16LE is decoded before the line end is looked for,
-and a character outside ASCII makes the file no yes; so does a file over 4 KiB. On POSIX
-it counts only as a regular file, checked on the descriptor opened with `O_NONBLOCK`,
-owned by the effective user. Consent is read once, by `hrr_consent()`, and is part of
-`hip_capture_enabled()`, so `hip_capture_output_dir()` is empty without it. Without
-consent `hip_capture_init()` prints one line on stderr naming what withheld it (the
-variable, or the file missing, not a regular file, owned by another user or not saying
-yes) and the process runs unrecorded; it never prompts. With
-consent the manifest metadata records `capture_consent` as `"file"` or
-`"HIP_HRR_CAPTURE_CONSENT"`, not the file's path, which names the user.
+Consent comes from `HIP_HRR_CAPTURE_CONSENT` or the per-user consent file; see
+[README.md](README.md#capture) for both and for which one decides. The file consents when
+its first line is `yes`, after any UTF-8 or UTF-16LE byte order mark and before trailing
+blanks. UTF-16LE is decoded before the line end is looked for, and a UTF-16LE unit
+outside ASCII makes the file no yes; so does a file over 4 KiB. On POSIX it counts only as a
+regular file, checked on the descriptor opened with `O_NONBLOCK`, owned by the effective
+user. Consent is read once, by `hrr_consent()`, and is part of `hip_capture_enabled()`.
+Without it `hip_capture_init()` prints one line on stderr naming what withheld it; it never
+prompts. `capture_consent` in the manifest metadata names the source, not the file's path,
+which names the user.
 
 ## Playback Tools
 

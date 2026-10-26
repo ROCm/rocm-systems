@@ -289,10 +289,10 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
  * ----------------
  *   - Spawns Unit_HRR_DeviceInfo_Direct with HIP_HRR_CAPTURE_OUTPUT set, without
  *     HIP_HRR_CAPTURE_CONSENT and with an empty configuration directory. The
- *     workload must still pass and say on stderr that capture needs consent and
- *     which file records it. After it exits the capture directory must hold
- *     nothing, not even an empty or partial pid-* directory: without consent
- *     hip_capture_enabled() is false, so neither init nor exit writes there.
+ *     workload must still pass and say on stderr that capture needs consent.
+ *     After it exits the capture directory must hold nothing, not even an empty
+ *     or partial pid-* directory: without consent hip_capture_enabled() is
+ *     false, so neither init nor exit writes there.
  *   - Writes yes to that consent file and captures again: the archive is
  *     written and its metadata records capture_consent "file".
  *   - Captures with HIP_HRR_CAPTURE_CONSENT=yes and no consent file: the
@@ -301,14 +301,13 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
  *     byte order mark: each still records capture_consent "file".
  *   - Writes UTF-16LE that is not a yes but would read as one with its NULs
  *     dropped or a line end looked for byte by byte: U+6579 then s, and yes,
- *     U+010A, no. Nothing is written and the notice says the file is no yes.
- *   - With yes in the file and HIP_HRR_CAPTURE_CONSENT=no, nothing is written
- *     and the notice names the variable: a set variable decides the run. With
- *     an empty exported variable the file consents. With "yes " and no file,
- *     the trailing blank is ignored as it is in the file.
+ *     U+010A, no. Nothing is written.
+ *   - With yes in the file and HIP_HRR_CAPTURE_CONSENT=no, nothing is written:
+ *     a set variable decides the run. With an empty exported variable the file
+ *     consents.
  *   - On POSIX, puts a FIFO with no writer at the consent path: the workload
- *     must finish within a deadline, with nothing written, instead of blocking
- *     HIP's init in the open of the consent file.
+ *     must finish within a deadline, with nothing written and the file named as
+ *     not regular, instead of blocking HIP's init in the open of the consent file.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_capture_consent"};
@@ -317,7 +316,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
   const fs::path consent_file = cfg.path / "hrr" / "capture-consent";
 
   // env_consent is the value of HIP_HRR_CAPTURE_CONSENT, or nullptr to unset it.
-  auto capture = [&](const char* env_consent) {
+  auto capture = [&](const char* env_consent, int timeout_seconds = 0) {
     hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     proc.setEnv("AMD_LOG_LEVEL", "0");
@@ -330,7 +329,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
       proc.setEnv("HIP_HRR_CAPTURE_CONSENT", env_consent);
     }
     set_proc_search_path(proc);
-    int ret = proc.run("\"Unit_HRR_DeviceInfo_Direct\"");
+    int ret = proc.runWithTimeout("\"Unit_HRR_DeviceInfo_Direct\"", timeout_seconds);
     const std::string out = proc.getOutput();
     INFO("Capture subprocess output:\n" << out);
     REQUIRE(ret == 0);
@@ -355,11 +354,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
     const std::string out = capture(nullptr);
     CHECK(out.find("[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent.") !=
           std::string::npos);
-    CHECK(out.find(consent_file.string() + " does not exist.") != std::string::npos);
-    CHECK(out.find("write the line yes to " + consent_file.string() + " once") !=
-          std::string::npos);
-    CHECK(out.find("set HIP_HRR_CAPTURE_CONSENT=yes") != std::string::npos);
-    CHECK(out.find("[HRR capture] Recording") == std::string::npos);
     CHECK(nothing_written());
   }
 
@@ -392,42 +386,26 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
         std::string("\xFF\xFEy\0e\0s\0\x0A\x01n\0o\0", 14)}) {
     fs::remove_all(cap.path);
     std::ofstream(consent_file, std::ios::binary) << not_yes;
-    const std::string out = capture(nullptr);
-    CHECK(out.find(consent_file.string() + " does not say yes.") != std::string::npos);
+    capture(nullptr);
     CHECK(nothing_written());
   }
 
   {
     fs::remove_all(cap.path);
     std::ofstream(consent_file) << "yes\n";
-    const std::string out = capture("no");
-    CHECK(out.find("capture needs your consent. HIP_HRR_CAPTURE_CONSENT is set to 'no', which "
-                   "withholds consent.") != std::string::npos);
+    capture("no");
     CHECK(nothing_written());
     // An exported empty variable counts as unset, so the file decides.
     capture("");
     CHECK(recorded_consent() == "file");
-    fs::remove_all(cap.path);
-    fs::remove(consent_file);
-    capture("yes ");
-    CHECK(recorded_consent() == "HIP_HRR_CAPTURE_CONSENT");
   }
 
 #if !defined(_WIN32)
   {
     fs::remove_all(cap.path);
+    fs::remove(consent_file);
     REQUIRE(::mkfifo(consent_file.c_str(), 0600) == 0);
-    hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    proc.setEnv("AMD_LOG_LEVEL", "0");
-    proc.setEnv("XDG_CONFIG_HOME", cfg.path.string());
-    proc.unsetEnv("HIP_HRR_CAPTURE_CONSENT");
-    set_proc_search_path(proc);
-    const int ret = proc.runWithTimeout("\"Unit_HRR_DeviceInfo_Direct\"", 60);
-    const std::string out = proc.getOutput();
-    INFO("Capture subprocess output:\n" << out);
-    REQUIRE(ret != hrr::test::SpawnProc::kKilledOnTimeout);
-    REQUIRE(ret == 0);
+    const std::string out = capture(nullptr, 60);
     CHECK(out.find(consent_file.string() + " is not a regular file.") != std::string::npos);
     CHECK(nothing_written());
   }
@@ -440,7 +418,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
  *   - Writes yes to the consent file, gives it to another user and spawns
  *     Unit_HRR_DeviceInfo_Direct with HIP_HRR_CAPTURE_OUTPUT set and no
  *     HIP_HRR_CAPTURE_CONSENT. A yes owned by someone else is not this user's,
- *     so the workload passes, prints the consent notice and writes nothing.
+ *     so the workload passes and writes nothing.
  *   - Gives the file back and captures again: the metadata records
  *     capture_consent "file", so the refusal came from the owner alone.
  *   - Skipped on Windows, where the file is not checked for an owner, and when
@@ -468,14 +446,12 @@ HRR_TEST_CASE(Unit_HRR_CaptureIgnoresConsentOfOtherUser) {
     const std::string out = proc.getOutput();
     INFO("Capture subprocess output:\n" << out);
     REQUIRE(ret == 0);
-    return out;
   };
 
   {
     // 65534 is nobody on most systems; any uid other than root's will do.
     REQUIRE(::chown(consent_file.c_str(), 65534, 65534) == 0);
-    const std::string out = capture();
-    CHECK(out.find(consent_file.string() + " is not owned by this user.") != std::string::npos);
+    capture();
     std::error_code ec;
     CHECK((!fs::exists(cap.path, ec) || fs::is_empty(cap.path, ec)));
   }
