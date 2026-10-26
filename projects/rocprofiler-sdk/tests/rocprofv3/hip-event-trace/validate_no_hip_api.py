@@ -164,16 +164,16 @@ def test_no_hip_api_graph_capture_exclusion(json_data):
         r.hip_event_handle for r in records if r.operation == HIP_EVENT_RECORD
     )
 
-    # The binary creates 7 events; 6 are recorded outside graph capture (event0, event1,
-    # destroy_event, default_event, same_stream_event, coalesce_event) and capture_event
-    # must be excluded. The observed count can be lower than 6: hipEventDestroy frees an
-    # address that a later hipEventCreate can reuse, so two distinct events may report the
-    # same handle. Only the upper bound is meaningful -- exceeding it means a record was
-    # emitted for the captured event.
-    assert len(record_handles) <= 6, (
-        f"Expected at most 6 unique RECORD handles (capture_event should be excluded). "
+    # The binary creates 10 events; 9 are recorded outside graph capture (event0, event1,
+    # destroy_event, default_event, same_stream_event, ordered_event, marker_event,
+    # ipc_event, coalesce_event) and capture_event must be excluded. The observed count can
+    # be lower than 9: hipEventDestroy frees an address that a later hipEventCreate can
+    # reuse, so two distinct events may report the same handle. Only the upper bound is
+    # meaningful -- exceeding it means a record was emitted for the captured event.
+    assert len(record_handles) <= 9, (
+        f"Expected at most 9 unique RECORD handles (capture_event should be excluded). "
         f"Found {len(record_handles)}: {record_handles}. "
-        f"If 7 handles, graph capture exclusion may have failed."
+        f"If 10 handles, graph capture exclusion may have failed."
     )
     # Loose floor: handle reuse makes an exact count unreliable, but tracing being
     # broken entirely would show far fewer than this.

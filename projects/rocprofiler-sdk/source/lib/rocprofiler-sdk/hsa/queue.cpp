@@ -577,14 +577,6 @@ WriteInterceptor(const void* packets,
                                ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                tracing_data_v);
 
-    auto hip_event_tracing_data_v = tracing::tracing_data{};
-    if(hip::event::is_active())
-    {
-        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
-                                   ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
-                                   hip_event_tracing_data_v);
-    }
-
     for(const auto* itr : context::get_active_contexts(queue_callback_context_filter))
         tracing_data_v.external_correlation_ids.emplace(itr, tracing::empty_user_data);
 
@@ -623,11 +615,7 @@ WriteInterceptor(const void* packets,
 
     using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
 
-    auto process_packet_batch = [&queue,
-                                 &corr_id,
-                                 tracing_data_v,
-                                 hip_event_tracing_data_v,
-                                 has_kernel_replay](
+    auto process_packet_batch = [&queue, &corr_id, tracing_data_v, has_kernel_replay](
                                     const rocprofiler_packet* _packets,
                                     uint64_t                  _num_packets,
                                     const packet_writer_fn_t& _writer,
@@ -685,8 +673,7 @@ WriteInterceptor(const void* packets,
                     is_barrier = (vendor_hdr.AmdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE);
                 }
 
-                auto plan = hip::event::plan_barrier(
-                    queue, _packets[i], packet_type, is_barrier, hip_event_tracing_data_v, corr_id);
+                auto plan = hip::event::plan_barrier(queue, _packets[i], packet_type, is_barrier);
 
                 if(plan.intercepted)
                 {

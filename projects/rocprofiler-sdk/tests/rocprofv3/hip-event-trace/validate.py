@@ -33,6 +33,11 @@ import pytest
 # Followed by:
 #   hipEventRecordWithFlags exercise
 #   Deferred wait: large kernel -> record -> wait -> kernel on other stream
+#   Ordered wait: record behind a long kernel on a non-blocking stream, then a wait from a
+#     blocking stream while the null stream is busy
+#   Marker record: record on a blocking stream while the null stream is busy, then a wait
+#     from the non-blocking stream
+#   Interprocess: record and wait on a hipEventInterprocess event within the process
 #   Coalescing: 3x hipEventRecord on a hipEventDisableTiming event
 #
 # This produces at least 8 hipEventRecord and 8 hipStreamWaitEvent calls.
@@ -187,6 +192,196 @@ def test_hip_event_cross_stream(json_data):
 
     for r in cross_stream:
         assert r.source_queue_id.handle > 0, "source_queue_id is zero"
+
+
+def test_hip_event_wait_ends_after_record(json_data):
+    """Verify every WAIT ends no earlier than the RECORD it waits for.
+
+    A WAIT is timed by a barrier that depends on the record's completion signal, so it cannot
+    retire before the record barrier did. A hipStreamWaitEvent can submit other barriers ahead
+    of its own (the app's ordered-wait scenario makes CLR enqueue a marker waiting for the
+    null stream first), and a WAIT timed by one of those ends before its RECORD.
+
+    The RECORD a WAIT refers to is the latest one on the same event handle whose API call
+    came before the wait's. WAITs whose record was not seen (source_queue_id 0) are skipped.
+    """
+    records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
+
+    record_records = sorted(
+        (r for r in records if r.operation == HIP_EVENT_RECORD),
+        key=lambda r: r.correlation_id.internal,
+    )
+    wait_records = [
+        r
+        for r in records
+        if r.operation == HIP_EVENT_WAIT and r.source_queue_id.handle != 0
+    ]
+    assert len(wait_records) > 0, "No correlated WAIT records"
+
+    for w in wait_records:
+        preceding = [
+            r
+            for r in record_records
+            if r.hip_event_handle == w.hip_event_handle
+            and r.correlation_id.internal < w.correlation_id.internal
+        ]
+        assert preceding, (
+            f"WAIT (correlation {w.correlation_id.internal}) on event "
+            f"{w.hip_event_handle:#x} has no preceding RECORD"
+        )
+        rec = preceding[-1]
+        assert w.end_timestamp >= rec.end_timestamp, (
+            f"WAIT (correlation {w.correlation_id.internal}) on event "
+            f"{w.hip_event_handle:#x} ended at {w.end_timestamp}, before its RECORD "
+            f"(correlation {rec.correlation_id.internal}) ended at {rec.end_timestamp}"
+        )
+
+
+def test_hip_event_marker_scenarios(json_data):
+    """Verify the RECORD and WAIT of calls that submit a marker ahead of their own barrier.
+
+    In the ordered-wait scenario CLR enqueues a marker ahead of the wait's barrier, and in the
+    marker-record scenario ahead of the record's. Each call must be timed by its own barrier:
+    a RECORD timed by its marker leaves the wait, which depends on the record's own barrier,
+    matching nothing, so no WAIT is reported at all.
+
+    The app calls hipStreamCreateWithFlags only ahead of these two scenarios, so their calls
+    are the first and second hipEventRecord and hipStreamWaitEvent after it.
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+    records = data["buffer_records"]["hip_event"]
+    hip_api = sorted(
+        data["buffer_records"]["hip_api"], key=lambda r: r.correlation_id.internal
+    )
+    string_table = data["strings"]["buffer_records"]
+
+    def get_operation_name(r):
+        return string_table[r.kind]["operations"][r.operation]
+
+    anchor = next(
+        (r for r in hip_api if get_operation_name(r) == "hipStreamCreateWithFlags"),
+        None,
+    )
+    assert anchor is not None, "No hipStreamCreateWithFlags call ahead of the scenarios"
+
+    def calls_after(name):
+        return [
+            r.correlation_id.internal
+            for r in hip_api
+            if r.correlation_id.internal > anchor.correlation_id.internal
+            and get_operation_name(r) == name
+        ][:2]
+
+    for scenario, record_corr, wait_corr in zip(
+        ("ordered-wait", "marker-record"),
+        calls_after("hipEventRecord"),
+        calls_after("hipStreamWaitEvent"),
+    ):
+        recs = [
+            r
+            for r in records
+            if r.operation == HIP_EVENT_RECORD
+            and r.correlation_id.internal == record_corr
+        ]
+        waits = [
+            r
+            for r in records
+            if r.operation == HIP_EVENT_WAIT and r.correlation_id.internal == wait_corr
+        ]
+        assert len(recs) == 1, (
+            f"{scenario}: expected 1 RECORD for hipEventRecord (correlation "
+            f"{record_corr}), found {len(recs)}"
+        )
+        assert len(waits) == 1, (
+            f"{scenario}: expected 1 WAIT for hipStreamWaitEvent (correlation "
+            f"{wait_corr}), found {len(waits)}"
+        )
+
+        rec, wait = recs[0], waits[0]
+        assert wait.hip_event_handle == rec.hip_event_handle
+        assert wait.source_queue_id.handle == rec.queue_id.handle, (
+            f"{scenario}: WAIT source_queue_id {wait.source_queue_id.handle} does not "
+            f"match its RECORD's queue {rec.queue_id.handle}"
+        )
+        assert (
+            wait.queue_id.handle != rec.queue_id.handle
+        ), f"{scenario}: WAIT was reported on the recording stream's queue"
+        assert wait.end_timestamp >= rec.end_timestamp, (
+            f"{scenario}: WAIT ended at {wait.end_timestamp}, before its RECORD ended at "
+            f"{rec.end_timestamp}"
+        )
+
+
+def test_hip_event_interprocess_wait(json_data):
+    """Verify a wait within the process on an interprocess event is reported.
+
+    The wait depends on the event's interprocess signal, so it is matched only when the RECORD
+    is timed by the barrier that completes on that signal. A RECORD timed by any other barrier
+    of the call leaves the wait matching nothing, so no WAIT is reported.
+
+    The app calls hipIpcGetEventHandle only after this scenario, so its calls are the last
+    hipEventRecord and hipStreamWaitEvent ahead of it.
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+    records = data["buffer_records"]["hip_event"]
+    hip_api = sorted(
+        data["buffer_records"]["hip_api"], key=lambda r: r.correlation_id.internal
+    )
+    string_table = data["strings"]["buffer_records"]
+
+    def get_operation_name(r):
+        return string_table[r.kind]["operations"][r.operation]
+
+    anchor = next(
+        (r for r in hip_api if get_operation_name(r) == "hipIpcGetEventHandle"),
+        None,
+    )
+    assert (
+        anchor is not None
+    ), "No hipIpcGetEventHandle call after the interprocess scenario"
+
+    def last_call_before(name):
+        corrs = [
+            r.correlation_id.internal
+            for r in hip_api
+            if r.correlation_id.internal < anchor.correlation_id.internal
+            and get_operation_name(r) == name
+        ]
+        assert corrs, f"No {name} call ahead of hipIpcGetEventHandle"
+        return corrs[-1]
+
+    record_corr = last_call_before("hipEventRecord")
+    wait_corr = last_call_before("hipStreamWaitEvent")
+
+    recs = [
+        r
+        for r in records
+        if r.operation == HIP_EVENT_RECORD and r.correlation_id.internal == record_corr
+    ]
+    waits = [
+        r
+        for r in records
+        if r.operation == HIP_EVENT_WAIT and r.correlation_id.internal == wait_corr
+    ]
+    assert len(recs) == 1, (
+        f"expected 1 RECORD for the interprocess hipEventRecord (correlation "
+        f"{record_corr}), found {len(recs)}"
+    )
+    assert len(waits) == 1, (
+        f"expected 1 WAIT for the interprocess hipStreamWaitEvent (correlation "
+        f"{wait_corr}), found {len(waits)}"
+    )
+
+    rec, wait = recs[0], waits[0]
+    assert wait.hip_event_handle == rec.hip_event_handle
+    assert wait.source_queue_id.handle == rec.queue_id.handle, (
+        f"WAIT source_queue_id {wait.source_queue_id.handle} does not match its RECORD's "
+        f"queue {rec.queue_id.handle}"
+    )
+    assert wait.end_timestamp >= rec.end_timestamp, (
+        f"WAIT ended at {wait.end_timestamp}, before its RECORD ended at "
+        f"{rec.end_timestamp}"
+    )
 
 
 def test_hip_event_handle_consistency(json_data):
