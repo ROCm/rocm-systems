@@ -64,9 +64,15 @@ inline BranchStackEntry pop_branch_stack(Wavefront &wf) {
 }
 
 /// @brief Execute S_CBRANCH_G_FORK or S_CBRANCH_I_FORK.
-/// @param compare Lanes that take the branch (S0).
+/// @details Updates EXEC and the branch stack; the caller must still set the PC
+/// to the returned address to complete the instruction.
+/// @param compare Per-lane branch condition: lanes whose bit is set take the
+/// branch. Only active lanes are considered.
+/// @param target Resolved branch target PC.
+/// @param next_pc Fall-through PC, the address of the instruction after the fork.
 /// @returns Address of the next instruction to execute.
-inline uint64_t cbranch_fork(Wavefront &wf, uint64_t compare, uint64_t target, uint64_t next_pc) {
+[[nodiscard]] inline uint64_t cbranch_fork(Wavefront &wf, uint64_t compare, uint64_t target,
+                                           uint64_t next_pc) {
   const uint64_t exec = wf.exec_raw();
   const uint64_t pass = compare & exec;
   const uint64_t fail = ~compare & exec;
@@ -89,10 +95,13 @@ inline uint64_t cbranch_fork(Wavefront &wf, uint64_t compare, uint64_t target, u
 }
 
 /// @brief Execute S_CBRANCH_JOIN.
-/// @param saved_csp MODE.CSP captured before the matching fork (S0).
-/// @returns Address of the next instruction to execute. Falling through leaves
-/// EXEC as the last path set it; the program restores the pre-fork mask.
-inline uint64_t cbranch_join(Wavefront &wf, uint32_t saved_csp, uint64_t next_pc) {
+/// @details Updates EXEC and the branch stack when it resumes a waiting path;
+/// the caller must still set the PC to the returned address. Falling through
+/// leaves EXEC as the last path set it; the program restores the pre-fork mask.
+/// @param saved_csp MODE.CSP value the program saved before the matching fork.
+/// @param next_pc Fall-through PC, the address of the instruction after the join.
+/// @returns Address of the next instruction to execute.
+[[nodiscard]] inline uint64_t cbranch_join(Wavefront &wf, uint32_t saved_csp, uint64_t next_pc) {
   if (wf.cond_stack_ptr() == saved_csp) // second arrival
     return next_pc;
   // Below the saved value, no entry of the matching fork is left to pop.
