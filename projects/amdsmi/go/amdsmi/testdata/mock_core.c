@@ -34,7 +34,12 @@ static struct operation operations[] = {
     OP(amdsmi_get_gpu_vbios_info),
     OP(amdsmi_get_temp_metric),
     OP(amdsmi_get_power_info),
+    OP(amdsmi_is_gpu_power_management_enabled),
     OP(amdsmi_get_power_cap_info),
+    OP(amdsmi_get_pcie_info),
+    OP(amdsmi_get_link_metrics),
+    OP(amdsmi_get_link_topology_nearest),
+    OP(amdsmi_get_soc_pstate),
     OP(amdsmi_get_clock_info),
     OP(amdsmi_get_clk_freq),
     OP(amdsmi_get_gpu_activity),
@@ -234,6 +239,7 @@ amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor,
   *out = non_gpu_stride != 0 && (entry->index + 1) % non_gpu_stride == 0
              ? AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU
              : AMDSMI_PROCESSOR_TYPE_AMD_GPU;
+  if (mock_mode(__func__) == 1 && entry->index == 1) return mock_finish(AMDSMI_STATUS_IO);
   return mock_finish(AMDSMI_STATUS_SUCCESS);
 }
 
@@ -276,6 +282,33 @@ amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf,
     }
   }
   return mock_finish(AMDSMI_STATUS_NOT_FOUND);
+}
+
+amdsmi_status_t amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor,
+                                                 amdsmi_link_type_t link_type,
+                                                 amdsmi_topology_nearest_t* out) {
+  amdsmi_status_t status = mock_begin(__func__, processor);
+  if (!out || !mock_is_zero(out, sizeof(*out))) return mock_finish(AMDSMI_STATUS_UNEXPECTED_DATA);
+  amdsmi_link_type_t expected_type = AMDSMI_LINK_TYPE_XGMI;
+  if (mock_mode(__func__) == 7) expected_type = AMDSMI_LINK_TYPE_PCIE;
+  if (mock_mode(__func__) == 8) expected_type = (amdsmi_link_type_t)0x12345678;
+  if (link_type != expected_type) return mock_finish(AMDSMI_STATUS_INVAL);
+  out->count = 1;
+  out->processor_list[0] = processor;
+  if (mock_mode(__func__) == 1) out->count = 2;
+  if (mock_mode(__func__) == 2) {
+    out->count = 2;
+    out->processor_list[1] = &processors[0][1];
+  }
+  if (mock_mode(__func__) == 3) out->count = 0;
+  if (mock_mode(__func__) == 4) {
+    out->count = sizeof(out->processor_list) / sizeof(out->processor_list[0]);
+    for (uint32_t index = 0; index < out->count; ++index) out->processor_list[index] = processor;
+  }
+  if (mock_mode(__func__) == 5)
+    out->count = sizeof(out->processor_list) / sizeof(out->processor_list[0]) + 1;
+  if (mock_mode(__func__) == 6) out->count = UINT32_MAX;
+  return mock_finish(status);
 }
 
 amdsmi_status_t amdsmi_get_lib_version(amdsmi_version_t* out) {

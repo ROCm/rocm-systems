@@ -58,6 +58,7 @@
 #include "amd_smi/impl/amd_smi_wsl_device.h"
 #endif
 #include "fwupd_carveout.h"
+#include "link_metrics_internal.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -3836,6 +3837,7 @@ amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle
   AMDSMI_CHECK_INIT();
   if (link_metrics == nullptr) return AMDSMI_STATUS_INVAL;
 
+  link_metrics->num_links = 0;
   amdsmi_gpu_metrics_t metric_info = {};
   for (unsigned int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i) {
     link_metrics->links[i].max_bandwidth = std::numeric_limits<uint32_t>::max();
@@ -3845,65 +3847,52 @@ amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle
 
   amdsmi_status_t status = amdsmi_get_gpu_metrics_info(processor_handle, &metric_info);
   if (status != AMDSMI_STATUS_SUCCESS) return status;
-  link_metrics->num_links = AMDSMI_MAX_NUM_XGMI_LINKS;
 
+  uint32_t mapped_count = 0;
   uint16_t link_to_dst_node[AMDSMI_MAX_NUM_XGMI_LINKS];
   std::fill_n(link_to_dst_node, AMDSMI_MAX_NUM_XGMI_LINKS, std::numeric_limits<uint16_t>::max());
-  status = rsmi_wrapper(rsmi_dev_xgmi_port_num_get, processor_handle, 0, &link_metrics->num_links,
+  status = rsmi_wrapper(rsmi_dev_xgmi_port_num_get, processor_handle, 0, &mapped_count,
                         link_to_dst_node);
 
-  for (unsigned int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; i++) {
-    memset(&link_metrics->links[i].bdf, 0xFF, sizeof(amdsmi_bdf_t));
-    if (link_to_dst_node[i] != std::numeric_limits<uint16_t>::max()) {
-      uint32_t node_id = link_to_dst_node[i];
-      std::string node_symlink = "node" + std::to_string(node_id);
-      std::string sysfs_base = "/sys/bus/pci/devices/";
-      DIR* dir = opendir(sysfs_base.c_str());
-      if (dir) {
-        struct dirent* entry;
-        while ((entry = readdir(dir)) != nullptr) {
-          if (entry->d_type != DT_DIR && entry->d_type != DT_LNK) continue;
-          std::string bdf = entry->d_name;
-          if (bdf == "." || bdf == "..") continue;
-          std::string symlink_path = sysfs_base + bdf + "/xgmi_hive_info/" + node_symlink;
-          char buf[PATH_MAX] = {0};
-          ssize_t len = readlink(symlink_path.c_str(), buf, sizeof(buf) - 1);
-          if (len > 0) {
-            buf[len] = '\0';
-            std::string target(buf);
-            size_t last_slash = target.find_last_of('/');
-            std::string bdf_str =
-                (last_slash != std::string::npos) ? target.substr(last_slash + 1) : target;
-            // Parse BDF string: "dddd:bb:dd.f"
-            uint64_t domain = 0;
-            uint32_t bus = 0, device = 0, function = 0;
-            if (sscanf(bdf_str.c_str(), "%4lx:%2x:%2x.%1x", &domain, &bus, &device, &function) ==
-                4) {
-              amdsmi_bdf_t dst_bdf = {};
-              dst_bdf.domain_number = domain & 0xffffffffffff;
-              dst_bdf.bus_number = static_cast<uint8_t>(bus) & 0xff;
-              dst_bdf.device_number = static_cast<uint8_t>(device) & 0x1f;
-              dst_bdf.function_number = static_cast<uint8_t>(function) & 0x07;
-              link_metrics->links[i].bdf = dst_bdf;
-            }
-            break;  // Found, stop searching
+  const auto resolve_bdf = [](uint16_t node_id) {
+    amdsmi_bdf_t dst_bdf;
+    memset(&dst_bdf, 0xFF, sizeof(dst_bdf));
+    std::string node_symlink = "node" + std::to_string(node_id);
+    std::string sysfs_base = "/sys/bus/pci/devices/";
+    DIR* dir = opendir(sysfs_base.c_str());
+    if (dir) {
+      struct dirent* entry;
+      while ((entry = readdir(dir)) != nullptr) {
+        if (entry->d_type != DT_DIR && entry->d_type != DT_LNK) continue;
+        std::string bdf = entry->d_name;
+        if (bdf == "." || bdf == "..") continue;
+        std::string symlink_path = sysfs_base + bdf + "/xgmi_hive_info/" + node_symlink;
+        char buf[PATH_MAX] = {0};
+        ssize_t len = readlink(symlink_path.c_str(), buf, sizeof(buf) - 1);
+        if (len > 0) {
+          buf[len] = '\0';
+          std::string target(buf);
+          size_t last_slash = target.find_last_of('/');
+          std::string bdf_str =
+              (last_slash != std::string::npos) ? target.substr(last_slash + 1) : target;
+          // Parse BDF string: "dddd:bb:dd.f"
+          uint64_t domain = 0;
+          uint32_t bus = 0, device = 0, function = 0;
+          if (sscanf(bdf_str.c_str(), "%4lx:%2x:%2x.%1x", &domain, &bus, &device, &function) == 4) {
+            dst_bdf.domain_number = domain & 0xffffffffffff;
+            dst_bdf.bus_number = static_cast<uint8_t>(bus) & 0xff;
+            dst_bdf.device_number = static_cast<uint8_t>(device) & 0x1f;
+            dst_bdf.function_number = static_cast<uint8_t>(function) & 0x07;
           }
+          break;  // Found, stop searching
         }
-        closedir(dir);
       }
+      closedir(dir);
     }
-    link_metrics->links[i].read = metric_info.xgmi_read_data_acc[i];
-    link_metrics->links[i].write = metric_info.xgmi_write_data_acc[i];
-    link_metrics->links[i].link_type = AMDSMI_LINK_TYPE_XGMI;
-    if (metric_info.xgmi_link_speed != std::numeric_limits<uint16_t>::max()) {
-      link_metrics->links[i].bit_rate = metric_info.xgmi_link_speed;
-    }
-    if ((metric_info.xgmi_link_speed != std::numeric_limits<uint16_t>::max()) &&
-        (metric_info.xgmi_link_width != std::numeric_limits<uint16_t>::max()))
-      link_metrics->links[i].max_bandwidth =
-          metric_info.xgmi_link_speed * metric_info.xgmi_link_width;
-  }
-  return AMDSMI_STATUS_SUCCESS;
+    return dst_bdf;
+  };
+  return amd::smi::detail::populate_link_metrics(metric_info, link_to_dst_node, mapped_count,
+                                                 status, link_metrics, resolve_bdf);
 }
 
 amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,

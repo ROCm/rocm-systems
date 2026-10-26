@@ -31,6 +31,9 @@ ENUM_TYPES = {
     "amdsmi_accelerator_partition_type_t": "AcceleratorPartitionType",
     "amdsmi_gpu_block_t": "GpuBlock",
     "amdsmi_ras_err_state_t": "RASState",
+    "amdsmi_card_form_factor_t": "CardFormFactor",
+    "amdsmi_link_type_t": "LinkType",
+    "amdsmi_link_status_t": "LinkStatus",
 }
 ALLOWED_CALLS = set(
     """
@@ -66,6 +69,11 @@ amdsmi_get_gpu_ecc_count
 amdsmi_get_gpu_total_ecc_count
 amdsmi_get_gpu_ras_block_features_enabled
 amdsmi_get_gpu_ras_feature_info
+amdsmi_is_gpu_power_management_enabled
+amdsmi_get_pcie_info
+amdsmi_get_link_metrics
+amdsmi_get_link_topology_nearest
+amdsmi_get_soc_pstate
 """.split()
 )
 
@@ -143,12 +151,12 @@ class ModuleTests(unittest.TestCase):
 
 
 class NativeCallTests(unittest.TestCase):
-    def test_rejects_every_call_outside_the_32_function_allowlist(self) -> None:
+    def test_rejects_every_call_outside_the_37_function_allowlist(self) -> None:
         self.assertTrue(
             callable(getattr(contract, "check_native_calls", None)),
             "native call validator is missing",
         )
-        self.assertEqual(len(ALLOWED_CALLS), 32)
+        self.assertEqual(len(ALLOWED_CALLS), 37)
         contract.check_native_calls(ALLOWED_CALLS, available_only=True)
         for name in (
             "amdsmi_set_power_cap",
@@ -274,6 +282,8 @@ class ProjectTests(unittest.TestCase):
         self.assertNotIn("Traceback", result.stderr)
 
     def test_checks_every_required_enum(self) -> None:
+        self.assertEqual(len(ENUM_TYPES), 14)
+        self.assertEqual(contract.REQUIRED_ENUMS, ENUM_TYPES)
         self.assertTrue(
             callable(getattr(contract, "check_project", None)),
             "project contract validator is missing",

@@ -7,7 +7,7 @@ myst:
 
 # AMD SMI Go interface overview
 
-The read-only Linux Go module provides GPU discovery, identity, telemetry,
+The read-only Linux Go module provides GPU discovery, identity, telemetry, interconnects,
 current partition metadata, and ECC/RAS queries directly through CGO and
 `libamd_smi`. It does not use Python, a CLI subprocess, or the legacy Go shim.
 See the [API reference](../reference/amdsmi-go-api.md) and the standalone guide
@@ -123,6 +123,9 @@ lookups rediscover every device and make an N-device traversal O(N²).
 | `GetGpuDeviceBdf(handle)` / `GetProcessorHandleFromBdf(bdf)` | Packed `Bdf uint64`; accessors retain the 48-bit domain and `String()` formats it |
 | `GetProcessorHandleFromIndex(index)` | Checked lookup; an invalid index returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` |
 | `GetFwInfo(handle)` | `FwInfo` has a validated `NumFwInfo` and fixed `FwList` array |
+| `GetPcieInfo(handle)` / `IsGpuPowerManagementEnabled(handle)` | Native PCIe fields and power-management Boolean; unsupported results remain errors |
+| `GetLinkMetrics(handle)` / `GetLinkTopologyNearest(handle, linkType)` | Bounded, copied link data and current-lifetime GPU handles; native ordering is preserved |
+| `GetSocPstate(handle)` | Copied policy IDs/descriptions and native current index; no policy change |
 | `GetGpuMemoryPartitionConfig(handle)` | `NpsCaps` capability fields, `NumNumaRanges`, and a fixed `NumaRanges` array |
 | `GetGpuAcceleratorPartitionProfile(handle)` | Returns `(AcceleratorPartitionProfile, []uint32, error)`; BM returns one current ID, not one per partition |
 | `GetGpuEccEnabled(handle)` | Returns `map[GpuBlock]bool`; unknown/reserved enabled bits remain map keys |
@@ -133,6 +136,8 @@ Shared source shape does not imply runtime parity or unit conversion:
 | --- | --- |
 | Power | BM socket power is W and voltages are mV; Host documents uW and V respectively. BM `PowerLimit` and power-cap fields are uW; `DpmCap` is a DPM level index, not MHz |
 | Clocks | `ClkInfo` is MHz; BM `GetClockFrequencies` returns Hz. `ClkLocked` and `ClkDeepSleep` are false/unavailable, not measured false; BM `ClkLockedRaw`/`ClkDeepSleepRaw` preserve the native bytes |
+| PCIe and links | Speeds are MT/s for PCIe and Gb/s for links; link read/write totals are KB. PCIe bandwidth is unconverted because native unit descriptions conflict. BM link status and maximum PCIe interface version are unpopulated, not measured zeros |
+| SOC policies | Validate `Current` against `NumSupported` and `len(Policies)`; unavailable indices are preserved |
 | Partitions | Empty resources/ranges can be unpopulated. Unknown `NumPartitions == UINT32_MAX` with zero resources is preserved without allocating that count; current ID can remain zero after a subordinate lookup failure |
 | BM-only getters | `GetClockFrequencies`, `GetKFDInfo`, `GetMemoryTotal`, `GetMemoryUsage`, `GetRASBlockState` |
 | BM-only fields | `Version.Build`, `StatusError.Op`/`Message`, raw clock bytes, and `NpsCaps.RawMask`; native `errors.Is` support is also retained |

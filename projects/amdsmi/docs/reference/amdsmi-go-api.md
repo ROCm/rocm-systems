@@ -131,6 +131,7 @@ unrecognized value.
 | --- | --- | --- |
 | `GetTempMetric(ProcessorHandle, TemperatureType, TemperatureMetric) (int64, error)` | `amdsmi_get_temp_metric` | Whole degrees C, including negatives, not millidegrees |
 | `GetPowerInfo(ProcessorHandle) (PowerInfo, error)` | `amdsmi_get_power_info` | W, mV, uW by member |
+| `IsGpuPowerManagementEnabled(ProcessorHandle) (bool, error)` | `amdsmi_is_gpu_power_management_enabled` | Native Boolean; `false` on error is not a measurement |
 | `GetPowerCapInfo(ProcessorHandle, uint32) (PowerCapInfo, error)` | `amdsmi_get_power_cap_info` | Second parameter is the sensor index; partial zeros preserved |
 | `GetClockInfo(ProcessorHandle, ClkType) (ClkInfo, error)` | `amdsmi_get_clock_info` | MHz; Boolean fields unavailable on BM |
 | `GetClockFrequencies(ProcessorHandle, ClkType) (Frequencies, error)` | `amdsmi_get_clk_freq` | BM extension: Hz; caller must range-check `Current` |
@@ -175,6 +176,57 @@ unavailable byte 255 nor a narrowed sleep-frequency byte such as 222 becomes
 `true`; read the raw extensions when needed. Except for these unavailable
 Boolean fields, there is no global conversion of unavailable data into zero,
 `nil`, or another unit.
+
+### PCIe, links, and SOC policies
+
+| Signature | Native entry | Rules |
+| --- | --- | --- |
+| `GetPcieInfo(ProcessorHandle) (PcieInfo, error)` | `amdsmi_get_pcie_info` | Native PCIe limits, metrics, and unavailable values |
+| `GetLinkMetrics(ProcessorHandle) (LinkMetrics, error)` | `amdsmi_get_link_metrics` | Copied link entries; not a link-health verdict |
+| `GetLinkTopologyNearest(ProcessorHandle, LinkType) (TopologyNearest, error)` | `amdsmi_get_link_topology_nearest` | Native ordering; requested type is forwarded, including unknown values |
+| `GetSocPstate(ProcessorHandle) (DpmPolicy, error)` | `amdsmi_get_soc_pstate` | Read-only supported policies and current index |
+
+| Type | Fields and Go types | Units / limitations |
+| --- | --- | --- |
+| `CardFormFactor` | `int32` | C-bound `AMDSMI_CARD_FORM_FACTOR_*` |
+| `LinkType` | `int32` | C-bound `AMDSMI_LINK_TYPE_*` |
+| `LinkStatus` | `int32` | C-bound `AMDSMI_LINK_STATUS_*` |
+| `PcieInfo` | `Static PcieStatic`; `Metric PcieMetric` | Native static and metric groups |
+| `PcieStatic` | `MaxPcieWidth uint16`; `MaxPcieSpeed uint32` | Lanes and MT/s |
+| `PcieStatic` | `PcieInterfaceVersion, MaxPcieInterfaceVersion uint32`; `SlotType CardFormFactor` | BM derives `PcieInterfaceVersion` from maximum link speed, leaves `MaxPcieInterfaceVersion` zero, and can retain the PCIe slot default after detection failure |
+| `PcieMetric` | `PcieWidth uint16`; `PcieSpeed uint32`; `PcieBandwidth uint32` | Lanes, MT/s, and unconverted native bandwidth respectively |
+| `PcieMetric` | `PcieReplayCount, PcieL0ToRecoveryCount, PcieReplayRollOverCount, PcieNakSentCount, PcieNakReceivedCount uint64`; `PcieLcPerfOtherEndRecoveryCount uint32` | Native counters, including unavailable values |
+| `LinkMetricInfo` | `Bdf Bdf`; `BitRate, MaxBandwidth uint32`; `LinkType LinkType` | Destination BDF and rates in Gb/s; destination/rates can be unavailable |
+| `LinkMetricInfo` | `Read, Write uint64`; `LinkStatus LinkStatus` | Accumulated data in KB; BM leaves status zero/unpopulated, not measured `ENABLED` |
+| `LinkMetrics` | `NumLinks uint32`; `Links []LinkMetricInfo` | Count equals slice length |
+| `TopologyNearest` | `Count uint32`; `ProcessorList []ProcessorHandle` | Count equals slice length; non-null AMD-GPU handles belonging to the current package lifetime |
+| `DpmPolicyEntry` | `PolicyID uint32`; `PolicyDescription string` | Native ID and copied description, bounded to 256 native bytes |
+| `DpmPolicy` | `NumSupported, Current uint32`; `Policies []DpmPolicyEntry` | Supported count equals slice length; validate the current index before use |
+
+`CardFormFactor`, `LinkType`, and `LinkStatus` provide `String() string`, returning
+the enum name or `UNKNOWN(n)` for an unrecognized value.
+
+The binding checks native capacities before copying: 64 link metric entries,
+256 nearest handles, and 32 policies. Zero counts produce empty Go-owned slices;
+oversized counts return `AMDSMI_STATUS_UNEXPECTED_SIZE`, not truncated results.
+Topology results reject null handles or non-AMD GPUs and propagate any handle-type
+query failure without exposing a partial list. Returned handles expire at final
+shutdown, including after reinitialization.
+
+Successful native calls can still contain partial or unavailable data. BM copies
+`pcie_bandwidth_inst` into `PcieBandwidth` without scaling, while native header and
+implementation comments disagree on its unit. Go preserves that value and makes
+no unit normalization claim. BM does not populate `MaxPcieInterfaceVersion` or
+link-metric `LinkStatus`; their zeros are not measured values. All-ones BDFs,
+maximum-width numeric values, and unknown enums remain unchanged. `Current` can
+be unavailable or outside `Policies`; check both the count and slice length
+before indexing. Reading these policies does not change GPU state.
+
+Native link metrics are packed in physical-source order within the reported
+count. Available counters are retained even when the destination BDF is
+unavailable, so the count can exceed the number of identified peers. Port-map
+read or parse failures return an error instead of a successful incomplete list.
+Use `GetLinkTopologyNearest` for nearest-peer discovery.
 
 ### Current partitions, ECC, and RAS
 

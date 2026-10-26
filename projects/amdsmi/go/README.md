@@ -1,6 +1,6 @@
 # Read-only AMD SMI Go module
 
-Linux GPU discovery, identity, telemetry, current partition metadata, and ECC/RAS
+Linux GPU discovery, identity, telemetry, interconnects, current partition metadata, and ECC/RAS
 queries through CGO and the AMD SMI native library. No Python/CLI subprocess or
 legacy shim dependency is used. Native dependencies are still required.
 
@@ -147,6 +147,11 @@ if errors.Is(err, amdsmi.AMDSMI_STATUS_NOT_SUPPORTED) {
 | Clocks | `ClkInfo` in MHz; BM `GetClockFrequencies` returns `Frequencies.Values` in Hz. Range-check `Current` against `NumSupported` and `len(Values)` |
 | Power | BM `SocketPower`, `CurrentSocketPower`, `AverageSocketPower`, `UbbPower` are W; `GfxVoltage`, `SocVoltage`, `MemVoltage` are mV; `PowerLimit` is uW. Host documents `SocketPower` in uW and voltages in V; no conversion is applied |
 | Power caps | `PowerCap`, `DefaultPowerCap`, `MinPowerCap`, `MaxPowerCap` are uW on BM; auxiliary zeros have no validity flag. `DpmCap` is a BM DPM level index, not MHz |
+| Power management | `IsGpuPowerManagementEnabled` returns the native Boolean; an unsupported query remains an error, not a measured `false` |
+| PCIe | `GetPcieInfo` returns lane widths, speed in MT/s, and native counters. `PcieBandwidth` is copied without conversion: native unit descriptions conflict. `MaxPcieInterfaceVersion` is unpopulated on BM, and `SlotType` can retain its PCIe default when detection fails |
+| Links | `GetLinkMetrics` returns rates in Gb/s and accumulated read/write data in KB. Destination BDF and rates can be unavailable. BM leaves `LinkStatus` unpopulated at zero (`ENABLED`); this is not measured link health |
+| Nearest GPUs | `GetLinkTopologyNearest` preserves native ordering and returns current-lifetime GPU handles. Returned handles expire at final shutdown, just like discovered handles |
+| SOC P-state | `GetSocPstate` returns supported policies and the native current index. Range-check `Current` against both `NumSupported` and `len(Policies)`; descriptions are bounded copies |
 | Clock flags | `ClkLocked` and `ClkDeepSleep` are always false/unavailable on BM, not measured false. `ClkLockedRaw` preserves the unpopulated native byte; `ClkDeepSleepRaw` preserves the narrowed sleep-frequency byte. Neither 255 nor 222 is interpreted as true |
 | Activity | Percent; `GfxActivity` can contain 65535 for unavailable data |
 | Current partitions | `GetGpuAcceleratorPartitionProfile` returns a profile and exactly one current ID on BM, not one ID per partition. Count/index can be `UINT32_MAX`; the ID can remain zero after a subordinate lookup failure |
@@ -160,7 +165,8 @@ public C enumerator names and values.
 ## Compatibility
 
 `FwBlock`, `ClkType`, `VramType`, `TemperatureType`, `TemperatureMetric`,
-`MemoryPartitionType`, and `AcceleratorPartitionType` use `int32`; `Status` uses
+`MemoryPartitionType`, `AcceleratorPartitionType`, `CardFormFactor`, `LinkType`,
+and `LinkStatus` use `int32`; `Status` uses
 `uint32`, and `GpuBlock` uses `uint64`. Constants remain bound to the BM C header.
 `Bdf` packs function/device/bus/domain into 3/5/8/48 bits; every `uint64` value is
 representable, including the full 48-bit domain.

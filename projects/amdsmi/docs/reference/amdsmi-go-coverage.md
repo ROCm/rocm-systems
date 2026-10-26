@@ -15,9 +15,10 @@ helper. Deferred entries are implementation gaps, not permanent backend exceptio
 | Area | Status |
 | --- | --- |
 | GPU lifecycle, discovery, selected identity/telemetry, current partition metadata, ECC/RAS | Implemented foundation; see the [API reference](amdsmi-go-api.md) for field availability |
+| PCIe information, power-management status, link metrics, nearest GPU topology, SOC P-state policies | Implemented read-only queries; native units and partial availability are preserved |
 | Partition setters, supported-profile enumeration, and process-idle queries | Priority follow-up pending consumer requirements and handle/restart contracts |
 | Remaining GPU queries and controls | Deferred for incremental coverage with native behavior and ownership tests |
-| CPU, NIC, events, counters, fabric and node APIs | Deferred for scoped lifecycle, ownership and consumer review |
+| CPU, NIC, events, counters, remaining fabric and node APIs | Deferred for scoped lifecycle, ownership and consumer review |
 | Unified BM/Host loading and package architecture | Not implemented; requires joint design and migration agreement |
 
 The legacy Go shim remains unchanged. The foundation does not replace DRA/DCM
@@ -47,8 +48,9 @@ field may be explicitly deferred instead of exposed, but must not be silently lo
 
 Inventory updates are manual and reviewed; CI never refreshes its own expected
 data. A new binding also needs behavioral tests and the agreed Host contract.
-The separate 32-call scope check and 11-enum completeness check remain in place
-until an implementation slice changes their scope explicitly.
+The inventory accounts for 262 C declarations: 37 bound and 225 deferred. The
+separate 37-call scope check and 14-enum completeness check constrain the
+implemented slice; complete accounting does not imply complete implementation.
 
 ## Partition delivery requirements
 

@@ -99,7 +99,7 @@ out of scope. The `amdsmi-license-headers` pre-commit hook
 The read-only [Go binding](../go/amdsmi/amdsmi_interface.go) is handwritten.
 When changing supported C APIs, review its signatures, constants, struct fields,
 and conversions, then update fixtures, tests, and [API docs](../docs/reference/amdsmi-go-api.md).
-The [contract check](../tests/go/test_api_contract.py) covers 11 mirrored enums;
+The [contract check](../tests/go/test_api_contract.py) covers 14 mirrored enums;
 new C struct fields can compile without being exposed in Go. Run the
 [Go checks](../go/README.md#repository-tests), including native and staged checks.
 The [coverage inventory](../docs/reference/amdsmi-go-coverage.md) must account

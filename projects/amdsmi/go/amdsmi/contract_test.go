@@ -144,6 +144,46 @@ var (
 	_ uint32                                                                                        = amdsmi.RasFeatureInfo{}.EccCorrectionSchemaFlag
 )
 
+var (
+	_ func(amdsmi.ProcessorHandle) (bool, error)                                    = amdsmi.IsGpuPowerManagementEnabled
+	_ func(amdsmi.ProcessorHandle) (amdsmi.PcieInfo, error)                         = amdsmi.GetPcieInfo
+	_ func(amdsmi.ProcessorHandle) (amdsmi.LinkMetrics, error)                      = amdsmi.GetLinkMetrics
+	_ func(amdsmi.ProcessorHandle, amdsmi.LinkType) (amdsmi.TopologyNearest, error) = amdsmi.GetLinkTopologyNearest
+	_ func(amdsmi.ProcessorHandle) (amdsmi.DpmPolicy, error)                        = amdsmi.GetSocPstate
+	_ uint16                                                                        = amdsmi.PcieStatic{}.MaxPcieWidth
+	_ uint32                                                                        = amdsmi.PcieStatic{}.MaxPcieSpeed
+	_ uint32                                                                        = amdsmi.PcieStatic{}.PcieInterfaceVersion
+	_ amdsmi.CardFormFactor                                                         = amdsmi.PcieStatic{}.SlotType
+	_ uint32                                                                        = amdsmi.PcieStatic{}.MaxPcieInterfaceVersion
+	_ uint16                                                                        = amdsmi.PcieMetric{}.PcieWidth
+	_ uint32                                                                        = amdsmi.PcieMetric{}.PcieSpeed
+	_ uint32                                                                        = amdsmi.PcieMetric{}.PcieBandwidth
+	_ uint64                                                                        = amdsmi.PcieMetric{}.PcieReplayCount
+	_ uint64                                                                        = amdsmi.PcieMetric{}.PcieL0ToRecoveryCount
+	_ uint64                                                                        = amdsmi.PcieMetric{}.PcieReplayRollOverCount
+	_ uint64                                                                        = amdsmi.PcieMetric{}.PcieNakSentCount
+	_ uint64                                                                        = amdsmi.PcieMetric{}.PcieNakReceivedCount
+	_ uint32                                                                        = amdsmi.PcieMetric{}.PcieLcPerfOtherEndRecoveryCount
+	_ amdsmi.PcieStatic                                                             = amdsmi.PcieInfo{}.Static
+	_ amdsmi.PcieMetric                                                             = amdsmi.PcieInfo{}.Metric
+	_ amdsmi.Bdf                                                                    = amdsmi.LinkMetricInfo{}.Bdf
+	_ uint32                                                                        = amdsmi.LinkMetricInfo{}.BitRate
+	_ uint32                                                                        = amdsmi.LinkMetricInfo{}.MaxBandwidth
+	_ amdsmi.LinkType                                                               = amdsmi.LinkMetricInfo{}.LinkType
+	_ uint64                                                                        = amdsmi.LinkMetricInfo{}.Read
+	_ uint64                                                                        = amdsmi.LinkMetricInfo{}.Write
+	_ amdsmi.LinkStatus                                                             = amdsmi.LinkMetricInfo{}.LinkStatus
+	_ uint32                                                                        = amdsmi.LinkMetrics{}.NumLinks
+	_ []amdsmi.LinkMetricInfo                                                       = amdsmi.LinkMetrics{}.Links
+	_ uint32                                                                        = amdsmi.TopologyNearest{}.Count
+	_ []amdsmi.ProcessorHandle                                                      = amdsmi.TopologyNearest{}.ProcessorList
+	_ uint32                                                                        = amdsmi.DpmPolicyEntry{}.PolicyID
+	_ string                                                                        = amdsmi.DpmPolicyEntry{}.PolicyDescription
+	_ uint32                                                                        = amdsmi.DpmPolicy{}.NumSupported
+	_ uint32                                                                        = amdsmi.DpmPolicy{}.Current
+	_ []amdsmi.DpmPolicyEntry                                                       = amdsmi.DpmPolicy{}.Policies
+)
+
 func underlyingInt32[T ~int32]()   {}
 func underlyingUint32[T ~uint32]() {}
 func underlyingUint64[T ~uint64]() {}
@@ -156,6 +196,9 @@ func TestContractUnderlyingTypes(t *testing.T) {
 	underlyingInt32[amdsmi.VramType]()
 	underlyingInt32[amdsmi.MemoryPartitionType]()
 	underlyingInt32[amdsmi.AcceleratorPartitionType]()
+	underlyingInt32[amdsmi.CardFormFactor]()
+	underlyingInt32[amdsmi.LinkType]()
+	underlyingInt32[amdsmi.LinkStatus]()
 	underlyingUint32[amdsmi.Status]()
 	underlyingUint64[amdsmi.InitFlags]()
 	underlyingUint64[amdsmi.Bdf]()
@@ -180,6 +223,24 @@ func TestContractEnumStrings(t *testing.T) {
 		{amdsmi.AMDSMI_ACCELERATOR_PARTITION_INVALID, "INVALID"},
 		{amdsmi.AMDSMI_ACCELERATOR_PARTITION_CPX, "CPX"},
 		{amdsmi.AcceleratorPartitionType(-1), "UNKNOWN(-1)"},
+		{amdsmi.AMDSMI_CARD_FORM_FACTOR_PCIE, "PCIE"},
+		{amdsmi.AMDSMI_CARD_FORM_FACTOR_OAM, "OAM"},
+		{amdsmi.AMDSMI_CARD_FORM_FACTOR_CEM, "CEM"},
+		{amdsmi.AMDSMI_CARD_FORM_FACTOR_UNKNOWN, "UNKNOWN"},
+		{amdsmi.CardFormFactor(-1), "UNKNOWN(-1)"},
+		{amdsmi.AMDSMI_LINK_TYPE_INTERNAL, "INTERNAL"},
+		{amdsmi.AMDSMI_LINK_TYPE_PCIE, "PCIE"},
+		{amdsmi.AMDSMI_LINK_TYPE_XGMI, "XGMI"},
+		{amdsmi.AMDSMI_LINK_TYPE_NOT_APPLICABLE, "NOT_APPLICABLE"},
+		{amdsmi.AMDSMI_LINK_TYPE_UNKNOWN, "UNKNOWN"},
+		{amdsmi.AMDSMI_LINK_TYPE_NUMA, "NUMA"},
+		{amdsmi.AMDSMI_LINK_TYPE_XNUMA, "XNUMA"},
+		{amdsmi.LinkType(-1), "UNKNOWN(-1)"},
+		{amdsmi.AMDSMI_LINK_STATUS_ENABLED, "ENABLED"},
+		{amdsmi.AMDSMI_LINK_STATUS_DISABLED, "DISABLED"},
+		{amdsmi.AMDSMI_LINK_STATUS_INACTIVE, "INACTIVE"},
+		{amdsmi.AMDSMI_LINK_STATUS_ERROR, "ERROR"},
+		{amdsmi.LinkStatus(-1), "UNKNOWN(-1)"},
 	} {
 		if got := test.value.String(); got != test.want {
 			t.Errorf("%T: got %q, want %q", test.value, got, test.want)

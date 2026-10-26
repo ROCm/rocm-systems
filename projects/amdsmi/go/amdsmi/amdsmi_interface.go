@@ -48,6 +48,12 @@ static amdsmi_status_t go_amdsmi_lookup_bdf(uint64_t domain, uint8_t bus,
     return amdsmi_get_processor_handle_from_bdf(bdf, out);
 }
 
+static uint64_t go_amdsmi_pack_bdf(amdsmi_bdf_t value) {
+	return ((uint64_t)value.bdf.domain_number << 16) |
+		((uint64_t)value.bdf.bus_number << 8) |
+		((uint64_t)value.bdf.device_number << 3) | value.bdf.function_number;
+}
+
 static uint32_t go_amdsmi_nps_mask(amdsmi_nps_caps_t value) {
 	return value.nps_cap_mask;
 }
@@ -1184,6 +1190,18 @@ func GetPowerInfo(h ProcessorHandle) (PowerInfo, error) {
 	})
 }
 
+// IsGpuPowerManagementEnabled reports native GPU power-management availability.
+func IsGpuPowerManagementEnabled(h ProcessorHandle) (bool, error) {
+	const op = "amdsmi_is_gpu_power_management_enabled"
+	return withProcessor(h, op, func(processor C.amdsmi_processor_handle) (bool, error) {
+		var enabled C.bool
+		if err := nativeErrorLocked(op, C.amdsmi_is_gpu_power_management_enabled(processor, &enabled)); err != nil {
+			return false, err
+		}
+		return bool(enabled), nil
+	})
+}
+
 // GetPowerCapInfo returns power caps in uW and DpmCap as a BM level index, not MHz.
 // sensorIndex is zero-based, normally zero; auxiliary fields may be zero after partial native success.
 func GetPowerCapInfo(h ProcessorHandle, sensorIndex uint32) (PowerCapInfo, error) {
@@ -1201,6 +1219,273 @@ func GetPowerCapInfo(h ProcessorHandle, sensorIndex uint32) (PowerCapInfo, error
 			MinPowerCap:     uint64(out.min_power_cap),
 			MaxPowerCap:     uint64(out.max_power_cap),
 		}, nil
+	})
+}
+
+// CardFormFactor identifies the native GPU card form factor.
+type CardFormFactor int32
+
+// Native card form factors.
+const (
+	AMDSMI_CARD_FORM_FACTOR_PCIE    CardFormFactor = C.AMDSMI_CARD_FORM_FACTOR_PCIE
+	AMDSMI_CARD_FORM_FACTOR_OAM     CardFormFactor = C.AMDSMI_CARD_FORM_FACTOR_OAM
+	AMDSMI_CARD_FORM_FACTOR_CEM     CardFormFactor = C.AMDSMI_CARD_FORM_FACTOR_CEM
+	AMDSMI_CARD_FORM_FACTOR_UNKNOWN CardFormFactor = C.AMDSMI_CARD_FORM_FACTOR_UNKNOWN
+)
+
+var cardFormFactorNames = map[CardFormFactor]string{
+	AMDSMI_CARD_FORM_FACTOR_PCIE:    "PCIE",
+	AMDSMI_CARD_FORM_FACTOR_OAM:     "OAM",
+	AMDSMI_CARD_FORM_FACTOR_CEM:     "CEM",
+	AMDSMI_CARD_FORM_FACTOR_UNKNOWN: "UNKNOWN",
+}
+
+// String returns the card form factor name or UNKNOWN with its numeric value.
+func (factor CardFormFactor) String() string {
+	if name, ok := cardFormFactorNames[factor]; ok {
+		return name
+	}
+	return fmt.Sprintf("UNKNOWN(%d)", int32(factor))
+}
+
+// PcieStatic holds PCIe limits, with MaxPcieSpeed in MT/s.
+type PcieStatic struct {
+	MaxPcieWidth            uint16
+	MaxPcieSpeed            uint32
+	PcieInterfaceVersion    uint32
+	SlotType                CardFormFactor
+	MaxPcieInterfaceVersion uint32
+}
+
+// PcieMetric holds native counters and speed in MT/s; bandwidth is passed through without conversion.
+type PcieMetric struct {
+	PcieWidth                       uint16
+	PcieSpeed                       uint32
+	PcieBandwidth                   uint32
+	PcieReplayCount                 uint64
+	PcieL0ToRecoveryCount           uint64
+	PcieReplayRollOverCount         uint64
+	PcieNakSentCount                uint64
+	PcieNakReceivedCount            uint64
+	PcieLcPerfOtherEndRecoveryCount uint32
+}
+
+// PcieInfo combines native PCIe limits and metrics.
+type PcieInfo struct {
+	Static PcieStatic
+	Metric PcieMetric
+}
+
+// GetPcieInfo preserves native units and unavailable field values.
+func GetPcieInfo(handle ProcessorHandle) (PcieInfo, error) {
+	const op = "amdsmi_get_pcie_info"
+	return withProcessor(handle, op, func(processor C.amdsmi_processor_handle) (PcieInfo, error) {
+		var out C.amdsmi_pcie_info_t
+		if err := nativeErrorLocked(op, C.amdsmi_get_pcie_info(processor, &out)); err != nil {
+			return PcieInfo{}, err
+		}
+		return PcieInfo{
+			Static: PcieStatic{
+				MaxPcieWidth:            uint16(out.pcie_static.max_pcie_width),
+				MaxPcieSpeed:            uint32(out.pcie_static.max_pcie_speed),
+				PcieInterfaceVersion:    uint32(out.pcie_static.pcie_interface_version),
+				SlotType:                CardFormFactor(out.pcie_static.slot_type),
+				MaxPcieInterfaceVersion: uint32(out.pcie_static.max_pcie_interface_version),
+			},
+			Metric: PcieMetric{
+				PcieWidth:                       uint16(out.pcie_metric.pcie_width),
+				PcieSpeed:                       uint32(out.pcie_metric.pcie_speed),
+				PcieBandwidth:                   uint32(out.pcie_metric.pcie_bandwidth),
+				PcieReplayCount:                 uint64(out.pcie_metric.pcie_replay_count),
+				PcieL0ToRecoveryCount:           uint64(out.pcie_metric.pcie_l0_to_recovery_count),
+				PcieReplayRollOverCount:         uint64(out.pcie_metric.pcie_replay_roll_over_count),
+				PcieNakSentCount:                uint64(out.pcie_metric.pcie_nak_sent_count),
+				PcieNakReceivedCount:            uint64(out.pcie_metric.pcie_nak_received_count),
+				PcieLcPerfOtherEndRecoveryCount: uint32(out.pcie_metric.pcie_lc_perf_other_end_recovery_count),
+			},
+		}, nil
+	})
+}
+
+// LinkType identifies the native interconnect type.
+type LinkType int32
+
+// Native interconnect types.
+const (
+	AMDSMI_LINK_TYPE_INTERNAL       LinkType = C.AMDSMI_LINK_TYPE_INTERNAL
+	AMDSMI_LINK_TYPE_PCIE           LinkType = C.AMDSMI_LINK_TYPE_PCIE
+	AMDSMI_LINK_TYPE_XGMI           LinkType = C.AMDSMI_LINK_TYPE_XGMI
+	AMDSMI_LINK_TYPE_NOT_APPLICABLE LinkType = C.AMDSMI_LINK_TYPE_NOT_APPLICABLE
+	AMDSMI_LINK_TYPE_UNKNOWN        LinkType = C.AMDSMI_LINK_TYPE_UNKNOWN
+	AMDSMI_LINK_TYPE_NUMA           LinkType = C.AMDSMI_LINK_TYPE_NUMA
+	AMDSMI_LINK_TYPE_XNUMA          LinkType = C.AMDSMI_LINK_TYPE_XNUMA
+)
+
+var linkTypeNames = map[LinkType]string{
+	AMDSMI_LINK_TYPE_INTERNAL:       "INTERNAL",
+	AMDSMI_LINK_TYPE_PCIE:           "PCIE",
+	AMDSMI_LINK_TYPE_XGMI:           "XGMI",
+	AMDSMI_LINK_TYPE_NOT_APPLICABLE: "NOT_APPLICABLE",
+	AMDSMI_LINK_TYPE_UNKNOWN:        "UNKNOWN",
+	AMDSMI_LINK_TYPE_NUMA:           "NUMA",
+	AMDSMI_LINK_TYPE_XNUMA:          "XNUMA",
+}
+
+// String returns the interconnect name or UNKNOWN with its numeric value.
+func (linkType LinkType) String() string {
+	if name, ok := linkTypeNames[linkType]; ok {
+		return name
+	}
+	return fmt.Sprintf("UNKNOWN(%d)", int32(linkType))
+}
+
+// LinkStatus is the native link status, including unknown values.
+type LinkStatus int32
+
+// Native link states.
+const (
+	AMDSMI_LINK_STATUS_ENABLED  LinkStatus = C.AMDSMI_LINK_STATUS_ENABLED
+	AMDSMI_LINK_STATUS_DISABLED LinkStatus = C.AMDSMI_LINK_STATUS_DISABLED
+	AMDSMI_LINK_STATUS_INACTIVE LinkStatus = C.AMDSMI_LINK_STATUS_INACTIVE
+	AMDSMI_LINK_STATUS_ERROR    LinkStatus = C.AMDSMI_LINK_STATUS_ERROR
+)
+
+var linkStatusNames = map[LinkStatus]string{
+	AMDSMI_LINK_STATUS_ENABLED:  "ENABLED",
+	AMDSMI_LINK_STATUS_DISABLED: "DISABLED",
+	AMDSMI_LINK_STATUS_INACTIVE: "INACTIVE",
+	AMDSMI_LINK_STATUS_ERROR:    "ERROR",
+}
+
+// String returns the link state name or UNKNOWN with its numeric value.
+func (status LinkStatus) String() string {
+	if name, ok := linkStatusNames[status]; ok {
+		return name
+	}
+	return fmt.Sprintf("UNKNOWN(%d)", int32(status))
+}
+
+// LinkMetricInfo holds rates in Gb/s and cumulative Read/Write data in KB.
+type LinkMetricInfo struct {
+	Bdf          Bdf
+	BitRate      uint32
+	MaxBandwidth uint32
+	LinkType     LinkType
+	Read         uint64
+	Write        uint64
+	LinkStatus   LinkStatus
+}
+
+// LinkMetrics holds a Go-owned list of native link metrics.
+type LinkMetrics struct {
+	NumLinks uint32
+	Links    []LinkMetricInfo
+}
+
+// GetLinkMetrics preserves native units, unknown enums, and unavailable values.
+func GetLinkMetrics(handle ProcessorHandle) (LinkMetrics, error) {
+	const op = "amdsmi_get_link_metrics"
+	return withProcessor(handle, op, func(processor C.amdsmi_processor_handle) (LinkMetrics, error) {
+		var out C.amdsmi_link_metrics_t
+		if err := nativeErrorLocked(op, C.amdsmi_get_link_metrics(processor, &out)); err != nil {
+			return LinkMetrics{}, err
+		}
+		count, err := checkedCount(op, uint64(out.num_links), len(out.links))
+		if err != nil {
+			return LinkMetrics{}, err
+		}
+		result := LinkMetrics{NumLinks: uint32(count), Links: make([]LinkMetricInfo, count)}
+		for index := range result.Links {
+			link := out.links[index]
+			result.Links[index] = LinkMetricInfo{
+				Bdf: Bdf(C.go_amdsmi_pack_bdf(link.bdf)), BitRate: uint32(link.bit_rate),
+				MaxBandwidth: uint32(link.max_bandwidth), LinkType: LinkType(link.link_type),
+				Read: uint64(link.read), Write: uint64(link.write), LinkStatus: LinkStatus(link.link_status),
+			}
+		}
+		return result, nil
+	})
+}
+
+// TopologyNearest holds a Go-owned list of nearest native GPU handles.
+type TopologyNearest struct {
+	Count         uint32
+	ProcessorList []ProcessorHandle
+}
+
+// GetLinkTopologyNearest returns handles belonging to the current initialized generation.
+func GetLinkTopologyNearest(handle ProcessorHandle, linkType LinkType) (TopologyNearest, error) {
+	const op = "amdsmi_get_link_topology_nearest"
+	return withProcessor(handle, op, func(processor C.amdsmi_processor_handle) (TopologyNearest, error) {
+		var out C.amdsmi_topology_nearest_t
+		status := C.amdsmi_get_link_topology_nearest(processor, C.amdsmi_link_type_t(linkType), &out)
+		if err := nativeErrorLocked(op, status); err != nil {
+			return TopologyNearest{}, err
+		}
+		count, err := checkedCount(op, uint64(out.count), len(out.processor_list))
+		if err != nil {
+			return TopologyNearest{}, err
+		}
+		result := TopologyNearest{Count: uint32(count), ProcessorList: make([]ProcessorHandle, count)}
+		for index := range result.ProcessorList {
+			if out.processor_list[index] == nil {
+				return TopologyNearest{}, &StatusError{Op: op, Code: AMDSMI_STATUS_UNEXPECTED_DATA,
+					Name: statusName(AMDSMI_STATUS_UNEXPECTED_DATA), Message: "native topology returned a null handle"}
+			}
+			var kind C.amdsmi_processor_type_t
+			status := C.amdsmi_get_processor_type(out.processor_list[index], &kind)
+			if err := nativeErrorLocked("amdsmi_get_processor_type", status); err != nil {
+				return TopologyNearest{}, err
+			}
+			if kind != C.AMDSMI_PROCESSOR_TYPE_AMD_GPU {
+				return TopologyNearest{}, &StatusError{Op: op, Code: AMDSMI_STATUS_NOT_SUPPORTED,
+					Name: statusName(AMDSMI_STATUS_NOT_SUPPORTED), Message: "native topology returned a non-AMD-GPU handle"}
+			}
+			result.ProcessorList[index] = ProcessorHandle{
+				ptr: unsafe.Pointer(out.processor_list[index]), generation: nativeState.generation,
+			}
+		}
+		return result, nil
+	})
+}
+
+// DpmPolicyEntry holds a native policy ID and its bounded description.
+type DpmPolicyEntry struct {
+	PolicyID          uint32
+	PolicyDescription string
+}
+
+// DpmPolicy holds Go-owned policies and the native current index, including unavailable values.
+type DpmPolicy struct {
+	NumSupported uint32
+	Current      uint32
+	Policies     []DpmPolicyEntry
+}
+
+// GetSocPstate returns the native SOC P-state policies without changing GPU state.
+func GetSocPstate(handle ProcessorHandle) (DpmPolicy, error) {
+	const op = "amdsmi_get_soc_pstate"
+	return withProcessor(handle, op, func(processor C.amdsmi_processor_handle) (DpmPolicy, error) {
+		var out C.amdsmi_dpm_policy_t
+		if err := nativeErrorLocked(op, C.amdsmi_get_soc_pstate(processor, &out)); err != nil {
+			return DpmPolicy{}, err
+		}
+		count, err := checkedCount(op, uint64(out.num_supported), len(out.policies))
+		if err != nil {
+			return DpmPolicy{}, err
+		}
+		result := DpmPolicy{
+			NumSupported: uint32(count), Current: uint32(out.current),
+			Policies: make([]DpmPolicyEntry, count),
+		}
+		for index := range result.Policies {
+			policy := out.policies[index]
+			result.Policies[index] = DpmPolicyEntry{
+				PolicyID:          uint32(policy.policy_id),
+				PolicyDescription: boundedString(&policy.policy_description[0], len(policy.policy_description)),
+			}
+		}
+		return result, nil
 	})
 }
 

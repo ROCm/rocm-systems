@@ -35,6 +35,9 @@ REQUIRED_ENUMS = {
     "amdsmi_accelerator_partition_type_t": "AcceleratorPartitionType",
     "amdsmi_gpu_block_t": "GpuBlock",
     "amdsmi_ras_err_state_t": "RASState",
+    "amdsmi_card_form_factor_t": "CardFormFactor",
+    "amdsmi_link_type_t": "LinkType",
+    "amdsmi_link_status_t": "LinkStatus",
 }
 ALLOWED_NATIVE_CALLS = {
     "amdsmi_init",
@@ -69,6 +72,11 @@ ALLOWED_NATIVE_CALLS = {
     "amdsmi_get_gpu_total_ecc_count",
     "amdsmi_get_gpu_ras_block_features_enabled",
     "amdsmi_get_gpu_ras_feature_info",
+    "amdsmi_is_gpu_power_management_enabled",
+    "amdsmi_get_pcie_info",
+    "amdsmi_get_link_metrics",
+    "amdsmi_get_link_topology_nearest",
+    "amdsmi_get_soc_pstate",
 }
 
 

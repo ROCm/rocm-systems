@@ -7,6 +7,195 @@ package amdsmi
 
 import "testing"
 
+func TestCoreTopologyNearest(t *testing.T) {
+	checkQuery(t, "amdsmi_get_link_topology_nearest", func(handle ProcessorHandle) (uint32, error) {
+		got, err := GetLinkTopologyNearest(handle, AMDSMI_LINK_TYPE_XGMI)
+		if err != nil {
+			assertZero(t, got)
+			return 0, err
+		}
+		if len(got.ProcessorList) != 1 || got.ProcessorList[0] != handle {
+			t.Fatalf("want current-generation handle %+v, got %#v", handle, got)
+		}
+		bdf, err := GetGpuDeviceBdf(got.ProcessorList[0])
+		if err != nil || bdf != Bdf(0xabcde12345670000) {
+			t.Fatalf("returned handle query: %v, err=%v", bdf, err)
+		}
+		return got.Count, nil
+	}, uint32(1))
+}
+
+func TestCoreTopologyNearestNullResult(t *testing.T) {
+	handle := fixtureHandle(t)
+	mockConfigure("amdsmi_get_link_topology_nearest", AMDSMI_STATUS_SUCCESS, 1)
+	got, err := GetLinkTopologyNearest(handle, AMDSMI_LINK_TYPE_XGMI)
+	assertNativeError(t, err, "amdsmi_get_link_topology_nearest", AMDSMI_STATUS_UNEXPECTED_DATA)
+	assertZero(t, got)
+}
+
+func TestCoreTopologyNearestNonGPUResult(t *testing.T) {
+	resetCoreFixture(t)
+	mockTopology(1, 2, 2)
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
+		t.Fatal(err)
+	}
+	handle, err := GetProcessorHandleFromIndex(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mockConfigure("amdsmi_get_link_topology_nearest", AMDSMI_STATUS_SUCCESS, 2)
+	got, err := GetLinkTopologyNearest(handle, AMDSMI_LINK_TYPE_XGMI)
+	assertNativeError(t, err, "amdsmi_get_link_topology_nearest", AMDSMI_STATUS_NOT_SUPPORTED)
+	assertZero(t, got)
+}
+
+func TestCoreTopologyNearestCounts(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		mode  uint32
+		count int
+	}{
+		{"Empty", 3, 0}, {"ExactCapacity", 4, 256},
+		{"Oversized", 5, -1}, {"Maximum", 6, -1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handle := fixtureHandle(t)
+			calls := mockCalls("amdsmi_get_processor_type")
+			mockConfigure("amdsmi_get_link_topology_nearest", AMDSMI_STATUS_SUCCESS, test.mode)
+			got, err := GetLinkTopologyNearest(handle, AMDSMI_LINK_TYPE_XGMI)
+			if test.count < 0 {
+				assertNativeError(t, err, "amdsmi_get_link_topology_nearest", AMDSMI_STATUS_UNEXPECTED_SIZE)
+				assertZero(t, got)
+			} else {
+				if err != nil || got.Count != uint32(test.count) || len(got.ProcessorList) != test.count {
+					t.Fatalf("want %d handles, got %#v, err=%v", test.count, got, err)
+				}
+				for index, returned := range got.ProcessorList {
+					if returned != handle {
+						t.Fatalf("handle %d: want %+v, got %+v", index, handle, returned)
+					}
+				}
+			}
+			if test.count <= 0 && mockCalls("amdsmi_get_processor_type") != calls {
+				t.Fatal("empty or oversized output reached processor-type validation")
+			}
+		})
+	}
+}
+
+func TestCoreTopologyNearestLinkType(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		mode     uint32
+		linkType LinkType
+	}{
+		{"PCIe", 7, AMDSMI_LINK_TYPE_PCIE},
+		{"Unknown", 8, LinkType(0x12345678)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handle := fixtureHandle(t)
+			mockConfigure("amdsmi_get_link_topology_nearest", AMDSMI_STATUS_SUCCESS, test.mode)
+			got, err := GetLinkTopologyNearest(handle, test.linkType)
+			if err != nil || got.Count != 1 || len(got.ProcessorList) != 1 || got.ProcessorList[0] != handle {
+				t.Fatalf("link type %d: got %#v, err=%v", test.linkType, got, err)
+			}
+			if mockCalls("amdsmi_get_link_topology_nearest") != 1 {
+				t.Fatal("requested link type did not reach the native query exactly once")
+			}
+		})
+	}
+}
+
+func TestCoreTopologyNearestPartialFailure(t *testing.T) {
+	handle := fixtureHandle(t)
+	calls := mockCalls("amdsmi_get_processor_type")
+	mockConfigure("amdsmi_get_link_topology_nearest", AMDSMI_STATUS_IO, 0)
+	got, err := GetLinkTopologyNearest(handle, AMDSMI_LINK_TYPE_XGMI)
+	assertNativeError(t, err, "amdsmi_get_link_topology_nearest", AMDSMI_STATUS_IO)
+	assertZero(t, got)
+	if mockCalls("amdsmi_get_processor_type") != calls {
+		t.Fatal("partial output reached processor-type validation")
+	}
+}
+
+func TestCoreTopologyNearestTypeFailure(t *testing.T) {
+	resetCoreFixture(t)
+	mockTopology(1, 2, 0)
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
+		t.Fatal(err)
+	}
+	handle, err := GetProcessorHandleFromIndex(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := mockCalls("amdsmi_get_processor_type")
+	mockConfigure("amdsmi_get_link_topology_nearest", AMDSMI_STATUS_SUCCESS, 2)
+	mockConfigure("amdsmi_get_processor_type", AMDSMI_STATUS_SUCCESS, 1)
+	got, err := GetLinkTopologyNearest(handle, AMDSMI_LINK_TYPE_XGMI)
+	assertNativeError(t, err, "amdsmi_get_processor_type", AMDSMI_STATUS_IO)
+	assertZero(t, got)
+	if mockCalls("amdsmi_get_processor_type") != calls+2 {
+		t.Fatal("expected the second returned handle's type query to fail")
+	}
+}
+
+func TestCoreTopologyNearestCopiedList(t *testing.T) {
+	handle := fixtureHandle(t)
+	first, err := GetLinkTopologyNearest(handle, AMDSMI_LINK_TYPE_XGMI)
+	if err != nil || len(first.ProcessorList) != 1 {
+		t.Fatalf("first query: %#v, err=%v", first, err)
+	}
+	second, err := GetLinkTopologyNearest(handle, AMDSMI_LINK_TYPE_XGMI)
+	if err != nil || len(second.ProcessorList) != 1 {
+		t.Fatalf("second query: %#v, err=%v", second, err)
+	}
+	second.ProcessorList[0] = ProcessorHandle{}
+	if first.ProcessorList[0] != handle {
+		t.Fatal("returned topology lists share storage")
+	}
+	third, err := GetLinkTopologyNearest(handle, AMDSMI_LINK_TYPE_XGMI)
+	if err != nil || len(third.ProcessorList) != 1 || third.ProcessorList[0] != handle {
+		t.Fatalf("caller mutation changed native output: %#v, err=%v", third, err)
+	}
+}
+
+func TestCoreTopologyNearestReturnedHandleLifecycle(t *testing.T) {
+	handle := fixtureHandle(t)
+	got, err := GetLinkTopologyNearest(handle, AMDSMI_LINK_TYPE_XGMI)
+	if err != nil || len(got.ProcessorList) != 1 {
+		t.Fatalf("topology query: %#v, err=%v", got, err)
+	}
+	returned := got.ProcessorList[0]
+	calls := mockCalls("amdsmi_get_gpu_device_bdf")
+	if err := ShutDown(); err != nil {
+		t.Fatal(err)
+	}
+	bdf, err := GetGpuDeviceBdf(returned)
+	assertNativeError(t, err, "amdsmi_get_gpu_device_bdf", AMDSMI_STATUS_NOT_INIT)
+	assertZero(t, bdf)
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
+		t.Fatal(err)
+	}
+	bdf, err = GetGpuDeviceBdf(returned)
+	assertNativeError(t, err, "amdsmi_get_gpu_device_bdf", AMDSMI_STATUS_INVAL)
+	assertZero(t, bdf)
+	if mockCalls("amdsmi_get_gpu_device_bdf") != calls {
+		t.Fatal("stale topology handle reached the native query")
+	}
+	fresh, err := GetProcessorHandleFromIndex(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = GetLinkTopologyNearest(fresh, AMDSMI_LINK_TYPE_XGMI)
+	if err != nil || len(got.ProcessorList) != 1 || got.ProcessorList[0] != fresh || fresh == returned {
+		t.Fatalf("reinitialized topology: %#v, err=%v", got, err)
+	}
+	bdf, err = GetGpuDeviceBdf(got.ProcessorList[0])
+	if err != nil || bdf != Bdf(0xabcde12345670000) {
+		t.Fatalf("reinitialized handle query: %v, err=%v", bdf, err)
+	}
+}
+
 func TestCoreDiscovery(t *testing.T) {
 	for _, test := range []struct {
 		name                        string
