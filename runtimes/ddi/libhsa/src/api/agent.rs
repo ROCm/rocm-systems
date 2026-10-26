@@ -217,16 +217,16 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                     Some(index),
                     Some(runtime.gpus[index].endpoint.clone()),
                     runtime.gpus[index].name.clone(),
-                    runtime.gpus[index].product_name.clone(),
+                    runtime.gpus[index].product_name().into(),
                     0,
                     0,
                     native_device,
                     host_alloc_dmabuf_supported(runtime.gpus.len()),
                     runtime.agent_cache_sizes(agent),
-                    runtime.gpus[index].asic_family_id,
+                    runtime.gpus[index].asic_family_id(),
                     runtime.gpus[index].hdp_flush,
                     Some(runtime.gpus[index].persisting_l2_cache_size.clone()),
-                    runtime.gpus[index].timestamp_frequency_hz,
+                    runtime.gpus[index].timestamp_frequency_hz(),
                     runtime.gpus[index].pc_sampling_supported,
                     host_xgmi_atomics,
                     cacheline_size,
@@ -600,7 +600,7 @@ pub unsafe extern "C" fn hsa_amd_agent_set_attribute(
             let gpu = &runtime.gpus[index];
             (
                 gpu.device.clone(),
-                gpu.info.persisting_l2_cache_size_max,
+                gpu.info().persisting_l2_cache_size_max,
                 gpu.persisting_l2_cache_size.clone(),
                 token,
             )
@@ -697,7 +697,7 @@ pub unsafe extern "C" fn hsa_agent_extension_supported(
         }
         let gpu_index = runtime.gpu_index(agent);
         let supported_gpu = gpu_index.is_some_and(|index| match extension {
-            EXTENSION_IMAGES => image_gfx12::supported_gpu(&runtime.gpus[index].info),
+            EXTENSION_IMAGES => image_gfx12::supported_gpu(&runtime.gpus[index].info()),
             EXTENSION_AMD_PC_SAMPLING => runtime.gpus[index].pc_sampling_supported,
             _ => true,
         });
@@ -746,7 +746,7 @@ pub unsafe extern "C" fn hsa_agent_major_extension_supported(
         }
         let gpu_index = runtime.gpu_index(agent);
         let supported_gpu = gpu_index.is_some_and(|index| match extension {
-            EXTENSION_IMAGES => image_gfx12::supported_gpu(&runtime.gpus[index].info),
+            EXTENSION_IMAGES => image_gfx12::supported_gpu(&runtime.gpus[index].info()),
             EXTENSION_AMD_PC_SAMPLING => runtime.gpus[index].pc_sampling_supported,
             _ => true,
         });

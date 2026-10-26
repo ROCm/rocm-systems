@@ -3328,6 +3328,7 @@ class TestExecutor:
                        "rccl-UnitTestsMicroRomeModels",
                        "rccl-UnitTestsMicroDda",
                        "rccl-UnitTestsMicroTopo",
+                       "rccl-UnitTestsMicroNetIbCastInit",
                        "rccl-UnitTestsMicroNetIbCastConnect",
                        "rccl-UnitTestsMicroNetIbCastQpSharing"]:
             binary_path = os.path.join(host_test_dir, binary)

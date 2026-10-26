@@ -3,7 +3,12 @@
 
 //! Code-object reader creation and destruction.
 
-use super::*;
+use std::ffi::c_void;
+
+use crate::ffi::*;
+use crate::loader::Reader;
+use crate::platform::memory as linux_interop;
+use crate::runtime::{boundary, initialized_mut, lock};
 
 #[cfg_attr(
     all(target_arch = "x86_64", not(test)),
@@ -47,13 +52,9 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_file(
             Ok(handle) => handle,
             Err(status) => return status,
         };
-        runtime.loader.readers.insert(
-            handle,
-            Reader {
-                bytes: bytes.into(),
-                storage: ReaderStorage::from_file(file, 0, size),
-            },
-        );
+        runtime
+            .loader
+            .insert_reader(handle, Reader::from_file(bytes, file, size));
         // SAFETY: The caller supplied writable output storage.
         unsafe { reader.write(HsaCodeObjectReader { handle }) };
         SUCCESS
@@ -96,13 +97,9 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_memory(
             Ok(handle) => handle,
             Err(status) => return status,
         };
-        runtime.loader.readers.insert(
-            handle,
-            Reader {
-                bytes: bytes.into(),
-                storage: ReaderStorage::Memory,
-            },
-        );
+        runtime
+            .loader
+            .insert_reader(handle, Reader::from_memory(bytes));
         // SAFETY: The caller supplied writable output storage.
         unsafe { reader.write(HsaCodeObjectReader { handle }) };
         SUCCESS
@@ -125,7 +122,7 @@ pub unsafe extern "C" fn hsa_code_object_reader_destroy(reader: HsaCodeObjectRea
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if runtime.loader.readers.remove(&reader.handle).is_some() {
+        if runtime.loader.remove_reader(reader.handle) {
             SUCCESS
         } else {
             INVALID_CODE_OBJECT_READER
