@@ -27,7 +27,8 @@ namespace {
 
 // Is a raw fp8 bit pattern NaN / Inf for the given interpretation?
 bool is_e4m3_special(unsigned i) { return (i & 0x7fu) == 0x7fu; }  // 0x7f, 0xff are NaN
-bool is_e5m2_special(unsigned i) { return (i & 0x7fu) >= 0x7bu; }  // sat E5M2: 0x7b inf, 0x7c overflow, 0x7d-7f NaN
+// 0x7c, 0xfc are Inf; 0x7d-0x7f, 0xfd-0xff are NaN
+bool is_e5m2_special(unsigned i) { return (i & 0x7fu) >= 0x7cu; }
 
 // All representable (finite, non-NaN) fp8 values for an interpretation.
 template <bool is_e4m3> std::vector<float> all_representable_fp8() {
@@ -118,12 +119,12 @@ HIP_TEST_CASE(Unit_ext_ocp_fp8_known_values_host) {
     }
   }
   SECTION("e5m2") {
-    // NOTE: 0x7B (E5M2 max normal, 57344) is intentionally excluded here. Under
-    // the saturating decode (sat=true) the reference classifies 0x7B as the
-    // saturated-inf pattern, so operator float() returns inf rather than 57344.
-    // Re-add {0x7B, 57344.0f} once the E5M2 max-normal/inf aliasing is resolved.
-    std::vector<std::pair<unsigned, float>> table = {
-        {0x3C, 1.0f}, {0x40, 2.0f}, {0x38, 0.5f}, {0x04, 6.10352e-05f} /*min normal 2^-14*/};
+    std::vector<std::pair<unsigned, float>> table = {{0x3C, 1.0f},
+                                                     {0x40, 2.0f},
+                                                     {0x38, 0.5f},
+                                                     {0x04, 6.10352e-05f} /*min normal 2^-14*/,
+                                                     {0x7B, 57344.0f} /*max normal*/,
+                                                     {0xFB, -57344.0f}};
     for (auto [pat, exp] : table) {
       __hipext_ocp_fp8_e5m2 t;
       t.__x = static_cast<__amd_fp8_storage_t>(pat);
@@ -131,6 +132,12 @@ HIP_TEST_CASE(Unit_ext_ocp_fp8_known_values_host) {
       INFO("e5m2 pattern 0x" << std::hex << pat);
       REQUIRE(f == Catch::Approx(exp));
     }
+    // 0x7C / 0xFC are +-Inf, one step above the largest finite value.
+    __hipext_ocp_fp8_e5m2 inf;
+    inf.__x = 0x7C;
+    REQUIRE(static_cast<float>(inf) == INFINITY);
+    inf.__x = 0xFC;
+    REQUIRE(static_cast<float>(inf) == -INFINITY);
   }
 }
 
