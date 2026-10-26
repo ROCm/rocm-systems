@@ -1613,17 +1613,11 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       if (latencyThreshold != 0) lat &= bytes[dir] <= nChannels[dir] * latencyThreshold;
       protocol[dir] = lat ? NCCL_PROTO_LL128 : NCCL_PROTO_SIMPLE;
     } else {
-      // Legacy LL: use the SIMPLE-derived per-channel P2P_LL_THRESHOLD first. Allow LL beyond that
-      // cutoff if the payload still fits in one LL data step across the LL channel plan, capped by
-      // the channel bound * P2P_LL_THRESHOLD.
-      //
-      // Single-node all-XGMI gfx942/gfx950 widens that cap to the measured 64 KiB/peer SIMPLE/LL
-      // crossover (bounded by p2pChunkSize / 8), because channel bound * P2P_LL_THRESHOLD (8 * 4 KiB)
-      // stops at 32 KiB/peer and SIMPLE costs ~11% bus bandwidth on 8-rank alltoall between 32 KiB
-      // and 64 KiB per peer; 128 KiB/peer and above keep SIMPLE (going past it regresses 1-4 MiB
-      // total). The LL channel-plan fit check below still gates the widened range. A user-set
-      // NCCL_P2P_LL_THRESHOLD keeps the stock cap, as does the LL128 P2P path (separate branch above)
-      // whose crossover has not been measured on single node.
+      // Legacy LL: the SIMPLE-derived per-channel threshold first, then one LL data step across the
+      // LL channel plan, capped by the channel bound * P2P_LL_THRESHOLD.
+      // Single-node all-XGMI gfx942/gfx950 widens that cap to p2pChunkSize/8, capped at 64 KiB/peer
+      // (the measured crossover; the stock cap stops at 32 KiB/peer). The LL fit check still applies.
+      // A set NCCL_P2P_LL_THRESHOLD, and the LL128 path, keep the stock cap.
       static bool const userSetP2pLLThreshold = ncclGetEnv("NCCL_P2P_LL_THRESHOLD") != nullptr;
       ssize_t llEligibleMax = (ssize_t)p2pChMax[dir] * p2pLlThreshold;
       if (comm->nNodes <= 1 && comm->isAllNvlink && (comm->cudaArch == 940 || comm->cudaArch == 950) &&
