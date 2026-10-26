@@ -461,7 +461,8 @@ public:
   [[nodiscard]] std::optional<std::vector<const BasicBlock *>>
   kernel_blocks(uint64_t entry_text_offset, std::string *error_out = nullptr);
 
-  /// @brief The first instruction in @p block a point can anchor at, if any.
+  /// @brief Byte offset within .text of the first instruction in @p block a
+  ///        point can anchor at, if any.
   ///
   /// Applies the anchor rules that do not depend on the point:
   /// is_relocatable_anchor(), and not being among the instructions an s_clause

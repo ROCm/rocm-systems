@@ -493,7 +493,8 @@ make_gfx950_elf_with_text_words(const std::vector<uint32_t> &words,
 
 std::vector<uint8_t> make_gfx950_elf_with_nop_text(uint64_t text_size) {
   // Must be a multiple of 4 so the entire section decodes: s_nop words and a
-  // final s_endpgm, since patch() refuses code that runs off .text.
+  // final s_endpgm, since patch() refuses a probe call in code that runs off
+  // .text.
   std::vector<uint32_t> words(text_size / sizeof(uint32_t), 0xBF800000u);
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   return make_gfx950_elf_with_text_words(words);
@@ -1157,8 +1158,6 @@ TEST(InstrumentorPatch, RejectsUnsupportedElfTableStridesBeforePatching) {
 }
 
 TEST(InstrumentorPatch, RejectsZeroQueuedPoints) {
-  // Ends in s_endpgm: patch() refuses code that runs off .text before it gets
-  // to the check under test.
   auto image = make_gfx950_elf_with_text_words(
       {0xBF800000u, 0xBF800000u, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)});
   AmdGpuCodeObject obj(image.data(), image.size());
@@ -1173,8 +1172,6 @@ TEST(InstrumentorPatch, RejectsZeroQueuedPoints) {
 }
 
 TEST(InstrumentorPatch, ValidationFailurePropagates) {
-  // Ends in s_endpgm: patch() refuses code that runs off .text before it gets
-  // to the check under test.
   auto image = make_gfx950_elf_with_text_words(
       {0xBF800000u, 0xBF800000u, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)});
   AmdGpuCodeObject obj(image.data(), image.size());
@@ -1209,8 +1206,6 @@ TEST(InstrumentorPatch, IsSingleCall) {
 // burns the budget. A caller that hits a recoverable argument error must
 // construct a new Instrumentor.
 TEST(InstrumentorPatch, FailedFirstCallStillBurnsSingleAttemptBudget) {
-  // Ends in s_endpgm: patch() refuses code that runs off .text before it gets
-  // to the check under test.
   auto image = make_gfx950_elf_with_text_words(
       {0xBF800000u, 0xBF800000u, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)});
   AmdGpuCodeObject obj(image.data(), image.size());
@@ -3876,9 +3871,9 @@ TEST(InstrumentorProbePatch, DescriptorlessProbeCallFailsClosed) {
 
 // Liveness cannot see every register some kernels still need: a wave32 kernel,
 // one that makes a call or runs off .text, one that reaches a register relative
-// to M0 or through GPR index mode, or one with an RDNA4 image instruction. patch() refuses each,
-// whether the point calls a probe or is an inline nop. patch_with_debug_summaries() patches them
-// all.
+// to M0 or through GPR index mode, or one with an RDNA4 image instruction.
+// patch() refuses each when the point calls a probe, and patches an inline nop,
+// which takes no registers. patch_with_debug_summaries() patches the probe call.
 TEST(InstrumentorProbePatch, RefusesKernelsLivenessCannotFollow) {
   struct Case {
     const char *reason;

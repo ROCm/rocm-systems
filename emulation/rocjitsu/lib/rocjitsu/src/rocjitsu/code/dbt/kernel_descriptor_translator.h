@@ -149,7 +149,7 @@ struct KernelDescriptorFacts {
 
   /// @brief True when legacy preload firmware may enter 256 bytes after the descriptor entry.
   ///
-  /// @details CDNA2/CDNA3/CDNA4 use the legacy firmware compatibility scheme in which
+  /// @details CDNA3/CDNA4 use the legacy firmware compatibility scheme in which
   /// a non-zero kernarg_preload_spec_length makes compatible firmware add 256
   /// bytes to KERNEL_CODE_ENTRY_BYTE_OFFSET. GFX1250 also supports kernarg
   /// preloading, but its descriptor entry is the single hardware entry and must
