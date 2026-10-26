@@ -47,6 +47,7 @@ RJ_DIAGNOSTIC_POP
 #include <linux/sync_file.h>
 #include <memory>
 #include <poll.h>
+#include <pthread.h>
 #include <spawn.h>
 #include <string>
 #include <sys/ioctl.h>
@@ -4742,6 +4743,117 @@ TEST(InterposerSyncobjTest, TimelineSignalWakesEveryBlockedWaiter) {
   destroy.handle = create.handle;
   EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
   EXPECT_EQ(close(drm), 0);
+}
+
+static void check_syncfile_broadcast_cancellation(bool import_fence) {
+  struct rlimit limit {};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &limit), 0);
+  if (limit.rlim_max < 8192)
+    GTEST_SKIP() << "Private DRM descriptors require a hard NOFILE limit of at least 8192";
+  RestoreLimit restore_limit(limit);
+  struct rlimit raised = limit;
+  raised.rlim_cur = std::max<rlim_t>(raised.rlim_cur, 8192);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &raised), 0);
+  auto configure_writes =
+      reinterpret_cast<void (*)(int)>(dlsym(RTLD_DEFAULT, "rj_test_notification_writes"));
+  auto write_count =
+      reinterpret_cast<unsigned (*)()>(dlsym(RTLD_DEFAULT, "rj_test_notification_write_count"));
+  ASSERT_NE(configure_writes, nullptr);
+  ASSERT_NE(write_count, nullptr);
+  const int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_syncobj_create completed{};
+  completed.flags = DRM_SYNCOBJ_CREATE_SIGNALED;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &completed), 0);
+  std::array<pollfd, 3> exports{};
+  for (auto &entry : exports) {
+    drm_syncobj_handle request{};
+    request.handle = completed.handle;
+    request.flags = DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE;
+    configure_writes(1);
+    const int result = ioctl(drm, DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD, &request);
+    const unsigned attempts = write_count();
+    configure_writes(0);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(attempts, 1u);
+    entry = {request.fd, POLLIN, 0};
+  }
+  ASSERT_EQ(poll(exports.data(), exports.size(), 0), 0);
+
+  drm_syncobj_create waiting{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &waiting), 0);
+  uint64_t point = 0;
+  std::array<std::atomic<pid_t>, 2> tids{};
+  std::array<int, 2> wait_results{-2, -2};
+  std::array<std::thread, 2> waiters;
+  for (size_t index = 0; index < waiters.size(); ++index) {
+    waiters[index] = std::thread([&, index] {
+      drm_syncobj_timeline_wait wait{};
+      wait.handles = reinterpret_cast<uintptr_t>(&waiting.handle);
+      wait.points = reinterpret_cast<uintptr_t>(&point);
+      wait.count_handles = 1;
+      wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+      wait.timeout_nsec = monotonic_deadline_after(std::chrono::seconds(5));
+      tids[index].store(gettid(), std::memory_order_release);
+      wait_results[index] = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
+    });
+  }
+  bool all_blocked = false;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (std::chrono::steady_clock::now() < deadline) {
+    all_blocked = std::all_of(tids.begin(), tids.end(), [](const auto &tid) {
+      return thread_is_waiting_on_syncobj(tid.load(std::memory_order_acquire));
+    });
+    if (all_blocked)
+      break;
+    std::this_thread::yield();
+  }
+  int signal_result = -2;
+  unsigned notified = 0;
+  bool returned_from_cancel = false;
+  std::thread signaler([&] {
+    configure_writes(2);
+    if (import_fence) {
+      drm_syncobj_handle imported{};
+      imported.handle = waiting.handle;
+      imported.fd = exports.front().fd;
+      imported.flags = DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE;
+      signal_result = ioctl(drm, DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE, &imported);
+    } else {
+      drm_syncobj_timeline_array signal{};
+      signal.handles = reinterpret_cast<uintptr_t>(&waiting.handle);
+      signal.points = reinterpret_cast<uintptr_t>(&point);
+      signal.count_handles = 1;
+      signal_result = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL, &signal);
+    }
+    notified = write_count();
+    configure_writes(0);
+    pthread_testcancel();
+    returned_from_cancel = true;
+  });
+  signaler.join();
+  for (auto &waiter : waiters)
+    waiter.join();
+  EXPECT_TRUE(all_blocked);
+  EXPECT_EQ(signal_result, 0);
+  EXPECT_EQ(notified, exports.size());
+  EXPECT_FALSE(returned_from_cancel);
+  for (int result : wait_results)
+    EXPECT_EQ(result, 0);
+  EXPECT_EQ(poll(exports.data(), exports.size(), 0), static_cast<int>(exports.size()));
+  for (const auto &entry : exports) {
+    EXPECT_NE(entry.revents & POLLIN, 0);
+    EXPECT_EQ(close(entry.fd), 0);
+  }
+  EXPECT_EQ(close(drm), 0);
+}
+
+TEST(InterposerSyncobjTest, DeferredCancellationCompletesSyncFileBroadcast) {
+  check_syncfile_broadcast_cancellation(false);
+}
+
+TEST(InterposerSyncobjTest, DeferredCancellationCompletesImportedSyncFileBroadcast) {
+  check_syncfile_broadcast_cancellation(true);
 }
 
 TEST(InterposerSyncobjTest, TimelineWaitReturnsEintrForSignal) {

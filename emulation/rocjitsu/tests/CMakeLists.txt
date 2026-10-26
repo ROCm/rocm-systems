@@ -481,6 +481,7 @@ add_executable(
     sysfs_test.cpp
     kfd_ioctl_test.cpp
     syncobj_notification_test.cpp
+    libc_cancellation_test.cpp
     waitcnt_counter_test.cpp
     wait_hazard_test.cpp
     memory_wait_scoreboard_test.cpp
@@ -2257,6 +2258,55 @@ rj_add_interposer_test_suite(
     TimelineWaitAllowsThreadExitFromSignal
     ENVIRONMENT ${_rj_signal_exit_env}
 )
+
+add_library(
+    syncfile_cancellation_preload
+    SHARED
+    syncfile_cancellation_preload_test.cpp
+)
+rj_configure_target(syncfile_cancellation_preload TEST)
+target_link_libraries(
+    syncfile_cancellation_preload
+    PRIVATE ${CMAKE_DL_LIBS} Threads::Threads
+)
+add_dependencies(interposer_dup_test syncfile_cancellation_preload)
+if(RJ_INSTALL_TESTS)
+    install(
+        TARGETS syncfile_cancellation_preload
+        LIBRARY DESTINATION ${RJ_INSTALL_TEST_BIN_DIR}
+    )
+endif()
+foreach(
+    _case
+    IN
+    ITEMS
+        DeferredCancellationCompletesSyncFileBroadcast
+        DeferredCancellationCompletesImportedSyncFileBroadcast
+)
+    rj_add_test(
+        NAME "InterposerSyncobjTest.${_case}"
+        COMMAND
+            ${RJ_CLI}
+            "--config"
+            ${RJ_CDNA4_KMD_CONFIG}
+            "--"
+            $<TARGET_FILE:interposer_dup_test>
+            "--gtest_filter=InterposerSyncobjTest.${_case}"
+        ENVIRONMENT
+            "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:syncfile_cancellation_preload>"
+        TIMEOUT 30
+        SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+        INSTALL_COMMAND
+            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            "--config"
+            "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+            "--"
+            "bin/interposer_dup_test"
+            "--gtest_filter=InterposerSyncobjTest.${_case}"
+        INSTALL_ENVIRONMENT
+            "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}bin/${CMAKE_SHARED_LIBRARY_PREFIX}syncfile_cancellation_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    )
+endforeach()
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
 # Spawns rocminfo via the rocjitsu CLI and validates output.

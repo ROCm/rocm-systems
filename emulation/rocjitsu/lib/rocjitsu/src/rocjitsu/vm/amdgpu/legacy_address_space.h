@@ -2396,9 +2396,8 @@ private:
     // Standalone VM users may run before a KMD driver resolves the table.
     const auto real_openat = libc.openat ? libc.openat : ::openat;
     const auto real_read = libc.read ? libc.read : ::read;
-    const auto real_close = libc.close ? libc.close : ::close;
-    const int fd = real_openat(AT_FDCWD, "/proc/self/maps", O_RDONLY | O_CLOEXEC);
-    if (fd < 0)
+    UniqueDriverFd fd(real_openat(AT_FDCWD, "/proc/self/maps", O_RDONLY | O_CLOEXEC));
+    if (!fd)
       return PageWritability::Indeterminate;
 
     // Parsed incrementally: the table can be large, and a line may straddle
@@ -2407,7 +2406,7 @@ private:
     char chunk[8192];
     PageWritability answer = PageWritability::Indeterminate;
     for (bool reading = true; reading;) {
-      const ssize_t got = real_read(fd, chunk, sizeof(chunk));
+      const ssize_t got = real_read(fd.get(), chunk, sizeof(chunk));
       if (got < 0) {
         // A signal arriving mid-read says nothing about the mapping.
         if (errno == EINTR)
@@ -2444,7 +2443,6 @@ private:
       }
       pending.erase(0, line_begin);
     }
-    real_close(fd);
     return answer;
   }
 

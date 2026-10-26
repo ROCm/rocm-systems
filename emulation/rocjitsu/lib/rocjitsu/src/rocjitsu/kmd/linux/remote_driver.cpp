@@ -448,6 +448,7 @@ RemoteDriver::RemoteDriver(int sock_fd) : sock_(sock_fd) {
 }
 
 RemoteDriver::~RemoteDriver() {
+  ScopedCancellationDisable cancellation;
   for (auto &[handle, fd] : handle_memfds_) {
     if (fd >= 0)
       libc_passthrough().close(fd);

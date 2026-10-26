@@ -1785,6 +1785,7 @@ public:
     }
     if (!file)
       return -EBADF;
+    rocjitsu::ScopedCancellationDisable cancellation;
     {
       std::lock_guard lock(fd_mutex_);
       for (uint32_t handle : handles)
@@ -2196,6 +2197,9 @@ public:
   void notify_syncobj_waiters(const DrmFileToken &file) {
     if (!file)
       return;
+    // Fence state is already committed. Finish every notification before a
+    // pending cancellation can be observed by an exported sync-file write.
+    rocjitsu::ScopedCancellationDisable cancellation;
     file->syncobj_generation.notify_all();
     imported_syncobj_generation_.notify_all();
     std::lock_guard lock(fd_mutex_);

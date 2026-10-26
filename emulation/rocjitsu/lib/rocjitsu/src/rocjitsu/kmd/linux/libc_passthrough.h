@@ -9,6 +9,7 @@
 
 #include "util/unique_handle.h"
 
+#include <cassert>
 #include <cstddef>
 #include <cstdio>
 #include <dirent.h>
@@ -99,6 +100,29 @@ private:
 /// @brief Return the process-wide libc pass-through table.
 LibcPassthrough &libc_passthrough();
 
+/// @brief Keep deferred pthread cancellation out of cleanup and publication.
+/// @details Restoring the caller's state leaves a deferred request pending until
+/// the next cancellation point. Do not use this to cover blocking waits. Like
+/// the surrounding C++ code, this does not support asynchronous cancellation.
+class ScopedCancellationDisable {
+public:
+  ScopedCancellationDisable() {
+    const int result = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_state_);
+    assert(result == 0);
+    (void)result;
+  }
+  ~ScopedCancellationDisable() {
+    const int result = pthread_setcancelstate(previous_state_, nullptr);
+    assert(result == 0);
+    (void)result;
+  }
+  ScopedCancellationDisable(const ScopedCancellationDisable &) = delete;
+  ScopedCancellationDisable &operator=(const ScopedCancellationDisable &) = delete;
+
+private:
+  int previous_state_ = PTHREAD_CANCEL_ENABLE;
+};
+
 /// @brief UniqueHandle traits that close through the libc pass-through table.
 /// @details The interposer and the drivers link into ONE DSO, and the interposer
 /// exports close() with default visibility, so a bare ::close() from driver code
@@ -115,6 +139,7 @@ struct PassthroughFdTraits {
   static handle_type invalid() noexcept { return -1; }
   static bool is_valid(handle_type fd) noexcept { return fd >= 0; }
   static void close(handle_type fd) noexcept {
+    ScopedCancellationDisable cancellation;
     // The table is unresolved until resolve() runs. These traits are reachable from
     // any driver TU, so fall back to ::close rather than calling a null pointer;
     // that path can only be taken before the interposer is live, so it cannot
