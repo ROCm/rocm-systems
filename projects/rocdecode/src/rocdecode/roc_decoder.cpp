@@ -122,7 +122,12 @@ rocDecStatus RocDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconf
         return rocdec_status;
     }
 #ifndef _WIN32
+    // Import on the decoder's device, then restore the caller's current device
+    int prev_device_id;
+    CHECK_HIP(hipGetDevice(&prev_device_id));
+    CHECK_HIP(hipSetDevice(decoder_create_info_.device_id));
     rocdec_status = ImportAllSurfaces();
+    CHECK_HIP(hipSetDevice(prev_device_id));
 #endif
     FunctionExitLog(g_rocdec_logger);
     return rocdec_status;
