@@ -80,20 +80,12 @@ amd-smi reset --gpureset --gpu all
 amd-smi --rocm-smi
 ```
 
-To select several devices, list them after one device option or repeat the option.
-For example, `amd-smi process --gpu 0 --gpu 1` selects the same GPUs as
-`amd-smi process --gpu 0 1`. Repeating `--gpu`, `--cpu`, `--core`, `--nic`, or `--switch`:
-
-- Adds devices, so a later option never narrows an earlier one.
-  `amd-smi reset --gpureset --gpu all --gpu 0` resets every GPU.
-- Selects a device listed more than once, including through `all`, only once.
-- Keeps the order in which devices were first selected, so `--gpu 2 --gpu all` reports
-  GPU 2 first.
-
-On virtualization hosts, `--vf` still uses only its last value. Separate values with
-spaces, because comma-separated lists such as `--gpu=0,1` are not supported.
-Single-value options, such as `--memory-partition` in `amd-smi set`, use the last value
-given for every selected device.
+On bare-metal systems, `--gpu`, `--cpu`, `--core`, `--nic`, and `--switch`
+accept space-separated lists or repeated options (`--gpu 0 1` or `--gpu 0 --gpu 1`).
+Selections combine without duplicates, in first-selected order. Later options do not
+narrow selection: `--gpu all --gpu 0` still selects every GPU, including for set/reset.
+Comma-separated lists are unsupported. Single-value settings such as
+`--memory-partition` apply the last value to every selected device.
 
 ```{note}
 For command-specific help, use `amd-smi [command] --help` for see more detailed
