@@ -13,12 +13,24 @@ from rocprof_trace_decoder import (
     RecordType,
     __version__,
 )
+from rocprof_trace_decoder.bindings import _find_library
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Smoke test the rocprof_trace_decoder Python API")
     parser.add_argument("--lib", help="Path to librocprof-trace-decoder")
+    parser.add_argument(
+        "--expect-lib", help="Fail unless library discovery selects this file"
+    )
     args = parser.parse_args()
+
+    # Discovery can silently fall back to an installed decoder, which then
+    # tests the wrong library.
+    if args.expect_lib:
+        found = Path(_find_library(args.lib)).resolve()
+        expected = Path(args.expect_lib).resolve()
+        if found != expected:
+            raise RuntimeError(f"Library discovery selected {found}, expected {expected}")
 
     assert __version__
     assert InstCategory.VALU.name == "VALU"
