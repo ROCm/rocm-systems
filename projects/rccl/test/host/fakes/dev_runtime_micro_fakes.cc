@@ -163,6 +163,8 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
 // like the params dev_runtime.cc owns, so a test can drive the NCCL_WIN_ENABLE=0
 // opt-out in ncclCommWindowRegister_impl.
 int64_t ncclParamWinEnable() { return g_loadParam("WIN_ENABLE", 1); }
+// Emitted by rocmwrap.cc; read by the host VMM GIN fail-closed check.
+int64_t ncclParamDmaBufEnable() { return g_loadParam("DMABUF_ENABLE", 1); }
 
 // ---------------------------------------------------------------------------
 // Proxy.
@@ -309,6 +311,7 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirement
   return ncclSuccess;
 }
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
+void ncclGinDevCommClearFields(struct ncclDevComm*) {}
 #ifdef ENABLE_ROCSHMEM_GIN
 // Only referenced from ncclDevrCommCreateInternal's SDMA signal-binding block,
 // which is itself behind ENABLE_ROCSHMEM_GIN. Copied from develop's
@@ -420,6 +423,18 @@ std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos =
 
 ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory* mem) { return g_devrBuildGinSegmentInfos(mem); }
 
+// Real body lives in dev_runtime_segments.cc. dev-runtime-test.cc compiles that
+// file as RealDevrCheckRegistrationSupport so this seam stays injectable; the
+// fixture points the hook at the real body.
+static ncclResult_t DefaultCheckRegistrationSupport(void*, size_t, struct ncclComm*, bool, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, size_t, struct ncclComm*, bool, int)> g_devrCheckRegistrationSupport =
+    DefaultCheckRegistrationSupport;
+
+ncclResult_t ncclDevrCheckRegistrationSupport(void* userPtr, size_t userSize, struct ncclComm* comm,
+                                              bool hasSysmemSegment, int winFlags) {
+  return g_devrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment, winFlags);
+}
+
 // The host-side ncclTeam* accessors live in fakes/nccl_device_core_fakes.cc; this
 // file's Reset chains theirs.
 
@@ -459,15 +474,18 @@ ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct nc
 // Barrier requirement builders (host variants).
 // ---------------------------------------------------------------------------
 extern "C" ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int, ncclLsaBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  if (req != nullptr) *req = {};
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  if (req != nullptr) *req = {};
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCftBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  if (req != nullptr) *req = {};
   return ncclSuccess;
 }
 
@@ -536,6 +554,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_devrVerifySegmentLayouts                = DefaultVerifySegmentLayouts;
   g_devrBuildGinSegmentInfos                = DefaultBuildGinSegmentInfos;
+  g_devrCheckRegistrationSupport            = DefaultCheckRegistrationSupport;
 
   // Not a hook either, but 12 tests assign it directly to steer the
   // POSIX-FD-vs-shareable-handle split in symMemory{Export,ImportAndMap}

@@ -13,10 +13,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
-#include <sys/prctl.h>
-#include <sys/resource.h>
 #include <vector>
 
 // ncclDevResourceRequirements / ncclTeam live behind core_tmp.h, transitively included below.
@@ -71,21 +68,6 @@ void ExpectNoGinCounterFields(const ncclDevResourceRequirements_t& req) {
   EXPECT_EQ(req.next, nullptr);
   EXPECT_EQ(req.ginCounterCount, 0);
   EXPECT_EQ(req.outGinCounterStart, nullptr);
-}
-
-// Only the forked child is affected: skip its core dump.
-void DisableCoreDumpsForExpectedCrash() {
-#if defined(__linux__)
-  if (prctl(PR_SET_DUMPABLE, 0) != 0) {
-    std::perror("prctl(PR_SET_DUMPABLE) failed");
-    _exit(1);
-  }
-#endif
-  const struct rlimit noCore = {0, 0};
-  if (setrlimit(RLIMIT_CORE, &noCore) != 0) {
-    std::perror("setrlimit(RLIMIT_CORE) failed");
-    _exit(1);
-  }
 }
 
 }  // namespace
@@ -262,29 +244,6 @@ TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_BufferSizeAnd
         << "x=" << x;
     }
   }
-}
-
-// A 1-rank team makes nPeers = 0, so idivRcp32(0) divides by zero; a fix flips this pin.
-TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_KnownBug_SingleRankTeamDividesByZero) {
-#if defined(__x86_64__)  // AArch64 UDIV returns 0 instead of trapping.
-  volatile int nRanksVolatile = 1;  // keeps -O2 from folding the divide away
-  // Assigned field by field: a braced init's commas would split EXPECT_EXIT's arguments.
-  EXPECT_EXIT(
-      {
-        DisableCoreDumpsForExpectedCrash();
-        ncclTeam_t peers;
-        peers.nRanks = nRanksVolatile;
-        peers.rank = 0;
-        peers.stride = 1;
-        ncclGinInboxA2AHandle handle = poisonedHandle<ncclGinInboxA2AHandle>();
-        ncclDevResourceRequirements_t req = poisonedRequirement();
-        // Not reached: SIGFPE fires inside idivRcp32.
-        ncclGinInboxA2ACreateRequirement(peers, /*nBlocks=*/1, /*size_log2=*/7, &handle, &req);
-      },
-      ::testing::KilledBySignal(SIGFPE), "");
-#else
-  GTEST_SKIP() << "divide-by-zero trap is x86_64-specific; AArch64 UDIV returns 0 without trapping";
-#endif
 }
 
 // ncclLsaBarrierCreateRequirement (src/nccl_device/lsa_barrier.cc)

@@ -151,6 +151,13 @@ typedef struct rj_vm_gpu_info_t {
 /// @retval ROCJITSU_STATUS_ERROR The loaded configuration does not contain a SoC.
 RJ_API_EXPORT rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode, rj_vm_t **vm);
 
+/// @brief Create a VM from only one named system node in a JSON file.
+/// @details The node must exist and must agree with `local_node` in the file,
+/// when present. A NULL or empty node uses JSON `local_node`; if neither
+/// selects a node, the graph must contain exactly one node.
+RJ_API_EXPORT rj_status_t rj_vm_create_for_node(const char *json_path, const char *node_id,
+                                                rj_vm_mode_t mode, rj_vm_t **vm);
+
 /// @brief Create a VM from a JSON configuration string.
 ///
 /// @param[in] json JSON configuration string.
@@ -162,6 +169,10 @@ RJ_API_EXPORT rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode,
 /// @retval ROCJITSU_STATUS_ERROR The loaded configuration does not contain a SoC.
 RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode,
                                                    rj_vm_t **vm);
+
+/// @brief Create a VM from one named system node in a JSON string.
+RJ_API_EXPORT rj_status_t rj_vm_create_from_string_for_node(const char *json, const char *node_id,
+                                                            rj_vm_mode_t mode, rj_vm_t **vm);
 
 /// @brief Load and attach the execution plugins declared in a config to a VM.
 ///
@@ -249,6 +260,7 @@ RJ_API_EXPORT rj_status_t rj_vm_run(rj_vm_t *vm, uint64_t *ticks_executed);
 /// @param[in] tick Simulation tick to record as the checkpoint timestamp.
 /// @retval ROCJITSU_STATUS_SUCCESS Checkpoint saved successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT @p vm or @p path is NULL.
+/// @retval ROCJITSU_STATUS_UNSUPPORTED The VM has multiple GPUs.
 /// @retval ROCJITSU_STATUS_ERROR Serialization or I/O failed.
 RJ_API_EXPORT rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *path, uint64_t tick);
 
@@ -337,6 +349,12 @@ RJ_API_EXPORT rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path);
 /// @param[in] vm VM handle.
 /// @param[out] info Simulated GPU metadata.
 RJ_API_EXPORT rj_status_t rj_vm_gpu_info(rj_vm_t *vm, rj_vm_gpu_info_t *info);
+
+/// @brief Get the number of node-local GPUs published by this VM.
+RJ_API_EXPORT rj_status_t rj_vm_gpu_count(rj_vm_t *vm, uint32_t *count);
+
+/// @brief Get metadata for one node-local GPU ordinal.
+RJ_API_EXPORT rj_status_t rj_vm_gpu_info_at(rj_vm_t *vm, uint32_t ordinal, rj_vm_gpu_info_t *info);
 
 /// @brief Get the borrowed backing memory handle (local mode).
 /// @details The VM retains ownership; the caller must not close the handle.
