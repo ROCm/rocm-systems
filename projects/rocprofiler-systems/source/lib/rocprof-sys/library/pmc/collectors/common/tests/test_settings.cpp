@@ -5,6 +5,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+
 namespace rocprofsys::pmc::collectors::testing
 {
 
