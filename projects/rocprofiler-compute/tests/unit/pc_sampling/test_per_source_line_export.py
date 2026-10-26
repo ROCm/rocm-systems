@@ -28,13 +28,7 @@ ISA_REFERENCE_FIELDS = (
 
 
 def make_isa_references_json(*isa_references):
-    """Encode references as the per-source-line select returns them.
-
-    A source line without instructions has no references, which the select
-    returns as None.
-    """
-    if not isa_references:
-        return None
+    """Encode references as the per-source-line select returns them."""
     return json.dumps([
         dict(zip(ISA_REFERENCE_FIELDS, isa_reference))
         for isa_reference in isa_references
@@ -130,8 +124,8 @@ def test_format_isa_references_names_a_kernel_without_a_short_name():
 
 
 def test_format_isa_references_is_empty_for_a_line_without_instructions():
-    """A line without instructions has no references."""
-    assert _format_isa_references(None) == ""
+    """A source line without instructions has no ISA references."""
+    assert _format_isa_references("[]") == ""
 
 
 def test_write_per_source_line_files_opens_one_file_per_source_file(tmp_path):

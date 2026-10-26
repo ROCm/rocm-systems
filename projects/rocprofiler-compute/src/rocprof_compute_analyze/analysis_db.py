@@ -5,8 +5,9 @@ import ast
 import json
 import re
 import warnings
+from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Any, DefaultDict, List, NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -22,8 +23,8 @@ from pc_sampling.code_object_analysis import (
 from pc_sampling.pc_sampling_analysis import (
     SOURCE_LINE_MISSING,
     InstructionLineRecord,
-    SampleTotals,
-    add_up_instruction_lines,
+    SourceLineRecord,
+    aggregate_instruction_lines,
     load_aggregated_pc_sampling,
 )
 from pc_sampling.per_kernel_isa_export import (
@@ -739,7 +740,8 @@ class db_analysis(OmniAnalyze_Base):
                     )
                     sampled_instruction_lines.append((instruction_line, line))
 
-        # A source line adds up the instructions of every process.
+        # Source lines aggregate the instructions of all processes, so their
+        # states are added once every process is loaded.
         self._add_source_line_sample_states(sampled_instruction_lines)
         return code_object_stores
 
@@ -806,7 +808,10 @@ class db_analysis(OmniAnalyze_Base):
         source_frames: SourceFrameCollector,
         gpu_arch: Optional[str] = None,
     ) -> orm.InstructionLine:
-        """Insert one instruction line with its sample state, and return the line."""
+        """Insert one instruction line with its sample state.
+
+        Returns the inserted instruction line.
+        """
         instruction_line = orm.InstructionLine(
             code_object_offset=line.code_object_offset,
             instruction=line.instruction,
@@ -841,37 +846,37 @@ class db_analysis(OmniAnalyze_Base):
             Tuple[orm.InstructionLine, InstructionLineRecord]
         ],
     ) -> None:
-        """Insert one sample state per source line, adding up its instructions.
+        """Insert one sample state for each source line of the sampled instructions.
 
-        An instruction counts once toward each distinct line of its inline stack.
+        An instruction counts once toward each distinct source line of its inline
+        stack.
         """
-        instruction_lines_by_source_line: Dict[
+        instruction_lines_by_source_line: DefaultDict[
             orm.SourceLine, List[InstructionLineRecord]
-        ] = {}
+        ] = defaultdict(list)
         for instruction_line, line in sampled_instruction_lines:
+            # Drop repeated source lines, and keep the order of the inline stack.
             source_lines = dict.fromkeys(
                 frame.source_line for frame in instruction_line.source_lines
             )
             for source_line in source_lines:
-                instruction_lines_by_source_line.setdefault(source_line, []).append(
-                    line
-                )
+                instruction_lines_by_source_line[source_line].append(line)
 
         for source_line, lines in instruction_lines_by_source_line.items():
             db_analysis._add_pc_sample_state(
-                add_up_instruction_lines(lines), source_line=source_line
+                aggregate_instruction_lines(lines), source_line=source_line
             )
 
     @staticmethod
     def _add_pc_sample_state(
-        samples: Union[InstructionLineRecord, SampleTotals],
+        samples: Union[InstructionLineRecord, SourceLineRecord],
         *,
         instruction_line: Optional[orm.InstructionLine] = None,
         source_line: Optional[orm.SourceLine] = None,
     ) -> orm.PCSampleState:
         """Insert the sample state of one instruction line or one source line.
 
-        The state's stall-reason counts are inserted with it.
+        Also inserts the stall-reason counts of the sample state.
         """
         sample_state = orm.PCSampleState(
             total_count=samples.total_count,
