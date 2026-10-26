@@ -4,9 +4,10 @@
 # libamdf
 
 libamdf implements the AMDF C API in Rust over [rocddi](../rocddi/README.md).
-`amdf_query_api` negotiates core ABI v5; the GPU extension supports v1. The
-XDNA extension is not implemented. The [AMDF headers](../../api-headers/include/amdf/)
-define the public contract, including arguments, ownership, and error behavior.
+`amdf_query_api` negotiates core ABI v12; the GPU extension supports v3 and
+the observation extension supports v1. The XDNA extension is not implemented.
+The [AMDF headers](../../api-headers/include/amdf/) define the public contract,
+including arguments, ownership, and error behavior.
 The Rust modules are private implementation details.
 
 ## Runtime model
@@ -14,6 +15,11 @@ The Rust modules are private implementation details.
 An instance owns a rocddi session. Creating an instance, enumerating endpoints,
 and opening an endpoint do not activate a GPU. Device creation activates an
 endpoint for execution. CPU memory services work without an available GPU.
+Endpoint host NUMA locality is a passive OS hint captured at `endpoint_open`;
+it does not publish a CPU endpoint or determine caller CPU affinity. The host
+profiling clock is a stateless observation service. A host mapping retains its
+qualified cache-maintenance recipe until unmap; the recipe is selected from
+that mapping's cache policy.
 
 The instance's `native_lifetime` selects a process-owned or instance-owned
 driver context. On Linux KFD, PROCESS can reuse the primary connection;
@@ -23,7 +29,9 @@ INSTANCE GPU activation requires a secondary context supported by KFD UAPI
 The CMake build stages `libamdf.a` and a `libamdf.so` alias of the shared image
 that also exports HSA. Each ABI owns a separate rocddi session and public
 handles; process-lifetime KFD contexts share rocddi's process-local backend
-state. A separately linked static archive has its own copy of that state.
+state. The shared image also coordinates the native signal-event page across
+AMDF and HSA; only GPUs mapped to an installed page report native events.
+A separately linked static archive has its own copy of that state.
 
 ## Current support
 

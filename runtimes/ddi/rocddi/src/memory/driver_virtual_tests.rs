@@ -153,6 +153,7 @@ impl VirtualMemoryOperations for FakeDriver {
                 size,
                 mapping_granularity: 0x1000,
                 physical_backing_id: [1, 2],
+                placement: None,
             },
             drops: self.drops.clone(),
         })?)
@@ -187,6 +188,13 @@ impl VirtualMemoryOperations for FakeDriver {
         _permissions: DeviceAccess,
     ) -> Result<Owned<Mapping>, Error> {
         Ok(Owned::new(Mapping { fail_once: true })?)
+    }
+
+    fn set_virtual_host_mapping_permissions(
+        _mapping: &mut Mapping,
+        _permissions: DeviceAccess,
+    ) -> Result<(), Error> {
+        Ok(())
     }
 
     fn free_virtual_host_mapping(mapping: &mut Mapping) -> Result<(), Error> {

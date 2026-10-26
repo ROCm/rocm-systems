@@ -8,7 +8,7 @@ use crate::generated::amdf::{
     amdf_endpoint_native_identity_t__value, amdf_endpoint_native_identity_t__value__linux_device,
 };
 use rocddi::topology::Endpoint;
-use rocddi::topology::platform::linux::kfd_drm_info;
+use rocddi::topology::platform::linux::{host_numa_node as native_host_numa_node, kfd_drm_info};
 
 pub(crate) use rocddi::memory::interop::linux as memory;
 pub(crate) use std::os::fd::IntoRawFd;
@@ -17,6 +17,10 @@ pub(crate) fn render_supported(endpoint: &Endpoint) -> bool {
     kfd_drm_info(endpoint)
         .and_then(|info| info.render_minor)
         .is_some()
+}
+
+pub(crate) fn host_numa_node(endpoint: &Endpoint) -> u32 {
+    native_host_numa_node(endpoint).unwrap_or(u32::MAX)
 }
 
 pub(crate) fn native_identity(endpoint: &Endpoint) -> amdf_endpoint_native_identity_t {

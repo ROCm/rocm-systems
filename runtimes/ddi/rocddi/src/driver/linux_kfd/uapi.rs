@@ -28,6 +28,7 @@ pub(super) const GET_AVAILABLE_MEMORY: u64 = request(3, 0x23, 16);
 pub(super) const UPDATE_QUEUE: u64 = request(1, 0x07, 24);
 pub(super) const CREATE_EVENT: u64 = request(3, 0x08, 32);
 pub(super) const DESTROY_EVENT: u64 = request(1, 0x09, 8);
+pub(super) const SET_EVENT: u64 = request(1, 0x0a, 8);
 pub(super) const RESET_EVENT: u64 = request(1, 0x0b, 8);
 pub(super) const WAIT_EVENTS: u64 = request(3, 0x0c, 24);
 pub(super) const SET_SCRATCH_BACKING_VA: u64 = request(3, 0x11, 16);
@@ -36,6 +37,7 @@ pub(super) const SET_TRAP_HANDLER: u64 = request(1, 0x13, 24);
 pub(super) const GET_APERTURES: u64 = request(3, 0x14, 16);
 pub(super) const ACQUIRE_VM: u64 = request(1, 0x15, 8);
 pub(super) const RUNTIME_ENABLE: u64 = request(3, 0x25, 16);
+pub(super) const SET_XNACK_MODE: u64 = request(3, 0x21, 4);
 pub(super) const CREATE_PROCESS: u64 = request(3, 0x27, 8);
 pub(super) const ALLOC_MEMORY: u64 = request(3, 0x16, 40);
 pub(super) const FREE_MEMORY: u64 = request(1, 0x17, 8);
@@ -157,6 +159,14 @@ pub(super) struct AvailableMemory {
     pub available: u64,
     pub gpu_id: u32,
     pub pad: u32,
+}
+
+/// Query or change the KFD process-wide recoverable page-fault mode.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub(super) struct XnackMode {
+    /// Negative queries without changing the mode; KFD returns zero or one.
+    pub xnack_enabled: i32,
 }
 
 /// Native tile and address configuration for one GPU.

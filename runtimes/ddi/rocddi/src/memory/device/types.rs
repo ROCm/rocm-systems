@@ -102,6 +102,8 @@ pub enum MemoryKind {
         host_visible: bool,
         /// Request coherent device mappings for fine-grained access.
         coherent: bool,
+        /// Promote device-scope atomic coherence to extended system scope.
+        extended_coherent: bool,
         /// Bypass device caches for this allocation.
         uncached: bool,
         /// Request physically contiguous backing.
@@ -152,6 +154,17 @@ pub struct VirtualMemoryInfo {
     pub mapping_granularity: u64,
     /// Stable native identity shared by equivalent handles for this backing.
     pub physical_backing_id: [u64; 2],
+    /// Native placement, if the driver could describe the backing.
+    pub placement: Option<VirtualMemoryPlacement>,
+}
+
+/// Placement class of a detached virtual-memory backing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VirtualMemoryPlacement {
+    /// System memory visible through a CPU agent.
+    System,
+    /// Device memory owned by the KFD GPU with this native identity.
+    Device(u32),
 }
 
 /// Cached facts for one reserved process virtual-address range.

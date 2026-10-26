@@ -84,6 +84,7 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
        "(warp-per-slice, bankSize=%zu)",
        nRanks, shardBytes, slices, grid.x, block.x, bankSize);
 
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled peer loops; 0: runtime fallback.
   switch (nRanks) {
@@ -91,19 +92,19 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 4>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                           static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
-                          bankSize);
+                          bankSize, params);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 8>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                           static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
-                          bankSize);
+                          bankSize, params);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 0>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                           static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
-                          bankSize);
+                          bankSize, params);
     break;
   }
 
@@ -116,9 +117,6 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
 
 bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                              ncclDataType_t datatype, ncclRedOp_t op) {
-  if (!rcclParamDdaLL()) {
-    return false;
-  }
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
@@ -137,7 +135,7 @@ bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuf
   if (op != ncclSum) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -179,6 +177,10 @@ ncclResult_t ncclReduceScatterDdaFabricLL128(const void* sendbuff, void* recvbuf
     return ncclReduceScatterDdaFabricLL128Typed<half>(sendbuff, recvbuff, recvcount, comm, stream);
   case ncclBfloat16:
     return ncclReduceScatterDdaFabricLL128Typed<bf16>(sendbuff, recvbuff, recvcount, comm, stream);
+  case ncclFloat8e4m3:
+    return ncclReduceScatterDdaFabricLL128Typed<dda::common::fp8e4m3>(sendbuff, recvbuff, recvcount, comm, stream);
+  case ncclFloat8e5m2:
+    return ncclReduceScatterDdaFabricLL128Typed<dda::common::fp8e5m2>(sendbuff, recvbuff, recvcount, comm, stream);
   default:
     return ncclInvalidArgument;
   }

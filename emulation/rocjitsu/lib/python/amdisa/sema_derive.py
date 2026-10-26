@@ -35,7 +35,11 @@ from amdisa.sema_effects import inline_binary_op_effects
 from amdisa.sema_properties import InstructionProperty, derive_properties
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
+    F32_TO_INTEGER_CONVERSIONS,
     F32_TO_INTEGER_DTYPES,
+    F64_TO_INTEGER_DTYPES,
+    TO_FLOAT_CONVERSIONS,
+    conversion_formats,
     is_float_relation,
 )
 
@@ -47,6 +51,41 @@ FLOAT_COMPARE_CALL = 'float_compare_'
 
 # Semantic call prefix for IEEE 754-2019 min/max forms, e.g. float_minmax_min_num.
 FLOAT_MINMAX_CALL = 'float_minmax_'
+
+# Semantic call prefix for conversions lowered through shared/conversion.h,
+# followed by the conversion data type, e.g. conversion_f32_i32.
+CONVERSION_CALL = 'conversion_'
+
+# The semantic type of each semantics.conversion_formats format.
+_SEMA_FORMATS = {
+    'F16': SemaType.F16,
+    'F32': SemaType.F32,
+    'F64': SemaType.F64,
+    'I16': SemaType('I', 16),
+    'U16': SemaType('U', 16),
+    'I32': SemaType.I32,
+    'U32': SemaType.U32,
+}
+
+
+def _conversion(dtype: str) -> SemaBlock:
+    """Write a conversion's destination bits from its typed source.
+
+    The typed source and destination let enrichment attach VOP3 ABS/NEG and
+    OMOD/CLAMP; lowering passes those fields to the shared conversion.
+    """
+    source_name, result_name = conversion_formats(dtype)
+    source_ty = _SEMA_FORMATS[source_name]
+    result_ty = _SEMA_FORMATS[result_name]
+    name = f'{CONVERSION_CALL}{dtype}'
+    call = SemaNode(
+        SemaNodeKind.CALL,
+        ty=result_ty,
+        call_name=name,
+        children=(_id(name), _cast(_src(0, source_ty), source_ty)),
+    )
+    return _assign(_cast(_dst(0, result_ty), result_ty), call)
+
 
 # Three-source min/max forms recognized directly by their operation name.
 _IEEE_MINMAX3 = (
@@ -513,6 +552,8 @@ class _ScalarBinop(_ScalarDeriver):
             # SALU float min/max match their VALU counterparts (RDNA4 ISA 6.8);
             # gfx1201 captures agree, including the VALU ISA discrepancies.
             result = _float_minmax(op, ty, src0, src1)
+        elif ty.base == 'F' and op in ('min', 'max'):
+            result = _float_minmax(f'legacy_{op}', ty, src0, src1)
         elif op in ('min', 'max', 'min_num', 'max_num', 'minimum', 'maximum'):
             fn = f'std::{op}' if op in ('min', 'max') else op
             result = SemaNode(
@@ -1012,6 +1053,17 @@ def _vec_binop_expr(
 ) -> SemaNode:
     if op is None:
         return SemaNode(SemaNodeKind.ADD, ty=ty, children=(src0, src1))
+    if op in ('sub', 'subrev', 'rsub') and ty.base == 'F':
+        # ISA discrepancy: the ISA expects S0 - S1 (S1 - S0 for SUBREV), but
+        # gfx1201 and gfx1100 add the negated subtrahend with the sources kept in
+        # operand order. A NaN subtrahend therefore returns with its sign flipped,
+        # and when both sources are NaN, S0's NaN wins, as for ADD. Other targets
+        # sharing this lowering inherit the rule without hardware measurement.
+        if op == 'sub':
+            src1 = SemaNode(SemaNodeKind.UMINUS, ty=ty, children=(src1,))
+        else:
+            src0 = SemaNode(SemaNodeKind.UMINUS, ty=ty, children=(src0,))
+        return SemaNode(SemaNodeKind.ADD, ty=ty, children=(src0, src1))
     if op in ('subrev', 'rsub'):
         return SemaNode(SemaNodeKind.SUB, ty=ty, children=(src1, src0))
     if op in ('lshlrev', 'lshrrev', 'shl', 'shr'):
@@ -1142,6 +1194,11 @@ class _VectorUnary(_ScalarDeriver):
             body = _assign(_cast(_dst(0, ty), ty), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
+        if op == 'cvt' and (
+            dtype in TO_FLOAT_CONVERSIONS or dtype in F32_TO_INTEGER_CONVERSIONS
+        ):
+            return SemaBlock(sem.name, ExecModel.VECTOR, _conversion(dtype))
+
         if op == 'cvt' and dtype:
             call_name = f'cvt_{dtype}'
             src0 = _src(0)
@@ -1162,10 +1219,12 @@ class _VectorUnary(_ScalarDeriver):
                         _cast(_src(0, SemaType.F32), SemaType.F32),
                     ),
                 )
+            elif dtype in F64_TO_INTEGER_DTYPES:
+                # Expose the floating source to VOP3 modifier enrichment; the
+                # conversion helper takes the decoded double.
+                src0 = _cast(_src(0, SemaType.F64), SemaType.F64)
             float_result = {
                 'f32_f16': SemaType.F32,
-                'f32_i32': SemaType.F32,
-                'f32_u32': SemaType.F32,
                 'f32_ubyte0': SemaType.F32,
                 'f32_ubyte1': SemaType.F32,
                 'f32_ubyte2': SemaType.F32,
@@ -1352,6 +1411,8 @@ class _VectorBinop(_ScalarDeriver):
             result = _float_minmax(op, ty, src0, src1)
         elif op in ('min', 'max') and ty.base == 'F' and '_num_' in name_lower:
             result = _float_minmax(f'{op}_num', ty, src0, src1)
+        elif op in ('min', 'max') and ty.base == 'F':
+            result = _float_minmax(f'legacy_{op}', ty, src0, src1)
         else:
             result = _vec_binop_expr(op, src0, src1, ty)
         body = _assign(_cast(_dst(0), ty), result)
@@ -1435,6 +1496,8 @@ class _VectorTernary(_ScalarDeriver):
             result = _float_minmax(op, ty, src0, src1, src2)
         elif op in ('min3', 'max3', 'med3') and '_NUM_F' in sem.name:
             result = _float_minmax(f'{op}_num', ty, src0, src1, src2)
+        elif ty.base == 'F' and op in ('min3', 'max3', 'med3', 'minmax', 'maxmin'):
+            result = _float_minmax(f'legacy_{op}', ty, src0, src1, src2)
         else:
             result = SemaNode(
                 SemaNodeKind.CALL,

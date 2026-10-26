@@ -30,6 +30,7 @@
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
+#include "util/except.h"
 #include "util/log.h"
 #include "util/result.h"
 
@@ -637,17 +638,26 @@ public:
   /// @param shader_engine_id Zero-based shader-engine index within the XCC.
   /// @param cu_index Zero-based CU index within the shader engine.
   /// @param cus_per_shader_array Width of each shader array in CU order; zero means unknown.
+  /// @param shader_engine_cu_count Total CUs in the shader engine; zero means unknown.
   void set_shader_engine_location(uint32_t shader_engine_id, uint32_t cu_index,
-                                  uint32_t cus_per_shader_array = 0) {
+                                  uint32_t cus_per_shader_array = 0,
+                                  uint32_t shader_engine_cu_count = 0) {
     shader_engine_id_ = shader_engine_id;
     shader_engine_cu_index_ = cu_index;
     scratch_scoreboard_base_ = shader_engine_cu_index_ * scratch_slots_per_cu_;
     cus_per_shader_array_ = cus_per_shader_array;
+    shader_engine_cu_count_ = shader_engine_cu_count;
     shader_array_cu_id_ = cus_per_shader_array ? cu_index % cus_per_shader_array : 0;
   }
 
   /// @brief Return this CU's physical shader-engine index.
   uint32_t shader_engine_id() const { return shader_engine_id_; }
+
+  /// @brief Return the physical XCC rank, or nullopt without an assigned CP topology.
+  std::optional<uint32_t> xcc_id() const;
+
+  /// @brief Return the shader engine CU count, or zero when unknown.
+  uint32_t shader_engine_cu_count() const { return shader_engine_cu_count_; }
 
   /// @brief Return the shader-array width, or zero when the geometry is unknown.
   uint32_t cus_per_shader_array() const { return cus_per_shader_array_; }
@@ -1209,11 +1219,14 @@ public:
   /// thread or from single-threaded test contexts only.
   /// @param inst The decoded instruction.
   /// @param wf The wavefront executing the instruction.
+  /// @param failure_detail Receives `UnimplementedInst::what()` when that legacy
+  /// exception is translated; otherwise the pointed-to string is unchanged.
   /// @returns Failure for an unimplemented instruction stub or a reported operand
   /// failure. The wavefront retains the reason for caller-owned diagnostics.
   /// Each call clears the previous error; a failed call does not halt the wavefront.
-  /// Validation inside implemented instructions can still raise exceptions.
-  util::Result execute_instruction(Instruction *inst, Wavefront &wf) {
+  /// Other host failures inside implemented instructions still raise exceptions.
+  util::Result execute_instruction(Instruction *inst, Wavefront &wf,
+                                   std::string *failure_detail = nullptr) {
     assert(inst->execute && "instruction execution backend is not linked");
     wf.clear_instruction_execution_error();
     const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
@@ -1221,7 +1234,16 @@ public:
       return util::Result::success();
     check_static_isa_diagnostics(*inst, wf);
     // The decoded instruction already selects its ISA execution callback.
-    inst->execute(*inst, &wf);
+    try {
+      inst->execute(*inst, &wf);
+    } catch (const util::UnimplementedInst &error) {
+      // Some implemented instructions reject particular operand or mode
+      // combinations through the legacy exception path. Treat those guest
+      // encodings like generated unimplemented stubs at the CU boundary.
+      wf.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
+      if (failure_detail)
+        *failure_detail = error.what();
+    }
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
   }
 
@@ -1272,6 +1294,9 @@ protected:
   /// @brief Issue a bounded MMA window and drain it before returning to scheduling.
   void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, uint32_t wave_size,
                                bool has_accvgprs);
+  /// @brief Convert a guest instruction execution failure into wave termination.
+  void fail_wave_instruction(Wavefront &wf, std::string_view instruction, uint64_t pc,
+                             InstructionExecutionError error, std::string_view failure_detail = {});
   struct NoAsyncWindow {};
   /// @brief Share ordinary instruction execution with the optional scoreboard adapter.
   template <bool EnableAsync>
@@ -1344,6 +1369,7 @@ protected:
   uint32_t shader_engine_cu_index_ = 0;
   uint32_t scratch_slots_per_cu_ = 1;
   uint32_t cus_per_shader_array_ = 0;
+  uint32_t shader_engine_cu_count_ = 0;
   uint32_t shader_array_cu_id_ = 0;
   uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
@@ -1632,6 +1658,10 @@ protected:
   friend class ::rocjitsu::test::ComputeUnitTestAccess;
 };
 
+// Keep LDS selection available to self-contained execution plugin modules.
+inline Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
+inline const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
+
 inline InstructionCache &InstructionComputeUnitView::instruction_cache() {
   return raw_cu().instruction_cache();
 }
@@ -1653,6 +1683,15 @@ inline uint32_t InstructionComputeUnitView::cus_per_shader_array() const {
 }
 inline uint32_t InstructionComputeUnitView::shader_array_cu_id() const {
   return raw_cu().shader_array_cu_id();
+}
+inline uint32_t InstructionComputeUnitView::shader_engine_id() const {
+  return raw_cu().shader_engine_id();
+}
+inline uint32_t InstructionComputeUnitView::shader_engine_cu_count() const {
+  return raw_cu().shader_engine_cu_count();
+}
+inline std::optional<uint32_t> InstructionComputeUnitView::xcc_id() const {
+  return raw_cu().xcc_id();
 }
 inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf_size(); }
 inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
