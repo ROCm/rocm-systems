@@ -524,6 +524,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // Spill saves: store each live+clobbered register before the call.
   env.insert(env.end(), spill.prologue.begin(), spill.prologue.end());
 
+  // TODO: Accept a DiagnosticEmitter in emit_probe_call and remove this error_out adapter.
   auto report_builder_error = [&](std::string_view message) {
     if (error_out != nullptr)
       error_out->assign(message);

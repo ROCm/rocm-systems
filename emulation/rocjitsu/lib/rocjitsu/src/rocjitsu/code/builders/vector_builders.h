@@ -112,9 +112,9 @@ build_v_mov_b32_imm(uint16_t vdst, uint32_t imm, rj_code_arch_t arch,
   default:
     // RV32I/RV64I and ROCJITSU_CODE_ARCH_INVALID reach here: not AMDGPU, so
     // there is no VOP1 encoding to pick.
-    if (error != nullptr)
-      return error->emit() << "unsupported target architecture for v_mov_b32 with a literal";
-    return util::Result::failure();
+    return error != nullptr
+               ? (error->emit() << "unsupported target architecture for v_mov_b32 with a literal")
+               : util::Result::failure();
   }
 }
 
@@ -141,9 +141,9 @@ inline util::FailureOr<uint32_t>
 build_v_mov_b32_src(uint16_t vdst, uint16_t src0, rj_code_arch_t arch,
                     const util::DiagnosticEmitter *error = nullptr) {
   if (src0 == kVectorSrcLiteral) {
-    if (error != nullptr)
-      return error->emit() << "v_mov_b32 from a literal needs build_v_mov_b32_imm";
-    return util::Result::failure();
+    return error != nullptr
+               ? (error->emit() << "v_mov_b32 from a literal needs build_v_mov_b32_imm")
+               : util::Result::failure();
   }
   const uint8_t dst = static_cast<uint8_t>(vdst);
   switch (arch) {
@@ -170,9 +170,9 @@ build_v_mov_b32_src(uint16_t vdst, uint16_t src0, rj_code_arch_t arch,
   default:
     // RV32I/RV64I and ROCJITSU_CODE_ARCH_INVALID reach here: not AMDGPU, so
     // there is no VOP1 encoding to pick.
-    if (error != nullptr)
-      return error->emit() << "unsupported target architecture for v_mov_b32 from a register";
-    return util::Result::failure();
+    return error != nullptr
+               ? (error->emit() << "unsupported target architecture for v_mov_b32 from a register")
+               : util::Result::failure();
   }
 }
 
