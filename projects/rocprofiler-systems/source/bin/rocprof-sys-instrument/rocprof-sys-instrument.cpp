@@ -37,8 +37,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <iomanip>
+#include <iostream>
 #include <iterator>
 #include <map>
 #include <regex>
@@ -293,6 +295,7 @@ auto _activate =
 //
 int
 main(int argc, char** argv)
+try
 {
     argv0 = argv[0];
 
@@ -2886,6 +2889,10 @@ main(int argc, char** argv)
         log_ofs->close();
     }
     return code;
+} catch(const std::exception& err)
+{
+    std::cerr << "[rocprof-sys] error: " << err.what() << '\n';
+    return EXIT_FAILURE;
 }
 
 //======================================================================================//
