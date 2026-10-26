@@ -574,13 +574,13 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
 
   auto symbol = find_symbol (pc);
 
-  agent_out << std::endl << "Disassembly";
+  agent_out () << std::endl << "Disassembly";
   if (symbol)
-    agent_out << " for function " << symbol->m_name;
-  agent_out << ":" << std::endl;
+    agent_out () << " for function " << symbol->m_name;
+  agent_out () << ":" << std::endl;
 
-  agent_out << "    code object: " << m_uri << std::endl;
-  agent_out << "    loaded at: "
+  agent_out () << "    code object: " << m_uri << std::endl;
+  agent_out () << "    loaded at: "
             << "[0x" << std::hex << m_load_address << "-"
             << "0x" << std::hex << (m_load_address + m_mem_size) << "]"
             << std::endl;
@@ -627,10 +627,10 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
           size_t line_number = it->second.second;
 
           if (file_name != prev_file_name || line_number != prev_line_number)
-            agent_out << std::endl;
+            agent_out () << std::endl;
 
           if (file_name != prev_file_name)
-            agent_out << file_name << ":" << std::endl;
+            agent_out () << file_name << ":" << std::endl;
 
           /* If the source line for `addr` is a different line than the
              previous one printed, then print it.  If the previous line printed
@@ -674,15 +674,15 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
 
               for (size_t line = first_line; line <= last_line; ++line)
                 {
-                  agent_out << std::setfill (' ') << std::setw (8) << std::left
-                            << std::dec << line;
+                  agent_out () << std::setfill (' ') << std::setw (8)
+                               << std::left << std::dec << line;
 
                   if (auto lines = get_source_file_index (file_name); !lines)
-                    agent_out << file_name << ": No such file or directory.";
+                    agent_out () << file_name << ": No such file or directory.";
                   else if (line && line <= lines->get ().size ())
-                    agent_out << lines->get ()[line - 1];
+                    agent_out () << lines->get ()[line - 1];
 
-                  agent_out << std::endl;
+                  agent_out () << std::endl;
                 }
             }
 
@@ -693,7 +693,7 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
              block, then print ... to show that the following instruction is
              not the first in the block.  */
           if (addr == start_pc && start_pc != saved_start_pc)
-            agent_out << "    ..." << std::endl;
+            agent_out () << "    ..." << std::endl;
         }
 
       std::vector<uint8_t> buffer (largest_instruction_size);
@@ -704,8 +704,8 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
               AMD_DBGAPI_ADDRESS_SPACE_GLOBAL, addr, &size, buffer.data ())
           != AMD_DBGAPI_STATUS_SUCCESS)
         {
-          agent_out << "Cannot access memory at address 0x" << std::hex << addr
-                    << std::endl;
+          agent_out () << "Cannot access memory at address 0x" << std::hex
+                       << addr << std::endl;
           break;
         }
 
@@ -738,20 +738,20 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
       std::string instruction (value);
       free (value);
 
-      agent_out << ((addr == pc) ? " => " : "    ");
+      agent_out () << ((addr == pc) ? " => " : "    ");
 
-      agent_out << "0x" << std::hex << addr;
+      agent_out () << "0x" << std::hex << addr;
       if (symbol)
         {
-          agent_out << " <";
+          agent_out () << " <";
           if (addr >= symbol->m_value)
-            agent_out << "+" << std::dec << (addr - symbol->m_value);
+            agent_out () << "+" << std::dec << (addr - symbol->m_value);
           else
-            agent_out << "-" << std::dec << (symbol->m_value - addr);
-          agent_out << ">";
+            agent_out () << "-" << std::dec << (symbol->m_value - addr);
+          agent_out () << ">";
         }
 
-      agent_out << ":    " << instruction << std::endl;
+      agent_out () << ":    " << instruction << std::endl;
 
       addr += size;
     }
@@ -762,9 +762,9 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
      printed.  */
   if (auto it = m_line_number_map->find (addr);
       it == m_line_number_map->end ())
-    agent_out << "    ..." << std::endl;
+    agent_out () << "    ..." << std::endl;
 
-  agent_out << std::endl << "End of disassembly." << std::endl;
+  agent_out () << std::endl << "End of disassembly." << std::endl;
 }
 
 bool

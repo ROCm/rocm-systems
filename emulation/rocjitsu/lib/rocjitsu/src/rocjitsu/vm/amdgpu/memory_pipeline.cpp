@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
+#include "rocjitsu/vm/amdgpu/coalesced_lane_runs.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
@@ -714,36 +715,43 @@ uint64_t fully_valid_lane_mask(std::span<const uint64_t> element_lane_masks, uin
   return full_lane_mask;
 }
 
-template <typename F>
-VmAccessOutcome for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask,
-                                            uint32_t wf_size, uint32_t stride, F &&fn) {
-  uint64_t remaining = lane_mask;
-  while (remaining) {
-    const uint32_t first_lane = std::countr_zero(remaining);
-    remaining &= ~(uint64_t{1} << first_lane);
-
-    uint32_t last_lane = first_lane;
-    while (last_lane + 1 < wf_size) {
-      const uint32_t next_lane = last_lane + 1;
-      const uint64_t next_bit = uint64_t{1} << next_lane;
-      if (!(remaining & next_bit) || addrs[next_lane] != addrs[last_lane] + stride)
-        break;
-      remaining &= ~next_bit;
-      last_lane = next_lane;
-    }
-
-    const VmAccessOutcome outcome = fn(first_lane, last_lane - first_lane + 1);
-    if (outcome != VmAccessOutcome::Complete)
-      return outcome;
-  }
-  return VmAccessOutcome::Complete;
-}
-
 void append_translated_requests(VectorMemState &d, uint64_t lane_mask, uint32_t addr_stride,
-                                uint32_t addr_base_offset) {
+                                uint32_t addr_base_offset, MemoryTransactionPolicy transactions) {
   const uint32_t stride = d.num_elems * d.elem_size;
   auto append = [&](uint64_t address, uint32_t data_offset, uint32_t size) {
-    d.translated.requests.push_back({.address = address, .data_offset = data_offset, .size = size});
+    // Preserve transport batching for the compatibility/default model. A
+    // backend may observe a larger span together; forcing a DMA per 128 bytes
+    // would add transport round trips without strengthening its contract.
+    if (transactions.bytes() == MemoryTransactionPolicy{}.bytes()) {
+      d.translated.requests.push_back(
+          {.address = address, .data_offset = data_offset, .size = size});
+      return;
+    }
+    while (size) {
+      const uint32_t chunk = transactions.chunk_size(address, size);
+      d.translated.requests.push_back(
+          {.address = address, .data_offset = data_offset, .size = chunk});
+      address += chunk;
+      data_offset += chunk;
+      size -= chunk;
+    }
+  };
+
+  auto append_run = [&](const CoalescedLaneRun &run) {
+    if (run.lane_ordered) {
+      append(run.address, run.first_lane * stride, run.size);
+      return true;
+    }
+    const uint32_t offset = d.translated.reordered_data.size();
+    d.translated.reordered_data.resize(offset + run.size);
+    d.translated.requests.push_back({.address = run.address,
+                                     .data_offset = offset,
+                                     .size = run.size,
+                                     .reordered_lane_mask = run.lane_mask});
+    if (!d.is_load)
+      gather_lane_run(run.address, run.lane_mask, run.size, d.per_lane_addr.data(),
+                      d.store_data.data(), stride, d.translated.reordered_data.data() + offset);
+    return true;
   };
 
   if (addr_stride != 0) {
@@ -777,12 +785,8 @@ void append_translated_requests(VectorMemState &d, uint64_t lane_mask, uint32_t 
 
   if (!all_elements_use_lane_mask(d.element_lane_masks.view(), lane_mask, d.num_elems)) {
     const uint64_t full_lane_mask = fully_valid_lane_mask(d.element_lane_masks.view(), lane_mask);
-    (void)for_each_coalesced_lane_run(d.per_lane_addr.data(), full_lane_mask, d.wf_size, stride,
-                                      [&](uint32_t first_lane, uint32_t run_lanes) {
-                                        append(d.per_lane_addr[first_lane], first_lane * stride,
-                                               run_lanes * stride);
-                                        return VmAccessOutcome::Complete;
-                                      });
+    for_each_coalesced_lane_run(d.per_lane_addr.data(), full_lane_mask, d.wf_size, stride,
+                                transactions, append_run);
     for (uint32_t elem = 0; elem < d.num_elems; ++elem) {
       uint64_t mask = d.element_lane_masks[elem] & lane_mask & ~full_lane_mask;
       while (mask) {
@@ -795,12 +799,8 @@ void append_translated_requests(VectorMemState &d, uint64_t lane_mask, uint32_t 
     return;
   }
 
-  (void)for_each_coalesced_lane_run(d.per_lane_addr.data(), lane_mask, d.wf_size, stride,
-                                    [&](uint32_t first_lane, uint32_t run_lanes) {
-                                      append(d.per_lane_addr[first_lane], first_lane * stride,
-                                             run_lanes * stride);
-                                      return VmAccessOutcome::Complete;
-                                    });
+  for_each_coalesced_lane_run(d.per_lane_addr.data(), lane_mask, d.wf_size, stride, transactions,
+                              append_run);
 }
 
 VmAccessOutcome execute_translated_transfer(VectorMemState &d) {
@@ -808,23 +808,30 @@ VmAccessOutcome execute_translated_transfer(VectorMemState &d) {
   while (d.translated.request_index < d.translated.requests.size()) {
     const TranslatedMemoryRequest &request = d.translated.requests[d.translated.request_index];
     VmAccessOutcome outcome = VmAccessOutcome::Malformed;
+    uint8_t *data = request.reordered_lane_mask ? d.translated.reordered_data.data()
+                    : d.is_load                 ? d.response_data.data()
+                                                : d.store_data.data();
     if (d.is_load) {
       outcome = d.translated.access->read(
           request.address,
-          std::span<std::byte>(
-              reinterpret_cast<std::byte *>(d.response_data.data() + request.data_offset),
-              request.size),
+          std::span<std::byte>(reinterpret_cast<std::byte *>(data + request.data_offset),
+                               request.size),
           d.translated.completed_bytes);
     } else {
       outcome = d.translated.access->write(
           request.address,
           std::span<const std::byte>(
-              reinterpret_cast<const std::byte *>(d.store_data.data() + request.data_offset),
-              request.size),
+              reinterpret_cast<const std::byte *>(data + request.data_offset), request.size),
           d.translated.completed_bytes);
     }
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
+    if (d.is_load && request.reordered_lane_mask) {
+      const uint32_t stride = d.num_elems * d.elem_size;
+      scatter_lane_run(request.address, request.reordered_lane_mask, request.size,
+                       d.per_lane_addr.data(), data + request.data_offset, stride,
+                       d.response_data.data());
+    }
     ++d.translated.request_index;
     d.translated.completed_bytes = 0;
   }
@@ -1203,9 +1210,10 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
       if (d.is_load)
         d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
       if (swizzled_lanes)
-        append_translated_requests(d, swizzled_lanes, stride, base_offset);
+        append_translated_requests(d, swizzled_lanes, stride, base_offset,
+                                   l1_->transaction_policy());
       if (plain_lanes)
-        append_translated_requests(d, plain_lanes, 0, 0);
+        append_translated_requests(d, plain_lanes, 0, 0, l1_->transaction_policy());
     }
     return execute_translated_transfer(d);
   }

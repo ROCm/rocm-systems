@@ -30,6 +30,7 @@
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/data_types.h"
 #include "util/except.h"
+#include "util/host_target.h"
 #include "util/meta_programming.h"
 #include "util/simd.h"
 
@@ -543,7 +544,8 @@ inline uint64_t read_swmmac_index_set(auto &cu, uint32_t index_base, uint32_t la
 template <uint32_t InBits, uint32_t K>
 inline uint32_t read_gfx12_swmmac_index_set(auto &cu, uint32_t wave_size, uint32_t index_base,
                                             uint32_t lane, uint32_t index_key) {
-  static_assert((K == 32 && (InBits == 4 || InBits == 8)) || (K == 64 && InBits == 4));
+  static_assert((K == 32 && (InBits == 4 || InBits == 8 || InBits == 16)) ||
+                (K == 64 && InBits == 4));
   uint32_t set_bits;
   if constexpr (K == 64)
     set_bits = wave_size == 32 ? 32 : 16;
@@ -708,14 +710,22 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t wave_size, uint32_t M, uint32_t 
 
 /// @brief Permute the A-matrix lane based on cbsz and abid fields.
 ///
-/// @details When cbsz > 0, a block of S = 64/(1<<cbsz) lanes is broadcast to
-/// all other blocks. abid selects which block is the broadcast source.
-/// cbsz=0 means no broadcast (identity).
+/// @details When cbsz > 0, the wave is divided into 1<<cbsz blocks and abid
+/// selects the source block. The source lane keeps its offset within a block.
+/// cbsz=0 is the identity. Reserved cbsz values also return the original lane,
+/// and abid is reduced modulo the block count, so decoded undefined controls
+/// can be diagnosed without causing an out-of-wave host access.
 inline uint32_t permute_a_lane(uint32_t lane, uint32_t cbsz, uint32_t abid) {
   if (cbsz == 0)
     return lane;
-  uint32_t S = 64 >> cbsz;
-  return (lane % S) + S * abid;
+  // Reserved CBSZ encodings are diagnosed from the decoded instruction flags.
+  // Keep undefined guest controls inside the wave so diagnostics never turn
+  // into host division-by-zero or out-of-range register access.
+  if (cbsz > 4)
+    return lane;
+  const uint32_t block_count = 1u << cbsz;
+  const uint32_t block_size = 64 / block_count;
+  return (lane % block_size) + block_size * (abid % block_count);
 }
 
 /// @brief Permute the B-matrix lane based on the blgp field.
@@ -1847,9 +1857,10 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
     writes.set_lane(r.reg, r.lane, r.val);
 }
 
-// GFX11 F16/BF16 WMMA executes adjacent K pairs as DOT2, starting at K=0.
-// Packed outputs narrow after every pair. Preserve raw NaN bits and stage all
-// outputs before writes, including D overlap with A, B or C.
+// GFX11 F16/BF16 WMMA evaluates adjacent pairs as DOT2 in increasing k order,
+// starting at 0. Packed results narrow after each pair and preserve the other D half.
+// Preserve raw NaN bits.
+// Stage the whole result before writing D, which may overlap A, B, or C.
 template <bool Bf16, bool Packed = false>
 void exec_gfx11_wmma_dot2(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
                           uint32_t s2, std::optional<uint32_t> const_acc, uint32_t neg,
@@ -1897,14 +1908,39 @@ void exec_gfx11_wmma_dot2(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
     }
 }
 
-// GFX12 F16/BF16 WMMA rounds after each group of four products; packed outputs
-// narrow at each group as well.
-// In wave32, documented K bits 2 and 3 occupy the lane and register selectors,
-// respectively; gfx12_wmma_input_loc uses contiguous per-lane K chunks.
-template <bool Bf16, bool Packed = false>
-void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
-                          uint32_t s2, std::optional<uint32_t> const_acc, uint32_t neg,
-                          uint32_t neg_hi, bool fp16_ovfl = false) {
+// Locate A/B for one product in a GFX12 floating-point WMMA or SWMMAC step.
+// Supports dense 16x16x16 and sparse 16x16x32, both with 16 stored products.
+// k is the accumulation position (compressed for sparse forms), not a VGPR index.
+template <uint32_t InBits, bool Sparse>
+std::pair<InputLoc, InputLoc> gfx12_wmma_dot_input_locs(auto &cu, uint32_t wave_size, uint32_t row,
+                                                        uint32_t col, uint32_t k,
+                                                        uint32_t index_base, uint32_t index_key) {
+  static_assert(InBits == 8 || InBits == 16);
+  if constexpr (Sparse) {
+    const auto a = swmmac_a_input_loc(wave_size, 16, 32, row, k, InBits);
+    const auto index = swmmac_index_loc(wave_size, 16, 32, InBits, row, k, 16);
+    const uint32_t indices =
+        read_gfx12_swmmac_index_set<InBits, 32>(cu, wave_size, index_base, index.lane, index_key);
+    // Only B expands to dense K; A stores the selected products contiguously.
+    const uint32_t dense_k = swmmac_dense_k(indices, k, index.local_compressed_k);
+    return {a, swmmac_b_input_loc(wave_size, 16, 32, col, dense_k, InBits)};
+  } else {
+    // Dense F16 wave32 and F8 wave64 exchange k's lane/register selector bits.
+    // The eight-bit mapping matches RdnaWmmaI32Policy::physical_k.
+    const bool swap_k = InBits == 16 ? wave_size == 32 : wave_size == 64;
+    const uint32_t physical_k = swap_k ? wmma_swap_k_bits_2_3(k) : k;
+    return {gfx12_wmma_input_loc(wave_size, 16, 16, row, physical_k, InBits),
+            gfx12_wmma_input_loc(wave_size, 16, 16, col, physical_k, InBits)};
+  }
+}
+
+// Compute a dense or sparse F16/BF16 matrix result, narrowing after every
+// four-product step for packed outputs. Destination storage may overlap any input.
+template <bool Bf16, bool Packed, bool Sparse>
+void exec_gfx12_wmma_dot4_impl(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                               uint32_t s2, std::optional<uint32_t> const_acc, uint32_t neg,
+                               uint32_t neg_hi, bool fp16_ovfl, uint32_t index_base,
+                               uint32_t index_key) {
   require_gfx12_wmma_wave_size(wave_size);
   std::array<uint32_t, 256> results;
   RegisterAccess regs(cu);
@@ -1915,6 +1951,7 @@ void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
           const_acc ? *const_acc : regs.read_vgpr(s2 + (Packed ? out.reg / 2 : out.reg), out.lane);
       if constexpr (Packed)
         acc = (acc >> (16 * (out.reg % 2))) & 0xffff;
+      // Apply accumulator ABS before NEG, including sparse F16/BF16 forms.
       if (neg_hi & 4)
         acc &= Packed ? 0x7fffu : 0x7fffffffu;
       if (neg & 4)
@@ -1923,14 +1960,16 @@ void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
         std::array<uint16_t, 4> a, b;
         for (uint32_t j = 0; j < 4; ++j) {
           const uint32_t logical_k = k + j;
-          const uint32_t physical_k = wave_size == 32 ? wmma_swap_k_bits_2_3(logical_k) : logical_k;
-          const auto al = gfx12_wmma_input_loc(wave_size, 16, 16, row, physical_k, 16);
-          const auto bl = gfx12_wmma_input_loc(wave_size, 16, 16, col, physical_k, 16);
+          const auto [al, bl] = gfx12_wmma_dot_input_locs<16, Sparse>(
+              cu, wave_size, row, col, logical_k, index_base, index_key);
           a[j] = uint16_t(regs.read_vgpr(s0 + al.vgpr_offset, al.lane) >> (16 * al.sub_element));
           b[j] = uint16_t(regs.read_vgpr(s1 + bl.vgpr_offset, bl.lane) >> (16 * bl.sub_element));
           if ((al.sub_element ? neg_hi : neg) & 1)
             a[j] ^= 0x8000u;
-          if ((bl.sub_element ? neg_hi : neg) & 2)
+          // gfx1201 observations select sparse B modifiers by compressed product slot,
+          // not by the register half selected by the sparse index.
+          const uint32_t b_half = Sparse ? logical_k & 1u : bl.sub_element;
+          if ((b_half ? neg_hi : neg) & 2)
             b[j] ^= 0x8000u;
         }
         if constexpr (Packed)
@@ -1941,6 +1980,7 @@ void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
       results[row * 16 + col] = acc;
     }
   }
+  // Defer all writes until every source (including sparse indices) has been read.
   for (uint32_t row = 0; row < 16; ++row)
     for (uint32_t col = 0; col < 16; ++col) {
       const auto out = gfx12_wmma_output_loc_32(wave_size, 16, 16, row, col);
@@ -1953,27 +1993,44 @@ void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
     }
 }
 
-// FP8/BF8 WMMA uses two eight-product steps. The wave64 layout swaps K bits
-// 2 and 3, as for dense eight-bit RdnaWmmaI32Policy::physical_k (unlike the
-// F16/BF16 wave32 permutation). Stage the whole result before writing overlapping D.
-template <bool A_FP8, bool B_FP8>
-void exec_gfx12_wmma_dot8(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
-                          uint32_t s2, std::optional<uint32_t> const_acc) {
+// Dense F16/BF16 WMMA with a VGPR or inline accumulator.
+template <bool Bf16, bool Packed = false>
+void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                          uint32_t s2, std::optional<uint32_t> const_acc, uint32_t neg,
+                          uint32_t neg_hi, bool fp16_ovfl = false) {
+  exec_gfx12_wmma_dot4_impl<Bf16, Packed, false>(cu, wave_size, dst, s0, s1, s2, const_acc, neg,
+                                                 neg_hi, fp16_ovfl, 0, 0);
+}
+
+// Sparse F16/BF16 WMMA reads its accumulator from the destination registers.
+template <bool Bf16, bool Packed = false>
+void exec_gfx12_swmmac_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                            uint32_t index_base, uint32_t index_key, uint32_t neg, uint32_t neg_hi,
+                            bool fp16_ovfl = false) {
+  exec_gfx12_wmma_dot4_impl<Bf16, Packed, true>(cu, wave_size, dst, s0, s1, dst, std::nullopt, neg,
+                                                neg_hi, fp16_ovfl, index_base, index_key);
+}
+
+// Compute a dense or sparse FP8/BF8 matrix result with two eight-product steps.
+// Destination storage may overlap factors, the accumulator, or sparse indices.
+template <bool A_FP8, bool B_FP8, bool Sparse>
+void exec_gfx12_wmma_dot8_impl(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                               uint32_t s2, std::optional<uint32_t> const_acc, uint32_t index_base,
+                               uint32_t index_key) {
   require_gfx12_wmma_wave_size(wave_size);
   std::array<uint32_t, 256> results;
   RegisterAccess regs(cu);
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       const auto out = gfx12_wmma_output_loc_32(wave_size, 16, 16, row, col);
-      // Assembler-accepted C ABS/NEG bit encodings do not modify C on gfx1201.
+      // C ABS/NEG bits have no effect for these FP8/BF8 forms.
       uint32_t acc = const_acc ? *const_acc : regs.read_vgpr(s2 + out.reg, out.lane);
       for (uint32_t k = 0; k < 16; k += 8) {
         std::array<uint8_t, 8> a, b;
         for (uint32_t j = 0; j < 8; ++j) {
           const uint32_t logical_k = k + j;
-          const uint32_t physical_k = wave_size == 64 ? wmma_swap_k_bits_2_3(logical_k) : logical_k;
-          const auto al = gfx12_wmma_input_loc(wave_size, 16, 16, row, physical_k, 8);
-          const auto bl = gfx12_wmma_input_loc(wave_size, 16, 16, col, physical_k, 8);
+          const auto [al, bl] = gfx12_wmma_dot_input_locs<8, Sparse>(
+              cu, wave_size, row, col, logical_k, index_base, index_key);
           a[j] = uint8_t(regs.read_vgpr(s0 + al.vgpr_offset, al.lane) >> al.bit_offset);
           b[j] = uint8_t(regs.read_vgpr(s1 + bl.vgpr_offset, bl.lane) >> bl.bit_offset);
         }
@@ -1982,11 +2039,27 @@ void exec_gfx12_wmma_dot8(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
       results[row * 16 + col] = acc;
     }
   }
+  // Defer all writes until every source (including sparse indices) has been read.
   for (uint32_t row = 0; row < 16; ++row)
     for (uint32_t col = 0; col < 16; ++col) {
       const auto out = gfx12_wmma_output_loc_32(wave_size, 16, 16, row, col);
       regs.write_vgpr(dst + out.reg, out.lane, results[row * 16 + col]);
     }
+}
+
+// Dense FP8/BF8 WMMA with F32 output and an optional inline accumulator.
+template <bool A_FP8, bool B_FP8>
+void exec_gfx12_wmma_dot8(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                          uint32_t s2, std::optional<uint32_t> const_acc) {
+  exec_gfx12_wmma_dot8_impl<A_FP8, B_FP8, false>(cu, wave_size, dst, s0, s1, s2, const_acc, 0, 0);
+}
+
+// Sparse FP8/BF8 WMMA reads its F32 accumulator from the destination registers.
+template <bool A_FP8, bool B_FP8>
+void exec_gfx12_swmmac_dot8(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                            uint32_t index_base, uint32_t index_key) {
+  exec_gfx12_wmma_dot8_impl<A_FP8, B_FP8, true>(cu, wave_size, dst, s0, s1, dst, std::nullopt,
+                                                index_base, index_key);
 }
 
 template <typename ExtractA, typename ExtractB>
@@ -2938,7 +3011,7 @@ enum class SwmmacK128Result { F32, F16 };
 /// AVX-512 fast path for gfx1250 16x16x128 FP8/BF8 SWMMAC. The sparse
 /// selectors occupy two VGPRs per lane. Snapshot both words and every matrix
 /// operand before writing D so D may alias A, B, C, or the index tuple.
-#if defined(__AVX512F__) && __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_AVX512_STDX_SIMD
 RJ_NOINLINE inline void exec_swmmac_16x16x128_8bit_fast_body(
     auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t acc_base, uint32_t index_base,
     SwmmacK128Input a_format, SwmmacK128Input b_format, SwmmacK128Result result_format,
@@ -3080,7 +3153,7 @@ template <typename ExtractA, typename ExtractB>
     uint32_t s1, uint32_t acc_base, uint32_t index_base, uint32_t index_entries, uint32_t index_key,
     ExtractA, ExtractB, SwmmacK128Result result_format, uint32_t const_acc = ACC_FROM_VGPR,
     uint32_t wave_size = WMMA_WAVE32, bool fp16_ovfl = false) {
-#if defined(__AVX512F__) && __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_AVX512_STDX_SIMD
   using A = std::remove_cvref_t<ExtractA>;
   using B = std::remove_cvref_t<ExtractB>;
   constexpr bool a_fp8 = std::is_same_v<A, ExtractFp8> || std::is_same_v<A, ExtractFp8Ocp>;
@@ -3117,6 +3190,8 @@ template <typename ExtractA, typename ExtractB>
   return false;
 }
 
+// Generic sparse-float execution for the remaining CDNA5 wave32 callers.
+// RDNA4 uses exec_gfx12_swmmac_dot4/dot8 for its measured arithmetic.
 template <typename ExtractA, typename ExtractB>
 void exec_swmmac_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t a_bits,
                            uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
@@ -3213,6 +3288,8 @@ void exec_swmmac_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
     RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
+// Generic sparse-float execution for the remaining CDNA5 wave32 callers.
+// RDNA4 uses exec_gfx12_swmmac_dot4/dot8 for its measured arithmetic.
 template <typename ExtractA, typename ExtractB>
 void exec_swmmac_f32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
                      uint32_t s0, uint32_t s1, uint32_t acc_base, uint32_t index_base,
@@ -3241,9 +3318,11 @@ void exec_swmmac_f32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_b
                         index_entries, index_key, ea, eb, const_acc, wave_size);
 }
 
-/// Execute sparse BF16F32 with its architectural mixed-width D/C contract:
-/// eight F32 accumulator registers are read and four packed-BF16 result
-/// registers are written. The encoding names the eight-register C view; the
+/// Execute sparse BF16F32 for the remaining CDNA5 wave32 callers.
+/// RDNA4 uses exec_gfx12_swmmac_dot4 for its measured arithmetic.
+/// The architectural mixed-width D/C contract reads eight F32 accumulator
+/// registers and writes four packed-BF16 result
+/// registers. The encoding names the eight-register C view; the
 /// generated operand metadata exposes that tied read separately from the
 /// four-register D definition. Runtime execution must leave dst+4 through
 /// dst+7 untouched.
@@ -3834,6 +3913,8 @@ void exec_wmma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32
   }
 }
 
+// Generic sparse-float execution for the remaining CDNA5 wave32 callers.
+// RDNA4 uses exec_gfx12_swmmac_dot4/dot8 for its measured arithmetic.
 template <typename ExtractA, typename ExtractB>
 void exec_swmmac_f16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
                      uint32_t s0, uint32_t s1, uint32_t acc_base, uint32_t index_base,
@@ -4076,6 +4157,8 @@ void exec_wmma_f16_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
   }
 }
 
+// Generic sparse-float execution for the remaining CDNA5 wave32 callers.
+// RDNA4 uses exec_gfx12_swmmac_dot4/dot8 for its measured arithmetic.
 template <typename ExtractA, typename ExtractB>
 void exec_swmmac_bf16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
                       uint32_t s0, uint32_t s1, uint32_t acc_base, uint32_t index_base,
@@ -4527,6 +4610,7 @@ void exec_rdna_wmma_i32_impl(auto &cu, uint32_t wave_size, uint32_t dst, uint32_
     for (uint32_t col = 0; col < 16; ++col)
       results[row * 16 + col] = static_cast<uint32_t>(c[col]);
   }
+  // Defer all writes until every source (including sparse indices) has been read.
   for (uint32_t row = 0; row < 16; ++row)
     for (uint32_t col = 0; col < 16; ++col) {
       const auto out = output_loc(row, col);
@@ -5248,7 +5332,7 @@ inline float smfmac_decode_snapshot(const uint32_t (&words)[Words], uint32_t ele
 /// publishing D: tied accumulators and overlapping A/B/index registers then
 /// have the same read-before-write behavior as the scalar helpers. Selected K
 /// positions are resolved once per row; the FMA loop retains q,s order.
-#if defined(__AVX512F__) && __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_AVX512_STDX_SIMD
 template <SmfmacLayout Layout, uint32_t M, uint32_t N, uint32_t K, typename ExtractA,
           typename ExtractB>
 RJ_NOINLINE inline void smfmac_avx512_fast_body(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
@@ -5344,7 +5428,7 @@ template <SmfmacLayout Layout, uint32_t M, uint32_t N, uint32_t K, typename Extr
 [[gnu::always_inline]] inline bool smfmac_try_avx512(auto &cu, uint32_t dst, uint32_t s0,
                                                      uint32_t s1, uint32_t idx_base, ExtractA,
                                                      ExtractB) {
-#if defined(__AVX512F__) && __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_AVX512_STDX_SIMD
   if (util::force_scalar() || cu.wf_size() != 64 || util::native<float>::size() != 16)
     return false;
 

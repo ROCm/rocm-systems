@@ -203,7 +203,20 @@ of touching hardware is still a **unit test**. Mocked and non-mocked unit tests 
 side by side under `unit/<component>/`, organized by *what* they test rather than *how* they are
 isolated.
 
-The cper suite shows both styles:
+#### Preferred approach: faking an entire external interface
+
+When a unit test needs to fake an entire external interface — sysfs, a synthetic registered
+device — rather than replaying a static fixture blob, follow the two-layer pattern established
+by the RAS `unit/gpu/` tests instead of designing an unrelated approach: reuse the universal,
+already-built processor-registration layer as-is, then investigate and seam only the
+backend-specific layer underneath (sysfs, ESMI, etc.) for the device type under test. This is
+the required convention for that category of test: see `docs/design/faking-external-interfaces.md`
+in the repository (internal design note, not part of the published docs) before writing one.
+
+#### Older approach: static fixture blobs
+
+The cper suite predates the pattern above and shows the older, still-supported style of
+replaying committed byte blobs instead of faking the interface that produced them:
 
 - `unit/gpu/cper_read_test.cc` — builds CPER byte blobs in memory at runtime (no fixtures); covers
   read-path edge cases and error handling (zero-size file, empty ring, partial reads, buffer
@@ -211,7 +224,7 @@ The cper suite shows both styles:
 - `unit/gpu/mock_cper_test.cc` — drives the same API against committed `.cper` fixtures and validates
   record counting and severity-mask filtering on realistic records.
 
-**To add a mocked unit test**, follow the `mock_cper` pattern:
+**To add a mocked unit test in this style**, follow the `mock_cper` pattern:
 
 1. Put the test at `unit/<component>/mock_<feature>_test.cc` and its fixtures in a sibling
    `unit/<component>/mock_<feature>/` folder — one folder per test, no shared catch-all.
