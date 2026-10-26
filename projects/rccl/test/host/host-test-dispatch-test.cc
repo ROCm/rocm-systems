@@ -616,8 +616,12 @@ TEST(HostDispatchArgsMicrotest, GtestAlsoRunDisabledEnvironmentSelectsAndForward
 
 TEST(HostDispatchArgsMicrotest, GtestAlsoRunDisabledFollowsGtestsFalsehood)
 {
-    // gtest's rule for its boolean variables: "0" is the only false value, unset aside.
+    // gtest's rule for its boolean variables: "0" is the only false value, unset aside. An empty
+    // value is set, so it is true -- reading it as false would skip the DISABLED_ cases a caller
+    // writing GTEST_ALSO_RUN_DISABLED_TESTS= asked gtest for.
+    EXPECT_FALSE(parseArgs({}, "", "", std::nullopt).alsoRunDisabled);
     EXPECT_FALSE(parseArgs({}, "", "", "0").alsoRunDisabled);
+    EXPECT_TRUE(parseArgs({}, "", "", "").alsoRunDisabled);
     EXPECT_TRUE(parseArgs({}, "", "", "anything else").alsoRunDisabled);
 }
 

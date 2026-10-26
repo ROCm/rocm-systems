@@ -653,14 +653,16 @@ void applyOutputSpec(std::string_view value, Options *options)
 // qualified names would select nothing in any of them while this process still asked for every
 // case. Taken here it is a default for the dispatcher's own filter, resolved over the published
 // names like a --gtest_filter flag, and clearConsumedEnvironment() keeps it from the children.
-// gtest's rule for a boolean GTEST_ variable: set and not "0" is true.
-bool environmentFlagIsSet(std::string_view value)
+// gtest's rule for a boolean GTEST_ variable: "0" is the only false value, unset aside. An empty
+// value is true, which is why the unset case is a nullopt rather than an empty string.
+bool environmentFlagIsSet(std::optional<std::string_view> value)
 {
-    return !value.empty() && value != "0";
+    return value && *value != "0";
 }
 
 Options parseArgs(const std::vector<std::string> &args, std::string_view outputEnv = "",
-                  std::string_view filterEnv = "", std::string_view disabledEnv = "")
+                  std::string_view filterEnv = "",
+                  std::optional<std::string_view> disabledEnv = std::nullopt)
 {
     constexpr std::string_view kFilterFlag = "--gtest_filter=";
     constexpr std::string_view kOutputFlag = "--gtest_output=";
@@ -1119,9 +1121,11 @@ int main(int argc, char **argv)
     const char *outputEnv = std::getenv("GTEST_OUTPUT");
     const char *filterEnv = std::getenv("GTEST_FILTER");
     const char *disabledEnv = std::getenv("GTEST_ALSO_RUN_DISABLED_TESTS");
-    const Options options = parseArgs(args, outputEnv == nullptr ? "" : outputEnv,
-                                      filterEnv == nullptr ? "" : filterEnv,
-                                      disabledEnv == nullptr ? "" : disabledEnv);
+    const Options options =
+        parseArgs(args, outputEnv == nullptr ? "" : outputEnv,
+                  filterEnv == nullptr ? "" : filterEnv,
+                  disabledEnv == nullptr ? std::nullopt
+                                         : std::optional<std::string_view>(disabledEnv));
     warnAboutUnknownGtestVariables(gtestVariablesToStrip());
 
     const std::string directory = selfDirectory(argv[0]);
