@@ -110,9 +110,11 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 120
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-multise-tool>"
-    ENVIRONMENT "TRIPLEBUFFER=1;ATT_LOOP_COUNT=1000"
+    ENVIRONMENT "TRIPLEBUFFER=1;ATT_LOOP_COUNT=2500"
     PASS_REGULAR_EXPRESSION "Multi-SE triple-buffer validation passed"
-    DISABLED ${TRIPLE_BUFFER_DISABLED})
+    DISABLED ${TRIPLE_BUFFER_DISABLED}
+    DISABLED_CODECOV
+    DISABLED_MEMCHECKS "Sanitizer")
 
 # Collects a lot of data, and check if parsing works successfully
 rocprofiler_add_integration_execute_test(

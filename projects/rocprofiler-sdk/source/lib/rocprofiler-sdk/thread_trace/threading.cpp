@@ -176,14 +176,16 @@ producer_loop(
 
     auto& submit_signal = *parameters.submit_signal;
 
-    auto                  start_t0 = std::chrono::system_clock::now();
-    bool                  do_sleep{false};
-    std::vector<uint64_t> next_chunk_indices(parameters.num_shader_engines);
-
-    std::vector<rocprofiler_thread_trace_timestamp_t> current_timestamps{};
+    auto   start_t0 = std::chrono::system_clock::now();
+    bool   do_sleep{false};
+    size_t num_shader_engines = 0;
     for(const auto& packet : buffer_packets)
-        current_timestamps.resize(
-            std::max(current_timestamps.size(), size_t(packet->shader_engine_id + 1)));
+        num_shader_engines = std::max(num_shader_engines, size_t(packet->shader_engine_id + 1));
+    ROCP_FATAL_IF(num_shader_engines > 64)
+        << "Triple buffering supports at most 64 shader engines, got " << num_shader_engines;
+
+    std::vector<uint64_t>                             next_chunk_indices(num_shader_engines);
+    std::vector<rocprofiler_thread_trace_timestamp_t> current_timestamps(num_shader_engines);
 
     auto sleep_fn = [&]() {
         sched_yield();
@@ -330,7 +332,6 @@ producer_loop(
     send_header();
     std::vector<hsa::sqtt_buffer_status_t> buffers_requiring_swap{};
     buffers_requiring_swap.reserve(buffer_packets.size());
-    auto swap_timestamps = current_timestamps;
 
     auto finish = common::scope_destructor{[&] {
         // Wake consumers on every exit; they drain filled slots before returning.
@@ -350,16 +351,19 @@ producer_loop(
         hsa::sqtt_buffer_status_t            status{};
         rocprofiler_thread_trace_timestamp_t start_ts{};
         rocprofiler_thread_trace_timestamp_t end_ts{};
-        int                                  flags{ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE};
     };
     std::deque<retired_buffer_t> retired_buffers{};
-    bool                         any_full = false;
+    uint64_t                     retired_mask = 0;  // Bit per SE with a buffer in retired_buffers
+    bool                         any_full     = false;
+
+    auto se_bit = [](int shader_engine_id) { return uint64_t{1} << shader_engine_id; };
 
     // Copies a retired buffer to a CPU slot. With allow_stop, stops the trace once if consumers
     // cannot keep up; this must only happen after the swaps of the current poll were submitted.
     auto copy_retired = [&](std::deque<retired_buffer_t>::iterator it, bool allow_stop) {
         size_t slot_idx = try_claim_slot();
-        int    flags    = it->flags;
+        int flags = it->status.gpu_full ? ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL
+                                        : ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
         if(slot_idx == num_buffers)
         {
             if(allow_stop)
@@ -379,6 +383,7 @@ producer_loop(
                          it->status.read_offset,
                          it->start_ts,
                          it->end_ts);
+        retired_mask &= ~se_bit(it->status.shader_engine_id);
         retired_buffers.erase(it);
         return true;
     };
@@ -444,21 +449,21 @@ producer_loop(
         // they are not delayed behind other engines' copies.
         std::stable_partition(
             buffers_requiring_swap.begin(), buffers_requiring_swap.end(), [&](const auto& status) {
-                return std::none_of(
-                    retired_buffers.begin(), retired_buffers.end(), [&](const auto& retired) {
-                        return retired.status.shader_engine_id == status.shader_engine_id;
-                    });
+                return (retired_mask & se_bit(status.shader_engine_id)) == 0;
             });
         // Swap packets carry the barrier bit and retire in order, so only the last one needs a
         // completion signal.
         for(size_t i = 0; i < buffers_requiring_swap.size(); i++)
         {
             auto& status = buffers_requiring_swap[i];
-            auto  it     = std::find_if(
-                retired_buffers.begin(), retired_buffers.end(), [&](const auto& retired) {
-                    return retired.status.shader_engine_id == status.shader_engine_id;
-                });
-            if(it != retired_buffers.end() && !copy_retired(it, false)) return;
+            if(retired_mask & se_bit(status.shader_engine_id))
+            {
+                auto it = std::find_if(
+                    retired_buffers.begin(), retired_buffers.end(), [&](const auto& retired) {
+                        return retired.status.shader_engine_id == status.shader_engine_id;
+                    });
+                if(!copy_retired(it, false)) return;
+            }
 
             const bool last = i + 1 == buffers_requiring_swap.size();
             ROCP_TRACE << "Sending buffer swap for SE " << status.shader_engine_id;
@@ -468,29 +473,19 @@ producer_loop(
         if(!buffers_requiring_swap.empty()) signal_wait(submit_signal);
         for(auto& status : buffers_requiring_swap)
         {
-            auto it =
-                std::find_if(buffer_packets.begin(), buffer_packets.end(), [&](const auto& packet) {
-                    return packet->shader_engine_id == status.shader_engine_id;
+            auto packet =
+                std::find_if(buffer_packets.begin(), buffer_packets.end(), [&](const auto& p) {
+                    return p->shader_engine_id == status.shader_engine_id;
                 });
-            swap_timestamps.at(status.shader_engine_id) =
-                convert_timestamp(queue.agent_id, (*it)->get_gpu_clock().latest);
-        }
-
-        for(auto& status : buffers_requiring_swap)
-        {
             auto& current_ts = current_timestamps.at(status.shader_engine_id);
-            auto  swap_ts    = swap_timestamps.at(status.shader_engine_id);
-            retired_buffers.push_back(
-                {status,
-                 current_ts,
-                 swap_ts,
-                 status.gpu_full ? ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL
-                                 : ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE});
+            auto  swap_ts    = convert_timestamp(queue.agent_id, (*packet)->get_gpu_clock().latest);
+            retired_buffers.push_back({status, current_ts, swap_ts});
+            retired_mask |= se_bit(status.shader_engine_id);
             current_ts = swap_ts;
         }
         buffers_requiring_swap.clear();
 
-        if(gpu_full && !any_full)
+        if(gpu_full)
         {
             if(!stop_trace()) return;
             any_full = true;
