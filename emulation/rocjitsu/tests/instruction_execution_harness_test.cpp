@@ -14,6 +14,8 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
@@ -1026,11 +1028,12 @@ struct FlatAtomicOpcodes {
   uint16_t add_u64;
 };
 
-// 8-byte FLAT atomics that resolve to dword-interleaved scratch return MEMVIOL,
-// while 4-byte private atomics are supported.
+// RDNA3/3.5/4 and CDNA5 specify MEMVIOL for 8-byte private FLAT atomics.
+// Earlier CDNA generations reject these as unsupported by the emulator; their
+// hardware fault policy is not established here. 4-byte private atomics remain supported.
 template <typename Isa, typename Encode>
 void check_private_flat_atomic64_faults(rj_code_arch_t arch, const FlatAtomicOpcodes &opcodes,
-                                        Encode encode) {
+                                        Encode encode, uint32_t wave_size = 32) {
   struct Case {
     uint16_t opcode;
     uint64_t exec;
@@ -1040,8 +1043,8 @@ void check_private_flat_atomic64_faults(rj_code_arch_t arch, const FlatAtomicOpc
   // its scratch dword sits directly after lane 1's.
   const std::array cases = {
       Case{opcodes.swap_b64, 0x3, true},  Case{opcodes.cmpswap_b64, 0x3, true},
-      Case{opcodes.add_u64, 0x3, true},   Case{opcodes.swap_b32, 0x3, false},
-      Case{opcodes.swap_b64, 0x1, false},
+      Case{opcodes.add_u64, 0x3, true},   Case{opcodes.swap_b64, 0x2, true},
+      Case{opcodes.swap_b32, 0x3, false}, Case{opcodes.swap_b64, 0x1, false},
   };
   for (const Case &test : cases) {
     SCOPED_TRACE(testing::Message() << "opcode=" << test.opcode << " exec=" << test.exec);
@@ -1061,16 +1064,16 @@ void check_private_flat_atomic64_faults(rj_code_arch_t arch, const FlatAtomicOpc
     constexpr uint32_t offset = 0x20;
     constexpr uint32_t canary = 0xdeadbeef;
     cu.set_apertures(shared_base, shared_base + 0xffff, private_base, private_base + 0xffff);
-    auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf, wave_size);
     ASSERT_NE(wf, nullptr);
-    ASSERT_EQ(wf->wf_size(), 32u);
+    ASSERT_EQ(wf->wf_size(), wave_size);
     wf->set_exec(test.exec);
     wf->set_scratch_base(scratch_base);
     wf->set_scratch_lane_size(128);
-    const auto scratch_address = [](uint32_t lane, uint32_t word) {
-      return scratch_base + (word * 32 + lane) * 4;
+    const auto scratch_address = [wave_size](uint32_t lane, uint32_t word) {
+      return scratch_base + (word * wave_size + lane) * 4;
     };
-    for (uint32_t lane = 0; lane < 32; ++lane)
+    for (uint32_t lane = 0; lane < wave_size; ++lane)
       for (uint32_t word = 0; word < 32; ++word)
         memory.write32(scratch_address(lane, word), canary);
     memory.write32(global_address, canary);
@@ -1105,7 +1108,7 @@ void check_private_flat_atomic64_faults(rj_code_arch_t arch, const FlatAtomicOpc
 
     const bool wide = test.opcode != opcodes.swap_b32;
     const bool private_written = !test.faults && (test.exec & 0x2);
-    for (uint32_t lane = 0; lane < 32; ++lane) {
+    for (uint32_t lane = 0; lane < wave_size; ++lane) {
       for (uint32_t word = 0; word < 32; ++word) {
         const uint32_t expected =
             private_written && lane == 1 && word == offset / 4 ? source(1, 0) : canary;
@@ -1122,6 +1125,62 @@ void check_private_flat_atomic64_faults(rj_code_arch_t arch, const FlatAtomicOpc
     }
     wf->halt();
   }
+}
+
+// Unsupported-operation protection, not an assertion about CDNA1's hardware fault policy.
+TEST(Cdna1MemoryExecutionHarness, PrivateFlatAtomic64IsUnsupportedBeforeAnySideEffect) {
+  check_private_flat_atomic64_faults<cdna1::Isa>(
+      ROCJITSU_CODE_ARCH_CDNA1,
+      {cdna1::kFlatAtomicSwapFlat, cdna1::kFlatAtomicSwapX2Flat, cdna1::kFlatAtomicCmpswapX2Flat,
+       cdna1::kFlatAtomicAddX2Flat},
+      [](uint16_t opcode) {
+        const auto encoded = cdna1::build_flat(
+            opcode, {.seg = 0, .glc = 1, .addr = 0, .data = 8, .saddr = 0x7F, .vdst = 16});
+        return std::array<uint32_t, 3>{encoded[0], encoded[1], 0};
+      },
+      64);
+}
+
+// Unsupported-operation protection, not an assertion about CDNA2's hardware fault policy.
+TEST(Cdna2MemoryExecutionHarness, PrivateFlatAtomic64IsUnsupportedBeforeAnySideEffect) {
+  check_private_flat_atomic64_faults<cdna2::Isa>(
+      ROCJITSU_CODE_ARCH_CDNA2,
+      {cdna2::kFlatAtomicSwapFlat, cdna2::kFlatAtomicSwapX2Flat, cdna2::kFlatAtomicCmpswapX2Flat,
+       cdna2::kFlatAtomicAddX2Flat},
+      [](uint16_t opcode) {
+        const auto encoded = cdna2::build_flat(
+            opcode, {.seg = 0, .glc = 1, .addr = 0, .data = 8, .saddr = 0x7F, .vdst = 16});
+        return std::array<uint32_t, 3>{encoded[0], encoded[1], 0};
+      },
+      64);
+}
+
+// Unsupported-operation protection, not an assertion about CDNA3's hardware fault policy.
+TEST(Cdna3MemoryExecutionHarness, PrivateFlatAtomic64IsUnsupportedBeforeAnySideEffect) {
+  check_private_flat_atomic64_faults<cdna3::Isa>(
+      ROCJITSU_CODE_ARCH_CDNA3,
+      {cdna3::kFlatAtomicSwapFlat, cdna3::kFlatAtomicSwapX2Flat, cdna3::kFlatAtomicCmpswapX2Flat,
+       cdna3::kFlatAtomicAddX2Flat},
+      [](uint16_t opcode) {
+        const auto encoded = cdna3::build_flat(
+            opcode, {.seg = 0, .sc0 = 1, .addr = 0, .data = 8, .saddr = 0x7F, .vdst = 16});
+        return std::array<uint32_t, 3>{encoded[0], encoded[1], 0};
+      },
+      64);
+}
+
+// Unsupported-operation protection, not an assertion about CDNA4's hardware fault policy.
+TEST(Cdna4MemoryExecutionHarness, PrivateFlatAtomic64IsUnsupportedBeforeAnySideEffect) {
+  check_private_flat_atomic64_faults<cdna4::Isa>(
+      ROCJITSU_CODE_ARCH_CDNA4,
+      {cdna4::kFlatAtomicSwapFlat, cdna4::kFlatAtomicSwapX2Flat, cdna4::kFlatAtomicCmpswapX2Flat,
+       cdna4::kFlatAtomicAddX2Flat},
+      [](uint16_t opcode) {
+        const auto encoded = cdna4::build_flat(
+            opcode, {.seg = 0, .sc0 = 1, .addr = 0, .data = 8, .saddr = 0x7F, .vdst = 16});
+        return std::array<uint32_t, 3>{encoded[0], encoded[1], 0};
+      },
+      64);
 }
 
 // RDNA3/3.5/4 section 11.1.
