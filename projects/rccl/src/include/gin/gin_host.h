@@ -9,6 +9,7 @@
 #define _NCCL_GIN_HOST_H_
 
 #include "allocator.h"
+#include "bitops.h"
 #include "nccl.h"
 #include "nccl_gin.h"
 #include "nccl_device/core_tmp.h"
@@ -76,6 +77,13 @@ struct ncclGinState {
   int numActiveBackends;
   struct ncclGinBackendState backends[NCCL_GIN_MAX_ACTIVE_BACKENDS];
 };
+
+// The ginContextCount a devComm gets from a backend with ginCommCount connections.
+// ncclDevrCommCreateInternal sizes per-context resource regions with it (via
+// devrGinContextsTotal), so the two must not diverge.
+static inline int ncclGinContextCount(int nGinContextsRequested, int ginCommCount) {
+  return ROUNDUP(nGinContextsRequested, ginCommCount);
+}
 
 extern int64_t ncclParamGinType();
 
