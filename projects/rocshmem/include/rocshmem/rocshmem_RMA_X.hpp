@@ -233,6 +233,11 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_wg(
  * granularity. However, all threads in a wave must participate in the
  * call using the same parameters.
  *
+ * On gfx1250 built with USE_TDM, this call uses the faster TDM (Tensor
+ * Data Mover) copy path if the workgroup registered an LDS buffer via
+ * rocshmem_set_tdm_lds(), split evenly across the block's waves;
+ * otherwise it falls back to the plain copy path.
+ *
  * @param[in] ctx    Context with which to perform this operation.
  * @param[in] dest   Destination address. Must be an address on the symmetric
  *                   heap.
@@ -258,6 +263,11 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem_wave(void *dest,
  * This function can be called from divergent control paths at per-workgroup
  * (WG) granularity. However, all threads in the workgroup must participate in
  * the call using the same parameters.
+ *
+ * On gfx1250 built with USE_TDM, this call uses the faster TDM (Tensor Data
+ * Mover) copy path if this workgroup registered an LDS buffer via
+ * rocshmem_set_tdm_lds() (see also rocshmem_query_tdm_lds_bytes()).
+ * Without registration, it falls back to the plain copy path.
  *
  * @param[in] ctx    Context with which to perform this operation.
  * @param[in] dest   Destination address. Must be an address on the symmetric
@@ -481,6 +491,11 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_get_wg(
  * granularity. However, all threads in a the wave must participate in the
  * call using the same parameters
  *
+ * On gfx1250 built with USE_TDM, this call uses the faster TDM (Tensor
+ * Data Mover) copy path if the workgroup registered an LDS buffer via
+ * rocshmem_set_tdm_lds(), split evenly across the block's waves;
+ * otherwise it falls back to the plain copy path.
+ *
  * @param[in] ctx     Context with which to perform this operation.
  * @param[in] dest    Destination address. Must be an address on the symmetric
  *                    heap.
@@ -505,6 +520,11 @@ __device__ ATTR_NO_INLINE void rocshmem_getmem_wave(void *dest,
  * This function can be called from divergent control paths at per-workgroup
  * (WG) granularity. However, all threads in the workgroup must participate
  * in the call using the same parameters
+ *
+ * On gfx1250 built with USE_TDM, this call uses the faster TDM (Tensor Data
+ * Mover) copy path if this workgroup registered an LDS buffer via
+ * rocshmem_set_tdm_lds() (see also rocshmem_query_tdm_lds_bytes()).
+ * Without registration, it falls back to the plain copy path.
  *
  * @param[in] ctx     Context with which to perform this operation.
  * @param[in] dest    Destination address. Must be an address on the symmetric
