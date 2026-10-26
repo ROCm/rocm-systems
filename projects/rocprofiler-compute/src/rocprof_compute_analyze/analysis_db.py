@@ -484,12 +484,13 @@ class db_analysis(OmniAnalyze_Base):
             Database.commit()
             csv_result_folder = Path(db_name).with_suffix("")
             # Before write_csv_dir, which closes the session these rows stream from.
-            per_kernel_folder = export_per_kernel_isa_files(
+            per_kernel_isa_files = export_per_kernel_isa_files(
                 csv_result_directory=csv_result_folder,
                 workload_isa_exports=self._build_workload_isa_exports(workload_objs),
             )
             export_per_source_line_files(
-                export_directory=per_kernel_folder,
+                export_directory=per_kernel_isa_files.directory,
+                isa_line_locations=per_kernel_isa_files.isa_line_locations,
                 workload_source_line_exports=(
                     self._build_workload_source_line_exports(workload_objs)
                 ),
@@ -497,7 +498,7 @@ class db_analysis(OmniAnalyze_Base):
             Database.write_csv_dir(csv_result_folder)
             export_source_snapshot_files(
                 workload_source_snapshots=workload_source_snapshots,
-                export_directory=per_kernel_folder,
+                export_directory=per_kernel_isa_files.directory,
             )
         else:
             Database.create_views()
@@ -848,19 +849,14 @@ class db_analysis(OmniAnalyze_Base):
     ) -> None:
         """Insert one sample state for each source line of the sampled instructions.
 
-        An instruction counts once toward each distinct source line of its inline
-        stack.
+        An instruction counts toward each source line of its inline stack.
         """
         instruction_lines_by_source_line: DefaultDict[
             orm.SourceLine, List[InstructionLineRecord]
         ] = defaultdict(list)
         for instruction_line, line in sampled_instruction_lines:
-            # Drop repeated source lines, and keep the order of the inline stack.
-            source_lines = dict.fromkeys(
-                frame.source_line for frame in instruction_line.source_lines
-            )
-            for source_line in source_lines:
-                instruction_lines_by_source_line[source_line].append(line)
+            for frame in instruction_line.source_lines:
+                instruction_lines_by_source_line[frame.source_line].append(line)
 
         for source_line, lines in instruction_lines_by_source_line.items():
             db_analysis._add_pc_sample_state(

@@ -1092,28 +1092,29 @@ def test_per_kernel_isa_select_leads_with_the_file_key_columns():
     ]
 
 
-def test_per_source_line_rows_read_each_lines_state_and_references(db_session):
-    """Each source line of a captured file has its sample state and ISA references."""
+def test_per_source_line_rows_read_each_lines_state_and_instructions(db_session):
+    """Each source line of a captured file has its sample state and instructions."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     source_file = add_captured_source_file(db_session, workload, "/s/a.cpp", 3)
     add_captured_source_file(db_session, workload, "/s/hip.h", 2)
-    for code_object_id, source in (
-        (5, "/s/hip.h:2 -> /s/a.cpp:2"),
-        # A source line that appears twice in one inline stack is referenced once.
-        (6, "/s/a.cpp:2 -> /s/a.cpp:2"),
-        (7, "/s/a.cpp:?"),
-        (8, "/s/absent.cpp:1"),
-    ):
-        add_pc_sampling_state(
+    instruction_lines = {
+        code_object_id: add_pc_sampling_state(
             db_session,
             workload=workload,
             kernel=kernel,
             pid=42,
             code_object_id=code_object_id,
             source=source,
+        ).instruction_line
+        for code_object_id, source in (
+            (5, "/s/hip.h:2 -> /s/a.cpp:2"),
+            (6, "/s/a.cpp:2"),
+            (7, "/s/a.cpp:?"),
+            (8, "/s/absent.cpp:1"),
         )
-    # Only a.cpp:2 has a sample state, so hip.h:2 has ISA references but no counts.
+    }
+    # Only a.cpp:2 has a sample state, so hip.h:2 has instructions but no counts.
     line_state = PCSampleState(
         source_line=source_file.source_lines[1],
         total_count=8,
@@ -1134,10 +1135,14 @@ def test_per_source_line_rows_read_each_lines_state_and_references(db_session):
     ])
     db_session.commit()
 
+    code_object_ids = {
+        instruction_line.instruction_uuid: code_object_id
+        for code_object_id, instruction_line in instruction_lines.items()
+    }
     rows = [
         (
             *row[:-1],
-            [isa_reference["code_object_id"] for isa_reference in json.loads(row[-1])],
+            sorted(code_object_ids[uuid] for uuid in json.loads(row[-1])),
         )
         for row in Database.stream_per_source_line_rows(
             workload.workload_id, ["NONE", "WAITCNT"]
