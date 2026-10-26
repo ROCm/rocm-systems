@@ -4024,6 +4024,11 @@
           "name": "Grow_RankPreservation_NetBidir",
           "description": "Regression for AICOMRCCL-3004: rank indices preserved after grow with net bidir OOB enabled",
           "test_filter": "GrowMPITest.Grow_RankPreservation"
+        },
+        {
+          "name": "Grow_CoordinatorOnlyUniqueId_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: coordinator-only uniqueId grow with net bidir OOB enabled, exercising inner existing ranks that run with nHandles==0 under NCCL_BOOTSTRAP_BIDIR_NET=1",
+          "test_filter": "GrowMPITest.Grow_CoordinatorOnlyUniqueId"
         }
       ]
     },
