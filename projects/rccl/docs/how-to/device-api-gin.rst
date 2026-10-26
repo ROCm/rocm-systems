@@ -146,9 +146,10 @@ rails is rejected.
    reqs.ginSignalCount = 1;
    reqs.barrierCount = 1;
 
-A stride of ``0``, a stride larger than the rail team, or a stride that is not
-a multiple of ``ginMinStride`` fails device-communicator creation with
-``ncclInvalidUsage``. Puts and gets are valid only for peers on that stride.
+A stride of ``0`` fails device-communicator creation with ``ncclInvalidUsage``.
+A stride larger than the rail team, or a stride that is not a multiple of
+``ginMinStride``, fails creation with ``ncclInternalError``. Puts and gets are
+valid only for peers on that stride.
 A generic ``ncclBarrierSession`` on the world team, with a fence that includes
 ``ncclGinFenceLevel::Put``, synchronizes the local team and then the ranks
 connected at ``ginCustomStride``.
