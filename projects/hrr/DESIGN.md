@@ -353,23 +353,16 @@ HRR's writes to the live tables and the HIP entry points follow one contract:
 - Every HIP entry point in `hip_table_interface.cpp` loads its slot with an acquire load,
   `hip::LoadDispatchSlot` from `projects/clr/hipamd/src/hip_dispatch_load.hpp`, through
   the `HIP_LOAD_DISPATCH_TABLE_FN` and `HIP_LOAD_COMPILER_TABLE_FN` macros.
-- Both sides use the `__atomic` builtins outside Windows and `std::atomic_ref<void*>` on
-  Windows.
 
 The contract covers HRR's writer only. For a slot that HRR writes, a caller therefore
 gets either the old function or the new one. The acquire load pairs
 with the release store, so a shim also sees what was written before its install, such
 as `g_real_table`. An acquire load of a pointer is a plain load on x86-64 and `LDAR` on
-AArch64. `hrr-unit-tests-tsan` races the store against the load under ThreadSanitizer.
-`hrr-unit-tests-dispatch-readers` fails if an entry point reads its slot directly, or if
-either macro stops going through `hip::LoadDispatchSlot`. The workflow
-`.github/workflows/hip-dispatch-slot-loads.yml` runs both on every pull request that
-changes `hip_table_interface.cpp` or `hip_dispatch_load.hpp`.
+AArch64.
 
 Other writers do not follow the contract yet. The CLR profiler
 (`projects/clr/hipamd/src/profiler/hip_clr_dispatch_wrappers.cpp`) installs and removes
-its wrappers with a whole-table `memcpy`, and keeps doing so until AIRUNTIME-2845
-(PR #13260) lands. rocprofiler-register tools write slots with
+its wrappers with a whole-table `memcpy`. rocprofiler-register tools write slots with
 ordinary stores during `ToolsInit()` in `hip_api_trace.cpp`. Those writes can race
 with the entry points.
 
