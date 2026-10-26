@@ -130,13 +130,14 @@ extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseAllGatherDirect;
 extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseReduceScatterDirect;
 // RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1).
 extern int64_t g_rcclParamDdaEnable;
+
 // -------------------------------------------------------------------------
 // DDA params and thresholds. Defaults match rccl_wrap.cc with no arch table.
 // -------------------------------------------------------------------------
 extern int64_t g_rcclParamDdaLL;      // 1
 extern int64_t g_rcclParamDdaLL128;   // kDdaThresholdUnset
 extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold;  // kDdaLLBaseDefault, UNDRIVEN
-extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold;  // kDdaLL128BaseDefault
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold;  // 0
 extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaVmmThreshold;  // kDdaVmmBaseDefault, UNDRIVEN
 extern std::function<size_t(const struct ncclComm*)> g_rcclDdaScratchPayloadCap;
 

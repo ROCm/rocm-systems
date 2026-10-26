@@ -273,7 +273,8 @@ int64_t g_rcclParamDdaLL128 = kDdaThresholdUnset;  // RCCL_PARAM(DdaLL128) defau
 int64_t rcclParamDdaLL128() { return g_rcclParamDdaLL128; }
 
 static size_t DefaultDdaLLThreshold(const struct ncclComm*, ncclFunc_t) { return kDdaLLBaseDefault; }
-static size_t DefaultDdaLL128Threshold(const struct ncclComm*, ncclFunc_t) { return kDdaLL128BaseDefault; }
+// DDA_LL128 unset with no arch table: off.
+static size_t DefaultDdaLL128Threshold(const struct ncclComm*, ncclFunc_t) { return 0; }
 static size_t DefaultDdaVmmThreshold(const struct ncclComm*, ncclFunc_t) { return kDdaVmmBaseDefault; }
 static size_t DefaultDdaScratchPayloadCap(const struct ncclComm*) {
   return std::max({kDdaLLBaseDefault, kDdaLL128BaseDefault, kDdaVmmBaseDefault});
