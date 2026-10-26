@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/kmd/linux/scoped_cancellation_disable.h"
 #include "util/log.h"
 #include "util/unique_handle.h"
 
@@ -590,6 +591,7 @@ bool RemoteDriver::handles_drm_render_minor(uint32_t minor) const {
 }
 
 int RemoteDriver::reissue_synthetic_kfd_fd() {
+  ScopedCancellationDisable cancellation;
   // Create a high-numbered synthetic KFD fd to avoid collisions with ROCR's
   // internal fd lifecycle. Use the top of the current rlimit range (same
   // approach as SimulatedKfd::init_reserved_fd_range).
@@ -645,6 +647,7 @@ int RemoteDriver::close() {
       rpc_send_exact(sock_, &hdr, sizeof(hdr));
     }
 
+    ScopedCancellationDisable cancellation;
     if (sock_ >= 0) {
       libc_passthrough().close(sock_);
       sock_ = -1;
@@ -1381,6 +1384,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   }
 
   if (request == AMDKFD_IOC_FREE_MEMORY_OF_GPU && resp->result == 0) {
+    ScopedCancellationDisable cancellation;
     auto *free_args = static_cast<kfd_ioctl_free_memory_of_gpu_args *>(arg);
     if (auto it = handle_memfds_.find(free_args->handle); it != handle_memfds_.end()) {
       int freed_memfd = it->second;

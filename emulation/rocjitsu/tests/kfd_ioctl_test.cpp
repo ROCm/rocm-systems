@@ -1966,6 +1966,8 @@ TEST_F(KfdIoctlCdna5Test, SdmaCreateNormalizesSmallRingsAndRejectsNonPowersOfTwo
 }
 
 TEST_F(KfdIoctlCdna5Test, BusySdmaUpdatePreservesPublishedRingGeometry) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   const long host_page_size = ::sysconf(_SC_PAGESIZE);
   ASSERT_GT(host_page_size, 0);
   const size_t doorbell_page_size = static_cast<size_t>(host_page_size);
@@ -2202,6 +2204,8 @@ protected:
 };
 
 TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
+  if (GetParam().debugger && !rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   const uint32_t exception_event_id = GetParam().polling ? 0 : 37;
   constexpr uint64_t kWaveIllegalInstruction = KFD_EC_MASK(EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION);
@@ -2463,6 +2467,8 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<InstructionRejectionCase> &info) { return info.param.name; });
 
 TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kTrapHandlerAddress = 0x600001000ULL;
   constexpr uint32_t kExceptionEventId = 37;
@@ -2850,19 +2856,27 @@ void KfdIoctlCdna5Test::expect_failed_runtime_exception(bool reject_overlapping_
 }
 
 TEST_F(KfdIoctlCdna5Test, RuntimeExceptionTimeoutRetainsEventForLaterDebugger) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   expect_failed_runtime_exception(/*reject_overlapping_debug_notification=*/false);
 }
 
 TEST_F(KfdIoctlCdna5Test, RuntimeExceptionTimeoutSurvivesRejectedDebuggerNotification) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   expect_failed_runtime_exception(/*reject_overlapping_debug_notification=*/true);
 }
 
 TEST_F(KfdIoctlCdna5Test, MissingRuntimeStatusBeforeAcknowledgmentRetainsEvent) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   expect_failed_runtime_exception(/*reject_overlapping_debug_notification=*/false,
                                   /*unmap_status_on_interrupt=*/true);
 }
 
 TEST_F(KfdIoctlCdna5Test, DebuggerResumeRejectsPendingRuntimeExceptionPublication) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kTrapHandlerAddress = 0x600001000ULL;
   constexpr uint64_t kExceptionStatusAddress = 0x600002000ULL;
@@ -3015,6 +3029,8 @@ TEST_F(KfdIoctlCdna5Test, DebuggerResumeRejectsPendingRuntimeExceptionPublicatio
 }
 
 TEST_F(KfdIoctlCdna5Test, DebuggerForwardsQueueExceptionsWithoutRuntimeAcknowledgment) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kExceptionStatusAddress = 0x600900000ULL;
   constexpr uint32_t kExceptionEventId = 84;
   constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
@@ -3874,7 +3890,8 @@ TEST_F(KfdIoctlTest, DbgTrapUnknownPidReturnsESRCH) {
   kfd_ioctl_dbg_trap_args args{};
   args.pid = 0x7fffffff; // a pid that maps to no emulated process
   args.op = KFD_IOC_DBG_TRAP_ENABLE;
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), -ESRCH);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args),
+            rocjitsu::libc_passthrough().pidfd_open ? -ESRCH : -ENOSYS);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapInvalidPidReturnsESRCH) {
@@ -3908,6 +3925,10 @@ TEST_F(KfdIoctlTest, DbgTrapWithoutLibcPidfdWrapperReturnsEnosys) {
   args.op = KFD_IOC_DBG_TRAP_ENABLE;
   args.enable.dbg_fd = make_debug_fd();
   auto &libc = rocjitsu::libc_passthrough();
+  const char *missing = std::getenv("ROCJITSU_TEST_MISSING_LIBC_WRAPPER");
+  if (missing && std::string_view(missing) == "pidfd_open") {
+    EXPECT_EQ(libc.pidfd_open, nullptr);
+  }
   const auto saved_pidfd_open = std::exchange(libc.pidfd_open, nullptr);
   const int result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args);
   args.op = KFD_IOC_DBG_TRAP_DISABLE;
@@ -3916,14 +3937,19 @@ TEST_F(KfdIoctlTest, DbgTrapWithoutLibcPidfdWrapperReturnsEnosys) {
   const int inactive_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args);
   args.pid = 0x7fffffff;
   const int absent_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args);
+  args.op = KFD_IOC_DBG_TRAP_ENABLE;
+  const int absent_enable_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args);
   libc.pidfd_open = saved_pidfd_open;
   EXPECT_EQ(result, -ENOSYS);
   EXPECT_EQ(disable_result, -EINVAL);
   EXPECT_EQ(inactive_result, -EINVAL);
   EXPECT_EQ(absent_result, -ESRCH);
+  EXPECT_EQ(absent_enable_result, -ENOSYS);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapEnablePopulatesRuntimeInfoThenDisable) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   // ROCr's runtime-enable must have run for the session to report ENABLED.
   kfd_ioctl_runtime_enable_args rt{};
   rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK | KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK;
@@ -3952,6 +3978,8 @@ TEST_F(KfdIoctlTest, DbgTrapEnablePopulatesRuntimeInfoThenDisable) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDoubleEnableReturnsEALREADY) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_dbg_trap_args args{};
   args.pid = static_cast<uint32_t>(getpid());
   args.op = KFD_IOC_DBG_TRAP_ENABLE;
@@ -3969,6 +3997,8 @@ TEST_F(KfdIoctlTest, DbgTrapDoubleEnableReturnsEALREADY) {
 // and runtime_mutex_. In local mode the session never owns dbg_fd, so a single
 // shared eventfd can back every ENABLE.
 TEST_F(KfdIoctlTest, DbgTrapConcurrentEnableDisableIsRaceFree) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   const int fd = make_debug_fd();
   const auto pid = static_cast<uint32_t>(getpid());
   constexpr int kThreads = 8;
@@ -4001,6 +4031,8 @@ TEST_F(KfdIoctlTest, DbgTrapConcurrentEnableDisableIsRaceFree) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapEnableBadFdReturnsEBADF) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   // kfd_dbg_trap_enable() fails with -EBADF when it cannot fget(dbg_fd); an
   // unusable notification target must not be stored on the session.
   kfd_ioctl_dbg_trap_args args{};
@@ -4022,6 +4054,8 @@ TEST_F(KfdIoctlTest, DbgTrapEnableBadFdReturnsEBADF) {
 // validates the access mode (fcntl F_GETFL) and rejects a non-writable fd with
 // -EBADF, matching a closed one; it must not be stored on the session.
 TEST_F(KfdIoctlTest, DbgTrapEnableReadOnlyFdReturnsEBADF) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   const int ro_fd = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
   ASSERT_GE(ro_fd, 0);
   debug_fds_.push_back(ro_fd); // closed in TearDown
@@ -4040,6 +4074,8 @@ TEST_F(KfdIoctlTest, DbgTrapEnableReadOnlyFdReturnsEBADF) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapEnableAcceptsPrimaryKfdDescriptor) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   alignas(rocjitsu::amdgpu::kAqlPacketBytes) std::array<uint8_t, 4096> ring{};
   uint64_t read_pointer = 0;
@@ -4097,6 +4133,8 @@ TEST_F(KfdIoctlTest, DbgTrapEnableAcceptsPrimaryKfdDescriptor) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapNotificationFallsBackWithoutClonePidfd) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   alignas(rocjitsu::amdgpu::kAqlPacketBytes) std::array<uint8_t, 4096> ring{};
   uint64_t read_pointer = 0;
@@ -4156,6 +4194,8 @@ TEST_F(KfdIoctlTest, DbgTrapNotificationFallsBackWithoutClonePidfd) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapNotificationWriterStaysOutsidePtraceDomain) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   alignas(rocjitsu::amdgpu::kAqlPacketBytes) std::array<uint8_t, 4096> ring{};
   uint64_t read_pointer = 0;
@@ -4270,26 +4310,38 @@ TEST_F(KfdIoctlTest, DbgTrapNotificationWriterStaysOutsidePtraceDomain) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDirectWakeSurvivesQueryBeforeCommit) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   expect_queue_wakeup_after_early_query(false);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapRetryWakeSurvivesQueryBeforeCommit) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   expect_queue_wakeup_after_early_query(true);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapProcessEventAfterEarlyQueryAndCommitGetsNewWake) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   expect_process_notification_after_early_query(false);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapProcessEventBetweenEarlyQueryAndCommitGetsNewWake) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   expect_process_notification_after_early_query(true);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapProcessEventAfterEarlyInfoClearGetsNewWake) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   expect_process_notification_after_early_query(false, true);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapQueueNewSurvivesFailedWake) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   const int notifier = make_debug_fd();
   kfd_ioctl_dbg_trap_args enable{};
   enable.pid = static_cast<uint32_t>(getpid());
@@ -4329,6 +4381,8 @@ TEST_F(KfdIoctlTest, DbgTrapQueueNewSurvivesFailedWake) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapPendingQueueNewNotificationStillRejectsSuspend) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_runtime_enable_args runtime{};
   runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
@@ -4398,6 +4452,8 @@ void record_notification_signal(int) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapNotifierChildDoesNotRunApplicationSignalHandler) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   int notifier[2];
   int marker[2];
   ASSERT_EQ(::pipe2(notifier, O_CLOEXEC | O_NONBLOCK), 0);
@@ -4436,6 +4492,8 @@ TEST_F(KfdIoctlTest, DbgTrapNotifierChildDoesNotRunApplicationSignalHandler) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapFifoNotifierWritesOneBytePerEvent) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   alignas(rocjitsu::amdgpu::kAqlPacketBytes) std::array<uint8_t, 4096> ring{};
   uint64_t read_pointer = 0;
@@ -4499,6 +4557,8 @@ TEST_F(KfdIoctlTest, DbgTrapFifoNotifierWritesOneBytePerEvent) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr std::string_view kProbe = "competing-notifier-writer";
   if (!is_isolated_probe(kProbe)) {
     EXPECT_EQ(run_isolated_test_probe(
@@ -4609,6 +4669,8 @@ TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapSubscriptionLossAfterWriteRejectsClaim) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kDebuggerOnly = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   constexpr uint64_t kRuntimeRoutable = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
   alignas(rocjitsu::amdgpu::kAqlPacketBytes) std::array<uint8_t, 4096> ring{};
@@ -4685,6 +4747,8 @@ TEST_F(KfdIoctlTest, DbgTrapSubscriptionLossAfterWriteRejectsClaim) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapUnrelatedMaskChangePreservesDebuggerOwnership) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kPublished = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
   constexpr uint64_t kUnrelated = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   alignas(rocjitsu::amdgpu::kAqlPacketBytes) std::array<uint8_t, 4096> ring{};
@@ -4759,29 +4823,39 @@ TEST_F(KfdIoctlTest, DbgTrapUnrelatedMaskChangePreservesDebuggerOwnership) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapAddingCombinedEventBitPreservesDebuggerOwnership) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kMemoryViolation = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
   constexpr uint64_t kCombined = kMemoryViolation | KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   expect_combined_event_subscription_transition(kMemoryViolation, kCombined);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapReplacingCombinedEventBitPreservesDebuggerOwnership) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   expect_combined_event_subscription_transition(KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION),
                                                 KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
 }
 
 TEST_F(KfdIoctlTest, DbgTrapRetryPreservesCombinedEventOwnershipAcrossBitReplacement) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   expect_combined_event_subscription_transition(KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION),
                                                 KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
                                                 /*publish_from_retry=*/true);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapNarrowingCombinedEventClaimPreservesDebuggerOwnership) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kMemoryViolation = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
   constexpr uint64_t kCombined = kMemoryViolation | KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   expect_combined_event_subscription_transition(kCombined, kMemoryViolation);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapHwOpWithoutRuntimeReturnsEPERM) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
@@ -4796,6 +4870,8 @@ TEST_F(KfdIoctlTest, DbgTrapHwOpWithoutRuntimeReturnsEPERM) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapWatchBadGpuReturnsENODEV) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_runtime_enable_args rt{};
   rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &rt), 0);
@@ -4815,6 +4891,8 @@ TEST_F(KfdIoctlTest, DbgTrapWatchBadGpuReturnsENODEV) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapQueryDebugEventReportsIdle) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
@@ -4836,6 +4914,8 @@ TEST_F(KfdIoctlTest, DbgTrapQueryDebugEventReportsIdle) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapQueryRuntimeExceptionInfoClampsAndPopulates) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_runtime_enable_args runtime{};
   runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK | KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK;
   runtime.r_debug = 0x123456789abcdef0ULL;
@@ -4878,6 +4958,8 @@ TEST_F(KfdIoctlTest, DbgTrapQueryRuntimeExceptionInfoClampsAndPopulates) {
 // ioctl. That keeps the test to what a single process can observe -- the event,
 // the notifier, and the toggled state rocdbgapi reads back.
 TEST_F(KfdIoctlTest, RuntimeDisableReportsProcessRuntimeTransition) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   const auto pid = static_cast<uint32_t>(getpid());
 
   kfd_ioctl_runtime_enable_args runtime{};
@@ -4957,6 +5039,8 @@ TEST_F(KfdIoctlTest, RuntimeDisableReportsProcessRuntimeTransition) {
 }
 
 TEST_F(KfdIoctlTest, RuntimeEnableRetainsMaskedProcessEventUntilEnabled) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   const auto pid = static_cast<uint32_t>(getpid());
   const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(notifier, 0);
@@ -5004,6 +5088,8 @@ TEST_F(KfdIoctlTest, RuntimeEnableRetainsMaskedProcessEventUntilEnabled) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapProcessRetryPreservesCombinedEventOwnershipAcrossBitReplacement) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kRuntime = KFD_EC_MASK(EC_PROCESS_RUNTIME);
   constexpr uint64_t kDeviceRemove = KFD_EC_MASK(EC_PROCESS_DEVICE_REMOVE);
   constexpr uint64_t kCombined = kRuntime | kDeviceRemove;
@@ -5075,6 +5161,8 @@ TEST_F(KfdIoctlTest, DbgTrapProcessRetryPreservesCombinedEventOwnershipAcrossBit
 }
 
 TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOpsValidateAndResetState) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_runtime_enable_args rt{};
   rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &rt), 0);
@@ -5163,6 +5251,8 @@ TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOpsValidateAndResetState) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapQueueControlOnlyChangesRequestedQueue) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_runtime_enable_args runtime{};
   runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
@@ -5228,6 +5318,8 @@ TEST_F(KfdIoctlTest, DbgTrapQueueControlOnlyChangesRequestedQueue) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapWaveLaunchOverrideValidatesRequest) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_runtime_enable_args runtime{};
   runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
@@ -5258,6 +5350,8 @@ TEST_F(KfdIoctlTest, DbgTrapWaveLaunchOverrideValidatesRequest) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapNodeAddressWatchAllocatesAndFreesSlots) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_runtime_enable_args runtime{};
   runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
@@ -5362,6 +5456,8 @@ TEST(KfdAddressWatchTest, AtomicAccessTripsNonreadAndAtomicWatches) {
 // DISABLE must leave it open for the debugger to close. Only daemon mode, which
 // dup'd the fd via SCM_RIGHTS, releases it on teardown.
 TEST_F(KfdIoctlTest, DbgTrapLocalDisableLeavesDebuggerFdOpen) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   const int fd = make_debug_fd();
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
@@ -5378,6 +5474,8 @@ TEST_F(KfdIoctlTest, DbgTrapLocalDisableLeavesDebuggerFdOpen) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDisableResumesStoppedQueue) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   const int fd = make_debug_fd();
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
@@ -5425,6 +5523,8 @@ TEST_F(KfdIoctlTest, DbgTrapDisableResumesStoppedQueue) {
 // the full struct size. An undersized buffer must truncate the copy — never
 // writing past the caller's buffer — while still reporting sizeof(kfd_runtime_info).
 TEST_F(KfdIoctlTest, DbgTrapEnableUndersizedRuntimeInfoTruncates) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_runtime_enable_args rt{};
   rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
   rt.r_debug = 0xcafef00d;
@@ -5460,6 +5560,8 @@ TEST_F(KfdIoctlTest, DbgTrapEnableUndersizedRuntimeInfoTruncates) {
 // marshalling — a crash there would take the server thread, and thus this test
 // process, down.
 TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   ASSERT_NE(soc_, nullptr);
 
   rocjitsu::SimulatedKfd daemon_driver(*soc_, /*daemon_mode=*/true);
@@ -5854,6 +5956,9 @@ TEST(RemoteDriverPtracerGrantTest, RefusesAPeerBelongingToAnotherUser) {
 class DbgTrapDaemonTest : public ::testing::Test {
 protected:
   void SetUp() override {
+    rocjitsu::libc_passthrough().resolve();
+    if (!rocjitsu::libc_passthrough().pidfd_open)
+      GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
     ASSERT_EQ(rj_vm_create(CONFIG_PATH.c_str(), RJ_VM_MODE_DAEMON, &vm_), ROCJITSU_STATUS_SUCCESS);
     ASSERT_NE(vm_, nullptr);
     ASSERT_EQ(rj_vm_device_open(vm_, kClientPid, &process_id_), ROCJITSU_STATUS_SUCCESS);
@@ -7850,6 +7955,8 @@ TEST_F(KfdIoctlTest, DestructorDrainsMultiplyOpenedProcess) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
@@ -7914,6 +8021,8 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
 // and with the caller's num_devices/entry_size left exactly as they were. A
 // caller cannot read a device total off a call that failed this way.
 TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotRejectsNullBufferWithoutWritingOutputs) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
@@ -7942,6 +8051,8 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotRejectsNullBufferWithoutWritingOutputs
 // and writes nothing -- the caller learns the count without providing room for
 // a single entry.
 TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
@@ -7966,6 +8077,8 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesMultipleAgentsWithCallerStride) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint32_t kSecondGpuId = kGpuId + 1;
   auto first_soc = load_standalone_soc(CONFIG_PATH);
   auto second_soc = load_standalone_soc(CONFIG_PATH);
@@ -8043,6 +8156,8 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesMultipleAgentsWithCallerStri
 // described set would hand rocdbgapi entries with simd_count or array_count
 // zero, which its agent_snapshot treats as fatal rather than as a bad ioctl.
 TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesOnlyDescribableDevices) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint32_t kSecondGpuId = kGpuId + 1;
   constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
   constexpr uint8_t kSentinel = 0xAB;
@@ -8201,6 +8316,8 @@ TEST(KfdTopologyTest, EffectiveTopologyDerivesGfx121Capability2) {
 }
 
 TEST_F(KfdIoctlCdna5Test, DbgTrapCwsrRoundTripPreservesGfx1250WaveState) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kCwsrAddress = 0x600100000ULL;
   constexpr uint32_t kCwsrSize = 0x40000;
   constexpr uint32_t kStatus = 1u | (5u << 1) | (1u << 7) | (1u << 19);
@@ -8492,6 +8609,8 @@ TEST_F(KfdIoctlCdna5Test, ScratchGrowthPreservesSpillsFromOverlappingDispatches)
 }
 
 TEST_F(KfdIoctlCdna5Test, DbgTrapPublishesAndRestoresSecondQueueAcrossActiveXccAreas) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kQueue0CwsrAddress = 0x610000000ULL;
   constexpr uint64_t kQueue1CwsrAddress = 0x620000000ULL;
   constexpr uint32_t kCwsrSize = 0x40000;
@@ -8611,6 +8730,8 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapPublishesAndRestoresSecondQueueAcrossActiveXccA
 // CWSR area (from which it walks wave save state). GET_QUEUE_SNAPSHOT must
 // report the ctx_save_restore address/size captured at CREATE_QUEUE.
 TEST_F(KfdIoctlTest, DbgTrapQueueSnapshotEnumeratesQueues) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
@@ -8781,6 +8902,8 @@ TEST_F(KfdIoctlTest, DbgTrapQueueSnapshotEnumeratesQueues) {
 }
 
 TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitCwsrSuspend) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kPeerAddress = 0x600001000ULL;
   constexpr uint64_t kTrapHandlerAddress = 0x600080000ULL;
@@ -9267,6 +9390,8 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
 }
 
 TEST_F(KfdIoctlCdna5Test, FailedRuntimeDeliveryDoesNotSuppressLaterDebuggerOwner) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kTrapHandlerAddress = 0x600080000ULL;
   constexpr uint64_t kCwsrAddress = 0x600100000ULL;
@@ -9460,6 +9585,8 @@ rocjitsu::amdgpu::Wavefront *fault_a_wave_on_a_scalar_load(rocjitsu::SoC *soc,
 // thing that could resume it is a debugger reading that record. The fault
 // therefore takes its ordinary undebugged path instead.
 TEST_F(KfdIoctlRdna3Test, DbgTrapDeclinesWaveStopsOnAPartWithNoModelledCwsrLayout) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kUnmappedAddress = 0x600200000ULL;
   constexpr uint64_t kCwsrAddress = 0x600100000ULL;
   constexpr uint32_t kCwsrSize = 0x40000;
@@ -9521,6 +9648,8 @@ TEST_F(KfdIoctlRdna3Test, DbgTrapDeclinesWaveStopsOnAPartWithNoModelledCwsrLayou
 // every other agent in the process still usable, rather than letting an attach
 // succeed and then declining each individual wave stop behind it.
 TEST_F(KfdIoctlRdna3Test, DbgTrapDeviceSnapshotWithholdsTrapDebugOnUnmodelledArch) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
@@ -9556,6 +9685,8 @@ TEST_F(KfdIoctlRdna3Test, DbgTrapDeviceSnapshotWithholdsTrapDebugOnUnmodelledArc
 // through a wave stop, and that route stops the waves first. Without the same
 // gate it would strand every resident wave behind the queue error it reports.
 TEST_F(KfdIoctlRdna3Test, DbgTrapSuspendQueuesOnUnmodelledArchErrsWithoutStrandingWaves) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kUnmappedAddress = 0x600200000ULL;
   constexpr uint64_t kCwsrAddress = 0x600100000ULL;
   constexpr uint32_t kCwsrSize = 0x40000;
@@ -9638,6 +9769,8 @@ TEST_F(KfdIoctlRdna3Test, DbgTrapSuspendQueuesOnUnmodelledArchErrsWithoutStrandi
 // and wakes the debugger. Without this the rollback cases could pass by never
 // reaching the callback at all.
 TEST_F(KfdIoctlTest, DbgTrapMemoryViolationStopsTheWaveAndPublishesItsRecord) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kCwsrAddress = 0x600100000ULL;
   constexpr uint32_t kCwsrSize = 0x40000;
@@ -9697,6 +9830,8 @@ TEST_F(KfdIoctlTest, DbgTrapMemoryViolationStopsTheWaveAndPublishesItsRecord) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapRejectedMemoryViolationFallsBackToRuntime) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kCwsrAddress = 0x600100000ULL;
   constexpr uint64_t kExceptionStatusAddress = 0x600900000ULL;
@@ -9862,6 +9997,8 @@ TEST_F(KfdIoctlTest, DbgTrapRejectedMemoryViolationFallsBackToRuntime) {
 }
 
 TEST_F(KfdIoctlTest, FailedDirectFatalDeliveryRemainsStoppedAcrossDetach) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kCwsrAddress = 0x600100000ULL;
   constexpr uint32_t kCwsrSize = 0x40000;
@@ -10092,6 +10229,8 @@ TEST_F(KfdIoctlTest, FailedDirectFatalDeliveryRemainsStoppedAcrossDetach) {
 // the reachable case -- ROCr sizes it from the largest dispatch it expects, and
 // nothing validates it at CREATE_QUEUE. The stop has to come back off the wave.
 TEST_F(KfdIoctlTest, DbgTrapUnpublishableStopRollsBackInsteadOfStrandingTheWave) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kCwsrAddress = 0x600100000ULL;
   // Enough to map, nowhere near enough for a 16-SGPR, 4-VGPR wave plus header,
@@ -10162,6 +10301,8 @@ TEST_F(KfdIoctlTest, DbgTrapUnpublishableStopRollsBackInsteadOfStrandingTheWave)
 // reach the wave through the handler's restore instead of overwriting the mask
 // the unfinished handler is still running under.
 TEST_F(KfdIoctlTest, DbgTrapCwsrShadowsTrapHandlerRegistersAndRoutesDebuggerEdits) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kKernelAddress = 0x600400000ULL;
   constexpr uint64_t kTrapHandlerAddress = 0x600480000ULL;
   constexpr uint64_t kCwsrAddress = 0x600500000ULL;
@@ -10351,6 +10492,8 @@ TEST_F(KfdIoctlTest, DbgTrapCwsrShadowsTrapHandlerRegistersAndRoutesDebuggerEdit
 }
 
 TEST_F(KfdIoctlTest, DbgTrapRejectedBreakpointDoesNotRetainAStaleEvent) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kTrapHandlerAddress = 0x600080000ULL;
   constexpr uint64_t kCwsrAddress = 0x600100000ULL;
@@ -10470,6 +10613,8 @@ TEST_F(KfdIoctlTest, DbgTrapRejectedBreakpointDoesNotRetainAStaleEvent) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapFailedNotifierWriteRollsBackSingleStep) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kCwsrAddress = 0x600100000ULL;
   constexpr uint32_t kCwsrSize = 0x40000;
@@ -10592,6 +10737,8 @@ TEST_F(KfdIoctlTest, DbgTrapFailedNotifierWriteRollsBackSingleStep) {
 }
 
 TEST_F(KfdIoctlTest, ConcurrentNotifierFailureCannotEraseSuccessfulPublication) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kCwsrAddress = 0x600100000ULL;
   constexpr uint32_t kCwsrSize = 0x40000;
   constexpr uint64_t kWaveTrap = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
@@ -10703,6 +10850,8 @@ TEST_F(KfdIoctlTest, ConcurrentNotifierFailureCannotEraseSuccessfulPublication) 
 }
 
 TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   constexpr uint64_t kSteppingAddress = 0x600200000ULL;
   constexpr uint64_t kPeerAddress = 0x600201000ULL;
   constexpr uint64_t kCwsrAddress = 0x600300000ULL;
@@ -10948,6 +11097,8 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapCrossProcessEnableAuthorizedByPtrace) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   pid_t child = fork();
   ASSERT_GE(child, 0);
   if (child == 0) {
@@ -11005,6 +11156,8 @@ TEST_F(KfdIoctlTest, DbgTrapCrossProcessEnableAuthorizedByPtrace) {
 // inferior exits, DISABLE must release the stale session/notifier but still
 // return ESRCH, matching the kernel's target-liveness check.
 TEST_F(KfdIoctlTest, DbgTrapExitedTargetDisableReturnsESRCHAndReleasesSession) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   pid_t child = fork();
   ASSERT_GE(child, 0);
   if (child == 0) {
@@ -11049,6 +11202,8 @@ TEST_F(KfdIoctlTest, DbgTrapExitedTargetDisableReturnsESRCHAndReleasesSession) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapIdentityChangeDuringAuthorizationReturnsESRCH) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   pid_t child = fork();
   ASSERT_GE(child, 0);
   if (child == 0) {
@@ -11086,6 +11241,8 @@ TEST_F(KfdIoctlTest, DbgTrapIdentityChangeDuringAuthorizationReturnsESRCH) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapExitedTargetReturnsESRCHBeforePtraceAuthorization) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   pid_t child = fork();
   ASSERT_GE(child, 0);
   if (child == 0) {
@@ -11127,6 +11284,8 @@ TEST_F(KfdIoctlTest, DbgTrapExitedTargetReturnsESRCHBeforePtraceAuthorization) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapSessionSurvivesTargetKfdConnectionClose) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   pid_t child = fork();
   ASSERT_GE(child, 0);
   if (child == 0) {
@@ -11168,6 +11327,8 @@ TEST_F(KfdIoctlTest, DbgTrapSessionSurvivesTargetKfdConnectionClose) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDisableAfterTargetKfdCloseAndExitReturnsESRCH) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   pid_t child = fork();
   ASSERT_GE(child, 0);
   if (child == 0) {
@@ -11230,6 +11391,8 @@ TEST_F(KfdIoctlTest, DbgTrapDisableWithoutSessionReportsZombieAsExited) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapSessionSurvivesDebuggerKfdConnectionClose) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   pid_t child = fork();
   ASSERT_GE(child, 0);
   if (child == 0) {
@@ -11271,6 +11434,8 @@ TEST_F(KfdIoctlTest, DbgTrapSessionSurvivesDebuggerKfdConnectionClose) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDebuggerExitReapsSessionAndAllowsReenable) {
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   int debugger_ready[2];
   ASSERT_EQ(pipe2(debugger_ready, O_CLOEXEC), 0);
 

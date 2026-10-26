@@ -10,9 +10,9 @@ All KFD debug behaviour is mirrored from the real driver source
 cross-checked against a physical MI300X and the in-tree `projects/rocdbgapi`.
 
 Debug sessions require libc's `pidfd_open` wrapper (glibc 2.36 or newer) to pin
-process identities.
-If the runtime libc does not provide it, debug session setup returns `ENOSYS`;
-ordinary simulation remains available.
+process identities. Without it, ENABLE returns `ENOSYS` before checking the
+existence of a valid positive target PID. Ordinary simulation remains available,
+and no-session operations other than ENABLE still validate process liveness.
 
 ## 1. How the pieces fit together
 

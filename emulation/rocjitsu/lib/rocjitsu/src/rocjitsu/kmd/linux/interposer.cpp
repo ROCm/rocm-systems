@@ -24,6 +24,7 @@
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/kmd/linux/scoped_cancellation_disable.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/kmd/linux/syncobj_notification.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
@@ -73,7 +74,6 @@ RJ_DIAGNOSTIC_POP
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <sstream>
@@ -1308,6 +1308,7 @@ public:
     std::shared_ptr<PrivateDrmFd> event_fd;
     bool notified = false;
     void refresh() {
+      rocjitsu::ScopedCancellationDisable cancellation;
       if (notified || !fence || (!fence->is_signaled() && !fence->is_failed()))
         return;
       uint64_t value = 1;
@@ -1920,6 +1921,7 @@ public:
   // The fd table and fence state are process-local, like the simulated DRM file.
   // Keep a private eventfd duplicate for poll notification after the export fd closes.
   int create_sync_file_locked(const std::shared_ptr<SyncobjFence> &fence) {
+    rocjitsu::ScopedCancellationDisable cancellation;
     auto object = std::make_shared<SyncFile>();
     object->fence = fence;
     const int fd = static_cast<int>(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
@@ -2126,9 +2128,9 @@ public:
     };
 
     while (true) {
-      auto &generation_word =
+      auto &notification =
           file->imported_sync_fence ? imported_syncobj_generation_ : file->syncobj_generation;
-      const uint32_t generation = generation_word.load(std::memory_order_acquire);
+      const uint32_t generation = notification.load(std::memory_order_acquire);
       auto [state, first_ready] = evaluate();
       if (state < 0)
         return state;
@@ -2150,7 +2152,7 @@ public:
       // so it cannot apply the kernel ioctl layer's SA_RESTART decision. Surface
       // EINTR consistently and let callers retry; the focused regression pins
       // that documented difference from the in-kernel DRM implementation.
-      const long rc = generation_word.wait_until(generation, &deadline);
+      const int rc = notification.wait_until(generation, &deadline);
       const int wait_errno = errno;
       lock.lock();
       if (rc == 0 || wait_errno == EAGAIN)
@@ -5484,8 +5486,8 @@ RJ_INTERPOSER_EXPORT void *mmap64(void *addr, size_t length, int prot, int flags
 
 static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
   if (!InterposerContext::real().ready() || !InterposerContext::real().mmap) {
-    auto function =
-        util::lookup_symbol<decltype(InterposerContext::real().mmap)>(RTLD_NEXT, "mmap");
+    auto function = reinterpret_cast<decltype(InterposerContext::real().mmap)>(
+        rocjitsu::bootstrap_mapping_symbol("mmap"));
     if (function)
       return function(addr, length, prot, flags, fd, offset);
     errno = ENOSYS;
@@ -5646,8 +5648,8 @@ RJ_INTERPOSER_EXPORT void *mremap(void *old_address, size_t old_size, size_t new
     va_end(ap);
   }
   if (!InterposerContext::real().ready() || !InterposerContext::real().mremap) {
-    auto function =
-        util::lookup_symbol<decltype(InterposerContext::real().mremap)>(RTLD_NEXT, "mremap");
+    auto function = reinterpret_cast<decltype(InterposerContext::real().mremap)>(
+        rocjitsu::bootstrap_mapping_symbol("mremap"));
     if (function)
       return function(old_address, old_size, new_size, flags, new_address);
     errno = ENOSYS;
@@ -5662,8 +5664,8 @@ RJ_INTERPOSER_EXPORT void *mremap(void *old_address, size_t old_size, size_t new
 
 RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
   if (!InterposerContext::real().ready() || !InterposerContext::real().munmap) {
-    auto function =
-        util::lookup_symbol<decltype(InterposerContext::real().munmap)>(RTLD_NEXT, "munmap");
+    auto function = reinterpret_cast<decltype(InterposerContext::real().munmap)>(
+        rocjitsu::bootstrap_mapping_symbol("munmap"));
     if (function)
       return function(addr, length);
     errno = ENOSYS;

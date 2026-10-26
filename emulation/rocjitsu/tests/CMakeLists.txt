@@ -1965,6 +1965,46 @@ rj_add_test(
         "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
 )
 
+add_library(libc_lookup_preload SHARED libc_lookup_preload_test.cpp)
+rj_configure_target(libc_lookup_preload TEST)
+# Sanitizer initialization itself calls dlsym before its tracing state exists.
+# Only this loader-injection helper must be uninstrumented; the exercised
+# rocjitsu code and test executables retain their normal sanitizer coverage.
+target_compile_options(libc_lookup_preload PRIVATE -fno-sanitize=all)
+target_link_libraries(libc_lookup_preload PRIVATE ${CMAKE_DL_LIBS})
+add_dependencies(early_mmap_driver libc_lookup_preload)
+if(RJ_INSTALL_TESTS)
+    install(
+        TARGETS libc_lookup_preload
+        LIBRARY DESTINATION ${RJ_INSTALL_TEST_BIN_DIR}
+    )
+endif()
+rj_add_test(
+    NAME "InterposerTest.AllocatorMappingDuringSymbolLookup"
+    COMMAND $<TARGET_FILE:early_mmap_driver>
+    ENVIRONMENT
+        "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:rocjitsu_shared>:$<TARGET_FILE:libc_lookup_preload>"
+        "ROCJITSU_TEST_LOOKUP_REENTRY=1"
+    TIMEOUT 30
+    INSTALL_COMMAND "bin/early_mmap_driver"
+    INSTALL_ENVIRONMENT
+        "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}libc_lookup_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        "ROCJITSU_TEST_LOOKUP_REENTRY=1"
+)
+add_dependencies(rocjitsu_tests libc_lookup_preload)
+rj_add_test(
+    NAME "LibcCompatibilityTest.DebuggerWithoutPidfdWrapper"
+    COMMAND $<TARGET_FILE:rocjitsu_tests> "--gtest_filter=*DbgTrap*:*Debugger*:*RuntimeDisableReportsProcessRuntimeTransition:*RuntimeEnableRetainsMaskedProcessEventUntilEnabled:*RuntimeTrapInterruptSignalsQueueExceptionFromM0:*RuntimeExceptionTimeout*:*MissingRuntimeStatusBeforeAcknowledgmentRetainsEvent:*FailedDirectFatalDeliveryRemainsStoppedAcrossDetach:*ConcurrentNotifierFailureCannotEraseSuccessfulPublication:*BusySdmaUpdatePreservesPublishedRingGeometry"
+    ENVIRONMENT
+        "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:libc_lookup_preload>"
+        "ROCJITSU_TEST_MISSING_LIBC_WRAPPER=pidfd_open"
+    TIMEOUT 120
+    INSTALL_COMMAND "bin/rocjitsu_tests" "--gtest_filter=*DbgTrap*:*Debugger*:*RuntimeDisableReportsProcessRuntimeTransition:*RuntimeEnableRetainsMaskedProcessEventUntilEnabled:*RuntimeTrapInterruptSignalsQueueExceptionFromM0:*RuntimeExceptionTimeout*:*MissingRuntimeStatusBeforeAcknowledgmentRetainsEvent:*FailedDirectFatalDeliveryRemainsStoppedAcrossDetach:*ConcurrentNotifierFailureCannotEraseSuccessfulPublication:*BusySdmaUpdatePreservesPublishedRingGeometry"
+    INSTALL_ENVIRONMENT
+        "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}bin/${CMAKE_SHARED_LIBRARY_PREFIX}libc_lookup_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        "ROCJITSU_TEST_MISSING_LIBC_WRAPPER=pidfd_open"
+)
+
 # --- interposer KFD/DRM integration tests (CLI launcher) ---
 # The launcher preloads the interposer and supplies its config_path file.
 # Exercise fd tracking, device discovery, GEM/PRIME mappings, synchronization
@@ -1975,7 +2015,12 @@ target_link_libraries(
     interposer_dup_test
     PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
 )
-add_dependencies(interposer_dup_test rocjitsu_bin rocjitsu_shared)
+add_dependencies(
+    interposer_dup_test
+    rocjitsu_bin
+    rocjitsu_shared
+    libc_lookup_preload
+)
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(interposer_dup_test)
 endif()
@@ -2187,6 +2232,24 @@ rj_add_interposer_test_suite(
     ChildFopenPreservesLibcModeSemantics
 )
 
+rj_add_test(
+    NAME "InterposerFreshForkTest.MissingGetdentsRefusesUnusedForkChild"
+    COMMAND ${RJ_CLI} "--config" ${RJ_CDNA4_KMD_CONFIG} "--"
+        $<TARGET_FILE:interposer_dup_test>
+        "--gtest_filter=InterposerFreshForkTest.MissingGetdentsRefusesUnusedForkChild"
+    ENVIRONMENT
+        "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:libc_lookup_preload>"
+        "ROCJITSU_TEST_MISSING_LIBC_WRAPPER=getdents64"
+    TIMEOUT 30
+    INSTALL_COMMAND "\${RJ_INSTALLED_BINDIR}/rocjitsu" "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}" "--"
+        "bin/interposer_dup_test"
+        "--gtest_filter=InterposerFreshForkTest.MissingGetdentsRefusesUnusedForkChild"
+    INSTALL_ENVIRONMENT
+        "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}bin/${CMAKE_SHARED_LIBRARY_PREFIX}libc_lookup_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        "ROCJITSU_TEST_MISSING_LIBC_WRAPPER=getdents64"
+)
+
 # TSan cannot start backend threads after a multithreaded fork. Keep the
 # single-threaded nested-fork case above in TSan, and run concurrent mappings in
 # regular and ASan/UBSan builds without disabling TSan's post-fork checks.
@@ -2282,6 +2345,8 @@ foreach(
     ITEMS
         DeferredCancellationCompletesSyncFileBroadcast
         DeferredCancellationCompletesImportedSyncFileBroadcast
+        DeferredCancellationPublishesExportedSyncFile
+        DeferredCancellationPublishesMergedSyncFile
 )
     rj_add_test(
         NAME "InterposerSyncobjTest.${_case}"

@@ -14,6 +14,8 @@
 /// these because they exercise the driver object directly, bypassing the fd
 /// tracking that lives in the interposer.
 
+#include "syncfile_cancellation_test.h"
+
 #include "scoped_temp.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -4715,7 +4717,7 @@ TEST(InterposerSyncobjTest, TimelineSignalWakesEveryBlockedWaiter) {
       wait.count_handles = 1;
       wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
       wait.timeout_nsec = monotonic_deadline_after(std::chrono::seconds(5));
-      tids[index].store(static_cast<pid_t>(syscall(SYS_gettid)), std::memory_order_release);
+      tids[index].store(static_cast<pid_t>(gettid()), std::memory_order_release);
       results[index] = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     });
   }
@@ -4745,6 +4747,69 @@ TEST(InterposerSyncobjTest, TimelineSignalWakesEveryBlockedWaiter) {
   EXPECT_EQ(close(drm), 0);
 }
 
+static void check_syncfile_publication_cancellation(bool merge_fences) {
+  struct rlimit limit {};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &limit), 0);
+  if (limit.rlim_max < 8192)
+    GTEST_SKIP() << "Private DRM descriptors require a hard NOFILE limit of at least 8192";
+  RestoreLimit restore_limit(limit);
+  struct rlimit raised = limit;
+  raised.rlim_cur = std::max<rlim_t>(raised.rlim_cur, 8192);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &raised), 0);
+  auto configure_writes = reinterpret_cast<void (*)(NotificationWriteMode)>(
+      dlsym(RTLD_DEFAULT, "rj_test_notification_writes"));
+  ASSERT_NE(configure_writes, nullptr);
+  const int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_syncobj_create completed{};
+  completed.flags = DRM_SYNCOBJ_CREATE_SIGNALED;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &completed), 0);
+  drm_syncobj_handle source{};
+  source.handle = completed.handle;
+  source.flags = DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE;
+  source.fd = -1;
+  if (merge_fences) {
+    ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD, &source), 0);
+  }
+  int result = -1, published = -1;
+  bool survived_cancel = false;
+  std::thread worker([&] {
+    configure_writes(NotificationWriteMode::Cancel);
+    if (merge_fences) {
+      sync_merge_data merge{};
+      merge.fd2 = source.fd;
+      result = ioctl(source.fd, SYNC_IOC_MERGE, &merge);
+      published = merge.fence;
+    } else {
+      result = ioctl(drm, DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD, &source);
+      published = source.fd;
+    }
+    configure_writes(NotificationWriteMode::Disabled);
+    pthread_testcancel();
+    survived_cancel = true;
+  });
+  worker.join();
+  EXPECT_FALSE(survived_cancel);
+  ASSERT_EQ(result, 0);
+  ASSERT_GE(published, 0);
+  pollfd ready{published, POLLIN, 0};
+  EXPECT_EQ(poll(&ready, 1, 0), 1);
+  EXPECT_NE(ready.revents & POLLIN, 0);
+  EXPECT_EQ(close(published), 0);
+  if (merge_fences) {
+    EXPECT_EQ(close(source.fd), 0);
+  }
+  EXPECT_EQ(close(drm), 0);
+}
+
+TEST(InterposerSyncobjTest, DeferredCancellationPublishesExportedSyncFile) {
+  check_syncfile_publication_cancellation(false);
+}
+
+TEST(InterposerSyncobjTest, DeferredCancellationPublishesMergedSyncFile) {
+  check_syncfile_publication_cancellation(true);
+}
+
 static void check_syncfile_broadcast_cancellation(bool import_fence) {
   struct rlimit limit {};
   ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &limit), 0);
@@ -4754,8 +4819,8 @@ static void check_syncfile_broadcast_cancellation(bool import_fence) {
   struct rlimit raised = limit;
   raised.rlim_cur = std::max<rlim_t>(raised.rlim_cur, 8192);
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &raised), 0);
-  auto configure_writes =
-      reinterpret_cast<void (*)(int)>(dlsym(RTLD_DEFAULT, "rj_test_notification_writes"));
+  auto configure_writes = reinterpret_cast<void (*)(NotificationWriteMode)>(
+      dlsym(RTLD_DEFAULT, "rj_test_notification_writes"));
   auto write_count =
       reinterpret_cast<unsigned (*)()>(dlsym(RTLD_DEFAULT, "rj_test_notification_write_count"));
   ASSERT_NE(configure_writes, nullptr);
@@ -4770,10 +4835,10 @@ static void check_syncfile_broadcast_cancellation(bool import_fence) {
     drm_syncobj_handle request{};
     request.handle = completed.handle;
     request.flags = DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE;
-    configure_writes(1);
+    configure_writes(NotificationWriteMode::Interrupt);
     const int result = ioctl(drm, DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD, &request);
     const unsigned attempts = write_count();
-    configure_writes(0);
+    configure_writes(NotificationWriteMode::Disabled);
     ASSERT_EQ(result, 0);
     ASSERT_EQ(attempts, 1u);
     entry = {request.fd, POLLIN, 0};
@@ -4812,7 +4877,7 @@ static void check_syncfile_broadcast_cancellation(bool import_fence) {
   unsigned notified = 0;
   bool returned_from_cancel = false;
   std::thread signaler([&] {
-    configure_writes(2);
+    configure_writes(NotificationWriteMode::Cancel);
     if (import_fence) {
       drm_syncobj_handle imported{};
       imported.handle = waiting.handle;
@@ -4827,7 +4892,7 @@ static void check_syncfile_broadcast_cancellation(bool import_fence) {
       signal_result = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL, &signal);
     }
     notified = write_count();
-    configure_writes(0);
+    configure_writes(NotificationWriteMode::Disabled);
     pthread_testcancel();
     returned_from_cancel = true;
   });
@@ -4942,7 +5007,7 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
       bool &unwound;
       ~Cleanup() { unwound = true; }
     } cleanup{unwound};
-    tid.store(syscall(SYS_gettid), std::memory_order_release);
+    tid.store(gettid(), std::memory_order_release);
     (void)call(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     returned = true;
   });
@@ -5029,6 +5094,26 @@ void check_fresh_fork_backends(bool concurrent_mappings) {
 
 // Run in a fresh executable so the parent has not used a GPU backend. Keep the
 // parent single-threaded here so TSan can instrument the new child backend threads.
+TEST(InterposerFreshForkTest, MissingGetdentsRefusesUnusedForkChild) {
+  ASSERT_EQ(dlsym(RTLD_DEFAULT, "getdents64"), nullptr);
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    alarm(10);
+    const int fd = open_kfd();
+    _exit(fd == -1 && errno == ENODEV ? 0 : 1);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
+  // The missing fork-child feature must not disable ordinary parent simulation.
+  const int fd = open_kfd();
+  ASSERT_GE(fd, 0);
+  EXPECT_TRUE(kfd_version_ok(fd));
+  EXPECT_EQ(close(fd), 0);
+}
+
 TEST(InterposerFreshForkTest, ChildAndGrandchildInitializeIndependentBackends) {
   check_fresh_fork_backends(/*concurrent_mappings=*/false);
 }

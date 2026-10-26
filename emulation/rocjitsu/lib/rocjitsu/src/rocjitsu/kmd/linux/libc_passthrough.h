@@ -7,9 +7,9 @@
 #ifndef ROCJITSU_KMD_LINUX_LIBC_PASSTHROUGH_H_
 #define ROCJITSU_KMD_LINUX_LIBC_PASSTHROUGH_H_
 
+#include "rocjitsu/kmd/linux/scoped_cancellation_disable.h"
 #include "util/unique_handle.h"
 
-#include <cassert>
 #include <cstddef>
 #include <cstdio>
 #include <dirent.h>
@@ -24,12 +24,15 @@ struct stat64;
 
 namespace rocjitsu {
 
-/// @brief Real libc function pointers resolved with dlsym(RTLD_NEXT).
-///
-/// @details The LD_PRELOAD interposer shadows these symbols. Code that needs
-/// to intentionally pass through to the host kernel or filesystem should call
-/// these pointers instead of plain libc symbols, which would recurse back into
-/// the wrappers.
+/// @brief Named libc wrappers for interposer bypass and unwindable calls.
+/// @details Interposed operations use RTLD_NEXT to preserve the next preload's
+/// implementation without re-entering rocjitsu. Non-interposed operations may
+/// also need non-noexcept pointers to preserve forced unwinding. Mutex acquisition
+/// uses RTLD_DEFAULT to match normal release and preserve sanitizer interception.
+/// Optional wrappers remain null when unavailable; callers implement the stated
+/// fallback or return an unsupported-feature error. read/write/close retain libc
+/// cancellation points: internal cleanup must protect the entire ownership or
+/// publication transaction, while application forwarding stays cancellable.
 class LibcPassthrough {
 public:
   int (*openat)(int, const char *, int, ...) = nullptr;
@@ -90,38 +93,24 @@ public:
   /// @brief Return true after all required symbols have been resolved.
   [[nodiscard]] bool ready() const { return initialized_; }
 
-  /// @brief Resolve the real libc functions from the next dynamic object.
+  /// @brief Resolve required and optional wrappers using their lookup contracts.
+  /// @details Use RTLD_NEXT for interposer bypass. For non-interposed operations
+  /// whose interception must match direct calls, use RTLD_DEFAULT. ready() requires
+  /// the mandatory entries, not optional feature wrappers or legacy aliases.
   void resolve();
 
 private:
   bool initialized_ = false;
 };
 
+/// @brief Find a libc mapping wrapper without allocating through dlsym.
+/// @details Only for mmap/munmap/mremap before resolve() completes. Inspect the
+/// already-loaded libc's ELF tables under dl_iterate_phdr's loader lock; do not
+/// call an IFUNC resolver or another preload during allocator initialization.
+void *bootstrap_mapping_symbol(const char *name);
+
 /// @brief Return the process-wide libc pass-through table.
 LibcPassthrough &libc_passthrough();
-
-/// @brief Keep deferred pthread cancellation out of cleanup and publication.
-/// @details Restoring the caller's state leaves a deferred request pending until
-/// the next cancellation point. Do not use this to cover blocking waits. Like
-/// the surrounding C++ code, this does not support asynchronous cancellation.
-class ScopedCancellationDisable {
-public:
-  ScopedCancellationDisable() {
-    const int result = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_state_);
-    assert(result == 0);
-    (void)result;
-  }
-  ~ScopedCancellationDisable() {
-    const int result = pthread_setcancelstate(previous_state_, nullptr);
-    assert(result == 0);
-    (void)result;
-  }
-  ScopedCancellationDisable(const ScopedCancellationDisable &) = delete;
-  ScopedCancellationDisable &operator=(const ScopedCancellationDisable &) = delete;
-
-private:
-  int previous_state_ = PTHREAD_CANCEL_ENABLE;
-};
 
 /// @brief UniqueHandle traits that close through the libc pass-through table.
 /// @details The interposer and the drivers link into ONE DSO, and the interposer

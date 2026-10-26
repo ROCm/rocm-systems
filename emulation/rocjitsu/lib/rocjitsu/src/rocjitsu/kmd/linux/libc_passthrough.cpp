@@ -2,16 +2,100 @@
 // SPDX-License-Identifier: MIT
 
 /// @file libc_passthrough.cpp
-/// @brief dlsym(RTLD_NEXT) libc pass-through table.
+/// @brief Named libc wrappers and allocation-free mapping bootstrap.
 
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 
 #include "util/dynamic_loader.h"
 
 #include <cassert>
+#include <cstdint>
 #include <dlfcn.h>
+#include <link.h>
+#include <string_view>
 
 namespace rocjitsu {
+
+void *bootstrap_mapping_symbol(const char *name) {
+  struct Lookup {
+    const char *name;
+    void *address;
+  } lookup{name, nullptr};
+  // Unlike dlsym's error-state initialization on older glibc, this walk does
+  // not allocate. Its recursive loader lock also permits allocator re-entry
+  // from a lookup that is already in progress.
+  dl_iterate_phdr(
+      +[](dl_phdr_info *info, size_t, void *opaque) {
+        auto &lookup = *static_cast<Lookup *>(opaque);
+        const std::string_view path(info->dlpi_name);
+        if (path != "libc.so.6" && !path.ends_with("/libc.so.6"))
+          return 0;
+        const ElfW(Dyn) *dynamic = nullptr;
+        for (ElfW(Half) index = 0; index < info->dlpi_phnum; ++index)
+          if (info->dlpi_phdr[index].p_type == PT_DYNAMIC)
+            dynamic = reinterpret_cast<const ElfW(Dyn) *>(info->dlpi_addr +
+                                                          info->dlpi_phdr[index].p_vaddr);
+        if (!dynamic)
+          return 1;
+        const ElfW(Sym) *symbols = nullptr;
+        const char *strings = nullptr;
+        const uint32_t *hash = nullptr, *gnu_hash = nullptr;
+        const ElfW(Half) *versions = nullptr;
+        for (const ElfW(Dyn) *entry = dynamic; entry->d_tag != DT_NULL; ++entry) {
+          // glibc relocates these dynamic pointers in loaded ELF objects.
+          const ElfW(Addr) address = entry->d_un.d_ptr;
+          switch (entry->d_tag) {
+          case DT_SYMTAB:
+            symbols = reinterpret_cast<const ElfW(Sym) *>(address);
+            break;
+          case DT_STRTAB:
+            strings = reinterpret_cast<const char *>(address);
+            break;
+          case DT_HASH:
+            hash = reinterpret_cast<const uint32_t *>(address);
+            break;
+          case DT_GNU_HASH:
+            gnu_hash = reinterpret_cast<const uint32_t *>(address);
+            break;
+          case DT_VERSYM:
+            versions = reinterpret_cast<const ElfW(Half) *>(address);
+            break;
+          }
+        }
+        if (!symbols || !strings)
+          return 1;
+        uint32_t count = hash ? hash[1] : 0;
+        if (!count && gnu_hash) {
+          const uint32_t bucket_count = gnu_hash[0], first_symbol = gnu_hash[1];
+          const auto *buckets = reinterpret_cast<const uint32_t *>(
+              reinterpret_cast<const ElfW(Addr) *>(gnu_hash + 4) + gnu_hash[2]);
+          const auto *chains = buckets + bucket_count;
+          count = first_symbol;
+          for (uint32_t index = 0; index < bucket_count; ++index) {
+            uint32_t symbol = buckets[index];
+            if (symbol < first_symbol)
+              continue;
+            while (!(chains[symbol - first_symbol] & 1))
+              ++symbol;
+            if (count <= symbol)
+              count = symbol + 1;
+          }
+        }
+        for (uint32_t index = 0; index < count; ++index) {
+          const ElfW(Sym) &symbol = symbols[index];
+          if (symbol.st_shndx == SHN_UNDEF || ELF64_ST_TYPE(symbol.st_info) != STT_FUNC ||
+              (versions && (versions[index] & 0x8000)))
+            continue;
+          if (std::string_view(strings + symbol.st_name) == lookup.name) {
+            lookup.address = reinterpret_cast<void *>(info->dlpi_addr + symbol.st_value);
+            break;
+          }
+        }
+        return 1;
+      },
+      &lookup);
+  return lookup.address;
+}
 
 void LibcPassthrough::resolve() {
   if (initialized_)

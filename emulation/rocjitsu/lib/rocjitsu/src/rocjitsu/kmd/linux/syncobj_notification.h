@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cassert>
 #include <cerrno>
+#include <cstdint>
 #include <ctime>
 #include <limits>
 #include <mutex>

@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "legacy_gpu_memory_fixture.h"
+#include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
+#include "rocjitsu/kmd/linux/rpc.h"
 
 #include <gtest/gtest.h>
 
@@ -11,7 +13,9 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <pthread.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 
 class LibcCancellationTest : public ::testing::Test {
@@ -140,6 +144,126 @@ protected:
     EXPECT_EQ(close(sockets[1]), 0);
   }
 
+  void arm_close_cancellation(unsigned cancel_at) {
+    closed_fds_.fill(-1);
+    close_count_ = 0;
+    cancel_at_ = cancel_at;
+    forward_close_ = saved_.close;
+    rocjitsu::libc_passthrough().close = +[](int fd) {
+      if (close_count_ < closed_fds_.size())
+        closed_fds_[close_count_] = fd;
+      if (++close_count_ == cancel_at_)
+        pthread_cancel(pthread_self());
+      return forward_close_(fd);
+    };
+  }
+
+  void queue_allocation(int server, uint64_t handle, uint64_t address) {
+    const int memfd = memfd_create("cancellation-test", MFD_CLOEXEC);
+    ASSERT_GE(memfd, 0);
+    ASSERT_EQ(ftruncate(memfd, 4096), 0);
+    rocjitsu::RpcHeader reply{};
+    reply.opcode = rocjitsu::RPC_IOCTL;
+    reply.payload_bytes = sizeof(kfd_ioctl_alloc_memory_of_gpu_args);
+    ASSERT_EQ(rocjitsu::rpc_send_msg(server, &reply, sizeof(reply), &memfd, 1), sizeof(reply));
+    kfd_ioctl_alloc_memory_of_gpu_args args{};
+    args.handle = handle;
+    args.va_addr = address;
+    args.size = 4096;
+    ASSERT_TRUE(rocjitsu::rpc_send_exact(server, &args, sizeof(args)));
+    ASSERT_EQ(close(memfd), 0);
+  }
+
+  void check_remote_cleanup(bool free_allocation) {
+    int sockets[2];
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
+    auto driver = std::make_unique<rocjitsu::RemoteDriver>(sockets[0]);
+    for (uint64_t handle = 1; handle <= (free_allocation ? 1u : 2u); ++handle) {
+      queue_allocation(sockets[1], handle, handle * 4096);
+      ASSERT_FALSE(HasFatalFailure());
+      kfd_ioctl_alloc_memory_of_gpu_args args{};
+      ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &args), 0);
+      ASSERT_EQ(args.handle, handle);
+    }
+    if (free_allocation) {
+      rocjitsu::RpcHeader reply{};
+      reply.opcode = rocjitsu::RPC_IOCTL;
+      ASSERT_TRUE(rocjitsu::rpc_send_exact(sockets[1], &reply, sizeof(reply)));
+    }
+    // For close(), interrupt the later close after the socket is already gone.
+    arm_close_cancellation(free_allocation ? 1 : 2);
+    int result = -1;
+    bool survived_cancel = false;
+    std::thread worker([&] {
+      kfd_ioctl_free_memory_of_gpu_args args{};
+      args.handle = 1;
+      result =
+          free_allocation ? driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &args) : driver->close();
+      pthread_testcancel();
+      survived_cancel = true;
+    });
+    worker.join();
+    rocjitsu::libc_passthrough() = saved_;
+    EXPECT_EQ(result, 0);
+    EXPECT_FALSE(survived_cancel);
+    const unsigned expected = free_allocation ? 1 : 3;
+    ASSERT_EQ(close_count_, expected);
+    int descriptor = -1;
+    off_t offset = 0;
+    EXPECT_EQ(driver->find_memfd_for_addr(reinterpret_cast<void *>(4096), 1, &descriptor, &offset),
+              rocjitsu::RemoteDriver::MemfdLookup::kNotFound);
+    const int replacement = open("/dev/null", O_RDONLY | O_CLOEXEC);
+    ASSERT_GE(replacement, 0);
+    for (unsigned index = 0; index < expected; ++index) {
+      const int fd = closed_fds_[index];
+      // open() may have reused exactly one of these numbers already.
+      if (fd != replacement) {
+        EXPECT_EQ(fcntl(fd, F_GETFD), -1);
+        EXPECT_EQ(errno, EBADF);
+      }
+      ASSERT_EQ(dup2(replacement, fd), fd);
+    }
+    driver.reset();
+    for (unsigned index = 0; index < expected; ++index) {
+      EXPECT_GE(fcntl(closed_fds_[index], F_GETFD), 0);
+      if (closed_fds_[index] != replacement) {
+        EXPECT_EQ(close(closed_fds_[index]), 0);
+      }
+    }
+    EXPECT_EQ(close(replacement), 0);
+    EXPECT_EQ(close(sockets[1]), 0);
+  }
+
+  void check_synthetic_creation(unsigned cancel_at) {
+    int sockets[2];
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
+    rocjitsu::RemoteDriver driver(sockets[0]);
+    arm_close_cancellation(cancel_at);
+    int descriptor = -1;
+    bool survived_cancel = false;
+    std::thread worker([&] {
+      descriptor = driver.reissue_synthetic_kfd_fd();
+      pthread_testcancel();
+      survived_cancel = true;
+    });
+    worker.join();
+    rocjitsu::libc_passthrough() = saved_;
+    EXPECT_FALSE(survived_cancel);
+    EXPECT_EQ(close_count_, 2u);
+    ASSERT_GE(descriptor, 256);
+    EXPECT_GE(fcntl(descriptor, F_GETFD), 0);
+    for (unsigned index = 0; index < close_count_ && index < closed_fds_.size(); ++index) {
+      EXPECT_EQ(fcntl(closed_fds_[index], F_GETFD), -1);
+      EXPECT_EQ(errno, EBADF);
+    }
+    EXPECT_EQ(close(descriptor), 0);
+    EXPECT_EQ(close(sockets[1]), 0);
+  }
+
+  static inline std::array<int, 4> closed_fds_;
+  static inline unsigned close_count_, cancel_at_;
+  static inline int (*forward_close_)(int);
+
   rocjitsu::LibcPassthrough saved_;
 };
 
@@ -157,4 +281,20 @@ TEST_F(LibcCancellationTest, RemoteDriverDestructionDefersCancellation) {
 
 TEST_F(LibcCancellationTest, RemoteDriverDestructionPreservesDisabledCancellation) {
   check_driver_destruction(PTHREAD_CANCEL_DISABLE);
+}
+
+TEST_F(LibcCancellationTest, RemoteCloseClearsOwnershipBeforeCancellation) {
+  check_remote_cleanup(false);
+}
+
+TEST_F(LibcCancellationTest, RemoteFreeClearsOwnershipBeforeCancellation) {
+  check_remote_cleanup(true);
+}
+
+TEST_F(LibcCancellationTest, SyntheticCreationDefersMarkerCloseCancellation) {
+  check_synthetic_creation(1);
+}
+
+TEST_F(LibcCancellationTest, SyntheticCreationDefersEventfdCloseCancellation) {
+  check_synthetic_creation(2);
 }

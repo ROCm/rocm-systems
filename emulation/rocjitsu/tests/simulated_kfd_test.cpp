@@ -6,6 +6,7 @@
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/guest_kfd.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
@@ -303,6 +304,9 @@ TEST_F(SimulatedKfdTest, ImportedDmabufReexportKeepsTheOriginalBacking) {
 }
 
 TEST_F(SimulatedKfdTest, GwsAndDebuggerAdmissionAreMutuallyExclusiveOnGfx1100) {
+  rocjitsu::libc_passthrough().resolve();
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   const auto config_path =
       (std::filesystem::path(CONFIG_PATH).parent_path() / "gfx1100_w7900.json").string();
   util::StringDiagnostic t_diagnostic;
@@ -350,6 +354,9 @@ TEST_F(SimulatedKfdTest, GwsAndDebuggerAdmissionAreMutuallyExclusiveOnGfx1100) {
 }
 
 TEST_F(SimulatedKfdTest, GwsAndDebuggerCoexistOnGfx908) {
+  rocjitsu::libc_passthrough().resolve();
+  if (!rocjitsu::libc_passthrough().pidfd_open)
+    GTEST_SKIP() << "Debug sessions require the libc pidfd_open wrapper (glibc 2.36+)";
   const auto config_path =
       (std::filesystem::path(CONFIG_PATH).parent_path() / "gfx942_cdna3.json").string();
   util::StringDiagnostic t_diagnostic;

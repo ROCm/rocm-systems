@@ -157,14 +157,26 @@ Foo foo = static_cast<Foo>(bar); // OK but could use auto instead to avoid repet
   `libc_passthrough()` from `kmd/linux/libc_passthrough.h`. Extend that table
   when another interposed operation needs a passthrough; do not bypass it with
   a direct system call. Preserve return values, `errno`, ownership, and lock
-  ordering.
+  ordering. Resolve interposed operations with `RTLD_NEXT`; non-interposed
+  operations that must share sanitizer interception with direct calls (such as
+  mutex acquisition/release) use `RTLD_DEFAULT`. Use non-`noexcept` function
+  pointers where libc calls must allow forced unwinding. Mark optional entries
+  explicitly and provide a tested fallback or unsupported-feature result.
+- Libc `read`, `write`, and `close` remain cancellation points. Internal cleanup
+  and publication must defer cancellation across the complete ownership
+  transaction, including removal of closed descriptors from tracking containers.
+  Use `ScopedCancellationDisable` for bounded cleanup; keep blocking RPCs and
+  waits outside that guard. Application forwarding retains libc cancellation
+  behavior. Asynchronous cancellation is not supported by these C++ paths.
 - When a system call has no libc wrapper, use an equivalent library facility
   (for example, libc polling for interruptible waits). Resolve optional newer
   libc wrappers at runtime and handle their absence explicitly; never hard-code
   syscall numbers as a compatibility fallback.
 - Keep loader initialization, fork-child, and signal-handler paths within their
   allocation, locking, and async-signal-safety constraints. Resolve passthroughs
-  before entering such paths.
+  before entering such paths. Before table initialization, mapping hooks use the
+  allocation-free libc ELF lookup in `bootstrap_mapping_symbol`; calling `dlsym`
+  there can re-enter allocator initialization on older libc versions.
 - Tests may use `syscall()` when deliberately exercising behavior outside the
   interposer or observing kernel state. Keep those calls confined to tests and
   explain why bypassing the named wrapper is necessary. Prefer libc wrappers
