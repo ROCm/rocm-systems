@@ -365,8 +365,15 @@ public:
   [[nodiscard]] int get_mmap_memfd(off_t offset) const;
 
   void setup_topology(const Sysfs::GpuInfo &gpu);
-  void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc);
-  void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc);
+  void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
+                      const config::PciDeviceConfig &pci = {});
+  void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc,
+                      bool publish_peer_links = true, bool strict_render_minor = false,
+                      const config::PciDeviceConfig &pci = {});
+  /// @brief Whether render-node opens must match a configured minor exactly.
+  /// @details False preserves the legacy single-GPU fallback that claims other
+  /// render minors; manifests and multi-GPU sessions use exact matching.
+  [[nodiscard]] bool strict_render_minor() const { return strict_render_minor_; }
   bool is_doorbell_range(const void *addr, size_t length) const override;
 
   /// @brief Perform an ordinary MAP_FIXED mmap while retiring replaced client doorbell views.
@@ -378,6 +385,9 @@ public:
 
   uint32_t gpu_id() const { return gpus_.empty() ? 0 : gpus_[0].gpu_id; }
   uint32_t num_gpus() const { return static_cast<uint32_t>(gpus_.size()); }
+  const Sysfs::GpuInfo *gpu_info_at(uint32_t ordinal) const {
+    return ordinal < gpu_infos_.size() ? &gpu_infos_[ordinal] : nullptr;
+  }
   /// @brief KFD gpu_id of the device at @p index, for callers that must name one.
   uint32_t gpu_id_at(uint32_t index) const {
     return index < gpus_.size() ? gpus_[index].gpu_id : 0;
@@ -504,6 +514,9 @@ public:
   };
 
 private:
+  /// Resolve a multi-GPU DRM render minor through published node metadata.
+  /// Before topology setup, retain the legacy ordinal fallback used by tests.
+  [[nodiscard]] std::optional<uint32_t> gpu_ordinal_for_render_minor(uint32_t minor) const;
   /// @brief Publish one process to every GPU memory/VM service atomically.
   /// @details The caller holds process_mutex_. A failed address-space
   /// registration unwinds every memory and VM registration made for @p proc.
@@ -536,6 +549,9 @@ private:
                   amdgpu::Mtype mtype = amdgpu::Mtype::RW,
                   KfdProcess::HostExtentOwner owner = KfdProcess::HostExtentOwner::Application);
   void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
+  /// @brief Withdraw GPU backing and release driver-owned allocation mappings.
+  /// @details Caller holds proc.alloc_mutex_; caller-owned client views survive.
+  void release_allocation_mappings(KfdProcess &proc, KfdProcess::GpuAllocation &alloc);
 
   /// @brief Export existing backing with its public mode and coherent sharing policy.
   /// @details Retains the policy for future mappings and imports as well as
@@ -895,6 +911,8 @@ private:
   /// @brief Per-GPU topology info captured at setup_topology, indexed to match
   /// gpus_. Feeds the AMDKFD_IOC_DBG_TRAP device snapshot.
   std::vector<Sysfs::GpuInfo> gpu_infos_;
+  /// Exact configured-minor matching; false permits legacy single-GPU fallback.
+  bool strict_render_minor_ = false;
 
   static constexpr int kReservedFdCount = 256;
   int reserved_fd_base_ = 0;
