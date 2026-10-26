@@ -10,11 +10,13 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     command_processor.cpp
     completion_tracker.cpp
     compute_unit.cpp
+    coalesced_lane_runs.cpp
     consumer_cursor_journal.cpp
     device_cache_coherence.cpp
     gpu_memory_access.cpp
     gpu_queue_registry.cpp
     gpu_vm.cpp
+    gws_device.cpp
     hwreg.cpp
     iod.cpp
     l1_scalar_cache.cpp
@@ -40,7 +42,9 @@ rj_add_object_library(rocjitsu_vm_amdgpu
 # propagates usage requirements without including those object files.
 target_link_libraries(
     rocjitsu_vm_amdgpu
-    INTERFACE $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
+    INTERFACE
+        $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+        $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
 )
 
 add_subdirectory(pci)

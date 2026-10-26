@@ -669,7 +669,12 @@ void GraphExecSegmented::BuildSyncPlan() {
     const bool completion_signal_needed = (hw_slot >= 0);
 
     auto& lastBatch = segBatch.packet_batches.back();
-    if (last_node_uncaptured && completion_signal_needed) {
+    // A segment whose trailing nodes emit no packets at all (e.g. a leaf segment
+    // holding only an empty node) has nothing to carry the signal, so it needs a
+    // standalone barrier just like an uncaptured trailing node. Without this the
+    // slot allocated in PASS 1 is never signalled and the leaf sync in
+    // EnqueueSegmentedGraph waits on it forever.
+    if (completion_signal_needed && (last_node_uncaptured || lastBatch.dispatchPackets.empty())) {
       uint8_t* completion_barrier = device->CreateBarrierPacket();
       sync_plan_.barrier_packets.push_back(completion_barrier);
 
@@ -680,7 +685,7 @@ void GraphExecSegmented::BuildSyncPlan() {
       sync_plan_.patch_list.push_back(
           {completion_barrier, nullptr, hw_slot,
            amd::Device::HwEventPatch::kCompletionSignal});
-    } else if (!lastBatch.dispatchPackets.empty() && completion_signal_needed) {
+    } else if (completion_signal_needed) {
       // Safe to patch the last kernel dispatch directly
       uint8_t* last_pkt = lastBatch.dispatchPackets.back();
       sync_plan_.patch_list.push_back(
@@ -2189,17 +2194,6 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
         size_t j = i;
         while (j < segment.nodes.size() && segment.nodes[j]->GraphCaptureEnabled()) {
           auto& currentNode = segment.nodes[j];
-          // Empty nodes are pure dependency points — no GPU commands or markers.
-          // Cross-stream ordering is handled by BuildSyncPlan barrier packets.
-          if (currentNode->GetType() == hipGraphNodeTypeEmpty) {
-            const size_t rangeIndex = newBatch.nodeRanges.size();
-            newBatch.nodeRanges.push_back({newBatch.dispatchPackets.size(), 0, true});
-            newBatch.nodeToRangeIndex[currentNode] = rangeIndex;
-            currentSegBatch.node_capture_status[j] = true;
-            ++j;
-            continue;
-          }
-          // Capture packets for this node
           std::vector<uint8_t*> nodePackets;
           std::vector<const std::string*> nodeKernelNames;
           std::vector<uint8_t*> nodeMetadataPackets;
@@ -2218,7 +2212,6 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
           }
 
           // Create NodeRange for this node
-          // RangeIndex is 0 at the start
           const size_t rangeIndex = newBatch.nodeRanges.size();
           const size_t startIndex = newBatch.dispatchPackets.size();
           const size_t packetCount = nodePackets.size();
@@ -2726,7 +2719,8 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
   if (sync_plan_.num_hw_events > 0) {
     const bool ok = recycle
         ? signalManager_->AcquireSet(device, sync_plan_.num_hw_events, segment_hw_events)
-        : device->CreateHwEvents(sync_plan_.num_hw_events, segment_hw_events);
+        : device->CreateHwEvents(sync_plan_.num_hw_events, /*batched=*/false,
+                                 segment_hw_events);
     if (!ok) {
       if (out_status != nullptr) {
         *out_status = hipErrorOutOfMemory;
@@ -3530,7 +3524,7 @@ bool GraphSignalManager::Prepopulate(amd::Device* device, int count, int num_set
   // would grow the pool without bound across re-instantiations.
   for (int i = static_cast<int>(pool.size()); i < num_sets; ++i) {
     std::vector<void*> set;
-    if (!device->CreateHwEvents(count, set)) {
+    if (!device->CreateHwEvents(count, /*batched=*/true, set)) {
       return false;
     }
     pool.push_back(std::move(set));
@@ -3558,7 +3552,7 @@ bool GraphSignalManager::AcquireSet(amd::Device* device, int count,
 
   // Fallback only: more launches in flight than pre-created sets. Create one
   // (armed to 1 by CreateHwEvents); it joins the pool when released.
-  return device->CreateHwEvents(count, out_set);
+  return device->CreateHwEvents(count, /*batched=*/true, out_set);
 }
 
 void GraphSignalManager::ReleaseSet(amd::Device* device, std::vector<void*>& set) {

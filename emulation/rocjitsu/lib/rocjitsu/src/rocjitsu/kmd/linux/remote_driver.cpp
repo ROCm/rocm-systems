@@ -479,8 +479,8 @@ int RemoteDriver::open() {
   assert(sock_ >= 0 && "open called on disconnected RemoteDriver");
   ptracer_verdict_.reset();
   closing_.store(false, std::memory_order_release);
-  has_gpu_info_ = false;
-  gpu_info_ = {};
+  gpu_infos_.clear();
+  strict_render_minor_ = false;
   topology_path_.clear();
   drm_path_.clear();
   // Drain the shutdown eventfd so it doesn't immediately wake pollers.
@@ -517,6 +517,11 @@ int RemoteDriver::open() {
   if (resp.result != 0)
     return resp.result;
 
+  if (resp.payload_bytes < sizeof(RpcHandshakeResponse) || resp.payload_bytes > kMaxPayloadBytes) {
+    poison_stream();
+    return -1;
+  }
+
   RpcHandshakeResponse hs = {};
   if (!rpc_recv_exact(sock_, &hs, sizeof(hs))) {
     poison_stream();
@@ -525,20 +530,23 @@ int RemoteDriver::open() {
 
   // Every rejection from here on abandons path bytes the reply header already
   // declared, which is the same misalignment as a short read.
-  if (hs.version != kRpcProtocolVersion) {
+  if (hs.version != kRpcProtocolVersion || hs.strict_render_minor > 1) {
     poison_stream();
     return -1;
   }
-
-  has_gpu_info_ = hs.gpu_info.present != 0;
-  if (has_gpu_info_)
-    gpu_info_ = gpu_info_from_rpc(hs.gpu_info);
 
   constexpr uint32_t kMaxPathLen = 4096;
-  if (hs.topology_path_len > kMaxPathLen) {
+  const uint64_t expected_bytes = sizeof(hs) + uint64_t{hs.topology_path_len} + hs.drm_path_len +
+                                  uint64_t{hs.extra_gpu_infos} * sizeof(RpcGpuInfo);
+  if (hs.topology_path_len > kMaxPathLen || hs.drm_path_len > kMaxPathLen ||
+      expected_bytes != resp.payload_bytes ||
+      (hs.extra_gpu_infos != 0 && hs.gpu_info.present == 0)) {
     poison_stream();
     return -1;
   }
+  if (hs.gpu_info.present != 0)
+    gpu_infos_.push_back(gpu_info_from_rpc(hs.gpu_info));
+  strict_render_minor_ = hs.strict_render_minor != 0;
   if (hs.topology_path_len > 0) {
     topology_path_.resize(hs.topology_path_len);
     if (!rpc_recv_exact(sock_, topology_path_.data(), hs.topology_path_len)) {
@@ -547,16 +555,23 @@ int RemoteDriver::open() {
     }
   }
 
-  if (hs.drm_path_len > kMaxPathLen) {
-    poison_stream();
-    return -1;
-  }
   if (hs.drm_path_len > 0) {
     drm_path_.resize(hs.drm_path_len);
     if (!rpc_recv_exact(sock_, drm_path_.data(), hs.drm_path_len)) {
       poison_stream();
       return -1;
     }
+  }
+  for (uint32_t i = 0; i < hs.extra_gpu_infos; ++i) {
+    RpcGpuInfo extra{};
+    if (!rpc_recv_exact(sock_, &extra, sizeof(extra)) || extra.present == 0 ||
+        std::ranges::any_of(gpu_infos_, [&](const Sysfs::GpuInfo &gpu) {
+          return gpu.drm_render_minor == extra.drm_render_minor;
+        })) {
+      poison_stream();
+      return -1;
+    }
+    gpu_infos_.push_back(gpu_info_from_rpc(extra));
   }
 
   // Only here, with the handshake complete. Everything above can fail on a peer
@@ -565,6 +580,20 @@ int RemoteDriver::open() {
   ptracer_verdict_ = authorize_daemon_address_space_access(sock_);
 
   return reissue_synthetic_kfd_fd();
+}
+
+const Sysfs::GpuInfo *RemoteDriver::gpu_info_for_render_minor(uint32_t minor) const {
+  if (gpu_infos_.empty())
+    return nullptr;
+  if (!strict_render_minor_ && gpu_infos_.size() == 1)
+    return &gpu_infos_.front();
+  const auto it = std::ranges::find_if(
+      gpu_infos_, [minor](const Sysfs::GpuInfo &gpu) { return gpu.drm_render_minor == minor; });
+  return it == gpu_infos_.end() ? nullptr : &*it;
+}
+
+bool RemoteDriver::handles_drm_render_minor(uint32_t minor) const {
+  return gpu_infos_.empty() || gpu_info_for_render_minor(minor) != nullptr;
 }
 
 int RemoteDriver::reissue_synthetic_kfd_fd() {
@@ -635,7 +664,7 @@ int RemoteDriver::close() {
     handle_memfds_.clear();
     alloc_ranges_.clear();
     // Deliberately do NOT clear the handshake metadata (topology_path_,
-    // drm_path_, gpu_info_, has_gpu_info_). It is written once during open() and
+    // drm_path_, gpu_infos_). It is written once during open() and
     // is immutable for the rest of the object's life. The interposer publishes
     // this RemoteDriver via an atomic shared_ptr and lets lock-free readers take
     // snapshots that call the accessors (topology_path(), drm_path(),

@@ -9,6 +9,8 @@
 
 #include "nccl.h"
 #include <cstddef>
+#include <hip/hip_runtime.h>
+#include <vector>
 
 /**
  * @file SymmetricBufferHelpers.hpp
@@ -155,6 +157,66 @@ inline ncclResult_t ncclSymBufAlloc(ncclComm_t comm, size_t bytes, SymBuf& sb)
         sb.comm = nullptr;
     }
     return ret;
+}
+
+// ============================================================================
+// ncclSymBufAllocPerRank – one buffer per rank of a single-process communicator
+// ============================================================================
+
+/**
+ * @brief Allocate one cuMem buffer per rank and register them all as symmetric
+ *        windows.
+ *
+ * comms[i] runs on device i. Registration is collective, so every rank
+ * registers inside one group; registering rank by rank would block the first
+ * rank waiting for its peers. With registerWindows false the buffers are only
+ * allocated.
+ *
+ * ncclCommWindowRegister can succeed without producing a window (for example
+ * with NCCL_WIN_ENABLE=0), which would leave the collectives running
+ * unregistered. That case is reported as ncclInvalidUsage.
+ *
+ * On failure, bufs keeps whatever was acquired so far. Clear it while the
+ * communicators are still alive.
+ *
+ * @return ncclSuccess, or the first failure. Callers usually treat a failure as
+ *         "symmetric windows unavailable" and skip.
+ */
+inline ncclResult_t ncclSymBufAllocPerRank(const std::vector<ncclComm_t>& comms,
+                                           size_t                         bytes,
+                                           std::vector<SymBuf>&           bufs,
+                                           bool                           registerWindows = true)
+{
+    bufs.clear();
+    bufs.resize(comms.size());
+    for(size_t i = 0; i < comms.size(); i++)
+    {
+        if(hipSetDevice(static_cast<int>(i)) != hipSuccess) return ncclUnhandledCudaError;
+        bufs[i].comm     = comms[i];
+        ncclResult_t ret = ncclMemAlloc(&bufs[i].ptr, bytes);
+        if(ret != ncclSuccess)
+        {
+            bufs[i].ptr = nullptr;
+            return ret;
+        }
+    }
+    if(!registerWindows) return ncclSuccess;
+
+    std::vector<ncclResult_t> rr(comms.size(), ncclSuccess);
+    ncclResult_t              ret = ncclGroupStart();
+    if(ret != ncclSuccess) return ret;
+    for(size_t i = 0; i < comms.size(); i++)
+    {
+        if(hipSetDevice(static_cast<int>(i)) != hipSuccess) rr[i] = ncclUnhandledCudaError;
+        else rr[i] = ncclCommWindowRegister(comms[i], bufs[i].ptr, bytes, &bufs[i].win, NCCL_WIN_COLL_SYMMETRIC);
+    }
+    ret = ncclGroupEnd();
+    for(ncclResult_t r : rr)
+        if(r != ncclSuccess) return r;
+    if(ret != ncclSuccess) return ret;
+    for(const SymBuf& b : bufs)
+        if(!b.valid()) return ncclInvalidUsage;
+    return ncclSuccess;
 }
 
 } // namespace RCCLTestHelpers
