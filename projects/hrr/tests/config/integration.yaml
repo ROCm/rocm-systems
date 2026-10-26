@@ -170,6 +170,10 @@ cases:
         kind: disabled
         reason: "Local-mode rocJitsu runs inside the process, and the case lowers RLIMIT_FSIZE, which also limits the simulator"
         issue: "https://github.com/ROCm/rocm-systems/issues/13726"
+  Unit_HRR_FailedEndCaptureInvalidatedRoundtrip: {}
+  Unit_HRR_FailedEndCaptureInvalidated_Direct: {}
+  Unit_HRR_FailedEndCaptureRoundtrip: {}
+  Unit_HRR_FailedEndCapture_Direct: {}
   Unit_HRR_FailedMemcpy3DNotRecorded: {}
   Unit_HRR_FailedMemcpy3D_Direct: {}
   Unit_HRR_FailedShimCallsNotRecorded: {}
