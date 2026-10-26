@@ -67,7 +67,7 @@ struct WaveDebugFixture {
   }
 };
 
-TEST(WaveDebugTest, DebuggerReadsPreserveValuesAndBounds) {
+TEST(WaveDebugTest, DebuggerReadsPreserveValuesAtNonzeroOffsets) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch, 2);
@@ -85,17 +85,31 @@ TEST(WaveDebugTest, DebuggerReadsPreserveValuesAndBounds) {
 
     EXPECT_EQ(wave->debug_read_sgpr(last_sgpr), 42u);
     EXPECT_EQ(wave->debug_read_vgpr(last_vgpr, last_lane), 43u);
-    EXPECT_EQ(wave->debug_read_sgpr(wave->num_sgprs()), 0u);
-    EXPECT_EQ(wave->debug_read_vgpr(wave->num_vgprs(), 0), 0u);
-    EXPECT_EQ(wave->debug_read_vgpr(0, wave->wf_size()), 0u);
-    EXPECT_EQ(first_wave->debug_read_sgpr(wave->sgpr_alloc().base - first_wave->sgpr_alloc().base +
-                                          last_sgpr),
-              0u);
-    EXPECT_EQ(first_wave->debug_read_vgpr(
-                  wave->vgpr_alloc().base - first_wave->vgpr_alloc().base + last_vgpr, last_lane),
-              0u);
   }
 }
+
+#ifndef NDEBUG
+TEST(WaveDebugDeathTest, DebuggerReadsRequireAllocatedRegistersAndLanes) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    WaveDebugFixture fx(arch, 2);
+    auto *first_wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(first_wave, nullptr);
+    auto *wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(wave, nullptr);
+
+    EXPECT_DEATH(static_cast<void>(wave->debug_read_sgpr(wave->num_sgprs())), "");
+    EXPECT_DEATH(static_cast<void>(wave->debug_read_vgpr(wave->num_vgprs(), 0)), "");
+    EXPECT_DEATH(static_cast<void>(wave->debug_read_vgpr(0, wave->wf_size())), "");
+    EXPECT_DEATH(static_cast<void>(first_wave->debug_read_sgpr(wave->sgpr_alloc().base -
+                                                               first_wave->sgpr_alloc().base)),
+                 "");
+    EXPECT_DEATH(static_cast<void>(first_wave->debug_read_vgpr(
+                     wave->vgpr_alloc().base - first_wave->vgpr_alloc().base, 0)),
+                 "");
+  }
+}
+#endif
 
 TEST(WaveDebugTest, STrapExecutesConfiguredTrapHandlerInstructions) {
   WaveDebugFixture fx;

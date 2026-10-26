@@ -61,14 +61,13 @@ bool InstructionComputeUnitView::signal_queue_exception(
 }
 
 uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
-  if (reg >= num_sgprs())
-    return 0;
+  assert(reg < num_sgprs());
   return cu_.read_sgpr_storage(sgpr_alloc_.base + reg);
 }
 
 uint32_t Wavefront::debug_read_vgpr(uint32_t reg, uint32_t lane) const {
-  if (reg >= num_vgprs() || lane >= wf_size())
-    return 0;
+  assert(reg < num_vgprs());
+  assert(lane < wf_size());
   return cu_.read_vgpr_storage(vgpr_alloc_.base + reg, lane);
 }
 
