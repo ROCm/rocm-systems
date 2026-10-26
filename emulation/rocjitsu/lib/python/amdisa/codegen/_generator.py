@@ -8043,7 +8043,7 @@ class CodeGenerator:
                 image_fields = (
                     '{.dmask = inst_.dmask, .a16 = bool(inst_.a16), '
                     '.d16 = bool(inst_.d16), .r128 = bool(inst_.r128), '
-                    '.lwe = false, .da = true, '
+                    '.tfe = bool(inst_.tfe), .lwe = false, .da = true, '
                     '.unorm = true}'
                 )
             else:
@@ -8064,10 +8064,15 @@ class CodeGenerator:
                     if self.isa_spec.arch_name.startswith('rdna')
                     else 'false'
                 )
+                tfe = (
+                    '.tfe = bool(inst_.tfe), '
+                    if self.isa_spec.arch_name.startswith('rdna')
+                    else ''
+                )
                 image_fields = (
                     '{.dmask = inst_.dmask, .a16 = bool(inst_.a16), '
                     f'.d16 = bool(inst_.d16), .r128 = {r128}, '
-                    '.lwe = bool(inst_.lwe), '
+                    f'{tfe}.lwe = bool(inst_.lwe), '
                     f'.da = {da}, .unorm = bool(inst_.unorm)}}'
                 )
             L.append(

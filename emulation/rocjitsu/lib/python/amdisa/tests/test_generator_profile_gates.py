@@ -4841,6 +4841,26 @@ def test_generated_rdna_image_load_tracks_d16_destination_preservation(
     assert 'std::popcount(uint32_t{inst_.dmask})' not in image_store_uses
 
 
+@pytest.mark.parametrize(
+    ('arch', 'stem', 'suffix'),
+    [
+        ('rdna3', 'mimg', 'Mimg'),
+        ('rdna3_5', 'mimg', 'Mimg'),
+        ('rdna4', 'vimage', 'Vimage'),
+    ],
+)
+def test_generated_rdna_image_execution_passes_tfe(
+    amdgpu_generated_root: Path, arch: str, stem: str, suffix: str
+):
+    execution = (
+        amdgpu_generated_root / _generated_dir_name(arch) / f'{stem}_exec.cpp'
+    ).read_text()
+    image_load = _generated_function_body(
+        execution, f'void ImageLoad{suffix}::execute_impl'
+    )
+    assert '.tfe = bool(inst_.tfe)' in image_load
+
+
 def test_gfx1250_compact_literal_policy_precedes_extension_sizing(
     gfx1250_generated_root: Path,
 ):

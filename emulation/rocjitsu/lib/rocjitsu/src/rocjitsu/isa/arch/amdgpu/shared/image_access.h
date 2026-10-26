@@ -25,6 +25,7 @@ struct ImageFields {
   bool a16 = false;
   bool d16 = false;
   bool r128 = false;
+  bool tfe = false;
   bool lwe = false;
   bool da = false;
   bool unorm = false;
@@ -68,7 +69,7 @@ inline ImageAddressRegisters gfx12_image_address_registers(const VimageMachineIn
 /// half registers. DA=0 accesses layer zero without a layer coordinate.
 /// @returns Failure after reporting an unsupported operand (empty DMASK,
 /// UNORM=0 store) or an unimplemented feature (tiling, mips, cube, MSAA,
-/// nonzero base array, format outside the buffer table, or LWE).
+/// nonzero base array, format outside the buffer table, TFE, or LWE).
 inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
                                          uint32_t resource_reg,
                                          const ImageAddressRegisters &address_registers,
@@ -90,7 +91,7 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   state.buffer_components = static_cast<uint32_t>(std::popcount(fields.dmask & 15u));
   if (fields.r128)
     return fail(InstructionExecutionError::UnimplementedInstruction);
-  if (fields.lwe)
+  if (fields.tfe || fields.lwe)
     return fail(InstructionExecutionError::UnimplementedInstruction);
   if (state.buffer_components == 0 || (!state.is_load && !fields.unorm))
     return fail(InstructionExecutionError::UnsupportedOperandValue);
