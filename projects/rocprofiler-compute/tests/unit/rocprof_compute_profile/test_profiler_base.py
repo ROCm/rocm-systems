@@ -868,7 +868,10 @@ def _make_run_profiling_profiler(tmp_path, filter_blocks, perfmon_files=0):
     )
     # run_profiling() consumes remaining as the already-joined command string.
     args.remaining = "-- ./app"
-    soc = SimpleNamespace(_mspec=SimpleNamespace(gpu_model="MI300"))
+    soc = SimpleNamespace(
+        _mspec=SimpleNamespace(gpu_model="MI300"),
+        get_arch=lambda: None,
+    )
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofv3", soc=soc)
     profiler._filter_blocks = filter_blocks
     return profiler
@@ -1101,7 +1104,8 @@ def _make_sdk_run_profiling_profiler(
     )
     args.remaining = "-- ./app"
     soc = SimpleNamespace(
-        _mspec=SimpleNamespace(gpu_model="MI300", rocm_version=rocm_version)
+        _mspec=SimpleNamespace(gpu_model="MI300", rocm_version=rocm_version),
+        get_arch=lambda: None,
     )
     profiler = RocProfCompute_Base(args, profiler_mode=profiler_mode, soc=soc)
     profiler._filter_blocks = filter_blocks

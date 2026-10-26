@@ -306,6 +306,89 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     assert "TCC_HIT" in merged_counters
 
 
+def test_run_prof_adds_generated_gfx115_expression_to_installed_config(
+    tmp_path, monkeypatch
+):
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - TCC_HIT[0]\n", encoding="utf-8")
+    # run_prof pairs pmc_perf_<suffix>.yaml with counter_def_<suffix>.yaml.
+    extra_counter = {
+        "name": "TCC_HIT[0]",
+        "description": "TCC_HIT on channel zero",
+        "properties": [],
+        "definitions": [
+            {
+                "architectures": ["gfx1151"],
+                "expression": (
+                    "select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[0]])"
+                ),
+            }
+        ],
+    }
+    (tmp_path / "counter_def_test.yaml").write_text(
+        utils_profile.yaml.dump({
+            "rocprofiler-sdk": {
+                "counters-schema-version": 1,
+                "counters": [extra_counter],
+            }
+        }),
+        encoding="utf-8",
+    )
+    installed_counter = {
+        "name": "TCC_HIT",
+        "description": "TCC hits",
+        "properties": [],
+        "definitions": [
+            {
+                "architectures": ["gfx1151"],
+                "block": "TCC",
+                "event": 1,
+            }
+        ],
+    }
+    installed_config = {
+        "rocprofiler-sdk": {
+            "counters-schema-version": 1,
+            "counters": [installed_counter],
+        }
+    }
+    captured_config = {}
+
+    def fake_metrics_path(sdk_config):
+        captured_config["sdk_config"] = sdk_config
+        return str(tmp_path / "metrics_path")
+
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr(
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
+    )
+    monkeypatch.setattr(
+        "utils.utils_profile.create_temp_rocprofiler_metrics_path", fake_metrics_path
+    )
+    monkeypatch.setattr(
+        "utils.utils_profile.installed_sdk_counter_config",
+        lambda sdk_tool_path: installed_config,
+    )
+    monkeypatch.setattr(
+        "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
+    )
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
+
+    utils_profile.run_prof(
+        str(fname),
+        ["--arg"],
+        str(tmp_path / "workload"),
+        agent_arch="gfx1151",
+        sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/tool.so",
+    )
+
+    counters = captured_config["sdk_config"]["rocprofiler-sdk"]["counters"]
+    assert [counter["name"] for counter in counters] == ["TCC_HIT", "TCC_HIT[0]"]
+
+
 @pytest.mark.parametrize(
     "rocprof_cmd, profiler_options",
     [
