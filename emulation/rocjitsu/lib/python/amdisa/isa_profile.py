@@ -234,7 +234,11 @@ def _modern_rdna_dpp_opcode_rule(
 
 
 class FloatDotAccumulation(Enum):
-    """Numerical accumulation policy for F32-output floating DOT2."""
+    """Numerical accumulation policy for the floating DOT instructions.
+
+    Selects the arithmetic for F32-output DOT2, true16 packed DOT2 and the
+    FP8/BF8 DOT4 forms.
+    """
 
     HOST_F32 = 'HostF32'
     GFX11 = 'Gfx11'
@@ -1531,7 +1535,7 @@ class _AmdgpuProfileBase(IsaProfile):
 
     @property
     def float_dot_accumulation(self) -> FloatDotAccumulation:
-        """Select the scalar/SIMD arithmetic contract for floating DOT2."""
+        """Select the scalar/SIMD arithmetic contract for the floating DOTs."""
         return FloatDotAccumulation.HOST_F32
 
     @property

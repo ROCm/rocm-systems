@@ -553,9 +553,33 @@ impl Driver for LinuxKfdDriver {
             visitor,
         )
     }
+    fn contribute_topology(
+        &self,
+        snapshot: &mut crate::topology::TopologySnapshot,
+    ) -> Result<(), Error> {
+        self.ensure_open()?;
+        sysfs::contribute_topology(
+            Self::TOPOLOGY_ROOT,
+            Self::DRM_ROOT,
+            self.driver_instance,
+            snapshot,
+        )
+    }
+    fn can_access_local_memory(&self, consumer: &Endpoint, owner: &Endpoint) -> bool {
+        sysfs::can_access_local_memory(consumer, owner)
+    }
     fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error> {
         self.ensure_open()?;
         sysfs::open_endpoint(
+            Self::TOPOLOGY_ROOT,
+            Self::DRM_ROOT,
+            self.driver_instance,
+            id,
+        )
+    }
+    fn probe_endpoint(&self, id: [u8; 16]) -> Result<Option<Endpoint>, Error> {
+        self.ensure_open()?;
+        sysfs::probe_endpoint(
             Self::TOPOLOGY_ROOT,
             Self::DRM_ROOT,
             self.driver_instance,
@@ -594,7 +618,7 @@ impl Driver for LinuxKfdDriver {
                 "native implementation requires host pages of at least 4 KiB",
             ));
         }
-        let EndpointSelector::LinuxKfd(native) = current.selector else {
+        let EndpointSelector::LinuxKfd { native, .. } = current.selector else {
             return Err(error(
                 ErrorKind::InvalidData,
                 "KFD endpoint has a foreign selector",

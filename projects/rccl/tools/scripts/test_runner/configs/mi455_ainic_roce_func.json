@@ -1810,6 +1810,11 @@
           "test_filter": "AllGather.InPlaceGraph"
         },
         {
+          "name": "AllGather.SymmetricInPlaceSlices",
+          "description": "AllGather in-place on symmetric windows, 16 B aligned and unaligned per-rank slices",
+          "test_filter": "AllGather.SymmetricInPlaceSlices"
+        },
+        {
           "name": "AllGather.ManagedMem",
           "description": "AllGather managed memory",
           "test_filter": "AllGather.ManagedMem"
@@ -2003,6 +2008,11 @@
           "name": "ReduceScatter.InPlaceGraph",
           "description": "ReduceScatter in-place graph",
           "test_filter": "ReduceScatter.InPlaceGraph"
+        },
+        {
+          "name": "ReduceScatter.SymmetricInPlaceSlices",
+          "description": "ReduceScatter in-place on symmetric windows, 16 B aligned and unaligned per-rank slices",
+          "test_filter": "ReduceScatter.SymmetricInPlaceSlices"
         },
         {
           "name": "ReduceScatter.ManagedMem",
@@ -5159,6 +5169,11 @@
           "test_filter": "DdaMPI_ReduceScatter.LLAndLL128Interleaved"
         },
         {
+          "name": "DDA_Fabric_ReduceScatter_InterleavedUnsynchronised",
+          "description": "DDA fabric ReduceScatter LL and LL128 alternated on one communicator with no stream drain and no MPI barrier at a tier switch, at RCCL_DDA_FABRIC_MAXBLOCKS=2. Both tiers double-buffer on the shared bank stride.",
+          "test_filter": "DdaMPI_ReduceScatter.LLAndLL128InterleavedUnsynchronised"
+        },
+        {
           "name": "DDA_Fabric_ReduceScatter_GridStride",
           "description": "DDA fabric ReduceScatter LL and LL128 with RCCL_DDA_FABRIC_MAXBLOCKS=2 so both kernels grid-stride; stream drain and global MPI barrier at each tier switch",
           "test_filter": "DdaMPI_ReduceScatter.GridStrideWithTwoBlocks"
@@ -5209,6 +5224,21 @@
           "name": "DDA_Fabric_AllReduce_LL128_TwoShot",
           "description": "DDA fabric AllReduce LL128 two-shot tier with the LL and LL128 one-shot thresholds zeroed; own process",
           "test_filter": "DdaMPI_AllReduce.LL128TwoShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_BitIdentical",
+          "description": "Float and bf16 AllReduce at 256 KiB to 4 MiB returns bit-identical output on every rank under the default selection",
+          "test_filter": "DdaMPI_AllReduce.BitIdenticalAcrossRanksDefaultSelection"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL_OneShot_BitIdentical",
+          "description": "DDA fabric AllReduce LL one-shot tier folds in rank order, so every rank gets the same bits back",
+          "test_filter": "DdaMPI_AllReduce.LLOneShotBitIdenticalAcrossRanks"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL128_OneShot_BitIdentical",
+          "description": "DDA fabric AllReduce LL128 one-shot tier folds in rank order, so every rank gets the same bits back; own process",
+          "test_filter": "DdaMPI_AllReduce.LL128OneShotBitIdenticalAcrossRanks"
         }
       ]
     },
