@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "decode_benchmark_cli.h"
+#include "cli_choices.h"
 
 #include <array>
 #include <limits>
@@ -9,7 +10,7 @@
 namespace rocjitsu::tools {
 namespace {
 
-constexpr std::array<std::pair<std::string_view, rj_code_target_id_t>, 6> targets{{
+constexpr std::array<NamedChoice<rj_code_target_id_t>, 6> kTargets{{
     {"gfx942", ROCJITSU_CODE_TARGET_GFX942},
     {"gfx950", ROCJITSU_CODE_TARGET_GFX950},
     {"gfx1200", ROCJITSU_CODE_TARGET_GFX1200},
@@ -26,19 +27,19 @@ cli::Result DecodeTargetFlag::set_value(std::optional<rj_code_target_id_t> value
     value_.reset();
     return cli::Result::success();
   }
-  for (const auto &[name, id] : targets) {
-    if (id == *value) {
-      value_ = value;
-      return cli::Result::success();
-    }
+  if (choice_name<rj_code_target_id_t>(kTargets, *value)) {
+    value_ = value;
+    return cli::Result::success();
   }
   return diagnostic.emit() << "unsupported decoder target";
 }
 
 std::string DecodeTargetFlag::format_value() const {
-  for (const auto &[name, id] : targets)
-    if (value_ && id == *value_)
-      return std::string(name);
+  if (value_) {
+    std::optional<std::string_view> name = choice_name<rj_code_target_id_t>(kTargets, *value_);
+    if (name)
+      return std::string(*name);
+  }
   return "auto";
 }
 
@@ -46,9 +47,9 @@ cli::Result DecodeTargetFlag::parse_value(std::string_view text,
                                           cli::DiagnosticEmitter diagnostic) {
   if (text == "auto")
     return set_value(std::nullopt, diagnostic);
-  for (const auto &[name, id] : targets)
-    if (text == name)
-      return set_value(id, diagnostic);
+  std::optional<rj_code_target_id_t> target = find_choice<rj_code_target_id_t>(kTargets, text);
+  if (target)
+    return set_value(*target, diagnostic);
   return diagnostic.emit() << "unsupported decoder target '" << text << "'";
 }
 

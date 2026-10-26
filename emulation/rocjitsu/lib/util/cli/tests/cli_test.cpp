@@ -126,6 +126,23 @@ TEST_F(CliTest, HelpSectionsPreserveOrderAndDoNotIntroduceScope) {
   EXPECT_EQ(output->value(), "out.txt");
 }
 
+TEST_F(CliTest, HelpUsesCustomOrEmptyPositionalUsage) {
+  root.set_positional_usage("INPUT...");
+  auto launch = root.add_command("launch", diagnostic.emitter(), PositionalMode::AfterSeparator);
+  ASSERT_TRUE(launch.succeeded());
+  launch.value()->set_positional_usage("APP [ARGS...]");
+  auto config = std::make_shared<StringFlag>(FlagInfo{"--config", {}, "Config"});
+  ASSERT_TRUE(launch.value()->add_flag(config, diagnostic.emitter()).succeeded());
+  auto status = root.add_command("status", diagnostic.emitter());
+  ASSERT_TRUE(status.succeeded());
+  status.value()->set_positional_usage("");
+  EXPECT_EQ(format_help(root), "Usage: tool [options] <command> [--] INPUT...\n"
+                               "\nCommands:\n  launch\n  status\n");
+  EXPECT_EQ(format_help(*launch.value()), "Usage: tool launch [options] -- APP [ARGS...]\n"
+                                          "\nOptions:\n  --config VALUE\n      Config\n");
+  EXPECT_EQ(format_help(*status.value()), "Usage: tool status [options]\n");
+}
+
 TEST_F(CliTest, BatchCollisionsDiagnoseAcrossAndWithinSections) {
   auto first = std::make_shared<IntFlag>(FlagInfo{"--first", {"-f"}, ""});
   auto fresh = std::make_shared<IntFlag>(FlagInfo{"--fresh", {}, ""});
@@ -245,6 +262,18 @@ TEST_F(CliTest, CommandSelectionDoesNotExecuteAndSeparatorStopsSelection) {
   EXPECT_EQ(result.value().positional, (std::vector<std::string>{"child", "--whatever"}));
 }
 
+TEST_F(CliTest, NestedCommandCanRequireSeparatorBeforePositionals) {
+  auto launch = root.add_command("launch", diagnostic.emitter(), PositionalMode::AfterSeparator);
+  ASSERT_TRUE(launch.succeeded());
+  EXPECT_TRUE(run({"launch", "application"}).failed());
+  EXPECT_NE(diagnostic.message().find("tool launch: expected --"), std::string::npos);
+  auto result = run({"launch", "--", "application", "--flag"});
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  EXPECT_EQ(result.value().command, launch.value());
+  EXPECT_TRUE(result.value().saw_separator);
+  EXPECT_EQ(result.value().positional, (std::vector<std::string>{"application", "--flag"}));
+}
+
 TEST(CliValues, LauncherRequiresSeparatorAndOwnsForwardedArguments) {
   Command command{"launcher", PositionalMode::AfterSeparator};
   util::StringDiagnostic diagnostic;
@@ -362,6 +391,28 @@ private:
   int64_t value_ = 1;
 };
 
+class AppendingFlag final : public Flag {
+public:
+  using Flag::Flag;
+  const std::vector<std::string> &values() const { return values_; }
+  std::string format_value() const override {
+    std::string result;
+    for (const std::string &value : values_) {
+      if (!result.empty())
+        result += ",";
+      result += value;
+    }
+    return result;
+  }
+  Result parse_value(std::string_view text, DiagnosticEmitter) override {
+    values_.emplace_back(text);
+    return Result::success();
+  }
+
+private:
+  std::vector<std::string> values_;
+};
+
 TEST_F(CliTest, CustomValidationSharesTypedAndStringPath) {
   auto value = std::make_shared<PositiveFlag>(FlagInfo{"--positive", {}, ""});
   ASSERT_TRUE(root.add_flag(value, diagnostic.emitter()).succeeded());
@@ -371,6 +422,14 @@ TEST_F(CliTest, CustomValidationSharesTypedAndStringPath) {
   EXPECT_EQ(diagnostic.message(), "tool: --positive: must be positive");
   ASSERT_TRUE(run({"--positive=42"}).succeeded());
   EXPECT_EQ(value->value(), 42);
+}
+
+TEST_F(CliTest, CustomFlagCanAppendRepeatedValuesInOrder) {
+  auto value = std::make_shared<AppendingFlag>(FlagInfo{"--path", {}, ""});
+  ASSERT_TRUE(root.add_flag(value, diagnostic.emitter()).succeeded());
+  ASSERT_TRUE(run({"--path", "first", "--path=second", "--path", ""}).succeeded());
+  EXPECT_EQ(value->values(), (std::vector<std::string>{"first", "second", ""}));
+  EXPECT_EQ(value->format_value(), "first,second,");
 }
 
 TEST_F(CliTest, SilentCustomFailureStillGetsContext) {

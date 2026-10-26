@@ -7,7 +7,11 @@ cmake_minimum_required(VERSION 3.22)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(util_cli LANGUAGES CXX)
     include(CTest)
-    add_subdirectory(../util ${CMAKE_CURRENT_BINARY_DIR}/util)
+    add_library(util INTERFACE)
+    target_include_directories(
+        util
+        INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    )
     if(BUILD_TESTING)
         find_package(GTest REQUIRED)
     endif()

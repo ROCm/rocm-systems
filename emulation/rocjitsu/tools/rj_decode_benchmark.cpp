@@ -177,6 +177,7 @@ int main(int argc, char **argv) {
   auto report = [](std::string_view message) { std::cerr << message << '\n'; };
   util::DiagnosticEmitter diagnostic(report);
   util::cli::Command command{"rj_decode_benchmark"};
+  command.set_positional_usage("INPUT");
   rocjitsu::tools::DecodeBenchmarkFlags flags;
   if (rocjitsu::tools::register_decode_benchmark_flags(command, flags, diagnostic).failed())
     return 1;

@@ -6,6 +6,17 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstdlib>
+
+namespace {
+
+const char *plugin_path() {
+  if (const char *path = std::getenv("RJ_CLI_PLUGIN_PATH"))
+    return path;
+  return RJ_CLI_PLUGIN_PATH;
+}
+
+} // namespace
 
 TEST(CliPlugin, RetainedFlagPinsLibraryBeyondTreeLifetime) {
   util::StringDiagnostic diagnostic;
@@ -13,7 +24,7 @@ TEST(CliPlugin, RetainedFlagPinsLibraryBeyondTreeLifetime) {
   std::weak_ptr<void> library;
   {
     util::cli::Command root{"tool"};
-    auto loaded = load_plugin(RJ_CLI_PLUGIN_PATH, root, diagnostic.emitter());
+    auto loaded = load_plugin(plugin_path(), root, diagnostic.emitter());
     ASSERT_TRUE(loaded.succeeded()) << diagnostic.message();
     library = loaded.value();
     loaded.value().reset();
@@ -31,7 +42,7 @@ TEST(CliPlugin, RetainedFlagPinsLibraryBeyondTreeLifetime) {
   EXPECT_EQ(diagnostic.message(), "--format: expected text or json");
   retained.reset();
   EXPECT_TRUE(library.expired());
-  void *unexpected = dlopen(RJ_CLI_PLUGIN_PATH, RTLD_NOW | RTLD_NOLOAD);
+  void *unexpected = dlopen(plugin_path(), RTLD_NOW | RTLD_NOLOAD);
   EXPECT_EQ(unexpected, nullptr) << "fixture must really unload to exercise the lifetime guard";
   if (unexpected)
     dlclose(unexpected);
@@ -41,8 +52,8 @@ TEST(CliPlugin, MissingLibraryAndRegistrationCollisionFail) {
   util::StringDiagnostic diagnostic;
   util::cli::Command root{"tool"};
   EXPECT_TRUE(load_plugin("/no/such/rocjitsu-cli-plugin.so", root, diagnostic.emitter()).failed());
-  auto first = load_plugin(RJ_CLI_PLUGIN_PATH, root, diagnostic.emitter());
+  auto first = load_plugin(plugin_path(), root, diagnostic.emitter());
   ASSERT_TRUE(first.succeeded());
-  EXPECT_TRUE(load_plugin(RJ_CLI_PLUGIN_PATH, root, diagnostic.emitter()).failed());
+  EXPECT_TRUE(load_plugin(plugin_path(), root, diagnostic.emitter()).failed());
   EXPECT_NE(diagnostic.message().find("duplicate command 'plugin'"), std::string::npos);
 }

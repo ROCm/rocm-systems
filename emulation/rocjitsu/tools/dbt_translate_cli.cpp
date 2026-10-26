@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "dbt_translate_cli.h"
+#include "cli_choices.h"
 #include "util/cli.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -110,40 +111,37 @@ void print_supported_targets(std::ostream &os) {
   return "unspecified";
 }
 
-// The DBT interface needs optional typed choices and hexadecimal bounded numbers.
-// Keep these small adapters local until another tool needs the same contracts.
+// The DBT interface owns its allowed values and optional policy; the shared
+// helper only provides table lookup and formatting.
 template <typename T> class ChoiceFlag final : public cli::Flag {
 public:
-  ChoiceFlag(cli::FlagInfo info, std::vector<std::pair<std::string, T>> choices,
-             std::optional<T> initial = {})
+  ChoiceFlag(cli::FlagInfo info, std::vector<NamedChoice<T>> choices, std::optional<T> initial = {})
       : Flag(std::move(info)), choices_(std::move(choices)), value_(std::move(initial)) {}
   const std::optional<T> &value() const { return value_; }
   util::Result set_value(std::optional<T> value, util::DiagnosticEmitter diagnostic) {
-    if (value) {
-      bool valid = false;
-      for (const auto &[name, candidate] : choices_)
-        valid |= candidate == *value;
-      if (!valid)
-        return diagnostic.emit() << "unsupported choice";
-    }
+    if (value && !choice_name<T>(choices(), *value))
+      return diagnostic.emit() << "unsupported choice";
     value_ = std::move(value);
     return util::Result::success();
   }
   std::string format_value() const override {
-    for (const auto &[name, candidate] : choices_)
-      if (value_ && candidate == *value_)
-        return name;
+    if (value_) {
+      std::optional<std::string_view> name = choice_name<T>(choices(), *value_);
+      if (name)
+        return std::string(*name);
+    }
     return "unset";
   }
 
 private:
   util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override {
-    for (const auto &[name, candidate] : choices_)
-      if (text == name)
-        return set_value(candidate, diagnostic);
+    std::optional<T> choice = find_choice<T>(choices(), text);
+    if (choice)
+      return set_value(*choice, diagnostic);
     return diagnostic.emit() << "unsupported value '" << text << "'";
   }
-  std::vector<std::pair<std::string, T>> choices_;
+  std::span<const NamedChoice<T>> choices() const { return {choices_.data(), choices_.size()}; }
+  std::vector<NamedChoice<T>> choices_;
   std::optional<T> value_;
 };
 
@@ -178,9 +176,9 @@ struct DbtFlags {
   std::shared_ptr<ChoiceFlag<ProcessorRevision>> input_revision;
   std::shared_ptr<ChoiceFlag<ProcessorRevision>> output_revision;
   std::shared_ptr<ChoiceFlag<OutputMode>> output_mode;
-  std::shared_ptr<DbtUIntFlag> index = std::make_shared<DbtUIntFlag>(cli::FlagInfo{
+  std::shared_ptr<DbtUIntFlag> code_object_index = std::make_shared<DbtUIntFlag>(cli::FlagInfo{
       "--code-object-index", {}, "Code-object index for executable input (default: 0)"});
-  std::shared_ptr<DbtUIntFlag> vgpr = std::make_shared<DbtUIntFlag>(
+  std::shared_ptr<DbtUIntFlag> debug_min_free_vgpr = std::make_shared<DbtUIntFlag>(
       cli::FlagInfo{"--debug-conservative-liveness",
                     {},
                     "Only allocate free VGPR scratch at or above this index"},
@@ -205,25 +203,25 @@ struct DbtFlags {
                     {},
                     "Require no registered rewrite trigger in final output",
                     cli::ValueMode::Switch});
-  std::shared_ptr<cli::BoolFlag> all = std::make_shared<cli::BoolFlag>(
+  std::shared_ptr<cli::BoolFlag> show_all_translations = std::make_shared<cli::BoolFlag>(
       cli::FlagInfo{"--show-all-translations",
                     {},
                     "Include unchanged identity mappings in diff output",
                     cli::ValueMode::Switch});
-  std::shared_ptr<cli::BoolFlag> list = std::make_shared<cli::BoolFlag>(cli::FlagInfo{
+  std::shared_ptr<cli::BoolFlag> list_code_objects = std::make_shared<cli::BoolFlag>(cli::FlagInfo{
       "--list-code-objects", {}, "List extractable code objects and exit", cli::ValueMode::Switch});
   std::shared_ptr<cli::BoolFlag> help = std::make_shared<cli::BoolFlag>(
       cli::FlagInfo{"--help", {"-h"}, "Show help", cli::ValueMode::Switch});
 
   DbtFlags() {
-    std::vector<std::pair<std::string, TargetInfo>> targets;
+    std::vector<NamedChoice<TargetInfo>> targets;
     for (const auto &target : kTargetInfos)
       targets.emplace_back(target.name, target);
     input_target = std::make_shared<ChoiceFlag<TargetInfo>>(
         cli::FlagInfo{"--input-target", {}, "Input LLVM machine, e.g. gfx950"}, targets);
     output_target = std::make_shared<ChoiceFlag<TargetInfo>>(
         cli::FlagInfo{"--output-target", {}, "Output LLVM machine, e.g. gfx1200"}, targets);
-    const std::vector<std::pair<std::string, ProcessorRevision>> revisions{
+    const std::vector<NamedChoice<ProcessorRevision>> revisions{
         {"a0", ProcessorRevision::Gfx1250A0}, {"b0", ProcessorRevision::Gfx1250B0}};
     input_revision = std::make_shared<ChoiceFlag<ProcessorRevision>>(
         cli::FlagInfo{"--input-revision", {}, "Input revision: a0 or b0 (gfx1250 only)"},
@@ -231,10 +229,9 @@ struct DbtFlags {
     output_revision = std::make_shared<ChoiceFlag<ProcessorRevision>>(
         cli::FlagInfo{"--output-revision", {}, "Output revision: a0 or b0 (gfx1250 only)"},
         revisions);
-    const std::vector<std::pair<std::string, OutputMode>> modes{
-        {"disasm", OutputMode::Disasm},
-        {"code-object", OutputMode::CodeObject},
-        {"diff", OutputMode::Diff}};
+    const std::vector<NamedChoice<OutputMode>> modes{{"disasm", OutputMode::Disasm},
+                                                     {"code-object", OutputMode::CodeObject},
+                                                     {"diff", OutputMode::Diff}};
     output_mode = std::make_shared<ChoiceFlag<OutputMode>>(
         cli::FlagInfo{"--output-mode", {}, "disasm, code-object, or diff (default: disasm)"}, modes,
         OutputMode::Disasm);
@@ -242,17 +239,19 @@ struct DbtFlags {
 
   util::Result register_flags(cli::Command &command, util::DiagnosticEmitter diagnostic) const {
     if (command
-            .add_flags(
-                "Translation",
-                {input_target, output_target, input_revision, output_revision, index, output_mode},
-                diagnostic)
+            .add_flags("Translation",
+                       {input_target, output_target, input_revision, output_revision,
+                        code_object_index, output_mode},
+                       diagnostic)
             .failed() ||
         command
             .add_flags("Validation and diagnostics",
-                       {vgpr, keep_going, skip_failed, idempotence, discharge, all}, diagnostic)
+                       {debug_min_free_vgpr, keep_going, skip_failed, idempotence, discharge,
+                        show_all_translations},
+                       diagnostic)
             .failed())
       return util::Result::failure();
-    return command.add_flags("Information", {list, help}, diagnostic);
+    return command.add_flags("Information", {list_code_objects, help}, diagnostic);
   }
 };
 
@@ -306,16 +305,17 @@ void print_help(const cli::Command &command) {
       flags.input_revision->value().value_or(ProcessorRevision::Unspecified);
   options.translate.output_revision =
       flags.output_revision->value().value_or(ProcessorRevision::Unspecified);
-  options.translate.code_object_index = flags.index->value().value_or(0);
-  if (flags.vgpr->value())
-    options.translate.debug_min_free_vgpr = static_cast<uint16_t>(*flags.vgpr->value());
+  options.translate.code_object_index = flags.code_object_index->value().value_or(0);
+  if (flags.debug_min_free_vgpr->value())
+    options.translate.debug_min_free_vgpr =
+        static_cast<uint16_t>(*flags.debug_min_free_vgpr->value());
   options.translate.debug_continue_after_failure = flags.keep_going->value();
   options.translate.skip_failed_kernels = flags.skip_failed->value();
   options.translate.verify_idempotence = flags.idempotence->value();
   options.translate.verify_rewrite_discharge = flags.discharge->value();
   options.output_mode = *flags.output_mode->value();
-  options.show_all_translations = flags.all->value();
-  options.list_code_objects = flags.list->value();
+  options.show_all_translations = flags.show_all_translations->value();
+  options.list_code_objects = flags.list_code_objects->value();
   return true;
 }
 
@@ -636,6 +636,7 @@ int list_code_objects(const CliOptions &options) {
 int rocjitsu::tools::detail::run_dbt_translate_cli(int argc, char **argv,
                                                    TranslateCodeObjectFn translate) {
   cli::Command command{"rj_dbt_translate"};
+  command.set_positional_usage("INPUT");
   DbtFlags flags;
   CliOptions options;
   if (!parse_args(argc, argv, command, flags, options)) {

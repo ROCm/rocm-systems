@@ -38,6 +38,15 @@ for tool, failure in (
     assert b"--help, -h" in invoke(tool, "-h")
     assert b"unknown flag" in invoke(tool, "--help", "--unknown", status=failure)
 
+launcher_help = invoke(launcher, "--help")
+assert b"launch overrides do not rewrite the source config" in launcher_help
+assert b"off disables checks" in launcher_help
+assert b"on enables ordinary checks" in launcher_help
+assert b"all includes gfx1250 XCNT checks" in launcher_help
+assert b"ROCJITSU_ENABLE_VFIO=ON" in launcher_help
+assert b"memory-backend-memfd" in launcher_help
+assert b"memory-backend=mem" in launcher_help
+
 assert b"expected --" in invoke(launcher, "bare-application", status=1)
 assert b"requires a value" in invoke(launcher, "--config", status=1)
 assert b"nonempty path" in invoke(launcher, "--vfio-socket=", status=1)

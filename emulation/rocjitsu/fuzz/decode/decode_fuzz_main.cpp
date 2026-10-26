@@ -196,6 +196,7 @@ int run_afl(std::string_view target) {
 int main(int argc, char **argv) {
   using namespace util::cli;
   Command command{"rj_decode_fuzz"};
+  command.set_positional_usage("");
   auto afl_flag = std::make_shared<BoolFlag>(
       FlagInfo{"--afl", {}, "Run the AFL fuzzing loop", ValueMode::Switch});
   auto json_flag = std::make_shared<BoolFlag>(

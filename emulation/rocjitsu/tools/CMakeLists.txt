@@ -50,6 +50,23 @@ target_link_libraries(
 rj_configure_target(rj_decode_benchmark PRIVATE_INCLUDES WARNINGS)
 
 if(BUILD_TESTING)
+    include(GoogleTest)
+    add_executable(
+        rocjitsu_benchmark_cli_test
+        ../tests/tools/benchmark_cli_test.cpp
+        decode_benchmark_cli.cpp
+    )
+    target_include_directories(
+        rocjitsu_benchmark_cli_test
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(
+        rocjitsu_benchmark_cli_test
+        PRIVATE util_cli GTest::gtest_main
+    )
+    rj_configure_target(rocjitsu_benchmark_cli_test PRIVATE_INCLUDES WARNINGS)
+    gtest_discover_tests(rocjitsu_benchmark_cli_test TEST_PREFIX "cli.")
+
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     add_test(
         NAME cli.decode_benchmark_process

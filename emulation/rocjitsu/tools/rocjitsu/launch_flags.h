@@ -6,10 +6,15 @@
 #include "rocjitsu/config/config_common.h"
 #include "util/cli.h"
 
+#include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
 
-namespace rocjitsu {
+namespace rocjitsu::cli {
 namespace ucli = ::util::cli;
 
 class NonEmptyStringFlag final : public ucli::Flag {
@@ -140,12 +145,14 @@ struct LaunchFlags {
       ucli::FlagInfo{"--cpu-thread-budget",
                      {},
                      "Override CPU thread budget for this launch; zero selects automatic sizing. "
-                     "Omission preserves JSON. Not available with --attach"});
+                     "Omission preserves JSON and launch overrides do not rewrite the source "
+                     "config. Not available with --attach"});
   std::shared_ptr<WaitCheckingFlag> wait = std::make_shared<WaitCheckingFlag>(ucli::FlagInfo{
       "--wait-checking",
       {},
-      "Override checks: on, off, or all (includes gfx1250 XCNT). Omission preserves JSON. "
-      "Not available with --attach"});
+      "Override wait checks: off disables checks, on enables ordinary checks, and all includes "
+      "gfx1250 XCNT. Omission preserves JSON and launch overrides do not rewrite the source "
+      "config. Not available with --attach"});
   std::shared_ptr<ucli::BoolFlag> thread_table = std::make_shared<ucli::BoolFlag>(
       ucli::FlagInfo{"--thread-budget-table",
                      {},
@@ -162,7 +169,8 @@ struct LaunchFlags {
       ucli::FlagInfo{
           "--vfio-socket",
           {},
-          "Serve a VMM on this AF_UNIX socket. Repeat once per local GPU in ordinal order"},
+          "Serve a VMM on this AF_UNIX socket. Requires ROCJITSU_ENABLE_VFIO=ON. Repeat once "
+          "per local GPU in ordinal order"},
       "requires a nonempty path");
   std::shared_ptr<OptionalUInt32Flag> vfio_ready_fd = std::make_shared<OptionalUInt32Flag>(
       ucli::FlagInfo{"--vfio-ready-fd", {}, "Write readiness to this nonnegative file descriptor"},
@@ -189,4 +197,4 @@ struct LaunchFlags {
   }
 };
 
-} // namespace rocjitsu
+} // namespace rocjitsu::cli

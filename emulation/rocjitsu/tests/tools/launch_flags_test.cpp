@@ -4,7 +4,7 @@
 #include "launch_flags.h"
 #include <gtest/gtest.h>
 
-namespace rocjitsu {
+namespace rocjitsu::cli {
 namespace ucli = ::util::cli;
 
 TEST(LaunchFlags, OmissionExplicitZeroAndRepeatedOverrides) {
@@ -76,4 +76,4 @@ TEST(LaunchFlags, IndependentInvocationsAndHelpMetadata) {
   EXPECT_EQ(command.find_flag("-v"), flags.version);
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::cli

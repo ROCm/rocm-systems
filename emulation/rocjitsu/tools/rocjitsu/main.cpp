@@ -390,7 +390,14 @@ void print_usage(const ucli::Command &command) {
                "  rocjitsu --attach --config foo.json -- ./app\n"
                "  rocjitsu --config foo.json --vfio-socket /tmp/gpu.sock\n"
                "  rocjitsu --config foo.json --vfio-socket /tmp/gpu0.sock --vfio-socket "
-               "/tmp/gpu1.sock\n";
+               "/tmp/gpu1.sock\n"
+               "\nLaunch overrides apply only to this invocation and do not rewrite the source "
+               "config.\n"
+               "--wait-checking=off disables checks, on enables ordinary checks, and all includes "
+               "gfx1250 XCNT checks.\n"
+               "VFIO serving requires ROCJITSU_ENABLE_VFIO=ON. VMM guest RAM must be shared, for "
+               "example with -object memory-backend-memfd,id=mem,size=<N>,share=on and -machine "
+               "memory-backend=mem.\n";
 }
 
 } // namespace
@@ -399,7 +406,7 @@ int main(int argc, char *argv[]) {
   std::signal(SIGPIPE, SIG_IGN);
 
   ucli::Command command{"rocjitsu", ucli::PositionalMode::AfterSeparator};
-  LaunchFlags flags;
+  rocjitsu::cli::LaunchFlags flags;
   auto report = [](std::string_view message) { std::cerr << message << '\n'; };
   util::DiagnosticEmitter diagnostic(report);
   if (flags.register_flags(command, diagnostic).failed())
