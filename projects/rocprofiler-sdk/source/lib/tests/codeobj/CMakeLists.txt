@@ -37,12 +37,15 @@ find_program(
     PATH_SUFFIXES bin llvm/bin NO_CACHE)
 
 # The aggregate dist root does not contain the HIP runtime used by amdclang++. Derive the
-# runtime root from the HIP package selected by the super-project.
+# runtime root from the HIP package selected by the super-project. The LLVM device
+# libraries live with the selected amdclang++ installation, not under the HIP runtime.
 set(CODEOBJ_ROCM_PATH "${ROCM_PATH}")
 if(DEFINED hip_DIR)
     get_filename_component(CODEOBJ_ROCM_PATH "${hip_DIR}/../../.." ABSOLUTE)
 endif()
-set(CODEOBJ_ROCM_DEVICE_LIB_PATH "${CODEOBJ_ROCM_PATH}/lib/llvm/amdgcn/bitcode")
+get_filename_component(CODEOBJ_LLVM_BIN_DIR "${CODEOBJ_AMDCLANGPP}" DIRECTORY)
+get_filename_component(CODEOBJ_ROCM_DEVICE_LIB_PATH
+                       "${CODEOBJ_LLVM_BIN_DIR}/../amdgcn/bitcode" ABSOLUTE)
 
 # The arch only matters for compilation, not execution -- the test only parses DWARF debug
 # info from the resulting ELF.  Any valid arch works here.
