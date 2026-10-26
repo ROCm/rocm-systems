@@ -433,8 +433,11 @@ pub(crate) unsafe fn interop_map_buffer(
         Ok(descriptor) => descriptor,
         Err(error) => return map_error(error),
     };
+    let Some(session) = runtime.session() else {
+        return ERROR;
+    };
     let allocation = match linux_interop::import_graphics_dma_buf(
-        &runtime.session,
+        session,
         &devices,
         descriptor.as_fd(),
         size_hint as u64,

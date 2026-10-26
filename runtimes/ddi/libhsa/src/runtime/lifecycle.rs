@@ -128,6 +128,20 @@ enum LifecyclePhase {
     Quarantined,
 }
 
+/// Work detached from the registry for one shutdown call.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "boxing HSA state would allocate while shutting down a runtime"
+)]
+pub(crate) enum ShutdownWork {
+    /// An initialization reference was released; the generation remains live.
+    Reference,
+    /// The final reference must retire all HSA and native state.
+    Runtime(HsaState, u64),
+    /// An earlier native shutdown failed after HSA state was retired.
+    NativeRetry(SessionRetirement, u64),
+}
+
 /// Process-wide gate for HSA generation transitions.
 pub(crate) struct HsaLifecycle {
     /// Published HSA adapter state for the active generation.
@@ -138,6 +152,8 @@ pub(crate) struct HsaLifecycle {
     generation: u64,
     /// Current transition phase under the registry mutex.
     phase: LifecyclePhase,
+    /// Native session retained for retry after HSA objects have been retired.
+    retired_session: Option<SessionRetirement>,
 }
 
 impl HsaLifecycle {
@@ -148,6 +164,7 @@ impl HsaLifecycle {
             references: 0,
             generation: 0,
             phase: LifecyclePhase::Inactive,
+            retired_session: None,
         }
     }
 
@@ -241,8 +258,8 @@ impl HsaLifecycle {
         Ok(())
     }
 
-    /// Returns None after releasing one of several active references.
-    pub(crate) fn begin_shutdown(&mut self) -> Result<Option<(HsaState, u64)>, Status> {
+    /// Detaches final teardown work, or releases one of several references.
+    pub(crate) fn begin_shutdown(&mut self) -> Result<ShutdownWork, Status> {
         match self.phase {
             LifecyclePhase::Active(generation) => {
                 if self.state.is_none() {
@@ -250,18 +267,22 @@ impl HsaLifecycle {
                 }
                 if self.references > 1 {
                     self.references -= 1;
-                    return Ok(None);
+                    return Ok(ShutdownWork::Reference);
                 }
                 let runtime = self.state.take().ok_or(ERROR)?;
                 self.references = 0;
                 self.phase = LifecyclePhase::Stopping(generation);
-                Ok(Some((runtime, generation)))
+                Ok(ShutdownWork::Runtime(runtime, generation))
+            }
+            LifecyclePhase::Quarantined => {
+                let session = self.retired_session.take().ok_or(INVALID_RUNTIME_STATE)?;
+                self.phase = LifecyclePhase::Stopping(self.generation);
+                Ok(ShutdownWork::NativeRetry(session, self.generation))
             }
             LifecyclePhase::Inactive => Err(NOT_INITIALIZED),
             LifecyclePhase::Starting(_)
             | LifecyclePhase::LoadingTools(_)
-            | LifecyclePhase::Stopping(_)
-            | LifecyclePhase::Quarantined => Err(INVALID_RUNTIME_STATE),
+            | LifecyclePhase::Stopping(_) => Err(INVALID_RUNTIME_STATE),
         }
     }
 
@@ -269,18 +290,21 @@ impl HsaLifecycle {
     pub(crate) fn finish_shutdown(
         &mut self,
         generation: u64,
-        status: Status,
+        outcome: &mut ShutdownOutcome,
     ) -> Result<(), Status> {
         if self.phase != LifecyclePhase::Stopping(generation) {
             return Err(ERROR);
         }
         // A failed stop can leave native resources alive. Do not create a new
         // runtime generation over their process-wide KFD state.
-        self.phase = if status == SUCCESS {
+        self.phase = if outcome.status == SUCCESS {
             LifecyclePhase::Inactive
         } else {
             LifecyclePhase::Quarantined
         };
+        if outcome.status != SUCCESS {
+            self.retired_session = outcome.pending_session.take();
+        }
         Ok(())
     }
 }
@@ -368,4 +392,48 @@ pub(crate) fn boundary(operation: impl FnOnce() -> Status) -> Status {
 /// Returns mutable initialized state or an HSA lifecycle error.
 pub(crate) fn initialized_mut(runtime: &mut HsaLifecycle) -> Result<&mut HsaState, Status> {
     runtime.as_mut().ok_or(NOT_INITIALIZED)
+}
+
+#[cfg(test)]
+#[allow(clippy::panic, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_native_shutdown_retains_session_until_retry_succeeds() {
+        let session = Session::new(DriverContextLifetime::Session).unwrap();
+        let clone = session.clone();
+        let mut retirement = session.into_retirement();
+        let error = retirement.try_destroy().unwrap_err();
+        let mut outcome = ShutdownOutcome {
+            status: map_error(error),
+            pending_session: Some(retirement),
+        };
+        let mut lifecycle = HsaLifecycle::new();
+        lifecycle.generation = 1;
+        lifecycle.phase = LifecyclePhase::Stopping(1);
+        lifecycle.finish_shutdown(1, &mut outcome).unwrap();
+        assert_eq!(lifecycle.phase, LifecyclePhase::Quarantined);
+
+        let ShutdownWork::NativeRetry(retirement, generation) = lifecycle.begin_shutdown().unwrap()
+        else {
+            panic!("failed session was not offered for retry");
+        };
+        assert_eq!(generation, 1);
+        let mut outcome = ShutdownOutcome::retry(retirement);
+        assert_eq!(outcome.status, RESOURCE_BUSY);
+        lifecycle.finish_shutdown(generation, &mut outcome).unwrap();
+        assert_eq!(lifecycle.phase, LifecyclePhase::Quarantined);
+
+        let ShutdownWork::NativeRetry(retirement, generation) = lifecycle.begin_shutdown().unwrap()
+        else {
+            panic!("failed session was not kept for another retry");
+        };
+        drop(clone);
+        let mut outcome = ShutdownOutcome::retry(retirement);
+        assert_eq!(outcome.status, SUCCESS);
+        lifecycle.finish_shutdown(generation, &mut outcome).unwrap();
+        assert_eq!(lifecycle.phase, LifecyclePhase::Inactive);
+        assert_eq!(lifecycle.begin_init().unwrap(), Some(2));
+    }
 }

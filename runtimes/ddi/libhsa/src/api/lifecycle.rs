@@ -6,17 +6,17 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
 use crate::api_trace;
 use crate::ffi::*;
-use crate::runtime::{HsaState, LifecycleTransition, boundary, lock};
+use crate::runtime::{HsaState, LifecycleTransition, ShutdownWork, boundary, lock};
 use crate::{runtime, signal};
 
 /// Finishes shutdown after deferred native work has released its owners.
 fn complete_deferred_shutdown(runtime: HsaState, generation: u64) {
     let mut transition = LifecycleTransition::stopping(generation);
-    let status = runtime.stop();
+    let mut outcome = runtime.stop();
     #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
     api_trace::unload();
     if let Ok(mut guard) = lock() {
-        if guard.finish_shutdown(generation, status).is_ok() {
+        if guard.finish_shutdown(generation, &mut outcome).is_ok() {
             transition.disarm();
         }
     }
@@ -97,15 +97,33 @@ pub extern "C" fn hsa_shut_down() -> Status {
         if runtime::LogWriteScope::active() {
             return INVALID_RUNTIME_STATE;
         }
-        let (runtime, generation) = {
+        let work = {
             let mut guard = match lock() {
                 Ok(guard) => guard,
                 Err(status) => return status,
             };
             match guard.begin_shutdown() {
-                Ok(None) => return SUCCESS,
-                Ok(Some(runtime)) => runtime,
+                Ok(work) => work,
                 Err(status) => return status,
+            }
+        };
+        let (runtime, generation) = match work {
+            ShutdownWork::Reference => return SUCCESS,
+            ShutdownWork::Runtime(runtime, generation) => (runtime, generation),
+            ShutdownWork::NativeRetry(retirement, generation) => {
+                let mut transition = LifecycleTransition::stopping(generation);
+                let mut outcome = runtime::ShutdownOutcome::retry(retirement);
+                let status = outcome.status;
+                let mut guard = match lock() {
+                    Ok(guard) => guard,
+                    Err(error) => return error,
+                };
+                let result = guard.finish_shutdown(generation, &mut outcome);
+                drop(guard);
+                if result.is_ok() {
+                    transition.disarm();
+                }
+                return result.map_or_else(|error| error, |()| status);
             }
         };
         let mut transition = LifecycleTransition::stopping(generation);
@@ -127,14 +145,15 @@ pub extern "C" fn hsa_shut_down() -> Status {
                 }
             }
         }
-        let status = runtime.stop();
+        let mut outcome = runtime.stop();
+        let status = outcome.status;
         #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
         api_trace::unload();
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(error) => return error,
         };
-        let result = guard.finish_shutdown(generation, status);
+        let result = guard.finish_shutdown(generation, &mut outcome);
         drop(guard);
         if result.is_ok() {
             transition.disarm();
