@@ -179,6 +179,7 @@ jobs:
     # workspace path is this container's workspace, so the paths compiled into
     # the test binaries resolve without a symlink on the runner.
     container:
+      # Digest pinned 2026-10-13.
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --user 0:0
     steps:
@@ -223,7 +224,7 @@ jobs:
           set -euo pipefail
           python -m venv "${RUNNER_TEMP}/hrr-venv"
           "${RUNNER_TEMP}/hrr-venv/bin/python" -m pip install --no-cache-dir \
-            -r therock/requirements.txt 'PyYAML==6.0.2'
+            -r therock/requirements.txt -r projects/hrr/requirements.txt
           echo "${RUNNER_TEMP}/hrr-venv/bin" >> "${GITHUB_PATH}"
 
       - name: Download rocJitsu

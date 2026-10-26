@@ -1,0 +1,3 @@
+# Python requirements of the HRR helper scripts, the api-matrix tools and the
+# CI workflows (.github/workflows/hrr-ci.yml, hrr-gpu.yml). Change a pin here.
+PyYAML==6.0.2

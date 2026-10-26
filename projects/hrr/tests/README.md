@@ -134,7 +134,8 @@ The host unit binary runs once in either command.
 ## Testing the Python helpers
 
 `scripts/` holds both the helpers and their tests. The tests need only Python and
-PyYAML (used by the api-matrix tools), not ROCm:
+PyYAML (used by the api-matrix tools), not ROCm. Install them with `python3 -m pip install -r projects/hrr/requirements-test.txt`
+(`requirements.txt` has only the runtime pins):
 
 ```bash
 python3 -m unittest discover -s projects/hrr/tests/scripts -p 'test_*.py' -v

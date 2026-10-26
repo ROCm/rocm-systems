@@ -1,21 +1,22 @@
-# HRR CI: API-ID and workload checks, the HRR helper-script tests and the host
-# unit suite, plus the GPU capture/replay suite (hrr-gpu.yml) for changes that
-# touch capture or replay. projects/hrr/tests/scripts/hrr_ci_configure.py
-# decides what runs from projects/hrr/tests/config/ci.yaml; "HRR CI Summary"
-# reports every platform and GPU family in one table.
+# HRR CI: API-ID and workload checks, HRR script tests and the host unit suite,
+# plus the GPU capture/replay suite (hrr-gpu.yml).
+# projects/hrr/tests/config/ci.yaml and hrr_ci_configure.py decide what runs.
+#
+# To run the capture/GPU suite on a pull request, add the `ci:hrr-capture` label.
+#
+# Interim: once TheRock CI builds and tests HRR (TheRock PR #8965 adds the
+# core-hrr artifact), the build and test jobs here are expected to go. This
+# workflow would keep only the checks TheRock does not run (API-ID and workload
+# checks, helper-script tests) and the rocJitsu simulator jobs until TheRock has
+# a capture variant. Not a committed plan.
 
 name: HRR CI
 
-# labeled stays in the types so that adding ci:hrr-capture can still start a
-# run; hrr_ci_configure.py decides from the label itself
-# whether anything runs, and the summary job reports the verdict of the run
-# that actually tested the commit (see `pass_through_ok`). A label that
-# changes nothing therefore cannot mask a failing run on the same commit.
-#
-# The paths filters are the union of the paths.cpu, paths.capture and
-# paths.suite lists of projects/hrr/tests/config/ci.yaml, less paths.excluded,
-# so a pull request that touches no HRR path starts no run.
-# test_hrr_ci_configure.py fails when the two disagree.
+# The paths filters are the union of paths.cpu, paths.capture and paths.suite in
+# ci.yaml, less paths.excluded; test_hrr_ci_configure.py fails if they differ.
+# `labeled` stays in the types so the label can start a run; the summary job
+# reports the run that tested the commit, so an irrelevant label cannot mask a
+# failure (see `pass_through_ok`).
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
@@ -112,6 +113,7 @@ jobs:
             projects/hrr/tests/scripts/hrr_ci_configure.py
             projects/hrr/tests/config/ci.yaml
             projects/hrr/tests/config/integration.yaml
+            projects/hrr/requirements.txt
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock family matrix
@@ -144,7 +146,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install PyYAML
-        run: python -m pip install --no-cache-dir PyYAML==6.0.2
+        run: python -m pip install --no-cache-dir -r projects/hrr/requirements.txt
 
       - name: Decide
         id: decide
@@ -196,7 +198,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install PyYAML
-        run: python -m pip install --no-cache-dir PyYAML==6.0.2
+        run: python -m pip install --no-cache-dir -r projects/hrr/requirements.txt
 
       - name: Check API IDs and the API matrix workloads
         env:
@@ -231,7 +233,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install test requirements
-        run: python -m pip install --no-cache-dir PyYAML==6.0.2 pytest==8.4.2
+        run: python -m pip install --no-cache-dir -r projects/hrr/requirements-test.txt
 
       - name: Lint the suite configs
         run: >-
@@ -281,7 +283,7 @@ jobs:
         env:
           ROCM_SDK_VERSION: ${{ needs.configure.outputs.rocm_sdk_version }}
         run: |
-          python -m pip install --no-cache-dir PyYAML==6.0.2
+          python -m pip install --no-cache-dir -r projects/hrr/requirements.txt
           python -m pip install --no-cache-dir --index-url "${ROCM_INDEX_URL}" "rocm[devel]==${ROCM_SDK_VERSION}"
           rocm-sdk init
           echo "ROCM_SDK=$(rocm-sdk path --root)" >> "${GITHUB_ENV}"
