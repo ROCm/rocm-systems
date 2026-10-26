@@ -755,6 +755,8 @@ void Device::FinalizeMapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, amd::Memor
   if (import_vmm_for_interprocess && (phys->getMemFlags() & ROCCLR_MEM_INTERPROCESS)) {
     vaddr_sub_obj->setVmmImported(true);
   }
+  // Attempt to re-resolve any cached ownership
+  RefreshMappedMemoryOwner(vaddr_sub_obj);
 }
 
 //==================================================================================================

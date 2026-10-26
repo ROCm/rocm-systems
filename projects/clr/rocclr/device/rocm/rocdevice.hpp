@@ -737,6 +737,10 @@ class Device : public NullDevice {
   //! Current number of queues pending deferred destroy.
   size_t DeferredQueueCount();
 
+ protected:
+  //! Re-resolve the owning agent cached on a freshly mapped VMM allocation.
+  void RefreshMappedMemoryOwner(amd::Memory* vaddr_sub_obj) const override;
+
  private:
   bool create();
 

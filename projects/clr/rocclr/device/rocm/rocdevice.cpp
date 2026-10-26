@@ -2758,6 +2758,30 @@ bool Device::virtualFree(void* addr) {
 }
 
 // ================================================================================================
+// A VMM allocation's owning agent is cached on each per-device device::Memory at create()
+// time, before the VA is backed, so for an imported handle it was left naming the local
+// device. hsa_amd_vmem_map has run by now, so pointer_info can name the exporting peer.
+void Device::RefreshMappedMemoryOwner(amd::Memory* vaddr_sub_obj) const {
+  if (!ROC_VMM_REFRESH_OWNING_AGENT || vaddr_sub_obj == nullptr) {
+    return;
+  }
+
+  // alloc=false: an instance that does not exist yet holds no stale value to correct.
+  constexpr bool kNoAlloc = false;
+  for (const auto& ctx_dev : vaddr_sub_obj->getContext().devices()) {
+    if (auto* dev_mem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(*ctx_dev, kNoAlloc))) {
+      dev_mem->refreshOwningAgentFromPointerInfo();
+    }
+  }
+
+  // The dispatching device need not be in the allocation's context. Keep the default
+  // alloc=true so this stays equivalent to the submitVirtualMap() call it replaced.
+  if (auto* dev_mem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(*this))) {
+    dev_mem->refreshOwningAgentFromPointerInfo();
+  }
+}
+
+// ================================================================================================
 // Direct synchronous map/unmap path bypassing VirtualMapCommand. Used by the
 // non-async hipMemMap/hipMemUnmap entry points (wired up in subsequent
 // commits). No execution() lock and no barrier packet: the HIP layer is
@@ -2791,13 +2815,9 @@ cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
   }
 
   constexpr bool kImportVmmForInterprocess = true;
+  // FinalizeMapMemObjBookkeeping() re-resolves the owning agent on every device view via
+  // Device::RefreshMappedMemoryOwner(), now that the handle is reachable.
   FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
-  // Resolve owningAgent now that the handle is reachable, refresh every device view.
-  for (auto* device : vaddr_sub_obj->getContext().devices()) {
-    if (auto* devMem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(*device))) {
-      devMem->refreshOwningAgentFromPointerInfo();
-    }
-  }
   return CL_SUCCESS;
 }
 

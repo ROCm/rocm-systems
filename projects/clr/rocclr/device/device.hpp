@@ -2541,6 +2541,17 @@ class Device : public RuntimeObject {
   amd::Monitor activeQueuesLock_{};                     //!< Guards access to the activeQueues set
   std::unordered_map<amd::CommandQueue*, bool> activeQueues;  //!< The set of active queues
   uint8_t group_mem_carveout_hint_{0}; //!< LDS carveout percentage (0 = no preference)
+
+ protected:
+  /**
+   * Invoked by FinalizeMapMemObjBookkeeping() once a reserved VA range is backed by physical
+   * pages. This is the earliest point at which a VMM mapping's true owner is knowable: for a
+   * handle imported from another process the backing pages live on a peer device.
+   *
+   * @param vaddr_sub_obj  The sub-buffer representing the freshly mapped VA range.
+   */
+  virtual void RefreshMappedMemoryOwner(amd::Memory* vaddr_sub_obj) const {}
+
  private:
   const Isa* isa_;  //!< Device isa
   bool IsTypeMatching(cl_device_type type, bool offlineDevices);

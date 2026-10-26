@@ -4520,13 +4520,10 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       LogError("HSA Command: hsa_amd_vmem_map failed!");
     } else if (vaddr_sub_obj != nullptr) {
       constexpr bool kImportVmmForInterprocess = true;
+      // FinalizeMapMemObjBookkeeping() re-resolves the owning agent via
+      // Device::RefreshMappedMemoryOwner(), now that the VA is backed.
       dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
                                          kImportVmmForInterprocess);
-      // The VA is now backed, so the true owning agent (a peer device for imported memory)
-      // can finally be resolved. create() ran before the mapping existed, so cache it now.
-      if (auto* devMem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(dev()))) {
-        devMem->refreshOwningAgentFromPointerInfo();
-      }
     }
   } else {
     dispatchBarrierPacket(kBarrierPacketHeader, false);
