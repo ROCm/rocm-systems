@@ -284,8 +284,10 @@ public:
   /// a consumer that adjusts the operand's width to the wave size. The
   /// encoding does not carry the wave size, so an RDNA decoder sizes the
   /// operand for Wave64. Fieldless VCC and EXEC lane masks stay unmarked,
-  /// except a VOPC destination that SDWA sd=1 turns into an encoded SGPR.
-  /// CDNA1-4 are Wave64-only and leave the flag clear.
+  /// except a VOPC destination that SDWA sd=1 turns into an encoded SGPR, so
+  /// the flag does not find every lane-mask access: a VOPC e32 write of VCC
+  /// is a lane mask but unmarked. CDNA1-4 are Wave64-only and leave the flag
+  /// clear.
   [[nodiscard]] bool is_wave_mask() const { return wave_mask_; }
 
   /// @brief Mark this operand a wave mask.
@@ -460,13 +462,15 @@ protected:
   /// @brief Capability/role flags, set once at construction and never
   /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
   /// operands get their (reads_value, writable, is_vgpr) triple from
-  /// apply_fieldless_caps(). Kept out of the public interface so only
+  /// apply_fieldless_caps(); generated instruction constructors mark wave
+  /// masks with set_wave_mask(). Kept out of the public interface so only
   /// construction can flip them: readers do lockless bool loads on the CU
   /// thread and rely on the flags being immutable post-construction. Query
-  /// through is_vgpr() / reads_value() / is_writable() / is_fieldless().
+  /// through is_vgpr() / reads_value() / is_writable() / is_fieldless() /
+  /// is_wave_mask().
   ///
   /// Defaults describe a normal field-bearing operand (readable, writable,
-  /// not fieldless).
+  /// not fieldless, not a wave mask).
   uint16_t decoded_vgpr_index_ = 0;
   uint8_t decoded_vgpr_width_ = 0;
   bool is_vgpr_ : 1 = false;

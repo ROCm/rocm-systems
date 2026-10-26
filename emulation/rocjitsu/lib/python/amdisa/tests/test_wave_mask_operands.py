@@ -9,6 +9,7 @@ consumer that knows the wave size can narrow it. A genuine 64-bit SGPR value on
 the same instruction is ``FMT_NUM_U64`` and stays unmarked.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -18,18 +19,17 @@ from amdisa.gpuisa import Operand
 from amdisa.isa_profile import Rdna4Profile
 from amdisa.parser import Parser
 
-_RDNA4_XML = (
-    Path(__file__).resolve().parents[6]
-    / 'shared'
-    / 'machine-readable-isa'
-    / 'isa'
-    / 'amdgpu_isa_rdna4.xml'
-)
+
+def _mrisa_dir() -> Path:
+    default = (
+        Path(__file__).resolve().parents[6] / 'shared' / 'machine-readable-isa' / 'isa'
+    )
+    return Path(os.environ.get('MRISA_PATH', default))
 
 
 @pytest.fixture(scope='module')
 def rdna4_operands():
-    spec = Parser(str(_RDNA4_XML), Rdna4Profile()).parse()
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
     return {
         (enc.enc_name, inst.name): {opnd.name: opnd for opnd in inst.operands}
         for enc in spec.inst_encodings
@@ -74,7 +74,16 @@ def test_fieldless_vcc_destination_keeps_its_m64_flag(rdna4_operands):
 
 def _sgpr_operand(name, wave_mask, fieldless=False):
     return Operand(
-        name, 64, 'OPR_SREG', False, True, False, False, 0, '', fieldless, wave_mask
+        name,
+        64,
+        'OPR_SREG',
+        False,
+        True,
+        False,
+        False,
+        0,
+        fieldless=fieldless,
+        wave_mask=wave_mask,
     )
 
 

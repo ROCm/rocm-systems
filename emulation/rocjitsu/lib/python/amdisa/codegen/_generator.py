@@ -1516,7 +1516,7 @@ class CodeGenerator:
         )
 
     @staticmethod
-    def _wave_mask_stmts(operands, wave32_capable: bool) -> list[str]:
+    def _wave_mask_stmts(operands: list[Operand], wave32_capable: bool) -> list[str]:
         """C++ statements marking the field-bearing wave-mask operands.
 
         A wave mask (MR ISA ``FMT_NUM_M64``) is one SGPR in Wave32 and a pair

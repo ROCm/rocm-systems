@@ -71,8 +71,11 @@
 #include <cmath>
 #include <cstdint>
 #include <format>
+#include <ios>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -1528,6 +1531,160 @@ TEST(FieldlessOperandDecodeTest, PlaceholderVaddrInertButSimm32StaysValueBearing
                                          simm_chunk.data());
   for (uint32_t v : simm_chunk)
     EXPECT_EQ(v, 0x1234u);
+}
+
+std::unique_ptr<Instruction> decode_one(rj_code_arch_t arch, const std::array<uint32_t, 4> &words) {
+  auto decoder = Decoder::create(arch);
+  return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, words.data()) : nullptr);
+}
+
+// A VALU destination an RDNA decoder reports as an SGPR pair is a lane mask.
+// Those destinations are VOP3 and VOP3SD operands, so this decodes every VOP3
+// opcode with zero register fields.
+TEST(WaveMaskOperandDecodeTest, RdnaVop3SgprPairDestinationsAreWaveMasks) {
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    bool reached_compare = false;
+    bool reached_carry_out = false;
+    for (uint32_t opcode = 0; opcode < 1024; ++opcode) {
+      // GFX10+ VOP3: encoding 53 in [31:26], opcode in [25:16].
+      const std::array<uint32_t, 4> words{(53u << 26) | (opcode << 16)};
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      if (inst == nullptr)
+        continue;
+      for (int i = 0; i < inst->num_dst_operands(); ++i) {
+        const Operand *op = inst->dst_operand(i);
+        const std::optional<RegisterRef> ref = op != nullptr ? op->to_register_ref() : std::nullopt;
+        if (!ref || ref->cls != RegClass::SGPR || ref->width < 2)
+          continue;
+        reached_compare |= inst->mnemonic() == "v_cmp_eq_u32";
+        reached_carry_out |= inst->mnemonic() == "v_add_co_u32";
+        EXPECT_TRUE(op->is_wave_mask())
+            << inst->mnemonic() << " destination " << i << " is an unmarked SGPR pair";
+      }
+    }
+    EXPECT_TRUE(reached_compare) << "the sweep never reached a VOP3 compare";
+    EXPECT_TRUE(reached_carry_out) << "the sweep never reached a VOP3SD carry-out";
+  }
+}
+
+// RDNA1/2 VOPC SDWA with sd=1 writes its compare result to an encoded SGPR pair,
+// which the constructor marks. With sd=0 the destination stays VCC (EXEC for
+// v_cmpx) and unmarked.
+TEST(WaveMaskOperandDecodeTest, Rdna1And2SdwaCompareDestinationFollowsSd) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const bool sd : {false, true}) {
+      SCOPED_TRACE(testing::Message() << static_cast<int>(arch) << " sd=" << sd);
+      size_t checked = 0;
+      for (uint32_t opcode = 0; opcode < 256; ++opcode) {
+        // VOPC: encoding 0x3E in [31:25], opcode in [24:17], vsrc1 v2, src0 249
+        // (SDWA). The SDWA dword: src0 v1, sdst s2 in [14:8], sd in [15], and
+        // dword selects.
+        const std::array<uint32_t, 4> words{(0x3Eu << 25) | (opcode << 17) | (2u << 9) | 249u,
+                                            0x06060001u | (sd ? (1u << 15) | (2u << 8) : 0u)};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        if (inst == nullptr || !inst->mnemonic().ends_with("_sdwa"))
+          continue;
+        ++checked;
+        const Operand *dst = inst->dst_operand(0);
+        ASSERT_NE(dst, nullptr) << inst->mnemonic();
+        if (sd) {
+          EXPECT_EQ(dst->to_register_ref(), (RegisterRef{RegClass::SGPR, 2, 2}))
+              << inst->mnemonic();
+          EXPECT_TRUE(dst->is_wave_mask()) << inst->mnemonic();
+        } else {
+          EXPECT_EQ(dst->to_special_reg_class(),
+                    inst->mnemonic().starts_with("v_cmpx_") ? RegClass::EXEC : RegClass::VCC)
+              << inst->mnemonic();
+          EXPECT_FALSE(dst->is_wave_mask()) << inst->mnemonic();
+        }
+      }
+      EXPECT_GT(checked, 0u);
+    }
+  }
+}
+
+// gfx1250 declares a VOP3 compare destination at one SGPR, so its width does
+// not show that it is a lane mask.
+TEST(WaveMaskOperandDecodeTest, Gfx1250Vop3CompareDestinationIsWaveMask) {
+  // v_cmp_eq_u32_e64 s53, 32, v4.
+  std::unique_ptr<Instruction> inst =
+      decode_one(ROCJITSU_CODE_ARCH_CDNA5, {0xD44A0035u, 0x020208A0u});
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_cmp_eq_u32");
+  EXPECT_TRUE(inst->dst_operand(0)->is_wave_mask());
+  EXPECT_FALSE(inst->src_operand(0)->is_wave_mask());
+  EXPECT_FALSE(inst->src_operand(1)->is_wave_mask());
+}
+
+// A gfx1250 VOPD3 v_dual_cndmask_b32 reads its selector from an SGPR pair in
+// either slot. Only that selector is marked, not the other slot's src2.
+TEST(WaveMaskOperandDecodeTest, Gfx1250VopdCndmaskSelectorIsWaveMask) {
+  constexpr uint32_t kCndmask = 9;
+  constexpr uint32_t kFmac = 0;
+  for (const bool x_slot : {true, false}) {
+    SCOPED_TRACE(x_slot ? "X slot" : "Y slot");
+    // The selector is s8. The v_dual_fmac_f32 src2 is v12 (X) or v14 (Y).
+    const uint32_t opx = x_slot ? kCndmask : kFmac;
+    const uint32_t opy = x_slot ? kFmac : kCndmask;
+    std::unique_ptr<Instruction> inst =
+        decode_one(ROCJITSU_CODE_ARCH_CDNA5,
+                   {0xcf000000u | (opx << 18) | (opy << 12) | 256u,
+                    258u | (4u << 16) | ((x_slot ? 8u : 12u) << 24),
+                    16u | (6u << 8) | ((x_slot ? 14u : 8u) << 16) | (18u << 24), 0u});
+    ASSERT_NE(inst, nullptr);
+    ASSERT_NE(inst->mnemonic().find("v_dual_cndmask_b32"), std::string_view::npos)
+        << inst->mnemonic();
+    int marked = 0;
+    for (int i = 0; i < inst->num_src_operands(); ++i) {
+      const Operand *op = inst->src_operand(i);
+      if (op == nullptr || !op->is_wave_mask())
+        continue;
+      ++marked;
+      EXPECT_EQ(op->to_register_ref(), (RegisterRef{RegClass::SGPR, 8, 2}));
+    }
+    EXPECT_EQ(marked, 1);
+  }
+}
+
+// Only an encoded lane mask is marked. A fieldless VCC stays unmarked although
+// the MR ISA gives it the same FMT_NUM_M64 format.
+TEST(WaveMaskOperandDecodeTest, Rdna4MarksOnlyEncodedLaneMasks) {
+  // v_cndmask_b32_e64 v0, v1, v2, s8.
+  std::unique_ptr<Instruction> vop3 =
+      decode_one(ROCJITSU_CODE_ARCH_RDNA4, {0xd5010000u, 0x00220501u});
+  ASSERT_NE(vop3, nullptr);
+  ASSERT_EQ(vop3->mnemonic(), "v_cndmask_b32");
+  EXPECT_FALSE(vop3->dst_operand(0)->is_wave_mask());
+  EXPECT_FALSE(vop3->src_operand(0)->is_wave_mask());
+  EXPECT_FALSE(vop3->src_operand(1)->is_wave_mask());
+  EXPECT_EQ(vop3->src_operand(2)->to_register_ref(), (RegisterRef{RegClass::SGPR, 8, 2}));
+  EXPECT_TRUE(vop3->src_operand(2)->is_wave_mask());
+
+  // v_cmp_eq_u32_e32 vcc_lo, v1, v2 and v_cndmask_b32_e32 v0, v1, v2, vcc_lo.
+  for (uint32_t word : {0x7c940501u, 0x02000501u}) {
+    SCOPED_TRACE(testing::Message() << std::hex << word);
+    std::unique_ptr<Instruction> inst = decode_one(ROCJITSU_CODE_ARCH_RDNA4, {word});
+    ASSERT_NE(inst, nullptr);
+    int fieldless_vcc = 0;
+    auto expect_unmarked = [&](const Operand *op) {
+      if (op == nullptr || !op->is_fieldless() || op->to_special_reg_class() != RegClass::VCC)
+        return;
+      ++fieldless_vcc;
+      EXPECT_FALSE(op->is_wave_mask());
+    };
+    for (int i = 0; i < inst->num_dst_operands(); ++i)
+      expect_unmarked(inst->dst_operand(i));
+    for (int i = 0; i < inst->num_src_operands(); ++i)
+      expect_unmarked(inst->src_operand(i));
+    EXPECT_EQ(fieldless_vcc, 1);
+  }
 }
 
 TEST(Rdna4WaitcntDecodeSmokeTest, FormatsCompatWaitcntWithGfx11Layout) {

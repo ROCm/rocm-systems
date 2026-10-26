@@ -10,6 +10,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <ios>
 #include <utility>
 #include <vector>
 
@@ -723,9 +724,10 @@ TEST(WaitcheckStream, RelativeRegisterOperandsAreIncomplete) {
 }
 
 TEST(WaitcheckStream, ScalarMaskDestinationsFollowWaveWidth) {
-  // Carry outputs (add/subtract/multiply-add) and f32/f64 divide-scale define s2
-  // in Wave32 and s[2:3] in Wave64. Encodings checked with LLVM's assembler.
-  const std::array<std::array<uint32_t, 2>, 10> encodings{{{0xd7000200u, 0x02020501u},
+  // Carry outputs (add/subtract/multiply-add), f32/f64 divide-scale and a VOP3
+  // compare define s2 in Wave32 and s[2:3] in Wave64. Encodings checked with
+  // LLVM's assembler.
+  const std::array<std::array<uint32_t, 2>, 11> encodings{{{0xd7000200u, 0x02020501u},
                                                            {0xd7010200u, 0x02020501u},
                                                            {0xd7020200u, 0x02020501u},
                                                            {0xd5200200u, 0x00120501u},
@@ -734,7 +736,8 @@ TEST(WaitcheckStream, ScalarMaskDestinationsFollowWaveWidth) {
                                                            {0xd6fc0200u, 0x040e0501u},
                                                            {0xd6fd0200u, 0x041a0902u},
                                                            {0xd6fe0200u, 0x040e0501u},
-                                                           {0xd6ff0200u, 0x040e0501u}}};
+                                                           {0xd6ff0200u, 0x040e0501u},
+                                                           {0xd44a0002u, 0x02020501u}}};
   for (const std::array<uint32_t, 2> &encoding : encodings) {
     for (uint32_t wave : {32u, 64u}) {
       for (uint32_t loaded : {2u, 3u}) {
