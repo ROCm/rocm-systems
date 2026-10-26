@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/memory_transaction.h"
 #include "simdojo/components/cache.h"
 
 #include <cstdint>
@@ -15,6 +16,7 @@ namespace amdgpu {
 class GpuMemory;
 class L2Cache;
 class RequestMtypeResolver;
+struct CoalescedLaneRun;
 
 /// @brief L1 Vector Cache (V$) controller for FLAT/MUBUF/MTBUF instructions.
 ///
@@ -25,14 +27,18 @@ class RequestMtypeResolver;
 /// CDNA3 V$ geometry: 128B lines, 64 sets, 4-way = 32KB.
 class L1VectorCache {
 public:
-  static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
+  static constexpr uint32_t LINE_SIZE_BITS = 7;
   static constexpr uint32_t NUM_SETS = 64;
   static constexpr uint32_t ASSOCIATIVITY = 4;
 
-  using CacheStore = simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY>;
+  using CacheStore =
+      simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY,
+                     simdojo::LRUPolicy<NUM_SETS, ASSOCIATIVITY>, /*LazyStorage=*/true>;
   static constexpr uint32_t LINE_SIZE = CacheStore::LINE_SIZE;
 
-  explicit L1VectorCache(L2Cache *l2 = nullptr);
+  explicit L1VectorCache(L2Cache *l2 = nullptr, MemoryTransactionPolicy transactions = {});
+
+  MemoryTransactionPolicy transaction_policy() const { return transactions_; }
   ~L1VectorCache();
 
   L1VectorCache(const L1VectorCache &) = delete;
@@ -88,6 +94,12 @@ private:
                              bool request_l1_bypass, uint32_t vmid, RequestMtypeResolver &mtypes);
   VmAccessOutcome write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, bool non_temporal,
                               uint32_t vmid, RequestMtypeResolver &mtypes);
+  VmAccessOutcome read_reordered(const CoalescedLaneRun &run, const uint64_t *addrs, uint8_t *dst,
+                                 uint32_t stride, bool non_temporal, bool request_l1_bypass,
+                                 uint32_t vmid, RequestMtypeResolver &mtypes);
+  VmAccessOutcome write_reordered(const CoalescedLaneRun &run, const uint64_t *addrs,
+                                  const uint8_t *src, uint32_t stride, bool non_temporal,
+                                  uint32_t vmid, RequestMtypeResolver &mtypes);
   VmAccessOutcome store_swizzled(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                                  uint32_t num_elems, const uint8_t *src, Mtype mtype,
                                  bool non_temporal, uint32_t vmid, uint32_t addr_stride,
@@ -101,6 +113,7 @@ private:
 
   CacheStore cache_;
   L2Cache *l2_;
+  const MemoryTransactionPolicy transactions_;
   GpuVm *gpu_vm_ = nullptr;
   VmMtypeCache mtype_cache_;
   uint64_t coherence_epoch_ = 0;

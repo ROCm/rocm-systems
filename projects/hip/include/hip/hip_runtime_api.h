@@ -3002,6 +3002,35 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
 hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev);
 
 /**
+ * @brief Set a device-wide attribute for a kernel on a specific device.
+ *
+ * Sets @p attr for @p kernel on @p device without requiring @p device to be
+ * current. Supported attributes are #hipFuncAttributeMaxDynamicSharedMemorySize,
+ * #hipFuncAttributePreferredSharedMemoryCarveout,
+ * #hipFuncAttributeRequiredClusterWidth,
+ * #hipFuncAttributeRequiredClusterHeight,
+ * #hipFuncAttributeRequiredClusterDepth,
+ * #hipFuncAttributeNonPortableClusterSizeAllowed, and
+ * #hipFuncAttributeClusterSchedulingPolicyPreference.
+ *
+ * Attributes set with #hipFuncSetAttribute override values set by this function
+ * for the corresponding device, regardless of call order.
+ *
+ * @note On AMD devices, non-portable cluster size and cluster scheduling policy
+ * are stored for readback but may not affect dispatch.
+ *
+ * @param [in] kernel Kernel to set the attribute for
+ * @param [in] attr Attribute to set
+ * @param [in] value Value to set
+ * @param [in] device Device ordinal on which to set the attribute
+ *
+ * @returns #hipSuccess, #hipErrorInvalidResourceHandle, #hipErrorInvalidValue,
+ * #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction
+ */
+hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value,
+                                          int device);
+
+/**
  * @brief Function will be extracted for specific kernel
  *
  * @param [out] pFunc  Pointer to function handle for the kernel
@@ -3010,6 +3039,40 @@ hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKer
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotFound
  */
 hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
+
+/**
+ * @brief Sets the preferred carveout setting for the specific kernel on a device
+ *
+ * On devices that allow setting a L1/shared memory split, this function allows to specify a
+ * preference:
+ * - hipFuncCachePreferNone no preference for shared memory or L1 (default)
+ * - hipFuncCachePreferShared prefer larger shared memory and smaller L1 cache
+ * - hipFuncCachePreferL1 prefer larger L1 cache and smaller shared memory
+ * - hipFuncCachePreferEqual prefer equal size L1 cache and shared memory
+ * This is only a hint and the underlying driver might not honor the setting. Additionally,
+ * a call to hipFuncSetCacheConfig(), referring to the same symbol and device, would override the
+ * value passed here, regardless of the relative execution order between the calls.
+ *
+ * hipKernelSetAttributeForDevice() can also be used to set a L1/shared memory split preference,
+ * in a more fine grained fashion. All AMD devices that support setting the carveout support this
+ * function too.
+ *
+ * As not all Nvidia devices allow setting a fine grained (numeric percentage) carveout
+ * value, when having a mixture of devices, where some support and others do not support numeric
+ * carveouts, hipKernelSetCacheConfig could be use to establish a baseline.
+ *
+ * The call does nothing on devices whose carveout is fixed.
+ *
+ * @param [in] kernel  The kernel whose carveout will be specified
+ * @param [in] config  The enumeration specifying the L1/shared memory split
+ * @param [in] device  The device where change the carveout for the specific kernel
+ *
+ * @returns #hipErrorInvalidResourceHandle, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction,
+ * #hipErrorMissingConfiguration, #hipErrorInvalidValue
+ *
+ * @see hipKernelSetAttributeForDevice
+ */
+hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t device);
 
 /**
  * @brief Set Cache configuration for a specific function

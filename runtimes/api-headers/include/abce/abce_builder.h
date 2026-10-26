@@ -134,6 +134,17 @@ static inline size_t abce_builder_max_copy_size(const abce_builder_t* builder) {
   return builder->max_copy_size;
 }
 
+// SWAP exists on gfx94x/95x and gfx125+; no other part has the packet.
+static inline bool abce_builder_swap_supported(const abce_builder_t* builder) {
+  return builder->is_gfx125plus || (builder->isa.major == 9 && builder->isa.minor >= 4);
+}
+
+// Required alignment of both swap endpoints.
+static inline size_t abce_builder_swap_alignment(const abce_builder_t* builder) {
+  return builder->is_gfx125plus ? SDMA_PKT_COPY_LINEAR_SWAP_GFX125PLUS_ALIGNMENT
+                                : SDMA_PKT_COPY_LINEAR_SWAP_ALIGNMENT;
+}
+
 static inline bool abce_builder_requires_gcr(const abce_builder_t* builder) {
   return builder->packet_caps.use_gcr;
 }
@@ -197,13 +208,15 @@ typedef struct abce_wait_signal_params_t {
   void* signal_addr;  // null => no signal block is emitted.
   uint64_t wait_reference;
   uint64_t wait_mask;
-  // Puts the WAIT on the first chunk and the SIGNAL on the last, so a chunked
-  // transfer consumes exactly one wait and one signal. This assumes the engine
-  // retires chunks of one packet stream in order, so the final chunk's SIGNAL
-  // cannot outrun an earlier chunk's data. ROCr's blit path instead waits and
-  // signals on every chunk and pre-arms the output by N-1; pass false to get
-  // that behavior. Chunking only occurs above the per-packet copy limit.
-  bool boundary_wait_signal;
+  // The SIGNAL is on every chunk: the engine may overlap chunks, and a fused
+  // signal covers only its own packet, so a chunked op signals once per chunk
+  // (abce_builder_num_*_packets()) and the waiter counts them all. Commands are
+  // dispatched in order, so one WAIT on the first chunk is enough; false waits
+  // on every chunk too.
+  bool wait_first_chunk_only;
+  uint32_t wait_function;     // SDMA_FUNC_*
+  uint32_t signal_operation;  // SDMA_SIGNAL_OP_*, with signal_value as operand.
+  uint64_t signal_value;
 } abce_wait_signal_params_t;
 
 static inline abce_wait_signal_params_t abce_wait_signal_none(void) {
@@ -212,7 +225,10 @@ static inline abce_wait_signal_params_t abce_wait_signal_none(void) {
   params.signal_addr = NULL;
   params.wait_reference = 0;
   params.wait_mask = UINT64_MAX;
-  params.boundary_wait_signal = false;
+  params.wait_first_chunk_only = false;
+  params.wait_function = SDMA_FUNC_EQUAL;
+  params.signal_operation = SDMA_SIGNAL_OP_SUB64;
+  params.signal_value = 1;
   return params;
 }
 
@@ -370,7 +386,7 @@ static inline void abce_builder_build_multicast_copy(const abce_builder_t* build
 // packet type the caller is building.
 #define ABCE_FORM_WAIT_DWORDS(tmpl, params, wait_dws)                             \
   do {                                                                            \
-    (tmpl).WAIT_FUNCTION_UNION.wait_function = SDMA_FUNC_EQUAL;                   \
+    (tmpl).WAIT_FUNCTION_UNION.wait_function = (params)->wait_function;           \
     (tmpl).WAIT_FUNCTION_UNION.wait_scope = SDMA_MEMORY_SCOPE_SYS;                \
     (tmpl).WAIT_ADDR_LO_UNION.wait_addr_31_3 = abce_ptr_low32((params)->wait_addr) >> 3; \
     (tmpl).WAIT_ADDR_HI_UNION.wait_addr_63_32 = abce_ptr_high32((params)->wait_addr);    \
@@ -384,14 +400,15 @@ static inline void abce_builder_build_multicast_copy(const abce_builder_t* build
 
 #define ABCE_FORM_SIGNAL_DWORDS(tmpl, params, signal_dws)                             \
   do {                                                                                \
-    (tmpl).SIGNAL_OPERATION_UNION.signal_operation = SDMA_SIGNAL_OP_SUB64;            \
+    (tmpl).SIGNAL_OPERATION_UNION.signal_operation = (params)->signal_operation;      \
     (tmpl).SIGNAL_OPERATION_UNION.signal_scope = SDMA_MEMORY_SCOPE_SYS;               \
     (tmpl).SIGNAL_ADDR_LO_UNION.signal_addr_31_3 =                                    \
         abce_ptr_low32((params)->signal_addr) >> 3;                                   \
     (tmpl).SIGNAL_ADDR_HI_UNION.signal_addr_63_32 =                                   \
         abce_ptr_high32((params)->signal_addr);                                       \
-    (tmpl).SIGNAL_DATA_LO_UNION.signal_data_31_0 = 1;                                 \
-    (tmpl).SIGNAL_DATA_HI_UNION.signal_data_63_32 = 0;                                \
+    (tmpl).SIGNAL_DATA_LO_UNION.signal_data_31_0 = (uint32_t)(params)->signal_value;  \
+    (tmpl).SIGNAL_DATA_HI_UNION.signal_data_63_32 =                                   \
+        (uint32_t)((params)->signal_value >> 32);                                     \
     memcpy((signal_dws), (const uint32_t*)&(tmpl) + 14, 5 * sizeof(uint32_t));        \
   } while (0)
 
@@ -416,9 +433,8 @@ static inline void abce_builder_build_multicast_wait_signal_copy(
   while (cur_size < size) {
     const size_t remaining = size - cur_size;
     const uint32_t copy_size = (uint32_t)ABCE_MIN(remaining, builder->max_copy_size);
-    const bool chunk_wait = do_wait && (!params->boundary_wait_signal || cur_size == 0);
-    const bool chunk_signal =
-        do_signal && (!params->boundary_wait_signal || cur_size + copy_size == size);
+    const bool chunk_wait = do_wait && (!params->wait_first_chunk_only || cur_size == 0);
+    const bool chunk_signal = do_signal;
 
     uint32_t* out = (uint32_t*)cmd_addr;
     uint32_t num_dwords = 0;
@@ -475,8 +491,7 @@ static inline void abce_builder_build_swap_copy(const abce_builder_t* builder, c
                      "gfx125plus swap packet must match legacy swap packet size for shared stride");
   const bool use_gfx125plus = builder->scope_fields && builder->is_gfx125plus;
 
-  const size_t alignment = use_gfx125plus ? SDMA_PKT_COPY_LINEAR_SWAP_GFX125PLUS_ALIGNMENT
-                                          : SDMA_PKT_COPY_LINEAR_SWAP_ALIGNMENT;
+  const size_t alignment = abce_builder_swap_alignment(builder);
   (void)alignment;
   ABCE_ASSERT(((uintptr_t)addr_a & (alignment - 1)) == 0);
   ABCE_ASSERT(((uintptr_t)addr_b & (alignment - 1)) == 0);
@@ -709,10 +724,9 @@ static inline void abce_builder_build_fill(const abce_builder_t* builder, char* 
     const uint32_t fill_count = (uint32_t)ABCE_MIN(count, (size_t)builder->max_fill_dwords);
 
     pkt->HEADER_UNION.op = SDMA_OP_CONST_FILL;
-    if (builder->scope_fields) {
-      pkt->HEADER_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
-      pkt->HEADER_UNION.npd = 1;
-    }
+    // NPD stays 0: the engine's dependency check keeps a fill behind earlier
+    // writes to the same memory.
+    if (builder->scope_fields) pkt->HEADER_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
     pkt->HEADER_UNION.fillsize = 2;
 
     pkt->DST_ADDR_LO_UNION.dst_addr_31_0 = abce_ptr_low32(cur_ptr);
@@ -726,12 +740,13 @@ static inline void abce_builder_build_fill(const abce_builder_t* builder, char* 
   }
 }
 
-static inline void abce_builder_build_poll(const abce_builder_t* builder, char* cmd_addr,
-                                           void* addr, uint32_t reference, uint32_t mask) {
+static inline void abce_builder_build_poll_compare(const abce_builder_t* builder, char* cmd_addr,
+                                                   void* addr, uint32_t reference, uint32_t mask,
+                                                   uint32_t function) {
   SDMA_PKT_POLL_REGMEM* pkt = (SDMA_PKT_POLL_REGMEM*)cmd_addr;
   pkt->HEADER_UNION.op = SDMA_OP_POLL_REGMEM;
   pkt->HEADER_UNION.mem_poll = 1;
-  pkt->HEADER_UNION.func = SDMA_FUNC_EQUAL;
+  pkt->HEADER_UNION.func = function;
   pkt->ADDR_LO_UNION.addr_31_0 = abce_ptr_low32(addr);
   pkt->ADDR_HI_UNION.addr_63_32 = abce_ptr_high32(addr);
   pkt->VALUE_UNION.value = reference;
@@ -741,12 +756,19 @@ static inline void abce_builder_build_poll(const abce_builder_t* builder, char* 
   if (builder->scope_fields) pkt->DW5_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
 }
 
-static inline void abce_builder_build_poll_64b(const abce_builder_t* builder, char* cmd_addr,
-                                               void* addr, uint64_t reference, uint64_t mask) {
+static inline void abce_builder_build_poll(const abce_builder_t* builder, char* cmd_addr,
+                                           void* addr, uint32_t reference, uint32_t mask) {
+  abce_builder_build_poll_compare(builder, cmd_addr, addr, reference, mask, SDMA_FUNC_EQUAL);
+}
+
+static inline void abce_builder_build_poll_64b_compare(const abce_builder_t* builder,
+                                                       char* cmd_addr, void* addr,
+                                                       uint64_t reference, uint64_t mask,
+                                                       uint32_t function) {
   SDMA_PKT_POLL_MEM_64B_GFX125PLUS* pkt = (SDMA_PKT_POLL_MEM_64B_GFX125PLUS*)cmd_addr;
   pkt->HEADER_UNION.op = SDMA_OP_POLL_REGMEM;
   pkt->HEADER_UNION.sub_op = SDMA_SUBOP_POLL_MEM_64B;
-  pkt->HEADER_UNION.func = SDMA_FUNC_EQUAL;
+  pkt->HEADER_UNION.func = function;
   pkt->ADDR_LO_UNION.addr_31_3 = abce_ptr_low32(addr) >> 3;
   pkt->ADDR_HI_UNION.addr_63_32 = abce_ptr_high32(addr);
   pkt->REFERENCE_LO_UNION.reference_31_0 = (uint32_t)reference;
@@ -756,6 +778,11 @@ static inline void abce_builder_build_poll_64b(const abce_builder_t* builder, ch
   pkt->HEADER_UNION.sys = 1;
   pkt->DW7_UNION.retry_count = 0;
   if (builder->scope_fields) pkt->DW7_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
+}
+
+static inline void abce_builder_build_poll_64b(const abce_builder_t* builder, char* cmd_addr,
+                                               void* addr, uint64_t reference, uint64_t mask) {
+  abce_builder_build_poll_64b_compare(builder, cmd_addr, addr, reference, mask, SDMA_FUNC_EQUAL);
 }
 
 static inline void abce_builder_build_fence_64b(const abce_builder_t* builder, char* cmd_addr,
@@ -797,9 +824,8 @@ static inline void abce_builder_build_wait_signal_copy(const abce_builder_t* bui
   while (cur_size < size) {
     const size_t remaining = size - cur_size;
     const uint32_t copy_size = (uint32_t)ABCE_MIN(remaining, builder->max_copy_size);
-    const bool chunk_wait = do_wait && (!params->boundary_wait_signal || cur_size == 0);
-    const bool chunk_signal =
-        do_signal && (!params->boundary_wait_signal || cur_size + copy_size == size);
+    const bool chunk_wait = do_wait && (!params->wait_first_chunk_only || cur_size == 0);
+    const bool chunk_signal = do_signal;
 
     uint32_t* out = (uint32_t*)cmd_addr;
     uint32_t num_dwords = 0;
@@ -936,10 +962,8 @@ static inline void abce_builder_build_wait_signal_swap(const abce_builder_t* bui
     // would underflow to UINT32_MAX). For a symmetric swap chunk_a == chunk_b.
     const uint32_t chunk = ABCE_MAX(chunk_a, chunk_b);
     const bool chunk_wait =
-        do_wait && (!params->boundary_wait_signal || (cur_a == 0 && cur_b == 0));
-    const bool chunk_signal =
-        do_signal && (!params->boundary_wait_signal ||
-                      (cur_a + chunk_a == size_a && cur_b + chunk_b == size_b));
+        do_wait && (!params->wait_first_chunk_only || (cur_a == 0 && cur_b == 0));
+    const bool chunk_signal = do_signal;
 
     const char* ptr_a = (const char*)addr_a + cur_a;
     const char* ptr_b = (const char*)addr_b + cur_b;
@@ -983,17 +1007,57 @@ static inline void abce_builder_build_wait_signal_swap(const abce_builder_t* bui
   }
 }
 
-static inline void abce_builder_build_atomic_add(const abce_builder_t* builder, char* cmd_addr,
-                                                 void* addr, uint64_t value) {
+// Writes the whole packet, so it does not rely on the zeroed-buffer contract.
+static inline void abce_builder_build_write(const abce_builder_t* builder, char* cmd_addr,
+                                            void* dst, const uint32_t* data, uint32_t num_dwords) {
+  (void)builder;
+  ABCE_ASSERT(num_dwords != 0 && ((uintptr_t)dst % sizeof(uint32_t)) == 0);
+  SDMA_PKT_WRITE_UNTILED header;
+  memset(&header, 0, sizeof(header));
+  header.HEADER_UNION.op = SDMA_OP_WRITE;
+  header.HEADER_UNION.sub_op = SDMA_SUBOP_WRITE_LINEAR;
+  header.DST_ADDR_LO_UNION.dst_addr_31_0 = abce_ptr_low32(dst);
+  header.DST_ADDR_HI_UNION.dst_addr_63_32 = abce_ptr_high32(dst);
+  header.DW_3_UNION.count = num_dwords - 1;
+  memcpy(cmd_addr, &header, sizeof(header));
+  memcpy(cmd_addr + sizeof(header), data, num_dwords * sizeof(uint32_t));
+}
+
+// Stores one byte at |dst| as a one-byte CONST_FILL (SIZE 0; only 0 = byte and
+// 2 = dword exist). Keeps the engine's dependency check (NPD = 0), so it cannot
+// overtake an earlier write to the same address. Writes the whole packet.
+static inline void abce_builder_build_fill_byte(const abce_builder_t* builder, char* cmd_addr,
+                                                void* dst, uint8_t value) {
+  SDMA_PKT_CONSTANT_FILL pkt;
+  memset(&pkt, 0, sizeof(pkt));
+  pkt.HEADER_UNION.op = SDMA_OP_CONST_FILL;
+  if (builder->scope_fields) pkt.HEADER_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
+  pkt.HEADER_UNION.fillsize = 0;
+  pkt.DST_ADDR_LO_UNION.dst_addr_31_0 = abce_ptr_low32(dst);
+  pkt.DST_ADDR_HI_UNION.dst_addr_63_32 = abce_ptr_high32(dst);
+  pkt.DATA_UNION.src_data_31_0 = value;
+  pkt.COUNT_UNION.count = 0;  // Bytes - 1.
+  memcpy(cmd_addr, &pkt, sizeof(pkt));
+}
+
+// |operation| is one of the 64-bit SDMA_ATOMIC_* opcodes, with |value| as the
+// operand.
+static inline void abce_builder_build_atomic(const abce_builder_t* builder, char* cmd_addr,
+                                             void* addr, uint32_t operation, uint64_t value) {
   SDMA_PKT_ATOMIC* pkt = (SDMA_PKT_ATOMIC*)cmd_addr;
   pkt->HEADER_UNION.op = SDMA_OP_ATOMIC;
-  pkt->HEADER_UNION.operation = SDMA_ATOMIC_ADD64;
+  pkt->HEADER_UNION.operation = operation;
   if (builder->scope_fields) pkt->HEADER_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
 
   pkt->ADDR_LO_UNION.addr_31_0 = abce_ptr_low32(addr);
   pkt->ADDR_HI_UNION.addr_63_32 = abce_ptr_high32(addr);
   pkt->SRC_DATA_LO_UNION.src_data_31_0 = (uint32_t)value;
   pkt->SRC_DATA_HI_UNION.src_data_63_32 = (uint32_t)(value >> 32);
+}
+
+static inline void abce_builder_build_atomic_add(const abce_builder_t* builder, char* cmd_addr,
+                                                 void* addr, uint64_t value) {
+  abce_builder_build_atomic(builder, cmd_addr, addr, SDMA_ATOMIC_ADD64, value);
 }
 
 static inline void abce_builder_build_atomic_decrement(const abce_builder_t* builder,

@@ -37,14 +37,16 @@ struct ncclTopoGraph;
 // NCCL_PARAM does not cover it.
 int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
 
-// src/plugin/net.cc: initTransportsRank's GDR probe.
+// src/plugin/net.cc: initTransportsRank's GDR probe. Omitted for rccl-UnitTestsMicroPlugin, which compiles net.cc.
 int g_gdrSupportValue = 0;
 int g_gdrSupportCalls = 0;
+#ifndef RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport
 ncclResult_t ncclGpuGdrSupport(struct ncclComm*, int* gdrSupport) {
   ++g_gdrSupportCalls;
   if (gdrSupport) *gdrSupport = g_gdrSupportValue;
   return ncclSuccess;
 }
+#endif
 
 // src/transport/net.cc:343. Was a fail-loud stub in nccl_stubs.cc, which forced
 // the enqueue target to omit it via a macro and supply its own; a seam here
@@ -55,9 +57,14 @@ static bool DefaultUseAinic() { return g_rcclUseAinicValue; }
 std::function<bool()> g_useAinic = DefaultUseAinic;
 bool rcclUseAinic() { return g_useAinic(); }
 
+// src/transport/net.cc:212, read by net_ib_cast/common.cc.
+int64_t ncclParamNetOptionalRecvCompletion() { return g_loadParam("NET_OPTIONAL_RECV_COMPLETION", 1); }
+
 static int DefaultPxnDisable(struct ncclComm*) { return 0; }
 std::function<int(struct ncclComm*)> g_pxnDisable = DefaultPxnDisable;
+#ifndef RCCL_TRANSPORT_STUBS_OMIT_ncclPxnDisable
 int ncclPxnDisable(struct ncclComm* comm) { return g_pxnDisable(comm); }
+#endif
 
 // src/proxy.cc: comm teardown stops the proxy through this, so it needs a working default, not a fail-loud one.
 static ncclResult_t DefaultNcclProxyStop(struct ncclComm*) { return ncclSuccess; }
@@ -134,3 +141,12 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
 // a definition even though the code path that uses it is dead.
 #include "transport.h"
 struct ncclTransport netTransport = {};
+
+// src/transport.cc's table. ncclTopoComputePaths asks P2P, then SHM, whether a peer is reachable; both say yes.
+static ncclResult_t ReachableCanConnect(int* ret, struct ncclComm*, struct ncclTopoGraph*, struct ncclPeerInfo*,
+                                        struct ncclPeerInfo*) {
+  *ret = 1;
+  return ncclSuccess;
+}
+static struct ncclTransport reachableTransport = {"fake", ReachableCanConnect};
+struct ncclTransport* ncclTransports[NTRANSPORTS] = {&reachableTransport, &reachableTransport};
