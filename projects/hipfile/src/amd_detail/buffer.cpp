@@ -61,14 +61,14 @@ Buffer::Buffer(const void *_buffer, size_t _length, int _flags, const PassKey<Bu
 
     hipPointerAttribute_t _attrs = Context<Hip>::get()->hipPointerGetAttributes(buffer);
 
-    auto validTypes = Context<Configuration>::get()->host()
-                          ? std::initializer_list{hipMemoryTypeDevice}
-                          : std::initializer_list{hipMemoryTypeDevice, hipMemoryTypeHost};
+    type = _attrs.type;
 
-    if (std::find(validTypes.begin(), validTypes.end(), _attrs.type) == validTypes.end()) {
+    bool hostEnabled = Context<Configuration>::get()->host();
+    std::initializer_list<hipMemoryType> validTypes{hipMemoryTypeDevice, hipMemoryTypeHost};
+    auto endValid = hostEnabled? validTypes.end() : validTypes.end() - 1;
+    if (std::find(validTypes.begin(), endValid, type) == endValid) {
         throw InvalidMemoryType();
     }
-    type = _attrs.type;
 
     gpu_id = type == hipMemoryTypeDevice ? _attrs.device : -1;
 

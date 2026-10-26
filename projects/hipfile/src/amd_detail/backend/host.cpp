@@ -68,8 +68,6 @@ private:
 };
 
 struct ReadFileFn {
-    static constexpr IoType op_type = IoType::Read;
-
     using host_buff_t = uint8_t *;
     Sys *system       = Context<Sys>::get();
 
@@ -84,8 +82,6 @@ struct ReadFileFn {
 };
 
 struct WriteFileFn {
-    static constexpr IoType op_type = IoType::Write;
-
     using host_buff_t = const uint8_t *;
     Sys *system       = Context<Sys>::get();
 
