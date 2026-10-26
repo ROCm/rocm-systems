@@ -226,17 +226,15 @@ class RocProfCompute_Base:
                 args.filter_blocks = current
 
         try:
-            selection = resolve_profile_selection(getattr(args, "trace_ml_api", None))
+            frameworks = resolve_profile_selection(getattr(args, "trace_ml_api", None))
         except ValueError as error:
             console_error(str(error))
-        if selection.warning:
-            console_warning(selection.warning)
         if getattr(args, "trace_ml_api", None) is not None:
-            args.trace_ml_api = list(selection.saved)
-        selected_frameworks = set(selection.injectable)
+            args.trace_ml_api = list(frameworks)
+        selected_frameworks = set(frameworks)
         self._selected_frameworks: set[str] = selected_frameworks
-        self._ml_api_trace_enabled: bool = selection.marker_trace
-        if selection.marker_trace and is_only_pc_sampling(args.filter_blocks):
+        self._ml_api_trace_enabled: bool = bool(frameworks)
+        if frameworks and is_only_pc_sampling(args.filter_blocks):
             console_error(
                 "--trace-ml-api cannot be used with PC-sampling-only profiling, "
                 "which does not collect counters. Remove --trace-ml-api or add "
@@ -268,7 +266,7 @@ class RocProfCompute_Base:
                 "Please remove one of these options."
             )
 
-        if selection.marker_trace:
+        if frameworks:
             if args.attach_pid:
                 console_error(
                     "ML API tracing cannot be used with --attach-pid. "

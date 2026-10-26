@@ -5,36 +5,24 @@
 
 import pytest
 
+from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.ml_api_selectors import (
-    JAX_NOT_COLLECTED_WARNING,
     resolve_list_selectors,
     resolve_operator_patterns,
     resolve_profile_selection,
 )
 
 
-def test_absent_profile_selection_disables_marker_trace():
-    selection = resolve_profile_selection(None)
-    assert selection.saved == []
-    assert selection.injectable == []
-    assert selection.marker_trace is False
-    assert selection.warning is None
+def test_absent_profile_selection_is_empty():
+    assert resolve_profile_selection(None) == []
 
 
-def test_bare_profile_selection_saves_defaults_without_jax_warning():
-    selection = resolve_profile_selection([])
-    assert selection.saved == ["torch", "triton", "jax"]
-    assert selection.injectable == ["torch", "triton"]
-    assert selection.marker_trace is True
-    assert selection.warning is None
+def test_bare_profile_selection_saves_known_backends():
+    assert resolve_profile_selection([]) == list(KNOWN_ML_API_BACKENDS)
 
 
-def test_named_torch_profile_selection_injects_only_torch():
-    selection = resolve_profile_selection(["torch"])
-    assert selection.saved == ["torch"]
-    assert selection.injectable == ["torch"]
-    assert selection.marker_trace is True
-    assert selection.warning is None
+def test_named_torch_profile_selection_saves_only_torch():
+    assert resolve_profile_selection(["torch"]) == ["torch"]
 
 
 def test_user_profile_selection_raises():
@@ -42,64 +30,65 @@ def test_user_profile_selection_raises():
         resolve_profile_selection(["user"])
 
 
-def test_jax_profile_selection_enables_marker_trace_without_injection():
-    selection = resolve_profile_selection(["jax"])
-    assert selection.saved == ["jax"]
-    assert selection.injectable == []
-    assert selection.marker_trace is True
-    assert selection.warning == JAX_NOT_COLLECTED_WARNING
-
-
-def test_torch_and_jax_profile_selection_injects_torch_and_warns():
-    selection = resolve_profile_selection(["torch", "jax"])
-    assert selection.saved == ["torch", "jax"]
-    assert selection.injectable == ["torch"]
-    assert selection.warning == JAX_NOT_COLLECTED_WARNING
-
-
 def test_comma_and_space_profile_tokens_save_the_same_pair():
     comma = resolve_profile_selection(["torch,triton"])
     space = resolve_profile_selection(["torch", "triton"])
-    assert comma.saved == space.saved == ["torch", "triton"]
+    assert comma == space == ["torch", "triton"]
 
 
 def test_colon_operator_token_is_explicit_torch_pattern():
-    resolved = resolve_operator_patterns(["torch:*/aten::addmm"])
-    assert resolved.explicit == {"torch": ["*/aten::addmm"]}
-    assert resolved.unscoped == []
-    assert resolved.jax_requested is False
+    assert resolve_operator_patterns(["torch:*/aten::addmm"]) == {
+        "torch": ["*/aten::addmm"]
+    }
 
 
-def test_unscoped_aten_pattern_is_not_copied_onto_triton():
-    resolved = resolve_operator_patterns(["*/aten::addmm"])
-    assert resolved.explicit == {}
-    assert resolved.unscoped == ["*/aten::addmm"]
+def test_unscoped_aten_pattern_keeps_the_double_colon_name():
+    pattern = ["*/aten::addmm"]
+    assert resolve_operator_patterns(pattern) == {
+        name: pattern for name in (*KNOWN_ML_API_BACKENDS, "user")
+    }
 
 
 def test_comma_patterns_stay_on_the_same_prefix():
-    resolved = resolve_operator_patterns(["torch:*conv*,*relu*"])
-    assert resolved.explicit == {"torch": ["*conv*", "*relu*"]}
-    assert resolved.unscoped == []
+    assert resolve_operator_patterns(["torch:*conv*,*relu*"]) == {
+        "torch": ["*conv*", "*relu*"]
+    }
 
 
 def test_split_operator_tokens_stay_by_backend():
-    resolved = resolve_operator_patterns(["torch:*conv*", "triton:*matmul*"])
-    assert resolved.explicit == {"torch": ["*conv*"], "triton": ["*matmul*"]}
-    assert resolved.unscoped == []
+    assert resolve_operator_patterns(["torch:*conv*", "triton:*matmul*"]) == {
+        "torch": ["*conv*"],
+        "triton": ["*matmul*"],
+    }
+
+
+def test_bare_pattern_keeps_the_preceding_prefix_across_words():
+    assert resolve_operator_patterns(
+        ["torch:*conv*", "*relu*", "triton:*matmul*"]
+    ) == {
+        "torch": ["*conv*", "*relu*"],
+        "triton": ["*matmul*"],
+    }
+
+
+def test_comma_joined_selectors_stay_by_backend():
+    assert resolve_operator_patterns(["torch:*conv*,triton:*matmul*"]) == {
+        "torch": ["*conv*"],
+        "triton": ["*matmul*"],
+    }
+
+
+def test_space_joined_selectors_stay_by_backend():
+    assert resolve_operator_patterns(["torch:*conv* triton:*matmul*"]) == {
+        "torch": ["*conv*"],
+        "triton": ["*matmul*"],
+    }
 
 
 def test_empty_operator_flag_is_unscoped_double_star():
-    resolved = resolve_operator_patterns([])
-    assert resolved.explicit == {}
-    assert resolved.unscoped == ["**"]
-    assert resolved.jax_requested is False
-
-
-def test_jax_operator_sets_flag_without_match_pattern():
-    resolved = resolve_operator_patterns(["jax:*dot*"])
-    assert resolved.jax_requested is True
-    assert resolved.explicit == {}
-    assert resolved.unscoped == []
+    assert resolve_operator_patterns([]) == {
+        name: ["**"] for name in (*KNOWN_ML_API_BACKENDS, "user")
+    }
 
 
 def test_empty_list_selectors_stay_empty():

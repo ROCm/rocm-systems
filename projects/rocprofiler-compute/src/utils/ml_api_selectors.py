@@ -3,30 +3,11 @@
 
 """Parse ML API selector flags for profile and analyze."""
 
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-PROFILE_SELECTORS: Tuple[str, ...] = ("torch", "triton", "jax")
-INJECTABLE_SELECTORS: Tuple[str, ...] = ("torch", "triton")
-ANALYZE_SELECTORS: Tuple[str, ...] = ("torch", "triton", "jax", "user")
-DEFAULT_PROFILE_SELECTORS: Tuple[str, ...] = ("torch", "triton", "jax")
-JAX_NOT_COLLECTED_WARNING = (
-    "JAX tracing is not available yet and will not be collected."
-)
-_PROFILE_SELECTOR_VALUES = "Values: torch, triton, jax."
-_ANALYZE_SELECTOR_VALUES = "Values: torch, triton, jax, user."
+from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 
-
-class ProfileSelection(NamedTuple):
-    saved: List[str]
-    injectable: List[str]
-    marker_trace: bool
-    warning: Optional[str]
-
-
-class OperatorPatterns(NamedTuple):
-    explicit: Dict[str, List[str]]
-    unscoped: List[str]
-    jax_requested: bool
+_OPERATOR_BACKENDS: Tuple[str, ...] = KNOWN_ML_API_BACKENDS + ("user",)
 
 
 def split_selector_tokens(raw_values: List[str]) -> List[str]:
@@ -55,20 +36,16 @@ def _comma_patterns(text: str) -> List[str]:
     return [piece.strip() for piece in text.split(",") if piece.strip()]
 
 
-def resolve_profile_selection(raw: Optional[List[str]]) -> ProfileSelection:
-    """Resolve --trace-ml-api into saved selectors, injection, and marker trace."""
+def resolve_profile_selection(raw: Optional[List[str]]) -> List[str]:
+    """Resolve --trace-ml-api. An empty list means the flag is absent."""
     if raw is None:
-        return ProfileSelection([], [], False, None)
+        return []
     if not raw:
-        saved = list(DEFAULT_PROFILE_SELECTORS)
-        injectable = [name for name in saved if name in INJECTABLE_SELECTORS]
-        return ProfileSelection(saved, injectable, True, None)
+        return list(KNOWN_ML_API_BACKENDS)
 
     tokens = split_selector_tokens(raw)
     if not tokens:
-        saved = list(DEFAULT_PROFILE_SELECTORS)
-        injectable = [name for name in saved if name in INJECTABLE_SELECTORS]
-        return ProfileSelection(saved, injectable, True, None)
+        return list(KNOWN_ML_API_BACKENDS)
 
     for name in tokens:
         if name == "user":
@@ -76,15 +53,13 @@ def resolve_profile_selection(raw: Optional[List[str]]) -> ProfileSelection:
                 "user is not a --trace-ml-api value. "
                 "User-defined regions are included with every --trace-ml-api run."
             )
-        if name not in PROFILE_SELECTORS:
+        if name not in KNOWN_ML_API_BACKENDS:
             raise ValueError(
-                f"Unknown --trace-ml-api value {name!r}. {_PROFILE_SELECTOR_VALUES}"
+                f"Unknown --trace-ml-api value {name!r}. "
+                f"Values: {', '.join(KNOWN_ML_API_BACKENDS)}."
             )
 
-    saved = _unique_keep_order(tokens)
-    injectable = [name for name in saved if name in INJECTABLE_SELECTORS]
-    warning = JAX_NOT_COLLECTED_WARNING if "jax" in saved else None
-    return ProfileSelection(saved, injectable, True, warning)
+    return _unique_keep_order(tokens)
 
 
 def resolve_list_selectors(raw: Optional[List[str]]) -> Optional[List[str]]:
@@ -93,47 +68,52 @@ def resolve_list_selectors(raw: Optional[List[str]]) -> Optional[List[str]]:
         return None
     tokens = split_selector_tokens(raw)
     for name in tokens:
-        if name not in ANALYZE_SELECTORS:
+        if name not in _OPERATOR_BACKENDS:
             raise ValueError(
-                f"Unknown --list-operators value {name!r}. {_ANALYZE_SELECTOR_VALUES}"
+                f"Unknown --list-operators value {name!r}. "
+                f"Values: {', '.join(_OPERATOR_BACKENDS)}."
             )
     return _unique_keep_order(tokens)
 
 
-def _split_operator_token(token: str) -> Tuple[Optional[str], List[str]]:
-    if ":" in token:
-        prefix, rest = token.split(":", 1)
-        if prefix in ANALYZE_SELECTORS:
-            return prefix, _comma_patterns(rest)
-    return None, _comma_patterns(token)
+def _patterns_by_backend(token: str) -> Dict[str, List[str]]:
+    """Split one --operator token into backend -> glob patterns."""
+    token = token.replace(" ", ",")
+    selector_tokens = _comma_patterns(token)
+    prefix: Optional[str] = None
+    selections: Dict[str, List[str]] = {}
+
+    def _save(backend: Optional[str], pattern: str) -> None:
+        names = (backend,) if backend else _OPERATOR_BACKENDS
+        for name in names:
+            selections.setdefault(name, []).append(pattern)
+
+    for selector_token in selector_tokens:
+        if (
+            "::" in selector_token
+            and selector_token.find("::") <= selector_token.find(":")
+        ):
+            _save(prefix, selector_token)
+            continue
+        if ":" in selector_token:
+            prefix, rest = selector_token.split(":", 1)
+            _save(prefix, rest.strip() or "**")
+            continue
+        _save(prefix, selector_token)
+    return selections
 
 
-def resolve_operator_patterns(raw: Optional[List[str]]) -> Optional[OperatorPatterns]:
-    """Resolve --operator into explicit prefixes, unscoped globs, and jax."""
+def resolve_operator_patterns(
+    raw: Optional[List[str]],
+) -> Optional[Dict[str, List[str]]]:
+    """Resolve --operator into backend -> glob patterns."""
     if raw is None:
         return None
-    if not raw:
-        return OperatorPatterns({}, ["**"], False)
+    token = " ".join(str(value).strip() for value in raw if str(value).strip())
+    if not token:
+        return {name: ["**"] for name in _OPERATOR_BACKENDS}
+    selections = _patterns_by_backend(token)
+    if not selections:
+        return {name: ["**"] for name in _OPERATOR_BACKENDS}
+    return selections
 
-    explicit: Dict[str, List[str]] = {}
-    unscoped: List[str] = []
-    jax_requested = False
-    for value in raw:
-        token = str(value).strip()
-        if not token:
-            continue
-        prefix, patterns = _split_operator_token(token)
-        if prefix == "jax":
-            jax_requested = True
-            continue
-        if not patterns:
-            if prefix is None:
-                continue
-            patterns = ["**"]
-        if prefix is None:
-            unscoped.extend(patterns)
-        else:
-            explicit.setdefault(prefix, []).extend(patterns)
-    if not explicit and not unscoped and not jax_requested:
-        return OperatorPatterns({}, ["**"], False)
-    return OperatorPatterns(explicit, unscoped, jax_requested)
