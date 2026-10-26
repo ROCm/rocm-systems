@@ -355,6 +355,7 @@ std::unique_ptr<ncclComm> P2pPartsComm(int nNodes, int nRanks, int p2pnChannels,
   comm->nRanks = nRanks;
   comm->p2pnChannels = p2pnChannels;
   comm->p2pnChannelsPerPeer = perPeer;
+  comm->p2pnChannelsPerPeerMax = perPeer;
   comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
   return comm;
 }
@@ -389,6 +390,15 @@ TEST_F(EnqueueMicrotest, P2pTaskParts_ScatterKeepsPerPeerOutsideMultiNodeAinicOr
   comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
   comm->nNodes = 1;
   EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "single node";
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_SendRecvCanUseThePreCapNetworkCount) {
+  auto comm = P2pPartsComm(/*nNodes=*/2, /*nRanks=*/16, /*p2pnChannels=*/64, /*perPeer=*/2);
+  comm->p2pnChannelsPerPeerMax = 4;
+  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncAlltoAll));
+  EXPECT_EQ(4, rcclP2pTaskParts(comm.get(), ncclFuncSend));
+  EXPECT_EQ(4, rcclP2pTaskParts(comm.get(), ncclFuncRecv));
+  EXPECT_EQ(4, rcclP2pTaskParts(comm.get(), ncclFuncSendRecv));
 }
 
 TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterBelowPerPeerReturnsItsParts) {

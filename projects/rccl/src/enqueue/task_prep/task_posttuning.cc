@@ -165,10 +165,10 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
   // private to each comm, so we need to set it anyway. Leave it clear when only
   // some parts are connected, so a later task to this peer still connects the rest.
   int nParts = rcclP2pTaskParts(comm, collAPI);
-  if (nParts == comm->p2pnChannelsPerPeer)
+  if (nParts == comm->p2pnChannelsPerPeerMax)
     (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
   for (int c = 0; c < nParts; c++) {
-    int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
+    int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, nParts, comm->nNodes,
                                           comm->p2pChannelShiftSize);
 
     // P2P uses only 1 connector. The send/recv connector is shared among split
@@ -233,7 +233,8 @@ static ncclResult_t postTuneP2pRegisterBuffer(struct ncclComm* comm, struct nccl
 
   NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
 
-  int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, 0, comm->p2pnChannelsPerPeer, comm->nNodes,
+  int nParts = rcclP2pTaskParts(comm, task->collAPI);
+  int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, 0, nParts, comm->nNodes,
                                         comm->p2pChannelShiftSize);
   struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
   struct ncclConnector* conn =
@@ -245,8 +246,8 @@ static ncclResult_t postTuneP2pRegisterBuffer(struct ncclComm* comm, struct nccl
   if (network) {
     bool pxnUsed = !ncclPxnDisable(comm) && comm->isAllNvlink && comm->maxLocalRanks > 1;
     if (proxySameProcess && !pxnUsed && (conn->conn.flags & NCCL_DIRECT_NIC)) {
-      for (int part = 0; part < comm->p2pnChannelsPerPeer; part++) {
-        int partChannelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, comm->p2pnChannelsPerPeer,
+      for (int part = 0; part < nParts; part++) {
+        int partChannelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, nParts,
                                                   comm->nNodes, comm->p2pChannelShiftSize);
         struct ncclConnector* partConn = isSendNotRecv ? &comm->channels[partChannelId].peers[peer]->send[connIndex] :
                                                          &comm->channels[partChannelId].peers[peer]->recv[connIndex];

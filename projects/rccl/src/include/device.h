@@ -395,8 +395,8 @@ struct alignas(16) ncclDevWorkP2p {
   size_t sendBytes, recvBytes;
   int sendRank, recvRank;
   uint64_t sendOpCount, recvOpCount;
-  // From the part index, nP2pChannels, and channelBase the device code can
-  // calculate which part of the transfer a channel is responsible for.
+  // From the part index, nP2pChannels, p2pPartsLog2, and channelBase the
+  // device code can calculate which part of the transfer a channel owns.
   uint8_t nP2pChannels; // Always equal to comm->p2pnChannels
   uint8_t channelBase; // Channel owning first part.
   // Zero channels indicates no work in that direction.
@@ -412,6 +412,10 @@ struct alignas(16) ncclDevWorkP2p {
   uint8_t sendIpcReg:1, recvIpcReg:1;
 
   uint8_t profilerEnabled:1;
+  // Log2 of the channel-to-part stride for this work. It may exceed the
+  // communicator default for send/sendrecv, while alltoall keeps the
+  // peer-sharing default from topology.
+  uint8_t p2pPartsLog2:3;
 
   uint8_t sendConnIndex:2, recvConnIndex:2;
 };

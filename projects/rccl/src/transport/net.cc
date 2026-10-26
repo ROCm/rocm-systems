@@ -367,9 +367,9 @@ static void populateCommNetAttrs(struct ncclComm* comm, struct ncclConnector* co
     if (comm->nRanks < maxConcPeers) maxConcPeers = comm->nRanks;
 
     netAttr->sendCommAttr.maxConcurrentPeers = maxConcPeers;
-    netAttr->sendCommAttr.maxFlowsPerPeer = comm->p2pnChannelsPerPeer;
+    netAttr->sendCommAttr.maxFlowsPerPeer = comm->p2pnChannelsPerPeerMax;
     netAttr->recvCommAttr.maxConcurrentPeers = maxConcPeers;
-    netAttr->recvCommAttr.maxFlowsPerPeer = comm->p2pnChannelsPerPeer;
+    netAttr->recvCommAttr.maxFlowsPerPeer = comm->p2pnChannelsPerPeerMax;
     netAttr->op =
       BIT(ncclFuncSend) | BIT(ncclFuncRecv) | BIT(ncclFuncAlltoAll) | BIT(ncclFuncScatter) | BIT(ncclFuncGather);
   } else {

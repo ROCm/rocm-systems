@@ -1479,6 +1479,10 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
          comm->p2pnChannelsPerPeer, newPpp, comm->p2pnChannels, maxP2pPeers);
     comm->p2pnChannelsPerPeer = newPpp;
   }
+  // Keep the network count before the all-to-all peer-sharing cap. Send and
+  // sendrecv can use it as a per-work part stride without changing the
+  // all-to-all default.
+  comm->p2pnChannelsPerPeerMax = comm->p2pnChannelsPerPeer;
   if (comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT) {
     // In the case of >1 NVLD (and the user didn't set nChannelsPerNetPeer), the network is the bottleneck.
     // Reduce the number of channels per host to avoid going above p2pnChannels to fit all the peers within a single round.
@@ -1555,6 +1559,7 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   // widens what can reach it: divUp(2, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is 1, so the loop
   // above can now stop at p2pnChannels/2 where dividing by nRanks stopped at /4 or lower.
   comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
+  comm->p2pnChannelsPerPeerMax = std::min(comm->p2pnChannelsPerPeerMax, comm->p2pnChannels);
 
   // Same grow reconciliation as ncclTopoPostset, for p2p channels (the grow path
   // skips the tpP2pNChannels clamp, so arch-specific p2p caps can diverge).
