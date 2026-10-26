@@ -1257,15 +1257,24 @@ bool rejects_flat_dds(const Instruction &inst, const Wavefront &wf, uint64_t req
   return true;
 }
 
-// CDNA5 section 10.2 returns MEMVIOL for 8-byte FLAT atomics that resolve to
-// scratch: the dword interleave places a lane's two halves a wave stride apart.
-// Only FLAT translation marks private-backed lanes; BUFFER swizzling does not.
+// RDNA3/3.5/4 section 11.1 and CDNA5 section 10.2 return MEMVIOL for 8-byte
+// FLAT atomics that resolve to scratch: the dword interleave places a lane's two
+// halves a wave stride apart. Only FLAT translation marks private-backed lanes;
+// BUFFER swizzling does not.
 bool rejects_private_atomic64(const VectorMemState &d, const Wavefront &wf,
                               uint64_t request_lanes) {
   if (d.atomic_op == AtomicOp::NONE || d.elem_size != sizeof(uint64_t) ||
       !d.requires_scratch_backing || !(d.scratch_lane_mask & request_lanes))
     return false;
-  return wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5;
+  switch (wf.cu().arch()) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return true;
+  default:
+    return false;
+  }
 }
 
 } // namespace

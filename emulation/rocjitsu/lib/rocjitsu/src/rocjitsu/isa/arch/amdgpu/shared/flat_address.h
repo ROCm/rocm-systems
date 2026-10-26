@@ -26,12 +26,11 @@ constexpr uint64_t scratch_lane_address(uint64_t scratch_base, uint64_t private_
          uint64_t{lane} * kScratchInterleaveBytes + private_offset % kScratchInterleaveBytes;
 }
 
-enum class FlatPrivateLayout { None, Interleaved, Linear, EncodedLane };
+enum class FlatPrivateLayout { None, Interleaved, EncodedLane };
 
 struct FlatAddress {
   uint64_t value;
   bool private_address = false;
-  bool swizzled = false;
 };
 
 /// Pure address translation shared by execution and pre-execution wait planning.
@@ -57,9 +56,7 @@ inline FlatAddress translate_flat_address(const Wavefront &wf, uint64_t address,
       return {address};
     offset = static_cast<uint32_t>(address);
   }
-  if (layout == FlatPrivateLayout::Linear)
-    return {wf.scratch_base() + uint64_t{lane} * wf.scratch_lane_size() + offset, true};
-  return {scratch_lane_address(wf.scratch_base(), offset, lane, wf.wf_size()), true, true};
+  return {scratch_lane_address(wf.scratch_base(), offset, lane, wf.wf_size()), true};
 }
 
 inline uint64_t flat_vector_offset(uint64_t value, bool signed_offset, unsigned scale = 1) {
