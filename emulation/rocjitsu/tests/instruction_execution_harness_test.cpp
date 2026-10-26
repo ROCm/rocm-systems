@@ -1219,7 +1219,7 @@ TEST(Rdna4MemoryExecutionHarness, PrivateFlatAtomic64FaultsBeforeAnySideEffect) 
       });
 }
 
-// CDNA5 section 10.2.
+// CDNA5 section 10.1.1.
 TEST(Gfx1250MemoryExecutionHarness, PrivateFlatAtomic64FaultsBeforeAnySideEffect) {
   check_private_flat_atomic64_faults<cdna5::Isa>(
       ROCJITSU_CODE_ARCH_CDNA5,
