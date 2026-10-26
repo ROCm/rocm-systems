@@ -2594,6 +2594,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, MultiSegmentRegisterOff_RegistersOneWind
   EXPECT_EQ(mem.numGinSegments, 2);
 }
 
+#if !defined(__HIP_PLATFORM_AMD__) || NCCL_CUMEM_HOST_GATE
 // An imported host segment reads as device here; with the owner's fd it must still
 // register as HOST_NUMA and hand that fd to GIN. Segments without one pass -1.
 TEST_F(SymMemoryRegisterGinElasticTest, HostOwnerFd_ForwardedWithHostNumaType) {
@@ -2607,6 +2608,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, HostOwnerFd_ForwardedWithHostNumaType) {
   EXPECT_EQ(mem.ginSegmentInfos[0].memType, hipMemLocationTypeDevice);
   EXPECT_EQ(mem.ginSegmentInfos[1].memType, kLocHostNuma);
 }
+#endif
 
 #if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
 // One host segment is not maxGlobalNumSegments > 1. needDmabuf still has to

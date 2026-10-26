@@ -3543,6 +3543,54 @@
         }
       ]
     },
+    "ce_hierarchical_multisegment_multinode": {
+      "extends": "ce_base",
+      "num_ranks": 8,
+      "num_nodes": 2,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_DISABLE": "0",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "RCCL_DDA_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "CE_Hierarchical_AllGather",
+          "description": "Two nodes, 4 ranks each: hierarchical CE AllGather over single-segment symmetric windows",
+          "test_filter": "CeMPI_AllGather.MultiNodeHierarchical"
+        },
+        {
+          "name": "CE_Hierarchical_AllGather_ChunkBoundary",
+          "description": "Hierarchical CE AllGather with a count on the inter-node chunk boundary",
+          "test_filter": "CeMPI_AllGather.MultiNodeHierarchicalChunkBoundary"
+        },
+        {
+          "name": "CE_Hierarchical_AllGather_MultiSegment",
+          "description": "Hierarchical CE AllGather over two-segment symmetric windows; the RMA proxy must register them",
+          "test_filter": "CeMPI_AllGather.MultiNodeHierarchicalMultiSegment"
+        },
+        {
+          "name": "CE_Hierarchical_AlltoAll",
+          "description": "Two nodes, 4 ranks each: hierarchical CE AlltoAll over single-segment symmetric windows",
+          "test_filter": "CeMPI_AlltoAll.MultiNodeHierarchical"
+        },
+        {
+          "name": "CE_Hierarchical_AlltoAll_ChunkBoundary",
+          "description": "Hierarchical CE AlltoAll with a count on the inter-node chunk boundary",
+          "test_filter": "CeMPI_AlltoAll.MultiNodeHierarchicalChunkBoundary"
+        },
+        {
+          "name": "CE_Hierarchical_AlltoAll_MultiSegment",
+          "description": "Hierarchical CE AlltoAll over two-segment symmetric windows; the RMA proxy must register them",
+          "test_filter": "CeMPI_AlltoAll.MultiNodeHierarchicalMultiSegment"
+        }
+      ]
+    },
     "ce_allreduce_recv_offset": {
       "extends": "ce_base",
       "num_ranks": 2,
@@ -5773,6 +5821,12 @@
       "name": "CE AllReduce LSA Guard (multi-node)",
       "description": "ncclCeAllReduce must reject a comm spanning two nodes before staging or any launch; forced CE AllReduce must never be selected.",
       "config": "ce_allreduce_lsa_guard_multinode",
+      "enabled": true
+    },
+    {
+      "name": "CE Hierarchical Multi-Segment (multi-node)",
+      "description": "Hierarchical CE over two-segment symmetric windows: the RMA proxy registers the window so inter-node puts are not rejected.",
+      "config": "ce_hierarchical_multisegment_multinode",
       "enabled": true
     },
     {
