@@ -86,6 +86,16 @@ func TestIdentityDriverStringsUnterminated(t *testing.T) {
 	}
 }
 
+func TestIdentityDriverLargerNativeLayout(t *testing.T) {
+	h := fixtureHandle(t)
+	mockConfigure("amdsmi_get_gpu_driver_info", AMDSMI_STATUS_SUCCESS, 2)
+	got, err := GetGpuDriverInfo(h)
+	want := DriverInfo{DriverVersion: "6.16", DriverDate: "20260925", DriverName: "amdgpu"}
+	if err != nil || got != want {
+		t.Fatalf("want %#v, got %#v, err=%v", want, got, err)
+	}
+}
+
 func TestIdentityBoard(t *testing.T) {
 	checkQuery(t, "amdsmi_get_gpu_board_info", GetGpuBoardInfo,
 		BoardInfo{ModelNumber: "model", ProductSerial: "serial", FruID: "fru",

@@ -68,8 +68,10 @@ Before the first package reference, `Init` rejects a native major different from
 the compiled header or an older minor with `AMDSMI_STATUS_NOT_SUPPORTED`. Newer
 minors in the same major are allowed; release differences are ignored. A native
 version-query error is propagated. Neither failure acquires a native reference.
-Compilation rejects older headers because 27.1 used incompatible driver-info
-layouts. Newer-minor runtime compatibility assumes stable native ABI layouts.
+Compilation rejects older headers because 27.1 builds shipped differing struct
+layouts. Driver-info queries reserve space for the 1792-byte layout some 27.1 and
+27.2 libraries write. Newer-minor runtime compatibility otherwise assumes stable
+native ABI layouts.
 
 Go indices refer only to the current filtered AMD-GPU list and need not match
 CLI `-g`. Correlate devices across tools with `GetGpuDeviceBdf`. To visit every

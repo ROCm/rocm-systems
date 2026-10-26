@@ -20,9 +20,11 @@ Go 1.18 is the language/toolchain floor declared by the Go module. The native
 AMD SMI 27.x dependency is separate: `Init` checks the loaded library against
 the compiled C header, not against the Go version. Both requirements apply.
 
-Headers older than 27.2 are rejected at compilation because 27.1 used incompatible
-driver-info layouts under the same version. Accepting newer runtime minors relies
-on native ABI stability within major 27. Go 1.18 is a compatibility baseline;
+Headers older than 27.2 are rejected at compilation because 27.1 builds shipped
+differing struct layouts under one version. Some 27.1 and 27.2 libraries write a
+1792-byte driver-info layout; the binding reserves that space, so either layout is
+safe. Accepting newer runtime minors otherwise relies on native ABI stability within
+major 27. Go 1.18 is a compatibility baseline;
 use a maintained Go toolchain for new deployments.
 
 Other operating systems and `CGO_ENABLED=0` are unsupported. The production
@@ -149,7 +151,7 @@ if errors.Is(err, amdsmi.AMDSMI_STATUS_NOT_SUPPORTED) {
 | Power caps | `PowerCap`, `DefaultPowerCap`, `MinPowerCap`, `MaxPowerCap` are uW on BM; auxiliary zeros have no validity flag. `DpmCap` is a BM DPM level index, not MHz |
 | Power management | `IsGpuPowerManagementEnabled` returns the native Boolean; an unsupported query remains an error, not a measured `false` |
 | PCIe | `GetPcieInfo` returns lane widths, speed in MT/s, and native counters. `PcieBandwidth` is copied without conversion: native unit descriptions conflict. `MaxPcieInterfaceVersion` is unpopulated on BM, and `SlotType` can retain its PCIe default when detection fails |
-| Links | `GetLinkMetrics` returns rates in Gb/s and accumulated read/write data in KB. Destination BDF and rates can be unavailable. BM leaves `LinkStatus` unpopulated at zero (`ENABLED`); this is not measured link health |
+| Links | `GetLinkMetrics` returns rates in Gb/s and accumulated read/write data in KB. Entries are packed in physical-slot order; an unknown peer has an all-ones `Bdf`, including when the kernel has no XGMI port map. Rates can be unavailable. BM leaves `LinkStatus` unpopulated at zero (`ENABLED`); this is not measured link health |
 | Nearest GPUs | `GetLinkTopologyNearest` preserves native ordering and returns current-lifetime GPU handles. Returned handles expire at final shutdown, just like discovered handles |
 | SOC P-state | `GetSocPstate` returns supported policies and the native current index. Range-check `Current` against both `NumSupported` and `len(Policies)`; descriptions are bounded copies |
 | Clock flags | `ClkLocked` and `ClkDeepSleep` are always false/unavailable on BM, not measured false. `ClkLockedRaw` preserves the unpopulated native byte; `ClkDeepSleepRaw` preserves the narrowed sleep-frequency byte. Neither 255 nor 222 is interpreted as true |

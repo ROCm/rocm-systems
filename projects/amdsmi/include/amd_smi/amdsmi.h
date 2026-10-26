@@ -7393,6 +7393,15 @@ amdsmi_status_t amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processo
  *
  *  @platform{gpu_bm_linux} @platform{host}
  *
+ *  @details On Linux BM, num_links counts the XGMI physical slots that have a mapped
+ *           peer or available read/write counters. Entries are packed in ascending
+ *           slot order, so an index equals the physical slot only when num_links is
+ *           ::AMDSMI_MAX_NUM_XGMI_LINKS. bdf is all ones when the peer is unknown,
+ *           including when the kernel provides no XGMI port map. link_status is not
+ *           populated. Entries at or beyond num_links are unspecified. A malformed
+ *           port map returns ::AMDSMI_STATUS_UNEXPECTED_DATA or
+ *           ::AMDSMI_STATUS_UNEXPECTED_SIZE.
+ *
  *  @param[in] processor_handle PF of a processor for which to query
  *
  *  @param[out] link_metrics reference to the link metrics struct.

@@ -207,7 +207,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Resolved Issues
 
 - **Fixed missing peers in XGMI link metrics**.  
-  - Preserves reported peers and counters, reports port-map failures, and displays `N/A` for CLI peer statuses that cannot be matched to physical slots.
+  - `amdsmi_get_link_metrics()` now counts every XGMI slot with a mapped peer or available counters, packed in slot order. Without a kernel port map, counters are kept and peers are unknown; a malformed port map returns an error.
+  - The Python `amdsmi_get_link_metrics()` returns only the `num_links` populated entries, and the CLI shows `N/A` for peer statuses that cannot be matched to physical slots.
 
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.

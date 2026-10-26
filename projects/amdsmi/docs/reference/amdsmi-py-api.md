@@ -5729,11 +5729,11 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
-`num_links` | Number of XGMI links reported
+`num_links` | Number of XGMI links reported; equals the length of `links`
 `bit_rate` | XGMI link bit rate (in appropriate units, e.g., Gbps)
 `max_bandwidth` | Maximum XGMI bandwidth (in appropriate units, e.g., GB/s)
-`links` | List of dictionaries, one per XGMI link, each with:
-`bdf` | BDF string for the destination
+`links` | List of dictionaries in ascending physical slot order, each with:
+`bdf` | BDF string for the destination; `ffffffffffff:ff:1f.7` when the peer is unknown
 `link_type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
 `read` | Accumulated read data for this link (e.g., KB)
 `write` | Accumulated write data for this link (e.g., KB)

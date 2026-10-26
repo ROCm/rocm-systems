@@ -2,7 +2,7 @@
   "snapshot": {
     "header": "include/amd_smi/amdsmi.h",
     "version": "27.2.0",
-    "header_sha256": "88222b054df114c6b7d0373bd9663c17990bd7ab018738e1d8e26b83b80a1177",
+    "header_sha256": "c6f8ee9c760d6f5928857f833ab01f97dabadcf45fdf31072f924e46b03a1ec2",
     "note": "Source provenance only; comparison uses declarations and binding type fingerprints, not the whole-file digest. Bound means binding presence, not consumer readiness."
   },
   "reasons": {
@@ -42,7 +42,7 @@
     "amdsmi_clk_type_t": "fc2524f6becf43177ccdcc85d0fd91d4ae2f1c60e4563ad631e5b591ba99db3e",
     "amdsmi_dpm_policy_entry_t": "403c418be2b53ad970d79728f4d6eaf20eaca08a724f9701779f9ed4fd76d487",
     "amdsmi_dpm_policy_t": "12c670ac6c22c04cdd8d9eec962841102f8838c05418b933fb5215ebff81f710",
-    "amdsmi_driver_info_t": "be8f6c79fd0e52803bd522057c08d4b605d2c97a2ee50bb49f9e2e6c45cf5885",
+    "amdsmi_driver_info_t": "08f1060d6ae5792a1d11e7f5dd8879a8e2d30a5bcf43b680cd938a3c3227ee63",
     "amdsmi_engine_usage_t": "75dfa51be7e1fed5746ac0b270fbbb47e6e027bce8e062939395253dc37232e8",
     "amdsmi_error_count_t": "303cdd35ac5918ae3946832e49c4ee56513d866d98e16fa684e94c661a2296a4",
     "amdsmi_frequencies_t": "537b2c3159c039045c34913550ae3366c01641ec6d6564acdc187bc9bbe2579f",
@@ -168,7 +168,7 @@
     "amdsmi_get_gpu_device_bdf": {"signature": "amdsmi_status_t(amdsmi_processor_handle,amdsmi_bdf_t*)", "status": "bound", "reason": "foundation", "go": "GetGpuDeviceBdf", "via": "go_amdsmi_get_bdf"},
     "amdsmi_get_gpu_device_cuid": {"signature": "amdsmi_status_t(amdsmi_processor_handle,unsigned int*,char*)", "status": "deferred", "reason": "discovery"},
     "amdsmi_get_gpu_device_uuid": {"signature": "amdsmi_status_t(amdsmi_processor_handle,unsigned int*,char*)", "status": "bound", "reason": "foundation", "go": "GetGpuDeviceUuid"},
-    "amdsmi_get_gpu_driver_info": {"signature": "amdsmi_status_t(amdsmi_processor_handle,amdsmi_driver_info_t*)", "status": "bound", "reason": "foundation", "go": "GetGpuDriverInfo"},
+    "amdsmi_get_gpu_driver_info": {"signature": "amdsmi_status_t(amdsmi_processor_handle,amdsmi_driver_info_t*)", "status": "bound", "reason": "foundation", "go": "GetGpuDriverInfo", "via": "go_amdsmi_get_driver_info"},
     "amdsmi_get_gpu_ecc_count": {"signature": "amdsmi_status_t(amdsmi_processor_handle,amdsmi_gpu_block_t,amdsmi_error_count_t*)", "status": "bound", "reason": "foundation", "go": "GetGpuEccCount"},
     "amdsmi_get_gpu_ecc_enabled": {"signature": "amdsmi_status_t(amdsmi_processor_handle,uint64_t*)", "status": "bound", "reason": "foundation", "go": "GetGpuEccEnabled"},
     "amdsmi_get_gpu_ecc_status": {"signature": "amdsmi_status_t(amdsmi_processor_handle,amdsmi_gpu_block_t,amdsmi_ras_err_state_t*)", "status": "deferred", "reason": "gpu-query"},

@@ -67,14 +67,39 @@ TEST(GpuUnit, LinkMetricsCompactsSparsePhysicalSlots) {
 TEST(GpuUnit, LinkMetricsPreservesMapFailure) {
   LinkMetricsInput input;
   input.AddLink(7);
-  for (const auto status :
-       {AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_FILE_ERROR, AMDSMI_STATUS_UNEXPECTED_SIZE}) {
+  for (const auto status : {AMDSMI_STATUS_UNEXPECTED_SIZE, AMDSMI_STATUS_UNEXPECTED_DATA}) {
     input.map_status = status;
     amdsmi_link_metrics_t result{};
     result.num_links = 17;
     EXPECT_EQ(input.Query(&result), status);
     EXPECT_EQ(result.num_links, 0u);
   }
+}
+
+TEST(GpuUnit, LinkMetricsKeepsCountersWithoutPortMap) {
+  LinkMetricsInput input;
+  input.AddLink(2);
+  input.AddLink(5);
+  for (const auto status : {AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_FILE_ERROR}) {
+    input.map_status = status;
+    amdsmi_link_metrics_t result{};
+    result.num_links = 17;
+    ASSERT_EQ(input.Query(&result), AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(result.num_links, 2u);
+    EXPECT_EQ(result.links[0].bdf.as_uint, UINT64_MAX);
+    EXPECT_EQ(result.links[1].bdf.as_uint, UINT64_MAX);
+    EXPECT_EQ(result.links[0].read, input.metrics.xgmi_read_data_acc[2]);
+    EXPECT_EQ(result.links[1].write, input.metrics.xgmi_write_data_acc[5]);
+  }
+}
+
+TEST(GpuUnit, LinkMetricsWithoutPortMapOrCountersIsEmpty) {
+  LinkMetricsInput input;
+  input.map_status = AMDSMI_STATUS_NOT_SUPPORTED;
+  amdsmi_link_metrics_t result{};
+  result.num_links = 17;
+  ASSERT_EQ(input.Query(&result), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(result.num_links, 0u);
 }
 
 TEST(GpuUnit, LinkMetricsKeepsUnmappedPhysicalCounters) {

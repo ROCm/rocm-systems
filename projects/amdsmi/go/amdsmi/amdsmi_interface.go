@@ -10,8 +10,9 @@ package amdsmi
 /*
 #cgo LDFLAGS: -lamd_smi
 #include <stddef.h>
+#include <string.h>
 #include <amd_smi/amdsmi.h>
-// Older 27.1 headers have incompatible driver-info layouts under the same version.
+// 27.1 builds shipped differing struct layouts under one version.
 #if AMDSMI_LIB_VERSION_MAJOR != 27 || AMDSMI_LIB_VERSION_MINOR < 2
 #error "Go bindings require AMD SMI 27.2 or later 27.x headers"
 #endif
@@ -23,6 +24,23 @@ static size_t go_amdsmi_string_length(const char *p, size_t capacity) {
     if (p == NULL) return 0;
     while (n < capacity && p[n] != '\0') ++n;
     return n;
+}
+
+// Some 27.1 and 27.2 libraries zero and fill a 1792-byte driver-info layout.
+#define GO_AMDSMI_DRIVER_INFO_CAPACITY (7 * AMDSMI_MAX_STRING_LENGTH)
+_Static_assert(GO_AMDSMI_DRIVER_INFO_CAPACITY >= sizeof(amdsmi_driver_info_t),
+    "driver-info capacity is smaller than the header layout");
+
+static amdsmi_status_t go_amdsmi_get_driver_info(amdsmi_processor_handle h,
+    amdsmi_driver_info_t *out) {
+    union {
+        amdsmi_driver_info_t info;
+        char storage[GO_AMDSMI_DRIVER_INFO_CAPACITY];
+    } buffer;
+    memset(&buffer, 0, sizeof(buffer));
+    amdsmi_status_t status = amdsmi_get_gpu_driver_info(h, &buffer.info);
+    if (status == AMDSMI_STATUS_SUCCESS) *out = buffer.info;
+    return status;
 }
 
 static amdsmi_status_t go_amdsmi_get_bdf(amdsmi_processor_handle h,
@@ -824,7 +842,7 @@ func GetGpuDriverInfo(h ProcessorHandle) (DriverInfo, error) {
 	const op = "amdsmi_get_gpu_driver_info"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (DriverInfo, error) {
 		var out C.amdsmi_driver_info_t
-		if err := nativeErrorLocked(op, C.amdsmi_get_gpu_driver_info(p, &out)); err != nil {
+		if err := nativeErrorLocked(op, C.go_amdsmi_get_driver_info(p, &out)); err != nil {
 			return DriverInfo{}, err
 		}
 		return DriverInfo{

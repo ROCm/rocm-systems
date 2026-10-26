@@ -66,6 +66,12 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle h, amdsmi_dri
     memset(out->driver_name, 'N', sizeof(out->driver_name));
     return mock_finish(AMDSMI_STATUS_SUCCESS);
   }
+  if (mock_mode(__func__) == 2) {
+    // Some 27.x libraries fill a 1792-byte layout with four more strings.
+    const size_t larger = 7 * AMDSMI_MAX_STRING_LENGTH;
+    if (!mock_is_zero(out, larger)) return mock_finish(AMDSMI_STATUS_UNEXPECTED_DATA);
+    memset((char*)out + sizeof(*out), 'X', larger - sizeof(*out));
+  }
   strcpy(out->driver_version, "6.16");
   strcpy(out->driver_date, "20260925");
   strcpy(out->driver_name, "amdgpu");
