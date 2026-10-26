@@ -214,6 +214,24 @@ class TestSuppressionSet(unittest.TestCase):
         ):
             self.assertIn(path, v19)
 
+    def test_vr_temperatures_follow_the_header_version(self):
+        # v1.0-v1.3 carry all three; v1.4 onwards, including the dynamic bound,
+        # keep only vrsoc. Version-absent on APU v2.x/v3.0 as well.
+        vr_paths = {("temperature", key) for key in ("vrgfx", "vrmem", "vrsoc")}
+        for version in ((1, 0), (1, 3)):
+            self.assertFalse(vr_paths & self.suppressed(*version), version)
+        for version in ((1, 4), (1, 6), (1, 8), (1, 9)):
+            self.assertEqual(
+                vr_paths & self.suppressed(*version),
+                {("temperature", "vrgfx"), ("temperature", "vrmem")},
+                version,
+            )
+        for version in ((2, 1), (2, 4), (3, 0)):
+            self.assertEqual(vr_paths & self.suppressed(*version), vr_paths, version)
+
+    def test_unknown_version_suppresses_no_vr_path(self):
+        self.assertFalse({p for p in self.suppressed(9, 9) if p[1].startswith("vr")})
+
     def test_paths_with_a_non_metrics_source_are_never_mapped(self):
         """Only paths sourced solely from the metrics blobs may be suppressed; anything
         metric.py can also fill from hwmon, sysfs or another API must stay."""
