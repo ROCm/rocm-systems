@@ -1927,7 +1927,6 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
 
   if (ginActivated) {
     NCCLCHECKGOTO(ncclGinConnectOnce(comm), ret, fail);
-    // Latch only on success: a failed connect leaves ginCommCount at 0, and a
     // Latch only on success: a failed connect leaves ginCommCount stale or 0, and
     // a retry must reconnect rather than reach ncclGinDevCommSetup.
     devr->ginEnabled = true;

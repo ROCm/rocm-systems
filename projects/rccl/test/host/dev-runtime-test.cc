@@ -5590,7 +5590,7 @@ TEST_F(DevrCommCreateInternalTest, GinConnectFails_RetryConnectsAgain) {
   ScopedHook connect(g_devrGinConnectOnce, [](ncclComm*) { return ncclSystemError; });
 
   EXPECT_EQ(Create(), ncclSystemError);
-  EXPECT_FALSE(comm->devrState.ginEnabled);
+  ASSERT_FALSE(comm->devrState.ginEnabled);
 
   EXPECT_EQ(Create(), ncclSystemError);
   EXPECT_EQ(connect.calls, 2);
