@@ -18,6 +18,7 @@
 #include "fakes/nccl_fakes.h"
 #include "fakes/os_fakes.h"
 #include "fakes/param_redirect.h"
+#include "transport/net_ib/NetIbDmaBufProbe.h"
 #include "transport/net_ib/common.h"
 
 namespace {
@@ -281,7 +282,7 @@ TEST_F(NetIbGdrMicrotest, DmaBufSupport_PublicApiReturnsCachedCapability) {
           *out = &pd;
           return ncclSuccess;
         };
-        g_ibvDirectRegDmaBufMr = [&](ibv_pd*, uint64_t, size_t, uint64_t, int, int) -> ibv_mr* {
+        g_ibvDirectRegDmabufMr = [&](ibv_pd*, uint64_t, size_t, uint64_t, int, int) -> ibv_mr* {
           ++probes;
           errno = EBADF;
           return nullptr;
@@ -314,7 +315,7 @@ TEST_F(NetIbGdrMicrotest, DmaBufSupport_PublicApiCachesUnsupportedCapability) {
           *out = &pd;
           return ncclSuccess;
         };
-        g_ibvDirectRegDmaBufMr = [&](ibv_pd*, uint64_t, size_t, uint64_t, int, int) -> ibv_mr* {
+        g_ibvDirectRegDmabufMr = [&](ibv_pd*, uint64_t, size_t, uint64_t, int, int) -> ibv_mr* {
           ++probes;
           errno = EOPNOTSUPP;
           return nullptr;

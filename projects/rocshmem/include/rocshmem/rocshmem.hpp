@@ -197,6 +197,19 @@ __host__ int rocshmem_set_attr_uniqueid_args(int rank, int nranks,
 __host__ void rocshmem_query_thread(int *provided);
 
 /**
+ * @brief Bytes of dynamic LDS the TDM (Tensor Data Mover) fast path wants
+ * for work-group or wave put/get on gfx1250 -- size the kernel's dynamic
+ * LDS and the buffer passed to rocshmem_set_tdm_lds() with this. Reflects
+ * ROCSHMEM_TDM_TILE_BYTES, doubled for double buffering (0/unset
+ * auto-sizes from this device's available LDS). Wave put/get splits this
+ * buffer across the block's waves, so its effective tile is smaller.
+ * Returns 0 if rocSHMEM wasn't built with USE_TDM.
+ *
+ * @return Number of bytes of dynamic LDS required.
+ */
+__host__ size_t rocshmem_query_tdm_lds_bytes();
+
+/**
  * @brief Function that dumps internal stats to stdout.
  */
 __host__ void rocshmem_dump_stats();
@@ -817,6 +830,45 @@ __host__ void rocshmem_global_exit(int status);
  * @return void.
  */
 __device__ void rocshmem_query_thread(int *provided);
+
+/**
+ * @brief Bytes of dynamic LDS the TDM (Tensor Data Mover) fast path wants
+ * for work-group or wave put/get on gfx1250 -- size the kernel's dynamic
+ * LDS and the buffer passed to rocshmem_set_tdm_lds() with this. Reflects
+ * ROCSHMEM_TDM_TILE_BYTES, doubled for double buffering (0/unset
+ * auto-sizes from this device's available LDS). Wave put/get splits this
+ * buffer across the block's waves, so its effective tile is smaller.
+ * Returns 0 if rocSHMEM wasn't built with USE_TDM.
+ *
+ * @return Number of bytes of dynamic LDS required.
+ */
+__device__ size_t rocshmem_query_tdm_lds_bytes();
+
+/**
+ * @brief Registers the LDS buffer this work-group lets rocSHMEM use for its
+ * TDM (Tensor Data Mover) fast path, for both work-group and wave put/get.
+ * Publishes the registration to the rest of the block via an internal
+ * barrier before returning. rocshmem_wg_ctx_create() resets it to
+ * "unregistered" when creating the default context, so a work-group that
+ * never calls this simply never uses TDM. Creating an additional context
+ * via rocshmem_wg_team_create_ctx() does not reset it, so one call per
+ * kernel is enough.
+ *
+ * Work-group put/get uses the whole buffer; wave put/get splits it into
+ * one fixed, non-overlapping slice per wave the block could launch, so
+ * concurrent waves never tile through the same LDS bytes.
+ *
+ * @param[in] lds        Workgroup-shared LDS buffer at least lds_bytes long
+ *                       (e.g. the caller's own extern __shared__ array).
+ *                       At least 8-byte aligned; 256-byte alignment
+ *                       recommended for peak TDM throughput.
+ * @param[in] lds_bytes  Size of \p lds in bytes. See
+ *                       rocshmem_query_tdm_lds_bytes() for rocSHMEM's
+ *                       preferred size; a smaller value still works (uses
+ *                       a smaller tile), and 0 disables TDM for this
+ *                       workgroup.
+ */
+__device__ void rocshmem_set_tdm_lds(void *lds, size_t lds_bytes);
 
 /**
  * @brief Creates an OpenSHMEM context. By design, the context is private

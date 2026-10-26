@@ -24,6 +24,7 @@
 #include "fakes/transport_net_ib_fakes.h"
 #include "fakes/transport_net_ib_p2p_fakes.h"
 #include "fakes/transport_net_ib_recovery_fakes.h"
+#include "transport/net_ib/NetIbDmaBufProbe.h"
 #include "transport/net_ib/common.h"
 
 namespace {
@@ -425,7 +426,7 @@ TEST_F(NetIbInitMicrotest, Mlx5DmaBufCapable_ProbeErrnoSelectsCapability) {
   ibv_context context{};
   ibv_pd pd{};
   ScopedDmaBufProbe dmaProbe(&pd, EBADF);
-  ScopedHook mlxProbe(g_mlx5dvDirectRegDmaBufMr,
+  ScopedHook mlxProbe(g_mlx5dvDirectRegDmabufMr,
                       [](ibv_pd*, uint64_t, size_t, uint64_t, int, int, int) -> ibv_mr* {
                         errno = EBADF;
                         return nullptr;
@@ -433,7 +434,7 @@ TEST_F(NetIbInitMicrotest, Mlx5DmaBufCapable_ProbeErrnoSelectsCapability) {
 
   EXPECT_TRUE(ncclMlx5dvDmaBufCapable(&context));
 
-  ScopedHook unsupported(g_mlx5dvDirectRegDmaBufMr,
+  ScopedHook unsupported(g_mlx5dvDirectRegDmabufMr,
                          [](ibv_pd*, uint64_t, size_t, uint64_t, int, int, int) -> ibv_mr* {
                            errno = EOPNOTSUPP;
                            return nullptr;
@@ -665,7 +666,7 @@ TEST_F(NetIbInitMicrotest, InitDevices_OneActivePortPublishesPhysicalAndMergedDe
   ScopedHook provider(g_mlx5dvIsSupported, [](ibv_device*) { return true; });
   ibv_pd pd{};
   ScopedDmaBufProbe dmaProbe(&pd, EBADF);
-  ScopedHook mlxDmaProbe(g_mlx5dvDirectRegDmaBufMr,
+  ScopedHook mlxDmaProbe(g_mlx5dvDirectRegDmabufMr,
                          [](ibv_pd*, uint64_t, size_t, uint64_t, int, int, int) -> ibv_mr* {
                            errno = EBADF;
                            return nullptr;

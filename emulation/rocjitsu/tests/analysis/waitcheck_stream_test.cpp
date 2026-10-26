@@ -60,7 +60,7 @@ TEST(WaitcheckStream, ReportsProducerConsumerAndRequiredWait) {
   const auto &diagnostic = report.diagnostics[0];
   EXPECT_EQ(diagnostic.producer_offset, 0u);
   EXPECT_EQ(diagnostic.consumer_offset, 12u);
-  EXPECT_EQ(diagnostic.counter, WaitCounterKind::Load);
+  EXPECT_EQ(diagnostic.counter, amdgpu::WaitCounterKind::Load);
   EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::VGPR, 0, 1}));
   EXPECT_EQ(diagnostic.access, WaitcheckAccess::Read);
   EXPECT_EQ(diagnostic.required_count, 0u);
@@ -98,7 +98,7 @@ TEST(WaitcheckStream, Gfx1251PackedArithmeticPreservesSubsequentMemoryChecks) {
       const auto &diagnostic = report.diagnostics[0];
       EXPECT_EQ(diagnostic.producer_offset, 8u);
       EXPECT_EQ(diagnostic.consumer_offset, 20u);
-      EXPECT_EQ(diagnostic.counter, WaitCounterKind::Load);
+      EXPECT_EQ(diagnostic.counter, amdgpu::WaitCounterKind::Load);
       EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::VGPR, 0, 1}));
       EXPECT_EQ(diagnostic.access, WaitcheckAccess::Read);
       EXPECT_EQ(diagnostic.required_wait, "s_wait_loadcnt <= 0");
@@ -195,7 +195,7 @@ TEST(WaitcheckStream, WrongCounterWaitDoesNotRetireLoad) {
   const auto report = analyze(program);
   ASSERT_FALSE(report.incomplete);
   ASSERT_EQ(report.diagnostics.size(), 1u);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Load);
 }
 
 TEST(WaitcheckStream, EveryUnorderedPendingLoadProtectsItsDestination) {
@@ -220,7 +220,7 @@ TEST(WaitcheckStream, DsOverwritesRequireAWait) {
   auto report = analyze(program);
   ASSERT_FALSE(report.incomplete);
   ASSERT_EQ(report.diagnostics.size(), 1u);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Ds);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
 }
 
@@ -262,7 +262,7 @@ TEST(WaitcheckStream, ScalarMemoryCannotUseAPartialWait) {
   auto report = analyze(program);
   ASSERT_FALSE(report.incomplete);
   ASSERT_EQ(report.diagnostics.size(), 1u);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Km);
+  EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Km);
   EXPECT_EQ(report.diagnostics[0].required_count, 0u);
   program[4] = 0xbfc70000u;
   report = analyze(program);
@@ -326,7 +326,7 @@ TEST(WaitcheckStream, FlatLoadRequiresBothMemoryCounters) {
   auto report = analyze(program);
   ASSERT_FALSE(report.incomplete);
   ASSERT_EQ(report.diagnostics.size(), 1u);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Ds);
   program.insert(program.begin() + 4, 0xbfc60000u);
   report = analyze(program);
   EXPECT_FALSE(report.incomplete);
@@ -343,7 +343,7 @@ TEST(WaitcheckStream, ExpertModeProtectsVmemAddressSources) {
   auto report = analyze(program, ROCJITSU_CODE_ARCH_RDNA4, true);
   ASSERT_FALSE(report.incomplete);
   ASSERT_EQ(report.diagnostics.size(), 1u);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
+  EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::VmVsrc);
   EXPECT_EQ(report.diagnostics[0].reg.index, 8u);
   program.insert(program.begin() + 3, 0xbf88ffe3u); // depctr_vm_vsrc(0).
   report = analyze(program, ROCJITSU_CODE_ARCH_RDNA4, true);
@@ -368,7 +368,7 @@ TEST(WaitcheckStream, SplitTargetsUseTheSameLoadCompletionPolicy) {
     auto report = analyze(program, arch);
     ASSERT_FALSE(report.incomplete);
     ASSERT_EQ(report.diagnostics.size(), 1u);
-    EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+    EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Load);
     program.insert(program.begin() + 3, 0xbfc00000u);
     report = analyze(program, arch);
     EXPECT_FALSE(report.incomplete);
@@ -506,6 +506,23 @@ TEST(WaitcheckStream, DirectToLdsParityOrderingIsIncomplete) {
   }
 }
 
+TEST(WaitcheckStream, FlatFamilyLdsTransfersDoNotCertifyUnwaitedLdsConsumers) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4})
+    for (uint32_t segment : {1u, 2u})
+      for (uint32_t opcode = 38; opcode <= 42; ++opcode) {
+        SCOPED_TRACE(testing::Message()
+                     << "arch=" << arch << " segment=" << segment << " opcode=" << opcode);
+        const Program program{0xdc000000u | (opcode << 18) | (segment << 14),
+                              0x08040002u,              // scratch/global_load_lds_*.
+                              0xd86c0000u, 0x00000001u, // ds_read_b32 v0, v1.
+                              0xbf810000u};             // s_endpgm.
+        const auto report = analyze(program, arch);
+        ASSERT_TRUE(report.incomplete);
+        EXPECT_EQ(report.instructions_analyzed, 0u);
+        EXPECT_NE(report.incomplete->reason.find("parity"), std::string::npos);
+      }
+}
+
 TEST(WaitcheckStream, InvalidOptionsAndTruncatedInputFail) {
   for (auto options :
        {WaitcheckStreamOptions{.wave_size = 16}, WaitcheckStreamOptions{.wave_size = 128}}) {
@@ -557,7 +574,7 @@ TEST(WaitcheckStream, Gfx1250TranslationWaitProtectsAddressSources) {
   auto report = analyze(program, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_FALSE(report.incomplete);
   ASSERT_EQ(report.diagnostics.size(), 1u);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::X);
   program.insert(program.begin() + 3, 0xbfc50000u);
   report = analyze(program, ROCJITSU_CODE_ARCH_CDNA5);
   EXPECT_FALSE(report.incomplete);
@@ -681,7 +698,7 @@ TEST(WaitcheckStream, ControlFlowBoundaryChecksKnownScalarOperands) {
       EXPECT_EQ(report.instructions_analyzed, waited ? 2u : 1u);
       ASSERT_EQ(report.diagnostics.size(), waited ? 0u : 1u);
       if (!waited) {
-        EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Km);
+        EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Km);
         EXPECT_EQ(report.diagnostics[0].consumer_offset, boundary);
         EXPECT_EQ(report.diagnostics[0].access,
                   write ? WaitcheckAccess::Write : WaitcheckAccess::Read);
