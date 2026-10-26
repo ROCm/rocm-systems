@@ -150,6 +150,7 @@ do_host_tests() {
   # rccl-HostUnitTests keeps host_tests.xml for backward compatibility.
   local -a binaries=(
     "rccl-HostUnitTests:$XML_FILE"
+    "rccl-UnitTestsMicroBootstrap:$SCRIPT_DIR/host_tests_micro_bootstrap.xml"
     "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
     "rccl-UnitTestsMicroCollectives:$SCRIPT_DIR/host_tests_micro_collectives.xml"
     "rccl-UnitTestsMicroOnerank:$SCRIPT_DIR/host_tests_micro_onerank.xml"
@@ -167,7 +168,12 @@ do_host_tests() {
     # gates its fault-mask blocks on ENABLE_FAULT_INJECTION at the preprocessor,
     # so one compile cannot cover both. See test/host/CMakeLists.txt.
     "rccl-UnitTestsMicroInit-faultinj:$SCRIPT_DIR/host_tests_micro_init_faultinj.xml"
+    "rccl-UnitTestsMicroCollTrace:$SCRIPT_DIR/host_tests_micro_coll_trace.xml"
+    "rccl-UnitTestsMicroRecorder:$SCRIPT_DIR/host_tests_micro_recorder.xml"
+    "rccl-UnitTestsMicroApiTrace:$SCRIPT_DIR/host_tests_micro_api_trace.xml"
+    "rccl-UnitTestsMicroDebug:$SCRIPT_DIR/host_tests_micro_debug.xml"
     "rccl-UnitTestsMicroEnqueue:$SCRIPT_DIR/host_tests_micro_enqueue.xml"
+    "rccl-UnitTestsMicroGinHostProxy:$SCRIPT_DIR/host_tests_micro_gin_host_proxy.xml"
     # ENABLE_DEVICE_LINKER defaults ON, so this variant is the arm that ships;
     # enqueue.cc gates rcclShmemDynamicSize on RCCL_DEVICE_LINKER at the
     # preprocessor, so one compile cannot cover both. See test/host/CMakeLists.txt.
@@ -185,6 +191,7 @@ do_host_tests() {
     "rccl-UnitTestsMicroProfiler:$SCRIPT_DIR/host_tests_micro_profiler.xml"
     "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
     "rccl-UnitTestsMicroGinHostFinalize:$SCRIPT_DIR/host_tests_micro_gin_host_finalize.xml"
+    "rccl-UnitTestsMicroProxy:$SCRIPT_DIR/host_tests_micro_proxy.xml"
     "rccl-UnitTestsMicroDdaIpc:$SCRIPT_DIR/host_tests_micro_dda_ipc.xml"
     "rccl-UnitTestsMicroRoctxNvml:$SCRIPT_DIR/host_tests_micro_roctx_nvml.xml"
     # Standalone-only: roctx.cc's ROCTX_ENABLE arm.
@@ -198,6 +205,7 @@ do_host_tests() {
     "rccl-UnitTestsMicroRmaProxy:$SCRIPT_DIR/host_tests_micro_rma_proxy.xml"
     "rccl-UnitTestsMicroDda:$SCRIPT_DIR/host_tests_micro_dda.xml"
     "rccl-UnitTestsMicroNetIbCastInit:$SCRIPT_DIR/host_tests_micro_net_ib_cast_init.xml"
+    "rccl-UnitTestsMicroNetIbCastDataPath:$SCRIPT_DIR/host_tests_micro_net_ib_cast_data_path.xml"
     "rccl-UnitTestsMicroP2pResiliency:$SCRIPT_DIR/host_tests_micro_p2p_resiliency.xml"
   )
   # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs
