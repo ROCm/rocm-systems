@@ -39,7 +39,7 @@ execute_process(
     COMMAND
         "@CMAKE_COMMAND@" -E env "PYTHONPATH=${pythonpath}" "ROCM_PATH=${stage_dir}"
         "LD_LIBRARY_PATH=${libdir}:@PYTHON_API_DEP_LIBRARY_PATH@:$ENV{LD_LIBRARY_PATH}"
-        "@Python3_EXECUTABLE@" "@CMAKE_CURRENT_SOURCE_DIR@/python_api_test.py"
+        "@Python3_EXECUTABLE@" "@CMAKE_CURRENT_SOURCE_DIR@/python_api_test.py" --expect-lib "${libpath}"
     RESULT_VARIABLE prefix_result
     OUTPUT_VARIABLE prefix_stdout
     ERROR_VARIABLE prefix_stderr)
@@ -60,13 +60,15 @@ string(APPEND versioned_libpath
        "@CMAKE_SHARED_LIBRARY_SUFFIX@.@VERSION_MAJOR@.@VERSION_MINOR@")
 file(COPY_FILE "${libpath}" "${versioned_libpath}")
 
+# Preload COMGR instead of adding its directory to LD_LIBRARY_PATH: discovery
+# searches that path before TheRock packages, and a ROCm install there would
+# shadow the staged library.
 execute_process(
     COMMAND
         "@CMAKE_COMMAND@" -E env "PYTHONPATH=${pythonpath}:${fake_site}"
         "ROCM_PATH=${stage_dir}/missing" "ROCM_HOME=${stage_dir}/missing"
-        "ROCPROF_TRACE_DECODER_LIB="
-        "LD_LIBRARY_PATH=@PYTHON_API_DEP_LIBRARY_PATH@:$ENV{LD_LIBRARY_PATH}" "@Python3_EXECUTABLE@"
-        "@CMAKE_CURRENT_SOURCE_DIR@/python_api_test.py"
+        "ROCPROF_TRACE_DECODER_LIB=" "LD_LIBRARY_PATH=" "LD_PRELOAD=@COMGR_LIB@"
+        "@Python3_EXECUTABLE@" "@CMAKE_CURRENT_SOURCE_DIR@/python_api_test.py" --expect-lib "${versioned_libpath}"
     RESULT_VARIABLE therock_result
     OUTPUT_VARIABLE therock_stdout
     ERROR_VARIABLE therock_stderr)
