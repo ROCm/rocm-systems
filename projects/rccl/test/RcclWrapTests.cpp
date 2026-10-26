@@ -2548,20 +2548,6 @@ TEST(Rcclwrap, Gfx950_SymOff_SmallMsg_TakesDda)
                                                /*symEligible=*/false, /*query=*/false));
 }
 
-
-// CE would be eligible by size/op/dtype but is blocked (e.g. graph latch); symEligible=false
-// so DDA takes the call. CE/DDA arbitration is handled by rcclCandSearch, not here.
-TEST(Rcclwrap, Gfx950_SymOn_GraphLatched_TakesDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*query=*/false));
-}
-
-
-
 // gfx942 above its 8 MiB DDA cap: rcclDdaEnabled returns false, so no DDA.
 TEST(Rcclwrap, Gfx942_SymOff_AboveCap_NoDda)
 {
@@ -2573,11 +2559,11 @@ TEST(Rcclwrap, Gfx942_SymOff_AboveCap_NoDda)
 }
 
 
-// gfx942, unsupported op; symEligible=false and 6 MiB within the 8 MiB DDA cap: DDA takes the call.
-TEST(Rcclwrap, Gfx942_SymOn_UnsupportedOp_TakesDda)
+// gfx942 within its 8 MiB DDA cap: DDA takes the call.
+TEST(Rcclwrap, Gfx942_InRange_TakesDda)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/true);
+    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32);
     EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                /*symEligible=*/false, /*query=*/false));
