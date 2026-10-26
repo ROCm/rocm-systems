@@ -40,11 +40,12 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg_tdm(void* dst, void* src,
                                                                 size_t size) {
 #if ROCSHMEM_TDM_ENABLED
-  // Non-temporal + system scope: correct either direction (peer may be remote).
-  constexpr int TdmLoadPolicy = tdm::make_cache_policy(
-    tdm::LoadTemporalHint::NonTemporal, tdm::Scope::System);
-  constexpr int TdmStorePolicy = tdm::make_cache_policy(
-    tdm::StoreTemporalHint::NonTemporal, tdm::Scope::System);
+  constexpr int TdmLoadPolicy = is_put(Kind)
+      ? tdm::make_cache_policy(tdm::LoadTemporalHint::Default, tdm::Scope::Wgp)
+      : tdm::make_cache_policy(tdm::LoadTemporalHint::NonTemporal, tdm::Scope::System);
+  constexpr int TdmStorePolicy = is_put(Kind)
+      ? tdm::make_cache_policy(tdm::StoreTemporalHint::NonTemporal, tdm::Scope::System)
+      : tdm::make_cache_policy(tdm::StoreTemporalHint::Default, tdm::Scope::Wgp);
 
   // Below threshold, TDM doesn't pay off (like the SDMA threshold); size
   // is small enough here that Unroll=4 is plenty.
@@ -89,10 +90,12 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wave_tdm(void* dst, void* src,
                                                                   size_t size) {
 #if ROCSHMEM_TDM_ENABLED
-  constexpr int TdmLoadPolicy = tdm::make_cache_policy(
-    tdm::LoadTemporalHint::NonTemporal, tdm::Scope::System);
-  constexpr int TdmStorePolicy = tdm::make_cache_policy(
-    tdm::StoreTemporalHint::NonTemporal, tdm::Scope::System);
+  constexpr int TdmLoadPolicy = is_put(Kind)
+      ? tdm::make_cache_policy(tdm::LoadTemporalHint::Default, tdm::Scope::Wgp)
+      : tdm::make_cache_policy(tdm::LoadTemporalHint::NonTemporal, tdm::Scope::System);
+  constexpr int TdmStorePolicy = is_put(Kind)
+      ? tdm::make_cache_policy(tdm::StoreTemporalHint::NonTemporal, tdm::Scope::System)
+      : tdm::make_cache_policy(tdm::StoreTemporalHint::Default, tdm::Scope::Wgp);
 
   if (size < constmem.tdm_threshold) {
     memcpy_wave<Kind>(dst, src, size);
