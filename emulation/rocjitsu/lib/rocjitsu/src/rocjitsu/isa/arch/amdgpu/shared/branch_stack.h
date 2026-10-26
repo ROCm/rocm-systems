@@ -91,8 +91,8 @@ struct BranchStackAccess {
   const uint32_t csp = wf.cond_stack_ptr();
   if (csp == saved_csp)
     return std::nullopt;
-  constexpr uint32_t kCspValues = Wavefront::CSP_MASK >> Wavefront::CSP_SHIFT;
-  return BranchStackAccess{((csp - 1) & kCspValues) * 4, /*write=*/false};
+  constexpr uint32_t kCspWrapMask = Wavefront::CSP_MASK >> Wavefront::CSP_SHIFT;
+  return BranchStackAccess{((csp - 1) & kCspWrapMask) * 4, /*write=*/false};
 }
 
 /// @brief Execute S_CBRANCH_G_FORK or S_CBRANCH_I_FORK.
