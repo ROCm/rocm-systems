@@ -60,14 +60,14 @@ pub(crate) struct Instance {
 impl Instance {
     /// Reserves frontend owner storage under this instance's callback policy.
     pub(crate) fn owner_slot<T>(&self) -> Result<UninitOwned<T>, u64> {
-        let _scope = self.host_allocator.scope();
-        Owned::<T>::try_new_uninit().map_err(|_| EXHAUSTED)
+        self.host_allocator
+            .with_scope(|| Owned::<T>::try_new_uninit().map_err(|_| EXHAUSTED))
     }
 
     /// Creates a shared frontend owner retaining the same callback policy.
     fn shared<T>(&self, value: T) -> Result<Shared<T>, u64> {
-        let _scope = self.host_allocator.scope();
-        Shared::new(value).map_err(|_| EXHAUSTED)
+        self.host_allocator
+            .with_scope(|| Shared::new(value).map_err(|_| EXHAUSTED))
     }
 }
 
@@ -644,10 +644,8 @@ pub(crate) unsafe extern "C" fn create(
             info.host_allocator.free,
         )
         .map_err(|_| INVALID)?;
-        let slot = {
-            let _scope = host_allocator.scope();
-            Owned::<Instance>::try_new_uninit().map_err(|_| EXHAUSTED)?
-        };
+        let slot = host_allocator
+            .with_scope(|| Owned::<Instance>::try_new_uninit().map_err(|_| EXHAUSTED))?;
         // The C ABI calls this native_lifetime; rocddi names the policy after
         // the driver context and its retained bindings.
         let lifetime = if info.native_lifetime == AMDF_NATIVE_LIFETIME_PROCESS {

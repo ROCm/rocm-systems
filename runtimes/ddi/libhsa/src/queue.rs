@@ -541,6 +541,22 @@ impl QueueState {
         Ok(id)
     }
 
+    /// Stops callback admission and detaches queue workers while queue backing
+    /// remains published for legacy tool unload callbacks.
+    pub(crate) fn take_callback_workers(
+        &mut self,
+    ) -> (Vec<JoinHandle<()>>, Vec<Arc<InterceptQueue>>) {
+        let mut workers = Vec::new();
+        for queue in self.queues.values_mut() {
+            queue.event_alive.store(false, Ordering::Release);
+            if let Some(worker) = queue.event_worker.take() {
+                workers.push(worker);
+            }
+        }
+        let intercepts = self.intercept_queues.values().cloned().collect();
+        (workers, intercepts)
+    }
+
     /// Stops every public queue before its native backing can be released.
     /// An uncertain native outcome requires retaining the whole HSA generation
     /// because a queue may still reach its memory and signal objects.
