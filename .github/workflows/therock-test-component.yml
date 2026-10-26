@@ -1,3 +1,12 @@
+# DEPRECATED: retained solely for media-libs-ci.yml.
+#
+# This was a shared component-test workflow for TheRock single-arch CI, which
+# was removed in b7ae4f90d3a. Its only remaining caller is
+# therock-media-test-packages.yml, itself reachable only from media-libs-ci.yml.
+#
+# Do not add new callers. Slated for removal once media libs CI moves to
+# TheRock's multi-arch pipeline (therock-multi-arch-ci.yml).
+
 name: Test component
 
 on:
