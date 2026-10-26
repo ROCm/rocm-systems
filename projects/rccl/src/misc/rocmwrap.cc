@@ -70,6 +70,10 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
   prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   prop.location.id = devOrdinal;
   prop.requestedHandleTypes = ncclCuMemHandleType;
+#if defined(__HIP_PLATFORM_AMD__)
+  // Match the buffers net.cc exports (alloc.h, mem_manager.cc).
+  prop.allocFlags.gpuDirectRDMACapable = 1;
+#endif
 
   // Smallest legal allocation: one granularity unit.
   if (CUPFN(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM)) != hipSuccess ||
@@ -180,7 +184,7 @@ static int ncclCuMemCapabilityCheck(int requireGfx1250ForAutoEnable) {
     const int param = ncclParamCuMemEnable();
     const bool decides = requireGfx1250ForAutoEnable ? param == -2 : param > 0;
     if (decides && !NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(ncclGetKernelVersionCode()))
-      INFO(NCCL_INIT, "cuMem on Linux kernel < 6.8 may not be performant; kernel >= 6.8 is recommended");
+      WARN("cuMem on Linux kernel < 6.8 may not be performant; kernel >= 6.8 is recommended");
   }
 
   return supported;

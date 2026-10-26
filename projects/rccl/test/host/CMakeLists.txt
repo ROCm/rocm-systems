@@ -2247,6 +2247,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRocmwrap
   SOURCES ${TEST_MICRO_ROCMWRAP_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
+    ${_MICRO_DMABUF_EXPORT_DEF}
     ROCMWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/rocmwrap.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rocmwrap.yaml")
 

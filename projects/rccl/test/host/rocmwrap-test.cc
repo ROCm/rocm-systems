@@ -511,8 +511,8 @@ TEST_F(RocmwrapMicrotest, CapabilityCheck_KernelExactly6_8Passes) {
   VmmLog log;
   InstallVmm(log);
   EXPECT_EQ(ncclCuMemCapabilityCheck(1), 1);
-  EXPECT_FALSE(Logged(NCCL_LOG_WARN, "kernel"));
-  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "may not be performant"));
+  EXPECT_FALSE(Logged(NCCL_LOG_WARN, "requires Linux kernel"));
+  EXPECT_FALSE(Logged(NCCL_LOG_WARN, "may not be performant"));
   static_assert(kKernel_6_8 == ((6 << 16) | (8 << 8)), "NCCL_KERNEL_VERSION_CODE layout");
 }
 
@@ -534,8 +534,8 @@ TEST_F(RocmwrapMicrotest, CapabilityCheck_KernelBelow6_8IsAdvisoryOnly) {
     InstallVmm(log);
     EXPECT_EQ(ncclCuMemCapabilityCheck(c.requireGfx1250), 1);
     EXPECT_FALSE(log.calls.empty());
-    EXPECT_FALSE(Logged(NCCL_LOG_WARN, "kernel"));
-    EXPECT_EQ(Logged(NCCL_LOG_INFO, "may not be performant"), c.advises);
+    EXPECT_FALSE(Logged(NCCL_LOG_WARN, "requires Linux kernel"));
+    EXPECT_EQ(Logged(NCCL_LOG_WARN, "may not be performant"), c.advises);
   }
 }
 
@@ -547,7 +547,7 @@ TEST_F(RocmwrapMicrotest, CapabilityCheck_KernelBelow6_8ProbeFailureSkipsTheAdvi
   log.failAt = "create";
   InstallVmm(log);
   EXPECT_EQ(ncclCuMemCapabilityCheck(1), 0);
-  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "may not be performant"));
+  EXPECT_FALSE(Logged(NCCL_LOG_WARN, "may not be performant"));
 }
 
 TEST_F(RocmwrapMicrotest, CapabilityCheck_BackportDriverWindowIsAccepted) {
@@ -627,7 +627,7 @@ TEST_F(RocmwrapMicrotest, CuMemEnable_ForceOnBelowKernel6_8EnablesCuMem) {
       g_params["CUMEM_ENABLE"] = 1;
       VmmLog log;
       InstallVmm(log);
-      bool ok = ncclCuMemEnable() == 1 && !log.calls.empty() && !Logged(NCCL_LOG_WARN, "kernel");
+      bool ok = ncclCuMemEnable() == 1 && !log.calls.empty() && !Logged(NCCL_LOG_WARN, "requires Linux kernel");
       std::exit(ok ? 0 : 1);
     },
     ::testing::ExitedWithCode(0), "");
