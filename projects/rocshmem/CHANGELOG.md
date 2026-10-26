@@ -1,5 +1,7 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.8.0 for ROCm 10.x
+## Unreleased - rocSHMEM 3.9.0 for ROCm 10.3
+
+## rocSHMEM 3.8.0 for ROCm 10.2
 
 ### Fixed
 * Fixed tile RMA operations (`rocshmem_tile_put`, `rocshmem_tile_get`) to correctly apply non-zero `start_coord` values to both the source and destination tensors; previously only the remote tensor was offset, causing incorrect data movement when `start_coord != 0`.
