@@ -238,10 +238,26 @@ void SoC::set_arch(rj_code_arch_t arch) {
   arch_ = arch;
 }
 
+void SoC::configure_mes_trap_handlers(amdgpu::CommandProcessor &owner) {
+  for (auto *cu : owner.compute_units()) {
+    cu->set_trap_handler_resolver([this](const amdgpu::Wavefront &wave)
+                                      -> std::optional<amdgpu::ComputeUnitCore::TrapHandlerConfig> {
+      const auto config = mes_engine_.resolve_trap_config({.address_space = wave.address_space(),
+                                                           .process_id = wave.process_id(),
+                                                           .queue_id = wave.queue_id()});
+      if (!config)
+        return std::nullopt;
+      return amdgpu::ComputeUnitCore::TrapHandlerConfig{
+          .tba = config->tba, .tma = config->tma, .debug_enabled = config->debug_enabled};
+    });
+  }
+}
+
 std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_aql(uint32_t /*queue_ordinal*/) {
   amdgpu::CommandProcessor *owner = assign_queue_owner_cp(0);
   if (owner == nullptr)
     return std::nullopt;
+  configure_mes_trap_handlers(*owner);
   // The PCI discovery profile currently exposes one graphics instance even
   // when the simulation config contains additional XCDs. A MES-created queue
   // must therefore stay on its selected owner: fanning it out would execute on
@@ -256,6 +272,7 @@ std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_pm4(uint32_t /*queue_or
   amdgpu::CommandProcessor *owner = assign_queue_owner_cp(0);
   if (owner == nullptr)
     return std::nullopt;
+  configure_mes_trap_handlers(*owner);
   return amdgpu::ComputeQueueBindingPlan{
       .factory = amdgpu::make_compute_queue_binding_factory(*owner, std::move(callbacks)),
       .xcd_fanout = false};

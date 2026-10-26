@@ -119,6 +119,27 @@ TEST(WaveDebugTest, STrapExecutesConfiguredTrapHandlerInstructions) {
   EXPECT_EQ(completion_count, 1u);
 }
 
+TEST(WaveDebugTest, Gfx1250TmaQueryUsesConfiguredAddressAfterTtmpClobber) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr uint64_t kTma = 0x1ffffffffbf1800;
+  fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, kTma, true};
+  });
+  fx.gpu_mem.write32(kKernelAddr, 0xbe844d82);     // s_sendmsg_rtn_b64 s[4:5], GET_TMA
+  fx.gpu_mem.write32(kKernelAddr + 4, 0xbe864c82); // s_sendmsg_rtn_b32 s6, GET_TMA
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_ttmp(14, 0x12345678);
+  wave->set_ttmp(15, 0xdeadbeef);
+
+  fx.cu->step();
+  fx.cu->step();
+
+  EXPECT_EQ(wave->debug_read_sgpr(4) | (static_cast<uint64_t>(wave->debug_read_sgpr(5)) << 32),
+            kTma >> 8);
+  EXPECT_EQ(wave->debug_read_sgpr(6), static_cast<uint32_t>(kTma >> 8));
+}
+
 // The ROCr handler temporarily reuses EXEC_LO for MSG_GET_DOORBELL. The wave
 // must be reported with the interrupted lane mask, not the handler's doorbell
 // response, or resuming a breakpoint changes which lanes execute user code.

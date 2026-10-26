@@ -4,6 +4,8 @@
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/pci/bar_access_trace.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
@@ -13,6 +15,12 @@
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
 #include "util/distributed_shared_mutex.h"
+
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/amd_hsa_queue.h"
+RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -71,6 +79,8 @@ protected:
   rocjitsu::RegisterSymbols symbols_;
   rocjitsu::BarAccessTrace trace_{symbols_};
   rocjitsu::amdgpu::GpuMemory memory_{"memory"};
+  rocjitsu::amdgpu::L2Cache l2_{"l2"};
+  std::unique_ptr<rocjitsu::amdgpu::ComputeUnitCore> compute_unit_;
   rocjitsu::amdgpu::CommandProcessor command_processor_{"cp"};
   rocjitsu::amdgpu::Xcd xcd_{"xcd"};
   rocjitsu::amdgpu::CommandProcessor hidden_command_processor_{"hidden-cp"};
@@ -1075,6 +1085,18 @@ protected:
   RecordingTransport transport_;
   simdojo::PciDevice::Transport attached_{.irq = &transport_, .dma = &transport_};
 
+  void configure_compute_unit() {
+    rocjitsu::amdgpu::ComputeUnitCore::Config config{};
+    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 64;
+    config.lds_size_kb = 64;
+    compute_unit_ = rocjitsu::amdgpu::ComputeUnitCore::create("cu", config, &memory_, &l2_);
+    command_processor_.add_compute_unit(compute_unit_.get());
+    l2_.set_gpu_vm(&soc_.gpu_vm());
+  }
+
   void SetUp() override {
     ASSERT_TRUE(device_.attach_transport(&attached_));
 
@@ -1251,6 +1273,77 @@ protected:
     return soc_.mes_engine().process_address_space_for_test(process_id);
   }
 };
+
+TEST_F(GpuDeviceMes, MesTrapConfigurationReachesTheComputeUnit) {
+  constexpr uint64_t kKernel = kDefaultComputeRingGpu + 0x80;
+  constexpr uint64_t kHandler = kDefaultComputeRingGpu + 0x1080;
+  constexpr uint64_t kTrapMemory = 0x123456789abc;
+  constexpr uint64_t kProcessContext = 0x123000;
+  configure_compute_unit();
+
+  for (const bool aql : {true, false}) {
+    SCOPED_TRACE(aql ? "AQL" : "PM4");
+    store_qword(kRingPhysical + 10 * 4, kProcessContext);
+    store_qword(kRingPhysical + 34 * 4, kHandler);
+    store_dword(kRingPhysical + 37 * 4, 1u << 10); // ADD_QUEUE.trap_en
+    store_qword(kRingPhysical + 42 * 4, kTrapMemory);
+    // This transport supports atomic loads/stores, but not system-memory CAS.
+    store_dword(kDefaultComputeSecondPagePhysical + 0xff8 -
+                    offsetof(amd_queue_t, write_dispatch_id) + offsetof(amd_queue_v2_t, caps),
+                AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM);
+    submit_default_compute_queue(aql);
+
+    const uint64_t debug_frame = kRingPhysical + 64 * 4;
+    store_dword(debug_frame, 0x000400e1);
+    store_dword(debug_frame + 4, 5); // MESAPI_MISC__SET_SHADER_DEBUGGER
+    store_qword(debug_frame + 2 * 4, kApiStatusGpu);
+    store_qword(debug_frame + 4 * 4, 2);
+    store_qword(debug_frame + 6 * 4, kProcessContext);
+    store_dword(debug_frame + 9 * 4, 1u << 3); // SPI_GDBG_PER_VMID_CNTL.TRAP_EN
+    auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+    ring_doorbell(0x60, doorbell);
+    ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+
+    store_dword(kDefaultComputeRingPhysical + 0x80, 0xbf900003); // gfx1250 s_trap 3
+    // gfx1250: advance the saved PC and return through s_rfe_i64 ttmp[0:1].
+    store_dword(kDefaultComputeSecondPagePhysical + 0x80, 0x806c846c);
+    store_dword(kDefaultComputeSecondPagePhysical + 0x84, 0x826d806d);
+    store_dword(kDefaultComputeSecondPagePhysical + 0x88, 0xbe804a6c);
+    const auto address_space = soc_.mes_engine().process_address_space_for_test(3);
+    ASSERT_TRUE(address_space.has_value());
+    for (const auto &[page, physical] : {std::pair{0x10u, kDefaultComputeRingPhysical},
+                                         std::pair{0x11u, kDefaultComputeSecondPagePhysical}})
+      store_vram_qword(kDefaultProcessPtb + page * sizeof(uint64_t),
+                       physical | kGfx12SystemLeafPteFlags | (1u << 4)); // Executable.
+    ASSERT_TRUE(soc_.gpu_vm().invalidate(*address_space));
+    auto *wave = compute_unit_->dispatch_wf(0, kKernel, 106, 64);
+    ASSERT_NE(wave, nullptr);
+    wave->set_process_id(3);
+    wave->set_queue_id(uint32_t{1} << 31); // First MES-created compute queue.
+    wave->set_address_space(*address_space);
+    wave->set_exec(0x1234);
+
+    compute_unit_->step();
+    ASSERT_TRUE(wave->in_trap_handler());
+    EXPECT_EQ(wave->pc, kHandler);
+    EXPECT_EQ(wave->ttmp(0), kKernel);
+    EXPECT_EQ(wave->ttmp(1), 3u << 28);
+    EXPECT_NE(wave->status_raw() & (1u << 5), 0u);
+    EXPECT_NE(wave->ttmp(11) & (1u << 23), 0u);
+    EXPECT_EQ(wave->ttmp(14), static_cast<uint32_t>(kTrapMemory));
+    EXPECT_EQ(wave->ttmp(15), static_cast<uint32_t>(kTrapMemory >> 32));
+
+    for (int i = 0; i < 3; ++i)
+      compute_unit_->step();
+    EXPECT_FALSE(wave->in_trap_handler());
+    EXPECT_EQ(wave->pc, kKernel + 4);
+    EXPECT_EQ(wave->status_raw() & (1u << 5), 0u);
+    EXPECT_EQ(wave->exec(), 0x1234u);
+    compute_unit_->free_wavefront_resources(*wave);
+    device_.reset(simdojo::ResetKind::FunctionLevel);
+    configure_gart();
+  }
+}
 
 TEST_F(GpuDeviceMes, ExecutesTheKernelQueueAndPublishesBothCompletionFences) {
   // SET_HW_RESOURCES: status begins at dword 50 in its 64-dword frame.

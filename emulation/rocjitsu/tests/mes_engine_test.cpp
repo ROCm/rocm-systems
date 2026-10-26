@@ -248,6 +248,17 @@ protected:
     store<uint32_t>(frame + 6 * sizeof(uint32_t), static_cast<uint32_t>(process_id) << 16);
   }
 
+  void write_shader_debugger_frame(uint64_t frame, uint64_t process_context, uint32_t control,
+                                   uint64_t completion_value, uint32_t flags = 0) {
+    store<uint32_t>(frame, 0x000400e1);
+    store<uint32_t>(frame + sizeof(uint32_t), 5); // MESAPI_MISC__SET_SHADER_DEBUGGER
+    store<uint64_t>(frame + 2 * sizeof(uint32_t), kCompletion);
+    store<uint64_t>(frame + 4 * sizeof(uint32_t), completion_value);
+    store<uint64_t>(frame + 6 * sizeof(uint32_t), process_context);
+    store<uint32_t>(frame + 8 * sizeof(uint32_t), flags);
+    store<uint32_t>(frame + 9 * sizeof(uint32_t), control);
+  }
+
   void write_compute_add_frame(uint64_t frame, bool aql, uint64_t completion_value) {
     store<uint32_t>(frame, 0x00040021);
     store<uint32_t>(frame + sizeof(uint32_t), 7);
@@ -351,6 +362,117 @@ TEST_F(MesEngineStateTest, AddRemoveAndDetachFollowCommittedQueueState) {
   EXPECT_EQ(load<uint64_t>(kCompletion), 2u);
   EXPECT_EQ(load<uint64_t>(kReadPointer), 2 * kFrameDwords);
   EXPECT_TRUE(engine_.detach_frontend());
+}
+
+TEST_F(MesEngineStateTest, ShaderDebuggerConfigurationSelectsTheProcessTrapHandler) {
+  constexpr uint64_t kTrapHandler = 0x20000;
+  constexpr uint64_t kTrapMemory = 0x30000;
+  constexpr uint64_t kOtherProcessContext = kProcessContext + 0x1000;
+
+  // Shader configuration may arrive before the process creates its first queue.
+  write_shader_debugger_frame(kRing, kProcessContext, 1u << 3, 1);
+  ASSERT_EQ(notify(kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+
+  const uint64_t add_frame = kRing + kFrameDwords * sizeof(uint32_t);
+  write_compute_add_frame(add_frame, true, 2);
+  store<uint64_t>(add_frame + 34 * sizeof(uint32_t), kTrapHandler);
+  store<uint64_t>(add_frame + 42 * sizeof(uint32_t), kTrapMemory);
+  store<uint32_t>(add_frame + 37 * sizeof(uint32_t), 1u << 10); // ADD_QUEUE.trap_en
+  ASSERT_EQ(notify(2 * kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+
+  ASSERT_EQ(bindings_.aql->requests.size(), 1u);
+  const rocjitsu::amdgpu::QueueIdentity identity = bindings_.aql->requests[0].identity;
+  const std::optional<rocjitsu::amdgpu::MesTrapConfig> config =
+      engine_.resolve_trap_config(identity);
+  ASSERT_TRUE(config.has_value());
+  EXPECT_EQ(config->tba, kTrapHandler);
+  EXPECT_EQ(config->tma, kTrapMemory);
+  EXPECT_TRUE(config->debug_enabled);
+  rocjitsu::amdgpu::QueueIdentity other_identity = identity;
+  other_identity.process_id = 8;
+  EXPECT_FALSE(engine_.resolve_trap_config(other_identity).has_value());
+
+  const uint64_t other_frame = kRing + 2 * kFrameDwords * sizeof(uint32_t);
+  write_shader_debugger_frame(other_frame, kOtherProcessContext, 0, 3);
+  ASSERT_EQ(notify(3 * kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  ASSERT_TRUE(engine_.resolve_trap_config(identity).has_value());
+  EXPECT_TRUE(engine_.resolve_trap_config(identity)->debug_enabled);
+
+  const uint64_t disable_frame = kRing + 3 * kFrameDwords * sizeof(uint32_t);
+  write_shader_debugger_frame(disable_frame, kProcessContext, 0, 4);
+  ASSERT_EQ(notify(4 * kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  ASSERT_TRUE(engine_.resolve_trap_config(identity).has_value());
+  EXPECT_FALSE(engine_.resolve_trap_config(identity)->debug_enabled);
+
+  const uint64_t flush_frame = kRing; // The four-frame ring wraps here.
+  // Flush takes precedence over the supplied debugger enable bit.
+  write_shader_debugger_frame(flush_frame, kProcessContext, 1u << 3, 5, 1u << 31);
+  ASSERT_EQ(notify(5 * kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  ASSERT_TRUE(engine_.resolve_trap_config(identity).has_value());
+  EXPECT_FALSE(engine_.resolve_trap_config(identity)->debug_enabled);
+  ASSERT_TRUE(engine_.reset());
+  EXPECT_FALSE(engine_.resolve_trap_config(identity).has_value());
+}
+
+TEST_F(MesEngineStateTest, TrapConfigurationFollowsTheQueueAndAddressSpaceGeneration) {
+  write_compute_add_frame(kRing, true, 1);
+  store<uint64_t>(kRing + 34 * sizeof(uint32_t), 0x20000);
+  store<uint64_t>(kRing + 42 * sizeof(uint32_t), 0x30000);
+  store<uint32_t>(kRing + 37 * sizeof(uint32_t), 1u << 10); // ADD_QUEUE.trap_en
+  ASSERT_EQ(notify(kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  ASSERT_EQ(bindings_.aql->requests.size(), 1u);
+  const rocjitsu::amdgpu::QueueIdentity first = bindings_.aql->requests[0].identity;
+
+  const uint64_t second_frame = kRing + kFrameDwords * sizeof(uint32_t);
+  write_compute_add_frame(second_frame, true, 2);
+  store<uint64_t>(second_frame + 34 * sizeof(uint32_t), 0x40000);
+  store<uint64_t>(second_frame + 42 * sizeof(uint32_t), 0x50000);
+  store<uint32_t>(second_frame + 37 * sizeof(uint32_t), 1u << 10);
+  store<uint32_t>(kMqd + 143 * sizeof(uint32_t), kComputeDoorbell + 4);
+  ASSERT_EQ(notify(2 * kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  ASSERT_EQ(bindings_.aql->requests.size(), 2u);
+  const rocjitsu::amdgpu::QueueIdentity second = bindings_.aql->requests[1].identity;
+  ASSERT_TRUE(engine_.resolve_trap_config(first).has_value());
+  ASSERT_TRUE(engine_.resolve_trap_config(second).has_value());
+  EXPECT_EQ(engine_.resolve_trap_config(first)->tba, 0x20000u);
+  EXPECT_EQ(engine_.resolve_trap_config(second)->tba, 0x40000u);
+  EXPECT_EQ(engine_.resolve_trap_config(second)->tma, 0x50000u);
+
+  // Both queues observe the same process-context update.
+  const uint64_t debug_frame = kRing + 2 * kFrameDwords * sizeof(uint32_t);
+  write_shader_debugger_frame(debug_frame, kProcessContext, 1u << 3, 3);
+  ASSERT_EQ(notify(3 * kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  EXPECT_TRUE(engine_.resolve_trap_config(first)->debug_enabled);
+  EXPECT_TRUE(engine_.resolve_trap_config(second)->debug_enabled);
+
+  rocjitsu::amdgpu::QueueIdentity unknown = second;
+  ++unknown.queue_id;
+  EXPECT_FALSE(engine_.resolve_trap_config(unknown).has_value());
+  unknown = second;
+  unknown.address_space = {};
+  EXPECT_FALSE(engine_.resolve_trap_config(unknown).has_value());
+
+  const uint64_t remove_frame = kRing + 3 * kFrameDwords * sizeof(uint32_t);
+  write_remove_frame(remove_frame, 4);
+  store<uint32_t>(remove_frame + sizeof(uint32_t), kComputeDoorbell / sizeof(uint32_t));
+  ASSERT_EQ(notify(4 * kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  EXPECT_FALSE(engine_.resolve_trap_config(first).has_value());
+  ASSERT_TRUE(engine_.resolve_trap_config(second).has_value());
+  EXPECT_TRUE(engine_.resolve_trap_config(second)->debug_enabled);
+
+  ASSERT_TRUE(engine_.reset());
+  store<uint64_t>(kReadPointer, 0);
+  write_compute_add_frame(kRing, true, 5);
+  store<uint64_t>(kRing + 34 * sizeof(uint32_t), 0x60000);
+  store<uint32_t>(kRing + 37 * sizeof(uint32_t), 1u << 10);
+  ASSERT_EQ(notify(kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  const rocjitsu::amdgpu::QueueIdentity replacement = bindings_.aql->requests.back().identity;
+  EXPECT_EQ(replacement.queue_id, first.queue_id);
+  EXPECT_NE(replacement.address_space, first.address_space);
+  EXPECT_FALSE(engine_.resolve_trap_config(first).has_value());
+  ASSERT_TRUE(engine_.resolve_trap_config(replacement).has_value());
+  EXPECT_EQ(engine_.resolve_trap_config(replacement)->tba, 0x60000u);
+  EXPECT_FALSE(engine_.resolve_trap_config(replacement)->debug_enabled);
 }
 
 TEST_F(MesEngineStateTest, RemovePublicationRetryDoesNotReplayTheSemantic) {

@@ -55,6 +55,26 @@ constexpr uint32_t kAddQueueWritePointerAddressDword = 22;
 constexpr uint32_t kAddQueueTypeDword = 28;
 constexpr uint32_t kAddQueueSizeDword = 30;
 constexpr uint32_t kAddQueueProcessContextAddressDword = 10;
+// MES v12 wire ABI: MESAPI__ADD_QUEUE in amd/include/mes_v12_api_def.h
+// (AMDGPU 7.1.3, MES_API_VERSION 0x14). Dword offsets count 32-bit words
+// from the frame start. The PCI frontend currently admits GC 12.1.0;
+// check protocol compatibility before enabling another MES implementation.
+constexpr uint32_t kAddQueueTrapHandlerAddressDword = 34;
+constexpr uint32_t kAddQueueFlagsDword = 37;
+constexpr uint32_t kAddQueueTrapMemoryAddressDword = 42;
+constexpr uint32_t kAddQueueTrapEnable = 1u << 10;
+// Same wire ABI: MESAPI_MISC_OPCODE and MESAPI__MISC::set_shader_debugger.
+constexpr uint32_t kMesMiscSetShaderDebugger = 5;
+constexpr uint32_t kShaderDebuggerProcessContextDword = 6;
+constexpr uint32_t kShaderDebuggerFlagsDword = 8;
+constexpr uint32_t kShaderDebuggerControlDword = 9;
+// AMDGPU 7.1.3: amd/amdgpu/amdgpu_mes.h, set_shader_debugger.flags;
+// amdgpu_mes_flush_shader_debugger() forwards process_ctx_flush on the wire.
+constexpr uint32_t kShaderDebuggerProcessContextFlush = 1u << 31;
+// GPU register bit, separate from the MES packet layout: TRAP_EN_MASK in
+// amd/include/asic_reg/gc/gc_12_0_0_sh_mask.h, SPI_GDBG_PER_VMID_CNTL.
+// Recheck the register definition when adding another GC IP version.
+constexpr uint32_t kShaderDebuggerTrapEnable = 1u << 3;
 constexpr uint32_t kRemoveQueueDoorbellDword = 1;
 constexpr uint32_t kInvalidateTlbsSelectorDword = 6;
 constexpr uint32_t kUpdateRootPageTableBaseDword = 2;
@@ -156,6 +176,20 @@ std::optional<uint32_t> status_dword(uint32_t opcode) {
 
 } // namespace
 
+std::optional<MesTrapConfig> MesEngine::resolve_trap_config(const QueueIdentity &identity) const {
+  for (const Queue &queue : mapped_queues_) {
+    if (queue.kind != QueueKind::Compute || queue.process_id != identity.process_id ||
+        queue.queue_id != identity.queue_id || queue.address_space != identity.address_space ||
+        !queue.trap_enabled || queue.trap_handler_address == 0)
+      continue;
+    return MesTrapConfig{.tba = queue.trap_handler_address,
+                         .tma = queue.trap_memory_address,
+                         .debug_enabled =
+                             debug_enabled_contexts_.contains(queue.process_context_address)};
+  }
+  return std::nullopt;
+}
+
 bool MesEngine::attach_frontend(std::string diagnostic_name,
                                 std::shared_ptr<SdmaQueueBindingFactory> sdma_queue_binding_factory,
                                 InterruptSink interrupt_sink, MesFrontendCallbacks callbacks) {
@@ -185,6 +219,7 @@ bool MesEngine::detach_frontend() {
     orphaned_address_spaces_.push_back(address_space.handle);
   }
   address_spaces_.clear();
+  debug_enabled_contexts_.clear();
   sdma_queue_binding_factory_ = nullptr;
   interrupt_sink_ = {};
   callbacks_ = {};
@@ -197,6 +232,7 @@ bool MesEngine::reset() {
   if (!teardown_queues())
     return false;
   next_queue_ordinal_ = 0;
+  debug_enabled_contexts_.clear();
   return true;
 }
 
@@ -683,6 +719,9 @@ amdgpu::VmAccessOutcome MesEngine::execute_mes_semantic(std::span<const std::byt
     Queue &mapped = *lookup.queue_;
     mapped.page_table_base = qword(frame, 2);
     mapped.process_context_address = qword(frame, kAddQueueProcessContextAddressDword);
+    mapped.trap_handler_address = qword(frame, kAddQueueTrapHandlerAddressDword);
+    mapped.trap_memory_address = qword(frame, kAddQueueTrapMemoryAddressDword);
+    mapped.trap_enabled = (dword(frame, kAddQueueFlagsDword) & kAddQueueTrapEnable) != 0;
     // MES's process_id is the PASID. CP_HQD_VMID is a hardware VMID and is
     // still zero in the MQD when the driver hands the queue to MES, before
     // firmware would assign one.
@@ -728,6 +767,20 @@ amdgpu::VmAccessOutcome MesEngine::execute_mes_semantic(std::span<const std::byt
                                      mapped.doorbell_offset));
       return committed;
     }
+  } else if (opcode == kMesApiMisc && dword(frame, 1) == kMesMiscSetShaderDebugger) {
+    // MESAPI_MISC__SET_SHADER_DEBUGGER programs one process context, including
+    // contexts whose first queue has not been added yet.
+    const uint64_t process_context = qword(frame, kShaderDebuggerProcessContextDword);
+    if (process_context == 0)
+      return VmAccessOutcome::Malformed;
+    const bool flush =
+        (dword(frame, kShaderDebuggerFlagsDword) & kShaderDebuggerProcessContextFlush) != 0;
+    const bool debug_enabled =
+        (dword(frame, kShaderDebuggerControlDword) & kShaderDebuggerTrapEnable) != 0;
+    if (debug_enabled && !flush)
+      debug_enabled_contexts_.insert(process_context);
+    else
+      debug_enabled_contexts_.erase(process_context);
   } else if (opcode == kMesApiRemoveQueue) {
     const uint64_t doorbell_offset =
         static_cast<uint64_t>(dword(frame, kRemoveQueueDoorbellDword)) * sizeof(uint32_t);

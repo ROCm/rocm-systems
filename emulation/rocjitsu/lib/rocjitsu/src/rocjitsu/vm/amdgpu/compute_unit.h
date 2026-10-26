@@ -384,6 +384,9 @@ public:
   /// @brief Resolve the KFD trap handler for a wave's process and GPU.
   using TrapHandlerResolver = std::function<std::optional<TrapHandlerConfig>(const Wavefront &wf)>;
   void set_trap_handler_resolver(TrapHandlerResolver cb) { trap_handler_resolver_ = std::move(cb); }
+  [[nodiscard]] std::optional<TrapHandlerConfig> resolve_trap_config(const Wavefront &wf) const {
+    return trap_handler_resolver_ ? trap_handler_resolver_(wf) : std::nullopt;
+  }
 
   /// @brief Handle an architected scalar message issued by trap-handler code.
   using SendmsgHandler = std::function<bool(Wavefront &wf, uint32_t message)>;
@@ -1734,6 +1737,10 @@ inline uint32_t InstructionComputeUnitView::fetch_instruction_word(uint64_t addr
 }
 inline void InstructionComputeUnitView::request_functional_yield() {
   raw_cu().request_functional_yield();
+}
+inline uint64_t InstructionComputeUnitView::trap_memory_address() const {
+  const auto config = raw_cu().resolve_trap_config(raw_wavefront());
+  return config ? config->tma : 0;
 }
 inline bool InstructionComputeUnitView::handle_sendmsg(Wavefront &wf, uint32_t message) {
   return raw_cu().handle_sendmsg(wf, message);
