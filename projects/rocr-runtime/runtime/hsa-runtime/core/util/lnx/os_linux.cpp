@@ -65,7 +65,12 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#if __has_include(<numa.h>)
+// HSA_HAS_NUMA is defined by the build system only when it also links libnuma
+// (see NUMA_FOUND in hsa-runtime/CMakeLists.txt). Gating on it rather than on
+// __has_include(<numa.h>) keeps the compiled numa_* calls and the linked
+// library in lockstep, avoiding unresolved numa_* symbols when the header is
+// visible but the library is not linked.
+#if defined(HSA_HAS_NUMA) && HSA_HAS_NUMA
 #include <numa.h>
 #define HAS_NUMA 1
 #else

@@ -486,6 +486,9 @@ endif()
 if (UNIX)
   if(NUMA_FOUND)
     target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt numa )
+    # Gate the numa_* code in os_linux.cpp on the same condition that links the
+    # library, so the compiled calls and the linked library never disagree.
+    target_compile_definitions ( ${CORE_RUNTIME_TARGET} PRIVATE HSA_HAS_NUMA=1 )
   else()
     target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
   endif()
