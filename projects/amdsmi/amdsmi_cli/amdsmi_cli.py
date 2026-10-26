@@ -123,6 +123,93 @@ def configure_logging_and_execute(args, amd_smi_commands):
     args.func(args)
 
 
+# Arguments that should preserve case for their (single) next value.
+CASE_SENSITIVE_ARGS = [
+    "--folder",
+    "--file",
+    "--gpu",
+    "--cpu",
+    "--core",
+    "--profile",
+    "--cper-file",
+    "--ampp-activate",
+]
+CASE_SENSITIVE_PREFIXES = [
+    "--folder=",
+    "--file=",
+    "--gpu=",
+    "--cpu=",
+    "--core=",
+    "--profile=",
+    "--cper-file=",
+    "--ampp-activate=",
+    # --ampp-configure and --power-stabilization-configure are nargs="+",
+    # so argparse only accepts a single token in the "--flag=value" form
+    # (anything after it becomes an unrecognized positional argument);
+    # that lone token can be an `@<path>` replay whose filesystem path is
+    # case-sensitive, so it must be preserved exactly like the
+    # space-separated form below. See MULTI_VALUE_CASE_SENSITIVE_ARGS.
+    "--ampp-configure=",
+    "--power-stabilization-configure=",
+]
+# Arguments whose *entire* remaining value list (nargs="+") must keep case
+# -- e.g. --ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...], where
+# the sysfs field names (KEY) are case-sensitive per the driver spec (e.g.
+# "PPT0_Limit", "MaxGfxclkFreq"). Unlike CASE_SENSITIVE_ARGS above, this
+# must preserve case for *all* following tokens, not just the next one,
+# until the next flag (a token starting with "-") or end of argv.
+MULTI_VALUE_CASE_SENSITIVE_ARGS = ["--ampp-configure", "--power-stabilization-configure"]
+
+
+def normalize_argv(argv):
+    """Lowercase CLI flags/positionals while preserving case for path/profile values.
+
+    Pure list transformation -- no GPU, parser, or argparse dependency -- so it
+    can be unit tested without hardware. See CASE_SENSITIVE_ARGS,
+    CASE_SENSITIVE_PREFIXES and MULTI_VALUE_CASE_SENSITIVE_ARGS above for the
+    three preservation rules it implements.
+    """
+    processed_argv = []
+    preserve_case_for_next = False
+    preserve_case_until_flag = False
+    for arg in argv:
+        if preserve_case_until_flag and not arg.startswith("-"):
+            # Still within the case-sensitive value list of a preceding
+            # multi-value flag (e.g. --ampp-configure).
+            processed_argv.append(arg)
+            continue
+        preserve_case_until_flag = False
+
+        if preserve_case_for_next:
+            # Preserve case for the next argument value
+            processed_argv.append(arg)
+            preserve_case_for_next = False
+        elif arg in MULTI_VALUE_CASE_SENSITIVE_ARGS:
+            # Convert flag to lowercase but preserve case for every value
+            # that follows, until the next flag.
+            processed_argv.append(arg.lower())
+            preserve_case_until_flag = True
+        elif arg in CASE_SENSITIVE_ARGS:
+            # Convert flag to lowercase but preserve next value
+            processed_argv.append(arg.lower())
+            preserve_case_for_next = True
+        elif any(arg.startswith(prefix) for prefix in CASE_SENSITIVE_PREFIXES):
+            # Handle --arg=value format, preserve case for the value part
+            for prefix in CASE_SENSITIVE_PREFIXES:
+                if arg.startswith(prefix):
+                    flag = prefix.rstrip("=")
+                    value = arg[len(prefix) :]
+                    processed_argv.append(flag.lower() + "=" + value)
+                    break
+        elif arg.startswith("--") or not arg.startswith("-"):
+            # Convert other long options and positional arguments to lowercase
+            processed_argv.append(arg.lower())
+        else:
+            # Preserve case for short options
+            processed_argv.append(arg)
+    return processed_argv
+
+
 if __name__ == "__main__":
     # Disable traceback before possible init errors in AMDSMICommands and AMDSMIParser
     copy_argv = str(sys.argv.copy()).upper()
@@ -174,75 +261,10 @@ if __name__ == "__main__":
     valid_commands = amd_smi_parser.possible_commands
     valid_commands += ["--help", "-h", "--rocm-smi"]
 
-    # Convert arguments to lowercase, but preserve case for folder path values
-    processed_argv = []
-    # Arguments that should preserve case
-    case_sensitive_args = [
-        "--folder",
-        "--file",
-        "--gpu",
-        "--cpu",
-        "--core",
-        "--profile",
-        "--cper-file",
-        "--ampp-activate",
-    ]
-    case_sensitive_prefixes = [
-        "--folder=",
-        "--file=",
-        "--gpu=",
-        "--cpu=",
-        "--core=",
-        "--profile=",
-        "--cper-file=",
-        "--ampp-activate=",
-    ]
-    # Arguments whose *entire* remaining value list (nargs="+") must keep case
-    # -- e.g. --ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...], where
-    # the sysfs field names (KEY) are case-sensitive per the driver spec (e.g.
-    # "PPT0_Limit", "MaxGfxclkFreq"). Unlike case_sensitive_args above, this
-    # must preserve case for *all* following tokens, not just the next one,
-    # until the next flag (a token starting with "-") or end of argv.
-    multi_value_case_sensitive_args = ["--ampp-configure"]
-
-    preserve_case_for_next = False
-    preserve_case_until_flag = False
-    for i, arg in enumerate(sys.argv):
-        if preserve_case_until_flag and not arg.startswith("-"):
-            # Still within the case-sensitive value list of a preceding
-            # multi-value flag (e.g. --ampp-configure).
-            processed_argv.append(arg)
-            continue
-        preserve_case_until_flag = False
-
-        if preserve_case_for_next:
-            # Preserve case for the next argument value
-            processed_argv.append(arg)
-            preserve_case_for_next = False
-        elif arg in multi_value_case_sensitive_args:
-            # Convert flag to lowercase but preserve case for every value
-            # that follows, until the next flag.
-            processed_argv.append(arg.lower())
-            preserve_case_until_flag = True
-        elif arg in case_sensitive_args:
-            # Convert flag to lowercase but preserve next value
-            processed_argv.append(arg.lower())
-            preserve_case_for_next = True
-        elif any(arg.startswith(prefix) for prefix in case_sensitive_prefixes):
-            # Handle --arg=value format, preserve case for the value part
-            for prefix in case_sensitive_prefixes:
-                if arg.startswith(prefix):
-                    flag = prefix.rstrip("=")
-                    value = arg[len(prefix) :]
-                    processed_argv.append(flag.lower() + "=" + value)
-                    break
-        elif arg.startswith("--") or not arg.startswith("-"):
-            # Convert other long options and positional arguments to lowercase
-            processed_argv.append(arg.lower())
-        else:
-            # Preserve case for short options
-            processed_argv.append(arg)
-    sys.argv = processed_argv
+    # Convert arguments to lowercase, but preserve case for folder/path/profile
+    # values (see normalize_argv() above, which owns the actual rules so they
+    # can be unit tested independently of GPU hardware).
+    sys.argv = normalize_argv(sys.argv)
 
     try:
         if len(sys.argv) == 1:

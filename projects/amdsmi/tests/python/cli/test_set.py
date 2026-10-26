@@ -4,6 +4,10 @@
 
 """CLI leaf test: set command."""
 
+import os
+import shutil
+import tempfile
+
 from common.common import amdsmi
 
 from cli.base import TestCliBase
@@ -193,5 +197,199 @@ class TestSet(TestCliBase):
 
         self.common.print("Restore Starting Values")
         self.RunCmds(cmds)
+
+        return
+
+    def test_power_stabilization_configure(self):
+        """Test set --power-stabilization-configure (write path, gpu 0)."""
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi set --power-stabilization-configure"
+        self.common.print(msg)
+
+        ps_baseline = self.static_data["gpu_data"][0]["power_stabilization"]
+        if ps_baseline == "N/A":
+            self.skipTest("Power Stabilization not supported on gpu 0")
+
+        # Negative paths: malformed input is rejected before any sysfs write.
+        cmds = [
+            ("amd-smi set --gpu 0 --power-stabilization-configure invalidkey=1", self.FAIL),
+            ("amd-smi set --gpu 0 --power-stabilization-configure host_control=1", self.FAIL),
+        ]
+        self.RunCmds(cmds)
+
+        # Missing "=" must produce a clean argparse-style error, not an
+        # uncaught traceback.
+        cmd = "amd-smi set --gpu 0 --power-stabilization-configure enable"
+        (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
+        self.assertNotEqual(rc, self.PASS, f"Command '{cmd}' unexpectedly succeeded")
+        combined_output = f"{std_out}\n{std_err}".lower()
+        self.assertIn(
+            "invalid key=value pair",
+            combined_output,
+            f"Command '{cmd}' did not produce the expected clean error message; "
+            f"got: {combined_output}",
+        )
+        self.assertNotIn(
+            "traceback",
+            combined_output,
+            f"Command '{cmd}' crashed with an uncaught traceback instead of a clean error",
+        )
+
+        # Missing / empty / invalid JSON file, via @<path>.
+        tmp_dir = tempfile.mkdtemp(prefix="amdsmi_ps_configure_")
+        try:
+            missing_path = os.path.join(tmp_dir, "missing.json")
+            empty_path = os.path.join(tmp_dir, "empty.json")
+            with open(empty_path, "w"):
+                pass
+            invalid_path = os.path.join(tmp_dir, "invalid.json")
+            with open(invalid_path, "w") as fout:
+                fout.write("not json")
+
+            cmds = [
+                (f"amd-smi set --gpu 0 --power-stabilization-configure @{missing_path}", self.FAIL),
+                (f"amd-smi set --gpu 0 --power-stabilization-configure @{empty_path}", self.FAIL),
+                (f"amd-smi set --gpu 0 --power-stabilization-configure @{invalid_path}", self.FAIL),
+            ]
+            self.RunCmds(cmds)
+
+            # Positive path: KEY=VALUE tokens (comma- and space-separated),
+            # insertion_priority by name, then an @<path> round-trip of the
+            # exact `static --json` dump (host_control is read-only and must
+            # be silently skipped).
+            cmds = [
+                (
+                    "amd-smi set --gpu 0 --power-stabilization-configure enable=1,power_floor=55",
+                    self.PASS,
+                ),
+                (
+                    "amd-smi set --gpu 0 --power-stabilization-configure "
+                    "insertion_priority=GUARANTEED ramp_enable=1",
+                    self.PASS,
+                ),
+            ]
+            self.RunCmds(cmds)
+
+            dump_path = os.path.join(tmp_dir, "dump.json")
+            cmd = "amd-smi static --gpu 0 --power-stabilization --json"
+            (rc, data, std_err) = self.util.RunCmdSync(cmd)
+            self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+            # Write the full 'gpu_data' dump as-is: set resolves the GPU 0
+            # entry by matching its integer "gpu" id, same as --ampp-configure.
+            with open(dump_path, "w") as fout:
+                fout.write(data)
+
+            cmds = [
+                (f"amd-smi set --gpu 0 --power-stabilization-configure @{dump_path}", self.PASS)
+            ]
+            self.RunCmds(cmds)
+        finally:
+            # Restore the shared mock sysfs fixture to its starting values.
+            # The read-path dump uses stative names (enabled/ramp_enabled);
+            # the setter's KEY=VALUE keys are the param_id operation names
+            # (enable/ramp_enable). host_control_enabled has no param_id
+            # (read-only), so it is never set.
+            read_to_write_key = {"enabled": "enable", "ramp_enabled": "ramp_enable"}
+            restore_tokens = ",".join(
+                f"{read_to_write_key.get(key, key)}="
+                f"{int(value) if isinstance(value, bool) else value}"
+                for key, value in ps_baseline.items()
+                if key != "host_control_enabled"
+            )
+            self.RunCmds(
+                [
+                    (
+                        f"amd-smi set --gpu 0 --power-stabilization-configure {restore_tokens}",
+                        self.PASS,
+                    )
+                ]
+            )
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        return
+
+    def test_power_stabilization_configure_case_sensitive_path(self):
+        """End-to-end regression test for the '@<path>' case-preservation bug (F-4/G-1).
+
+        The CLI's argv-lowercasing pass must leave an `@<path>` value from
+        --power-stabilization-configure untouched in *both* legal spellings:
+        the space-separated form (`--power-stabilization-configure @path`)
+        and the `=` form (`--power-stabilization-configure=@path`) -- only
+        the flag name itself may be lowercased. Uses a deterministic
+        mixed-case directory and filename rather than tempfile.mkdtemp's
+        random suffix (which draws from ascii_letters, so any uppercase
+        coverage there is accidental, not a guard): a regression that
+        lowercases the path turns into a file-not-found FAIL here, since the
+        lowercased path does not exist on this case-sensitive filesystem.
+
+        This exercises the real CLI binary end-to-end, but self-skips below
+        when the GPU does not report Power Stabilization support -- i.e. on
+        every hardware-free CI runner (review finding F-3). The guard that is
+        actually CI-reachable regardless of hardware is
+        tests/python/unit/system/test_cli_argv_case_normalization.py, which
+        unit-tests amdsmi_cli.normalize_argv() directly with no GPU
+        dependency. Keep both: this one additionally proves the fix holds
+        through the real argparse/dispatch path on real hardware.
+        """
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi set --power-stabilization-configure (case-sensitive @<path>)"
+        self.common.print(msg)
+
+        ps_baseline = self.static_data["gpu_data"][0]["power_stabilization"]
+        if ps_baseline == "N/A":
+            self.skipTest("Power Stabilization not supported on gpu 0")
+
+        tmp_dir = tempfile.mkdtemp(prefix="amdsmi_ps_configure_case_")
+        try:
+            cmd = "amd-smi static --gpu 0 --power-stabilization --json"
+            (rc, data, std_err) = self.util.RunCmdSync(cmd)
+            self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+
+            mixed_case_dir = os.path.join(tmp_dir, "PS_Config")
+            os.makedirs(mixed_case_dir)
+            mixed_case_path = os.path.join(mixed_case_dir, "Dump.json")
+            with open(mixed_case_path, "w") as fout:
+                fout.write(data)
+
+            # Space-separated form: "--power-stabilization-configure @<path>".
+            self.RunCmds(
+                [
+                    (
+                        f"amd-smi set --gpu 0 --power-stabilization-configure @{mixed_case_path}",
+                        self.PASS,
+                    )
+                ]
+            )
+
+            # "=" form: "--power-stabilization-configure=@<path>". argparse
+            # only accepts a single token after "=" for a nargs="+" flag, so
+            # this is the only shape that spelling supports.
+            self.RunCmds(
+                [
+                    (
+                        f"amd-smi set --gpu 0 --power-stabilization-configure=@{mixed_case_path}",
+                        self.PASS,
+                    )
+                ]
+            )
+        finally:
+            # Restore the shared mock sysfs fixture to its starting values,
+            # same idiom as test_power_stabilization_configure above.
+            read_to_write_key = {"enabled": "enable", "ramp_enabled": "ramp_enable"}
+            restore_tokens = ",".join(
+                f"{read_to_write_key.get(key, key)}="
+                f"{int(value) if isinstance(value, bool) else value}"
+                for key, value in ps_baseline.items()
+                if key != "host_control_enabled"
+            )
+            self.RunCmds(
+                [
+                    (
+                        f"amd-smi set --gpu 0 --power-stabilization-configure {restore_tokens}",
+                        self.PASS,
+                    )
+                ]
+            )
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
         return

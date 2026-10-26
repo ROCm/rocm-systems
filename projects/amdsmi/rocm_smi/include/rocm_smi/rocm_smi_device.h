@@ -204,6 +204,9 @@ class Device {
   // AMPP (amdsmi power profile) sysfs root path helper method
   std::string get_ampp_root_path(void) const;
 
+  // Power Stabilization sysfs root path helper method
+  std::string get_power_stabilization_root_path(void) const;
+
   int readDevInfo(DevInfoTypes type, uint64_t* val);
   int readDevInfoLine(DevInfoTypes type, std::string* line);
   int readDevInfo(DevInfoTypes type, std::string* val);
