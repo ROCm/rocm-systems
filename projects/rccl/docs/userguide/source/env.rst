@@ -1765,8 +1765,9 @@ Value accepted
 NCCL_MULTI_SEGMENT_REGISTER
 ---------------------------
 
-Register one DMA-BUF memory region per physical segment. When this is off,
-registration keeps the single-region path.
+Register one DMA-BUF memory region per physical segment. When this is off, a buffer that spans several physical segments is not registered per segment.
+
+NET registration counts segments over the whole registered buffer. With this variable set to 0, a collective on any part of a buffer whose registration spans several segments skips NET registration and stages through the internal buffers.
 
 Value accepted
 ^^^^^^^^^^^^^^
