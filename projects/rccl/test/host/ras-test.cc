@@ -1645,6 +1645,144 @@ TEST_F(RasMicrotest, MsgRecvRejectsCollReqBodyTooShortForItsCollectiveType) {
   EXPECT_EQ(nullptr, sock.recvMsg);
 }
 
+// The fixed part of a message carries element counts for the variable-length
+// arrays that follow it (peers, dead peers, skipped comms, collective data).
+// Those counts are peer-supplied too, so a message whose fixed part is complete
+// can still claim a million peers in forty bytes; the handlers then index into
+// memory past the end of the allocation. rasMsgRecv must size the tails from
+// the counts and reject anything that does not fit.
+//
+// Drives rasMsgRecv with a peer-supplied length and a body written by `fill`,
+// and returns the result. Anything allocated on the way is released.
+ncclResult_t MsgRecvWithBody(int peerLength, const std::function<void(rasMsg*)>& fill) {
+  rasSocket sock{};
+  int calls = 0;
+  g_socketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
+    if (++calls == 1)
+      *static_cast<int*>(ptr) = peerLength;
+    else
+      fill(reinterpret_cast<rasMsg*>(static_cast<char*>(ptr) + sizeof(int)));
+    *offset = size;
+    *closed = false;
+    return ncclSuccess;
+  };
+  rasMsg* msg = nullptr;
+  bool closed = false;
+  ncclResult_t result = rasMsgRecv(&sock, &msg, &closed);
+  std::free(msg);
+  std::free(sock.recvMsg);
+  return result;
+}
+
+TEST_F(RasMicrotest, MsgRecvRejectsPeersUpdateClaimingMorePeersThanItCarries) {
+  const int msgLen = static_cast<int>(rasMsgLength(RAS_MSG_PEERSUPDATE));
+  // One peer entry announced, none transmitted: rasMsgHandlePeersUpdate would
+  // read a whole rasPeerInfo past the end of the body.
+  EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_PEERSUPDATE;
+    msg->peersUpdate.nPeers = 1;
+  }));
+  // The count the message would have to be gigabytes long to justify.
+  EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_PEERSUPDATE;
+    msg->peersUpdate.nPeers = 1000000;
+  }));
+  // A count large enough that the tail size itself overflows the arithmetic.
+  EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_PEERSUPDATE;
+    msg->peersUpdate.nPeers = INT_MAX;
+  }));
+  // A negative count never describes a tail at all.
+  EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_PEERSUPDATE;
+    msg->peersUpdate.nPeers = -1;
+  }));
+}
+
+TEST_F(RasMicrotest, MsgRecvRejectsPeersUpdateClaimingMoreDeadPeersThanItCarries) {
+  // The dead peers follow the peers array, so the check has to account for both
+  // tails: a message long enough for its one peer is still short by one address.
+  const int msgLen = static_cast<int>(rasMsgLength(RAS_MSG_PEERSUPDATE) + sizeof(rasPeerInfo));
+  EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_PEERSUPDATE;
+    msg->peersUpdate.nPeers = 1;
+    msg->peersUpdate.nDeadPeers = 1;
+  }));
+  EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_PEERSUPDATE;
+    msg->peersUpdate.nPeers = 0;
+    msg->peersUpdate.nDeadPeers = -1;
+  }));
+}
+
+TEST_F(RasMicrotest, MsgRecvAcceptsPeersUpdateThatCarriesTheTailsItClaims) {
+  const int msgLen = static_cast<int>(rasMsgLength(RAS_MSG_PEERSUPDATE) + 2 * sizeof(rasPeerInfo) +
+                                      3 * sizeof(ncclSocketAddress));
+  EXPECT_EQ(ncclSuccess, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_PEERSUPDATE;
+    msg->peersUpdate.nPeers = 2;
+    msg->peersUpdate.nDeadPeers = 3;
+  }));
+}
+
+TEST_F(RasMicrotest, MsgRecvRejectsCollReqClaimingMoreSkippedCommsThanItCarries) {
+  const int msgLen = static_cast<int>(rasMsgLength(RAS_MSG_COLLREQ, RAS_COLL_COMMS));
+  // rasCollCommsIsSkipMissingRanks bsearches this array in place.
+  EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_COLLREQ;
+    msg->collReq.type = RAS_COLL_COMMS;
+    msg->collReq.comms.nSkipMissingRanksComms = 1000000;
+  }));
+  EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_COLLREQ;
+    msg->collReq.type = RAS_COLL_COMMS;
+    msg->collReq.comms.nSkipMissingRanksComms = -1;
+  }));
+}
+
+TEST_F(RasMicrotest, MsgRecvAcceptsCollReqThatCarriesTheSkippedCommsItClaims) {
+  const int msgLen = static_cast<int>(rasMsgLength(RAS_MSG_COLLREQ, RAS_COLL_COMMS) + 2 * sizeof(rasCommId));
+  EXPECT_EQ(ncclSuccess, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_COLLREQ;
+    msg->collReq.type = RAS_COLL_COMMS;
+    msg->collReq.comms.nSkipMissingRanksComms = 2;
+  }));
+}
+
+TEST_F(RasMicrotest, MsgRecvRejectsCollRespClaimingMoreThanItCarries) {
+  const int msgLen = static_cast<int>(rasMsgLength(RAS_MSG_COLLRESP));
+  EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_COLLRESP;
+    msg->collResp.nPeers = 1000000;
+  }));
+  EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_COLLRESP;
+    msg->collResp.nPeers = -1;
+  }));
+  // rasCollDiagMerge memcpy()s nData bytes out of the body.
+  EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_COLLRESP;
+    msg->collResp.nData = 1;
+  }));
+  EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(msgLen, [](rasMsg* msg) {
+    msg->type = RAS_MSG_COLLRESP;
+    msg->collResp.nData = -1;
+  }));
+}
+
+TEST_F(RasMicrotest, MsgRecvAcceptsCollRespThatCarriesTheTailsItClaims) {
+  // The sender aligns the data to int64_t, so the accepted length must include
+  // that padding -- a check that ignored it would reject a legitimate response.
+  size_t msgLen = rasMsgLength(RAS_MSG_COLLRESP) + 2 * sizeof(ncclSocketAddress);
+  ALIGN_SIZE(msgLen, alignof(int64_t));
+  msgLen += 16;
+  EXPECT_EQ(ncclSuccess, MsgRecvWithBody(static_cast<int>(msgLen), [](rasMsg* msg) {
+    msg->type = RAS_MSG_COLLRESP;
+    msg->collResp.nPeers = 2;
+    msg->collResp.nData = 16;
+  }));
+}
+
 TEST_F(RasMicrotest, MsgRecvAcceptsExactMinimumLengthForItsMessageType) {
   // The bound must not be so eager that it rejects legitimate traffic: a
   // message exactly as long as its type requires still has to get through.

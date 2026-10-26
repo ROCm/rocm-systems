@@ -390,6 +390,15 @@ ncclResult_t rasConnSendMsg(struct rasConnection* conn, bool* closed, bool* allS
   return ncclSuccess;
 }
 
+// Extends wantLength by a variable-length tail of count elements, rejecting a negative count supplied by the peer
+// as well as any arithmetic overflow.
+static ncclResult_t rasMsgAddTailLength(size_t* wantLength, int count, size_t eleSize) {
+  if (count < 0) return ncclRemoteError;
+  if ((size_t)count > (SIZE_MAX - *wantLength) / eleSize) return ncclRemoteError;
+  *wantLength += (size_t)count * eleSize;
+  return ncclSuccess;
+}
+
 static ncclResult_t rasMsgCheckBodyLength(const struct rasMsg* msg, int recvLength) {
   rasCollectiveType collType = RAS_MSG_NONE;
   if (msg->type == RAS_MSG_COLLREQ) {
@@ -401,7 +410,27 @@ static ncclResult_t rasMsgCheckBodyLength(const struct rasMsg* msg, int recvLeng
   }
   // A zero length means an unrecognized type; rasMsgHandle rejects those, so leave that diagnosis to it.
   size_t wantLength = rasMsgLength(msg->type, collType);
-  if (wantLength > 0 && (size_t)recvLength < wantLength) return ncclRemoteError;
+  if (wantLength == 0) return ncclSuccess;
+  if ((size_t)recvLength < wantLength) return ncclRemoteError;
+
+  // The fixed part is all there, so the element counts it holds can be read.  They are peer-supplied, so the
+  // variable-length tails they describe must fit in what we received before the handlers may index into them.
+  if (msg->type == RAS_MSG_PEERSUPDATE) {
+    NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->peersUpdate.nPeers, sizeof(msg->peersUpdate.peers[0])));
+    NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->peersUpdate.nDeadPeers, sizeof(union ncclSocketAddress)));
+  } else if (msg->type == RAS_MSG_COLLREQ && collType == RAS_COLL_COMMS) {
+    NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->collReq.comms.nSkipMissingRanksComms,
+                                  sizeof(msg->collReq.comms.skipMissingRanksComms[0])));
+  } else if (msg->type == RAS_MSG_COLLRESP) {
+    NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->collResp.nPeers, sizeof(msg->collResp.peers[0])));
+    if (msg->collResp.nData < 0) return ncclRemoteError;
+    if (msg->collResp.nData > 0) {
+      // The sender aligns the data that follows the peers array (see rasConnSendCollResp).
+      ALIGN_SIZE(wantLength, alignof(int64_t));
+      NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->collResp.nData, 1));
+    }
+  }
+  if ((size_t)recvLength < wantLength) return ncclRemoteError;
   return ncclSuccess;
 }
 
