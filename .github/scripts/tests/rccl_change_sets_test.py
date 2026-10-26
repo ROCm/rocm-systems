@@ -38,6 +38,7 @@ EXAMPLES = {
             "projects/rccl/test/test_categories_fixtures.yaml",
             "projects/rccl/test/test_categories_mpi.yaml",
             "projects/rccl/test/test_categories_micro.yml",
+            "projects/rccl/test/test_categories_microbench.yaml",
         ],
     ),
     "test runner": (
