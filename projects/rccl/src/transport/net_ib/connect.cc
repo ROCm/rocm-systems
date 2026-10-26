@@ -2212,7 +2212,7 @@ ncclResult_t ncclIbCloseListen(void* listenComm) {
 ncclResult_t rcclNetP2pPolicy(void* handle, int isP2p) {
   if (!handle) return ncclInvalidArgument;
   struct ncclIbHandle* ibHandle = (struct ncclIbHandle*)handle;
-  if (ibHandle->magic != NCCL_SOCKET_MAGIC) return ncclInvalidArgument;
+  if (ibHandle->magic != ncclSocketDefaultMagic()) return ncclInvalidArgument;
   ibHandle->isP2p = isP2p;
   return ncclSuccess;
 }
