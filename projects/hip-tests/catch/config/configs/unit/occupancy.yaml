@@ -93,3 +93,13 @@ occupancy:
     disabled:
       targets: [nvidia]
       reason: "AIRUNTIME-2744 - AMD-specific LDS/occupancy consistency check; not applicable on the NVIDIA platform. Needs re-triage."
+  Unit_hipOccupancy_Positive_MonotoneInVgprCount:
+    <<: *level_default
+    disabled:
+      targets: [nvidia]
+      reason: "AIRUNTIME-2744 - AMD-specific LDS/occupancy consistency check; not applicable on the NVIDIA platform. Needs re-triage."
+  Unit_hipOccupancy_Positive_EqualVgprCountEqualOccupancy:
+    <<: *level_default
+    disabled:
+      targets: [nvidia]
+      reason: "AIRUNTIME-2744 - AMD-specific LDS/occupancy consistency check; not applicable on the NVIDIA platform. Needs re-triage."
