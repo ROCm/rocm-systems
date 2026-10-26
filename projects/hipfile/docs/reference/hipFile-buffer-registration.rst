@@ -6,7 +6,7 @@
 hipFile buffer registration
 ****************************
 
-Buffer registration stores the buffer's base pointer and length in bytes in an internal map. During ``hipFileRead()`` and ``hipFileWrite()``, offsets and sizes are validated against the map without requiring HIP pointer lookup. This is useful for situations where the buffer is reused for multiple transfers or when predictable bounds checks are needed.
+Buffer registration stores the buffer's base pointer and length in bytes in an internal map. During ``hipFileRead()`` and ``hipFileWrite()``, offsets and sizes are validated against the map without requiring HIP pointer lookup. This is useful for situations where the buffer is reused in multiple transfers or when predictable bounds checks are needed. The advantage is that buffer metadata is already loaded and doesn't need to be extracted at the time of the I/O operation.
 
 Buffers are registered with ``hipFileBufRegister()``. If ``hipFileBufRegister()`` is called, it must be done before any calls to ``hipFileRead()`` or ``hipFileWrite()``. Buffers with either ``hipMemoryTypeDevice`` or ``hipMemoryTypeHost`` can be registered.
 
