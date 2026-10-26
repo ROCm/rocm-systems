@@ -31,7 +31,7 @@ keep its name. Don't add a prefix. For example, an `--example-ids`
 filter in `profile` is also `--example-ids` in `analyze`.
 
 Options that belong to one feature share its name as a prefix even when they can
-be used on their own, such as `--roofline-device` and `--roofline-sort`.
+be used on their own, such as `--roofline-device`.
 
 Frequently used options get a short alias: a single lowercase letter with a
 single dash, such as `-v`.
