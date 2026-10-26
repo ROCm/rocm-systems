@@ -84,6 +84,44 @@ profiler_ioctl(kfd_ioctl_profiler_args& args)
         return ROCPROFILER_STATUS_SUCCESS;
     return ROCPROFILER_STATUS_ERROR;
 }
+
+// Shared KFD_IOC_PROFILER_PMC failure handling for the exclusive device lock and the
+// dispatch-mode perfmon enable, which fail for the same reasons (errno holds the ioctl failure).
+rocprofiler_status_t
+handle_pmc_ioctl_error(const rocprofiler_agent_t* agent)
+{
+    auto err = errno;
+    switch(err)
+    {
+        case EBUSY:
+            ROCP_WARNING << fmt::format(
+                "Device {} has a profiler attached to it. PMC Counters may be inaccurate.",
+                agent->id.handle);
+            return ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES;
+        case EPERM:
+            ROCP_WARNING << fmt::format(
+                "Device {} could not be locked for profiling due to lack of permissions "
+                "(capability SYS_PERFMON). PMC Counters may be inaccurate and System Counter "
+                "Collection will be degraded.",
+                agent->id.handle);
+            return ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED;
+        case EINVAL:
+            ROCP_WARNING << fmt::format(
+                "Driver/Kernel version does not support locking device {}. PMC Counters may be "
+                "inaccurate and System Counter Collection will be degraded.",
+                agent->id.handle);
+            return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
+        default:
+            ROCP_WARNING << fmt::format(
+                "Failed to lock device {} (error: {}). PMC Counters may be "
+                "inaccurate and System Counter "
+                "Collection will be degraded.",
+                agent->id.handle,
+                strerror(err));
+            return ROCPROFILER_STATUS_ERROR;
+    }
+}
+
 }  // namespace
 
 unsigned long
@@ -98,17 +136,47 @@ get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_ve
 }
 
 bool
+dispatch_mode_supported_for_version(uint32_t version)
+{
+    return version >= KFD_IOC_PROFILER_VERSION_NUM;
+}
+
+// Dispatch mode (KFD_IOC_PROFILER_PMC with lock=0, perfcount_enable=1) trades the old
+// exclusive profiler_process lock for a per-process perfmon clock override, and relies on
+// process teardown (not an explicit unlock ioctl) to release it. The kernel only honors this
+// behavior starting at KFD_IOC_PROFILER_VERSION_NUM 2; older Linux kernels don't support it at
+// all, so counter_collection_dispatch_perfmon_enable() treats this as a no-op rather than
+// issuing the ioctl. Version numbers are cumulative (see the history comment above
+// KFD_IOC_PROFILER_VERSION_NUM in kfd_ioctl.h), so any version >= 2 retains this behavior.
+bool
+dispatch_mode_supported()
+{
+    return dispatch_mode_supported_for_version(kfd_profiler_version());
+}
+
+uint32_t
+kfd_profiler_version()
+{
+    static uint32_t version = []() -> uint32_t {
+        kfd_ioctl_profiler_args args = {};
+        args.op                      = KFD_IOC_PROFILER_VERSION;
+        if(profiler_ioctl(args) != ROCPROFILER_STATUS_SUCCESS) return 0;
+        return args.version;
+    }();
+    return version;
+}
+
+bool
 counter_collection_has_device_lock()
 {
-    kfd_ioctl_profiler_args args = {};
-    args.op                      = KFD_IOC_PROFILER_VERSION;
-    return profiler_ioctl(args) == ROCPROFILER_STATUS_SUCCESS;
+    return kfd_profiler_version() != 0;
 }
 
 rocprofiler_status_t
 counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues)
 {
     CHECK(agent);
+
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_PMC;
     args.pmc.gpu_id              = agent->gpu_id;
@@ -116,39 +184,7 @@ counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues
     args.pmc.perfcount_enable    = all_queues ? 1 : 0;
 
     auto status = profiler_ioctl(args);
-    if(status == ROCPROFILER_STATUS_ERROR)
-    {
-        auto err = errno;
-        switch(err)
-        {
-            case EBUSY:
-                ROCP_WARNING << fmt::format(
-                    "Device {} has a profiler attached to it. PMC Counters may be inaccurate.",
-                    agent->id.handle);
-                return ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES;
-            case EPERM:
-                ROCP_WARNING << fmt::format(
-                    "Device {} could not be locked for profiling due to lack of permissions "
-                    "(capability SYS_PERFMON). PMC Counters may be inaccurate and System Counter "
-                    "Collection will be degraded.",
-                    agent->id.handle);
-                return ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED;
-            case EINVAL:
-                ROCP_WARNING << fmt::format(
-                    "Driver/Kernel version does not support locking device {}. PMC Counters may be "
-                    "inaccurate and System Counter Collection will be degraded.",
-                    agent->id.handle);
-                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
-            default:
-                ROCP_WARNING << fmt::format(
-                    "Failed to lock device {} (error: {}). PMC Counters may be "
-                    "inaccurate and System Counter "
-                    "Collection will be degraded.",
-                    agent->id.handle,
-                    strerror(err));
-                return ROCPROFILER_STATUS_ERROR;
-        }
-    }
+    if(status == ROCPROFILER_STATUS_ERROR) return handle_pmc_ioctl_error(agent);
 
     return status;
 }
@@ -157,6 +193,7 @@ rocprofiler_status_t
 counter_collection_device_unlock(const rocprofiler_agent_t* agent)
 {
     CHECK(agent);
+
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_PMC;
     args.pmc.gpu_id              = agent->gpu_id;
@@ -171,6 +208,26 @@ counter_collection_device_unlock(const rocprofiler_agent_t* agent)
                                     agent->id.handle,
                                     strerror(err));
     }
+
+    return status;
+}
+
+rocprofiler_status_t
+counter_collection_dispatch_perfmon_enable(const rocprofiler_agent_t* agent)
+{
+    CHECK(agent);
+
+    // A no-op success on kernels that don't support dispatch mode.
+    if(!dispatch_mode_supported()) return ROCPROFILER_STATUS_SUCCESS;
+
+    kfd_ioctl_profiler_args args = {};
+    args.op                      = KFD_IOC_PROFILER_PMC;
+    args.pmc.gpu_id              = agent->gpu_id;
+    args.pmc.lock                = 0;
+    args.pmc.perfcount_enable    = 1;
+
+    auto status = profiler_ioctl(args);
+    if(status == ROCPROFILER_STATUS_ERROR) return handle_pmc_ioctl_error(agent);
 
     return status;
 }

@@ -26,8 +26,10 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
+#include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
@@ -946,4 +948,25 @@ TEST(core, create_counter)
             }
         }
     }
+}
+
+// KFD_IOC_PROFILER_VERSION_NUM is documented in kfd_ioctl.h as cumulative: each new version
+// keeps all prior behavior and adds more. dispatch_mode_supported_for_version() must therefore
+// treat any version >= KFD_IOC_PROFILER_VERSION_NUM as supporting dispatch mode, not just an
+// exact match (a future kernel reporting a newer version must not disable dispatch mode).
+TEST(kfd_profiler_version, dispatch_mode_not_supported_below_threshold)
+{
+    EXPECT_FALSE(counters::dispatch_mode_supported_for_version(0));
+    EXPECT_FALSE(counters::dispatch_mode_supported_for_version(KFD_IOC_PROFILER_VERSION_NUM - 1));
+}
+
+TEST(kfd_profiler_version, dispatch_mode_supported_at_threshold)
+{
+    EXPECT_TRUE(counters::dispatch_mode_supported_for_version(KFD_IOC_PROFILER_VERSION_NUM));
+}
+
+TEST(kfd_profiler_version, dispatch_mode_supported_above_threshold)
+{
+    EXPECT_TRUE(counters::dispatch_mode_supported_for_version(KFD_IOC_PROFILER_VERSION_NUM + 1));
+    EXPECT_TRUE(counters::dispatch_mode_supported_for_version(100));
 }
