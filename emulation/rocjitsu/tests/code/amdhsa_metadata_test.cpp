@@ -25,13 +25,14 @@ std::vector<KernelDescriptorInfo> descriptors(const std::vector<uint8_t> &image)
 }
 
 std::vector<uint8_t> plain_kernel() {
-  return test::make_gfx950_kernel_elf({0xbf800000u, 0xbf810000u}, 0);
+  return test::make_kernarg_kernel_elf({0xbf800000u, 0xbf810000u}, 4096,
+                                       EF_AMDGPU_MACH_AMDGCN_GFX950, 20);
 }
 
 TEST(AmdhsaMetadata, UpdatesSelectedKernelDescriptorAndNoteTogether) {
-  const std::vector<uint8_t> image =
-      test::with_resource_metadata(test::make_gfx950_two_kernel_elf({0xbf800000u, 0xbf810000u}, 0),
-                                   {{"test_kernel0", 0, 16, 4}, {"test_kernel1", 0, 16, 4}});
+  const std::vector<uint8_t> image = test::with_resource_metadata(
+      test::make_gfx950_two_kernel_elf({0xbf800000u, 0xbf810000u}, 4096),
+      {{"test_kernel0", 0, 16, 4}, {"test_kernel1", 0, 16, 4}});
   const std::vector<KernelDescriptorInfo> kernels = descriptors(image);
   ASSERT_EQ(kernels.size(), 2u);
   const AmdGpuCodeObject object(image.data(), image.size());
@@ -86,6 +87,52 @@ TEST(AmdhsaMetadata, WrapperOnlyUpdateRetainsRegisterMetadata) {
   EXPECT_EQ(entries->array[0].integer_field(".kernarg_segment_size"), 40u);
   EXPECT_EQ(entries->array[0].integer_field(".sgpr_count"), 16u);
   EXPECT_EQ(entries->array[0].integer_field(".vgpr_count"), 4u);
+}
+
+TEST(AmdhsaMetadata, ScratchGrowthUpdatesTheDescriptorAndNoteTogether) {
+  const std::vector<uint8_t> image =
+      test::with_resource_metadata(test::make_gfx950_kernel_elf({0xbf800000u, 0xbf810000u}, 4096),
+                                   {{"test_kernel", 0, 16, 4, 4096}});
+  const std::vector<KernelDescriptorInfo> kernels = descriptors(image);
+  ASSERT_EQ(kernels.size(), 1u);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  CodeObjectPatcher patcher(object);
+  amdhsa::kernel_descriptor_t descriptor = kernels.front().descriptor;
+  descriptor.kernarg_size = 24;
+  descriptor.private_segment_fixed_size = 8192;
+  std::string error;
+  ASSERT_TRUE(patcher.patch_kernel_resources(kernels.front(), descriptor, std::nullopt,
+                                             std::nullopt, &error))
+      << error;
+  const FailureOr<amdhsa::MetadataDocument> metadata =
+      amdhsa::MetadataDocument::parse(patcher.image_bytes(), &error);
+  ASSERT_TRUE(metadata.succeeded()) << error;
+  const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+  ASSERT_NE(entries, nullptr);
+  ASSERT_EQ(entries->array.size(), 1u);
+  EXPECT_EQ(entries->array.front().integer_field(".private_segment_fixed_size"), 8192u);
+  EXPECT_EQ(entries->array.front().integer_field(".kernarg_segment_size"), 24u);
+  const std::vector<KernelDescriptorInfo> updated = descriptors(patcher.emit());
+  ASSERT_EQ(updated.size(), 1u);
+  EXPECT_EQ(updated.front().descriptor.private_segment_fixed_size, 8192u);
+}
+
+TEST(AmdhsaMetadata, ScratchWidthFailureLeavesBothRepresentationsUnchanged) {
+  const std::vector<uint8_t> image =
+      test::with_resource_metadata(test::make_gfx950_kernel_elf({0xbf800000u, 0xbf810000u}, 127),
+                                   {{"test_kernel", 0, 16, 4, 127}}, true);
+  const std::vector<KernelDescriptorInfo> kernels = descriptors(image);
+  ASSERT_EQ(kernels.size(), 1u);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  CodeObjectPatcher patcher(object);
+  amdhsa::kernel_descriptor_t descriptor = kernels.front().descriptor;
+  descriptor.kernarg_size = 24;
+  descriptor.private_segment_fixed_size = 128;
+  std::string error;
+  EXPECT_FALSE(patcher.patch_kernel_resources(kernels.front(), descriptor, std::nullopt,
+                                              std::nullopt, &error));
+  EXPECT_NE(error.find("wider"), std::string::npos);
+  EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), image));
 }
 
 TEST(AmdhsaMetadata, WiderIntegerRejectsBeforeNoteOrDescriptorChanges) {

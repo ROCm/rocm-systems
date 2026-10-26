@@ -22,6 +22,7 @@ struct MetadataKernel {
   uint32_t kernarg_bytes;
   uint32_t sgprs;
   uint32_t vgprs;
+  uint32_t private_bytes = 4096;
 };
 
 inline void append_metadata_text(std::vector<uint8_t> &bytes, std::string_view text) {
@@ -63,7 +64,7 @@ inline std::vector<uint8_t> resource_metadata_payload(std::initializer_list<Meta
     // Keep a nonzero scratch baseline to check that unrelated kernarg/GPR edits
     // preserve the existing private-segment metadata.
     append_metadata_text(bytes, ".private_segment_fixed_size");
-    append_metadata_integer(bytes, 4096, narrow);
+    append_metadata_integer(bytes, kernel.private_bytes, narrow);
   }
   append_metadata_text(bytes, "vendor.extra");
   append_metadata_text(bytes, "unchanged");

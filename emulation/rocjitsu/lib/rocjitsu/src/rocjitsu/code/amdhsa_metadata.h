@@ -55,11 +55,11 @@ private:
 /// @brief Update one kernel's numeric resources without resizing its note.
 /// @details Only the named kernel in supported v1.2 metadata is edited. Missing
 /// fields, ambiguous entries, descriptor overlap, or wider integer encodings
-/// fail before any writes. Absent register counts retain their original fields.
-[[nodiscard]] Result update_resource_metadata(std::span<uint8_t> image,
-                                              const KernelDescriptorInfo &kernel,
-                                              uint32_t kernarg_bytes, std::optional<uint32_t> sgprs,
-                                              std::optional<uint32_t> vgprs,
-                                              std::string *error = nullptr);
+/// fail before any writes. Kernarg and private-segment sizes come from the new
+/// descriptor. Absent register counts retain their original fields.
+[[nodiscard]] Result
+update_resource_metadata(std::span<uint8_t> image, const KernelDescriptorInfo &kernel,
+                         const kernel_descriptor_t &descriptor, std::optional<uint32_t> sgprs,
+                         std::optional<uint32_t> vgprs, std::string *error = nullptr);
 
 } // namespace rocjitsu::amdhsa

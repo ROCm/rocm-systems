@@ -1401,7 +1401,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   }
 
   std::optional<SpillManager> spills;
-  uint64_t spill_descriptor_file_offset = 0;
 
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());
@@ -1611,7 +1610,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
           // guards in the planners agree.
           const uint32_t scratch_limit = max_scratch_offset_bytes(arch_) + SpillManager::kSlotBytes;
           spills.emplace(kernel.descriptor.private_segment_fixed_size, scratch_limit);
-          spill_descriptor_file_offset = kernel.descriptor_file_offset;
         }
         // Split by class: VGPRs go straight to scratch; SGPRs bridge through a dead
         // VGPR; AccVGPRs go straight to scratch via the CDNA `acc` bit (no bridge).
@@ -1682,20 +1680,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   if (!result.errors.empty())
     return result;
 
-  // Grow the spilled kernel's per-lane scratch to cover its DBI spill zone. Done
-  // before replace_text so the edit lands at the descriptor's original file offset;
-  // replace_text then relocates the descriptor with the rest of the ELF.
-  if (spills) {
-    if (!patcher.set_private_segment_fixed_size(spill_descriptor_file_offset,
-                                                spills->total_private_bytes())) {
-      result.errors.emplace_back(
-          "failed to grow private_segment_fixed_size for the spilled kernel descriptor");
-      return result;
-    }
-  }
-
-  // Like the scratch growth above, written at the descriptor's original file
-  // offset; replace_text then shifts the entry field with everything else.
+  // Redirect at the original descriptor offset; replace_text then shifts the
+  // entry field with everything else. Resource sizes are committed together
+  // with their metadata after text replacement.
   if (entry_patch &&
       !patcher.redirect_kernel_entry(kernels.front().descriptor_file_offset,
                                      kernels.front().entry_text_offset, entry_patch->stub_offset)) {
@@ -1752,7 +1739,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
 
   // Emit and build patch summaries.
   std::vector<uint8_t> image = patcher.emit();
-  if (options_.register_growth ||
+  if (spills || options_.register_growth ||
       options_.kernarg_binding == DbiKernargBinding::CallerSuppliedWrapper) {
     AmdGpuCodeObject updated(image.data(), image.size());
     if (!updated.is_valid() || updated.text_sections().size() != 1) {
@@ -1768,6 +1755,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     }
     const KernelDescriptorInfo &kernel = updated_kernels.front();
     amdhsa::kernel_descriptor_t descriptor = kernel.descriptor;
+    if (spills)
+      descriptor.private_segment_fixed_size = spills->total_private_bytes();
     result.resources.kernarg_bytes = descriptor.kernarg_size;
     // A binding authorizes the wrapper needed by entry-storage readers. Calls
     // without that prologue must retain the guest's original kernarg ABI.
@@ -1803,7 +1792,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                            result.resources.vgprs / 4 - 1);
       }
     }
-    if (options_.register_growth || entry_storage_base) {
+    if (spills || options_.register_growth || entry_storage_base) {
       CodeObjectPatcher resource_patcher{AmdGpuCodeObject(image.data(), image.size())};
       std::string error;
       const std::optional<uint32_t> sgprs =

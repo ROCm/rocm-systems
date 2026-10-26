@@ -214,7 +214,7 @@ TEST_F(ConSanPrepare, RegisterPressureReturnsAResourceErrorInsteadOfAnInternalAs
     MetadataResources resources = metadata.value();
     resources.sgprs = declared;
     ASSERT_TRUE(amdhsa::update_resource_metadata(image, input.value().kernel,
-                                                 resources.kernarg_bytes, resources.sgprs,
+                                                 input.value().kernel.descriptor, resources.sgprs,
                                                  resources.vgprs, &metadata_error)
                     .succeeded())
         << metadata_error;
@@ -262,9 +262,11 @@ TEST_F(ConSanPrepare, MetadataGrowthFailureDoesNotPartiallyMutateTheImage) {
   ASSERT_TRUE(input.succeeded());
   const std::vector<uint8_t> saved = original_;
   std::string message;
-  EXPECT_TRUE(
-      amdhsa::update_resource_metadata(original_, input.value().kernel, 4096, 28, 16, &message)
-          .failed());
+  amdhsa::kernel_descriptor_t descriptor = input.value().kernel.descriptor;
+  descriptor.kernarg_size = 4096;
+  EXPECT_TRUE(amdhsa::update_resource_metadata(original_, input.value().kernel, descriptor, 28, 16,
+                                               &message)
+                  .failed());
   EXPECT_EQ(original_, saved);
   EXPECT_NE(message.find("wider"), std::string::npos);
 }

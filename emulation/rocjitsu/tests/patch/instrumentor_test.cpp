@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/amdhsa_metadata.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/smem_builders.h"
@@ -3487,8 +3488,12 @@ protected:
   Caved patch_spill(const std::vector<uint32_t> &kernel_body,
                     const std::vector<uint32_t> &probe_body, uint32_t private_bytes,
                     uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0) {
-    auto target = a_.make_kernel(kernel_body, private_bytes, /*granulated_sgpr_count=*/3,
-                                 granulated_vgpr_count, accum_offset);
+    std::vector<uint8_t> target =
+        a_.make_kernel(kernel_body, private_bytes, /*granulated_sgpr_count=*/3,
+                       granulated_vgpr_count, accum_offset);
+    if (private_bytes != 0)
+      target = test::with_resource_metadata(
+          target, {{"test_kernel", 0, 32, 4 * (granulated_vgpr_count + 1), private_bytes}});
     auto probe = a_.make_probe("rj_test_probe", probe_body);
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -4328,6 +4333,85 @@ TEST(InstrumentorKernelBoundary, EntryDoesNotRelocateOrOverwriteATwelveByteInstr
   EXPECT_EQ(words.at(branch_pc / 4), build_s_branch(*branch, ROCJITSU_CODE_ARCH_RDNA4));
 }
 
+TEST(InstrumentorResources, ScratchGrowthWithoutMetadataPublishesNothing) {
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, 64);
+  const std::vector<uint8_t> original = image;
+  const std::vector<uint8_t> probe_image =
+      make_gfx950_probe_elf("scratch", {kMovV2Zero, kProbeSetpcS30S31});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+  Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint point;
+  point.probe_obj = &probe;
+  point.probe_symbol = "scratch";
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("metadata"), std::string::npos);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.sites.empty());
+  EXPECT_EQ(image, original);
+}
+
+TEST(InstrumentorResources, ScratchGrowthAndWrapperShareMetadataPublication) {
+  for (const DbiKernargBinding binding :
+       {DbiKernargBinding::None, DbiKernargBinding::CallerSuppliedWrapper}) {
+    for (const uint32_t original_private : {64u, 127u}) {
+      SCOPED_TRACE(static_cast<int>(binding));
+      SCOPED_TRACE(original_private);
+      const bool narrow = original_private == 127;
+      const std::vector<uint8_t> image = test::with_resource_metadata(
+          make_kernarg_kernel_elf({kMovV3V2, 0xbf810000u}, original_private,
+                                  EF_AMDGPU_MACH_AMDGCN_GFX950, 20),
+          {{"test_kernel", 20, 32, 4, original_private}}, narrow);
+      const std::vector<uint8_t> original = image;
+      const std::vector<uint8_t> probe_image =
+          make_gfx950_probe_elf("scratch", {kMovV2Zero, kProbeSetpcS30S31});
+      const AmdGpuCodeObject object(image.data(), image.size());
+      const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+      Instrumentor instrumentor(
+          object, ROCJITSU_CODE_ARCH_CDNA4,
+          InstrumentationOptions{.kernarg_binding = binding, .register_growth = std::nullopt});
+      InstrumentationPoint point;
+      point.probe_obj = &probe;
+      point.probe_symbol = "scratch";
+      if (binding == DbiKernargBinding::CallerSuppliedWrapper)
+        point.probe_args = {{ProbeArgSource::LogBufferPtrLo}, {ProbeArgSource::LogBufferPtrHi}};
+      instrumentor.add_point(point);
+      const InstrumentedCodeObject result = instrumentor.patch();
+      if (narrow) {
+        ASSERT_FALSE(result.errors.empty());
+        EXPECT_NE(result.errors.front().find("wider"), std::string::npos);
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+      } else {
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        const AmdGpuCodeObject output(result.elf_bytes.data(), result.elf_bytes.size());
+        ASSERT_EQ(output.text_sections().size(), 1u);
+        const Section &text = *output.text_sections().front();
+        const std::vector<KernelDescriptorInfo> kernels =
+            scan_kernel_descriptors(result.elf_bytes, text.sectionOffset(), text.size());
+        ASSERT_EQ(kernels.size(), 1u);
+        const FailureOr<amdhsa::MetadataDocument> metadata =
+            amdhsa::MetadataDocument::parse(result.elf_bytes);
+        ASSERT_TRUE(metadata.succeeded());
+        const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+        ASSERT_NE(entries, nullptr);
+        ASSERT_EQ(entries->array.size(), 1u);
+        const amdhsa::MetadataValue &entry = entries->array.front();
+        EXPECT_GT(kernels.front().descriptor.private_segment_fixed_size, original_private);
+        EXPECT_EQ(entry.integer_field(".private_segment_fixed_size"),
+                  kernels.front().descriptor.private_segment_fixed_size);
+        EXPECT_EQ(entry.integer_field(".kernarg_segment_size"),
+                  kernels.front().descriptor.kernarg_size);
+        EXPECT_EQ(kernels.front().descriptor.kernarg_size,
+                  binding == DbiKernargBinding::CallerSuppliedWrapper ? 40u : 20u);
+      }
+      EXPECT_EQ(image, original);
+    }
+  }
+}
+
 TEST(InstrumentorResources, ExplicitPoliciesRequireTheirMetadataInputs) {
   const std::vector<uint8_t> image = make_gfx950_kernel_elf_with_two_nops();
   const AmdGpuCodeObject object(image.data(), image.size());
@@ -4392,7 +4476,7 @@ TEST(InstrumentorResources, OddSgprCountsLeaveBothEntrySnapshotsOutsideRegisterB
     const std::vector<uint8_t> image = test::with_resource_metadata(
         make_kernarg_kernel_elf({build_s_nop(0, kArch), build_s_endpgm(kArch)}, 0,
                                 EF_AMDGPU_MACH_AMDGCN_GFX950, kTestKernargSize, false, 5),
-        {{"test_kernel", kTestKernargSize, original_sgprs, 4}});
+        {{"test_kernel", kTestKernargSize, original_sgprs, 4, 0}});
     const std::vector<uint8_t> body = make_gfx950_probe_elf("snapshots", {kProbeSetpcS30S31});
     const AmdGpuCodeObject object(image.data(), image.size());
     const AmdGpuCodeObject probe(body.data(), body.size());

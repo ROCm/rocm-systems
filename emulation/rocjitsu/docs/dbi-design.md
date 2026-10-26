@@ -463,12 +463,15 @@ supply `InstrumentationOptions::register_growth` with validated
 from the descriptor and wrapper layout, not the register-growth request.
 DBI then plans bounded SGPR/VGPR allocation and
 register backups and includes ABI input padding. `CodeObjectPatcher` updates
-the matching numeric metadata and descriptor as one operation, rejecting missing
-fields or insufficient integer widths before either changes. Analysis-specific
+the matching kernarg size, private-segment size, register metadata, and descriptor
+as one operation, rejecting missing fields or insufficient integer widths before
+either changes. Analysis-specific
 admission stays with the client. `DeclaredRegisters` preserves every originally
 declared GPR; the default preserves live values. Growth rejects AGPR guests and
-non-enumerable register uses, and never enables scratch. Metadata failure emits
-no ELF or site map. Resource policy fails closed when the probe body reads a register its convention does not supply, when the link pair is live without a register backup, when a site passes more argument dwords than `kMaxProbeArgVgprs`, when the argument VGPRs fall outside the kernel's ordinary-VGPR bound, when a site passes arguments but no single kernel descriptor was discovered to derive that bound from, when a non-empty `probe_args` accompanies an inline-nop point, when no dead target pair or required temp is available within the kernel's ordinary SGPRs, when the probe clobbers FLAT_SCRATCH (the spill store/load depend on it), when the kernel has zero scratch or is one of several kernels, when a spill offset exceeds the arch's scratch-offset field, (for SGPR spills) when no dead bridge VGPR exists in the ordinary-VGPR range, or (for AccVGPR spills) when the target has no AccVGPR file (`arch_has_accvgpr` is false) or an AccVGPR index falls outside the descriptor-derived accumulator window (`kernel_vgpr_count − accum_base`). The spill set itself is `instrument_clobbers ∩ live_at_anchor` and is spilled, not rejected.
+non-enumerable register uses, and never enables scratch. Scratch growth, including
+the default spill path, also requires a supported
+resource note; it is committed with wrapper/register edits after text replacement.
+Metadata failure emits no ELF or site map. Resource policy fails closed when the probe body reads a register its convention does not supply, when the link pair is live without a register backup, when a site passes more argument dwords than `kMaxProbeArgVgprs`, when the argument VGPRs fall outside the kernel's ordinary-VGPR bound, when a site passes arguments but no single kernel descriptor was discovered to derive that bound from, when a non-empty `probe_args` accompanies an inline-nop point, when no dead target pair or required temp is available within the kernel's ordinary SGPRs, when the probe clobbers FLAT_SCRATCH (the spill store/load depend on it), when the kernel has zero scratch or is one of several kernels, when a spill offset exceeds the arch's scratch-offset field, (for SGPR spills) when no dead bridge VGPR exists in the ordinary-VGPR range, or (for AccVGPR spills) when the target has no AccVGPR file (`arch_has_accvgpr` is false) or an AccVGPR index falls outside the descriptor-derived accumulator window (`kernel_vgpr_count − accum_base`). The spill set itself is `instrument_clobbers ∩ live_at_anchor` and is spilled, not rejected.
 
 ---
 

@@ -176,8 +176,9 @@ FailureOr<MetadataDocument> MetadataDocument::parse(std::span<const uint8_t> ima
 }
 
 Result update_resource_metadata(std::span<uint8_t> image, const KernelDescriptorInfo &kernel,
-                                uint32_t kernarg_bytes, std::optional<uint32_t> sgprs,
-                                std::optional<uint32_t> vgprs, std::string *error) {
+                                const kernel_descriptor_t &descriptor,
+                                std::optional<uint32_t> sgprs, std::optional<uint32_t> vgprs,
+                                std::string *error) {
   if (!util::is_range_in_bounds(kernel.descriptor_file_offset, sizeof(kernel.descriptor),
                                 image.size()))
     return fail(error, "AMDHSA descriptor lies outside the image");
@@ -211,8 +212,9 @@ Result update_resource_metadata(std::span<uint8_t> image, const KernelDescriptor
   if (payload_offset < kernel.descriptor_file_offset + sizeof(kernel.descriptor) &&
       kernel.descriptor_file_offset < payload_offset + payload.size())
     return fail(error, "AMDHSA metadata overlaps the kernel descriptor");
-  const std::array<std::pair<std::string_view, std::optional<uint32_t>>, 3> updates = {{
-      {".kernarg_segment_size", kernarg_bytes},
+  const std::array<std::pair<std::string_view, std::optional<uint32_t>>, 4> updates = {{
+      {".kernarg_segment_size", descriptor.kernarg_size},
+      {".private_segment_fixed_size", descriptor.private_segment_fixed_size},
       {".sgpr_count", sgprs},
       {".vgpr_count", vgprs},
   }};

@@ -27,6 +27,7 @@
 /// Read back per lane: v3 must be the argument the site passed, and v1 must be
 /// K0, the value the guest put in v0 before the anchor.
 
+#include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
 
@@ -97,9 +98,11 @@ protected:
     const uint32_t endpgm = build_s_endpgm(a_.arch);
     const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
     // v_mov v0, K0 ; v_mov v1, v0 (ANCHOR at offset 4, v0 live) ; s_endpgm.
-    auto target = test::make_amdgpu_kernel_elf(
-        {test::make_mov_vgpr_inline(0, kGuestValue), kMovV1V0, endpgm}, /*private_bytes=*/64,
-        /*granulated_sgpr_count=*/3, a_.e_flags);
+    const std::vector<uint8_t> target = test::with_resource_metadata(
+        test::make_amdgpu_kernel_elf({test::make_mov_vgpr_inline(0, kGuestValue), kMovV1V0, endpgm},
+                                     /*private_bytes=*/64,
+                                     /*granulated_sgpr_count=*/3, a_.e_flags),
+        {{"test_kernel", 0, 32, 4, 64}});
     auto probe = test::make_amdgpu_probe_elf("rj_test_arg_probe", {kMovV3V0, setpc}, a_.e_flags);
 
     AmdGpuCodeObject obj(target.data(), target.size());
@@ -215,11 +218,13 @@ class DbiGuestArgumentSim : public ::testing::TestWithParam<ArgSimArch> {};
 
 TEST_P(DbiGuestArgumentSim, OverlappingArgumentsCaptureGuestValuesBeforeOverwritingThem) {
   const ArgSimArch &target = GetParam();
-  const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
-      {test::make_mov_vgpr_inline(0, 7), test::make_mov_vgpr_inline(1, 13),
-       build_v_mov_b32_src(2, 256, target.arch), build_s_endpgm(target.arch)},
-      /*private_bytes=*/64, /*granulated_sgpr_count=*/3, target.e_flags,
-      /*granulated_vgpr_count=*/3, /*accum_offset=*/1);
+  const std::vector<uint8_t> image = test::with_resource_metadata(
+      test::make_amdgpu_kernel_elf(
+          {test::make_mov_vgpr_inline(0, 7), test::make_mov_vgpr_inline(1, 13),
+           build_v_mov_b32_src(2, 256, target.arch), build_s_endpgm(target.arch)},
+          /*private_bytes=*/64, /*granulated_sgpr_count=*/3, target.e_flags,
+          /*granulated_vgpr_count=*/3, /*accum_offset=*/1),
+      {{"test_kernel", 0, 32, 16, 64}});
   const std::vector<uint8_t> body = test::make_amdgpu_probe_elf(
       "guest_arguments",
       {build_v_mov_b32_src(3, 256, target.arch), build_v_mov_b32_src(4, 257, target.arch),

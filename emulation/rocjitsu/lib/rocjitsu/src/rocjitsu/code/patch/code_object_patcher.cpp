@@ -1513,8 +1513,7 @@ bool CodeObjectPatcher::patch_kernel_resources(const KernelDescriptorInfo &kerne
     return false;
   }
   const amdhsa::kernel_descriptor_t updated = descriptor;
-  if (amdhsa::update_resource_metadata(image_, kernel, updated.kernarg_size, sgprs, vgprs, error)
-          .failed())
+  if (amdhsa::update_resource_metadata(image_, kernel, updated, sgprs, vgprs, error).failed())
     return false;
   return patch_kernel_descriptor(kernel.descriptor_file_offset,
                                  {reinterpret_cast<const uint8_t *>(&updated), sizeof(updated)});
