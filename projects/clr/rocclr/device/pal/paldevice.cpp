@@ -2137,10 +2137,18 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
         allocedMem[Pal::GpuHeapLocal] + allocedMem[Pal::GpuHeapInvisible];
     const Pal::gpusize hostUsed =
         allocedMem[Pal::GpuHeapGartUswc] + allocedMem[Pal::GpuHeapGartCacheable];
+    const Pal::gpusize cachedTotal = resourceCache().cacheSize();
+    const Pal::gpusize cachedHost =
+        cachedTotal - std::min<Pal::gpusize>(cachedTotal, cache_group_local);
+    const Pal::gpusize deviceAfterCache =
+        deviceUsed - std::min<Pal::gpusize>(deviceUsed, cache_group_local);
+    const Pal::gpusize hostAfterCache =
+        hostUsed - std::min(hostUsed, cachedHost);
     const Pal::gpusize admitted =
-        ((apuCarveOutLimit_ > deviceUsed) ? apuCarveOutLimit_ - deviceUsed : 0) +
-        ((apuBorrowLimit_ > hostUsed) ? apuBorrowLimit_ - hostUsed : 0) +
-        resourceCache().cacheSize();
+        ((!settings().remoteAlloc_ && (apuCarveOutLimit_ > deviceAfterCache))
+             ? apuCarveOutLimit_ - deviceAfterCache
+             : 0) +
+        ((apuBorrowLimit_ > hostAfterCache) ? apuBorrowLimit_ - hostAfterCache : 0);
     freeMemory[TotalFreeMemory] =
         std::min(freeMemory[TotalFreeMemory], static_cast<size_t>(admitted / Ki));
   }
