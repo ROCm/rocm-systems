@@ -1,19 +1,20 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Teardown must retain the session while abandoned native owners still depend
-//! on its caller allocator. The raw resource owners below model native-failure
-//! retention, with test-only recovery so every callback allocation is reclaimed.
+//! Teardown must retain the connection while abandoned native owners still
+//! depend on it. Raw resource owners model native-failure retention; test-only
+//! recovery confirms that each callback allocation is reclaimed.
 #![allow(unsafe_code, clippy::unwrap_used, clippy::panic)]
 
 use super::super::LinuxKfdDriver;
 use super::*;
 use crate::driver::Driver;
+use crate::memory::storage::TryPush;
 use crate::test_support::allocator::State;
 use std::sync::Arc;
 
-fn scripted_driver(allocator: Allocator) -> LinuxKfdDriver {
-    let mut driver = LinuxKfdDriver::new(allocator);
+fn scripted_driver() -> LinuxKfdDriver {
+    let mut driver = LinuxKfdDriver::new();
     let mut endpoint = sys::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(|call| match call {
@@ -23,51 +24,42 @@ fn scripted_driver(allocator: Allocator) -> LinuxKfdDriver {
         }),
     );
     endpoint.mark_runtime_enabled_for_test();
-    let kfd = Shared::new(endpoint, allocator).unwrap();
-    let loss = Shared::new(
-        LossEvent {
-            kfd: kfd.clone(),
-            hardware_event_id: AtomicU32::new(19),
-            memory_event_id: AtomicU32::new(20),
-            hardware_destroy_uncertain: AtomicBool::new(false),
-            memory_destroy_uncertain: AtomicBool::new(false),
-            observed: Mutex::new(ObservedEvents::new(allocator).unwrap()),
-            lost: AtomicBool::new(false),
-        },
-        allocator,
-    )
+    let kfd = Shared::new(endpoint).unwrap();
+    let loss = Shared::new(LossEvent {
+        kfd: kfd.clone(),
+        hardware_event_id: AtomicU32::new(19),
+        memory_event_id: AtomicU32::new(20),
+        hardware_destroy_uncertain: AtomicBool::new(false),
+        memory_destroy_uncertain: AtomicBool::new(false),
+        observed: Mutex::new(ObservedEvents::new().unwrap()),
+        lost: AtomicBool::new(false),
+    })
     .unwrap();
-    let vm = Shared::new(
-        DeviceVm {
-            loss: loss.clone(),
-            render: Some(File::open("/dev/null").unwrap()),
-            system_dma_buf_import: false,
-            gpu_id: 42,
-            render_minor: 128,
-            identity: [0; 16],
-            unique_id: Some(123),
-            base: 0x10000,
-            limit: isize::MAX as u64,
-            lds_base: 0x1000_0000_0000,
-            scratch_base: 0x2000_0000_0000,
-            sdma_next_engine: AtomicU32::new(0),
-            scratch: Mutex::new(ScratchPool::new(
-                sysfs::KfdQueueProperties {
-                    gfx_target: 120_001,
-                    xcc_count: 1,
-                    ..sysfs::KfdQueueProperties::default()
-                },
-                allocator,
-            )),
-            vmem: Mutex::new(super::super::vmem::VmState::new(allocator)),
-            version: uapi::Version {
-                major: 1,
-                minor: 23,
-            },
-            doorbells: super::super::queue::Doorbells::default(),
+    let vm = Shared::new(DeviceVm {
+        loss: loss.clone(),
+        render: Some(File::open("/dev/null").unwrap()),
+        system_dma_buf_import: false,
+        gpu_id: 42,
+        render_minor: 128,
+        identity: [0; 16],
+        unique_id: Some(123),
+        base: 0x10000,
+        limit: isize::MAX as u64,
+        lds_base: 0x1000_0000_0000,
+        scratch_base: 0x2000_0000_0000,
+        sdma_next_engine: AtomicU32::new(0),
+        scratch: Mutex::new(ScratchPool::new(sysfs::KfdQueueProperties {
+            gfx_target: 120_001,
+            xcc_count: 1,
+            ..sysfs::KfdQueueProperties::default()
+        })),
+        vmem: Mutex::new(super::super::vmem::VmState::new()),
+        version: uapi::Version {
+            major: 1,
+            minor: 23,
         },
-        allocator,
-    )
+        doorbells: super::super::queue::Doorbells::default(),
+    })
     .unwrap();
     assert!(driver.local.kfd.set(kfd).is_ok());
     let bindings = driver.local.bindings.bindings.get_mut().unwrap();
@@ -80,12 +72,12 @@ fn scripted_driver(allocator: Allocator) -> LinuxKfdDriver {
 fn forgotten_callback_resource_keeps_its_vm_and_instance_alive() {
     let callbacks = State::default();
     // SAFETY: Callback state remains stationary until all owners are reclaimed.
-    let allocator = unsafe { callbacks.allocator() };
-    let mut driver = scripted_driver(allocator);
+    let _scope = unsafe { callbacks.allocator() }.scope();
+    let mut driver = scripted_driver();
     let vm = driver.local.bindings.bindings.get_mut().unwrap().devices[0].clone();
     // This callback-owned resource has the same retained VM dependency as a
     // forgotten allocation or queue backing. No normal destructor owns it now.
-    let abandoned = Owned::new(vm, allocator).unwrap().into_raw();
+    let abandoned = Owned::new(vm).unwrap().into_raw();
     let allocations = callbacks.allocations.load(Ordering::Relaxed);
     let frees = callbacks.frees.load(Ordering::Relaxed);
     for _ in 0..3 {
@@ -148,8 +140,8 @@ fn forgotten_callback_resource_keeps_its_vm_and_instance_alive() {
 fn retained_loss_owner_preserves_the_remaining_shutdown_records() {
     let callbacks = State::default();
     // SAFETY: Callback state outlives the driver instance and recovered resource.
-    let allocator = unsafe { callbacks.allocator() };
-    let mut driver = scripted_driver(allocator);
+    let _scope = unsafe { callbacks.allocator() }.scope();
+    let mut driver = scripted_driver();
     let loss = driver
         .local
         .bindings
@@ -160,7 +152,7 @@ fn retained_loss_owner_preserves_the_remaining_shutdown_records() {
         .as_ref()
         .unwrap()
         .clone();
-    let abandoned = Owned::new(loss, allocator).unwrap().into_raw();
+    let abandoned = Owned::new(loss).unwrap().into_raw();
     assert_eq!(
         driver.shutdown().unwrap_err().kind(),
         ErrorKind::DriverContract
@@ -209,10 +201,10 @@ fn retained_loss_owner_preserves_the_remaining_shutdown_records() {
 fn retained_kfd_owner_prevents_success_after_other_cleanup_finishes() {
     let callbacks = State::default();
     // SAFETY: Callback state outlives the driver instance and recovered resource.
-    let allocator = unsafe { callbacks.allocator() };
-    let mut driver = scripted_driver(allocator);
+    let _scope = unsafe { callbacks.allocator() }.scope();
+    let mut driver = scripted_driver();
     let kfd = driver.local.kfd.get().unwrap().clone();
-    let abandoned = Owned::new(kfd, allocator).unwrap().into_raw();
+    let abandoned = Owned::new(kfd).unwrap().into_raw();
     assert_eq!(
         driver.shutdown().unwrap_err().kind(),
         ErrorKind::DriverContract

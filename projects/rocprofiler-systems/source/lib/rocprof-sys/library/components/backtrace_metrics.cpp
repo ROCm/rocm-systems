@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/components/backtrace_metrics.hpp"
+#include "common/clocks.hpp"
 #include "common/units/data_size.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/perfetto.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -26,7 +26,6 @@
 #include <timemory/components/papi/papi_vector.hpp>
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/rusage/types.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/components/trip_count/extern.hpp>
 #include <timemory/macros.hpp>
 #include <timemory/math.hpp>
@@ -45,7 +44,6 @@
 #include <array>
 #include <chrono>
 #include <cstring>
-#include <ctime>
 #include <initializer_list>
 #include <mutex>
 #include <regex>
@@ -79,9 +77,6 @@ using papi_label_instances = thread_data<std::vector<std::string>, category::sam
 
 namespace
 {
-struct perfetto_rusage
-{};
-
 unique_ptr_t<std::vector<std::string>>&
 get_papi_labels(std::int64_t _tid)
 {
@@ -317,7 +312,7 @@ backtrace_metrics::sample(int)
     }
 
     auto const _cache = tim::rusage_cache{ RUSAGE_THREAD };
-    m_cpu             = tim::get_clock_thread_now<std::int64_t, std::nano>();
+    m_cpu_time        = clocks::thread_cpu::now();
     m_mem_peak        = _cache.get_peak_rss();
     m_ctx_swch        = _cache.get_num_priority_context_switch() +
                  _cache.get_num_voluntary_context_switch();
@@ -354,7 +349,6 @@ backtrace_metrics::configure(bool _setup, std::int64_t _tid)
 
         if constexpr(tim::trait::is_available<hw_counters>::value)
         {
-            perfetto_counter_track<hw_counters>::init();
             LOG_DEBUG("HW COUNTER: starting...");
             if(get_papi_vector(_tid))
             {
@@ -380,119 +374,6 @@ backtrace_metrics::configure(bool _setup, std::int64_t _tid)
             }
         }
         LOG_DEBUG("Sampler destroyed for thread {}...", _tid);
-    }
-}
-
-void
-backtrace_metrics::init_perfetto(std::int64_t _tid, valid_array_t _valid)
-{
-    auto const _hw_cnt_labels = *get_papi_labels(_tid);
-    auto       _tid_name      = fmt::format("[{}]", _tid);
-
-    if(!perfetto_counter_track<perfetto_rusage>::exists(_tid))
-    {
-        if(get_valid(category::thread_cpu_time{}, _valid))
-        {
-            perfetto_counter_track<perfetto_rusage>::emplace(
-                _tid, fmt::format("Thread CPU time {} (S)", _tid_name), "sec");
-        }
-        if(get_valid(category::thread_peak_memory{}, _valid))
-        {
-            perfetto_counter_track<perfetto_rusage>::emplace(
-                _tid, fmt::format("Thread Peak Memory Usage {} (S)", _tid_name), "MB");
-        }
-        if(get_valid(category::thread_context_switch{}, _valid))
-        {
-            perfetto_counter_track<perfetto_rusage>::emplace(
-                _tid, fmt::format("Thread Context Switches {} (S)", _tid_name));
-        }
-        if(get_valid(category::thread_page_fault{}, _valid))
-        {
-            perfetto_counter_track<perfetto_rusage>::emplace(
-                _tid, fmt::format("Thread Page Faults {} (S)", _tid_name));
-        }
-    }
-
-    if(!perfetto_counter_track<hw_counters>::exists(_tid) &&
-       get_valid(type_list<hw_counters>{}, _valid) &&
-       get_valid(category::thread_hardware_counter{}, _valid))
-    {
-        for(auto const& itr : _hw_cnt_labels)
-        {
-            std::string _desc = tim::papi::get_event_info(itr).short_descr;
-            if(_desc.empty())
-            {
-                _desc = itr;
-            }
-            if(_desc.empty())
-            {
-                throw std::runtime_error(
-                    fmt::format("Empty description for {}", itr.c_str()));
-            }
-            perfetto_counter_track<hw_counters>::emplace(
-                _tid, fmt::format("Thread {} {} (S)", _desc, _tid_name));
-        }
-    }
-}
-
-void
-backtrace_metrics::fini_perfetto(std::int64_t _tid, valid_array_t _valid)
-{
-    auto const  _hw_cnt_labels = *get_papi_labels(_tid);
-    const auto& _thread_info   = thread_info::get(_tid, SequentTID);
-
-    if(!_thread_info)
-    {
-        throw std::runtime_error(
-            fmt::format("Error! missing thread info for tid={}", _tid));
-    }
-    if(!_thread_info)
-    {
-        return;
-    }
-
-    std::uint64_t _ts         = _thread_info->get_stop();
-    std::uint64_t _rusage_idx = 0;
-
-    if(get_valid(category::thread_cpu_time{}, _valid))
-    {
-        TRACE_COUNTER(trait::name<category::thread_cpu_time>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
-                      _ts, 0);
-    }
-
-    if(get_valid(category::thread_peak_memory{}, _valid))
-    {
-        TRACE_COUNTER(trait::name<category::thread_peak_memory>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
-                      _ts, 0);
-    }
-
-    if(get_valid(category::thread_context_switch{}, _valid))
-    {
-        TRACE_COUNTER(trait::name<category::thread_context_switch>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
-                      _ts, 0);
-    }
-
-    if(get_valid(category::thread_page_fault{}, _valid))
-    {
-        TRACE_COUNTER(trait::name<category::thread_page_fault>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
-                      _ts, 0);
-    }
-
-    if(get_valid(type_list<hw_counters>{}, _valid) &&
-       get_valid(category::thread_hardware_counter{}, _valid))
-    {
-        for(size_t i = 0; i < perfetto_counter_track<hw_counters>::size(_tid); ++i)
-        {
-            if(i < _hw_cnt_labels.size())
-            {
-                TRACE_COUNTER(trait::name<category::thread_hardware_counter>::value,
-                              perfetto_counter_track<hw_counters>::at(_tid, i), _ts, 0.0);
-            }
-        }
     }
 }
 
@@ -540,7 +421,7 @@ backtrace_metrics::operator-=(const backtrace_metrics& _rhs)
 
     if(_lhs(category::thread_cpu_time{}))
     {
-        _lhs.m_cpu -= _rhs.m_cpu;
+        _lhs.m_cpu_time -= _rhs.m_cpu_time;
     }
 
     if(_lhs(category::thread_peak_memory{}))
@@ -570,55 +451,6 @@ backtrace_metrics::operator-=(const backtrace_metrics& _rhs)
 }
 
 void
-backtrace_metrics::post_process_perfetto(std::int64_t _tid, std::uint64_t _ts) const
-{
-    std::uint64_t _rusage_idx = 0;
-
-    if((*this)(category::thread_cpu_time{}))
-    {
-        TRACE_COUNTER(
-            trait::name<category::thread_cpu_time>::value,
-            perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++), _ts,
-            std::chrono::duration<double>{ std::chrono::nanoseconds{ m_cpu } }.count());
-    }
-
-    if((*this)(category::thread_peak_memory{}))
-    {
-        TRACE_COUNTER(
-            trait::name<category::thread_peak_memory>::value,
-            perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++), _ts,
-            data_size_cast<megabytes>(bytes{ static_cast<double>(m_mem_peak) }).count());
-    }
-
-    if((*this)(category::thread_context_switch{}))
-    {
-        TRACE_COUNTER(trait::name<category::thread_context_switch>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
-                      _ts, m_ctx_swch);
-    }
-
-    if((*this)(category::thread_page_fault{}))
-    {
-        TRACE_COUNTER(trait::name<category::thread_page_fault>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
-                      _ts, m_page_flt);
-    }
-
-    if((*this)(type_list<hw_counters>{}) && (*this)(category::thread_hardware_counter{}))
-    {
-        for(size_t i = 0; i < perfetto_counter_track<hw_counters>::size(_tid); ++i)
-        {
-            if(i < m_hw_counter.size())
-            {
-                TRACE_COUNTER(trait::name<category::thread_hardware_counter>::value,
-                              perfetto_counter_track<hw_counters>::at(_tid, i), _ts,
-                              m_hw_counter.at(i));
-            }
-        }
-    }
-}
-
-void
 backtrace_metrics::cache_backtrace_data(std::int64_t _tid, std::uint64_t _ts) const
 {
     auto const is_category_enabled = [&](const auto& _category) {
@@ -628,9 +460,7 @@ backtrace_metrics::cache_backtrace_data(std::int64_t _tid, std::uint64_t _ts) co
     if(is_category_enabled(category::thread_cpu_time{}))
     {
         cache_backtrace_metrics_events<category::thread_cpu_time, double>(
-            0, _ts,
-            std::chrono::duration<double>{ std::chrono::nanoseconds{ m_cpu } }.count(),
-            _tid);
+            0, _ts, std::chrono::duration<double>{ m_cpu_time }.count(), _tid);
     }
 
     if(is_category_enabled(category::thread_peak_memory{}))

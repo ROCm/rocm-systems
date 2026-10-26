@@ -4,9 +4,12 @@
 /// @file wave_debug_test.cpp
 /// @brief Wave-level KFD debugger groundwork, exercised through the compute unit.
 
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
@@ -814,6 +817,71 @@ TEST(WaveDebugTest, ScalarLoadStraddlingIntoUnmappedPageReportsMemoryViolation) 
   fx.gpu_mem.unregister_process(kProcessId);
 }
 
+TEST(WaveDebugTest, ScalarAtomicX2AtPageEndChecksOnlyItsAccessWidth) {
+  WaveDebugFixture fx;
+  constexpr uint32_t kProcessId = 9;
+  constexpr uint64_t kPageSize = amdgpu::GpuMemory::PAGE_SIZE;
+  constexpr uint64_t kDataAddr = 0x40000;
+
+  std::vector<uint8_t> kernel_page(kPageSize);
+  std::vector<uint8_t> data_page(kPageSize);
+  KfdProcess::PageTable page_table;
+  util::DistributedSharedMutex page_table_mutex;
+  page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
+                                                              amdgpu::Mtype::RW};
+  // Exactly one data page is mapped; the page above it deliberately is not.
+  page_table[kDataAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {data_page.data(), amdgpu::Mtype::RW};
+  fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
+
+  const auto atomic =
+      cdna4::build_smem(cdna4::kSAtomicDecX2Smem, {.sbase = 0, .sdata = 2, .glc = 1, .imm = 1});
+  fx.gpu_mem.write32(kKernelAddr, atomic[0], kProcessId);
+  fx.gpu_mem.write32(kKernelAddr + 4, atomic[1], kProcessId);
+  fx.gpu_mem.write32(kKernelAddr + 8, 0xBF800000u, kProcessId); // s_nop 0
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(kProcessId);
+  fx.cu->set_debug_active(true);
+  fx.l2.set_backing_memory(&fx.gpu_mem);
+
+  // The last eight bytes of the mapped page. The atomic is one 8-byte element
+  // returned as two dwords; checking elem_size * num_dwords bytes would run into
+  // the unmapped page above.
+  const uint64_t last_qword = kDataAddr + kPageSize - 8;
+  ASSERT_TRUE(fx.gpu_mem.is_mapped(last_qword, kProcessId));
+  ASSERT_FALSE(fx.gpu_mem.is_mapped(last_qword + 8, kProcessId));
+  const uint64_t initial = 5;
+  std::memcpy(data_page.data() + kPageSize - 8, &initial, sizeof(initial));
+  const uint32_t sbase = wave->sgpr_alloc().base;
+  fx.cu->write_sgpr(sbase + 0, static_cast<uint32_t>(last_qword));
+  fx.cu->write_sgpr(sbase + 1, static_cast<uint32_t>(last_qword >> 32));
+  fx.cu->write_sgpr(sbase + 2, 9);
+  fx.cu->write_sgpr(sbase + 3, 0);
+
+  unsigned violations = 0;
+  fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &, uint64_t, bool) {
+    ++violations;
+    return true;
+  });
+
+  fx.cu->step();
+  EXPECT_EQ(violations, 0u);
+  EXPECT_FALSE(wave->debug_halted());
+  EXPECT_FALSE(wave->is_halted());
+  EXPECT_EQ(wave->pc, kKernelAddr + 8);
+
+  // The atomic completes: memory decrements and GLC returns the old qword.
+  for (int step = 0; step < 8 && fx.cu->read_sgpr(sbase + 2) != initial; ++step)
+    fx.cu->step();
+  uint64_t updated = 0;
+  std::memcpy(&updated, data_page.data() + kPageSize - 8, sizeof(updated));
+  EXPECT_EQ(updated, initial - 1);
+  EXPECT_EQ(fx.cu->read_sgpr(sbase + 2), static_cast<uint32_t>(initial));
+  EXPECT_EQ(fx.cu->read_sgpr(sbase + 3), 0u);
+
+  fx.gpu_mem.unregister_process(kProcessId);
+}
+
 // Linked gfx950 code forms helper addresses as GETPC plus a signed rel32
 // relocation. The 64-bit sum can have a 0x1ffff high dword even though it
 // denotes an address relative to the loaded code object. SWAPPC must relocate
@@ -928,13 +996,31 @@ TEST(WaveDebugTest, IllegalInstructionStopsWaveUnderDebugger) {
   EXPECT_FALSE(wave->fatal_exception_pending());
 }
 
-TEST(WaveDebugTest, IllegalInstructionWithoutDebuggerHalts) {
+TEST(WaveDebugTest, IllegalInstructionWithoutHandlerHalts) {
   WaveDebugFixture fx;
   fx.gpu_mem.write32(kKernelAddr, 0xFFFFFFFFu);
   auto *wave = fx.dispatch(kKernelAddr);
   ASSERT_NE(wave, nullptr);
   fx.cu->step();
   EXPECT_TRUE(wave->is_halted());
+}
+
+TEST(WaveDebugTest, Pm4DecodeFailureDoesNotNotifyAqlOwner) {
+  WaveDebugFixture fx;
+  fx.gpu_mem.write32(kKernelAddr, 0xFFFFFFFFu);
+  uint32_t notifications = 0;
+  fx.cu->set_illegal_inst_handler([&](amdgpu::Wavefront &) {
+    ++notifications;
+    return true;
+  });
+  auto failure = std::make_shared<amdgpu::Pm4FailureState>();
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_pm4_failure(failure);
+  fx.cu->step();
+  EXPECT_TRUE(failure->failed.load());
+  EXPECT_TRUE(wave->is_halted());
+  EXPECT_EQ(notifications, 0u);
 }
 
 TEST(WaveDebugTest, STrapWithoutConfiguredHandlerAdvancesPcWithoutChangingWaveState) {

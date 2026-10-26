@@ -9,7 +9,7 @@
 #include "rocjitsu/kmd/linux/rpc.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_sysfs.h"
+#include "uapi/linux/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
 #include <cerrno>
@@ -264,15 +264,15 @@ void Sysfs::write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links)
 }
 
 void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, const GpuInfo &gpu,
-                           uint32_t total_gpus) {
+                           uint32_t total_gpus, bool publish_peer_links) {
   std::string node_dir = nodes_dir + "/" + std::to_string(node_idx);
   make_dir(node_dir);
   make_dir(node_dir + "/mem_banks/0");
   make_dir(node_dir + "/caches/0");
   make_dir(node_dir + "/caches/1");
 
-  // IO links: link 0 = to CPU, links 1..N-1 = XGMI to peer GPUs
-  uint32_t num_io_links = 1 + (total_gpus > 1 ? total_gpus - 1 : 0);
+  // IO link 0 reaches the CPU. Peer links require an executable route.
+  uint32_t num_io_links = publish_peer_links ? total_gpus : 1;
   for (uint32_t i = 0; i < num_io_links; ++i)
     make_dir(node_dir + "/io_links/" + std::to_string(i));
 
@@ -284,7 +284,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   const DebugTopology topology = kmd::effective_topology_for(
       gpu.gfx_target_version, gpu.capability, gpu.capability2, gpu.debug_prop, gpu.revision_id);
 
-  uint32_t p2p_links = total_gpus > 1 ? total_gpus - 1 : 0;
+  uint32_t p2p_links = publish_peer_links ? total_gpus - 1 : 0;
 
   // array_count is the one geometry property KFD reports per node rather than
   // per XCC: node_show() emits node_props.array_count * NUM_XCC, while
@@ -397,7 +397,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   }
 
   // IO links 1..N-1: XGMI to peer GPUs (type 11)
-  if (total_gpus > 1) {
+  if (publish_peer_links && total_gpus > 1) {
     uint32_t link_idx = 1;
     for (uint32_t peer = 1; peer <= total_gpus; ++peer) {
       if (peer == node_idx)
@@ -508,7 +508,7 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
 
 std::string Sysfs::generate(const GpuInfo &gpu) { return generate(std::vector<GpuInfo>{gpu}); }
 
-std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
+std::string Sysfs::generate(const std::vector<GpuInfo> &gpus, bool publish_peer_links) {
   cleanup();
 
   static std::once_flag reap_once;
@@ -531,7 +531,7 @@ std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
 
   write_cpu_node(nodes_dir, num_gpus);
   for (uint32_t i = 0; i < num_gpus; ++i)
-    write_gpu_node(nodes_dir, i + 1, gpus[i], num_gpus);
+    write_gpu_node(nodes_dir, i + 1, gpus[i], num_gpus, publish_peer_links);
 
   write_drm_tree(gpus);
 
