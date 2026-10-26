@@ -7,7 +7,6 @@
 #include <gtest/gtest.h>
 
 #include <climits>
-#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -615,8 +614,9 @@ TEST_F(RomeModelsParseGraphMicrotest, ExactlyMaxChannels_IsAccepted) {
 // and parseGraph's gpu_map bound, which trusts ngpus, then reads past rdm. The
 // model describes exactly 16 GPUs, so admitting more was never intended.
 //
-// The overrun is a stack write that only ASan can see; in the ordinary build this
-// test passes either way and so does not protect CI on its own.
+// No GPU->CPU paths are set here, so a gate that admits this system does not just
+// overrun -- it dereferences a null paths[CPU] in parseRomeSystem
+// (rome_models.cc:4357) and crashes in the ordinary build, not only under ASan.
 TEST(RomeModelsGioToposMicrotest, SystemWithMoreGpusThanTheModel_IsIgnored) {
   constexpr int kModelGpus = 16;
   constexpr int kCpus = 2;
@@ -625,16 +625,6 @@ TEST(RomeModelsGioToposMicrotest, SystemWithMoreGpusThanTheModel_IsIgnored) {
   wider.system()->nodes[NET].count = 0;      // and no NICs
   wider.system()->totalBw = 120.0f;
 
-  // parseRomeSystem walks each GPU's path to every CPU to work out its NUMA
-  // node, so those have to exist before it is reached.
-  std::vector<std::vector<ncclTopoLinkList>> gpuToCpuPaths(kModelGpus + 1);
-  for (int g = 0; g <= kModelGpus; g++) {
-    gpuToCpuPaths[g].assign(kCpus, ncclTopoLinkList{});
-    for (int c = 0; c < kCpus; c++) gpuToCpuPaths[g][c].count = 1 + (g % kCpus != c);
-    wider.system()->nodes[GPU].nodes[g].paths[CPU] = gpuToCpuPaths[g].data();
-    std::snprintf(wider.system()->nodes[GPU].nodes[g].gpu.gcn,
-                  sizeof(wider.system()->nodes[GPU].nodes[g].gpu.gcn), "gfx90a");
-  }
   for (int c = 0; c < kCpus; c++) wider.system()->nodes[CPU].nodes[c].id = c;
 
   ncclTopoGraph graph;
