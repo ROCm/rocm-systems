@@ -308,6 +308,9 @@ protected:
     // Applied to every per-thread context InitNetIbCtx creates, as communicator
     // init would after AllGather1.
     std::function<void(void*)> threadCtxInit_;
+    // Applied to every listen comm CreateListenComm creates, as the net proxy
+    // does for the communicator it listens for.
+    std::function<void(void*)> listenCommInit_;
 
     void SetUp() override {
         MPITestBase::SetUp();
@@ -315,6 +318,7 @@ protected:
         numDevices_ = 0;
         initCtx_ = nullptr;
         threadCtxInit_ = nullptr;
+        listenCommInit_ = nullptr;
     }
 
     void TearDown() override {
@@ -377,7 +381,9 @@ protected:
 
     // Helper: Create listen comm
     ncclResult_t CreateListenComm(int dev, ncclNetHandle_t* handle, void** listenComm) {
-        return net_->listen(initCtx_, dev, handle, listenComm);
+        ncclResult_t res = net_->listen(initCtx_, dev, handle, listenComm);
+        if (res == ncclSuccess && *listenComm && listenCommInit_) listenCommInit_(*listenComm);
+        return res;
     }
 
     // Helper: Connect to remote

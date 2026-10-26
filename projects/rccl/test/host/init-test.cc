@@ -2214,16 +2214,17 @@ TEST_F(InitMicrotest, SetIbGdrFlushFlag_MixedReportedByRankZeroAndOtherNetsUntou
   EXPECT_TRUE(g_ibSetGdrFlushFlagCalls.empty()) << "only an ncclNetIb context holds the decision";
 }
 
-// A comm sharing its parent's net context keeps the parent's decision there and needs it too.
+// A net context shared with the parent keeps the parent's decision; the votes, which carry the parent's
+// decision (rcclFillSharedParentInfo), decide for the comm.
 TEST_F(InitMicrotest, SetIbGdrFlushFlag_SharedNetContextKeepsTheParentsDecision) {
-  for (bool parentOn : {false, true}) {
+  for (bool vote : {false, true}) {
     g_ibSetGdrFlushFlagCalls.clear();
-    IbGdrFlushFlagComm t({true, true});
+    IbGdrFlushFlagComm t({true, vote});
     FillInfoComm parent;
     parent.get()->netContext = &t.ctx;
-    parent.get()->ibGdrFlushFlag = parentOn;
+    parent.get()->ibGdrFlushFlag = true;
     t.Run(parent.get());
-    EXPECT_EQ(parentOn, t.comm.get()->ibGdrFlushFlag) << "parent " << parentOn;
+    EXPECT_EQ(vote, t.comm.get()->ibGdrFlushFlag) << "vote " << vote;
     EXPECT_TRUE(g_ibSetGdrFlushFlagCalls.empty()) << "the shared context belongs to the parent";
   }
   g_ibSetGdrFlushFlagCalls.clear();
@@ -2235,6 +2236,46 @@ TEST_F(InitMicrotest, SetIbGdrFlushFlag_SharedNetContextKeepsTheParentsDecision)
   t.Run(parent.get());
   EXPECT_TRUE(t.comm.get()->ibGdrFlushFlag) << "a comm with its own context decides alone";
   EXPECT_EQ(1u, g_ibSetGdrFlushFlagCalls.size());
+}
+
+// A rank sharing its parent's resources votes the parent's flag decision and LL128 sizes, so the new ranks of an
+// ncclCommGrow, which have no parent, reach the same decision as the existing ones.
+TEST_F(InitMicrotest, FillSharedParentInfo_SharingRankVotesTheParentsDecision) {
+  FillInfoComm parent;
+  parent.get()->buffSizes[NCCL_PROTO_LL128] = 4 << 20;
+  parent.get()->p2pLl128BuffSize = 1 << 20;
+  for (bool share : {false, true}) {
+    for (bool parentOn : {false, true}) {
+      parent.get()->shareResources = share;
+      parent.get()->ibGdrFlushFlag = parentOn;
+      ncclPeerInfo info{};
+      info.ibGdrFlushFlag = true;
+      rcclFillSharedParentInfo(&info, parent.get());
+      EXPECT_EQ(!share || parentOn, info.ibGdrFlushFlag) << "share " << share << " parent " << parentOn;
+      EXPECT_EQ(share ? 4 << 20 : 0, info.sharedLl128BuffSize) << "share " << share;
+      EXPECT_EQ(share ? 1 << 20 : 0, info.sharedP2pLl128BuffSize) << "share " << share;
+    }
+  }
+  {
+    ncclPeerInfo info{};
+    rcclFillSharedParentInfo(&info, parent.get());
+    EXPECT_FALSE(info.ibGdrFlushFlag) << "the parent's decision cannot make an incapable rank capable";
+  }
+  {
+    ncclPeerInfo info{};
+    info.ibGdrFlushFlag = true;
+    rcclFillSharedParentInfo(&info, nullptr);
+    EXPECT_TRUE(info.ibGdrFlushFlag);
+    EXPECT_EQ(0, info.sharedLl128BuffSize);
+  }
+
+  // Existing ranks 0 and 1 share a parent that decided 0; new ranks 2 and 3 are capable and have no parent.
+  IbGdrFlushFlagComm grown({true, true, true, true}, &ncclNetIb, /*rank=*/2);
+  parent.get()->shareResources = true;
+  parent.get()->ibGdrFlushFlag = false;
+  for (int r = 0; r < 2; r++) rcclFillSharedParentInfo(&grown.peers[r], parent.get());
+  grown.Run();
+  EXPECT_FALSE(grown.comm.get()->ibGdrFlushFlag) << "a new rank counts the existing ranks' parent decision";
 }
 
 TEST_F(InitMicrotest, CommInitAll_GetDeviceFault_StopsBeforeCount) {

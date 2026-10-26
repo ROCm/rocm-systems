@@ -46,9 +46,11 @@ extern NCCL_NET_DATA_IMPORT ncclNet_t ncclNetNd;
 
 // RCCL_IB_GDR_FLUSH_FLAG=1: whether this process can use the flag (the comm
 // enables it only when every rank can), and the comm-wide decision for an
-// ncclNetIb context.
+// ncclNetIb context, which listen copies into each listen comm. A comm sharing
+// its parent's context sets its own decision on its listen comms instead.
 bool ncclIbGdrFlushFlagLocalSupport();
 void ncclIbSetGdrFlushFlag(void* netContext, int enable);
+void ncclIbSetListenGdrFlushFlag(void* listenComm, int enable);
 // The ordering part of ncclIbGdrFlushFlagLocalSupport, over explicit settings:
 // NCCL_IB_OOO_RQ, NCCL_IB_RESILIENCY_PORT_FAILOVER,
 // NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME and the adaptive routing state of each

@@ -649,7 +649,8 @@ struct ncclPeerInfo {
   // [RCCL] The rcclTuningPartition this rank asks for (RCCL_TUNING_PARTITION_MODE). The comm
   // uses DPX only when every rank asks for it.
   int tuningPartition;
-  // [RCCL] This rank can use RCCL_IB_GDR_FLUSH_FLAG; the comm uses it only when every rank can.
+  // [RCCL] This rank can use RCCL_IB_GDR_FLUSH_FLAG, and so can the parent it shares resources with, if any; the
+  // comm uses it only when every rank can.
   bool ibGdrFlushFlag;
   // [RCCL] Collective and send/recv LL128 buffer sizes of the proxy this rank shares with its parent, 0 if it shares
   // none. Every rank of the comm adopts them (computeBuffSizes). Append later fields after these.

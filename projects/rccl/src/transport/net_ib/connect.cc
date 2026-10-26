@@ -150,6 +150,10 @@ void ncclIbSetGdrFlushFlag(void* netContext, int enable) {
   ((struct ncclIbNetCtx*)netContext)->gdrFlushFlag = enable;
 }
 
+void ncclIbSetListenGdrFlushFlag(void* listenComm, int enable) {
+  ((struct ncclIbListenComm*)listenComm)->gdrFlushFlag = enable;
+}
+
 NCCL_PARAM(IbSubnetAwareRouting, "IB_SUBNET_AWARE_ROUTING", 0);
 NCCL_PARAM(IbSubnetPrefixLen, "IB_SUBNET_PREFIX_LEN", 24);
 

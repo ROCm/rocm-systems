@@ -1343,16 +1343,23 @@ static void rcclSetTuningPartition(struct ncclComm* comm) {
   INFO(NCCL_INIT | NCCL_TUNING, "gfx1250 tuning table: %s", partition == RCCL_TUNING_PARTITION_DPX ? "DPX" : "SPX");
 }
 
+// [RCCL] What this rank shares with its parent goes into its AllGather1 info, so ranks of an ncclCommGrow that
+// have no parent (or none sharing resources) reach the same decisions.
+static void rcclFillSharedParentInfo(struct ncclPeerInfo* info, struct ncclComm* parent) {
+  if (parent == nullptr || !parent->shareResources) return;
+  info->ibGdrFlushFlag = info->ibGdrFlushFlag && parent->ibGdrFlushFlag;
+  info->sharedLl128BuffSize = parent->buffSizes[NCCL_PROTO_LL128];
+  info->sharedP2pLl128BuffSize = parent->p2pLl128BuffSize;
+}
+
 // Every rank sets up its net receives and picks algorithms on its own, so RCCL_IB_GDR_FLUSH_FLAG is on
-// for a comm only when every rank can use it. A comm sharing its parent's net context also needs the
-// parent's decision, which stays in that context.
+// for a comm only when every rank can use it. A net context shared with the parent keeps the parent's
+// decision; the net proxy applies this comm's decision to each of its receives.
 static void rcclSetIbGdrFlushFlag(struct ncclComm* comm, struct ncclComm* parent) {
   int nCapable = 0;
   for (int i = 0; i < comm->nRanks; i++) nCapable += comm->peerInfo[i].ibGdrFlushFlag;
   comm->ibGdrFlushFlag = nCapable == comm->nRanks;
-  if (parent && comm->netContext == parent->netContext) {
-    comm->ibGdrFlushFlag = comm->ibGdrFlushFlag && parent->ibGdrFlushFlag;
-  } else if (comm->ncclNet == &ncclNetIb) {
+  if (comm->ncclNet == &ncclNetIb && !(parent && comm->netContext == parent->netContext)) {
     ncclIbSetGdrFlushFlag(comm->netContext, comm->ibGdrFlushFlag);
   }
   if (comm->rank == 0 && nCapable > 0 && !comm->ibGdrFlushFlag) {
@@ -1883,10 +1890,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // AllGather1 - begin
   NCCLCHECKGOTO(ncclCalloc(&comm->peerInfo, nranks + 1), ret, fail); // Extra rank to represent CollNet root
   NCCLCHECKGOTO(fillInfo(comm, comm->peerInfo + rank, comm->commHash), ret, fail);
-  if (parent && parent->shareResources) {
-    comm->peerInfo[rank].sharedLl128BuffSize = parent->buffSizes[NCCL_PROTO_LL128];
-    comm->peerInfo[rank].sharedP2pLl128BuffSize = parent->p2pLl128BuffSize;
-  }
+  rcclFillSharedParentInfo(comm->peerInfo + rank, parent);
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, comm->peerInfo, sizeof(struct ncclPeerInfo)), ret, fail);
   COMPILER_ATOMIC_STORE(&comm->peerInfoValid, true, std::memory_order_release);
 

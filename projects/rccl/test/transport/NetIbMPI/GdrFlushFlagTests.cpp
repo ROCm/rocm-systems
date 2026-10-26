@@ -455,6 +455,58 @@ TEST_F(GdrFlushFlagTest, Disabled_NoFlagAndHintIgnored) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// Enabled on the net context, but not for this listen comm, as for a
+// communicator that shares its parent's context and decided against the flag
+// (ncclCommGrow with a rank that cannot use it): the receiver offers no flag
+// page, so the sender writes none and the RDMA read flush stays.
+TEST_F(GdrFlushFlagTest, Enabled_ListenCommOffKeepsRdmaReadFlush) {
+    if (!validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                   false, kMinGpusPerNode, kNoNodeLimit))
+        GTEST_SKIP() << "requires exactly " << kExactTwoProcesses << " ranks";
+    AssertInitAndGetDevices(nullptr);
+    const std::string why = EnableFlagForComm();
+    if (!why.empty()) GTEST_SKIP() << why;
+    listenCommInit_ = [](void* listenComm) { ncclIbSetListenGdrFlushFlag(listenComm, 0); };
+
+    const int rank = MPIEnvironment::world_rank;
+    ConnectionPair pair;
+    NetConnectionGuard connGuard(net_);
+    SetupConnectionWithGuard(0, pair, connGuard);
+    EXPECT_FALSE(FlagSetUp(pair, nullptr)) << "the recv comm took the context's flag over the listen comm's";
+
+    const size_t size = 8191;
+    void* buffer = nullptr;
+    ASSERT_TRUE(AllRanksOk(hipMalloc(&buffer, size) == hipSuccess));
+    auto bufGuard = makeDeviceBufferAutoGuard(buffer);
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+    void* mh = nullptr;
+    ASSERT_TRUE(AllRanksOk(RegisterGdrMemory(comm, buffer, size, &mh) == ncclSuccess));
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    std::string err;
+    void* req = nullptr;
+    for (int it = 0; it < 2; it++) {
+        const int seed = 60 + it;
+        if (rank == 0) {
+            void* bufs[1] = {buffer};
+            size_t sizes[1] = {size};
+            int tags[1] = {30 + it};
+            void* mhs[1] = {mh};
+            EXPECT_TRUE(PostFlaggedRecv(pair.recvComm, /*flag=*/true, 1, bufs, sizes, tags, mhs, &req, &err))
+                << err;
+            EXPECT_TRUE(req && TightWait(req, nullptr, &err)) << err;
+            EXPECT_EQ(ncclIbGetGpuFlushFlagSeq(pair.recvComm), 0u) << "descriptor published without the flag";
+            EXPECT_TRUE(FlushAndWait(pair.recvComm, 1, bufs, sizes, mhs, &err)) << err;
+            EXPECT_TRUE(VerifyPattern(buffer, size, seed, &err)) << err;
+        } else {
+            EXPECT_EQ(initializeBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed)), hipSuccess);
+            EXPECT_TRUE(TightSend(pair.sendComm, buffer, size, 30 + it, mh, &req, &err)) << err;
+            EXPECT_TRUE(TightWait(req, nullptr, &err)) << err;
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // Enabled for the communicator, but over a fused (two-NIC) device: the flag WR
 // would carry one NIC's keys on the other NIC's QPs, so the connection keeps
 // the RDMA read flush and a flagged hint has no effect. Both sides fuse with

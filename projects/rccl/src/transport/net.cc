@@ -214,6 +214,7 @@ struct setupReq {
   uint32_t* curr_hdp_reg;
   int isP2p;
   int sameDevice; // proxy and kernel are on the same CUDA device
+  int gdrFlushFlag; // Recv only: comm->ibGdrFlushFlag, which a net context shared with a parent may not hold
 };
 
 NCCL_PARAM(NetOptionalRecvCompletion, "NET_OPTIONAL_RECV_COMPLETION", 1);
@@ -590,6 +591,7 @@ static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
   req.tpRemoteRank = comm->topParentRanks[peerInfo->rank];
   req.sameDevice = (comm->peerInfo[proxyRank].cudaDev == comm->cudaDev);
   req.isP2p = graph == NULL ? 1 : 0;
+  req.gdrFlushFlag = comm->ibGdrFlushFlag;
   NCCLCHECK(ncclProxyCallBlocking(comm, &recv->proxyConn, ncclProxyMsgSetup, &req, sizeof(req), connectInfo,
                                   sizeof(ncclNetHandle_t)));
   memcpy((uint8_t*)connectInfo + sizeof(ncclNetHandle_t), &req.useGdr, sizeof(int));
@@ -1093,6 +1095,7 @@ static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struc
 
   if (respSize != sizeof(ncclNetHandle_t)) return ncclInternalError;
   NCCLCHECK(proxyState->ncclNet->listen(proxyState->netContext, req->netDev, respBuff, &resources->netListenComm));
+  if (proxyState->ncclNet == &ncclNetIb) ncclIbSetListenGdrFlushFlag(resources->netListenComm, req->gdrFlushFlag);
   *done = 1;
 
   return ncclSuccess;
