@@ -361,8 +361,9 @@ memory:
     tags: [multigpu, transfer]
   Unit_hipMemcpy_OrderedAfterEventRecord:
     <<: *level_2
-    # Calibrates against a device busy-loop; ASAN instrumentation skews the timing
-    disabled: [asan]
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2744 - long fixed-length busy-wait kernels hold the ordering window open; much slower under device ASAN with no added coverage; needs to be re-triaged."
     tags: [transfer]
   Unit_hipHostRegister_ReferenceFromKernelandhipMemset:
     <<: *level_default
