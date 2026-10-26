@@ -419,7 +419,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   if ((live_at_anchor - saved_sources).intersects(probe_link_pair(abi))) {
     report(error_out, ("probe-call resource planning: return-link pair s[" +
                        std::to_string(kLinkPairBase) + ":" + std::to_string(kLinkPairBase + 1) +
-                       "] is live at the anchor; cannot yet save a live link pair")
+                       "] is live at the anchor without an explicit register backup")
                           .c_str());
     return false;
   }

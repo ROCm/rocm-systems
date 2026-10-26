@@ -2,7 +2,14 @@
 
 ## Overview
 
-The Dynamic Binary Instrumentation (DBI) system patches AMDGPU HSA code objects in-place, before they are loaded into device memory, to inject code at chosen anchor instructions. Patched code objects can be loaded by either the simulated KMD (`SimulatedDriver`) or — eventually — by real ROCR via the HSA tools layer (`HSA_TOOLS_LIB=librocjitsu_hooks.so`). DBI itself is target-agnostic at the layer boundary; most per-ISA differences are confined to the instruction/spill builders and decoder, but a few arch predicates (`max_scratch_offset_bytes`, `arch_has_accvgpr`, `arch_has_unified_vgpr_allocation`) live in the orchestrator.
+The Dynamic Binary Instrumentation (DBI) system patches AMDGPU HSA code objects
+in-place, before they are loaded into device memory, to inject code at chosen
+anchor instructions. ConSan loads DBI-patched objects through its HSA tools
+plugin (`HSA_TOOLS_LIB=libhsa_consan.so`) in simulator and physical-GPU runs.
+DBI itself is target-agnostic at the layer boundary; most per-ISA differences
+are confined to the instruction/spill builders and decoder, but a few arch
+predicates (`max_scratch_offset_bytes`, `arch_has_accvgpr`,
+`arch_has_unified_vgpr_allocation`) live in the orchestrator.
 
 This document describes the DBI subsystem as implemented. The instrumentor can
 insert an inline nop or call a verified, copied probe body. Calls pass explicit
@@ -193,7 +200,28 @@ The intermediate site/plan types are expected to thicken as the framework grows 
 
 ### Code Object Patcher (`code/patch/code_object_patcher.h`) [shared with DBT]
 
-Owns ELF-level mutations. The DBI orchestrator reads the original payload via `text_bytes()`, assembles the new `.text` locally (each anchor spliced in place, then the probe bodies, the `s_nop`-padded entry-prologue stub if there is one, and every trampoline appended after the original bytes with `append_words()` / `append_nop_padding()`), and applies it with a single `replace_text()`. A patch carrying an entry prologue first calls `redirect_kernel_entry()` to point the descriptor at the stub, at the descriptor's original file offset, before `replace_text()` shifts the entry field with everything else. A patch carrying an entry prologue then adds its `.rocjitsu.kernarg` record through `append_nonalloc_section()`, and `emit()` returns the patched ELF buffer. When a site spills, the orchestrator also calls `set_private_segment_fixed_size(descriptor_file_offset, SpillManager::total_private_bytes())` to grow the kernel's scratch reservation to cover the DBI spill zone before `replace_text`. The patcher accepts any well-formed mutation request; layout decisions stay in the orchestrator. Trampolines live inside `.text` as a local code cave (the same layout DBT uses) rather than a separate section, so cave offsets are plain `.text`-relative bytes in `[text_size, text_size + cave_bytes)`.
+Owns ELF-level mutations. The DBI orchestrator reads the original payload via
+`text_bytes()`, assembles the new `.text` locally (each anchor spliced in place,
+then the probe bodies, the `s_nop`-padded entry-prologue stub if there is one, and
+every trampoline appended after the original bytes with `append_words()` /
+`append_nop_padding()`), and applies it with a single `replace_text()`. A patch
+carrying an entry prologue first calls `redirect_kernel_entry()` to point the
+descriptor at the stub, at the descriptor's original file offset, before
+`replace_text()` shifts the entry field with everything else. After text
+replacement, it adds the `.rocjitsu.kernarg` record when entry storage is used.
+
+Resource edits use the descriptor rediscovered in that rewritten image.
+`patch_kernel_resources()` validates and updates the requested kernarg,
+private-segment, and register metadata together with the descriptor. A spill
+grows the private-segment size to `SpillManager::total_private_bytes()` through
+this operation, including on the default spill path. Missing metadata or an
+insufficient integer encoding rejects the patch before any ELF or site map is
+published.
+
+The patcher accepts any well-formed mutation request; layout decisions stay in
+the orchestrator. Trampolines live inside `.text` as a local code cave (the same
+layout DBT uses) rather than a separate section, so cave offsets are plain
+`.text`-relative bytes in `[text_size, text_size + cave_bytes)`.
 
 ### Instruction Builder (`code/builders/instruction_builder.h`) [shared with DBT]
 

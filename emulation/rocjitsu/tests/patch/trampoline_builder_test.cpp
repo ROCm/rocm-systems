@@ -354,7 +354,7 @@ bool has_sgpr(const RegisterSet &set, uint16_t index) {
   return set.contains(RegisterRef{RegClass::SGPR, index, 1});
 }
 
-// A live link pair s[30:31] fails closed (until this is supported)
+// A live link pair s[30:31] fails closed without an explicit register backup.
 TEST(TrampolineBuilderPlan, LiveLinkPairFails) {
   TrampolinePlan plan;
   std::string err;
