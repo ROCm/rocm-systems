@@ -168,6 +168,10 @@ do_host_tests() {
     # gates its fault-mask blocks on ENABLE_FAULT_INJECTION at the preprocessor,
     # so one compile cannot cover both. See test/host/CMakeLists.txt.
     "rccl-UnitTestsMicroInit-faultinj:$SCRIPT_DIR/host_tests_micro_init_faultinj.xml"
+    "rccl-UnitTestsMicroCollTrace:$SCRIPT_DIR/host_tests_micro_coll_trace.xml"
+    "rccl-UnitTestsMicroRecorder:$SCRIPT_DIR/host_tests_micro_recorder.xml"
+    "rccl-UnitTestsMicroApiTrace:$SCRIPT_DIR/host_tests_micro_api_trace.xml"
+    "rccl-UnitTestsMicroDebug:$SCRIPT_DIR/host_tests_micro_debug.xml"
     "rccl-UnitTestsMicroEnqueue:$SCRIPT_DIR/host_tests_micro_enqueue.xml"
     # ENABLE_DEVICE_LINKER defaults ON, so this variant is the arm that ships;
     # enqueue.cc gates rcclShmemDynamicSize on RCCL_DEVICE_LINKER at the
