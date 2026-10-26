@@ -178,7 +178,6 @@ struct InstrumentedSite {
   uint32_t guest_size = 0;
   uint64_t instrumentation_offset = 0;
   uint32_t instrumentation_size = 0;
-  uint64_t probe_body_offset = 0;
 };
 
 /// @brief Original SGPR/VGPR metadata counts needed to request register growth.

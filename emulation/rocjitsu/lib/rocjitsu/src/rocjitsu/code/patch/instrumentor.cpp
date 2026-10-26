@@ -1829,8 +1829,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                                               ? 0u
                                               : a.site->original_size,
                             .instrumentation_offset = a.trampoline_offset,
-                            .instrumentation_size = a.bytes.original_byte_offset,
-                            .probe_body_offset = a.probe_target_offset});
+                            .instrumentation_size = a.bytes.original_byte_offset});
     result.patches.push_back(std::move(patch));
   }
   return result;
