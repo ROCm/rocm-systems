@@ -128,6 +128,11 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_INTERRUPT");
     enable_interrupt_ = (var == "0") ? false : true;
 
+    // Report the exporting device as the owner of a dmabuf-imported VMM mapping in
+    // hsa_amd_pointer_info. Set to 0 to restore the legacy behavior of reporting no owner.
+    var = os::GetEnvVar("HSA_ENABLE_VMEM_IMPORT_OWNER");
+    enable_vmem_import_owner_ = (var == "0") ? false : true;
+
     var = os::GetEnvVar("HSA_ENABLE_SDMA");
     enable_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
@@ -421,6 +426,8 @@ class Flag {
 
   bool enable_interrupt() const { return enable_interrupt_; }
 
+  bool enable_vmem_import_owner() const { return enable_vmem_import_owner_; }
+
   bool enable_sdma_hdp_flush() const { return enable_sdma_hdp_flush_; }
 
   bool running_valgrind() const { return running_valgrind_; }
@@ -610,6 +617,7 @@ class Flag {
   bool check_flat_scratch_;
   bool enable_vm_fault_message_;
   bool enable_interrupt_;
+  bool enable_vmem_import_owner_;
   bool enable_sdma_hdp_flush_;
   bool running_valgrind_;
   bool sdma_wait_idle_;
