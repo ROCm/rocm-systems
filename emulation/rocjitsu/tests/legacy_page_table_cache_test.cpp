@@ -18,6 +18,23 @@
 namespace rocjitsu::amdgpu {
 namespace {
 
+TEST(LegacyPageTableCacheStateTest, MutationTokenIsCacheLineAlignedAndRetained) {
+  std::shared_ptr<const std::atomic<uint64_t>> token;
+  uint64_t published_epoch = 0;
+  {
+    KfdProcess process(7);
+    token = process.page_table_mutation_epoch();
+    ASSERT_NE(token, nullptr);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(token.get()) % 64, 0u);
+    const uint64_t initial_epoch = token->load();
+    std::array<uint8_t, kLegacyPageSize> page{};
+    process.map_pages(0x40000000, page.data(), page.size(), Mtype::RW);
+    published_epoch = token->load();
+    EXPECT_GT(published_epoch, initial_epoch);
+  }
+  EXPECT_EQ(token->load(), published_epoch);
+}
+
 TEST(LegacyPageTableCacheStateTest, RegistrationRequiresMutationSerialization) {
   GpuMemory memory("page_cache_registration");
   LegacyAddressSpace space(memory);
