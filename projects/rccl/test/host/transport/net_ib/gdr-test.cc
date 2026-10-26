@@ -18,6 +18,7 @@
 #include "fakes/nccl_fakes.h"
 #include "fakes/os_fakes.h"
 #include "fakes/param_redirect.h"
+#include "transport/net_ib/NetIbDmaBufProbe.h"
 #include "transport/net_ib/common.h"
 
 namespace {
@@ -94,9 +95,15 @@ TEST_F(NetIbGdrMicrotest, GdrSupportInitOnce_DiscoveredPeerMemPublishesModule) {
 TEST_F(NetIbGdrMicrotest, GdrSupportInitOnce_HyperVWithNumaBalancingAndStrictOrderingIsBlocklisted) {
   ncclIbGdrModuleLoaded = 0;
   ncclIbGdrBlocklisted = 0;
-  int reads = 0;
-  ScopedHook topo(g_ncclOsTopoGetStrFromSys, [&reads](const char*, const char*, char* value, int size) {
-    std::snprintf(value, size, "%s", reads++ == 0 ? "Hyper-V UEFI Release v4.1" : "1");
+  ScopedHook topo(g_ncclOsTopoGetStrFromSys, [](const char*, const char* fileName, char* value, int size) {
+    if (std::strcmp(fileName, "bios_version") == 0) {
+      std::snprintf(value, size, "%s", "Hyper-V UEFI Release v4.1");
+    } else if (std::strcmp(fileName, "numa_balancing") == 0) {
+      std::snprintf(value, size, "%s", "1");
+    } else {
+      ADD_FAILURE() << "unexpected sysfs file " << fileName;
+      return ncclInternalError;
+    }
     return ncclSuccess;
   });
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
@@ -114,9 +121,15 @@ TEST_F(NetIbGdrMicrotest, GdrSupportInitOnce_HyperVWithNumaBalancingAndStrictOrd
 TEST_F(NetIbGdrMicrotest, GdrSupportInitOnce_HyperVWithoutNumaBalancingKeepsDiscoveredModule) {
   ncclIbGdrModuleLoaded = 0;
   ncclIbGdrBlocklisted = 0;
-  int reads = 0;
-  ScopedHook topo(g_ncclOsTopoGetStrFromSys, [&reads](const char*, const char*, char* value, int size) {
-    std::snprintf(value, size, "%s", reads++ == 0 ? "Hyper-V UEFI Release v4.1" : "0");
+  ScopedHook topo(g_ncclOsTopoGetStrFromSys, [](const char*, const char* fileName, char* value, int size) {
+    if (std::strcmp(fileName, "bios_version") == 0) {
+      std::snprintf(value, size, "%s", "Hyper-V UEFI Release v4.1");
+    } else if (std::strcmp(fileName, "numa_balancing") == 0) {
+      std::snprintf(value, size, "%s", "0");
+    } else {
+      ADD_FAILURE() << "unexpected sysfs file " << fileName;
+      return ncclInternalError;
+    }
     return ncclSuccess;
   });
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
@@ -234,20 +247,22 @@ TEST_F(NetIbGdrMicrotest, DmaBufSupportInitOnce_SupportedProbeMarksPhysicalDevic
 }
 
 TEST_F(NetIbGdrMicrotest, DmaBufSupportInitOnce_UnsupportedErrnoMarksDeviceUnsupported) {
-  ibv_context context{};
-  ibv_pd pd{};
-  ncclIbMergedDevs[0].vProps.devs[0] = 0;
-  ncclIbDevs[0].context = &context;
-  ncclIbDevs[0].dmaBufSupported = 0;
-  ibDmaSupportInitDev = 0;
-  ScopedDmaBufProbe dmaProbe(&pd, EOPNOTSUPP);
+  for (int probeErrno : {EOPNOTSUPP, EPROTONOSUPPORT}) {
+    ibv_context context{};
+    ibv_pd pd{};
+    ncclIbMergedDevs[0].vProps.devs[0] = 0;
+    ncclIbDevs[0].context = &context;
+    ncclIbDevs[0].dmaBufSupported = 0;
+    ibDmaSupportInitDev = 0;
+    ScopedDmaBufProbe dmaProbe(&pd, probeErrno);
 
-  ibDmaBufSupportInitOnce();
+    ibDmaBufSupportInitOnce();
 
-  EXPECT_EQ(ncclIbDevs[0].dmaBufSupported, -1);
-  EXPECT_EQ(dmaProbe.alloc.calls, 1);
-  EXPECT_EQ(dmaProbe.probe.calls, 1);
-  EXPECT_EQ(dmaProbe.dealloc.calls, 1);
+    EXPECT_EQ(ncclIbDevs[0].dmaBufSupported, -1);
+    EXPECT_EQ(dmaProbe.alloc.calls, 1);
+    EXPECT_EQ(dmaProbe.probe.calls, 1);
+    EXPECT_EQ(dmaProbe.dealloc.calls, 1);
+  }
 }
 
 TEST_F(NetIbGdrMicrotest, DmaBufSupport_PublicApiReturnsCachedCapability) {
@@ -267,7 +282,7 @@ TEST_F(NetIbGdrMicrotest, DmaBufSupport_PublicApiReturnsCachedCapability) {
           *out = &pd;
           return ncclSuccess;
         };
-        g_ibvDirectRegDmaBufMr = [&](ibv_pd*, uint64_t, size_t, uint64_t, int, int) -> ibv_mr* {
+        g_ibvDirectRegDmabufMr = [&](ibv_pd*, uint64_t, size_t, uint64_t, int, int) -> ibv_mr* {
           ++probes;
           errno = EBADF;
           return nullptr;
@@ -300,7 +315,7 @@ TEST_F(NetIbGdrMicrotest, DmaBufSupport_PublicApiCachesUnsupportedCapability) {
           *out = &pd;
           return ncclSuccess;
         };
-        g_ibvDirectRegDmaBufMr = [&](ibv_pd*, uint64_t, size_t, uint64_t, int, int) -> ibv_mr* {
+        g_ibvDirectRegDmabufMr = [&](ibv_pd*, uint64_t, size_t, uint64_t, int, int) -> ibv_mr* {
           ++probes;
           errno = EOPNOTSUPP;
           return nullptr;

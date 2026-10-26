@@ -9,7 +9,7 @@
 // A producer over the reserve/commit protocol in abce_ring_core.h, the same
 // functions the host ring in abce_ring_host.h runs, driven from a shader. It
 // adds only what the host ring does not need: stores into the ring from a
-// kernel, and releasing them to system scope as a submission is published.
+// kernel, and making them visible to the engine as a submission is published.
 //
 // A device ring belongs to the kernels of one device; the host never submits to
 // it. That keeps a kernel's copy from queueing behind host work that may itself
@@ -19,7 +19,7 @@
 // Requirements: the ring buffer and its read/write/doorbell words must be
 // DEVICE-VISIBLE and the doorbell device-writable (an hsa_amd_queue_create SDMA
 // queue whose read/write pointer and doorbell addresses are exposed through
-// hsa_amd_queue_get_info).
+// hsa_amd_queue_get_info), and the ring buffer mapped UNCACHED, as ROCr maps it.
 
 #ifndef ABCE_RING_DEVICE_H_
 #define ABCE_RING_DEVICE_H_
@@ -29,6 +29,7 @@
 
 #include "abce_config.h"
 #include "abce_ring_core.h"
+#include "sdma_packets.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,13 +54,17 @@ static inline char* abce_device_ring_write_address(const abce_device_ring_t* rin
   return (char*)ring->base + abce_ring_wrap(write_index, ring->size);
 }
 
-// Fills a reservation with NOPs: a zero dword is an SDMA NOP. Only wrap padding
-// needs it; the submitter stores its packets whole.
-static inline void abce_device_ring_zero(const abce_device_ring_t* ring,
-                                         const abce_ring_reservation_t* reservation) {
+// Fills a reservation with NOPs: one counted header over the first
+// SDMA_NOP_MAX_DWORDS, so the engine skips them as one packet, and zero dwords
+// (one-dword NOPs) after it. Only wrap padding needs it; the submitter stores
+// its packets whole.
+static inline void abce_device_ring_pad(const abce_device_ring_t* ring,
+                                        const abce_ring_reservation_t* reservation) {
   uint32_t* words = (uint32_t*)abce_device_ring_write_address(ring, reservation->start);
   const uint64_t num_words = abce_ring_reservation_bytes(reservation) / sizeof(uint32_t);
   for (uint64_t word_idx = 0; word_idx < num_words; ++word_idx) words[word_idx] = 0;
+  const uint64_t nop_words = num_words < SDMA_NOP_MAX_DWORDS ? num_words : SDMA_NOP_MAX_DWORDS;
+  words[0] = (uint32_t)(nop_words - 1) << SDMA_NOP_COUNT_SHIFT;
 }
 
 static inline uint64_t abce_device_ring_load_read_index(void* user_data) {
@@ -67,16 +72,12 @@ static inline uint64_t abce_device_ring_load_read_index(void* user_data) {
   return abce_ring_atomic_load_hw(ring->read_ptr);
 }
 
-// THE RELEASE FENCE IS THE SUBMISSION'S SYSTEM-SCOPE RELEASE POINT: it orders
-// the packet dwords, and everything the calling thread wrote beforehand
-// including the buffers the packets name, ahead of the engine seeing new work.
-// A fence rather than a release store on one of them, because which store the
-// engine acts on is target-dependent — gfx9/gfx10 SDMA has only read-pointer
-// writeback, so the doorbell starts it; gfx11+ also polls the write pointer.
+// The packets land before either store below (gfx9/gfx10 start on the doorbell,
+// gfx11+ also poll the write pointer). Nothing else the thread wrote is
+// released.
 static inline void abce_device_ring_publish_write_index(void* user_data, uint64_t new_write_index) {
   abce_device_ring_t* ring = (abce_device_ring_t*)user_data;
-  abce_ring_atomic_fence_release();
-  // Both relaxed: the fence covers every store below it.
+  abce_ring_wait_stores();
   abce_ring_atomic_store_hw(ring->write_ptr, new_write_index);
   abce_ring_atomic_store_hw(ring->doorbell, new_write_index);
 }
@@ -92,25 +93,22 @@ static inline abce_status_t abce_device_ring_submit(abce_device_ring_t* ring,
   return abce_ring_publish(&publisher, reservation);
 }
 
-static inline abce_status_t abce_device_ring_publish_padding(
-    void* user_data, const abce_ring_reservation_t* padding) {
-  abce_device_ring_t* ring = (abce_device_ring_t*)user_data;
-  abce_device_ring_zero(ring, padding);
-  return abce_device_ring_submit(ring, padding);
-}
-
-// Reserves |bytes| of contiguous ring space, blocking while the ring is full.
-// Fails only with ABCE_STATUS_OUT_OF_RANGE, when |bytes| can never fit.
+// Reserves |bytes| of contiguous ring space. While the ring is full it waits if
+// |block|, else returns ABCE_STATUS_NOT_READY. Wrap padding is folded in
+// (abce_ring_reserve()): the payload is the last |bytes| of the reservation, and
+// any tail before it must be filled with NOPs before submit. |bytes| may be at
+// most half the ring; ABCE_STATUS_OUT_OF_RANGE otherwise.
 static inline abce_status_t abce_device_ring_reserve(abce_device_ring_t* ring, uint64_t bytes,
+                                                     bool block,
                                                      abce_ring_reservation_t* out_reservation) {
   abce_ring_producer_t producer;
   producer.reserve_cursor = &ring->control->reserve_cursor;
   producer.cached_read_index = &ring->control->cached_read_index;
   producer.size = ring->size;
   producer.load_read_index = abce_device_ring_load_read_index;
-  producer.publish_padding = abce_device_ring_publish_padding;
+  producer.publish_padding = NULL;
   producer.user_data = ring;
-  return abce_ring_reserve(&producer, bytes, out_reservation);
+  return abce_ring_reserve_(&producer, bytes, block, out_reservation);
 }
 
 #ifdef __cplusplus

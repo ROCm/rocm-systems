@@ -58,6 +58,47 @@ void InitOneQpBase(ncclIbNetCommBase* base, FakeIbvVerbs* verbs, bool isSend) {
   base->weights[0] = 100;
 }
 
+struct TwoQpSendComm {
+  static constexpr uint64_t kRemoteAddr = 0x3000;
+
+  TwoQpSendComm(uint32_t firstQpNum, uint32_t secondQpNum, size_t bytes)
+      : first(firstQpNum), second(secondQpNum), data(bytes) {
+    comm.base.isSend = true;
+    comm.base.vProps.ndevs = 2;
+    comm.base.nqps = 2;
+    comm.base.nDataQps = 2;
+    comm.base.splitDataOnQps = 1;
+    comm.base.recvMatchingScheme = BY_INDEX;
+    ibv_qp* qps[] = {&first.qp, &second.qp};
+    for (int i = 0; i < 2; ++i) {
+      comm.base.qps[i].qp = qps[i];
+      comm.base.qps[i].devIndex = i;
+      comm.base.qps[i].remDevIdx = i;
+      comm.base.activeQps[i] = &comm.base.qps[i];
+    }
+    request.base = &comm.base;
+    request.type = NCCL_NET_IB_REQ_SEND;
+    request.send.data = data.data();
+    request.send.size = data.size();
+    request.send.weights[0] = request.send.weights[1] = 50;
+    request.send.lkeys[0] = 0x10;
+    request.send.lkeys[1] = 0x11;
+    comm.sendReqs[0][0] = &request;
+    comm.ctsFifo[0][0].nreqs = 1;
+    comm.ctsFifo[0][0].addr = kRemoteAddr;
+    comm.ctsFifo[0][0].rkeys[0] = 0x20;
+    comm.ctsFifo[0][0].rkeys[1] = 0x21;
+  }
+
+  uint64_t DataAddr(size_t offset) const { return reinterpret_cast<uintptr_t>(data.data()) + offset; }
+
+  FakeIbvVerbs first;
+  FakeIbvVerbs second;
+  std::vector<unsigned char> data;
+  ncclIbSendComm comm{};
+  ncclIbRequest request{};
+};
+
 class NetIbP2pMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -369,10 +410,14 @@ TEST_F(NetIbP2pMicrotest, PostFifo_DifferentSlotIsUnsignaledUnlessResiliencyIsEn
   request.base = &comm.base;
   request.id = 0;
   request.nreqs = 1;
+  const uint64_t slotOneRemote = 0x1000 + NCCL_NET_IB_MAX_RECVS * sizeof(struct ncclIbSendFifo);
+  const uint64_t slotOneLocal = reinterpret_cast<uintptr_t>(comm.remCtsFifo.elems[1]);
 
   ASSERT_EQ(ncclIbPostFifo(&comm, &request, /*slot=*/1), ncclSuccess);
   ASSERT_EQ(g_ibvPostedSends.size(), 1u);
   EXPECT_EQ(g_ibvPostedSends[0].sendFlags & IBV_SEND_SIGNALED, 0);
+  EXPECT_EQ(g_ibvPostedSends[0].remoteAddress, slotOneRemote);
+  EXPECT_EQ(g_ibvPostedSends[0].sge.addr, slotOneLocal);
 
   g_ibvPostedSends.clear();
   ncclIbResiliency resiliency{};
@@ -380,164 +425,68 @@ TEST_F(NetIbP2pMicrotest, PostFifo_DifferentSlotIsUnsignaledUnlessResiliencyIsEn
   ASSERT_EQ(ncclIbPostFifo(&comm, &request, /*slot=*/1), ncclSuccess);
   ASSERT_EQ(g_ibvPostedSends.size(), 1u);
   EXPECT_NE(g_ibvPostedSends[0].sendFlags & IBV_SEND_SIGNALED, 0);
+  EXPECT_EQ(g_ibvPostedSends[0].wrId, 1u);
+  EXPECT_EQ(g_ibvPostedSends[0].remoteAddress, slotOneRemote);
+  EXPECT_EQ(g_ibvPostedSends[0].sge.addr, slotOneLocal);
 }
 
 TEST_F(NetIbP2pMicrotest, MultiSend_SmallPayloadUsesOnlyRotatedActiveQp) {
-  FakeIbvVerbs first(21);
-  FakeIbvVerbs second(22);
-  ncclIbSendComm comm{};
-  comm.base.isSend = true;
-  comm.base.vProps.ndevs = 2;
-  comm.base.nqps = 2;
-  comm.base.nDataQps = 2;
-  comm.base.splitDataOnQps = 1;
-  comm.base.recvMatchingScheme = BY_INDEX;
-  comm.base.qps[0].qp = &first.qp;
-  comm.base.qps[0].devIndex = 0;
-  comm.base.qps[0].remDevIdx = 0;
-  comm.base.qps[1].qp = &second.qp;
-  comm.base.qps[1].devIndex = 1;
-  comm.base.qps[1].remDevIdx = 1;
-  comm.base.activeQps[0] = &comm.base.qps[0];
-  comm.base.activeQps[1] = &comm.base.qps[1];
-  ncclIbRequest request{};
-  request.base = &comm.base;
-  request.id = 0;
-  request.type = NCCL_NET_IB_REQ_SEND;
-  std::array<unsigned char, 64> data{};
-  request.send.data = data.data();
-  request.send.size = data.size();
-  request.send.weights[0] = 50;
-  request.send.weights[1] = 50;
-  request.send.lkeys[0] = 0x10;
-  request.send.lkeys[1] = 0x11;
-  comm.sendReqs[0][0] = &request;
-  comm.ctsFifo[0][0].nreqs = 1;
-  comm.ctsFifo[0][0].addr = 0x2000;
-  comm.ctsFifo[0][0].rkeys[0] = 0x20;
-  comm.ctsFifo[0][0].rkeys[1] = 0x21;
+  TwoQpSendComm send(21, 22, /*bytes=*/64);
 
-  ASSERT_EQ(ncclIbMultiSend(&comm, 0), ncclSuccess);
+  ASSERT_EQ(ncclIbMultiSend(&send.comm, 0), ncclSuccess);
   ASSERT_EQ(g_ibvPostedSends.size(), 2u);
   EXPECT_EQ(g_ibvPostedSends[0].qpNum, 21u);
-  EXPECT_EQ(g_ibvPostedSends[0].sge.length, data.size());
+  EXPECT_EQ(g_ibvPostedSends[0].sge.length, send.data.size());
   EXPECT_EQ(g_ibvPostedSends[1].qpNum, 22u);
   EXPECT_EQ(g_ibvPostedSends[1].sge.length, 0u);
   EXPECT_EQ(g_ibvPostedSends[0].opcode, IBV_WR_RDMA_WRITE_WITH_IMM);
-  EXPECT_EQ(be32toh(g_ibvPostedSends[0].immData), data.size());
+  EXPECT_EQ(be32toh(g_ibvPostedSends[0].immData), send.data.size());
 }
 
 TEST_F(NetIbP2pMicrotest, MultiSend_WeightedPayloadAlignsChunksAndClampsFinalBytes) {
-  FakeIbvVerbs first(31);
-  FakeIbvVerbs second(32);
-  ncclIbSendComm comm{};
-  comm.base.isSend = true;
-  comm.base.vProps.ndevs = 2;
-  comm.base.nqps = 2;
-  comm.base.nDataQps = 2;
-  comm.base.splitDataOnQps = 1;
-  comm.base.recvMatchingScheme = BY_INDEX;
-  for (int i = 0; i < 2; ++i) {
-    comm.base.qps[i].qp = i == 0 ? &first.qp : &second.qp;
-    comm.base.qps[i].devIndex = i;
-    comm.base.qps[i].remDevIdx = i;
-    comm.base.activeQps[i] = &comm.base.qps[i];
-  }
-  ncclIbRequest request{};
-  request.base = &comm.base;
-  request.id = 0;
-  request.type = NCCL_NET_IB_REQ_SEND;
-  std::array<unsigned char, 300> data{};
-  request.send.data = data.data();
-  request.send.size = data.size();
-  request.send.weights[0] = 75;
-  request.send.weights[1] = 25;
-  comm.sendReqs[0][0] = &request;
-  comm.ctsFifo[0][0].nreqs = 1;
-  comm.ctsFifo[0][0].addr = 0x3000;
-  comm.ctsFifo[0][0].rkeys[0] = 1;
-  comm.ctsFifo[0][0].rkeys[1] = 2;
+  TwoQpSendComm send(31, 32, /*bytes=*/300);
+  send.request.send.weights[0] = 75;
+  send.request.send.weights[1] = 25;
+  // Crossed so that a remote-indexed rkey and a local-indexed lkey cannot pass for each other.
+  send.comm.base.qps[0].remDevIdx = 1;
+  send.comm.base.qps[1].remDevIdx = 0;
 
-  ASSERT_EQ(ncclIbMultiSend(&comm, 0), ncclSuccess);
+  ASSERT_EQ(ncclIbMultiSend(&send.comm, 0), ncclSuccess);
   ASSERT_EQ(g_ibvPostedSends.size(), 2u);
   EXPECT_EQ(g_ibvPostedSends[0].sge.length, 256u);
   EXPECT_EQ(g_ibvPostedSends[1].sge.length, 44u);
-  EXPECT_EQ(g_ibvPostedSends[0].sge.length + g_ibvPostedSends[1].sge.length, data.size());
-  EXPECT_EQ(g_ibvPostedSends[1].remoteAddress, 0x3000u + 256);
+  EXPECT_EQ(g_ibvPostedSends[0].sge.length + g_ibvPostedSends[1].sge.length, send.data.size());
+  EXPECT_EQ(g_ibvPostedSends[0].sge.addr, send.DataAddr(0));
+  EXPECT_EQ(g_ibvPostedSends[0].sge.lkey, 0x10u);
+  EXPECT_EQ(g_ibvPostedSends[0].rkey, 0x21u);
+  EXPECT_EQ(g_ibvPostedSends[1].sge.addr, send.DataAddr(256));
+  EXPECT_EQ(g_ibvPostedSends[1].sge.lkey, 0x11u);
+  EXPECT_EQ(g_ibvPostedSends[1].rkey, 0x20u);
+  EXPECT_EQ(g_ibvPostedSends[1].remoteAddress, TwoQpSendComm::kRemoteAddr + 256);
 }
 
 TEST_F(NetIbP2pMicrotest, MultiSend_PayloadAtSplitThresholdUsesWeightedPath) {
-  FakeIbvVerbs first(33);
-  FakeIbvVerbs second(34);
-  ncclIbSendComm comm{};
-  comm.base.isSend = true;
-  comm.base.vProps.ndevs = 2;
-  comm.base.nqps = 2;
-  comm.base.nDataQps = 2;
-  comm.base.splitDataOnQps = 1;
-  for (int i = 0; i < 2; ++i) {
-    comm.base.qps[i].qp = i == 0 ? &first.qp : &second.qp;
-    comm.base.qps[i].devIndex = i;
-    comm.base.qps[i].remDevIdx = i;
-    comm.base.activeQps[i] = &comm.base.qps[i];
-  }
+  TwoQpSendComm send(33, 34, /*bytes=*/256);
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     return std::strcmp(name, "RCCL_IB_SPLIT_DATA_THRESHOLD") == 0 ? int64_t{256} : fallback;
   });
-  ncclIbRequest request{};
-  request.base = &comm.base;
-  request.type = NCCL_NET_IB_REQ_SEND;
-  std::array<unsigned char, 256> data{};
-  request.send.data = data.data();
-  request.send.size = data.size();
-  request.send.weights[0] = request.send.weights[1] = 50;
-  comm.sendReqs[0][0] = &request;
-  comm.ctsFifo[0][0].nreqs = 1;
-  comm.ctsFifo[0][0].addr = 0x3500;
-  comm.ctsFifo[0][0].rkeys[0] = 1;
-  comm.ctsFifo[0][0].rkeys[1] = 2;
 
-  ASSERT_EQ(ncclIbMultiSend(&comm, 0), ncclSuccess);
+  ASSERT_EQ(ncclIbMultiSend(&send.comm, 0), ncclSuccess);
   ASSERT_EQ(g_ibvPostedSends.size(), 2u);
   EXPECT_EQ(g_ibvPostedSends[0].sge.length, 128u);
   EXPECT_EQ(g_ibvPostedSends[1].sge.length, 128u);
 }
 
 TEST_F(NetIbP2pMicrotest, MultiSend_RequestRotationSelectsOwningActiveQp) {
-  FakeIbvVerbs first(35);
-  FakeIbvVerbs second(36);
-  ncclIbSendComm comm{};
-  comm.base.isSend = true;
-  comm.base.vProps.ndevs = 2;
-  comm.base.nqps = 2;
-  comm.base.nDataQps = 1;
-  comm.base.splitDataOnQps = 0;
-  comm.base.qps[0].qp = &first.qp;
-  comm.base.qps[0].devIndex = 0;
-  comm.base.qps[0].remDevIdx = 0;
-  comm.base.qps[1].qp = &second.qp;
-  comm.base.qps[1].devIndex = 1;
-  comm.base.qps[1].remDevIdx = 1;
-  comm.base.activeQps[0] = &comm.base.qps[0];
-  comm.base.activeQps[1] = &comm.base.qps[1];
-  ncclIbRequest request{};
-  request.base = &comm.base;
-  request.id = 1;
-  request.type = NCCL_NET_IB_REQ_SEND;
-  std::array<unsigned char, 64> data{};
-  request.send.data = data.data();
-  request.send.size = data.size();
-  request.send.weights[0] = request.send.weights[1] = 50;
-  comm.sendReqs[0][0] = &request;
-  comm.ctsFifo[0][0].nreqs = 1;
-  comm.ctsFifo[0][0].addr = 0x3600;
-  comm.ctsFifo[0][0].rkeys[0] = 1;
-  comm.ctsFifo[0][0].rkeys[1] = 2;
+  TwoQpSendComm send(35, 36, /*bytes=*/64);
+  send.comm.base.nDataQps = 1;
+  send.comm.base.splitDataOnQps = 0;
+  send.request.id = 1;
 
-  ASSERT_EQ(ncclIbMultiSend(&comm, 0), ncclSuccess);
+  ASSERT_EQ(ncclIbMultiSend(&send.comm, 0), ncclSuccess);
   ASSERT_EQ(g_ibvPostedSends.size(), 1u);
   EXPECT_EQ(g_ibvPostedSends[0].qpNum, 36u);
-  EXPECT_EQ(g_ibvPostedSends[0].sge.length, data.size());
+  EXPECT_EQ(g_ibvPostedSends[0].sge.length, send.data.size());
 }
 
 TEST_F(NetIbP2pMicrotest, Isend_MatchedReceivePublishesClampedRequestAndAdvancesFifo) {

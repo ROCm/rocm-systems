@@ -9,6 +9,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 
 #include <algorithm>
 
@@ -22,11 +23,10 @@ namespace {
 } // namespace
 
 WaitcntValues decode_waitcnt_gfx9(uint16_t simm16) {
-  WaitcntValues v;
-  v.vmcnt = (simm16 & 0xF) | (static_cast<uint8_t>((simm16 >> 14) & 0x3) << 4);
-  v.expcnt = static_cast<uint8_t>((simm16 >> 4) & 0x7);
-  v.lgkmcnt = static_cast<uint8_t>((simm16 >> 8) & 0x0F);
-  return v;
+  const amdgpu::LegacyWaitcnt fields = amdgpu::decode_gfx9_waitcnt(simm16);
+  return {.vmcnt = static_cast<uint8_t>(fields.vmcnt),
+          .lgkmcnt = static_cast<uint8_t>(fields.lgkmcnt),
+          .expcnt = static_cast<uint8_t>(fields.expcnt)};
 }
 
 std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals) {
