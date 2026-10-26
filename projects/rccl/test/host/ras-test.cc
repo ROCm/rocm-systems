@@ -1619,6 +1619,31 @@ TEST_F(RasMicrotest, MsgRecvRejectsBodyTooShortForItsMessageType) {
   }
 }
 
+TEST_F(RasMicrotest, MsgRecvRejectsCollReqTooShortToHoldItsCollectiveType) {
+  // The collective type is what tells rasMsgRecv how long a RAS_MSG_COLLREQ has
+  // to be, so it must be read before the length is known -- and reading it is
+  // itself an over-read unless the body is long enough to contain it. One byte
+  // short of the end of the type field is the case that proves the point.
+  const int shortLength =
+    static_cast<int>(offsetof(rasMsg, collReq) + offsetof(rasCollRequest, type) + sizeof(rasCollectiveType)) - 1;
+  rasSocket sock{};
+  int calls = 0;
+  g_socketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
+    if (++calls == 1)
+      *static_cast<int*>(ptr) = shortLength;
+    else
+      reinterpret_cast<rasMsg*>(static_cast<char*>(ptr) + sizeof(int))->type = RAS_MSG_COLLREQ;
+    *offset = size;
+    *closed = false;
+    return ncclSuccess;
+  };
+  rasMsg* msg = nullptr;
+  bool closed = false;
+  EXPECT_EQ(ncclRemoteError, rasMsgRecv(&sock, &msg, &closed));
+  EXPECT_EQ(nullptr, msg);
+  EXPECT_EQ(nullptr, sock.recvMsg);
+}
+
 TEST_F(RasMicrotest, MsgRecvRejectsCollReqBodyTooShortForItsCollectiveType) {
   // RAS_MSG_COLLREQ's required length depends on a second peer-supplied field,
   // the collective type, nested inside the body.
