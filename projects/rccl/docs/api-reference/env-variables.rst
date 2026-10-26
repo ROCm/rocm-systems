@@ -1199,11 +1199,14 @@ threshold table introduced for gfx1250.
 
     * - | ``RCCL_CE_AR_2SHOT_MAX_BYTES``
         | Overrides the CE 2-shot AllReduce message size cap. When ``-1`` (default),
-          the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table. A
-          null or unknown-arch table restores the pre-table 256 MiB default. This
-          variable sizes the selector only; it does not affect the staging buffer
-          allocation (see ``RCCL_CE_AR_STAGING_BYTES``).
+          the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table.
+          A table entry of ``0`` (e.g. gfx1250, where the value is a placeholder)
+          resolves to 256 MiB when ``NCCL_CTA_POLICY=2`` (ZERO CU policy) is active;
+          without ZERO policy it stays ``0`` and 2-shot is disabled. Setting this
+          variable to ``0`` explicitly disables 2-shot and skips the 512 MiB staging
+          reservation entirely, even under ZERO CU policy.
       - | ``-1``: Resolved from the per-arch table (default).
+        | ``0``: Disable 2-shot and skip staging reservation.
         | ``N`` (bytes): Use ``N`` as the 2-shot AllReduce size cap.
 
     * - | ``RCCL_CE_AR_STAGING_BYTES``
