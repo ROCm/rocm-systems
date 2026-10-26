@@ -22,10 +22,11 @@
 /// guest's addresses are not the daemon's and passthrough stays off. Covering it
 /// needs a daemon-mode regression, not this fixture.
 
+#include "config_test_util.h"
 #include "test_paths.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
@@ -41,7 +42,6 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/amd_hsa_queue.h"
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
@@ -90,7 +90,8 @@ struct KfdFanoutFixture {
   SimulatedKfd *driver = nullptr;
   std::thread sim_thread;
 
-  KfdFanoutFixture() : loaded(config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema)) {
+  void initialize() {
+    ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
     // Both taken before take_root(): the loader owns the tree until then, and
     // its accessors stop resolving once ownership has moved out.
     soc = loaded.soc();
@@ -194,12 +195,12 @@ struct HostImageLoader {
 
 /// Register a host buffer with the driver so the GPU can reach it.
 ///
-/// USERPTR with a caller-supplied address maps the process page table 1:1, so
-/// the GPU VA and the host pointer are the same number and the test can seed and
-/// read back memory directly.
+/// This fixture chooses the host pointer as its GPU VA so the test can seed
+/// and read back memory directly. USERPTR does not require equal addresses.
 bool map_userptr(SimulatedKfd *driver, uint32_t pid, void *host, size_t size) {
   kfd_ioctl_alloc_memory_of_gpu_args alloc{};
   alloc.va_addr = reinterpret_cast<uint64_t>(host);
+  alloc.mmap_offset = reinterpret_cast<uint64_t>(host);
   alloc.size = size;
   alloc.gpu_id = kGpuId;
   alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
@@ -225,6 +226,7 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
   ASSERT_NE(co, nullptr);
 
   KfdFanoutFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   ASSERT_NE(fx.soc, nullptr);
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
   fx.driver->setup_topology(fx.loaded.device, kTotalXcds);
@@ -273,7 +275,7 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
 
   // The premise of the whole test: without a private segment the dispatch never
   // reaches the scratch path at all.
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   std::memcpy(&kd, reinterpret_cast<const void *>(kernel_object), sizeof(kd));
   ASSERT_GT(kd.private_segment_fixed_size, 0u)

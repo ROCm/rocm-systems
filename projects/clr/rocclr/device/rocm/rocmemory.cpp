@@ -910,10 +910,11 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
       }
     } else if (memFlags & ROCCLR_MEM_HOST_NUMA) {
       // Host-resident NUMA VMM: decode the packed node selector. Stored value is
-      // (node + 1); 0 means "resolve current node" (HostNumaCurrent) -> pass -1.
+      // (node + 2); 1 means "resolve current node" (HostNumaCurrent) -> pass -1;
+      // 0 means use default agent (Host) -> pass -2.
       const uint64_t stored =
           (memFlags & ROCCLR_MEM_HOST_NUMA_NODE_MASK) >> ROCCLR_MEM_HOST_NUMA_NODE_SHIFT;
-      const int numaNode = (stored == 0) ? -1 : static_cast<int>(stored - 1);
+      const int numaNode = static_cast<int>(stored) - 2;
       owner()->getUserData().hsa_handle = dev().hostVmemAlloc(owner()->getSize(),
                                           memFlags & ROCCLR_MEM_HSA_UNCACHED
                                           ? HSA_AMD_MEMORY_POOL_UNCACHED_FLAG : 0,

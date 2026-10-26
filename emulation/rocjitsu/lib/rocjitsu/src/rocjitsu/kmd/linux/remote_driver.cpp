@@ -238,6 +238,9 @@ Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
   gpu.num_xcc = src.num_xcc;
   gpu.max_slots_scratch_cu = src.max_slots_scratch_cu;
   gpu.local_mem_size = src.local_mem_size;
+  gpu.visible_vram_size = src.visible_vram_size;
+  gpu.control_stack_size = src.control_stack_size;
+  gpu.context_save_size = src.context_save_size;
   gpu.vram_type = src.vram_type;
   gpu.lds_size_kb = src.lds_size_kb;
   gpu.mem_width = src.mem_width;
@@ -479,8 +482,8 @@ int RemoteDriver::open() {
   assert(sock_ >= 0 && "open called on disconnected RemoteDriver");
   ptracer_verdict_.reset();
   closing_.store(false, std::memory_order_release);
-  has_gpu_info_ = false;
-  gpu_info_ = {};
+  gpu_infos_.clear();
+  strict_render_minor_ = false;
   topology_path_.clear();
   drm_path_.clear();
   // Drain the shutdown eventfd so it doesn't immediately wake pollers.
@@ -517,6 +520,11 @@ int RemoteDriver::open() {
   if (resp.result != 0)
     return resp.result;
 
+  if (resp.payload_bytes < sizeof(RpcHandshakeResponse) || resp.payload_bytes > kMaxPayloadBytes) {
+    poison_stream();
+    return -1;
+  }
+
   RpcHandshakeResponse hs = {};
   if (!rpc_recv_exact(sock_, &hs, sizeof(hs))) {
     poison_stream();
@@ -525,20 +533,23 @@ int RemoteDriver::open() {
 
   // Every rejection from here on abandons path bytes the reply header already
   // declared, which is the same misalignment as a short read.
-  if (hs.version != kRpcProtocolVersion) {
+  if (hs.version != kRpcProtocolVersion || hs.strict_render_minor > 1) {
     poison_stream();
     return -1;
   }
-
-  has_gpu_info_ = hs.gpu_info.present != 0;
-  if (has_gpu_info_)
-    gpu_info_ = gpu_info_from_rpc(hs.gpu_info);
 
   constexpr uint32_t kMaxPathLen = 4096;
-  if (hs.topology_path_len > kMaxPathLen) {
+  const uint64_t expected_bytes = sizeof(hs) + uint64_t{hs.topology_path_len} + hs.drm_path_len +
+                                  uint64_t{hs.extra_gpu_infos} * sizeof(RpcGpuInfo);
+  if (hs.topology_path_len > kMaxPathLen || hs.drm_path_len > kMaxPathLen ||
+      expected_bytes != resp.payload_bytes ||
+      (hs.extra_gpu_infos != 0 && hs.gpu_info.present == 0)) {
     poison_stream();
     return -1;
   }
+  if (hs.gpu_info.present != 0)
+    gpu_infos_.push_back(gpu_info_from_rpc(hs.gpu_info));
+  strict_render_minor_ = hs.strict_render_minor != 0;
   if (hs.topology_path_len > 0) {
     topology_path_.resize(hs.topology_path_len);
     if (!rpc_recv_exact(sock_, topology_path_.data(), hs.topology_path_len)) {
@@ -547,16 +558,23 @@ int RemoteDriver::open() {
     }
   }
 
-  if (hs.drm_path_len > kMaxPathLen) {
-    poison_stream();
-    return -1;
-  }
   if (hs.drm_path_len > 0) {
     drm_path_.resize(hs.drm_path_len);
     if (!rpc_recv_exact(sock_, drm_path_.data(), hs.drm_path_len)) {
       poison_stream();
       return -1;
     }
+  }
+  for (uint32_t i = 0; i < hs.extra_gpu_infos; ++i) {
+    RpcGpuInfo extra{};
+    if (!rpc_recv_exact(sock_, &extra, sizeof(extra)) || extra.present == 0 ||
+        std::ranges::any_of(gpu_infos_, [&](const Sysfs::GpuInfo &gpu) {
+          return gpu.drm_render_minor == extra.drm_render_minor;
+        })) {
+      poison_stream();
+      return -1;
+    }
+    gpu_infos_.push_back(gpu_info_from_rpc(extra));
   }
 
   // Only here, with the handshake complete. Everything above can fail on a peer
@@ -565,6 +583,20 @@ int RemoteDriver::open() {
   ptracer_verdict_ = authorize_daemon_address_space_access(sock_);
 
   return reissue_synthetic_kfd_fd();
+}
+
+const Sysfs::GpuInfo *RemoteDriver::gpu_info_for_render_minor(uint32_t minor) const {
+  if (gpu_infos_.empty())
+    return nullptr;
+  if (!strict_render_minor_ && gpu_infos_.size() == 1)
+    return &gpu_infos_.front();
+  const auto it = std::ranges::find_if(
+      gpu_infos_, [minor](const Sysfs::GpuInfo &gpu) { return gpu.drm_render_minor == minor; });
+  return it == gpu_infos_.end() ? nullptr : &*it;
+}
+
+bool RemoteDriver::handles_drm_render_minor(uint32_t minor) const {
+  return gpu_infos_.empty() || gpu_info_for_render_minor(minor) != nullptr;
 }
 
 int RemoteDriver::reissue_synthetic_kfd_fd() {
@@ -635,7 +667,7 @@ int RemoteDriver::close() {
     handle_memfds_.clear();
     alloc_ranges_.clear();
     // Deliberately do NOT clear the handshake metadata (topology_path_,
-    // drm_path_, gpu_info_, has_gpu_info_). It is written once during open() and
+    // drm_path_, gpu_infos_). It is written once during open() and
     // is immutable for the rest of the object's life. The interposer publishes
     // this RemoteDriver via an atomic shared_ptr and lets lock-free readers take
     // snapshots that call the accessors (topology_path(), drm_path(),
@@ -736,6 +768,18 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   size_t arg_size = 0;
   if (!validate_ioctl_arg_size(request, arg, arg_size))
     return -EINVAL;
+
+  // The daemon rewrites mmap_offset to the allocation handle in its reply.
+  // Preserve the caller's USERPTR CPU address for the client-side promotion.
+  uint64_t userptr_cpu_address = 0;
+  if (request == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU) {
+    const auto *alloc = static_cast<const kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
+    if (alloc->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
+      userptr_cpu_address = alloc->mmap_offset;
+      if (userptr_cpu_address == 0)
+        return -EINVAL;
+    }
+  }
 
   // Save original embedded pointers before serialization. The daemon rewrites
   // these to point at its own buffer; we must restore the client-side originals
@@ -1336,7 +1380,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
                           received_fds[0]);
 
       if (alloc_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
-        promote_userptr(alloc_args->va_addr, alloc_args->size, received_fds[0]);
+        promote_userptr(userptr_cpu_address, alloc_args->size, received_fds[0]);
     }
   }
 

@@ -203,6 +203,7 @@ struct VmRamDwordStore {
 class PhysicalMemoryAccess {
 public:
   using AtomicMutation = std::function<void(std::span<std::byte>)>;
+  using AtomicLaneMutation = std::function<void(uint32_t, std::span<std::byte>)>;
 
   virtual ~PhysicalMemoryAccess() = default;
 
@@ -299,6 +300,40 @@ public:
     return VmAccessOutcome::Faulted;
   }
 
+  /// @brief Apply an indexed batch of independent atomic_modify() calls.
+  /// Service the set bits of @p lane_mask from @p next_lane upward.
+  /// @details Lane order and per-lane atomicity are those of atomic_modify(); an
+  /// implementation may share lookups and admissions across lanes but must not
+  /// retain any of them past the call. @p next_lane is the first unapplied lane on
+  /// return: the failing lane, or the address count when every lane completed.
+  /// @param addresses At most 64 translated addresses, all in @p domain.
+  /// @param mutation Invoked as mutation(lane, bytes) once per serviced lane.
+  [[nodiscard]] virtual VmAccessOutcome atomic_modify_lanes(VmMemoryDomain domain,
+                                                            std::span<const uint64_t> addresses,
+                                                            uint64_t lane_mask, uint32_t width,
+                                                            const AtomicLaneMutation &mutation,
+                                                            uint32_t &next_lane) {
+    if (addresses.size() > 64)
+      return VmAccessOutcome::Malformed;
+    uint32_t lane = 0;
+    const AtomicMutation lane_mutation = [&](std::span<std::byte> bytes) { mutation(lane, bytes); };
+    for (lane = next_lane; lane < addresses.size(); ++lane) {
+      if (!(lane_mask & (1ULL << lane)))
+        continue;
+      if (!mutation) {
+        next_lane = lane;
+        return VmAccessOutcome::Malformed;
+      }
+      const VmAccessOutcome outcome = atomic_modify(domain, addresses[lane], width, lane_mutation);
+      if (outcome != VmAccessOutcome::Complete) {
+        next_lane = lane;
+        return outcome;
+      }
+    }
+    next_lane = static_cast<uint32_t>(addresses.size());
+    return VmAccessOutcome::Complete;
+  }
+
   /// @brief Resolve a translated backing range to borrowed host storage.
   /// @details This optional debug/introspection capability returns nullptr when
   /// the backing is not directly host-addressable.
@@ -369,12 +404,18 @@ public:
 
 private:
   friend class GpuVmAccess;
-  static constexpr std::size_t kSnapshotCount = 64;
+  static constexpr std::size_t kSnapshotCount = 128;
   using Snapshots = std::array<VmMtypeSnapshot, kSnapshotCount>;
+  // Interleaved lanes revisit short page runs in widely separated rows.
+  // Offset each 128-page block by eight slots to separate those runs without
+  // mirroring adjacent pages at block boundaries; adding page >> 10 spreads
+  // 4 MiB strides. Runs of up to 119 pages are conflict-free, but pages about
+  // 120 apart can alias. Range and mutation-token checks validate every hit.
+  [[nodiscard]] static std::size_t snapshot_index(uint64_t address) {
+    const uint64_t page = address >> 12;
+    return (page + ((page >> 7) << 3) + (page >> 10)) % kSnapshotCount;
+  }
   std::weak_ptr<GpuVmAccessState> access_state_;
-  // Interleaved lanes can revisit several pages in one request.
-  // Hashing by 4 KiB page avoids discarding their copied policy on every lane;
-  // each snapshot still validates its translator-provided range and epoch.
   std::unique_ptr<Snapshots> snapshots_;
 };
 
@@ -581,7 +622,9 @@ public:
 /// a quantum, checking is_current() before reuse.
 /// Operations on a revoked snapshot report @ref VmAccessOutcome::Revoked,
 /// never the retryable Unavailable outcome.
-class GpuVmAccess {
+// Keep immutable metadata read by every CU off the cache line containing a
+// coallocated shared_ptr reference count, which wave admission and retirement update.
+class alignas(64) GpuVmAccess {
 public:
   /// @brief Whether this snapshot's access state is still valid.
   /// @details Replacement, invalidation, and unregistration retire ordinary snapshots.
@@ -653,6 +696,21 @@ public:
   [[nodiscard]] VmAccessOutcome
   atomic_modify(uint64_t address, uint32_t width,
                 const PhysicalMemoryAccess::AtomicMutation &mutation) const;
+  /// @brief Apply one atomic mutation per active lane under one revocation lease.
+  /// @details Equivalent to calling atomic_modify() for each set bit of
+  /// @p lane_mask from @p next_lane upward, in lane order, except that the
+  /// shared revocation lease is taken once and one translated span is reused
+  /// by every lane whose operand it covers. Every lane's backing mutation is
+  /// still an independent atomic, and translation failures are reported per
+  /// lane exactly as atomic_modify() reports them. On return @p next_lane is
+  /// the first lane not yet applied: the address count when all completed, or
+  /// the failing lane, so a retry resumes there. No translation outlives the call.
+  /// @param lane_addresses At most 64 per-lane virtual operand addresses.
+  /// @param mutation Invoked as mutation(lane, bytes) once per serviced lane.
+  [[nodiscard]] VmAccessOutcome
+  atomic_modify_lanes(std::span<const uint64_t> lane_addresses, uint64_t lane_mask, uint32_t width,
+                      const PhysicalMemoryAccess::AtomicLaneMutation &mutation,
+                      uint32_t &next_lane) const;
   [[nodiscard]] std::byte *resolve_host_pointer(uint64_t address, std::size_t size = 1) const;
   [[nodiscard]] std::pair<uint64_t, uint64_t> host_range(uint64_t address) const;
 
