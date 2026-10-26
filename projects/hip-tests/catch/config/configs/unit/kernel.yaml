@@ -85,7 +85,7 @@ kernel:
     tags: [launch, P1]
   Unit_hipGridLaunch_ExceedMaxGridDim_Negative:
     <<: *level_default
-    disabled: [amd_windows, amd_linux, amd_wsl]
+    disabled: [amd_wsl]
     tags: [launch]
   Unit_hipExtDynDataPrefetch_NegativeTests:
     <<: *level_default
