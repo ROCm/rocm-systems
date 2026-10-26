@@ -37,13 +37,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from format_yaml import normalize_equation, sort_top_level_keys  # noqa: E402
+from format_yaml import normalize_equation, sort_top_level_keys
 
-import config  # noqa: E402
-from rocprof_compute_soc.soc_base import OmniSoC_Base  # noqa: E402
-from roofline.benchmark.ceilings import measured_ceilings  # noqa: E402
-from roofline.run_benchmark import BENCHMARKING_SUPPORTED  # noqa: E402
-from utils.metric_library import (  # noqa: E402
+import config
+from rocprof_compute_soc.soc_base import OmniSoC_Base
+from roofline.benchmark.ceilings import measured_ceilings
+from roofline.run_benchmark import BENCHMARKING_SUPPORTED
+from utils.metric_library import (
     METRIC_LIBRARY_PARENT_ARCH,
     VARIABLES_FILENAME,
     MetricLibrary,
@@ -51,20 +51,20 @@ from utils.metric_library import (  # noqa: E402
     default_metric_library_dir,
     load_metric_library,
 )
-from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
-from utils.utils_common import (  # noqa: E402
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     canonical_config_arch,
     load_panel_configs,
 )
-from utils.utils_counter_defs import get_build_in_vars  # noqa: E402
-from utils.yaml_inherit_loader import (  # noqa: E402
+from utils.utils_counter_defs import get_build_in_vars
+from utils.yaml_inherit_loader import (
     INHERIT_KEY,
     InheritanceError,
     InheritLoader,
     load_inherited_yaml,
 )
-from vendored import yaml  # noqa: E402
+from vendored import yaml
 
 # "{category}.{subcategory}_{name}": lowercase words joined by underscores.
 METRIC_ID_RE = re.compile(r"^[a-z][a-z0-9]*\.[a-z0-9]+(_[a-z0-9]+)*$")

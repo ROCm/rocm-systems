@@ -14,16 +14,16 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-import validate_metric_library  # noqa: E402
-from common import (  # noqa: E402
+import validate_metric_library
+from common import (
     METRIC_LIBRARY_FAMILY_PARENTS,
     write_metric_library_family,
     write_text_file,
 )
-from validate_metric_library import ANALYSIS_CONFIGS, main, validate  # noqa: E402
+from validate_metric_library import ANALYSIS_CONFIGS, main, validate
 
-from utils import metric_library  # noqa: E402
-from utils.metric_library import MetricLibrary, default_metric_library_dir  # noqa: E402
+from utils import metric_library
+from utils.metric_library import MetricLibrary, default_metric_library_dir
 
 BASE_METRIC = """\
 compute.valu_util:

@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from format_yaml import check_file, normalize_equation  # noqa: E402
+from format_yaml import check_file, normalize_equation
 
 
 class TestCriticalCorrectness:
