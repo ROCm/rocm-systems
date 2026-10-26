@@ -2168,7 +2168,7 @@ static void HIPRT_CB hostStreamPlanCallback(void* plan_) {
   NCCL_NVTX3_FUNC_RANGE;
   struct ncclKernelPlan* plan = (struct ncclKernelPlan*)plan_;
   if (plan->persistent &&
-      (plan->comm->destroyFlag || plan->comm->revokedFlag ||
+      (COMPILER_ATOMIC_LOAD(&plan->comm->revokedFlag, std::memory_order_acquire) != 0 ||
        COMPILER_ATOMIC_LOAD(plan->comm->abortFlag, std::memory_order_acquire) != 0)) {
     return;
   }

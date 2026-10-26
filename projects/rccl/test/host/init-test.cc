@@ -6028,6 +6028,22 @@ TEST_F(InitMicrotest, CommDestroySync_AbortWithGraphStillHeld_OrphansPlansWithou
   ncclPersistentPlanRefDrop(graph.ref);
 }
 
+TEST_F(InitMicrotest, CommDestroySync_AbortCallbackError_StillStopsProxy) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  *c.get()->abortFlag = 1;
+
+  static Teardown_CommCallback bad;
+  bad = {};
+  bad.base.fn = [](ncclComm*, ncclCommCallback*) { return ncclSystemError; };
+  ncclIntruQueueMpscEnqueue(&c.get()->callbackQueue, &bad.base);
+
+  EXPECT_EQ(ncclSystemError, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(1, proxyStop.calls);
+}
+
 TEST_F(InitMicrotest, CommDestroySync_LiveGraphOnDestroy_WaitsAndDoesNotReclaim) {
   Teardown_LifecycleComm c;
   Teardown_AllowStreamCaptureExchange();
@@ -7073,6 +7089,62 @@ TEST_F(InitMicrotest, CommReclaim_RevokedCommWithGraphStillHeld_DefersCleanupUnt
   EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(comm));
   EXPECT_EQ(0, graph.reclaimed);
   EXPECT_EQ(0, members[0].rec.finalizeCalls);
+  int reaperTid = -1;
+  for (int i = 0; i < 100 && reaperTid < 0; ++i) {
+    for (int tid : snapshotTasks()) {
+      if (std::find(tasksBefore.begin(), tasksBefore.end(), tid) == tasksBefore.end()) {
+        reaperTid = tid;
+        break;
+      }
+    }
+    if (reaperTid < 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_GE(reaperTid, 0);
+  ncclIntruQueueMpscEnqueue(&comm->callbackQueue, &graph.plan.reclaimer);
+  for (int i = 0; i < 400; ++i) {
+    std::string taskPath = "/proc/self/task/" + std::to_string(reaperTid);
+    DIR* task = opendir(taskPath.c_str());
+    bool alive = task != nullptr;
+    if (task != nullptr) closedir(task);
+    if (members[0].rec.finalizeCalls != 0 && !alive) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  EXPECT_EQ(1, graph.reclaimed);
+  EXPECT_EQ(1, members[0].rec.finalizeCalls);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, graph.ref->state);
+  EXPECT_EQ(1, graph.ref->refCount);
+  ncclPersistentPlanRefDrop(graph.ref);
+}
+
+TEST_F(InitMicrotest, CommReclaim_AbortWithGraphStillHeld_DefersCleanupUntilThePlanIsReleased) {
+  Teardown_AllowStreamCaptureExchange();
+  const int kChainLength = 1;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
+  ncclComm* comm = members[0].comm;
+  comm->initState = ncclSuccess;
+  members[0].abortFlag = 1;
+  Teardown_HeldGraph graph;
+  graph.Attach(comm, ncclPersistentPlanRefLive);
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  auto snapshotTasks = [] {
+    std::vector<int> tids;
+    DIR* dir = opendir("/proc/self/task");
+    if (dir == nullptr) return tids;
+    while (dirent* ent = readdir(dir)) {
+      if (ent->d_name[0] == '.') continue;
+      tids.push_back(std::atoi(ent->d_name));
+    }
+    closedir(dir);
+    return tids;
+  };
+  std::vector<int> tasksBefore = snapshotTasks();
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(comm));
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(0, members[0].rec.finalizeCalls);
+  EXPECT_EQ(1, proxyStop.calls);
   int reaperTid = -1;
   for (int i = 0; i < 100 && reaperTid < 0; ++i) {
     for (int tid : snapshotTasks()) {

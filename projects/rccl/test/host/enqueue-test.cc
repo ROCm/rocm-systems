@@ -4095,3 +4095,46 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
   ASSERT_NE(nullptr, batch);
   EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
 }
+
+static int g_planCallbackEntered;
+
+ncclResult_t ncclProfilerStartGroupEvent(struct ncclKernelPlan*) {
+  g_planCallbackEntered++;
+  return ncclSuccess;
+}
+ncclResult_t ncclProfilerStopGroupEvent(struct ncclKernelPlan*) { return ncclSuccess; }
+ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan*) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopTaskEvents(struct ncclKernelPlan*) { return ncclSuccess; }
+ncclResult_t ncclProfilerPostPlanWork(struct ncclComm*, struct ncclKernelPlan*) { return ncclSuccess; }
+ncclResult_t ncclProfilerAddPidToProxyOp(struct ncclProxyOp*) { return ncclSuccess; }
+const char* ncclGetErrorString(ncclResult_t) { return "ncclSuccess"; }
+
+TEST_F(EnqueueMicrotest, HostStreamPlanCallback_AbortOrRevokeReturns_DestroyStillRuns) {
+  g_planCallbackEntered = 0;
+  ncclComm comm{};
+  uint32_t abortFlag = 0;
+  comm.abortFlag = &abortFlag;
+  ncclKernelPlan plan{};
+  plan.persistent = 1;
+  plan.comm = &comm;
+
+  abortFlag = 1;
+  hostStreamPlanCallback(&plan);
+  EXPECT_EQ(0, g_planCallbackEntered);
+
+  abortFlag = 0;
+  comm.revokedFlag = 1;
+  hostStreamPlanCallback(&plan);
+  EXPECT_EQ(0, g_planCallbackEntered);
+
+  comm.revokedFlag = 0;
+  comm.destroyFlag = 1;
+  hostStreamPlanCallback(&plan);
+  EXPECT_EQ(1, g_planCallbackEntered);
+
+  ncclKernelPlan eager{};
+  eager.comm = &comm;
+  abortFlag = 1;
+  hostStreamPlanCallback(&eager);
+  EXPECT_EQ(2, g_planCallbackEntered);
+}

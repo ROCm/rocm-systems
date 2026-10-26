@@ -4512,7 +4512,6 @@ static void persistentPlanReaper(ncclComm_t comm) {
     ncclResult_t ret = ncclCommPollCallbacks(comm, /*waitSome=*/true);
     if (ret != ncclSuccess) {
       WARN("persistentPlanReaper: comm %p rank %d poll error %d", comm, comm->rank, ret);
-      return;
     }
   }
   uint64_t commHash = comm->commHash;
@@ -4606,9 +4605,7 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
         uint64_t commHash = curIntraComm->commHash;
         nextIntraComm = nextIntraComm->intraNext;
 
-        int deferCleanup = (COMPILER_ATOMIC_LOAD(curIntraComm->abortFlag, std::memory_order_acquire) != 0 ||
-                            curIntraComm->revokedFlag) &&
-                           curIntraComm->localPersistentRefs != 0;
+        int deferCleanup = curIntraComm->localPersistentRefs != 0;
         if (deferCleanup) {
           std::thread reaperThread;
           STDTHREADCREATE_GOTO(reaperThread, persistentPlanReaper, ret, exit, curIntraComm);
@@ -4771,7 +4768,7 @@ ncclResult_t ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags) {
   // Abort in-flight kernels so commRevokeAsync's stream sync cannot deadlock.
   // finalizeCalled blocks commDestroySync in commReclaim (revoke handles cleanup).
   (void)setCommAbortFlags(comm, 1);
-  comm->revokedFlag = 1;
+  COMPILER_ATOMIC_STORE(&comm->revokedFlag, 1u, std::memory_order_release);
   (void)ncclCommEnsureReady(comm);
   comm->finalizeCalled = true;
 
