@@ -33,20 +33,56 @@ namespace counters
 unsigned long
 get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_version);
 
+// Returns the KFD profiler interface version reported by the running kernel (via the
+// KFD_IOC_PROFILER_VERSION op), or 0 if that op is not available (e.g. no /dev/kfd, or a
+// kernel predating the profiler ioctl entirely).
+uint32_t
+kfd_profiler_version();
+
+// Whether the given KFD profiler interface version supports dispatch mode (see
+// KFD_IOC_PROFILER_VERSION_NUM history in kfd_ioctl.h). Exposed separately from
+// dispatch_mode_supported() so the version-comparison logic can be unit tested without a real
+// /dev/kfd.
+bool
+dispatch_mode_supported_for_version(uint32_t version);
+
+// Whether the running kernel supports dispatch mode, i.e. dispatch_mode_supported_for_version()
+// on the version reported by kfd_profiler_version(). Used internally by
+// counter_collection_dispatch_perfmon_enable() to gate the dispatch-mode ioctl below.
+bool
+dispatch_mode_supported();
+
 bool
 counter_collection_has_device_lock();
 
+// Device counting isn't scoped to one dispatch, so another process's concurrent kernels would
+// pollute the values without exclusivity. Requests the exclusive profiler_process lock
+// (lock=1), which the kernel gates on CAP_PERFMON regardless of KFD profiler interface version.
 rocprofiler_status_t
 counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues);
 
 rocprofiler_status_t
 counter_collection_device_unlock(const rocprofiler_agent_t* agent);
 
+// Dispatch counting already serializes hardware execution to one dispatch at a time, so --
+// unlike device counting above -- it needs no device lock to isolate its counters; there is
+// really no "lock" involved here at all, which is why this is a separate call rather than a
+// mode of counter_collection_device_lock(). Starting at KFD_IOC_PROFILER_VERSION_NUM 2 (see
+// dispatch_mode_supported()) the kernel supports a non-exclusive KFD_IOC_PROFILER_PMC request
+// (lock=0, perfcount_enable=1) that just forces the perfmon clock on, without requiring
+// CAP_PERFMON. A no-op success on older kernels that lack this, rather than falling back to the
+// CAP_PERFMON-gated lock above: dispatch counting must not pick up that requirement just
+// because the kernel is old. The kernel only clears the perfmon clock request when this
+// process's KFD device context is torn down (e.g. process exit) -- there is no unprivileged
+// "off" ioctl, so no matching disable call exists.
+rocprofiler_status_t
+counter_collection_dispatch_perfmon_enable(const rocprofiler_agent_t* agent);
+
 bool
 ptl_control_supported();
 
 bool
-use_device_lock_at_start();
+lock_at_configure_time();
 
 rocprofiler_status_t
 counter_collection_ptl_disable(const rocprofiler_agent_t* agent);

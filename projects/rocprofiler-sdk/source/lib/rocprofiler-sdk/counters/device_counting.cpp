@@ -463,16 +463,17 @@ start_agent_ctx(const context::context* ctx)
             break;
         }
 
-        // Lock the device for profiling (non-fatal if it fails)
-        // Only lock here if using NEW behavior (lock at context start, not at configuration)
-        if(!use_device_lock_at_start() && counters::counter_collection_has_device_lock())
+        // Lock the device for profiling (non-fatal if it fails). By default this happens
+        // here, at context start; lock_at_configure_time() opts into locking earlier,
+        // at configuration time, in which case configure_agent_collection() already did it.
+        if(!lock_at_configure_time() && counters::counter_collection_has_device_lock())
         {
             counters::counter_collection_device_lock(agent->get_rocp_agent(), true);
         }
 
-        // Disable PTL (non-fatal if it fails)
-        // Only disable here if using NEW behavior (at context start, not at configuration)
-        if(!use_device_lock_at_start())
+        // Disable PTL (non-fatal if it fails). Same default-vs-lock_at_configure_time
+        // split as the device lock above.
+        if(!lock_at_configure_time())
         {
             counters::counter_collection_ptl_disable(agent->get_rocp_agent());
         }
@@ -615,16 +616,16 @@ stop_agent_ctx(const context::context* ctx)
                                                           UINT64_MAX,
                                                           HSA_WAIT_STATE_ACTIVE);
 
-        // Re-enable PTL (non-fatal if it fails)
-        // Only re-enable here if using NEW behavior (at context start, not at configuration)
-        if(!use_device_lock_at_start())
+        // Re-enable PTL (non-fatal if it fails). Only needed if it was disabled above in
+        // start_agent_ctx(), i.e. when not using the legacy lock_at_configure_time() path.
+        if(!lock_at_configure_time())
         {
             counters::counter_collection_ptl_enable(agent->get_rocp_agent());
         }
 
-        // Unlock the device (non-fatal if it fails)
-        // Only unlock here if using NEW behavior (lock at context start, not at configuration)
-        if(!use_device_lock_at_start() && counters::counter_collection_has_device_lock())
+        // Unlock the device (non-fatal if it fails). Only needed if it was locked above in
+        // start_agent_ctx(), i.e. when not using the legacy lock_at_configure_time() path.
+        if(!lock_at_configure_time() && counters::counter_collection_has_device_lock())
         {
             counters::counter_collection_device_unlock(agent->get_rocp_agent());
         }
