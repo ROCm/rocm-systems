@@ -100,18 +100,17 @@ std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::initGranularities() {
             {"128M", 128 * 1024 * 1024},
             {"256M", 256 * 1024 * 1024},
             {"512M", 512 * 1024 * 1024},
-            // 256 MiB completes. 384 MiB and above are submitted as one SDMA
-            // linear copy when the runtime cap is 0x3fffffff, and that packet
-            // times out. 0x3fffffff is the largest 30-bit copy. 1 GiB is one
-            // byte past that cap, so the runtime emits the full packet plus a
-            // remainder.
+            // Some asics cap the copy sizes to 0x3fffffff internally. This
+            // validates that a single OP with the largest size can run.
             {"0x3fffffff", (1ull << 30) - 1},
-            {"1G", 1024ull * 1024ull * 1024ull}};
+            // One largest-size packet plus another packet.
+            {"1G", 1024ull * 1024ull * 1024ull},
+            {"2G", 2ull * 1024ull * 1024ull * 1024ull}};
   }
 }
 
 const std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::Granularities = MemoryAsyncCopy::initGranularities();
-const int MemoryAsyncCopy::kMaxCopySize = MemoryAsyncCopy::Granularities.back().Size;
+const size_t MemoryAsyncCopy::kMaxCopySize = MemoryAsyncCopy::Granularities.back().Size;
 
 MemoryAsyncCopy::MemoryAsyncCopy(void) : TestBase() {
   cpu_agent_.handle = 0;  // Ignore any previous initialization

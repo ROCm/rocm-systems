@@ -202,7 +202,7 @@ class MemoryAsyncCopy : public TestBase {
   };
 
   static const std::vector<Granularity> Granularities;
-  static const int kMaxCopySize;
+  static const size_t kMaxCopySize;
 
   // @Brief: Helper function to initialize Granularities based on emulator mode
   static std::vector<Granularity> initGranularities();
