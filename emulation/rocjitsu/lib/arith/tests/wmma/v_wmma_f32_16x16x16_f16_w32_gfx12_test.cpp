@@ -57,8 +57,10 @@ TEST(WmmaF32F16W32Gfx12, Arithmetic) {
   // C starts at VGPR 8: C[row][col] maps to VGPR 8 + row % 8,
   // lane col + 16 * (row / 8). Set C[9][10] to a quiet NaN and
   // C[11][12] to +Inf, outside the NaN/Inf rows and columns of A and B.
-  input.v[8 + 9 % 8][10 + 16 * (9 / 8)] = rocjitsu::arith::test::kF32QuietNaNBits;
-  input.v[8 + 11 % 8][12 + 16 * (11 / 8)] = rocjitsu::arith::test::kF32PositiveInfinityBits;
+  rocjitsu::arith::test::wmma_gfx12_acc<32>(input.v + 8, 9, 10) =
+      rocjitsu::arith::test::kF32QuietNaNBits;
+  rocjitsu::arith::test::wmma_gfx12_acc<32>(input.v + 8, 11, 12) =
+      rocjitsu::arith::test::kF32PositiveInfinityBits;
   // Numeric goldens from the rocjitsu model, confirmed word-for-word on gfx1201.
   constexpr float factor_nan = std::bit_cast<float>(0xffc00a3dU);
   constexpr float accumulator_nan = std::bit_cast<float>(0x7fc12345U);
@@ -109,7 +111,8 @@ TEST(WmmaF32F16W32Gfx12, Arithmetic) {
           for (int row = 0; row < 16; ++row) {
             for (int col = 0; col < 16; ++col) {
               float expected = golden[row][col];
-              uint32_t actual = r.v[aliasing_offset + row % 8][col + 16 * (row / 8)];
+              uint32_t actual =
+                  rocjitsu::arith::test::wmma_gfx12_acc<32>(r.v + aliasing_offset, row, col);
               if (semantics == RJ_ARITH_SEMANTICS_LOOSE) {
                 rocjitsu::arith::test::expect_f32(actual, expected, semantics, /*atol=*/1e-5,
                                                   /*rtol=*/1e-5);
@@ -127,15 +130,9 @@ TEST(WmmaF32F16W32Gfx12, Arithmetic) {
 
 // Reject controls not implemented by this slice, before accessing operands.
 TEST(WmmaF32F16W32Gfx12, UnsupportedGuestControls) {
-  for (uint64_t flag :
-       {RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
-        RJ_ARITH_FP_IEEE_MODE, RJ_ARITH_FP_DX10_CLAMP_OFF, RJ_ARITH_FP_ROUND_UP,
-        RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS_F16,
-        RJ_ARITH_FP_PRESERVE_INPUT_DENORMALS_F16}) {
-    EXPECT_EQ(
-        rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(flag, 0, nullptr, nullptr, nullptr, nullptr),
-        RJ_ARITH_ERROR_INVALID_FLAGS);
-  }
+  rocjitsu::arith::test::expect_unsupported_guest_controls([&](uint64_t flag) {
+    return rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(flag, 0, nullptr, nullptr, nullptr, nullptr);
+  });
 }
 
 } // namespace

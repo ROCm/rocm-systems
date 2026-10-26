@@ -1,10 +1,6 @@
 # Instruction coverage
 
-The gfx12 Wave32 FP16/BF16 WMMA instructions with FP32 outputs and FP16/FP32
-FMA support loose and empirical exact numeric results with default controls.
-FP16 FMA supports FP status; FP32 FMA rejects mode 3 without changing outputs.
-WMMA has no FP-status output.
-Instruction modifiers are rejected in this slice.
-
-`RJ_ARITH_FP16_OVFL` saturates finite FP16 FMA overflow while preserving
-OVERFLOW | INEXACT status; it has no effect on FP32 outputs.
+RDNA3 and RDNA4 support FP16/BF16 WMMA with FP32 output and FP16/FP32 FMA,
+in both wave sizes. All support loose and empirical exact numeric results.
+Only RDNA4 FP16 FMA supports FP-status reporting. WMMA has no status output.
+Instruction modifiers and guest controls other than FP16_OVFL are rejected.

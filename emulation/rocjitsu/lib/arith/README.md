@@ -2,9 +2,10 @@
 
 ## Current implementation
 
-FP16/BF16 WMMA and FP16/FP32 FMA support loose and empirical exact results.
-FP16 FMA reports FP status in mode 3; FP32 FMA rejects mode 3. WMMA accepts
-modes 0–3 and has no FP-status output.
+FP16/BF16 WMMA and FP16/FP32 FMA support Wave32 and Wave64, with loose
+and empirical exact results.
+gfx12 FP16 FMA reports FP status in mode 3; gfx11 FMA and FP32 FMA reject
+mode 3. WMMA accepts modes 0–3 and has no FP-status output.
 CPU implementations are scalar; SIMD backends are planned.
 Compatibility and instruction modifiers are planned; mode 7 is currently rejected.
 
@@ -21,9 +22,6 @@ The semantics field selects loose or empirical bit-exact arithmetic. rj-arith is
 See [coverage per architecture](COVERAGE.md) for instruction-family support.
 
 Rocjitsu continues to use its existing instruction handlers.
-
-For gfx12 FP16 FMA and FP32-output WMMA, modes 0–3 are supported.
-FP16 FMA mode 3 accumulates FP status; FP32 FMA rejects mode 3; WMMA has no FP-status output.
 
 ## Build and run
 

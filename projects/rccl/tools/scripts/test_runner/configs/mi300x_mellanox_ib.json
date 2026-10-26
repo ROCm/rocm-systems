@@ -195,14 +195,14 @@
       },
       "tests": [
         {
-          "name": "UBR_MultiSegment_Generic",
-          "description": "Out-of-place AllReduce on a buffer spanning multiple VMM segments (multi-segment registration branch on Ring AllReduce)",
-          "test_filter": "UBR_MultiSegment.Generic"
-        },
-        {
           "name": "UBR_MultiSegment_Generic_Reuse",
           "description": "Register once, AllReduce twice - exercises the multi-segment registration reuse fast path (IPC or NET reuse)",
           "test_filter": "UBR_MultiSegment.Generic_Reuse"
+        },
+        {
+          "name": "UBR_MultiSegment_NetSegmentCountOddSizedHipMalloc",
+          "description": "NET segment count of an odd-sized hipMalloc registration must not walk past the allocation into the page-rounded tail",
+          "test_filter": "UBR_MultiSegment.NetSegmentCountOddSizedHipMalloc"
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa",
@@ -238,6 +238,36 @@
         "RCCL_MPI_LOG_ALL_RANKS": "1"
       },
       "tests": [
+        {
+          "name": "UBR_MultiSegment_Generic",
+          "description": "Out-of-place AllReduce on an 8-segment VMM buffer; asserts the NET cache rcclNet.nSegments",
+          "test_filter": "UBR_MultiSegment.Generic"
+        },
+        {
+          "name": "UBR_MultiSegment_GenericGraph",
+          "description": "Graph-captured AllReduce reusing a wider 8-segment graph record; asserts the NET cache counts the whole record",
+          "test_filter": "UBR_MultiSegment.GenericGraph",
+          "env_variables": {
+            "NCCL_GRAPH_REGISTER": "1"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_MultiSegmentRegisterOff_SliceSkipsNet",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: a one-segment slice of an 8-segment registration skips NET and the AllReduce is correct",
+          "test_filter": "UBR_MultiSegment.MultiSegmentRegisterOff_SliceSkipsNet",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_MultiSegmentRegisterOff_GraphSliceSkipsNet",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: graph registration of a one-segment slice reusing an 8-segment record skips NET and drops its reference",
+          "test_filter": "UBR_MultiSegment.MultiSegmentRegisterOff_GraphSliceSkipsNet",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0",
+            "NCCL_GRAPH_REGISTER": "1"
+          }
+        },
         {
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
           "description": "Cross-node ReduceScatter over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
@@ -3592,6 +3622,11 @@
           "test_filter": "DdaMPI_AllReduce.StreamAlternationUngrouped"
         },
         {
+          "name": "DDA_BitIdenticalAcrossRanks_8Ranks",
+          "description": "Float and bf16 AllReduce at 256 KiB to 4 MiB returns bit-identical output on every rank; order-sensitive input catches a rank-dependent summation order",
+          "test_filter": "DdaMPI_AllReduce.BitIdenticalAcrossRanksDefaultSelection"
+        },
+        {
           "name": "DDA_CapturedForkJoin_8Ranks",
           "description": "A captured AllReduce keeps its done event inside the graph: a copy forked off comm->doneEvent and joined back adds exactly one node and one edge",
           "test_filter": "DdaMPI_AllReduce.CapturedForkJoinStaysInsideGraph"
@@ -4774,7 +4809,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
-          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv:GinMPIDeviceTests.Log_ReportsUsedBackend",
           "timeout": 600
         },
         {
@@ -4835,6 +4870,11 @@
             "NCCL_IB_QPS_PER_CONNECTION": "4",
             "RCCL_IB_QPS_PER_P2P": "2"
           }
+        },
+        {
+          "name": "GIN_Log_ReportsUsedBackend",
+          "description": "GIN logs the backend each DevComm uses (IB proxy, NCCL_GIN_TYPE=2)",
+          "test_filter": "GinMPIDeviceTests.Log_ReportsUsedBackend"
         }
       ]
     },
@@ -5158,6 +5198,11 @@
           "name": "Symk_AllGatherStoreData",
           "description": "Forced AllGather_ST with position-dependent data across its byte, 4-byte and 16-byte tiers and in-place",
           "test_filter": "SymmetricKernelCorruptionTest.AllGatherST_PositionDependentData"
+        },
+        {
+          "name": "Symk_GroupedAllGatherVaryingSizes",
+          "description": "Four AllGathers of different sizes fused in one group, exercising the work-range split; skips without cuMem",
+          "test_filter": "SymmetricKernelCorruptionTest.GroupedAllGather_VaryingSizes"
         }
       ]
     }
@@ -5443,6 +5488,18 @@
       "name": "UBR Concurrent Registration Hang Tests",
       "description": "Tests demonstrating UBR concurrent registration hang with separate buffers and fix with contiguous buffers. Includes one test expected to hang (run with timeout).",
       "config": "ubr_concurrent_reg_hang",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Registration and LSA",
+      "description": "Single-node UBR multi-segment registration tests",
+      "config": "ubr_multisegment_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - LSA plus GIN (Multi-Node)",
+      "description": "Two-node UBR multi-segment tests including Generic rcclNet.nSegments",
+      "config": "ubr_multisegment_lsagin_multinode",
       "enabled": true
     },
     {
