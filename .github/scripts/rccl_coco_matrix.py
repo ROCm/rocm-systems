@@ -37,9 +37,9 @@ SCHEDULED_CATALOGUE = [
     ("nightly", "oci-rccl-perf-nightly", "oci", "perf", 720),
     ("nightly", "oci-rccl-unit-nightly", "oci", "unit", 720),
     ("nightly", "oci-nixl-nightly", "oci", "nixl", 120),
-    # ext-plugins stays off the PR gate until the nightly is stable.
-    # Runner ruby-linux-slurm-scale-runner, launcher timeout 360 min, non-gating.
-    ("nightly", "ruby64-rccl-ext-plugins-nightly", "ruby", "ext-plugins", 360),
+    # ext-plugins has no dedicated scheduled slot: it runs as the ext-plugins
+    # lane of ruby64-rccl-unit-nightly (above). configs/jobs/
+    # ruby64-rccl-ext-plugins-nightly.yaml stays in tRCCL for manual `coco run`.
     ("weekly", "ruby64-rccl-perf-weekly", "ruby", "perf", 2880),
     ("weekly", "oci-rccl-perf-weekly", "oci", "perf", 2880),
     ("monthly", "ruby64-rccl-perf-monthly", "ruby", "perf", 2880),
