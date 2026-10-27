@@ -42,6 +42,17 @@ extern std::function<ncclResult_t(uint32_t, uint64_t, int, bool*)> g_amdSmiFabri
 ncclResult_t DefaultAmdSmiFabricTelemetryRelease(uint32_t deviceIndex);
 extern std::function<ncclResult_t(uint32_t)> g_amdSmiFabricTelemetryRelease;
 
+struct amdsmiDiagEccCounts;
+struct amdsmiDiagXgmiLinks;
+
+// RAS diagnostics GPU queries. The defaults answer ncclSystemError, i.e. a host where libamd_smi cannot be used.
+extern int g_amdSmiDiagInitCalls;
+extern std::function<ncclResult_t(uint32_t*)> g_amdSmiDiagGpuCount;
+extern std::function<ncclResult_t(int64_t, char*, size_t)> g_amdSmiDiagGpuModel;
+extern std::function<ncclResult_t(int64_t, char*, size_t)> g_amdSmiDiagDriverVersion;
+extern std::function<ncclResult_t(int64_t, struct amdsmiDiagEccCounts*)> g_amdSmiDiagEccCounts;
+extern std::function<ncclResult_t(int64_t, struct amdsmiDiagXgmiLinks*)> g_amdSmiDiagXgmiLinks;
+
 void ResetAmdSmiFakes();
 
 #endif  // RCCL_TEST_HOST_AMDSMI_FAKES_H_
