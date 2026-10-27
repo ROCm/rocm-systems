@@ -113,6 +113,10 @@ ncclResult_t rcclIbCastDeregMrMultiSeg(void*, void*) {
 ncclResult_t IbCastRegMrDmaBufMultiSeg(void*, int, void**, size_t*, uint64_t*, int*, int, void**) {
   FailLoudUnfaked("net_ib_cast_p2p_fakes", "IbCastRegMrDmaBufMultiSeg");
 }
+// gin.cc calls this on its multi-segment path; rccl_dev_runtime.cc is not built into this binary.
+int rcclHostSegmentFdLookup(uintptr_t, size_t, uint64_t*) {
+  FailLoudUnfaked("net_ib_cast_p2p_fakes", "rcclHostSegmentFdLookup");
+}
 
 void ResetNetIbCastP2pFakes() {
   g_ibCastMultiSend = DefaultIbCastMultiSend;

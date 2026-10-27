@@ -38,6 +38,7 @@
 #include "rccl_common.h"
 #include "register.h"
 #include "register_inline.h"
+#include "transport/net_ib/rma_multiseg.h"
 #ifdef ENABLE_FAULT_INJECTION
 #include "ce_fault_inject.h"
 #endif
@@ -1051,6 +1052,12 @@ protected:
         ASSERT_MPI_NE(devrWin->memory, nullptr);
         ASSERT_MPI_EQ(numSegments, devrWin->memory->numSegments);
         ASSERT_MPI_TRUE(devrWin->memory->hasSysmemSegment);
+        // The RMA backend (IB or IB-CAST) must hold one MR per segment, not skip the window.
+        if (ncclRmaProxyEnabled(reinterpret_cast<struct ncclComm*>(getActiveCommunicator())) &&
+            isMultiSegmentRegisterEnabled()) {
+            ASSERT_MPI_NE(devrWin->memory->rmaHostWins[0], nullptr);
+            ASSERT_MPI_EQ(numSegments, rcclRmaMrSegmentCount(devrWin->memory->rmaHostWins[0]));
+        }
     }
 
     // Shared geometry for Symmetric_Lsa AFTER and the BEFORE-legacy-offset
