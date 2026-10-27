@@ -1426,7 +1426,7 @@ TEST_F(SearchXmlChannelMicrotest, WellFormedChannel_TranscribesGpuDevsToRanksInO
   ncclXmlNode* channel = NewNode("channel");
   for (int dev : devs) AddChild(channel, "gpu", std::to_string(dev).c_str());
 
-  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+  ASSERT_EQ(ncclSuccess, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
 
   for (int i = 0; i < kGpus; i++) {
     EXPECT_EQ(graph()->intra[i], SearchXmlScene::kRankBase + devs[i]) << "slot " << i;
@@ -1440,7 +1440,7 @@ TEST_F(SearchXmlChannelMicrotest, WellFormedChannel_TranscribesNetDevsToInter) {
   AddChild(channel, "gpu", "0");
   AddChild(channel, "net", "b");
 
-  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+  ASSERT_EQ(ncclSuccess, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
 
   EXPECT_EQ(graph()->inter[0], 0xa);
   EXPECT_EQ(graph()->inter[1], 0xb);
@@ -1452,7 +1452,7 @@ TEST_F(SearchXmlChannelMicrotest, ExplicitRankAttribute_IsUsedInsteadOfDevLookup
   ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
   SetAttr(gpu, "rank", std::to_string(SearchXmlScene::kRankBase + 5).c_str());
 
-  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+  ASSERT_EQ(ncclSuccess, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
 
   EXPECT_EQ(graph()->intra[0], SearchXmlScene::kRankBase + 5);
 }
@@ -1471,7 +1471,7 @@ TEST_F(SearchXmlChannelMicrotest, ChannelIndex_SelectsItsOwnSliceOfIntraAndInter
   AddChild(channel, "gpu", "6");
   AddChild(channel, "net", "2");
 
-  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, kChannel, system(), graph()), ncclSuccess);
+  ASSERT_EQ(ncclSuccess, ncclTopoGetChannelFromXml(channel, kChannel, system(), graph()));
 
   EXPECT_EQ(graph()->intra[kGpus * kChannel], SearchXmlScene::kRankBase + 6);
   EXPECT_EQ(graph()->inter[2 * kChannel], 1);
@@ -1487,7 +1487,7 @@ TEST_F(SearchXmlChannelMicrotest, UnknownGpuDev_IsRejected) {
   ncclXmlNode* channel = NewNode("channel");
   AddChild(channel, "gpu", "9");
 
-  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSystemError);
+  EXPECT_EQ(ncclSystemError, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
 }
 
 TEST_F(SearchXmlChannelMicrotest,
@@ -1514,7 +1514,7 @@ TEST_F(SearchXmlChannelMicrotest,
   ASSERT_EQ(ncclTopoGetXmlFromChannel(written.get(), 0, system(), xml, root), ncclSuccess);
   ASSERT_EQ(root->nSubs, 1);
 
-  ASSERT_EQ(ncclTopoGetChannelFromXml(root->subs[0], 0, system(), graph()), ncclSuccess);
+  ASSERT_EQ(ncclSuccess, ncclTopoGetChannelFromXml(root->subs[0], 0, system(), graph()));
 
   for (int i = 0; i < kGpus; i++) EXPECT_EQ(graph()->intra[i], ranks[i]) << "slot " << i;
   EXPECT_EQ(graph()->inter[0], 0xa);
@@ -1533,7 +1533,7 @@ TEST_F(SearchXmlChannelMicrotest, ChannelIndexBeyondMaxChannels_IsRejected) {
   ncclXmlNode* channel = NewNode("channel");
   AddChild(channel, "net", "1122334455667788");
 
-  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, kChannel, system(), graph()), ncclInvalidUsage);
+  EXPECT_EQ(ncclInvalidUsage, ncclTopoGetChannelFromXml(channel, kChannel, system(), graph()));
   EXPECT_TRUE(Logged("channel 256 out of range"));
   EXPECT_EQ(graph()->nIntraChannels, 0);
   EXPECT_EQ(graph()->intraNets[0], 0);
@@ -1545,7 +1545,7 @@ TEST_F(SearchXmlChannelMicrotest, NegativeChannelIndex_IsRejected) {
   ncclXmlNode* channel = NewNode("channel");
   AddChild(channel, "net", "1");
 
-  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, -1, system(), graph()), ncclInvalidUsage);
+  EXPECT_EQ(ncclInvalidUsage, ncclTopoGetChannelFromXml(channel, -1, system(), graph()));
 }
 
 TEST_F(SearchXmlChannelMicrotest, SubnodesThatAreNeitherNetNorGpu_AreIgnored) {
@@ -1557,7 +1557,7 @@ TEST_F(SearchXmlChannelMicrotest, SubnodesThatAreNeitherNetNorGpu_AreIgnored) {
   AddChild(channel, "gpu", "2");
   AddChild(channel, "net", "3");
 
-  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+  ASSERT_EQ(ncclSuccess, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
 
   EXPECT_EQ(graph()->inter[0], 1);
   EXPECT_EQ(graph()->inter[1], 3);
@@ -1573,7 +1573,7 @@ TEST_F(SearchXmlChannelMicrotest, LastValidChannelIndex_IsStillAccepted) {
   AddChild(channel, "gpu", "2");
   AddChild(channel, "net", "3");
 
-  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, kChannel, system(), graph()), ncclSuccess);
+  ASSERT_EQ(ncclSuccess, ncclTopoGetChannelFromXml(channel, kChannel, system(), graph()));
 
   EXPECT_EQ(graph()->inter[2 * kChannel], 1);
   EXPECT_EQ(graph()->inter[2 * kChannel + 1], 3);
@@ -1590,7 +1590,7 @@ TEST_F(SearchXmlChannelMicrotest, MoreNetSubsThanTheChannelHolds_IsRejected) {
   ncclXmlNode* channel = NewNode("channel");
   for (const char* dev : {"1", "2", "3", "4"}) AddChild(channel, "net", dev);
 
-  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+  EXPECT_EQ(ncclInvalidUsage, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
   EXPECT_TRUE(Logged("too many net subnodes"));
   EXPECT_EQ(graph()->inter[2], kSentinel);
   EXPECT_EQ(graph()->inter[3], kSentinel);
@@ -1603,7 +1603,7 @@ TEST_F(SearchXmlChannelMicrotest, ExactlyTwoNetSubs_AreStillAccepted) {
   AddChild(channel, "gpu", "0");
   AddChild(channel, "net", "2");
 
-  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+  ASSERT_EQ(ncclSuccess, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
 
   EXPECT_EQ(graph()->inter[0], 1);
   EXPECT_EQ(graph()->inter[1], 2);
@@ -1620,7 +1620,7 @@ TEST_F(SearchXmlChannelMicrotest, MoreGpuSubsThanTheSystemHasGpus_IsRejected) {
     AddChild(channel, "gpu", std::to_string(i % kGpus).c_str());
   }
 
-  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+  EXPECT_EQ(ncclInvalidUsage, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
   EXPECT_TRUE(Logged("too many gpu subnodes"));
   EXPECT_EQ(graph()->intra[kGpus], kSentinel);
   EXPECT_EQ(graph()->intra[kGpus + 1], kSentinel);
@@ -1632,7 +1632,7 @@ TEST_F(SearchXmlChannelMicrotest, ExactlyNgpusGpuSubs_AreStillAccepted) {
   ncclXmlNode* channel = NewNode("channel");
   for (int i = 0; i < kGpus; i++) AddChild(channel, "gpu", std::to_string(i).c_str());
 
-  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+  ASSERT_EQ(ncclSuccess, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
 
   for (int i = 0; i < kGpus; i++) {
     EXPECT_EQ(graph()->intra[i], SearchXmlScene::kRankBase + i) << "slot " << i;
@@ -1646,7 +1646,7 @@ TEST_F(SearchXmlChannelMicrotest, RankAttributeTooWideForAnInt_IsRejected) {
   ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
   SetAttr(gpu, "rank", std::to_string((1LL << 32) + SearchXmlScene::kRankBase).c_str());
 
-  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+  EXPECT_EQ(ncclInvalidUsage, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
   EXPECT_EQ(graph()->intra[0], 0);  // nothing was written
 }
 
@@ -1656,7 +1656,7 @@ TEST_F(SearchXmlChannelMicrotest, NegativeRankAttribute_IsRejected) {
   ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
   SetAttr(gpu, "rank", std::to_string(-(1LL << 32) + SearchXmlScene::kRankBase).c_str());
 
-  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+  EXPECT_EQ(ncclInvalidUsage, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
 }
 
 TEST_F(SearchXmlChannelMicrotest, RankAttributeNamingARankTheTopologyDoesNotHave_IsRejected) {
@@ -1666,7 +1666,7 @@ TEST_F(SearchXmlChannelMicrotest, RankAttributeNamingARankTheTopologyDoesNotHave
   ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
   SetAttr(gpu, "rank", std::to_string(INT_MAX).c_str());
 
-  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+  EXPECT_EQ(ncclInvalidUsage, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
   EXPECT_TRUE(Logged("not found in topology"));
   EXPECT_EQ(graph()->intra[0], 0);  // nothing was written
 }
@@ -1678,7 +1678,7 @@ TEST_F(SearchXmlChannelMicrotest, LowestRankInTheTopology_IsStillAccepted) {
   SetAttr(gpu, "rank", std::to_string(SearchXmlScene::kRankBase).c_str());
   graph()->intra[0] = -7;  // dirty it: the fixture zeroes the graph
 
-  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+  ASSERT_EQ(ncclSuccess, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
 
   EXPECT_EQ(graph()->intra[0], SearchXmlScene::kRankBase);
 }
@@ -1689,7 +1689,7 @@ TEST_F(SearchXmlChannelMicrotest, HighestRankInTheTopology_IsStillAccepted) {
   ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
   SetAttr(gpu, "rank", std::to_string(SearchXmlScene::kRankBase + kGpus - 1).c_str());
 
-  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+  ASSERT_EQ(ncclSuccess, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
 
   EXPECT_EQ(graph()->intra[0], SearchXmlScene::kRankBase + kGpus - 1);
 }
@@ -1701,7 +1701,7 @@ TEST_F(SearchXmlChannelMicrotest, RankJustOutsideTheTopologysRankSet_IsRejected)
   ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
   SetAttr(gpu, "rank", std::to_string(SearchXmlScene::kRankBase + kGpus).c_str());
 
-  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+  EXPECT_EQ(ncclInvalidUsage, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
 }
 
 // --- The caller: ncclTopoGetGraphFromXmlSub -------------------------------
@@ -1734,8 +1734,8 @@ TEST_F(SearchXmlGraphMicrotest, NchannelsClaimingMoreChannelsThanArePresent_IsRe
   // uses as the loop bound over the MAXCHANNELS-sized intra/inter arrays.
   int nChannels = -1;
 
-  EXPECT_EQ(ncclTopoGetGraphFromXmlSub(MakeGraph(999999, 1), system(), graph(), &nChannels),
-            ncclInvalidUsage);
+  EXPECT_EQ(ncclInvalidUsage,
+            ncclTopoGetGraphFromXmlSub(MakeGraph(999999, 1), system(), graph(), &nChannels));
   EXPECT_TRUE(Logged("does not match the 1 channels present"));
 }
 
@@ -1745,8 +1745,8 @@ TEST_F(SearchXmlGraphMicrotest, NchannelsOneMoreThanThePresentChannels_IsRejecte
   // an off-by-one overclaim.
   int nChannels = -1;
 
-  EXPECT_EQ(ncclTopoGetGraphFromXmlSub(MakeGraph(2, 1), system(), graph(), &nChannels),
-            ncclInvalidUsage);
+  EXPECT_EQ(ncclInvalidUsage,
+            ncclTopoGetGraphFromXmlSub(MakeGraph(2, 1), system(), graph(), &nChannels));
 }
 
 TEST_F(SearchXmlGraphMicrotest, NchannelsOneFewerThanThePresentChannels_IsRejected) {
@@ -1754,15 +1754,15 @@ TEST_F(SearchXmlGraphMicrotest, NchannelsOneFewerThanThePresentChannels_IsReject
   // it declares would leave the trailing ones imported but uncounted.
   int nChannels = -1;
 
-  EXPECT_EQ(ncclTopoGetGraphFromXmlSub(MakeGraph(1, 2), system(), graph(), &nChannels),
-            ncclInvalidUsage);
+  EXPECT_EQ(ncclInvalidUsage,
+            ncclTopoGetGraphFromXmlSub(MakeGraph(1, 2), system(), graph(), &nChannels));
 }
 
 TEST_F(SearchXmlGraphMicrotest, NchannelsMatchingTheChannelsPresent_IsStillAccepted) {
   int nChannels = -1;
 
-  ASSERT_EQ(ncclTopoGetGraphFromXmlSub(MakeGraph(3, 3), system(), graph(), &nChannels),
-            ncclSuccess);
+  ASSERT_EQ(ncclSuccess,
+            ncclTopoGetGraphFromXmlSub(MakeGraph(3, 3), system(), graph(), &nChannels));
 
   EXPECT_EQ(graph()->nChannels, 3);
   EXPECT_EQ(nChannels, 3);
@@ -1777,9 +1777,9 @@ TEST_F(SearchXmlGraphMicrotest, TheLargestPermittedNchannels_IsStillAccepted) {
   // bound by one has to break this.
   int nChannels = -1;
 
-  ASSERT_EQ(ncclTopoGetGraphFromXmlSub(MakeGraph(MAXCHANNELS, MAXCHANNELS), system(), graph(),
-                                       &nChannels),
-            ncclSuccess);
+  ASSERT_EQ(ncclSuccess,
+            ncclTopoGetGraphFromXmlSub(MakeGraph(MAXCHANNELS, MAXCHANNELS), system(), graph(),
+                                       &nChannels));
 
   EXPECT_EQ(graph()->nChannels, MAXCHANNELS);
 }
@@ -1790,9 +1790,9 @@ TEST_F(SearchXmlGraphMicrotest, GraphForAnotherIdIsIgnoredWithoutBeingValidated)
   int nChannels = -1;
   graph()->id = 0;
 
-  EXPECT_EQ(ncclTopoGetGraphFromXmlSub(MakeGraph(999999, 1, /*id=*/2), system(), graph(),
-                                       &nChannels),
-            ncclSuccess);
+  EXPECT_EQ(ncclSuccess,
+            ncclTopoGetGraphFromXmlSub(MakeGraph(999999, 1, /*id=*/2), system(), graph(),
+                                       &nChannels));
   EXPECT_EQ(graph()->nChannels, 0);
 }
 
