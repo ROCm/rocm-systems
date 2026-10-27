@@ -96,7 +96,6 @@ static uint64_t get_multiplier_from_char(char units_char) {
       break;
 
     default:
-      assert(false);  // Unexpected units for frequency
       throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
   }
   return multiplier;
