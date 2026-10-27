@@ -304,6 +304,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amd_smi/impl/amd_smi_cper.h` and `example/amd_smi_cper.cc` are no longer installed in the dev package**.  
   - The header's functions are not exported, so code that included it failed to link. The example needed that header.
 
+- **Reworked the Python package install layout for system packages and pip wheels**.  
+  - `.deb` and `.rpm` packages now install the `amdsmi` Python package directly into the system Python's `site-packages` (or `dist-packages`) instead of running `pip install` during installation, so `pip list` no longer shows it.
+  - The new `-DBUILD_PYTHON_WHEEL=ON` CMake option builds a standalone pip wheel. It bundles its own `libamd_smi_python.so`, which can be loaded in the same process as the system `libamd_smi.so`.
+
 ### Resolved Issues
 
 - **Fixed `amdsmi_get_gpu_reg_table_info()` failing on register-state images with no SMN entries**.  
@@ -546,12 +550,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - New C and Python API `amdsmi_get_gpu_process_list_by_pid()`.
 
 ### Changed
-
-- **Reworked Python package install layout for system packages and pip wheels**.  
-  - System `.deb` / `.rpm` packages no longer run `pip install` during postinst; the `amdsmi` Python package is installed directly into the default system Python's `site-packages`/`dist-packages` (detected from the distro-default interpreter) as part of the package payload, so plain `import amdsmi` works after `apt install` / `dnf install`. Removing the package removes those files. `pip list` will no longer show `amdsmi` for the system package.
-  - The module is additionally staged under `share/amd_smi` (its historical location) for consumers that resolve it via `ROCM_PATH/share/amd_smi` rather than `site-packages` (e.g. rocprofiler-compute, omnistat) and for the TheRock artifact layout, whose manifest captures `share/amd_smi` but not the interpreter's `site-packages`. `site-packages` remains the primary importable location.
-  - Added new CMake option `-DBUILD_PYTHON_WHEEL=ON` (default `OFF`) which builds the standalone Python wheel and an isolated `libamd_smi_python.so` (distinct SONAME) bundled inside it, so the wheel-shipped library can coexist in-process with the system `libamd_smi.so` without symbol collisions. With `-DBUILD_PYTHON_WHEEL=OFF` (the default used by ROCm CI) only the system-package layout is built; no wheel artifact is produced.
-  - `py-interface/amdsmi_wrapper.py` now loads the shared library in this order: the `AMDSMI_LIB_OVERRIDE` env var (development / ABI-test escape hatch), a `libamd_smi_python.so` bundled next to the wrapper (pip wheel), then the system `libamd_smi.so` via the dynamic linker. A `_MissingLibrary` sentinel defers `OSError` to the first API call when no candidate is loadable, so import-time tooling (docs, lint) still works without a runtime library.
 
 - **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.  
   - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
