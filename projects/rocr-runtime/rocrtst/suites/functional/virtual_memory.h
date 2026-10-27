@@ -89,6 +89,8 @@ class VirtMemoryTestBasic : public TestBase {
 
   void TestHostBackedAllocImportInfo(void);
 
+  void TestImportedBlitWithoutOwnerAccess(void);
+
   void TestGpuAccessToHostMemoryAllocation(void);
 
   void ImportedShareableHandleSetAccessAfterFdClose(void);
@@ -100,6 +102,9 @@ class VirtMemoryTestBasic : public TestBase {
   void FabricImportedHandlePointerInfo(hsa_agent_t gpu_agent, hsa_amd_memory_pool_t pool);
   void DmaBufImportedHandlePointerInfo(hsa_agent_t gpu_agent, hsa_amd_memory_pool_t pool);
   void HostBackedImportedHandlePointerInfo(hsa_agent_t gpu_agent, hsa_amd_memory_pool_t cpu_pool);
+  void ImportedBlitWithNoAccess(hsa_agent_t owner_gpu, hsa_amd_memory_pool_t owner_pool);
+  void ImportedBlitWithPeerAccessOnly(hsa_agent_t owner_gpu, hsa_amd_memory_pool_t owner_pool,
+                                      hsa_agent_t peer_gpu);
   void ImportedAllocInfoForPool(hsa_amd_memory_pool_t pool, hsa_device_type_t expected_owner,
                                 const char* label);
   void TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
