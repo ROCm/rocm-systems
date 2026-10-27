@@ -188,6 +188,20 @@ def test_metrics_cannot_share_a_formula(tree, formula):
     )
 
 
+def test_metrics_cannot_share_a_name(tree):
+    second = (
+        BASE_METRIC
+        .replace("valu_util", "valu_util_copy")
+        .replace("name: VALU Utilization", "name: valu utilization")
+        .replace("SUM(SQ_ACTIVE_INST_VALU)", "SUM(SQ_ACTIVE_INST_SCA)")
+    )
+    write_base_metrics(tree, BASE_METRIC + second)
+    assert (
+        "[gfx_base] ['compute.valu_util', 'compute.valu_util_copy']: share a name; "
+        "name each after what it measures" in validate(tree)
+    )
+
+
 def test_child_file_must_inherit_from_its_parent(tree):
     path = tree / "gfx_c4" / "compute.yaml"
     path.write_text(

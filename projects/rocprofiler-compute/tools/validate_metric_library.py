@@ -15,7 +15,7 @@ For every arch in src/rocprof_compute_soc/metric_library/, check that:
   5. metric ids look like "{category}.{subcategory}_{name}", name hardware rather than
      a view, and live in the file named after their category, so each id is unique on
      the arch;
-  6. no two metrics on the arch share a formula;
+  6. no two metrics on the arch share a formula or a name;
   7. units use one spelling;
   8. the library matches analysis_configs: every equation a row shows is a library
      formula (DISPLAY_VARIANTS list the rows that show one in another form), every
@@ -194,6 +194,7 @@ def validate_arch(metric_dir: Path, arch: str) -> list[str]:
             )
     errors.extend(_ceiling_errors(arch, metrics))
     errors.extend(_shared_formula_errors(arch, metrics))
+    errors.extend(_shared_name_errors(arch, metrics))
     return errors
 
 
@@ -373,13 +374,35 @@ def _ceiling_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
 
 
 def _shared_formula_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
-    ids_by_formula = defaultdict(list)
-    for metric_id, metric in metrics.items():
-        ids_by_formula[_canonical(metric.get("formula"))].append(metric_id)
+    return _shared_value_errors(
+        arch,
+        {metric_id: _canonical(m.get("formula")) for metric_id, m in metrics.items()},
+        "share a formula; merge them into one id",
+    )
+
+
+def _shared_name_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
+    return _shared_value_errors(
+        arch,
+        {
+            metric_id: m["name"].casefold()
+            for metric_id, m in metrics.items()
+            if isinstance(m.get("name"), str)
+        },
+        "share a name; name each after what it measures",
+    )
+
+
+def _shared_value_errors(
+    arch: str, values: dict[str, Optional[str]], problem: str
+) -> list[str]:
+    ids_by_value = defaultdict(list)
+    for metric_id, value in values.items():
+        ids_by_value[value].append(metric_id)
     return [
-        f"[{arch}] {metric_ids}: share a formula; merge them into one id"
-        for formula, metric_ids in ids_by_formula.items()
-        if formula is not None and len(metric_ids) > 1
+        f"[{arch}] {metric_ids}: {problem}"
+        for value, metric_ids in ids_by_value.items()
+        if value is not None and len(metric_ids) > 1
     ]
 
 
