@@ -10,6 +10,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
@@ -622,6 +623,11 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   std::vector<uint32_t> env;
   env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
+  auto record_move_error = [error_out](std::string_view message) {
+    if (error_out != nullptr)
+      error_out->assign(message);
+  };
+  const util::DiagnosticEmitter move_error(record_move_error);
 
   // The full-mask window: needed to spill, and to define the argument VGPRs in
   // every lane rather than only the ones active at the anchor. Mirrors
@@ -701,10 +707,17 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   if (!validate_register_saves(plan, {}, unavailable_backups, register_save_destinations,
                                error_out))
     return std::nullopt;
-  for (const RegisterSave &save : plan.register_saves)
-    env.push_back(save.cls == RegClass::SGPR
-                      ? build_s_mov_b32(save.destination, save.source, plan.arch)
-                      : build_v_mov_b32_src(save.destination, 256 + save.source, plan.arch));
+  for (const RegisterSave &save : plan.register_saves) {
+    if (save.cls == RegClass::SGPR) {
+      env.push_back(build_s_mov_b32(save.destination, save.source, plan.arch));
+    } else {
+      const util::FailureOr<uint32_t> word =
+          build_v_mov_b32_src(save.destination, 256 + save.source, plan.arch, &move_error);
+      if (word.failed())
+        return std::nullopt;
+      env.push_back(word.value());
+    }
+  }
 
   if (needs_rdna4_save_guard(plan.arch, plan.special_state_saves, plan.register_saves))
     env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe));
@@ -719,8 +732,13 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     report(error_out, "probe-call emission: guest VGPR argument copy plan is inconsistent");
     return std::nullopt;
   }
-  for (const ProbeArgumentMove &move : plan.argument_moves)
-    env.push_back(build_v_mov_b32_src(move.destination, 256 + move.source, plan.arch));
+  for (const ProbeArgumentMove &move : plan.argument_moves) {
+    const util::FailureOr<uint32_t> word =
+        build_v_mov_b32_src(move.destination, 256 + move.source, plan.arch, &move_error);
+    if (word.failed())
+      return std::nullopt;
+    env.push_back(word.value());
+  }
 
   // Argument materialization: consecutive VGPRs from the ABI's base, in order.
   //
@@ -733,6 +751,38 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   for (size_t i = 0; i < plan.probe_args.size(); ++i) {
     const ProbeArgValue &arg = plan.probe_args[i];
     const uint16_t vdst = static_cast<uint16_t>(plan.arg_vgpr_base + i);
+    // TODO: Accept a DiagnosticEmitter in emit_probe_call and remove this adapter.
+    auto report_builder_error = [&](std::string_view message) {
+      if (error_out == nullptr)
+        return;
+      std::string_view source;
+      switch (arg.source) {
+      case ProbeArgSource::EntryVgprLane0:
+        source = "EntryVgprLane0";
+        break;
+      case ProbeArgSource::AnchorVgpr:
+        source = "AnchorVgpr";
+        break;
+      case ProbeArgSource::Immediate:
+        source = "Immediate";
+        break;
+      case ProbeArgSource::AnchorExecLo:
+        source = "AnchorExecLo";
+        break;
+      case ProbeArgSource::AnchorExecHi:
+        source = "AnchorExecHi";
+        break;
+      case ProbeArgSource::LogBufferPtrLo:
+        source = "LogBufferPtrLo";
+        break;
+      case ProbeArgSource::LogBufferPtrHi:
+        source = "LogBufferPtrHi";
+        break;
+      }
+      *error_out = "probe-call emission: argument " + std::to_string(i) + " (" +
+                   std::string(source) + "): " + std::string(message);
+    };
+    const util::DiagnosticEmitter error(report_builder_error);
     // Screened again here rather than inherited from planning: emit_probe_call is
     // callable on a plan this builder did not produce.
     if (!is_declared_probe_arg_source(arg.source)) {
@@ -758,32 +808,59 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
         report(error_out, "probe-call emission: missing entry VGPR capture");
         return std::nullopt;
       }
-      env.push_back(build_v_mov_b32_src(vdst, captured->sgpr, plan.arch));
+      const util::FailureOr<uint32_t> word =
+          build_v_mov_b32_src(vdst, captured->sgpr, plan.arch, &error);
+      if (word.failed())
+        return std::nullopt;
+      env.push_back(word.value());
       break;
     }
     case ProbeArgSource::AnchorVgpr:
       break; // Already captured by the parallel assignment above.
     case ProbeArgSource::Immediate: {
-      const auto words = build_v_mov_b32_imm(vdst, arg.immediate, plan.arch);
+      const util::FailureOr<std::array<uint32_t, 2>> maybe_words =
+          build_v_mov_b32_imm(vdst, arg.immediate, plan.arch, &error);
+      if (maybe_words.failed())
+        return std::nullopt;
+      const auto &words = maybe_words.value();
       env.insert(env.end(), words.begin(), words.end());
       break;
     }
-    case ProbeArgSource::AnchorExecLo:
-      env.push_back(build_v_mov_b32_src(vdst, exec_temp, plan.arch));
+    case ProbeArgSource::AnchorExecLo: {
+      const util::FailureOr<uint32_t> word =
+          build_v_mov_b32_src(vdst, exec_temp, plan.arch, &error);
+      if (word.failed())
+        return std::nullopt;
+      env.push_back(word.value());
       break;
-    case ProbeArgSource::AnchorExecHi:
-      env.push_back(build_v_mov_b32_src(vdst, static_cast<uint16_t>(exec_temp + 1), plan.arch));
+    }
+    case ProbeArgSource::AnchorExecHi: {
+      const util::FailureOr<uint32_t> word =
+          build_v_mov_b32_src(vdst, static_cast<uint16_t>(exec_temp + 1), plan.arch, &error);
+      if (word.failed())
+        return std::nullopt;
+      env.push_back(word.value());
       break;
+    }
     // The pair is read, never written, so it needs no save/restore here: the
     // prologue defined it at kernel entry and planning kept the envelope and the
     // probe body off it.
-    case ProbeArgSource::LogBufferPtrLo:
-      env.push_back(build_v_mov_b32_src(vdst, *plan.entry_storage_base, plan.arch));
+    case ProbeArgSource::LogBufferPtrLo: {
+      const util::FailureOr<uint32_t> word =
+          build_v_mov_b32_src(vdst, *plan.entry_storage_base, plan.arch, &error);
+      if (word.failed())
+        return std::nullopt;
+      env.push_back(word.value());
       break;
-    case ProbeArgSource::LogBufferPtrHi:
-      env.push_back(build_v_mov_b32_src(vdst, static_cast<uint16_t>(*plan.entry_storage_base + 1),
-                                        plan.arch));
+    }
+    case ProbeArgSource::LogBufferPtrHi: {
+      const util::FailureOr<uint32_t> word = build_v_mov_b32_src(
+          vdst, static_cast<uint16_t>(*plan.entry_storage_base + 1), plan.arch, &error);
+      if (word.failed())
+        return std::nullopt;
+      env.push_back(word.value());
       break;
+    }
     }
   }
 
@@ -851,10 +928,17 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   // Spill fills: reload each saved register after the call and wait for the loads.
   env.insert(env.end(), spill.epilogue.begin(), spill.epilogue.end());
-  for (const RegisterSave &save : plan.register_saves)
-    env.push_back(save.cls == RegClass::SGPR
-                      ? build_s_mov_b32(save.source, save.destination, plan.arch)
-                      : build_v_mov_b32_src(save.source, 256 + save.destination, plan.arch));
+  for (const RegisterSave &save : plan.register_saves) {
+    if (save.cls == RegClass::SGPR) {
+      env.push_back(build_s_mov_b32(save.source, save.destination, plan.arch));
+    } else {
+      const util::FailureOr<uint32_t> word =
+          build_v_mov_b32_src(save.source, 256 + save.destination, plan.arch, &move_error);
+      if (word.failed())
+        return std::nullopt;
+      env.push_back(word.value());
+    }
+  }
 
   // Special-state restores: copy each temp back into its register. After the spill
   // loads so EXEC is restored to its anchor mask only once the full-mask loads are

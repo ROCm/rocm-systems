@@ -280,7 +280,7 @@ public:
   /// Returns std::nullopt and writes a diagnostic to @p error_out (if non-null)
   /// when the plan is not a probe call, the synthesized envelope size disagrees
   /// with the planned before_word_count (plan/emit drift), or build() reports a
-  /// branch-range failure.
+  /// branch-range failure, or a delegated vector builder rejects an argument operand.
   [[nodiscard]] static std::optional<TrampolineBytes>
   emit_probe_call(const TrampolinePlan &plan, std::string *error_out = nullptr);
 };

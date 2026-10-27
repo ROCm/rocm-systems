@@ -371,8 +371,9 @@ TEST(ProbeLiveInTest, RejectsCdna5) {
 
 TEST(ProbeLiveInTest, Cdna5ProvenZeroBanksResolveGuestArgumentRegisters) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
-  const std::vector<uint32_t> body{build_v_mov_b32_src(1, 256, kArch),
-                                   build_s_setpc_b64(30, kArch)};
+  const util::FailureOr<uint32_t> move = build_v_mov_b32_src(1, 256, kArch);
+  ASSERT_TRUE(move.succeeded());
+  const std::vector<uint32_t> body{move.value(), build_s_setpc_b64(30, kArch)};
   const std::vector<uint8_t> image = make_elf(body, EF_AMDGPU_MACH_AMDGCN_GFX1250);
   const AmdGpuCodeObject object(image.data(), image.size());
   std::string error;

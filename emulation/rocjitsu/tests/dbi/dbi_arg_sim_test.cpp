@@ -158,7 +158,9 @@ protected:
   // whatever the guest happened to leave in v0. Nop the two v_mov_b32 v0, literal
   // words and the probe should read the guest's value instead.
   void expect_without_the_argument_write_probe_reads_the_guest_value() {
-    const auto arg_write = build_v_mov_b32_imm(0, kArgSentinel, a_.arch);
+    const auto maybe_arg_write = build_v_mov_b32_imm(0, kArgSentinel, a_.arch);
+    ASSERT_TRUE(maybe_arg_write.succeeded());
+    const auto arg_write = maybe_arg_write.value();
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
@@ -218,17 +220,22 @@ class DbiGuestArgumentSim : public ::testing::TestWithParam<ArgSimArch> {};
 
 TEST_P(DbiGuestArgumentSim, OverlappingArgumentsCaptureGuestValuesBeforeOverwritingThem) {
   const ArgSimArch &target = GetParam();
+  const util::FailureOr<uint32_t> guest_move = build_v_mov_b32_src(2, 256, target.arch);
+  const util::FailureOr<uint32_t> probe_first = build_v_mov_b32_src(3, 256, target.arch);
+  const util::FailureOr<uint32_t> probe_second = build_v_mov_b32_src(4, 257, target.arch);
+  ASSERT_TRUE(guest_move.succeeded());
+  ASSERT_TRUE(probe_first.succeeded());
+  ASSERT_TRUE(probe_second.succeeded());
   const std::vector<uint8_t> image = test::with_descriptor_metadata(
       test::make_amdgpu_kernel_elf(
-          {test::make_mov_vgpr_inline(0, 7), test::make_mov_vgpr_inline(1, 13),
-           build_v_mov_b32_src(2, 256, target.arch), build_s_endpgm(target.arch)},
+          {test::make_mov_vgpr_inline(0, 7), test::make_mov_vgpr_inline(1, 13), guest_move.value(),
+           build_s_endpgm(target.arch)},
           /*private_bytes=*/64, /*granulated_sgpr_count=*/3, target.e_flags,
           /*granulated_vgpr_count=*/3, /*accum_offset=*/1),
       target.arch);
   const std::vector<uint8_t> body = test::make_amdgpu_probe_elf(
       "guest_arguments",
-      {build_v_mov_b32_src(3, 256, target.arch), build_v_mov_b32_src(4, 257, target.arch),
-       build_s_setpc_b64(30, target.arch)},
+      {probe_first.value(), probe_second.value(), build_s_setpc_b64(30, target.arch)},
       target.e_flags);
   AmdGpuCodeObject object(image.data(), image.size());
   AmdGpuCodeObject probe(body.data(), body.size());
@@ -257,7 +264,9 @@ TEST_P(DbiGuestArgumentSim, OverlappingArgumentsCaptureGuestValuesBeforeOverwrit
   }
   // Removing the cycle's source capture must corrupt the observed argument.
   std::vector<uint32_t> broken = text;
-  const uint32_t capture = build_v_mov_b32_src(3, 257, target.arch);
+  const util::FailureOr<uint32_t> capture_word = build_v_mov_b32_src(3, 257, target.arch);
+  ASSERT_TRUE(capture_word.succeeded());
+  const uint32_t capture = capture_word.value();
   const std::vector<uint32_t>::iterator found = std::find(broken.begin(), broken.end(), capture);
   ASSERT_NE(found, broken.end());
   *found = build_s_nop(0, target.arch);

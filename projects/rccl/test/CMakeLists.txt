@@ -75,6 +75,13 @@ if(BUILD_TESTS)
     # explicitly before _exit() so child-process coverage data is flushed.
     add_compile_definitions(RCCL_TEST_CODE_COVERAGE=1)
   endif()
+  # -fgpu-rdc TUs skip host coverage: clang 24 rejects -fgpu-rdc plus
+  # -fprofile-instr-generate on TUs with dynamic initializers.
+  set(RCCL_TEST_GPU_RDC_COMPILE_OPTIONS -fgpu-rdc)
+  if (ENABLE_CODE_COVERAGE)
+    # Revert once the coverage nightly moves to ROCm 10.3, which has the clang fix.
+    list(APPEND RCCL_TEST_GPU_RDC_COMPILE_OPTIONS -fno-profile-instr-generate -fno-coverage-mapping)
+  endif()
 
   # add_rocshmem_targets() exports these with PARENT_SCOPE from src/, so re-derive them here.
   if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
@@ -1051,6 +1058,7 @@ if(BUILD_TESTS)
       transport/ShmMPITests.cpp
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/GdrFlushTests.cpp
+      transport/NetIbMPI/GdrFlushFlagTests.cpp
       transport/NetIbMPI/NicFusionTests.cpp
       transport/NetIbMPI/CastTests.cpp
       transport/NetIbMPI/OptRecvCompletionTests.cpp
@@ -1068,6 +1076,7 @@ if(BUILD_TESTS)
       CommMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
       MaxP2pPeersMPITests.cpp
+      GdrFlushFlagProtoSwitchMPITests.cpp
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
       HostApiCustomGinPluginMPITests.cpp
@@ -1292,7 +1301,7 @@ if(BUILD_TESTS)
       set_source_files_properties(transport/GinDeviceMPITests.cpp PROPERTIES
           COMPILE_OPTIONS "-UNCCL_GIN_ANVIL_SDMA_ENABLE;-DNCCL_GIN_ANVIL_SDMA_ENABLE=1"
           INCLUDE_DIRECTORIES "${_ANVIL_SDMA_INCLUDES}")
-      target_compile_options(${test_executable} PRIVATE -fgpu-rdc)
+      target_compile_options(${test_executable} PRIVATE ${RCCL_TEST_GPU_RDC_COMPILE_OPTIONS})
       if(TARGET rocshmem_static)
         add_dependencies(${test_executable} rocshmem_static)
       endif()
@@ -1351,7 +1360,7 @@ if(BUILD_TESTS)
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilIpcDevice_test.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilSdmaTemplate_test.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/device/sdma/anvil_stub_quiet_count.cpp
-      PROPERTIES COMPILE_OPTIONS "-fgpu-rdc")
+      PROPERTIES COMPILE_OPTIONS "${RCCL_TEST_GPU_RDC_COMPILE_OPTIONS}")
     # install.sh --rocshmem-gin -t (GIN CI) sets ENABLE_ROCSHMEM_GIN without
     # GIN_ANVIL_UNIT_TESTS, so the gate at line 372 keeps Suite H out of that
     # build and only the IPC test and the counter TU compile relocatable there.

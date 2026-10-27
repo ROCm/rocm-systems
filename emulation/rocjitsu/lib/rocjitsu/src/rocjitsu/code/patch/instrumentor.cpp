@@ -28,6 +28,7 @@
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "util/except.h"
+#include "util/result.h"
 
 #include <algorithm>
 #include <array>
@@ -961,6 +962,20 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     out.errors.emplace_back("code object has multiple .text sections; currently supports only one");
     return out;
   }
+  // A join keeps its fallthrough edge, but its SGPR-held resume edge to the waiting side
+  // is unknown. G_FORK also has an unknown SGPR-held target. Liveness can miss registers
+  // needed on those paths, allowing scratch allocation to clobber them.
+  for (const auto &block : blocks_) {
+    for (const Instruction &inst : block->instructions()) {
+      if (inst.flags() & BRANCH_STACK) {
+        out.errors.push_back("code object uses the conditional branch stack (" +
+                             std::string(inst.mnemonic()) + " at .text offset " +
+                             std::to_string(inst.src_loc()) +
+                             "); liveness across fork/join is not modelled");
+        return out;
+      }
+    }
+  }
   const Section *text = obj_.text_sections().front();
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                             text->size());
@@ -989,16 +1004,28 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
           has_call |= (instruction.flags() & INDIRECT_CALL) != 0;
       }
       if (!has_call) {
+        bool bank_analysis_failed = false;
         const bool zero = std::ranges::all_of(points_, [&](const auto &point) {
           const Instruction *anchor = find_instruction_at_offset(point.anchor_offset);
           if (!anchor)
             return false;
           for (amdgpu::VgprMsbRole role : {amdgpu::VgprMsbRole::Src0, amdgpu::VgprMsbRole::Src1,
-                                           amdgpu::VgprMsbRole::Src2, amdgpu::VgprMsbRole::Dst})
-            if (liveness_->vgpr_msb_bank_before(*anchor, role) != 0)
+                                           amdgpu::VgprMsbRole::Src2, amdgpu::VgprMsbRole::Dst}) {
+            const util::FailureOr<std::optional<uint8_t>> bank =
+                liveness_->vgpr_msb_bank_before(*anchor, role);
+            if (bank.failed()) {
+              bank_analysis_failed = true;
               return false;
+            }
+            if (bank.value() != 0)
+              return false;
+          }
           return true;
         });
+        if (bank_analysis_failed) {
+          out.errors.emplace_back("probe entry VGPR bank liveness is unavailable");
+          return out;
+        }
         if (zero)
           probe_entry_state = ProbeEntryState::ZeroVgprBanks;
       }
@@ -1169,32 +1196,6 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
 }
 
 InstrumentedCodeObject Instrumentor::patch() {
-  // The entry prologue loads through a kernarg wrapper that only a dispatch-time
-  // runtime must build. Without an explicit binding both loads
-  // read past the kernarg allocation and the guest's kernarg pointer is
-  // overwritten, so patch() refuses any point that would need the prologue.
-  // patch_with_debug_summaries() still plans it, for callers that supply the
-  // wrapper themselves.
-  std::string readers;
-  for (const InstrumentationPoint &pt : points_) {
-    if (std::none_of(pt.probe_args.begin(), pt.probe_args.end(),
-                     [](const ProbeArgValue &arg) { return reads_entry_storage(arg.source); }))
-      continue;
-    if (readers.find("'" + pt.probe_symbol + "'") != std::string::npos)
-      continue;
-    if (!readers.empty())
-      readers += ", ";
-    readers += "'" + pt.probe_symbol + "'";
-  }
-  if (!patched_ && !readers.empty() && options_.kernarg_binding == DbiKernargBinding::None) {
-    patched_ = true;
-    InstrumentedCodeObject result;
-    result.errors.emplace_back("a probe reads the framework's entry storage, which needs a kernarg "
-                               "wrapper and CallerSuppliedWrapper binding; requested by " +
-                               readers);
-    return result;
-  }
-
   // Slice off the debug summaries; move the base subobject into the return.
   auto debug = patch_with_debug_summaries();
   return std::move(static_cast<InstrumentedCodeObject &>(debug));
@@ -1219,6 +1220,30 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   if (points_.empty()) {
     result.errors.emplace_back("Instrumentor::patch requires at least one queued point; got zero");
     return result;
+  }
+
+  // Entry storage needs a runtime-owned kernarg wrapper. Both patch entry points
+  // require the caller to bind it explicitly. Tests may skip this gate to inspect
+  // or dispatch a wrapper themselves; the prologue planner's checks still run.
+  if (!skip_patch_gates_ && options_.kernarg_binding == DbiKernargBinding::None) {
+    std::string readers;
+    for (const InstrumentationPoint &pt : points_) {
+      if (std::none_of(pt.probe_args.begin(), pt.probe_args.end(),
+                       [](const ProbeArgValue &arg) { return reads_entry_storage(arg.source); }))
+        continue;
+      if (readers.find("'" + pt.probe_symbol + "'") != std::string::npos)
+        continue;
+      if (!readers.empty())
+        readers += ", ";
+      readers += "'" + pt.probe_symbol + "'";
+    }
+    if (!readers.empty()) {
+      result.errors.emplace_back(
+          "a probe reads the framework's entry storage, which needs a "
+          "kernarg wrapper and CallerSuppliedWrapper binding; requested by " +
+          readers);
+      return result;
+    }
   }
 
   ResolvedPoints resolved = resolve_points();
@@ -1316,7 +1341,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     });
   };
   if (options_.register_growth) {
-    if (kernels.size() != 1 || !liveness.global_vgpr_usage_is_complete() ||
+    const util::FailureOr<bool> complete = liveness.global_vgpr_usage_is_complete();
+    if (complete.failed()) {
+      result.errors.emplace_back("register growth's liveness is unavailable");
+      return result;
+    }
+    if (kernels.size() != 1 || !complete.value() ||
         accesses_sgprs_indirectly_via_movrel(liveness_scope)) {
       result.errors.emplace_back("register growth needs one kernel with enumerable register uses");
       return result;
@@ -1510,7 +1540,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.errors.emplace_back("internal: anchor instruction vanished after validation");
         continue;
       }
-      RegisterSet live = liveness.live_before(*anchor) | probe_argument_registers(site.probe_args);
+      const util::FailureOr<const RegisterSet *> maybe_live = liveness.live_before(*anchor);
+      if (maybe_live.failed()) {
+        result.errors.emplace_back("internal: anchor liveness is unavailable");
+        continue;
+      }
+      RegisterSet live = *maybe_live.value() | probe_argument_registers(site.probe_args);
       if (options_.register_growth &&
           options_.preservation == GuestStatePreservation::DeclaredRegisters) {
         for (uint16_t reg = 0; reg < options_.register_growth->sgprs; ++reg)

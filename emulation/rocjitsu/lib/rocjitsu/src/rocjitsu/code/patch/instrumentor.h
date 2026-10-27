@@ -495,8 +495,7 @@ public:
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
   ///
-  /// Also allows entry-storage planning without a production binding, for tests
-  /// that construct and dispatch a wrapper themselves.
+  /// Refuses the same points patch() does.
   ///
   /// Currently intended for tests and debugging, although could eventually
   /// be used to communicate important information for the host (an ordering
@@ -510,6 +509,12 @@ private:
   InstrumentationOptions options_;
   std::vector<InstrumentationPoint> points_;
   bool patched_ = false;
+
+  // Tests can bypass runtime-binding gates to inspect a plan or supply their own
+  // dispatch support. Planner validation still runs; production callers cannot
+  // bypass the gates.
+  friend struct InstrumentorTestAccess;
+  bool skip_patch_gates_ = false;
 
   // Lazily populated.
   std::unique_ptr<Decoder> decoder_;
