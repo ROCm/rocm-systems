@@ -47,8 +47,7 @@ void register_pending_event(WaveRaceState &race, uint64_t pc, MemoryEventType ty
                             std::vector<uint32_t> registers, WaitCounterType counter,
                             MemoryOrderClass order) {
   const std::array obligations{MemoryCounterObligation{counter, order}};
-  const InstructionSnapshot instruction{.pc = pc, .words = {S_NOP}, .word_count = 1};
-  race.registerEvent(instruction, type, std::move(registers), 1, 0xf, obligations, order);
+  race.registerEvent(testInstruction(pc), type, std::move(registers), 1, 0xf, obligations, order);
 }
 
 void execute_wait(ExecutionPluginGroup &plugins, Wavefront &wave, uint32_t word) {
@@ -2445,13 +2444,11 @@ TEST(FindConflictTest, UsesRecordedConflictingEvent) {
   const std::array obligations{
       MemoryCounterObligation{WaitCounterType::VMCNT, MemoryOrderClass::VMEM}};
   EventId first = detector.allocateEventId(
-      WaveId{0}, InstructionSnapshot{.pc = 0x100, .words = {S_NOP}, .word_count = 1},
-      MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1, 0xf, {}, obligations,
-      MemoryOrderClass::VMEM);
+      WaveId{0}, testInstruction(/*pc=*/0x100), MemoryEventType::GLOBAL_TO_VGPR, {2},
+      /*execMask=*/1, 0xf, {}, obligations, MemoryOrderClass::VMEM);
   EventId second = detector.allocateEventId(
-      WaveId{0}, InstructionSnapshot{.pc = 0x200, .words = {S_NOP}, .word_count = 1},
-      MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1, 0xf, {}, obligations,
-      MemoryOrderClass::VMEM);
+      WaveId{0}, testInstruction(/*pc=*/0x200), MemoryEventType::GLOBAL_TO_VGPR, {2},
+      /*execMask=*/1, 0xf, {}, obligations, MemoryOrderClass::VMEM);
   ASSERT_NE(first, second);
 
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), second};

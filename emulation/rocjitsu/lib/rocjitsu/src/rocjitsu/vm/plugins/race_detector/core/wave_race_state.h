@@ -39,6 +39,14 @@ struct CounterCapacities {
 /// queues, and provides event registration, waitcnt resolution, and VGPR
 /// race checking. Holds a pointer to the workgroup level RaceDetector for
 /// event allocation and lifecycle transitions.
+///
+/// Every event registration method (registerEvent, registerScalarLoad,
+/// registerLdsEvent and registerDualOffsetLdsEvent) takes the producing
+/// instruction as an InstructionSnapshot holding its PC and complete encoding;
+/// the event's PC comes from the snapshot. A snapshot with no words or more than
+/// InstructionSnapshot::kMaxWords words throws std::logic_error before any event
+/// state changes and before scalar-write checks run. The encoding is decoded
+/// only if a plugin report needs its disassembly.
 class WaveRaceState {
 public:
   WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *, CounterCapacities);
@@ -51,9 +59,6 @@ public:
   /// Apply backpressure to every counter incremented by a resolved issue.
   void prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &);
 
-  /// All registration forms require a complete captured instruction. Empty or oversized
-  /// snapshots throw std::logic_error before event mutation or scalar-write checks.
-  /// The instruction is decoded only when a plugin report needs disassembly.
   /// Register an in-flight memory event that does not involve LDS.
   /// \param instruction Complete captured encoding and PC of the producing instruction.
   /// \param type The type of the memory event.
