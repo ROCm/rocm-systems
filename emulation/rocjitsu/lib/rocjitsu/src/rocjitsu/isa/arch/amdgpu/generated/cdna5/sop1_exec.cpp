@@ -306,31 +306,27 @@ void SMovrelsd2B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SGetPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::RegisterAccess(wf).write_scalar64(sdst, wf.pc + size_);
+  constexpr uint64_t kPcAddressMask = 0x01FFFFFFFFFFFFFFULL;
+  uint64_t next_pc = (wf.pc + size_) & kPcAddressMask;
+  if (next_pc & (1ULL << 56))
+    next_pc |= ~kPcAddressMask;
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, next_pc);
 }
 
 void SSetPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
-  constexpr uint64_t kPcSignBit = 1ULL << 47;
+  constexpr uint64_t kPcAddressMask = 0x01FFFFFFFFFFFFFFULL;
   const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
   uint64_t target = encoded & kPcAddressMask;
-  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)
-    target = wf.code_load_bias() + static_cast<int32_t>(encoded);
-  else if (target & kPcSignBit)
-    target |= ~kPcAddressMask;
   wf.pc = target - size_;
 }
 
 void SSwapPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
-  constexpr uint64_t kPcSignBit = 1ULL << 47;
-  uint64_t next_pc = wf.pc + size_;
+  constexpr uint64_t kPcAddressMask = 0x01FFFFFFFFFFFFFFULL;
+  uint64_t next_pc = (wf.pc + size_) & kPcAddressMask;
+  if (next_pc & (1ULL << 56))
+    next_pc |= ~kPcAddressMask;
   const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
   uint64_t target = encoded & kPcAddressMask;
-  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)
-    target = next_pc - 20 + static_cast<int32_t>(encoded);
-  else if (target & kPcSignBit)
-    target |= ~kPcAddressMask;
   wf.pc = target - size_;
   amdgpu::RegisterAccess(wf).write_scalar64(sdst, next_pc);
 }

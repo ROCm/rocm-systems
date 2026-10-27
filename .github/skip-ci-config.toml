@@ -26,6 +26,19 @@ common = [
     ".github/label*.yml",
     "*CODEOWNERS",
     "*LICENSE",
+
+    # This file defines CI gating, so a change here is not validated by any CI
+    # run it skips. Review it on that basis: a too-broad pattern added here can
+    # silently stop CI for unrelated paths.
+    ".github/skip-ci-config.toml",
+
+    # RCCL's workflows run on their own schedules/triggers and are never
+    # invoked by TheRock CI, so editing them cannot affect a TheRock build.
+    # `therock-rccl-*` is rooted at therock-rccl-ci.yml (schedule +
+    # workflow_dispatch only), so it is likewise outside TheRock PR CI.
+    ".github/workflows/rccl[-_]*.yml",
+    ".github/workflows/therock-rccl-*.yml",
+
     "*/.markdownlint-ci2.yaml",
     "tools/systems_pr_bot/*",
 

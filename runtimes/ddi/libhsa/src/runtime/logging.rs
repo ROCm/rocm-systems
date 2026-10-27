@@ -99,7 +99,7 @@ impl LogOutput {
     }
 
     /// Stops this session.
-    pub(super) fn stop(&self) {
+    pub(crate) fn stop(&self) {
         let mut config = self
             .config
             .lock()
