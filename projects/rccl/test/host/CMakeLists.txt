@@ -1051,6 +1051,7 @@ function(rccl_define_micro_source_lists)
     misc/mlx5dvwrap-test.cc
     fakes/dl_fakes.cc                    # dlopen/dlvsym
     fakes/env_fakes.cc                   # NCCL_IBVERBS_LIB
+    fakes/libc_fakes.cc                  # gdr_peermem.cc opendir
     fakes/nccl_fakes.cc
     fakes/net_ib_ops_fault_fakes.cc      # ibvwrap.cc fault shims
     fakes/transport_stubs.cc             # rcclUseAinic

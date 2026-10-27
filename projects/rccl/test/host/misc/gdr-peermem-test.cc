@@ -17,26 +17,20 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
-#include <functional>
 #include <string>
 #include <vector>
 
 #include "ScopedHook.h"
+#include "fakes/libc_fakes.h"
 
-// Records every directory the scan opens; the default opens it for real. Local to this test:
-// gdr_peermem.cc is the only unit that scans directories.
-static std::vector<std::string> g_openedDirs;
-static std::function<DIR*(const char*)> g_opendir = [](const char* path) { return opendir(path); };
-static DIR* GdrPeermemTestOpendir(const char* path) {
-  g_openedDirs.push_back(path);
-  return g_opendir(path);
-}
-
-#define opendir GdrPeermemTestOpendir
+#include "fakes/libc_seam.h"
 #include GDR_PEERMEM_CC_PATH
-#undef opendir
+#include "fakes/libc_seam_undef.h"
 
 namespace {
+
+// Every directory the scan opened, in order.
+std::vector<std::string> g_openedDirs;
 
 namespace fs = std::filesystem;
 
@@ -48,7 +42,10 @@ class GdrPeermemScanMicrotest : public ::testing::Test {
     root_ = tmpl;
     g_openedDirs.clear();
   }
-  void TearDown() override { fs::remove_all(root_); }
+  void TearDown() override {
+    fs::remove_all(root_);
+    ResetLibcFakes();
+  }
 
   // Creates <root>/<base>/ and returns its path.
   std::string MakeBase(const std::string& base) {
@@ -70,6 +67,10 @@ class GdrPeermemScanMicrotest : public ::testing::Test {
   }
 
   std::string root_;
+  ScopedHook<DIR*(const char*)> opendir_{g_opendir, [](const char* path) {
+                                           g_openedDirs.push_back(path);
+                                           return ::opendir(path);
+                                         }};
 };
 
 TEST_F(GdrPeermemScanMicrotest, Scan_EmptyList_FindsNothing) {
@@ -112,7 +113,10 @@ TEST_F(GdrPeermemScanMicrotest, Scan_VersionPathDoesNotFitPathMax_SkipsEntry) {
 }
 
 TEST(GdrPeermemDefaultScanMicrotest, ScanDefault_NoClient_ProbesEveryStandardMemoryPeersPath) {
-  ScopedHook noDirs(g_opendir, [](const char*) -> DIR* { return nullptr; });
+  ScopedHook noDirs(g_opendir, [](const char* path) -> DIR* {
+    g_openedDirs.push_back(path);
+    return nullptr;
+  });
   g_openedDirs.clear();
 
   EXPECT_EQ(ncclIbScanDefaultPeerMemClients(), 0);
