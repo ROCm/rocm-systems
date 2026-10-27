@@ -52,6 +52,32 @@ bool daemon_ready(const std::string &path) {
   return ok;
 }
 
+/// Call only in a forked child before exec.
+void redirect_output_or_exit(const std::string &path) {
+  const int output = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+  if (output < 0 || dup2(output, STDOUT_FILENO) < 0 || dup2(output, STDERR_FILENO) < 0)
+    _exit(127);
+  close(output);
+}
+
+bool wait_for_exit(pid_t pid, int &status, std::chrono::seconds timeout) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  do {
+    const pid_t exited = waitpid(pid, &status, WNOHANG);
+    if (exited == pid)
+      return true;
+    if (exited < 0 && errno != EINTR)
+      return false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  } while (std::chrono::steady_clock::now() < deadline);
+  return false;
+}
+
+std::string read_file(const std::string &path) {
+  std::ifstream input(path);
+  return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
 struct TestPaths {
   std::string daemon_bin = RJ_DAEMON_BIN;
   std::string daemon_config = RJ_DAEMON_CONFIG;
@@ -212,11 +238,7 @@ protected:
     ASSERT_GE(daemon_pid_, 0) << "fork failed: " << strerror(errno);
 
     if (daemon_pid_ == 0) {
-      const int output =
-          open((tmp_dir_ + "/daemon.log").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-      if (output < 0 || dup2(output, STDOUT_FILENO) < 0 || dup2(output, STDERR_FILENO) < 0)
-        _exit(127);
-      close(output);
+      redirect_output_or_exit(tmp_dir_ + "/daemon.log");
       setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
       setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
       execl(daemon_bin(), daemon_bin(), "--daemon", "--config", config_path_.c_str(), nullptr);
@@ -240,21 +262,15 @@ protected:
   void TearDown() override {
     if (daemon_pid_ > 0) {
       int status = 0;
-      pid_t exited = 0;
+      bool exited = false;
       if (expected_daemon_exit_ != EXIT_SUCCESS) {
         // Fatal VM failures must stop the daemon without a teardown signal.
         // SIGTERM sent after its signal-wait loop has ended can remain pending
         // until the CLI restores its signal mask, replacing the failure exit.
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        do {
-          exited = waitpid(daemon_pid_, &status, WNOHANG);
-          if (exited == daemon_pid_ || (exited < 0 && errno != EINTR))
-            break;
-          std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        } while (std::chrono::steady_clock::now() < deadline);
-        EXPECT_EQ(exited, daemon_pid_) << "daemon did not exit after a fatal VM failure";
+        exited = wait_for_exit(daemon_pid_, status, std::chrono::seconds(5));
+        EXPECT_TRUE(exited) << "daemon did not exit after a fatal VM failure";
       }
-      if (exited != daemon_pid_) {
+      if (!exited) {
         EXPECT_EQ(kill(daemon_pid_, SIGTERM), 0);
         EXPECT_EQ(waitpid(daemon_pid_, &status, 0), daemon_pid_);
       }
@@ -265,16 +281,14 @@ protected:
       EXPECT_FALSE(std::filesystem::exists(sock_path_));
       daemon_pid_ = -1;
     }
-    std::ifstream daemon_log(tmp_dir_ + "/daemon.log");
-    const std::string output{std::istreambuf_iterator<char>(daemon_log),
-                             std::istreambuf_iterator<char>()};
-    EXPECT_FALSE(rocjitsu::test::has_sanitizer_diagnostic(output)) << output;
+    const std::string output = read_file(tmp_dir_ + "/daemon.log");
+    EXPECT_FALSE(rocjitsu::test::has_sanitizer_diagnostic(output))
+        << "daemon output contains a sanitizer diagnostic";
     if (expected_daemon_diagnostic_) {
       const ::testing::Matcher<const std::string &> diagnostic =
           ::testing::ContainsRegex(expected_daemon_diagnostic_);
       EXPECT_TRUE(diagnostic.Matches(output))
-          << "expected daemon diagnostic: " << expected_daemon_diagnostic_ << '\n'
-          << output;
+          << "expected daemon diagnostic: " << expected_daemon_diagnostic_;
     }
     if (HasFailure())
       std::fputs(output.c_str(), stderr);
@@ -393,6 +407,9 @@ TEST_F(DaemonTest, HipVectorAdd) {
 }
 
 #ifdef RJ_HAS_INSTRUCTION_FAILURE_TEST
+constexpr char kDaemonDecodeDiagnostic[] =
+    "CU .*could not decode.*pc=.*pid=.*qid=.*dispatch=.*0xbfff0000";
+
 TEST_F(DaemonTest, HipUnsupportedInstructionExitsWithFailure) {
   expected_daemon_exit_ = EXIT_FAILURE;
   expected_daemon_diagnostic_ =
@@ -405,7 +422,7 @@ TEST_F(DaemonTest, HipUnsupportedInstructionExitsWithFailure) {
 
 TEST_F(DaemonTest, HipDecodeFailureExitsWithFailure) {
   expected_daemon_exit_ = EXIT_FAILURE;
-  expected_daemon_diagnostic_ = "CU .*could not decode.*pc=.*pid=.*qid=.*dispatch=.*0xbfff0000";
+  expected_daemon_diagnostic_ = kDaemonDecodeDiagnostic;
   auto r = run_hip_test(hip_instruction_failure_bin(),
                         "HipDaemonInstructionFailureTest.DecodeFailureExitsWithFailure");
   EXPECT_EQ(r.exit_code, 0) << r.output;
@@ -420,10 +437,7 @@ TEST_F(DaemonTest, HipFatalDecodeDisconnectsValidClient) {
     // Kill the death-test child along with its launcher if the regression hangs.
     if (setpgid(0, 0) != 0)
       _exit(127);
-    const int output = open(output_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (output < 0 || dup2(output, STDOUT_FILENO) < 0 || dup2(output, STDERR_FILENO) < 0)
-      _exit(127);
-    close(output);
+    redirect_output_or_exit(output_path);
     setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
     setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
     setenv("ROCJITSU_TEST_CLIENT_READY", ready_path.c_str(), 1);
@@ -456,25 +470,16 @@ TEST_F(DaemonTest, HipFatalDecodeDisconnectsValidClient) {
   ASSERT_TRUE(std::filesystem::exists(ready_path)) << "valid client did not complete its kernel";
 
   expected_daemon_exit_ = EXIT_FAILURE;
-  expected_daemon_diagnostic_ = "CU .*could not decode.*pc=.*pid=.*qid=.*dispatch=.*0xbfff0000";
+  expected_daemon_diagnostic_ = kDaemonDecodeDiagnostic;
   const ProcessResult faulting =
       run_hip_test(hip_instruction_failure_bin(),
                    "HipDaemonInstructionFailureTest.DecodeFailureExitsWithFailure");
   EXPECT_EQ(faulting.exit_code, 0) << faulting.output;
   int status = 0;
-  pid_t exited = 0;
-  const auto exit_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-  do {
-    exited = waitpid(valid_client, &status, WNOHANG);
-    if (exited == valid_client || (exited < 0 && errno != EINTR))
-      break;
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  } while (std::chrono::steady_clock::now() < exit_deadline);
-  ASSERT_EQ(exited, valid_client) << "valid client did not exit after shared engine failure";
+  ASSERT_TRUE(wait_for_exit(valid_client, status, std::chrono::seconds(10)))
+      << "valid client did not exit after shared engine failure";
   guard.reaped();
-  std::ifstream output_file(output_path);
-  const std::string output((std::istreambuf_iterator<char>(output_file)),
-                           std::istreambuf_iterator<char>());
+  const std::string output = read_file(output_path);
   ASSERT_TRUE(WIFEXITED(status)) << output;
   EXPECT_EQ(WEXITSTATUS(status), 0) << output;
 }
