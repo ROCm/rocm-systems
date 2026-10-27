@@ -18,20 +18,14 @@ endif()
 set(HRR_BUILD_REV "unknown")
 set(HRR_BUILD_BRANCH "unknown")
 
-# HRR is routinely built in a container against a source tree bind-mounted from
-# the host, where the tree's owner is not the build user and git refuses to read
-# it at all ("detected dubious ownership") - which would leave every such build
-# reporting an unknown revision. safe.directory is honoured only from a config
-# *file*: neither "git -c safe.directory=*" nor GIT_CONFIG_COUNT injection is
-# accepted. So point git at a throwaway global config for these read-only
-# queries instead of modifying the user's real one.
+# Do not disable git's ownership check. A bind-mounted tree the build user does
+# not own then reports "unknown", which is the honest answer. Trusting every
+# directory would also trust a repository planted in a parent of a git-less
+# source tree, and git would run that repository's commands as the builder.
+# A checkout the builder already trusts belongs in their own git config.
+
 get_filename_component(_out_dir "${OUT_FILE}" DIRECTORY)
 file(MAKE_DIRECTORY "${_out_dir}")
-set(_git_config "${_out_dir}/hrr_version_stamp.gitconfig")
-if(NOT EXISTS "${_git_config}")
-  file(WRITE "${_git_config}" "[safe]\n\tdirectory = *\n")
-endif()
-set(ENV{GIT_CONFIG_GLOBAL} "${_git_config}")
 
 find_package(Git QUIET)
 if(GIT_FOUND)
