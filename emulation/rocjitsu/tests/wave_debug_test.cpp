@@ -4,8 +4,10 @@
 /// @file wave_debug_test.cpp
 /// @brief Wave-level KFD debugger groundwork, exercised through the compute unit.
 
+#include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -68,9 +70,12 @@ struct WaveDebugFixture {
 };
 
 TEST(WaveDebugTest, DebuggerReadsPreserveValuesAtNonzeroOffsets) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
+  const auto check = []<GpuIsa Isa>(rj_code_arch_t arch) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch, 2);
+    using ComputeUnit = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
+    const auto *cu = dynamic_cast<const ComputeUnit *>(fx.cu.get());
+    ASSERT_NE(cu, nullptr);
     auto *first_wave = fx.dispatch(kKernelAddr);
     ASSERT_NE(first_wave, nullptr);
     auto *wave = fx.dispatch(kKernelAddr);
@@ -94,14 +99,15 @@ TEST(WaveDebugTest, DebuggerReadsPreserveValuesAtNonzeroOffsets) {
               43u);
 
     const auto sgpr_end = fx.cu->sgpr_file().total_regs() - wave->sgpr_alloc().base;
-    const auto vgpr_end =
-        fx.cu->num_wf_slots() * fx.cu->vgpr_allocation_block_size() - wave->vgpr_alloc().base;
+    const auto vgpr_end = cu->vgpr_file().total_regs() - wave->vgpr_alloc().base;
     EXPECT_EQ(wave->debug_read_sgpr(sgpr_end), 0u);
     EXPECT_EQ(wave->debug_read_sgpr(sgpr_end + 1), 0u);
     EXPECT_EQ(wave->debug_read_vgpr(vgpr_end, 0), 0u);
     EXPECT_EQ(wave->debug_read_vgpr(vgpr_end + 1, 0), 0u);
     EXPECT_EQ(wave->debug_read_vgpr(last_vgpr, fx.cu->vgpr_storage_lane_count()), 0u);
-  }
+  };
+  check.operator()<cdna4::Isa>(ROCJITSU_CODE_ARCH_CDNA4);
+  check.operator()<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4);
 }
 
 TEST(WaveDebugTest, DebuggerReadsPreserveSmallAllocationStorage) {
