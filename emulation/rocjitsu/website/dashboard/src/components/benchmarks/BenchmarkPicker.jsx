@@ -10,6 +10,7 @@ import CheckBoxIcon from '@mui/icons-material/CheckBox';
 import CheckBoxOutlineBlankIcon from '@mui/icons-material/CheckBoxOutlineBlank';
 
 import { boundedGridSelection, filterBenchmarkOptions } from './benchmarkExplorer';
+import { MAX_BENCHMARK_CHARTS } from '../../config/benchmarkGrid';
 
 // Size before Popper's flip/overflow calculations, using the larger side of the
 // anchor. A fixed 340px list can extend below a short dialog/phone viewport.
@@ -36,9 +37,10 @@ function formatDataType(value) {
 export function BenchmarkGridPicker({
   availableOptions,
   selected,
-  maxSelected = 8,
+  maxSelected = MAX_BENCHMARK_CHARTS,
   onChange,
 }) {
+  const maximum = Math.min(maxSelected, MAX_BENCHMARK_CHARTS);
   const selectedIds = new Set(selected.map((option) => option.id));
   // MUI groupBy requires adjacent suite members; publication order can interleave.
   const options = [...availableOptions].sort((a, b) => a.suite.localeCompare(b.suite));
@@ -59,9 +61,9 @@ export function BenchmarkGridPicker({
       isOptionEqualToValue={(option, value) => option.id === value.id}
       groupBy={(option) => option.suite}
       filterOptions={(candidateOptions, state) => filterBenchmarkOptions(candidateOptions, state.inputValue)}
-      getOptionDisabled={(option) => selected.length >= maxSelected && !selectedIds.has(option.id)}
+      getOptionDisabled={(option) => selected.length >= maximum && !selectedIds.has(option.id)}
       onChange={(_, nextOptions) => {
-        onChange(boundedGridSelection(nextOptions, maxSelected));
+        onChange(boundedGridSelection(nextOptions, maximum));
       }}
       noOptionsText="No benchmarks match within the selected targets / suites"
       renderOption={(props, option, state) => {
@@ -84,7 +86,7 @@ export function BenchmarkGridPicker({
           {...params}
           label="Benchmarks to graph"
           placeholder={selected.length === 0 ? 'Search and select benchmarks…' : ''}
-          helperText={`${selected.length} of ${maxSelected} benchmarks selected · ${availableOptions.length} available in the selected targets / suites · Search all; up to 50 matches shown`}
+          helperText={`${selected.length} of ${maximum} benchmarks selected · ${availableOptions.length} available in the selected targets / suites · Search all; up to 50 matches shown`}
         />
       )}
       slots={{ paper: Paper }}

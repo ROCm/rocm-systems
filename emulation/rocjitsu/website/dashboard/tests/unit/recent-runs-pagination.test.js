@@ -7,13 +7,26 @@ const { data } = createRecentRunsHistory();
 const filters = { targets: ['gfx1250'], suites: ['Triton'], modes: ['single'] };
 
 test('page bounds clamp shrinking, short and empty histories without overlapping ranges', () => {
-  expect(presentation.recentRunsPage?.(65, 0)).toEqual({ page: 0, start: 0, end: 20 });
-  expect(presentation.recentRunsPage?.(65, 1)).toEqual({ page: 1, start: 20, end: 40 });
-  expect(presentation.recentRunsPage?.(65, 2)).toEqual({ page: 2, start: 40, end: 60 });
-  expect(presentation.recentRunsPage?.(65, 3)).toEqual({ page: 3, start: 60, end: 65 });
-  expect(presentation.recentRunsPage?.(24, 3)).toEqual({ page: 1, start: 20, end: 24 });
-  expect(presentation.recentRunsPage?.(3, 3)).toEqual({ page: 0, start: 0, end: 3 });
-  expect(presentation.recentRunsPage?.(0, 3)).toEqual({ page: 0, start: 0, end: 0 });
+  expect(presentation.recentRunsPage?.(65, 0)).toMatchObject({ page: 0, start: 0, end: 20 });
+  expect(presentation.recentRunsPage?.(65, 1)).toMatchObject({ page: 1, start: 20, end: 40 });
+  expect(presentation.recentRunsPage?.(65, 2)).toMatchObject({ page: 2, start: 40, end: 60 });
+  expect(presentation.recentRunsPage?.(65, 3)).toMatchObject({ page: 3, start: 60, end: 65 });
+  expect(presentation.recentRunsPage?.(24, 3)).toMatchObject({ page: 1, start: 20, end: 24 });
+  expect(presentation.recentRunsPage?.(3, 3)).toMatchObject({ page: 0, start: 0, end: 3 });
+  expect(presentation.recentRunsPage?.(0, 3)).toMatchObject({ page: 0, start: 0, end: 0 });
+});
+
+test('pagination model exposes its twenty-row policy and navigation count for every reachable slice', () => {
+  const first = presentation.recentRunsPage(65, 0);
+  expect(first).toMatchObject({ pageSize: 20, pageCount: 4 });
+  const covered = Array.from({ length: first.pageCount }, (_, page) => {
+    const slice = presentation.recentRunsPage(65, page);
+    expect(slice.pageSize).toBe(20);
+    expect(slice.pageCount).toBe(4);
+    return Array.from({ length: slice.end - slice.start }, (_, index) => slice.start + index);
+  }).flat();
+  expect(covered).toEqual(Array.from({ length: 65 }, (_, index) => index));
+  expect(presentation.recentRunsPage(0, 3)).toMatchObject({ page: 0, start: 0, end: 0, pageCount: 0, pageSize: 20 });
 });
 
 test('uncapped history preserves validated canonical attempts, tied execution order and selected coverage', () => {

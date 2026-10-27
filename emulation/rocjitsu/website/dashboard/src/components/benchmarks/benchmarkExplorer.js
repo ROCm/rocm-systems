@@ -1,6 +1,7 @@
 import { formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
 import { commitTimestampFor, hasCommitTimestamp } from '../../data/runOrdering';
 import { resolveHistoryRange } from '../../config/historyRanges';
+import { MAX_BENCHMARK_CHARTS } from '../../config/benchmarkGrid';
 
 export function benchmarkResultChoices(viewModel) {
   return viewModel.runs.flatMap((run, index) => viewModel.series.map((series) => {
@@ -14,8 +15,8 @@ export function benchmarkResultChoices(viewModel) {
 }
 
 // Local presentation helpers for Benchmark Explorer.
-export function boundedGridSelection(options, maximum = 8) {
-  return [...new Map(options.map((option) => [option.id, option])).values()].slice(0, Math.min(maximum, 8));
+export function boundedGridSelection(options, maximum = MAX_BENCHMARK_CHARTS) {
+  return [...new Map(options.map((option) => [option.id, option])).values()].slice(0, Math.min(maximum, MAX_BENCHMARK_CHARTS));
 }
 
 export function filterBenchmarkOptions(options, query) {

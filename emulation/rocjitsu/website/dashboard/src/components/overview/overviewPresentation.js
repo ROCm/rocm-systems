@@ -56,8 +56,12 @@ export function nearestTrendIndex(history, x) {
   return nearest != null && history.slots[nearest].run && history.rows.some((row) => Number.isFinite(row.points[nearest]?.speedup)) ? nearest : null;
 }
 
+const RECENT_RUNS_PAGE_SIZE = 20;
+
 export function recentRunsPage(rowCount, requestedPage) {
-  const page = Math.max(0, Math.min(requestedPage, Math.ceil(rowCount / 20) - 1));
-  const start = page * 20;
-  return { page, start, end: Math.min(rowCount, start + 20) };
+  const pageSize = RECENT_RUNS_PAGE_SIZE;
+  const pageCount = Math.ceil(rowCount / pageSize);
+  const page = Math.max(0, Math.min(requestedPage, pageCount - 1));
+  const start = page * pageSize;
+  return { page, start, end: Math.min(rowCount, start + pageSize), pageCount, pageSize };
 }

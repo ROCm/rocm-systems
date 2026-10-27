@@ -171,7 +171,23 @@ def test_benchmark_pin_and_unfiltered_execution():
         s['run'] for s in benchmark['steps'] if s['name'] == 'Run performance suite'
     )
     assert command.count('-m benchmarks.runner') == 1
-    assert '--manifest benchmarks/suites/performance-v1.toml' in command
+    assert (
+        workflow['env']['BENCHMARK_MANIFEST'] == 'benchmarks/suites/performance-v1.toml'
+    )
+    assert '--manifest "${BENCHMARK_MANIFEST}"' in command
+    generation = next(
+        s['run']
+        for s in benchmark['steps']
+        if s['name'] == 'Generate pinned Tensile artifacts'
+    )
+    assert (
+        'prepare-benchmarks.py" generate --manifest "${BENCHMARK_MANIFEST}"'
+        in generation
+    )
+    workflow_text = (WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text()
+    assert workflow_text.count('benchmarks/suites/performance-v1.toml') == 1
+    helper = WORKFLOWS.parents[1] / 'emulation/rocjitsu/scripts/prepare-benchmarks.py'
+    assert 'benchmarks/suites/performance-v1.toml' not in helper.read_text()
     assert command.count('--target-config ') == 2
     assert '--output "${ROCJITSU_RESULT_DIR}"' in command
     for selector in (

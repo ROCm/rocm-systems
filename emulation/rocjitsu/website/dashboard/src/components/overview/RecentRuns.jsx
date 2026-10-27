@@ -30,12 +30,12 @@ function statusFor(row) {
 export default function RecentRuns({ data, filters }) {
   const attempts = useMemo(() => selectRecentRunAttempts(data), [data]);
   const [requestedPage, setPage] = useState(0);
-  const { page, start, end } = recentRunsPage(attempts.length, requestedPage);
+  const { page, start, end, pageCount, pageSize } = recentRunsPage(attempts.length, requestedPage);
   // Clamp before rendering; retain the corrected page if history grows again.
   if (requestedPage !== page) setPage(page);
   const rows = useMemo(() => selectRecentRunSummaries(attempts.slice(start, end), filters), [attempts, start, end, filters]);
   return (
-    <SectionCard title="Recent Runs" subtitle="Published develop runs · newest executions first · 20 per page · selected targets, suites and thread policies" data-testid="recent-runs" sx={{ minWidth: 0 }} contentSx={{ p: 2, '&:last-child': { pb: 2 }, minWidth: 0 }}>
+    <SectionCard title="Recent Runs" subtitle={`Published develop runs · newest executions first · ${pageSize} per page · selected targets, suites and thread policies`} data-testid="recent-runs" sx={{ minWidth: 0 }} contentSx={{ p: 2, '&:last-child': { pb: 2 }, minWidth: 0 }}>
       {rows.length > 0 ? <>
         <TableContainer key={page} data-testid="recent-runs-table" tabIndex={0} role="region" aria-label="Recent runs scroll area" sx={{ height: rows.length > 5 ? 344 : 'auto', maxHeight: 344, maxWidth: '100%', overflow: 'auto', scrollbarGutter: 'stable', overscrollBehavior: 'contain', '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 2 } }}>
           <Table stickyHeader size="small" aria-label="Recent runs" sx={{ tableLayout: 'fixed', minWidth: 760, borderCollapse: 'separate', borderSpacing: 0, '& td, & th': { boxSizing: 'border-box', px: 1.5 }, '& th': { height: 44, py: 1, whiteSpace: 'nowrap', fontSize: 11, bgcolor: 'action.hover' }, '& td': { height: 60, py: 1, fontSize: 12, whiteSpace: 'nowrap' }, '& td:not(:first-of-type), & th:not(:first-of-type)': { textAlign: 'center' } }}>
@@ -64,7 +64,7 @@ export default function RecentRuns({ data, filters }) {
           <Typography role="status" aria-live="polite" variant="caption" color="text.secondary">Showing {start + 1}–{start + rows.length} of {attempts.length} runs</Typography>
           <Pagination
             aria-label="Recent runs pages"
-            count={Math.ceil(attempts.length / 20)} page={page + 1}
+            count={pageCount} page={page + 1}
             onChange={(_event, value) => setPage(value - 1)}
             showFirstButton showLastButton siblingCount={0} boundaryCount={1} size="small"
             renderItem={(item) => <PaginationItem {...item} title={['first', 'previous', 'next', 'last'].includes(item.type) ? `Go to ${item.type} page` : undefined} />}

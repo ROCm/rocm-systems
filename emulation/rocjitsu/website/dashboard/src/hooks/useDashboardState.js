@@ -3,6 +3,7 @@ import { THREAD_POLICIES } from '../data/runSchema.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { historyRanges } from '../config/historyRanges.js';
 import { dashboardPages } from '../config/dashboardPages.js';
+import { MAX_BENCHMARK_CHARTS } from '../config/benchmarkGrid.js';
 
 const FILTER_STORAGE_KEY = 'rocjitsu-dashboard-filters';
 const BENCHMARK_STORAGE_KEY = 'rocjitsu-dashboard-benchmarks';
@@ -117,7 +118,7 @@ function readFilters() {
 function readBenchmarkSelection() {
   try {
     const saved = JSON.parse(globalThis.window?.localStorage?.getItem(BENCHMARK_STORAGE_KEY) ?? 'null');
-    if (Array.isArray(saved) && saved.length <= 8
+    if (Array.isArray(saved) && saved.length <= MAX_BENCHMARK_CHARTS
       && saved.every((test) => test && ['id', 'name', 'suite'].every((key) => typeof test[key] === 'string' && test[key].trim())
         && (test.problem === undefined || isJsonObject(test.problem) && isJsonValue(test.problem)))
       && new Set(saved.map((test) => test.id)).size === saved.length) return saved;

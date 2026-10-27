@@ -5,10 +5,11 @@ import { afterEach, expect, test, vi } from 'vitest';
 import RecentRuns from '../../src/components/overview/RecentRuns.jsx';
 import { selectRecentRunAttempts, selectRecentRunSummaries } from '../../src/data/selectors.js';
 import { createRecentRunsHistory } from '../fixtures/recent-runs-history.js';
+import * as presentation from '../../src/components/overview/overviewPresentation.js';
 
 const filters = { targets: ['gfx1250'], suites: ['Triton'], modes: ['single'] };
 const roots = [];
-afterEach(() => { for (const root of roots.splice(0)) act(() => root.unmount()); vi.unstubAllGlobals(); });
+afterEach(() => { for (const root of roots.splice(0)) act(() => root.unmount()); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 test('paged summaries preserve execution ordering and coverage for selected and explicitly empty scopes', () => {
   const { data } = createRecentRunsHistory();
@@ -62,8 +63,19 @@ function mountRecentRuns(initialData) {
     render,
     page: () => nodes(tree).find((node) => node.props['aria-label'] === 'Recent runs pages'),
     rows: () => nodes(tree).filter((node) => node.props['data-run-id']).map((node) => node.props['data-run-id']),
+    subtitle: () => tree.props.subtitle,
   };
 }
+
+test('Recent Runs takes navigation and subtitle from the pagination model', () => {
+  // A changed model policy must reach the component without a matching UI edit.
+  vi.spyOn(presentation, 'recentRunsPage').mockReturnValue({ page: 6, start: 60, end: 65, pageCount: 7, pageSize: 10 });
+  const probe = mountRecentRuns(createRecentRunsHistory().data);
+  expect(probe.page().props.count).toBe(7);
+  expect(probe.page().props.page).toBe(7);
+  expect(probe.subtitle()).toContain('10 per page');
+  expect(probe.rows()).toEqual(Array.from({ length: 5 }, (_, index) => `fictional-pagination-00${4 - index}`));
+});
 
 test('Recent Runs evaluates only visible summaries once and never scans results for baselines', () => {
   const { data } = createRecentRunsHistory();

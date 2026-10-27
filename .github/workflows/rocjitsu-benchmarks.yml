@@ -27,6 +27,7 @@ defaults:
     shell: bash
 
 env:
+  BENCHMARK_MANIFEST: benchmarks/suites/performance-v1.toml
   CORPUS_SHA: b95ea549e1f500ce4ce83ae511ae5e4434930374
   TENSILE_SHA: dd77374194a3ea1a7258cd54f87af6747b6362a5
   NANOBIND_SHA: 9b3afa9dbdc23641daf26fadef7743e7127ff92f
@@ -118,7 +119,6 @@ jobs:
     name: Run performance benchmark
     needs: source-metadata
     runs-on: rocjitsu-benchmark
-    # Includes preparation; phase caps do not reserve suite or diagnostic time.
     timeout-minutes: 120
     permissions:
       contents: read
@@ -253,14 +253,12 @@ jobs:
         run: python "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" rocjitsu
 
       - name: Prepare Tensile wheel and native adapter
-        timeout-minutes: 45
         run: python "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" native
 
       - name: Generate pinned Tensile artifacts
-        timeout-minutes: 45
         id: prepare
         run: |
-          "${ROCJITSU_VENV}/bin/python" "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" generate
+          "${ROCJITSU_VENV}/bin/python" "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" generate --manifest "${BENCHMARK_MANIFEST}"
 
       - name: Run performance suite
         if: ${{ success() && steps.prepare.outcome == 'success' }}
@@ -278,7 +276,7 @@ jobs:
             --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json" \
             --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json" \
             --run-wrapper "/usr/bin/python3 -E -s /usr/local/libexec/rocjitsu-benchmark-runner/benchmark_run.py -- \"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
-            --manifest benchmarks/suites/performance-v1.toml \
+            --manifest "${BENCHMARK_MANIFEST}" \
             --output "${ROCJITSU_RESULT_DIR}" | taskset -c 0-15 tee "${BENCHMARK_DIR}/runner-output.txt"
           RUNNER_PIPE_STATUS=("${PIPESTATUS[@]}")
           set -e
@@ -304,7 +302,6 @@ jobs:
 
       - name: Collect preparation diagnostics
         if: always()
-        timeout-minutes: 3
         run: |
           if [[ -n "${BENCHMARK_DIR:-}" && -f "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" && -x /usr/bin/python3 ]]; then
             /usr/bin/python3 "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" diagnostics
@@ -314,7 +311,6 @@ jobs:
 
       - name: Upload benchmark diagnostics
         if: always()
-        timeout-minutes: 4
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.RESULTS_ARTIFACT }}
@@ -324,7 +320,6 @@ jobs:
 
       - name: Upload preparation diagnostics
         if: always()
-        timeout-minutes: 6
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rocjitsu-preparation-${{ github.run_id }}-${{ github.run_attempt }}
@@ -334,7 +329,6 @@ jobs:
 
       - name: Clean owned benchmark scratch
         if: always()
-        timeout-minutes: 2
         run: |
           if [[ -n "${BENCHMARK_DIR:-}" && -f "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" && -x /usr/bin/python3 ]]; then
             /usr/bin/python3 "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" cleanup

@@ -11,6 +11,7 @@ import CategoryTag from '../shared/CategoryTag';
 import { benchmarkRangeData, benchmarkResultChoices, boundedGridSelection } from '../benchmarks/benchmarkExplorer';
 import { selectBenchmarkCatalog, selectBenchmarkSeries, selectDefaultBenchmarks } from '../../data/selectors';
 import { historyRanges } from '../../config/historyRanges';
+import { MAX_BENCHMARK_CHARTS } from '../../config/benchmarkGrid';
 import { formatFullDate } from '../../utils/formatters';
 
 export default function BenchmarksView({ data, filters, historyRange: controlledRange, onRangeChange, initialBenchmarkIds, selectedBenchmarks, onBenchmarksChange, selectedRunIds = [], onSelectRun, onClearSelectedRuns }) {
@@ -61,7 +62,7 @@ export default function BenchmarksView({ data, filters, historyRange: controlled
         <Stack direction="row" sx={{ justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 1.5 }}>
           <Typography variant="caption" color="text.secondary">{filters.targets.length} targets · {filters.suites.length} suites · {(filters.modes ?? []).length} thread policies · develop only</Typography>
           <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-            <Typography role="status" variant="caption" color="text.secondary">{selected.length} of 8 charts{selected.length === 8 ? ' · Remove a workload to free a slot' : ''}</Typography>
+            <Typography role="status" variant="caption" color="text.secondary">{selected.length} of {MAX_BENCHMARK_CHARTS} charts{selected.length === MAX_BENCHMARK_CHARTS ? ' · Remove a workload to free a slot' : ''}</Typography>
             <ToggleButtonGroup exclusive size="small" value={range} onChange={(_, next) => next && changeRange(next)} aria-label="Benchmark history timeframe">
               {historyRanges.map(({ id: value, label }) => <ToggleButton key={value} value={value} aria-label={label} sx={{ minHeight: { xs: 44, sm: 32 }, fontSize: 11, px: 1 }}>{value}</ToggleButton>)}
             </ToggleButtonGroup>
@@ -96,7 +97,7 @@ export default function BenchmarksView({ data, filters, historyRange: controlled
       </SectionCard>
       <Dialog open={draft !== null} onClose={() => setDraft(null)} fullWidth maxWidth="sm" aria-labelledby="add-benchmarks-title">
         <DialogTitle id="add-benchmarks-title">Add benchmarks</DialogTitle>
-        <DialogContent><Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Choose up to eight workloads. Options follow the selected targets, suites and thread policies.</Typography><BenchmarkGridPicker availableOptions={catalog.available} selected={draft ?? []} maxSelected={8} onChange={setDraft} /></DialogContent>
+        <DialogContent><Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{`Choose up to ${MAX_BENCHMARK_CHARTS} workloads. Options follow the selected targets, suites and thread policies.`}</Typography><BenchmarkGridPicker availableOptions={catalog.available} selected={draft ?? []} onChange={setDraft} /></DialogContent>
         <DialogActions><Button color="inherit" onClick={() => setDraft(null)}>Cancel</Button><Button variant="contained" onClick={() => { changeSelection(draft ?? []); setDraft(null); }}>Apply selection</Button></DialogActions>
       </Dialog>
       <Dialog open={Boolean(inspectedBenchmark)} disableEnforceFocus={Boolean(selectedRecord)} onClose={closeInspector} fullWidth maxWidth="sm" aria-labelledby="inspect-results-title">

@@ -20,6 +20,19 @@ function renderOption(dataType) {
   return picker.props.renderOption({ key: option.id, role: 'option', 'aria-selected': true, tabIndex: -1 }, option, { selected: true });
 }
 
+it('picker uses the global cap even when a caller requests more, and retains smaller bounds', () => {
+  const options = Array.from({ length: 10 }, (_, index) => ({ id: `${index}`, name: `Workload ${index}`, suite: 'Triton' }));
+  for (const [requested, effective] of [[undefined, 8], [9, 8], [3, 3]]) {
+    let chosen;
+    const picker = BenchmarkGridPicker({ availableOptions: options, selected: options.slice(0, effective), maxSelected: requested, onChange: (next) => { chosen = next; } });
+    expect(picker.props.getOptionDisabled(options[effective])).toBe(true);
+    expect(picker.props.getOptionDisabled(options[0])).toBe(false);
+    picker.props.onChange(null, [...options, options[0]]);
+    expect(chosen).toEqual(options.slice(0, effective));
+    expect(picker.props.renderInput({}).props.helperText).toContain(`${effective} of ${effective} benchmarks selected`);
+  }
+});
+
 it('grid groups interleaved suites contiguously without mutating exact options or losing bounded search', () => {
   const options = Array.from({ length: 60 }, (_, index) => ({ id: `exact-${index}`, name: `Workload ${index}`, suite: index % 2 ? 'Llama' : 'Triton', problem: { dataType: index } }));
   const picker = BenchmarkGridPicker({ availableOptions: options, selected: [], onChange() {} });

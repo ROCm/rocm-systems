@@ -243,7 +243,7 @@ def test_generation_rejects_wrong_artifact_before_ready_export(tmp_path):
     assert not (ctx.root / 'ready.json').exists()
 
 
-def test_workflow_preparation_order_pins_and_phase_ceiling(tmp_path):
+def test_workflow_preparation_order_pins_and_timeout_authority(tmp_path):
     import yaml
 
     workflow = yaml.safe_load(
@@ -275,27 +275,16 @@ def test_workflow_preparation_order_pins_and_phase_ceiling(tmp_path):
         'Build rocjitsu',
     ]
     setup += ['Record checked Tensile revision', 'Install benchmark dependencies']
+    setup += required[:-1]
     assert all('timeout-minutes' not in by_name[name] for name in setup)
-    assert [by_name[name]['timeout-minutes'] for name in required[2:]] == [45, 45, 60]
-    module = load_helper()
-    assert module.PHASE_SECONDS == {
-        'dependencies': 20 * 60,
-        'rocjitsu': 8 * 60,
-        'native': 45 * 60,
-        'generate': 45 * 60,
-        'diagnostics': 3 * 60,
+    # Workflow limits are authoritative, not additive or reserved headroom.
+    assert {
+        step['name']: step['timeout-minutes']
+        for step in steps
+        if 'timeout-minutes' in step
+    } == {
+        'Run performance suite': 60,
     }
-    # These are failure safeguards, not additive budgets or reserved suite time.
-    # The job ceiling can interrupt preparation, performance or diagnostics.
-    assert [step['timeout-minutes'] for step in steps if 'timeout-minutes' in step] == [
-        45,
-        45,
-        60,
-        3,
-        4,
-        6,
-        2,
-    ]
     assert workflow['jobs']['benchmark']['timeout-minutes'] == 120
     assert workflow['jobs']['publish']['timeout-minutes'] == 30
     for name, key, revision in [
@@ -359,13 +348,114 @@ def fixture_preparation(tmp_path, inherited_target=None):
     header = Path(env['NANOBIND_SOURCE']) / 'ext/robin_map/include/tsl/robin_map.h'
     header.parent.mkdir(parents=True)
     header.write_text('FICTIONAL header')
-    return module, module.Preparation(env)
+    return module, module.Preparation(env, 'benchmarks/suites/performance-v1.toml')
+
+
+@pytest.mark.parametrize('alternative', [False, True])
+def test_cli_manifest_reaches_preparation_inventory(tmp_path, alternative):
+    import os
+    import sys
+
+    module, ctx = fixture_preparation(tmp_path)
+    corpus = Path(ctx.env['CORPUS_SOURCE_DIR'])
+    manifest = 'benchmarks/suites/performance-v1.toml'
+    if alternative:
+        manifest = 'benchmarks/suites/alternative recipe.toml'
+        (corpus / manifest).write_text(
+            '[[cases]]\nworkload="tensile_candidate"\ntargets=["gfx1250"]\n'
+            'params={variant="bf16_subtile",m=128,n=256,k=512}\n'
+        )
+    selected = {}
+
+    def inventory_only(self):
+        selected.update(self.inventory())
+
+    with mock.patch.dict(os.environ, ctx.env, clear=True), mock.patch.object(
+        sys, 'argv', ['prepare-benchmarks.py', 'generate', '--manifest', manifest]
+    ), mock.patch.object(module.Preparation, 'generate', inventory_only):
+        module.main()
+    assert list(selected) == (
+        ['bf16_subtile']
+        if alternative
+        else ['bf16_streamk', 'bf16_subtile', 'mxfp8_subtile', 'mxfp4_streamk']
+    )
+    assert selected['bf16_subtile']['shape'] == (
+        [128, 256, 512] if alternative else [4096] * 3
+    )
+
+
+@pytest.mark.parametrize(
+    'manifest',
+    [
+        None,
+        '',
+        '/outside.toml',
+        '../outside.toml',
+        'missing.toml',
+        'directory.toml',
+        'recipe.json',
+        'linked.toml',
+        'linked-dir/performance-v1.toml',
+        'benchmarks/../outside.toml',
+    ],
+)
+def test_inventory_rejects_invalid_manifest_path(tmp_path, manifest):
+    module, ctx = fixture_preparation(tmp_path)
+    corpus = Path(ctx.env['CORPUS_SOURCE_DIR'])
+    (corpus / 'directory.toml').mkdir()
+    text = (corpus / ctx.manifest).read_text()
+    (corpus / 'recipe.json').write_text(text)
+    (corpus.parent / 'outside.toml').write_text(text)
+    (corpus / 'outside.toml').write_text(text)
+    (corpus / 'linked.toml').symlink_to(corpus / ctx.manifest)
+    (corpus / 'linked-dir').symlink_to(
+        corpus / 'benchmarks/suites', target_is_directory=True
+    )
+    ctx.manifest = manifest
+    with pytest.raises(ValueError, match='[Mm]anifest'):
+        ctx.inventory()
+
+
+def test_generate_cli_requires_explicit_manifest_before_preparation(capsys):
+    import sys
+
+    module = load_helper()
+    with mock.patch.object(
+        sys, 'argv', ['prepare-benchmarks.py', 'generate']
+    ), mock.patch.object(module, 'Preparation') as preparation:
+        with pytest.raises(SystemExit) as error:
+            module.main()
+    assert error.value.code == 2
+    assert '--manifest is required for generate' in capsys.readouterr().err
+    preparation.assert_not_called()
+
+
+@pytest.mark.parametrize('phase', ['dependencies', 'rocjitsu', 'native'])
+def test_noninventory_cli_phases_do_not_require_manifest(tmp_path, phase):
+    import os
+    import sys
+
+    module = load_helper()
+    env = environment(tmp_path)
+    root = Path(env['BENCHMARK_DIR'])
+    (root / 'phase-dependencies.json').write_text('{"success":true}')
+    if phase == 'dependencies':
+        (root / 'phase-dependencies.json').unlink()
+
+    def no_inventory(self):
+        assert self.manifest is None
+
+    with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(
+        sys, 'argv', ['prepare-benchmarks.py', phase]
+    ), mock.patch.object(module.Preparation, phase, no_inventory):
+        module.main()
+    assert json.loads((root / f'phase-{phase}.json').read_text())['success']
 
 
 def test_inventory_prepares_only_selected_variants(tmp_path):
     module, ctx = fixture_preparation(tmp_path)
     corpus = Path(ctx.env['CORPUS_SOURCE_DIR'])
-    recipe = corpus / module.MANIFEST
+    recipe = corpus / ctx.manifest
     first_case = recipe.read_text().split('[[cases]]')[1]
     recipe.write_text('name="fictional-subset"\n[[cases]]' + first_case)
     candidates = corpus / 'corpus/benchmarks/tensile_candidates/prepare.py'
@@ -419,7 +509,7 @@ def test_inventory_rejects_unsupported_candidate_declaration(tmp_path, declarati
 )
 def test_inventory_rejects_invalid_recipe_selection(tmp_path, change):
     module, ctx = fixture_preparation(tmp_path)
-    recipe = Path(ctx.env['CORPUS_SOURCE_DIR']) / module.MANIFEST
+    recipe = Path(ctx.env['CORPUS_SOURCE_DIR']) / ctx.manifest
     text = recipe.read_text()
     if change == 'empty':
         text = 'cases=[]\n'
@@ -460,9 +550,7 @@ class FictionalCommands:
         )
         self.calls = []
 
-    def __call__(
-        self, label, argv, capture=False, env_overrides=None, timeout_seconds=None
-    ):
+    def __call__(self, label, argv, capture=False, env_overrides=None):
         import zipfile
 
         self.calls.append((label, [str(arg) for arg in argv]))
@@ -563,20 +651,17 @@ def phases(module, ctx, commands):
             ctx.finish(True)
 
 
-@pytest.mark.parametrize('outcome', ['success', 'failure', 'timeout'])
-def test_prepared_python_loader_smoke_is_early_and_bounded(tmp_path, outcome):
-    import subprocess
-
+@pytest.mark.parametrize('outcome', ['success', 'failure'])
+def test_prepared_python_loader_smoke_is_early_and_propagates_failure(
+    tmp_path, outcome
+):
     module, ctx = fixture_preparation(tmp_path)
     ctx.env['LD_LIBRARY_PATH'] = '/toolcache/lib'
     commands = FictionalCommands(module, ctx)
     process = mock.Mock(pid=987654)
-    if outcome == 'timeout':
-        process.wait.side_effect = [subprocess.TimeoutExpired('smoke', 60), 0]
-    else:
-        process.wait.return_value = 0 if outcome == 'success' else 1
+    process.wait.return_value = 0 if outcome == 'success' else 1
 
-    def intercept(label, argv, capture=False, env_overrides=None, timeout_seconds=None):
+    def intercept(label, argv, capture=False, env_overrides=None):
         if label == 'python-loader-smoke':
             return module.Preparation.run(
                 ctx,
@@ -584,15 +669,12 @@ def test_prepared_python_loader_smoke_is_early_and_bounded(tmp_path, outcome):
                 argv,
                 capture,
                 env_overrides,
-                timeout_seconds=timeout_seconds,
             )
         return commands(label, argv, capture, env_overrides)
 
     with mock.patch.object(ctx, 'run', side_effect=intercept), mock.patch.object(
         module.subprocess, 'Popen', return_value=process
-    ) as launch, mock.patch.object(module.os, 'killpg'), mock.patch.object(
-        module.time, 'sleep'
-    ):
+    ) as launch:
         ctx.start('dependencies')
         if outcome == 'success':
             ctx.dependencies()
@@ -610,12 +692,46 @@ def test_prepared_python_loader_smoke_is_early_and_bounded(tmp_path, outcome):
         str(ctx.root / 'venv/sdk' / name)
         for name in ('lib', 'lib/rocm_sysdeps/lib', 'lib/llvm/lib', 'lib/host-math/lib')
     ] + ['/toolcache/lib']
-    assert 0 < process.wait.call_args_list[0].kwargs['timeout'] <= 60
+    process.wait.assert_called_once_with()
     labels = [label for label, _ in commands.calls]
-    if outcome != 'success':
+    if outcome == 'success':
+        assert 'dependency-preflight' in labels
+    else:
         assert 'dependency-preflight' not in labels
         assert not Path(ctx.env['GITHUB_ENV']).exists()
         assert not (ctx.root / 'ready.json').exists()
+
+
+def test_build_worker_policy_reaches_both_builds_wheel_and_export(tmp_path):
+    module, ctx = fixture_preparation(tmp_path)
+    assert ctx.env['CMAKE_BUILD_PARALLEL_LEVEL'] == '4'
+    # Model changing only preparation's owned build policy, not an incoming override.
+    ctx.env['CMAKE_BUILD_PARALLEL_LEVEL'] = '2'
+    commands = FictionalCommands(module, ctx)
+    worker_env = {}
+
+    def intercept(label, argv, capture=False, env_overrides=None):
+        if label in ('build', 'adapter-build', 'wheel'):
+            worker_env[label] = ctx.env['CMAKE_BUILD_PARALLEL_LEVEL']
+        return commands(label, argv, capture, env_overrides)
+
+    phases(module, ctx, intercept)
+    builds = {
+        label: args[args.index('--parallel') + 1]
+        for label, args in commands.calls
+        if label in ('build', 'adapter-build')
+    }
+    assert builds == {'build': '2', 'adapter-build': '2'}
+    assert worker_env == {'build': '2', 'wheel': '2', 'adapter-build': '2'}
+    assert 'CMAKE_BUILD_PARALLEL_LEVEL=2\n' in Path(ctx.env['GITHUB_ENV']).read_text()
+    # Generator workers are a different policy and must remain four.
+    for variant in ctx.inventory():
+        import yaml
+
+        config = yaml.safe_load(
+            (ctx.artifacts / variant / 'candidate.yaml').read_text()
+        )
+        assert config['GlobalParameters']['CpuThreads'] == 4
 
 
 def test_intercepted_preparation_orders_exact_owned_wheel_and_four_generators(tmp_path):
@@ -715,60 +831,132 @@ def test_intercepted_tampered_generation_rejects_before_performance_export(tmp_p
     assert not (ctx.root / 'ready.json').exists()
 
 
-def test_timeout_terminates_only_owned_process_group_and_records_failure(tmp_path):
+def test_helper_delegates_time_limits_to_workflow():
+    import ast
+    import inspect
+
+    module = load_helper()
+    tree = ast.parse(HELPER.read_text())
+    # This simplicity contract covers every helper phase, including diagnostics
+    # and the early loader import: no second timeout policy inside Python.
+    forbidden = {'PHASE_SECONDS', 'deadline', 'remaining', 'timeout_seconds'}
+    assert (
+        not {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        & forbidden
+    )
+    assert (
+        not {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+        & forbidden
+    )
+    assert 'timeout_seconds' not in inspect.signature(module.Preparation.run).parameters
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            assert not {'timeout'} & {keyword.arg for keyword in node.keywords}
+            if isinstance(node.func, ast.Attribute):
+                assert node.func.attr not in {'sleep', 'alarm', 'setitimer', 'Timer'}
+
+
+@pytest.mark.parametrize('signalled', [False, True])
+def test_actual_child_failure_preserves_status_output_and_elapsed_receipts(
+    tmp_path, signalled
+):
     import signal
-    import subprocess
+    import sys
 
     module, ctx = fixture_preparation(tmp_path)
     ctx.start('native')
-    process = mock.Mock(pid=987654)
-    process.wait.side_effect = [
-        subprocess.TimeoutExpired('fictional', 1),
-        subprocess.TimeoutExpired('fictional', 3),
-        0,
-    ]
-    with mock.patch.object(
-        module.subprocess, 'Popen', return_value=process
-    ) as launch, mock.patch.object(module.os, 'killpg') as kill:
-        with pytest.raises(ValueError, match='exit 124'):
-            ctx.run('fictional-timeout', ['fictional-compiler'])
-    assert launch.call_args.kwargs['start_new_session'] is True
-    assert launch.call_args.kwargs['cwd'] == ctx.cwd
-    assert kill.call_args_list == [
-        mock.call(987654, signal.SIGTERM),
-        mock.call(987654, signal.SIGKILL),
-    ]
-    assert json.loads((ctx.root / 'commands.jsonl').read_text())['timed_out'] is True
+    code = -signal.SIGTERM if signalled else 7
+    child = 'import os,signal; print("child failure evidence", flush=True); ' + (
+        'os.kill(os.getpid(), signal.SIGTERM)' if signalled else 'raise SystemExit(7)'
+    )
+    with pytest.raises(ValueError, match=f'exit {code}'):
+        ctx.run('actual-failure', [sys.executable, '-B', '-c', child])
+    ctx.finish(False)
+    receipt = json.loads((ctx.root / 'commands.jsonl').read_text())
+    assert receipt['exit_code'] == code
+    assert receipt['elapsed_seconds'] >= 0
+    assert Path(receipt['log']).read_text() == 'child failure evidence\n'
+    phase = json.loads((ctx.root / 'phase-native.json').read_text())
+    assert phase['success'] is False and phase['elapsed_seconds'] >= 0
+    assert not (ctx.root / 'ready.json').exists()
 
 
-@pytest.mark.parametrize('absent', [False, True])
-def test_timeout_escalates_even_when_leader_exits_before_child(tmp_path, absent):
+@pytest.mark.parametrize('interrupt', ['SIGINT', 'SIGTERM'])
+def test_actual_interrupt_cleans_owned_group_and_records_failed_phase(
+    tmp_path, interrupt
+):
+    import os
     import signal
     import subprocess
+    import sys
+    import time
 
-    module, ctx = fixture_preparation(tmp_path)
-    ctx.start('native')
-    process = mock.Mock(pid=987654)
-    process.wait.side_effect = [subprocess.TimeoutExpired('fictional', 1), 0]
-
-    def signal_group(pid, sig):
-        if absent:
-            raise ProcessLookupError()
-
-    with mock.patch.object(
-        module.subprocess, 'Popen', return_value=process
-    ), mock.patch.object(
-        module.os, 'killpg', side_effect=signal_group
-    ) as kill, mock.patch.object(
-        module.time, 'sleep'
-    ):
-        with pytest.raises(ValueError, match='exit 124'):
-            ctx.run('leader-exits', ['fictional-command'])
-    assert kill.call_args_list == [
-        mock.call(987654, signal.SIGTERM),
-        mock.call(987654, signal.SIGKILL),
-    ]
-    assert json.loads((ctx.root / 'commands.jsonl').read_text())['timed_out'] is True
+    env = environment(tmp_path)
+    ready = tmp_path / 'child-pids.json'
+    # Both leader and descendant ignore graceful signals. Cleanup must address
+    # the owned group, not wait for the leader or use a timed grace period.
+    child = '\n'.join(
+        [
+            'import json,os,pathlib,signal,subprocess,sys',
+            'signal.signal(signal.SIGINT, signal.SIG_IGN)',
+            'signal.signal(signal.SIGTERM, signal.SIG_IGN)',
+            'descendant=subprocess.Popen([sys.executable,"-c","import signal; signal.pause()"] )',
+            'pathlib.Path(sys.argv[1]).write_text(json.dumps([os.getpid(),descendant.pid]))',
+            'signal.pause()',
+        ]
+    )
+    wrapper = '\n'.join(
+        [
+            'import importlib.util,sys',
+            'spec=importlib.util.spec_from_file_location("preparation",sys.argv[1])',
+            'module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)',
+            'child,ready=sys.argv[2:4]',
+            'module.Preparation.dependencies=lambda self: self.run("interrupted-child",[sys.executable,"-B","-c",child,ready])',
+            'sys.argv=[sys.argv[1],"dependencies"]',
+            'module.main()',
+        ]
+    )
+    process = subprocess.Popen(
+        [sys.executable, '-B', '-c', wrapper, str(HELPER), child, str(ready)],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    pids = []
+    try:
+        until = time.monotonic() + 5
+        while not ready.exists():
+            assert process.poll() is None, process.communicate()
+            assert time.monotonic() < until, 'actual child did not become ready'
+            time.sleep(0.01)
+        pids = json.loads(ready.read_text())
+        process.send_signal(getattr(signal, interrupt))
+        stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode != 0, stdout + stderr
+        for pid in pids:
+            status = Path(f'/proc/{pid}/stat')
+            assert not status.exists() or status.read_text().split()[2] == 'Z'
+        root = Path(env['BENCHMARK_DIR'])
+        phase = json.loads((root / 'phase-dependencies.json').read_text())
+        assert phase['success'] is False and phase['elapsed_seconds'] >= 0
+        receipt = json.loads((root / 'commands.jsonl').read_text())
+        assert receipt['exit_code'] == -signal.SIGKILL
+        assert receipt['interrupted'] is True
+        assert receipt['elapsed_seconds'] >= 0
+        assert not (root / 'ready.json').exists()
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate()
+        if not pids and ready.exists():
+            pids = json.loads(ready.read_text())
+        if pids:
+            try:
+                os.killpg(pids[0], signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def test_foreign_loader_file_rejected_but_owned_assembler_output_allowed(tmp_path):
@@ -820,7 +1008,7 @@ def test_owned_cleanup_does_not_follow_runner_output_symlink(tmp_path):
     assert (outside / 'keep').read_text() == 'keep'
 
 
-def test_diagnostics_are_bounded_and_do_not_follow_symlinks(tmp_path):
+def test_diagnostics_size_limits_and_symlink_exclusion(tmp_path):
     import tarfile
 
     module, ctx = fixture_preparation(tmp_path)
@@ -956,16 +1144,6 @@ def test_actual_performance_condition_blocks_preparation_failure():
             )
 
 
-def test_rocjitsu_watchdog_is_independent_of_other_setup_elapsed_time(tmp_path):
-    module, ctx = fixture_preparation(tmp_path)
-    (ctx.root / 'phase-dependencies.json').write_text(
-        '{"success":true,"elapsed_seconds":0}'
-    )
-    with mock.patch.object(module.time, 'monotonic', return_value=100):
-        ctx.start('rocjitsu')
-    assert ctx.deadline == 580
-
-
 def test_rocjitsu_still_requires_successful_dependencies(tmp_path):
     _, ctx = fixture_preparation(tmp_path)
     (ctx.root / 'phase-dependencies.json').write_text('{"success":false}')
@@ -973,22 +1151,8 @@ def test_rocjitsu_still_requires_successful_dependencies(tmp_path):
         ctx.start('rocjitsu')
 
 
-def test_early_deadline_prevents_process_launch(tmp_path):
-    import time
-
-    module, ctx = fixture_preparation(tmp_path)
-    ctx.start('native')
-    ctx.deadline = time.monotonic() - 1
-    with mock.patch.object(module.subprocess, 'Popen') as launch:
-        with pytest.raises(ValueError, match='budget exhausted'):
-            ctx.run('compile', ['fictional-compiler'])
-        launch.assert_not_called()
-
-
-@pytest.mark.parametrize('outcome', ['success', 'failure', 'timeout'])
+@pytest.mark.parametrize('outcome', ['success', 'failure'])
 def test_generator_target_overlay_reaches_child_without_leakage(tmp_path, outcome):
-    import subprocess
-
     module, ctx = fixture_preparation(tmp_path, inherited_target='gfx9999')
     assert 'HCC_AMDGPU_TARGET' not in ctx.env
     commands = FictionalCommands(module, ctx)
@@ -999,15 +1163,12 @@ def test_generator_target_overlay_reaches_child_without_leakage(tmp_path, outcom
         launched.append((argv, kwargs['env']))
         assert kwargs['env'] is not ctx.env
         process = mock.Mock(pid=987654)
-        if len(launched) == 2 and outcome == 'timeout':
-            process.wait.side_effect = [subprocess.TimeoutExpired('fictional', 1), 0]
-        else:
-            process.wait.return_value = (
-                1 if len(launched) == 2 and outcome == 'failure' else 0
-            )
+        process.wait.return_value = (
+            1 if len(launched) == 2 and outcome == 'failure' else 0
+        )
         return process
 
-    def intercept(label, argv, capture=False, env_overrides=None, timeout_seconds=None):
+    def intercept(label, argv, capture=False, env_overrides=None):
         result = commands(label, argv, capture, env_overrides)
         if label.startswith('generate-'):
             return module.Preparation.run(
@@ -1015,9 +1176,7 @@ def test_generator_target_overlay_reaches_child_without_leakage(tmp_path, outcom
             )
         return result
 
-    with mock.patch.object(
-        module.subprocess, 'Popen', side_effect=launch
-    ), mock.patch.object(module.os, 'killpg'), mock.patch.object(module.time, 'sleep'):
+    with mock.patch.object(module.subprocess, 'Popen', side_effect=launch):
         with mock.patch.object(ctx, 'run', side_effect=intercept):
             if outcome == 'success':
                 phases(module, ctx, intercept)
@@ -1045,23 +1204,14 @@ def test_generator_target_overlay_reaches_child_without_leakage(tmp_path, outcom
     assert records[-1]['HCC_AMDGPU_TARGET'] is None
 
 
-@pytest.mark.parametrize('outcome', ['success', 'failure', 'timeout'])
+@pytest.mark.parametrize('outcome', ['success', 'failure'])
 def test_command_overlay_does_not_mutate_base_environment(tmp_path, outcome):
-    import subprocess
-
     module, ctx = fixture_preparation(tmp_path)
     ctx.start('generate')
     before = dict(ctx.env)
     process = mock.Mock(pid=987654)
-    if outcome == 'timeout':
-        process.wait.side_effect = [subprocess.TimeoutExpired('fictional', 1), 0]
-    else:
-        process.wait.return_value = 1 if outcome == 'failure' else 0
-    with mock.patch.object(
-        module.subprocess, 'Popen', return_value=process
-    ) as launch, mock.patch.object(module.os, 'killpg'), mock.patch.object(
-        module.time, 'sleep'
-    ):
+    process.wait.return_value = 1 if outcome == 'failure' else 0
+    with mock.patch.object(module.subprocess, 'Popen', return_value=process) as launch:
         if outcome == 'success':
             ctx.run(
                 'explicit-target',

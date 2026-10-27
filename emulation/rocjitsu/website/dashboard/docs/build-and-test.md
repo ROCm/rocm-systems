@@ -50,10 +50,15 @@ PLAYWRIGHT_PUBLISHED_DATA=1 npm run test:e2e:production -- tests/production/publ
 Clear the data/server overrides listed above first. The production Playwright config
 owns a fresh data-free build and preview; do not start another server. This test
 uses the default GitHub Raw `gh-pages-rocjitsu/rocjitsu-dashboard/data/` endpoint,
-without interception or fictional fallback. It requires a successful nonempty
-index and run load, waits for loading to settle, checks the downloaded source,
-and fails on dashboard alerts, uncaught browser errors, or JavaScript dialogs.
-Network/CORS failures and incompatible published data are failures, not skips.
+without interception or fictional fallback. It waits for loading to settle and
+distinguishes three published states: index HTTP 404 requires the specific
+missing-data banner, disabled Download JSON, and no run requests; a valid empty
+`runFiles: []` index requires successful loading and an empty source JSON download,
+without data-error banners or run requests; a nonempty index requires successful
+run loads and a source download matching the index and run count. Unexpected
+alerts, uncaught browser errors, and JavaScript dialogs fail in every state.
+Malformed data, other HTTP errors, network/CORS failures, and incompatible runs
+are failures, not skips.
 
 The website workflow runs this command separately after `npm run verify`, with
 the opt-in flag scoped to that step. Ordinary production and fixture suites
@@ -79,7 +84,14 @@ python -m pytest scripts/dashboard-data/tests
 The `dashboard-data` CI job (Verify benchmark preparation and publication) uses
 the same requirements file. The suite exercises benchmark preparation and the
 publication workflow shell, not the removed standalone publishers. Preparation
-build/install/native commands are intercepted. These tests stay under the dashboard
+build/install/native commands are intercepted; small real child processes cover
+exit-status reporting and owned-group cleanup on SIGINT/SIGTERM. Workflow contract
+tests keep only the benchmark job (120 minutes), performance step (60 minutes)
+and publisher job (30 minutes) limits in Actions, with no helper timers or separate
+diagnostic/upload/cleanup caps. CLI tests exercise explicit manifest parsing through
+Preparation inventory and alternative recipe selection; inventory tests cover path
+rejection. Workflow contracts verify generation and measurement consume the same `BENCHMARK_MANIFEST`.
+These tests stay under the dashboard
 and are separate from `npm run verify`; they do not require npm dependencies.
 
 For deployment destinations and the separate data-publication workflow, see [website deployment versus data publication](architecture-and-publication.md#website-deployment-versus-data-publication).

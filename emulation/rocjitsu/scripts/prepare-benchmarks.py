@@ -20,15 +20,6 @@ import time
 import tomllib
 import zipfile
 
-PHASE_SECONDS = {
-    'dependencies': 1200,
-    'rocjitsu': 480,
-    'native': 2700,
-    'generate': 2700,
-    'diagnostics': 180,
-}
-MANIFEST = 'benchmarks/suites/performance-v1.toml'
-
 
 def require(condition, message):
     if not condition:
@@ -40,8 +31,9 @@ def sha256(path):
 
 
 class Preparation:
-    def __init__(self, environment):
+    def __init__(self, environment, manifest=None):
         self.env = dict(environment)
+        self.manifest = manifest
         attempt = f"{self.env['GITHUB_RUN_ID']}:{self.env['GITHUB_RUN_ATTEMPT']}"
         require(re.fullmatch(r'\d+:\d+', attempt), 'Invalid attempt identity')
         value = self.env.get('BENCHMARK_DIR', '')
@@ -131,7 +123,6 @@ class Preparation:
             PIP_DISABLE_PIP_VERSION_CHECK='1',
             HSA_ENABLE_SDMA_COPY_SIZE_OVERRIDE='0',
         )
-        self.deadline = None
         self.phase = None
         self.started = None
         self.sequence = 0
@@ -142,12 +133,9 @@ class Preparation:
             'Refusing to replay a preparation phase',
         )
         self.phase, self.started = phase, time.monotonic()
-        seconds = PHASE_SECONDS[phase]
         if phase == 'rocjitsu':
             deps = json.loads((self.root / 'phase-dependencies.json').read_text())
             require(deps['success'], 'Dependencies did not complete')
-        require(seconds > 10, f'{phase} phase budget exhausted')
-        self.deadline = self.started + seconds
 
     def finish(self, success):
         (self.root / f'phase-{self.phase}.json').write_text(
@@ -162,7 +150,7 @@ class Preparation:
             + '\n'
         )
 
-    def run(self, label, argv, capture=False, env_overrides=None, timeout_seconds=None):
+    def run(self, label, argv, capture=False, env_overrides=None):
         require(not self.cwd.is_symlink(), 'Controlled working directory is symbolic')
         require(
             self.cwd.stat().st_mode & 0o200,
@@ -175,15 +163,11 @@ class Preparation:
             ),
             'Controlled working directory contains foreign files',
         )
-        remaining = self.deadline - time.monotonic() - 5
-        if timeout_seconds is not None:
-            remaining = min(remaining, timeout_seconds)
-        require(remaining > 0, f'{self.phase} phase budget exhausted before {label}')
         self.sequence += 1
         output = self.logs / f'{self.phase}-{self.sequence:03}-{label}.log'
         started = time.monotonic()
-        timed_out = False
-        leader_reaped = True
+        code = None
+        interrupted = False
         command_env = {**self.env, **(env_overrides or {})}
         with output.open('wb') as stream:
             process = subprocess.Popen(
@@ -195,43 +179,39 @@ class Preparation:
                 start_new_session=True,
             )
             try:
-                code = process.wait(timeout=remaining)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                # Keep the leader unreaped during grace so its owned group ID
-                # cannot be reused. Leader exit does not mean children exited.
-                try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-                time.sleep(3)
+                code = process.wait()
+            except BaseException:
+                interrupted = True
+                # No helper timer or grace period: on ordinary interruption,
+                # stop the whole owned group before reaping its leader. This is
+                # best effort; hard termination can prevent Python cleanup.
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-                try:
-                    process.wait(timeout=1)
-                except subprocess.TimeoutExpired:
-                    leader_reaped = False
-                code = 124
-        with (self.root / 'commands.jsonl').open('a') as log:
-            log.write(
-                json.dumps(
-                    {
-                        'phase': self.phase,
-                        'label': label,
-                        'argv': [str(a) for a in argv],
-                        'cwd': str(self.cwd),
-                        'exit_code': code,
-                        'timed_out': timed_out,
-                        'leader_reaped': leader_reaped,
-                        'HCC_AMDGPU_TARGET': command_env.get('HCC_AMDGPU_TARGET'),
-                        'log': str(output),
-                        'elapsed_seconds': time.monotonic() - started,
-                    }
-                )
-                + '\n'
-            )
+                code = process.wait()
+                raise
+            finally:
+                with (self.root / 'commands.jsonl').open('a') as log:
+                    log.write(
+                        json.dumps(
+                            {
+                                'phase': self.phase,
+                                'label': label,
+                                'argv': [str(a) for a in argv],
+                                'cwd': str(self.cwd),
+                                'exit_code': code,
+                                'interrupted': interrupted,
+                                'HCC_AMDGPU_TARGET': command_env.get(
+                                    'HCC_AMDGPU_TARGET'
+                                ),
+                                'log': str(output),
+                                'elapsed_seconds': time.monotonic() - started,
+                            }
+                        )
+                        + '\n'
+                    )
+
         require(code == 0, f'{label} failed (exit {code}); see {output}')
         return output.read_text(errors='replace').strip() if capture else ''
 
@@ -396,7 +376,6 @@ class Preparation:
         self.run(
             'python-loader-smoke',
             [self.python, '-B', '-c', 'import ctypes, joblib'],
-            timeout_seconds=60,
         )
         self.preflight()
         self.export_environment()
@@ -462,7 +441,7 @@ class Preparation:
                 '--build',
                 self.root / 'build',
                 '--parallel',
-                '4',
+                self.env['CMAKE_BUILD_PARALLEL_LEVEL'],
                 '--target',
                 'rocjitsu_bin',
                 'rocjitsu_shared',
@@ -709,7 +688,7 @@ class Preparation:
                 '--build',
                 self.root / 'tensile-native',
                 '--parallel',
-                '4',
+                self.env['CMAKE_BUILD_PARALLEL_LEVEL'],
                 '--target',
                 'tensile_candidate',
                 'tensile_candidate_host_tests',
@@ -730,9 +709,23 @@ class Preparation:
         self.sources()
 
     def inventory(self):
-        recipe = tomllib.loads(
-            (Path(self.env['CORPUS_SOURCE_DIR']) / MANIFEST).read_text()
+        require(self.manifest, 'Manifest is required for inventory')
+        relative = Path(self.manifest)
+        require(
+            not relative.is_absolute()
+            and '..' not in relative.parts
+            and relative.suffix == '.toml',
+            'Manifest must be a corpus-relative TOML path without traversal',
         )
+        corpus = Path(self.env['CORPUS_SOURCE_DIR'])
+        manifest = corpus / relative
+        require(
+            not any(path.is_symlink() for path in (manifest, *manifest.parents))
+            and manifest.resolve().is_relative_to(corpus.resolve())
+            and manifest.is_file(),
+            'Manifest must be a contained regular file without symlinks',
+        )
+        recipe = tomllib.loads(manifest.read_text())
         candidates_file = (
             Path(self.env['CORPUS_SOURCE_DIR'])
             / 'corpus/benchmarks/tensile_candidates/prepare.py'
@@ -977,11 +970,31 @@ class Preparation:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('phase', choices=(*PHASE_SECONDS, 'cleanup'))
+    parser.add_argument(
+        'phase',
+        choices=(
+            'dependencies',
+            'rocjitsu',
+            'native',
+            'generate',
+            'diagnostics',
+            'cleanup',
+        ),
+    )
+    parser.add_argument('--manifest', help='Corpus-relative TOML recipe for generate')
     args = parser.parse_args()
+    if args.phase == 'generate' and not args.manifest:
+        parser.error('--manifest is required for generate')
     ctx = None
+
+    # Actions may deliver SIGTERM to this helper rather than its separate child
+    # session. Unwind normally so run() can stop that owned process group.
+    def terminate(signum, frame):
+        raise SystemExit(128 + signum)
+
+    previous = signal.signal(signal.SIGTERM, terminate)
     try:
-        ctx = Preparation(os.environ)
+        ctx = Preparation(os.environ, args.manifest)
         if args.phase == 'cleanup':
             shutil.rmtree(ctx.root)
             print('Removed only verified owned benchmark scratch')
@@ -995,6 +1008,8 @@ def main():
         ctx.finish(True)
     except (ValueError, KeyError, OSError, json.JSONDecodeError) as error:
         parser.exit(1, f'error: {error}\n')
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 if __name__ == '__main__':

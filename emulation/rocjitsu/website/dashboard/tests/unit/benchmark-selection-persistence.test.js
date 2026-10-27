@@ -9,6 +9,10 @@ import BenchmarksView from '../../src/components/views/BenchmarksView.jsx';
 import { BenchmarkGridPicker } from '../../src/components/benchmarks/BenchmarkPicker.jsx';
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
 import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
+import { boundedGridSelection } from '../../src/components/benchmarks/benchmarkExplorer.js';
+
+const gridPolicy = vi.hoisted(() => ({ maximum: 8 }));
+vi.mock('../../src/config/benchmarkGrid.js', () => ({ get MAX_BENCHMARK_CHARTS() { return gridPolicy.maximum; } }));
 
 const loader = vi.hoisted(() => ({ requests: [] }));
 vi.mock('../../src/data/publishedDataUrls.js', () => ({ resolvePublishedDataUrls: () => ({ indexUrl: 'https://example.test/data/index.json' }) }));
@@ -33,6 +37,7 @@ const roots = [];
 afterEach(() => {
   for (const root of roots.splice(0)) act(() => root.unmount());
   loader.requests = [];
+  gridPolicy.maximum = 8;
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -95,6 +100,29 @@ it.each([
   vi.stubEnv('MODE', mode);
   mountApp();
   expect(loader.requests.findLast(({ options }) => !options.signal.aborted).options.mutableData).toBe(mutableData);
+});
+
+it.each([6, 9])('one grid policy of %i controls selection, picker, storage admission and view copy', async (maximum) => {
+  gridPolicy.maximum = maximum;
+  const options = Array.from({ length: 60 }, (_, index) => ({ id: `policy-${index}`, name: `Workload ${index}`, suite: 'Triton' }));
+  const selected = options.slice(0, maximum);
+  expect(boundedGridSelection([...options, options[0]])).toEqual(selected);
+  expect(boundedGridSelection(options, 3)).toEqual(options.slice(0, 3));
+  const picker = BenchmarkGridPicker({ availableOptions: options, selected, onChange() {} });
+  expect(picker.props.getOptionDisabled(options[maximum])).toBe(true);
+  expect(picker.props.getOptionDisabled(options[0])).toBe(false);
+  expect(picker.props.renderInput({}).props.helperText).toContain(`${maximum} of ${maximum} benchmarks selected`);
+  expect(picker.props.filterOptions(options, { inputValue: '' })).toHaveLength(50);
+  const restored = mountApp(new Map([['rocjitsu-dashboard-benchmarks', JSON.stringify(selected)]]));
+  expect(restored.state.selectedBenchmarks).toEqual(selected);
+  await restored.settle(adaptPublishedDashboardData(createMaintainedPublication()).data);
+  const oversized = mountApp(new Map([['rocjitsu-dashboard-benchmarks', JSON.stringify(options.slice(0, maximum + 1))]]));
+  expect(oversized.state.selectedBenchmarks).toBeNull();
+  const count = nodes(restored.tree).find((node) => node.props.role === 'status' && Array.isArray(node.props.children));
+  expect(renderToStaticMarkup(count)).toContain(`${maximum} of ${maximum} charts · Remove a workload to free a slot`);
+  const copy = nodes(restored.tree).find((node) => typeof node.props.children === 'string' && node.props.children.startsWith('Choose up to '));
+  expect(copy.props.children).toBe(`Choose up to ${maximum} workloads. Options follow the selected targets, suites and thread policies.`);
+  expect(restored.ids()).toEqual(selected.map(({ id }) => id));
 });
 
 it('typed workload definitions survive fresh App persistence restoration', () => {
