@@ -307,6 +307,7 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipHostMalloc",
     "hipMallocHost",
     "hipFreeHost",
+    "hipHostFree",
     # Host memory registration — need handle map + blob restore + device ptr recording
     "hipHostRegister",
     "hipHostUnregister",

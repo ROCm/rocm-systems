@@ -488,10 +488,12 @@ static void host_snapshot_copy(void* data) {
 
 // Write a launch's pinned host snapshots back when its stream reaches it, by a
 // host function queued ahead of the kernel. The replay thread does not wait
-// for the stream, which may wait on work it has yet to submit. hipHostFree and
-// hipHostUnregister wait for every stream, so the allocation outlives the copy.
-// Nothing is restored when the stream captures into a graph, where the kernel
-// runs only when the graph is launched.
+// for the stream, which may wait on work it has yet to submit. Kernel launches
+// give up the global turn before this runs, so a free on another thread can
+// otherwise release the destination first. host_free_mu is held shared from
+// the lookup through the queue; every host free takes it exclusive before it
+// drops the map entry. Nothing is restored when the stream captures into a
+// graph, where the kernel runs only when the graph is launched.
 static hipError_t restore_host_snapshots(PlaybackContext& ctx, const uint8_t* rec,
                                          uint16_t n, hipStream_t stream,
                                          const std::string& kernel_name) {
@@ -500,6 +502,7 @@ static hipError_t restore_host_snapshots(PlaybackContext& ctx, const uint8_t* re
         ctx.host_snapshots_skipped += n;
         return hipSuccess;
     }
+    std::shared_lock host_free(ctx.host_free_mu);
     auto copies = std::make_unique<HostSnapCopies>();
     for (uint16_t i = 0; i < n; i++, rec += kHostSnapRecordSize) {
         uint64_t hash[2];
@@ -3152,6 +3155,7 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 // buffer, so free it, and give its charge back, before the new one is charged.
 // Otherwise the old buffer would stay allocated with no charge against it.
 static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
+    std::unique_lock host_free(ctx.host_free_mu);
     void* host_ptr = nullptr;
     void* reg_buf = nullptr;
     AllocKind kind = AllocKind::Device;
@@ -3219,7 +3223,22 @@ hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
     return r;
 }
 
+hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* pl) {
+    std::unique_lock host_free(ctx.host_free_mu);
+    const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(pl);
+    void* live = ctx.lookup_ptr(a->ptr);
+    if (!live) return hipSuccess;
+    hipError_t r = hipHostFree(live);
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipHostFree", a->ret);
+        return hipSuccess;
+    }
+    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
+    return r;
+}
+
 hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
+    std::unique_lock host_free(ctx.host_free_mu);
     const auto* a = reinterpret_cast<const hrr_args_hipFreeHost*>(pl);
     void* live = ctx.lookup_ptr(a->ptr);
     if (!live) return hipSuccess;
@@ -3296,6 +3315,7 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
 }
 
 hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
+    std::unique_lock host_free(ctx.host_free_mu);
     const auto* a = reinterpret_cast<const hrr_args_hipHostUnregister*>(pl);
 
     // Retrieve the backing buffer regardless of whether lookup_ptr succeeds —
@@ -3377,6 +3397,7 @@ hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t*
 // hipFreeAsync:  ret(4) dev_ptr(8) stream(8)
 
 hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
+    std::unique_lock host_free(ctx.host_free_mu);
     const auto* a = reinterpret_cast<const hrr_args_hipFree*>(pl);
     void* live = ctx.lookup_ptr(a->ptr);
     if (!live) return hipSuccess;
@@ -3392,6 +3413,7 @@ hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
 }
 
 hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
+    std::unique_lock host_free(ctx.host_free_mu);
     const auto* a  = reinterpret_cast<const hrr_args_hipFreeAsync*>(pl);
     void*       live   = ctx.lookup_ptr(a->dev_ptr);
     hipStream_t stream = ctx.translate_stream(a->stream);

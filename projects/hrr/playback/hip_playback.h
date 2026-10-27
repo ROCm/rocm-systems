@@ -198,6 +198,11 @@ struct PlaybackContext {
     // ---- Handle translation maps (recorded raw ptr -> live handle) ----
     // Protected by map_mutex: shared_lock for reads, unique_lock for writes.
     mutable std::shared_mutex map_mutex;
+    // Orders a pinned-host snapshot copy against the free of its destination.
+    // Shared while destinations are resolved and the copy is queued; exclusive
+    // across map removal and the HIP free. Take this before map_mutex, never
+    // the other way round.
+    std::shared_mutex host_free_mu;
     std::unordered_map<uint64_t, hipStream_t>    stream_map;
     std::unordered_map<uint64_t, hipEvent_t>     event_map;
     std::unordered_map<uint64_t, hipModule_t>    module_map;

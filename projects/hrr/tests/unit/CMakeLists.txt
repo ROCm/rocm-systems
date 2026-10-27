@@ -106,6 +106,7 @@ if(TARGET hrr-playback AND NOT WIN32)
     hrr_access_policy_window_test.cc
     hrr_capture_state_test.cc
     hrr_unmapped_note_test.cc
+    hrr_snapshot_order_test.cc
   )
 
   add_executable(hrr-handler-tests
