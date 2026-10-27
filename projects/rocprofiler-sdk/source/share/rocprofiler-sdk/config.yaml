@@ -14196,7 +14196,8 @@ rocprofiler-sdk:
           event: 0
     - name: GCEA_ALWAYS_COUNT_sum
       description: >-
-        Sum across all GCEA instances. Number of GCEA clock cycles. Utilization ratios use this count as the
+        Sum across all GCEA instances. Number of GCEA clock cycles. Utilization ratios use this count
+        as the
         denominator.
       properties: []
       definitions:
@@ -14270,7 +14271,8 @@ rocprofiler-sdk:
           event: 1
     - name: GCEA_RDRAM_NUM_BANKS_VLD_sum
       description: >-
-        Sum across all GCEA instances. Number of pending DRAM read banks. The count does not rise above 16.
+        Sum across all GCEA instances. Number of pending DRAM read banks. The count does not rise above
+        16.
       properties: []
       definitions:
         - architectures:
@@ -14499,7 +14501,8 @@ rocprofiler-sdk:
           event: 8
     - name: GCEA_WDRAM_NUM_BANKS_VLD_sum
       description: >-
-        Sum across all GCEA instances. Number of pending DRAM write banks. The count does not rise above 16.
+        Sum across all GCEA instances. Number of pending DRAM write banks. The count does not rise above
+        16.
       properties: []
       definitions:
         - architectures:
@@ -15333,7 +15336,8 @@ rocprofiler-sdk:
           expression: reduce(GL2C_CYCLE,sum)
     - name: GL2C_EA_RDREQ_DRAM
       description: >-
-        Number of GL2C/EA read requests (either 32-byte, 64-byte, 96-byte or 128-byte or 256-byte) destined for DRAM (MC).
+        Number of GL2C/EA read requests (either 32-byte, 64-byte, 96-byte or 128-byte or 256-byte) destined
+        for DRAM (MC).
       properties: []
       definitions:
         - architectures:
@@ -15564,7 +15568,8 @@ rocprofiler-sdk:
           event: 74
     - name: GL2C_WRITE_sum
       description: >-
-        Sum across all GL2C instances: Number of write requests. This is measured at the output_fifos block.
+        Sum across all GL2C instances: Number of write requests. This is measured at the output_fifos
+        block.
       properties: []
       definitions:
         - architectures:
@@ -16346,7 +16351,8 @@ rocprofiler-sdk:
           event: 41
     - name: TCP_DATA_FIFO_STALL_sum
       description: >-
-        Sum across all TCP instances. TCP stalls the texture addresser (TA) request because the data FIFO is
+        Sum across all TCP instances. TCP stalls the texture addresser (TA) request because the data FIFO
+        is
         full.
       properties: []
       definitions:
