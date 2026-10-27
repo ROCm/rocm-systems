@@ -793,12 +793,12 @@ fail:
 ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction,
                         ncclProfilerCallback_t profFunction) {
   ncclResult_t ret = ncclSuccess;
-  ncclNetCommConfig_t* netCommConfig = nullptr;
+  struct ncclIbNetCtx* netCtx = nullptr;
   NCCLCHECK(ncclIbInitDevices(logFunction, profFunction));
   NCCLCHECK(ncclIbPortRecoveryThreadStart());
-  NCCLCHECK(ncclCalloc(&netCommConfig, 1));
-  netCommConfig->trafficClass = config->trafficClass;
-  *ctx = (void*)netCommConfig;
+  NCCLCHECK(ncclCalloc(&netCtx, 1));
+  netCtx->config.trafficClass = config->trafficClass;
+  *ctx = (void*)netCtx;
   return ret;
 }
 

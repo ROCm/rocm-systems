@@ -119,6 +119,8 @@ test_categories:
       - "GdrProbeTest.*"
       # misc/mlx5dvwrap.cc
       - "Mlx5dvRegDmabufTest.*"
+      # transport/nvls.cc (rccl-UnitTestsMicroNvls)
+      - "NvlsHipStubTest.*"
       # misc/ionicdvsymbols.cc, misc/mlx5dvsymbols.cc
       - "DvSymbolsTestIsolated.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)

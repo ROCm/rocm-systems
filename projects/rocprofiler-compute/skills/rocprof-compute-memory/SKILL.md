@@ -85,14 +85,14 @@ What usually follows from what:
 ## 4. Memory bandwidth analysis (experimental, gfx950)
 
 A guided breakdown that walks the bandwidth tree and names the limiting level.
-It is experimental and currently shipped for gfx950 only. It needs block 30 at
-both profile and analyze time:
+It is experimental and currently shipped for gfx950 only. It needs only the
+memory chart (block 3) and block 30, so profile only those two blocks:
 
 ```bash
-rocprof-compute profile --experimental --membw-analysis --name <name> -- <application>
+rocprof-compute profile --experimental --membw-analysis -b 3 30 \
+    --name <name> -- <application>
 
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> \
-    --experimental --membw-analysis -k <kernel_id>
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id>
 ```
 
 Its cutoffs and guidance text are data, not something to restate from memory.
