@@ -3332,6 +3332,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       liveness_options.live_before_instructions = std::span<const Instruction *const>(
           live_before_instructions.data(), live_before_instructions.size());
     }
+    // Model rules that query liveness without declaring that requirement.
+    if (force_unavailable_liveness_)
+      scope_requires_liveness = false;
     LivenessAnalysis liveness = LivenessAnalysis::unavailable();
     std::vector<ScopedCfgEdge> scope_analysis_edges;
     if (scope_requires_liveness) {
@@ -4119,6 +4122,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           auto expansion =
               semantic_translator_->try_lower_expand(inst, offset, text, liveness, kernel_context);
           if (expansion.status == ExpandStatus::Failed) {
+            if (expansion.internal_error) {
+              append_error(result.diagnostics, DiagnosticKind::InternalError, expansion.message,
+                           offset, std::string(inst.mnemonic()));
+              return leave_unchanged();
+            }
             auto failure = make_kernel_failure(
                 DiagnosticKind::ExpandFailed,
                 expansion.message.empty()
@@ -4190,6 +4198,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           auto registered_expansion = semantic_translator_->try_lower_instruction_rewrite(
               inst, offset, text, liveness, kernel_context);
           if (registered_expansion.status == ExpandStatus::Failed) {
+            if (registered_expansion.internal_error) {
+              append_error(result.diagnostics, DiagnosticKind::InternalError,
+                           registered_expansion.message, offset, std::string(inst.mnemonic()));
+              return leave_unchanged();
+            }
             auto failure = make_kernel_failure(
                 DiagnosticKind::ExpandFailed, registered_expansion.message, offset,
                 std::string(inst.mnemonic()), std::move(registered_expansion.required_work));
