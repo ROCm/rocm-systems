@@ -266,17 +266,22 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 // complete, correct alltoalls with no external bookkeeping.
 template <typename T>
 __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+  // Confine all GIN work to CTA 0. THREAD mode elides the SQ lock, which is only
+  // safe when each peer QP has a single poster across the whole grid -- the rail
+  // barrier signals/flushes qps[peer] too, so a multi-CTA barrier would race it.
+  // CTAs 1..N have no non-GIN work here, so they simply drop out.
+  if (blockIdx.x != 0) return;
+
   int ginContext = 0;
-  unsigned int signalIndex = blockIdx.x;
-  // One thread per peer QP (single-owner), so THREAD mode drops the SQ lock.
+  unsigned int signalIndex = 0;
   ncclGin gin { devComm, ginContext, ginResourceSharingModeDev() };
   uint64_t signalValue = gin.readSignal(signalIndex);
 
-  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
+  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, 0 };
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  int nthreads = blockDim.x * gridDim.x;
+  int tid = threadIdx.x;
+  int nthreads = blockDim.x;
 
   /* send to all peers via GIN; the Anvil-SDMA backend segments large puts
    * internally (<=128 MiB per SDMA copy) so a single gin.put() is safe at any
@@ -289,9 +294,7 @@ __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWin
         size, ncclGin_SignalInc{signalIndex});
   }
 
-  int receivingCta = (devComm.rank % nthreads) / blockDim.x;
-  if (blockIdx.x == receivingCta)
-    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
+  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
   gin.flush(ncclCoopCta());
 
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
