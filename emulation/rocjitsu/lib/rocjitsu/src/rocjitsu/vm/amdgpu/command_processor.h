@@ -198,6 +198,25 @@ public:
   /// @brief Whether this CP currently owns any AQL or PM4 queue state.
   [[nodiscard]] bool has_registered_queues() const;
 
+  /// @brief Save progress and resource requirements of a suspended, non-fanned-out queue.
+  /// @details The encoding is rocjitsu-private: public AMD documentation does not
+  /// specify the complete CP firmware checkpoint format. No host pointers or VM
+  /// leases are encoded. Wave/register state is saved separately through CWSR.
+  /// The caller must quiesce waves and their memory accesses first. Host-owned
+  /// PM4 submissions and cross-XCD state are unsupported and return Faulted.
+  /// Unavailable requires an outstanding publication to finish before retrying.
+  [[nodiscard]] VmAccessOutcome save_queue_context(const QueueIdentity &identity,
+                                                   std::vector<uint8_t> &context);
+  /// @brief Rebuild progress and resident resources in a new suspended binding.
+  /// @details Validates before mutation; leaves admission suspended. The caller
+  /// must restore the queue's waves before making the queue runnable.
+  [[nodiscard]] VmAccessOutcome restore_queue_context(const QueueIdentity &identity,
+                                                      std::span<const uint8_t> context);
+  /// @brief Discard paused resident resources without completing their work.
+  /// @details Called after durable context publication, or to roll back restore.
+  /// The caller owns queue deregistration and must keep admission suspended.
+  void release_queue_context(const QueueIdentity &identity);
+
   /// @brief Compute queues whose root ring initially processes PM4.
   /// @details Test-only visibility for cross-layer teardown assertions.
   [[nodiscard]] size_t registered_pm4_queue_count_for_test() const;
@@ -572,6 +591,7 @@ private:
     std::array<uint32_t, 4> scratch_resource_descriptor{};
     uint64_t write_dispatch_id = 0;
   };
+  struct QueueContext;
 
   struct KernelDescriptorReadResult {
     VmAccessOutcome outcome;

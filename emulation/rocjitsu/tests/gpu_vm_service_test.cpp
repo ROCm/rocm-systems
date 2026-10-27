@@ -48,6 +48,11 @@ public:
 
 class CommandProcessorCloseTestAccess {
 public:
+  template <typename Inspect> static void with_first_queue(CommandProcessor &cp, Inspect inspect) {
+    std::lock_guard lock(cp.hw_queue_mutex_);
+    inspect(cp.compute_queues_.at(0), cp.dispatch_launch_metadata_);
+  }
+
   static bool fetch_first_queue(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
     if (command_processor.compute_queues_.size() != 1)
@@ -2474,6 +2479,136 @@ TEST(GpuVmService, AqlReconfigureRejectsInvalidRingGeometry) {
   EXPECT_EQ(disabled.status, QueueReconfigureStatus::Disabled);
 
   EXPECT_TRUE(queues.unregister_queue(queue));
+  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
+TEST(GpuVmService, AqlContextRestoresProgressAfterDestroyingTheOriginalBinding) {
+  GpuVm gpu_vm;
+  CommandProcessor cp("cp");
+  GpuQueueRegistry queues(gpu_vm);
+  const auto address_space = register_byte_address_space(gpu_vm, 7, 0x11);
+  cp.set_gpu_vm(&gpu_vm);
+  auto request = queue_request(address_space, cp, 1);
+  request.ring.size_bytes = 1024;
+  auto queue = queues.register_queue(request);
+  ASSERT_TRUE(queue);
+  cp.set_queue_debug_suspended(1, 7, true);
+  CommandProcessorCloseTestAccess::with_first_queue(cp, [&](auto &state, auto &metadata) {
+    state.read_pointer_journal.reset(5);
+    state.fetch_cursor = 8;
+    state.next_dispatch_idx = 0;
+    state.implicit_barrier_next = true;
+    for (uint32_t i = 0; i < 3; ++i) {
+      DispatchEntry entry{};
+      entry.kind = DispatchPacketKind::Kernel;
+      entry.dispatch_id = 10 + i;
+      entry.queue_id = 1;
+      entry.process_id = 7;
+      entry.address_space = address_space;
+      entry.aql_packet_id = 5 + i;
+      entry.queue_packet_id = 5 + i;
+      entry.aql_packet_address = 0x100 + (5 + i) * kAqlPacketBytes;
+      entry.owns_aql_ring_slot = true;
+      entry.kernel_entry_pc = 0x4000 + i * 0x100;
+      entry.kernel_code_properties =
+          amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER;
+      entry.queue_ptr = 0x900;
+      entry.total_wgs = 6;
+      entry.dispatched_wgs = i == 0 ? 4 : 0;
+      entry.completed_wgs = i == 0 ? 2 : 0;
+      entry.execution_begun = i == 0;
+      entry.group_segment_fixed_size = 256;
+      entry.private_segment_fixed_size = 20;
+      entry.scratch_wave_bytes = 1024;
+      entry.scratch_use_once = i == 2;
+      entry.completion_signal = 0x800 + i * 0x100;
+      metadata[entry.dispatch_id].scratch_resource_descriptor = {1, 2, 3, i + 4};
+      metadata[entry.dispatch_id].write_dispatch_id = 20 + i;
+      state.entries.push_back(std::move(entry));
+    }
+    state.scratch_reclaim.begin(state.entries.back().dispatch_id);
+  });
+  std::vector<uint8_t> context;
+  ASSERT_EQ(cp.save_queue_context(request.identity, context), VmAccessOutcome::Complete);
+  ASSERT_FALSE(context.empty());
+  ASSERT_TRUE(queues.unregister_queue(queue, QueueCloseMode::ForceCancel));
+  ASSERT_FALSE(cp.has_registered_queues());
+
+  request.identity.queue_id = 2; // A fresh execution identity, same guest queue.
+  queue = queues.register_queue(request);
+  ASSERT_TRUE(queue);
+  cp.set_queue_debug_suspended(2, 7, true);
+  ASSERT_EQ(cp.restore_queue_context(request.identity, context), VmAccessOutcome::Complete);
+  CommandProcessorCloseTestAccess::with_first_queue(cp, [&](auto &state, auto &metadata) {
+    EXPECT_TRUE(state.debug_suspended);
+    EXPECT_EQ(state.fetch_cursor, 8u);
+    EXPECT_EQ(state.read_pointer_journal.cursor(), 5u);
+    EXPECT_EQ(state.next_dispatch_idx, 0u);
+    EXPECT_TRUE(state.implicit_barrier_next);
+    ASSERT_EQ(state.entries.size(), 3u);
+    EXPECT_EQ(state.scratch_reclaim.phase, QueueScratchReclaimPhase::WaitingForDispatch);
+    EXPECT_EQ(state.scratch_reclaim.dispatch_id, state.entries.back().dispatch_id);
+    for (uint32_t i = 0; i < 3; ++i) {
+      const auto &entry = state.entries[i];
+      EXPECT_NE(entry.dispatch_id, 0u);
+      if (i != 0)
+        EXPECT_NE(entry.dispatch_id, state.entries[i - 1].dispatch_id);
+      EXPECT_EQ(entry.queue_id, 2u);
+      EXPECT_EQ(entry.address_space, address_space);
+      EXPECT_TRUE(entry.execution_access);
+      ASSERT_TRUE(metadata.contains(entry.dispatch_id));
+      EXPECT_EQ(metadata.at(entry.dispatch_id).scratch_resource_descriptor,
+                (std::array<uint32_t, 4>{1, 2, 3, i + 4}));
+      EXPECT_EQ(metadata.at(entry.dispatch_id).write_dispatch_id, 20 + i);
+      EXPECT_EQ(entry.aql_packet_id, 5 + i);
+      EXPECT_EQ(entry.kernel_entry_pc, 0x4000 + i * 0x100);
+      EXPECT_EQ(entry.dispatched_wgs, i == 0 ? 4u : 0u);
+      EXPECT_EQ(entry.completed_wgs, i == 0 ? 2u : 0u);
+      EXPECT_EQ(entry.execution_begun, i == 0);
+      EXPECT_EQ(entry.group_segment_fixed_size, 256u);
+      EXPECT_EQ(entry.private_segment_fixed_size, 20u);
+      EXPECT_EQ(entry.scratch_wave_bytes, 1024u);
+      EXPECT_EQ(entry.completion_signal, 0x800 + i * 0x100);
+    }
+  });
+  EXPECT_TRUE(queues.unregister_queue(queue, QueueCloseMode::ForceCancel));
+  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
+TEST(GpuVmService, AqlContextRejectsTruncationAndDifferentRingsBeforeChangingState) {
+  GpuVm gpu_vm;
+  CommandProcessor cp("cp");
+  GpuQueueRegistry queues(gpu_vm);
+  const auto address_space = register_byte_address_space(gpu_vm, 7, 0x11);
+  cp.set_gpu_vm(&gpu_vm);
+  auto request = queue_request(address_space, cp, 1);
+  auto queue = queues.register_queue(request);
+  ASSERT_TRUE(queue);
+  cp.set_queue_debug_suspended(1, 7, true);
+  std::vector<uint8_t> context;
+  ASSERT_EQ(cp.save_queue_context(request.identity, context), VmAccessOutcome::Complete);
+  ASSERT_TRUE(queues.unregister_queue(queue, QueueCloseMode::ForceCancel));
+  queue = queues.register_queue(request);
+  ASSERT_TRUE(queue);
+  cp.set_queue_debug_suspended(1, 7, true);
+  CommandProcessorCloseTestAccess::with_first_queue(
+      cp, [](auto &state, auto &) { state.fetch_cursor = 99; });
+  for (const auto size : {size_t{0}, context.size() - 1}) {
+    EXPECT_EQ(cp.restore_queue_context(request.identity, std::span(context).first(size)),
+              VmAccessOutcome::Malformed);
+    CommandProcessorCloseTestAccess::with_first_queue(cp, [](auto &state, auto &) {
+      EXPECT_EQ(state.fetch_cursor, 99u);
+      EXPECT_TRUE(state.entries.empty());
+      EXPECT_TRUE(state.debug_suspended);
+    });
+  }
+  ASSERT_TRUE(queues.unregister_queue(queue, QueueCloseMode::ForceCancel));
+  request.ring.base_address += kAqlPacketBytes;
+  queue = queues.register_queue(request);
+  ASSERT_TRUE(queue);
+  cp.set_queue_debug_suspended(1, 7, true);
+  EXPECT_EQ(cp.restore_queue_context(request.identity, context), VmAccessOutcome::Malformed);
+  EXPECT_TRUE(queues.unregister_queue(queue, QueueCloseMode::ForceCancel));
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
 }
 
