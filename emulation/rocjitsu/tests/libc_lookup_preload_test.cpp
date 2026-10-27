@@ -18,10 +18,10 @@ static const char *missing_wrapper = nullptr;
 extern "C" __attribute__((visibility("default"))) void *dlsym(void *handle, const char *name) {
   // The versions cover glibc's combined libdl and its older x86-64/AArch64 ABIs.
   // dlvsym is not interposed by this helper.
-  void *(*next)(void *, const char *) = nullptr;
+  decltype(&::dlsym) next = nullptr;
   for (const char *version : {"GLIBC_2.34", "GLIBC_2.2.5", "GLIBC_2.17"}) {
     if (auto *symbol = dlvsym(RTLD_NEXT, "dlsym", version)) {
-      next = reinterpret_cast<void *(*)(void *, const char *)>(symbol);
+      next = reinterpret_cast<decltype(next)>(symbol);
       break;
     }
   }
@@ -43,8 +43,16 @@ extern "C" __attribute__((visibility("default"))) void *dlsym(void *handle, cons
     inside_allocator = false;
     exercise_allocator = false;
   }
-  if (missing_wrapper && std::strcmp(missing_wrapper, name) == 0)
+  if (missing_wrapper && std::strcmp(missing_wrapper, name) == 0) {
     return nullptr;
+  }
+  // RTLD_NEXT is relative to the caller's return address. Keep the original
+  // caller visible so sanitizer lookup still reaches rocjitsu's interposers.
+#if __has_cpp_attribute(clang::musttail)
+  [[clang::musttail]]
+#elif __has_cpp_attribute(gnu::musttail)
+  [[gnu::musttail]]
+#endif
   return next(handle, name);
 }
 

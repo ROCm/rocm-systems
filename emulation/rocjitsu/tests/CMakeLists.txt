@@ -1954,7 +1954,12 @@ rj_configure_target(libc_lookup_preload TEST)
 # Sanitizer initialization itself calls dlsym before its tracing state exists.
 # Only this loader-injection helper must be uninstrumented; the exercised
 # rocjitsu code and test executables retain their normal sanitizer coverage.
-target_compile_options(libc_lookup_preload PRIVATE -fno-sanitize=all)
+# RTLD_NEXT forwarding must preserve the original caller even in Debug builds
+# with older GCC versions that do not support the musttail statement attribute.
+target_compile_options(
+    libc_lookup_preload
+    PRIVATE -fno-sanitize=all -O2 -foptimize-sibling-calls
+)
 target_link_libraries(libc_lookup_preload PRIVATE ${CMAKE_DL_LIBS})
 add_dependencies(early_mmap_driver libc_lookup_preload)
 if(RJ_INSTALL_TESTS)

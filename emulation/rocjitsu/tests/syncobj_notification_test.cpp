@@ -3,6 +3,8 @@
 
 #include "rocjitsu/kmd/linux/syncobj_notification.h"
 
+#include "thread_test_util.h"
+
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -167,7 +169,7 @@ protected:
       private:
         bool &unwound_;
       } cleanup(unwound);
-      tid.store(gettid(), std::memory_order_release);
+      tid.store(rocjitsu::test::current_thread_id(), std::memory_order_release);
       // Leave sem_clockwait untouched: TSan can defer this real sleep's
       // signal until the next intercepted call, unlike the ppoll hooks.
       (void)notification.wait_until(0, &deadline);
@@ -363,7 +365,7 @@ TEST_F(SyncobjNotificationTest, ThreadExitDuringContendedRegistrationUnwinds) {
       bool &unwound_;
       std::atomic<bool> &done_;
     } cleanup(unwound, done);
-    tid.store(gettid(), std::memory_order_release);
+    tid.store(rocjitsu::test::current_thread_id(), std::memory_order_release);
     (void)notification.wait_until(expected, &deadline);
     returned = true;
   });

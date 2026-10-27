@@ -17,6 +17,7 @@
 #include "syncfile_cancellation_test.h"
 
 #include "scoped_temp.h"
+#include "thread_test_util.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -4692,7 +4693,7 @@ static void check_syncobj_wait_after_descriptor_replacement(bool use_dup3) {
   std::atomic<pid_t> tid{0};
   int wait_result = -2;
   std::thread waiter([&] {
-    tid.store(gettid(), std::memory_order_release);
+    tid.store(rocjitsu::test::current_thread_id(), std::memory_order_release);
     wait_result = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
   });
   bool blocked = false;
@@ -4752,7 +4753,7 @@ TEST(InterposerSyncobjTest, TimelineSignalWakesEveryBlockedWaiter) {
       wait.count_handles = 1;
       wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
       wait.timeout_nsec = monotonic_deadline_after(std::chrono::seconds(5));
-      tids[index].store(static_cast<pid_t>(gettid()), std::memory_order_release);
+      tids[index].store(rocjitsu::test::current_thread_id(), std::memory_order_release);
       results[index] = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     });
   }
@@ -4894,7 +4895,7 @@ static void check_syncfile_broadcast_cancellation(bool import_fence) {
       wait.count_handles = 1;
       wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
       wait.timeout_nsec = monotonic_deadline_after(std::chrono::seconds(5));
-      tids[index].store(gettid(), std::memory_order_release);
+      tids[index].store(rocjitsu::test::current_thread_id(), std::memory_order_release);
       wait_results[index] = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     });
   }
@@ -5042,7 +5043,7 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
       bool &unwound;
       ~Cleanup() { unwound = true; }
     } cleanup{unwound};
-    tid.store(gettid(), std::memory_order_release);
+    tid.store(rocjitsu::test::current_thread_id(), std::memory_order_release);
     (void)call(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     returned = true;
   });
