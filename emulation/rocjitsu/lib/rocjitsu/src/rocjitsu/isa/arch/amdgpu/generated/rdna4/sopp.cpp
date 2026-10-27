@@ -18,6 +18,8 @@ SNopSopp::SNopSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -115,6 +117,8 @@ SDelayAluSopp::SDelayAluSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -135,6 +139,8 @@ SWaitAluSopp::SWaitAluSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -155,6 +161,8 @@ SWaitcntSopp::SWaitcntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -173,6 +181,8 @@ SWaitIdleSopp::SWaitIdleSopp(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -310,6 +320,8 @@ SBranchSopp::SBranchSopp(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= BRANCH;
   flags_ |= IGNORES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -339,6 +351,8 @@ SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -369,6 +383,8 @@ SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -399,6 +415,8 @@ SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -429,6 +447,8 @@ SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -459,6 +479,8 @@ SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -489,6 +511,8 @@ SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -733,6 +757,8 @@ SWaitLoadcntSopp::SWaitLoadcntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -754,6 +780,8 @@ SWaitStorecntSopp::SWaitStorecntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -775,6 +803,8 @@ SWaitSamplecntSopp::SWaitSamplecntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -796,6 +826,8 @@ SWaitBvhcntSopp::SWaitBvhcntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -817,6 +849,8 @@ SWaitExpcntSopp::SWaitExpcntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -838,6 +872,8 @@ SWaitDscntSopp::SWaitDscntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -858,6 +894,8 @@ SWaitKmcntSopp::SWaitKmcntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -878,6 +916,8 @@ SWaitLoadcntDscntSopp::SWaitLoadcntDscntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -899,6 +939,8 @@ SWaitStorecntDscntSopp::SWaitStorecntDscntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {

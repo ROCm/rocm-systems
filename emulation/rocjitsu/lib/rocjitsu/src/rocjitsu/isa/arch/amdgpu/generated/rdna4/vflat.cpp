@@ -40,6 +40,8 @@ FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -74,6 +76,8 @@ FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -108,6 +112,8 @@ FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -142,6 +148,8 @@ FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -176,6 +184,8 @@ FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -210,6 +220,8 @@ FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -244,6 +256,8 @@ FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -278,6 +292,8 @@ FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -313,6 +329,8 @@ FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -348,6 +366,8 @@ FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -382,6 +402,8 @@ FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -416,6 +438,8 @@ FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -450,6 +474,8 @@ FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -484,6 +510,8 @@ FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -518,6 +546,8 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -558,6 +588,8 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -598,6 +630,8 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -638,6 +672,8 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -678,6 +714,8 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -718,6 +756,8 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -759,6 +799,8 @@ FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -794,6 +836,8 @@ FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {

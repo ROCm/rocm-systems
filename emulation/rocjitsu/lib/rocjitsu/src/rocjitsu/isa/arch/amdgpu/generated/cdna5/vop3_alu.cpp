@@ -39,6 +39,8 @@ VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -198,6 +200,8 @@ VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -377,6 +381,8 @@ VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -429,6 +435,8 @@ VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -585,6 +593,8 @@ VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1156,6 +1166,8 @@ VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1410,6 +1422,8 @@ VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1934,6 +1948,8 @@ VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2071,6 +2087,8 @@ VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2209,6 +2227,8 @@ VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2414,6 +2434,8 @@ VNotB16Vop3::VNotB16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2957,6 +2979,8 @@ VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3022,6 +3046,8 @@ VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3081,6 +3107,8 @@ VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3140,6 +3168,8 @@ VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3194,6 +3224,8 @@ VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3319,6 +3351,8 @@ VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3738,6 +3772,8 @@ VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3797,6 +3833,8 @@ VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3856,6 +3894,8 @@ VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3915,6 +3955,8 @@ VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4088,6 +4130,8 @@ VFmacF64Vop3::VFmacF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4154,6 +4198,8 @@ VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4214,6 +4260,8 @@ VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4274,6 +4322,8 @@ VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4334,6 +4384,8 @@ VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4393,6 +4445,8 @@ VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4452,6 +4506,8 @@ VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4511,6 +4567,8 @@ VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4564,6 +4622,8 @@ VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4631,6 +4691,8 @@ VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4690,6 +4752,8 @@ VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4749,6 +4813,8 @@ VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4804,6 +4870,8 @@ VAddNcU64Vop3::VAddNcU64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4865,6 +4933,8 @@ VSubNcU64Vop3::VSubNcU64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4916,6 +4986,8 @@ VMulU64Vop3::VMulU64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4974,6 +5046,8 @@ VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5201,6 +5275,8 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5280,6 +5356,8 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5359,6 +5437,8 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5439,6 +5519,8 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5519,6 +5601,8 @@ VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5598,6 +5682,8 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6497,6 +6583,8 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6577,6 +6665,8 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6737,6 +6827,8 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6816,6 +6908,8 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6895,6 +6989,8 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6974,6 +7070,8 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7053,6 +7151,8 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7133,6 +7233,8 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7200,6 +7302,8 @@ VMinU64Vop3::VMinU64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7260,6 +7364,8 @@ VMaxU64Vop3::VMaxU64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7320,6 +7426,8 @@ VMinI64Vop3::VMinI64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7380,6 +7488,8 @@ VMaxI64Vop3::VMaxI64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7445,6 +7555,8 @@ VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7681,6 +7793,8 @@ VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7740,6 +7854,8 @@ VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7793,6 +7909,8 @@ VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7852,6 +7970,8 @@ VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7911,6 +8031,8 @@ VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7970,6 +8092,8 @@ VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8044,6 +8168,8 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8125,6 +8251,8 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8273,6 +8401,8 @@ VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8334,6 +8464,8 @@ VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8533,6 +8665,8 @@ VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8612,6 +8746,8 @@ VOrB16Vop3::VOrB16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8691,6 +8827,8 @@ VXorB16Vop3::VXorB16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {

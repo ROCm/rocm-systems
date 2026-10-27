@@ -551,6 +551,8 @@ DsWriteB32Ds::DsWriteB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -594,6 +596,8 @@ DsWrite2B32Ds::DsWrite2B32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -637,6 +641,8 @@ DsWrite2st64B32Ds::DsWrite2st64B32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1017,6 +1023,8 @@ DsWriteB8Ds::DsWriteB8Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1055,6 +1063,8 @@ DsWriteB16Ds::DsWriteB16Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2126,6 +2136,8 @@ DsReadB32Ds::DsReadB32Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2240,6 +2252,8 @@ DsReadI8Ds::DsReadI8Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2279,6 +2293,8 @@ DsReadU8Ds::DsReadU8Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2318,6 +2334,8 @@ DsReadI16Ds::DsReadI16Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2357,6 +2375,8 @@ DsReadU16Ds::DsReadU16Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3001,6 +3021,8 @@ DsWriteB64Ds::DsWriteB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3044,6 +3066,8 @@ DsWrite2B64Ds::DsWrite2B64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3087,6 +3111,8 @@ DsWrite2st64B64Ds::DsWrite2st64B64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3294,6 +3320,8 @@ DsWriteB8D16HiDs::DsWriteB8D16HiDs(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3333,6 +3361,8 @@ DsWriteB16D16HiDs::DsWriteB16D16HiDs(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3371,6 +3401,8 @@ DsReadU8D16Ds::DsReadU8D16Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3408,6 +3440,8 @@ DsReadU8D16HiDs::DsReadU8D16HiDs(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3446,6 +3480,8 @@ DsReadI8D16Ds::DsReadI8D16Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3483,6 +3519,8 @@ DsReadI8D16HiDs::DsReadI8D16HiDs(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3521,6 +3559,8 @@ DsReadU16D16Ds::DsReadU16D16Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3558,6 +3598,8 @@ DsReadU16D16HiDs::DsReadU16D16HiDs(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4573,6 +4615,8 @@ DsReadB64Ds::DsReadB64Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5155,6 +5199,8 @@ DsWriteB96Ds::DsWriteB96Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5192,6 +5238,8 @@ DsWriteB128Ds::DsWriteB128Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5231,6 +5279,8 @@ DsReadB96Ds::DsReadB96Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5270,6 +5320,8 @@ DsReadB128Ds::DsReadB128Ds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {

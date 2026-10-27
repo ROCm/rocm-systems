@@ -31,6 +31,8 @@ SMovB32Sop1::SMovB32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
   flags_ |= RESULT_COPY;
 }
 
@@ -67,6 +69,8 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
   }
   if ((inst_.sdst < 105u && (inst_.sdst & 1u)) || (inst_.ssrc0 < 105u && (inst_.ssrc0 & 1u)))
     flags_ |= MISALIGNED_SCALAR_DATA;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
   flags_ |= RESULT_COPY;
 }
 
@@ -105,6 +109,8 @@ SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
   }
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= PREDICATED_DEF;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -143,6 +149,8 @@ SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
   }
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= PREDICATED_DEF;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -175,6 +183,8 @@ SBrevB32Sop1::SBrevB32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -208,6 +218,8 @@ SBrevB64Sop1::SBrevB64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -261,6 +273,8 @@ SCtzI32B32Sop1::SCtzI32B32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -294,6 +308,8 @@ SCtzI32B64Sop1::SCtzI32B64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -326,6 +342,8 @@ SClzI32U32Sop1::SClzI32U32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -359,6 +377,8 @@ SClzI32U64Sop1::SClzI32U64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -456,6 +476,8 @@ SSextI32I8Sop1::SSextI32I8Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(8, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -489,6 +511,8 @@ SSextI32I16Sop1::SSextI32I16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -523,6 +547,8 @@ SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -557,6 +583,8 @@ SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -591,6 +619,8 @@ SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -625,6 +655,8 @@ SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -729,6 +761,8 @@ SBcnt0I32B32Sop1::SBcnt0I32B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -766,6 +800,8 @@ SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -802,6 +838,8 @@ SBcnt1I32B32Sop1::SBcnt1I32B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -839,6 +877,8 @@ SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -875,6 +915,8 @@ SQuadmaskB32Sop1::SQuadmaskB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -912,6 +954,8 @@ SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -948,6 +992,8 @@ SWqmB32Sop1::SWqmB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -984,6 +1030,8 @@ SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1019,6 +1067,8 @@ SNotB32Sop1::SNotB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1055,6 +1105,8 @@ SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1097,6 +1149,8 @@ SAndSaveexecB32Sop1::SAndSaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1141,6 +1195,8 @@ SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1184,6 +1240,8 @@ SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
   flags_ |= RESULT_OR;
 }
 
@@ -1229,6 +1287,8 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
   flags_ |= RESULT_OR;
 }
 
@@ -1273,6 +1333,8 @@ SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1317,6 +1379,8 @@ SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1360,6 +1424,8 @@ SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1404,6 +1470,8 @@ SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1447,6 +1515,8 @@ SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1491,6 +1561,8 @@ SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1534,6 +1606,8 @@ SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1578,6 +1652,8 @@ SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1621,6 +1697,8 @@ SAndNot0SaveexecB32Sop1::SAndNot0SaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1665,6 +1743,8 @@ SAndNot0SaveexecB64Sop1::SAndNot0SaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1708,6 +1788,8 @@ SOrNot0SaveexecB32Sop1::SOrNot0SaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1752,6 +1834,8 @@ SOrNot0SaveexecB64Sop1::SOrNot0SaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1795,6 +1879,8 @@ SAndNot1SaveexecB32Sop1::SAndNot1SaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1839,6 +1925,8 @@ SAndNot1SaveexecB64Sop1::SAndNot1SaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1882,6 +1970,8 @@ SOrNot1SaveexecB32Sop1::SOrNot1SaveexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1926,6 +2016,8 @@ SOrNot1SaveexecB64Sop1::SOrNot1SaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1969,6 +2061,8 @@ SAndNot0WrexecB32Sop1::SAndNot0WrexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2013,6 +2107,8 @@ SAndNot0WrexecB64Sop1::SAndNot0WrexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2056,6 +2152,8 @@ SAndNot1WrexecB32Sop1::SAndNot1WrexecB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2100,6 +2198,8 @@ SAndNot1WrexecB64Sop1::SAndNot1WrexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2274,6 +2374,8 @@ SGetPcI64Sop1::SGetPcI64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2298,6 +2400,9 @@ SSetPcI64Sop1::SSetPcI64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_BRANCH;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= ABSOLUTE_INDIRECT_BRANCH;
 }
 
 namespace detail {
@@ -2707,6 +2812,8 @@ SFloorF32Sop1::SFloorF32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2739,6 +2846,8 @@ STruncF32Sop1::STruncF32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3089,6 +3198,8 @@ SFloorF16Sop1::SFloorF16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3135,6 +3246,8 @@ STruncF16Sop1::STruncF16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {

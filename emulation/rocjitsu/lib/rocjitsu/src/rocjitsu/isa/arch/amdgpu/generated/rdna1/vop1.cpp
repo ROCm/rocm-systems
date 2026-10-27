@@ -17,6 +17,8 @@ VNopVop1::VNopVop1(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VNopVop1)) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -80,6 +82,8 @@ VMovB32Vop1::VMovB32Vop1(const MachineInst *inst)
     sdwa_omod_ = sw->omod;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -109,6 +113,8 @@ VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1301,6 +1307,8 @@ VTruncF64Vop1::VTruncF64Vop1(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1400,6 +1408,8 @@ VFloorF64Vop1::VFloorF64Vop1(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1486,6 +1496,8 @@ VFractF32Vop1::VFractF32Vop1(const MachineInst *inst)
     sdwa_omod_ = sw->omod;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1558,6 +1570,8 @@ VTruncF32Vop1::VTruncF32Vop1(const MachineInst *inst)
     sdwa_omod_ = sw->omod;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1773,6 +1787,8 @@ VFloorF32Vop1::VFloorF32Vop1(const MachineInst *inst)
     sdwa_omod_ = sw->omod;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2515,6 +2531,8 @@ VNotB32Vop1::VNotB32Vop1(const MachineInst *inst)
     sdwa_omod_ = sw->omod;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2903,6 +2921,8 @@ VFractF64Vop1::VFractF64Vop1(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4302,6 +4322,8 @@ VFloorF16Vop1::VFloorF16Vop1(const MachineInst *inst)
     sdwa_omod_ = sw->omod;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4459,6 +4481,8 @@ VTruncF16Vop1::VTruncF16Vop1(const MachineInst *inst)
     sdwa_omod_ = sw->omod;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4617,6 +4641,8 @@ VFractF16Vop1::VFractF16Vop1(const MachineInst *inst)
     sdwa_omod_ = sw->omod;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {

@@ -17,6 +17,8 @@ VNopVop3::VNopVop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VNopVop3)) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -60,6 +62,8 @@ VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -87,6 +91,8 @@ VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -956,6 +962,8 @@ VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1049,6 +1057,8 @@ VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1121,6 +1131,8 @@ VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
       src0.is_vgpr() ? amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0) : 0xf);
   vdst.set_register_byte_mask(
       vdst.is_vgpr() ? amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 3) : 0xf);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1176,6 +1188,8 @@ VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1225,6 +1239,8 @@ VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1372,6 +1388,8 @@ VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -1907,6 +1925,8 @@ VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -2200,6 +2220,8 @@ VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3198,6 +3220,8 @@ VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3316,6 +3340,8 @@ VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3434,6 +3460,8 @@ VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3786,6 +3814,8 @@ VNotB16Vop3::VNotB16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -3955,6 +3985,8 @@ VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4011,6 +4043,8 @@ VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4066,6 +4100,8 @@ VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4121,6 +4157,8 @@ VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4160,6 +4198,8 @@ VFmacDx9ZeroF32Vop3::VFmacDx9ZeroF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4270,6 +4310,8 @@ VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4657,6 +4699,8 @@ VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4712,6 +4756,8 @@ VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4767,6 +4813,8 @@ VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4822,6 +4870,8 @@ VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4877,6 +4927,8 @@ VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4933,6 +4985,8 @@ VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4989,6 +5043,8 @@ VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5045,6 +5101,8 @@ VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5100,6 +5158,8 @@ VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5155,6 +5215,8 @@ VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5210,6 +5272,8 @@ VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5265,6 +5329,8 @@ VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5320,6 +5386,8 @@ VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5375,6 +5443,8 @@ VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5432,6 +5502,8 @@ VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5550,6 +5622,8 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5619,6 +5693,8 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5688,6 +5764,8 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5757,6 +5835,8 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5827,6 +5907,8 @@ VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6034,6 +6116,8 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6101,6 +6185,8 @@ VFmaDx9ZeroF32Vop3::VFmaDx9ZeroF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6712,6 +6798,8 @@ VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6759,6 +6847,8 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8691,6 +8781,8 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -9481,6 +9573,8 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -10087,6 +10181,8 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -10823,6 +10919,8 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -10892,6 +10990,8 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -11140,6 +11240,8 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -11209,6 +11311,8 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -11278,6 +11382,8 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -11347,6 +11453,8 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -11416,6 +11524,8 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -11485,6 +11595,8 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -11735,6 +11847,8 @@ VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12230,6 +12344,8 @@ VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12285,6 +12401,8 @@ VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12325,6 +12443,8 @@ VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12363,6 +12483,8 @@ VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12476,6 +12598,8 @@ VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12512,6 +12636,8 @@ VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12548,6 +12674,8 @@ VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12584,6 +12712,8 @@ VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12682,6 +12812,8 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12752,6 +12884,8 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12868,6 +13002,8 @@ VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12906,6 +13042,8 @@ VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12944,6 +13082,8 @@ VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -12972,6 +13112,8 @@ VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -13005,6 +13147,8 @@ VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -13073,6 +13217,8 @@ VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -13142,6 +13288,8 @@ VOrB16Vop3::VOrB16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -13211,6 +13359,8 @@ VXorB16Vop3::VXorB16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -13280,6 +13430,8 @@ VCmpFF16Vop3::VCmpFF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -14225,6 +14377,8 @@ VCmpTF16Vop3::VCmpTF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -14280,6 +14434,8 @@ VCmpFF32Vop3::VCmpFF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -15105,6 +15261,8 @@ VCmpTF32Vop3::VCmpTF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -15145,6 +15303,8 @@ VCmpFF64Vop3::VCmpFF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -15715,6 +15875,8 @@ VCmpTF64Vop3::VCmpTF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -15776,6 +15938,8 @@ VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -15839,6 +16003,8 @@ VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -15902,6 +16068,8 @@ VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -15965,6 +16133,8 @@ VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16028,6 +16198,8 @@ VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16091,6 +16263,8 @@ VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16154,6 +16328,8 @@ VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16217,6 +16393,8 @@ VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16280,6 +16458,8 @@ VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16343,6 +16523,8 @@ VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16406,6 +16588,8 @@ VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16469,6 +16653,8 @@ VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16524,6 +16710,8 @@ VCmpFI32Vop3::VCmpFI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16579,6 +16767,8 @@ VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16634,6 +16824,8 @@ VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16689,6 +16881,8 @@ VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16744,6 +16938,8 @@ VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16799,6 +16995,8 @@ VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16854,6 +17052,8 @@ VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16909,6 +17109,8 @@ VCmpTI32Vop3::VCmpTI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -16964,6 +17166,8 @@ VCmpFU32Vop3::VCmpFU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17019,6 +17223,8 @@ VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17074,6 +17280,8 @@ VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17129,6 +17337,8 @@ VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17184,6 +17394,8 @@ VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17239,6 +17451,8 @@ VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17294,6 +17508,8 @@ VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17349,6 +17565,8 @@ VCmpTU32Vop3::VCmpTU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17389,6 +17607,8 @@ VCmpFI64Vop3::VCmpFI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17427,6 +17647,8 @@ VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17465,6 +17687,8 @@ VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17503,6 +17727,8 @@ VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17541,6 +17767,8 @@ VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17579,6 +17807,8 @@ VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17617,6 +17847,8 @@ VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17655,6 +17887,8 @@ VCmpTI64Vop3::VCmpTI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17693,6 +17927,8 @@ VCmpFU64Vop3::VCmpFU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17731,6 +17967,8 @@ VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17769,6 +18007,8 @@ VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17807,6 +18047,8 @@ VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17845,6 +18087,8 @@ VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17883,6 +18127,8 @@ VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17921,6 +18167,8 @@ VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -17959,6 +18207,8 @@ VCmpTU64Vop3::VCmpTU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -18178,6 +18428,8 @@ VCmpxFF16Vop3::VCmpxFF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -18244,6 +18496,8 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -18310,6 +18564,8 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -18376,6 +18632,8 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -18442,6 +18700,8 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -18508,6 +18768,8 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -18574,6 +18836,8 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -18772,6 +19036,8 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -18839,6 +19105,8 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -18906,6 +19174,8 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -18973,6 +19243,8 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19040,6 +19312,8 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19107,6 +19381,8 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19174,6 +19450,8 @@ VCmpxTF16Vop3::VCmpxTF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19232,6 +19510,8 @@ VCmpxFF32Vop3::VCmpxFF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19290,6 +19570,8 @@ VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19348,6 +19630,8 @@ VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19406,6 +19690,8 @@ VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19464,6 +19750,8 @@ VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19522,6 +19810,8 @@ VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19580,6 +19870,8 @@ VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19754,6 +20046,8 @@ VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19813,6 +20107,8 @@ VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19872,6 +20168,8 @@ VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19931,6 +20229,8 @@ VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -19990,6 +20290,8 @@ VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20049,6 +20351,8 @@ VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20108,6 +20412,8 @@ VCmpxTF32Vop3::VCmpxTF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20151,6 +20457,8 @@ VCmpxFF64Vop3::VCmpxFF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20192,6 +20500,8 @@ VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20233,6 +20543,8 @@ VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20274,6 +20586,8 @@ VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20315,6 +20629,8 @@ VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20356,6 +20672,8 @@ VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20397,6 +20715,8 @@ VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20520,6 +20840,8 @@ VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20562,6 +20884,8 @@ VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20604,6 +20928,8 @@ VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20646,6 +20972,8 @@ VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20688,6 +21016,8 @@ VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20730,6 +21060,8 @@ VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20772,6 +21104,8 @@ VCmpxTF64Vop3::VCmpxTF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20836,6 +21170,8 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20902,6 +21238,8 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -20968,6 +21306,8 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21034,6 +21374,8 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21100,6 +21442,8 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21166,6 +21510,8 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21232,6 +21578,8 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21298,6 +21646,8 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21364,6 +21714,8 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21430,6 +21782,8 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21496,6 +21850,8 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21562,6 +21918,8 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21620,6 +21978,8 @@ VCmpxFI32Vop3::VCmpxFI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21678,6 +22038,8 @@ VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21736,6 +22098,8 @@ VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21794,6 +22158,8 @@ VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21852,6 +22218,8 @@ VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21910,6 +22278,8 @@ VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -21968,6 +22338,8 @@ VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22026,6 +22398,8 @@ VCmpxTI32Vop3::VCmpxTI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22084,6 +22458,8 @@ VCmpxFU32Vop3::VCmpxFU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22142,6 +22518,8 @@ VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22200,6 +22578,8 @@ VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22258,6 +22638,8 @@ VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22316,6 +22698,8 @@ VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22374,6 +22758,8 @@ VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22432,6 +22818,8 @@ VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22490,6 +22878,8 @@ VCmpxTU32Vop3::VCmpxTU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22533,6 +22923,8 @@ VCmpxFI64Vop3::VCmpxFI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22574,6 +22966,8 @@ VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22615,6 +23009,8 @@ VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22656,6 +23052,8 @@ VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22697,6 +23095,8 @@ VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22738,6 +23138,8 @@ VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22779,6 +23181,8 @@ VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22820,6 +23224,8 @@ VCmpxTI64Vop3::VCmpxTI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22861,6 +23267,8 @@ VCmpxFU64Vop3::VCmpxFU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22902,6 +23310,8 @@ VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22943,6 +23353,8 @@ VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -22984,6 +23396,8 @@ VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -23025,6 +23439,8 @@ VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -23066,6 +23482,8 @@ VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -23107,6 +23525,8 @@ VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -23148,6 +23568,8 @@ VCmpxTU64Vop3::VCmpxTU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {

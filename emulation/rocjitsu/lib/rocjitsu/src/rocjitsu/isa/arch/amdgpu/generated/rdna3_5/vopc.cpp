@@ -49,6 +49,9 @@ VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -874,6 +877,9 @@ VCmpTF16Vopc::VCmpTF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -926,6 +932,9 @@ VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -1706,6 +1715,9 @@ VCmpTF32Vopc::VCmpTF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -1742,6 +1754,9 @@ VCmpFF64Vopc::VCmpFF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2252,6 +2267,9 @@ VCmpTF64Vopc::VCmpTF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2305,6 +2323,9 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2360,6 +2381,9 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2415,6 +2439,9 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2470,6 +2497,9 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2525,6 +2555,9 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2580,6 +2613,9 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2635,6 +2671,9 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2690,6 +2729,9 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2745,6 +2787,9 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2800,6 +2845,9 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2855,6 +2903,9 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2910,6 +2961,9 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -2962,6 +3016,9 @@ VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3014,6 +3071,9 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3066,6 +3126,9 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3118,6 +3181,9 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3170,6 +3236,9 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3222,6 +3291,9 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3274,6 +3346,9 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3326,6 +3401,9 @@ VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3378,6 +3456,9 @@ VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3430,6 +3511,9 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3482,6 +3566,9 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3534,6 +3621,9 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3586,6 +3676,9 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3638,6 +3731,9 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3690,6 +3786,9 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3742,6 +3841,9 @@ VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3778,6 +3880,9 @@ VCmpFI64Vopc::VCmpFI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3812,6 +3917,9 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3846,6 +3954,9 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3880,6 +3991,9 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3914,6 +4028,9 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3948,6 +4065,9 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -3982,6 +4102,9 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -4016,6 +4139,9 @@ VCmpTI64Vopc::VCmpTI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -4050,6 +4176,9 @@ VCmpFU64Vopc::VCmpFU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -4084,6 +4213,9 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -4118,6 +4250,9 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -4152,6 +4287,9 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -4186,6 +4324,9 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -4220,6 +4361,9 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -4254,6 +4398,9 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -4288,6 +4435,9 @@ VCmpTU64Vopc::VCmpTU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
+  flags_ |= WRITES_VCC;
 }
 
 namespace detail {
@@ -4485,6 +4635,8 @@ VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4543,6 +4695,8 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4601,6 +4755,8 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4659,6 +4815,8 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4717,6 +4875,8 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4775,6 +4935,8 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -4833,6 +4995,8 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5007,6 +5171,8 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5066,6 +5232,8 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5125,6 +5293,8 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5184,6 +5354,8 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5243,6 +5415,8 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5302,6 +5476,8 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5361,6 +5537,8 @@ VCmpxTF16Vopc::VCmpxTF16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5416,6 +5594,8 @@ VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5471,6 +5651,8 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5526,6 +5708,8 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5581,6 +5765,8 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5636,6 +5822,8 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5691,6 +5879,8 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5746,6 +5936,8 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5911,6 +6103,8 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -5967,6 +6161,8 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6023,6 +6219,8 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6079,6 +6277,8 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6135,6 +6335,8 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6191,6 +6393,8 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6247,6 +6451,8 @@ VCmpxTF32Vopc::VCmpxTF32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6286,6 +6492,8 @@ VCmpxFF64Vopc::VCmpxFF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6323,6 +6531,8 @@ VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6360,6 +6570,8 @@ VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6397,6 +6609,8 @@ VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6434,6 +6648,8 @@ VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6471,6 +6687,8 @@ VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6508,6 +6726,8 @@ VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6619,6 +6839,8 @@ VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6657,6 +6879,8 @@ VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6695,6 +6919,8 @@ VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6733,6 +6959,8 @@ VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6771,6 +6999,8 @@ VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6809,6 +7039,8 @@ VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6847,6 +7079,8 @@ VCmpxTF64Vopc::VCmpxTF64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6903,6 +7137,8 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -6961,6 +7197,8 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7019,6 +7257,8 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7077,6 +7317,8 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7135,6 +7377,8 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7193,6 +7437,8 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7251,6 +7497,8 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7309,6 +7557,8 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7367,6 +7617,8 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7425,6 +7677,8 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7483,6 +7737,8 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7541,6 +7797,8 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7596,6 +7854,8 @@ VCmpxFI32Vopc::VCmpxFI32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7651,6 +7911,8 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7706,6 +7968,8 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7761,6 +8025,8 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7816,6 +8082,8 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7871,6 +8139,8 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7926,6 +8196,8 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -7981,6 +8253,8 @@ VCmpxTI32Vopc::VCmpxTI32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8036,6 +8310,8 @@ VCmpxFU32Vopc::VCmpxFU32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8091,6 +8367,8 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8146,6 +8424,8 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8201,6 +8481,8 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8256,6 +8538,8 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8311,6 +8595,8 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8366,6 +8652,8 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8421,6 +8709,8 @@ VCmpxTU32Vopc::VCmpxTU32Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8460,6 +8750,8 @@ VCmpxFI64Vopc::VCmpxFI64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8497,6 +8789,8 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8534,6 +8828,8 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8571,6 +8867,8 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8608,6 +8906,8 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8645,6 +8945,8 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8682,6 +8984,8 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8719,6 +9023,8 @@ VCmpxTI64Vopc::VCmpxTI64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8756,6 +9062,8 @@ VCmpxFU64Vopc::VCmpxFU64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8793,6 +9101,8 @@ VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8830,6 +9140,8 @@ VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8867,6 +9179,8 @@ VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8904,6 +9218,8 @@ VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8941,6 +9257,8 @@ VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -8978,6 +9296,8 @@ VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -9015,6 +9335,8 @@ VCmpxTU64Vopc::VCmpxTU64Vopc(const MachineInst *inst)
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
