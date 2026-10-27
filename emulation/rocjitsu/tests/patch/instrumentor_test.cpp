@@ -586,8 +586,8 @@ std::vector<uint8_t> make_gfx950_elf_with_two_nops() {
 // (nops at .text offsets 0 and 4). Probe calls require a discovered descriptor to
 // bound SGPR selection, so probe-call tests use this variant. private_bytes is 0
 // because these bodies clobber nothing live, so no site spills. The kernel runs
-// off .text, which patch() refuses for a probe call, so those tests go through
-// patch_with_debug_summaries().
+// off .text, which the patch gates refuse for a probe call, so those tests skip
+// them.
 std::vector<uint8_t> make_gfx950_kernel_elf_with_two_nops() {
   return make_gfx950_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
 }
@@ -1238,9 +1238,9 @@ std::vector<uint8_t> with_kernarg_preload(std::vector<uint8_t> image) {
 
 // On CDNA2 and CDNA4, firmware that supports kernarg preload can enter the
 // kernel past its descriptor entry, which is not treated as a kernel entry, so
-// patch() refuses a preloading kernel. patch_with_debug_summaries() still
-// patches it. CDNA2 is refused although uses_kernarg_preload_firmware_skip()
-// leaves it out.
+// both patch entry points refuse a preloading kernel. Skipping the patch gates
+// patches it.
+// CDNA2 is refused although uses_kernarg_preload_firmware_skip() leaves it out.
 TEST(InstrumentorPatch, RefusesAKernelThatPreloadsKernelArguments) {
   for (const auto &[arch, e_flags] :
        {std::pair{ROCJITSU_CODE_ARCH_CDNA2, EF_AMDGPU_MACH_AMDGCN_GFX90A},
@@ -1251,17 +1251,22 @@ TEST(InstrumentorPatch, RefusesAKernelThatPreloadsKernelArguments) {
                                /*private_bytes=*/0, /*granulated_sgpr_count=*/3, e_flags));
     AmdGpuCodeObject obj(image.data(), image.size());
 
-    Instrumentor refusing(obj, arch);
-    refusing.add_point_by_offset(4);
-    const InstrumentedCodeObject refused = refusing.patch();
-    EXPECT_TRUE(refused.elf_bytes.empty());
-    ASSERT_FALSE(refused.errors.empty());
-    EXPECT_NE(refused.errors.front().find("preloads 1 kernarg dwords"), std::string::npos)
-        << refused.errors.front();
-    EXPECT_TRUE(refused.kernel_unsupported);
+    for (const bool with_summaries : {false, true}) {
+      SCOPED_TRACE(with_summaries ? "patch_with_debug_summaries()" : "patch()");
+      Instrumentor refusing(obj, arch);
+      refusing.add_point_by_offset(4);
+      const InstrumentedCodeObject refused =
+          with_summaries ? refusing.patch_with_debug_summaries() : refusing.patch();
+      EXPECT_TRUE(refused.elf_bytes.empty());
+      ASSERT_FALSE(refused.errors.empty());
+      EXPECT_NE(refused.errors.front().find("preloads 1 kernarg dwords"), std::string::npos)
+          << refused.errors.front();
+      EXPECT_TRUE(refused.kernel_unsupported);
+    }
 
     Instrumentor debugging(obj, arch);
     debugging.add_point_by_offset(4);
+    InstrumentorTestAccess::skip_patch_gates(debugging);
     const InstrumentedCodeObjectDebug patched = debugging.patch_with_debug_summaries();
     EXPECT_TRUE(patched.errors.empty()) << patched.errors.front();
     EXPECT_FALSE(patched.elf_bytes.empty());
@@ -2276,6 +2281,7 @@ TEST(InstrumentorProbePatch, EmitsValidElfWithProbeMetadata) {
   pt.probe_symbol = "rj_test_probe";
   instr.add_point(pt);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2309,6 +2315,7 @@ TEST(InstrumentorProbePatch, PatchedAnchorIsBranchToTrampoline) {
   pt.probe_symbol = "rj_test_probe";
   instr.add_point(pt);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2335,6 +2342,7 @@ TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
   pt.probe_symbol = "rj_test_probe";
   instr.add_point(pt);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2395,6 +2403,7 @@ TEST(InstrumentorProbePatch, PointsDisagreeingOnArgumentCountAreRejected) {
     instr.add_point(pt);
   }
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("already declared with 0 argument dwords"),
@@ -2422,6 +2431,7 @@ TEST(InstrumentorProbePatch, PointsDisagreeingOnArgumentSourceAreRejected) {
     instr.add_point(pt);
   }
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("different argument sources"), std::string::npos)
@@ -2447,6 +2457,7 @@ TEST(InstrumentorProbePatch, PointsDisagreeingOnMaskPolicyAreRejected) {
     instr.add_point(pt);
   }
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("already declared with the anchor mask"), std::string::npos)
@@ -2470,6 +2481,7 @@ TEST(InstrumentorProbePatch, PointsAgreeingOnPolicyAndSourcesShareOneBody) {
     instr.add_point(pt);
   }
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2508,6 +2520,7 @@ TEST(InstrumentorProbePatch, PointsDifferingOnlyInImmediateValuesShareOneBody) {
     instr.add_point(pt);
   }
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2544,6 +2557,7 @@ TEST(InstrumentorProbePatch, AnchorExecHighDwordOnAWave32KernelFailsClosed) {
   pt.probe_args = {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}};
   instr.add_point(pt);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("Wave32"), std::string::npos) << result.errors.front();
@@ -2566,6 +2580,7 @@ TEST(InstrumentorProbePatch, AnchorExecHighDwordOnAWave64KernelIsAccepted) {
   pt.probe_args = {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}};
   instr.add_point(pt);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2594,7 +2609,8 @@ std::vector<uint32_t> gfx12_store_probe_body(bool define_base) {
 }
 
 // Patch @p body into a Wave32 gfx1200 kernel, passing @p arg_dwords immediate
-// arguments in v0 upward.
+// arguments in v0 upward. The patch gates refuse a probe call in a Wave32
+// kernel, so this skips them; these tests check the probe body.
 InstrumentedCodeObjectDebug patch_gfx12_probe(const std::vector<uint32_t> &body,
                                               size_t arg_dwords) {
   auto target = make_gfx1200_wave32_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
@@ -2609,6 +2625,7 @@ InstrumentedCodeObjectDebug patch_gfx12_probe(const std::vector<uint32_t> &body,
   pt.probe_symbol = "rj_test_probe";
   pt.probe_args.assign(arg_dwords, probe_arg_imm(0));
   instr.add_point(pt);
+  InstrumentorTestAccess::skip_patch_gates(instr);
   return instr.patch_with_debug_summaries();
 }
 
@@ -2674,6 +2691,7 @@ TEST(InstrumentorProbePatch, ArgumentsPastTheKernelVgprAllocationFailClosed) {
   pt.probe_args.assign(5, probe_arg_imm(0));
   instr.add_point(pt);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("v0..v4"), std::string::npos) << result.errors.front();
@@ -2697,6 +2715,7 @@ TEST(InstrumentorProbePatch, ArgumentsFillingTheOrdinaryVgprWindowAreAccepted) {
   pt.probe_args = {probe_arg_imm(1), probe_arg_imm(2), probe_arg_imm(3), probe_arg_imm(4)};
   instr.add_point(pt);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2720,6 +2739,7 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
   pt.probe_args = {probe_arg_imm(1)};
   instr.add_point(pt);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("bound VGPR selection"), std::string::npos)
@@ -3227,8 +3247,9 @@ TEST(InstrumentorEntryPrologue, MultipleKernelsFailClosed) {
       << result.errors.front();
 }
 
-// Nothing asks for the storage, so no prologue is planned and no gate applies:
-// the descriptor still enters at the original entry.
+// Nothing asks for the storage, so no prologue is planned: the descriptor still
+// enters at the original entry. The fixture runs off .text, so the test skips
+// the patch gates.
 TEST(InstrumentorEntryPrologue, OrdinaryProbeCallLeavesTheEntryAlone) {
   auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
@@ -3243,6 +3264,7 @@ TEST(InstrumentorEntryPrologue, OrdinaryProbeCallLeavesTheEntryAlone) {
   pt.probe_args = {probe_arg_imm(1)};
   instr.add_point(pt);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -3596,6 +3618,7 @@ TEST(InstrumentorKernargRecord, OrdinaryProbeCallDeclaresNothing) {
   pt.probe_args = {probe_arg_imm(1)};
   instr.add_point(pt);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -3638,6 +3661,7 @@ TEST(InstrumentorProbePatch, RejectsMoreArgumentsThanFitInRegisters) {
   pt.probe_args.assign(kMaxProbeArgVgprs + 1, probe_arg_imm(0));
   instr.add_point(pt);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("the limit is"), std::string::npos) << result.errors.front();
@@ -3661,6 +3685,7 @@ TEST(InstrumentorProbePatch, TwoSitesSharingOneProbeCopyBodyOnce) {
     instr.add_point(pt);
   }
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -3714,6 +3739,7 @@ TEST(InstrumentorProbePatch, TwoSitesDistinctProbesEachTargetsItsBody) {
   pt_b.probe_symbol = "rj_probe_b";
   instr.add_point(pt_b);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -3879,8 +3905,9 @@ TEST(InstrumentorProbePatch, DescriptorlessProbeCallFailsClosed) {
 // Liveness cannot see every register some kernels still need: a wave32 kernel,
 // one that makes a call or runs off .text, one that reaches a register relative
 // to M0 or through GPR index mode, or one with an RDNA4 image instruction.
-// patch() refuses each when the point calls a probe, and patches an inline nop,
-// which takes no registers. patch_with_debug_summaries() patches the probe call.
+// Both patch entry points refuse each when the point calls a probe, and patch an
+// inline nop, which takes no registers. Skipping the patch gates patches the
+// probe call.
 TEST(InstrumentorProbePatch, RefusesKernelsLivenessCannotFollow) {
   struct Case {
     const char *reason;
@@ -3939,14 +3966,18 @@ TEST(InstrumentorProbePatch, RefusesKernelsLivenessCannotFollow) {
     pt.probe_obj = &probe_obj;
     pt.probe_symbol = "rj_test_probe";
 
-    Instrumentor refusing(obj, test_case.arch);
-    refusing.add_point(pt);
-    const InstrumentedCodeObject refused = refusing.patch();
-    EXPECT_TRUE(refused.elf_bytes.empty());
-    ASSERT_FALSE(refused.errors.empty());
-    EXPECT_NE(refused.errors.front().find(test_case.reason), std::string::npos)
-        << refused.errors.front();
-    EXPECT_TRUE(refused.kernel_unsupported);
+    for (const bool with_summaries : {false, true}) {
+      SCOPED_TRACE(with_summaries ? "patch_with_debug_summaries()" : "patch()");
+      Instrumentor refusing(obj, test_case.arch);
+      refusing.add_point(pt);
+      const InstrumentedCodeObject refused =
+          with_summaries ? refusing.patch_with_debug_summaries() : refusing.patch();
+      EXPECT_TRUE(refused.elf_bytes.empty());
+      ASSERT_FALSE(refused.errors.empty());
+      EXPECT_NE(refused.errors.front().find(test_case.reason), std::string::npos)
+          << refused.errors.front();
+      EXPECT_TRUE(refused.kernel_unsupported);
+    }
 
     // The inline nop takes no registers, so liveness does not decide it.
     Instrumentor patching_nop(obj, test_case.arch);
@@ -3957,6 +3988,7 @@ TEST(InstrumentorProbePatch, RefusesKernelsLivenessCannotFollow) {
 
     Instrumentor debugging(obj, test_case.arch);
     debugging.add_point(pt);
+    InstrumentorTestAccess::skip_patch_gates(debugging);
     const InstrumentedCodeObjectDebug patched = debugging.patch_with_debug_summaries();
     EXPECT_TRUE(patched.errors.empty()) << patched.errors.front();
     EXPECT_FALSE(patched.elf_bytes.empty());
@@ -4053,6 +4085,9 @@ protected:
     pt.probe_symbol = "rj_test_probe";
     instr.add_point(pt);
 
+    // The M0 restore test reads M0 through s_movrels, which the patch gates
+    // refuse; these tests check the call envelope, not the gates.
+    InstrumentorTestAccess::skip_patch_gates(instr);
     auto result = instr.patch_with_debug_summaries();
     EXPECT_TRUE(result.errors.empty())
         << (result.errors.empty() ? std::string{} : result.errors.front());

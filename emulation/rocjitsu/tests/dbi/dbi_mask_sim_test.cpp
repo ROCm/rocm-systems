@@ -27,6 +27,7 @@
 /// the anchor-mask restore that force_full_exec is defined by skipping.
 
 #include "../dbi_test_util.h"
+#include "../instrumentor_test_access.h"
 #include "dbi_sim.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -139,6 +140,10 @@ protected:
     pt.force_full_exec = full_exec;
     instr.add_point(pt);
 
+    // The RDNA4 target descriptor advertises Wave32, which the patch gates
+    // refuse for a probe call; this suite checks the envelope's EXEC handling,
+    // not the gates.
+    InstrumentorTestAccess::skip_patch_gates(instr);
     auto result = instr.patch_with_debug_summaries();
     EXPECT_TRUE(result.errors.empty())
         << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -330,6 +335,8 @@ protected:
     pt.probe_args = {{ProbeArgSource::AnchorExecHi, 0}};
     instr.add_point(pt);
 
+    // The RDNA4 target descriptor advertises Wave32, which the patch gates refuse.
+    InstrumentorTestAccess::skip_patch_gates(instr);
     auto result = instr.patch_with_debug_summaries();
     ASSERT_FALSE(result.errors.empty()) << "a Wave32 kernel has no high EXEC dword to pass";
     EXPECT_NE(result.errors.front().find("Wave32"), std::string::npos) << result.errors.front();

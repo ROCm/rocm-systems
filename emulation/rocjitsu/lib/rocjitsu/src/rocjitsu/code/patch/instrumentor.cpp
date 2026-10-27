@@ -1251,33 +1251,6 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
 }
 
 InstrumentedCodeObject Instrumentor::patch() {
-  // patch() refuses a code object kernarg_preload_refusal_reason() flags, and
-  // one liveness_refusal_reason() flags when a point calls a probe: only a
-  // probe call reads liveness, and the inline nop takes no registers.
-  // patch_with_debug_summaries() does not, for tests that patch such kernels
-  // on purpose. A failed decode, or a .text it cannot anchor in, is left for it
-  // to report.
-  if (!patched_) {
-    const std::optional<std::span<const uint8_t>> text = anchor_text(nullptr);
-    const bool calls_probe =
-        std::any_of(points_.begin(), points_.end(),
-                    [](const InstrumentationPoint &pt) { return !pt.probe_symbol.empty(); });
-    std::string refusal;
-    if (text) {
-      if (calls_probe)
-        refusal = liveness_refusal_reason(arch_, obj_, blocks_, *text);
-      if (refusal.empty())
-        refusal = kernarg_preload_refusal_reason(arch_, obj_);
-    }
-    if (!refusal.empty()) {
-      patched_ = true;
-      InstrumentedCodeObject result;
-      result.errors.push_back(std::move(refusal));
-      result.kernel_unsupported = true;
-      return result;
-    }
-  }
-
   // Slice off the debug summaries; move the base subobject into the return.
   auto debug = patch_with_debug_summaries();
   return std::move(static_cast<InstrumentedCodeObject &>(debug));
@@ -1321,6 +1294,27 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                                  "kernarg wrapper that no runtime builds yet; requested by " +
                                  readers);
       return result;
+    }
+
+    // Kernels the Instrumentor does not support: one kernarg_preload_refusal_reason()
+    // flags, and one liveness_refusal_reason() flags when a point calls a probe
+    // (only a probe call reads liveness; the inline nop takes no registers). A
+    // failed decode, or a .text no point can anchor in, is left to
+    // resolve_points() to report.
+    if (const std::optional<std::span<const uint8_t>> text = anchor_text(nullptr)) {
+      const bool calls_probe =
+          std::any_of(points_.begin(), points_.end(),
+                      [](const InstrumentationPoint &pt) { return !pt.probe_symbol.empty(); });
+      std::string refusal;
+      if (calls_probe)
+        refusal = liveness_refusal_reason(arch_, obj_, blocks_, *text);
+      if (refusal.empty())
+        refusal = kernarg_preload_refusal_reason(arch_, obj_);
+      if (!refusal.empty()) {
+        result.errors.push_back(std::move(refusal));
+        result.kernel_unsupported = true;
+        return result;
+      }
     }
   }
 

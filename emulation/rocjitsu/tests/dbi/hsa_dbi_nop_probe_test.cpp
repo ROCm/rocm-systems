@@ -31,6 +31,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa_ext_amd.h>
 RJ_DIAGNOSTIC_POP
 
+#include "../instrumentor_test_access.h"
 #include "../test_paths.h"
 #include "dbi_test_fixtures.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -181,6 +182,10 @@ protected:
       pt.probe_obj = probe_co;
       pt.probe_symbol = "rj_nop_probe";
       instr.add_point(pt);
+      // The gfx1201 fixture is built for Wave32, which the patch gates refuse for
+      // a probe call. The CDNA fixtures go through the gates.
+      if (kernel_wavefront_size(params_.arch, kernels.front().descriptor) == 32)
+        InstrumentorTestAccess::skip_patch_gates(instr);
       auto result = instr.patch_with_debug_summaries();
       if (result.errors.empty()) {
         anchor_offset_ = off;

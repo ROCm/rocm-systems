@@ -176,8 +176,9 @@ struct InstrumentedCodeObject {
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
   std::vector<std::string> warnings;
-  /// True when patch() refused the code object for a kernel property it does
-  /// not support, rather than failing to patch the queued points.
+  /// True when the patch gates refused the code object for a kernel property
+  /// the Instrumentor does not support, rather than failing to patch the queued
+  /// points.
   bool kernel_unsupported = false;
 };
 
@@ -503,15 +504,14 @@ public:
   /// Refuses any point whose probe reads a `LogBufferPtr*` argument: the entry
   /// prologue those need loads through a kernarg wrapper that no runtime builds
   /// yet.
+  ///
+  /// These refusals are the patch gates; only a test can skip them (see
+  /// `skip_patch_gates_`).
   [[nodiscard]] InstrumentedCodeObject patch();
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
   ///
-  /// Refuses the `LogBufferPtr*` points patch() does. It also patches every
-  /// kernel patch() refuses for its liveness or entries: wave32 kernels,
-  /// kernels with a call, an unresolved edge, a relative register access or an
-  /// RDNA4 image instruction, and kernels that preload kernel arguments, for
-  /// tests that exercise those shapes.
+  /// Refuses the same points and kernels patch() does.
   ///
   /// Currently intended for tests and debugging, although could eventually
   /// be used to communicate important information for the host (an ordering
@@ -526,9 +526,12 @@ private:
   bool patched_ = false;
 
   // The patch gates refuse points that need runtime support no runtime provides
-  // yet. Tests skip them through the InstrumentorTestAccess friend to exercise
-  // the gated path, whether or not they provide that support themselves; the
-  // planner's checks after the gates still run. Production callers cannot skip.
+  // yet (the kernarg wrapper), and kernels the Instrumentor does not support
+  // (the liveness and kernarg-preload limits). Tests skip them through the
+  // InstrumentorTestAccess friend to exercise the gated path. Skipping makes
+  // neither safe: a test that supplies the wrapper itself still gets no sound
+  // liveness for an unsupported kernel. The planner's checks after the gates
+  // still run. Production callers cannot skip.
   friend struct InstrumentorTestAccess;
   bool skip_patch_gates_ = false;
 
