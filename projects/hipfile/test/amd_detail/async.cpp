@@ -103,10 +103,10 @@ struct AsyncTest : public ::testing::Test {
                      stream);
     }
 
-    std::shared_ptr<AsyncOp> makeOp(std::function<void(AsyncOp *)> io_fn)
+    std::shared_ptr<AsyncOp> makeOp()
     {
         return std::make_shared<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
-                                         &buffer_offset, &bytes, std::move(io_fn), backend);
+                                         &buffer_offset, &bytes, backend);
     }
 
     NiceMock<MHip>                      mhip;
@@ -127,7 +127,7 @@ struct AsyncTest : public ::testing::Test {
 TEST_F(AsyncTest, RunIoRecordsBytes)
 {
     EXPECT_CALL(*backend, io(IoType::Read, _, _, size, file_offset, buffer_offset)).WillOnce(Return(512));
-    auto op = makeOp(async_run_io);
+    auto op = makeOp();
     async_run_io(op.get());
     EXPECT_EQ(bytes, 512);
 }
@@ -136,7 +136,7 @@ TEST_F(AsyncTest, RunIoInvalidParamsReportsInvalidValue)
 {
     ON_CALL(*buffer, getLength).WillByDefault(Return(16));
     EXPECT_CALL(*backend, io).Times(0);
-    auto op = makeOp(async_run_io);
+    auto op = makeOp();
     async_run_io(op.get());
     EXPECT_EQ(bytes, -hipFileInvalidValue);
 }
@@ -144,7 +144,7 @@ TEST_F(AsyncTest, RunIoInvalidParamsReportsInvalidValue)
 TEST_F(AsyncTest, RunIoBackendThrowReportsInternalError)
 {
     EXPECT_CALL(*backend, io).WillOnce(Throw(std::runtime_error("boom")));
-    auto op = makeOp(async_run_io);
+    auto op = makeOp();
     async_run_io(op.get());
     EXPECT_EQ(bytes, -hipFileInternalError);
 }
@@ -267,7 +267,7 @@ TEST_F(AsyncTest, DispatchBlockingOpWaitsForIo)
     // A real one-worker pool runs the op on another thread, so returning early would leave it unfinished.
     AsyncMonitor                   monitor{std::make_unique<ThreadPool>(1)};
     ContextOverride<IAsyncMonitor> co{&monitor};
-    auto                           op = makeOp(async_run_io);
+    auto                           op = makeOp();
     op->block                         = true;
     op->self                          = op;
     EXPECT_CALL(*backend, io).WillOnce(Return(512));
@@ -280,7 +280,7 @@ TEST_F(AsyncTest, DispatchBlockingOpWaitsForIo)
 TEST_F(AsyncTest, DispatchNonBlockingOpSubmits)
 {
     MAsyncMonitor monitor;
-    auto          op = makeOp(async_run_io);
+    auto          op = makeOp();
     op->self         = op;
     EXPECT_CALL(monitor, submitIo);
 
@@ -292,7 +292,7 @@ TEST_F(AsyncTest, DispatchSubmitFailureFinishesOpWithError)
 {
     // A blocking op, so a failed submission must still finish the op or the host function would hang.
     MAsyncMonitor monitor;
-    auto          op = makeOp(async_run_io);
+    auto          op = makeOp();
     op->block        = true;
     op->self         = op;
     EXPECT_CALL(monitor, submitIo).WillOnce(Throw(std::runtime_error("no workers")));
@@ -306,11 +306,11 @@ TEST_F(AsyncTest, DispatchSubmitFailureFinishesOpWithError)
 TEST_F(AsyncTest, MonitorSubmitIoRunsOpAndSignals)
 {
     AsyncMonitor monitor{std::make_unique<InlinePool>()};
-    bool         ran{false};
-    auto         op = makeOp([&ran](AsyncOp *) { ran = true; });
+    auto         op = makeOp();
+    EXPECT_CALL(*backend, io).WillOnce(Return(512));
 
     monitor.submitIo(op);
-    EXPECT_TRUE(ran);
+    EXPECT_EQ(bytes, 512);
     EXPECT_EQ(slot, 1u);
     EXPECT_EQ(op->state.load(), AsyncOpState::Done);
 }
@@ -318,12 +318,12 @@ TEST_F(AsyncTest, MonitorSubmitIoRunsOpAndSignals)
 TEST_F(AsyncTest, MonitorSkipsAbandonedOp)
 {
     AsyncMonitor monitor{std::make_unique<InlinePool>()};
-    bool         ran{false};
-    auto         op = makeOp([&ran](AsyncOp *) { ran = true; });
+    auto         op = makeOp();
     op->state.store(AsyncOpState::Abandoned);
+    EXPECT_CALL(*backend, io).Times(0);
 
     monitor.submitIo(op);
-    EXPECT_FALSE(ran);
+    EXPECT_EQ(bytes, -1);
     EXPECT_EQ(slot, 1u);
     EXPECT_EQ(op->state.load(), AsyncOpState::Abandoned);
 }

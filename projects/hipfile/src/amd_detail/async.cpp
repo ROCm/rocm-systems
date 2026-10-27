@@ -45,7 +45,7 @@ runOp(AsyncOp *op, bool run_io)
     }
 
     if (run_io) {
-        op->io_fn(op);
+        async_run_io(op);
     }
     else {
         *op->bytes_transferred = -hipFileInternalError;
@@ -67,8 +67,7 @@ waitUntilDone(AsyncOp *op)
 
 AsyncOp::AsyncOp(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<IBuffer> _buffer,
                  std::shared_ptr<IStream> _stream, size_t *_size, hoff_t *_file_offset,
-                 hoff_t *_buffer_offset, ssize_t *_bytes_transferred, std::function<void(AsyncOp *)> _io_fn,
-                 std::shared_ptr<Backend> _backend)
+                 hoff_t *_buffer_offset, ssize_t *_bytes_transferred, std::shared_ptr<Backend> _backend)
     : io_type{_io_type}, file{std::move(_file)}, buffer{std::move(_buffer)}, stream{std::move(_stream)},
       size{stream->fixedIOSize() ? std::variant<size_t, size_t *>{std::min(*_size, hipFile::getMaxRwCount())}
                                  : std::variant<size_t, size_t *>{_size}},
@@ -76,7 +75,7 @@ AsyncOp::AsyncOp(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<
                                             : std::variant<const hoff_t, hoff_t *>{_file_offset}},
       buffer_offset{stream->fixedBufferOffset() ? std::variant<const hoff_t, hoff_t *>{*_buffer_offset}
                                                 : std::variant<const hoff_t, hoff_t *>{_buffer_offset}},
-      bytes_transferred{_bytes_transferred}, io_fn{std::move(_io_fn)}, backend{std::move(_backend)}
+      bytes_transferred{_bytes_transferred}, backend{std::move(_backend)}
 {
 }
 
@@ -135,9 +134,9 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType io_type, std::shared_ptr<I
 
     if (isDefaultStream(stream->getHipStream())) {
         AsyncOp op(io_type, std::move(file), std::move(buffer), stream, size, file_offset, buffer_offset,
-                   bytes_transferred, async_run_io, std::move(backend));
+                   bytes_transferred, std::move(backend));
         Context<Hip>::get()->hipStreamSynchronize(stream->getHipStream());
-        op.io_fn(&op);
+        async_run_io(&op);
         return;
     }
 
@@ -153,7 +152,7 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType io_type, std::shared_ptr<I
         }
 
         op = std::make_shared<AsyncOp>(io_type, std::move(file), std::move(buffer), stream, size, file_offset,
-                                       buffer_offset, bytes_transferred, async_run_io, std::move(backend));
+                                       buffer_offset, bytes_transferred, std::move(backend));
         op->block       = !gated;
         uint64_t target = gated ? stream->nextSignalTarget() : 0;
 

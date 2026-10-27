@@ -11,7 +11,6 @@
 
 #include <atomic>
 #include <cstddef>
-#include <functional>
 #include <memory>
 #include <sys/types.h>
 #include <variant>
@@ -39,7 +38,6 @@ public:
     std::variant<const hoff_t, hoff_t *> file_offset;
     std::variant<const hoff_t, hoff_t *> buffer_offset;
     ssize_t *const                       bytes_transferred;
-    std::function<void(AsyncOp *)>       io_fn;
     std::shared_ptr<Backend>             backend;
 
     // Set before the dispatch host function is queued and never changed: true when the stream can't be gated
@@ -60,8 +58,7 @@ public:
 
     AsyncOp(IoType io_type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
             std::shared_ptr<IStream> stream, size_t *size, hoff_t *file_offset, hoff_t *buffer_offset,
-            ssize_t *bytes_transferred, std::function<void(AsyncOp *)> io_fn,
-            std::shared_ptr<Backend> backend);
+            ssize_t *bytes_transferred, std::shared_ptr<Backend> backend);
 };
 
 class IAsyncMonitor {
