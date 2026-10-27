@@ -2502,15 +2502,20 @@ TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
   std::mutex interrupt_mutex;
   std::atomic<uint64_t> delivered_status{0};
   std::atomic<uint32_t> deliveries{0};
-  struct QueueGuard {
-    rocjitsu::SimulatedKfd *driver;
-    uint32_t queue_id;
+  class QueueGuard {
+  public:
+    QueueGuard(rocjitsu::SimulatedKfd *driver, uint32_t queue_id)
+        : driver_(driver), queue_id_(queue_id) {}
     ~QueueGuard() {
-      driver->set_interrupt_callback_for_testing(nullptr);
+      driver_->set_interrupt_callback_for_testing(nullptr);
       kfd_ioctl_destroy_queue_args destroy{};
-      destroy.queue_id = queue_id;
-      driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy);
+      destroy.queue_id = queue_id_;
+      driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy);
     }
+
+  private:
+    rocjitsu::SimulatedKfd *driver_;
+    uint32_t queue_id_;
   } guard{driver_, create.queue_id};
 
   driver_->set_interrupt_callback_for_testing([&](uint32_t process_id, uint32_t event_id) {
