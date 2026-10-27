@@ -94,6 +94,7 @@ inline bool isQuickLevel() {
 // Not thread-safe
 #define HIP_CHECK(error)                                                                           \
   {                                                                                                \
+    g_hipCalledInTestCase = true;                                                                  \
     hipError_t localError = error;                                                                 \
     if ((localError != hipSuccess) && (localError != hipErrorPeerAccessAlreadyEnabled)) {          \
       INFO("Error: " << hipGetErrorString(localError) << "\n    Code: " << localError              \
@@ -105,6 +106,7 @@ inline bool isQuickLevel() {
 
 #define HIP_CHECK_IGNORED_RETURN(error, ignoredError)                                              \
   {                                                                                                \
+    g_hipCalledInTestCase = true;                                                                  \
     hipError_t localError = error;                                                                 \
     if ((localError == ignoredError)) {                                                            \
       INFO("Skipped: " << hipGetErrorString(localError) << "\n    Code: " << localError            \
@@ -197,6 +199,7 @@ inline std::string& threadInfoMessageBuffer() {
 // Check that an expression, errorExpr, evaluates to the expected error_t, expectedError.
 #define HIP_CHECK_ERROR(errorExpr, expectedError)                                                  \
   {                                                                                                \
+    g_hipCalledInTestCase = true;                                                                  \
     hipError_t localError = errorExpr;                                                             \
     INFO("Matching Errors: "                                                                       \
          << "\n    Expected Error: " << hipGetErrorString(expectedError)                           \
@@ -211,6 +214,7 @@ inline std::string& threadInfoMessageBuffer() {
 // expectedError1.
 #define HIP_CHECK_ERRORS(errorExpr, expectedError, expectedError1)                                 \
   {                                                                                                \
+    g_hipCalledInTestCase = true;                                                                  \
     hipError_t localError = errorExpr;                                                             \
     INFO("Matching Errors: "                                                                       \
          << "\n    Expected Error: " << hipGetErrorString(expectedError)                           \

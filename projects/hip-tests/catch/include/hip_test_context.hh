@@ -145,6 +145,12 @@ class TestContext {
 
 static bool _log_enable = (!TestContext::getEnvVar("HT_LOG_ENABLE").empty() ? true : false);
 
+// Set by the HIP check macros when the current thread runs a HIP call in a test
+// case; the listener uses it to skip the last-error reset (and thus avoid
+// initializing HIP) for tests whose parent never touches HIP, e.g. fork-based
+// multiprocess tests that require an uninitialized parent.
+inline thread_local bool g_hipCalledInTestCase = false;
+
 // printing logs
 #define LogPrintf(format, ...)                                                                     \
   {                                                                                                \
