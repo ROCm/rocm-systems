@@ -22,7 +22,8 @@
  * a line naming the sequence and the kernel, exit non-zero, and launch nothing.
  * Two edits are not refused, because nothing is read past the record: one more
  * argument appended, and an int recorded as eight bytes. Each must replay as
- * the unmodified archive does.
+ * the unmodified archive does. Reading the signature must also leave no GPU
+ * error behind.
  */
 
 #include "hrr_test_common.hh"
@@ -245,6 +246,18 @@ TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
     REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
     CHECK(pass >= 1);
     CHECK(fail == 0);
+  }
+
+  // The signature read ends on a call that answers hipErrorInvalidValue, one
+  // index past the last parameter. That must not stay HIP's last error: the
+  // warm-up pass --kernel-filter adds would report it as a pending GPU error
+  // (and --sync-after-event would abort on it).
+  SECTION("the unmodified archive leaves no pending GPU error behind") {
+    auto [rc, out] = hrr_playback_merged(cap.path, std::string("--kernel-filter ") + kProbeName);
+    INFO("Replay:\n" << out);
+    CHECK(rc == 0);
+    CHECK(out.find("pending GPU error") == std::string::npos);
+    CHECK(kernels_launched(out) == 1);
   }
 
   SECTION("a launch record with too few arguments is refused") {

@@ -1075,7 +1075,11 @@ static bool kernel_args_fit_signature(
     } else {
         // hipKernelGetParamInfo has no count: on a resolved function it
         // answers hipSuccess for each parameter and hipErrorInvalidValue for the
-        // first index past the end.
+        // first index past the end. That last call is not a failure, so it must
+        // not stay HIP's last error: replay would report it against this
+        // launch (--sync-after-event aborts on it, the warm-up pass logs it).
+        // An error already pending from an earlier call is overwritten by that
+        // call anyway, so clearing loses nothing that was still there.
         for (size_t i = 0;; i++) {
             size_t off = 0, size = 0;
             if (hipKernelGetParamInfo(reinterpret_cast<hipKernel_t>(func), i,
@@ -1083,6 +1087,7 @@ static bool kernel_args_fit_signature(
                 break;
             declared.push_back(size);
         }
+        (void)hipGetLastError();
     }
     std::vector<size_t> recorded;
     recorded.reserve(arg_storage.size());
