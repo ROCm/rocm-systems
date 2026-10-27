@@ -275,7 +275,7 @@ static testResult_t AllGatherLaunchDeviceKernel(F kernel, void* sendbuff, size_t
   ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
   ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
   if (gridCtas < 1) gridCtas = 1;
-  TESTCHECK(uploadGinResourceSharingMode());
+  TESTCHECK(uploadGinResourceSharingMode(stream));
   kernel<<<gridCtas, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, sdmaThreshold, *devComm);
   return testSuccess;
 }
@@ -345,7 +345,7 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
   // Upload the resource-sharing flag to each local GPU before the timed launch.
   for (int i = 0; i < args->nGpus; i++) {
     CUDACHECK(hipSetDevice(args->gpus[i]));
-    TESTCHECK(uploadGinResourceSharingMode());
+    TESTCHECK(uploadGinResourceSharingMode(args->streams[i]));
   }
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,

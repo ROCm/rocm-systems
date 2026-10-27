@@ -1240,7 +1240,7 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
         if (largeTier == gin_sdma::BcastLargeTier::ScatterAG) {
           bcastReportTier(BcastLaunchTier::ScatterAllgather);
           const int sagGrid = gin_sdma::bcastSagCtas(msgBytes, sagRanks, bcastThr, bcastCtasEnv, hybridPool);
-          TESTCHECK(uploadGinResourceSharingMode());
+          TESTCHECK(uploadGinResourceSharingMode(stream));
           TESTCHECK(testLaunchDeviceKernelCtas(SPECIALIZE_KERNEL(GinScatterAllgatherBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, sagGrid));
           return testSuccess;
         }
@@ -1261,7 +1261,7 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
             case gin_sdma::BcastTier::Flat:      bcastReportTier(BcastLaunchTier::Flat); break;
           }
           const int hybridGrid = gin_sdma::bcastHybridCtas(msgBytes, bcastThr, llSlots, g_bcastLLMaxBytes, bcastCtasEnv, hybridPool);
-          TESTCHECK(uploadGinResourceSharingMode());
+          TESTCHECK(uploadGinResourceSharingMode(stream));
           TESTCHECK(testLaunchDeviceKernelThresholdLL(SPECIALIZE_KERNEL(GinHybridBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, bcastThr, g_bcastLLHandle, g_bcastLLMaxBytes, hybridGrid));
         }
         return testSuccess;

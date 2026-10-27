@@ -474,11 +474,11 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
 #endif
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
       case 3:
-        TESTCHECK(uploadGinResourceSharingMode());
+        TESTCHECK(uploadGinResourceSharingMode(stream));
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
       case 4:
-        TESTCHECK(uploadGinResourceSharingMode());
+        TESTCHECK(uploadGinResourceSharingMode(stream));
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(HybridAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
 #endif
@@ -546,7 +546,7 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
   // Upload the resource-sharing flag to each local GPU before the timed launch.
   for (int i = 0; i < args->nGpus; i++) {
     CUDACHECK(hipSetDevice(args->gpus[i]));
-    TESTCHECK(uploadGinResourceSharingMode());
+    TESTCHECK(uploadGinResourceSharingMode(args->streams[i]));
   }
 
   double devUs = 0.0;

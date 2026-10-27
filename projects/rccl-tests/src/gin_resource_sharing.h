@@ -34,22 +34,25 @@ static inline ncclGinResourceSharingMode ginResourceSharingModeFromCli(int cli) 
   }
 }
 
-// Ensure the current device's d_ginResourceSharingMode holds the selected mode.
-// The value is fixed for the whole run (a CLI flag), so this does the synchronous
-// hipMemcpyToSymbol at most ONCE per device and is a no-op on every later call --
-// it must stay out of the per-iteration launch path (a blocking symbol copy there
-// serializes the device and inflates small-message latency). Call after
-// cudaSetDevice() and before a GIN launch. Not thread-safe across the -t N threads
-// of one process, but they share the device and upload the same value, so a race
-// only re-writes an identical byte.
+// Enqueue the selected mode into the current device's d_ginResourceSharingMode.
+// Call after cudaSetDevice() and before a GIN launch. Notes:
+//  - Once per device: the value is a fixed CLI flag, so later calls are no-ops.
+//    Keep it off the per-iteration path (a blocking copy there inflates latency).
+//  - ASYNC on `stream`: a sync copy is illegal under -G >= 1 graph capture; the
+//    same-stream enqueue stays capturable and orders before the kernel.
+//  - Persistent host source (static, not stack): the copy may run at graph-launch,
+//    after this returns.
+//  - Thread races (-t N) only re-write an identical byte, so no locking needed.
 #define GIN_RESOURCE_SHARING_MAX_DEVICES 64
-static inline testResult_t uploadGinResourceSharingMode() {
+static inline testResult_t uploadGinResourceSharingMode(cudaStream_t stream) {
   static int8_t uploaded[GIN_RESOURCE_SHARING_MAX_DEVICES] = {0};  // -1 once uploaded, per device
+  static uint8_t hostMode[GIN_RESOURCE_SHARING_MAX_DEVICES] = {0};  // persistent async copy source
   int dev = 0;
   if (cudaGetDevice(&dev) != cudaSuccess || dev < 0 || dev >= GIN_RESOURCE_SHARING_MAX_DEVICES) dev = 0;
   if (uploaded[dev]) return testSuccess;
-  uint8_t v = (uint8_t)ginResourceSharingModeFromCli(ginResourceSharingMode);
-  CUDACHECK(hipMemcpyToSymbol(d_ginResourceSharingMode, &v, sizeof(v), 0, hipMemcpyHostToDevice));
+  hostMode[dev] = (uint8_t)ginResourceSharingModeFromCli(ginResourceSharingMode);
+  CUDACHECK(hipMemcpyToSymbolAsync(d_ginResourceSharingMode, &hostMode[dev], sizeof(hostMode[dev]), 0,
+                                   hipMemcpyHostToDevice, stream));
   uploaded[dev] = -1;
   return testSuccess;
 }
