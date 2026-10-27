@@ -2169,10 +2169,10 @@ def run(app_args, args, **kwargs):
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3-avail")
 
         # rocprofv3-avail owns the library and the output file; pass it options
-        # and let it decide, so a direct invocation behaves the same way. Only an
-        # explicit -o/-d diverts the listing from stdout. It is resolved against
-        # the same -d root, but %pid% there names this helper rather than the
-        # application, so only an explicit -o gives the run a shared stem
+        # and let it decide, so a direct invocation behaves the same way. Only a
+        # requested output location, -o/-d or an input file, diverts the listing
+        # from stdout. A placeholder in the name is expanded by rocprofv3-avail,
+        # so the listing shares the run's stem only when the name has none
         avail_command = [sys.executable, path]
         if args.output_file is not None or args.output_directory is not None:
             avail_command += ["--output-directory", _output_path]
