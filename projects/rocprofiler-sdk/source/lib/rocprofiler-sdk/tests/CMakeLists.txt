@@ -74,7 +74,7 @@ rocprofiler_add_unit_test(
 
 set(rocprofiler_shared_lib_sources
     external_correlation.cpp intercept_table.cpp registration.cpp registration_attach.cpp
-    roctx.cpp status.cpp)
+    roctx.cpp status.cpp tracing_service_kinds.cpp)
 
 add_executable(rocprofiler-sdk-lib-tests-shared)
 target_sources(rocprofiler-sdk-lib-tests-shared PRIVATE ${rocprofiler_shared_lib_sources})
