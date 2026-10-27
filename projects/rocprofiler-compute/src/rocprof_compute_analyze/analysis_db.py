@@ -69,6 +69,7 @@ from utils.metrics.aggregation import (
 )
 from utils.metrics.common import EVAL_BUILTINS, ValuDualIssueDetector
 from utils.metrics.expression import transform_expression
+from utils.metrics.metric_evaluator import rows_for_expression
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -1009,6 +1010,7 @@ class db_analysis(OmniAnalyze_Base):
                 value,
             )
         try:
+            pmc_df = rows_for_expression(pmc_df, value)
             prev_noise_clamp_count = get_noise_clamp_warnings()["count"]
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always", RuntimeWarning)
