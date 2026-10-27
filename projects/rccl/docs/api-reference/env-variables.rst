@@ -389,7 +389,7 @@ collected in the following table.
         | Default: ``8388608`` (8 MiB). This is also a hard upper limit, so
           larger values are clamped to it and only lower values change
           behavior.
-        | ``-1``: Use the 8 MiB default.
+        | Leave unset or set to ``8388608`` to use the default.
 
     * - | ``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``
         | Sets the smallest AllGather, in bytes per rank (``sendcount`` x type
