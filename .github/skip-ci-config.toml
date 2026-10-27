@@ -27,6 +27,11 @@ common = [
     "*CODEOWNERS",
     "*LICENSE",
 
+    # This file defines CI gating, so a change here is not validated by any CI
+    # run it skips. Review it on that basis: a too-broad pattern added here can
+    # silently stop CI for unrelated paths.
+    ".github/skip-ci-config.toml",
+
     # RCCL's workflows run on their own schedules/triggers and are never
     # invoked by TheRock CI, so editing them cannot affect a TheRock build.
     # `therock-rccl-*` is rooted at therock-rccl-ci.yml (schedule +
