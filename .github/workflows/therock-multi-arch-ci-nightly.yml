@@ -124,7 +124,7 @@ jobs:
     # fails with coverage + HIP RDC).
     # TODO: Restore the linux_build_and_test condition once TheRock restores the
     # comm-libs coverage build and wait_for_baseline_stage.py waits on comm-libs.
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_coverage_linux.yml@users/jainprad/codecoverage-workflows-therock
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_coverage_linux.yml@users/madkasul/codecoverage-rocm-systems
     secrets: inherit
     with:
       # Baseline is this run's own linux_build_and_test stack; the coverage
@@ -146,7 +146,7 @@ jobs:
       # Cross-repo call: pin the reusable workflow's own repo/ref so its
       # checkout finds TheRock scripts (defaults to the caller otherwise).
       repository: ROCm/TheRock
-      ref: users/jainprad/codecoverage-workflows-therock
+      ref: users/madkasul/codecoverage-rocm-systems
     permissions:
       contents: read
       id-token: write
