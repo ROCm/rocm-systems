@@ -693,6 +693,8 @@ panel that shows it:
 - It spells out abbreviations: `Requests`, `Bandwidth`, `Address`, `Memory`,
   `Arithmetic Intensity`.
 - A per-channel metric ends with `per Channel`.
+- It is in title case; short words (`and`, `by`, `of`, `on`, `over`, `per`, `to`,
+  `under`, `vs`) stay lowercase.
 - Names are unique on an arch, ignoring case; the validator rejects two metrics with the
   same name. Two quantities that panels show under one label get names that tell them
   apart (`Wavefront Occupancy`, `Wavefront Occupancy (Percent)`).
