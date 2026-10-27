@@ -23,7 +23,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added PC sampling counts per source line.
   * `rocprof-compute analyze --output-format csv` writes `<file>_pc_sampling.csv` beside each captured source file. It lists every source line of the file with the samples of the instructions compiled from it, and where those instructions sit in the per-kernel ISA files.
   * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
-  * When the compiler gives some instructions of a source file no line number, that file's CSV starts with an `Unattributable instructions` row, which holds the number of samples on those instructions.
+  * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
 
 ### Changed
 

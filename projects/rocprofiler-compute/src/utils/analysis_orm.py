@@ -942,8 +942,8 @@ class Database:
 
         Each source line has its sample state and the uuids of the instructions
         whose inline stack includes that source line. This includes the "?"
-        source line of a file, which holds the instructions that the compiler
-        gave no line number in that file.
+        row of each file, which holds the instructions without a source line
+        number.
         """
         return (
             select(
@@ -994,7 +994,7 @@ class Database:
             # The stall-reason and instruction joins add rows, so group them
             # back into one row per source line.
             .group_by(SourceLine.source_line_uuid)
-            # The "?" source line of a file has no line number, so it comes first.
+            # The "?" row of a file has no source line number, so it sorts first.
             .order_by(SourceFile.file_path, SourceLine.line_number.nulls_first())
         )
 

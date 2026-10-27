@@ -190,7 +190,7 @@ def test_write_per_source_line_files_writes_header_and_rows(tmp_path):
 def test_write_per_source_line_files_keeps_only_total_count_of_unattributable_row(
     tmp_path,
 ):
-    """The "?" source line becomes a labeled row with its total count only."""
+    """The "?" row becomes a labeled row with its total count only."""
     source_line_rows = [
         make_source_line_row(
             line_number=None,

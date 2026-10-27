@@ -128,10 +128,11 @@ def _number_instruction_lines(
     file_key: FileKey,
     file_rows: List[Row],
 ) -> Iterator[List[Any]]:
-    """Prefix each instruction row of one ISA file with its line number, from 1.
+    """Prefix each instruction row of one ISA file with its instruction line number.
 
-    Records the location of each instruction in isa_line_locations. Each row
-    starts with its instruction uuid, which is not written.
+    The instruction line numbers count from 1. Records the location of each
+    instruction in isa_line_locations. Each row starts with its instruction
+    uuid, which is not written.
     """
     _, _, *kernel_key = file_key
     isa_file = resolve_isa_relative_path(*kernel_key)

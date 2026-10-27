@@ -289,7 +289,7 @@ that line:
    * - Column
      - Description
    * - ``Source line number``
-     - Line number in the source file.
+     - Source line number in the source file.
    * - ``Source line``
      - Text of the line.
    * - ``Total count``, ``Active count``, ``Stall count``, ``Stall <REASON>``
@@ -306,11 +306,13 @@ inline stack. For example, an instruction that reads ``blockDim.x`` counts towar
 both the HIP header lines that implement it and the application line that reads
 it.
 
-When the compiler gives some instructions of a file no line number, shown as
-``<file>:?`` in the per-kernel ISA files, the first row of that file is
-``Unattributable instructions``. Its ``Total count`` is the number of samples on
-those instructions, and its ``ISA references`` lists them. Its other columns are
-empty. See the :ref:`note <pc-sampling-note>` for why the compiler does this.
+Some instructions have no source line number, shown as ``<file>:?`` in the
+per-kernel ISA files. A file with such instructions starts with an
+``Unattributable instructions`` row. Its ``Total count`` is the number of samples
+lost because those instructions have no source line number, and its
+``ISA references`` lists the instructions. Its other columns are empty. See the
+:ref:`note <pc-sampling-note>` for why the compiler leaves out the source line
+number.
 
 .. _pc-sampling-note:
 

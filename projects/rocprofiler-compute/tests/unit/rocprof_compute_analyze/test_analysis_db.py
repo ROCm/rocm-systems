@@ -3371,8 +3371,8 @@ def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
 def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path):
     """The per-source-line file sits beside the source copy and has ISA references.
 
-    The instruction without a line number goes to the unattributable row, which
-    comes first.
+    The instruction without a source line number goes to the unattributable
+    row, which comes first.
     """
     workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
     tool_data_records = make_source_workload_tool_data_records(

@@ -31,7 +31,7 @@ from utils.analysis_orm import per_source_line_file_key_columns
 from utils.logger import console_debug
 
 SOURCE_LINE_FILE_SUFFIX = "_pc_sampling.csv"
-# Labels the row of the instructions that the compiler gave no line number
+# Labels the row for instructions without a source line number
 UNATTRIBUTABLE_INSTRUCTIONS_LABEL = "Unattributable instructions"
 # A spreadsheet shows each ISA file of the cell on a separate line of the cell.
 ISA_REFERENCE_SEPARATOR = "\n"
@@ -124,12 +124,7 @@ def _format_source_line_rows(
     file_rows: List[Row],
     isa_line_locations: Dict[int, IsaLineLocation],
 ) -> Iterator[List[Any]]:
-    """Replace the instruction uuids of each source line row with ISA references.
-
-    The "?" source line, which has no line number, becomes the unattributable
-    row. It keeps only its total count: the samples on the instructions that
-    the compiler gave no line number in this file.
-    """
+    """Replace the instruction uuids of each source line row with ISA references."""
     for (
         line_number,
         content,
@@ -140,6 +135,8 @@ def _format_source_line_rows(
         isa_references = _format_isa_references(
             instruction_uuids_json, isa_line_locations
         )
+        # The "?" row has no source line number. It keeps only its total count,
+        # which is the samples lost to instructions without a source line number.
         if line_number is None:
             yield [
                 None,
