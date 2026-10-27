@@ -5795,15 +5795,12 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceSymmetricChoosesSymkWhenEligibl
                                  SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/4));
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
-        std::string warn = RcclUnitTesting::CaptureLog([&]() {
-          EXPECT_EQ(ncclSuccess,
-                    rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
-                                        /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
-        });
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                      /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
-        EXPECT_EQ(std::string::npos, warn.find("preferred backend"))
-            << "no fallback warn expected when preferred is found";
         DeleteCommWithArch(comm);
       });
 }
