@@ -878,6 +878,10 @@ def test_roofline_points_read_each_metric_from_one_pass():
         ),
         "l2_cache_data": "COLLECT_RATIO(_collect.a, _collect.b)",
         "lds_cache_data": "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])",
+        "hbm_data": (
+            "to_avg((raw_pmc_df['TA_BUSY'] + raw_pmc_df['TD_BUSY'])"
+            " / raw_pmc_df['GRBM_GUI_ACTIVE'])"
+        ),
     }
 
     with patch(
@@ -895,7 +899,8 @@ def test_roofline_points_read_each_metric_from_one_pass():
 
     assert points["l1_cache_data"] == pytest.approx(50.0 / 200.0)
     assert "l2_cache_data" not in points
-    assert pd.isna(points["lds_cache_data"])
+    assert points["lds_cache_data"] == pytest.approx(50.0 / 30.0)
+    assert pd.isna(points["hbm_data"])
 
 
 def test_calc_dataframe_expressions_computes_pass_scoped_builtins():
