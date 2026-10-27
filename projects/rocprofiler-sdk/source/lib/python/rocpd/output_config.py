@@ -163,6 +163,7 @@ def add_args(parser):
 
     return process_args
 
+
 def add_generic_args(parser):
     """Add generic arguments that apply to multiple output formats."""
 
