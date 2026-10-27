@@ -11545,6 +11545,13 @@ class CodeGenerator:
                                 f'modifiers.memory_result_last_bytes = {hex(last_result_bytes)};'
                             )
                         if access_conditions:
+                            if self._supports_dpp_for_instruction(
+                                inst, inst_dpp_enc_name
+                            ):
+                                access_conditions.insert(
+                                    0,
+                                    f'{inst.fmt_true_enc_name}::amdgpu_register_modifiers(modifiers);',
+                                )
                             public_members.append(
                                 cgen.Line(
                                     'void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {'
