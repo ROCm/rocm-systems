@@ -647,19 +647,13 @@ enum class ScalarAtomicOp { FADD, FMIN, FMAX, FCMPSWAP };
 /// global F32 contradict that rule on those paths. CDNA1-4 and RDNA3.5 LDS F32/F64,
 /// RDNA1/2 cache F32/F64, RDNA3.5 cache F32, and gfx1100 FLAT/BUFFER F32 inherit this policy
 /// without equivalent captures. CDNA5/RDNA4 expose no FCMPSWAP instructions in this tree.
+/// Every capture used FP_DENORM 0 or 3, endpoints that cannot separate input-controlled
+/// from output-controlled flushing. Denormal memory compared against +0 with a normal
+/// replacement would, under FP_DENORM 1 or 2: this policy swaps only in mode 2.
 template <typename Bits>
 Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bits compare_bits,
                    uint32_t denorm_mode, bool legacy_minmax, bool source_nan_first = false) {
   static_assert(std::is_same_v<Bits, uint32_t> || std::is_same_v<Bits, uint64_t>);
-  switch (operation) {
-  case ScalarAtomicOp::FADD:
-  case ScalarAtomicOp::FMIN:
-  case ScalarAtomicOp::FMAX:
-  case ScalarAtomicOp::FCMPSWAP:
-    break;
-  default:
-    throw std::invalid_argument("unsupported scalar floating-point atomic operation");
-  }
   using Float = std::conditional_t<sizeof(Bits) == 4, float, double>;
   constexpr Bits kSign = Bits{1} << (sizeof(Bits) * 8 - 1);
   constexpr Bits kExponent =
@@ -701,6 +695,9 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
     const Bits result = std::bit_cast<Bits>(static_cast<Float>(old_value + source_value));
     return (denorm_mode & 2u) ? result : flush(result);
   }
+
+  if (operation != ScalarAtomicOp::FMIN && operation != ScalarAtomicOp::FMAX)
+    throw std::invalid_argument("unsupported scalar floating-point atomic operation");
 
   // CDNA1-4 / RDNA1-3.5 preserve selected denormals and propagate SNaNs.
   // CDNA5 / RDNA4 MIN_NUM/MAX_NUM select from the flushed values instead.
