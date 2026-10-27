@@ -649,3 +649,13 @@ void ResetNcclFakes()
     g_commGraphDeregister          = DefaultCommGraphDeregister;
     g_ncclSetThreadName            = DefaultSetThreadName;
 }
+
+// ppc64le TOC references survive --gc-sections, so rome_models.cc's
+// extern topoPathTypeStr[] needs a definition even when the code path is dead.
+// Weak so that tests linking topo_stubs.cc (which has a strong definition) win.
+#if defined(__powerpc64__) || defined(__PPC64__)
+#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
+#include "graph.h"
+__attribute__((weak)) const char* topoPathTypeStr[] = {"LOC", "XGMI", "NVB", "C2C", "PIX", "PXB", "P2C", "PXN", "PHB", "SYS", "NET", "DIS"};
+#endif
+#endif
