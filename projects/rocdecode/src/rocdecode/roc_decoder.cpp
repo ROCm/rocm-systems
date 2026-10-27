@@ -247,8 +247,16 @@ rocDecStatus RocDecoder::ImportSurface(int pic_idx) {
         return rocdec_status;
     }
 
+    // The exported DRM PRIME fds are closed on every path below, including the error paths
+    auto close_fds = [&va_drm_prime_surface_desc]() {
+        for (auto i = 0; i < va_drm_prime_surface_desc.num_objects; ++i) {
+            close(va_drm_prime_surface_desc.objects[i].fd);
+        }
+    };
+
     if (va_drm_prime_surface_desc.num_layers == 0 || va_drm_prime_surface_desc.num_layers > 3) {
         ErrorLog(g_rocdec_logger, "VA-API returned an unsupported value for num_layers. num_layers = " + ROCDEC_TOSTR(va_drm_prime_surface_desc.num_layers));
+        close_fds();
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_RUNTIME_ERROR;
     }
@@ -257,10 +265,26 @@ rocDecStatus RocDecoder::ImportSurface(int pic_idx) {
     external_mem_handle_desc.handle.fd = va_drm_prime_surface_desc.objects[0].fd;
     external_mem_handle_desc.size = va_drm_prime_surface_desc.objects[0].size;
 
-    CHECK_HIP(hipImportExternalMemory(&hip_interop_[pic_idx].hip_ext_mem, &external_mem_handle_desc));
+    hipError_t hip_status = hipImportExternalMemory(&hip_interop_[pic_idx].hip_ext_mem, &external_mem_handle_desc);
+    if (hip_status != hipSuccess) {
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("HIP failure: hipImportExternalMemory failed with status: ") + ROCDEC_STR(hipGetErrorName(hip_status)));
+        hip_interop_[pic_idx].hip_ext_mem = nullptr;
+        close_fds();
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
 
     external_mem_buffer_desc.size = va_drm_prime_surface_desc.objects[0].size;
-    CHECK_HIP(hipExternalMemoryGetMappedBuffer((void**)&hip_interop_[pic_idx].hip_mapped_device_mem, hip_interop_[pic_idx].hip_ext_mem, &external_mem_buffer_desc));
+    hip_status = hipExternalMemoryGetMappedBuffer((void**)&hip_interop_[pic_idx].hip_mapped_device_mem, hip_interop_[pic_idx].hip_ext_mem, &external_mem_buffer_desc);
+    if (hip_status != hipSuccess) {
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("HIP failure: hipExternalMemoryGetMappedBuffer failed with status: ") + ROCDEC_STR(hipGetErrorName(hip_status)));
+        (void)hipDestroyExternalMemory(hip_interop_[pic_idx].hip_ext_mem);
+        hip_interop_[pic_idx].hip_ext_mem = nullptr;
+        hip_interop_[pic_idx].hip_mapped_device_mem = nullptr;
+        close_fds();
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
 
     hip_interop_[pic_idx].width = va_drm_prime_surface_desc.width;
     hip_interop_[pic_idx].height = va_drm_prime_surface_desc.height;
@@ -272,9 +296,7 @@ rocDecStatus RocDecoder::ImportSurface(int pic_idx) {
 
     hip_interop_[pic_idx].num_layers = va_drm_prime_surface_desc.num_layers;
 
-    for (auto i = 0; i < va_drm_prime_surface_desc.num_objects; ++i) {
-        close(va_drm_prime_surface_desc.objects[i].fd);
-    }
+    close_fds();
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
