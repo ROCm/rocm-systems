@@ -133,7 +133,6 @@ capture_context(hsa_agent_t agent, msnp::capture_mode mode, bool gpu_backend_ava
     if(!cache) return std::nullopt;
     return msnp::capture_context_t{
         agent,
-        cache->get_rocp_agent()->id,
         cache->near_cpu(),
         cache->gpu_pool(),
         cache->cpu_pool(),
@@ -492,11 +491,8 @@ TEST(kernel_replay_snapshot, unavailable_gpu_and_pinned_arenas_decline_capture)
     const auto agent = allocation.agent;
     record_for_snapshot_test(buffer, n * sizeof(float), agent);
 
-    const auto* rocp_agent = rocprofiler::agent::get_rocprofiler_agent(agent);
-    ASSERT_NE(rocp_agent, nullptr);
     const auto snapshot = msnp::snap(msnp::capture_context_t{
         agent,
-        rocp_agent->id,
         hsa_agent_t{.handle = 0},
         hsa_amd_memory_pool_t{.handle = 0},
         hsa_amd_memory_pool_t{.handle = 0},

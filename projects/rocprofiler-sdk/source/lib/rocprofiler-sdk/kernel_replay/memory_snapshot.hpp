@@ -24,15 +24,12 @@
 
 #include "lib/rocprofiler-sdk/kernel_replay/blit-copy.hpp"
 
-#include <rocprofiler-sdk/fwd.h>
-
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <optional>
 #include <vector>
 
 namespace rocprofiler
@@ -82,8 +79,8 @@ struct block_t
     explicit operator bool() const { return data != nullptr; }
 };
 
-// The only non-trivial storage object. GPU-local blocks return to the replay backing cache; pinned
-// host blocks return directly to their HSA pool.
+// RAII handle for one materialized HSA arena. GPU-local blocks return to the replay backing cache;
+// pinned-host blocks return directly to their HSA pool.
 class owned_block_t
 {
 public:
@@ -111,16 +108,15 @@ private:
 
 struct snapshot_region_t
 {
-    size_t        size           = 0;
-    void*         live_address   = nullptr;
-    size_t        logical_offset = 0;
-    liveness_kind liveness       = liveness_kind::tracked_allocation;
+    size_t        size         = 0;
+    void*         live_address = nullptr;
+    liveness_kind liveness     = liveness_kind::tracked_allocation;
 };
 
 struct storage_segment_t
 {
-    size_t        size           = 0;
-    size_t        logical_offset = 0;
+    size_t        size          = 0;
+    size_t        storage_index = 0;
     owned_block_t backing{};
 };
 
@@ -128,22 +124,19 @@ struct snapshot_extent_t
 {
     size_t size = 0;
 
-    size_t region_index  = 0;
-    size_t region_offset = 0;
-
+    size_t region_index   = 0;
     size_t segment_index  = 0;
     size_t segment_offset = 0;
 };
 
 struct capture_context_t
 {
-    hsa_agent_t            agent{};
-    rocprofiler_agent_id_t agent_id{};
-    hsa_agent_t            pinned_agent{};
-    hsa_amd_memory_pool_t  gpu_pool{};
-    hsa_amd_memory_pool_t  pinned_pool{};
-    capture_mode           mode                  = capture_mode::automatic;
-    bool                   gpu_backend_available = true;
+    hsa_agent_t           agent{};
+    hsa_agent_t           cpu_agent{};
+    hsa_amd_memory_pool_t gpu_pool{};
+    hsa_amd_memory_pool_t pinned_pool{};
+    capture_mode          mode                  = capture_mode::automatic;
+    bool                  gpu_backend_available = true;
 };
 
 struct storage_budgets_t
@@ -155,26 +148,15 @@ struct storage_budgets_t
 // A captured set of device allocations for a single agent.
 struct snapshot_t
 {
-    hsa_agent_t                    agent{};
-    hsa_agent_t                    pinned_agent{};
-    rocprofiler_agent_id_t         agent_id{};
     std::vector<snapshot_region_t> regions{};
     std::vector<storage_segment_t> segments{};
     std::vector<snapshot_extent_t> extents{};
     capture_status                 status{capture_status::unavailable};
 
     bool         complete() const { return status == capture_status::complete; }
-    bool         empty() const { return regions.empty(); }
     size_t       footprint_bytes() const;
     storage_kind storage() const;
 };
-
-std::optional<size_t>
-assign_logical_offsets(std::vector<snapshot_region_t>&);
-
-std::optional<std::vector<snapshot_extent_t>>
-map_regions_to_storage(const std::vector<snapshot_region_t>&,
-                       const std::vector<storage_segment_t>&);
 
 // Plan whole-region placement against queried GPU and host budgets, materialize at most one arena
 // per tier, and capture only after every required arena exists.

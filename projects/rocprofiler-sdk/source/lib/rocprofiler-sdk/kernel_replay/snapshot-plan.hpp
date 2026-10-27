@@ -22,15 +22,12 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <new>
 #include <optional>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -49,6 +46,7 @@ enum class error_code : uint8_t
     no_backing_capacity,
     overflow,
     metadata_failure,
+    invalid_state,
 };
 
 struct error_t
@@ -60,9 +58,9 @@ struct error_t
 
 struct slice_t
 {
-    size_t       size   = 0;
-    size_t       offset = 0;
-    storage_kind tier   = storage_kind::none;
+    size_t size          = 0;
+    size_t offset        = 0;
+    size_t storage_index = std::numeric_limits<size_t>::max();
 };
 
 struct result_t
@@ -71,19 +69,20 @@ struct result_t
     error_t                error{};
 
     explicit       operator bool() const { return value.has_value(); }
+    slice_t&       operator*() { return *value; }
     const slice_t& operator*() const { return *value; }
+    slice_t*       operator->() { return &*value; }
     const slice_t* operator->() const { return &*value; }
 };
 
-template <storage_kind Tier>
-class bounded_allocator
+class bounded_policy
 {
 public:
-    explicit bounded_allocator(size_t capacity)
+    explicit bounded_policy(size_t capacity)
     : m_capacity{capacity}
     {}
 
-    result_t allocate(size_t size, size_t alignment)
+    result_t reserve(size_t size, size_t alignment)
     {
         if(alignment == 0) return result_t{.error = error_t{error_code::overflow, size}};
 
@@ -98,60 +97,15 @@ public:
         if(end > m_capacity) return result_t{.error = error_t{error_code::exhausted, size}};
 
         m_used = end;
-        return result_t{.value = slice_t{size, offset, Tier}};
+        return result_t{.value = slice_t{size, offset}};
     }
 
     size_t used() const { return m_used; }
+    void   reset() { m_used = 0; }
 
 private:
     size_t m_capacity = 0;
     size_t m_used     = 0;
-};
-
-class null_allocator
-{
-public:
-    result_t allocate(size_t size, size_t)
-    {
-        return result_t{.error = error_t{error_code::no_backing_capacity, size}};
-    }
-
-    size_t used() const { return 0; }
-};
-
-template <typename... Allocators>
-class fallback_allocator
-{
-public:
-    explicit fallback_allocator(Allocators... allocators)
-    : m_allocators{std::move(allocators)...}
-    {}
-
-    result_t allocate(size_t size, size_t alignment) { return allocate_from<0>(size, alignment); }
-
-    template <size_t Index>
-    auto& get()
-    {
-        return std::get<Index>(m_allocators);
-    }
-
-private:
-    template <size_t Index>
-    result_t allocate_from(size_t size, size_t alignment)
-    {
-        if constexpr(Index == sizeof...(Allocators))
-        {
-            return result_t{.error = error_t{error_code::no_backing_capacity, size}};
-        }
-        else
-        {
-            auto result = std::get<Index>(m_allocators).allocate(size, alignment);
-            if(result || result.error.code != error_code::exhausted) return result;
-            return allocate_from<Index + 1>(size, alignment);
-        }
-    }
-
-    std::tuple<Allocators...> m_allocators;
 };
 
 struct request_t
@@ -163,25 +117,23 @@ struct request_t
 
 struct placement_t
 {
-    size_t       size           = 0;
-    size_t       region_index   = 0;
-    storage_kind tier           = storage_kind::none;
-    size_t       backing_offset = 0;
+    size_t size           = 0;
+    size_t region_index   = 0;
+    size_t storage_index  = std::numeric_limits<size_t>::max();
+    size_t backing_offset = 0;
 };
 
 struct plan_t
 {
     std::vector<placement_t> placements{};
-    size_t                   gpu_bytes  = 0;
-    size_t                   host_bytes = 0;
     error_t                  error{};
 
     bool complete() const { return error.code == error_code::none; }
 };
 
-template <typename Allocator>
+template <typename Storage>
 plan_t
-build(std::vector<request_t> requests, Allocator& allocator, size_t alignment)
+build(std::vector<request_t> requests, Storage& storage, size_t alignment)
 {
     auto plan = plan_t{};
     try
@@ -194,15 +146,15 @@ build(std::vector<request_t> requests, Allocator& allocator, size_t alignment)
 
         for(const auto& request : requests)
         {
-            auto result = allocator.allocate(request.size, alignment);
+            auto result = storage.reserve(request.size, alignment);
             if(!result)
             {
                 plan.error              = result.error;
                 plan.error.region_index = request.region_index;
                 return plan;
             }
-            plan.placements.emplace_back(
-                placement_t{request.size, request.region_index, result->tier, result->offset});
+            plan.placements.emplace_back(placement_t{
+                request.size, request.region_index, result->storage_index, result->offset});
         }
     } catch(const std::bad_alloc&)
     {
@@ -210,14 +162,8 @@ build(std::vector<request_t> requests, Allocator& allocator, size_t alignment)
         return plan;
     }
 
-    plan.gpu_bytes  = allocator.template get<0>().used();
-    plan.host_bytes = allocator.template get<1>().used();
     return plan;
 }
-
-using gpu_allocator      = bounded_allocator<storage_kind::gpu_local>;
-using pinned_allocator   = bounded_allocator<storage_kind::pinned_host>;
-using snapshot_allocator = fallback_allocator<gpu_allocator, pinned_allocator, null_allocator>;
 }  // namespace planning
 }  // namespace memory_snapshot
 }  // namespace kernel_replay

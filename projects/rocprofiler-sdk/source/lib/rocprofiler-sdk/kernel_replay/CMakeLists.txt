@@ -8,6 +8,7 @@ set(ROCPROFILER_LIB_KERNEL_REPLAY_HEADERS
     memory_tracker.hpp
     replay_callbacks.hpp
     snapshot-plan.hpp
+    snapshot-storage.hpp
     untracked_memory.hpp
     utils.hpp)
 set(ROCPROFILER_LIB_KERNEL_REPLAY_SOURCES
