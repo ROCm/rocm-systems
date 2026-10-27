@@ -277,6 +277,10 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipMallocManaged",
     "hipFree",
     "hipFreeAsync",
+    # Context lifecycle — destroy only a context replay itself created.
+    # A queried or primary context is recorded for translation and is not retained.
+    "hipCtxCreate",
+    "hipCtxDestroy",
     # Stream lifecycle — need ctx.record_stream / ctx.remove_stream
     "hipStreamCreate",
     "hipStreamCreateWithFlags",

@@ -3141,6 +3141,48 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 }
 
 // ---------------------------------------------------------------------------
+// Manual playback: hipCtxCreate / hipCtxDestroy
+// ---------------------------------------------------------------------------
+// hipCtxGetCurrent, hipCtxPopCurrent and hipDevicePrimaryCtxRetain record the
+// live context so later calls can translate the handle. They do not retain it.
+// hipCtxDestroy of one of those would release references the runtime took for
+// itself. Only a hipCtxCreate replay performed is destroyed.
+
+hipError_t playback_hipCtxCreate(PlaybackContext& ctx, const uint8_t* payload) {
+    const auto* a = reinterpret_cast<const hrr_args_hipCtxCreate*>(payload);
+    hipCtx_t out = nullptr;
+    hipError_t r = hipCtxCreate(&out, static_cast<unsigned int>(a->flags),
+                                static_cast<hipDevice_t>(a->device));
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipCtxCreate", a->ret);
+        return hipSuccess;
+    }
+    if (r == hipSuccess) {
+        ctx.record_ctx(a->ctx, out);
+        ctx.note_ctx_create(a->ctx);
+    }
+    return r;
+}
+
+hipError_t playback_hipCtxDestroy(PlaybackContext& ctx, const uint8_t* payload) {
+    const auto* a = reinterpret_cast<const hrr_args_hipCtxDestroy*>(payload);
+    if (!ctx.take_ctx_retain(a->ctx)) {
+        fprintf(stderr,
+                "[HRR] hipCtxDestroy: recorded context 0x%llx was not created by "
+                "replay, so it is not destroyed\n",
+                (unsigned long long)a->ctx);
+        return hipErrorInvalidContext;
+    }
+    hipError_t r = hipCtxDestroy(ctx.translate_ctx(a->ctx));
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipCtxDestroy", a->ret);
+        return hipSuccess;
+    }
+    if (r == hipSuccess) ctx.remove_ctx(a->ctx);
+    return r;
+}
+
+// ---------------------------------------------------------------------------
 // Manual playback: hipHostMalloc / hipMallocHost
 // ---------------------------------------------------------------------------
 // hipHostMalloc:  ret(4) ptr(8) size(8) flags(4)

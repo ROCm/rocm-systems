@@ -167,33 +167,11 @@ static hipError_t playback_hipCreateTextureObject(PlaybackContext& ctx, const ui
   return hipSuccess;
 }
 
-static hipError_t playback_hipCtxCreate(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipCtxCreate*>(payload);
-  hipCtx_t _out_ctx = nullptr;
-  hipError_t _r = (hipError_t)hipCtxCreate(&_out_ctx, (unsigned int)a->flags, (hipDevice_t)a->device);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipCtxCreate", a->ret);
-    return hipSuccess;
-  }
-  if (_r == hipSuccess) {
-    ctx.record_ctx(a->ctx, _out_ctx);
-  }
-  return _r;
-}
+extern hipError_t playback_hipCtxCreate(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipCtxDestroy(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipCtxDestroy*>(payload);
-  uint64_t _rec_hdl = a->ctx;
-  hipError_t _r = (hipError_t)hipCtxDestroy((hipCtx_t)ctx.translate_ctx(_rec_hdl));
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipCtxDestroy", a->ret);
-    return hipSuccess;
-  }
-  if (_r == hipSuccess) {
-    ctx.remove_ctx(_rec_hdl);
-  }
-  return _r;
-}
+
+extern hipError_t playback_hipCtxDestroy(PlaybackContext& ctx, const uint8_t* payload);
+
 
 static hipError_t playback_hipCtxDisablePeerAccess(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;

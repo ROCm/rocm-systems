@@ -215,6 +215,10 @@ struct PlaybackContext {
     // replay pushed a capture-time hipCtx_t and the thread was left with no
     // current device, which killed the process several events later.
     std::unordered_map<uint64_t, hipCtx_t>       ctx_map;
+    // How many hipCtxCreate calls replay has made for this recorded handle.
+    // hipCtxDestroy consumes one. A context only recorded by a query has none,
+    // and destroy must not release the runtime's own references.
+    std::unordered_map<uint64_t, uint32_t>       ctx_retains;
     // JIT linker states. hipLinkCreate used to throw its output away, so
     // hipLinkComplete and hipLinkDestroy were handed the capturing process's
     // pointer and failed no matter what the linker inputs were.
@@ -924,6 +928,18 @@ struct PlaybackContext {
     void record_surface (uint64_t rec, hipSurfaceObject_t live) { std::unique_lock lk(map_mutex); surface_map[rec] = live; }
     void record_texture (uint64_t rec, hipTextureObject_t live) { std::unique_lock lk(map_mutex); texture_map[rec] = live; }
     void record_ctx     (uint64_t rec, hipCtx_t        live) { std::unique_lock lk(map_mutex); ctx_map[rec]        = live; }
+    void note_ctx_create(uint64_t rec) {
+        std::unique_lock lk(map_mutex);
+        ctx_retains[rec] += 1;
+    }
+    // False when replay did not create this context. Does not touch ctx_map.
+    bool take_ctx_retain(uint64_t rec) {
+        std::unique_lock lk(map_mutex);
+        auto it = ctx_retains.find(rec);
+        if (it == ctx_retains.end() || it->second == 0) return false;
+        if (--it->second == 0) ctx_retains.erase(it);
+        return true;
+    }
     void record_link_state(uint64_t rec, hipLinkState_t live){ std::unique_lock lk(map_mutex); link_state_map[rec] = live; }
 
     // ---- Handle removal (exclusive lock) ----
