@@ -6,8 +6,25 @@
 
 // Symbols owned by src/transport/net_ib/connect.cc, for the microtest binaries that do not compile it.
 
+#include "transport_net_ib_fakes.h"
+
 #include <cstdint>
 
 #include "fakes/nccl_fakes.h"
+#include "net.h"
 
 int64_t ncclParamIbQpsPerConn() { return g_loadParam("IB_QPS_PER_CONNECTION", 1); }
+
+// src/transport/net_ib/common.cc. Only its address matters: init.cc compares comm->ncclNet against it.
+ncclNet_t ncclNetIb{};
+
+bool g_ibGdrFlushFlagLocalSupport = false;
+bool ncclIbGdrFlushFlagLocalSupport() { return g_ibGdrFlushFlagLocalSupport; }
+
+std::vector<std::pair<void*, int>> g_ibSetGdrFlushFlagCalls;
+void ncclIbSetGdrFlushFlag(void* netContext, int enable) { g_ibSetGdrFlushFlagCalls.emplace_back(netContext, enable); }
+
+void ResetTransportNetIbFakes() {
+  g_ibGdrFlushFlagLocalSupport = false;
+  g_ibSetGdrFlushFlagCalls.clear();
+}

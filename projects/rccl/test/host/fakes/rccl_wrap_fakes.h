@@ -43,6 +43,13 @@ extern int64_t g_rcclParamDirectReduceScatterThreshold;  // UNDRIVEN
 extern int g_rcclUpdateCollectiveProtocolCalls;
 extern int g_rcclUpdateCollectiveAlgorithmCalls;
 extern bool g_rcclUpdateCollectiveAlgorithmBeforeProtocol;
+extern int g_rcclUpdateRemoteFlushAlgoProtoCalls;
+extern bool g_rcclUpdateRemoteFlushAlgoProtoAfterProtocol;
+// Channel count the rcclUpdateRemoteFlushAlgoProto fake returns (0: keep RCCL's own).
+extern int g_rcclUpdateRemoteFlushAlgoProtoChannels;
+// rcclScaleCollLl128BuffSize fake: counts calls and multiplies buffSizes[NCCL_PROTO_LL128] by the factor.
+extern int g_rcclScaleCollLl128BuffSizeCalls;
+extern int g_rcclScaleCollLl128BuffSizeFactor;
 extern int g_rcclUpdateCollectiveChannelsCalls;
 extern int g_rcclSetPipeliningCalls;
 extern int g_rcclUpdateThreadThresholdCalls;

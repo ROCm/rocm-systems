@@ -408,6 +408,50 @@ TEST_F(NetIbMPITest, InlineSendBoundary) {
                    buf.get(), buf.get(), sz,
                    tag++, mh, mh, static_cast<int>(sz));
     }
+
+    // A multi-receive writes one CTS entry per receive, more than the CTS QP's
+    // inline limit of one entry, so irecv must post it without IBV_SEND_INLINE.
+    constexpr int kNRecvs = 4;
+    constexpr size_t kSubSize = 4096;
+    constexpr int kTagBase = 100;
+    char* base = static_cast<char*>(buf.get());
+    void* req = nullptr;
+    void* sreqs[kNRecvs] = {};
+    if (rank == 0) {
+        void* bufs[kNRecvs];
+        size_t subSizes[kNRecvs];
+        int tags[kNRecvs];
+        void* mhs[kNRecvs];
+        for (int i = 0; i < kNRecvs; i++) {
+            bufs[i] = base + i * kSubSize;
+            subSizes[i] = kSubSize;
+            tags[i] = kTagBase + i;
+            mhs[i] = mh;
+        }
+        EXPECT_EQ(PostRecv(cp.recvComm, kNRecvs, bufs, subSizes, tags, mhs, &req), ncclSuccess)
+            << "multi-receive irecv with NCCL_IB_USE_INLINE=1";
+        int got[kNRecvs] = {};
+        EXPECT_EQ(WaitForCompletion(req, got), ncclSuccess);
+        for (int i = 0; i < kNRecvs; i++) EXPECT_EQ(got[i], (int)kSubSize) << "receive " << i;
+    } else {
+        for (int i = 0; i < kNRecvs && !HasFailure(); i++) {
+            fillHostBufferWithPattern<uint8_t>(base + i * kSubSize, kSubSize, makeBytePattern(kTagBase + i));
+            PostSendWithRetry(cp.sendComm, base + i * kSubSize, kSubSize, kTagBase + i, mh, &sreqs[i]);
+        }
+        for (int i = 0; i < kNRecvs; i++) {
+            if (sreqs[i]) EXPECT_EQ(WaitForCompletion(sreqs[i], nullptr), ncclSuccess) << "send " << i;
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0) {
+        for (int i = 0; i < kNRecvs; i++) {
+            size_t errIdx;
+            uint8_t errExp, errGot;
+            EXPECT_TRUE(verifyHostBufferData<uint8_t>(base + i * kSubSize, kSubSize, makeBytePattern(kTagBase + i),
+                                                      0, 0.0, &errIdx, &errExp, &errGot))
+                << "receive " << i << ": data mismatch at byte " << errIdx;
+        }
+    }
 }
 
 // E7.  MixedSizeBarrage — 25 sizes from 1B to 64MB on a single connection.
