@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/tuning/tuning_general.cc.
+// Host-only microtests for src/tuning/tuning_general.cc and the Ring model in src/tuning/ring.cc.
 
 #include <gtest/gtest.h>
 
@@ -19,6 +19,7 @@
 #include "ScopedHook.h"
 
 #include TUNING_GENERAL_CC_PATH
+#include RING_CC_PATH
 
 namespace {
 
@@ -65,6 +66,22 @@ class TuningGeneralMicrotest : public ::testing::Test {
     input.numPipeOps = pipeOps;
     input.datatype = datatype;
     return input;
+  }
+
+  // Ring/Simple time from ring.cc for a 10 us base latency and a bandwidth so high that the size term
+  // vanishes: 10 us times the Ring plateau factor.
+  float RingSimpleTimeUs(ncclFunc_t func, int nRanks, size_t bytesPerRankPerChannel) {
+    comm_->nRanks = nRanks;
+    comm_->nChannels = 4;
+    comm_->tuningContext.generalLatencies[func][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 10.0f;
+    comm_->tuningContext.generalBandwidths[func][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 1e12f;
+    ncclTuningInput_t input = MakeTimeInput(bytesPerRankPerChannel * comm_->nChannels * nRanks, 1, ncclFloat32);
+    input.func = func;
+    ncclTuningResult_t result = NCCL_TUNING_RESULT_INIT;
+    result.algo = NCCL_ALGO_RING;
+    result.proto = NCCL_PROTO_SIMPLE;
+    EXPECT_EQ(ncclSuccess, ncclTuningRingModelSim(&input, &result));
+    return result.timeUs;
   }
 
   std::unique_ptr<ncclComm> comm_;
@@ -173,6 +190,42 @@ TEST_F(TuningGeneralMicrotest, TimeEstimatePenalizesDeepFp8RingOnly) {
   EXPECT_FLOAT_EQ(2.0f, ncclTuningGetTime(&input, NCCL_ALGO_RING, &latency, &bandwidth));
   input.datatype = ncclFloat8e5m2;
   EXPECT_FLOAT_EQ(2048.0f, ncclTuningGetTime(&input, NCCL_ALGO_RING, &latency, &bandwidth));
+}
+
+// gfx1250 reports compute capability 12.5 (125) and RCCL wires XGMI as PATH_NVL, so a single-node
+// gfx1250 comm takes ring.cc's single-node Blackwell NVLink branch.
+TEST_F(TuningGeneralMicrotest, RingSimplePlateauScalesWithStepsAndWorkOnSingleNodeNvl) {
+  comm_->nNodes = 1;
+  comm_->minCompCap = 125;
+  comm_->graphs[NCCL_ALGO_RING].typeIntra = PATH_NVL;
+  // AllReduce takes the plateau too. Each Ring step past the first keeps 0.1/0.4 of the remaining
+  // distance to the full 0.4 delta: two steps give 1 + 0.75 * 0.4, fourteen saturate at 1.4.
+  EXPECT_NEAR(13.0, RingSimpleTimeUs(ncclFuncAllReduce, 2, 1024), 1e-3);
+  EXPECT_NEAR(14.0, RingSimpleTimeUs(ncclFuncAllReduce, 8, 1024), 1e-3);
+  // A one-step Ring gets no plateau.
+  EXPECT_NEAR(10.0, RingSimpleTimeUs(ncclFuncAllGather, 2, 1024), 1e-3);
+  // Work past 256 KiB per rank/channel trims the delta linearly, by at most 0.1 from 512 KiB: three
+  // steps (0.9375) give 1 + 0.9375 * 0.35 at 384 KiB and 1 + 0.9375 * 0.3 at 1 MiB.
+  EXPECT_NEAR(13.28125, RingSimpleTimeUs(ncclFuncReduceScatter, 4, 384 << 10), 1e-3);
+  EXPECT_NEAR(12.8125, RingSimpleTimeUs(ncclFuncAllGather, 4, 1 << 20), 1e-3);
+}
+
+TEST_F(TuningGeneralMicrotest, RingSimplePlateauIsFixedMultiNodeAndAbsentElsewhere) {
+  comm_->nNodes = 2;
+  comm_->minCompCap = 125;
+  comm_->graphs[NCCL_ALGO_RING].typeIntra = PATH_NVL;
+  EXPECT_NEAR(14.0, RingSimpleTimeUs(ncclFuncAllReduce, 2, 1024), 1e-3);
+  // Single node: gfx942 (compute capability 94) over XGMI and any comm over PCI take no plateau, and
+  // nothing applies below 64 bytes per rank/channel.
+  comm_->nNodes = 1;
+  comm_->minCompCap = 94;
+  EXPECT_NEAR(10.0, RingSimpleTimeUs(ncclFuncAllReduce, 8, 1024), 1e-3);
+  EXPECT_NEAR(10.0, RingSimpleTimeUs(ncclFuncAllGather, 8, 1024), 1e-3);
+  comm_->minCompCap = 125;
+  comm_->graphs[NCCL_ALGO_RING].typeIntra = PATH_PIX;
+  EXPECT_NEAR(10.0, RingSimpleTimeUs(ncclFuncAllGather, 8, 1024), 1e-3);
+  comm_->graphs[NCCL_ALGO_RING].typeIntra = PATH_NVL;
+  EXPECT_NEAR(10.0, RingSimpleTimeUs(ncclFuncAllGather, 2, 32), 1e-3);
 }
 
 TEST_F(TuningGeneralMicrotest, ThreadCountValidationUsesDefaultAndBounds) {
