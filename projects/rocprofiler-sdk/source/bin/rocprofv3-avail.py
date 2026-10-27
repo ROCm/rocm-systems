@@ -663,7 +663,11 @@ def main(argv=None):
         # buffered to /dev/null so the interpreter does not fail again
         # while flushing at shutdown.
         with contextlib.suppress(OSError, ValueError):
-            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            try:
+                os.dup2(devnull, sys.stdout.fileno())
+            finally:
+                os.close(devnull)
         return 1
     except OSError as error:
         avail.fatal_error(f"Unable to write list-avail output: {error}")
