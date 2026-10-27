@@ -11,15 +11,24 @@
 
 #include "MPIHelpers.hpp"
 #include "ipcsocket.h"
+#include "rocmwrap.h"
 
 #include "MultiSegmentVmmHelpers.hpp"
 
 #include <hip/hip_runtime.h>
 #include <mpi.h>
 
+// hipMemLocationTypeHost is undeclared without the CMake host probe; outside the gate the shim is harmless (HOST == 2).
+#if !NCCL_CUMEM_HOST_GATE
+#ifndef hipMemLocationTypeHost
+#define hipMemLocationTypeHost (static_cast<hipMemLocationType>(2))
+#endif
+#endif
+
 #include <unistd.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <random>
 #include <string>
 #include <utility>
@@ -116,16 +125,29 @@ cleanup:
     return support;
 }
 
+enum class HybridVmmStatus { Ok, Skip, Fail };
+
+// RCCL_TEST_HYBRID_VMM_REQUIRE=1 (hybrid CI job) fails instead of skipping on a missing ROCM-29812 fix or host gate.
+inline HybridVmmStatus HybridVmmUnsupportedStatus()
+{
+    const char* require = std::getenv("RCCL_TEST_HYBRID_VMM_REQUIRE");
+    return (require && std::string(require) == "1") ? HybridVmmStatus::Fail : HybridVmmStatus::Skip;
+}
+
 // Collective: every rank must call it. Skips on ROCM-29812. Imported handles are not re-exported.
-inline bool CheckHybridVmmRuntimeSupport(int dev, std::string* reason = nullptr)
+// Hybrid elastic windows require NCCL_SYM_REUSE_SYSMEM_HANDLES=1 at registration time.
+inline bool CheckHybridVmmRuntimeSupport(int dev, std::string* reason = nullptr,
+                                         HybridVmmStatus* status = nullptr)
 {
     HybridVmmRuntimeSupport local = ProbeHybridVmmRuntimeSupport(dev);
     bool cpuAccessSupported = MPIHelpers::allRanksTrue(local.importedHostCpuAccess);
+    if (status) *status = HybridVmmStatus::Skip;
 
     // TODO(ROCM-29812): Remove this skip gate when imported host VMM CPU access is fixed.
     if (!cpuAccessSupported)
     {
         if (reason) *reason = "ROCM-29812: imported host VMM CPU access is unsupported";
+        if (status) *status = HybridVmmUnsupportedStatus();
         return false;
     }
     return true;
@@ -421,7 +443,208 @@ inline bool AllocHybridVmm(int dev, size_t gpuBytes, size_t localCpuBytes,
     return true;
 }
 
+inline bool AllocHybridForLocalRanks(int dev, size_t gpuBytes, size_t localCpuBytes,
+                                     int expectedLocalRanks, HybridVmmBuffer* out,
+                                     std::string* reason = nullptr)
+{
+    if (!AllocHybridVmm(dev, gpuBytes, localCpuBytes, out, reason))
+        return false;
+    if (out->localSize != expectedLocalRanks)
+    {
+        if (reason)
+            *reason = "need " + std::to_string(expectedLocalRanks) +
+                      " ranks per node, got " + std::to_string(out->localSize);
+        FreeHybridVmm(*out);
+        return false;
+    }
+    return true;
+}
+
+// Collective over MPI_COMM_WORLD: support check, then allocation. A failure on any rank frees *out on every rank.
+inline HybridVmmStatus AllocHybridCollective(size_t gpuBytes, size_t localCpuBytes, int expectedLocalRanks,
+                                             HybridVmmBuffer* out, std::string* reason)
+{
+    *out = HybridVmmBuffer{};
+#if !NCCL_CUMEM_HOST_GATE
+    // Compile-time gate, so every rank returns here without a collective.
+    (void)gpuBytes; (void)localCpuBytes; (void)expectedLocalRanks;
+    *reason = "host VMM is outside this build's NCCL_CUMEM_HOST_GATE window";
+    return HybridVmmUnsupportedStatus();
+#else
+    int dev = 0;
+    // The support check runs collectives; call it even if hipGetDevice failed.
+    const bool haveDev = hipGetDevice(&dev) == hipSuccess;
+    HybridVmmStatus status = HybridVmmStatus::Skip;
+    bool supported = CheckHybridVmmRuntimeSupport(dev, reason, &status) && haveDev;
+    if (!MPIHelpers::allRanksTrue(supported))
+    {
+        if (reason->empty()) *reason = "hybrid VMM runtime support is unavailable on another rank";
+        return status;
+    }
+    bool allocated = AllocHybridForLocalRanks(dev, gpuBytes, localCpuBytes, expectedLocalRanks, out, reason);
+    if (!MPIHelpers::allRanksTrue(allocated))
+    {
+        FreeHybridVmm(*out);
+        if (reason->empty()) *reason = "hybrid VMM allocation failed on another rank";
+        return HybridVmmStatus::Skip;
+    }
+    return HybridVmmStatus::Ok;
+#endif
+}
+
+// Fails or skips the calling test for a non-Ok AllocHybridCollective status; all ranks see the same status.
+#define HYBRID_VMM_SKIP_OR_FAIL(status, reason)                                                    \
+    do {                                                                                         \
+        const RCCLHybridVmmTests::HybridVmmStatus hybridStatus_ = (status);                      \
+        if (hybridStatus_ == RCCLHybridVmmTests::HybridVmmStatus::Fail)                          \
+            FAIL() << "RCCL_TEST_HYBRID_VMM_REQUIRE=1: " << (reason);                           \
+        if (hybridStatus_ != RCCLHybridVmmTests::HybridVmmStatus::Ok)                            \
+            GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << (reason);                \
+    } while (0)
+
+// DeepEP ElasticSymmetricMemory geometry: one GPU segment then one independently
+// sized CPU segment in a 2 MiB-aligned VA. Shared by UBR and RMA tests.
+struct DeepEpElasticRange
+{
+    hipDeviceptr_t                               base      = 0;
+    size_t                                       totalSize = 0;
+    size_t                                       gpuBytes  = 0;
+    size_t                                       cpuBytes  = 0;
+    std::vector<hipMemGenericAllocationHandle_t> handles;
+    std::vector<size_t>                          segSizes;
+};
+
+inline bool AllocDeepEpElasticRange(int dev, size_t gpuBytes, size_t cpuBytes,
+                                    DeepEpElasticRange* out)
+{
+    constexpr size_t kDeepEpAlignment = 2u * 1024 * 1024;
+    if (out == nullptr || gpuBytes == 0 || cpuBytes == 0 ||
+        gpuBytes % kDeepEpAlignment != 0 || cpuBytes % kDeepEpAlignment != 0)
+        return false;
+    *out = DeepEpElasticRange{};
+
+    hipMemAllocationProp gpuProp = {};
+    gpuProp.type                            = hipMemAllocationTypePinned;
+    gpuProp.location.type                   = hipMemLocationTypeDevice;
+    gpuProp.location.id                     = dev;
+    gpuProp.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
+    gpuProp.allocFlags.gpuDirectRDMACapable = 1;
+
+    hipMemAllocationProp cpuProp = {};
+    cpuProp.type                = hipMemAllocationTypePinned;
+    cpuProp.location.type       = hipMemLocationTypeHost;
+    cpuProp.location.id         = 0;
+    cpuProp.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+
+    size_t gpuGran = 0, cpuGran = 0;
+    if (hipMemGetAllocationGranularity(&gpuGran, &gpuProp, hipMemAllocationGranularityMinimum) != hipSuccess ||
+        hipMemGetAllocationGranularity(&cpuGran, &cpuProp, hipMemAllocationGranularityMinimum) != hipSuccess ||
+        gpuGran == 0 || cpuGran == 0 ||
+        kDeepEpAlignment % gpuGran != 0 || kDeepEpAlignment % cpuGran != 0)
+        return false;
+
+    const size_t totalSize = gpuBytes + cpuBytes;
+    hipDeviceptr_t vaBase = 0;
+    if (hipMemAddressReserve(&vaBase, totalSize, kDeepEpAlignment, 0, 0) != hipSuccess)
+        return false;
+
+    std::vector<hipMemGenericAllocationHandle_t> handles(2, 0);
+    std::vector<size_t> segSizes = {gpuBytes, cpuBytes};
+    int mapped = 0;
+    auto cleanup = [&]() {
+        if (mapped > 0)
+            (void)hipMemUnmap(vaBase, gpuBytes);
+        if (mapped > 1)
+        {
+            hipDeviceptr_t cpuVa = reinterpret_cast<hipDeviceptr_t>(
+                reinterpret_cast<uintptr_t>(vaBase) + gpuBytes);
+            (void)hipMemUnmap(cpuVa, cpuBytes);
+        }
+        for (auto h : handles)
+        {
+            if (h != 0) (void)hipMemRelease(h);
+        }
+        (void)hipMemAddressFree(vaBase, totalSize);
+    };
+
+    if (hipMemCreate(&handles[0], gpuBytes, &gpuProp, 0) != hipSuccess ||
+        hipMemMap(vaBase, gpuBytes, 0, handles[0], 0) != hipSuccess)
+    {
+        cleanup();
+        return false;
+    }
+    mapped = 1;
+
+    hipDeviceptr_t cpuVa = reinterpret_cast<hipDeviceptr_t>(
+        reinterpret_cast<uintptr_t>(vaBase) + gpuBytes);
+    if (hipMemCreate(&handles[1], cpuBytes, &cpuProp, 0) != hipSuccess ||
+        hipMemMap(cpuVa, cpuBytes, 0, handles[1], 0) != hipSuccess)
+    {
+        cleanup();
+        return false;
+    }
+    mapped = 2;
+
+    hipMemAccessDesc accessDesc = {};
+    accessDesc.location.type    = hipMemLocationTypeDevice;
+    accessDesc.location.id      = dev;
+    accessDesc.flags            = hipMemAccessFlagsProtReadWrite;
+    hipMemAccessDesc hostAccess = {};
+    hostAccess.location.type    = hipMemLocationTypeHost;
+    hostAccess.location.id      = 0;
+    hostAccess.flags            = hipMemAccessFlagsProtReadWrite;
+    // Device RW on both segments (GPU kernels / GIN). Host RW on the CPU
+    // segment matches DeepEP CPU-storage access.
+    if (hipMemSetAccess(vaBase, gpuBytes, &accessDesc, 1) != hipSuccess ||
+        hipMemSetAccess(cpuVa, cpuBytes, &accessDesc, 1) != hipSuccess)
+    {
+        cleanup();
+        return false;
+    }
+    // Best-effort: callers touch the CPU segment only through hipMemcpy/hipMemset.
+    const hipError_t hostAccessErr = hipMemSetAccess(cpuVa, cpuBytes, &hostAccess, 1);
+    if (hostAccessErr != hipSuccess)
+    {
+        (void)hipGetLastError();
+        fprintf(stderr, "[ WARNING  ] DeepEP elastic CPU segment host access grant failed (%s); continuing\n",
+                hipGetErrorString(hostAccessErr));
+    }
+
+    out->base      = vaBase;
+    out->totalSize = totalSize;
+    out->gpuBytes  = gpuBytes;
+    out->cpuBytes  = cpuBytes;
+    out->handles   = std::move(handles);
+    out->segSizes  = std::move(segSizes);
+    return true;
+}
+
 } // namespace RCCLHybridVmmTests
+
+#ifdef RCCL_HAS_RMA_IB_PROXY
+namespace RCCLRmaTests
+{
+
+inline bool AllocDeepEpElasticVmm(int dev, size_t gpuBytes, size_t cpuBytes,
+                                  RCCLTestHelpers::MultiSegmentVmmBuffer* out)
+{
+    if (out == nullptr) return false;
+    RCCLHybridVmmTests::DeepEpElasticRange range;
+    if (!RCCLHybridVmmTests::AllocDeepEpElasticRange(dev, gpuBytes, cpuBytes, &range))
+        return false;
+    *out = RCCLTestHelpers::MultiSegmentVmmBuffer{};
+    out->ptr       = reinterpret_cast<void*>(range.base);
+    out->base      = range.base;
+    out->totalSize = range.totalSize;
+    out->segSize   = 0; // non-uniform by design
+    out->nSegments = 2;
+    out->handles   = std::move(range.handles);
+    out->segSizes  = std::move(range.segSizes);
+    return true;
+}
+
+} // namespace RCCLRmaTests
+#endif // RCCL_HAS_RMA_IB_PROXY
 
 #endif // MPI_TESTS_ENABLED
 
