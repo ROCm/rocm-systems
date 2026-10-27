@@ -31,6 +31,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -128,8 +129,8 @@ build_v_mov_b32_imm(uint16_t vdst, uint32_t imm, rj_code_arch_t arch,
 /// holds in an SGPR rather than as a build-time constant.
 ///
 /// @returns Failure when the target ISA has no VOP1 encoding or @p src0 names
-///   the literal constant. That form
-///   needs a trailing word this encoder has no way to return, so accepting it
+///   a literal constant (including CDNA5 SRC_LITERAL64). These forms
+///   need trailing words this encoder has no way to return, so accepting them
 ///   would emit an instruction that reads whatever follows it.
 ///
 /// @param error Optional caller-owned diagnostic emitter, used only on failure.
@@ -143,6 +144,13 @@ build_v_mov_b32_src(uint16_t vdst, uint16_t src0, rj_code_arch_t arch,
   if (src0 == kVectorSrcLiteral) {
     return error != nullptr
                ? (error->emit() << "v_mov_b32 from a literal needs build_v_mov_b32_imm")
+               : util::Result::failure();
+  }
+  // Selector 254 is src_lds_direct on older CDNA targets, but a two-word
+  // literal on CDNA5. Neither literal form fits this single-word result.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && src0 == cdna5::OPR_SRC_SRC_LITERAL64) {
+    return error != nullptr
+               ? (error->emit() << "v_mov_b32 from a 64-bit literal needs trailing literal words")
                : util::Result::failure();
   }
   const uint8_t dst = static_cast<uint8_t>(vdst);

@@ -927,7 +927,7 @@ TEST(TrampolineBuilderEmit, UndeclaredArgumentSourceFails) {
 
 // A separately constructed plan can name the literal source code instead of
 // an SGPR. The failed vector builder must stop emission without returning bytes.
-TEST(TrampolineBuilderEmit, InvalidArgumentRegisterSourceFails) {
+TEST(TrampolineBuilderEmit, LiteralArgumentSourceFailurePropagates) {
   for (const auto source : {ProbeArgSource::AnchorExecLo, ProbeArgSource::AnchorExecHi,
                             ProbeArgSource::LogBufferPtrLo, ProbeArgSource::LogBufferPtrHi}) {
     SCOPED_TRACE(static_cast<int>(source));
@@ -952,7 +952,12 @@ TEST(TrampolineBuilderEmit, InvalidArgumentRegisterSourceFails) {
       saved->temp_base = invalid_base;
     }
     EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &err).has_value());
-    EXPECT_EQ(err, "v_mov_b32 from a literal needs build_v_mov_b32_imm");
+    const std::string source_name = source == ProbeArgSource::AnchorExecLo     ? "AnchorExecLo"
+                                    : source == ProbeArgSource::AnchorExecHi   ? "AnchorExecHi"
+                                    : source == ProbeArgSource::LogBufferPtrLo ? "LogBufferPtrLo"
+                                                                               : "LogBufferPtrHi";
+    EXPECT_EQ(err, "probe-call emission: argument 0 (" + source_name +
+                       "): v_mov_b32 from a literal needs build_v_mov_b32_imm");
     EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan).has_value());
   }
 }

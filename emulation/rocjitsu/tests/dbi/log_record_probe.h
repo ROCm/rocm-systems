@@ -139,6 +139,7 @@ inline void append_salu_sgpr_write_wait(std::vector<uint32_t> &words, rj_code_ar
 /// @brief Build the probe body for @p arch.
 /// @param record_type Written into every record.
 /// @param slot_count The buffer's slot count, a power of two no larger than 64.
+/// @param words Caller-owned output, cleared before emission and filled with the probe body.
 inline void build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_type,
                                         uint32_t slot_count, std::vector<uint32_t> &words) {
   if (slot_count == 0 || (slot_count & (slot_count - 1)) != 0 || slot_count > 64)

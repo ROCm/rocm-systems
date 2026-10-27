@@ -88,6 +88,17 @@ TEST(VectorBuilder, BuildVMovB32SrcRejectsLiteralSource) {
   for (const rj_code_arch_t arch : kAmdGpuArchs)
     EXPECT_TRUE(build_v_mov_b32_src(0, kVectorSrcLiteral, arch).failed())
         << "arch " << static_cast<int>(arch);
+  EXPECT_TRUE(
+      build_v_mov_b32_src(0, cdna5::OPR_SRC_SRC_LITERAL64, ROCJITSU_CODE_ARCH_CDNA5).failed());
+}
+
+TEST(VectorBuilder, BuildVMovB32SrcAllowsOlderCdnaLdsDirectSource) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                                    ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    const util::FailureOr<uint32_t> word = build_v_mov_b32_src(0, 254, arch);
+    ASSERT_TRUE(word.succeeded());
+    EXPECT_EQ(word.value(), 0x7E0002FEu) << "arch " << static_cast<int>(arch);
+  }
 }
 
 TEST(VectorBuilder, BuildVMovB32SrcRejectsNonAmdGpuArch) {

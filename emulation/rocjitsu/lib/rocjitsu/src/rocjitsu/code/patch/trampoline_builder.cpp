@@ -524,13 +524,6 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // Spill saves: store each live+clobbered register before the call.
   env.insert(env.end(), spill.prologue.begin(), spill.prologue.end());
 
-  // TODO: Accept a DiagnosticEmitter in emit_probe_call and remove this error_out adapter.
-  auto report_builder_error = [&](std::string_view message) {
-    if (error_out != nullptr)
-      error_out->assign(message);
-  };
-  const util::DiagnosticEmitter error(report_builder_error);
-
   // Argument materialization: consecutive VGPRs from the ABI's base, in order.
   //
   // Three things fix this position. It follows the spill prologue, so an argument
@@ -542,6 +535,32 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   for (size_t i = 0; i < plan.probe_args.size(); ++i) {
     const ProbeArgValue &arg = plan.probe_args[i];
     const uint16_t vdst = static_cast<uint16_t>(plan.arg_vgpr_base + i);
+    // TODO: Accept a DiagnosticEmitter in emit_probe_call and remove this adapter.
+    auto report_builder_error = [&](std::string_view message) {
+      if (error_out == nullptr)
+        return;
+      std::string_view source;
+      switch (arg.source) {
+      case ProbeArgSource::Immediate:
+        source = "Immediate";
+        break;
+      case ProbeArgSource::AnchorExecLo:
+        source = "AnchorExecLo";
+        break;
+      case ProbeArgSource::AnchorExecHi:
+        source = "AnchorExecHi";
+        break;
+      case ProbeArgSource::LogBufferPtrLo:
+        source = "LogBufferPtrLo";
+        break;
+      case ProbeArgSource::LogBufferPtrHi:
+        source = "LogBufferPtrHi";
+        break;
+      }
+      *error_out = "probe-call emission: argument " + std::to_string(i) + " (" +
+                   std::string(source) + "): " + std::string(message);
+    };
+    const util::DiagnosticEmitter error(report_builder_error);
     // Screened again here rather than inherited from planning: emit_probe_call is
     // callable on a plan this builder did not produce.
     if (!is_declared_probe_arg_source(arg.source)) {
@@ -560,7 +579,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     // reserves the temp, and the guard above fails closed if it is somehow absent.
     switch (arg.source) {
     case ProbeArgSource::Immediate: {
-      const auto maybe_words = build_v_mov_b32_imm(vdst, arg.immediate, plan.arch, &error);
+      const util::FailureOr<std::array<uint32_t, 2>> maybe_words =
+          build_v_mov_b32_imm(vdst, arg.immediate, plan.arch, &error);
       if (maybe_words.failed())
         return std::nullopt;
       const auto &words = maybe_words.value();
@@ -568,14 +588,15 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
       break;
     }
     case ProbeArgSource::AnchorExecLo: {
-      const auto word = build_v_mov_b32_src(vdst, exec_temp, plan.arch, &error);
+      const util::FailureOr<uint32_t> word =
+          build_v_mov_b32_src(vdst, exec_temp, plan.arch, &error);
       if (word.failed())
         return std::nullopt;
       env.push_back(word.value());
       break;
     }
     case ProbeArgSource::AnchorExecHi: {
-      const auto word =
+      const util::FailureOr<uint32_t> word =
           build_v_mov_b32_src(vdst, static_cast<uint16_t>(exec_temp + 1), plan.arch, &error);
       if (word.failed())
         return std::nullopt;
@@ -586,14 +607,15 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     // prologue defined it at kernel entry and planning kept the envelope and the
     // probe body off it.
     case ProbeArgSource::LogBufferPtrLo: {
-      const auto word = build_v_mov_b32_src(vdst, *plan.entry_storage_base, plan.arch, &error);
+      const util::FailureOr<uint32_t> word =
+          build_v_mov_b32_src(vdst, *plan.entry_storage_base, plan.arch, &error);
       if (word.failed())
         return std::nullopt;
       env.push_back(word.value());
       break;
     }
     case ProbeArgSource::LogBufferPtrHi: {
-      const auto word = build_v_mov_b32_src(
+      const util::FailureOr<uint32_t> word = build_v_mov_b32_src(
           vdst, static_cast<uint16_t>(*plan.entry_storage_base + 1), plan.arch, &error);
       if (word.failed())
         return std::nullopt;
