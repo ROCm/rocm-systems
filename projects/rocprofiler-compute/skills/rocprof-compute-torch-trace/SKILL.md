@@ -95,8 +95,9 @@ rocprof-compute analyze \
 
 Patterns are shell-style globs, not regexes, matched against a `/`-separated
 operator hierarchy. `*relu*` contains relu, `*/aten::addmm` is an addmm leaf
-on the reconstructed path, and `all` or `'*'` matches everything. Several
-patterns can be given, space or comma separated.
+on the reconstructed path. Several patterns can be given, space or comma
+separated; a piece with no framework stays on the preceding one. Bare
+`--operator` or `**` matches everything.
 Quote patterns so the shell does not expand them.
 
 `--operator triton:*rmsnorm_kernel*` works the same way.

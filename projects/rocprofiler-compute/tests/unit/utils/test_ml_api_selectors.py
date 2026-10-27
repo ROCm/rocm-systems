@@ -42,7 +42,7 @@ def test_colon_operator_token_is_explicit_torch_pattern():
     }
 
 
-def test_unscoped_aten_pattern_keeps_the_double_colon_name():
+def test_prefix_less_aten_pattern_keeps_the_double_colon_name():
     pattern = ["*/aten::addmm"]
     assert resolve_operator_patterns(pattern) == {
         name: pattern for name in (*KNOWN_ML_API_BACKENDS, "user")
@@ -55,7 +55,7 @@ def test_comma_patterns_stay_on_the_same_prefix():
     }
 
 
-def test_split_operator_tokens_stay_by_backend():
+def test_separate_operator_words_stay_by_backend():
     assert resolve_operator_patterns(["torch:*conv*", "triton:*matmul*"]) == {
         "torch": ["*conv*"],
         "triton": ["*matmul*"],
@@ -85,7 +85,7 @@ def test_space_joined_selectors_stay_by_backend():
     }
 
 
-def test_empty_operator_flag_is_unscoped_double_star():
+def test_empty_operator_flag_is_double_star_on_each_backend():
     assert resolve_operator_patterns([]) == {
         name: ["**"] for name in (*KNOWN_ML_API_BACKENDS, "user")
     }

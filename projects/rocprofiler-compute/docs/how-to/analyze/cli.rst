@@ -916,16 +916,17 @@ Filtering by Operator
 ---------------------
 
 ``--operator`` selects operators with shell-style glob patterns.
-``FW:PATTERN`` limits matching to that framework; an unscoped pattern matches
+``FW:PATTERN`` limits matching to that framework. A later piece with no
+framework stays on the preceding one. A piece before any framework matches
 collected torch, triton, and user nodes. A pattern can match an operator's
 name or its full call path, such as ``nn.Module.Net.forward/aten::addmm``.
-Matching is case-sensitive.
+Matching is case-sensitive. Spaces or commas separate patterns.
 
 * **Wildcard** — ``*relu*`` matches any operator whose name contains ``relu``.
 * **Call path** — ``*/aten::addmm`` matches ``aten::addmm`` when another
   operator calls it.
 * **Exact** — ``aten::addmm``
-* **Match all** — no arguments, ``all``, ``*``, or ``**``
+* **Match all** — no arguments, or ``**``
 
 rocprof-compute prints the call tree of the matching operators. The metric
 tables then cover only the kernels that those operators launched. To narrow
@@ -943,21 +944,25 @@ These options do not change the printed operator tree. Kernel IDs depend on
 
 .. code-block:: shell-session
 
-   # Selector-scoped match
+   # Framework-scoped match
    $ rocprof-compute analyze --experimental --operator torch:*relu* --path ./workload
 
-   # Unscoped path match
+   # Path match before any framework (torch, triton, and user)
    $ rocprof-compute analyze --experimental --operator "*/aten::addmm" --path ./workload
 
    # Match all collected operators (no arguments)
    $ rocprof-compute analyze --experimental --operator --path ./workload
 
-**Filter multiple operators** (comma-separated on one selector):
+**Filter multiple operators.** These two commands are the same filter.
+``*relu*`` stays on torch until ``triton:`` starts the next selector:
 
 .. code-block:: shell-session
 
    $ rocprof-compute analyze --experimental \
-       --operator "torch:*conv*,*relu*" --path ./workload
+       --operator torch:*conv* *relu* triton:*matmul* --path ./workload
+
+   $ rocprof-compute analyze --experimental \
+       --operator torch:*conv*,*relu*,triton:*matmul* --path ./workload
 
 
 Triton operator analysis
