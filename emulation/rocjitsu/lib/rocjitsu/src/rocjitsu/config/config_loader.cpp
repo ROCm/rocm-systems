@@ -374,6 +374,9 @@ private:
       if (maybe_r.failed())
         return util::Result::failure();
       auto r = maybe_r.value();
+      // Division and remainder by zero retain the previous result of 0. Reject
+      // INT_MIN / -1 and INT_MIN % -1: both native operations are undefined
+      // because the quotient is unrepresentable, even though the remainder is 0.
       if (o == '*') {
         const int64_t result = int64_t{l} * r;
         if (result < std::numeric_limits<int32_t>::min() ||
