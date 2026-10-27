@@ -6721,6 +6721,10 @@ protected:
   ncclComm* comm = nullptr;
   ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   ncclDevComm outDevComm{};
+  size_t memSegmentSizes[2] = {8192, 8192};
+  hipMemGenericAllocationHandle_t memHandles[2] = {reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55),
+                                                   reinterpret_cast<hipMemGenericAllocationHandle_t>(0x56)};
+  ncclDevrMemory mems[2] = {};
 
   void SetUp() override {
     DevRuntimeMicroTest::SetUp();
@@ -6745,6 +6749,8 @@ protected:
   }
 
   void TearDown() override {
+    comm->devrState.memHead = nullptr;
+    for (ncclDevrMemory& mem : mems) free(mem.ginSegmentInfos);
     while (comm->devrState.teamHead != nullptr) {
       ncclDevrTeam* next = comm->devrState.teamHead->next;
       free(comm->devrState.teamHead);
@@ -6756,6 +6762,20 @@ protected:
   ncclResult_t Create() {
     return ncclDevrCommCreateInternal(comm, &reqs, &outDevComm, /*isInternal=*/false,
                                       /*deviceCodeVersion=*/NCCL_VERSION_CODE);
+  }
+
+  // Puts mems on memHead as GIN-capable memories obtained before GIN was enabled.
+  void LinkPreGinMemories() {
+    for (int m = 0; m < 2; m++) {
+      mems[m].primaryAddr = reinterpret_cast<void*>(0x100000 * (m + 1));
+      mems[m].size = memSegmentSizes[m];
+      mems[m].numSegments = 1;
+      mems[m].maxGlobalNumSegments = 1;
+      mems[m].segmentSizes = &memSegmentSizes[m];
+      mems[m].memHandles = &memHandles[m];
+    }
+    mems[0].next = &mems[1];
+    comm->devrState.memHead = &mems[0];
   }
 };
 
@@ -6849,21 +6869,7 @@ TEST_F(DevrCommCreateInternalTest, GinConnectFails_RetryConnectsAgain) {
 TEST_F(DevrCommCreateInternalTest, GinRegisterFailsAfterConnect_RollsBackActivation) {
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
   comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
-
-  size_t segmentSizes[2] = {8192, 8192};
-  hipMemGenericAllocationHandle_t memHandles[2] = {reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55),
-                                                   reinterpret_cast<hipMemGenericAllocationHandle_t>(0x56)};
-  ncclDevrMemory mems[2] = {};
-  for (int m = 0; m < 2; m++) {
-    mems[m].primaryAddr = reinterpret_cast<void*>(0x100000 * (m + 1));
-    mems[m].size = segmentSizes[m];
-    mems[m].numSegments = 1;
-    mems[m].maxGlobalNumSegments = 1;
-    mems[m].segmentSizes = &segmentSizes[m];
-    mems[m].memHandles = &memHandles[m];
-  }
-  mems[0].next = &mems[1];
-  comm->devrState.memHead = &mems[0];
+  LinkPreGinMemories();
 
   void* const goodHostWin = reinterpret_cast<void*>(0xa1);
   int goodRegistrations = 0;
@@ -6896,9 +6902,40 @@ TEST_F(DevrCommCreateInternalTest, GinRegisterFailsAfterConnect_RollsBackActivat
   EXPECT_EQ(goodRegistrations, 2);
   EXPECT_EQ(goodDeregistrations, 2);
   EXPECT_FALSE(comm->devrState.ginEnabled);
+}
 
-  comm->devrState.memHead = nullptr;
-  for (ncclDevrMemory& mem : mems) free(mem.ginSegmentInfos);
+// Stream creation fails after every memory registered: activation still rolls back.
+TEST_F(DevrCommCreateInternalTest, StreamCreateFailsAfterGinRegister_RollsBackActivation) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->sharedRes->ginState.numActiveBackends = 1;
+  comm->sharedRes->ginState.backends[0].ginCommCount = 1;
+  LinkPreGinMemories();
+
+  int registrations = 0;
+  int deregistrations = 0;
+  ScopedHook connect(g_devrGinConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void* addr, size_t, void* hostWins[], ncclGinWindow_t[], uint32_t[],
+                                        int, bool, int) {
+    hostWins[0] = addr;
+    registrations++;
+    return ncclSuccess;
+  });
+  ScopedHook dereg(g_devrGinDeregister, [&](ncclComm*, void* hostWins[], uint32_t const[]) {
+    if (hostWins[0] == mems[0].primaryAddr || hostWins[0] == mems[1].primaryAddr) deregistrations++;
+    return ncclSuccess;
+  });
+  ScopedHook stream(g_hipStreamCreateWithFlags, [](hipStream_t*, unsigned) { return hipErrorInvalidValue; });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(stream.calls, 1);
+  EXPECT_EQ(registrations, 2);
+  EXPECT_EQ(deregistrations, 2);
+  EXPECT_FALSE(comm->devrState.ginEnabled);
+  for (ncclDevrMemory& mem : mems) {
+    EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+    EXPECT_EQ(mem.ginHostWins[0], nullptr);
+  }
 }
 
 // Branch: a GIN request rejected after the support checks but before connect
