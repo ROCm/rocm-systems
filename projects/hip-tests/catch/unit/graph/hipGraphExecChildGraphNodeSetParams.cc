@@ -40,6 +40,8 @@
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
+#include "graph_tests_common.hh"
+
 
 HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_Negative) {
   constexpr size_t N = 1024;
@@ -311,39 +313,6 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_ChildTopology) {
   HIP_CHECK(hipStreamDestroy(streamForGraph));
 }
 
-/* Returns the single node of wantType in graph. The child graph below has exactly one
-   node of each type, so a second match means the test graph was changed, not the runtime. */
-static hipGraphNode_t FindNodeOfType(hipGraph_t graph, hipGraphNodeType wantType) {
-  size_t numNodes = 0;
-  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
-  REQUIRE(numNodes > 0);
-  std::vector<hipGraphNode_t> nodes(numNodes);
-  HIP_CHECK(hipGraphGetNodes(graph, nodes.data(), &numNodes));
-
-  hipGraphNode_t found = nullptr;
-  for (size_t i = 0; i < numNodes; ++i) {
-    hipGraphNodeType type;
-    HIP_CHECK(hipGraphNodeGetType(nodes[i], &type));
-    if (type == wantType) {
-      REQUIRE(found == nullptr);
-      found = nodes[i];
-    }
-  }
-  REQUIRE(found != nullptr);
-  return found;
-}
-
-static void VerifyResult(const std::vector<int>& result, const std::vector<int>& expected,
-                         const char* stage) {
-  for (size_t i = 0; i < expected.size(); ++i) {
-    if (result[i] != expected[i]) {
-      WARN("Validation failed at '" << stage << "' index " << i << ": got " << result[i]
-                                    << " expected " << expected[i]);
-      REQUIRE(false);
-    }
-  }
-}
-
 /*
    Update individual nodes *inside* a child graph through the parent's executable graph,
    using the node handles of the graph embedded in the parent's child graph node
@@ -443,7 +412,7 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes) {
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
   HIP_CHECK(hipStreamSynchronize(streamForGraph));
   for (size_t i = 0; i < N; ++i) expected[i] = kMemsetVal0 + A_h[i];
-  VerifyResult(result_h, expected, "baseline");
+  HipTest::checkTest(expected.data(), result_h.data(), N);
 
   // The parent holds a clone of the caller's graph, not the caller's graph itself.
   hipGraph_t embeddedGraph = nullptr;
@@ -451,9 +420,9 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes) {
   REQUIRE(embeddedGraph != nullptr);
   REQUIRE(embeddedGraph != childGraph);
 
-  hipGraphNode_t embMemset = FindNodeOfType(embeddedGraph, hipGraphNodeTypeMemset);
-  hipGraphNode_t embMemcpy = FindNodeOfType(embeddedGraph, hipGraphNodeTypeMemcpy);
-  hipGraphNode_t embKernel = FindNodeOfType(embeddedGraph, hipGraphNodeTypeKernel);
+  hipGraphNode_t embMemset = GraphGetUniqueNodeOfType(embeddedGraph, hipGraphNodeTypeMemset);
+  hipGraphNode_t embMemcpy = GraphGetUniqueNodeOfType(embeddedGraph, hipGraphNodeTypeMemcpy);
+  hipGraphNode_t embKernel = GraphGetUniqueNodeOfType(embeddedGraph, hipGraphNodeTypeKernel);
 
   SECTION("Update embedded memset node with hipGraphExecMemsetNodeSetParams") {
     memsetParams.value = kMemsetVal1;
@@ -462,7 +431,7 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes) {
     HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
     HIP_CHECK(hipStreamSynchronize(streamForGraph));
     for (size_t i = 0; i < N; ++i) expected[i] = kMemsetVal1 + A_h[i];
-    VerifyResult(result_h, expected, "memset updated");
+    HipTest::checkTest(expected.data(), result_h.data(), N);
   }
 
   SECTION("Update embedded memcpy node with hipGraphExecMemcpyNodeSetParams1D") {
@@ -473,7 +442,7 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes) {
     HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
     HIP_CHECK(hipStreamSynchronize(streamForGraph));
     for (size_t i = 0; i < N; ++i) expected[i] = kMemsetVal0 + S_h[i];
-    VerifyResult(result_h, expected, "memcpy1D updated");
+    HipTest::checkTest(expected.data(), result_h.data(), N);
   }
 
   SECTION("Update embedded kernel node with hipGraphExecKernelNodeSetParams") {
@@ -485,7 +454,7 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes) {
     HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
     HIP_CHECK(hipStreamSynchronize(streamForGraph));
     for (size_t i = 0; i < N; ++i) expected[i] = kMemsetVal0 + kMemsetVal0;
-    VerifyResult(result_h, expected, "kernel updated");
+    HipTest::checkTest(expected.data(), result_h.data(), N);
   }
 
   SECTION("Update embedded memset node with generic hipGraphExecNodeSetParams") {
@@ -498,7 +467,7 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes) {
     HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
     HIP_CHECK(hipStreamSynchronize(streamForGraph));
     for (size_t i = 0; i < N; ++i) expected[i] = kMemsetVal2 + A_h[i];
-    VerifyResult(result_h, expected, "generic node params updated");
+    HipTest::checkTest(expected.data(), result_h.data(), N);
   }
 
   SECTION("Caller's own child graph node handles are rejected") {
@@ -514,7 +483,7 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes) {
     // The rejected updates must not have disturbed the graph.
     HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
     HIP_CHECK(hipStreamSynchronize(streamForGraph));
-    VerifyResult(result_h, expected, "after rejected updates");
+    HipTest::checkTest(expected.data(), result_h.data(), N);
   }
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
