@@ -20,6 +20,14 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   // THREAD (exclusive QP ownership) -> !ThreadSafe (drop the lock). Like GDAKI, a
   // single elected lane posts for the whole coop; the mode only changes the
   // internal SQ synchronization, not who posts.
+  //
+  // PRECONDITION for THREAD on this backend (stronger than GDAKI): the QP is picked
+  // by `peer` alone (below) and every context shares cctx->gpu_qp_ptrs, so there is
+  // one SQ per peer for the WHOLE grid -- unlike GDAKI, which indexes
+  // handle[contextId] and gets a QP per context. THREAD is therefore only safe when
+  // a single coop posts to each peer across the entire grid (e.g. all GIN confined
+  // to one CTA). A multi-CTA barrier that signals/flushes qps[peer] breaks this;
+  // such callers must use GPU mode. Opt-in only (library default is GPU).
   template <bool threadSafe, typename Coop>
   NCCL_DEVICE_INLINE static void callImpl(ncclGinCtx ctx, Coop coop, int peer, bool hasWins, ncclGinWindow_t dstWin,
                                           size_t dstOff, ncclGinWindow_t srcWin, size_t srcOff, size_t bytes,
