@@ -1239,6 +1239,9 @@ void Memory::refreshOwningAgentFromPointerInfo() {
     // IPC memory). Note ROCr does not always tag IPC-opened memory with
     // HSA_EXT_POINTER_TYPE_IPC, so key off a valid agentOwner rather than the pointer type.
     //
+    // A zero handle is not a failure: a fabric-backed import carries no dma-buf, so its
+    // placement is never recoverable and ROCr correctly reports no owner.
+    //
     // computeAndSetOwningAgent() calls this before anything is cached, so an unresolvable
     // owner must still land on a usable agent rather than leaving the handle at its 0
     // initializer: getOwningAgent() feeds the copy agents in rocblit.
