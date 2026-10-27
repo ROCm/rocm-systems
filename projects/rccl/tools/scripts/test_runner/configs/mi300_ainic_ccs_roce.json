@@ -687,6 +687,21 @@
           "name": "A20_Multiplane_GidStringMatchesXmlKey",
           "description": "GID string canonical format matches XML key lookup.",
           "test_filter": "MultiplaneLoadTest.GidStringMatchesXmlKey"
+        },
+        {
+          "name": "A20_Cast_FlushPrefix",
+          "description": "A failed signaled flush tail frees the request instead of arming a completion.",
+          "test_filter": "NetIbCastFlushPrefix.*"
+        },
+        {
+          "name": "A20_Cast_SegmentedSendPrefix",
+          "description": "A segmented send keeps the events of the QPs that posted and frees the request when none did.",
+          "test_filter": "NetIbCastSegmentedSendPrefix.*"
+        },
+        {
+          "name": "A20_Cast_SideTable",
+          "description": "RMA comms and NCCL_MULTI_SEGMENT_REGISTER=0 allocate no CTS side table and advertise no multi-segment cap.",
+          "test_filter": "NetIbCastSideTable.*"
         }
       ]
     },

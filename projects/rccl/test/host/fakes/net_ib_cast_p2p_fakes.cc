@@ -13,7 +13,7 @@
 #include "nccl_fakes.h"
 #include "signature-drift.h"
 
-const char* IbCastReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut"};
+const char* IbCastReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut", "IGet", "Failed"};
 int64_t IbCastArThreshold = 8192;
 
 int64_t ncclParamIbCastArThreshold() { return g_loadParam("IB_AR_THRESHOLD", -2); }
@@ -105,6 +105,14 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
   return g_ibCastIflush(recvComm, n, data, sizes, mhandles, request);
 }
 ncclResult_t IbCastTest(void* request, int* done, int* sizes) { return g_ibCastTest(request, done, sizes); }
+
+// reg.cc calls these on its multi-segment paths; rccl_reg_multiseg_cast.cc is not built into this binary.
+ncclResult_t rcclIbCastDeregMrMultiSeg(void*, void*) {
+  FailLoudUnfaked("net_ib_cast_p2p_fakes", "rcclIbCastDeregMrMultiSeg");
+}
+ncclResult_t IbCastRegMrDmaBufMultiSeg(void*, int, void**, size_t*, uint64_t*, int*, int, void**) {
+  FailLoudUnfaked("net_ib_cast_p2p_fakes", "IbCastRegMrDmaBufMultiSeg");
+}
 
 void ResetNetIbCastP2pFakes() {
   g_ibCastMultiSend = DefaultIbCastMultiSend;
