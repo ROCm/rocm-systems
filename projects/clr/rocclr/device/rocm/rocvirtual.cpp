@@ -5455,14 +5455,15 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
         ClearStateFlag(kForceIrq);
         return;
       }
-      // IPC event record: if ipc_s is non-zero, first dispatch a NOP barrier with
-      // the IPC signal as completion_signal; it fires when prior work completes.
+      // IPC event record: the IPC barrier must resolve pending SDMA/blit
+      // dependency signals so that ipc_s fires only after all prior work
+      // (including cross-engine copies) has completed. (ROCM-30067)
       if (ipc_s.handle != 0) {
         if (settings.barrier_value_packet_) {
-          dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, false, hsa_signal_t{0}, 0,
+          dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true, hsa_signal_t{0}, 0,
                                      0, HSA_SIGNAL_CONDITION_EQ, true, ipc_s);
         } else {
-          dispatchBarrierPacket(kNopPacketHeader, true, ipc_s);
+          dispatchBarrierPacket(kNopPacketHeader, false, ipc_s);
         }
       }
 
