@@ -8,10 +8,10 @@ import pytest
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.ml_api_selectors import (
     UNSCOPED_OPERATOR_KEY,
-    authorize_unscoped_operator_patterns,
+    check_list_operators_against_traced_frameworks,
+    operator_patterns_for_traced_frameworks,
     resolve_operator_patterns,
     resolve_profile_selection,
-    sanitize_ml_api_selector_args,
 )
 
 
@@ -57,38 +57,33 @@ def test_empty_operator_flag_is_unscoped_double_star():
     assert resolve_operator_patterns([]) == {UNSCOPED_OPERATOR_KEY: ["**"]}
 
 
-def test_sanitize_rejects_named_backend_missing_from_workload():
+def test_list_operators_rejects_backend_missing_from_workload():
     with pytest.raises(ValueError, match="triton"):
-        sanitize_ml_api_selector_args(["triton"], None, ["torch"])
+        check_list_operators_against_traced_frameworks(["triton"], ["torch"])
+
+
+def test_operator_patterns_reject_backend_missing_from_workload():
     with pytest.raises(ValueError, match="triton"):
-        sanitize_ml_api_selector_args(
-            None, resolve_operator_patterns(["triton:*matmul*"]), ["torch"]
+        operator_patterns_for_traced_frameworks(
+            resolve_operator_patterns(["triton:*matmul*"]), ["torch"]
         )
 
 
-def test_sanitize_rejects_operator_when_workload_has_no_trace():
+def test_operator_patterns_reject_when_workload_has_no_trace():
     with pytest.raises(ValueError, match="was not profiled"):
-        sanitize_ml_api_selector_args(None, resolve_operator_patterns([]), [])
+        operator_patterns_for_traced_frameworks(resolve_operator_patterns([]), [])
 
 
-def test_sanitize_does_not_treat_unscoped_as_a_named_backend():
-    sanitize_ml_api_selector_args(
-        None, resolve_operator_patterns(["*relu*"]), ["torch"]
-    )
-    sanitize_ml_api_selector_args(None, resolve_operator_patterns([]), ["triton"])
-
-
-def test_authorize_copies_unscoped_onto_collected_frameworks_and_user():
-    assert authorize_unscoped_operator_patterns(
+def test_operator_patterns_attach_unscoped_to_traced_frameworks_and_user():
+    assert operator_patterns_for_traced_frameworks(
         resolve_operator_patterns(["*relu*"]), ["torch"]
     ) == {"torch": ["*relu*"], "user": ["*relu*"]}
-    assert authorize_unscoped_operator_patterns(
-        resolve_operator_patterns([]), ["triton"]
-    ) == {"triton": ["**"], "user": ["**"]}
-
-
-def test_authorize_does_not_invent_uncollected_frameworks():
-    bound = authorize_unscoped_operator_patterns(
+    patterns_by_backend = operator_patterns_for_traced_frameworks(
         resolve_operator_patterns([]), ["triton"]
     )
-    assert "torch" not in bound
+    assert patterns_by_backend == {"triton": ["**"], "user": ["**"]}
+    assert "torch" not in patterns_by_backend
+
+
+def test_list_operators_bare_flag_does_not_require_a_named_backend():
+    check_list_operators_against_traced_frameworks([], ["torch"])

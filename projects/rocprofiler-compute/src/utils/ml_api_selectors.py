@@ -3,7 +3,7 @@
 
 """Parse ML API selector flags and apply them to a collected workload."""
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 
@@ -121,51 +121,60 @@ def resolve_operator_patterns(
     return selections
 
 
-def sanitize_ml_api_selector_args(
-    list_selectors: Optional[List[str]],
-    operator_patterns: Optional[Dict[str, List[str]]],
+def check_list_operators_against_traced_frameworks(
+    list_operators: List[str],
     traced_frameworks: List[str],
 ) -> None:
-    """Reject user-named backends the workload did not collect.
+    """Reject --list-operators backends the workload did not collect."""
+    _require_ml_api_trace(traced_frameworks)
+    traced_framework_set = set(traced_frameworks)
+    for backend in list_operators:
+        _reject_untraced_named_backend(backend, traced_framework_set)
 
-    Prefix-less --operator patterns are not a named-backend request.
+
+def operator_patterns_for_traced_frameworks(
+    operator_patterns: Dict[str, List[str]],
+    traced_frameworks: List[str],
+) -> Dict[str, List[str]]:
+    """Check --operator backends.
+
+    Copy prefix-less patterns onto traced frameworks and user.
     """
-    if list_selectors is None and operator_patterns is None:
-        return
+    _require_ml_api_trace(traced_frameworks)
+    traced_framework_set = set(traced_frameworks)
+    for backend in operator_patterns:
+        if backend == UNSCOPED_OPERATOR_KEY:
+            continue
+        _reject_untraced_named_backend(backend, traced_framework_set)
 
+    patterns_by_backend: Dict[str, List[str]] = {}
+    unscoped_patterns: List[str] = []
+    for backend, patterns in operator_patterns.items():
+        if backend == UNSCOPED_OPERATOR_KEY:
+            unscoped_patterns.extend(patterns)
+            continue
+        patterns_by_backend.setdefault(backend, []).extend(patterns)
+    if unscoped_patterns:
+        for operator_backend in dict.fromkeys(traced_frameworks + ["user"]):
+            patterns_by_backend.setdefault(operator_backend, []).extend(
+                unscoped_patterns
+            )
+    return patterns_by_backend
+
+
+def _require_ml_api_trace(traced_frameworks: List[str]) -> None:
     if not traced_frameworks:
         raise ValueError(
             "Workload was not profiled with --trace-ml-api. "
             "Cannot use --list-operators or --operator."
         )
 
-    traced_framework_set = set(traced_frameworks)
-    requested = list(list_selectors or [])
-    if operator_patterns is not None:
-        requested.extend(
-            name for name in operator_patterns if name != UNSCOPED_OPERATOR_KEY
+
+def _reject_untraced_named_backend(
+    backend: str, traced_framework_set: Set[str]
+) -> None:
+    if backend in KNOWN_ML_API_BACKENDS and backend not in traced_framework_set:
+        raise ValueError(
+            f'Workload was not profiled with "--trace-ml-api {backend}". '
+            "Cannot use that selector with --list-operators or --operator."
         )
-    for name in requested:
-        if name in KNOWN_ML_API_BACKENDS and name not in traced_framework_set:
-            raise ValueError(
-                f'Workload was not profiled with "--trace-ml-api {name}". '
-                "Cannot use that selector with --list-operators or --operator."
-            )
-
-
-def authorize_unscoped_operator_patterns(
-    operator_patterns: Dict[str, List[str]],
-    traced_frameworks: List[str],
-) -> Dict[str, List[str]]:
-    """Copy prefix-less patterns onto collected frameworks and user."""
-    bound: Dict[str, List[str]] = {}
-    unscoped: List[str] = []
-    for backend, patterns in operator_patterns.items():
-        if backend == UNSCOPED_OPERATOR_KEY:
-            unscoped.extend(patterns)
-            continue
-        bound.setdefault(backend, []).extend(patterns)
-    if unscoped:
-        for name in list(dict.fromkeys(traced_frameworks + ["user"])):
-            bound.setdefault(name, []).extend(unscoped)
-    return bound
