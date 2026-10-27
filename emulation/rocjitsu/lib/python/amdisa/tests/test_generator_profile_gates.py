@@ -4836,11 +4836,14 @@ def test_generated_rdna_image_load_tracks_d16_destination_preservation(
     )
     assert 'implicit_preservation_uses(uses)' in image_load_uses
     preservation_uses = _generated_function_body(
-        source, f'void ImageLoad{suffix}::implicit_preservation_uses'
+        source, f'bool ImageLoad{suffix}::implicit_preservation_uses'
     )
     assert 'std::popcount(uint32_t{inst_.dmask})' in preservation_uses
     assert 'inst_.d16 && (components & 1u)' in preservation_uses
     assert 'r->index + components / 2' in preservation_uses
+    assert 'image_coordinate_register_count' in preservation_uses
+    assert 'registers[index] == preserved.index' in preservation_uses
+    assert 'return true' in preservation_uses
     image_store_uses = _generated_function_body(
         source, f'void ImageStore{suffix}::implicit_uses'
     )

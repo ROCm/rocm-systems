@@ -707,25 +707,33 @@ TEST(MemoryWaitExecutionTest, D16ImageWaitsTrackPartialResultsAndRealImplicitRea
     ASSERT_NE(wf, nullptr);
     wf->set_exec(1);
     auto decoder = Decoder::create(arch);
-    auto decode = [&](uint8_t dmask) -> DecodeResult {
+    auto decode = [&](uint8_t dmask, uint8_t first_address = 2) -> DecodeResult {
       util::StringDiagnostic error;
       if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
-        const auto base = rdna3::build_mimg(
-            rdna3::kImageLoadMimg,
-            {.nsa = 1, .dim = 1, .unorm = 1, .dmask = dmask, .d16 = 1, .vaddr = 2, .vdata = 8});
+        const auto base = rdna3::build_mimg(rdna3::kImageLoadMimg, {.nsa = 1,
+                                                                    .dim = 1,
+                                                                    .unorm = 1,
+                                                                    .dmask = dmask,
+                                                                    .d16 = 1,
+                                                                    .vaddr = first_address,
+                                                                    .vdata = 8});
         const std::array<uint32_t, 3> words{base[0], base[1], 6};
         return decoder->decode_window(words, 0, error.emitter());
       }
       if (arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
-        const auto base = rdna3_5::build_mimg(
-            rdna3_5::kImageLoadMimg,
-            {.nsa = 1, .dim = 1, .unorm = 1, .dmask = dmask, .d16 = 1, .vaddr = 2, .vdata = 8});
+        const auto base = rdna3_5::build_mimg(rdna3_5::kImageLoadMimg, {.nsa = 1,
+                                                                        .dim = 1,
+                                                                        .unorm = 1,
+                                                                        .dmask = dmask,
+                                                                        .d16 = 1,
+                                                                        .vaddr = first_address,
+                                                                        .vdata = 8});
         const std::array<uint32_t, 3> words{base[0], base[1], 6};
         return decoder->decode_window(words, 0, error.emitter());
       }
       const auto words = rdna4::build_vimage(
           rdna4::kImageLoadVimage,
-          {.dim = 1, .d16 = 1, .dmask = dmask, .vdata = 8, .vaddr0 = 2, .vaddr1 = 6});
+          {.dim = 1, .d16 = 1, .dmask = dmask, .vdata = 8, .vaddr0 = first_address, .vaddr1 = 6});
       return decoder->decode_window(words, 0, error.emitter());
     };
 
@@ -771,6 +779,22 @@ TEST(MemoryWaitExecutionTest, D16ImageWaitsTrackPartialResultsAndRealImplicitRea
         state.check_instruction(inst, *wf);
         EXPECT_EQ(reports, pending == 2 ? 1u : 0u);
       }
+
+      // A register can be both the preserved destination and a real coordinate
+      // source. Preservation must not erase the coordinate dependency.
+      auto aliased = decode(dmask, static_cast<uint8_t>(last));
+      ASSERT_TRUE(aliased.succeeded());
+      state.clear();
+      reports = 0;
+      state.add({state.issue(WaitCounterKind::Ds),
+                 0x100,
+                 1,
+                 {RegClass::VGPR, last, 1},
+                 WaitCounterKind::Ds,
+                 0xc});
+      bind_reports();
+      state.check_instruction(*aliased.value(), *wf);
+      EXPECT_EQ(reports, 1u);
 
       // GFX11 image loads have ordered writeback within their completion class.
       // A second partial load can supersede the first low-half result without

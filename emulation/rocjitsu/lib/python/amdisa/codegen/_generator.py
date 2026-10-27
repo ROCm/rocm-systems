@@ -11566,7 +11566,7 @@ class CodeGenerator:
                         if _image_d16_preserves_destination:
                             public_members.append(
                                 cgen.Statement(
-                                    'void implicit_preservation_uses('
+                                    'bool implicit_preservation_uses('
                                     'RegisterSet &uses) const override'
                                 )
                             )
@@ -13976,9 +13976,19 @@ class CodeGenerator:
                             '  const uint32_t components = '
                             'std::popcount(uint32_t{inst_.dmask});\n'
                             '  if (inst_.d16 && (components & 1u))\n'
-                            '    if (auto r = vdata.to_register_ref())\n'
-                            '      preservation_uses.expand(RegisterRef{r->cls,\n'
-                            '          static_cast<uint16_t>(r->index + components / 2), 1});\n'
+                            '    if (auto r = vdata.to_register_ref()) {\n'
+                            '      const RegisterRef preserved{\n'
+                            '          r->cls, static_cast<uint16_t>(r->index + components / 2), '
+                            '1};\n'
+                            f'      const auto registers = {address_registers};\n'
+                            '      const uint32_t count = '
+                            'amdgpu::image_coordinate_register_count(\n'
+                            '          inst_.dim, bool(inst_.a16));\n'
+                            '      for (uint32_t index = 0; index < count; ++index)\n'
+                            '        if (registers[index] == preserved.index)\n'
+                            '          return true;\n'
+                            '      preservation_uses.expand(preserved);\n'
+                            '    }\n'
                             if _image_d16_preserves_destination
                             else ''
                         )
@@ -14005,9 +14015,10 @@ class CodeGenerator:
                         if _image_d16_preserves_destination:
                             inst_impls.append(
                                 cgen.Line(
-                                    f'void {inst.fmt_name}::implicit_preservation_uses'
+                                    f'bool {inst.fmt_name}::implicit_preservation_uses'
                                     '(RegisterSet &preservation_uses) const {\n'
                                     f'{image_d16_preservation}'
+                                    '  return true;\n'
                                     '}'
                                 )
                             )

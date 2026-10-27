@@ -23,7 +23,7 @@ public:
       modifiers.memory_result_last_bytes = 0x3;
   }
   void implicit_uses(RegisterSet &uses) const override;
-  void implicit_preservation_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
   bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;

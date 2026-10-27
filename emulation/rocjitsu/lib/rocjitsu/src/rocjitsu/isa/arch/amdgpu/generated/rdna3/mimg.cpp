@@ -102,12 +102,20 @@ void ImageLoadMimg::implicit_uses(RegisterSet &uses) const {
   implicit_preservation_uses(uses);
 }
 
-void ImageLoadMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+bool ImageLoadMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
   const uint32_t components = std::popcount(uint32_t{inst_.dmask});
   if (inst_.d16 && (components & 1u))
-    if (auto r = vdata.to_register_ref())
-      preservation_uses.expand(
-          RegisterRef{r->cls, static_cast<uint16_t>(r->index + components / 2), 1});
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
 }
 
 bool ImageLoadMimg::tracks_explicit_source(uint8_t operand_index) const {

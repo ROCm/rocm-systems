@@ -383,7 +383,9 @@ public:
   /// @details These uses matter to liveness but do not consume a pending memory
   /// result. Keeping them separate lets memory-wait checking retain genuine
   /// implicit reads, such as image coordinate registers.
-  virtual void implicit_preservation_uses(RegisterSet & /*uses*/) const {}
+  /// @returns True when the instruction distinguishes preservation-only uses
+  /// from genuine implicit reads, even if this encoding has no preservation use.
+  virtual bool implicit_preservation_uses(RegisterSet & /*uses*/) const { return false; }
 
   /// @brief Query already-decoded modifiers only when a register may be pending.
   virtual void amdgpu_register_modifiers(amdgpu::RegisterModifiers & /*modifiers*/) const {}

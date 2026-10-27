@@ -637,11 +637,11 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     }
   }
   RegisterSet implicit, preservation_uses;
-  inst.implicit_preservation_uses(preservation_uses);
+  const bool distinguishes_preservation = inst.implicit_preservation_uses(preservation_uses);
   // Legacy partial-destination hooks do not distinguish preservation from
   // genuine hidden reads. Instructions that do provide the distinction retain
   // their real implicit dependencies while dropping only preservation uses.
-  if (!preserves_destination || !preservation_uses.none()) {
+  if (!preserves_destination || distinguishes_preservation) {
     inst.implicit_uses(implicit);
     implicit -= preservation_uses;
   }

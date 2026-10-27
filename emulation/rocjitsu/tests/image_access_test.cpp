@@ -71,8 +71,19 @@ std::array<uint32_t, 8> descriptor(const Image &image) {
   return r;
 }
 
-std::array<uint32_t, 8> rdna_image_descriptor(rj_code_arch_t arch, uint32_t type = amdgpu::kImage2d,
-                                              uint32_t format = 20, uint32_t selectors = kXOne) {
+struct RdnaImageDescriptor {
+  uint32_t type = amdgpu::kImage2d;
+  uint32_t format = 20;
+  uint32_t selectors = kXOne;
+  uint32_t width = 3;
+  uint32_t height = 2;
+  uint32_t pitch = 64;
+  uint32_t depth = 4;
+  bool gfx12_bit_157 = false;
+};
+
+std::array<uint32_t, 8> rdna_image_descriptor(rj_code_arch_t arch,
+                                              const RdnaImageDescriptor &image = {}) {
   std::array<uint32_t, 8> words{};
   const auto set = [&](uint32_t bit, uint32_t width, uint64_t value) {
     for (uint32_t i = 0; i < width; ++i)
@@ -80,15 +91,17 @@ std::array<uint32_t, 8> rdna_image_descriptor(rj_code_arch_t arch, uint32_t type
   };
   const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
   set(0, 40, kBase >> 8);
-  set(gfx12 ? 49 : 52, 8, format);
-  set(62, gfx12 ? 16 : 14, 2); // Width 3.
-  set(78, gfx12 ? 16 : 14, 1); // Height 2.
-  set(96, 12, selectors);
-  set(124, 4, type);
-  if (amdgpu::image_resource_encodes_pitch(type))
-    set(128, gfx12 ? 16 : 14, 63); // Pitch 64.
+  set(gfx12 ? 49 : 52, 8, image.format);
+  set(62, gfx12 ? 16 : 14, image.width - 1);
+  set(78, gfx12 ? 16 : 14, image.height - 1);
+  set(96, 12, image.selectors);
+  set(124, 4, image.type);
+  if (amdgpu::image_resource_encodes_pitch(image.type))
+    set(128, gfx12 ? 16 : 14, image.pitch - 1);
   else
-    set(128, gfx12 ? 14 : 13, 3); // Four layers or depth slices.
+    set(128, gfx12 ? 14 : 13, image.depth - 1);
+  if (gfx12 && image.gfx12_bit_157)
+    set(157, 1, 1);
   return words;
 }
 
@@ -558,22 +571,8 @@ TEST(ImageAccessTest, RdnaLinearR32DescriptorsPrepareTheExpectedMemoryAccess) {
     ASSERT_NE(wf, nullptr);
     wf->set_exec(1);
 
-    std::array<uint32_t, 8> words{};
-    const auto set = [&](uint32_t bit, uint32_t width, uint64_t value) {
-      for (uint32_t i = 0; i < width; ++i)
-        words[(bit + i) / 32] |= static_cast<uint32_t>((value >> i) & 1u) << ((bit + i) % 32);
-    };
-    const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
-    set(0, 40, kBase >> 8);
-    set(gfx12 ? 49 : 52, 8, 20); // R32_UINT.
-    set(62, gfx12 ? 16 : 14, 63);
-    set(78, gfx12 ? 16 : 14, 0);
-    set(96, 12, kXOne);
-    set(116, 5, 0); // Linear.
-    set(124, 4, amdgpu::kImage2d);
-    set(128, gfx12 ? 14 : 13, 63);
-    if (gfx12)
-      set(157, 1, 1); // Adjacent GFX12 field is not part of BASE_ARRAY.
+    const auto words =
+        rdna_image_descriptor(arch, {.width = 64, .height = 1, .gfx12_bit_157 = true});
     for (uint32_t i = 0; i < words.size(); ++i)
       cu->write_sgpr(wf->sgpr_alloc().base + i, words[i]);
     cu->write_vgpr(wf->vgpr_alloc().base, 0, 0);
@@ -636,7 +635,8 @@ protected:
   }
 
   void bind_resource(uint32_t format = 20, uint32_t selectors = kXOne) {
-    const auto resource = rdna_image_descriptor(GetParam(), amdgpu::kImage2d, format, selectors);
+    const auto resource =
+        rdna_image_descriptor(GetParam(), {.format = format, .selectors = selectors});
     for (uint32_t i = 0; i < resource.size(); ++i)
       cu->write_sgpr(wf->sgpr_alloc().base + kResourceBase + i, resource[i]);
   }
@@ -1001,7 +1001,7 @@ TEST(ImageAccessTest, RdnaLayeredAnd3dLinearImagesRejectUnknownPitch) {
       ASSERT_NE(wf, nullptr);
       wf->set_exec(1);
 
-      const auto resource = rdna_image_descriptor(arch, type);
+      const auto resource = rdna_image_descriptor(arch, {.type = type});
       for (uint32_t i = 0; i < resource.size(); ++i)
         cu->write_sgpr(wf->sgpr_alloc().base + i, resource[i]);
       cu->write_vgpr(wf->vgpr_alloc().base, 0, 0);
