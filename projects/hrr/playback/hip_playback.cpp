@@ -4589,28 +4589,36 @@ bool hrr_translate_memcpy3d_arrays(const PlaybackContext& ctx, const char* api,
            translate_array_or_refuse(ctx, api, "destination", &parms.dstArray);
 }
 
-// A host-to-array or array-to-host hipMemcpy3D measures extent.width in array
-// elements, but capture sized the host blob, and replay sizes its scratch buffer
-// and reads the blob, as if it were bytes. The runtime would then read past the
-// blob or write past the scratch buffer by the element size, so such a copy is
-// not issued. Copies between an array and device memory, or another array, have
-// no host side and are replayed.
-static bool memcpy3d_declines_host_array(PlaybackContext& ctx, const char* api,
+// A hipMemcpy3D with a host end and an array end, as its kind says, measures
+// extent.width in array elements, but capture sized the host blob, and replay
+// sizes its scratch buffer and reads the blob, as if it were bytes. The runtime
+// would then read past the blob or write past the scratch buffer by the element
+// size, so such a copy is not issued. A copy between an array and device memory,
+// or another array, has no host side and is replayed; so is one whose kind is
+// hipMemcpyDefault, which is issued as a device-to-device copy.
+static bool memcpy3d_is_host_array(const hipMemcpy3DParms& p) {
+    return (p.kind == hipMemcpyHostToDevice && p.dstArray) ||
+           (p.kind == hipMemcpyDeviceToHost && p.srcArray);
+}
+
+// Not issuing the copy leaves its effect out of the replay, so it is reported as
+// unreplayable and returns hipErrorNotSupported, which ends the replay (or
+// counts an event failure under --continue-on-error) instead of passing. An
+// array-to-host copy with a D2H check counts as the failed check it was before
+// replay translated arrays, when its null source failed in note_unmapped_d2h_src.
+static hipError_t refuse_host_array_copy(PlaybackContext& ctx, const char* api,
                                          const hipMemcpy3DParms& p, int32_t recorded_ret,
                                          uint64_t hash_lo, uint64_t hash_hi) {
-    const bool host_array = (p.kind == hipMemcpyHostToDevice && p.dstArray) ||
-                            (p.kind == hipMemcpyDeviceToHost && p.srcArray);
-    if (!host_array) return false;
-    static std::atomic<bool> warned{false};
-    if (!warned.exchange(true))
-        fprintf(stderr, "[HRR] %s: a copy between host memory and an array is not replayed "
-                        "(the recorded host rect is sized in bytes, the copy in array elements); "
-                        "it is skipped and results may differ from capture.\n", api);
-    // A skipped check still counts as expected, as in replay_pitched_d2h.
-    if (p.kind == hipMemcpyDeviceToHost && ctx.validate_d2h && (hash_lo || hash_hi) &&
-        recorded_ret == 0)
+    if (recorded_ret != 0) return hipSuccess;  // it failed at capture too
+    if (p.kind == hipMemcpyDeviceToHost && ctx.validate_d2h && (hash_lo || hash_hi)) {
         ctx.d2h_attempted++;
-    return true;
+        ctx.note_d2h_fail(hrr_dispatch_seq);
+    }
+    hrr_note_unreplayable(ctx, api,
+                          "a copy between host memory and an array has its extent in array "
+                          "elements but its recorded host rect and blob in bytes, so issuing it "
+                          "would read or write past them");
+    return hipErrorNotSupported;
 }
 
 // hipMemcpy3D runs on the legacy default stream and hipMemcpy3D_spt on this
@@ -4623,9 +4631,9 @@ static hipError_t replay_memcpy3d(PlaybackContext& ctx, const uint8_t* pl, bool 
     hipError_t (*const copy)(const hipMemcpy3DParms*) = spt ? hipMemcpy3D_spt : hipMemcpy3D;
     if (!hrr_translate_memcpy3d_arrays(ctx, spt ? "hipMemcpy3D_spt" : "hipMemcpy3D", parms))
         return hipErrorInvalidValue;
-    if (memcpy3d_declines_host_array(ctx, spt ? "hipMemcpy3D_spt" : "hipMemcpy3D", parms, a->ret,
-                                     a->d2h_hash_lo, a->d2h_hash_hi))
-        return hipSuccess;
+    if (memcpy3d_is_host_array(parms))
+        return refuse_host_array_copy(ctx, spt ? "hipMemcpy3D_spt" : "hipMemcpy3D", parms, a->ret,
+                                      a->d2h_hash_lo, a->d2h_hash_hi);
 
     if (parms.kind == hipMemcpyHostToDevice) {
         if (!memcpy3d_h2d_src(ctx, "hipMemcpy3D", a->blob_hash_lo, a->blob_hash_hi, parms))
@@ -4679,9 +4687,9 @@ static hipError_t replay_memcpy3d_async(PlaybackContext& ctx, const uint8_t* pl,
     if (!hrr_translate_memcpy3d_arrays(
             ctx, spt ? "hipMemcpy3DAsync_spt" : "hipMemcpy3DAsync", parms))
         return hipErrorInvalidValue;
-    if (memcpy3d_declines_host_array(ctx, spt ? "hipMemcpy3DAsync_spt" : "hipMemcpy3DAsync", parms,
-                                     a->ret, a->d2h_hash_lo, a->d2h_hash_hi))
-        return hipSuccess;
+    if (memcpy3d_is_host_array(parms))
+        return refuse_host_array_copy(ctx, spt ? "hipMemcpy3DAsync_spt" : "hipMemcpy3DAsync",
+                                      parms, a->ret, a->d2h_hash_lo, a->d2h_hash_hi);
     hipStream_t stream = memcpy3d_async_stream(ctx, a->stream, spt);
 
     if (parms.kind == hipMemcpyHostToDevice) {
@@ -4977,13 +4985,27 @@ hipError_t playback_hipMemcpyParam2DAsync(PlaybackContext& ctx, const uint8_t* p
 // here rather than by a ptr_members rewrite in the generator.
 // ---------------------------------------------------------------------------
 
-// False when an array operand names a handle replay never created.
+// False when the operand cannot be handed to HIP: an array operand whose handle
+// is null or names an array replay never created (CLR dereferences it to size
+// the element), or a type that is neither pointer nor array (CLR would leave the
+// operand's side of the copy uninitialised).
 static bool translate_batch_operand(PlaybackContext& ctx, const char* what,
                                     hipMemcpy3DOperand& operand) {
     if (operand.type == hipMemcpyOperandTypePointer) {
         operand.op.ptr.ptr = ctx.translate_ptr(
             reinterpret_cast<uint64_t>(operand.op.ptr.ptr));
         return true;
+    }
+    if (operand.type != hipMemcpyOperandTypeArray) {
+        fprintf(stderr, "[HRR] hipMemcpy3DBatchAsync: the %s operand has type %d, which is "
+                        "neither pointer nor array, so the batch is refused\n",
+                what, static_cast<int>(operand.type));
+        return false;
+    }
+    if (!operand.op.array.array) {
+        fprintf(stderr, "[HRR] hipMemcpy3DBatchAsync: the %s array operand is null, so the "
+                        "batch is refused\n", what);
+        return false;
     }
     return translate_array_or_refuse(ctx, "hipMemcpy3DBatchAsync", what,
                                      &operand.op.array.array);
@@ -5855,8 +5877,9 @@ hipError_t playback_hipGraphAddMemAllocNode(PlaybackContext& ctx,
 }
 
 // Translate a recorded HIP_MEMCPY3D in place. A host operand is a payload the
-// archive never carried, and an address or array handle replay never created
-// is not ours to hand to HIP; each is reported and false is returned.
+// archive never carried, so it is reported rather than passed through. An array
+// replay never created becomes null, which CLR refuses with hipErrorInvalidValue
+// (ihipDrvMemcpy3D_validate), also for the graph set-params calls.
 static bool translate_drv_memcpy3d(PlaybackContext& ctx, const char* api,
                                    HIP_MEMCPY3D& c) {
     struct Side { const char* what; hipMemoryType type; const void* host;
@@ -5883,7 +5906,8 @@ static bool translate_drv_memcpy3d(PlaybackContext& ctx, const char* api,
             }
             *s.dev = live;
         }
-        if (!translate_array_or_refuse(ctx, api, s.what, s.arr)) return false;
+        if (*s.arr)
+            *s.arr = ctx.translate_array(reinterpret_cast<uint64_t>(*s.arr));
     }
     return true;
 }

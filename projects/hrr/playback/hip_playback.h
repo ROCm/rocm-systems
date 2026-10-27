@@ -1066,7 +1066,7 @@ hipCtx_t hrr_live_ctx(uint64_t recorded);
 // Replaces the srcArray and dstArray handles of a recorded hipMemcpy3DParms with
 // the live arrays replay created for them. A handle replay never created is an
 // archive-chosen address the runtime would dereference, so it is named on stderr
-// and false is returned; the copy must then not reach HIP.
+// and false is returned; the copy must then not reach HIP. A null handle stays null.
 bool hrr_translate_memcpy3d_arrays(const PlaybackContext& ctx, const char* api,
                                    hipMemcpy3DParms& parms);
 

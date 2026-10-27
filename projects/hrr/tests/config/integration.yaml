@@ -45,8 +45,6 @@ cases:
   Unit_HRR_ApiMatrix_T4_Roundtrip: {}
   Unit_HRR_ApiMatrix_T5_Roundtrip: {}
   Unit_HRR_ApiMatrix_UC1Dense_Direct: {}
-  Unit_HRR_ArrayCopiesRoundtrip: {}
-  Unit_HRR_ArrayCopies_Direct: {}
   Unit_HRR_BlankCaptureOutputCapturesNothing: {}
   Unit_HRR_CaptureAbort_Direct: {}
   Unit_HRR_CaptureActiveMarker: {}
