@@ -519,6 +519,7 @@ add_executable(
     decode_execute_benchmark.cpp
     util_conditional_wake_spinlock_test.cpp
     util_distributed_shared_mutex_test.cpp
+    util_intrusive_list_test.cpp
     util_observable_shared_mutex_test.cpp
     host_mapping_lock_test.cpp
     util_result_test.cpp
