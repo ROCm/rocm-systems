@@ -200,10 +200,11 @@ __device__ void ginAllGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWi
 
   const int ginContext = 0;
   const unsigned int signalIndex = blockIdx.x;
-  // Peer r is owned by exactly one thread (CTA r%gridDim.x, thread r/gridDim.x), so
-  // each QP has a single poster; THREAD mode (--gin_resource_sharing 0) drops the
-  // per-WQE SQ-lock atomics on the rocshmem-GDA bnxt/mlx5 path.
-  ncclGin gin { devComm, ginContext, ginResourceSharingModeDev() };
+  // GPU-locked, NOT --gin_resource_sharing: unlike alltoall/broadcast, the puts
+  // here are spread across CTAs (peer r on CTA r%gridDim.x) and every CTA posts
+  // the world barrier, so qps[peer] is multi-poster -- THREAD's lock elision would
+  // race. Keep the SQ lock regardless of the CLI selection.
+  ncclGin gin { devComm, ginContext, NCCL_GIN_RESOURCE_SHARING_GPU };
   const uint64_t signalValue = gin.readSignal(signalIndex);
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
