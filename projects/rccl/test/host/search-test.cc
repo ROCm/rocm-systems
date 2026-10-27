@@ -1022,7 +1022,7 @@ TEST_F(SearchMicrotest, GraphFromXml_SkipsOtherIdsAndCrossNicWhenDisabled) {
   EXPECT_EQ(0, nChannels);
 
   g_params.clear();
-  EXPECT_EQ(ncclSystemError, ncclTopoGetGraphFromXml(xml->nodes, system_.get(), graph.get(), &nChannels));
+  EXPECT_EQ(ncclInvalidUsage, ncclTopoGetGraphFromXml(xml->nodes, system_.get(), graph.get(), &nChannels));
   EXPECT_TRUE(Logged("XML Import Channel : dev 9 not found"));
   EXPECT_FLOAT_EQ(1.5, graph->latencyInter);
   EXPECT_EQ(1, graph->crossNic);
@@ -1487,7 +1487,8 @@ TEST_F(SearchXmlChannelMicrotest, UnknownGpuDev_IsRejected) {
   ncclXmlNode* channel = NewNode("channel");
   AddChild(channel, "gpu", "9");
 
-  EXPECT_EQ(ncclSystemError, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
+  EXPECT_EQ(ncclInvalidUsage, ncclTopoGetChannelFromXml(channel, 0, system(), graph()));
+  EXPECT_TRUE(Logged("dev 9 not found"));
 }
 
 TEST_F(SearchXmlChannelMicrotest,

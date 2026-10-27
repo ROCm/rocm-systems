@@ -10,6 +10,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Changed
 * On gfx1250, cuMem auto-detection (`NCCL_CUMEM_ENABLE=-2`, the default) no longer requires Linux kernel 6.8 or later; it enables cuMem whenever the ROCm version, VMM support and runtime probe checks pass. The runtime probe now also exports a DMA-BUF, so hosts that cannot export one keep cuMem off. Kernel 6.8 or later is still recommended for performance, and RCCL logs a warning when cuMem runs on an older kernel. Set `NCCL_CUMEM_ENABLE=0` to keep cuMem off.
 * A graph XML file supplied through `NCCL_GRAPH_FILE` is now rejected with `ncclInvalidUsage` if its `nchannels` attribute does not match the number of `<channel>` elements present, instead of reading uninitialized channel data.
+* A `<gpu>` element in an `NCCL_GRAPH_FILE` graph naming a `dev` the topology does not contain now returns `ncclInvalidUsage` rather than `ncclSystemError`, matching the other rejections of malformed graph files.
 
 ### Removed
 
