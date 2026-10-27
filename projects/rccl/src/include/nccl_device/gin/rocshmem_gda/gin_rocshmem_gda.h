@@ -235,13 +235,13 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
                                       cuda::memory_order ord, uint32_t* abortFlag) {
     (void)hasDescriptor;
     (void)descriptor;
-    (void)ord;
     using nccl::gin::rocshmem_gda::quietPeer;
     using nccl::gin::rocshmem_gda::quietTarget;
 #pragma unroll 1
     for (int peer = coop.thread_rank(); peer < ctx.nRanks; peer += coop.size()) {
       (void)quietPeer</*HasTimeout=*/false>(ctx, peer, quietTarget(ctx, peer), abortFlag, 0, 0);
     }
+    cuda::atomic_thread_fence(ord, cuda::thread_scope_system);
   }
   template <typename Coop>
   NCCL_DEVICE_INLINE static ncclResult_t call(ncclGinCtx ctx, Coop coop, bool hasDescriptor,
@@ -249,7 +249,6 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
                                               uint32_t* abortFlag, uint64_t timeoutCycles) {
     (void)hasDescriptor;
     (void)descriptor;
-    (void)ord;
     using nccl::gin::rocshmem_gda::quietPeer;
     using nccl::gin::rocshmem_gda::quietTarget;
     uint64_t startCycle = clock64();
@@ -259,6 +258,7 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         quietPeer</*HasTimeout=*/true>(ctx, peer, quietTarget(ctx, peer), abortFlag, startCycle, timeoutCycles);
       if (ret != ncclSuccess) return ret;
     }
+    cuda::atomic_thread_fence(ord, cuda::thread_scope_system);
     return ncclSuccess;
   }
 };
