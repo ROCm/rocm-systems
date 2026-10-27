@@ -209,6 +209,7 @@ def test_sanitize_authorizes_trace_ml_api_selectors(tmp_path, monkeypatch) -> No
 
     run_sanitize(list_operators=["torch"])
     run_sanitize(list_operators=["user"])
+    run_sanitize(list_operators=[], operator=["triton:*matmul*"])
     run_sanitize(operator=["torch:*relu*"])
     unscoped = run_sanitize(operator=["*relu*"])
     assert unscoped.operator_patterns == {"torch": ["*relu*"], "user": ["*relu*"]}

@@ -23,8 +23,8 @@ from utils.logger import (
 )
 from utils.metrics.expression import build_metric_value_string
 from utils.ml_api_selectors import (
-    authorize_unscoped_operator_patterns,
-    sanitize_ml_api_selector_args,
+    check_list_operators_against_traced_frameworks,
+    operator_patterns_for_traced_frameworks,
 )
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
@@ -311,18 +311,19 @@ class OmniAnalyze_Base:
         profiling_config = self.get_profiling_config()
         trace_ml_api = profiling_config.get("trace_ml_api")
         traced_frameworks = [str(name) for name in trace_ml_api] if trace_ml_api else []
-        list_selectors = getattr(args, "list_operators", None)
+        list_operators = getattr(args, "list_operators", None)
         operator_patterns = getattr(args, "operator_patterns", None)
         try:
-            sanitize_ml_api_selector_args(
-                list_selectors, operator_patterns, traced_frameworks
-            )
+            if list_operators is not None:
+                check_list_operators_against_traced_frameworks(
+                    list_operators, traced_frameworks
+                )
+            elif operator_patterns is not None:
+                args.operator_patterns = operator_patterns_for_traced_frameworks(
+                    operator_patterns, traced_frameworks
+                )
         except ValueError as error:
             console_error("ml api trace", str(error))
-        if operator_patterns is not None:
-            args.operator_patterns = authorize_unscoped_operator_patterns(
-                operator_patterns, traced_frameworks
-            )
 
         for dir_info in args.path:
             if not any([
