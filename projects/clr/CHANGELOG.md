@@ -11,8 +11,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - Library Management: support for API parity with corresponding CUDA API.
       * `hipLibraryGetModule` returns the module handle associated with a library.
       * `hipKernelSetAttributeForDevice` sets a device-wide attribute for a kernel on a specific device.
-    - Device Management: support for L2 cache persistence control, matching the corresponding CUDA API.
-      * `hipLimitPersistingL2CacheSize` is a new `hipLimit_t` enumerator for use with `hipDeviceGetLimit` and `hipDeviceSetLimit`, allowing applications to control the portion of the L2 cache reserved for persisting accesses.
 * Support for the `hipMemRangeFlagDmaBufMappingTypePcie` flag in `hipMemGetHandleForAddressRange`, providing parity with CUDA behavior.
 * Support for recovering allocation properties from imported virtual memory handles. `hipMemGetAllocationPropertiesFromHandle` now correctly reports `hipMemLocationTypeHost` for host-backed allocations imported via `hipMemImportFromShareableHandle`, instead of always reporting device memory. For device-backed allocations, it reports the owning device rather than the device that was current when the handle was imported.
 * Support in WSL 2 to prevent indefinite application hangs and to report errors for device-side faults, including out-of-bounds writes, null pointer dereferences, and device asserts.
@@ -39,7 +37,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Changed
 
-* `hipDeviceProp_t::persistingL2CacheMaxSize` now reports the actual maximum persisting L2 cache size queried from the device at initialization time. On devices or runtime versions that do not support L2 persistence, this value is 0. Previously it was reported as `l2CacheSize`. Applications should check that `persistingL2CacheMaxSize > 0` before calling `hipDeviceSetLimit` with `hipLimitPersistingL2CacheSize`.
 * Stream priority is now disabled to avoid known queue-priority-related issues. Priority streams are currently not supported.
 * HRR capture feature is now disabled.
 * `hipMemAdvise` now aliases `hipMemAdvise_v2`, which uses a `hipMemLocation` parameter instead of a device ID. Applications using the legacy `hipMemAdvise` signature may require source updates to pass a `hipMemLocation` structure. To maintain compatibility with the previous API signature, define `HIP_TARGET_API_VERSION` to a nonzero value less than 800 (for example, 700 for HIP 7.0 or 717 for HIP 7.17) at compile time. By default, `hipMemAdvise` alias to the `hipMemAdvise_v2` interface.
