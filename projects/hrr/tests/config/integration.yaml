@@ -136,9 +136,11 @@ cases:
   Unit_HRR_DrvMemcpy_Direct: {}
   Unit_HRR_EmbeddedPtrRoundtrip: {}
   Unit_HRR_EmbeddedPtrStruct_Direct: {}
+  Unit_HRR_ExtLaunchEventMarkers: {}
   Unit_HRR_ExtMallocRoundtrip: {}
   Unit_HRR_ExtMalloc_Direct: {}
   Unit_HRR_ExtModuleLaunchKernelRoundtrip: {}
+  Unit_HRR_ExtModuleLaunchKernelTiming_Direct: {}
   Unit_HRR_ExtModuleLaunchKernel_Direct: {}
   Unit_HRR_FailedBlobClose_Direct: {}
   Unit_HRR_FailedBlobClose_LeavesCaptureIncomplete: {}

@@ -4212,16 +4212,21 @@ hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx,
     // archive recorded before that side effect was stored has no
     // hipEventRecord for the pair, and the captured call still succeeded.
     // Both handles resolving means the events are still live, so this is not
-    // a destroyed event. The same return also covers a marker replay did not
-    // apply. The milliseconds were not stored. Warn once and clear the
-    // sticky error — the next call would otherwise report it.
-    if (r == hipErrorInvalidHandle && a->ret == 0 && start && stop) {
+    // a destroyed event. The milliseconds were not stored. Warn once and clear
+    // the sticky error — the next call would otherwise report it.
+    // Only such an archive gets this: one with
+    // HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS stored the markers, so a missing
+    // one there is a capture or replay fault and fails the replay.
+    if (r == hipErrorInvalidHandle && a->ret == 0 && start && stop &&
+        !ctx.ext_launch_event_markers) {
         static std::atomic<bool> warned{false};
         if (!warned.exchange(true)) {
             fprintf(stderr,
                     "[HRR] hipEventElapsedTime: no marker on a live pair "
-                    "(recorded success, replay returned hipErrorInvalidHandle); "
-                    "continuing\n");
+                    "(start=0x%llx stop=0x%llx; archive predates ext-launch "
+                    "event markers, recorded success, replay returned "
+                    "hipErrorInvalidHandle); continuing\n",
+                    (unsigned long long)a->start, (unsigned long long)a->stop);
         }
         (void)hipGetLastError();
         return hipSuccess;

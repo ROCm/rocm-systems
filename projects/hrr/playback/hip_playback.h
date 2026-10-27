@@ -295,6 +295,10 @@ struct PlaybackContext {
     // The archive header has HRR_FILE_FLAG_PACKED_HOST_RECTS: the host blobs of
     // the pitched copies hold only the copied rows, packed end to end.
     bool packed_host_rects = false;
+    // The archive header has HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS: capture
+    // wrote the hipEventRecord events for hipExtModuleLaunchKernel start/stop
+    // events. Without it the archive predates them.
+    bool ext_launch_event_markers = false;
     std::string kernel_filter;
 
     // Lightweight replay tracing. These are intentionally separate from

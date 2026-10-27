@@ -107,8 +107,15 @@ typedef struct {
  * the copied rows, packed end to end: width*height*depth bytes, whatever the
  * pitch. Without it, a blob spans the host rect from its base pointer through
  * the last copied byte, or holds the flat width*height*depth bytes from the
- * base pointer (3D and driver D2H, hipMemcpy3D H2D). */
+ * base pointer (3D and driver D2H, hipMemcpy3D H2D).
+ * HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS: hipExtModuleLaunchKernel records
+ * its start and stop events as hipEventRecord events around the launch.
+ * Without it, replay cannot tell a missing marker from a replay that failed to
+ * apply one, so only an archive without the flag may tolerate a
+ * hipEventElapsedTime that returns hipErrorInvalidHandle. No version bump: an
+ * older reader replays the extra hipEventRecord events like any others. */
 #define HRR_FILE_FLAG_PACKED_HOST_RECTS ((uint16_t)0x0001u)
+#define HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS ((uint16_t)0x0002u)
 
 #ifdef __cplusplus
 static_assert(sizeof(hrr_file_header) == 8, "hrr_file_header must be 8 bytes");

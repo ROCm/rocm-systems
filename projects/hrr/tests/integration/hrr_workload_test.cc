@@ -1947,6 +1947,85 @@ extern "C" __global__ void ext_fill(int* out, int val, int n) {
 }
 
 // ===========================================================================
+// Workload G6b: hipExtModuleLaunchKernel timed with start and stop events
+//
+// The runtime marks both events inside the launch, so the app never calls
+// hipEventRecord and hipEventElapsedTime succeeds. Capture stores those markers
+// as hipEventRecord events around the launch record; replay needs them for
+// hipEventElapsedTime to succeed again. Final blob: h[i] == 55.
+// ===========================================================================
+TEST_CASE("Unit_HRR_ExtModuleLaunchKernelTiming_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  constexpr int    LN  = 256;
+  constexpr size_t LSZ = LN * sizeof(int);
+
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, LSZ));
+  hipStream_t s;
+  HRR_HIP_CHECK(hipStreamCreate(&s));
+
+  static const char* ext_fill_src = R"(
+extern "C" __global__ void ext_fill_timed(int* out, int val, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) out[i] = val;
+}
+)";
+  hiprtcProgram prog = nullptr;
+  HRR_HIPRTC_CHECK(hiprtcCreateProgram(&prog, ext_fill_src, "ext_fill_timed.hip",
+                                   0, nullptr, nullptr));
+  hiprtcResult crc = hiprtcCompileProgram(prog, 0, nullptr);
+  if (crc != HIPRTC_SUCCESS) {
+    size_t log_sz = 0;
+    (void)hiprtcGetProgramLogSize(prog, &log_sz);
+    std::string log(log_sz, '\0');
+    (void)hiprtcGetProgramLog(prog, log.data());
+    (void)hiprtcDestroyProgram(&prog);
+    FAIL("hiprtcCompileProgram failed: " + log);
+  }
+  size_t co_size = 0;
+  HRR_HIPRTC_CHECK(hiprtcGetCodeSize(prog, &co_size));
+  std::vector<char> co(co_size);
+  HRR_HIPRTC_CHECK(hiprtcGetCode(prog, co.data()));
+  HRR_HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+
+  hipModule_t mod = nullptr;
+  HRR_HIP_CHECK(hipModuleLoadData(&mod, co.data()));
+  hipFunction_t fn = nullptr;
+  HRR_HIP_CHECK(hipModuleGetFunction(&fn, mod, "ext_fill_timed"));
+
+  hipEvent_t start = nullptr, stop = nullptr;
+  HRR_HIP_CHECK(hipEventCreate(&start));
+  HRR_HIP_CHECK(hipEventCreate(&stop));
+
+  int   val = 55;
+  int   n   = LN;
+  void* args[] = { &d, &val, &n };
+  HRR_HIP_CHECK(hipExtModuleLaunchKernel(fn,
+      /*globalWorkSize*/ LN, 1, 1,
+      /*localWorkSize */ 256, 1, 1,
+      /*sharedMemBytes*/ 0, s, args, /*extra*/ nullptr,
+      start, stop, /*flags*/ 0));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+
+  float ms = -1.f;
+  HRR_HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
+  REQUIRE(ms >= 0.f);
+
+  HRR_HIP_CHECK(hipEventDestroy(start));
+  HRR_HIP_CHECK(hipEventDestroy(stop));
+  HRR_HIP_CHECK(hipModuleUnload(mod));
+
+  int* h = new int[LN]();
+  HRR_HIP_CHECK(hipMemcpyAsync(h, d, LSZ, hipMemcpyDeviceToHost, s));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < LN; ++i) REQUIRE(h[i] == 55);
+
+  HRR_HIP_CHECK(hipFree(d));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
 // Workload G7: hipHostFree (pinned host allocation lifecycle)
 //
 // hipHostFree has a real (non-noop) playback handler that translates the

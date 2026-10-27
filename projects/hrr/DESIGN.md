@@ -624,6 +624,26 @@ before the launch, and `capture_hipLaunchByPtr` snapshots it (a copy, since the 
 `hipLaunchByPtr` moves the exec out via `PopExec`) and feeds it through the same
 signature-driven serialization path.
 
+#### Start and stop events of `hipExtModuleLaunchKernel`
+
+The runtime marks `startEvent` and `stopEvent` inside the launch, so an app never
+calls `hipEventRecord` on them and `hipEventElapsedTime` still succeeds. Capture
+writes that side effect as a `hipEventRecord` for a non-null start event before
+the launch record and one for a non-null stop event after it, and sets
+`HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS` in `hrr_file_header.reserved` (no version
+bump: an older reader replays the extra events like any others).
+`playback_hipEventElapsedTime` returns `hipErrorInvalidHandle` for such an
+archive, so a missing marker fails the replay. Only an archive without the flag,
+captured before the markers were stored, gets the fallback: a captured success
+with both handles live continues, warns once and clears the sticky error.
+`Unit_HRR_ExtLaunchEventMarkers` checks the order on a real capture and both
+replay outcomes.
+
+Follow-up: `hipExtLaunchKernel` and `hipHccModuleLaunchKernel` also take start and
+stop events, but their playback is a no-op (the launch itself is not replayed), so
+no marker is applied at replay either. Replaying those launches is the fix; the
+capture shim records no marker for them.
+
 ### Pointers Embedded in By-Value Struct Args (`value_kind == 3`)
 
 `KernelSignature` classifies an argument as a GPU pointer only when
