@@ -15,12 +15,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace {
@@ -67,6 +70,8 @@ public:
 class TestExternalAddressSpace final : public amdgpu::AddressSpaceTranslator,
                                        public amdgpu::PhysicalMemoryAccess {
 public:
+  std::optional<uint64_t> unavailable_translation_address;
+
   struct AccessRecord {
     uint64_t address = 0;
     std::size_t size = 0;
@@ -76,6 +81,8 @@ public:
 
   amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
                                         amdgpu::VmAccessKind access) const override {
+    if (unavailable_translation_address == address)
+      return {.outcome = amdgpu::VmAccessOutcome::Unavailable, .translation = {}};
     if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
       return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
     if (access == amdgpu::VmAccessKind::Atomic && !atomic_allowed_)
@@ -101,6 +108,8 @@ public:
     last_read = {.address = address, .size = bytes.size()};
     read_history.push_back(last_read);
     if (domain == amdgpu::VmMemoryDomain::Compatibility || !contains(address, bytes.size()))
+      return amdgpu::VmAccessOutcome::Faulted;
+    if (faulted_read_call == read_calls)
       return amdgpu::VmAccessOutcome::Faulted;
     if (unavailable_read_call == read_calls) {
       unavailable_read_call = 0;
@@ -217,6 +226,7 @@ public:
   amdgpu::VmAccessOutcome next_atomic_load_outcome = amdgpu::VmAccessOutcome::Complete;
   uint64_t translation_granule = 0;
   uint32_t unavailable_read_call = 0;
+  uint32_t faulted_read_call = 0;
   uint32_t unavailable_write_call = 0;
   uint32_t unavailable_atomic_load_call = 0;
   uint32_t read_calls = 0;
@@ -257,8 +267,20 @@ public:
   amdgpu::Wavefront *wf = nullptr;
   amdgpu::AddressSpaceHandle address_space;
 
-  void initialize(bool legacy_cache_compatible = false) {
-    ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  void initialize(bool legacy_cache_compatible = false, bool xcnt_checks = false) {
+    if (xcnt_checks) {
+      std::ifstream file(kGfx1250ConfigPath);
+      ASSERT_TRUE(file.is_open());
+      std::string config(std::istreambuf_iterator<char>{file}, {});
+      const auto cu_config = config.find("\"type\": \"compute_unit\"");
+      ASSERT_NE(cu_config, std::string::npos);
+      const auto parameters = config.find('[', config.find("\"config\"", cu_config));
+      ASSERT_NE(parameters, std::string::npos);
+      config.insert(parameters + 1, R"({"key":"xcnt_diagnostics","value":"warn"},)");
+      ASSERT_NO_FATAL_FAILURE(sim.initialize(config));
+    } else {
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
+    }
     cu = sim.cu();
     address_space = sim.soc->gpu_vm().register_address_space(77, external, external, {},
                                                              legacy_cache_compatible);
@@ -330,7 +352,7 @@ TEST(GpuVmPipeline, NestedStepPreservesOuterInstructionSnapshot) {
   context.sim.soc->set_plugin_group(group);
   uint32_t faults = 0;
   context.cu->set_debug_active(true);
-  context.cu->set_memory_violation_handler([&](amdgpu::Wavefront &wf, uint64_t, bool) {
+  context.cu->set_memory_violation_handler([&](amdgpu::Wavefront &wf, uint64_t, bool, uint64_t) {
     if (&wf != context.wf)
       return false;
     ++faults;
@@ -687,16 +709,22 @@ TEST(GpuVmPipeline, ScratchRetryWithRevokedBackingReportsOneFault) {
   amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
   uint32_t fault_count = 0;
   amdgpu::VmAccessOutcome fault_outcome = amdgpu::VmAccessOutcome::Complete;
-  pipeline.set_fault_handler([&](amdgpu::Wavefront &, amdgpu::VmAccessOutcome outcome) {
-    ++fault_count;
-    fault_outcome = outcome;
-  });
+  constexpr uint64_t kIssuingPc = 0x123456780040ULL;
+  context.wf->pc = kIssuingPc;
+  uint64_t reported_pc = 0;
+  pipeline.set_fault_handler(
+      [&](amdgpu::Wavefront &, amdgpu::VmAccessOutcome outcome, uint64_t pc) {
+        ++fault_count;
+        fault_outcome = outcome;
+        reported_pc = pc;
+      });
 
   EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(store)), *context.wf),
             amdgpu::VmAccessOutcome::Complete);
   ASSERT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
   ASSERT_FALSE(context.wf->wait_counters().empty());
 
+  context.wf->pc += 64;
   context.wf->set_scratch_base(0);
   pipeline.tick();
 
@@ -704,6 +732,7 @@ TEST(GpuVmPipeline, ScratchRetryWithRevokedBackingReportsOneFault) {
   EXPECT_TRUE(context.wf->wait_counters().empty());
   EXPECT_EQ(fault_count, 1u);
   EXPECT_EQ(fault_outcome, amdgpu::VmAccessOutcome::Faulted);
+  EXPECT_EQ(reported_pc, kIssuingPc);
 }
 
 TEST(GpuVmPipeline, CompletionRetryOnOneQueueDoesNotStarveAnotherQueue) {
@@ -782,14 +811,139 @@ TEST(GpuVmPipeline, CompletionRetryOnOneQueueDoesNotStarveAnotherQueue) {
   for (uint32_t step = 0; step < 1000 && sim.cp()->dispatched_count() != 2; ++step)
     ASSERT_TRUE(sim.engine->step());
   ASSERT_EQ(sim.cp()->dispatched_count(), 2u);
-  for (uint32_t step = 0; step < 1000 && sim.cp()->has_dispatch_for_test(kRunnableQueueId, 0, 2);
+  // Dispatch IDs are partitioned by XCC; wait for this queue's externally
+  // observable completion instead of assuming that its dispatch ID is 2.
+  for (uint32_t step = 0; step < 1000 && sim.memory->read64(kRunnableRingAddress + 0x10000) != 1;
        ++step)
     ASSERT_TRUE(sim.engine->step());
 
   EXPECT_EQ(sim.cp()->accepted_entry_count_for_test(kRunnableQueueId, 0), 1u);
-  EXPECT_FALSE(sim.cp()->has_dispatch_for_test(kRunnableQueueId, 0, 2));
+  EXPECT_FALSE(sim.cp()->queue_faulted_for_test(kRunnableQueueId, 0));
   EXPECT_EQ(sim.memory->read64(kRunnableRingAddress + 0x10000), 1u);
+  EXPECT_EQ(external->load<uint64_t>(kSignalAddress + 8), 1u);
   EXPECT_GT(external->unavailable_atomic_store_hits, 1u);
+}
+
+TEST(GpuVmPipeline, InfrastructureFailuresDoNotReachTheArchitecturalFaultOwner) {
+  for (const bool missing_vm : {false, true}) {
+    SCOPED_TRACE(missing_vm);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    uint32_t faults = 0;
+    context.cu->set_memory_violation_handler([&](amdgpu::Wavefront &wf, uint64_t, bool, uint64_t) {
+      ++faults;
+      wf.set_fatal_exception_pending(true);
+      wf.set_debug_suspended(true);
+      return true;
+    });
+    if (missing_vm) {
+      context.cu->set_gpu_vm(nullptr);
+    } else {
+      ASSERT_TRUE(context.sim.soc->gpu_vm().unregister_address_space(context.address_space));
+    }
+    context.cu->step();
+    EXPECT_EQ(faults, 0u);
+    EXPECT_TRUE(context.wf->is_halted());
+    EXPECT_FALSE(context.wf->fatal_exception_pending());
+  }
+}
+
+TEST(GpuVmPipeline, ADeclinedFetchFaultIsOfferedOnlyOnce) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  constexpr uint64_t kUnmappedCode = 0x20000;
+  context.wf->pc = kUnmappedCode;
+  uint32_t faults = 0;
+  context.cu->set_memory_violation_handler(
+      [&](amdgpu::Wavefront &, uint64_t address, bool write, uint64_t issue_pc) {
+        ++faults;
+        EXPECT_EQ(address, kUnmappedCode);
+        EXPECT_EQ(issue_pc, kUnmappedCode);
+        EXPECT_FALSE(write);
+        return false;
+      });
+  context.cu->step();
+  EXPECT_EQ(faults, 1u);
+  EXPECT_TRUE(context.wf->is_halted());
+}
+
+TEST(GpuVmPipeline, TensorDmaFaultReportsIssueAndResumePcs) {
+  for (const bool rewind : {false, true}) {
+    SCOPED_TRACE(rewind);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    constexpr uint64_t kCode = 0x1000, kUnmappedData = 0x20000;
+    const std::array<uint32_t, 3> instruction{0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+    context.external->store(kCode, instruction);
+    context.wf->pc = kCode;
+    context.wf->set_lds_base(context.cu->allocate_lds(256));
+    context.wf->set_lds_size(256);
+    const uint32_t base = context.wf->sgpr_alloc().base;
+    context.cu->write_sgpr(base, 1);
+    context.cu->write_sgpr(base + 1, 0);
+    context.cu->write_sgpr(base + 2, kUnmappedData);
+    context.cu->write_sgpr(base + 3, 0x80000000u);
+    context.cu->write_sgpr(base + 12, (2u << 16) | (1u << 18));
+    context.cu->write_sgpr(base + 13, (1u << 16) | (64u >> 3));
+    context.cu->write_sgpr(base + 15, 1u << 16);
+    uint32_t faults = 0;
+    context.cu->set_memory_violation_handler(
+        [&](amdgpu::Wavefront &wf, uint64_t, bool, uint64_t issue_pc) {
+          ++faults;
+          EXPECT_EQ(issue_pc, kCode);
+          EXPECT_EQ(wf.pc, kCode + sizeof(instruction));
+          if (rewind)
+            wf.pc = issue_pc;
+          wf.set_fatal_exception_pending(true);
+          wf.set_debug_suspended(true);
+          return true;
+        });
+    context.cu->step();
+    EXPECT_EQ(faults, 1u);
+    EXPECT_TRUE(context.wf->fatal_exception_pending());
+    EXPECT_EQ(context.wf->pc, rewind ? kCode : kCode + sizeof(instruction));
+  }
+}
+
+TEST(GpuVmPipeline, DebuggerProbeDoesNotClaimUnavailableTranslation) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  constexpr uint64_t kCode = 0x1000, kData = 0x2000;
+  constexpr uint32_t kValue = 0x12345678, kDestination = 1;
+  constexpr auto load = cdna5::build_vglobal(
+      cdna5::kGlobalLoadB32Vglobal, {.saddr = 0, .vdst = kDestination, .vaddr = 0, .ioffset = 0});
+  context.external->store(kCode, std::array{load[0], load[1], load[2], 0xBF800000u});
+  context.external->store(kData, kValue);
+  context.external->unavailable_translation_address = kData;
+  context.wf->pc = kCode;
+  context.wf->set_exec(1);
+  context.cu->write_sgpr(context.wf->sgpr_alloc().base, kData);
+  context.cu->write_sgpr(context.wf->sgpr_alloc().base + 1, 0);
+  context.cu->write_vgpr(context.wf->vgpr_alloc().base, 0, 0);
+  // Runtime exception owners now claim faults even without their own debugger.
+  // A CU-wide probe must leave transient translation failures to memory retry.
+  uint32_t faults = 0;
+  context.cu->set_debug_active(true);
+  context.cu->set_memory_violation_handler([&](amdgpu::Wavefront &wf, uint64_t, bool, uint64_t) {
+    ++faults;
+    wf.set_fatal_exception_pending(true);
+    wf.set_debug_suspended(true);
+    return true;
+  });
+  context.cu->step();
+  EXPECT_EQ(faults, 0u);
+  EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+  EXPECT_FALSE(context.wf->fatal_exception_pending());
+  context.external->unavailable_translation_address.reset();
+  for (unsigned i = 0; i < 4 && !context.wf->wait_counters().empty(); ++i)
+    context.cu->step();
+  EXPECT_TRUE(context.wf->wait_counters().empty());
+  EXPECT_EQ(context.cu->read_vgpr_storage(context.wf->vgpr_alloc().base + kDestination, 0), kValue);
+  EXPECT_EQ(faults, 0u);
 }
 
 TEST(GpuVmPipeline, UnavailableDataRetryDoesNotReplayInstructionPluginCallbacks) {
@@ -837,6 +991,337 @@ TEST(GpuVmPipeline, UnavailableDataRetryDoesNotReplayInstructionPluginCallbacks)
   EXPECT_EQ(context.cu->read_vgpr_storage(context.wf->vgpr_alloc().base + kDestination, 0), kValue);
 }
 
+TEST(GpuVmPipeline, DeferredScalarFaultRetainsTheIssuingPc) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  constexpr uint64_t kIssuingPc = 0x123456780040ULL;
+  constexpr uint64_t kAddress = 0x2000;
+  context.wf->pc = kIssuingPc;
+  context.external->store(kAddress, 0x12345678u);
+  context.external->unavailable_read_call = 1;
+  context.external->faulted_read_call = 2;
+  auto load = std::make_unique<amdgpu::ScalarMemState>();
+  load->addr = kAddress;
+  load->dst_register = {amdgpu::ScalarRegisterStorage::SGPR, 1, 1};
+  load->num_dwords = 1;
+  load->is_load = true;
+  amdgpu::ScalarMemPipeline pipeline(&context.cu->l1_scalar());
+  uint32_t faults = 0;
+  pipeline.set_fault_handler(
+      [&](amdgpu::Wavefront &wave, amdgpu::VmAccessOutcome outcome, uint64_t pc) {
+        EXPECT_EQ(&wave, context.wf);
+        EXPECT_EQ(outcome, amdgpu::VmAccessOutcome::Faulted);
+        EXPECT_EQ(pc, kIssuingPc);
+        EXPECT_EQ(wave.pc, kIssuingPc + 64);
+        ++faults;
+      });
+  ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(load)), *context.wf),
+            amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+  context.wf->pc += 64;
+  pipeline.tick();
+  EXPECT_EQ(faults, 1u);
+  EXPECT_TRUE(pipeline.empty());
+  EXPECT_TRUE(context.wf->wait_counters().empty());
+}
+
+enum class RetainedFaultPath { Immediate, Deferred, SnapshotRetry, DebuggerProbe };
+
+TEST(GpuVmPipeline, ClaimedFaultResumesWithoutStaleMemoryWaits) {
+  for (bool scalar : {false, true}) {
+    for (const auto path : {RetainedFaultPath::Immediate, RetainedFaultPath::Deferred,
+                            RetainedFaultPath::SnapshotRetry, RetainedFaultPath::DebuggerProbe}) {
+      SCOPED_TRACE(scalar);
+      SCOPED_TRACE(static_cast<unsigned>(path));
+      TranslatedPipelineContext context;
+      ASSERT_NO_FATAL_FAILURE(context.initialize(/*legacy_cache_compatible=*/false,
+                                                 /*xcnt_checks=*/true));
+      ASSERT_NE(context.wf, nullptr);
+      auto &wave = *context.wf;
+      constexpr uint64_t kCode = 0x1000, kData = 0x2000, kUnmapped = 0x20000;
+      constexpr uint32_t kDestination = 4, kValue = 0x12345678;
+      const auto scalar_load = cdna5::build_smem(
+          cdna5::kSLoadB32Smem, {.sbase = 0, .sdata = kDestination, .soffset = 124});
+      const auto vector_load =
+          cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                               {.saddr = 0, .vdst = kDestination, .vaddr = 0, .ioffset = 0});
+      const auto load =
+          scalar ? std::span<const uint32_t>(scalar_load) : std::span<const uint32_t>(vector_load);
+      for (size_t i = 0; i < load.size(); ++i)
+        context.external->store(kCode + i * sizeof(uint32_t), load[i]);
+      const uint64_t next_pc = kCode + load.size_bytes();
+      context.external->store(
+          next_pc, cdna5::build_sopp(scalar ? cdna5::kSWaitKmcntSopp : cdna5::kSWaitLoadcntSopp,
+                                     {.simm16 = 0}));
+      context.external->store(next_pc + sizeof(uint32_t), S_ENDPGM_GFX12);
+      context.external->store(kData, kValue);
+      wave.pc = kCode;
+      wave.set_queue_id(1);
+      wave.set_exec(1);
+      if (!scalar)
+        wave.set_mode_raw(wave.mode_raw() | (1u << 25));
+      const auto issuing_mode = wave.mode_raw();
+      context.cu->write_sgpr(wave.sgpr_alloc().base,
+                             path == RetainedFaultPath::DebuggerProbe ? kUnmapped : kData);
+      context.cu->write_sgpr(wave.sgpr_alloc().base + 1, 0);
+      context.cu->write_vgpr(wave.vgpr_alloc().base, 0, 0);
+      // An earlier eagerly completed load still needs a software wait. Fault
+      // cleanup must preserve that producer while removing only the new one.
+      const auto counter = scalar ? amdgpu::WaitCounterKind::Km : amdgpu::WaitCounterKind::Load;
+      auto &scoreboard = wave.ensure_memory_wait_scoreboard();
+      const auto older_sequence = scoreboard.issue(counter, scalar);
+      scoreboard.add({older_sequence,
+                      kCode - 4,
+                      scalar ? ~uint64_t{0} : 1,
+                      {scalar ? RegClass::SGPR : RegClass::VGPR, 6, 1},
+                      counter,
+                      0xf});
+      std::vector<uint64_t> issued_x_positions;
+      auto observer = std::make_unique<InstructionVmPlugin>();
+      observer->before_instruction = [&](amdgpu::Wavefront &observed) {
+        if (observed.pc == kCode)
+          issued_x_positions.push_back(scoreboard.outstanding(amdgpu::WaitCounterKind::X));
+      };
+      ASSERT_TRUE(context.sim.plugin_group->add(std::move(observer)));
+      context.sim.soc->set_plugin_group(context.sim.plugin_group);
+      // The first read fetches code; the second is the data access.
+      if (path == RetainedFaultPath::DebuggerProbe)
+        context.cu->set_debug_active(true);
+      else if (path == RetainedFaultPath::Immediate)
+        context.external->faulted_read_call = 2;
+      else
+        context.external->unavailable_read_call = 2;
+      uint32_t faults = 0;
+      context.cu->set_memory_violation_handler(
+          [&](amdgpu::Wavefront &faulted, uint64_t, bool, uint64_t issue_pc) {
+            EXPECT_EQ(&faulted, &wave);
+            EXPECT_EQ(issue_pc, kCode);
+            EXPECT_EQ(faulted.pc, next_pc);
+            ++faults;
+            faulted.pc = issue_pc;
+            faulted.set_debug_suspended(true);
+            // A claimant may change MODE before returning. Cancellation must
+            // still remove the issuing instruction's replay position.
+            if (path == RetainedFaultPath::DebuggerProbe)
+              faulted.set_mode_raw(faulted.mode_raw() & ~(1u << 25));
+            return true;
+          });
+      context.cu->step();
+      ASSERT_EQ(issued_x_positions, (std::vector<uint64_t>{1}));
+      if (path == RetainedFaultPath::Deferred || path == RetainedFaultPath::SnapshotRetry) {
+        ASSERT_EQ(wave.state(), amdgpu::WfState::VM_RETRY);
+        EXPECT_EQ(scoreboard.outstanding(counter), 2u);
+        EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::X), 1u);
+        context.external->faulted_read_call = context.external->read_calls + 1;
+        if (path == RetainedFaultPath::SnapshotRetry) {
+          wave.set_runtime_suspended(true);
+          context.cu->retry_paused_queue_memory(77, 1, false);
+        } else {
+          context.cu->step();
+        }
+      }
+      ASSERT_EQ(faults, 1u);
+      EXPECT_EQ(wave.state(), amdgpu::WfState::RUNNING);
+      EXPECT_TRUE(wave.wait_counters().empty());
+      EXPECT_EQ(scoreboard.events().size(), 1u);
+      if (scoreboard.events().size() == 1) {
+        EXPECT_EQ(scoreboard.events().front().pc, kCode - 4);
+        EXPECT_EQ(scoreboard.events().front().sequence, older_sequence);
+      }
+      EXPECT_EQ(scoreboard.outstanding(counter), 1u);
+      EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::X), 0u);
+      // Repair the backing and release both owners' gates without changing the
+      // scheduler state. Replaying the load must not report a false overwrite.
+      context.external->faulted_read_call = 0;
+      context.cu->write_sgpr(wave.sgpr_alloc().base, kData);
+      wave.set_mode_raw(issuing_mode);
+      wave.set_debug_suspended(false);
+      wave.set_runtime_suspended(false);
+      context.cu->step();
+      EXPECT_EQ(wave.pc, next_pc);
+      EXPECT_EQ(scalar ? wave.debug_read_sgpr(kDestination)
+                       : context.cu->read_vgpr_storage(wave.vgpr_alloc().base + kDestination, 0),
+                kValue);
+      EXPECT_EQ(scoreboard.outstanding(counter), 2u);
+      EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::X), 1u);
+      EXPECT_EQ(issued_x_positions, (std::vector<uint64_t>{1, 1}));
+      for (unsigned i = 0; i < 16 && !wave.is_halted(); ++i)
+        context.cu->step();
+      EXPECT_TRUE(wave.is_halted());
+      EXPECT_EQ(faults, 1u);
+      EXPECT_EQ(context.cu->memory_wait_diagnostic_count(), 0u);
+      EXPECT_EQ(context.cu->xcnt_diagnostic_count(), 0u);
+    }
+  }
+}
+
+TEST(GpuVmPipeline, DeclinedDeferredFaultStillCancelsTheDispatch) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  constexpr uint64_t kCode = 0x1000, kData = 0x2000;
+  constexpr auto load = cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                             {.saddr = 0, .vdst = 4, .vaddr = 0, .ioffset = 0});
+  context.external->store(kCode, std::array{load[0], load[1], load[2], S_ENDPGM_GFX12});
+  context.wf->pc = kCode;
+  context.wf->set_exec(1);
+  context.cu->write_sgpr(context.wf->sgpr_alloc().base, kData);
+  context.cu->write_sgpr(context.wf->sgpr_alloc().base + 1, 0);
+  context.cu->write_vgpr(context.wf->vgpr_alloc().base, 0, 0);
+  uint32_t faults = 0;
+  context.cu->set_memory_violation_handler(
+      [&](amdgpu::Wavefront &wave, uint64_t, bool, uint64_t issue_pc) {
+        ++faults;
+        EXPECT_EQ(&wave, context.wf);
+        EXPECT_EQ(issue_pc, kCode);
+        return false;
+      });
+  context.external->unavailable_read_call = 2;
+  context.cu->step();
+  ASSERT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+  context.external->faulted_read_call = context.external->read_calls + 1;
+  context.cu->step();
+  EXPECT_EQ(faults, 1u);
+  EXPECT_TRUE(context.wf->is_halted());
+  EXPECT_TRUE(context.wf->wait_counters().empty());
+  EXPECT_FALSE(context.wf->fatal_exception_pending());
+  EXPECT_TRUE(context.sim.snapshot->snapshots().empty());
+  for (unsigned i = 0; i < 16; ++i)
+    context.cu->step();
+  EXPECT_EQ(faults, 1u);
+}
+
+TEST(GpuVmPipeline, SnapshotRetryLeavesOtherQueuesAndProcessesPending) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  std::array<amdgpu::Wavefront *, 3> waves{context.wf, nullptr, nullptr};
+  const auto other_space =
+      context.sim.soc->gpu_vm().register_address_space(78, context.external, context.external);
+  ASSERT_TRUE(other_space);
+  for (uint32_t i = 0; i < waves.size(); ++i) {
+    if (i != 0)
+      waves[i] = context.cu->dispatch_wf(i, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(waves[i], nullptr);
+    waves[i]->set_process_id(i == 2 ? 78 : 77);
+    waves[i]->set_queue_id(i == 1 ? 2 : 1);
+    waves[i]->set_address_space(i == 2 ? other_space : context.address_space);
+  }
+  amdgpu::ScalarMemPipeline pipeline(&context.cu->l1_scalar());
+  for (uint32_t i = 0; i < waves.size(); ++i) {
+    const uint64_t address = 0x200 + 64 * i;
+    context.external->store(address, 100u + i);
+    context.external->unavailable_read_call = context.external->read_calls + 1;
+    auto state = std::make_unique<amdgpu::ScalarMemState>();
+    state->addr = address;
+    state->num_dwords = 1;
+    state->dst_register = {amdgpu::ScalarRegisterStorage::SGPR, 0, 1};
+    ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), *waves[i]),
+              amdgpu::VmAccessOutcome::Complete);
+    ASSERT_FALSE(waves[i]->wait_counters().empty());
+  }
+  pipeline.retry_for_queue(77, 1);
+  EXPECT_TRUE(waves[0]->wait_counters().empty());
+  EXPECT_EQ(waves[0]->debug_read_sgpr(0), 100u);
+  for (uint32_t i : {1u, 2u}) {
+    EXPECT_EQ(waves[i]->state(), amdgpu::WfState::VM_RETRY);
+    EXPECT_FALSE(waves[i]->wait_counters().empty());
+    EXPECT_EQ(waves[i]->debug_read_sgpr(0), 0u);
+  }
+  EXPECT_EQ(context.external->read_calls, 4u);
+  pipeline.retry_for_queue(77, 2);
+  EXPECT_EQ(waves[1]->debug_read_sgpr(0), 101u);
+  EXPECT_FALSE(waves[2]->wait_counters().empty());
+  pipeline.tick();
+  EXPECT_EQ(waves[2]->debug_read_sgpr(0), 102u);
+  EXPECT_TRUE(waves[2]->wait_counters().empty());
+  EXPECT_TRUE(pipeline.empty());
+}
+
+TEST(GpuVmPipeline, SnapshotRetryContinuesAfterFaultAndToleratesDispatchCancellation) {
+  for (const bool cancel_dispatch : {false, true}) {
+    SCOPED_TRACE(cancel_dispatch);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    auto *second = context.cu->dispatch_wf(1, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(second, nullptr);
+    second->set_process_id(77);
+    second->set_queue_id(1);
+    second->set_address_space(context.address_space);
+    context.wf->set_queue_id(1);
+    std::array<amdgpu::Wavefront *, 2> waves{context.wf, second};
+    amdgpu::ScalarMemPipeline pipeline(&context.cu->l1_scalar());
+    for (uint32_t i = 0; i < waves.size(); ++i) {
+      context.external->store(0x200 + i * 64, 100u + i);
+      context.external->unavailable_read_call = context.external->read_calls + 1;
+      auto load = std::make_unique<amdgpu::ScalarMemState>();
+      load->addr = 0x200 + i * 64;
+      load->num_dwords = 1;
+      load->dst_register = {amdgpu::ScalarRegisterStorage::SGPR, 0, 1};
+      ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(load)), *waves[i]),
+                amdgpu::VmAccessOutcome::Complete);
+      waves[i]->set_runtime_suspended(true);
+    }
+    uint32_t faults = 0;
+    pipeline.set_fault_handler([&](auto &wave, auto outcome, uint64_t) {
+      EXPECT_EQ(&wave, waves[0]);
+      EXPECT_EQ(outcome, amdgpu::VmAccessOutcome::Faulted);
+      ++faults;
+      wave.set_fatal_exception_pending(true);
+      wave.set_debug_suspended(true);
+      if (cancel_dispatch)
+        for (auto *cancelled : waves)
+          pipeline.cancel(*cancelled);
+    });
+    context.external->faulted_read_call = context.external->read_calls + 1;
+    pipeline.retry_for_queue(77, 1);
+    EXPECT_EQ(faults, 1u);
+    EXPECT_TRUE(pipeline.empty());
+    EXPECT_TRUE(waves[0]->wait_counters().empty());
+    if (!cancel_dispatch) {
+      EXPECT_EQ(second->debug_read_sgpr(0), 101u);
+      EXPECT_TRUE(second->wait_counters().empty());
+    }
+  }
+}
+
+TEST(GpuVmPipeline, DebuggerRewindsAnUnavailableVectorLoadWithoutWriteback) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  constexpr uint64_t pc = 0x123456780040ULL, address = 0x240;
+  constexpr uint32_t destination = 4, value = 0x12345678, sentinel = 0xA5A5;
+  auto &wave = *context.wf;
+  wave.pc = pc;
+  context.external->store(address, value);
+  context.external->unavailable_read_call = 1;
+  context.cu->write_vgpr(wave.vgpr_alloc().base + destination, 0, sentinel);
+  auto load = [&] {
+    auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    state->elem_size = 4;
+    state->num_elems = 1;
+    state->is_load = true;
+    state->wf_size = wave.wf_size();
+    state->exec_mask = state->lane_mask = 1;
+    state->dst_reg_base = wave.vgpr_alloc().base + destination;
+    state->per_lane_addr[0] = address;
+    return new TestMemoryInstruction(std::move(state));
+  };
+  amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+  ASSERT_EQ(pipeline.issue_deferred(load(), wave), amdgpu::VmAccessOutcome::Complete);
+  ASSERT_FALSE(wave.wait_counters().empty());
+  wave.pc += 8;
+  ASSERT_TRUE(pipeline.rewind_unavailable_load(wave));
+  EXPECT_EQ(wave.pc, pc);
+  EXPECT_EQ(wave.state(), amdgpu::WfState::RUNNING);
+  EXPECT_TRUE(wave.wait_counters().empty());
+  EXPECT_TRUE(pipeline.empty());
+  EXPECT_EQ(context.cu->read_vgpr(wave.vgpr_alloc().base + destination, 0), sentinel);
+  ASSERT_EQ(pipeline.issue_deferred(load(), wave), amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(context.cu->read_vgpr(wave.vgpr_alloc().base + destination, 0), value);
+  EXPECT_TRUE(wave.wait_counters().empty());
+  EXPECT_EQ(context.external->write_calls, 0u);
+}
+
 TEST(GpuVmPipeline, RevokedDataRetryTerminatesInsteadOfSpinning) {
   TranslatedPipelineContext context;
   ASSERT_NO_FATAL_FAILURE(context.initialize());
@@ -862,7 +1347,7 @@ TEST(GpuVmPipeline, RevokedDataRetryTerminatesInsteadOfSpinning) {
   amdgpu::ScalarMemPipeline pipeline(&context.cu->l1_scalar());
   uint32_t fault_count = 0;
   amdgpu::VmAccessOutcome fault_outcome = amdgpu::VmAccessOutcome::Complete;
-  pipeline.set_fault_handler([&](amdgpu::Wavefront &, amdgpu::VmAccessOutcome outcome) {
+  pipeline.set_fault_handler([&](amdgpu::Wavefront &, amdgpu::VmAccessOutcome outcome, uint64_t) {
     ++fault_count;
     fault_outcome = outcome;
   });
@@ -1166,6 +1651,374 @@ TEST(GpuVmPipeline, TranslatedVectorLoadAndStoreCoalesceInExternalBacking) {
   EXPECT_EQ(context.external->last_write.size, sizeof(kStored));
 }
 
+TEST(GpuVmPipeline, TransactionPolicyPreservesBatchingAndSplitRetryProgress) {
+  using Policy = amdgpu::MemoryTransactionPolicy;
+  for (auto policy : {Policy{}, Policy::unqualified_64()}) {
+    for (auto [elements, lanes, offset] :
+         {std::array<uint32_t, 3>{4, 8, 16}, {4, 16, 16}, {3, 16, 0}, {4, 8, 4}}) {
+      const uint32_t width = elements * sizeof(uint32_t);
+      const uint32_t bytes = lanes * width;
+      for (bool reverse : {false, true}) {
+        for (bool is_load : {false, true}) {
+          SCOPED_TRACE(std::format("granule={} bytes={} reverse={} load={}", policy.bytes(), bytes,
+                                   reverse, is_load));
+          TranslatedPipelineContext context;
+          ASSERT_NO_FATAL_FAILURE(context.initialize());
+          EXPECT_EQ(context.cu->l1_vector().transaction_policy().bytes(), 128u);
+          EXPECT_EQ(context.sim.soc->memory()->transaction_policy().bytes(), 128u);
+          // Offset the record to cover partial first/last transactions too.
+          const uint64_t address = 0x200 + offset;
+          constexpr uint32_t kDestination = 8;
+          std::vector<uint32_t> values(bytes / sizeof(uint32_t));
+          for (uint32_t i = 0; i < values.size(); ++i) {
+            values[i] = 0x12340000 + i;
+            context.external->store(address + i * sizeof(uint32_t), is_load ? values[i] : 0u);
+          }
+          auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+          state->elem_size = sizeof(uint32_t);
+          state->num_elems = elements;
+          state->is_load = is_load;
+          state->wf_size = context.wf->wf_size();
+          state->exec_mask = (uint64_t{1} << lanes) - 1;
+          state->lane_mask = state->exec_mask;
+          state->dst_reg_base = context.wf->vgpr_alloc().base + kDestination;
+          state->store_data.resize(state->wf_size * width);
+          for (uint32_t lane = 0; lane < lanes; ++lane) {
+            const uint32_t index = reverse ? lanes - 1 - lane : lane;
+            state->per_lane_addr[lane] = address + index * width;
+            if (!is_load)
+              std::memcpy(state->store_data.data() + lane * width, values.data() + index * elements,
+                          width);
+          }
+          if (is_load)
+            context.external->unavailable_read_call = 2;
+          else
+            context.external->unavailable_write_call = 2;
+          amdgpu::L1VectorCache l1(context.cu->l2(), policy);
+          amdgpu::GlobalMemPipeline pipeline(&l1, context.cu->l2());
+          ASSERT_EQ(
+              pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), *context.wf),
+              amdgpu::VmAccessOutcome::Complete);
+          const bool split_requests = reverse || policy.bytes() < Policy{}.bytes();
+          EXPECT_EQ(context.wf->state(),
+                    split_requests ? amdgpu::WfState::VM_RETRY : amdgpu::WfState::RUNNING);
+          // Reordered runs visit the transaction containing the first active
+          // lane first. Change a completed word to detect accidental replay.
+          const uint64_t first_address =
+              reverse
+                  ? std::max(address, (address + bytes - width) / policy.bytes() * policy.bytes())
+                  : address;
+          if (split_requests) {
+            context.external->store(first_address, uint32_t{0xabcdef01});
+            pipeline.tick();
+          }
+          ASSERT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+          if (is_load) {
+            for (uint32_t lane = 0; lane < lanes; ++lane) {
+              const uint32_t index = reverse ? lanes - 1 - lane : lane;
+              for (uint32_t word = 0; word < elements; ++word)
+                EXPECT_EQ(context.cu->read_vgpr(context.wf->vgpr_alloc().base + kDestination + word,
+                                                lane),
+                          values[index * elements + word]);
+            }
+          } else {
+            for (uint32_t i = 0; i < values.size(); ++i)
+              EXPECT_EQ(context.external->load<uint32_t>(address + i * sizeof(uint32_t)),
+                        split_requests && address + i * sizeof(uint32_t) == first_address
+                            ? 0xabcdef01
+                            : values[i]);
+          }
+          const auto &history =
+              is_load ? context.external->read_history : context.external->write_history;
+          if (!split_requests) {
+            ASSERT_EQ(history.size(), 1u);
+            EXPECT_EQ(history.front().address, address);
+            EXPECT_EQ(history.front().size, bytes);
+            continue;
+          }
+          const uint32_t first = std::min<uint64_t>(
+              address + bytes - first_address, policy.bytes() - first_address % policy.bytes());
+          ASSERT_EQ(history.size(),
+                    (address % policy.bytes() + bytes + policy.bytes() - 1) / policy.bytes() + 1);
+          EXPECT_EQ(history.front().address, first_address);
+          EXPECT_EQ(history.front().size, first);
+          EXPECT_EQ(history[2].address, history[1].address);
+          for (const auto &request : history) {
+            EXPECT_LE(request.size, policy.bytes());
+            EXPECT_EQ(request.address / policy.bytes(),
+                      (request.address + request.size - 1) / policy.bytes());
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(GpuVmPipeline, PermutedTranslatedVectorTransfersPreserveSnapshotsAndRetryProgress) {
+  for (uint32_t num_lanes : {4u, 8u}) {
+    for (bool is_load : {true, false}) {
+      TranslatedPipelineContext context;
+      ASSERT_NO_FATAL_FAILURE(context.initialize());
+      constexpr uint64_t kAddress = 0x200;
+      constexpr uint32_t kDestination = 8;
+      constexpr uint32_t kElements = 4;
+      std::vector<uint32_t> values(num_lanes * kElements);
+      for (uint32_t i = 0; i < values.size(); ++i) {
+        values[i] = 0x12340000 + i;
+        context.external->store(kAddress + i * sizeof(uint32_t), is_load ? values[i] : 0u);
+      }
+      auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+      state->elem_size = sizeof(uint32_t);
+      state->num_elems = kElements;
+      state->is_load = is_load;
+      state->wf_size = context.wf->wf_size();
+      state->exec_mask = (1u << num_lanes) - 1;
+      state->lane_mask = state->exec_mask;
+      state->dst_reg_base = context.wf->vgpr_alloc().base + kDestination;
+      state->store_data.resize(state->wf_size * kElements * sizeof(uint32_t));
+      for (uint32_t lane = 0; lane < num_lanes; ++lane) {
+        state->per_lane_addr[lane] =
+            kAddress + (num_lanes - 1 - lane) * kElements * sizeof(uint32_t);
+        if (!is_load)
+          std::memcpy(state->store_data.data() + lane * kElements * sizeof(uint32_t),
+                      values.data() + (num_lanes - 1 - lane) * kElements,
+                      kElements * sizeof(uint32_t));
+      }
+      const uint32_t half_bytes = values.size() * sizeof(uint32_t) / 2;
+      // Retry halfway through a reordered transaction. The first half must
+      // not be reloaded or republished when the second translation span resumes.
+      context.external->translation_granule = half_bytes;
+      if (is_load)
+        context.external->unavailable_read_call = 2;
+      else
+        context.external->unavailable_write_call = 2;
+      amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+      ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), *context.wf),
+                amdgpu::VmAccessOutcome::Complete);
+      ASSERT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+      // Change the completed span externally to detect replay on either path.
+      context.external->store(kAddress, uint32_t{0xabcdef01});
+      pipeline.tick();
+      ASSERT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+      if (is_load) {
+        for (uint32_t lane = 0; lane < num_lanes; ++lane)
+          for (uint32_t elem = 0; elem < kElements; ++elem)
+            EXPECT_EQ(
+                context.cu->read_vgpr(context.wf->vgpr_alloc().base + kDestination + elem, lane),
+                values[(num_lanes - 1 - lane) * kElements + elem]);
+      } else {
+        for (uint32_t i = 0; i < values.size(); ++i)
+          EXPECT_EQ(context.external->load<uint32_t>(kAddress + i * sizeof(uint32_t)),
+                    i == 0 ? 0xabcdef01 : values[i]);
+      }
+      const auto &history =
+          is_load ? context.external->read_history : context.external->write_history;
+      ASSERT_EQ(history.size(), 3u);
+      EXPECT_EQ(history[0].address, kAddress);
+      EXPECT_EQ(history[1].address, kAddress + half_bytes);
+      EXPECT_EQ(history[2].address, kAddress + half_bytes);
+      for (const auto &request : history)
+        EXPECT_EQ(request.size, half_bytes);
+    }
+  }
+}
+
+TEST(GpuVmPipeline, PermutedTranslatedLanesUseOnePhysicalRequest) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  constexpr uint64_t kAddress = 0x200;
+  constexpr uint32_t kDestination = 8;
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    context.external->store(kAddress + lane * sizeof(uint32_t), 0x1000u + lane);
+  auto load = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  load->elem_size = sizeof(uint32_t);
+  load->num_elems = 1;
+  load->is_load = true;
+  load->wf_size = context.wf->wf_size();
+  load->exec_mask = 0xffffffff;
+  load->lane_mask = 0xffffffff;
+  load->dst_reg_base = context.wf->vgpr_alloc().base + kDestination;
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    load->per_lane_addr[lane] = kAddress + (lane ^ 1) * sizeof(uint32_t);
+  amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+  ASSERT_EQ(pipeline.issue(new TestMemoryInstruction(std::move(load)), *context.wf),
+            amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(context.external->read_calls, 1u);
+  EXPECT_EQ(context.external->last_read.address, kAddress);
+  EXPECT_EQ(context.external->last_read.size, 32 * sizeof(uint32_t));
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    EXPECT_EQ(context.cu->read_vgpr(context.wf->vgpr_alloc().base + kDestination, lane),
+              0x1000u + (lane ^ 1));
+}
+
+TEST(GpuVmPipeline, ReorderedTranslatedTransactionsRespectBoundariesAndOverlaps) {
+  constexpr uint32_t kDestination = 8;
+  for (const auto &addresses : {std::array<uint64_t, 4>{0x284, 0x280, 0x27c, 0x278},
+                                std::array<uint64_t, 4>{0x240, 0x240, 0x244, 0x248}}) {
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    std::array<uint32_t, 4> values{1, 2, 3, 4};
+    amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+    for (bool is_load : {false, true}) {
+      auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+      state->elem_size = sizeof(uint32_t);
+      state->num_elems = 1;
+      state->is_load = is_load;
+      state->wf_size = context.wf->wf_size();
+      state->exec_mask = 0xf;
+      state->lane_mask = 0xf;
+      state->dst_reg_base = context.wf->vgpr_alloc().base + kDestination;
+      state->store_data.resize(state->wf_size * sizeof(uint32_t));
+      std::memcpy(state->store_data.data(), values.data(), sizeof(values));
+      std::ranges::copy(addresses, state->per_lane_addr.begin());
+      ASSERT_EQ(pipeline.issue(new TestMemoryInstruction(std::move(state)), *context.wf),
+                amdgpu::VmAccessOutcome::Complete);
+    }
+    for (uint32_t lane = 0; lane < addresses.size(); ++lane) {
+      const uint32_t expected = addresses[0] == addresses[1] && lane == 0 ? 2 : values[lane];
+      EXPECT_EQ(context.external->load<uint32_t>(addresses[lane]), expected);
+      EXPECT_EQ(context.cu->read_vgpr(context.wf->vgpr_alloc().base + kDestination, lane),
+                expected);
+    }
+    EXPECT_EQ(context.external->write_calls, 2u);
+    EXPECT_EQ(context.external->read_calls, 2u);
+    if (addresses[0] != addresses[1]) {
+      EXPECT_EQ(context.external->write_history[0].address, 0x280u);
+      EXPECT_EQ(context.external->write_history[1].address, 0x278u);
+      EXPECT_EQ(context.external->write_history[0].size, 2 * sizeof(uint32_t));
+      EXPECT_EQ(context.external->write_history[1].size, 2 * sizeof(uint32_t));
+    }
+  }
+}
+
+TEST(GpuVmPipeline, OverlapBeforePermutedRecordPreservesRequestOrderAcrossRetry) {
+  constexpr uint64_t kDuplicate = 0x240;
+  constexpr uint64_t kRecord = 0x300;
+  constexpr uint32_t kDestination = 8;
+  constexpr uint32_t kChanged = 0xabcdef01;
+  const std::array<uint64_t, 5> addresses{kDuplicate, kDuplicate, kRecord + 8, kRecord,
+                                          kRecord + 4};
+  const std::array<uint32_t, 5> stored{10, 20, 30, 40, 50};
+  for (bool is_load : {false, true}) {
+    SCOPED_TRACE(is_load);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    context.external->store(kDuplicate, uint32_t{101});
+    for (uint32_t word = 0; word < 3; ++word)
+      context.external->store(kRecord + word * sizeof(uint32_t), 102u + word);
+    auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = is_load;
+    state->wf_size = context.wf->wf_size();
+    state->exec_mask = 0x1f;
+    state->lane_mask = state->exec_mask;
+    state->dst_reg_base = context.wf->vgpr_alloc().base + kDestination;
+    std::ranges::copy(addresses, state->per_lane_addr.begin());
+    state->store_data.resize(state->wf_size * sizeof(uint32_t));
+    std::memcpy(state->store_data.data(), stored.data(), sizeof(stored));
+    if (is_load)
+      context.external->unavailable_read_call = 2;
+    else
+      context.external->unavailable_write_call = 2;
+    amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+    ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), *context.wf),
+              amdgpu::VmAccessOutcome::Complete);
+    ASSERT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+    context.external->store(kDuplicate, kChanged);
+    pipeline.tick();
+    ASSERT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+    EXPECT_TRUE(context.wf->wait_counters().empty());
+    if (is_load) {
+      const std::array<uint32_t, 5> expected{101, kChanged, 104, 102, 103};
+      for (uint32_t lane = 0; lane < expected.size(); ++lane)
+        EXPECT_EQ(context.cu->read_vgpr(context.wf->vgpr_alloc().base + kDestination, lane),
+                  expected[lane]);
+    } else {
+      EXPECT_EQ(context.external->load<uint32_t>(kDuplicate), stored[1]);
+      EXPECT_EQ(context.external->load<uint32_t>(kRecord), stored[3]);
+      EXPECT_EQ(context.external->load<uint32_t>(kRecord + 4), stored[4]);
+      EXPECT_EQ(context.external->load<uint32_t>(kRecord + 8), stored[2]);
+    }
+    // The duplicate operand selects original lane order for the instruction,
+    // including the later independent record. Only the refused request repeats.
+    const auto &history =
+        is_load ? context.external->read_history : context.external->write_history;
+    const std::array<uint64_t, 5> expected_addresses{kDuplicate, kDuplicate, kDuplicate,
+                                                     kRecord + 8, kRecord};
+    ASSERT_EQ(history.size(), expected_addresses.size());
+    for (size_t request = 0; request < history.size(); ++request) {
+      EXPECT_EQ(history[request].address, expected_addresses[request]);
+      EXPECT_EQ(history[request].size, request == 4 ? 2 * sizeof(uint32_t) : sizeof(uint32_t));
+    }
+  }
+}
+
+TEST(GpuVmPipeline, ClippedReorderedRetryPreservesGapsAndCompletedBytes) {
+  constexpr uint64_t kAddress = 0x200;
+  constexpr uint32_t kDestination = 8;
+  constexpr uint32_t kSentinel = 0xcccccccc;
+  const std::array<uint32_t, 6> kSource{10, 11, 20, 21, 30, 31};
+  const std::array<uint32_t, 8> kExpected{20, 21, 10, 11, kSentinel, kSentinel, 30, kSentinel};
+  for (bool load : {false, true}) {
+    for (uint32_t retry_call : {2u, 4u}) {
+      SCOPED_TRACE(load);
+      SCOPED_TRACE(retry_call);
+      TranslatedPipelineContext context;
+      ASSERT_NO_FATAL_FAILURE(context.initialize());
+      for (unsigned i = 0; i < kExpected.size(); ++i)
+        context.external->store(kAddress + i * sizeof(uint32_t), load ? kExpected[i] : kSentinel);
+      auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+      state->elem_size = sizeof(uint32_t);
+      state->num_elems = 2;
+      state->is_load = load;
+      state->wf_size = context.wf->wf_size();
+      state->exec_mask = 7;
+      state->lane_mask = 7;
+      state->element_lane_masks.assign(2, 7);
+      state->element_lane_masks[1] = 3;
+      state->dst_reg_base = context.wf->vgpr_alloc().base + kDestination;
+      state->per_lane_addr[0] = kAddress + 8;
+      state->per_lane_addr[1] = kAddress;
+      state->per_lane_addr[2] = kAddress + 24;
+      state->store_data.resize(state->wf_size * 2 * sizeof(uint32_t));
+      std::memcpy(state->store_data.data(), kSource.data(), sizeof(kSource));
+      context.external->translation_granule = 6;
+      if (load)
+        context.external->unavailable_read_call = retry_call;
+      else
+        context.external->unavailable_write_call = retry_call;
+      amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+      ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), *context.wf),
+                amdgpu::VmAccessOutcome::Complete);
+      ASSERT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+      context.external->store(kAddress, uint32_t{0xabcdef01});
+      pipeline.tick();
+      ASSERT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+      ASSERT_TRUE(context.wf->wait_counters().empty());
+      for (unsigned i = 0; i < kExpected.size(); ++i)
+        EXPECT_EQ(context.external->load<uint32_t>(kAddress + i * sizeof(uint32_t)),
+                  i == 0 ? 0xabcdef01 : kExpected[i]);
+      if (load) {
+        for (unsigned lane = 0; lane < 3; ++lane)
+          for (unsigned element = 0; element < 2; ++element)
+            EXPECT_EQ(
+                context.cu->read_vgpr(context.wf->vgpr_alloc().base + kDestination + element, lane),
+                lane == 2 && element == 1 ? 0 : kSource[lane * 2 + element]);
+      }
+      const auto &history = load ? context.external->read_history : context.external->write_history;
+      unsigned prefix_calls = 0;
+      for (const auto &request : history) {
+        prefix_calls += request.address == kAddress;
+        EXPECT_TRUE(
+            (request.address >= kAddress && request.address + request.size <= kAddress + 16) ||
+            (request.address >= kAddress + 24 && request.address + request.size <= kAddress + 28));
+      }
+      EXPECT_EQ(prefix_calls, 1u);
+    }
+  }
+}
+
 TEST(GpuVmPipeline, TranslatedVectorStoreRetrySkipsCompletedRequests) {
   TranslatedPipelineContext context;
   ASSERT_NO_FATAL_FAILURE(context.initialize());
@@ -1196,6 +2049,10 @@ TEST(GpuVmPipeline, TranslatedVectorStoreRetrySkipsCompletedRequests) {
   EXPECT_EQ(context.external->load<uint32_t>(kFirstAddress), kStored[0]);
   EXPECT_EQ(context.external->load<uint32_t>(kSecondAddress), 0u);
 
+  const auto saved_pc = context.wf->pc;
+  EXPECT_FALSE(pipeline.rewind_unavailable_load(*context.wf));
+  EXPECT_EQ(context.wf->pc, saved_pc);
+  EXPECT_FALSE(context.wf->wait_counters().empty());
   pipeline.tick();
 
   EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
@@ -1424,6 +2281,10 @@ TEST(GpuVmPipeline, TranslatedAtomicRetrySkipsCompletedLanes) {
   EXPECT_EQ(context.external->load<uint32_t>(kFirstAddress), kInitial[0] + kSource[0]);
   EXPECT_EQ(context.external->load<uint32_t>(kSecondAddress), kInitial[1]);
 
+  const auto saved_pc = context.wf->pc;
+  EXPECT_FALSE(pipeline.rewind_unavailable_load(*context.wf));
+  EXPECT_EQ(context.wf->pc, saved_pc);
+  EXPECT_FALSE(context.wf->wait_counters().empty());
   pipeline.tick();
 
   EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
