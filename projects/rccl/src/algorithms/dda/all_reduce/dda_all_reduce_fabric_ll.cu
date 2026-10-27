@@ -68,6 +68,23 @@ static inline std::pair<dim3, dim3> ddaAllReduceFabricLLGeom(ncclComm* comm, siz
   return std::make_pair(dim3(blocks), dim3(threads));
 }
 
+// Two-shot covers one shard (the message divided by nRanks) with 1024-thread
+// blocks, and keeps the full fabric cap. That grid can be larger than the
+// halved one-shot cap, so the tuner must see both.
+static inline std::pair<dim3, dim3> ddaAllReduceFabricLLTwoShotGeom(ncclComm* comm, size_t count, int typeSize) {
+  const size_t nPk = (((size_t)count * (size_t)typeSize) >> 3) / (size_t)comm->nRanks;
+  const unsigned threads = 1024;
+  int nBlocksMax = comm->ddaFabricMaxBlocks;
+  if (nBlocksMax < 1) {
+    nBlocksMax = 1;
+  }
+  unsigned blocks = (unsigned)std::min<size_t>((nPk + threads - 1) / threads, (size_t)nBlocksMax);
+  if (blocks == 0) {
+    blocks = 1;
+  }
+  return std::make_pair(dim3(blocks), dim3(threads));
+}
+
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
                                                   cudaStream_t stream) {
@@ -250,19 +267,11 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
                                                          ncclComm* comm, cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
-  const size_t nPk = (bytes >> 3 ) / (size_t)nRanks; // 8 payload bytes per packet
+  const size_t nPk = (bytes >> 3) / (size_t)nRanks; // 8 payload bytes per packet
 
-  const unsigned threads = 1024;
-  int nBlocksMax = comm->ddaFabricMaxBlocks;
-  if (nBlocksMax < 1) {
-    nBlocksMax = 1;
-  }
-  unsigned blocks = (unsigned)std::min<size_t>((nPk + threads - 1) / threads, (size_t)nBlocksMax);
-  if (blocks == 0) {
-    blocks = 1;
-  }
-  dim3 block(threads);
-  dim3 grid(blocks);
+  const auto geom = ddaAllReduceFabricLLTwoShotGeom(comm, count, (int)sizeof(T));
+  const dim3 grid = geom.first;
+  const dim3 block = geom.second;
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   // Same epoch counter the one-shot tier uses: the two share a scratch layout, so
@@ -628,13 +637,17 @@ ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, s
 }
 
 uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
-  const auto grid = ddaAllReduceFabricLLGeom(comm, count, ncclTypeSize(datatype)).first;
-  return grid.x * grid.y;
+  const int typeSize = ncclTypeSize(datatype);
+  const auto oneShot = ddaAllReduceFabricLLGeom(comm, count, typeSize).first;
+  const auto twoShot = ddaAllReduceFabricLLTwoShotGeom(comm, count, typeSize).first;
+  // The two-shot tier keeps the full fabric cap, so a mid-size message can
+  // launch more blocks than the halved one-shot grid.
+  return std::max(oneShot.x * oneShot.y, twoShot.x * twoShot.y);
 }
 
-// Reports the one-shot tier's grid, as the LL counterpart above reports the LL
-// one-shot's: the two-shot tier sizes its grid on a shard rather than the whole
-// message, so it runs on no more blocks than this.
+// LL128 one-shot and two-shot share ddaFabricMaxBlocks, and the two-shot grid is
+// sized on a shard, so it never exceeds this one-shot count. LL is different:
+// ncclAllReduceDdaFabricLLBlocks reports the larger of its two tiers.
 uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
   const size_t slices = ddaLL128Slices(count * ncclTypeSize(datatype));
   const size_t warps = 512 / (size_t)kDdaLL128Warp;

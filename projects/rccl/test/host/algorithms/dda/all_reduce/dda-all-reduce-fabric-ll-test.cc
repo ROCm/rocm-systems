@@ -453,19 +453,29 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_TwoShotPassesShardBytesAndSlices)
   EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
 }
 
-// One-shot LL: a block per 512 packets of the message, capped at ddaFabricMaxBlocks.
+// One-shot LL: a block per 512 packets of the message, capped at ddaFabricLLOneShotMaxBlocks.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_OneShotGridFollowsMessagePackets) {
   EXPECT_EQ(RunOneLL(1024).grid.x, 1u);
   EXPECT_EQ(RunOneLL(1028).grid.x, 2u);
   EXPECT_EQ(RunOneLL(1024, ncclFloat16).grid.x, 1u);
   EXPECT_EQ(RunOneLL(1u << 16).grid.x, 64u);
   EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), 1u << 16, ncclFloat32), 64u);
-  comm().ddaFabricMaxBlocks = 5;
+  comm().ddaFabricLLOneShotMaxBlocks = 5;
   EXPECT_EQ(RunOneLL(1u << 16).grid.x, 5u);
+  // Two-shot for this message is 4 blocks at the full cap, so the reporter still follows one-shot.
   EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), 1u << 16, ncclFloat32), 5u);
+  comm().ddaFabricLLOneShotMaxBlocks = 0;
   comm().ddaFabricMaxBlocks = 0;
   EXPECT_EQ(RunOneLL(1u << 16).grid.x, 1u);
   EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), 1u << 16, ncclFloat32), 1u);
+}
+
+// 4 MiB at 8 ranks: one-shot geometry caps at 48, two-shot launches 64 of the full cap.
+TEST_F(DdaAllReduceFabricLLMicrotest, Blocks_ReportsTheLargerOfOneShotAndTwoShot) {
+  comm().ddaFabricLLOneShotMaxBlocks = 48;
+  comm().ddaFabricMaxBlocks = 96;
+  constexpr size_t kCount = (4u << 20) / sizeof(float);
+  EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), kCount, ncclFloat32), 64u);
 }
 
 // Two-shot LL: a block per 1024 packets of one shard.
