@@ -39,7 +39,7 @@ Multiple debug flags can be combined:
    This replaces the removed ``-g`` flag. Combine it with ``--block`` to
    isolate a metric, for example ``--block 2.1.0 --debug --debug-single-metric``.
 * ``--debug-verify-deps``: Check analyze-mode Python dependencies, then exit without
-   analyzing a workload. The standalone ``--verify-deps`` spelling also works.
+     analyzing a workload. The standalone ``--verify-deps`` spelling also works.
 
 The ``--debug-*`` flags require ``--debug``; their order does not matter.
 The enabling flag alone does not turn on metric diagnostics.
