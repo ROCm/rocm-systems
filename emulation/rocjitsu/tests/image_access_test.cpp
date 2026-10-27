@@ -23,6 +23,8 @@
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include "gfx11_mimg_test_common.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -649,41 +651,26 @@ protected:
   DecodeResult decode(bool load) { return decode(load, Encoding{}); }
 
   DecodeResult decode(bool load, Encoding encoding) {
+    const test::Gfx11MimgEncoding mimg{.nsa = encoding.nsa,
+                                       .dim = encoding.dim,
+                                       .unorm = true,
+                                       .dmask = encoding.dmask,
+                                       .r128 = encoding.r128,
+                                       .a16 = encoding.a16,
+                                       .d16 = encoding.d16,
+                                       .vaddr = 2,
+                                       .vdata = 8,
+                                       .srsrc = 2,
+                                       .tfe = encoding.tfe,
+                                       .nsa_word = 6};
     if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
-      const auto base = rdna3::build_mimg(load ? rdna3::kImageLoadMimg : rdna3::kImageStoreMimg,
-                                          {.nsa = encoding.nsa,
-                                           .dim = encoding.dim,
-                                           .unorm = 1,
-                                           .dmask = encoding.dmask,
-                                           .r128 = encoding.r128,
-                                           .a16 = encoding.a16,
-                                           .d16 = encoding.d16,
-                                           .vaddr = 2,
-                                           .vdata = 8,
-                                           .srsrc = 2,
-                                           .tfe = encoding.tfe});
-      if (!encoding.nsa)
-        return decoder->decode(base.data());
-      const std::array<uint32_t, 3> words{base[0], base[1], 6};
-      return decoder->decode(words.data());
+      return test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(
+          *decoder, rdna3::build_mimg, load ? rdna3::kImageLoadMimg : rdna3::kImageStoreMimg, mimg);
     }
     if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5) {
-      const auto base = rdna3_5::build_mimg(
-          load ? rdna3_5::kImageLoadMimg : rdna3_5::kImageStoreMimg, {.nsa = encoding.nsa,
-                                                                      .dim = encoding.dim,
-                                                                      .unorm = 1,
-                                                                      .dmask = encoding.dmask,
-                                                                      .r128 = encoding.r128,
-                                                                      .a16 = encoding.a16,
-                                                                      .d16 = encoding.d16,
-                                                                      .vaddr = 2,
-                                                                      .vdata = 8,
-                                                                      .srsrc = 2,
-                                                                      .tfe = encoding.tfe});
-      if (!encoding.nsa)
-        return decoder->decode(base.data());
-      const std::array<uint32_t, 3> words{base[0], base[1], 6};
-      return decoder->decode(words.data());
+      return test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
+          *decoder, rdna3_5::build_mimg, load ? rdna3_5::kImageLoadMimg : rdna3_5::kImageStoreMimg,
+          mimg);
     }
     const auto words = rdna4::build_vimage(
         load ? rdna4::kImageLoadVimage : rdna4::kImageStoreVimage, {.dim = encoding.dim,

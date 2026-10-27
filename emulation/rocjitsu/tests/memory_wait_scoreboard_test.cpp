@@ -27,6 +27,8 @@
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
+#include "gfx11_mimg_test_common.h"
+
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -709,27 +711,21 @@ TEST(MemoryWaitExecutionTest, D16ImageWaitsTrackPartialResultsAndRealImplicitRea
     auto decoder = Decoder::create(arch);
     auto decode = [&](uint8_t dmask, uint8_t first_address = 2) -> DecodeResult {
       util::StringDiagnostic error;
+      const test::Gfx11MimgEncoding mimg{.nsa = true,
+                                         .dim = 1,
+                                         .unorm = true,
+                                         .dmask = dmask,
+                                         .d16 = true,
+                                         .vaddr = first_address,
+                                         .vdata = 8,
+                                         .nsa_word = 6};
       if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
-        const auto base = rdna3::build_mimg(rdna3::kImageLoadMimg, {.nsa = 1,
-                                                                    .dim = 1,
-                                                                    .unorm = 1,
-                                                                    .dmask = dmask,
-                                                                    .d16 = 1,
-                                                                    .vaddr = first_address,
-                                                                    .vdata = 8});
-        const std::array<uint32_t, 3> words{base[0], base[1], 6};
-        return decoder->decode_window(words, 0, error.emitter());
+        return test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(
+            *decoder, rdna3::build_mimg, rdna3::kImageLoadMimg, mimg, error.emitter());
       }
       if (arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
-        const auto base = rdna3_5::build_mimg(rdna3_5::kImageLoadMimg, {.nsa = 1,
-                                                                        .dim = 1,
-                                                                        .unorm = 1,
-                                                                        .dmask = dmask,
-                                                                        .d16 = 1,
-                                                                        .vaddr = first_address,
-                                                                        .vdata = 8});
-        const std::array<uint32_t, 3> words{base[0], base[1], 6};
-        return decoder->decode_window(words, 0, error.emitter());
+        return test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
+            *decoder, rdna3_5::build_mimg, rdna3_5::kImageLoadMimg, mimg, error.emitter());
       }
       const auto words = rdna4::build_vimage(
           rdna4::kImageLoadVimage,
