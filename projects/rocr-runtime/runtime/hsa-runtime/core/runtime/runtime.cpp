@@ -4575,10 +4575,6 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  if (flag().enable_vmem_import_owner()) {
-    EnsureImportInfo(memoryHandle);
-  }
-
   uint64_t offset = 0;
   // Register the mapping
   mapped_handle_map_.emplace(std::piecewise_construct, std::forward_as_tuple(va),
@@ -4790,8 +4786,7 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, uint64_t flags_u
       imported(false),
       is_fabric_handle(false),
       alloc_flag(alloc_flag),
-      drm_owner(nullptr),
-      import_info_queried(false) {
+      drm_owner(nullptr) {
   assert(driver_handle.handle != 0);
 }
 
@@ -4803,8 +4798,23 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
       imported(true),
       is_fabric_handle(false),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr),
-      import_info_queried(false) {}
+      drm_owner(nullptr) {
+  /* Caller holds memory_lock_. Ask each agent driver in turn and take the first
+   * that recognizes the fd. AgentDriver(KFD) is not used because it throws when
+   * no KFD driver is present. alloc_flag stays AllocateNoFlags: the dmabuf carries
+   * no memory-type metadata. */
+  if (driver_handle.dmabuf_fd < 0) return;
+
+  core::Runtime* runtime = core::Runtime::runtime_singleton_;
+  core::DmaBufInfo info = {};
+  for (auto& driver : runtime->AgentDrivers()) {
+    if (driver->QueryDmaBufInfo(driver_handle.dmabuf_fd, &info) == HSA_STATUS_SUCCESS) {
+      region = runtime->ResolveImportedRegion(info);
+      driver_handle.size = info.size;
+      return;
+    }
+  }
+}
 
 Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
     : region(nullptr),
@@ -4814,8 +4824,7 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
       imported(true),
       is_fabric_handle(true),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr),
-      import_info_queried(false) {}
+      drm_owner(nullptr) {}
 
 Runtime::MemoryHandle::~MemoryHandle() {
   if (driver_handle.handle != 0) {
@@ -5079,30 +5088,6 @@ const core::MemoryRegion* Runtime::ResolveImportedRegion(const core::DmaBufInfo&
   return system_regions_fine_[0].get();
 }
 
-/* Recover an imported handle's placement and size from its dmabuf and cache it in
- * the handle's own fields. Ask each agent driver in turn and take the first that
- * recognizes the fd; AgentDriver(KFD) is not used because it throws when no KFD
- * driver is present. A buffer the driver cannot describe is marked queried so the
- * ioctl is not repeated. Caller must hold memory_lock_. */
-void Runtime::EnsureImportInfo(MemoryHandle* memoryHandle) {
-  if (!memoryHandle->imported || memoryHandle->import_info_queried) return;
-  memoryHandle->import_info_queried = true;
-
-  if (memoryHandle->driver_handle.dmabuf_fd < 0) return;
-
-  core::DmaBufInfo info = {};
-  for (auto& driver : AgentDrivers()) {
-    if (driver->QueryDmaBufInfo(memoryHandle->driver_handle.dmabuf_fd, &info) ==
-        HSA_STATUS_SUCCESS) {
-      memoryHandle->region = ResolveImportedRegion(info);
-      memoryHandle->driver_handle.size = info.size;
-      /* alloc_flag stays AllocateNoFlags: the dmabuf carries no memory-type
-       * metadata, and the exporter may legitimately have used MEMORY_TYPE_NONE. */
-      return;
-    }
-  }
-}
-
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   /* The per-GPU import of this dmabuf is deferred until hsa_amd_vmem_set_access is called, but the
@@ -5112,8 +5097,8 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   int owned_fd = os::DmaBufDup(dmabuf_fd);
   if (owned_fd < 0) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  /* Placement is not recovered here: importers that never query it should not pay
-   * for an ioctl. EnsureImportInfo does it on the first query that needs it. */
+  /* memory_lock_ is held across construction. The dmabuf constructor queries the
+   * fd for its owning region, which requires that lock. */
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd);
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
@@ -5178,8 +5163,6 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  EnsureImportInfo(memoryHandle);
-
   const MemoryRegion* region = memoryHandle->region;
   *mem_region = region;
   *type = (region != nullptr && (memoryHandle->alloc_flag & core::MemoryRegion::AllocatePinned))
@@ -5209,7 +5192,6 @@ hsa_status_t Runtime::VMemoryGetHandleInfo(hsa_amd_vmem_alloc_handle_t allocHand
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  EnsureImportInfo(memoryHandle);
   const MemoryRegion* region = memoryHandle->region;
 
   /* An unresolved import has no agent to report, and succeeding would hand back a
