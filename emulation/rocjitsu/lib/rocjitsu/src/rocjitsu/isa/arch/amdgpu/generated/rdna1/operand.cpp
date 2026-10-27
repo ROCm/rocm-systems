@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include <format>
 #include <optional>
@@ -24,9 +25,11 @@ std::string reg_name(const char *prefix, int reg_num, int size_bits) {
 }
 } // namespace
 
-Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
+Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
+                 ScalarExtent scalar_extent)
     : IsaOperand<Isa>(size_bits, opr_type, encoding_value),
       execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())) {
+  const int minimum_size_bits = scalar_extent == ScalarExtent::WaveMask ? 32 : size_bits;
   switch (opr_type) {
   case OperandType::OPR_ATTR:
     if (!((encoding_value >= 0 && encoding_value <= 32)))
@@ -59,6 +62,12 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
   case OperandType::OPR_SDST:
     if (!((encoding_value >= 0 && encoding_value <= 127)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSdst::OPR_SDST_TTMP_MIN &&
+        encoding_value <= OpSelSdst::OPR_SDST_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSdst::OPR_SDST_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SDST_EXEC:
     if (!((encoding_value >= 126 && encoding_value <= 127)))
@@ -75,12 +84,24 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
   case OperandType::OPR_SMEM_OFFSET:
     if (!((encoding_value >= 0 && encoding_value <= 125)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
+        encoding_value <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SRC:
     if (!((encoding_value >= 0 && encoding_value <= 208) ||
           (encoding_value >= 235 && encoding_value <= 248) ||
           (encoding_value >= 251 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSrc::OPR_SRC_TTMP_MIN &&
+        encoding_value <= OpSelSrc::OPR_SRC_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSrc::OPR_SRC_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     if (encoding_value >= OpSelSrc::OPR_SRC_VGPR_MIN &&
         encoding_value <= OpSelSrc::OPR_SRC_VGPR_MAX) {
       initialize_vgpr_reference(encoding_value - OpSelSrc::OPR_SRC_VGPR_MIN + 0);
@@ -92,6 +113,12 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 251 && encoding_value <= 253) ||
           (encoding_value >= 255 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MIN &&
+        encoding_value <= OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     if (encoding_value >= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MIN &&
         encoding_value <= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MAX) {
       initialize_vgpr_reference(encoding_value - OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MIN + 0);
@@ -103,6 +130,12 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 251 && encoding_value <= 253) ||
           (encoding_value >= 256 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MIN &&
+        encoding_value <= OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     if (encoding_value >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&
         encoding_value <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX) {
       initialize_vgpr_reference(encoding_value - OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN + 0);
@@ -120,6 +153,12 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
     if (!((encoding_value >= 0 && encoding_value <= 123) ||
           (encoding_value >= 125 && encoding_value <= 125)))
       defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSreg::OPR_SREG_TTMP_MIN &&
+        encoding_value <= OpSelSreg::OPR_SREG_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSreg::OPR_SREG_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SREG_M0_INL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
@@ -127,9 +166,21 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 235 && encoding_value <= 248) ||
           (encoding_value >= 251 && encoding_value <= 253)))
       defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN &&
+        encoding_value <= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SREG_NONULL:
     if (!((encoding_value >= 0 && encoding_value <= 123)))
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSregNonull::OPR_SREG_NONULL_TTMP_MIN &&
+        encoding_value <= OpSelSregNonull::OPR_SREG_NONULL_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSregNonull::OPR_SREG_NONULL_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
       defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SSRC:
@@ -137,11 +188,23 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 235 && encoding_value <= 248) ||
           (encoding_value >= 251 && encoding_value <= 255)))
       defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
+        encoding_value <= OpSelSsrc::OPR_SSRC_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSsrc::OPR_SSRC_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SSRC_LANESEL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
           (encoding_value >= 128 && encoding_value <= 192)))
       defer_encoding_error(EncodingError::InvalidLaneSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
+        encoding_value <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SSRC_NOLDS:
     if (!((encoding_value >= 0 && encoding_value <= 208) ||
@@ -149,6 +212,12 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 251 && encoding_value <= 253) ||
           (encoding_value >= 255 && encoding_value <= 255)))
       defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSsrcNolds::OPR_SSRC_NOLDS_TTMP_MIN &&
+        encoding_value <= OpSelSsrcNolds::OPR_SSRC_NOLDS_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSsrcNolds::OPR_SSRC_NOLDS_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SSRC_SPECIAL_SCC:
     if (!((encoding_value >= 253 && encoding_value <= 253)))

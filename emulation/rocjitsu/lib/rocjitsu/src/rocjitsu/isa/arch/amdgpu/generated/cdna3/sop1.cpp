@@ -862,9 +862,9 @@ SSetpcB64Sop1::SSetpcB64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_BRANCH;
+  flags_ |= ABSOLUTE_INDIRECT_BRANCH;
   flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
   flags_ |= VCC_WRITE_EFFECTS_KNOWN;
-  flags_ |= ABSOLUTE_INDIRECT_BRANCH;
 }
 
 namespace detail {

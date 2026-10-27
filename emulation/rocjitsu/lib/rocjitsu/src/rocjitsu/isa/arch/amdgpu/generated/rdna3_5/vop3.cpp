@@ -3952,7 +3952,8 @@ VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2, false,
+           false, Operand::ScalarExtent::WaveMask) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -10140,7 +10141,8 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2, false,
+           false, Operand::ScalarExtent::WaveMask) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -13388,7 +13390,8 @@ void VXorB16Vop3::implicit_uses(RegisterSet &uses) const {
 VCmpFF16Vop3::VCmpFF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -13453,7 +13456,8 @@ DecodeResult decodeVCmpFF16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -13516,7 +13520,8 @@ DecodeResult decodeVCmpLtF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -13579,7 +13584,8 @@ DecodeResult decodeVCmpEqF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -13642,7 +13648,8 @@ DecodeResult decodeVCmpLeF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -13705,7 +13712,8 @@ DecodeResult decodeVCmpGtF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lg_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLgF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -13768,7 +13776,8 @@ DecodeResult decodeVCmpLgF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -13831,7 +13840,8 @@ DecodeResult decodeVCmpGeF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_o_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpOF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -13894,7 +13904,8 @@ DecodeResult decodeVCmpOF16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_u_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpUF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -13957,7 +13968,8 @@ DecodeResult decodeVCmpUF16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nge_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgeF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14020,7 +14032,8 @@ DecodeResult decodeVCmpNgeF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlg_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNlgF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14083,7 +14096,8 @@ DecodeResult decodeVCmpNlgF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ngt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgtF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14146,7 +14160,8 @@ DecodeResult decodeVCmpNgtF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nle_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNleF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14209,7 +14224,8 @@ DecodeResult decodeVCmpNleF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_neq_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeqF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14272,7 +14288,8 @@ DecodeResult decodeVCmpNeqF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNltF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14335,7 +14352,8 @@ DecodeResult decodeVCmpNltF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpTF16Vop3::VCmpTF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_t_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14400,7 +14418,8 @@ DecodeResult decodeVCmpTF16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpFF32Vop3::VCmpFF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14457,7 +14476,8 @@ DecodeResult decodeVCmpFF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14512,7 +14532,8 @@ DecodeResult decodeVCmpLtF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14567,7 +14588,8 @@ DecodeResult decodeVCmpEqF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14622,7 +14644,8 @@ DecodeResult decodeVCmpLeF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14677,7 +14700,8 @@ DecodeResult decodeVCmpGtF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lg_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLgF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14732,7 +14756,8 @@ DecodeResult decodeVCmpLgF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14787,7 +14812,8 @@ DecodeResult decodeVCmpGeF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_o_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpOF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14842,7 +14868,8 @@ DecodeResult decodeVCmpOF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_u_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpUF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14897,7 +14924,8 @@ DecodeResult decodeVCmpUF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nge_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgeF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -14952,7 +14980,8 @@ DecodeResult decodeVCmpNgeF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlg_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNlgF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15007,7 +15036,8 @@ DecodeResult decodeVCmpNlgF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ngt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgtF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15062,7 +15092,8 @@ DecodeResult decodeVCmpNgtF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nle_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNleF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15117,7 +15148,8 @@ DecodeResult decodeVCmpNleF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_neq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeqF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15172,7 +15204,8 @@ DecodeResult decodeVCmpNeqF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNltF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15227,7 +15260,8 @@ DecodeResult decodeVCmpNltF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpTF32Vop3::VCmpTF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_t_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15284,7 +15318,8 @@ DecodeResult decodeVCmpTF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpFF64Vop3::VCmpFF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15324,7 +15359,8 @@ DecodeResult decodeVCmpFF64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15362,7 +15398,8 @@ DecodeResult decodeVCmpLtF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15400,7 +15437,8 @@ DecodeResult decodeVCmpEqF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15438,7 +15476,8 @@ DecodeResult decodeVCmpLeF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15476,7 +15515,8 @@ DecodeResult decodeVCmpGtF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lg_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLgF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15514,7 +15554,8 @@ DecodeResult decodeVCmpLgF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15552,7 +15593,8 @@ DecodeResult decodeVCmpGeF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_o_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpOF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15590,7 +15632,8 @@ DecodeResult decodeVCmpOF64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_u_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpUF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15628,7 +15671,8 @@ DecodeResult decodeVCmpUF64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nge_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgeF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15666,7 +15710,8 @@ DecodeResult decodeVCmpNgeF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlg_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNlgF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15704,7 +15749,8 @@ DecodeResult decodeVCmpNlgF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ngt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgtF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15742,7 +15788,8 @@ DecodeResult decodeVCmpNgtF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nle_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNleF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15780,7 +15827,8 @@ DecodeResult decodeVCmpNleF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_neq_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeqF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15818,7 +15866,8 @@ DecodeResult decodeVCmpNeqF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNltF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15856,7 +15905,8 @@ DecodeResult decodeVCmpNltF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCmpTF64Vop3::VCmpTF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_t_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15896,7 +15946,8 @@ DecodeResult decodeVCmpTF64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtI16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -15961,7 +16012,8 @@ DecodeResult decodeVCmpLtI16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqI16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16026,7 +16078,8 @@ DecodeResult decodeVCmpEqI16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeI16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16091,7 +16144,8 @@ DecodeResult decodeVCmpLeI16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtI16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16156,7 +16210,8 @@ DecodeResult decodeVCmpGtI16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeI16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16221,7 +16276,8 @@ DecodeResult decodeVCmpNeI16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeI16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16286,7 +16342,8 @@ DecodeResult decodeVCmpGeI16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtU16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16351,7 +16408,8 @@ DecodeResult decodeVCmpLtU16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqU16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16416,7 +16474,8 @@ DecodeResult decodeVCmpEqU16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeU16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16481,7 +16540,8 @@ DecodeResult decodeVCmpLeU16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtU16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16546,7 +16606,8 @@ DecodeResult decodeVCmpGtU16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeU16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16611,7 +16672,8 @@ DecodeResult decodeVCmpNeU16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeU16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16676,7 +16738,8 @@ DecodeResult decodeVCmpGeU16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpFI32Vop3::VCmpFI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFI32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16733,7 +16796,8 @@ DecodeResult decodeVCmpFI32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtI32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16790,7 +16854,8 @@ DecodeResult decodeVCmpLtI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqI32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16847,7 +16912,8 @@ DecodeResult decodeVCmpEqI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeI32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16904,7 +16970,8 @@ DecodeResult decodeVCmpLeI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtI32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -16961,7 +17028,8 @@ DecodeResult decodeVCmpGtI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeI32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17018,7 +17086,8 @@ DecodeResult decodeVCmpNeI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeI32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17075,7 +17144,8 @@ DecodeResult decodeVCmpGeI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpTI32Vop3::VCmpTI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_t_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTI32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17132,7 +17202,8 @@ DecodeResult decodeVCmpTI32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpFU32Vop3::VCmpFU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFU32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17189,7 +17260,8 @@ DecodeResult decodeVCmpFU32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtU32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17246,7 +17318,8 @@ DecodeResult decodeVCmpLtU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqU32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17303,7 +17376,8 @@ DecodeResult decodeVCmpEqU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeU32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17360,7 +17434,8 @@ DecodeResult decodeVCmpLeU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtU32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17417,7 +17492,8 @@ DecodeResult decodeVCmpGtU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeU32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17474,7 +17550,8 @@ DecodeResult decodeVCmpNeU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeU32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17531,7 +17608,8 @@ DecodeResult decodeVCmpGeU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpTU32Vop3::VCmpTU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_t_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTU32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17588,7 +17666,8 @@ DecodeResult decodeVCmpTU32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpFI64Vop3::VCmpFI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFI64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17628,7 +17707,8 @@ DecodeResult decodeVCmpFI64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtI64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17668,7 +17748,8 @@ DecodeResult decodeVCmpLtI64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqI64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17708,7 +17789,8 @@ DecodeResult decodeVCmpEqI64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeI64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17748,7 +17830,8 @@ DecodeResult decodeVCmpLeI64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtI64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17788,7 +17871,8 @@ DecodeResult decodeVCmpGtI64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeI64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17828,7 +17912,8 @@ DecodeResult decodeVCmpNeI64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeI64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17868,7 +17953,8 @@ DecodeResult decodeVCmpGeI64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpTI64Vop3::VCmpTI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_t_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTI64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17908,7 +17994,8 @@ DecodeResult decodeVCmpTI64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpFU64Vop3::VCmpFU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFU64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17948,7 +18035,8 @@ DecodeResult decodeVCmpFU64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtU64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -17988,7 +18076,8 @@ DecodeResult decodeVCmpLtU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqU64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -18028,7 +18117,8 @@ DecodeResult decodeVCmpEqU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeU64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -18068,7 +18158,8 @@ DecodeResult decodeVCmpLeU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtU64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -18108,7 +18199,8 @@ DecodeResult decodeVCmpGtU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeU64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -18148,7 +18240,8 @@ DecodeResult decodeVCmpNeU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeU64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -18188,7 +18281,8 @@ DecodeResult decodeVCmpGeU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCmpTU64Vop3::VCmpTU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_t_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTU64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -18228,7 +18322,8 @@ DecodeResult decodeVCmpTU64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_class_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpClassF16Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -18291,7 +18386,8 @@ DecodeResult decodeVCmpClassF16Vop3(const MachineInst *opcode,
 VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_class_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpClassF32Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -18346,7 +18442,8 @@ DecodeResult decodeVCmpClassF32Vop3(const MachineInst *opcode,
 VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_class_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpClassF64Vop3)),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -23757,10 +23854,12 @@ VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_add_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VAddCoCiU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2, false,
+           false, Operand::ScalarExtent::WaveMask) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
   src_operands_[0] = &src0;
@@ -23825,10 +23924,12 @@ VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubCoCiU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2, false,
+           false, Operand::ScalarExtent::WaveMask) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
   src_operands_[0] = &src0;
@@ -23893,10 +23994,12 @@ VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubrevCoCiU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2, false,
+           false, Operand::ScalarExtent::WaveMask) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
   src_operands_[0] = &src0;
@@ -23961,7 +24064,8 @@ VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_div_scale_f32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VDivScaleF32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -24006,7 +24110,8 @@ VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_div_scale_f64", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VDivScaleF64Vop3SdstEnc)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -24057,7 +24162,8 @@ VMadU64U32Vop3SdstEnc::VMadU64U32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_mad_u64_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VMadU64U32Vop3SdstEnc)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -24104,7 +24210,8 @@ VMadI64I32Vop3SdstEnc::VMadI64I32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_mad_i64_i32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VMadI64I32Vop3SdstEnc)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -24151,7 +24258,8 @@ VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_add_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VAddCoU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -24217,7 +24325,8 @@ VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubCoU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -24283,7 +24392,8 @@ VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubrevCoU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst, false,
+           false, Operand::ScalarExtent::WaveMask),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;

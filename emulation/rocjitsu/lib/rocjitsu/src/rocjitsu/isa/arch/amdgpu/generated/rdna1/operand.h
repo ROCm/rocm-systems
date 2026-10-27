@@ -19,8 +19,12 @@ namespace rdna1 {
 class Operand final : public IsaOperand<Isa> {
 public:
   enum class Literal32Widening { ZeroExtend, SignExtend, Replicate32, F64HighBits };
+  /// WaveMask validates the minimum 32-bit extent at decode;
+  /// execution validates its actual wave width. size_bits() retains the maximum.
+  enum class ScalarExtent { Fixed, WaveMask };
   static constexpr bool kStaticRegisterAccess = true;
-  Operand(int size_bits, OperandType opr_type, int encoding_value);
+  Operand(int size_bits, OperandType opr_type, int encoding_value,
+          ScalarExtent scalar_extent = ScalarExtent::Fixed);
   Operand(int size_bits, OperandType opr_type, int encoding_value, uint16_t literal16_display_value,
           bool has_literal16_display);
   Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
