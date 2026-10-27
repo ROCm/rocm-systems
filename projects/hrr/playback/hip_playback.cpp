@@ -503,6 +503,13 @@ static hipError_t restore_host_snapshots(PlaybackContext& ctx, const uint8_t* re
     for (uint16_t i = 0; i < n; i++, rec += kHostSnapRecordSize) {
         uint64_t hash[2];
         memcpy(hash, rec + 24, 16);
+        // Capture left the bytes out, as it does over HIP_HRR_CAPTURE_MAX_BLOB_MB.
+        if (!hash[0] && !hash[1]) {
+            fprintf(stderr, "[HRR] '%s': pinned host snapshot %u was captured without its "
+                            "contents; refusing the launch\n",
+                    compact_kernel_name(kernel_name).c_str(), i);
+            return hipErrorNotFound;
+        }
         size_t blob_len = 0;
         const void* blob = ctx.load_blob(hash[0], hash[1], &blob_len);
         // Refused for the host memory cap or a read error, not merely absent.
@@ -3642,6 +3649,18 @@ static void scan_h2d_payload(PlaybackContext& ctx, const void* blob, size_t n,
                 (unsigned long long)dst_rec, hits, n);
 }
 
+// True, having refused the copy by name, when a host-to-device copy of `size`
+// bytes has no blob: capture left its contents out, as it does for a copy over
+// HIP_HRR_CAPTURE_MAX_BLOB_MB.
+static bool h2d_contents_left_out(const char* api, uint64_t size, uint64_t hash_lo,
+                                  uint64_t hash_hi) {
+    if (size == 0 || hash_lo || hash_hi) return false;
+    fprintf(stderr, "[HRR] %s: host-to-device copy of %llu bytes was captured without "
+                    "its contents; refusing the call\n",
+            api, (unsigned long long)size);
+    return true;
+}
+
 // This mirrors the captured API exactly — hipMemcpyAsync on the default stream
 // (stream_rec==0, translated to nullptr) must still use the async variant.
 static hipError_t replay_memcpy_impl(PlaybackContext& ctx, const char* api,
@@ -3649,13 +3668,8 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx, const char* api,
                                      uint64_t size, int32_t kind,
                                      bool is_async, hipStream_t stream,
                                      uint64_t hash_lo, uint64_t hash_hi) {
-    // Capture leaves out the contents of a copy over HIP_HRR_CAPTURE_MAX_BLOB_MB.
-    if (kind == hipMemcpyHostToDevice && size > 0 && !hash_lo && !hash_hi) {
-        fprintf(stderr, "[HRR] %s: host-to-device copy of %llu bytes was captured without "
-                        "its contents; refusing the call\n",
-                api, (unsigned long long)size);
+    if (kind == hipMemcpyHostToDevice && h2d_contents_left_out(api, size, hash_lo, hash_hi))
         return hipErrorNotFound;
-    }
     // Only the kinds that write device memory translate dst. A D2H dst is a
     // host buffer replay never uses (validation reads back into its own), and
     // translating it would report every pageable destination as unmapped.
@@ -4545,25 +4559,25 @@ static HrrHostRect memcpy3d_host_dst(const hipMemcpy3DParms& p) {
 static size_t drvmemcpy_host_bytes(size_t pitch, size_t pitch_height,
                                    size_t x, size_t y, size_t z,
                                    size_t width, size_t height, size_t depth);
-static const void* drvmemcpy_h2d_src_blob(PlaybackContext& ctx, const char* api,
-                                          uint64_t hash_lo, uint64_t hash_hi,
-                                          size_t need);
+static hipError_t drvmemcpy_h2d_src_blob(PlaybackContext& ctx, const char* api,
+                                         uint64_t hash_lo, uint64_t hash_hi,
+                                         size_t need, const void** blob);
 
 // Points a hipMemcpy3D H2D source at its captured blob, which must span the
 // whole source rect in the layout the copy reads it with: dense for a packed
-// blob, the recorded pitch and position otherwise. False when there is no such
-// blob; the copy is then skipped, never issued from the capture-time host
-// address.
-static bool memcpy3d_h2d_src(PlaybackContext& ctx, const char* api, uint64_t hash_lo,
-                             uint64_t hash_hi, hipMemcpy3DParms& p) {
+// blob, the recorded pitch and position otherwise. Returns what
+// drvmemcpy_h2d_src_blob() returns, with p.srcPtr.ptr null when there is no
+// such blob; the copy is then not issued from the capture-time host address.
+static hipError_t memcpy3d_h2d_src(PlaybackContext& ctx, const char* api, uint64_t hash_lo,
+                                   uint64_t hash_hi, hipMemcpy3DParms& p) {
     if (ctx.packed_host_rects) hrr_pack_host_side(p.srcPtr, p.srcPos, p.extent);
     size_t need = drvmemcpy_host_bytes(p.srcPtr.pitch, p.srcPtr.ysize, p.srcPos.x, p.srcPos.y,
                                        p.srcPos.z, p.extent.width, p.extent.height,
                                        p.extent.depth);
-    const void* blob = drvmemcpy_h2d_src_blob(ctx, api, hash_lo, hash_hi, need);
-    if (!blob) return false;
+    const void* blob = nullptr;
+    const hipError_t r = drvmemcpy_h2d_src_blob(ctx, api, hash_lo, hash_hi, need, &blob);
     p.srcPtr.ptr = const_cast<void*>(blob);
-    return true;
+    return r;
 }
 
 // hipMemcpy3D runs on the legacy default stream and hipMemcpy3D_spt on this
@@ -4576,10 +4590,11 @@ static hipError_t replay_memcpy3d(PlaybackContext& ctx, const uint8_t* pl, bool 
     hipError_t (*const copy)(const hipMemcpy3DParms*) = spt ? hipMemcpy3D_spt : hipMemcpy3D;
 
     if (parms.kind == hipMemcpyHostToDevice) {
-        if (!memcpy3d_h2d_src(ctx, "hipMemcpy3D", a->blob_hash_lo, a->blob_hash_hi, parms))
-            return hipSuccess;
+        hipError_t r =
+            memcpy3d_h2d_src(ctx, "hipMemcpy3D", a->blob_hash_lo, a->blob_hash_hi, parms);
+        if (!parms.srcPtr.ptr) return r;
         parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
-        hipError_t r = copy(&parms);
+        r = copy(&parms);
         if (r == hipSuccess)
             r = hrr_sync_after_replayed_h2d(ctx, "replayed 3D H2D memcpy");
         return r;
@@ -4627,11 +4642,11 @@ static hipError_t replay_memcpy3d_async(PlaybackContext& ctx, const uint8_t* pl,
     hipStream_t stream = memcpy3d_async_stream(ctx, a->stream, spt);
 
     if (parms.kind == hipMemcpyHostToDevice) {
-        if (!memcpy3d_h2d_src(ctx, "hipMemcpy3DAsync", a->blob_hash_lo, a->blob_hash_hi,
-                              parms))
-            return hipSuccess;
+        hipError_t r = memcpy3d_h2d_src(ctx, "hipMemcpy3DAsync", a->blob_hash_lo,
+                                        a->blob_hash_hi, parms);
+        if (!parms.srcPtr.ptr) return r;
         parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
-        hipError_t r = hipMemcpy3DAsync(&parms, stream);
+        r = hipMemcpy3DAsync(&parms, stream);
         if (r == hipSuccess)
             r = hrr_sync_after_replayed_h2d(ctx, "replayed 3D async H2D memcpy");
         return r;
@@ -4685,29 +4700,34 @@ static size_t drvmemcpy_host_bytes(size_t pitch, size_t pitch_height,
     return r.ok ? r.extent : SIZE_MAX;
 }
 
-// Resolve the H2D source blob for a driver copy, a hipMemcpy3D or a hipMemcpy2D.
-// Returns nullptr when there is nothing faithful to substitute: no blob
-// recorded, or a blob smaller than the recorded source rect (an archive captured
-// before the blob-footprint fix, or a damaged one). Never fall back to the stale
-// capture-time host VA, and never hand the runtime a short buffer to stride off.
-static const void* drvmemcpy_h2d_src_blob(PlaybackContext& ctx, const char* api,
-                                          uint64_t hash_lo, uint64_t hash_hi,
-                                          size_t need) {
+// Resolve the H2D source blob for a driver copy, a hipMemcpy3D or a hipMemcpy2D
+// into *blob. hipErrorNotFound when capture left the contents of a non-empty
+// rect out (h2d_contents_left_out). Otherwise hipSuccess, with *blob null when
+// there is nothing faithful to substitute: no blob recorded, or a blob smaller
+// than the recorded source rect (an archive captured before the blob-footprint
+// fix, or a damaged one). Never fall back to the stale capture-time host VA,
+// and never hand the runtime a short buffer to stride off.
+static hipError_t drvmemcpy_h2d_src_blob(PlaybackContext& ctx, const char* api,
+                                         uint64_t hash_lo, uint64_t hash_hi,
+                                         size_t need, const void** blob) {
+    *blob = nullptr;
+    if (h2d_contents_left_out(api, need, hash_lo, hash_hi)) return hipErrorNotFound;
     size_t blob_sz = 0;
-    const void* blob = (hash_lo || hash_hi)
-                           ? ctx.load_blob(hash_lo, hash_hi, &blob_sz)
-                           : nullptr;
-    if (!blob) {
+    const void* found = (hash_lo || hash_hi)
+                            ? ctx.load_blob(hash_lo, hash_hi, &blob_sz)
+                            : nullptr;
+    if (!found) {
         fprintf(stderr, "[HRR] %s H2D: no blob to substitute, skipped\n", api);
-        return nullptr;
+        return hipSuccess;
     }
     if (blob_sz < need) {
         fprintf(stderr,
                 "[HRR] %s H2D: blob covers %zu of the %zu bytes the recorded rect "
                 "spans, skipped\n", api, blob_sz, need);
-        return nullptr;
+        return hipSuccess;
     }
-    return blob;
+    *blob = found;
+    return hipSuccess;
 }
 
 // Array-typed rects are out of scope for these APIs, so decline them up front
@@ -4748,13 +4768,14 @@ static hipError_t replay_drvmemcpy3d(PlaybackContext& ctx, HIP_MEMCPY3D& parms,
         size_t need = drvmemcpy_host_bytes(parms.srcPitch, parms.srcHeight,
                                            parms.srcXInBytes, parms.srcY, parms.srcZ,
                                            parms.WidthInBytes, parms.Height, parms.Depth);
-        const void* blob = drvmemcpy_h2d_src_blob(ctx, api, blob_hash_lo, blob_hash_hi, need);
-        if (!blob) return hipSuccess;
+        const void* blob = nullptr;
+        hipError_t r =
+            drvmemcpy_h2d_src_blob(ctx, api, blob_hash_lo, blob_hash_hi, need, &blob);
+        if (!blob) return r;
         parms.srcHost = blob;
         parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
             ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
-        hipError_t r = is_async ? hipDrvMemcpy3DAsync(&parms, stream)
-                                : hipDrvMemcpy3D(&parms);
+        r = is_async ? hipDrvMemcpy3DAsync(&parms, stream) : hipDrvMemcpy3D(&parms);
         if (r == hipSuccess)
             r = hrr_sync_after_replayed_h2d(ctx, is_async ? "replayed driver 3D async H2D memcpy"
                                                           : "replayed driver 3D H2D memcpy");
@@ -4844,13 +4865,14 @@ static hipError_t replay_drvmemcpy2d(PlaybackContext& ctx, const T* a,
         size_t need = drvmemcpy_host_bytes(pitch, /*pitch_height=*/0, parms.srcXInBytes,
                                            parms.srcY, /*z=*/0, parms.WidthInBytes,
                                            parms.Height, /*depth=*/1);
-        const void* blob = drvmemcpy_h2d_src_blob(ctx, api, a->blob_hash_lo,
-                                                  a->blob_hash_hi, need);
-        if (!blob) return hipSuccess;
+        const void* blob = nullptr;
+        hipError_t r = drvmemcpy_h2d_src_blob(ctx, api, a->blob_hash_lo, a->blob_hash_hi,
+                                              need, &blob);
+        if (!blob) return r;
         parms.srcHost = blob;
         parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
             ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
-        hipError_t r = issue(&parms);
+        r = issue(&parms);
         if (r == hipSuccess)
             r = hrr_sync_after_replayed_h2d(ctx, "replayed driver 2D H2D memcpy");
         return r;
@@ -4979,12 +5001,12 @@ static hipError_t replay_memcpy2d(PlaybackContext& ctx, const T* a,
         // must reach spitch * (height - 1) + width bytes.
         const size_t need = drvmemcpy_host_bytes(spitch, /*pitch_height=*/0, 0, 0, 0,
                                                  width, height, /*depth=*/1);
-        const void* blob = drvmemcpy_h2d_src_blob(
+        const void* blob = nullptr;
+        hipError_t r = drvmemcpy_h2d_src_blob(
             ctx, is_async ? "hipMemcpy2DAsync" : "hipMemcpy2D", a->blob_hash_lo,
-            a->blob_hash_hi, need);
-        if (!blob) return hipSuccess;
+            a->blob_hash_hi, need, &blob);
+        if (!blob) return r;
         void* dst = ctx.translate_ptr(a->dst);
-        hipError_t r = hipSuccess;
         if (is_async)
             r = hipMemcpy2DAsync(dst, dpitch, blob, spitch, width, height,
                                  hipMemcpyHostToDevice, stream);

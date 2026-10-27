@@ -744,8 +744,8 @@ TEST_CASE("Unit_HRR_CaptureLimit_ForkAfterStop_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dev));
 }
 
-// Run with HIP_HRR_CAPTURE_MAX_BLOB_MB set to 1: two copies over it, then one
-// under it and its read back.
+// Run with HIP_HRR_CAPTURE_MAX_BLOB_MB set to 1: two copies and a 2D copy over
+// it, then one under it and its read back.
 TEST_CASE("Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct", "[.][hrr-direct]") {
   if (getenv("HIP_HRR_CAPTURE_MAX_BLOB_MB") == nullptr)
     HRR_SKIP("started by Unit_HRR_CaptureLimit_SkipsLargeBlob");
@@ -754,6 +754,9 @@ TEST_CASE("Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(&dev, kBigCopy));
   copy_to_device(dev, 1700, kBigCopy);
   copy_to_device(dev, 1701, kBigCopy);
+  const std::vector<unsigned char> rows = pattern(kBigCopy, 1703);
+  HRR_HIP_CHECK(hipMemcpy2D(dev, kStepCopy, rows.data(), kStepCopy, kStepCopy,
+                            kBigCopy / kStepCopy, hipMemcpyHostToDevice));
   copy_to_device(dev, 1702, kStepCopy);
   std::vector<unsigned char> out(kStepCopy);
   HRR_HIP_CHECK(hipMemcpy(out.data(), dev, kStepCopy, hipMemcpyDeviceToHost));
@@ -1112,7 +1115,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureLimit_ForkAfterStop) {
 
 // A copy over the per-blob limit is recorded without its contents and the
 // archive is marked incomplete, but capture goes on and stores the next copy.
-// Replay refuses the copy it has no contents for.
+// Replay refuses each copy it has no contents for.
 HRR_TEST_CASE(Unit_HRR_CaptureLimit_SkipsLargeBlob) {
   ScopedDir cap(cap_dir("limit_blob"));
   const WorkloadRun run = run_workload("Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct", cap.path,
@@ -1145,11 +1148,13 @@ HRR_TEST_CASE(Unit_HRR_CaptureLimit_SkipsLargeBlob) {
   CHECK(big == 2);
   CHECK(small == 2);  // the copy in and its read back
 
-  const auto [rc, out] = hrr_playback_merged(cap.path);
+  const auto [rc, out] = hrr_playback_merged(cap.path, "--continue-on-error");
   INFO("Replay output:\n" << out);
   CHECK(rc != 0);
-  CHECK(count_of(out, "hipMemcpy: host-to-device copy of " + std::to_string(kBigCopy) +
-                          " bytes was captured without its contents; refusing the call") == 1);
+  const std::string refused = ": host-to-device copy of " + std::to_string(kBigCopy) +
+                              " bytes was captured without its contents; refusing the call";
+  CHECK(count_of(out, "hipMemcpy" + refused) == 2);
+  CHECK(count_of(out, "hipMemcpy2D" + refused) == 1);
 }
 
 #endif  // !_WIN32 && HRR_TEST_EXE
