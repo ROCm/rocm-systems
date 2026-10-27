@@ -1066,6 +1066,11 @@ TEST_P(AtomicPolicyExecutionTest, MemoryFloatCompareStore) {
     EXPECT_EQ(execute_memory(buffer, 0, 0x3f800000, 0xf0, true, 0x80000000), 0x3f800000u);
     EXPECT_EQ(execute_memory(buffer, 0x7fc00002, 0x3f800000, 0xf0, true, 0x7fc00002), 0x7fc00002u);
     EXPECT_EQ(execute_memory(buffer, 1, 0x3f800000, 0, true, 0), 0x3f800000u);
+    // Flushing applies only to the comparison: a matching denormal replacement is
+    // stored unchanged and a mismatch leaves denormal memory untouched.
+    EXPECT_EQ(execute_memory(buffer, 0x3f800000, 1, 0, true, 0x3f800000), 1u);
+    EXPECT_EQ(execute_memory(buffer, 1, 0x3f800000, 0, true, 0x40400000), 1u);
+    EXPECT_EQ(execute_memory(buffer, 0x80000001, 0x3f800000, 0, true, 0x3f800000), 0x80000001u);
   }
 }
 
