@@ -67,6 +67,8 @@ test_categories:
       - "TuningGeneralMicrotest.*"
       # tuning/tuning.cc
       - "TuningMicrotest.*"
+      # tuning/sym_model/lsa.cc
+      - "SymModelLsaMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
       - "ReclaimPlannerStateTest.*"
