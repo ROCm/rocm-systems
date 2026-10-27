@@ -20,7 +20,9 @@ request(mode& current)
     {
         case mode::idle: current = mode::running; break;
         case mode::running: break;
-        default: break;
+        default:
+            throw std::logic_error(
+                fmt::format("mode {} not handled", static_cast<int>(current)));
     }
 }
 ```

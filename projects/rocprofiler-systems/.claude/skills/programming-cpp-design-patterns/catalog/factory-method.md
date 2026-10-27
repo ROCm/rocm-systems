@@ -26,7 +26,9 @@ make_exporter(exporter_kind kind)
         case exporter_kind::perfetto: return perfetto_exporter{};
         case exporter_kind::csv: return csv_exporter{};
         case exporter_kind::rocpd: return rocpd_exporter{};
-        default: throw std::invalid_argument{ "unknown exporter" };
+        default:
+            throw std::logic_error(
+                fmt::format("exporter_kind {} not handled", static_cast<int>(kind)));
     }
 }
 ```
