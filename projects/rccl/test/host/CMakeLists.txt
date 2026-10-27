@@ -68,6 +68,7 @@ function(rccl_define_micro_source_lists)
     rma-proxy-launch-test.cc            # RMA proxy queue + stream-memop coverage
     rma-proxy-progress-test.cc
     gin-plugin-init-test.cc
+    net-ib-gin-test.cc                   # src/transport/net_ib/gin.cc IB RMA/GIN proxy allgather
     rma-test.cc
     rma-ce-test.cc
     ras-test.cc
@@ -765,6 +766,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime_segments.cc"
     # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify keeps the name.
     GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/gin.cc"
+    # transport/net_ib/gin.cc is the second, so add_file_unique() renames it.
+    NET_IB_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/gin_tmp.cc"
     GDR_PROBE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/gdr_probe.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
