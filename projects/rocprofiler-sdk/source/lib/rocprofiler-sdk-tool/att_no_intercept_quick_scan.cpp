@@ -161,7 +161,6 @@ handle_dispatch(scan_context_t&                                    context,
             }
 
             trace.remaining_dispatches = std::max<uint64_t>(state.consecutive_kernels, 1);
-            trace.flush_count          = 0;
         }
     }
 
@@ -172,6 +171,15 @@ handle_dispatch(scan_context_t&                                    context,
         trace.pipe_id = dispatch.pipe_id;
         --trace.remaining_dispatches;
     }
+    else if(trace.active && dispatch.me_id == trace.me_id && dispatch.pipe_id == trace.pipe_id)
+    {
+        // The SQ orders tokens per me/pipe and runs one dispatch at a time per me/pipe, so
+        // the next dispatch on this me/pipe is the end of the current trace range.
+        ROCP_INFO << "End cut trace at dispatch byte: " << dispatch.byte_offset;
+        trace.offset_end = dispatch.byte_offset;
+        context.completed->emplace_back(trace);
+        trace = {};
+    }
 }
 
 void
@@ -179,35 +187,6 @@ handle_event(scan_context_t& context, const rocprofiler_thread_trace_decoder_eve
 {
     // Latch first valid offset
     if(--context.first_flush_count == 0) context.first_valid_offset = event.byte_offset;
-
-    // TODO: Handle terminal trace ranges that only have one trailing cut-end event
-    // before chunk end. The current two-event rule avoids slicing off the end event but can
-    // skip the last/only dispatch in a chunk.
-    //
-    auto& trace = context.trace;
-    if(!trace.active) return;
-
-    if(trace.remaining_dispatches > 0 || event.me_id != trace.me_id ||
-       event.pipe_id != trace.pipe_id)
-    {
-        return;
-    }
-
-    bool is_dispatch_end = event.type == ROCPROF_TRACE_DECODER_EVENT_DISPATCH_END;
-    bool is_flush        = event.type == ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH ||
-                    event.type == ROCPROF_TRACE_DECODER_EVENT_BOTTOM_OF_PIPE_TS;
-
-    if(!is_dispatch_end && !is_flush && trace.flush_count == 0) return;
-
-    if(is_flush || trace.flush_count > 0) trace.flush_count++;
-
-    if(trace.flush_count == 2)
-    {
-        ROCP_INFO << "End cut trace at byte: " << event.byte_offset;
-        trace.offset_end = event.byte_offset;
-        context.completed->emplace_back(trace);
-        trace = {};
-    }
 }
 
 rocprofiler_thread_trace_decoder_status_t

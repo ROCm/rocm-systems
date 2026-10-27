@@ -88,7 +88,6 @@ struct trace_range_t
     uint64_t offset_begin         = 0;
     uint64_t offset_end           = 0;
     uint64_t remaining_dispatches = 0;
-    uint64_t flush_count          = 0;
 };
 
 struct agent_state_t

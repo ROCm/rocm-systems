@@ -685,6 +685,21 @@ def test_att_no_intercept_target_kernel(att_no_intercept_out_dir_path):
         f"Traced kernels: {traced_kernel_names}"
     )
 
+    # The trace is cut per kernel: each stats file covers one code object and labels only
+    # the kernel it was cut for.
+    for stats_file in sorted(out_dir.glob("stats_*.csv")):
+        with open(stats_file, newline="") as f:
+            rows = [row for row in csv.reader(f) if row and len(row) >= 3][1:]
+        code_objs = {row[0].strip() for row in rows if row[0].strip()}
+        kernels = {row[2][2:].strip() for row in rows if row[2].startswith("; ")}
+        assert rows, f"{stats_file.name} has no instruction rows"
+        assert (
+            len(code_objs) == 1
+        ), f"{stats_file.name} covers more than one code object: {sorted(code_objs)}"
+        assert kernels and all(
+            expected in name for name in kernels
+        ), f"{stats_file.name} covers more than the traced kernel: {sorted(kernels)}"
+
 
 def test_counter_collection_with_att(att_pmc_json_data):
     data = att_pmc_json_data["rocprofiler-sdk-tool"]
