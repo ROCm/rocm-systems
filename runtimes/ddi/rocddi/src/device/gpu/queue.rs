@@ -7,9 +7,11 @@
 //! destruction succeeds. Packet-format policy and public ABI behavior remain
 //! responsibilities of the frontend using rocddi.
 
+mod layout;
 mod scratch;
 mod types;
 pub use super::kernel_queue::*;
+pub(crate) use layout::{AqlControlLayout, AqlQueueHeader};
 pub use scratch::{MAX_PRIVATE_SEGMENT_BYTES, ScratchPlan, plan_scratch};
 pub use types::*;
 
@@ -143,6 +145,155 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
 /// backing through process teardown because producers may still publish.
 pub struct Queue {
     pub(crate) inner: driver::QueueState,
+}
+
+/// Native queue paired with every frontend-owned address it can still read.
+/// The dependency bundle is released only after explicit native destruction
+/// succeeds. Dropping a live or uncertain queue retains the whole bundle
+/// through process teardown along with its native transport.
+pub struct RetainedQueue<D, Q = Queue> {
+    queue: std::mem::ManuallyDrop<Q>,
+    dependencies: std::mem::ManuallyDrop<D>,
+    retired: bool,
+}
+
+impl<D, Q> RetainedQueue<D, Q> {
+    fn new(queue: Q, dependencies: D) -> Self {
+        Self {
+            queue: std::mem::ManuallyDrop::new(queue),
+            dependencies: std::mem::ManuallyDrop::new(dependencies),
+            retired: false,
+        }
+    }
+
+    fn retire_with_dependencies(
+        &mut self,
+        retire: impl FnOnce(&mut Q, &mut D) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        retire(&mut self.queue, &mut self.dependencies)?;
+        self.retired = true;
+        Ok(())
+    }
+}
+
+impl<D> RetainedQueue<D> {
+    /// Copies the native transport facts while this owner is live.
+    #[must_use]
+    pub fn info(&self) -> QueueTransport {
+        self.queue.info()
+    }
+
+    /// Samples native read and write positions without retiring work.
+    ///
+    /// # Errors
+    /// Propagates native queue or device errors.
+    pub fn progress(&self) -> Result<(u64, u64), Error> {
+        self.queue.progress()
+    }
+
+    /// Maps the retained queue transport into another compatible device view.
+    ///
+    /// # Errors
+    /// Propagates ownership, routing, and native mapping failures.
+    pub fn map_device(&self, device: GpuDevice<'_>) -> Result<QueueTransport, Error> {
+        self.queue.map_device(device)
+    }
+
+    /// Stops native execution while keeping its dependency bundle live.
+    ///
+    /// # Errors
+    /// Propagates native queue or device errors.
+    pub fn inactivate(&mut self) -> Result<(), Error> {
+        self.queue.inactivate()
+    }
+
+    /// Changes the native queue's scheduling priority.
+    ///
+    /// # Errors
+    /// Propagates native queue or device errors.
+    pub fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
+        self.queue.set_priority(priority)
+    }
+
+    /// Changes the native queue's compute-unit mask.
+    ///
+    /// # Errors
+    /// Propagates native queue or device errors.
+    pub fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
+        self.queue.set_cu_mask(mask)
+    }
+
+    /// Provides separate mutable borrows for a staged scratch update.
+    ///
+    /// # Safety
+    /// The caller must not separate this queue from its active dependencies,
+    /// and must retain each candidate backing before publishing its address.
+    #[allow(unsafe_code)]
+    pub unsafe fn parts_mut(&mut self) -> (&mut Queue, &mut D) {
+        (&mut self.queue, &mut self.dependencies)
+    }
+
+    /// Retires native state after the frontend has stopped all producers and
+    /// public transport mappings. The bundle stays owned until this succeeds.
+    ///
+    /// # Errors
+    /// Leaves the bundle retained if native retirement or cleanup fails.
+    ///
+    /// # Safety
+    /// Producers and public transport mappings must be retired.
+    #[allow(unsafe_code)]
+    pub unsafe fn destroy(&mut self) -> Result<(), Error> {
+        // SAFETY: The caller upholds the public producer contract.
+        self.retire_with_dependencies(|queue, _| unsafe { queue.destroy() })
+    }
+
+    /// Invokes `callback` once at native retirement while the public control
+    /// mapping and dependency bundle remain live. The callback may release
+    /// backing no longer reachable by the stopped queue.
+    ///
+    /// # Errors
+    /// Leaves remaining dependencies retained on failure.
+    ///
+    /// # Safety
+    /// Producers and public transport mappings must be retired.
+    #[allow(unsafe_code)]
+    pub unsafe fn destroy_with_retained_transport(
+        &mut self,
+        callback: &mut dyn FnMut(&mut D),
+    ) -> Result<(), Error> {
+        // SAFETY: The caller upholds the public producer contract. The
+        // dependency bundle remains live throughout this native call.
+        self.retire_with_dependencies(|queue, dependencies| unsafe {
+            queue.destroy_with_retained_transport(&mut || callback(dependencies))
+        })
+    }
+
+    /// Destroys a queue never published to a producer. A failed cleanup or
+    /// unwind retains its native and external backing through process exit.
+    ///
+    /// # Errors
+    /// Returns the native destruction failure.
+    ///
+    /// # Safety
+    /// No producer has observed the queue or any public transport mapping.
+    #[allow(unsafe_code)]
+    pub unsafe fn abandon_unpublished(mut self) -> Result<(), Error> {
+        // SAFETY: The caller guarantees that the queue was not published.
+        unsafe { self.destroy() }
+    }
+}
+
+impl<D, Q> Drop for RetainedQueue<D, Q> {
+    #[allow(unsafe_code)]
+    fn drop(&mut self) {
+        // SAFETY: Native teardown has either succeeded or Queue's destructor
+        // conservatively retains native backing. External dependencies are
+        // released only in the former case and only after the native owner.
+        unsafe { std::mem::ManuallyDrop::drop(&mut self.queue) };
+        if self.retired {
+            unsafe { std::mem::ManuallyDrop::drop(&mut self.dependencies) };
+        }
+    }
 }
 
 /// Keep externally supplied backing alive if native queue creation may have
@@ -371,27 +522,25 @@ impl GpuDevice<'_> {
     /// Creates a queue while carrying every frontend-owned signal and scratch
     /// dependency through native acquisition. A creation error with uncertain
     /// native ownership or an unwind retains `dependencies` until process teardown.
-    /// A successful result returns the dependencies with the queue so the
-    /// frontend can keep them live through queue destruction.
+    /// A successful result retains the dependencies inside the native queue
+    /// owner through explicit destruction.
     ///
     /// # Errors
     /// Returns the same validation and native errors as `create_queue`.
     ///
     /// # Safety
     /// `dependencies` must own all externally supplied GPU addresses in
-    /// `desc`. The caller must keep the returned owner with the queue until
-    /// native destruction proves those addresses are no longer in use, and
-    /// must obey the selected producer publication protocol. Dropping an
-    /// undestroyed queue requires retaining those dependencies through process
-    /// teardown.
+    /// `desc`. The caller must obey the selected producer publication protocol.
     #[allow(unsafe_code)]
     pub unsafe fn create_queue_with_dependencies<D: 'static>(
         &self,
         desc: QueueRequest,
         dependencies: D,
-    ) -> Result<(Queue, D), Error> {
-        // SAFETY: The caller supplies and retains the described backing.
-        retain_create_dependencies(|| unsafe { self.create_queue(desc) }, dependencies)
+    ) -> Result<RetainedQueue<D>, Error> {
+        // SAFETY: The caller supplies backing for every external GPU address.
+        let (queue, dependencies) =
+            retain_create_dependencies(|| unsafe { self.create_queue(desc) }, dependencies)?;
+        Ok(RetainedQueue::new(queue, dependencies))
     }
 }
 
@@ -477,6 +626,7 @@ mod queue_resource_tests {
             ring_host_address: 0x1000,
             ring_device_address: 0x2000,
             ring_size_bytes: 4096,
+            aql_control: None,
             sdma_engine_id: None,
             read_index_host_address: 0x3000,
             read_index_device_address: 0x4000,
@@ -497,6 +647,56 @@ mod queue_resource_tests {
             kind: ErrorKind::Driver,
             detail,
         }
+    }
+
+    #[test]
+    fn retained_queue_releases_dependencies_only_after_proven_retirement() {
+        struct NativeProbe(Arc<AtomicBool>);
+        impl Drop for NativeProbe {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+        struct BackingProbe {
+            native_dropped: Arc<AtomicBool>,
+            drops: Arc<AtomicUsize>,
+        }
+        impl Drop for BackingProbe {
+            fn drop(&mut self) {
+                assert!(self.native_dropped.load(Ordering::Acquire));
+                self.drops.fetch_add(1, Ordering::Release);
+            }
+        }
+
+        let native_dropped = Arc::new(AtomicBool::new(false));
+        let backing_drops = Arc::new(AtomicUsize::new(0));
+        let mut uncertain = RetainedQueue::new(
+            NativeProbe(native_dropped.clone()),
+            BackingProbe {
+                native_dropped: native_dropped.clone(),
+                drops: backing_drops.clone(),
+            },
+        );
+        assert!(
+            uncertain
+                .retire_with_dependencies(|_, _| Err(failure("uncertain native destroy")))
+                .is_err()
+        );
+        drop(uncertain);
+        assert!(native_dropped.load(Ordering::Acquire));
+        assert_eq!(backing_drops.load(Ordering::Acquire), 0);
+
+        let native_dropped = Arc::new(AtomicBool::new(false));
+        let mut retired = RetainedQueue::new(
+            NativeProbe(native_dropped.clone()),
+            BackingProbe {
+                native_dropped: native_dropped.clone(),
+                drops: backing_drops.clone(),
+            },
+        );
+        assert!(retired.retire_with_dependencies(|_, _| Ok(())).is_ok());
+        drop(retired);
+        assert_eq!(backing_drops.load(Ordering::Acquire), 1);
     }
 
     impl UserQueueResource for FakeQueue {

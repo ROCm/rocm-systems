@@ -1337,17 +1337,9 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
  */
 typedef struct {
-  char driver_version[AMDSMI_MAX_STRING_LENGTH];         //!< Driver version, such as
-                                                         //!< 6.19.14.31400000
-  char driver_date[AMDSMI_MAX_STRING_LENGTH];            //!< Driver release date
-  char driver_name[AMDSMI_MAX_STRING_LENGTH];            //!< Driver name
-  char driver_kernel_version[AMDSMI_MAX_STRING_LENGTH];  //!< amdgpu kernel source version,
-                                                         //!< such as 6.19.14
-  char amdgpu_driver_version[AMDSMI_MAX_STRING_LENGTH];  //!< amdgpu module version, such
-                                                         //!< as 31400000
-  char driver_build_version[AMDSMI_MAX_STRING_LENGTH];   //!< DKMS build, such as 2370381
-  char driver_full_version[AMDSMI_MAX_STRING_LENGTH];    //!< Full version, such
-                                                         //!< as 6.19.14.31400000-2370381
+  char driver_version[AMDSMI_MAX_STRING_LENGTH];
+  char driver_date[AMDSMI_MAX_STRING_LENGTH];
+  char driver_name[AMDSMI_MAX_STRING_LENGTH];
 } amdsmi_driver_info_t;
 
 /**
@@ -8219,14 +8211,6 @@ amdsmi_status_t amdsmi_stop_gpu_event_notification(amdsmi_processor_handle proce
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
  *  @platform{guest_windows}
  *
- *  @details On Linux, driver_version is /sys/module/amdgpu/version, such as
- *           6.19.14.31400000, or N/A. driver_kernel_version (6.19.14) and
- *           amdgpu_driver_version (31400000) are its parts,
- *           driver_build_version is the active DKMS build, and
- *           driver_full_version is driver_version-build, or driver_version
- *           when there is no build. The other fields are empty when
- *           unavailable.
- *
  *  @param[in] processor_handle Device which to query
  *
  *  @param[out] info Reference to driver information structure. Must be
@@ -10754,7 +10738,7 @@ amdsmi_status_t amdsmi_activate_ampp_profile(amdsmi_processor_handle processor_h
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/, or
  *          if the profile is not listed in config/writable_slot_mask,
  *          ::AMDSMI_STATUS_NO_PERM if the caller lacks write permission on
- *          app_modes/<profile_name>/config/* (typically requires
+ *          the files under app_modes/<profile_name>/config/ (typically requires
  *          root/CAP_SYS_ADMIN),
  *          ::AMDSMI_STATUS_INVAL if @p profile_name does not match any
  *          published profile_N, if @p fields contains a field name not

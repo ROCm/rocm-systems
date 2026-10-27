@@ -45,7 +45,7 @@ abce_wait_signal_params_t WaitAndSignal() {
   params.signal_addr = FakeAddress(0x3000);
   params.wait_reference = 5;
   params.wait_mask = ~0ull;
-  params.boundary_wait_signal = false;
+  params.wait_first_chunk_only = false;
   return params;
 }
 
