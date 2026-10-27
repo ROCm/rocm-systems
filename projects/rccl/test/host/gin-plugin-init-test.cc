@@ -251,7 +251,6 @@ TEST_F(GinFinalizeTest, LiveBackend_SetDefaultBackendArmsSupported) {
   EXPECT_EQ(fake_.finalizeCalls, 0);
 }
 
-#ifdef ENABLE_ROCSHMEM_GIN
 // AICOMRCCL-3417: Anvil SDMA stays on a single physical host alongside PROXY.
 TEST_F(GinFinalizeTest, AnvilSdma_KeptWithProxyOnSingleHost) {
   void* anvil = std::malloc(8);
@@ -314,7 +313,6 @@ TEST_F(GinFinalizeTest, AnvilSdmaOnly_MultiHostClearsSupported) {
   EXPECT_EQ(ginState->numActiveBackends, 0);
   EXPECT_EQ(fake_.finalizeCalls, 1);
 }
-#endif  // ENABLE_ROCSHMEM_GIN
 
 // Success path: keep the context, mark the plugin enabled, do not finalize.
 TEST_F(GinPluginInitTest, KeepsContextWhenDevicesSucceed) {

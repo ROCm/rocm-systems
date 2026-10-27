@@ -451,12 +451,8 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
   // is in the communicator (including multi-host MNNVL where nNodes folds to 1).
   for (int i = 0; i < initialNumActiveBackends; i++) {
     struct ncclGinBackendState* backend = &ginState->backends[i];
-#ifdef ENABLE_ROCSHMEM_GIN
     const bool anvilMultiHost =
         comm->topo->nHosts > 1 && backend->ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
-#else
-    const bool anvilMultiHost = false;
-#endif
     if (anvilMultiHost || !(BIT(backend->ginType) & globalBitMask)) {
       if (anvilMultiHost) {
         INFO(NCCL_INIT | NCCL_NET,
