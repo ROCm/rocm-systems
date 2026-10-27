@@ -89,7 +89,7 @@ ALL_CEILINGS = {
     column for family in FAMILY_CEILINGS.values() for column in family.values()
 }
 
-_GFX11_UNSUPPORTED = [
+_GFX11_UNSUPPORTED = (
     "HBM",
     "WMMA-F4",
     "WMMA-F6",
@@ -101,18 +101,19 @@ _GFX11_UNSUPPORTED = [
     "WMMA-F32",
     "WMMA-F64",
     "WMMA-I8",
-]
+)
 
 # Data types each device's benchmark skips, for every device with a benchmark class.
-UNSUPPORTED_DATA_TYPES: dict[str, list[str]] = {
-    "gfx90a": ["MALL", "MFMA-F4", "MFMA-F6", "MFMA-F6F4", "MFMA-MXF8", "MFMA-F8"],
-    "gfx942": ["MFMA-F4", "MFMA-F6", "MFMA-F6F4", "MFMA-MXF8"],
-    "gfx950": [],
-    "gfx1150": [*_GFX11_UNSUPPORTED, "MALL"],
+# Tuples, so a benchmark instance cannot change the shared data.
+UNSUPPORTED_DATA_TYPES: dict[str, tuple[str, ...]] = {
+    "gfx90a": ("MALL", "MFMA-F4", "MFMA-F6", "MFMA-F6F4", "MFMA-MXF8", "MFMA-F8"),
+    "gfx942": ("MFMA-F4", "MFMA-F6", "MFMA-F6F4", "MFMA-MXF8"),
+    "gfx950": (),
+    "gfx1150": (*_GFX11_UNSUPPORTED, "MALL"),
     "gfx1151": _GFX11_UNSUPPORTED,
-    "gfx1152": [*_GFX11_UNSUPPORTED, "MALL"],
-    "gfx1153": [*_GFX11_UNSUPPORTED, "MALL"],
-    "gfx1250": ["L1", "MALL", "WMMA-F64"],
+    "gfx1152": (*_GFX11_UNSUPPORTED, "MALL"),
+    "gfx1153": (*_GFX11_UNSUPPORTED, "MALL"),
+    "gfx1250": ("L1", "MALL", "WMMA-F64"),
 }
 
 # gfx940 (MI300A_A0) and gfx941 (MI300X_A0) use the gfx942 (MI300_A1) benchmark.
