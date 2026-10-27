@@ -1574,7 +1574,8 @@ TEST(WaveMaskOperandDecodeTest, RdnaVop3SgprPairDestinationsAreWaveMasks) {
 
 // RDNA1/2 VOPC SDWA with sd=1 writes its compare result to an encoded SGPR pair,
 // which the constructor marks. With sd=0 the destination stays VCC (EXEC for
-// v_cmpx) and unmarked.
+// v_cmpx) and unmarked. v_cmpx has no SDWA sdst field, so only v_cmp checks
+// sd=1.
 TEST(WaveMaskOperandDecodeTest, Rdna1And2SdwaCompareDestinationFollowsSd) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
     auto decoder = Decoder::create(arch);
@@ -1591,6 +1592,9 @@ TEST(WaveMaskOperandDecodeTest, Rdna1And2SdwaCompareDestinationFollowsSd) {
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
         if (inst == nullptr || !inst->mnemonic().ends_with("_sdwa"))
           continue;
+        const bool cmpx = inst->mnemonic().starts_with("v_cmpx_");
+        if (sd && cmpx)
+          continue;
         ++checked;
         const Operand *dst = inst->dst_operand(0);
         ASSERT_NE(dst, nullptr) << inst->mnemonic();
@@ -1599,8 +1603,7 @@ TEST(WaveMaskOperandDecodeTest, Rdna1And2SdwaCompareDestinationFollowsSd) {
               << inst->mnemonic();
           EXPECT_TRUE(dst->is_wave_mask()) << inst->mnemonic();
         } else {
-          EXPECT_EQ(dst->to_special_reg_class(),
-                    inst->mnemonic().starts_with("v_cmpx_") ? RegClass::EXEC : RegClass::VCC)
+          EXPECT_EQ(dst->to_special_reg_class(), cmpx ? RegClass::EXEC : RegClass::VCC)
               << inst->mnemonic();
           EXPECT_FALSE(dst->is_wave_mask()) << inst->mnemonic();
         }
