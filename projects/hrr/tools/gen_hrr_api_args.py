@@ -2072,11 +2072,14 @@ _HEADER_PREAMBLE = """\
  * A v8 reader would decode those events as the wrong API.
  * v10: a kernel launch event carries pinned host snapshot records after its
  * arguments (num_snapshots was always 0). A v9 reader would not restore them.
- * v11: capture without HIP_HRR_CAPTURE_CONTENT records no contents. It sets
+ * v11: hipKernelSetCacheConfig was appended to HipDispatchTable, taking the
+ * first compiler ID and shifting the compiler API IDs up by one.
+ * A v10 reader would decode those events as the wrong API.
+ * v12: capture without HIP_HRR_CAPTURE_CONTENT records no contents. It sets
  * HRR_FILE_FLAG_METADATA_ONLY and stores HRR_HASH_WITHHELD where a blob or
- * code-object hash would be. A v10 reader ignored the flag, skipped the H2D
- * copies whose blob it could not find and replayed on. */
-#define HRR_VERSION ((uint16_t)11u)
+ * code-object hash would be. A v11 reader would fail each withheld H2D copy
+ * with hipErrorNotFound, without saying that the capture left the contents out. */
+#define HRR_VERSION ((uint16_t)12u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -3173,7 +3176,7 @@ _POST_CALL_EXTRA: Dict[str, List[str]] = {
 # Playback calls the PUBLIC HIP API by name; capture goes through the dispatch
 # table. Those are two different declarations, and they are allowed to diverge:
 # hip_api_trace.hpp is append-only ABI, while hip_runtime_api.h re-declares an
-# API with a new signature under a HIP_FORCE_API_VERSION guard.
+# API with a new signature under a HIP_TARGET_API_VERSION guard.
 #
 # validate_playback_signatures() refuses to generate when the two disagree, so
 # a divergence cannot silently produce a wrong cast. An entry here is the
@@ -3202,7 +3205,7 @@ _PLAYBACK_ARG_BRIDGES: Dict[str, Dict[str, object]] = {
     # bridge rebuilds a hipMemLocation from it rather than passing a zeroed
     # struct — the recorded device is preserved on both sides of the guard.
     'hipMemAdvise': {
-        'guard': 'HIP_FORCE_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)',
+        'guard': 'HIP_TARGET_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)',
         'param': 'device',
         'pre': [
             '  hipMemLocation _loc_{name}{{}};',
@@ -3932,7 +3935,7 @@ def generate_playback_cpp(entries: List[ApiEntry]) -> str:
 # public API by name. Deriving playback casts from the table is therefore only
 # sound while the two declarations agree, and they are not required to: the
 # table is append-only ABI, while hip_runtime_api.h may re-declare an API with
-# a different signature under a HIP_FORCE_API_VERSION guard (hipMemAdvise gained
+# a different signature under a HIP_TARGET_API_VERSION guard (hipMemAdvise gained
 # a hipMemLocation parameter in HIP 8.0 this way).
 #
 # This pass parses the public header and refuses to generate when a playback
@@ -3943,7 +3946,7 @@ def generate_playback_cpp(entries: List[ApiEntry]) -> str:
 class PublicDecl:
     """One non-template declaration of a public HIP API."""
     types:   Tuple[str, ...]
-    guarded: bool          # inside a HIP_FORCE_API_VERSION / HIP_ABI_IMPL #if
+    guarded: bool          # inside a HIP_TARGET_API_VERSION / HIP_ABI_IMPL #if
     line:    int
 
 

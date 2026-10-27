@@ -1435,8 +1435,9 @@ static bool repair_root(const std::string& archive_path, int& exit_code) {
 
 // The archive format version leads because it is the number that decides whether
 // this binary can read a given capture at all: the reader rejects a mismatch
-// ("Version mismatch: file=N reader=M"). The revision answers the separate
-// question of which build this is, which nothing else in the binary records.
+// ("Version mismatch in <path>: file=N reader=M"). The revision answers the
+// separate question of which build this is, which nothing else in the binary
+// records.
 static void print_version() {
   printf("hrr-playback (HIP Record & Replay)\n");
   printf("  archive format version : %u\n", static_cast<unsigned>(HRR_VERSION));

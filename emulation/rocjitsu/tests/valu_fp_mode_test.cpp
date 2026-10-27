@@ -22,6 +22,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/host_target.h"
 #include "util/simd_test_hooks.h"
 
 #include <array>
@@ -53,9 +54,9 @@ constexpr SimdPathExpectation expect_simd_path(amdgpu::SimdFastPath path) {
 constexpr SimdPathExpectation expect_simd_fallback() { return {.checked = true}; }
 
 // Conversions with 64-bit lanes fall back to scalar where native 64-bit SIMD
-// masks are broken (UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS).
+// masks are broken (RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS).
 constexpr SimdPathExpectation expect_simd_path_64(amdgpu::SimdFastPath path) {
-  return UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS ? expect_simd_fallback() : expect_simd_path(path);
+  return RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS ? expect_simd_fallback() : expect_simd_path(path);
 }
 
 struct ArithmeticCase {
@@ -1260,7 +1261,7 @@ std::vector<ArithmeticCase> f16_fma_omod_cases() {
 
 std::vector<ArithmeticCase> host_mxcsr_cases() {
   std::vector<ArithmeticCase> cases;
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
   constexpr uint32_t kDazMask = 1u << 6;
   constexpr uint32_t kFtzMask = 1u << 15;
   constexpr uint32_t kControlMask = _MM_ROUND_MASK | kDazMask | kFtzMask;
@@ -1374,7 +1375,7 @@ std::vector<ArithmeticCase> modifier_environment_cases() {
       }
     }
   }
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
   constexpr uint32_t kDazMask = 1u << 6;
   constexpr uint32_t kControlMask = _MM_ROUND_MASK | kDazMask | (1u << 15);
   for (uint32_t daz : {0u, kDazMask}) {
@@ -2800,7 +2801,7 @@ std::vector<ArithmeticCase> f16_binary_modifier_cases() {
       FE_TONEAREST, 0, expect_simd_fallback());
   add("AddHostRoundUpStillUsesSimd", false, 0x3c00, 0x1000, 0xa5a53c00u, 0xc0, 0, 0, 0, 0, 0,
       FE_UPWARD);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
   // Enable the full-MXCSR preservation assertion without overriding rounding.
   cases.back().mxcsr_mask = _MM_EXCEPT_MASK;
   // Widened F16 ADD/MUL operands and results cannot be F32 subnormals, so host
@@ -4418,7 +4419,7 @@ std::vector<ArithmeticCase> ldexp_tininess_cases() {
       sources.emplace_back(1, uint32_t(lane.value >> 32));
       expected.emplace_back(7, uint32_t(lane.expected >> 32));
     }
-    const bool simd = !f64 || !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS;
+    const bool simd = !f64 || !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS;
     cases.push_back(
         {std::string(f64 ? "LdexpF64" : "LdexpF32") + lane.name,
          ROCJITSU_CODE_ARCH_RDNA4,
@@ -4807,7 +4808,7 @@ std::vector<DotLane> dot_family_lanes() {
                        uint32_t src1, uint32_t acc, uint32_t gfx1201,
                        std::optional<uint32_t> gfx1100, std::vector<uint32_t> modes,
                        SimdPathExpectation simd = {}) {
-    if (UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && modifiers.clamp &&
+    if (RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS && modifiers.clamp &&
         simd.path == amdgpu::SimdFastPath::VOP3P_DOT_INT)
       simd = expect_simd_fallback();
     lanes.push_back(
@@ -5416,11 +5417,11 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
       cu->write_sgpr(wave->sgpr_alloc().base + source.first, source.second);
     std::fenv_t saved_environment;
     ASSERT_EQ(std::fegetenv(&saved_environment), 0);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     const uint32_t saved_mxcsr = _mm_getcsr();
 #endif
     ASSERT_EQ(std::fesetround(test.host_rounding), 0);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     // Sticky flags from earlier tests must not hide exception-state leaks.
     const uint32_t host_mxcsr =
         (_mm_getcsr() & ~(test.mxcsr_mask | _MM_EXCEPT_MASK)) | test.mxcsr_bits;
@@ -5430,11 +5431,11 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
     amdgpu::ScopedSimdFastPathTracker tracker;
     const bool succeeded = cu->execute_instruction(instruction.get(), *wave).succeeded();
     const int restored_rounding = std::fegetround();
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     const uint32_t restored_mxcsr = _mm_getcsr();
 #endif
     const int restore_status = std::fesetenv(&saved_environment);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     _mm_setcsr(saved_mxcsr);
     if (test.mxcsr_mask != 0) {
       EXPECT_EQ(restored_mxcsr, host_mxcsr);
@@ -5481,7 +5482,7 @@ struct ForceScalarGuard {
 // on the host, so the caller's flags survive only if its slot is scoped; the
 // RDNA3 MAX selects on raw bits and raises nothing. mxcsr_mask makes the harness
 // assert the flags survive, which it does only where MXCSR exists.
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 TEST(ValuFpModeHelpers, VopdInexactAddKeepsHostFlags) {
   const ArithmeticCase test{
       "gfx1100VopdInexactAddSignalingNanMaxKeepsHostFlags",
@@ -5814,7 +5815,7 @@ INSTANTIATE_TEST_SUITE_P(Rdna3Boundary, ValuMullitModeTest,
                            return info.param.name;
                          });
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 void expect_f16_binary_host_environment(uint32_t host_mxcsr, int host_rounding = FE_TONEAREST) {
   ForceScalarGuard guard;
   struct Sample {
@@ -6288,7 +6289,7 @@ TEST(ValuFpModeHelpers, LegacySdwaOutputScalePrecedesF16Rounding) {
 }
 
 TEST(ValuFpModeHelpers, HostFlushControlsDoNotOverrideGpuMode) {
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
   using amdgpu::fp_mode::Arithmetic;
   const uint32_t saved_mxcsr = _mm_getcsr();
   const uint32_t host_mxcsr = saved_mxcsr | (1u << 6) | (1u << 15);
