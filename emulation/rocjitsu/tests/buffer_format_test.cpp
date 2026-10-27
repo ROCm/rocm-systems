@@ -988,6 +988,68 @@ TEST_P(BufferFormatExecutionTest, UnqualifiedStoreSelectorsAreRejectedBeforeMemo
   }
 }
 
+TEST_P(BufferFormatExecutionTest, SingleChannelFloat32ZeroSelectorsUseA8Routing) {
+  struct Form {
+    uint16_t mubuf_op, vbuffer_op;
+    uint32_t components;
+    bool d16, hi = false;
+  };
+  constexpr std::array forms{
+      Form{cdna4::kBufferStoreFormatXMubuf, rdna4::kBufferStoreFormatXVbuffer, 1, false},
+      Form{cdna4::kBufferStoreFormatXyMubuf, rdna4::kBufferStoreFormatXyVbuffer, 2, false},
+      Form{cdna4::kBufferStoreFormatXyzMubuf, rdna4::kBufferStoreFormatXyzVbuffer, 3, false},
+      Form{cdna4::kBufferStoreFormatXyzwMubuf, rdna4::kBufferStoreFormatXyzwVbuffer, 4, false},
+      Form{cdna4::kBufferStoreFormatD16XMubuf, rdna4::kBufferStoreD16FormatXVbuffer, 1, true},
+      Form{cdna4::kBufferStoreFormatD16XyMubuf, rdna4::kBufferStoreD16FormatXyVbuffer, 2, true},
+      Form{cdna4::kBufferStoreFormatD16XyzMubuf, rdna4::kBufferStoreD16FormatXyzVbuffer, 3, true},
+      Form{cdna4::kBufferStoreFormatD16XyzwMubuf, rdna4::kBufferStoreD16FormatXyzwVbuffer, 4, true},
+      Form{cdna4::kBufferStoreFormatD16HiXMubuf, rdna4::kBufferStoreD16HiFormatXVbuffer, 1, true,
+           true}};
+  const auto vb = wf->vgpr_alloc().base;
+  for (auto form : forms) {
+    SCOPED_TRACE(testing::Message()
+                 << "components=" << form.components << " d16=" << form.d16 << " hi=" << form.hi);
+    for (uint32_t selectors : {0u, 4u << 9}) {
+      SCOPED_TRACE(selectors);
+      descriptor(22, 4, selectors);
+      for (uint32_t lane = 0; lane < 3; ++lane) {
+        cu->write_vgpr(vb, lane, lane);
+        for (uint32_t i = 0; i < 4; ++i)
+          cu->write_vgpr(vb + 8 + i, lane, bits(static_cast<float>(i + 1)));
+        if (form.d16) {
+          cu->write_vgpr(vb + 8, lane, form.hi ? 0x3c00dead : 0x40003c00); // X=1, Y=2.
+          cu->write_vgpr(vb + 9, lane, 0x44004200);                        // Z=3, W=4.
+        }
+        memory.write32(0x1000 + lane * 4, 0xa5a5a5a5u);
+      }
+      amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+      state.is_load = false;
+      const auto prepared = amdgpu::prepare_buffer_format(*wf, state, 4, -1, form.components);
+      ASSERT_TRUE(prepared.succeeded());
+      ASSERT_TRUE(prepared.value());
+      EXPECT_EQ(state.buffer_selectors, 4u << 9);
+      auto inst = store_instruction(form.mubuf_op, form.vbuffer_op);
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      ASSERT_NE(inst->data(), nullptr);
+      const auto *stored = static_cast<const amdgpu::VectorMemState *>(inst->data());
+      EXPECT_EQ(stored->buffer_components, form.components);
+      EXPECT_EQ(stored->buffer_d16, form.d16);
+      EXPECT_EQ(stored->d16_hi, form.hi);
+      amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+      ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+      cu->l1_vector().flush_all();
+      l2.flush_all();
+      const uint32_t expected = form.components == 4                     ? bits(4)
+                                : GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? bits(1)
+                                                                         : 0;
+      EXPECT_EQ(memory.read32(0x1000), expected);
+      EXPECT_EQ(memory.read32(0x1004), 0xa5a5a5a5u);
+      EXPECT_EQ(memory.read32(0x1008), expected);
+    }
+  }
+}
+
 TEST_P(BufferFormatExecutionTest, ZeroSelectorsRejectUnqualifiedFormatsThroughBothApis) {
   const auto encoding =
       arch_is_cdna_4_or_lower(GetParam())      ? amdgpu::BufferFormatEncoding::Gfx9
@@ -1794,65 +1856,3 @@ TEST_P(RdnaLegacyFormatDecodeTest, SplitOpcodeBitSelectsD16BeforeExecution) {
 INSTANTIATE_TEST_SUITE_P(Rdna, RdnaLegacyFormatDecodeTest,
                          ::testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2));
 } // namespace
-
-TEST_P(BufferFormatExecutionTest, SingleChannelFloat32ZeroSelectorsUseA8Routing) {
-  struct Form {
-    uint16_t mubuf_op, vbuffer_op;
-    uint32_t components;
-    bool d16, hi = false;
-  };
-  constexpr std::array forms{
-      Form{cdna4::kBufferStoreFormatXMubuf, rdna4::kBufferStoreFormatXVbuffer, 1, false},
-      Form{cdna4::kBufferStoreFormatXyMubuf, rdna4::kBufferStoreFormatXyVbuffer, 2, false},
-      Form{cdna4::kBufferStoreFormatXyzMubuf, rdna4::kBufferStoreFormatXyzVbuffer, 3, false},
-      Form{cdna4::kBufferStoreFormatXyzwMubuf, rdna4::kBufferStoreFormatXyzwVbuffer, 4, false},
-      Form{cdna4::kBufferStoreFormatD16XMubuf, rdna4::kBufferStoreD16FormatXVbuffer, 1, true},
-      Form{cdna4::kBufferStoreFormatD16XyMubuf, rdna4::kBufferStoreD16FormatXyVbuffer, 2, true},
-      Form{cdna4::kBufferStoreFormatD16XyzMubuf, rdna4::kBufferStoreD16FormatXyzVbuffer, 3, true},
-      Form{cdna4::kBufferStoreFormatD16XyzwMubuf, rdna4::kBufferStoreD16FormatXyzwVbuffer, 4, true},
-      Form{cdna4::kBufferStoreFormatD16HiXMubuf, rdna4::kBufferStoreD16HiFormatXVbuffer, 1, true,
-           true}};
-  const auto vb = wf->vgpr_alloc().base;
-  for (auto form : forms) {
-    SCOPED_TRACE(testing::Message()
-                 << "components=" << form.components << " d16=" << form.d16 << " hi=" << form.hi);
-    for (uint32_t selectors : {0u, 4u << 9}) {
-      SCOPED_TRACE(selectors);
-      descriptor(22, 4, selectors);
-      for (uint32_t lane = 0; lane < 3; ++lane) {
-        cu->write_vgpr(vb, lane, lane);
-        for (uint32_t i = 0; i < 4; ++i)
-          cu->write_vgpr(vb + 8 + i, lane, bits(static_cast<float>(i + 1)));
-        if (form.d16) {
-          cu->write_vgpr(vb + 8, lane, form.hi ? 0x3c00dead : 0x40003c00); // X=1, Y=2.
-          cu->write_vgpr(vb + 9, lane, 0x44004200);                        // Z=3, W=4.
-        }
-        memory.write32(0x1000 + lane * 4, 0xa5a5a5a5u);
-      }
-      amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
-      state.is_load = false;
-      const auto prepared = amdgpu::prepare_buffer_format(*wf, state, 4, -1, form.components);
-      ASSERT_TRUE(prepared.succeeded());
-      ASSERT_TRUE(prepared.value());
-      EXPECT_EQ(state.buffer_selectors, 4u << 9);
-      auto inst = store_instruction(form.mubuf_op, form.vbuffer_op);
-      ASSERT_NE(inst, nullptr);
-      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-      ASSERT_NE(inst->data(), nullptr);
-      const auto *stored = static_cast<const amdgpu::VectorMemState *>(inst->data());
-      EXPECT_EQ(stored->buffer_components, form.components);
-      EXPECT_EQ(stored->buffer_d16, form.d16);
-      EXPECT_EQ(stored->d16_hi, form.hi);
-      amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
-      ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
-      cu->l1_vector().flush_all();
-      l2.flush_all();
-      const uint32_t expected = form.components == 4                     ? bits(4)
-                                : GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? bits(1)
-                                                                         : 0;
-      EXPECT_EQ(memory.read32(0x1000), expected);
-      EXPECT_EQ(memory.read32(0x1004), 0xa5a5a5a5u);
-      EXPECT_EQ(memory.read32(0x1008), expected);
-    }
-  }
-}
