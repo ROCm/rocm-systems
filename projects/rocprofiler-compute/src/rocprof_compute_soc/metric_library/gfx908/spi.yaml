@@ -114,13 +114,13 @@ spi.scratch_stall_rate:
 spi.sgpr_writes:
   name: SGPR Writes
   formula: SUM(SPI_SWC_CSC_WR) / SUM(SPI_CSN_WAVE)
-  unit: Cycles/wave
+  unit: Cycles per Wavefront
   description: >-
     The average number of cycles spent initializing SGPRs at wave creation.
 spi.vgpr_writes:
   name: VGPR Writes
   formula: 4 * SUM(SPI_VWC_CSC_WR) / SUM(SPI_CSN_WAVE)
-  unit: Cycles/wave
+  unit: Cycles per Wavefront
   description: >-
     The average number of cycles spent initializing VGPRs at wave creation.
 spi.workgroup_manager_util:

@@ -33,7 +33,7 @@ compute.inst_mix_smem:
     used for loading kernel arguments, base-pointers and loads from HIP's __constant__
     memory.
 compute.insts_per_wave:
-  name: Instructions per wavefront
+  name: Instructions per Wavefront
   formula: SUM(SQ_INSTS) / SUM(SQ_WAVES)
   unit: Instructions per Wavefront
   description: >-

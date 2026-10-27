@@ -247,7 +247,7 @@ vl1d.rw_wr:
 vl1d.stalled_on_l2_data:
   name: Stalled on L2 Data
   formula: 100 * TCP_PENDING_STALL_CYCLES_sum / TCP_GATE_EN1_sum
-  unit: ''
+  unit: Percent
   description: >-
     The ratio of the number of cycles where the vL1D is stalled waiting for requested
     data to return from the L2 cache divided by the number of cycles where the vL1D
@@ -255,7 +255,7 @@ vl1d.stalled_on_l2_data:
 vl1d.stalled_on_l2_req:
   name: Stalled on L2 Req
   formula: 100 * TCP_TCR_TCP_STALL_CYCLES_sum / TCP_GATE_EN1_sum
-  unit: ''
+  unit: Percent
   description: >-
     The ratio of the number of cycles where the vL1D is stalled waiting to issue a
     request for data to the L2 cache divided by the number of cycles where the vL1D
@@ -263,7 +263,7 @@ vl1d.stalled_on_l2_req:
 vl1d.tag_ram_stall_atomic:
   name: Tag RAM Stall (Atomic)
   formula: 100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
-  unit: ''
+  unit: Percent
   description: >-
     The ratio of the number of cycles where the vL1D is stalled due to Atomic requests
     with conflicting tags being looked up concurrently, divided by the number of cycles
@@ -271,7 +271,7 @@ vl1d.tag_ram_stall_atomic:
 vl1d.tag_ram_stall_rd:
   name: Tag RAM Stall (Read)
   formula: 100 * TCP_READ_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
-  unit: ''
+  unit: Percent
   description: >-
     The ratio of the number of cycles where the vL1D is stalled due to Read requests
     with conflicting tags being looked up concurrently, divided by the number of cycles
@@ -279,7 +279,7 @@ vl1d.tag_ram_stall_rd:
 vl1d.tag_ram_stall_wr:
   name: Tag RAM Stall (Write)
   formula: 100 * TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
-  unit: ''
+  unit: Percent
   description: >-
     The ratio of the number of cycles where the vL1D is stalled due to Write requests
     with conflicting tags being looked up concurrently, divided by the number of cycles

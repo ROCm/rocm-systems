@@ -38,7 +38,7 @@ dispatch.scratch_allocation:
 dispatch.scratch_allocation_per_wave:
   name: Scratch Allocation per Wave
   formula: AVG(Scratch_Per_Workitem) * $wave_size / 1024
-  unit: KB per Wave
+  unit: KB per Wavefront
   description: >-
     The amount of scratch memory requested per wavefront, in KB: the scratch bytes
     requested per work-item multiplied by the wavefront size. Scratch memory is used

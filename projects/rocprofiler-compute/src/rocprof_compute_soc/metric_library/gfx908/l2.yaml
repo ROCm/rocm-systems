@@ -34,47 +34,47 @@ l2.cc_req:
 l2.chan_atomic:
   name: L2 Atomic
   formula: SUM(TO_INT(TCC_ATOMIC[::_1])) / SUM($denom)
-  unit: ''
+  unit: (Requests + $normUnit)
   description: ''
 l2.chan_fabric_128b_rd_req_per_normunit:
   name: L2-Fabric (128B read requests per normUnit)
   formula: TO_INT(TCC_BUBBLE[::_1]) / $denom
-  unit: ''
+  unit: (Requests + $normUnit)
   description: ''
 l2.chan_fabric_atomic:
   name: L2-Fabric Atomic
   formula: SUM(TO_INT(TCC_EA0_ATOMIC[::_1])) / SUM($denom)
-  unit: ''
+  unit: (Requests + $normUnit)
   description: ''
 l2.chan_fabric_atomic_lat_cycles:
   name: L2-Fabric Atomic Latency (Cycles)
   formula: TCC_EA0_ATOMIC_LEVEL[::_1] / TCC_EA0_ATOMIC[::_1] if TCC_EA0_ATOMIC[::_1] != 0 else 0
-  unit: ''
+  unit: Cycles
   description: ''
 l2.chan_fabric_rd:
   name: L2-Fabric Read
   formula: SUM(TO_INT(TCC_EA0_RDREQ[::_1])) / SUM($denom)
-  unit: ''
+  unit: (Requests + $normUnit)
   description: ''
 l2.chan_fabric_rd_lat_cycles:
   name: L2-Fabric Read Latency (Cycles)
   formula: TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]
-  unit: ''
+  unit: Cycles
   description: ''
 l2.chan_fabric_wr_atomic:
   name: L2-Fabric Write and Atomic
   formula: SUM(TO_INT(TCC_EA0_WRREQ[::_1])) / SUM($denom)
-  unit: ''
+  unit: (Requests + $normUnit)
   description: ''
 l2.chan_fabric_wr_atomic_lat_cycles:
   name: L2-Fabric Write and Atomic Latency (Cycles)
   formula: TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]
-  unit: ''
+  unit: Cycles
   description: ''
 l2.chan_fabric_wr_starve:
   name: L2-Fabric Write Starve
   formula: SUM(TO_INT(TCC_TOO_MANY_EA_WRREQS_STALL[::_1])) / SUM($denom)
-  unit: ''
+  unit: (Cycles + $normUnit)
   description: ''
 l2.chan_hit_rate_all:
   name: L2 Cache Hit Rate (Sum over Channels)
@@ -86,22 +86,22 @@ l2.chan_hit_rate_all:
 l2.chan_hit_rate_per_chan:
   name: L2 Cache Hit Rate per Channel
   formula: 100 * TCC_HIT[::_1] / (TCC_HIT[::_1] + TCC_MISS[::_1])
-  unit: ''
+  unit: Percent
   description: ''
 l2.chan_rd:
   name: L2 Read
   formula: SUM(TO_INT(TCC_READ[::_1])) / SUM($denom)
-  unit: ''
+  unit: (Requests + $normUnit)
   description: ''
 l2.chan_req_per_normunit:
   name: L2 Requests (per normUnit)
   formula: TO_INT(TCC_REQ[::_1]) / $denom
-  unit: ''
+  unit: (Requests + $normUnit)
   description: ''
 l2.chan_wr:
   name: L2 Write
   formula: SUM(TO_INT(TCC_WRITE[::_1])) / SUM($denom)
-  unit: ''
+  unit: (Requests + $normUnit)
   description: ''
 l2.evict_internal:
   name: Evict (Internal)
