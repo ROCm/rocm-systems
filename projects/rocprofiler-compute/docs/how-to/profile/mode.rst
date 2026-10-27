@@ -735,8 +735,7 @@ b) Otherwise, profile mode runs microbenchmarks and collects roofline performanc
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
 roofline HTML plots, use ``rocprof-compute analyze`` on a profiling output directory
 that contains both ``roofline.csv`` and application performance counters
-(see :doc:`../analyze/mode`). Visualization options (``--sort``, ``--mem-level``,
-``--roofline-data-type``) are available in analyze mode.
+(see :doc:`../analyze/mode`).
 
 .. note::
    Matrix multiplication benchmarking and counter collection will vary depending on which architecture is profiled:
@@ -987,95 +986,32 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 Torch trace collector
 ---------------------
 
-One ``torch_trace_collector.so`` ships with rocprofiler-compute and is loaded
-through a plain-C interface. It is built as C++17 without PyTorch headers or
-libraries, and it does not depend on the Python version the workload runs, so
-a single file covers every supported setup.
+rocprofiler-compute ships one collector library, ``torch_trace_collector.so``.
+It does not need PyTorch development packages and works with any Python
+version.
 
-The collector reads a few PyTorch types by byte offset, so it is enabled only
-for the PyTorch versions whose layouts rocprofiler-compute records. Any other
-version falls back to ``TorchDispatchMode``.
+The collector depends on how a specific PyTorch version stores its data
+internally, so it runs only with PyTorch 2.13 and 2.14. Other PyTorch versions
+use ``TorchDispatchMode`` instead, which misses backward-pass operators.
 
 Output
 ------
 
 When Torch operator mapping is enabled, profiling writes additional CSV files in
 the workload directory: **marker_api_trace** and **counter_collection** files with
-the ``ml_api_trace`` prefix. These correlate PyTorch operators
-with GPU kernels and performance counters. When you run analyze (e.g. with
-``--list-torch-operators`` or ``--torch-operator``), a consolidated CSV is written
-to ``ml_api_trace/consolidated.csv``; the source marker and counter files are
-**retained** in the workload directory and are not deleted.
+the ``ml_api_trace`` prefix. The source marker and counter files are **retained**
+in the workload directory.
 
-``ml_api_trace/`` directory
-The ``ml_api_trace/`` directory contains ``consolidated.csv`` with all
-operator/kernel data. The columns include:
+Analyze reads those files and prints an operator call tree and a per-operator
+summary (for example with ``--list-torch-operators`` or ``--torch-operator``).
 
-   * ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
-   * ``Context_Id``: Call context (e.g., ``1@__init__.py:231``)
-   * ``Counter_Name`` / ``Counter_Value``: Performance counter values
-   * ``Start_Timestamp_function`` / ``End_Timestamp_function``: Operator timing
-   * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel``: Kernel timing
+Performance counter data
+------------------------
 
-The consolidated CSV is generated automatically on the first analysis run that
-requires it (``--list-torch-operators`` or ``--torch-operator``) and is reused on
-subsequent runs.
-
-Sample rows from ``ml_api_trace/consolidated.csv`` (from profiling an mnist model).
-
-.. list-table::
-   :header-rows: 1
-   :widths: 16 14 42 22 12 14 14 14 14
-
-   * - Operator_Name
-     - Context_Id
-     - Kernel_Name
-     - Counter_Name
-     - Counter_Value
-     - Start_Timestamp_function
-     - End_Timestamp_function
-     - Start_Timestamp_kernel
-     - End_Timestamp_kernel
-
-   * - torch.ones_like
-     - 1@__init__.py:231
-     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
-     - CPC_CPC_STAT_BUSY
-     - 23004
-     - 6789210204040073
-     - 6789210223815845
-     - 6789210223810274
-     - 6789210223811914
-
-   * - torch.ones_like
-     - 1@__init__.py:231
-     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
-     - CPC_CPC_STAT_IDLE
-     - 0
-     - 6789210204040073
-     - 6789210223815845
-     - 6789210223810274
-     - 6789210223811914
-
-   * - torch.ones_like
-     - 1@__init__.py:231
-     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
-     - CPC_CPC_STAT_STALL
-     - 6715
-     - 6789281060081123
-     - 6789281079930585
-     - 6789281079932564
-     - 6789281079934204
-
-Performance counter data file
------------------------------
-
-The ``pmc_perf.csv.gz`` file contains the standard performance counter data (same as non-torch profiling). This data enables analysis such as:
-
-* Identifying which PyTorch operators executed which GPU kernels
-* Aggregating performance counter values by operator
-* Correlating operator-level timing with kernel-level hardware metrics
-* Tracing the execution flow from high-level PyTorch API to low-level GPU kernels
+The ``ml_api_trace_*_counter_collection.csv.gz`` files hold the same
+performance counters as a profile without Torch trace. In analyze mode,
+``--torch-operator`` and ``--triton-operator`` show the usual metric tables
+for the kernels that the matching operators launched.
 
 .. _torch-trace-limitations:
 
@@ -1088,7 +1024,7 @@ The Torch trace feature currently has the following limitations:
 
 * The ``--torch-trace`` option requires the application to be a Python command or Python script.
 
-* The workload’s Python version must match the Python version used by ``roctx``.
+* The workload's Python version must match the Python version used by ``roctx``.
 
 * This feature adds instrumentation overhead to track operator boundaries. For performance-critical measurements, consider profiling without this option first.
 
@@ -1111,18 +1047,14 @@ This means the install requirement above was not met.
 Hierarchical operator names
 ----------------------------
 
-PyTorch operators are captured with full module hierarchy when available (e.g.,
-``nn.Module`` and ``torch.nn.functional`` wrappers), so you see where each
-operator occurs in your PyTorch application:
+Analyze shows each operator under the operator that called it. The operator
+summary writes this call path with ``/`` between operators:
 
 .. code-block:: text
 
-   nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d
+   nn.Module.Net.forward/nn.Module.Conv2d.forward/aten::convolution
    nn.Module.MyModel.forward/nn.Module.Linear.forward
-   torch.nn.functional.relu
-
-The ``Operator_Name`` column in ``ml_api_trace/consolidated.csv`` contains
-the full operator hierarchy.
+   aten::relu
 
 This hierarchical information enables:
 
@@ -1130,7 +1062,7 @@ This hierarchical information enables:
 * **Debugging**: Identify performance issues in specific model components.
 * **Optimization**: Focus tuning efforts on bottleneck operators.
 
-Example with hierarchical naming:
+Example:
 
 .. code-block:: python
 
@@ -1141,14 +1073,15 @@ Example with hierarchical naming:
            self.decoder = nn.Linear(1024, 512)
 
        def forward(self, x):
-           x = self.encoder(x)  # Captured as nn.Module.MyModel.forward/nn.Module.Linear.forward
-           x = self.decoder(x)  # Same hierarchy; both appear in consolidated.csv under Operator_Name
+           x = self.encoder(x)  # Linear.forward appears under MyModel.forward
+           x = self.decoder(x)  # A second Linear.forward under MyModel.forward
            return x
 
 **Analyzing captured operators**: After profiling, use the analyze CLI (see
 :doc:`../analyze/cli`) to list and filter by operator name. Filtering
-(``--torch-operator``) accepts shell-style glob patterns (e.g. ``*conv2d``,
-``torch.nn.functional.conv2d``, ``*/*conv2d``). To select all operators, pass
+(``--torch-operator``) accepts shell-style glob patterns that match an operator
+name or its call path (for example ``*relu*`` or ``*/aten::addmm``). To select
+all operators, pass
 no arguments, ``all``, ``*``, or ``**`` — all four forms are equivalent.
 
 Combining Torch operator with other options
@@ -1174,10 +1107,13 @@ Triton trace
 ============
 
 In addition to PyTorch, ROCm Compute Profiler can map performance counters to
-Triton kernels (including Triton kernels launched by ``torch.compile`` /
-Inductor). This is enabled with the ``--triton-trace`` option and shares the
-same ``ml_api_trace`` output, ``Backend`` attribution, and analysis flow as Torch
-trace.
+the Triton kernels that your code launches, such as ``@triton.jit`` functions.
+Enable it with the ``--triton-trace`` option. It writes the same
+``ml_api_trace`` output as Torch trace and is analyzed the same way.
+
+``--triton-trace`` does not capture the Triton kernels that ``torch.compile``
+generates, because PyTorch launches those kernels itself. Use ``--torch-trace``
+for them. They appear under the ``torch.compile`` call in the operator tree.
 
 .. warning::
 
@@ -1210,10 +1146,9 @@ frameworks in a single run:
 
    $ rocprof-compute profile --experimental --torch-trace --triton-trace --name compiled_model -- python train.py
 
-Each captured marker records its originating framework in the ``Backend`` column
-of ``ml_api_trace/consolidated.csv``, so each framework can be analyzed
-independently. To enable all supported backends at once, use
-:ref:`--ml-api-trace <ml-api-trace>`.
+Each captured operator records which framework it came from, so you can
+analyze each framework separately. To enable all supported backends at once,
+use :ref:`--ml-api-trace <ml-api-trace>`.
 
 To analyze the captured Triton kernels, use the ``--list-triton-operators`` and
 ``--triton-operator`` options in analyze mode (see :doc:`../analyze/cli`).
@@ -1236,8 +1171,8 @@ single option.
    $ rocprof-compute profile --experimental --ml-api-trace --name model -- python train.py
 
 The output is identical to enabling each framework's trace flag individually.
-Captured kernels are attributed in the ``Backend`` column and analyzed with the
-corresponding per-framework operator options (see :doc:`../analyze/cli`).
+Each kernel is attributed to the framework that launched it. Analyze each
+framework with its own operator options (see :doc:`../analyze/cli`).
 
 .. _profile-vllm-workloads:
 

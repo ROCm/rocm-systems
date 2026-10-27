@@ -293,6 +293,26 @@ TEST(WaitcheckStream, UntrackedScalarMemoryDestinationsStopBeforeLosingDependenc
   }
 }
 
+TEST(WaitcheckStream, BranchStackInstructionsStopTheStream) {
+  // S_CBRANCH_I_FORK has no PC destination operand, so only its branch flag
+  // marks it as a control-flow transfer.
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (uint32_t instruction : {
+             0xB86A0002u, // s_cbranch_i_fork vcc, 2
+             0x9480246Au, // s_cbranch_g_fork vcc, s[36:37]
+             0xBE802E22u, // s_cbranch_join s34
+         }) {
+      SCOPED_TRACE(testing::Message() << "arch=" << arch << " instruction=" << instruction);
+      const auto report = analyze({instruction}, arch);
+      ASSERT_TRUE(report.incomplete);
+      EXPECT_EQ(report.incomplete->offset, 0u);
+      EXPECT_EQ(report.instructions_analyzed, 0u);
+      EXPECT_NE(report.incomplete->reason.find("control flow"), std::string::npos)
+          << report.incomplete->reason;
+    }
+  }
+}
+
 TEST(WaitcheckStream, TrapTemporaryUsesAndOverwritesAreIncomplete) {
   for (uint32_t instruction : {0xbe84006cu, 0xbeec0004u}) {
     const auto report = analyze({instruction}, ROCJITSU_CODE_ARCH_CDNA3);
@@ -603,8 +623,8 @@ TEST(WaitcheckStream, BothWaveSizesAcceptOrdinaryMemoryStreams) {
   Program program;
   load(program);
   program.insert(program.end(), {0xbfc00000u, v_mov(1, 0)});
-  for (uint32_t wave : {32u, 64u}) {
-    const auto report = analyze(program, ROCJITSU_CODE_ARCH_RDNA4, false, wave);
+  for (uint32_t wave_size : {32u, 64u}) {
+    const auto report = analyze(program, ROCJITSU_CODE_ARCH_RDNA4, false, wave_size);
     EXPECT_FALSE(report.incomplete);
     EXPECT_TRUE(report.diagnostics.empty());
   }
@@ -736,13 +756,13 @@ TEST(WaitcheckStream, ScalarMaskDestinationsFollowWaveWidth) {
                                                            {0xd6fe0200u, 0x040e0501u},
                                                            {0xd6ff0200u, 0x040e0501u}}};
   for (const std::array<uint32_t, 2> &encoding : encodings) {
-    for (uint32_t wave : {32u, 64u}) {
+    for (uint32_t wave_size : {32u, 64u}) {
       for (uint32_t loaded : {2u, 3u}) {
         const auto report =
             analyze({0xf4000002u | (loaded << 6), 0xf8000000u, encoding[0], encoding[1]},
-                    ROCJITSU_CODE_ARCH_RDNA4, false, wave);
+                    ROCJITSU_CODE_ARCH_RDNA4, false, wave_size);
         ASSERT_FALSE(report.incomplete);
-        const bool conflicts = wave == 64 || loaded == 2;
+        const bool conflicts = wave_size == 64 || loaded == 2;
         ASSERT_EQ(report.diagnostics.size(), conflicts ? 1u : 0u);
         if (conflicts) {
           EXPECT_EQ(report.diagnostics[0].reg.index, loaded);
@@ -757,12 +777,13 @@ TEST(WaitcheckStream, LegacyMadScalarDestinationsFollowWaveWidth) {
   // RDNA3/3.5 use v_mad_{u64_u32,i64_i32}; RDNA4 adds _co to their names.
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
     for (uint32_t opcode : {0xd6fe0200u, 0xd6ff0200u}) {
-      for (uint32_t wave : {32u, 64u}) {
+      for (uint32_t wave_size : {32u, 64u}) {
         for (uint32_t loaded : {2u, 3u}) {
-          const auto report = analyze(
-              {0xf4000002u | (loaded << 6), 0xf8000000u, opcode, 0x040e0501u}, arch, false, wave);
+          const auto report =
+              analyze({0xf4000002u | (loaded << 6), 0xf8000000u, opcode, 0x040e0501u}, arch, false,
+                      wave_size);
           ASSERT_FALSE(report.incomplete);
-          EXPECT_EQ(report.diagnostics.size(), wave == 64 || loaded == 2 ? 1u : 0u);
+          EXPECT_EQ(report.diagnostics.size(), wave_size == 64 || loaded == 2 ? 1u : 0u);
         }
       }
     }
