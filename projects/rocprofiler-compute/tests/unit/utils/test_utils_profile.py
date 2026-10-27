@@ -334,22 +334,35 @@ def test_run_prof_adds_generated_gfx115_expression_to_installed_config(
         }),
         encoding="utf-8",
     )
-    installed_counter = {
-        "name": "TCC_HIT",
-        "description": "TCC hits",
-        "properties": [],
-        "definitions": [
-            {
-                "architectures": ["gfx1151"],
-                "block": "TCC",
-                "event": 1,
-            }
-        ],
-    }
     installed_config = {
         "rocprofiler-sdk": {
             "counters-schema-version": 1,
-            "counters": [installed_counter],
+            "counters": [
+                {
+                    "name": "SQ_WAVES",
+                    "description": "Waves",
+                    "properties": [],
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1151"],
+                            "block": "SQ",
+                            "event": 4,
+                        }
+                    ],
+                },
+                {
+                    "name": "TCC_HIT",
+                    "description": "TCC hits",
+                    "properties": [],
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1151"],
+                            "block": "TCC",
+                            "event": 1,
+                        }
+                    ],
+                },
+            ],
         }
     }
     captured_config = {}
@@ -386,7 +399,11 @@ def test_run_prof_adds_generated_gfx115_expression_to_installed_config(
     )
 
     counters = captured_config["sdk_config"]["rocprofiler-sdk"]["counters"]
-    assert [counter["name"] for counter in counters] == ["TCC_HIT", "TCC_HIT[0]"]
+    assert [counter["name"] for counter in counters] == [
+        "SQ_WAVES",
+        "TCC_HIT",
+        "TCC_HIT[0]",
+    ]
 
 
 @pytest.mark.parametrize(

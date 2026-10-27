@@ -1195,37 +1195,48 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
 
 
 @pytest.mark.misc
-def test_definitions_limited_to_gfx115_uses_only_installed_config():
-    local_config = {
-        "rocprofiler-sdk": {
-            "counters": [
-                {
-                    "name": "LOCAL_GFX942_COUNTER",
-                    "definitions": [
-                        {
-                            "architectures": ["gfx942"],
-                            "block": "SQ",
-                            "event": 1,
-                        }
-                    ],
-                }
-            ]
-        }
+def test_gfx115_merge_keeps_sdk_counters_and_generated_extras():
+    config_path = (
+        Path(utils_common.config.rocprof_compute_home)
+        / "rocprof_compute_soc/profile_configs/sdk_config.yaml"
+    )
+    local_config = utils_common.yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    extra_counter = {
+        "name": "TCC_HIT[0]",
+        "definitions": [
+            {
+                "architectures": ["gfx1151"],
+                "expression": (
+                    "select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[0]])"
+                ),
+            }
+        ],
     }
+    local_config["rocprofiler-sdk"]["counters"].append(extra_counter)
     installed_config = {
         "rocprofiler-sdk": {
             "counters-schema-version": 1,
             "counters": [
                 {
-                    "name": "SDK_GFX115_COUNTER",
+                    "name": "SQ_WAVES",
                     "definitions": [
                         {
                             "architectures": ["gfx1151"],
                             "block": "SQ",
-                            "event": 2,
+                            "event": 4,
                         }
                     ],
-                }
+                },
+                {
+                    "name": "TCC_HIT",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1151"],
+                            "block": "TCC",
+                            "event": 1,
+                        }
+                    ],
+                },
             ],
         }
     }
@@ -1236,7 +1247,8 @@ def test_definitions_limited_to_gfx115_uses_only_installed_config():
         installed_config,
     )
 
-    assert limited == installed_config
+    names = [counter["name"] for counter in limited["rocprofiler-sdk"]["counters"]]
+    assert names == ["SQ_WAVES", "TCC_HIT", "TCC_HIT[0]"]
 
 
 @pytest.mark.misc
