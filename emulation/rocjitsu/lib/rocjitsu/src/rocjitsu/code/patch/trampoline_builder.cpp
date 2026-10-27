@@ -329,9 +329,10 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     reserved.expand(RegisterRef{RegClass::SGPR, *scc_temp, 1});
   }
 
-  // Special-state temps: one dead SGPR (pair for the wave64 EXEC/VCC masks,
-  // single for M0) per register the probe clobbers. Shared reserve path so EXEC,
-  // VCC, and M0 differ only by their row below, not by a branch each.
+  // Allocate a dead SGPR temp per register that must be preserved: a pair for
+  // EXEC/VCC, one for M0. The preserve_* inputs request saves; a full-mask window
+  // additionally requires EXEC. Shared reserve path so EXEC, VCC, and M0 differ
+  // only by their row below, not by a branch each.
   std::vector<SpecialStateSlot> special_saves;
   auto reserve_special = [&](bool requested, uint16_t operand, uint8_t width,
                              const char *name) -> bool {
