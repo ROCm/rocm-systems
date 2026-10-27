@@ -298,22 +298,17 @@ TEST(GpuUnit, DpmRangesUnavailableSleepSentinelNotRejected) {
   EXPECT_EQ(ranges.sleep_state_freq, -1);
 }
 
-// An empty pp_dpm_* stream with no overdrive range has no range to report, so it
-// answers as a missing pp_dpm_* file does.
-TEST(GpuUnit, DpmRangesEmptyStreamNotSupported) {
-  std::istringstream dpm("");
-  SmiAmdgpuOdClkRange od_range;  // not present -> derive from the (absent) levels
-  SmiAmdgpuClkRanges ranges;
-  EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_NOT_SUPPORTED);
-}
-
-// The amdgpu driver prints a bare newline for a clock without a DPM table, e.g.
-// pp_dpm_fclk on a Raphael iGPU. That line is not a malformed level.
-TEST(GpuUnit, DpmRangesBlankLineNotSupported) {
-  std::istringstream dpm("\n");
-  SmiAmdgpuOdClkRange od_range;
-  SmiAmdgpuClkRanges ranges;
-  EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_NOT_SUPPORTED);
+TEST(GpuUnit, DpmRangesEmptyTablesReportIoError) {
+  for (const char* contents : {"", "\n", " \t\r\n", "\n\n"}) {
+    std::istringstream dpm(contents);
+    SmiAmdgpuOdClkRange od_range;
+    SmiAmdgpuClkRanges ranges{1800, 1300, 2, 400};
+    EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_IO);
+    EXPECT_EQ(ranges.max_freq, 1800);
+    EXPECT_EQ(ranges.min_freq, 1300);
+    EXPECT_EQ(ranges.num_dpm, 2);
+    EXPECT_EQ(ranges.sleep_state_freq, 400);
+  }
 }
 
 // With an overdrive range the domain still has a range to report.
@@ -352,13 +347,18 @@ TEST(GpuUnit, DpmFrequencyMissingTableNotSupported) {
             RSMI_STATUS_NOT_SUPPORTED);
 }
 
-TEST(GpuUnit, DpmFrequencyEmptyTablesNotSupported) {
+TEST(GpuUnit, DpmFrequencyEmptyTablesPreserveDataError) {
   FakeDpmDevice device;
   for (const char* contents : {"", "\n", " \t\r\n", "\n\n"}) {
-    device.WriteTable(contents);
+    device.WriteTable("0: 1300Mhz *\n");
     rsmi_frequencies_t frequencies{};
+    ASSERT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
+              RSMI_STATUS_SUCCESS);
+    ASSERT_EQ(frequencies.num_supported, 1u);
+
+    device.WriteTable(contents);
     EXPECT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
-              RSMI_STATUS_NOT_SUPPORTED);
+              RSMI_STATUS_UNEXPECTED_DATA);
     EXPECT_EQ(frequencies.num_supported, 0u);
   }
 }

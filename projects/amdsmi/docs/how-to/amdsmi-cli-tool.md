@@ -906,9 +906,9 @@ Command Modifiers:
 ```
 
 `reset --clocks` also restores a lowered FCLK cap to the highest supported DPM
-level. GPUs without FCLK information skip this step. If restoring the cap fails,
-the command reports the failure in `reset_clocks.fclk` and its exit status while
-still attempting to reset the performance level.
+level. Unsupported FCLK queries skip this step. Clock-query and cap-restoration
+errors are reported in `reset_clocks.fclk` and the exit status while the command
+still attempts to reset the performance level.
 
 (cmd-monitor)=
 ### amd-smi monitor

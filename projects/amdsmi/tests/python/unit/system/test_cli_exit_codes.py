@@ -2267,22 +2267,26 @@ class TestResetGpuGAllFailureGuards(unittest.TestCase):
         result = next(value for _, key, value in cmd.logger.stored if key == "reset_clocks")
         self.assertEqual(set(result), {"overdrive", "clocks", "performance"})
 
-    def test_fclk_read_failure_is_reported(self):
+    def test_fclk_read_failure_is_reported(self) -> None:
         reset = _load_reset()
-        cmd = _make_reset_cmd(reset)
+        for operation, code in (
+            ("amdsmi_get_clk_freq", amdsmi_wrapper.AMDSMI_STATUS_IO),
+            ("amdsmi_get_clk_freq", amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA),
+            ("amdsmi_get_clock_info", amdsmi_wrapper.AMDSMI_STATUS_IO),
+        ):
+            with self.subTest(operation=operation, code=code):
+                cmd = _make_reset_cmd(reset)
 
-        def fail_read(*args):
-            raise _DriverlessLibErr(amdsmi_wrapper.AMDSMI_STATUS_IO)
+                def fail_read(*_args: object) -> None:
+                    raise _DriverlessLibErr(code)
 
-        patches = _build_reset_specs(reset)["clocks"](cmd, "success")
-        patches["amdsmi_get_clk_freq"] = fail_read
-        with _patch_amdsmi_interface(reset, **patches):
-            cmd.reset(_reset_args(reset, clocks=True))
-        self.assertEqual(
-            cmd.helpers.error_collector.resolve_exit_code(), amdsmi_wrapper.AMDSMI_STATUS_IO
-        )
-        result = next(value for _, key, value in cmd.logger.stored if key == "reset_clocks")
-        self.assertIn("Unable to restore FCLK cap", result["fclk"])
+                patches = _build_reset_specs(reset)["clocks"](cmd, "success")
+                patches[operation] = fail_read
+                with _patch_amdsmi_interface(reset, **patches):
+                    cmd.reset(_reset_args(reset, clocks=True))
+                self.assertEqual(cmd.helpers.error_collector.resolve_exit_code(), code)
+                result = next(value for _, key, value in cmd.logger.stored if key == "reset_clocks")
+                self.assertIn("Unable to restore FCLK cap", result["fclk"])
 
     def test_fclk_permission_failure_requires_elevation(self):
         reset = _load_reset()

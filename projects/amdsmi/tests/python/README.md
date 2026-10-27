@@ -85,6 +85,7 @@ they all delegate to `common.run_test_dir()`.
 The `set` sweep runs each setting with a numeric `--gpu` selector and derives
 clock and power values from that GPU. Each device's exit code is checked
 independently; aggregate errors are not added to the allowed codes.
+Empty DPM data remains an error and is not added to the sweep's allowed statuses.
 
 The sweep explicitly excludes memory-partition changes. A request can remain
 queued until driver reload, and requesting the currently active mode does not
