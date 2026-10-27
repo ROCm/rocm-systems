@@ -223,6 +223,20 @@ KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
   };
 }
 
+// The wave size every kernel in @p kernels runs at, or nullopt when there are
+// none or they disagree.
+std::optional<uint8_t> common_wavefront_size(rj_code_arch_t arch,
+                                             std::span<const KernelDescriptorInfo> kernels) {
+  std::optional<uint8_t> common;
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    const uint8_t wave_size = kernel_wavefront_size(arch, kernel.descriptor);
+    if (common && *common != wave_size)
+      return std::nullopt;
+    common = wave_size;
+  }
+  return common;
+}
+
 // Special machine state preserved across a probe call: SCC (via the trampoline
 // envelope), EXEC/VCC/M0 (saved to a dead SGPR temp; the orchestrator sets the
 // plan.preserve_* flags below), and ordinary GPRs (via the spill policy).
@@ -1123,6 +1137,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   CodeObjectPatcher patcher(obj_);
   const uint64_t cave_start = patcher.text_size();
 
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(patcher.image_bytes(), patcher.text_offset(), patcher.text_size());
+
   // Liveness over the decoded blocks, built once and reused by every probe-call
   // site. validate_points() already built blocks_, and obj_ owns the
   // Instructions live_before() is keyed on.
@@ -1133,10 +1150,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   liveness_scope.reserve(blocks_.size());
   for (const auto &block : blocks_)
     liveness_scope.push_back(block.get());
-  // Every kernel is analyzed at Wave64, where a wave-mask destination is an
-  // SGPR pair. In a Wave32 kernel that over-kills the register above a compare's
-  // destination; using the kernel's wave size is deferred.
-  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope), /*wave_size=*/64};
+  // Liveness needs the wave size because a Wave32 compare writes one SGPR of
+  // the pair its encoding names. The scope is the whole object, so the kernels
+  // must share one. Without it, every probe-call site fails below before
+  // querying liveness, so the 64 fallback is never read.
+  const std::optional<uint8_t> kernel_wave_size = common_wavefront_size(arch_, kernels);
+  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope), kernel_wave_size.value_or(64)};
 
   // Lay out the appended region as [probe bodies][s_nop padding][entry stub]
   // [trampolines], the padding and stub only when the kernel has an entry
@@ -1152,13 +1171,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     probe.output_text_offset = cave_cursor;
     cave_cursor += probe.body_words.size() * sizeof(uint32_t);
   }
-
-  // Register spilling targets a single-kernel code object for now: any site that
-  // must spill grows that one kernel's per-lane scratch. The SpillManager is
-  // created lazily on the first spilling site and shared by the rest; its final
-  // size is written back to the descriptor after all sites succeed.
-  const std::vector<KernelDescriptorInfo> kernels =
-      scan_kernel_descriptors(patcher.image_bytes(), patcher.text_offset(), patcher.text_size());
 
   // Temporary SGPR-allocation bound. The probe-call return-link pair is fixed
   // by the calling convention, so the kernel must allocate up to it. Derived from
@@ -1212,6 +1224,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     cave_cursor = entry_patch->stub_offset + entry_patch->words.size() * sizeof(uint32_t);
   }
 
+  // Register spilling targets a single-kernel code object for now: any site that
+  // must spill grows that one kernel's per-lane scratch. The SpillManager is
+  // created lazily on the first spilling site and shared by the rest; its final
+  // size is written back to the descriptor after all sites succeed.
   std::optional<SpillManager> spills;
   uint64_t spill_descriptor_file_offset = 0;
 
@@ -1241,6 +1257,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                                 std::to_string(site.anchor_offset) +
                                 " requires a discovered kernel descriptor to bound SGPR "
                                 "selection, but none was found");
+        continue;
+      }
+
+      // Liveness was configured with one wave size for the whole object. The
+      // SGPR-bound gate above proved kernels exist, so nullopt means they
+      // disagree and no one wave size is right for all of them.
+      if (!kernel_wave_size) {
+        result.errors.push_back("probe call at anchor_offset " +
+                                std::to_string(site.anchor_offset) +
+                                " is in a code object whose kernels mix Wave32 and Wave64; "
+                                "liveness supports one wave size per code object");
         continue;
       }
 

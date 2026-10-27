@@ -2452,6 +2452,38 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
       << result.errors.front();
 }
 
+// Liveness takes one wave size per code object, and kernels that mix Wave32 and
+// Wave64 have none. Two Wave32 kernels are the control.
+TEST(InstrumentorProbePatch, MixedWaveSizesFailClosed) {
+  for (const std::array<bool, 2> wave32 : {std::array{true, false}, std::array{true, true}}) {
+    const bool mixed = !wave32[1];
+    SCOPED_TRACE(mixed ? "mixed" : "both Wave32");
+    auto target = make_amdgpu_two_kernel_elf(
+        {build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4), build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)},
+        /*private_bytes=*/0, /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1200, wave32);
+    auto probe =
+        make_gfx1200_probe_elf("rj_test_probe", {build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_RDNA4)});
+    AmdGpuCodeObject obj(target.data(), target.size());
+    AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+    Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+    InstrumentationPoint pt;
+    pt.anchor_offset = 0;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    instr.add_point(pt);
+
+    auto result = instr.patch_with_debug_summaries();
+    if (!mixed) {
+      EXPECT_TRUE(result.errors.empty()) << result.errors.front();
+      continue;
+    }
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_NE(result.errors.front().find("mix Wave32 and Wave64"), std::string::npos)
+        << result.errors.front();
+  }
+}
+
 //==============================================================================
 // The DBI entry prologue
 //
