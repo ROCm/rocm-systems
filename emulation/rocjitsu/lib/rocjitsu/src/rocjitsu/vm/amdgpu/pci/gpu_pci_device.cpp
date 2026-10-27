@@ -156,7 +156,7 @@ const BlockModelBinding kBlockModels[] = {
 /// refuse one that does not.
 constexpr uint8_t kModelledInstance = 0;
 
-/// @brief GFX CP end-of-pipe interrupt identifiers consumed by KFD.
+/// @brief GFX CP end-of-pipe and SQ wave-message interrupt identifiers consumed by KFD.
 constexpr uint8_t kGraphicsInterruptClient = 0x14;
 constexpr uint8_t kCpEndOfPipeSource = 181;
 constexpr uint8_t kSqInterruptSource = 239;

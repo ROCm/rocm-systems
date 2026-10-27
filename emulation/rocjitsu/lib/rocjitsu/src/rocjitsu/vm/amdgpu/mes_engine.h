@@ -13,6 +13,7 @@
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
 #include "rocjitsu/vm/amdgpu/trap_handler_config.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -34,6 +35,16 @@ struct ComputeQueueBindingPlan {
   bool xcd_fanout = false;
 };
 
+/// @brief Save completion and the MQD offsets chosen by the CWSR producer.
+/// @details Offsets are relative to the context-save base and valid only on
+/// Complete. A queue without resident waves may still save CP execution state
+/// after the public wave image, so it can report a nonempty save.
+struct QueueContextSaveResult {
+  VmAccessOutcome outcome = VmAccessOutcome::Faulted;
+  uint32_t control_stack_offset = 0;
+  uint32_t wave_state_offset = 0;
+};
+
 /// @brief Device-level compute placement used by transport-neutral MES semantics.
 class ComputeQueueBindingProvider {
 public:
@@ -42,6 +53,43 @@ public:
   [[nodiscard]] virtual std::optional<ComputeQueueBindingPlan> make_aql(uint32_t queue_ordinal) = 0;
   [[nodiscard]] virtual std::optional<ComputeQueueBindingPlan>
   make_pm4(uint32_t queue_ordinal, Pm4PacketCallbacks callbacks) = 0;
+
+  /// @brief Suspend a queue and publish its state in the context-save area.
+  /// @details address and area_size name the GPU virtual save area;
+  /// control_stack_size is its control-stack capacity. Complete supplies the
+  /// MQD offsets. Unavailable leaves the operation pending: retry with the same
+  /// identity and area, without acknowledging REMOVE. Other outcomes are failures.
+  [[nodiscard]] virtual QueueContextSaveResult save_context(const QueueIdentity &identity,
+                                                            uint64_t address, uint32_t area_size,
+                                                            uint32_t control_stack_size) {
+    (void)identity;
+    (void)address;
+    (void)area_size;
+    (void)control_stack_size;
+    return {};
+  }
+  /// @brief Release paused resident resources after MQD publication succeeds.
+  /// @details Also used to roll back a failed restore. No normal WG completion
+  /// is generated; queue deregistration remains owned by MES.
+  virtual void release_context(const QueueIdentity &identity) { (void)identity; }
+
+  /// @brief Apply saved state into a new binding, keeping execution suspended.
+  /// @details identity names the new suspended binding; address, area_size and
+  /// control_stack_size describe the preceding save. Complete leaves waves
+  /// suspended until the caller publishes the queue and resumes it. Unavailable
+  /// keeps ADD pending; the caller releases the new resources and binding before
+  /// retrying ADD. Other outcomes are failures and require the same cleanup.
+  [[nodiscard]] virtual VmAccessOutcome restore_context(const QueueIdentity &identity,
+                                                        uint64_t address, uint32_t area_size,
+                                                        uint32_t control_stack_size) {
+    (void)identity;
+    (void)address;
+    (void)area_size;
+    (void)control_stack_size;
+    return VmAccessOutcome::Faulted;
+  }
+  /// @brief Make a queue runnable after MES publishes its mapping.
+  virtual void resume_context(const QueueIdentity &identity) { (void)identity; }
 };
 
 /// @brief Result of servicing one MES or MES-created queue doorbell.
@@ -173,7 +221,9 @@ public:
                   const MesDoorbellContext &context);
 
   /// @brief Return the number of queues currently mapped by MES.
-  [[nodiscard]] std::size_t active_queues() const { return mapped_queues_.size(); }
+  [[nodiscard]] std::size_t active_queues() const {
+    return std::ranges::count_if(mapped_queues_, [](const auto &queue) { return queue.active; });
+  }
   /// @brief Return the number of process address spaces currently tracked by MES.
   [[nodiscard]] std::size_t active_address_spaces() const { return address_spaces_.size(); }
   /// @brief Return the MES-owned handle for one process, for focused integration tests.
@@ -198,6 +248,12 @@ private:
     uint64_t process_context_address = 0;
     uint64_t trap_handler_address = 0;
     uint64_t trap_memory_address = 0;
+    uint64_t mqd_address = 0;
+    uint64_t context_save_address = 0;
+    uint32_t context_save_size = 0;
+    uint32_t control_stack_size = 0;
+    uint32_t control_stack_offset = 0;
+    uint32_t wave_state_offset = 0;
     uint64_t ring_dwords = 0;
     uint64_t doorbell_offset = 0;
     uint32_t process_id = 0;
@@ -266,7 +322,8 @@ private:
                                                      const MesDoorbellContext &context,
                                                      const GpuVmAccess &gart_access);
   [[nodiscard]] VmAccessOutcome publish_mes_frame(PendingMesFrame &pending);
-  [[nodiscard]] VmAccessOutcome remove_queue(uint64_t doorbell_offset);
+  [[nodiscard]] VmAccessOutcome remove_queue(uint64_t doorbell_offset,
+                                             const GpuVmAccess &gart_access);
   [[nodiscard]] VmAccessOutcome commit_queue(Queue queue, bool created_address_space);
   void release_unused_address_space(uint32_t process_id);
   void reap_orphaned_address_spaces();
@@ -277,8 +334,8 @@ private:
   [[nodiscard]] bool update_process_address_space(uint64_t process_context_address,
                                                   uint64_t page_table_base,
                                                   std::shared_ptr<PhysicalMemoryAccess> memory);
-  [[nodiscard]] bool register_aql_queue(Queue &queue);
-  [[nodiscard]] bool register_pm4_queue(Queue &queue);
+  [[nodiscard]] bool register_aql_queue(Queue &queue, bool suspended = false);
+  [[nodiscard]] bool register_pm4_queue(Queue &queue, bool suspended = false);
   [[nodiscard]] bool register_sdma_queue(Queue &queue);
   [[nodiscard]] bool same_source(const PendingMesFrame &pending,
                                  const MesDoorbellContext &context) const;

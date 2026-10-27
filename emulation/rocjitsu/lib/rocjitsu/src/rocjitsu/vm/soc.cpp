@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/soc.h"
 
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 
 #include "simdojo/sim/simulation.h"
@@ -12,6 +13,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -238,18 +240,19 @@ void SoC::set_arch(rj_code_arch_t arch) {
   arch_ = arch;
 }
 
-void SoC::configure_mes_trap_handlers(amdgpu::CommandProcessor &owner) {
-  for (auto *cu : owner.compute_units()) {
-    cu->set_trap_handler_resolver([this](const amdgpu::Wavefront &wave)
-                                      -> std::optional<amdgpu::ComputeUnitCore::TrapHandlerConfig> {
-      const auto config = mes_engine_.resolve_trap_config({.address_space = wave.address_space(),
-                                                           .process_id = wave.process_id(),
-                                                           .queue_id = wave.queue_id()});
-      if (!config)
-        return std::nullopt;
-      return amdgpu::ComputeUnitCore::TrapHandlerConfig{
-          .tba = config->tba, .tma = config->tma, .debug_enabled = config->debug_enabled};
-    });
+amdgpu::CommandProcessor *SoC::acquire_mes_queue_owner_cp() {
+  if (mes_queue_owner_ != nullptr)
+    return mes_queue_owner_;
+  amdgpu::CommandProcessor *owner = assign_queue_owner_cp(0);
+  if (owner == nullptr)
+    return nullptr;
+  for (auto *cu : owner->compute_units()) {
+    cu->set_trap_handler_resolver(
+        [this](const amdgpu::Wavefront &wave) -> std::optional<amdgpu::TrapHandlerConfig> {
+          return mes_engine_.resolve_trap_config({.address_space = wave.address_space(),
+                                                  .process_id = wave.process_id(),
+                                                  .queue_id = wave.queue_id()});
+        });
     cu->set_sendmsg_handler([this](amdgpu::Wavefront &wave, uint32_t message) {
       constexpr uint32_t kMessageIdMask = 0xf;
       constexpr uint32_t kMessageInterrupt = 1;
@@ -258,13 +261,14 @@ void SoC::configure_mes_trap_handlers(amdgpu::CommandProcessor &owner) {
       return mes_engine_.deliver_trap_interrupt(wave.process_id(), wave.m0());
     });
   }
+  mes_queue_owner_ = owner;
+  return owner;
 }
 
 std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_aql(uint32_t /*queue_ordinal*/) {
-  amdgpu::CommandProcessor *owner = assign_queue_owner_cp(0);
+  amdgpu::CommandProcessor *owner = acquire_mes_queue_owner_cp();
   if (owner == nullptr)
     return std::nullopt;
-  configure_mes_trap_handlers(*owner);
   // The PCI discovery profile currently exposes one graphics instance even
   // when the simulation config contains additional XCDs. A MES-created queue
   // must therefore stay on its selected owner: fanning it out would execute on
@@ -276,13 +280,212 @@ std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_aql(uint32_t /*queue_or
 
 std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_pm4(uint32_t /*queue_ordinal*/,
                                                              amdgpu::Pm4PacketCallbacks callbacks) {
-  amdgpu::CommandProcessor *owner = assign_queue_owner_cp(0);
+  amdgpu::CommandProcessor *owner = acquire_mes_queue_owner_cp();
   if (owner == nullptr)
     return std::nullopt;
-  configure_mes_trap_handlers(*owner);
   return amdgpu::ComputeQueueBindingPlan{
       .factory = amdgpu::make_compute_queue_binding_factory(*owner, std::move(callbacks)),
       .xcd_fanout = false};
+}
+
+amdgpu::QueueContextSaveResult SoC::save_context(const amdgpu::QueueIdentity &identity,
+                                                 uint64_t address, uint32_t area_size,
+                                                 uint32_t control_stack_size) {
+  using amdgpu::VmAccessOutcome;
+  const auto access = gpu_vm_.snapshot(identity.address_space);
+  if (!access || !kmd::cwsr_layout_modelled(arch_))
+    return {};
+
+  std::vector<kmd::CwsrWaveState> states;
+  std::unordered_set<amdgpu::L2Cache *> caches;
+  const auto belongs_to_queue = [&](const amdgpu::Wavefront *wave) {
+    return wave && !wave->is_halted() && wave->process_id() == identity.process_id &&
+           wave->queue_id() == identity.queue_id && wave->address_space() == identity.address_space;
+  };
+  bool pending = false;
+  for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    cp->set_queue_debug_suspended(identity.queue_id, identity.process_id, true);
+    for (auto *cu : cp->compute_units()) {
+      cu->with_wave_state_locked([&] {
+        for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+          auto *wave = cu->wf(slot);
+          if (!belongs_to_queue(wave))
+            continue;
+          // Let the handler finish its return before freezing the architectural PC.
+          if (wave->in_trap_handler()) {
+            pending = true;
+            continue;
+          }
+          wave->set_debug_suspended(true);
+        }
+      });
+    }
+  });
+  for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    for (auto *cu : cp->compute_units()) {
+      cu->retry_paused_queue_memory(identity.process_id, identity.queue_id, /*replay_loads=*/true);
+      cu->with_wave_state_locked([&] {
+        for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+          auto *wave = cu->wf(slot);
+          if (!belongs_to_queue(wave) || wave->in_trap_handler())
+            continue;
+          if (!wave->wait_counters().empty()) {
+            pending = true;
+            continue;
+          }
+          states.push_back(kmd::build_cwsr_wave_state(*wave, arch_));
+        }
+      });
+      if (cu->l2())
+        caches.insert(cu->l2());
+    }
+  });
+  if (pending)
+    return {.outcome = VmAccessOutcome::Unavailable};
+  for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    for (auto *cu : cp->compute_units())
+      cu->with_wave_state_locked([&] { cu->flush_l1(identity.process_id); });
+  });
+  for (auto *cache : caches) {
+    const auto status = cache->flush_all(identity.process_id);
+    if (status != VmAccessOutcome::Complete)
+      return {.outcome = status};
+  }
+  for (auto *iod : iods_) {
+    const auto status = iod->msc()->flush_all();
+    if (status != VmAccessOutcome::Complete)
+      return {.outcome = status};
+  }
+  if (!mes_queue_owner_)
+    return {};
+  std::vector<uint8_t> queue_context;
+  const auto saved = mes_queue_owner_->save_queue_context(identity, queue_context);
+  if (saved != VmAccessOutcome::Complete)
+    return {.outcome = saved};
+  std::array<uint32_t, 2> debug_region{};
+  const auto read = access->read(address + 16, std::as_writable_bytes(std::span(debug_region)));
+  if (read != VmAccessOutcome::Complete)
+    return {.outcome = read};
+  kmd::prepare_cwsr_wave_states(states);
+  VmAccessOutcome status = VmAccessOutcome::Complete;
+  auto write = [&](uint64_t target, std::span<const uint8_t> bytes) {
+    if (status == VmAccessOutcome::Complete)
+      status = access->write(target, std::as_bytes(bytes));
+  };
+  const kmd::CwsrLayout layout = kmd::serialize_queue_cwsr_bulk(
+      address, area_size, states, write, arch_, control_stack_size,
+      kmd::CwsrDebugRegion{debug_region[0], debug_region[1]}, queue_context);
+  if (!layout.ok)
+    return {};
+  return {.outcome = status,
+          .control_stack_offset = layout.control_stack_offset,
+          .wave_state_offset = layout.wave_state_offset};
+}
+
+void SoC::release_context(const amdgpu::QueueIdentity &identity) {
+  if (mes_queue_owner_)
+    mes_queue_owner_->release_queue_context(identity);
+}
+
+amdgpu::VmAccessOutcome SoC::restore_context(const amdgpu::QueueIdentity &identity,
+                                             uint64_t address, uint32_t area_size,
+                                             uint32_t control_stack_size) {
+  using amdgpu::VmAccessOutcome;
+  const auto access = gpu_vm_.snapshot(identity.address_space);
+  if (!access || !kmd::cwsr_layout_modelled(arch_))
+    return VmAccessOutcome::Faulted;
+  if (!mes_queue_owner_)
+    return VmAccessOutcome::Faulted;
+  VmAccessOutcome status = VmAccessOutcome::Complete;
+  auto read = [&](uint64_t source, std::span<uint8_t> bytes) {
+    if (status == VmAccessOutcome::Complete)
+      status = access->read(source, std::as_writable_bytes(bytes));
+  };
+  std::vector<uint8_t> queue_context;
+  std::vector<kmd::CwsrWaveState> states;
+  const bool decoded =
+      kmd::deserialize_queue_cwsr_context(address, area_size, queue_context, read,
+                                          control_stack_size) &&
+      kmd::deserialize_queue_cwsr_bulk(address, area_size, states, read, arch_, control_stack_size);
+  if (status != VmAccessOutcome::Complete)
+    return status;
+  if (!decoded)
+    return VmAccessOutcome::Malformed;
+  mes_queue_owner_->set_queue_debug_suspended(identity.queue_id, identity.process_id, true);
+  const auto restored = mes_queue_owner_->restore_queue_context(identity, queue_context);
+  if (restored != VmAccessOutcome::Complete)
+    return restored;
+  std::vector<amdgpu::Wavefront *> waves;
+  std::vector<amdgpu::ComputeUnitCore *> owners;
+  for (auto *cu : mes_queue_owner_->compute_units())
+    cu->with_wave_state_locked([&] {
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        auto *wave = cu->wf(slot);
+        if (wave && !wave->is_halted() && wave->process_id() == identity.process_id &&
+            wave->queue_id() == identity.queue_id &&
+            wave->address_space() == identity.address_space) {
+          waves.push_back(wave);
+          owners.push_back(cu);
+        }
+      }
+    });
+  const auto matches = kmd::match_cwsr_wave_states(states, waves);
+  if (!matches) {
+    release_context(identity);
+    return VmAccessOutcome::Malformed;
+  }
+  // Validate every allocation before applying any debugger edits.
+  for (size_t index = 0; index < states.size(); ++index) {
+    const auto *wave = waves[(*matches)[index]];
+    auto &state = states[index];
+    if (state.num_sgprs < wave->num_sgprs() || state.num_vgprs < wave->num_vgprs() ||
+        (!state.lds.empty() && state.lds.size() < wave->lds_size())) {
+      release_context(identity);
+      return VmAccessOutcome::Malformed;
+    }
+    state.num_sgprs = wave->num_sgprs();
+    state.num_vgprs = wave->num_vgprs();
+  }
+  for (size_t index = 0; index < states.size(); ++index) {
+    const size_t wave_index = (*matches)[index];
+    owners[wave_index]->with_wave_state_locked([&] {
+      auto &wave = *waves[wave_index];
+      const auto &state = states[index];
+      for (uint32_t t = 0; t < state.ttmps.size(); ++t)
+        wave.set_ttmp(t, state.ttmps[t]);
+      kmd::apply_cwsr_to_wave(wave, state, arch_);
+      // Scratch remains in its original backing even when execution moves.
+      wave.set_scratch_scoreboard_id(state.scratch_scoreboard_id);
+      wave.set_shader_engine_id(state.shader_engine_id);
+      // The shared KFD helper preserves the live stack registers across a
+      // debugger edit. A newly allocated wave has no live stack to preserve.
+      for (uint32_t reg : {32u, 33u})
+        if (reg < state.num_sgprs)
+          wave.debug_write_sgpr(reg, state.sgprs[reg]);
+      wave.set_trap_id(state.trap_id);
+    });
+  }
+  return VmAccessOutcome::Complete;
+}
+
+void SoC::resume_context(const amdgpu::QueueIdentity &identity) {
+  if (!mes_queue_owner_)
+    return;
+  // MES has published the new queue identity and trap configuration before
+  // opening admission, so a resumed wave can immediately resolve its handler.
+  mes_queue_owner_->set_queue_debug_suspended(identity.queue_id, identity.process_id, false);
+  for (auto *cu : mes_queue_owner_->compute_units()) {
+    cu->with_wave_state_locked([&] {
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        auto *wave = cu->wf(slot);
+        if (wave && !wave->is_halted() && wave->process_id() == identity.process_id &&
+            wave->queue_id() == identity.queue_id &&
+            wave->address_space() == identity.address_space)
+          wave->set_debug_suspended(false);
+      }
+    });
+    cu->schedule_work_async();
+  }
 }
 
 void SoC::set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group) {

@@ -1605,7 +1605,9 @@ void ComputeUnitCore::update_wf_states() {
     if (wf->state() == WfState::WAITCNT && wf->wait_satisfied()) {
       wf->set_state(WfState::RUNNING);
       wf->set_ready_cycle(cycle_counter_);
-    } else if (wf->state() == WfState::ENDING && wf->wait_counters().empty()) {
+    } else if (wf->state() == WfState::ENDING && !wf->debug_paused() &&
+               wf->wait_counters().empty()) {
+      // Restored waves retain their resources until the whole queue resumes.
       wf->halt();
     }
   }

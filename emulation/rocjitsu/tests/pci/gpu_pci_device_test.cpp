@@ -1,6 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
@@ -37,6 +40,7 @@ RJ_DIAGNOSTIC_POP
 #include <map>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <thread>
 
 namespace {
@@ -81,6 +85,7 @@ protected:
   rocjitsu::amdgpu::GpuMemory memory_{"memory"};
   rocjitsu::amdgpu::L2Cache l2_{"l2"};
   std::unique_ptr<rocjitsu::amdgpu::ComputeUnitCore> compute_unit_;
+  std::unique_ptr<rocjitsu::amdgpu::ComputeUnitCore> second_compute_unit_;
   rocjitsu::amdgpu::CommandProcessor command_processor_{"cp"};
   rocjitsu::amdgpu::Xcd xcd_{"xcd"};
   rocjitsu::amdgpu::CommandProcessor hidden_command_processor_{"hidden-cp"};
@@ -442,6 +447,9 @@ public:
   simdojo::DmaAccessOutcome read_outcome(uint64_t guest_phys, std::span<std::byte> dst) override {
     {
       const std::lock_guard lock(memory_mutex_);
+      if (counted_read_range_ && guest_phys >= counted_read_range_->first &&
+          guest_phys < counted_read_range_->second)
+        ++counted_reads_;
       if (next_read_outcome_ && next_read_outcome_->first == guest_phys) {
         const simdojo::DmaAccessOutcome outcome = next_read_outcome_->second;
         next_read_outcome_.reset();
@@ -546,6 +554,17 @@ public:
     next_read_outcome_ = std::pair{guest_phys, outcome};
   }
 
+  void count_reads_in(uint64_t address, uint64_t size) {
+    const std::lock_guard lock(memory_mutex_);
+    counted_read_range_ = std::pair{address, address + size};
+    counted_reads_ = 0;
+  }
+
+  [[nodiscard]] size_t counted_reads() const {
+    const std::lock_guard lock(memory_mutex_);
+    return counted_reads_;
+  }
+
   void fail_next_write(uint64_t guest_phys, simdojo::DmaAccessOutcome outcome) {
     const std::lock_guard lock(memory_mutex_);
     next_write_outcome_ = std::pair{guest_phys, outcome};
@@ -606,6 +625,8 @@ private:
   /// @brief Writes to accept before refusing, or negative for no limit.
   int writes_before_refusing_ = -1;
   std::optional<std::pair<uint64_t, simdojo::DmaAccessOutcome>> next_read_outcome_;
+  std::optional<std::pair<uint64_t, uint64_t>> counted_read_range_;
+  size_t counted_reads_ = 0;
   std::optional<std::pair<uint64_t, simdojo::DmaAccessOutcome>> next_write_outcome_;
   std::mutex read_mutex_;
   std::condition_variable read_state_changed_;
@@ -1085,10 +1106,10 @@ protected:
   RecordingTransport transport_;
   simdojo::PciDevice::Transport attached_{.irq = &transport_, .dma = &transport_};
 
-  void configure_compute_unit() {
+  void configure_compute_unit(uint32_t num_wf_slots = 1) {
     rocjitsu::amdgpu::ComputeUnitCore::Config config{};
     config.arch = ROCJITSU_CODE_ARCH_CDNA5;
-    config.num_wf_slots = 1;
+    config.num_wf_slots = num_wf_slots;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 64;
     config.lds_size_kb = 64;
@@ -1227,6 +1248,11 @@ protected:
     store_dword(kSchedulerMqdPhysical + 143 * sizeof(uint32_t), doorbell);
     store_dword(kSchedulerMqdPhysical + 145 * sizeof(uint32_t), 9 | (aql ? 0x08000000 : 0));
     store_dword(kSchedulerMqdPhysical + 181 * sizeof(uint32_t), aql ? 1 : 0);
+    // Fresh MQDs start with an empty control stack, even when their backing
+    // storage still contains an earlier queue's saved context.
+    const auto capacity = transport_.dword_at(kSchedulerMqdPhysical + 175 * sizeof(uint32_t));
+    store_dword(kSchedulerMqdPhysical + 174 * sizeof(uint32_t), capacity);
+    store_dword(kSchedulerMqdPhysical + 176 * sizeof(uint32_t), capacity);
 
     auto mes_doorbell = std::bit_cast<std::array<std::byte, sizeof(uint64_t)>>(
         second ? uint64_t{128} : uint64_t{64});
@@ -1340,6 +1366,674 @@ TEST_F(GpuDeviceMes, MesTrapConfigurationReachesTheComputeUnit) {
     EXPECT_EQ(wave->status_raw() & (1u << 5), 0u);
     EXPECT_EQ(wave->exec(), 0x1234u);
     compute_unit_->free_wavefront_resources(*wave);
+    device_.reset(simdojo::ResetKind::FunctionLevel);
+    configure_gart();
+  }
+}
+
+TEST_F(GpuDeviceMes, QueueCreationPreservesInstalledComputeUnitTrapHooks) {
+  configure_compute_unit();
+  submit_default_compute_queue(/*aql=*/false);
+
+  // Observe the installed CU interfaces across creation of another queue.
+  bool resolved = false;
+  bool messaged = false;
+  compute_unit_->set_trap_handler_resolver(
+      [&](const rocjitsu::amdgpu::Wavefront &)
+          -> std::optional<rocjitsu::amdgpu::ComputeUnitCore::TrapHandlerConfig> {
+        resolved = true;
+        return std::nullopt;
+      });
+  compute_unit_->set_sendmsg_handler([&](rocjitsu::amdgpu::Wavefront &, uint32_t) {
+    messaged = true;
+    return true;
+  });
+  submit_default_compute_queue(/*aql=*/false, /*second=*/true);
+
+  auto *wave = compute_unit_->dispatch_wf(0, 0x10080, 106, 64);
+  ASSERT_NE(wave, nullptr);
+  EXPECT_FALSE(compute_unit_->resolve_trap_config(*wave));
+  EXPECT_TRUE(resolved);
+  EXPECT_TRUE(compute_unit_->handle_sendmsg(*wave, 1));
+  EXPECT_TRUE(messaged);
+  compute_unit_->free_wavefront_resources(*wave);
+}
+
+TEST_F(GpuDeviceMes, RemoveSavesProgressAndReleasesQueuesWithoutResidentWaves) {
+  constexpr uint64_t kContext = 0x20000;
+  constexpr uint64_t kContextPhysical = 0x300000;
+  constexpr uint32_t kControlStack = 0x1000;
+  configure_compute_unit();
+  for (const auto &[aql, pending_dispatch] :
+       {std::pair{false, false}, std::pair{true, false}, std::pair{true, true}}) {
+    SCOPED_TRACE(::testing::Message() << "aql=" << aql << " pending_dispatch=" << pending_dispatch);
+    store_dword(kSchedulerMqdPhysical + 171 * 4, kContext);
+    store_dword(kSchedulerMqdPhysical + 175 * 4, kControlStack);
+    store_dword(kSchedulerMqdPhysical + 177 * 4, 0x20000);
+    store_dword(kDefaultComputeSecondPagePhysical + 0xff8 -
+                    offsetof(amd_queue_t, write_dispatch_id) + offsetof(amd_queue_v2_t, caps),
+                AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM);
+    submit_default_compute_queue(aql);
+    for (uint64_t offset = 0; offset < 0x20000; offset += 0x1000)
+      store_vram_qword(kDefaultProcessPtb + ((kContext + offset) >> 12) * sizeof(uint64_t),
+                       (kContextPhysical + offset) | kGfx12SystemLeafPteFlags);
+    const auto address_space = soc_.mes_engine().process_address_space_for_test(3);
+    ASSERT_TRUE(address_space);
+    ASSERT_TRUE(soc_.gpu_vm().invalidate(*address_space));
+    for (uint32_t word = 0; word < 4; ++word)
+      store_dword(kContextPhysical + word * sizeof(uint32_t), 0xfeedface);
+
+    if (pending_dispatch) {
+      // No resident wave: this dispatch has been accepted but not launched.
+      rocjitsu::amdgpu::DispatchEntry entry{};
+      entry.kind = rocjitsu::amdgpu::DispatchPacketKind::Kernel;
+      entry.dispatch_id = 1;
+      entry.queue_id = uint32_t{1} << 31;
+      entry.process_id = 3;
+      entry.address_space = *address_space;
+      entry.total_wgs = 1;
+      command_processor_.accept_fanout_shard(std::move(entry));
+      command_processor_.drain_fanout_inbox_for_test();
+      ASSERT_TRUE(command_processor_.has_dispatch_for_test(uint32_t{1} << 31, 3, 1));
+      ASSERT_FALSE(compute_unit_->has_active_wfs());
+    }
+
+    constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+    store_dword(kRemove, 0x00040031);
+    store_dword(kRemove + 4, kDefaultComputeDoorbell / sizeof(uint32_t));
+    store_qword(kRemove + 6 * 4, kApiStatusGpu);
+    store_qword(kRemove + 8 * 4, 2);
+    auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+    ring_doorbell(0x60, doorbell);
+    ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+    const auto cs_offset = transport_.dword_at(kSchedulerMqdPhysical + 174 * sizeof(uint32_t));
+    EXPECT_LT(cs_offset, kControlStack);
+    EXPECT_EQ(transport_.dword_at(kSchedulerMqdPhysical + 176 * sizeof(uint32_t)), kControlStack);
+    EXPECT_EQ(transport_.dword_at(kContextPhysical), cs_offset);
+    EXPECT_EQ(transport_.dword_at(kContextPhysical + 8), kControlStack);
+    EXPECT_EQ(transport_.dword_at(kContextPhysical + 12), 0u); // No resident wave payload.
+    std::vector<uint8_t> queue_context;
+    ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr_context(
+        kContext, 0x20000, queue_context,
+        [&](uint64_t address, std::span<uint8_t> bytes) {
+          EXPECT_TRUE(transport_.read(kContextPhysical + address - kContext,
+                                      std::as_writable_bytes(bytes)));
+        },
+        kControlStack));
+    EXPECT_EQ(soc_.mes_engine().active_queues(), 0u);
+    EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
+    EXPECT_FALSE(command_processor_.has_registered_queues());
+    EXPECT_FALSE(soc_.mes_engine().process_address_space_for_test(3));
+    device_.reset(simdojo::ResetKind::FunctionLevel);
+    configure_gart();
+  }
+}
+
+TEST_F(GpuDeviceMes, RemoveAndReaddSaveAndRestoreAnUnfinishedWave) {
+  constexpr uint64_t kKernel = kDefaultComputeRingGpu + 0x80;
+  constexpr uint64_t kData = kDefaultComputeRingGpu + 0x1200;
+  constexpr uint64_t kDataPhysical = kDefaultComputeSecondPagePhysical + 0x200;
+  constexpr uint32_t kLoadedValue = 0x76543210;
+  constexpr auto load = rocjitsu::cdna5::build_smem(rocjitsu::cdna5::kSLoadB32Smem,
+                                                    {.sbase = 1, .sdata = 4, .soffset = 124});
+  constexpr uint64_t kAfterLoad = kKernel + sizeof(load);
+  constexpr uint64_t kContext = 0x20000;
+  constexpr uint64_t kContextPhysical = 0x300000;
+  constexpr uint32_t kContextSize = 0x20000;
+  constexpr uint32_t kControlStack = 0x1000;
+  configure_compute_unit();
+  for (const auto &[pending_dispatch, lds_bytes] :
+       {std::pair{true, 0u}, std::pair{false, 0u}, std::pair{true, 256u}, std::pair{false, 256u},
+        std::pair{true, 1024u}, std::pair{false, 1024u}}) {
+    SCOPED_TRACE(::testing::Message()
+                 << "pending_dispatch=" << pending_dispatch << " lds_bytes=" << lds_bytes);
+    store_dword(kSchedulerMqdPhysical + 171 * 4, kContext);
+    store_dword(kSchedulerMqdPhysical + 175 * 4, kControlStack);
+    store_dword(kSchedulerMqdPhysical + 177 * 4, kContextSize);
+    store_dword(kDefaultComputeSecondPagePhysical + 0xff8 -
+                    offsetof(amd_queue_t, write_dispatch_id) + offsetof(amd_queue_v2_t, caps),
+                AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM);
+    submit_default_compute_queue(true);
+    for (uint64_t offset = 0; offset < kContextSize; offset += 0x1000)
+      store_vram_qword(kDefaultProcessPtb + ((kContext + offset) >> 12) * sizeof(uint64_t),
+                       (kContextPhysical + offset) | kGfx12SystemLeafPteFlags);
+    const auto address_space = soc_.mes_engine().process_address_space_for_test(3);
+    ASSERT_TRUE(address_space);
+    store_vram_qword(kDefaultProcessPtb + (kKernel >> 12) * sizeof(uint64_t),
+                     kDefaultComputeRingPhysical | kGfx12SystemLeafPteFlags | (1u << 4));
+    ASSERT_TRUE(soc_.gpu_vm().invalidate(*address_space));
+    for (size_t word = 0; word < load.size(); ++word)
+      store_dword(kDefaultComputeRingPhysical + 0x80 + word * sizeof(uint32_t), load[word]);
+    store_dword(kDataPhysical, kLoadedValue);
+    l2_.invalidate_all();
+    auto *wave = compute_unit_->dispatch_wf(0, kKernel, 106, 64);
+    ASSERT_NE(wave, nullptr);
+    wave->set_address_space(*address_space);
+    wave->set_process_id(3);
+    wave->set_queue_id(uint32_t{1} << 31);
+    wave->set_exec(1);
+    wave->set_trap_id(2);
+    wave->debug_write_sgpr(0, 0x12345678);
+    wave->debug_write_sgpr(2, kData);
+    wave->debug_write_sgpr(3, 0);
+    wave->debug_write_sgpr(4, 0);
+    wave->debug_write_vgpr(0, 0, 0xabcdef01);
+    wave->set_lds_base(compute_unit_->allocate_lds(lds_bytes));
+    wave->set_lds_size(lds_bytes);
+    const uint32_t neighbor_base = compute_unit_->allocate_lds(256);
+    const std::vector<uint8_t> expected_lds(lds_bytes, 0x5a);
+    const std::vector<uint8_t> expected_neighbor(256, 0xa5);
+    wave->lds().write(wave->lds_base(), expected_lds.data(), lds_bytes);
+    wave->lds().write(neighbor_base, expected_neighbor.data(), expected_neighbor.size());
+
+    transport_.fail_next_read(kDataPhysical, simdojo::DmaAccessOutcome::Unavailable);
+    compute_unit_->step();
+    ASSERT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+    ASSERT_FALSE(wave->wait_counters().empty());
+    ASSERT_EQ(wave->debug_read_sgpr(4), 0u);
+    ASSERT_EQ(wave->pc, kAfterLoad);
+    wave->set_debug_halted(true);
+    wave->set_status_halt(true);
+    ASSERT_FALSE(compute_unit_->has_runnable_wfs());
+
+    if (pending_dispatch) {
+      rocjitsu::amdgpu::DispatchEntry entry{};
+      entry.kind = rocjitsu::amdgpu::DispatchPacketKind::Kernel;
+      entry.dispatch_id = 1;
+      entry.queue_id = wave->queue_id();
+      entry.process_id = wave->process_id();
+      entry.address_space = wave->address_space();
+      entry.total_wgs = 1;
+      entry.dispatched_wgs = 1;
+      wave->set_dispatch_id(entry.dispatch_id);
+      command_processor_.accept_fanout_shard(std::move(entry));
+      command_processor_.drain_fanout_inbox_for_test();
+      ASSERT_EQ(command_processor_.accepted_entry_count_for_test(wave->queue_id(), 3), 1u);
+    }
+
+    constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+    store_dword(kRemove, 0x00040031);
+    store_dword(kRemove + 4, kDefaultComputeDoorbell / sizeof(uint32_t));
+    store_qword(kRemove + 6 * 4, kApiStatusGpu);
+    store_qword(kRemove + 8 * 4, 2);
+    transport_.fail_next_write(kContextPhysical, simdojo::DmaAccessOutcome::Unavailable);
+    auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+    ring_doorbell(0x60, doorbell);
+    EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+    EXPECT_FALSE(wave->is_halted());
+    transport_.fail_next_write(kSchedulerMqdPhysical + 174 * sizeof(uint32_t),
+                               simdojo::DmaAccessOutcome::Unavailable);
+    device_.drain_doorbell_inbox_for_test();
+    EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+    EXPECT_FALSE(wave->is_halted());
+    EXPECT_TRUE(command_processor_.has_registered_queues());
+    device_.drain_doorbell_inbox_for_test();
+    ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+    ASSERT_FALSE(compute_unit_->has_active_wfs());
+    EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
+    EXPECT_FALSE(command_processor_.has_registered_queues());
+
+    std::vector<rocjitsu::kmd::CwsrWaveState> states(1);
+    states[0].num_sgprs = 106;
+    states[0].num_vgprs = 64;
+    states[0].lds.resize(lds_bytes);
+    auto read = [&](uint64_t address) {
+      return transport_.dword_at(kContextPhysical + address - kContext);
+    };
+    EXPECT_EQ(transport_.dword_at(kSchedulerMqdPhysical + 174 * sizeof(uint32_t)), read(kContext));
+    EXPECT_EQ(transport_.dword_at(kSchedulerMqdPhysical + 176 * sizeof(uint32_t)),
+              read(kContext + 2 * sizeof(uint32_t)));
+    ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(kContext, kContextSize, states, read,
+                                                      ROCJITSU_CODE_ARCH_CDNA5, kControlStack));
+    EXPECT_EQ(states[0].pc, kAfterLoad);
+    EXPECT_EQ(states[0].exec, 1u);
+    EXPECT_EQ(states[0].sgprs[0], 0x12345678u);
+    EXPECT_EQ(states[0].sgprs[4], kLoadedValue);
+    EXPECT_EQ(states[0].vgprs[0], 0xabcdef01u);
+    EXPECT_EQ(states[0].trap_id, 2u);
+    std::vector<uint8_t> queue_context;
+    ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr_context(
+        kContext, kContextSize, queue_context,
+        [&](uint64_t address, std::span<uint8_t> bytes) {
+          EXPECT_TRUE(transport_.read(kContextPhysical + address - kContext,
+                                      std::as_writable_bytes(bytes)));
+        },
+        kControlStack));
+    states[0].sgprs[0] = 0x44444444;
+    states[0].vgprs[0] = 0x88888888;
+    states[0].wave_stopped = false;
+    auto write = [&](uint64_t address, uint32_t value) {
+      store_dword(kContextPhysical + address - kContext, value);
+    };
+    ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(kContext, kContextSize, states, write,
+                                                    ROCJITSU_CODE_ARCH_CDNA5, kControlStack,
+                                                    rocjitsu::kmd::CwsrDebugRegion{}, queue_context)
+                    .ok);
+    compute_unit_->lds().zero_range(0, lds_bytes);
+    for (uint64_t word = 0; word < 64; ++word)
+      store_dword(kRingPhysical + 128 * 4 + word * 4,
+                  transport_.dword_at(kRingPhysical + word * 4));
+    store_qword(kRingPhysical + 128 * 4 + 40 * 4, 3);
+    doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{192});
+    const uint64_t unavailable_at =
+        lds_bytes == 0     ? kContextPhysical
+        : lds_bytes == 256 ? kContextPhysical + read(kContext + 8) + (pending_dispatch ? 0 : 8)
+                           : kContextPhysical + kControlStack;
+    transport_.fail_next_read(unavailable_at, simdojo::DmaAccessOutcome::Unavailable);
+    ring_doorbell(0x60, doorbell);
+    EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+    EXPECT_FALSE(compute_unit_->has_active_wfs());
+    EXPECT_FALSE(command_processor_.has_registered_queues());
+    EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
+    transport_.count_reads_in(kContextPhysical, kContextSize);
+    device_.drain_doorbell_inbox_for_test();
+    EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 3u);
+    // Transfers may split at guest page boundaries, but must not read each
+    // register or private-context word through a separate DMA operation.
+    EXPECT_LE(transport_.counted_reads(), kContextSize / 4096 + 8);
+    RecordProperty("context_reads_" + std::to_string(pending_dispatch) + "_" +
+                       std::to_string(lds_bytes),
+                   static_cast<int>(transport_.counted_reads()));
+    wave = compute_unit_->wf(0);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_FALSE(wave->is_halted());
+    EXPECT_FALSE(wave->debug_stopped());
+    EXPECT_EQ(wave->debug_read_sgpr(0), 0x44444444u);
+    EXPECT_EQ(wave->debug_read_vgpr(0, 0), 0x88888888u);
+    std::vector<uint8_t> restored_lds(lds_bytes);
+    std::vector<uint8_t> neighbor_lds(expected_neighbor.size());
+    const auto &lds = wave->lds();
+    lds.read(wave->lds_base(), restored_lds.data(), lds_bytes);
+    lds.read(neighbor_base, neighbor_lds.data(), neighbor_lds.size());
+    EXPECT_EQ(restored_lds, expected_lds);
+    EXPECT_EQ(neighbor_lds, expected_neighbor);
+    if (pending_dispatch)
+      EXPECT_TRUE(
+          command_processor_.has_dispatch_for_test(wave->queue_id(), 3, wave->dispatch_id()));
+    compute_unit_->free_wavefront_resources(*wave);
+    device_.reset(simdojo::ResetKind::FunctionLevel);
+    configure_gart();
+  }
+}
+
+TEST_F(GpuDeviceMes, ReaddRebuildsBarriersAndContinuesOnlyUnissuedWorkgroups) {
+  constexpr uint64_t kKernel = kDefaultComputeRingGpu + 0x80;
+  constexpr uint64_t kContext = 0x20000, kContextPhysical = 0x300000;
+  constexpr uint32_t kContextSize = 0x20000, kControlStack = 0x1000;
+  constexpr uint64_t kSignal = 0x1f000, kSignalPhysical = 0x500000;
+  constexpr uint64_t kScratch = 0x18000, kScratchPhysical = 0x510000;
+  constexpr uint32_t kScratchStride = 256;
+  constexpr uint32_t kQueue = uint32_t{1} << 31;
+  configure_compute_unit(2);
+  auto config = compute_unit_->config();
+  config.num_wf_slots = 4;
+  second_compute_unit_ =
+      rocjitsu::amdgpu::ComputeUnitCore::create("second-cu", config, &memory_, &l2_);
+  second_compute_unit_->set_shader_engine_location(1, 0, 1);
+  command_processor_.add_compute_unit(second_compute_unit_.get());
+  command_processor_.startup();
+  store_dword(kSchedulerMqdPhysical + 171 * 4, kContext);
+  store_dword(kSchedulerMqdPhysical + 175 * 4, kControlStack);
+  store_dword(kSchedulerMqdPhysical + 177 * 4, kContextSize);
+  store_dword(kDefaultComputeSecondPagePhysical + 0xff8 - offsetof(amd_queue_t, write_dispatch_id) +
+                  offsetof(amd_queue_v2_t, caps),
+              AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM);
+  submit_default_compute_queue(true);
+  for (uint64_t offset = 0; offset < kContextSize; offset += 0x1000)
+    store_vram_qword(kDefaultProcessPtb + ((kContext + offset) >> 12) * sizeof(uint64_t),
+                     (kContextPhysical + offset) | kGfx12SystemLeafPteFlags);
+  store_vram_qword(kDefaultProcessPtb + (kSignal >> 12) * sizeof(uint64_t),
+                   kSignalPhysical | (kGfx12SystemLeafPteFlags & ~uint64_t{2}));
+  store_vram_qword(kSignalPhysical + 8, 1);
+  store_vram_qword(kDefaultProcessPtb + (kScratch >> 12) * sizeof(uint64_t),
+                   kScratchPhysical | (kGfx12SystemLeafPteFlags & ~uint64_t{2}));
+  store_vram_qword(kDefaultProcessPtb + (kKernel >> 12) * sizeof(uint64_t),
+                   kDefaultComputeRingPhysical | kGfx12SystemLeafPteFlags | (1u << 4));
+  store_dword(kDefaultComputeRingPhysical + 0x80,
+              rocjitsu::cdna5::build_sopp(rocjitsu::cdna5::kSEndpgmSopp)[0]);
+  const auto address_space = soc_.mes_engine().process_address_space_for_test(3);
+  ASSERT_TRUE(address_space);
+  ASSERT_TRUE(soc_.gpu_vm().invalidate(*address_space));
+
+  rocjitsu::amdgpu::DispatchEntry entry{};
+  entry.kind = rocjitsu::amdgpu::DispatchPacketKind::Kernel;
+  entry.dispatch_id = 1;
+  entry.queue_id = kQueue;
+  entry.process_id = 3;
+  entry.address_space = *address_space;
+  entry.kernel_entry_pc = kKernel;
+  entry.wfs_per_workgroup = 2;
+  entry.sgprs_per_wf = 106;
+  entry.vgprs_per_wf = 64;
+  entry.kernel_wave_size = 32;
+  entry.workgroup_size_x = 64;
+  entry.workgroup_size_y = entry.workgroup_size_z = 1;
+  entry.grid_size_x = 256;
+  entry.grid_size_y = entry.grid_size_z = 1;
+  entry.grid_wgs_x = 4;
+  entry.grid_wgs_y = entry.grid_wgs_z = 1;
+  entry.total_wgs = 4;
+  entry.dispatched_wgs = 2;
+  entry.completed_wgs = 1;
+  entry.execution_begun = true;
+  entry.group_segment_fixed_size = 256;
+  entry.scratch_backing_addr = kScratch;
+  entry.private_segment_fixed_size = 8;
+  entry.scratch_wave_bytes = kScratchStride;
+  entry.scratch_wave_limit_per_se = 2;
+  entry.scratch_wave_stride_per_se = 2;
+  entry.completion_signal = kSignal;
+  command_processor_.accept_fanout_shard(std::move(entry));
+  command_processor_.drain_fanout_inbox_for_test();
+  const auto lds_base = compute_unit_->allocate_lds(256);
+  std::array<uint8_t, 256> expected_lds;
+  expected_lds.fill(0x5a);
+  compute_unit_->lds().write(lds_base, expected_lds.data(), expected_lds.size());
+  compute_unit_->begin_workgroup(1, 1, 2, 1);
+  for (uint32_t slot = 0; slot < 2; ++slot) {
+    auto *wave = compute_unit_->dispatch_wf(1, kKernel, 106, 64);
+    ASSERT_NE(wave, nullptr);
+    wave->set_dispatch_id(1);
+    wave->set_queue_id(kQueue);
+    wave->set_process_id(3);
+    wave->set_address_space(*address_space);
+    wave->set_wg_coord(1, 0, 0);
+    wave->set_wave_in_group(slot);
+    wave->set_debug_wave_id(100 + slot);
+    wave->set_lds_base(lds_base);
+    wave->set_lds_size(256);
+    wave->set_scratch_base(kScratch + slot * kScratchStride);
+    wave->set_scratch_lane_size(8);
+    store_vram_qword(kScratchPhysical + slot * kScratchStride, 0x12345678 + slot);
+    wave->debug_write_sgpr(32, 0x1234 + slot);
+    wave->debug_write_sgpr(33, 0x5678 + slot);
+    wave->set_ttmp(2, 0xabcdef00 + slot);
+    compute_unit_->named_barrier_join(*wave, 1);
+  }
+  compute_unit_->named_barrier_init(*compute_unit_->wf(0), 1, 2);
+  compute_unit_->barrier_signal(*compute_unit_->wf(0), 1, 0);
+  compute_unit_->barrier_wait(*compute_unit_->wf(0), 1);
+  ASSERT_EQ(compute_unit_->wf(0)->state(), rocjitsu::amdgpu::WfState::BARRIER);
+
+  const uint64_t remove = kRingPhysical + 64 * 4;
+  store_dword(remove, 0x00040031);
+  store_dword(remove + 4, kDefaultComputeDoorbell / sizeof(uint32_t));
+  store_qword(remove + 6 * 4, kApiStatusGpu);
+  store_qword(remove + 8 * 4, 2);
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ring_doorbell(0x60, doorbell);
+  ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+  ASSERT_FALSE(compute_unit_->has_active_wfs());
+  ASSERT_FALSE(command_processor_.has_registered_queues());
+  ASSERT_EQ(soc_.queue_registry().active_queues(), 0u);
+  EXPECT_EQ(vram_dword_at(kSignalPhysical + 8), 1u);
+
+  // Another queue takes an old execution slot. The whole workgroup must now
+  // fit on the other CU, while retaining its original private-memory regions.
+  auto *occupant = compute_unit_->dispatch_wf(77, kKernel, 106, 64);
+  ASSERT_NE(occupant, nullptr);
+  occupant->set_process_id(99);
+  occupant->set_debug_halted(true);
+  occupant->debug_write_sgpr(0, 0x76543210);
+
+  std::array<rocjitsu::amdgpu::Wavefront *, 2> other_occupants{};
+  for (auto &other : other_occupants) {
+    other = second_compute_unit_->dispatch_wf(77, kKernel, 106, 64);
+    ASSERT_NE(other, nullptr);
+    other->set_process_id(99);
+    other->set_debug_halted(true);
+  }
+
+  for (uint64_t word = 0; word < 64; ++word)
+    store_dword(kRingPhysical + 128 * 4 + word * 4, transport_.dword_at(kRingPhysical + word * 4));
+  store_qword(kRingPhysical + 128 * 4 + 40 * 4, 3);
+  doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{192});
+  ring_doorbell(0x60, doorbell);
+  ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 3u);
+  ASSERT_TRUE(compute_unit_->has_active_wfs());
+  for (uint32_t slot = 0; slot < 2; ++slot) {
+    auto *wave = second_compute_unit_->wf(slot + 2);
+    ASSERT_FALSE(wave->is_halted());
+    EXPECT_EQ(wave->debug_read_sgpr(32), 0x1234 + slot);
+    EXPECT_EQ(wave->debug_read_sgpr(33), 0x5678 + slot);
+    EXPECT_EQ(wave->ttmp(2), 0xabcdef00 + slot);
+    EXPECT_NE(wave->queue_id(), kQueue);
+    EXPECT_EQ(wave->scratch_base(), kScratch + slot * kScratchStride);
+    std::array<uint8_t, 256> restored_lds;
+    const auto &lds = wave->lds();
+    lds.read(wave->lds_base(), restored_lds.data(), restored_lds.size());
+    EXPECT_EQ(restored_lds, expected_lds);
+    const auto state = rocjitsu::kmd::build_cwsr_wave_state(*wave, soc_.arch());
+    EXPECT_EQ(state.shader_engine_id, 0u);
+    EXPECT_EQ(state.scratch_scoreboard_id, slot);
+  }
+  EXPECT_EQ(occupant->debug_read_sgpr(0), 0x76543210u);
+  EXPECT_EQ(second_compute_unit_->wf(2)->lds_base(), second_compute_unit_->wf(3)->lds_base());
+  EXPECT_EQ(second_compute_unit_->wf(2)->state(), rocjitsu::amdgpu::WfState::BARRIER);
+  const auto barrier = second_compute_unit_->barrier_state(*second_compute_unit_->wf(3), 1);
+  EXPECT_EQ((barrier >> 4) & 0x7fu, 2u);
+  EXPECT_EQ((barrier >> 16) & 0x7fu, 1u);
+  EXPECT_EQ(vram_dword_at(kSignalPhysical + 8), 1u);
+  compute_unit_->free_wavefront_resources(*occupant);
+  for (auto *other : other_occupants)
+    second_compute_unit_->free_wavefront_resources(*other);
+  const auto issued = command_processor_.dispatched_workgroups();
+  command_processor_.step();
+  // Four scratch regions are occupied, although two execution slots remain.
+  // The next workgroup must wait rather than allocate beyond the scratch pool.
+  EXPECT_EQ(command_processor_.dispatched_workgroups() - issued, 1u);
+  for (unsigned retry = 0; retry < 3; ++retry)
+    command_processor_.step();
+  EXPECT_EQ(command_processor_.dispatched_workgroups() - issued, 1u);
+  EXPECT_TRUE(second_compute_unit_->can_accept_workgroup(2, 64 * 1024 - 256, 2));
+  EXPECT_FALSE(
+      command_processor_.queue_faulted_for_test(second_compute_unit_->wf(2)->queue_id(), 3));
+  EXPECT_TRUE(second_compute_unit_->wf(0)->is_halted());
+  EXPECT_TRUE(second_compute_unit_->wf(1)->is_halted());
+  constexpr auto store = rocjitsu::cdna5::build_vscratch(rocjitsu::cdna5::kScratchStoreB32Vscratch,
+                                                         {.saddr = 124, .vsrc = 1});
+  for (size_t word = 0; word < store.size(); ++word)
+    store_dword(kDefaultComputeRingPhysical + 0x100 + word * 4, store[word]);
+  store_dword(kDefaultComputeRingPhysical + 0x100 + sizeof(store),
+              rocjitsu::cdna5::build_sopp(rocjitsu::cdna5::kSEndpgmSopp)[0]);
+  for (uint32_t slot = 0; slot < 2; ++slot) {
+    auto *wave = compute_unit_->wf(slot);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_FALSE(wave->is_halted());
+    EXPECT_GE(wave->scratch_base(), kScratch + 2 * kScratchStride);
+    EXPECT_LT(wave->scratch_base(), kScratch + 4 * kScratchStride);
+    const auto state = rocjitsu::kmd::build_cwsr_wave_state(*wave, soc_.arch());
+    EXPECT_EQ(state.shader_engine_id, 1u);
+    EXPECT_EQ(state.scratch_scoreboard_id, slot);
+    EXPECT_EQ(vram_dword_at(kScratchPhysical + slot * kScratchStride), 0x12345678u + slot);
+    wave->pc = kDefaultComputeRingGpu + 0x100;
+    wave->debug_write_vgpr(1, 0, 0xabcdef00 + slot);
+  }
+  compute_unit_->step();
+  for (uint32_t slot = 0; slot < 2; ++slot)
+    compute_unit_->wf(slot)->set_debug_suspended(true);
+  compute_unit_->retry_paused_queue_memory(3, compute_unit_->wf(0)->queue_id(), true);
+  for (uint32_t slot = 0; slot < 2; ++slot) {
+    EXPECT_EQ(vram_dword_at(kScratchPhysical + slot * kScratchStride), 0x12345678u + slot);
+    EXPECT_EQ(vram_dword_at(kScratchPhysical + (slot + 2) * kScratchStride), 0xabcdef00u + slot);
+    compute_unit_->wf(slot)->set_debug_suspended(false);
+  }
+  EXPECT_NE(compute_unit_->wf(0)->scratch_base(), compute_unit_->wf(1)->scratch_base());
+  second_compute_unit_->barrier_signal(*second_compute_unit_->wf(3), 1, 0);
+  ASSERT_EQ(second_compute_unit_->wf(2)->state(), rocjitsu::amdgpu::WfState::RUNNING);
+  // Rebuilt waves must stay resident until the whole queue is resumed, even
+  // when one has already issued its end instruction and only awaits retirement.
+  for (uint32_t slot = 0; slot < 2; ++slot)
+    second_compute_unit_->wf(slot + 2)->set_debug_suspended(true);
+  second_compute_unit_->wf(3)->set_state(rocjitsu::amdgpu::WfState::ENDING);
+  second_compute_unit_->step();
+  ASSERT_FALSE(second_compute_unit_->wf(3)->is_halted());
+  EXPECT_EQ(vram_dword_at(kSignalPhysical + 8), 1u);
+  for (uint32_t slot = 0; slot < 2; ++slot)
+    second_compute_unit_->wf(slot + 2)->set_debug_suspended(false);
+  for (unsigned step = 0; step < 8; ++step) {
+    compute_unit_->step();
+    second_compute_unit_->step();
+    command_processor_.step();
+  }
+  EXPECT_FALSE(compute_unit_->has_active_wfs());
+  EXPECT_FALSE(second_compute_unit_->has_active_wfs());
+  EXPECT_EQ(command_processor_.dispatched_workgroups() - issued, 2u);
+  EXPECT_EQ(vram_dword_at(kSignalPhysical + 8), 0u);
+  command_processor_.shutdown();
+}
+
+TEST_F(GpuDeviceMes, RemoveAndReaddMatchesEveryWaveBeforeRestoringState) {
+  constexpr uint64_t kContext = 0x20000;
+  constexpr uint64_t kContextPhysical = 0x300000;
+  constexpr uint32_t kContextSize = 0x20000;
+  constexpr uint32_t kControlStack = 0x1000;
+  constexpr uint64_t kScratch = 0x18000, kScratchPhysical = 0x510000;
+  constexpr auto load = rocjitsu::cdna5::build_vscratch(rocjitsu::cdna5::kScratchLoadB32Vscratch,
+                                                        {.saddr = 124, .vdst = 1});
+  configure_compute_unit(4);
+  for (const auto &[use_wave_ids, duplicate_identity] :
+       {std::pair{false, false}, std::pair{false, true}, std::pair{true, false},
+        std::pair{true, true}}) {
+    SCOPED_TRACE(::testing::Message() << "use_wave_ids=" << use_wave_ids
+                                      << " duplicate_identity=" << duplicate_identity);
+    store_dword(kSchedulerMqdPhysical + 171 * 4, kContext);
+    store_dword(kSchedulerMqdPhysical + 175 * 4, kControlStack);
+    store_dword(kSchedulerMqdPhysical + 177 * 4, kContextSize);
+    submit_default_compute_queue();
+    for (uint64_t offset = 0; offset < kContextSize; offset += 0x1000)
+      store_vram_qword(kDefaultProcessPtb + ((kContext + offset) >> 12) * sizeof(uint64_t),
+                       (kContextPhysical + offset) | kGfx12SystemLeafPteFlags);
+    const auto address_space = soc_.mes_engine().process_address_space_for_test(3);
+    ASSERT_TRUE(address_space);
+    store_vram_qword(kDefaultProcessPtb + (kScratch >> 12) * sizeof(uint64_t),
+                     kScratchPhysical | (kGfx12SystemLeafPteFlags & ~uint64_t{2}));
+    store_vram_qword(kDefaultProcessPtb + (kDefaultComputeRingGpu >> 12) * sizeof(uint64_t),
+                     kDefaultComputeRingPhysical | kGfx12SystemLeafPteFlags | (1u << 4));
+    ASSERT_TRUE(soc_.gpu_vm().invalidate(*address_space));
+    std::array<rocjitsu::amdgpu::Wavefront *, 2> waves{};
+    for (uint32_t index = 0; index < waves.size(); ++index) {
+      auto *wave = compute_unit_->dispatch_wf(index, 0x10080 + index * 4, 106, 64);
+      ASSERT_NE(wave, nullptr);
+      waves[index] = wave;
+      wave->set_address_space(*address_space);
+      wave->set_process_id(3);
+      wave->set_queue_id(uint32_t{1} << 31);
+      wave->set_wg_coord(index, 0, 0);
+      wave->set_debug_wave_id(use_wave_ids ? 100 + index : 0);
+      wave->set_scratch_base(kScratch + index * 256);
+      wave->set_scratch_lane_size(8);
+      wave->set_exec(1);
+      store_vram_qword(kScratchPhysical + index * 256, 0xabcdef00 + index);
+      wave->set_debug_halted(true);
+      wave->set_status_halt(true);
+      wave->debug_write_sgpr(0, 0x1000 + index);
+    }
+
+    constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+    store_dword(kRemove, 0x00040031);
+    store_dword(kRemove + 4, kDefaultComputeDoorbell / sizeof(uint32_t));
+    store_qword(kRemove + 6 * 4, kApiStatusGpu);
+    store_qword(kRemove + 8 * 4, 2);
+    auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+    ring_doorbell(0x60, doorbell);
+    ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+
+    ASSERT_FALSE(compute_unit_->has_active_wfs());
+    EXPECT_FALSE(command_processor_.has_registered_queues());
+    std::vector<rocjitsu::kmd::CwsrWaveState> states;
+    std::vector<uint8_t> queue_context;
+    ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr_context(
+        kContext, kContextSize, queue_context,
+        [&](uint64_t address, std::span<uint8_t> bytes) {
+          EXPECT_TRUE(transport_.read(kContextPhysical + address - kContext,
+                                      std::as_writable_bytes(bytes)));
+        },
+        kControlStack));
+    ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
+        kContext, kContextSize, states,
+        [&](uint64_t address) {
+          return transport_.dword_at(kContextPhysical + address - kContext);
+        },
+        soc_.arch(), kControlStack));
+    for (uint32_t index = 0; index < states.size(); ++index) {
+      states[index].pc = 0x10100 + index * 0x10;
+      for (size_t word = 0; word < load.size(); ++word)
+        store_dword(kDefaultComputeRingPhysical + 0x100 + index * 0x10 + word * 4, load[word]);
+      states[index].sgprs[0] = 0x2000 + index;
+      states[index].wave_stopped = false;
+      // Stable wave IDs take precedence over debugger-edited dispatch metadata.
+      if (use_wave_ids && !duplicate_identity)
+        states[index].group_ids[0] += 100;
+    }
+    if (duplicate_identity)
+      states[1] = states[0];
+    std::ranges::reverse(states);
+    ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(
+                    kContext, kContextSize, states,
+                    [&](uint64_t address, uint32_t value) {
+                      store_dword(kContextPhysical + address - kContext, value);
+                    },
+                    soc_.arch(), kControlStack, rocjitsu::kmd::CwsrDebugRegion{}, queue_context)
+                    .ok);
+
+    for (uint64_t word = 0; word < 64; ++word)
+      store_dword(kRingPhysical + 128 * 4 + word * 4,
+                  transport_.dword_at(kRingPhysical + word * 4));
+    store_qword(kRingPhysical + 128 * 4 + 40 * 4, 3);
+    doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{192});
+    // Keep another queue in an old slot. Restore uses the remaining slots
+    // without disturbing that queue or changing the saved scratch regions.
+    rocjitsu::amdgpu::Wavefront *occupant = nullptr;
+    if (!use_wave_ids && !duplicate_identity) {
+      occupant = compute_unit_->dispatch_wf_at(1, 77, 0x12000, 106, 64);
+      ASSERT_NE(occupant, nullptr);
+      occupant->set_process_id(99);
+      occupant->debug_write_sgpr(0, 0x76543210);
+      occupant->set_debug_halted(true);
+    }
+    ring_doorbell(0x60, doorbell);
+    if (occupant) {
+      EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 3u);
+      EXPECT_FALSE(compute_unit_->wf(0)->is_halted());
+      EXPECT_FALSE(occupant->is_halted());
+      EXPECT_EQ(occupant->debug_read_sgpr(0), 0x76543210u);
+      EXPECT_EQ(soc_.queue_registry().active_queues(), 1u);
+      EXPECT_TRUE(command_processor_.has_registered_queues());
+    }
+    EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), duplicate_identity ? 2u : 3u);
+    if (duplicate_identity) {
+      EXPECT_FALSE(compute_unit_->has_active_wfs());
+      EXPECT_FALSE(command_processor_.has_registered_queues());
+      EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
+    } else {
+      for (uint32_t index = 0; index < waves.size(); ++index) {
+        const uint32_t slot = occupant && index == 1 ? 2 : index;
+        auto *wave = compute_unit_->wf(slot);
+        ASSERT_NE(wave, nullptr);
+        ASSERT_FALSE(wave->is_halted());
+        EXPECT_FALSE(wave->debug_suspended());
+        EXPECT_FALSE(wave->debug_halted());
+        EXPECT_EQ(wave->pc, 0x10100u + index * 0x10);
+        EXPECT_EQ(wave->debug_read_sgpr(0), 0x2000u + index);
+        EXPECT_EQ(wave->scratch_base(), kScratch + index * 256);
+      }
+      compute_unit_->step();
+      for (uint32_t index = 0; index < waves.size(); ++index) {
+        const uint32_t slot = occupant && index == 1 ? 2 : index;
+        auto *wave = compute_unit_->wf(slot);
+        wave->set_debug_suspended(true);
+      }
+      compute_unit_->retry_paused_queue_memory(3, compute_unit_->wf(0)->queue_id(), true);
+      for (uint32_t index = 0; index < waves.size(); ++index) {
+        const uint32_t slot = occupant && index == 1 ? 2 : index;
+        auto *wave = compute_unit_->wf(slot);
+        EXPECT_EQ(wave->debug_read_vgpr(1, 0), 0xabcdef00u + index);
+        compute_unit_->free_wavefront_resources(*wave);
+      }
+    }
+    if (occupant)
+      compute_unit_->free_wavefront_resources(*occupant);
     device_.reset(simdojo::ResetKind::FunctionLevel);
     configure_gart();
   }

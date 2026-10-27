@@ -273,11 +273,23 @@ private:
   /// @brief Share the SoC-owned device-global GWS store across every XCD's CUs.
   void wire_gws_to_xcds();
   [[nodiscard]] bool install_internal_address_space(amdgpu::GpuMemory *memory);
-  void configure_mes_trap_handlers(amdgpu::CommandProcessor &owner);
+  /// @brief Acquire the PCI/MES compute owner and install its CU hooks once.
+  /// @details Topology must be complete before the first binding request. The
+  /// owner lasts for the SoC lifetime; resets change MES state, not its hooks.
+  /// Local/daemon SimulatedKfd owns these slots instead and must not share this CP.
+  [[nodiscard]] amdgpu::CommandProcessor *acquire_mes_queue_owner_cp();
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
   make_aql(uint32_t queue_ordinal) override;
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
   make_pm4(uint32_t queue_ordinal, amdgpu::Pm4PacketCallbacks callbacks) override;
+  [[nodiscard]] amdgpu::QueueContextSaveResult save_context(const amdgpu::QueueIdentity &identity,
+                                                            uint64_t address, uint32_t area_size,
+                                                            uint32_t control_stack_size) override;
+  void release_context(const amdgpu::QueueIdentity &identity) override;
+  void resume_context(const amdgpu::QueueIdentity &identity) override;
+  [[nodiscard]] amdgpu::VmAccessOutcome restore_context(const amdgpu::QueueIdentity &identity,
+                                                        uint64_t address, uint32_t area_size,
+                                                        uint32_t control_stack_size) override;
 
   static inline std::atomic<uint32_t> next_gpu_id_{0};
   uint32_t gpu_id_ = next_gpu_id_++;
@@ -293,6 +305,7 @@ private:
   amdgpu::SdmaQueueScheduler sdma_queue_scheduler_;
   amdgpu::GpuQueueRegistry queue_registry_;
   amdgpu::MesEngine mes_engine_;
+  amdgpu::CommandProcessor *mes_queue_owner_ = nullptr; ///< CP whose CU hooks MES owns.
   std::vector<amdgpu::Xcd *> xcds_;
   std::vector<amdgpu::Iod *> iods_;
   amdgpu::GpuMemory *memory_ = nullptr;

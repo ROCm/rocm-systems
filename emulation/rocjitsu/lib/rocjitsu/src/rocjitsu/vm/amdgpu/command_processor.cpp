@@ -736,6 +736,52 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
           (static_cast<uint64_t>(scratch_xcc_id_) * shader_engine_count + shader_engine_id) *
               scratch_wave_stride_per_se +
           scoreboard_id;
+      // Restored waves keep their scratch even after moving to another CU.
+      // Derive occupancy from live waves rather than reserving their old
+      // execution slots or maintaining a second allocation table.
+      std::vector<std::pair<uint64_t, uint64_t>> occupied;
+      for (auto *owner : cus_)
+        owner->with_wave_state_locked([&] {
+          for (uint32_t slot = 0; slot < owner->num_wf_slots(); ++slot) {
+            const auto *other = owner->wf(slot);
+            if (!other || other == wf || other->is_halted() ||
+                other->address_space() != wf->address_space() ||
+                other->process_id() != wf->process_id() || other->scratch_base() == 0 ||
+                other->scratch_lane_size() == 0)
+              continue;
+            occupied.emplace_back(other->scratch_base(),
+                                  uint64_t{other->scratch_lane_size()} * other->wf_size());
+          }
+        });
+      const auto available = [&](uint64_t slot) {
+        if (slot > (std::numeric_limits<uint64_t>::max() - scratch_pool) / per_wave_size)
+          return false;
+        const uint64_t base = scratch_pool + slot * per_wave_size;
+        return std::ranges::none_of(occupied, [&](const auto &region) {
+          return base <= region.first ? region.first - base < per_wave_size
+                                      : base - region.first < region.second;
+        });
+      };
+      if (!available(scratch_slot)) {
+        const uint32_t slots_per_se =
+            std::min(pkt.scratch_wave_limit_per_se, scratch_wave_stride_per_se);
+        bool found = false;
+        for (uint32_t se = 0; se < shader_engine_count && !found; ++se)
+          for (uint32_t id = 0; id < slots_per_se; ++id) {
+            const uint64_t candidate = (uint64_t{scratch_xcc_id_} * shader_engine_count + se) *
+                                           scratch_wave_stride_per_se +
+                                       id;
+            if (!available(candidate))
+              continue;
+            scratch_slot = candidate;
+            wf->set_shader_engine_id(se);
+            wf->set_scratch_scoreboard_id(id);
+            found = true;
+            break;
+          }
+        if (!found)
+          return VmAccessOutcome::Unavailable;
+      }
     } else {
       // Legacy CWSR records use the dispatch-wide logical scratch slot.
       wf->set_scratch_scoreboard_id(static_cast<uint32_t>(global_wave_idx));
@@ -2419,10 +2465,9 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // begin_workgroup() has not run, there is no active_wgs_ entry / cluster pin to
     // unwind either. Also reclaim the placement's LDS/WGP reservation symmetrically
     // with how it was reserved:
-    //   - CU / cluster mode: the SPI (or the direct CU path) advanced the CU's
-    //     next_lds_alloc_ via allocate_lds(); maybe_reset_lds_alloc() rolls it back
-    //     iff the CU is now idle (freeing these waves left no active waves) and
-    //     unpinned. It correctly no-ops when peers of the same dispatch are resident.
+    //   - CU / cluster mode: return the latest CU-local LDS reservation, including
+    //     when earlier workgroups remain resident. maybe_reset_lds_alloc() also
+    //     resets the allocator once the whole CU is idle and unpinned.
     //   - WGP mode: allocate_workgroup() reserved SPI-side state (wgp.next_lds_alloc,
     //     wgp.active_workgroups, resident_wgp_workgroups_) that is NOT CU-local, so
     //     maybe_reset_lds_alloc() cannot reach it; release_wgp_workgroup() is the
@@ -2447,6 +2492,10 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
         for (auto *spi : spis_)
           if (spi->release_wgp_workgroup(entry.dispatch_id, global_wg_id))
             break;
+      } else {
+        // Admission owns the latest CU-local LDS reservation. Return it on
+        // backpressure too, even when another workgroup is still resident.
+        cu->with_wave_state_locked([&] { cu->next_lds_alloc_ = lds_base; });
       }
       cu->maybe_reset_lds_alloc();
     };
