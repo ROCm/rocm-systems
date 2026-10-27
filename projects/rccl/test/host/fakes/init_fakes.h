@@ -35,6 +35,7 @@
 #include "strongstream_stubs.h"  // src/misc/strongstream.cc
 #include "topo_stubs.h"          // src/graph/*.cc
 #include "transport_stubs.h"     // src/transport/*.cc + src/plugin/net.cc
+#include "transport_net_ib_fakes.h"  // src/transport/net_ib
 #include "tuning_fakes.h"        // src/graph/tuning.cc
 
 struct ncclComm;

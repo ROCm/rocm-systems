@@ -111,6 +111,7 @@ void ResetInitFakes() {
   ResetStrongStreamStubs();
   ResetTopoStubs();
   ResetTransportStubs();
+  ResetTransportNetIbFakes();
   ResetTuningFakes();
   g_ncclNetInitResult = ncclSuccess;
 }

@@ -32,11 +32,14 @@
 #include "fakes/env_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/net_ib_cast_common_fakes.h"
+#include "fakes/net_ib_cast_connect_fakes.h"
 #include "fakes/proxy_fakes.h"
 #include "fakes/rccl_wrap_fakes.h"
 #include "fakes/rocmwrap_fakes.h"
 #include "fakes/topo_net_stubs.h"
 #include "fakes/topo_stubs.h"
+#include "fakes/transport_net_ib_connect_net_fakes.h"
 #include "fakes/transport_net_ib_fakes.h"
 #include "fakes/transport_p2p_fakes.h"
 
@@ -335,6 +338,17 @@ class NetMicrotestBase : public ::testing::Test {
   FakeNet net_;
   ncclNet_t vtable_{};
   ncclProxyState proxyState_{};
+  ncclNet_t savedNetIb_{};
+  bool usingNetIb_ = false;
+
+  // Runs the proxy on ncclNetIb, wired to the fake net (a copy of vtable_ as it is now). net.cc keys
+  // IB-only paths off that address.
+  void UseIbPlugin() {
+    if (!usingNetIb_) savedNetIb_ = ncclNetIb;
+    usingNetIb_ = true;
+    ncclNetIb = vtable_;
+    proxyState_.ncclNet = &ncclNetIb;
+  }
 
   void SetUp() override {
     g_activeNet = &net_;
@@ -356,6 +370,7 @@ class NetMicrotestBase : public ::testing::Test {
   }
 
   void TearDown() override {
+    if (usingNetIb_) ncclNetIb = savedNetIb_;
     g_activeNet = nullptr;
     rcclPrimaryNicInfo = {rcclIBNicTypeUnknown, 0, 0};
     ncclGdrCopy = nullptr;
@@ -365,6 +380,9 @@ class NetMicrotestBase : public ::testing::Test {
     ResetProxyFakes();
     ResetRcclWrapFakes();
     ResetTopoStubs();
+    ResetNetIbCastCommonFakes();
+    ResetNetIbCastConnectFakes();
+    ResetTransportNetIbConnectNetFakes();
     ResetTransportNetIbFakes();
     ResetTransportP2pFakes();
     ResetEnvFakes();
@@ -1170,6 +1188,26 @@ TEST_F(NetProxySetupMicrotest, RecvSetup_ValidRequest_RecordsRequestAndListens) 
   EXPECT_EQ(handle_[0], 0x5A);  // the plugin's listen handle is the response
 }
 
+TEST_F(NetProxySetupMicrotest, RecvSetup_IbPlugin_PassesGdrFlushFlagToListenComm) {
+  req_.isP2p = 1;
+  req_.gdrFlushFlag = 1;
+  ASSERT_EQ(RecvSetup(), ncclSuccess);
+  EXPECT_EQ(RecvRes()->isP2p, 1);
+  EXPECT_TRUE(g_ibSetListenGdrFlushFlagCalls.empty());  // only ncclNetIb has the flag
+
+  UseIbPlugin();
+  for (int flag : {1, 0}) {
+    SCOPED_TRACE(flag);
+    ResetConn();
+    g_ibSetListenGdrFlushFlagCalls.clear();
+    req_.gdrFlushFlag = flag;
+    ASSERT_EQ(RecvSetup(), ncclSuccess);
+    ASSERT_EQ(g_ibSetListenGdrFlushFlagCalls.size(), 1u);
+    EXPECT_EQ(g_ibSetListenGdrFlushFlagCalls[0].first, &net_.listenComm);
+    EXPECT_EQ(g_ibSetListenGdrFlushFlagCalls[0].second, flag);
+  }
+}
+
 TEST_F(NetProxySetupMicrotest, Setup_WrongRequestSize_RejectedWithoutResources) {
   EXPECT_EQ(SendSetup(sizeof(setupReq) - 1), ncclInternalError);
   EXPECT_EQ(RecvSetup(sizeof(setupReq) + 1), ncclInternalError);
@@ -1597,6 +1635,18 @@ TEST_F(NetSetupMicrotest, RecvSetup_RingConnection_ListensOnOwnNicAndReturnsHand
   EXPECT_EQ(req_.sameDevice, 1);
   EXPECT_EQ(ConnectInfoInt(0), 0x5A5A5A5A);  // the proxy's listen handle
   EXPECT_EQ(ConnectInfoInt(sizeof(ncclNetHandle_t)), (int)ncclTopoGdrModePci);
+}
+
+TEST_F(NetSetupMicrotest, RecvSetup_PassesP2pAndCommGdrFlushFlag) {
+  comm_.ibGdrFlushFlag = true;
+  ASSERT_EQ(RecvSetup(&graph_, 0), ncclSuccess);
+  EXPECT_EQ(req_.isP2p, 0);
+  EXPECT_EQ(req_.gdrFlushFlag, 1);
+
+  comm_.ibGdrFlushFlag = false;
+  ASSERT_EQ(RecvSetup(nullptr, 0), ncclSuccess);
+  EXPECT_EQ(req_.isP2p, 1);
+  EXPECT_EQ(req_.gdrFlushFlag, 0);
 }
 
 TEST_F(NetSetupMicrotest, RecvSetup_Gdr_AsksTopologyWhetherToFlush) {
@@ -2117,6 +2167,17 @@ TEST_F(NetConnectMicrotest, RecvConnect_GdcSyncWord_UsedAsTail) {
   EXPECT_EQ(conn_.conn.head, &SendMem()->head);
 }
 
+TEST_F(NetConnectMicrotest, RecvConnect_GdrFlushFlag_WiredToConnector) {
+  uint64_t flags[8] = {}, seq[NCCL_STEPS] = {};
+  map_.gdrFlushFlag = flags;
+  map_.gdrFlushSeq = seq;
+
+  ASSERT_EQ(RecvConnect(), ncclSuccess);
+
+  EXPECT_EQ(conn_.conn.gdrFlushFlag, flags);
+  EXPECT_EQ(conn_.conn.gdrFlushSeq, seq);
+}
+
 TEST_F(NetConnectMicrotest, Free_NoMap_ReturnsSuccess) {
   EXPECT_EQ(sendFree(&comm_, &conn_), ncclSuccess);
   EXPECT_EQ(recvFree(&comm_, &conn_), ncclSuccess);
@@ -2211,6 +2272,7 @@ template <typename Res>
 class NetProxyConnectMicrotest : public NetAllocMicrotestBase {
  protected:
   static constexpr int kSizes[NCCL_NUM_PROTOCOLS] = {1 << 12, 1 << 13, 1 << 14};  // LL, LL128, SIMPLE
+  static constexpr int kP2pLl128Size = 1 << 15;  // send/recv connections' own LL128 size
   std::deque<ncclProxyConnection> conns_;
   connectMap resp_{};
   int done_ = -1;
@@ -2228,6 +2290,7 @@ class NetProxyConnectMicrotest : public NetAllocMicrotestBase {
     proxyState_.p2pnChannels = 2;
     proxyState_.p2pChunkSize = 1 << 10;
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) proxyState_.buffSizes[p] = kSizes[p];
+    proxyState_.p2pLl128BuffSize = kP2pLl128Size;
     rcclPrimaryNicInfo = {rcclIBNicTypeDefault, 0, 0};
   }
 
@@ -2456,6 +2519,18 @@ TEST_F(NetSendProxyConnectMicrotest, DedicatedHostBuffers_RegistersEveryProtocol
   EXPECT_EQ(memcmp(&resp_, &r->map, sizeof(resp_)), 0);
 }
 
+TEST_F(NetSendProxyConnectMicrotest, DedicatedP2p_UsesP2pLl128Size) {
+  sendNetResources* r = AddConn();
+  r->isP2p = 1;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL], kSizes[NCCL_PROTO_LL]);
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL128], kP2pLl128Size);
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_SIMPLE], kSizes[NCCL_PROTO_SIMPLE]);
+  EXPECT_EQ(Buffer(r, NCCL_PROTO_SIMPLE) - Buffer(r, NCCL_PROTO_LL128), kP2pLl128Size);  // what the map reserved
+}
+
 TEST_F(NetSendProxyConnectMicrotest, DedicatedGdr_KeepsOnlyLlInHostMemory) {
   sendNetResources* r = AddConn(0, /*useGdr=*/1);
 
@@ -2550,7 +2625,7 @@ TEST_F(NetSendProxyConnectMicrotest, SharedGdrWithLlBuffers_StagesLlAndLl128) {
   EXPECT_FALSE(InDeviceMemory(r, NCCL_PROTO_LL));
   EXPECT_TRUE(InDeviceMemory(r, NCCL_PROTO_LL128));
   EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL], kSizes[NCCL_PROTO_LL]);
-  EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL128], kSizes[NCCL_PROTO_LL128]);
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL128], kP2pLl128Size);
   EXPECT_EQ(devAllocs_, 2);  // the pool and the LL128 staging bank
   EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS);
 }
@@ -2894,6 +2969,123 @@ TEST_F(NetRecvProxyConnectMicrotest, DedicatedHostBuffers_RegistersEveryProtocol
   EXPECT_EQ(memcmp(&resp_, &r->map, sizeof(resp_)), 0);
 }
 
+TEST_F(NetRecvProxyConnectMicrotest, DedicatedP2p_UsesP2pLl128Size) {
+  recvNetResources* r = AddRecvConn();
+  r->isP2p = 1;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL], kSizes[NCCL_PROTO_LL]);
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL128], kP2pLl128Size);
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_SIMPLE], kSizes[NCCL_PROTO_SIMPLE]);
+  EXPECT_EQ(Buffer(r, NCCL_PROTO_SIMPLE) - Buffer(r, NCCL_PROTO_LL128), kP2pLl128Size);
+}
+
+// GDR buffers that need a flush on the IB plugin, whose recv comm has flush flags: the GPU can wait on those
+// flags instead of the proxy flushing.
+TEST_F(NetRecvProxyConnectMicrotest, IbGdrFlushFlag_AllocatesZeroedSeqAndReturnsFlag) {
+  UseIbPlugin();
+  uint64_t flags[8] = {};
+  void* flagComm = nullptr;
+  ScopedHook flag(g_ibGetGpuFlushFlag, [&](void* comm) {
+    flagComm = comm;
+    return flags;
+  });
+  size_t lastSize = 0;
+  unsigned lastFlags = 0;
+  ScopedHook alloc(g_hipExtMallocWithFlags, [&](void** p, size_t n, unsigned f) {
+    ++devAllocs_;
+    *p = Alloc(n);
+    memset(*p, 0xFF, n);  // so the proxy has to zero the sequence itself
+    lastSize = n;
+    lastFlags = f;
+    return hipSuccess;
+  });
+  recvNetResources* r = AddRecvConn(0, 1);
+  r->needFlush = ncclTopoFlushAlways;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(flagComm, &net_.recvComm);
+  EXPECT_EQ(r->gdrFlushFlag, flags);
+  ASSERT_NE(r->gdrFlushSeq, nullptr);
+  EXPECT_EQ(devAllocs_, 2);  // the buffer bank, then the sequence
+  EXPECT_EQ(lastSize, NCCL_STEPS * sizeof(uint64_t));
+#if defined(HIP_UNCACHED_MEMORY)
+  EXPECT_EQ(lastFlags, (unsigned)hipDeviceMallocUncached);
+#else
+  EXPECT_EQ(lastFlags, (unsigned)hipDeviceMallocFinegrained);
+#endif
+  for (int i = 0; i < NCCL_STEPS; i++) EXPECT_EQ(r->gdrFlushSeq[i], 0u) << "slot " << i;
+  EXPECT_EQ(resp_.gdrFlushFlag, flags);
+  EXPECT_EQ(resp_.gdrFlushSeq, r->gdrFlushSeq);
+}
+
+TEST_F(NetRecvProxyConnectMicrotest, IbGdrFlushFlag_EachMissingPreconditionKeepsRdmaReadFlush) {
+  uint64_t flags[8] = {};
+  bool haveFlags = true;
+  ScopedHook flag(g_ibGetGpuFlushFlag, [&](void*) { return haveFlags ? flags : nullptr; });
+  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);  // only the GDRCOPY_FLUSH_ENABLE row gets a flush word
+  struct Case {
+    const char* name;
+    bool ib;
+    int useGdr;
+    ncclTopoFlushType needFlush;
+    int gdcFlush;
+    bool haveFlags;
+  };
+  const Case cases[] = {
+      {"another plugin", false, 1, ncclTopoFlushAlways, 0, true},
+      {"host buffers", true, 0, ncclTopoFlushAlways, 0, true},
+      {"no flush needed", true, 1, ncclTopoFlushNone, 0, true},
+      {"GDRCOPY flush word", true, 1, ncclTopoFlushAlways, 1, true},
+      {"comm has no flags", true, 1, ncclTopoFlushAlways, 0, false},
+  };
+  UseIbPlugin();
+  ncclNet_t* ib = proxyState_.ncclNet;
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    const Case& c = cases[i];
+    SCOPED_TRACE(c.name);
+    proxyState_.ncclNet = c.ib ? ib : &vtable_;
+    haveFlags = c.haveFlags;
+    ScopedHook param(g_loadParam, ParamOverride({{"GDRCOPY_FLUSH_ENABLE", c.gdcFlush}}));
+    recvNetResources* r = AddRecvConn(0, c.useGdr);
+    r->needFlush = c.needFlush;
+
+    ASSERT_EQ(Connect(i), ncclSuccess);
+
+    EXPECT_EQ(r->gdrFlushFlag, nullptr);
+    EXPECT_EQ(r->gdrFlushSeq, nullptr);
+    EXPECT_EQ(resp_.gdrFlushFlag, nullptr);
+    EXPECT_EQ(resp_.gdrFlushSeq, nullptr);
+  }
+}
+
+TEST_F(NetRecvProxyConnectMicrotest, IbGdrFlushFlag_SeqAllocFails_KeepsRdmaReadFlush) {
+  UseIbPlugin();
+  uint64_t flags[8] = {};
+  ScopedHook flag(g_ibGetGpuFlushFlag, [&](void*) { return flags; });
+  ScopedHook alloc(g_hipExtMallocWithFlags, [this](void** p, size_t n, unsigned) {
+    if (n == NCCL_STEPS * sizeof(uint64_t)) {
+      *p = reinterpret_cast<void*>(0x1);  // the proxy must not keep what a failed allocation left
+      return hipErrorOutOfMemory;
+    }
+    ++devAllocs_;
+    *p = Alloc(n);
+    return hipSuccess;
+  });
+  recvNetResources* r = AddRecvConn(0, 1);
+  r->needFlush = ncclTopoFlushAlways;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(alloc.calls, 2);
+  EXPECT_EQ(r->gdrFlushFlag, nullptr);
+  EXPECT_EQ(r->gdrFlushSeq, nullptr);
+  EXPECT_EQ(resp_.gdrFlushFlag, nullptr);
+  EXPECT_EQ(resp_.gdrFlushSeq, nullptr);
+}
+
 TEST_F(NetRecvProxyConnectMicrotest, DedicatedGdr_PutsEveryProtocolInDeviceMemory) {
   recvNetResources* r = AddRecvConn(0, 1);
 
@@ -2957,7 +3149,7 @@ TEST_F(NetRecvProxyConnectMicrotest, SharedGdrWithLlBuffers_StagesLlAndLl128) {
   EXPECT_FALSE(InDeviceMemory(r, NCCL_PROTO_LL));
   EXPECT_TRUE(InDeviceMemory(r, NCCL_PROTO_LL128));
   EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL], kSizes[NCCL_PROTO_LL]);
-  EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL128], kSizes[NCCL_PROTO_LL128]);
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL128], kP2pLl128Size);
   EXPECT_EQ(devAllocs_, 2);
   EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS);
 }
@@ -3407,6 +3599,21 @@ TEST_F(NetRecvProxyFreeMicrotest, Connected_DeregistersClosesAndReleasesEverythi
   EXPECT_EQ(net_.closedRecvs[0], &net_.recvComm);
   EXPECT_EQ(hostFrees_, 1);
   EXPECT_EQ(devFrees_, 1);
+  EXPECT_TRUE(live_.empty());
+}
+
+TEST_F(NetRecvProxyFreeMicrotest, GdrFlushSeq_Freed) {
+  UseIbPlugin();
+  uint64_t flags[8] = {};
+  ScopedHook flag(g_ibGetGpuFlushFlag, [&](void*) { return flags; });
+  recvNetResources* r = AddRecvConn(0, 1);
+  r->needFlush = ncclTopoFlushAlways;
+  ASSERT_EQ(Connect(), ncclSuccess);
+  ASSERT_NE(r->gdrFlushSeq, nullptr);
+
+  ASSERT_EQ(Free(), ncclSuccess);
+
+  EXPECT_EQ(devFrees_, 2);  // the buffer bank and the sequence
   EXPECT_TRUE(live_.empty());
 }
 
@@ -4752,6 +4959,32 @@ TEST_F(NetRecvProgressMicrotest, Post_Dedicated_PostsSliceSizedSlot) {
   EXPECT_EQ(args_->idle, 0);
 }
 
+TEST_F(NetRecvProgressMicrotest, Post_GdrFlushFlag_HintsWhetherTheReceiveIsSimple) {
+  uint64_t flags[8] = {};
+  auto post = [&](int protocol, uint64_t* flag) {
+    args_ = std::make_unique<ncclProxyArgs>();
+    args_->state = ncclProxyOpReady;
+    args_->protocol = protocol;
+    args_->sliceSteps = args_->chunkSteps = 1;
+    args_->collAPI = ncclFuncRecv;
+    args_->nPeers = args_->nChannels = 1;
+    res_.gdrFlushFlag = flag;
+    AddSub(1);
+    return Progress();
+  };
+  for (int p : {NCCL_PROTO_SIMPLE, NCCL_PROTO_LL}) {
+    SCOPED_TRACE(p);
+    g_ibSetGpuFlushFlagHintCalls.clear();
+    ASSERT_EQ(post(p, nullptr), ncclSuccess);
+    EXPECT_TRUE(g_ibSetGpuFlushFlagHintCalls.empty());  // no flags, no hint
+
+    ASSERT_EQ(post(p, flags), ncclSuccess);
+    ASSERT_EQ(g_ibSetGpuFlushFlagHintCalls.size(), 1u);
+    EXPECT_EQ(g_ibSetGpuFlushFlagHintCalls[0].first, &net_.recvComm);
+    EXPECT_EQ(g_ibSetGpuFlushFlagHintCalls[0].second, p == NCCL_PROTO_SIMPLE ? 1 : 0);
+  }
+}
+
 TEST_F(NetRecvProgressMicrotest, Post_PipelineFull_Waits) {
   net_.testDone = 0;
   ncclProxySubArgs& sub = AddSub(20);
@@ -4936,6 +5169,105 @@ TEST_F(NetRecvProgressMicrotest, Receive_GdrDataNeedingFlush_FlushesReceivedSlot
   EXPECT_EQ(net_.iflushes[0].sizes[0], 64u);
   EXPECT_EQ(net_.iflushes[0].mhandles[0], mhandles_[NCCL_PROTO_SIMPLE]);
   EXPECT_NE(sub.requests[0], nullptr);
+}
+
+TEST_F(NetRecvProgressMicrotest, Receive_GpuFlagWait_PublishesFlagSeqInsteadOfFlushing) {
+  NeedGdrFlush();
+  uint64_t flags[8] = {}, seq[NCCL_STEPS] = {};
+  res_.gdrFlushFlag = flags;
+  res_.gdrFlushSeq = seq;
+  void* seqComm = nullptr;
+  ScopedHook flagSeq(g_ibGetGpuFlushFlagSeq, [&](void* comm) {
+    seqComm = comm;
+    return uint64_t{0x123456};
+  });
+  ncclProxySubArgs& sub = AddSub(1);
+
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
+
+  EXPECT_TRUE(net_.iflushes.empty());
+  EXPECT_EQ(seqComm, &net_.recvComm);
+  EXPECT_EQ(sub.received, 1u);
+  EXPECT_EQ(sub.requests[0], nullptr);  // nothing left for the proxy to wait on
+  for (int i = 0; i < NCCL_STEPS; i++) {
+    EXPECT_EQ(seq[i], i == (int)(sub.base % NCCL_STEPS) ? 0x123456u : 0u) << "slot " << i;
+  }
+}
+
+TEST_F(NetRecvProgressMicrotest, Receive_GpuFlagWait_SkipsGroupedSubPastItsLastStep) {
+  NeedGdrFlush();
+  res_.maxRecvs = 2;
+  uint64_t flags[8] = {}, seqA[NCCL_STEPS] = {}, seqB[NCCL_STEPS] = {};
+  res_.gdrFlushFlag = flags;
+  res_.gdrFlushSeq = seqA;
+  ncclProxySubArgs& a = AddSub(1);
+  // Another connection on the same recv comm, with one more step than `a`.
+  otherRes_.push_back(res_);
+  otherRes_.back().gdrFlushSeq = seqB;
+  otherConns_.emplace_back();
+  otherConns_.back().transportResources = &otherRes_.back();
+  ncclProxySubArgs& b = AddSub(2);
+  b.connection = &otherConns_.back();
+  uint64_t next = 0;
+  ScopedHook flagSeq(g_ibGetGpuFlushFlagSeq, [&](void*) { return ++next; });
+  net_.testSizes = {64, 64};
+
+  for (int i = 0; i < 8 && b.received < 2; i++) ASSERT_EQ(Progress(), ncclSuccess);
+
+  ASSERT_EQ(b.received, 2u);
+  EXPECT_EQ(next, 2u);
+  for (int i = 0; i < NCCL_STEPS; i++) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(seqA[i], i == (int)(a.base % NCCL_STEPS) ? 1u : 0u);  // nothing for the step `a` does not have
+    uint64_t wantB = i == (int)(b.base % NCCL_STEPS) ? 1 : i == (int)((b.base + 1) % NCCL_STEPS) ? 2 : 0;
+    EXPECT_EQ(seqB[i], wantB);
+  }
+}
+
+TEST_F(NetRecvProgressMicrotest, Receive_GpuFlagWait_NothingToFlush_PublishesNothing) {
+  uint64_t flags[8] = {}, seq[NCCL_STEPS] = {};
+  ScopedHook flagSeq(g_ibGetGpuFlushFlagSeq, [](void*) { return uint64_t{0x123456}; });
+  for (bool emptyStep : {true, false}) {
+    SCOPED_TRACE(emptyStep ? "empty step" : "no flush needed");
+    args_ = std::make_unique<ncclProxyArgs>();
+    args_->state = ncclProxyOpReady;
+    args_->protocol = NCCL_PROTO_SIMPLE;
+    args_->sliceSteps = args_->chunkSteps = 1;
+    args_->collAPI = ncclFuncRecv;
+    args_->nPeers = args_->nChannels = 1;
+    res_.useGdr = ncclTopoGdrModeDefault;
+    res_.needFlush = emptyStep ? ncclTopoFlushAlways : ncclTopoFlushNone;
+    res_.gdrFlushFlag = flags;
+    res_.gdrFlushSeq = seq;
+    ncclProxySubArgs& sub = AddSub(1);
+
+    ASSERT_NO_FATAL_FAILURE(PostAndReceive(emptyStep ? 0 : 64));
+
+    EXPECT_EQ(sub.received, 1u);
+  }
+  EXPECT_EQ(flagSeq.calls, 0);
+  for (uint64_t v : seq) EXPECT_EQ(v, 0u);
+}
+
+TEST_F(NetRecvProgressMicrotest, Receive_GroupedSubWithoutFlagSeq_FlushesInstead) {
+  NeedGdrFlush();
+  res_.maxRecvs = 2;
+  uint64_t flags[8] = {}, seq[NCCL_STEPS] = {};
+  res_.gdrFlushFlag = flags;
+  res_.gdrFlushSeq = seq;
+  AddSub(1);
+  // Another connection on the same recv comm whose sequence was never allocated.
+  otherRes_.push_back(res_);
+  otherRes_.back().gdrFlushSeq = nullptr;
+  otherConns_.emplace_back();
+  otherConns_.back().transportResources = &otherRes_.back();
+  AddSub(1).connection = &otherConns_.back();
+
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
+
+  ASSERT_EQ(args_->subs[0].groupSize, 2);
+  EXPECT_EQ(net_.iflushes.size(), 1u);
+  for (uint64_t v : seq) EXPECT_EQ(v, 0u);
 }
 
 TEST_F(NetRecvProgressMicrotest, Receive_ZeroBytes_SkipsFlush) {
