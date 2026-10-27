@@ -165,9 +165,10 @@ typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
   hipErrorInvalidResourceHandle = 400,  ///< Resource handle (hipEvent_t or hipStream_t) invalid.
   hipErrorIllegalState = 401,  ///< Resource required is not in a valid state to perform operation.
   hipErrorLossyQuery = 402,    ///< This indicates that the queried object is not in a state where
-                               ///< the requested information can be returned without loss. On AMD
-                               ///< this is never produced: graph edges carry no edge data, so a
-                               ///< query can never discard any.
+                               ///< the requested information can be returned without loss. The
+                               ///< current AMD graph-capture implementation records only default
+                               ///< edge annotations, so no information can be discarded and this
+                               ///< is not produced on that path.
   hipErrorNotFound = 500,      ///< Not found
   hipErrorNotReady = 600,      ///< Indicates that asynchronous operations enqueued earlier are not
                            ///< ready.  This is not actually an error, but is used to distinguish

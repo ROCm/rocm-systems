@@ -747,6 +747,10 @@ typedef hipError_t (*t_hipStreamGetCaptureInfo_v3)(
     hipStream_t stream, hipStreamCaptureStatus* captureStatus_out, unsigned long long* id_out,
     hipGraph_t* graph_out, const hipGraphNode_t** dependencies_out,
     const hipGraphEdgeData** edgeData_out, size_t* numDependencies_out);
+typedef hipError_t (*t_hipStreamGetCaptureInfo_v3_spt)(
+    hipStream_t stream, hipStreamCaptureStatus* captureStatus_out, unsigned long long* id_out,
+    hipGraph_t* graph_out, const hipGraphNode_t** dependencies_out,
+    const hipGraphEdgeData** edgeData_out, size_t* numDependencies_out);
 typedef hipError_t (*t_hipStreamGetDevice)(hipStream_t stream, hipDevice_t* device);
 typedef hipError_t (*t_hipStreamGetFlags)(hipStream_t stream, unsigned int* flags);
 typedef hipError_t (*t_hipStreamGetId)(hipStream_t stream, unsigned long long* streamId);
@@ -1870,6 +1874,7 @@ struct HipDispatchTable {
 
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
   t_hipStreamGetCaptureInfo_v3 hipStreamGetCaptureInfo_v3_fn;
+  t_hipStreamGetCaptureInfo_v3_spt hipStreamGetCaptureInfo_v3_spt_fn;
 
   // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 40

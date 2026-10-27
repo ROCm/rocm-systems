@@ -433,11 +433,13 @@ namespace hip {
     }
     /// Returns last captured graph node
     const std::vector<hip::GraphNode*>& GetLastCapturedNodes() const { return lastCapturedNodes_; }
-    /// Refreshes and returns edge data describing the last captured nodes. AMD graph edges carry
-    /// no per-edge metadata, so every entry is zero-initialized - which is what CUDA defines as a
-    /// full serialization of two nodes with memory visibility. Filled on demand rather than kept
-    /// in lockstep with lastCapturedNodes_, so the capture path is untouched; the returned storage
-    /// has the same lifetime as GetLastCapturedNodes(), i.e. until the next op on this stream.
+    /// Refreshes and returns edge data describing the last captured nodes. The current graph
+    /// implementation records no per-edge metadata, so every entry is zero-initialized - what CUDA
+    /// defines as a full serialization of two nodes with memory visibility. Filled on demand
+    /// rather than kept in lockstep with lastCapturedNodes_, so the capture path is untouched; the
+    /// returned storage has the same lifetime as GetLastCapturedNodes(), i.e. until the next
+    /// operation on this stream. Not safe against concurrent queries on the same stream, matching
+    /// the existing thread-safety contract of the capture-state accessors.
     const std::vector<hipGraphEdgeData>& RefreshCapturedEdgeData() {
       capturedEdgeData_.assign(lastCapturedNodes_.size(), hipGraphEdgeData{});
       return capturedEdgeData_;

@@ -2313,45 +2313,25 @@ hipError_t hipStreamGetCaptureInfo_v3_common(hipStream_t stream,
                                              const hipGraphNode_t** dependencies_out,
                                              const hipGraphEdgeData** edgeData_out,
                                              size_t* numDependencies_out) {
-  if (captureStatus_out == nullptr) {
-    return hipErrorInvalidValue;
-  }
-  // Edge data is only meaningful alongside the nodes it annotates.
+  // Edge data only annotates the nodes returned alongside it.
   if (edgeData_out != nullptr && dependencies_out == nullptr) {
     return hipErrorInvalidValue;
   }
-  if (hip::Stream::StreamCaptureBlocking() == true &&
-      (stream == nullptr || stream == hipStreamLegacy)) {
-    return hipErrorStreamCaptureImplicit;
+  // v3 is v2 plus edge data; defer every shared check to v2 so the two cannot drift apart.
+  hipError_t status = hipStreamGetCaptureInfo_v2_common(stream, captureStatus_out, id_out,
+                                                        graph_out, dependencies_out,
+                                                        numDependencies_out);
+  if (status != hipSuccess || *captureStatus_out != hipStreamCaptureStatusActive) {
+    return status;
   }
-  if (stream == nullptr || stream == hipStreamLegacy) {
-    *captureStatus_out = hipStreamCaptureStatusNone;
-    return hipSuccess;
-  }
-  if (!hip::isValid(stream)) {
-    return hipErrorContextIsDestroyed;
-  }
-  hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
-  *captureStatus_out = s->GetCaptureStatus();
-  if (*captureStatus_out == hipStreamCaptureStatusActive) {
-    if (id_out != nullptr) {
-      *id_out = s->GetCaptureID();
-    }
-    if (graph_out != nullptr) {
-      *graph_out = reinterpret_cast<hipGraph_t>(s->GetCaptureGraph());
-    }
-    if (dependencies_out != nullptr) {
-      *dependencies_out = reinterpret_cast<hipGraphNode_t const*>(s->GetLastCapturedNodes().data());
-    }
-    // Note: hipErrorLossyQuery is unreachable here. CUDA raises it when a caller asks for
-    // dependencies without edge data while some edge carries non-zero data; AMD has no per-edge
-    // metadata at all, so there is never anything to discard.
-    if (edgeData_out != nullptr) {
-      *edgeData_out = s->RefreshCapturedEdgeData().data();
-    }
-    if (numDependencies_out != nullptr) {
-      *numDependencies_out = s->GetLastCapturedNodes().size();
-    }
+  if (edgeData_out != nullptr) {
+    // The graph-capture implementation records no per-edge metadata, so every edge is a default
+    // (zero-initialized) annotation: full completion of the upstream node with memory visibility.
+    // Because no non-default annotation can exist, nothing can be discarded by a query that omits
+    // edgeData_out, and hipErrorLossyQuery is therefore not returned on this path. If per-edge
+    // metadata is added later, that check belongs here.
+    hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+    *edgeData_out = s->RefreshCapturedEdgeData().data();
   }
   return hipSuccess;
 }
@@ -2363,6 +2343,20 @@ hipError_t hipStreamGetCaptureInfo_v3(hipStream_t stream, hipStreamCaptureStatus
                                       size_t* numDependencies_out) {
   HIP_INIT_API(hipStreamGetCaptureInfo_v3, stream, captureStatus_out, id_out, graph_out,
                dependencies_out, edgeData_out, numDependencies_out);
+  HIP_RETURN(hipStreamGetCaptureInfo_v3_common(stream, captureStatus_out, id_out, graph_out,
+                                               dependencies_out, edgeData_out,
+                                               numDependencies_out));
+}
+
+hipError_t hipStreamGetCaptureInfo_v3_spt(hipStream_t stream,
+                                          hipStreamCaptureStatus* captureStatus_out,
+                                          unsigned long long* id_out, hipGraph_t* graph_out,
+                                          const hipGraphNode_t** dependencies_out,
+                                          const hipGraphEdgeData** edgeData_out,
+                                          size_t* numDependencies_out) {
+  HIP_INIT_API(hipStreamGetCaptureInfo_v3, stream, captureStatus_out, id_out, graph_out,
+               dependencies_out, edgeData_out, numDependencies_out);
+  PER_THREAD_DEFAULT_STREAM(stream);
   HIP_RETURN(hipStreamGetCaptureInfo_v3_common(stream, captureStatus_out, id_out, graph_out,
                                                dependencies_out, edgeData_out,
                                                numDependencies_out));

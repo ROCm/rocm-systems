@@ -74,6 +74,8 @@ if(HIP_PLATFORM MATCHES "amd")
     hipStreamCaptureExtModuleLaunchKernel.cc
     hipStreamBeginCaptureToGraph.cc
     hipGetProcAddressGraphApis.cc
+    # AMD-only until hipother gains a hipStreamGetCaptureInfo_v3 forwarder to cuStreamGetCaptureInfo_v3.
+    hipStreamGetCaptureInfo_v3.cc
     # Below files are disabled in NVIDIA as PSDB builds are failing due to lower CUDA version.
     hipGraphExecNodeSetParams.cc
     hipGraphNodeSetParams.cc

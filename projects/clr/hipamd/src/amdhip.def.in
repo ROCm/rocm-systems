@@ -569,4 +569,5 @@ hipKernelNameRefByPtr
 hipModuleEnumerateFunctions
 hipDeviceFlushGPUDirectRDMAWrites
 hipStreamGetCaptureInfo_v3
+hipStreamGetCaptureInfo_v3_spt
 @HSA_EXPORTS@

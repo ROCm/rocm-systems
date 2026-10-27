@@ -66,6 +66,7 @@
 #define hipStreamIsCapturing __HIP_API_SPT(hipStreamIsCapturing)
 #define hipStreamGetCaptureInfo __HIP_API_SPT(hipStreamGetCaptureInfo)
 #define hipStreamGetCaptureInfo_v2 __HIP_API_SPT(hipStreamGetCaptureInfo_v2)
+#define hipStreamGetCaptureInfo_v3 __HIP_API_SPT(hipStreamGetCaptureInfo_v3)
 
 // Driver Entry Point API
 #define hipGetDriverEntryPoint __HIP_API_SPT(hipGetDriverEntryPoint)
@@ -178,6 +179,12 @@ hipError_t hipStreamGetCaptureInfo_v2_spt(hipStream_t stream,
                                           hipStreamCaptureStatus* captureStatus_out,
                                           unsigned long long* id_out, hipGraph_t* graph_out,
                                           const hipGraphNode_t** dependencies_out,
+                                          size_t* numDependencies_out);
+hipError_t hipStreamGetCaptureInfo_v3_spt(hipStream_t stream,
+                                          hipStreamCaptureStatus* captureStatus_out,
+                                          unsigned long long* id_out, hipGraph_t* graph_out,
+                                          const hipGraphNode_t** dependencies_out,
+                                          const hipGraphEdgeData** edgeData_out,
                                           size_t* numDependencies_out);
 hipError_t hipLaunchHostFunc_spt(hipStream_t stream, hipHostFn_t fn, void* userData);
 hipError_t hipGetDriverEntryPoint_spt(const char* symbol, void** funcPtr, unsigned long long flags,
