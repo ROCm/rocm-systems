@@ -8,6 +8,7 @@
 #include <gmock/gmock.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <vector>
 #include <memory>
@@ -960,5 +961,69 @@ TEST_F(AqlProfileV2ApiTest, SpmRepeatedCreateEmitsIdenticalCommandStreams)
     const auto second = create_command_streams();
     ASSERT_EQ(first.size(), 2u);
     EXPECT_EQ(second, first);
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmTcaProgramsOneDelayPerInstance)
+{
+    for(const char* gfxip : {"gfx942", "gfx950"})
+    {
+        aqlprofile_agent_info_v1_t info{};
+        info.agent_gfxip          = gfxip;
+        info.xcc_num              = 1;
+        info.se_num               = 4;
+        info.cu_num               = 64;
+        info.shader_arrays_per_se = 2;
+        info.domain               = 0;
+        info.location_id          = 0x1234;
+        auto agent                = aql_profile::RegisterAgent(&info);
+
+        aqlprofile_pmc_event_t event{};
+        event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCA;
+        event.event_id   = 1;
+
+        const auto* factory    = aql_profile::Pm4Factory::Create(agent);
+        const auto* block_info = factory->GetBlockInfo(&event);
+        ASSERT_EQ(block_info->instance_count, 2u) << gfxip;
+
+        std::vector<std::vector<uint8_t>> copies{};
+        aqlprofile_spm_profile_t          profile{};
+        profile.aql_agent   = agent;
+        profile.events      = &event;
+        profile.event_count = 1;
+        profile.alloc_cb    = memory_alloc_mock;
+        profile.dealloc_cb  = memory_dealloc_mock;
+        profile.memcpy_cb   = record_memory_copy;
+        profile.userdata    = &copies;
+
+        aqlprofile_handle_t          handle{};
+        aqlprofile_spm_buffer_desc_t desc{};
+        aqlprofile_spm_aql_packets_t packets{};
+        ASSERT_EQ(aqlprofile_spm_create_packets(&handle, &desc, &packets, profile, 0),
+                  HSA_STATUS_SUCCESS);
+        aqlprofile_spm_delete_packets(handle);
+        ASSERT_EQ(copies.size(), 2u);
+
+        const auto* ip_offsets = acquire_ip_offset_table(aql_profile::GetAgentInfo(agent));
+        pm4_builder::CmdBuffer delay_write{};
+        factory->GetCmdBuilder()->BuildWriteUConfigRegPacket(
+            &delay_write, (*ip_offsets)[block_info->delay_info.reg], 0);
+        ASSERT_EQ(delay_write.DwSize(), 3u);
+        const auto* delay_write_dwords = static_cast<const uint32_t*>(delay_write.Data());
+
+        const auto&           start_bytes = copies.front();
+        std::vector<uint32_t> start(start_bytes.size() / sizeof(uint32_t));
+        std::memcpy(start.data(), start_bytes.data(), start.size() * sizeof(uint32_t));
+
+        std::vector<uint32_t> written_delays{};
+        for(size_t i = 0; i + 2 < start.size(); ++i)
+        {
+            if(start[i] == delay_write_dwords[0] && start[i + 1] == delay_write_dwords[1])
+                written_delays.push_back(start[i + 2]);
+        }
+
+        const auto*                 delays = block_info->delay_info.val;
+        const std::vector<uint32_t> expected_delays(delays, delays + block_info->instance_count);
+        EXPECT_EQ(written_delays, expected_delays) << gfxip;
+    }
 }
 }  // namespace aql_profile_v2_tests
