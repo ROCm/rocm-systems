@@ -3,6 +3,8 @@
 
 """Unit tests for same-pass analyze provenance and binding."""
 
+import importlib
+
 import pandas as pd
 import pytest
 
@@ -15,6 +17,7 @@ from utils.metrics.pass_provenance import (
     bind_expression_dataframe,
     bind_metric_tables_to_passes,
     build_pass_layout,
+    evaluate_pass_scoped_builtins,
     extract_row_refs,
     natural_pass_sort_key,
     select_pass,
@@ -662,3 +665,75 @@ def test_missing_denominator_keeps_pooled_ratio() -> None:
 
     assert float(dfs[1].at["9.9.9", "Avg"]) == 50.0
     assert float(dfs[1].at["9.9.8", "Avg"]) == 100.0
+
+
+def test_pass_scoped_builtins_evaluate_per_xcd_first_in_pass_order() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1", "pmc_perf_10"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"GRBM_GUI_ACTIVE"}),
+            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE", "SQ_BUSY_CU_CYCLES"}),
+            "pmc_perf_10": frozenset({"GRBM_GUI_ACTIVE"}),
+        },
+        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
+    )
+    calls = []
+
+    def record(variable_key, eval_string, pass_locals):
+        calls.append((variable_key, sorted(pass_locals)))
+        return len(calls)
+
+    results = evaluate_pass_scoped_builtins(
+        layout,
+        {"pmc_perf_10", "pmc_perf_1"},
+        "MI300",
+        ["to_avg(ammolite__numActiveCUs__pass1)"],
+        record,
+        key_prefix="ammolite__",
+    )
+
+    assert calls == [
+        ("GRBM_GUI_ACTIVE_PER_XCD", []),
+        ("numActiveCUs", ["ammolite__GRBM_GUI_ACTIVE_PER_XCD__pass1"]),
+        ("GRBM_GUI_ACTIVE_PER_XCD", []),
+        ("numActiveCUs", ["ammolite__GRBM_GUI_ACTIVE_PER_XCD__pass2"]),
+    ]
+    assert results == {
+        "ammolite__GRBM_GUI_ACTIVE_PER_XCD__pass1": 1,
+        "ammolite__numActiveCUs__pass1": 2,
+        "ammolite__GRBM_GUI_ACTIVE_PER_XCD__pass2": 3,
+        "ammolite__numActiveCUs__pass2": 4,
+    }
+
+
+@pytest.mark.parametrize(
+    ("module_name", "call_evaluator"),
+    [
+        (
+            "utils.metrics.evaluation_pipeline",
+            lambda module, layout: module._calc_pass_scoped_builtins(
+                pd.DataFrame(), {}, "gfx942", layout, {"pmc_perf_0"}, ["x"]
+            ),
+        ),
+        (
+            "rocprof_compute_analyze.analysis_db",
+            lambda module, layout: module.db_analysis.calc_pass_scoped_builtin_sys_info(
+                pd.DataFrame(), {"gpu_arch": "gfx942"}, layout, {"pmc_perf_0"}, ["x"]
+            ),
+        ),
+    ],
+)
+def test_cli_and_db_builtins_share_one_evaluation(
+    monkeypatch, module_name, call_evaluator
+) -> None:
+    module = importlib.import_module(module_name)
+    seen = []
+
+    def record(layout, used_passes, gpu_series, expressions, evaluate, key_prefix):
+        seen.append((used_passes, gpu_series, expressions))
+        return {"marker": 1}
+
+    monkeypatch.setattr(module, "evaluate_pass_scoped_builtins", record)
+
+    assert call_evaluator(module, SPLIT_LAYOUT) == {"marker": 1}
+    assert seen == [({"pmc_perf_0"}, "MI300", ["x"])]

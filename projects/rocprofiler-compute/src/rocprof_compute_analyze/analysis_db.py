@@ -6,6 +6,7 @@ import json
 import re
 import warnings
 from collections import defaultdict
+from functools import partial
 from pathlib import Path
 from typing import Any, DefaultDict, Dict, List, NamedTuple, Optional, Tuple, Union
 
@@ -84,11 +85,10 @@ from utils.metrics.noise_clamper import (
     to_noise_clamp,
 )
 from utils.metrics.pass_provenance import (
-    PASS_VAR_SEP,
     PassLayout,
     bind_expression_dataframe,
-    ordered_scoped_builtin_bindings,
-    pass_scoped_builtins,
+    evaluate_pass_scoped_builtins,
+    strip_bound_builtin_suffixes,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import (
@@ -108,11 +108,6 @@ from utils.utils_counter_defs import (
 KernelKey = str
 CodeObjectKey = tuple[int, int]
 KernelSymbolKey = tuple[int, int, str]  # (pid, code_object_id, kernel_name)
-
-# Bound same-pass builtins look like ammolite__VAR__pass12; strip for discovery.
-_BOUND_AMMOLITE_PASS_RE = re.compile(
-    rf"(ammolite__[A-Za-z0-9_]+?){re.escape(PASS_VAR_SEP)}\d+"
-)
 
 # db_analysis.evaluate runs once per kernel, so the same expression problem is
 # hit again for every kernel. Collect the messages here and report each
@@ -232,6 +227,22 @@ def _roofline_point_values(
         used_passes=used_passes,
     )
     return dict(zip(expression_df["metric_id"], values))
+
+
+def _evaluate_pass_scoped_builtin(
+    pmc_df: pd.DataFrame,
+    sys_info: Dict[str, Any],
+    variable_key: str,
+    bound_expression: str,
+    pass_locals: Dict[str, object],
+) -> object:
+    return db_analysis.evaluate(
+        variable_key,
+        bound_expression,
+        pmc_df,
+        {**sys_info, **pass_locals},
+        parse=False,
+    )
 
 
 class MetricInfoRow(NamedTuple):
@@ -1207,13 +1218,6 @@ class db_analysis(OmniAnalyze_Base):
                 )
 
     @staticmethod
-    def _expressions_without_pass_suffixes(expressions: list[str]) -> list[str]:
-        """Strip ``ammolite__var__passN`` back to ``ammolite__var`` for discovery."""
-        return [
-            _BOUND_AMMOLITE_PASS_RE.sub(r"\1", expression) for expression in expressions
-        ]
-
-    @staticmethod
     def calc_pass_scoped_builtin_sys_info(
         pmc_df: pd.DataFrame,
         sys_info: dict,
@@ -1225,54 +1229,15 @@ class db_analysis(OmniAnalyze_Base):
 
         Keys are ``{var}__pass{ordinal}`` so that bound ``ammolite__var__passN``
         expressions resolve via ``sys_info["var__passN"]``.
-
-        expressions may already be pass-bound. Builtin names are recovered by
-        stripping __passN and then resolving formulas transitively, so a
-        dependent such as GRBM_GUI_ACTIVE_PER_XCD is computed when only
-        numActiveCUs is named. PER_XCD built-ins are evaluated before
-        dependents that reference them (same order as calc_builtin_vars).
         """
-        if not used_passes or not pass_layout.has_duplicates:
-            return {}
-
-        gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
-        scoped = pass_scoped_builtins(pass_layout, gpu_series)
-        if not scoped:
-            return {}
-
-        # extract_counters_and_variables resolves built-ins transitively.
-        # Strip __passN first; that walker does not.
-        plain_expressions = db_analysis._expressions_without_pass_suffixes(expressions)
-        _, expression_builtin_vars = extract_counters_and_variables(
-            "\n".join(plain_expressions),
-            gpu_series,
+        return evaluate_pass_scoped_builtins(
+            pass_layout,
+            used_passes,
+            mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"]),
+            expressions,
+            partial(_evaluate_pass_scoped_builtin, pmc_df, sys_info),
+            key_prefix="",
         )
-        build_in_vars = {
-            key: value
-            for key, value in get_build_in_vars(gpu_series).items()
-            if key in expression_builtin_vars and key in scoped
-        }
-        if not build_in_vars:
-            return {}
-
-        results: dict[str, Any] = {}
-        for pass_key in sorted(used_passes, key=lambda key: pass_layout.ordinal(key)):
-            ordinal = pass_layout.ordinal(pass_key)
-            pass_locals: dict[str, Any] = {}
-            for variable_key, bound in ordered_scoped_builtin_bindings(
-                build_in_vars, pass_key, pass_layout, scoped
-            ):
-                pass_locals[f"{variable_key}{PASS_VAR_SEP}{ordinal}"] = (
-                    db_analysis.evaluate(
-                        variable_key,
-                        bound,
-                        pmc_df,
-                        {**sys_info, **pass_locals},
-                        parse=False,
-                    )
-                )
-            results.update(pass_locals)
-        return results
 
     @staticmethod
     def calc_dataframe_expressions(
@@ -1297,7 +1262,7 @@ class db_analysis(OmniAnalyze_Base):
         db_analysis.calc_builtin_vars(
             pmc_df,
             sys_info,
-            db_analysis._expressions_without_pass_suffixes(expressions),
+            strip_bound_builtin_suffixes(expressions),
         )
         if pass_layout is not None and used_passes and pass_layout.has_duplicates:
             sys_info.update(
