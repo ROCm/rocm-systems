@@ -155,4 +155,10 @@ ncclResult_t ncclAddProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan
 
 ncclResult_t ncclGetRegBuff(struct ncclComm* comm, struct ncclTaskColl* info, int* regBuff);
 
+// Reports the Send/Recv protocol and channel count used by Direct AllToAll's
+// per-peer P2P tasks. This is intended for post-launch reporting: it consults
+// the connected P2P path to the rank's first non-self peer.
+ncclResult_t rcclGetAlltoAllP2pInfo(struct ncclComm* comm, size_t count, ncclDataType_t datatype, int* protocol,
+                                    int* nChannels);
+
 #endif // End include guard

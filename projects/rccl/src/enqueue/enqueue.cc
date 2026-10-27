@@ -1367,6 +1367,73 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   return -1;
 }
 
+// Direct AllToAll is decomposed into one Send and one Recv for every peer.
+// rccl-tests has one set of -A columns per benchmark row, so report the
+// outgoing task to the first non-self peer.  This is deliberately a
+// post-launch query: only then are the connector buffers available to tell
+// whether this particular P2P path can use LL or LL128.
+ncclResult_t rcclGetAlltoAllP2pInfo(struct ncclComm* comm, size_t count, ncclDataType_t datatype, int* protocol,
+                                    int* nChannels) {
+  if (comm == nullptr || protocol == nullptr || nChannels == nullptr) return ncclInvalidArgument;
+  *protocol = NCCL_PROTO_SIMPLE;
+  *nChannels = 0;
+  if (comm->nRanks <= 1) return ncclSuccess;
+
+  int peer = (comm->rank + 1) % comm->nRanks;
+  ssize_t bytes = count * ncclTypeSize(datatype);
+  int nChannelsMax = comm->p2pnChannelsPerPeer;
+  int nChannelsMin = nChannelsMax;
+  while (nChannelsMin * comm->nRanks > comm->p2pnChannels && nChannelsMin > 1) nChannelsMin /= 2;
+
+  // Keep this in sync with rcclP2pPolicyChannels().  AllToAll is the only
+  // caller of this reporter, and the policy is independent of the task's
+  // buffers/count after the collective type is known.
+  if (!ncclParamP2pDisable() && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110")) {
+    nChannelsMax = nChannelsMin = 1;
+  }
+  if (nChannelsMax <= 0) return ncclSuccess;
+
+  int round = 0;
+  while (round < comm->nRanks && comm->p2pSchedule[round].sendRank != peer) round++;
+  if (round == comm->nRanks) return ncclInternalError;
+  uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
+
+  bool hasLL = true;
+  bool hasLL128 = true;
+  int connIndex = comm->p2pNet && bytes > rcclParamP2pNetThreshold() ? NCCL_CONN_IDX_P2P_NET : 1;
+  for (int part = 0; part < nChannelsMax; part++) {
+    int channelId =
+      ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes, comm->p2pChannelShiftSize);
+    struct ncclConnector* conn = &comm->channels[channelId].peers[peer]->send[connIndex];
+    hasLL &= conn->conn.buffs[NCCL_PROTO_LL] != nullptr;
+    hasLL128 &= conn->conn.buffs[NCCL_PROTO_LL128] != nullptr;
+  }
+
+  ssize_t minPartSize = comm->nNodes > 1 ? comm->p2pChunkSize / 2 : comm->p2pChunkSize / 8;
+  ssize_t maxPartSize = comm->nNodes > 1 ? comm->p2pChunkSize : comm->p2pChunkSize * 32;
+  int selectedChannels = bytes == 0 ? 1 : std::min<int>(nChannelsMin, divUp(bytes, minPartSize));
+  ssize_t partSize = std::max(minPartSize, divUp(bytes, selectedChannels));
+  while (partSize > maxPartSize && selectedChannels <= nChannelsMax / 2) {
+    selectedChannels *= 2;
+    partSize = divUp(bytes, selectedChannels);
+  }
+
+  bool useLL128OptIn = false;
+#if defined(ENABLE_LL128)
+  bool p2pLl128Gfx9 = (comm->cudaArch == 940 || comm->cudaArch == 950) && comm->allocP2pNetLLBuffers;
+  bool p2pLl128Gfx1250 = comm->cudaArch == 1250 && ncclParamP2pLL128Enable() > 0;
+  useLL128OptIn = comm->topo->ll128Enabled && (p2pLl128Gfx9 || p2pLl128Gfx1250);
+#endif
+  if (useLL128OptIn && hasLL128 &&
+      (ncclParamP2pLL128Threshold() == 0 || bytes <= selectedChannels * ncclParamP2pLL128Threshold())) {
+    *protocol = NCCL_PROTO_LL128;
+  } else if (hasLL && bytes <= selectedChannels * ncclParamP2pLLThreshold()) {
+    *protocol = NCCL_PROTO_LL;
+  }
+  *nChannels = selectedChannels;
+  return ncclSuccess;
+}
+
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
 // match the corresponding values for this round of the p2p schedule (no -1's).

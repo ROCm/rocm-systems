@@ -2456,14 +2456,16 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   }
 
   // (7) Direct (p2p) fallback. AllToAll has no collective kernel: taskAppend()
-  // decomposes it into one Send and one Recv task per peer, which run Simple
-  // over the p2p channels -- the same shape rcclSelectAllGather reports as
-  // Direct, so it is named that way rather than Ring. The ring/tree tuning model
-  // has no AllToAll entry, so querying it would only invent an algorithm this
-  // collective never runs.
+  // decomposes it into one Send and one Recv task per peer. The ring/tree
+  // tuning model has no AllToAll entry, so querying it would only invent an
+  // algorithm this collective never runs. The post-run -A query instead reads
+  // the selected protocol and channels from a connected Send/Recv path.
   decision->algo = RCCL_DIRECT_ALLTOALL;
   decision->protocol = NCCL_PROTO_SIMPLE;
   decision->nMaxChannels = comm->p2pnChannels;
+  if (query) {
+    NCCLCHECK(rcclGetAlltoAllP2pInfo(comm, count, datatype, &decision->protocol, &decision->nMaxChannels));
+  }
   return ncclSuccess;
 }
 
