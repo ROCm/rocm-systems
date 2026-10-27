@@ -31,6 +31,8 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace rocprofiler
@@ -54,6 +56,18 @@ get_ids();
 
 uint64_t
 get_kernel_id(uint64_t kernel_object);
+
+// Where the arguments of the kernel named `symbol` (an HSA kernel symbol name) of the code object
+// load `code_object_id` end in its kernarg segment, i.e. the size of the arguments the kernel
+// itself declares, read from the amdhsa metadata while that code object was being registered. The
+// compiler appends its hidden argument block only to kernels that use it, so this boundary cannot
+// be derived from the segment size, and it belongs to a particular load: two loads may define
+// kernels of the same name with different argument lists. nullopt when the metadata was not
+// readable, does not know the kernel, or reports a segment other than `segment_size`.
+std::optional<size_t>
+get_kernarg_explicit_arg_size(uint64_t           code_object_id,
+                              const std::string& symbol,
+                              size_t             segment_size);
 
 void
 iterate_loaded_code_objects(code_object_iterator_t&& func);

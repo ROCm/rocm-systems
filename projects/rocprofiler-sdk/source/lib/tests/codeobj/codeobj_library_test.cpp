@@ -590,3 +590,98 @@ TEST(codeobj_library, memory_loaded_code_object_symbol_map)
     ASSERT_NE(symbol, symbol_map.end());
     EXPECT_EQ(symbol->second, "_Z18syncthreads_kernelPi");
 }
+
+// One pass over a code object's amdhsa metadata yields both maps: the symbol-to-device names the
+// loader already needed, and where each kernel's own arguments end inside its kernarg segment. The
+// The expected values are the metadata of the checked-in fixtures:
+// syncthreads_kernel(int* data) declares one 8-byte pointer and the compiler appends its hidden
+// argument block after it, so the segment is 264 bytes while the declared arguments occupy 8.
+TEST(codeobj_library, metadata_reports_kernarg_layouts)
+{
+    std::string   path    = codeobjhelper::get_data_file_path("syncthreads_kernel.bin");
+    ASSERT_FALSE(path.empty()) << "syncthreads_kernel.bin not found";
+    std::ifstream file(path, std::ios::binary);
+    using iterator_t = std::istreambuf_iterator<char>;
+    std::vector<char> objdata{iterator_t(file), iterator_t{}};
+    ASSERT_FALSE(objdata.empty());
+
+    auto metadata = rocprofiler::code_object::hip::get_metadata_from_executable(objdata.data(),
+                                                                                objdata.size());
+
+    ASSERT_FALSE(metadata.kernel_symbol_device_map.empty());
+    ASSERT_FALSE(metadata.kernarg_layout_map.empty());
+
+    // Kernels are reachable under both spellings the loader uses for them.
+    for(const auto* key : {"_Z18syncthreads_kernelPi.kd", "_Z18syncthreads_kernelPi"})
+    {
+        const auto layout = metadata.kernarg_layout_map.find(key);
+        ASSERT_NE(layout, metadata.kernarg_layout_map.end()) << key;
+        EXPECT_EQ(layout->second.segment_size, 264u) << key;
+        EXPECT_EQ(layout->second.explicit_size, 8u) << key;
+        // The boundary must never run past the segment it was read from.
+        EXPECT_LE(layout->second.explicit_size, layout->second.segment_size) << key;
+    }
+
+    EXPECT_EQ(metadata.kernel_symbol_device_map.at("_Z18syncthreads_kernelPi.kd"),
+              "_Z18syncthreads_kernelPi");
+}
+
+// A kernel whose argument list carries no hidden entries has no hidden block: its declared arguments
+// are the whole segment, and the layout says so instead of subtracting a fixed block.
+TEST(codeobj_library, metadata_reports_kernel_without_hidden_arguments)
+{
+    std::string   path    = codeobjhelper::get_data_file_path("smallkernel.bin");
+    ASSERT_FALSE(path.empty()) << "smallkernel.bin not found";
+    std::ifstream file(path, std::ios::binary);
+    using iterator_t = std::istreambuf_iterator<char>;
+    std::vector<char> objdata{iterator_t(file), iterator_t{}};
+    ASSERT_FALSE(objdata.empty());
+
+    auto metadata = rocprofiler::code_object::hip::get_metadata_from_executable(objdata.data(),
+                                                                                objdata.size());
+
+    const auto layout = metadata.kernarg_layout_map.find("_Z20reproducible_runtimel.kd");
+    ASSERT_NE(layout, metadata.kernarg_layout_map.end());
+    EXPECT_EQ(layout->second.segment_size, 8u);
+    EXPECT_EQ(layout->second.explicit_size, 8u);
+}
+
+// Bytes that are not a parsable code object yield no metadata at all. The caller treats a missing
+// layout as "boundary unknown" and scans conservatively, so an empty result is the safe answer; what
+// must not happen is a partial or invented one.
+TEST(codeobj_library, metadata_of_unparsable_bytes_is_empty)
+{
+    const auto objdata = std::vector<char>(512, static_cast<char>(0x7f));
+
+    auto metadata = rocprofiler::code_object::hip::get_metadata_from_executable(objdata.data(),
+                                                                                objdata.size());
+
+    EXPECT_TRUE(metadata.kernel_symbol_device_map.empty());
+    EXPECT_TRUE(metadata.kernarg_layout_map.empty());
+    EXPECT_EQ(metadata.kernarg_layout_map.count("_Z18syncthreads_kernelPi.kd"), 0u);
+}
+
+// A layout describes one kernel of one load. Asked about a different segment size -- another kernel
+// that happens to share the name, or the same source rebuilt with a different argument list -- it
+// declines rather than handing back a boundary it never measured.
+TEST(codeobj_library, kernarg_layout_answers_only_for_the_segment_it_describes)
+{
+    const auto layout = rocprofiler::code_object::hip::kernarg_layout_t{
+        /* explicit_size */ 32, /* segment_size */ 288};
+
+    EXPECT_EQ(layout.explicit_size_for(288).value_or(0), 32u);
+    EXPECT_FALSE(layout.explicit_size_for(296));
+    EXPECT_FALSE(layout.explicit_size_for(32));
+    EXPECT_FALSE(layout.explicit_size_for(0));
+}
+
+// Layouts are stored under the id of the load they came from, so a load that was never registered --
+// or one already unloaded, whose entries were dropped -- answers nothing and the caller scans the
+// whole segment.
+TEST(codeobj_library, unknown_load_has_no_kernarg_layout)
+{
+    constexpr auto never_loaded = static_cast<uint64_t>(-1);
+    const auto     symbol       = std::string{"_Z18syncthreads_kernelPi.kd"};
+
+    EXPECT_FALSE(rocprofiler::code_object::get_kernarg_explicit_arg_size(never_loaded, symbol, 264));
+}

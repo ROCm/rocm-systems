@@ -145,6 +145,31 @@ rocprofiler_add_integration_validate_test(
         "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     FIXTURES_REQUIRED rocprofv3-test-kernel-replay-iteration-range-data)
 
+# Kernels writing memory the snapshot does not track: host-pinned memory (the dispatch runs
+# once) and fine-grained device memory (saved and restored between passes). The app checks
+# that each launch applied its update exactly once.
+add_test(
+    NAME rocprofv3-test-kernel-replay-untracked-memory
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
+        --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --replay-mode kernel
+        --kernel-replay-beta-enabled --output-format json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-untracked-memory -o out --
+        $<TARGET_FILE:kernel-replay> 65536 1 untracked)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-untracked-memory
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay"
+               ENVIRONMENT
+               "${rocprofv3-generate-env}"
+               RESOURCE_LOCK
+               rocprofiler_kernel_replay
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 # One-pass baseline for performance scaling checks (same workload, single --pmc group).
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-kernel-replay-baseline-generate

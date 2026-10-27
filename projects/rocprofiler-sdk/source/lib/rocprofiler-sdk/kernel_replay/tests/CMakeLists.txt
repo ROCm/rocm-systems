@@ -106,6 +106,25 @@ rocprofiler_add_unit_test(
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+# Classification of kernel-argument words and save/restore of memory the snapshot does not
+# cover. Pointer lookups and copies are injected, so no GPU is needed.
+add_executable(kernel-replay-untracked-memory-test)
+target_sources(kernel-replay-untracked-memory-test PRIVATE untracked_memory.cpp)
+
+target_link_libraries(
+    kernel-replay-untracked-memory-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kernel-replay-untracked-memory-test
+    SOURCES untracked_memory.cpp
+    TIMEOUT 60
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 # Layout and C/C++ agreement checks for the public kernel-replay header. These are
 # properties of the header alone: no GPU, no HSA, and no link against the SDK, so the test
 # runs anywhere.
