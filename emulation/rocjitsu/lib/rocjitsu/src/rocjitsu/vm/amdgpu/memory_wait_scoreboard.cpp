@@ -716,16 +716,18 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
     xcnt_group(xevent->kind == WaitEventKind::Smem);
   const auto defs = std::ranges::find(classified.value(), TrackedRegisterSource::Defs,
                                       &ClassifiedEvent::registers);
+  // Legacy VMEM loads, LDS loads on every target, and qualified direct/parameter
+  // LDS loads each preserve writeback order within their class, so a load that
+  // overwrites a pending result of the same class needs no wait. Direct and
+  // parameter loads use EXP independently of exports and indexed LDS accesses.
   const auto model = waitcnt_model(wf.cu().arch());
   const bool legacy = model.succeeded() && uses_legacy_waitcnt(model.value());
   const bool has_defs = defs != classified.value().end();
-  // Legacy VMEM loads and qualified direct/parameter LDS loads each preserve
-  // writeback order within their class. The latter use EXP independently of
-  // exports and indexed LDS accesses.
-  const bool ordered_writeback = has_defs && ((legacy && defs->counter == WaitCounterKind::Load) ||
-                                              (has_ordered_lds_direct_writeback(wf.cu().arch()) &&
-                                               defs->counter == WaitCounterKind::Exp &&
-                                               defs->kind == WaitEventKind::LdsDirect));
+  const bool ordered_writeback =
+      has_defs &&
+      ((legacy && defs->counter == WaitCounterKind::Load) || defs->counter == WaitCounterKind::Ds ||
+       (has_ordered_lds_direct_writeback(wf.cu().arch()) && defs->counter == WaitCounterKind::Exp &&
+        defs->kind == WaitEventKind::LdsDirect));
   const uint16_t order =
       ordered_writeback ? ordered_write_order(*defs, wf.cu().arch()) : kUnordered;
   const bool vector_replay =
@@ -736,7 +738,7 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
       access(reg, ~uint64_t{0}, 0xf, true);
       continue;
     }
-    if (defs == classified.value().end())
+    if (!has_defs)
       continue;
     auto check = [&](RegisterRef range, uint8_t bytes) {
       if (vector_replay)

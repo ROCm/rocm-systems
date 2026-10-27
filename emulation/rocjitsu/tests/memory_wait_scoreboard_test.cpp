@@ -3,6 +3,10 @@
 
 #include "cdna5_sim_test_common.h"
 #include "mma_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
@@ -1941,6 +1945,111 @@ TEST(MemoryWaitExecutionTest, LegacyImageOverwritesCheckTheIncomingCompletionCla
         track(second, 2);
         const bool same_class = std::string_view(first) == second;
         EXPECT_EQ(cu->memory_wait_diagnostic_count(), wait || same_class ? 0u : 1u);
+      }
+}
+
+// ds_load_u16 v2, v0, or the D16_HI form that writes only the high half of v2.
+std::array<uint32_t, 2> ds_load_u16_words(rj_code_arch_t arch, bool high, bool gds) {
+  const uint8_t gds_bit = gds ? 1 : 0;
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::build_ds(high ? cdna1::kDsReadU16D16HiDs : cdna1::kDsReadU16Ds,
+                           {.gds = gds_bit, .vdst = 2});
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::build_ds(high ? cdna2::kDsReadU16D16HiDs : cdna2::kDsReadU16Ds,
+                           {.gds = gds_bit, .vdst = 2});
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::build_ds(high ? cdna3::kDsReadU16D16HiDs : cdna3::kDsReadU16Ds,
+                           {.gds = gds_bit, .vdst = 2});
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::build_ds(high ? cdna4::kDsReadU16D16HiDs : cdna4::kDsReadU16Ds,
+                           {.gds = gds_bit, .vdst = 2});
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::build_ds(high ? rdna1::kDsReadU16D16HiDs : rdna1::kDsReadU16Ds,
+                           {.gds = gds_bit, .vdst = 2});
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::build_ds(high ? rdna2::kDsReadU16D16HiDs : rdna2::kDsReadU16Ds,
+                           {.gds = gds_bit, .vdst = 2});
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::build_ds(high ? rdna3::kDsLoadU16D16HiDs : rdna3::kDsLoadU16Ds,
+                           {.gds = gds_bit, .vdst = 2});
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::build_ds(high ? rdna3_5::kDsLoadU16D16HiDs : rdna3_5::kDsLoadU16Ds,
+                             {.gds = gds_bit, .vdst = 2});
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    EXPECT_FALSE(gds) << "GFX12 has no GDS";
+    return rdna4::build_vds(high ? rdna4::kDsLoadU16D16HiVds : rdna4::kDsLoadU16Vds, {.vdst = 2});
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    EXPECT_FALSE(gds) << "GFX12 has no GDS";
+    return cdna5::build_vds(high ? cdna5::kDsLoadU16D16HiVds : cdna5::kDsLoadU16Vds, {.vdst = 2});
+  default:
+    ADD_FAILURE() << "no DS encoding for arch " << arch;
+    return {};
+  }
+}
+
+TEST(MemoryWaitExecutionTest, LdsLoadsOverwriteInIssueOrder) {
+  // Packing two 16-bit LDS values into one register needs no wait between the
+  // loads. GDS and VMEM results are not ordered with LDS.
+  enum class Sequence { LdsThenLds, LdsThenGlobal, GdsThenLds, LdsThenGds };
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
+                    ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                    ROCJITSU_CODE_ARCH_RDNA4})
+    for (auto sequence : {Sequence::LdsThenLds, Sequence::LdsThenGlobal, Sequence::GdsThenLds,
+                          Sequence::LdsThenGds})
+      for (bool wait : {false, true}) {
+        const bool gds_first = sequence == Sequence::GdsThenLds;
+        const bool gds_second = sequence == Sequence::LdsThenGds;
+        const bool has_gds = arch != ROCJITSU_CODE_ARCH_CDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5 &&
+                             arch != ROCJITSU_CODE_ARCH_RDNA4;
+        if ((gds_first || gds_second) && !has_gds)
+          continue;
+        SCOPED_TRACE(static_cast<unsigned>(arch));
+        SCOPED_TRACE(static_cast<int>(sequence));
+        SCOPED_TRACE(wait);
+        GpuMemory memory("lds_overwrite_memory");
+        L2Cache l2("lds_overwrite_l2");
+        ComputeUnitCore::Config config{};
+        config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 32;
+        config.lds_size_kb = 64;
+        auto cu = ComputeUnitCore::create("lds_overwrite_cu", config, &memory, &l2);
+        auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+        ASSERT_NE(wf, nullptr);
+        wf->set_exec(1);
+        auto decoder = Decoder::create(arch);
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        auto track = [&](Instruction &inst) {
+          state.check_instruction(inst, *wf);
+          cu->track_memory_wait(inst, *wf);
+          wf->pc += 8;
+        };
+        auto ds_load = [&](bool high, bool gds) -> std::unique_ptr<Instruction> {
+          util::StringDiagnostic error;
+          auto decoded =
+              decoder->decode_window(ds_load_u16_words(arch, high, gds), 0, error.emitter());
+          EXPECT_TRUE(decoded.succeeded()) << error.message();
+          return decoded.succeeded() ? std::move(decoded.value()) : nullptr;
+        };
+        auto first = ds_load(/*high=*/false, gds_first);
+        ASSERT_NE(first, nullptr);
+        track(*first);
+        if (wait)
+          state.wait(WaitCounterKind::Ds, 0);
+        if (sequence == Sequence::LdsThenGlobal) {
+          TestMemoryLoad global("global_load_dword", 2);
+          track(global);
+        } else {
+          auto second = ds_load(/*high=*/true, gds_second);
+          ASSERT_NE(second, nullptr);
+          track(*second);
+        }
+        const bool ordered = sequence == Sequence::LdsThenLds;
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), wait || ordered ? 0u : 1u);
       }
 }
 
