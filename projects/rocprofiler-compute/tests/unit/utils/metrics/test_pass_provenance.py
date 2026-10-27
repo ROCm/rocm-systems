@@ -29,6 +29,21 @@ ROCPD_COUNTER_HEADER = (
 )
 ROCPD_COUNTER_ROW_PREFIX = "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,"
 
+# TA_BUSY and TD_BUSY are collected once each, in different passes.
+SPLIT_LAYOUT = PassLayout(
+    pass_keys=("pmc_perf_0", "pmc_perf_1"),
+    counters_by_pass={
+        "pmc_perf_0": frozenset({"TA_BUSY", "GRBM_GUI_ACTIVE"}),
+        "pmc_perf_1": frozenset({"TD_BUSY", "GRBM_GUI_ACTIVE"}),
+    },
+    duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
+)
+UNIQUE_COUNTERS_EXPR = "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])"
+DUPLICATED_COUNTER_EXPR = (
+    "to_avg((raw_pmc_df['TA_BUSY'] + raw_pmc_df['TD_BUSY'])"
+    " / raw_pmc_df['GRBM_GUI_ACTIVE'])"
+)
+
 
 def _counter_row(
     dispatch_id: int,
@@ -423,38 +438,83 @@ def test_bind_expression_dataframe_groups_by_metric_id() -> None:
     assert expression_df.at[0, "value"].count("@pass:") == 1
 
 
-def test_bind_leaves_metric_unset_when_counters_span_passes() -> None:
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0", "pmc_perf_1"),
-        counters_by_pass={
-            "pmc_perf_0": frozenset({"TA_BUSY", "GRBM_GUI_ACTIVE"}),
-            "pmc_perf_1": frozenset({"TD_BUSY", "GRBM_GUI_ACTIVE"}),
-        },
-        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
-    )
+def test_bind_keeps_metric_without_duplicated_counters_across_passes() -> None:
     expression_df = pd.DataFrame({
         "metric_id": ["1.0.0"],
-        "value": ["to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])"],
+        "value": [UNIQUE_COUNTERS_EXPR],
     })
 
-    used = bind_expression_dataframe(expression_df, layout, "MI300")
+    used = bind_expression_dataframe(expression_df, SPLIT_LAYOUT, "MI300")
 
     assert used == set()
-    assert expression_df.at[0, "value"] == "None"
+    assert expression_df.at[0, "value"] == UNIQUE_COUNTERS_EXPR
     assert expression_df.attrs[METRIC_ROW_PASS_ATTR] == {}
 
-    metric_df = pd.DataFrame({
-        "Avg": ["to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])"],
-    })
+    metric_df = pd.DataFrame({"Avg": [UNIQUE_COUNTERS_EXPR]})
     table_used = bind_metric_tables_to_passes(
         {1: metric_df},
         {1: "metric_table"},
-        layout,
+        SPLIT_LAYOUT,
         "MI300",
         frozenset({"Avg"}),
     )
     assert table_used == set()
-    assert metric_df.at[0, "Avg"] == "None"
+    assert metric_df.at[0, "Avg"] == UNIQUE_COUNTERS_EXPR
+
+
+def test_bind_leaves_metric_unset_when_duplicated_counter_spans_passes() -> None:
+    expression_df = pd.DataFrame({
+        "metric_id": ["1.0.0", "1.0.0"],
+        "value": [DUPLICATED_COUNTER_EXPR, "None"],
+    })
+
+    used = bind_expression_dataframe(expression_df, SPLIT_LAYOUT, "MI300")
+
+    assert used == set()
+    assert expression_df["value"].tolist() == ["None", "None"]
+    assert expression_df.attrs[METRIC_ROW_PASS_ATTR] == {}
+
+    metric_df = pd.DataFrame({"Avg": [DUPLICATED_COUNTER_EXPR], "Min": ["None"]})
+    table_used = bind_metric_tables_to_passes(
+        {1: metric_df},
+        {1: "metric_table"},
+        SPLIT_LAYOUT,
+        "MI300",
+        frozenset({"Avg", "Min"}),
+    )
+    assert table_used == set()
+    assert metric_df.loc[0].tolist() == ["None", "None"]
+
+
+def test_both_binders_choose_the_pass_in_one_helper(monkeypatch) -> None:
+    seen = []
+
+    def record_choice(label, expressions, layout, gpu_series):
+        seen.append((label, tuple(expressions)))
+        return "pmc_perf_0", False
+
+    monkeypatch.setattr(
+        "utils.metrics.pass_provenance._choose_metric_pass", record_choice
+    )
+    expression_df = pd.DataFrame({
+        "metric_id": ["1.0.0"],
+        "value": [DUPLICATED_COUNTER_EXPR],
+    })
+    metric_df = pd.DataFrame({"Avg": [DUPLICATED_COUNTER_EXPR]})
+
+    bind_expression_dataframe(expression_df, SPLIT_LAYOUT, "MI300")
+    bind_metric_tables_to_passes(
+        {1: metric_df},
+        {1: "metric_table"},
+        SPLIT_LAYOUT,
+        "MI300",
+        frozenset({"Avg"}),
+    )
+
+    assert seen == [
+        ("metric 1.0.0", (DUPLICATED_COUNTER_EXPR,)),
+        ("row 0", (DUPLICATED_COUNTER_EXPR,)),
+    ]
 
 
 def test_eval_metric_uses_same_pass_for_duplicated_denominator() -> None:
