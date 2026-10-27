@@ -895,12 +895,15 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc                  # core floor, incl. proxy profiler hooks
+    fakes/net_ib_cast_common_fakes.cc    # netIbCast
+    fakes/net_ib_cast_connect_fakes.cc   # rcclCastNetP2pPolicy
     fakes/os_fakes.cc
     fakes/proxy_fakes.cc
     fakes/rccl_wrap_fakes.cc             # NET registration segment count / commit
     fakes/rocmwrap_fakes.cc
     fakes/topo_stubs.cc
-    fakes/transport_net_ib_fakes.cc      # ncclNetIb / netIbCast
+    fakes/transport_net_ib_fakes.cc      # ncclNetIb, ncclIbGidInfoQuery
+    fakes/transport_net_ib_p2p_policy_fakes.cc  # rcclNetP2pPolicy
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real parseStringList/matchIfList for NCCL_IB_HCA
@@ -2320,6 +2323,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastInit
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroNet
   SOURCES ${TEST_MICRO_NET_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # the net_ib_cast fakes' headers
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ${_MICRO_DMABUF_EXPORT_DEF}  # standalone: the cuMem DMA-BUF arms in-build gets from rccl

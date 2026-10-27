@@ -9,17 +9,31 @@
 #ifndef RCCL_TEST_HOST_TRANSPORT_NET_IB_FAKES_H_
 #define RCCL_TEST_HOST_TRANSPORT_NET_IB_FAKES_H_
 
+#include <cstdint>
 #include <functional>
 #include <utility>
 #include <vector>
 
 #include "nccl.h"
-#include "transport/net_ib/common.h"
+
+// Forward declarations only: init_fakes.h includes this header ahead of init-test.cc's free() redirect,
+// so it must not pull in net_ib/common.h (and through it alloc.h).
+struct ibv_context;
+struct ibv_port_attr;
+struct ncclIbGidInfo;
 
 // ncclIbGdrFlushFlagLocalSupport() returns this.
 extern bool g_ibGdrFlushFlagLocalSupport;
 // Every ncclIbSetGdrFlushFlag(netContext, enable) call, in order.
 extern std::vector<std::pair<void*, int>> g_ibSetGdrFlushFlagCalls;
+// Every ncclIbSetListenGdrFlushFlag(listenComm, enable) call, in order.
+extern std::vector<std::pair<void*, int>> g_ibSetListenGdrFlushFlagCalls;
+// ncclIbGetGpuFlushFlag(recvComm): NULL (the connection keeps the RDMA read flush) by default.
+extern std::function<uint64_t*(void*)> g_ibGetGpuFlushFlag;
+// ncclIbGetGpuFlushFlagSeq(recvComm): 0 by default.
+extern std::function<uint64_t(void*)> g_ibGetGpuFlushFlagSeq;
+// Every ncclIbSetGpuFlushFlagHint(recvComm, need) call, in order.
+extern std::vector<std::pair<void*, int>> g_ibSetGpuFlushFlagHintCalls;
 // ncclIbGidInfoQuery. Fails with ncclSystemError by default.
 extern std::function<ncclResult_t(struct ibv_context*, uint8_t, struct ibv_port_attr*, struct ncclIbGidInfo*)>
     g_ncclIbGidInfoQuery;
