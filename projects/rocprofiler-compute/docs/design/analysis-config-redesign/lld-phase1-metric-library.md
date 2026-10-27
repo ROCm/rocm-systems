@@ -527,13 +527,12 @@ compares the library with today's analysis configs:
 
 - **Formulas:** every equation a row shows (its `avg`, `value` or `expr` form; for a row
   with none of these, each of its table's value columns; without display-only `ROUND()`)
-  is a library formula;
-  every library formula is shown by some row. Display variants, listed by positional id
-  and label, show a formula in Bytes/s or write it differently; the validator checks
-  each one's equation against its metric.
+  is a library formula; every library formula is shown by some row. A row that divides
+  by the kernel time in seconds shows the GB/s formula scaled by 1e9, its peak too.
+  Display variants, listed by positional id and label, write a formula differently; the
+  validator checks each one's equation against its metric.
 - **Units:** every row's unit is its metric's unit, after unit aliases, except the rows
-  listed as unit variants. A display variant that shows a GB/s metric in seconds says
-  Bytes/s.
+  listed as unit variants. A row that shows a GB/s metric in seconds says Bytes/s.
 - **Counters:** the counters the whole library selects equal the counters
   `detect_counters()` selects with no filter (with `--membw-analysis` where the arch has
   panel 3000).

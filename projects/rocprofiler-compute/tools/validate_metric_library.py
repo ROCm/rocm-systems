@@ -116,18 +116,9 @@ NANOSECONDS = "/SUM(End_Timestamp-Start_Timestamp)"
 SECONDS_SCALE_UNITS = {"GB/s": "Bytes/s"}
 # TODO(AIPROFCOMP-820): remove with the row equation check when the old panel files are
 # deleted (see "Equivalence with analysis_configs" below).
-# Rows showing a metric in another display form (positional id -> label, metric id,
-# row equation). Without a row equation, the row shows the formula in Bytes/s (the
-# library keeps GB/s); with one, the row writes the formula differently.
-_CDNA_MEMORY_CHART_VARIANTS = {
-    "3.1.16": ("VL1_L2 Read BW", "vl1d.l2_rd_bw", None),
-    "3.1.17": ("VL1_L2 Write BW", "vl1d.l2_wr_bw", None),
-    "3.1.18": ("VL1_L2 Atomic BW", "vl1d.l2_atomic_bw", None),
-    "3.1.21": ("sL1D_L2 Read BW", "sl1d.l2_rd_bw", None),
-    "3.1.24": ("IL1_L2 Read BW", "l1i.l2_bw", None),
-    "3.1.26": ("L2-Fabric Read BW", "fabric.rd_bw", None),
-    "3.1.27": ("L2-Fabric Write and Atomic BW", "fabric.wr_atomic_bw", None),
-}
+# Rows that write a metric's formula differently (positional id -> label, metric id,
+# row equation). A row whose time is in seconds needs no entry: it shows a GB/s formula
+# scaled by 1e9, and its unit must say Bytes/s.
 # The roofline's L2 bandwidth at its bytes per request (64 up to gfx941, then 128).
 _ROOFLINE_L2_BW_EQUATION = (
     "{} * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
@@ -158,24 +149,15 @@ _PIPELINE_MFMA_UTIL = (
 )
 DISPLAY_VARIANTS = {
     "gfx908": {
-        **_CDNA_MEMORY_CHART_VARIANTS,
         "4.1.9": _ROOFLINE_L2_BW,
         "4.1.11": _ROOFLINE_LDS_BW,
     },
     "gfx90a": {
-        **_CDNA_MEMORY_CHART_VARIANTS,
         "4.1.9": _ROOFLINE_L2_BW,
         "4.1.11": _ROOFLINE_LDS_BW,
         "11.2.7": _PIPELINE_MFMA_UTIL,
     },
     "gfx940": {
-        **_CDNA_MEMORY_CHART_VARIANTS,
-        "3.1.28": ("Estimated HBM Read BW", "fabric.hbm_rd_bw_est", None),
-        "3.1.29": (
-            "Estimated HBM Write and Atomic BW",
-            "fabric.hbm_wr_atomic_bw_est",
-            None,
-        ),
         "4.1.10": _ROOFLINE_L2_BW,
         "4.1.12": _ROOFLINE_LDS_BW,
         "11.2.7": _PIPELINE_MFMA_UTIL,
@@ -189,23 +171,6 @@ DISPLAY_VARIANTS["gfx950"] = {
         "SUM(128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum "
         "+ 32 * TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)",
     ),
-    "3.1.19": ("VL1_L2 Read BW", "vl1d.l2_rd_bw", None),
-    "3.1.20": ("VL1_L2 Write BW", "vl1d.l2_wr_bw", None),
-    "3.1.21": ("VL1_L2 Atomic BW", "vl1d.l2_atomic_bw", None),
-    "3.1.24": ("sL1D_L2 Read BW", "sl1d.l2_rd_bw", None),
-    "3.1.27": ("IL1_L2 Read BW", "l1i.l2_bw", None),
-    "3.1.29": ("L2-Fabric Read BW", "fabric.rd_bw", None),
-    "3.1.30": ("L2-Fabric Write and Atomic BW", "fabric.wr_atomic_bw", None),
-    "3.1.31": ("HBM Read BW", "fabric.hbm_rd_bw", None),
-    "3.1.32": ("HBM Write BW", "fabric.hbm_wr_bw", None),
-    "3.1.33": ("HBM Atomic BW", "fabric.hbm_atomic_bw", None),
-    "3.1.34": ("HBM Write and Atomic BW", "fabric.hbm_wr_atomic_bw", None),
-    "3.1.35": ("xGMI Read BW", "fabric.xgmi_rd_bw", None),
-    "3.1.36": ("xGMI Write BW", "fabric.xgmi_wr_bw", None),
-    "3.1.37": ("xGMI Atomic BW", "fabric.xgmi_atomic_bw", None),
-    "3.1.38": ("PCIe Read BW", "fabric.pcie_rd_bw", None),
-    "3.1.39": ("PCIe Write BW", "fabric.pcie_wr_bw", None),
-    "3.1.40": ("PCIe Atomic BW", "fabric.pcie_atomic_bw", None),
     "4.1.12": _ROOFLINE_L2_BW_128B,
     "4.1.14": _ROOFLINE_LDS_BW,
     "11.2.9": _PIPELINE_MFMA_UTIL,
@@ -630,7 +595,7 @@ def _row_metric_id(
     named_id = names.get(row.label.casefold())
     if row.equation is None:
         return named_id
-    metric_id = formulas.get(row.equation)
+    metric_id = formulas.get(_gb_per_second(row))
     if metric_id is not None and SHARED_FORMULA_IDS.get(named_id) == metric_id:
         return named_id
     return metric_id
@@ -662,12 +627,7 @@ def _variant_errors(
         return [f"[{arch}] {row.legacy_id} is now {row.label!r}; update variants"]
     if metric_id not in library.metrics:
         return [f"[{arch}] {row.legacy_id} {label}: no metric {metric_id}"]
-    if row_equation:
-        expected = _canonical(row_equation)
-    else:
-        formula = _canonical(library.metrics[metric_id]["formula"])
-        expected = formula.replace(NANOSECONDS, SECONDS_SCALE)
-    if row.equation == expected:
+    if row.equation == _canonical(row_equation):
         return []
     return [f"[{arch}] {row.legacy_id} {label}: not the listed form of {metric_id}"]
 
@@ -711,7 +671,6 @@ def _unit_errors(
     library: MetricLibrary,
 ) -> list[str]:
     unit_variants = UNIT_VARIANTS.get(arch, {})
-    display_variants = DISPLAY_VARIANTS.get(arch, {})
     errors = []
     for row, metric_id in zip(rows, metric_ids):
         if row.unit is None or metric_id is None:
@@ -719,8 +678,7 @@ def _unit_errors(
         label, unit = unit_variants.get(
             row.legacy_id, (row.label, library.metrics[metric_id]["unit"])
         )
-        variant = display_variants.get(row.legacy_id)
-        if variant is not None and variant[2] is None:
+        if _in_seconds(row):
             unit = SECONDS_SCALE_UNITS.get(unit, unit)
         if row.label != label:
             errors.append(
@@ -748,18 +706,20 @@ def _peak_errors(
     """
     benchmarked = bool(_arch_ceilings(arch))
     errors = []
-    shown_peaks = defaultdict(set)
+    shown_fields = defaultdict(set)
     for row, metric_id in zip(rows, metric_ids):
         if row.peak is None or metric_id is None:
             continue
         if not benchmarked and EMPIRICAL_PEAK_RE.search(row.peak):
             continue
-        shown_peaks[metric_id].add(row.peak)
         metric = library.metrics[metric_id]
-        if row.peak not in (
-            _canonical(metric.get("peak")),
-            _canonical(metric.get("peak_empirical")),
-        ):
+        fields = [
+            field
+            for field in ("peak", "peak_empirical")
+            if field in metric and row.peak == _canonical(metric[field])
+        ]
+        shown_fields[metric_id].update(fields)
+        if not fields:
             errors.append(
                 f"[{arch}] {row.legacy_id} {row.label}: peak {row.peak} is neither the "
                 f"'peak' nor the 'peak_empirical' of {metric_id}"
@@ -768,9 +728,21 @@ def _peak_errors(
         f"[{arch}] {metric_id}: no analysis config row shows its '{field}'"
         for metric_id, metric in library.metrics.items()
         for field in ("peak", "peak_empirical")
-        if field in metric and _canonical(metric[field]) not in shown_peaks[metric_id]
+        if field in metric and field not in shown_fields[metric_id]
     )
     return errors
+
+
+def _gb_per_second(row: "_Row") -> Optional[str]:
+    """Return a row's equation, with time in seconds turned into nanoseconds (GB/s)."""
+    if _in_seconds(row):
+        return row.equation[: -len(SECONDS_SCALE)] + NANOSECONDS
+    return row.equation
+
+
+def _in_seconds(row: "_Row") -> bool:
+    """Return whether a row divides by the kernel time in seconds (a Bytes/s row)."""
+    return row.equation is not None and row.equation.endswith(SECONDS_SCALE)
 
 
 def _counter_errors(arch: str, library: MetricLibrary, analysis_dir: Path) -> list[str]:
