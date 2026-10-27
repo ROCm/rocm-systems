@@ -115,6 +115,9 @@ constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
  * @brief Dispatch time for a caller's completion signal whose kernel completed on a
  * rocprofiler-owned signal. Until the completion handler stores the time, it is read from the
  * rocprofiler-owned signal, which is complete once the trailing barrier signals the caller.
+ *
+ * Batched graph submissions may release or reuse the profiler-owned signal before the caller
+ * queries the timing, so the completion handler caches the result before that signal is returned.
  */
 struct dispatch_time_entry
 {
@@ -134,6 +137,8 @@ get_dispatch_time_map()
     return _v;
 }
 
+// Caller signals can be recycled while an earlier batch is finishing; discard stale timing
+// state so a reused handle cannot resolve to the previous dispatch.
 void
 forget_dispatch_time(hsa_signal_t _signal)
 {
@@ -196,7 +201,8 @@ get_dispatch_time_impl(hsa_agent_t                        _agent,
             const auto& _entry = itr->second;
             if(_entry.pending_signal.handle != 0)
             {
-                // the rocprofiler-owned signal may already be released
+                // During finalization the pooled signal may already be released; never query a
+                // stale handle.
                 if(registration::get_fini_status() > 0) return;
                 _status = get_amd_ext_table()->hsa_amd_profiling_get_dispatch_time_fn(
                     _entry.agent, _entry.pending_signal, _time);
@@ -215,6 +221,7 @@ get_dispatch_time_impl(hsa_agent_t                        _agent,
         _agent, _signal, _time);
 }
 
+// Remove timing state before forwarding destruction because signal handles may be recycled.
 hsa_status_t
 signal_destroy_impl(hsa_signal_t _signal)
 {
@@ -1145,6 +1152,7 @@ WriteInterceptor(const void* packets,
                 transformed_packets.emplace_back(barrier);
 
                 _packet_data.orig_completion_signal = original_completion_signal;
+                // The barrier restores the caller's signal; retain its mapping until timing is cached.
                 track_dispatch_time(original_completion_signal,
                                     kernel_packet.kernel_dispatch.completion_signal,
                                     queue.get_agent().get_hsa_agent());

@@ -64,6 +64,7 @@ get_dispatch_time(hsa_agent_t             _hsa_agent,
     }
     else
     {
+        // A missing timing sample is recoverable; preserve the error status without aborting.
         ROCP_ERROR << fmt::format(
             "hsa_amd_profiling_get_dispatch_time for kernel id={} on agent-{} returned status={} "
             ":: {}",
