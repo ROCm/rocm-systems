@@ -1163,12 +1163,18 @@ public:
   /// @details This deliberately bypasses plugin observation and is reserved
   /// for VM storage operations. Instruction code receives
   /// `InstructionComputeUnitView`, which does not expose this API.
+  /// @pre @p reg_idx identifies an existing physical VGPR and @p lane is less
+  /// than vgpr_storage_lane_count().
+  /// @see read_vgpr_storage_bounded() for reads with bounds checks.
   uint32_t read_vgpr_storage(uint32_t reg_idx, uint32_t lane) const {
     return reinterpret_cast<const uint32_t *>(raw_vgpr_data(reg_idx))[lane];
   }
 
   /// @brief Read physical VGPR storage without producing an observation callback.
+  /// @details Suitable for debugger and VM inspection; checks physical-register
+  /// and lane bounds before reading storage.
   /// @returns Lane value, or zero outside the physical register or lane bounds.
+  /// @see read_vgpr_storage() for unchecked reads requiring valid indices.
   virtual uint32_t read_vgpr_storage_bounded(uint32_t reg_idx, uint32_t lane) const = 0;
 
   /// @brief Number of physical VGPR registers in one allocation block.
