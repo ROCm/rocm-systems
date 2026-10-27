@@ -301,9 +301,16 @@ that line:
        ``<kernel folder>/<ISA file>:<instruction line numbers>``, with one ISA
        file per line of the cell.
 
-An instruction from inlined code counts in full toward every line of its inline
-stack. For example, an instruction that reads ``blockDim.x`` counts toward both
-the HIP header lines that implement it and the application line that reads it.
+An instruction from inlined code counts in full toward every source line of its
+inline stack. For example, an instruction that reads ``blockDim.x`` counts toward
+both the HIP header lines that implement it and the application line that reads
+it.
+
+When the compiler gives some instructions of a file no line number, shown as
+``<file>:?`` in the per-kernel ISA files, the first row of that file is
+``Unattributable instructions``. Its ``Total count`` is the number of samples on
+those instructions, and its ``ISA references`` lists them. Its other columns are
+empty. See the :ref:`note <pc-sampling-note>` for why the compiler does this.
 
 .. _pc-sampling-note:
 

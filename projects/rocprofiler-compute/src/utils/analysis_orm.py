@@ -941,7 +941,9 @@ class Database:
         """Select every source line of one workload's captured source files.
 
         Each source line has its sample state and the uuids of the instructions
-        whose inline stack includes that source line.
+        whose inline stack includes that source line. This includes the "?"
+        source line of a file, which holds the instructions that the compiler
+        gave no line number in that file.
         """
         return (
             select(
@@ -989,12 +991,11 @@ class Database:
             .where(SourceFile.workload_id == workload_id)
             # Only captured files are exported.
             .where(SourceFile.md5_checksum.is_not(None))
-            # Skip "?" frames, which are stored without a line number.
-            .where(SourceLine.line_number.is_not(None))
             # The stall-reason and instruction joins add rows, so group them
             # back into one row per source line.
             .group_by(SourceLine.source_line_uuid)
-            .order_by(SourceFile.file_path, SourceLine.line_number)
+            # The "?" source line of a file has no line number, so it comes first.
+            .order_by(SourceFile.file_path, SourceLine.line_number.nulls_first())
         )
 
     @staticmethod
