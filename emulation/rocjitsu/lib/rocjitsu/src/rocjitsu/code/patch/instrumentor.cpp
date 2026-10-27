@@ -23,10 +23,11 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
-#include "util/except.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstring>
 #include <optional>
 #include <span>
@@ -180,7 +181,10 @@ bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_CDNA5:
     return false;
   default:
-    throw util::UnimplementedInst("unified VGPR allocation for target architecture");
+    // ensure_blocks_built rejects RISC-V and requires a registered decoder
+    // before patching; every registered AMDGPU architecture is handled above.
+    assert(false && "unified VGPR allocation for an unadmitted architecture");
+    return false;
   }
 }
 
