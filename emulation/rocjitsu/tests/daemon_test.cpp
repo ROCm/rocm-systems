@@ -408,13 +408,12 @@ TEST_F(DaemonTest, HipVectorAdd) {
 
 #ifdef RJ_HAS_INSTRUCTION_FAILURE_TEST
 constexpr char kDaemonDecodeDiagnostic[] =
-    "CU .*could not decode.*pc=.*pid=.*qid=.*dispatch=.*0xbfff0000";
+    rocjitsu::test::kDecodeFailureDiagnostic;
 
 TEST_F(DaemonTest, HipUnsupportedInstructionExitsWithFailure) {
   expected_daemon_exit_ = EXIT_FAILURE;
   expected_daemon_diagnostic_ =
-      "CU .*could not execute s_rfe_restore_b64.*pc=.*pid=.*qid=.*dispatch=.*unimplemented "
-      "instruction";
+      rocjitsu::test::kUnimplementedInstructionDiagnostic;
   auto r = run_hip_test(hip_instruction_failure_bin(),
                         "HipDaemonInstructionFailureTest.UnsupportedInstructionExitsWithFailure");
   EXPECT_EQ(r.exit_code, 0) << r.output;

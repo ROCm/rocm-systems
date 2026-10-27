@@ -64,8 +64,7 @@ TEST(SanitizerDiagnosticDeathTest, RejectsAssertionAbortAfterExpectedDiagnostic)
           "(pid=0 qid=1 dispatch=1 wg=0): unimplemented instruction\n"
           "test: test.cpp:42: void fail(): Assertion `false' failed.\n",
           true,
-          "CU .*could not execute s_rfe_restore_b64.*pc=.*pid=.*qid=.*dispatch=.*unimplemented "
-          "instruction"),
+          rocjitsu::test::kUnimplementedInstructionDiagnostic),
       "without sanitizer or assertion diagnostics");
 }
 
