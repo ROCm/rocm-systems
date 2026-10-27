@@ -325,6 +325,12 @@ int main(int argc, char **argv) {
         for (const auto &input_file_path : input_file_paths) {
             std::unique_ptr<VideoDemuxer> demuxer(new VideoDemuxer(input_file_path.c_str()));
             std::string input_file_name = input_file_path.substr(input_file_path.find_last_of("/\\") + 1);
+            // VideoDemuxer doesn't throw when it can't open the file or find a video stream; it leaves the bit depth at 0
+            // and the codec ID unset.
+            if (demuxer->GetBitDepth() == 0) {
+                std::cerr << "Error: Failed to open " << input_file_name << " as a video file" << std::endl;
+                return 1;
+            }
             bool b_supported = true;
             for (int dev_id : dec_device_ids) {
                 RocdecDecodeCaps decode_caps = {};
