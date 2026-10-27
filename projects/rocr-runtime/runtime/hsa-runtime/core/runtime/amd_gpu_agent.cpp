@@ -3297,14 +3297,20 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
     return;
   }
 
-  // Translate end first to reduce clock measurement jitter impact on duration.
-  time.end = TranslateTime(end);
-  time.start = TranslateTime(start);
-
-  // Barrier packets on some hardware (e.g. gfx1171) may write start_ts > end_ts.
-  // This is a hardware bug — report zero duration rather than negative.
-  if (time.start > time.end) {
-    time.start = time.end;
+  // Barrier packets on some hardware (e.g. gfx1171) produce unreliable
+  // timestamps — swapped or non-monotonic across signals.  Detect by small
+  // tick delta (< 8192) or swapped start/end, and translate the max tick once
+  // for both start and end to ensure cross-signal monotonicity.
+  uint64_t delta = (start > end) ? (start - end) : (end - start);
+  if (start > end || delta < 8192) {
+    uint64_t max_tick = std::max(start, end);
+    uint64_t translated = TranslateTime(max_tick);
+    time.start = translated;
+    time.end = translated;
+  } else {
+    // Normal dispatch path: translate end first to reduce jitter impact.
+    time.end = TranslateTime(end);
+    time.start = TranslateTime(start);
   }
 }
 
@@ -3320,15 +3326,18 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
     return;
   }
 
-  // Translate end first to reduce clock measurement jitter impact on duration.
-  time.end = TranslateTime(end);
-  time.start = TranslateTime(start);
-
-  // Some hardware (e.g. gfx1171) may write start_ts > end_ts.
-  // This is a hardware bug — report zero duration rather than negative.
-  if (time.start > time.end) {
-    time.start = time.end;
+  // Apply same barrier workaround as dispatch overload.
+  uint64_t adelta = (start > end) ? (start - end) : (end - start);
+  if (start > end || adelta < 8192) {
+    uint64_t max_tick = std::max(start, end);
+    uint64_t translated = TranslateTime(max_tick);
+    time.start = translated;
+    time.end = translated;
+  } else {
+    time.end = TranslateTime(end);
+    time.start = TranslateTime(start);
   }
+
 }
 
 /*
