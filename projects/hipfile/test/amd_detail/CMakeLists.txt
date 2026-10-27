@@ -112,3 +112,38 @@ hipfile_add_test_executable(
 )
 
 target_link_libraries(hipfileread-cpu-visibility PRIVATE Threads::Threads)
+
+# CI runs every stress test, so keep the iteration and watcher counts small
+# here. The top of hipfileread-cpu-visibility.cpp describes a soak test.
+set(_hipfileread_cpu_visibility_args --directory ${HIPFILE_CAPABLE_DIR} --iterations 100 --watchers 8)
+set(_hipfile_fastpath_gate_args)
+if(HIPFILE_ALLOW_SKIP_FASTPATH_TESTS)
+    set(_hipfile_fastpath_gate_args --allow-skip-fastpath)
+endif()
+
+add_test(
+    NAME hipfileread_cpu_visibility_fastpath_test
+    COMMAND $<TARGET_FILE:hipfile-fastpath-gate> ${_hipfile_fastpath_gate_args} ${HIPFILE_CAPABLE_DIR}
+            -- $<TARGET_FILE:hipfileread-cpu-visibility> ${_hipfileread_cpu_visibility_args}
+)
+add_test(
+    NAME hipfileread_cpu_visibility_fallback_test
+    COMMAND $<TARGET_FILE:hipfileread-cpu-visibility> ${_hipfileread_cpu_visibility_args}
+)
+set_tests_properties(
+    hipfileread_cpu_visibility_fastpath_test hipfileread_cpu_visibility_fallback_test
+    PROPERTIES LABELS "stress;internal"
+)
+# Report these runs as skipped rather than failed: the program's run on a GPU
+# whose VRAM the CPU can't map, and, only with --allow-skip-fastpath,
+# hipfile-fastpath-gate's report that fastpath is unavailable. Keep the markers
+# synchronized with the messages in hipfileread-cpu-visibility.cpp and
+# hipfile-fastpath-gate.cpp.
+set_tests_properties(hipfileread_cpu_visibility_fastpath_test PROPERTIES
+    ENVIRONMENT "HIPFILE_ALLOW_COMPAT_MODE=false"
+    SKIP_REGULAR_EXPRESSION "VRAM is not CPU-accessible;Fast path is not available"
+)
+set_tests_properties(hipfileread_cpu_visibility_fallback_test PROPERTIES
+    ENVIRONMENT "HIPFILE_FORCE_COMPAT_MODE=true"
+    SKIP_REGULAR_EXPRESSION "VRAM is not CPU-accessible"
+)
