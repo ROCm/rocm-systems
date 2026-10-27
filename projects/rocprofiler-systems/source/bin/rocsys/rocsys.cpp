@@ -6,6 +6,9 @@
 #include "delivery.hpp"
 #include "diagnostic.hpp"
 #include "launcher.hpp"
+#include "options/parser.hpp"
+#include "options/table.hpp"
+#include "options/validator.hpp"
 
 #include <timemory/utility/argparse.hpp>
 
@@ -56,18 +59,49 @@ copy_argv(int argc, char** argv)
     return tokens;
 }
 
+[[nodiscard]] rocprofsys::rocsys::result<rocprofsys::rocsys::launch_plan>
+prepare_launch(const rocprofsys::cli::dispatch_result& routed,
+               const std::vector<std::string>&         argv)
+{
+    if(routed.spec == nullptr || argv.empty())
+    {
+        return rocprofsys::rocsys::diagnostic{ .error = "missing command arguments" };
+    }
+    const rocprofsys::rocsys::options::context ctx{};
+    auto                                       parsed =
+        rocprofsys::rocsys::options::parse(rocprofsys::rocsys::options::parse_request{
+            .verb             = routed.spec,
+            .strip_subcommand = routed.strip_subcommand,
+            .argv             = argv,
+            .options          = rocprofsys::rocsys::options::option_table(),
+            .ctx              = &ctx,
+        });
+    if(!parsed)
+    {
+        return parsed.error();
+    }
+    auto checked = rocprofsys::rocsys::options::validate(std::move(parsed.value()));
+    if(!checked)
+    {
+        return checked.error();
+    }
+    auto env = rocprofsys::rocsys::options::resolve(checked.value(), ctx);
+    if(!env)
+    {
+        return env.error();
+    }
+    // The verb is already removed. Delivery sees argv0, legacy flags, then the app.
+    return rocprofsys::rocsys::plan(
+        *routed.spec, false,
+        rocprofsys::rocsys::options::command_argv(argv.front(), checked.value()),
+        env.value());
+}
+
 [[nodiscard]] int
-launch_command(const rocprofsys::cli::dispatch_result& parsed,
+launch_command(const rocprofsys::cli::dispatch_result& routed,
                const std::vector<std::string>& argv, std::string_view program)
 {
-    if(parsed.spec == nullptr)
-    {
-        return EXIT_FAILURE;
-    }
-    // No rocsys options yet, so the env plan is empty. Options append ops in a later
-    // change.
-    const auto planned =
-        rocprofsys::rocsys::plan(*parsed.spec, parsed.strip_subcommand, argv, {});
+    const auto planned = prepare_launch(routed, argv);
     if(!planned)
     {
         print_diagnostic(std::cerr, planned.error());

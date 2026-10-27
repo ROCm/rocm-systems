@@ -16,6 +16,9 @@ add_library(
     cli_dispatcher.cpp
     delivery.cpp
     default_system.cpp
+    options/parser.cpp
+    options/table.cpp
+    options/validator.cpp
 )
 
 target_include_directories(
