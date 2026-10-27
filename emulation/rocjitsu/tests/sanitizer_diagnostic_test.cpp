@@ -58,13 +58,11 @@ TEST(NativeFailureDiagnosticTest, DoesNotCombineSeparateLinesIntoAnAssertionRepo
 
 TEST(SanitizerDiagnosticDeathTest, RejectsAssertionAbortAfterExpectedDiagnostic) {
   EXPECT_NONFATAL_FAILURE(
-      expect_diagnosed_exit(
-          "rocjitsu: daemon connection lost\n"
-          "CU cu0: wf0 could not execute s_rfe_restore_b64 at pc=0x1040 "
-          "(pid=0 qid=1 dispatch=1 wg=0): unimplemented instruction\n"
-          "test: test.cpp:42: void fail(): Assertion `false' failed.\n",
-          true,
-          rocjitsu::test::kUnimplementedInstructionDiagnostic),
+      expect_diagnosed_exit("rocjitsu: daemon connection lost\n"
+                            "CU cu0: wf0 could not execute s_rfe_restore_b64 at pc=0x1040 "
+                            "(pid=0 qid=1 dispatch=1 wg=0): unimplemented instruction\n"
+                            "test: test.cpp:42: void fail(): Assertion `false' failed.\n",
+                            true, rocjitsu::test::kUnimplementedInstructionDiagnostic),
       "without sanitizer or assertion diagnostics");
 }
 
