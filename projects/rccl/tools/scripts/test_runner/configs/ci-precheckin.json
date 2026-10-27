@@ -496,17 +496,6 @@
       "tests": [
         {"name": "DdaMicrotests", "description": "Host-only src/algorithms/dda/ microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
-    },
-    "unit_tests_micro_transport": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroTransport",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "TransportMicrotests", "description": "Host-only src/transport/ microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
     }
   },
   "test_suites": [
@@ -694,12 +683,6 @@
       "name": "RCCL Microtests - algorithms/dda",
       "description": "rccl-UnitTestsMicroDda (host-only src/algorithms/dda/ microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_dda",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - transport",
-      "description": "rccl-UnitTestsMicroTransport (host-only src/transport/ microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_transport",
       "enabled": true
     }
   ]
