@@ -31,15 +31,14 @@ namespace {
 // per-cgroup memory.current / memory.max / memory.pressure instead of the
 // system-wide /proc files.
 //
-// Env vars:
-//   GPU_SKIP_PIN_UNDER_PRESSURE     0 to disable (default: enabled)
-//   GPU_PIN_PRESSURE_THRESHOLD_MB   MemAvailable threshold in MiB
-//                                   (default: max(2048, 5% of MemTotal))
-//   GPU_PIN_PRESSURE_PSI_THRESHOLD  PSI some avg10 threshold, percent (default: 5.0)
+// Pinning is skipped only when available memory is below the threshold AND PSI
+// shows reclaim stalls. Without PSI the detector stays off, unless
+// GPU_PIN_PRESSURE_PSI_THRESHOLD=0 explicitly selects available-memory-only mode.
+// Tuned by GPU_SKIP_PIN_UNDER_PRESSURE, GPU_PIN_PRESSURE_THRESHOLD_MB and
+// GPU_PIN_PRESSURE_PSI_THRESHOLD (see utils/flags.hpp).
 struct MemPressureDetector {
   static constexpr int64_t kFloorBytes = 2LL * 1024 * 1024 * 1024;
   static constexpr int kDefaultFractionPercent = 5;
-  static constexpr int kDefaultPsiThresholdX100 = 500;
   static constexpr int64_t kCheckIntervalUs = 100'000;
 
   std::atomic<int64_t> cached_avail_bytes_{INT64_MAX};
@@ -171,31 +170,43 @@ struct MemPressureDetector {
   }
 
   MemPressureDetector() {
-    const char* env = getenv("GPU_SKIP_PIN_UNDER_PRESSURE");
-    if (env && atoi(env) == 0) return;
+    if (!GPU_SKIP_PIN_UNDER_PRESSURE) return;
 
     detectCgroup();
 
-    const char* thresh_env = getenv("GPU_PIN_PRESSURE_THRESHOLD_MB");
-    if (thresh_env) {
-      threshold_bytes_ = atoll(thresh_env) * 1024LL * 1024LL;
+    int64_t mem_total = use_cgroup_ ? cg_mem_max_ : readMemTotal();
+    if (!flagIsDefault(GPU_PIN_PRESSURE_THRESHOLD_MB)) {
+      threshold_bytes_ = static_cast<int64_t>(GPU_PIN_PRESSURE_THRESHOLD_MB * Mi);
     } else {
-      int64_t mem_total = use_cgroup_ ? cg_mem_max_ : readMemTotal();
-      int64_t fraction = mem_total * kDefaultFractionPercent / 100;
-      threshold_bytes_ = std::max(kFloorBytes, fraction);
+      // Cap the floor at a quarter of the total so small containers are not
+      // treated as permanently low on memory.
+      int64_t floor = std::min(kFloorBytes, mem_total / 4);
+      threshold_bytes_ = std::max(floor, mem_total * kDefaultFractionPercent / 100);
     }
 
-    const char* psi_env = getenv("GPU_PIN_PRESSURE_PSI_THRESHOLD");
-    psi_threshold_x100_ =
-        psi_env ? static_cast<int>(atof(psi_env) * 100) : kDefaultPsiThresholdX100;
-
-    // For PSI: prefer per-cgroup, fall back to system-wide
+    // PSI threshold 0 is the explicit opt-in to available-memory-only detection.
+    psi_threshold_x100_ = static_cast<int>(GPU_PIN_PRESSURE_PSI_THRESHOLD) * 100;
+    use_psi_ = psi_threshold_x100_ > 0;
     const char* psi_path = use_cgroup_ ? cg_pressure_path_.c_str() : "/proc/pressure/memory";
-    FILE* f = fopen(psi_path, "r");
-    use_psi_ = (f != nullptr) && (psi_threshold_x100_ > 0);
-    if (f) fclose(f);
+    if (use_psi_) {
+      FILE* f = fopen(psi_path, "r");
+      if (f == nullptr) {
+        ClPrint(amd::LOG_INFO, amd::LOG_COPY,
+                "Pinning under memory pressure: detector off, %s is unavailable "
+                "(set GPU_PIN_PRESSURE_PSI_THRESHOLD=0 to use available memory only)",
+                psi_path);
+        return;
+      }
+      fclose(f);
+    }
 
     enabled_ = true;
+    ClPrint(amd::LOG_INFO, amd::LOG_COPY,
+            "Pinning under memory pressure: using staging when %s available memory < %lld MiB "
+            "and PSI some avg10 > %u%% (0 = PSI not used)",
+            use_cgroup_ ? "cgroup" : "system",
+            static_cast<long long>(threshold_bytes_ / static_cast<int64_t>(Mi)),
+            GPU_PIN_PRESSURE_PSI_THRESHOLD);
   }
 
   void refresh() {

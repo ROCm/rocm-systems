@@ -28,6 +28,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Fixed a host-blocking issue in `hipMemcpyBatchAsync` that could occur when the API was repeatedly issued on a stream containing a long-running kernel. The implementation now reserves only the total descriptor space required for each dispatch in the kernel argument pool, preventing pool exhaustion and eliminating unnecessary host waits for kernel completion.
 * Resolved a segmentation fault in `hipStreamEndCapture` during multi-stream capture caused by a bookkeeping cycle among capture participants. The fix tracks capture participants in a single origin-stream-owned set, eliminating recursive traversal of forked streams during capture finalization and improving stream capture stability.
 * Resolved a potential deadlock between `hipMallocAsync` and `hipEventSynchronize` during concurrent multi-threaded execution.
+* Resolved stalls of up to several minutes in `hipMemcpy` from pageable host memory, such as memory-mapped files, on Linux hosts under memory reclaim pressure. Pinning that memory caused KFD to evict GPU queues during reclaim. While available memory is low and memory pressure stall information (PSI) shows reclaim stalls, the runtime now uses its staging-buffer path for these copies instead. Systems without PSI are unaffected. Set `GPU_SKIP_PIN_UNDER_PRESSURE=0` to restore the previous behavior; `GPU_PIN_PRESSURE_THRESHOLD_MB` and `GPU_PIN_PRESSURE_PSI_THRESHOLD` tune the detection.
 
 ### Optimized
 
