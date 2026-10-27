@@ -3,6 +3,9 @@
 
 #include "cli_dispatcher.hpp"
 
+#include "help/renderer.hpp"
+#include "options/table.hpp"
+
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -136,7 +139,13 @@ Experimental: This is a preview of the rocsys command-line tool.
 Commands and workflows are subject to change.
 
 Subcommands:
-{subcommands}
+{subcommands})",
+        fmt::arg("usage", make_usage(program)), fmt::arg("subcommands", subcommands));
+    out << '\n';
+    rocprofsys::rocsys::help::write_common_options(
+        out, rocprofsys::rocsys::options::option_table());
+    out << fmt::format(
+        R"(
 Examples:
   {program} -- ./app
   {program} profile -- ./app
@@ -147,7 +156,6 @@ Use '{program} <subcommand> --help' for subcommand-specific options.
 
 Documentation: {docs}
 )",
-        fmt::arg("usage", make_usage(program)), fmt::arg("subcommands", subcommands),
         fmt::arg("program", program), fmt::arg("docs", k_docs_url));
 }
 

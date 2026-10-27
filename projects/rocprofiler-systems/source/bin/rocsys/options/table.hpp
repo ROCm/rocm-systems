@@ -10,7 +10,7 @@
 namespace rocprofsys::rocsys::options
 {
 
-/// @brief Shipped rocsys options. Empty until the first option is added.
+/// @brief Shipped rocsys options. A new option is one row in this table.
 [[nodiscard]] std::span<const option_spec>
 option_table() noexcept;
 
