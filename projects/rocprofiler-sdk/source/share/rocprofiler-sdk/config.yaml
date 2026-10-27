@@ -15352,7 +15352,7 @@ rocprofiler-sdk:
     - name: GL2C_EA_RDREQ_DRAM_sum
       description: >-
         Sum across all GL2C instances: Number of GL2C/EA read requests (either 32-byte, 64-byte, 96-byte
-        or 128-byte) destined for DRAM (MC).
+        or 128-byte or 256-byte) destined for DRAM (MC).
       properties: []
       definitions:
         - architectures:
