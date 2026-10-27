@@ -101,6 +101,15 @@ TEST(help_test, every_verb_lists_dry_run_and_rewrite_names_the_follow_up)
         EXPECT_NE(text.find("  --dry-run     Show the launch plan and exit\n"),
                   std::string::npos)
             << verb.name;
+        const auto traces = text.find("--traces");
+        if(verb.name == "avail")
+        {
+            EXPECT_NE(traces, std::string::npos);
+        }
+        else
+        {
+            EXPECT_EQ(traces, std::string::npos) << verb.name;
+        }
         if(verb.name == "rewrite")
         {
             EXPECT_NE(text.find("  rocsys -- ./app.inst\n"), std::string::npos);

@@ -173,31 +173,43 @@ TEST(options_test, suggest_choice_picks_one_close_name)
     EXPECT_FALSE(suggest_choice("hip", choices).has_value());
 }
 
-TEST(options_test, shipped_table_recognizes_dry_run_and_passes_traces_through)
+TEST(options_test, shipped_table_recognizes_dry_run_and_the_avail_traces_query)
 {
     const auto table = option_table();
-    ASSERT_EQ(table.size(), 1U);
-    EXPECT_EQ(table.front().name, "dry-run");
-    EXPECT_EQ(table.front().kind, value_kind::flag);
-    EXPECT_EQ(table.front().required_caps, 0U);
+    ASSERT_EQ(table.size(), 2U);
+    EXPECT_EQ(table[0].name, "dry-run");
+    EXPECT_EQ(table[0].kind, value_kind::flag);
+    EXPECT_EQ(table[0].required_caps, 0U);
+    EXPECT_EQ(table[1].name, "traces");
+    EXPECT_EQ(table[1].kind, value_kind::flag);
+    EXPECT_EQ(table[1].required_caps,
+              static_cast<capability_set>(capability::query_only));
 
     const auto* profile = find_verb("profile");
+    const auto* avail   = find_verb("avail");
     ASSERT_NE(profile, nullptr);
+    ASSERT_NE(avail, nullptr);
     const context ctx{};
     const auto    argv =
         std::vector<std::string>{ "rocsys",   "profile", "--dry-run", "--preset=quick",
                                   "--traces", "hip",     "--",        "./app" };
-    const auto parsed = parse(make_request(*profile, true, argv, table, ctx));
+    auto parsed = parse(make_request(*profile, true, argv, table, ctx));
     ASSERT_TRUE(parsed);
-    ASSERT_EQ(parsed.value().options.size(), 1U);
-    EXPECT_EQ(parsed.value().options.front().spec, &table.front());
-    EXPECT_TRUE(parsed.value().options.front().values.empty());
+    ASSERT_EQ(parsed.value().options.size(), 2U);
+    EXPECT_EQ(parsed.value().options[0].spec->name, "dry-run");
+    EXPECT_EQ(parsed.value().options[1].spec->name, "traces");
     EXPECT_EQ(parsed.value().passthrough,
-              (std::vector<std::string>{ "--preset=quick", "--traces", "hip" }));
-    EXPECT_EQ(parsed.value().app, (std::vector<std::string>{ "--", "./app" }));
-    EXPECT_EQ(command_argv("rocsys", parsed.value()),
-              (std::vector<std::string>{ "rocsys", "--preset=quick", "--traces", "hip",
-                                         "--", "./app" }));
+              (std::vector<std::string>{ "--preset=quick", "hip" }));
+    auto checked = validate(std::move(parsed.value()));
+    ASSERT_FALSE(checked);
+    EXPECT_NE(checked.error().error.find("not available for 'profile'"),
+              std::string::npos);
+
+    const auto avail_argv   = std::vector<std::string>{ "rocsys", "avail", "--traces" };
+    auto       avail_parsed = parse(make_request(*avail, true, avail_argv, table, ctx));
+    ASSERT_TRUE(avail_parsed);
+    EXPECT_TRUE(avail_parsed.value().passthrough.empty());
+    EXPECT_TRUE(validate(std::move(avail_parsed.value())));
 }
 
 TEST(options_test, dry_run_after_the_separator_stays_with_the_application)

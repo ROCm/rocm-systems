@@ -4,6 +4,7 @@
 add_library(
     rocsys-tests
     OBJECT
+    test_catalog.cpp
     test_cli_dispatcher.cpp
     test_delivery.cpp
     test_dry_run.cpp
