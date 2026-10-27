@@ -13,6 +13,7 @@
 
 #include "bootstrap.h"
 #include "debug.h"
+#include "common_cast.h"  // ncclIbDev / IbCastDevs / MAX_IB_DEVS / MAXNAMESIZE
 #include <dlfcn.h>
 #include <hip/hip_runtime.h>
 #include <set>
@@ -96,6 +97,41 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
 int64_t ncclParamGinIbTc() { return -1; }
 int64_t ncclParamIbTc() { return -1; }
 
+// IB-CAST device table + enumeration. Real definitions live in
+// transport/net_ib_cast/, which this target does not link. The plugin's NIC
+// enumeration intersects rocshmem_gin_list_devices() names with IbCastDevs[],
+// so the stub seeds IbCastDevs[0..probeResult) with matching "nicN" names.
+int IbCastNDevs = 0;
+struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
+
+ncclResult_t IbCastInitDevices(ncclDebugLogger_t, ncclProfilerCallback_t) {
+  IbCastNDevs = Stubs::g.probeResult;
+  if (IbCastNDevs > MAX_IB_DEVS) IbCastNDevs = MAX_IB_DEVS;
+  for (int i = 0; i < IbCastNDevs; i++) {
+    snprintf(IbCastDevs[i].devName, MAXNAMESIZE, "nic%d", i);
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t IbCastFinalizeDevices(void) { return ncclSuccess; }
+
+ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
+  if (dev < 0 || dev >= IbCastNDevs) return ncclInvalidUsage;
+  memset(props, 0, sizeof(*props));
+  props->name = IbCastDevs[dev].devName;
+  return ncclSuccess;
+}
+
+// Real definition lives in graph/topo.cc, which this target does not link. The
+// plugin uses this best-effort to pick a GIN-local NIC; report the first device
+// so connect() resolves a preferred NIC name (failure would just fall back to
+// the factory's first-usable-device selection).
+ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm*, int* localGinDevs, int* localGinCount) {
+  localGinDevs[0] = 0;
+  *localGinCount = IbCastNDevs > 0 ? 1 : 0;
+  return ncclSuccess;
+}
+
 extern "C" hipError_t hipMalloc(void** ptr, size_t size) {
   using Fn = hipError_t (*)(void**, size_t);
   static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "hipMalloc"));
@@ -134,11 +170,24 @@ ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
 
 extern "C" int rocshmem_gin_probe_devices(void) { return Stubs::g.probeResult; }
 
+extern "C" int rocshmem_gin_list_devices(char* names, int max_count, int name_stride) {
+  // Report the probe count; synthesize distinct names ("nic0", "nic1", ...) so
+  // the plugin's name->IB-CAST-index match finds the stubbed IbCastDevs entries.
+  int n = Stubs::g.probeResult;
+  if (names) {
+    for (int i = 0; i < n && i < max_count; i++) {
+      snprintf(names + (size_t)i * name_stride, name_stride, "nic%d", i);
+    }
+  }
+  return n;
+}
+
 extern "C" int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void*, void*, size_t),
-                                       void* allgather_ctx, int traffic_class,
+                                       void* allgather_ctx, int traffic_class, const char* preferred_nic_name,
                                        rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps) {
   (void)allgather_ctx;
   (void)traffic_class;
+  (void)preferred_nic_name;
   if (Stubs::g.createQpsFail || !allgather || nRanks < 1 || myRank < 0 || myRank >= nRanks) return -1;
   *out_qp_set = reinterpret_cast<rocshmem_gin_qp_set_t>(&Stubs::g_qpSetToken);
   *out_gpu_qps = Stubs::FakeGpuQps();
