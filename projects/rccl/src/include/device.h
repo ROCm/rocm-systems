@@ -224,7 +224,8 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
  * buffers, agree. A narrower flag holds (step + 1) truncated to its width in the top bytes of the line's last
  * word, and wraps. Every (RCCL_LL128_CLEAN_MASK + 1) steps of a slot the sender stamps the current flag on
  * every line of the step and forwards the whole step, so no line's flag is a whole flag period old, as in LL.
- * RCCL_LL128_FLAG_TEST=1 / 2 wraps a narrow flag every 256 / 32 steps to exercise this. */
+ * RCCL_LL128_FLAG_TEST=1 / 2 (CMake option of the same name) wraps a narrow flag every 256 / 32 steps to
+ * exercise this; test/LL128NarrowFlagTests.cpp covers it. */
 #ifndef RCCL_LL128_FLAG_BYTES
 #define RCCL_LL128_FLAG_BYTES 8
 #endif

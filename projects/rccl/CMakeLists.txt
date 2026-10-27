@@ -137,6 +137,15 @@ endif()
 if(NOT RCCL_LL128_FLAG_BYTES STREQUAL "8")
   add_compile_definitions(RCCL_LL128_FLAG_BYTES=${RCCL_LL128_FLAG_BYTES})
 endif()
+# Testing only: wrap a narrow LL128 flag every 256 (1) or 32 (2) steps so its wraparound handling runs quickly.
+set(RCCL_LL128_FLAG_TEST "0" CACHE STRING "Testing only: wrap a narrow LL128 flag every 256 (1) or 32 (2) steps")
+set_property(CACHE RCCL_LL128_FLAG_TEST PROPERTY STRINGS 0 1 2)
+if(NOT RCCL_LL128_FLAG_TEST MATCHES "^[012]$")
+  message(FATAL_ERROR "RCCL_LL128_FLAG_TEST must be 0, 1 or 2, got '${RCCL_LL128_FLAG_TEST}'")
+endif()
+if(NOT RCCL_LL128_FLAG_TEST STREQUAL "0")
+  add_compile_definitions(RCCL_LL128_FLAG_TEST=${RCCL_LL128_FLAG_TEST})
+endif()
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):
 #   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
