@@ -372,3 +372,24 @@ module:
       targets: [nvidia_linux, nvidia_windows]
       reason: "AIRUNTIME-2744 - compiled-in kernel path; fixture/build support is amd-only; needs to be re-triaged."
     tags: [load]
+  Unit_CodeObjectMetadata_FatBinary:
+    <<: *level_default
+    tags: [load]
+  Unit_CodeObjectMetadata_GenericTarget:
+    <<: *level_default
+    tags: [load]
+  Unit_CodeObjectMetadata_NativeBeforeGeneric:
+    <<: *level_default
+    tags: [load]
+  Unit_CodeObjectMetadata_RawElf:
+    <<: *level_default
+    tags: [load]
+  Unit_CodeObjectMetadata_MultipleNotes:
+    <<: *level_default
+    tags: [load]
+  Unit_CodeObjectMetadata_UnknownCompressedVersion:
+    <<: *level_default
+    tags: [load]
+  Unit_CodeObjectMetadata_ModuleApi:
+    <<: *level_default
+    tags: [load]
