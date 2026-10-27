@@ -10,7 +10,18 @@ using values from one qualifying pass, not a name-keyed mega-table last-write.
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import Dict, FrozenSet, List, Mapping, Match, Optional, Set, Tuple, Union
+from typing import (
+    Dict,
+    FrozenSet,
+    List,
+    Mapping,
+    Match,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import pandas as pd
 
@@ -276,10 +287,6 @@ def select_pass_with_normalization_fallback(
     return fallback, fallback is not None
 
 
-def _expression_should_unset(value: object) -> bool:
-    return isinstance(value, str) and bool(value) and value != _UNSET_EXPRESSION
-
-
 # Dividing by these counters across passes is not a same-pass result.
 # Relaxing them would read another pass's copy.
 _SAME_PASS_COUNTERS = frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"})
@@ -371,58 +378,22 @@ def bind_metric_tables_to_passes(
     for table_id, df in dfs.items():
         if dfs_type.get(table_id) != "metric_table":
             continue
+        fields = [field for field in df.columns if field in supported_fields]
         row_pass: Dict[object, str] = {}
-        for row_id, row in df.iterrows():
-            exprs = [
-                row[field]
-                for field in df.columns
-                if field in supported_fields
-                and isinstance(row[field], str)
-                and row[field]
-            ]
-            refs = extract_row_refs(exprs)
-            required = expand_required_counters(refs, gpu_series)
-            if not required:
-                continue
-            # Prefer a pass that also has any normalization counters named
-            # directly (already in required if present in the formula).
-            chosen, normalization_relaxed = select_pass_with_normalization_fallback(
-                required,
+        for row_id in df.index:
+            binding = _bind_metric_values(
+                f"row {row_id}",
+                [df.at[row_id, field] for field in fields],
                 pass_layout,
                 gpu_series,
+                scoped,
             )
-            if chosen is None:
-                unbound += 1
-                console_warning(
-                    "pass_provenance",
-                    f"row {row_id}: no single pass for {sorted(required)}; "
-                    "leaving the metric unset",
-                )
-                for field in df.columns:
-                    if field not in supported_fields:
-                        continue
-                    value = df.at[row_id, field]
-                    if _expression_should_unset(value):
-                        df.at[row_id, field] = _UNSET_EXPRESSION
-                continue
-            if normalization_relaxed:
-                missing = required - pass_layout.counters_by_pass[chosen]
-                console_warning(
-                    "pass_provenance",
-                    f"row {row_id}: runtime normalization counters "
-                    f"{sorted(missing)} are not in {chosen}; binding formula "
-                    "counters to that pass",
-                )
-            used_passes.add(chosen)
-            row_pass[row_id] = chosen
-            for field in df.columns:
-                if field not in supported_fields:
-                    continue
-                value = df.at[row_id, field]
-                if isinstance(value, str) and value:
-                    df.at[row_id, field] = bind_expression(
-                        value, chosen, pass_layout, scoped
-                    )
+            for field, value in zip(fields, binding.values):
+                df.at[row_id, field] = value
+            unbound += binding.unset
+            if binding.pass_key is not None:
+                used_passes.add(binding.pass_key)
+                row_pass[row_id] = binding.pass_key
         df.attrs[METRIC_ROW_PASS_ATTR] = row_pass
 
     if unbound:
@@ -458,50 +429,19 @@ def bind_expression_dataframe(
     unbound = 0
 
     for metric_id, group in expression_df.groupby("metric_id", sort=False):
-        exprs = [
-            value
-            for value in group["value"].tolist()
-            if isinstance(value, str) and value and value != "None"
-        ]
-        if not exprs:
-            continue
-        refs = extract_row_refs(exprs)
-        required = expand_required_counters(refs, gpu_series)
-        if not required:
-            continue
-        chosen, normalization_relaxed = select_pass_with_normalization_fallback(
-            required,
+        binding = _bind_metric_values(
+            f"metric {metric_id}",
+            group["value"].tolist(),
             pass_layout,
             gpu_series,
+            scoped,
         )
-        if chosen is None:
-            unbound += 1
-            console_warning(
-                "pass_provenance",
-                f"metric {metric_id}: no single pass for {sorted(required)}; "
-                "leaving the metric unset",
-            )
-            for row_index in group.index:
-                value = expression_df.at[row_index, "value"]
-                if _expression_should_unset(value):
-                    expression_df.at[row_index, "value"] = _UNSET_EXPRESSION
-            continue
-        if normalization_relaxed:
-            missing = required - pass_layout.counters_by_pass[chosen]
-            console_warning(
-                "pass_provenance",
-                f"metric {metric_id}: runtime normalization counters "
-                f"{sorted(missing)} are not in {chosen}; binding formula "
-                "counters to that pass",
-            )
-        used_passes.add(chosen)
-        metric_pass[metric_id] = chosen
-        for row_index in group.index:
-            value = expression_df.at[row_index, "value"]
-            if isinstance(value, str) and value and value != "None":
-                expression_df.at[row_index, "value"] = bind_expression(
-                    value, chosen, pass_layout, scoped
-                )
+        for row_index, value in zip(group.index, binding.values):
+            expression_df.at[row_index, "value"] = value
+        unbound += binding.unset
+        if binding.pass_key is not None:
+            used_passes.add(binding.pass_key)
+            metric_pass[metric_id] = binding.pass_key
 
     expression_df.attrs[METRIC_ROW_PASS_ATTR] = metric_pass
     if unbound:
@@ -511,3 +451,77 @@ def bind_expression_dataframe(
             "(counters do not share a pass)",
         )
     return used_passes
+
+
+def _is_metric_expression(value: object) -> bool:
+    return isinstance(value, str) and bool(value) and value != _UNSET_EXPRESSION
+
+
+def _bind_metric_values(
+    label: str,
+    values: List[object],
+    layout: PassLayout,
+    gpu_series: str,
+    scoped_builtins: FrozenSet[str],
+) -> "_MetricBinding":
+    """Rewrite one metric's expression values onto the pass it reads from."""
+    expressions = [value for value in values if _is_metric_expression(value)]
+    pass_key, unset = _choose_metric_pass(label, expressions, layout, gpu_series)
+    if unset:
+        rewritten = [
+            _UNSET_EXPRESSION if _is_metric_expression(value) else value
+            for value in values
+        ]
+        return _MetricBinding(None, rewritten, True)
+    if pass_key is None:
+        return _MetricBinding(None, list(values), False)
+    rewritten = [
+        bind_expression(value, pass_key, layout, scoped_builtins)
+        if _is_metric_expression(value)
+        else value
+        for value in values
+    ]
+    return _MetricBinding(pass_key, rewritten, False)
+
+
+def _choose_metric_pass(
+    label: str,
+    expressions: List[str],
+    layout: PassLayout,
+    gpu_series: str,
+) -> Tuple[Optional[str], bool]:
+    """Pick the one pass a metric reads its counters from.
+
+    Returns (pass_key, unset). A counter collected in one pass has one value,
+    so a metric that reads no duplicated counter keeps its base columns even
+    when its counters span passes. Only a metric that reads a duplicated
+    counter and fits no single pass is left unset.
+    """
+    required = expand_required_counters(extract_row_refs(expressions), gpu_series)
+    if not required:
+        return None, False
+    chosen, normalization_relaxed = select_pass_with_normalization_fallback(
+        required, layout, gpu_series
+    )
+    if chosen is None:
+        if not required & layout.duplicated:
+            return None, False
+        console_warning(
+            "pass_provenance",
+            f"{label}: no single pass for {sorted(required)}; leaving the metric unset",
+        )
+        return None, True
+    if normalization_relaxed:
+        missing = required - layout.counters_by_pass[chosen]
+        console_warning(
+            "pass_provenance",
+            f"{label}: runtime normalization counters {sorted(missing)} are "
+            f"not in {chosen}; binding formula counters to that pass",
+        )
+    return chosen, False
+
+
+class _MetricBinding(NamedTuple):
+    pass_key: Optional[str]
+    values: List[object]
+    unset: bool
