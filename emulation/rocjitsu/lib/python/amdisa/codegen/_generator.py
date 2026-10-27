@@ -7337,6 +7337,10 @@ class CodeGenerator:
             )
             L.append('  uint64_t value = 0;')
             L.append('  switch (msg) {')
+            L.append('  case 0x80: { // MSG_RTN_GET_DOORBELL')
+            L.append('    value = wf.doorbell_id();')
+            L.append('    break;')
+            L.append('  }')
             L.append('  case 0x82: { // MSG_RTN_GET_TMA')
             L.append('    // Hardware stores TMA in units of 256 bytes.')
             L.append('    value = wf.cu().trap_memory_address() >> 8;')
@@ -7346,7 +7350,6 @@ class CodeGenerator:
             L.append('    value = wf.realtime_timestamp();')
             L.append('    break;')
             L.append('  }')
-            L.append('  case 0x80:')  # MSG_RTN_GET_DOORBELL
             L.append('  case 0x81:')  # MSG_RTN_GET_DDID
             L.append('  case 0x84:')  # MSG_RTN_SAVE_WAVE
             L.append('  case 0x85:')  # MSG_RTN_GET_TBA

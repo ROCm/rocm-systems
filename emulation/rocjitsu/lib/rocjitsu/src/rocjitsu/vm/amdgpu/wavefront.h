@@ -258,6 +258,10 @@ public:
   /// queue whose context-save-restore area holds its saved state.
   void set_queue_id(uint32_t id) { queue_id_ = id; }
 
+  /// @brief Queue's 10-bit doorbell ID returned by shader messages.
+  uint32_t doorbell_id() const { return doorbell_id_; }
+  void set_doorbell_id(uint32_t id) { doorbell_id_ = id; }
+
   /// @brief Return the owning process ID (PASID analog).
   uint32_t process_id() const { return process_id_; }
 
@@ -1073,6 +1077,7 @@ public:
     trap_id_ = 0;
     debug_wave_id_ = 0;
     queue_id_ = 0;
+    doorbell_id_ = 0;
   }
 
 protected:
@@ -1106,7 +1111,8 @@ protected:
   bool use_system_clock_ = false;                ///< PM4 shader timestamps use host monotonic time.
   std::shared_ptr<Pm4FailureState> pm4_failure_; ///< Null for AQL launches.
   std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
-  uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
+  uint32_t queue_id_ = 0;    ///< KFD queue ID that launched this wave (debugger correlation).
+  uint32_t doorbell_id_ = 0; ///< Queue doorbell ID captured at dispatch.
   mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.

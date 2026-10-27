@@ -2479,6 +2479,7 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_pm4_failure(entry.pm4_failure);
       wf->set_mode_raw(entry.initial_mode_raw);
       wf->set_queue_id(entry.queue_id);
+      wf->set_doorbell_id((entry.doorbell_offset / sizeof(uint64_t)) & 0x3ffu);
       wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, wf->wf_size()));
       const uint32_t relative_wg_id = global_wg_id - entry.workgroup_id_offset;
       const WorkgroupCoord coord = entry.local_wg_coord(relative_wg_id);
@@ -3215,6 +3216,7 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   dp.address_space = queue.address_space;
   dp.process_id = queue.process_id;
   dp.queue_id = queue.queue_id;
+  dp.doorbell_offset = queue.doorbell_offset;
   dp.interrupt_sink = queue.interrupt_sink;
   dp.enabled_cus = queue.enabled_cus;
   dp.kernel_wave_size = (initiator & (1u << 15)) ? 32 : 64;
@@ -4039,6 +4041,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
 
   DispatchEntry dp{};
   dp.queue_id = queue.queue_id;
+  dp.doorbell_offset = queue.doorbell_offset;
   dp.enabled_cus = queue.enabled_cus;
   dp.queue_packet_id = queue_packet_id;
   dp.address_space = queue.address_space;
