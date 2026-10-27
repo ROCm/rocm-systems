@@ -990,6 +990,13 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_cond
   return HSA_STATUS_SUCCESS;
 }
 
+void Runtime::WakeAsyncSignalMonitor() {
+  // Notify unconditionally, as SetAsyncSignalHandler() does, so a monitor about to park can't
+  // miss it. Like SetAsyncSignalHandler(), this assumes waiters are gone before teardown.
+  if (!asyncSignals_.empty())
+    hsa_signal_handle((*asyncSignals_)->control.wake)->StoreReleaseAndNotify(1);
+}
+
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
                                  hsa_interop_map_flag_t flags, size_t size_hint, size_t* size,
                                  void** ptr, size_t* metadata_size, const void** metadata) {
@@ -2150,7 +2157,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       if (core::Runtime::runtime_singleton_->flag().wait_any()) {
         index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
                                      &async_events_.cond_[0], &async_events_.value_[0],
-                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false);
+                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false,
+                                     /*wake_async_monitor=*/false);
       } else {
         // Skip wake-up signal logic
         index = 1;
