@@ -10,6 +10,9 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+- Resolved code objects loaded prior to tool initialization. During `rocprofiler_force_configure`, callbacks for the live and frozen code objects (and their kernel symbols) will be deliever to any client/tools which has not already received them.
+  - Due to HSA permitting the original ELF buffer to be deleted after a call to `hsa_executable_freeze`, HIP-derived `rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t` data is not reported.
+
 ### Known issues
 
 ### Removed
