@@ -614,7 +614,7 @@ std::vector<std::string> getLinkOptions(const LinkArguments& args) {
 
 // RTC Program Member Functions
 RTCProgram::RTCProgram(const std::string &name) : name_(name) {
-  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib);
+  amd::Comgr::Load();
   if (exec_input_.Create() != AMD_COMGR_STATUS_SUCCESS) {
     guarantee(false, "Failed to allocate internal hiprtc structure");
   }

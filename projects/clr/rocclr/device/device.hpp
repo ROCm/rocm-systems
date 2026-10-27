@@ -1467,8 +1467,6 @@ class VirtualDevice : public amd::ReferenceCountedObject {
     return type;
   }
 };
-
-extern bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& retValue);
 }  // namespace amd::device
 
 namespace amd {
@@ -1661,6 +1659,27 @@ class Isa {
   /// @returns This Isa's LDS alignment
   uint32_t ldsAlignment() const { return ldsAlignment_; }
 
+  /// @returns The addressable VGPRs per wave (comgr ISA metadata AddressableNumVGPRs).
+  uint32_t addressableVgprs() const { return addressableVgprs_; }
+
+  /// @returns The VGPRs per SIMD (TotalNumVGPRs).
+  uint32_t vgprsPerSimd() const { return vgprsPerSimd_; }
+
+  /// @returns The VGPR allocation granule (VGPRAllocGranule).
+  uint32_t vgprAllocGranule() const { return vgprAllocGranule_; }
+
+  /// @returns The addressable SGPRs per wave (AddressableNumSGPRs).
+  uint32_t addressableSgprs() const { return addressableSgprs_; }
+
+  /// @returns The SGPR allocation granule (SGPRAllocGranule).
+  uint32_t sgprAllocGranule() const { return sgprAllocGranule_; }
+
+  /// @returns True if a trap handler is enabled (TrapHandlerEnabled).
+  bool trapHandlerEnabled() const { return trapHandlerEnabled_; }
+
+  /// @returns True if the ISA supports images (ImageSupport).
+  bool hasImageSupport() const { return imageSupport_; }
+
   /// @returns True if @p codeObjectIsa and @p agentIsa are compatible,
   /// false otherwise.
   static bool isCompatible(const Isa& codeObjectIsa, const Isa& agentIsa);
@@ -1683,7 +1702,10 @@ class Isa {
                 uint32_t versionMajor, uint32_t versionMinor, uint32_t versionStepping,
                 Feature sramecc, Feature xnack, uint32_t simdPerCU, uint32_t simdWidth,
                 uint32_t simdInstructionWidth, uint32_t memChannelBankWidth,
-                uint32_t localMemSizePerCU, uint32_t localMemBanks, uint32_t ldsAlignment)
+                uint32_t localMemSizePerCU, uint32_t localMemBanks, uint32_t ldsAlignment,
+                uint32_t addressableVgprs, uint32_t vgprsPerSimd, uint32_t vgprAllocGranule,
+                uint32_t addressableSgprs, uint32_t sgprAllocGranule, bool trapHandlerEnabled,
+                bool imageSupport)
       : targetId_(targetId),
         runtimeRocSupported_(runtimeRocSupported),
         runtimePalSupported_(runtimePalSupported),
@@ -1698,7 +1720,14 @@ class Isa {
         memChannelBankWidth_(memChannelBankWidth),
         localMemSizePerCU_(localMemSizePerCU),
         localMemBanks_(localMemBanks),
-        ldsAlignment_(ldsAlignment) {}
+        ldsAlignment_(ldsAlignment),
+        addressableVgprs_(addressableVgprs),
+        vgprsPerSimd_(vgprsPerSimd),
+        vgprAllocGranule_(vgprAllocGranule),
+        addressableSgprs_(addressableSgprs),
+        sgprAllocGranule_(sgprAllocGranule),
+        trapHandlerEnabled_(trapHandlerEnabled),
+        imageSupport_(imageSupport) {}
 
   // @brief Returns the begin and end iterators for the suppported ISAs.
   static std::pair<const Isa*, const Isa*> supportedIsas();
@@ -1721,6 +1750,13 @@ class Isa {
   uint32_t localMemSizePerCU_;     //!< Local memory size per CU.
   uint32_t localMemBanks_;         //!< Number of banks of local memory.
   uint32_t ldsAlignment_;          //!< LDS alignment.
+  uint32_t addressableVgprs_;      //!< Addressable VGPRs per wave.
+  uint32_t vgprsPerSimd_;          //!< VGPRs per SIMD.
+  uint32_t vgprAllocGranule_;      //!< VGPR allocation granule.
+  uint32_t addressableSgprs_;      //!< Addressable SGPRs per wave.
+  uint32_t sgprAllocGranule_;      //!< SGPR allocation granule.
+  bool trapHandlerEnabled_;        //!< A trap handler is enabled.
+  bool imageSupport_;              //!< Images are supported.
 };  // class Isa
 
 /*! \addtogroup Runtime
@@ -2392,9 +2428,6 @@ class Device : public RuntimeObject {
   // P2P devices for memory allocation. This list contains devices that can have access to the
   // current device
   std::vector<Device*> p2p_access_devices_;
-
-  //! Checks if OCL runtime can use code object manager for compilation
-  bool ValidateComgr();
 
   bool IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* mem_offset) const;
 

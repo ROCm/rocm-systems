@@ -104,12 +104,6 @@ bool NullDevice::create(const amd::Isa& isa) {
     return false;
   }
 
-  if (!ValidateComgr()) {
-    LogPrintfError("Code object manager initialization failed for offline HSA device %s",
-                   isa.targetId());
-    return false;
-  }
-
   if (!amd::Device::create(isa)) {
     LogPrintfError("Unable to setup offline HSA device %s", isa.targetId());
     return false;
@@ -689,12 +683,6 @@ bool Device::create() {
                                            isXgmi_, isAPU_)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
-    return false;
-  }
-
-  if (!ValidateComgr()) {
-    LogPrintfError("Code object manager initialization failed for HSA device %s (PCI ID %x)",
-                   agent_name, pciDeviceId_);
     return false;
   }
 
@@ -1762,19 +1750,10 @@ bool Device::populateOCLDeviceConstants() {
   info_.maxOnDeviceQueues_ = 1;
   info_.maxOnDeviceEvents_ = settings().numDeviceEvents_;
 
-  std::string addressableNumVGPRs, totalNumVGPRs, vGPRAllocGranule;
-  std::string isaName = isa().isaName();
-  info_.availableVGPRs_ =
-      amd::device::getValueFromIsaMeta(isaName, "AddressableNumVGPRs", addressableNumVGPRs)
-      ? atoi(addressableNumVGPRs.c_str())
-      : 0;
-  info_.vgprsPerSimd_ = amd::device::getValueFromIsaMeta(isaName, "TotalNumVGPRs", totalNumVGPRs)
-      ? atoi(totalNumVGPRs.c_str())
-      : 0;
-  info_.vgprAllocGranularity_ =
-      amd::device::getValueFromIsaMeta(isaName, "VGPRAllocGranule", vGPRAllocGranule)
-      ? atoi(vGPRAllocGranule.c_str())
-      : 0;
+  // The ISA's register limits and image support, as comgr's ISA metadata reports them
+  info_.availableVGPRs_ = isa().addressableVgprs();
+  info_.vgprsPerSimd_ = isa().vgprsPerSimd();
+  info_.vgprAllocGranularity_ = isa().vgprAllocGranule();
 
   info_.availableRegistersPerCU_ = info_.vgprsPerSimd_ * info_.simdPerCU_ * info_.wavefrontWidth_;
   ClPrint(amd::LOG_INFO, amd::LOG_INIT,
@@ -1783,35 +1762,17 @@ bool Device::populateOCLDeviceConstants() {
           info_.availableVGPRs_, info_.vgprsPerSimd_, info_.vgprAllocGranularity_,
           info_.availableRegistersPerCU_);
 
-  std::string sgprValue;
-  info_.availableSGPRs_ =
-      (amd::device::getValueFromIsaMeta(isaName, "AddressableNumSGPRs", sgprValue))
-      ? (atoi(sgprValue.c_str()))
-      : 0;
-
-  std::string sgprAllocGranule, trapHandlerEnabled;
-  info_.sgprAllocGranularity_ =
-      amd::device::getValueFromIsaMeta(isaName, "SGPRAllocGranule", sgprAllocGranule)
-      ? atoi(sgprAllocGranule.c_str())
-      : 0;
-  // Comgr reports whether a trap handler is present, but not the size of the
+  info_.availableSGPRs_ = isa().addressableSgprs();
+  info_.sgprAllocGranularity_ = isa().sgprAllocGranule();
+  // The ISA metadata says whether a trap handler is present, but not the size of the
   // SGPR block it reserves per wave, which is arch-independent.
   constexpr uint32_t kTrapNumSgprs = 16;  // LLVM IsaInfo::TRAP_NUM_SGPRS
-  info_.sgprTrapHandlerReserve_ =
-      (amd::device::getValueFromIsaMeta(isaName, "TrapHandlerEnabled", trapHandlerEnabled) &&
-       atoi(trapHandlerEnabled.c_str()) != 0)
-      ? kTrapNumSgprs
-      : 0;
+  info_.sgprTrapHandlerReserve_ = isa().trapHandlerEnabled() ? kTrapNumSgprs : 0;
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "sgprAllocGranule=%u, sgprTrapHandlerReserve=%u",
           info_.sgprAllocGranularity_, info_.sgprTrapHandlerReserve_);
-  std::string imageSupport;
-  if (amd::device::getValueFromIsaMeta(isaName, "ImageSupport", imageSupport)) {
-    info_.imageSupport_ =
-        (DEBUG_CLR_DISABLE_IMAGE || !image_is_supported) ? 0 : std::atoi(imageSupport.c_str());
-    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "imageSupport=%u", info_.imageSupport_);
-  } else {
-    LogInfo("Can not get image support info from ISA meta");
-  }
+  info_.imageSupport_ =
+      (DEBUG_CLR_DISABLE_IMAGE || !image_is_supported) ? 0 : isa().hasImageSupport();
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "imageSupport=%u", info_.imageSupport_);
 
   // Generic support for HMM interfaces
   if (HSA_STATUS_SUCCESS !=

@@ -119,6 +119,7 @@ class Program {
   mutable std::string buildLog_;  //!< build log.
   int32_t buildStatus_;           //!< build status.
   int32_t buildError_;            //!< build error
+  bool compilerUnavailable_ = false;  //!< A compile or link step needed comgr and it didn't load
 
   size_t globalVariableTotalSize_;
   amd::option::Options* programOptions_;
@@ -282,6 +283,9 @@ class Program {
 
   //! Link the device program.
   bool linkImpl(amd::option::Options* options);
+
+  //! Loads comgr for a compile or link step. On failure logs it and sets compilerUnavailable_
+  bool requireCompiler();
 
   //! Link the device programs.
   bool linkImpl(const std::vector<Program*>& inputPrograms, amd::option::Options* options,

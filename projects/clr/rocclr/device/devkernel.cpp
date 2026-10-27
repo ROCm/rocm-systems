@@ -108,35 +108,6 @@ static bool readMetaDim3(codeobject::MsgPackReader& reader, std::array<size_t, 3
 }
 
 // ================================================================================================
-bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& retValue) {
-  amd_comgr_metadata_node_t isaMeta;
-
-  amd_comgr_status_t status = amd::Comgr::get_isa_metadata(isa.c_str(), &isaMeta);
-
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "getIsaMeta(%s) failed!", isa.c_str());
-    return false;
-  }
-
-  amd_comgr_metadata_node_t valMeta;
-  size_t size = 0;
-  status = amd::Comgr::metadata_lookup(isaMeta, key, &valMeta);
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    status = amd::Comgr::get_metadata_string(valMeta, &size, NULL);
-  }
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    retValue.resize(size - 1);
-    status = amd::Comgr::get_metadata_string(valMeta, &size, &(retValue[0]));
-  }
-
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    status = amd::Comgr::destroy_metadata(valMeta);
-  }
-  amd::Comgr::destroy_metadata(isaMeta);
-  return (status == AMD_COMGR_STATUS_SUCCESS) ? true : false;
-}
-
-// ================================================================================================
 //! Applies one field of an .args entry to @p lcArg; the reader is at the field's value.
 //! @returns false only if the metadata is malformed.
 static bool populateArgsV3(std::string_view key, codeobject::MsgPackReader& reader,

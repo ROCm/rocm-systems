@@ -23,6 +23,7 @@ add_executable(codeobject_test
   test_offload_bundle.cpp
   test_compressed_bundle.cpp
   test_elf.cpp
+  test_isa.cpp
   test_metadata_notes.cpp
   test_msgpack.cpp
 )

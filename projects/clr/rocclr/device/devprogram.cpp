@@ -486,6 +486,9 @@ bool Program::compileImpl(const std::string& sourceCode,
       return false;
     }
   }
+  if (!requireCompiler()) {
+    return false;
+  }
 
   // add CL source to input data set
   amd_comgr_data_set_t inputs;
@@ -618,6 +621,9 @@ bool Program::compileImpl(const std::string& sourceCode,
 // ================================================================================================
 bool Program::linkImpl(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
                        bool createLibrary) {
+  if (!requireCompiler()) {
+    return false;
+  }
   amd_comgr_data_set_t inputs;
 
   if (amd::Comgr::create_data_set(&inputs) != AMD_COMGR_STATUS_SUCCESS) {
@@ -726,11 +732,42 @@ static void dumpCodeObject(const std::string& image) {
 }
 
 // ================================================================================================
+bool Program::requireCompiler() {
+  if (amd::Comgr::Load()) {
+    return true;
+  }
+  compilerUnavailable_ = true;
+  buildLog_ += "Error: the compiler (comgr library) is not available.\n";
+  return false;
+}
+
+// ================================================================================================
 bool Program::linkImpl(amd::option::Options* options) {
   file_type_t continueCompileFrom = FILE_TYPE_LLVMIR_BINARY;
 
   internal_ = (compileOptions_.find("-cl-internal-kernel") != std::string::npos) ? true : false;
 
+  if (llvmBinary_.empty()) {
+    continueCompileFrom = getNextCompilationStageFromBinary(options);
+  }
+
+  // A finished code object needs no compiler: create the kernels without touching comgr
+  if (continueCompileFrom == FILE_TYPE_ISA) {
+    binary_t isaBinary = binary();
+    if (GPU_DUMP_CODE_OBJECT) {
+      dumpCodeObject(std::string{(const char*)isaBinary.first, isaBinary.second});
+    }
+    if (!createKernels(const_cast<void*>(isaBinary.first), isaBinary.second,
+                       options->oVariables->UniformWorkGroupSize, internal_)) {
+      buildLog_ += "Error: Cannot create kernels.\n";
+      return false;
+    }
+    return true;
+  }
+
+  if (!requireCompiler()) {
+    return false;
+  }
   amd_comgr_data_set_t inputs;
   if (amd::Comgr::create_data_set(&inputs) != AMD_COMGR_STATUS_SUCCESS) {
     buildLog_ += "Error: COMGR fails to create data set for linking.\n";
@@ -738,10 +775,6 @@ bool Program::linkImpl(amd::option::Options* options) {
   }
 
   bool bLinkLLVMBitcode = true;
-  if (llvmBinary_.empty()) {
-    continueCompileFrom = getNextCompilationStageFromBinary(options);
-  }
-
   switch (continueCompileFrom) {
     case FILE_TYPE_CG:
     case FILE_TYPE_LLVMIR_BINARY: {
@@ -761,20 +794,6 @@ bool Program::linkImpl(amd::option::Options* options) {
 
       bLinkLLVMBitcode = false;
       break;
-    }
-    case FILE_TYPE_ISA: {
-      amd::Comgr::destroy_data_set(inputs);
-      binary_t isaBinary = binary();
-      if (GPU_DUMP_CODE_OBJECT) {
-        dumpCodeObject(std::string{(const char*)isaBinary.first, isaBinary.second});
-      }
-
-      if (!createKernels(const_cast<void*>(isaBinary.first), isaBinary.second,
-                         options->oVariables->UniformWorkGroupSize, internal_)) {
-        buildLog_ += "Error: Cannot create kernels.\n";
-        return false;
-      }
-      return true;
     }
     default:
       buildLog_ += "Error while Codegen phase: the binary is incomplete \n";
@@ -1036,7 +1055,7 @@ int32_t Program::compile(const std::string& sourceCode,
   if (buildStatus_ == CL_BUILD_IN_PROGRESS) {
     buildStatus_ = CL_BUILD_SUCCESS;
   } else {
-    buildError_ = CL_COMPILE_PROGRAM_FAILURE;
+    buildError_ = compilerUnavailable_ ? CL_COMPILER_NOT_AVAILABLE : CL_COMPILE_PROGRAM_FAILURE;
   }
 
   if (options->oVariables->EnableBuildTiming) {
@@ -1136,7 +1155,7 @@ int32_t Program::link(const std::vector<Program*>& inputPrograms, const char* or
   if (buildStatus_ == CL_BUILD_IN_PROGRESS) {
     buildStatus_ = CL_BUILD_SUCCESS;
   } else {
-    buildError_ = CL_LINK_PROGRAM_FAILURE;
+    buildError_ = compilerUnavailable_ ? CL_LINKER_NOT_AVAILABLE : CL_LINK_PROGRAM_FAILURE;
   }
 
   if (options.oVariables->EnableBuildTiming) {
@@ -1322,7 +1341,7 @@ int32_t Program::build(const std::string& sourceCode, const char* origOptions,
   if (buildStatus_ == CL_BUILD_IN_PROGRESS) {
     buildStatus_ = CL_BUILD_SUCCESS;
   } else {
-    buildError_ = CL_BUILD_PROGRAM_FAILURE;
+    buildError_ = compilerUnavailable_ ? CL_COMPILER_NOT_AVAILABLE : CL_BUILD_PROGRAM_FAILURE;
   }
 
   if (options->oVariables->EnableBuildTiming) {
