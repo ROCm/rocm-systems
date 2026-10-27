@@ -77,7 +77,10 @@ public:
   /// @brief Deliver an out-of-order-ready non-kernel packet's completion.
   [[nodiscard]] VmAccessOutcome complete_non_kernel(DispatchEntry &entry);
 
-  /// @brief Flush L1/L2 caches before firing a completion signal.
+  /// @brief Flush L1/L2 and invalidate instruction caches before completion.
+  /// @details The CP calls this with its queue mutex held and CU workers joined.
+  /// CU maintenance serializes with runtime snapshots without delivering pending
+  /// notifications, which could invalidate the completion entry being published.
   void flush_caches(uint32_t vmid = 0);
 
   /// @brief Check if all queues have no pending entries.

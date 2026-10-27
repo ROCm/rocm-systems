@@ -803,26 +803,42 @@ public:
   ///
   /// @details Both L1 caches use write-through, so flush just invalidates. L2
   /// flushes all dirty lines to the backing MemoryInterface (MSC or HBM).
+  /// Takes the CU mutex without delivering CP notifications. Callers performing
+  /// queue-wide maintenance must first join their CU workers.
   /// Note: prefer flush_l1() + per-XCD L2 flush to avoid redundant L2 flushes
   /// when multiple CUs share the same L2.
   void flush_all(uint32_t vmid = 0) {
+    std::lock_guard lock(wave_state_mutex_);
     util::Logger::vm([&](auto &os) {
       if (l1_vector_.store_count() > 0)
         os << std::format("CU {}@{} L1 stores: total={} active={} l2_writes={}", this->name(),
                           reinterpret_cast<uintptr_t>(this), l1_vector_.store_count(),
                           l1_vector_.store_active_count(), l1_vector_.store_l2_writes());
     });
-    l1_scalar_.invalidate_all();
-    l1_vector_.flush_all();
-    inst_cache_.invalidate_all();
+    flush_l1(vmid);
     l2_->flush_all(vmid);
   }
 
+  /// @brief Invalidate scalar, vector and instruction caches under the CU mutex.
+  /// @details Serializes with execution and runtime snapshots without delivering
+  /// CP notifications. Shared L2 maintenance remains the caller's responsibility.
   void flush_l1(uint32_t vmid = 0) {
+    std::lock_guard lock(wave_state_mutex_);
     (void)vmid;
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
     inst_cache_.invalidate_all();
+  }
+
+  /// @brief Serialize cache maintenance without delivering CP notifications.
+  /// @details Uses the wave-state mutex to exclude execution and runtime
+  /// snapshots. The callback must only access caches; it must not change waves
+  /// or call the CP. Queue-wide callers must first join their CU workers.
+  /// Unlike with_wave_state_locked(), releasing this lock cannot re-enter the CP
+  /// while it holds references to admitted packets or completion entries.
+  template <typename F> decltype(auto) with_cache_state_locked(F &&fn) {
+    std::lock_guard lock(wave_state_mutex_);
+    return std::forward<F>(fn)();
   }
 
   /// @brief Set (or replace) the shared GPU memory pointer.
