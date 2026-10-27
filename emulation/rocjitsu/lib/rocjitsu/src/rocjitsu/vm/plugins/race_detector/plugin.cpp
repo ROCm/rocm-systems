@@ -48,6 +48,18 @@ InstructionSnapshot capture_instruction(uint64_t pc, const Instruction &inst) {
   return snapshot;
 }
 
+// onAmdgpuBeforeExecuteInstruction() records each instruction before it can
+// access registers or memory, so the newest trace entry is the instruction that
+// is executing. Use it instead of wf.pc, which some instructions change before
+// they finish accessing registers (for example, s_swappc_b64).
+const InstructionSnapshot &current_instruction(const RaceWavefrontState &state,
+                                               const amdgpu::Wavefront &wf) {
+  if (state.trace.size() == 0)
+    throw std::logic_error(
+        std::format("race detector has no current instruction at PC {:#x}", wf.pc));
+  return state.trace[state.trace.size() - 1];
+}
+
 void warn_cluster_peer_writes_ignored_once() {
   static std::once_flag warned;
   std::call_once(warned, [] {
@@ -270,10 +282,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     amdgpu::Wavefront *wf = wf_ptrs[v.wave];
     auto *ws = get_state(wf);
     assert(ws && ws->race_state && "no wavefront state for race");
-    if (!ws->trace.size())
-      throw std::logic_error(
-          std::format("race detector has no current instruction at PC {:#x}", wf->pc));
-    const auto current = ws->trace[ws->trace.size() - 1];
+    const InstructionSnapshot current = current_instruction(*ws, *wf);
     uint64_t pc = current.pc;
 
     {
@@ -361,8 +370,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   auto *rs = s->race_state;
   auto *detector = rs->getDetector();
   auto waveId = rs->getWaveId();
-  const auto instruction =
-      capture_instruction(s->trace.size() ? s->trace[s->trace.size() - 1].pc : wf.pc, inst);
+  const InstructionSnapshot &instruction = current_instruction(*s, wf);
   const auto *decoded = inst.amdgpu_memory_issue_info();
   assert(decoded && "memory instruction reached the race detector without issue metadata");
   if (!decoded)
@@ -470,7 +478,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       }
       rs->registerLdsEvent(instruction, MemoryEventType::GLOBAL_TO_LDS, {}, validLaneMask,
                            wf.wf_size(), std::span<const uint32_t>(ldsAddrs, wf.wf_size()),
-                           perLaneBytes, 0xF, obligations, memoryOrder, ~uint64_t{0}, 0);
+                           perLaneBytes, 0xF, obligations, memoryOrder);
     } else if (d.is_load) {
       auto destinations = validated_load_destinations(d, wf);
       if (!destinations)
@@ -488,7 +496,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
                         d.exec_mask, byte_mask, obligations, memoryOrder, last_byte_mask);
     } else if (!obligations.empty()) {
       rs->registerEvent(instruction, MemoryEventType::VGPR_TO_GLOBAL, {}, d.exec_mask, 0xF,
-                        obligations, memoryOrder, 0);
+                        obligations, memoryOrder);
     }
   }
 
@@ -499,11 +507,11 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         rs->registerScalarLoad(instruction, *reg, wf.exec(), obligations, memoryOrder);
       } else {
         rs->registerEvent(instruction, MemoryEventType::GLOBAL_TO_SGPR, {}, wf.exec(), 0xF,
-                          obligations, memoryOrder, 0);
+                          obligations, memoryOrder);
       }
     } else {
       rs->registerEvent(instruction, MemoryEventType::SCALAR_TO_GLOBAL, {}, wf.exec(), 0xF,
-                        obligations, memoryOrder, 0);
+                        obligations, memoryOrder);
     }
   }
 }

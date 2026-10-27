@@ -96,9 +96,9 @@ You should see output:
 ```
 RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
-  ==>  ds_write_b32 v0, v1  ; <-- wave 1
-       v_sub_u32_e32 v1, 0, v0
-  ==>  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
+  ==>  0x7f6a1e801010  ds_write_b32 v0, v1  ; <-- wave 1
+       0x7f6a1e801018  v_sub_u32_e32 v1, 0, v0
+  ==>  0x7f6a1e80101c  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
 END_RACE
 ```
 
@@ -108,6 +108,22 @@ without a barrier in between. The `kernel` field is a compact display name, and
 `symbol` is the exact ELF symbol when rocjitsu can resolve it. If a name cannot
 be resolved, rocjitsu reports `?` for the unresolved field. The fix is to add
 `__syncthreads()` between the write and the read.
+
+Each trace line shows an instruction's GPU virtual address, which varies
+between runs, and its disassembly. The trace lists the instructions
+that the reporting wave (here wave 0) executed, oldest first, ending at its
+racing access. `==>` marks the two instructions involved in the race, and the
+`<--` annotation names the wave and lane that performed each one. When the
+conflicting instruction ran in another wave, as with wave 1's `ds_write_b32`
+above, the marker is placed where the reporting wave executed the same
+address.
+
+The race detector retains the last 256 instructions of each wave. If the
+conflicting instruction is older than that, the report prints it first with a
+`(before trace window)` note. Traces longer than 32 instructions show only
+their first and last 16. Disassembly is produced from the instruction bytes
+that the wave executed, so it remains accurate if the kernel's code is later
+overwritten or unmapped.
 
 ### Running your own application
 

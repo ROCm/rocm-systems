@@ -116,7 +116,7 @@ void WaveRaceState::registerScalarLoad(
     return;
   if (limit == 0) {
     registerEvent(instruction, MemoryEventType::GLOBAL_TO_SGPR, {}, execMask, 0xF,
-                  counterObligations, memoryOrder, 0);
+                  counterObligations, memoryOrder);
     return;
   }
   if (destination.index >= limit || destination.width > limit - destination.index)
@@ -130,7 +130,7 @@ void WaveRaceState::registerScalarLoad(
   registerEvent(instruction,
                 destination.cls == RegClass::SGPR ? MemoryEventType::GLOBAL_TO_SGPR
                                                   : MemoryEventType::GLOBAL_TO_TTMP,
-                std::move(registers), execMask, 0xF, counterObligations, memoryOrder, 0);
+                std::move(registers), execMask, 0xF, counterObligations, memoryOrder);
 }
 
 void WaveRaceState::registerEventWithIntervals(
@@ -262,7 +262,7 @@ void WaveRaceState::registerLdsEvent(
   });
   intervals.finalize();
   registerEventWithIntervals(instruction, type, std::move(registers), execMask, byteMask,
-                             std::move(intervals), counterObligations, memoryOrder, 0);
+                             std::move(intervals), counterObligations, memoryOrder);
 }
 
 void WaveRaceState::registerLdsEvent(
@@ -278,7 +278,7 @@ void WaveRaceState::registerLdsEvent(
   });
   intervals.finalize();
   registerEventWithIntervals(instruction, type, std::move(registers), execMask, byteMask,
-                             std::move(intervals), counterObligations, memoryOrder, 0);
+                             std::move(intervals), counterObligations, memoryOrder);
 }
 
 void WaveRaceState::registerDualOffsetLdsEvent(InstructionSnapshot instruction,

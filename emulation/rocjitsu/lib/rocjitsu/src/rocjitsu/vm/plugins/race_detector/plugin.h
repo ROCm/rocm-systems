@@ -40,19 +40,32 @@ template <typename T, size_t N> struct RingBuffer {
       ++len;
   }
 
-  T operator[](size_t i) const { return data[(head - len + i) % N]; }
+  /// Element i in insertion order; 0 is the oldest retained element.
+  const T &operator[](size_t i) const { return data[(head - len + i) % N]; }
   size_t size() const { return len; }
 };
 
 /// Return the memory instruction recorded as the exact conflict.
 MarkedInstruction findConflict(const RaceViolation &, RaceDetector &);
 
-/// Format a trace with ==> markers and wave/lane annotations.
+/// Format the instructions that one wave executed between a conflicting memory
+/// instruction and the access that raced with it.
+///
+/// Marks trace entries whose PC matches `conflict` or `read` with `==>` and
+/// annotates them with wave and lane. Drops entries before the first marked one
+/// and after the first match of `read` that follows it, and elides the middle of
+/// a remaining span longer than 32 rows. If the trace contains no entry at the
+/// conflict's PC, prints the conflict first with a "(before trace window)" note.
+/// Marked rows print the marked instruction's bytes; other rows print the trace
+/// entry's bytes. Calls `disassemble` only for printed rows.
 std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                         const std::function<std::string(const InstructionSnapshot &)> &disassemble,
                         std::optional<MarkedInstruction> conflict, MarkedInstruction read);
 
 struct RaceWavefrontState : WavefrontState {
+  /// The wave's most recently issued instructions, oldest first. Each entry owns
+  /// a copy of its encoding, so reports can disassemble it after the code is
+  /// rewritten or unmapped.
   RingBuffer<InstructionSnapshot, 256> trace;
   WaveRaceState *race_state = nullptr;
 };
