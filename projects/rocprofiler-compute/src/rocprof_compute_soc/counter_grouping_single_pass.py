@@ -36,7 +36,6 @@ from .counter_file import CounterFile, flat_counters_in_perfmon_file
 from .counter_grouping_buckets import (
     bucket_counter_set,
     counters_fit_one_bucket,
-    iter_metric_groups,
     rebuild_counter_file,
 )
 from .counter_grouping_tcc import (
@@ -268,7 +267,7 @@ def _partition_unique_metric_sets(
     multi_sets: List[FrozenSet[str]] = []
     single_count = 0
     multi_count = 0
-    for _sort_key, group, _label in iter_metric_groups(soc, profile_counters):
+    for _sort_key, group, _label in soc.metric_groups(profile_counters):
         if counters_fit_one_bucket(group, perfmon_config):
             single_count += 1
             for candidate in adjust_candidate_groups(group, profile_counters):
