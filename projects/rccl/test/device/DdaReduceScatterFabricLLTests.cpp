@@ -1,0 +1,228 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// ddaReduceScatterFabricLL on one GPU: the host plays the peers by writing LL lines into coherent host scratch.
+// This binary builds with DWORDX4_INTRINSICS_FORCE_OFF, so the phase-2 wait runs its dword-load re-read path.
+
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstring>
+#include <thread>
+#include <vector>
+
+#include "DeviceTestBase.hpp"
+#include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h"
+#include "gtest/gtest.h"
+
+namespace RcclUnitTesting {
+
+namespace {
+
+using dda::common::DdaKernelParams;
+using dda::common::LLPacket16;
+
+constexpr int kRanks = 3;  // two peers share one receive batch, one batch lane stays out of range
+constexpr int kSelf = 1;  // peers 2 and 0, so the peer index wraps
+constexpr size_t kRecvCount = 2050;  // floats per shard; 1025 packets, so the last block is partial
+constexpr size_t kPackets = kRecvCount * sizeof(float) / 8;
+constexpr unsigned kThreads = 256;  // the production launcher's block size
+constexpr unsigned kBlocks = (kPackets + kThreads - 1) / kThreads;
+constexpr uint32_t kFlag = 2;  // epoch cells start at 1, so the kernel uses flag 2 and bank 0
+constexpr float kUntouched = -1.0f;
+constexpr auto kWatchdog = std::chrono::seconds(30);
+
+float sendValue(int rank, size_t i) {
+  return static_cast<float>(rank * 4096 + static_cast<int>(i % 4096));
+}
+
+float peerValue(int peer, size_t i) {
+  return static_cast<float>((peer + 1) * 3 + static_cast<int>(i % 977));
+}
+
+uint32_t bitsOf(float f) {
+  uint32_t u = 0;
+  std::memcpy(&u, &f, sizeof(u));
+  return u;
+}
+
+class DdaReduceScatterFabricLL : public DeviceTestBase {
+protected:
+  void SetUp() override {
+    DeviceTestBase::SetUp();
+    const size_t bankBytes = dda::common::ddaLLRsBankBytes(kRanks);
+    for (int r = 0; r < kRanks; ++r) {
+      HIP_CHECK(hipHostMalloc(&hostScratch_[r], bankBytes, hipHostMallocMapped | hipHostMallocCoherent));
+      std::memset(hostScratch_[r], 0, bankBytes);
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&devScratch_[r]), hostScratch_[r], 0));
+    }
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&abortFlag_), sizeof(uint32_t),
+                            hipHostMallocMapped | hipHostMallocCoherent));
+    *abortFlag_ = 0;
+    HIP_CHECK(hipMalloc(&dPeers_, sizeof(devScratch_)));
+    HIP_CHECK(hipMemcpy(dPeers_, devScratch_, sizeof(devScratch_), hipMemcpyHostToDevice));
+
+    std::vector<float> send(kRecvCount * kRanks);
+    for (int r = 0; r < kRanks; ++r) {
+      for (size_t i = 0; i < kRecvCount; ++i) {
+        send[r * kRecvCount + i] = sendValue(r, i);
+      }
+    }
+    HIP_CHECK(hipMalloc(&dSend_, send.size() * sizeof(float)));
+    HIP_CHECK(hipMemcpy(dSend_, send.data(), send.size() * sizeof(float), hipMemcpyHostToDevice));
+    const std::vector<float> recv(kRecvCount, kUntouched);
+    HIP_CHECK(hipMalloc(&dRecv_, kRecvCount * sizeof(float)));
+    HIP_CHECK(hipMemcpy(dRecv_, recv.data(), kRecvCount * sizeof(float), hipMemcpyHostToDevice));
+    const std::vector<uint32_t> epoch(kBlocks, kFlag - 1);
+    HIP_CHECK(hipMalloc(&dEpoch_, kBlocks * sizeof(uint32_t)));
+    HIP_CHECK(hipMemcpy(dEpoch_, epoch.data(), kBlocks * sizeof(uint32_t), hipMemcpyHostToDevice));
+    HIP_CHECK(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
+  }
+
+  void TearDown() override {
+    HIP_EXPECT(hipStreamDestroy(stream_));
+    HIP_EXPECT(hipFree(dEpoch_));
+    HIP_EXPECT(hipFree(dRecv_));
+    HIP_EXPECT(hipFree(dSend_));
+    HIP_EXPECT(hipFree(dPeers_));
+    HIP_EXPECT(hipHostFree(abortFlag_));
+    for (void* p : hostScratch_) {
+      HIP_EXPECT(hipHostFree(p));
+    }
+  }
+
+  volatile uint32_t* line(int owner, int sender, size_t pk) {
+    LLPacket16* base = static_cast<LLPacket16*>(hostScratch_[owner]);
+    return reinterpret_cast<volatile uint32_t*>(&base[sender * dda::common::kDdaLLRsSlotStridePkts + pk]);
+  }
+
+  // Writes the payload before the flags, as one 16B store would make them visible together to the poller.
+  void publishPeer(int peer) {
+    for (size_t pk = 0; pk < kPackets; ++pk) {
+      volatile uint32_t* w = line(kSelf, peer, pk);
+      w[0] = bitsOf(peerValue(peer, 2 * pk));
+      w[2] = bitsOf(peerValue(peer, 2 * pk + 1));
+      std::atomic_thread_fence(std::memory_order_release);
+      w[1] = kFlag;
+      w[3] = kFlag;
+    }
+  }
+
+  // True once every thread has stored its first phase-1 line, so nearly all of them are already polling.
+  bool phase1Done() {
+    const int peer = (kSelf + 1) % kRanks;
+    for (size_t pk = 0; pk < kPackets; ++pk) {
+      volatile uint32_t* w = line(peer, kSelf, pk);
+      if (w[1] != kFlag || w[3] != kFlag) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void launch() {
+    hipLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<float, 0>), dim3(kBlocks), dim3(kThreads), 0, stream_,
+                       dPeers_, dRecv_, dSend_, kRecvCount, kSelf, kRanks, dEpoch_, static_cast<int>(kBlocks),
+                       dda::common::ddaLLRsBankBytes(kRanks), DdaKernelParams{abortFlag_});
+    ASSERT_EQ(hipGetLastError(), hipSuccess);
+  }
+
+  // Raises the abort flag if the kernel outlives the watchdog, so a lost wake-up fails instead of hanging.
+  bool finishes() {
+    const auto deadline = std::chrono::steady_clock::now() + kWatchdog;
+    while (hipStreamQuery(stream_) == hipErrorNotReady) {
+      if (std::chrono::steady_clock::now() > deadline) {
+        *abortFlag_ = 1;
+        EXPECT_EQ(hipStreamSynchronize(stream_), hipSuccess);
+        return false;
+      }
+      std::this_thread::yield();
+    }
+    return hipStreamSynchronize(stream_) == hipSuccess;
+  }
+
+  std::vector<float> recv() {
+    std::vector<float> out(kRecvCount);
+    EXPECT_EQ(hipMemcpy(out.data(), dRecv_, kRecvCount * sizeof(float), hipMemcpyDeviceToHost), hipSuccess);
+    return out;
+  }
+
+  void expectEpochAdvanced() {
+    std::vector<uint32_t> epoch(kBlocks);
+    ASSERT_EQ(hipMemcpy(epoch.data(), dEpoch_, kBlocks * sizeof(uint32_t), hipMemcpyDeviceToHost), hipSuccess);
+    for (unsigned b = 0; b < kBlocks; ++b) {
+      EXPECT_EQ(epoch[b], kFlag) << "block " << b;
+    }
+  }
+
+  void expectReduced() {
+    const std::vector<float> out = recv();
+    for (size_t i = 0; i < kRecvCount; ++i) {
+      const float want = sendValue(kSelf, i) + peerValue((kSelf + 1) % kRanks, i) + peerValue((kSelf + 2) % kRanks, i);
+      ASSERT_EQ(out[i], want) << "element " << i;
+    }
+    for (int r = 1; r < kRanks; ++r) {
+      const int peer = (kSelf + r) % kRanks;
+      for (size_t pk = 0; pk < kPackets; ++pk) {
+        volatile uint32_t* w = line(peer, kSelf, pk);
+        ASSERT_EQ(w[0], bitsOf(sendValue(peer, 2 * pk))) << "peer " << peer << " packet " << pk;
+        ASSERT_EQ(w[2], bitsOf(sendValue(peer, 2 * pk + 1))) << "peer " << peer << " packet " << pk;
+      }
+    }
+    expectEpochAdvanced();
+  }
+
+  void* hostScratch_[kRanks] = {};
+  float* devScratch_[kRanks] = {};
+  uint32_t* abortFlag_ = nullptr;
+  float** dPeers_ = nullptr;
+  float* dSend_ = nullptr;
+  float* dRecv_ = nullptr;
+  uint32_t* dEpoch_ = nullptr;
+  hipStream_t stream_ = nullptr;
+};
+
+} // namespace
+
+TEST_F(DdaReduceScatterFabricLL, LinesPublishedBeforeLaunchAreReduced) {
+  publishPeer((kSelf + 1) % kRanks);
+  publishPeer((kSelf + 2) % kRanks);
+  launch();
+  ASSERT_TRUE(finishes()) << "kernel did not finish with every line already fresh";
+  expectReduced();
+}
+
+TEST_F(DdaReduceScatterFabricLL, LateLinesAreReReadUntilFresh) {
+  launch();
+  const auto deadline = std::chrono::steady_clock::now() + kWatchdog;
+  while (!phase1Done() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::yield();
+  }
+  if (!phase1Done()) {
+    *abortFlag_ = 1;
+    finishes();
+    FAIL() << "phase 1 never stored its lines";
+  }
+  // One peer at a time, so a batch first holds one fresh and one stale line.
+  publishPeer((kSelf + 2) % kRanks);
+  std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  publishPeer((kSelf + 1) % kRanks);
+  ASSERT_TRUE(finishes()) << "kernel never saw the late lines";
+  expectReduced();
+}
+
+TEST_F(DdaReduceScatterFabricLL, AbortExitsTheWaitAndAdvancesEpoch) {
+  publishPeer((kSelf + 2) % kRanks);
+  *abortFlag_ = 1;
+  launch();
+  ASSERT_TRUE(finishes()) << "kernel ignored the abort flag";
+  for (float v : recv()) {
+    ASSERT_EQ(v, kUntouched) << "an aborted thread wrote recvbuff";
+  }
+  expectEpochAdvanced();
+}
+
+} // namespace RcclUnitTesting

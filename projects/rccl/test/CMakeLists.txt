@@ -402,6 +402,7 @@ if(BUILD_TESTS)
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
       device/DdaIpcGpuBarrierOrderingTests.cpp
+      device/DdaReduceScatterFabricLLTests.cpp
       device/DdaVecElementAddTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
