@@ -19,6 +19,7 @@ from amdisa.codegen.execute.conversion import (
     to_fp8_expr,
 )
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_shared_fp8
+from amdisa.codegen.execute.required_vgpr import append_required_vgpr_offset
 from amdisa.codegen.execute.vop3_modifiers import (
     apply_output,
     output_policy_decl,
@@ -2682,15 +2683,9 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     if is_sr_pk_fp4_f32:
         L.append('  auto &cu = wf.cu();')
         L.append('  uint32_t vb = wf.vgpr_alloc().base;')
-        L.append(
-            f'  auto data_src_off = Isa::resolved_vgpr_offset({src[0]}.opr_type_, '
-            f'{src[0]}.encoding_value_);'
+        append_required_vgpr_offset(
+            L, 'data_src_off', src[0], uses_vgpr_msb_indexing=False
         )
-        L.append('  if (!data_src_off) {')
-        L.append('    wf.report_instruction_execution_error(')
-        L.append('        amdgpu::InstructionExecutionError::UnsupportedOperandValue);')
-        L.append('    return;')
-        L.append('  }')
         L.append(
             f'  uint32_t data_src_base = vb + amdgpu::apply_gpr_idx('
             f'wf, *data_src_off, {src[0]}.vgpr_msb_role());'
@@ -3002,15 +2997,9 @@ def _gen_wide_scalef32(
     if direction == 'narrow' and mode == '2xpk16':
         direct_ops.append(src[1])
     for direct_op in dict.fromkeys(direct_ops):
-        L.append(
-            f'  auto {direct_op}_off = Isa::resolved_vgpr_offset('
-            f'{direct_op}.opr_type_, {direct_op}.encoding_value_);'
+        append_required_vgpr_offset(
+            L, f'{direct_op}_off', direct_op, uses_vgpr_msb_indexing=False
         )
-        L.append(f'  if (!{direct_op}_off) {{')
-        L.append('    wf.report_instruction_execution_error(')
-        L.append('        amdgpu::InstructionExecutionError::UnsupportedOperandValue);')
-        L.append('    return;')
-        L.append('  }')
         L.append(
             f'  uint32_t {direct_op}_base = vb + amdgpu::apply_gpr_idx('
             f'wf, *{direct_op}_off, {direct_op}.vgpr_msb_role());'

@@ -11,7 +11,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3p.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -55,21 +54,21 @@ protected:
   }
 
   void expect_rejected(Instruction &instruction) {
-    const auto before = registers();
+    const auto before = read_vgprs();
     const auto exec = wave->exec(), vcc = wave->vcc();
     const auto scc = wave->read_scc();
     ASSERT_NE(instruction.execute, nullptr);
     EXPECT_NO_THROW({ EXPECT_TRUE(cu->execute_instruction(&instruction, *wave).failed()); });
     EXPECT_EQ(wave->instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    EXPECT_EQ(registers(), before);
+    EXPECT_EQ(read_vgprs(), before);
     EXPECT_EQ(wave->exec(), exec);
     EXPECT_EQ(wave->vcc(), vcc);
     EXPECT_EQ(wave->read_scc(), scc);
     EXPECT_FALSE(wave->is_halted());
   }
 
-  std::vector<uint32_t> registers() const {
+  std::vector<uint32_t> read_vgprs() const {
     std::vector<uint32_t> words;
     for (uint32_t reg = 0; reg < 128; ++reg)
       for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)

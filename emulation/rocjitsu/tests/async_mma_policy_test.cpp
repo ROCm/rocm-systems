@@ -122,6 +122,84 @@ TEST(AsyncMmaPolicyTest, Cdna5DefaultFamiliesIncludeK32AndScaledWmma) {
   EXPECT_FALSE(policy::candidate("v_wmma_f32_16x16x16_f16"));
 }
 
+// These are the production decoder restrictions that keep the defensive
+// Wavefront reporting guards unreachable on MMA helper threads.
+TEST(AsyncMmaPolicyTest, Cdna5AsyncCandidatesRejectNonVgprMatrixInputsAtDecode) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  unsigned candidates = 0;
+  for (unsigned opcode = 0; opcode != 512; ++opcode) {
+    const auto encoding = cdna5::build_vop3p(
+        opcode, {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+    const std::array<uint32_t, cdna5::Decoder::kMaxInstructionWords> words = {encoding[0],
+                                                                              encoding[1]};
+    auto decoded = decoder->decode(words.data());
+    if (decoded.failed() || !policy::candidate(decoded.value()->mnemonic()))
+      continue;
+    ++candidates;
+    SCOPED_TRACE(decoded.value()->mnemonic());
+    for (bool first : {false, true}) {
+      const auto bad = cdna5::build_vop3p(opcode, {.vdst = 64,
+                                                   .src0 = static_cast<uint16_t>(first ? 128 : 256),
+                                                   .src1 = static_cast<uint16_t>(first ? 288 : 128),
+                                                   .src2 = 320,
+                                                   .opsel_hi = 3});
+      const std::array<uint32_t, cdna5::Decoder::kMaxInstructionWords> bad_words = {bad[0], bad[1]};
+      EXPECT_TRUE(decoder->decode(bad_words.data()).failed());
+    }
+  }
+  for (bool first : {false, true}) {
+    const auto bad = mma_test::make_cdna5_wmma_scale_words(4, 4, 448, 449, 64, first ? 128 : 256,
+                                                           first ? 288 : 128);
+    EXPECT_TRUE(decoder->decode(bad.data()).failed());
+  }
+  EXPECT_GT(candidates, 0u);
+}
+
+TEST(AsyncMmaPolicyTest, DynamicAsyncCandidatesRejectReservedFormatsAtDecode) {
+  auto cdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto cdna5_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  for (unsigned opcode : {45u, 46u}) {
+    for (bool scaled : {false, true}) {
+      const auto good = mma_test::make_cdna4_mfma_scale_words(opcode, 1, 448, 449);
+      const auto dense = cdna4::build_vop3p_mfma(
+          opcode, {.vdst = 64, .cbsz = 4, .src0 = 256, .src1 = 288, .src2 = 320, .blgp = 4});
+      std::unique_ptr<Instruction> decoded(
+          decode_valid(*cdna4_decoder, scaled ? good.data() : dense.data()));
+      ASSERT_TRUE(policy::candidate(decoded->mnemonic()));
+      for (unsigned format : {5u, 6u, 7u}) {
+        for (bool first : {false, true}) {
+          const auto bad_scaled = mma_test::make_cdna4_mfma_scale_words(
+              opcode, 1, 448, 449, 0, 0, first ? format : 4, first ? 4 : format);
+          const auto bad_dense =
+              cdna4::build_vop3p_mfma(opcode, {.vdst = 64,
+                                               .cbsz = static_cast<uint8_t>(first ? format : 4),
+                                               .src0 = 256,
+                                               .src1 = 288,
+                                               .src2 = 320,
+                                               .blgp = static_cast<uint8_t>(first ? 4 : format)});
+          EXPECT_TRUE(
+              cdna4_decoder->decode(scaled ? bad_scaled.data() : bad_dense.data()).failed());
+        }
+      }
+    }
+  }
+  const auto good = mma_test::make_cdna5_wmma_scale_words(4, 4, 448, 449);
+  std::unique_ptr<Instruction> decoded(decode_valid(*cdna5_decoder, good.data()));
+  ASSERT_TRUE(policy::candidate(decoded->mnemonic()));
+  for (unsigned format : {5u, 6u, 7u}) {
+    for (bool first : {false, true}) {
+      const auto words =
+          mma_test::make_cdna5_wmma_scale_words(first ? format : 4, first ? 4 : format, 448, 449);
+      EXPECT_TRUE(cdna5_decoder->decode(words.data()).failed());
+    }
+  }
+  for (unsigned shift : {29u, 8u}) {
+    auto words = good;
+    words[shift == 29u ? 1 : 0] |= 3u << shift;
+    EXPECT_TRUE(cdna5_decoder->decode(words.data()).failed());
+  }
+}
+
 TEST(AsyncMmaPolicyTest, ScaledWmmaHintAndFootprintIncludeBothScaleRegisters) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   for (unsigned format_a = 0; format_a != 5; ++format_a) {
@@ -325,6 +403,7 @@ TEST(AsyncMmaPolicyTest, TerminalMemoryFaultDrainsPendingMmaBeforePublishingFail
 struct BlockedMmaState {
   std::binary_semaphore started{0};
   std::binary_semaphore unblock{0};
+  std::atomic<bool> done{false};
 };
 
 // Retain real decoded operands while replacing arithmetic with a controlled
@@ -337,6 +416,7 @@ public:
                       auto &state = static_cast<BlockedMma &>(self).state_;
                       state.started.release();
                       state.unblock.acquire();
+                      state.done.store(true, std::memory_order_release);
                     }),
         state_(state) {
     num_src_ = decoded.num_src_operands();
@@ -398,5 +478,70 @@ TEST(AsyncMmaPolicyTest, WaitIdleDrainsBlockedMmaBeforeReturningToIssue) {
     EXPECT_TRUE(window.stopped());
     window.drain();
   }
+}
+TEST(AsyncMmaPolicyTest, SynchronousFormatFailureDrainsEarlierMatrixWork) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  const auto good_words =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+  std::unique_ptr<Instruction> decoded(decode_valid(*decoder, good_words.data()));
+  // Ordinary dynamic-format WMMA can decode a reserved format, but is not
+  // eligible for asynchronous execution. Its error must stay on the CU thread.
+  const auto bad_words =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
+                         {.vdst = 64, .opsel = 5, .src0 = 256, .src1 = 288, .src2 = 128});
+  std::unique_ptr<Instruction> failing(decode_valid(*decoder, bad_words.data()));
+  ASSERT_NE(failing, nullptr);
+  EXPECT_FALSE(policy::candidate(failing->mnemonic()));
+  amdgpu::GpuMemory memory("matrix_failure_memory");
+  amdgpu::L2Cache l2("matrix_failure_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 128;
+  config.async_resources = std::make_shared<mc::ExecutionResources>(1);
+  auto cu = amdgpu::ComputeUnitCore::create("matrix_failure_cu", config, &memory, &l2);
+  auto *wave = cu->dispatch_wf(0, 0, 106, 128);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0xffffffff);
+  std::vector<uint32_t> destinations;
+  for (uint32_t reg = 64; reg < 80; ++reg)
+    for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+      const uint32_t value = 0xdead0000u + reg * 64 + lane;
+      cu->write_vgpr(wave->vgpr_alloc().base + reg, lane, value);
+      destinations.push_back(value);
+    }
+  BlockedMmaState state;
+  amdgpu::AsyncInstructionWindow window(*cu, *wave);
+  std::unique_ptr<Instruction> blocked = std::make_unique<BlockedMma>(*decoded, state);
+  ASSERT_TRUE(window.submit_mma(blocked));
+  state.started.acquire();
+
+  std::binary_semaphore returned{0};
+  bool returned_before_completion = false;
+  std::thread releaser([&] {
+    returned_before_completion = returned.try_acquire_for(std::chrono::milliseconds(50));
+    state.unblock.release();
+  });
+  window.before(*failing);
+  returned.release();
+  releaser.join();
+  EXPECT_FALSE(returned_before_completion);
+  EXPECT_FALSE(window.pending());
+  EXPECT_TRUE(window.stopped());
+  EXPECT_FALSE(window.submit_mma(failing));
+  ASSERT_NE(failing, nullptr);
+  EXPECT_TRUE(state.done.load(std::memory_order_acquire));
+  EXPECT_EQ(wave->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
+  EXPECT_NO_THROW({ EXPECT_TRUE(cu->execute_instruction(failing.get(), *wave).failed()); });
+  EXPECT_EQ(wave->instruction_execution_error(),
+            amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+  size_t index = 0;
+  for (uint32_t reg = 64; reg < 80; ++reg)
+    for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+      EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + reg, lane), destinations[index++]);
+  window.drain();
+  wave->halt();
 }
 } // namespace
