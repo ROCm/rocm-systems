@@ -59,7 +59,7 @@ from utils.utils_common import (
     canonical_config_arch,
     load_panel_configs,
 )
-from utils.utils_counter_defs import get_build_in_vars
+from utils.utils_counter_defs import get_build_in_vars, metric_value_keys
 from utils.yaml_inherit_loader import (
     INHERIT_KEY,
     InheritanceError,
@@ -94,8 +94,11 @@ EMPIRICAL_PEAK_RE = re.compile(r"\$(\w+)_empirical_peak")
 CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops")
 VARIABLE_FIELDS = ("formula",)
 
-# A row's equation comes from the first of these columns it has.
+# A row's equation comes from the first of these columns it has; a row with none
+# shows one equation in each of its table's value columns.
 MAIN_FORMS = ("avg", "value", "expr")
+# Value columns that _Row reads separately rather than as equations.
+ROW_FIELDS = ("unit", "peak")
 ROUND_RE = re.compile(r"^\s*ROUND\((.*),\s*\d+\s*\)\s*$", re.DOTALL)
 # Time in seconds (Bytes/s rows) and in nanoseconds (GB/s).
 SECONDS_SCALE = "/(SUM(End_Timestamp-Start_Timestamp)/1e9)"
@@ -609,8 +612,7 @@ def _row_equations(arch_dir: Path) -> Iterator["_Row"]:
             for index, label in enumerate(labels):
                 row = table["metric"][label]
                 legacy_id = f"{table['id'] // 100}.{table['id'] % 100}.{index}"
-                forms = [form for form in MAIN_FORMS if form in row][:1] or list(row)
-                for form in forms:
+                for form in _row_forms(table, row):
                     yield _Row(
                         legacy_id,
                         label,
@@ -618,6 +620,16 @@ def _row_equations(arch_dir: Path) -> Iterator["_Row"]:
                         _canonical(row.get("peak")),
                         row.get("unit"),
                     )
+
+
+def _row_forms(table: dict[str, Any], row: dict[str, Any]) -> list[str]:
+    """Return the columns of row that show an equation."""
+    main_forms = [form for form in MAIN_FORMS if form in row]
+    if main_forms:
+        return main_forms[:1]
+    return [
+        key for key in row if key in metric_value_keys(table) and key not in ROW_FIELDS
+    ]
 
 
 def _canonical(equation: object) -> Optional[str]:
