@@ -870,12 +870,8 @@ struct PlaybackContext {
         return alloc_map.find(rec) != alloc_map.end();
     }
 
-    // A graph node's host operand has to stay alive until the graph is
-    // launched, which is long after the call that built the node returned, and
-    // a node keeps the pointer it was given. So a block, once handed out, is
-    // never moved or freed: replay does not replay hipGraphDestroy or
-    // hipGraphExecDestroy (they are no-ops), and the graphs it built are
-    // destroyed only at teardown, so every block lives until the context does.
+    // A graph node keeps the host pointer it was given, so a block is never
+    // moved or freed before teardown.
     // Keyed by the recorded host address so the same recorded destination
     // reuses one block until a later event asks for more room.
     struct LandingBuffer {
@@ -895,15 +891,9 @@ struct PlaybackContext {
         std::unique_lock lk(map_mutex);
         auto& buf = host_landing_buffers[rec];
         if (!buf.cur || buf.size < sz) {
-            // A bigger request gets a new block; the old one stays for any node
-            // already holding it. Both are resident, so the new block is charged
-            // whole. A refusal leaves the buffer as it was.
+            // Charged whole, since the outgrown block stays resident.
             if (!charge_host(sz, "graph host operand buffer")) return nullptr;
-            std::unique_ptr<uint8_t[]> next(new (std::nothrow) uint8_t[sz ? sz : 1]());
-            if (!next) {
-                host_budget.release(sz);
-                return nullptr;
-            }
+            auto next = std::make_unique<uint8_t[]>(sz ? sz : 1);
             if (buf.cur) buf.retired.push_back(std::move(buf.cur));
             buf.cur = std::move(next);
             buf.size = sz;
