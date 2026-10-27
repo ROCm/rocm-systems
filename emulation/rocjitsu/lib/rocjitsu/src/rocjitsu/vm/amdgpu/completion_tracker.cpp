@@ -343,7 +343,7 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
 void CompletionTracker::flush_caches(uint32_t vmid) {
   std::set<L2Cache *> flushed_l2s;
   for (auto *cu : cus_) {
-    cu->flush_l1(vmid);
+    cu->with_wave_state_locked([&] { cu->flush_l1(vmid); });
     if (auto *l2 = cu->l2(); l2 && flushed_l2s.insert(l2).second)
       l2->flush_all(vmid);
   }

@@ -566,6 +566,7 @@ public:
 private:
   friend class CommandProcessorCloseTestAccess;
   friend class CommandProcessorPlacementTestAccess;
+  friend class CommandProcessorCacheTestAccess;
 
   class QueueRegistrationTransaction {
   public:
