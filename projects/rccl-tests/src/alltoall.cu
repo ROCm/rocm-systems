@@ -386,7 +386,11 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
 // alltoall example). Requires barrierCount == gridDim.x in devComm setup.
 __device__ inline void hybridTimedGridJoin(struct ncclDevComm devComm) {
   int ginContext = 0;
-  ncclGin gin { devComm, ginContext };
+  // GPU-locked, NOT --gin_resource_sharing: this join (device_timing only) posts
+  // the world barrier from EVERY CTA, so qps[peer] is multi-poster and THREAD's
+  // lock elision would race. A lock on one poster gives no exclusion against an
+  // unlocked one, so the mode must be GPU here regardless of the CLI selection.
+  ncclGin gin { devComm, ginContext, NCCL_GIN_RESOURCE_SHARING_GPU };
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, (uint32_t)blockIdx.x };
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 }
