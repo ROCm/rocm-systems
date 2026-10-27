@@ -601,6 +601,16 @@ TEST(ImageAccessTest, RdnaLinearR32DescriptorsPrepareTheExpectedMemoryAccess) {
 
 class RdnaDecodedImageAccessTest : public testing::TestWithParam<rj_code_arch_t> {
 protected:
+  struct Encoding {
+    bool r128 = false;
+    uint8_t dim = amdgpu::kImageDim2d;
+    bool a16 = false;
+    bool nsa = true;
+    uint8_t dmask = 1;
+    bool d16 = false;
+    bool tfe = false;
+  };
+
   static constexpr uint32_t kResourceBase = 8;
   amdgpu::GpuMemory memory{"rdna_image_memory"};
   amdgpu::L2Cache l2{"rdna_image_l2"};
@@ -636,61 +646,61 @@ protected:
       wf->halt();
   }
 
-  DecodeResult decode(bool load, bool r128 = false, uint8_t dim = amdgpu::kImageDim2d,
-                      bool a16 = false, bool nsa = true, uint8_t dmask = 1, bool d16 = false,
-                      bool tfe = false) {
+  DecodeResult decode(bool load) { return decode(load, Encoding{}); }
+
+  DecodeResult decode(bool load, Encoding encoding) {
     if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
-      const auto base =
-          rdna3::build_mimg(load ? rdna3::kImageLoadMimg : rdna3::kImageStoreMimg, {.nsa = nsa,
-                                                                                    .dim = dim,
-                                                                                    .unorm = 1,
-                                                                                    .dmask = dmask,
-                                                                                    .r128 = r128,
-                                                                                    .a16 = a16,
-                                                                                    .d16 = d16,
-                                                                                    .vaddr = 2,
-                                                                                    .vdata = 8,
-                                                                                    .srsrc = 2,
-                                                                                    .tfe = tfe});
-      if (!nsa)
+      const auto base = rdna3::build_mimg(load ? rdna3::kImageLoadMimg : rdna3::kImageStoreMimg,
+                                          {.nsa = encoding.nsa,
+                                           .dim = encoding.dim,
+                                           .unorm = 1,
+                                           .dmask = encoding.dmask,
+                                           .r128 = encoding.r128,
+                                           .a16 = encoding.a16,
+                                           .d16 = encoding.d16,
+                                           .vaddr = 2,
+                                           .vdata = 8,
+                                           .srsrc = 2,
+                                           .tfe = encoding.tfe});
+      if (!encoding.nsa)
         return decoder->decode(base.data());
       const std::array<uint32_t, 3> words{base[0], base[1], 6};
       return decoder->decode(words.data());
     }
     if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5) {
       const auto base = rdna3_5::build_mimg(
-          load ? rdna3_5::kImageLoadMimg : rdna3_5::kImageStoreMimg, {.nsa = nsa,
-                                                                      .dim = dim,
+          load ? rdna3_5::kImageLoadMimg : rdna3_5::kImageStoreMimg, {.nsa = encoding.nsa,
+                                                                      .dim = encoding.dim,
                                                                       .unorm = 1,
-                                                                      .dmask = dmask,
-                                                                      .r128 = r128,
-                                                                      .a16 = a16,
-                                                                      .d16 = d16,
+                                                                      .dmask = encoding.dmask,
+                                                                      .r128 = encoding.r128,
+                                                                      .a16 = encoding.a16,
+                                                                      .d16 = encoding.d16,
                                                                       .vaddr = 2,
                                                                       .vdata = 8,
                                                                       .srsrc = 2,
-                                                                      .tfe = tfe});
-      if (!nsa)
+                                                                      .tfe = encoding.tfe});
+      if (!encoding.nsa)
         return decoder->decode(base.data());
       const std::array<uint32_t, 3> words{base[0], base[1], 6};
       return decoder->decode(words.data());
     }
     const auto words = rdna4::build_vimage(
-        load ? rdna4::kImageLoadVimage : rdna4::kImageStoreVimage, {.dim = dim,
-                                                                    .r128 = r128,
-                                                                    .d16 = d16,
-                                                                    .a16 = a16,
-                                                                    .dmask = dmask,
+        load ? rdna4::kImageLoadVimage : rdna4::kImageStoreVimage, {.dim = encoding.dim,
+                                                                    .r128 = encoding.r128,
+                                                                    .d16 = encoding.d16,
+                                                                    .a16 = encoding.a16,
+                                                                    .dmask = encoding.dmask,
                                                                     .vdata = 8,
                                                                     .rsrc = kResourceBase,
-                                                                    .tfe = tfe,
+                                                                    .tfe = encoding.tfe,
                                                                     .vaddr0 = 2,
                                                                     .vaddr1 = 6});
     return decoder->decode(words.data());
   }
 
   void issue(bool load, uint8_t dmask = 1, bool d16 = false) {
-    auto decoded = decode(load, false, amdgpu::kImageDim2d, false, true, dmask, d16);
+    auto decoded = decode(load, {.dmask = dmask, .d16 = d16});
     ASSERT_TRUE(decoded.succeeded());
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     ASSERT_NE(inst, nullptr);
@@ -792,7 +802,7 @@ TEST_P(RdnaDecodedImageAccessTest, D16LoadPreservesAndReadsOnlyThePartialDestina
       for (uint32_t reg = 8; reg < 12; ++reg)
         cu->write_vgpr(vb + reg, 0, 0xabcdffff);
 
-      auto decoded = decode(true, false, amdgpu::kImageDim2d, false, true, dmask, d16);
+      auto decoded = decode(true, {.dmask = dmask, .d16 = d16});
       ASSERT_TRUE(decoded.succeeded());
       std::unique_ptr<Instruction> inst = std::move(decoded).value();
       ASSERT_NE(inst, nullptr);
@@ -838,7 +848,7 @@ TEST_P(RdnaDecodedImageAccessTest, TfeLoadReportsUnimplementedBeforeProducingDat
   cu->write_vgpr(vb + 9, 0, 0xdeadbeef);
   memory.write32(kBase, 0x12345678);
 
-  auto decoded = decode(true, false, amdgpu::kImageDim2d, false, true, 1, false, true);
+  auto decoded = decode(true, {.tfe = true});
   ASSERT_TRUE(decoded.succeeded());
   std::unique_ptr<Instruction> inst = std::move(decoded).value();
   ASSERT_NE(inst, nullptr);
@@ -862,7 +872,7 @@ TEST_P(RdnaDecodedImageAccessTest, OneDimensionalDimRejectsTwoDimensionalResourc
             continue;
           SCOPED_TRACE(testing::Message() << "dim=" << unsigned{dim} << " load=" << load
                                           << " a16=" << a16 << " nsa=" << nsa);
-          auto decoded = decode(load, false, dim, a16, nsa);
+          auto decoded = decode(load, {.dim = dim, .a16 = a16, .nsa = nsa});
           ASSERT_TRUE(decoded.succeeded());
           std::unique_ptr<Instruction> inst = std::move(decoded).value();
           ASSERT_NE(inst, nullptr);
@@ -892,7 +902,7 @@ TEST_P(RdnaDecodedImageAccessTest, TwoDimensionalArrayDimUsesTwoDimensionalResou
       cu->write_vgpr(vb + 8, 0, value);
 
       for (const bool load : {false, true}) {
-        auto decoded = decode(load, false, amdgpu::kImageDim2dArray, a16, nsa);
+        auto decoded = decode(load, {.dim = amdgpu::kImageDim2dArray, .a16 = a16, .nsa = nsa});
         ASSERT_TRUE(decoded.succeeded());
         std::unique_ptr<Instruction> inst = std::move(decoded).value();
         ASSERT_NE(inst, nullptr);
@@ -935,7 +945,7 @@ TEST_P(RdnaDecodedImageAccessTest, NonNsaAddressWidthFollowsDimAndA16) {
     for (bool load : {false, true}) {
       SCOPED_TRACE(testing::Message()
                    << "dim=" << unsigned{test.dim} << " a16=" << test.a16 << " load=" << load);
-      auto decoded = decode(load, false, test.dim, test.a16, false);
+      auto decoded = decode(load, {.dim = test.dim, .a16 = test.a16, .nsa = false});
       ASSERT_TRUE(decoded.succeeded());
       const std::unique_ptr<Instruction> inst = std::move(decoded).value();
       ASSERT_NE(inst, nullptr);
@@ -956,7 +966,7 @@ TEST_P(RdnaDecodedImageAccessTest, R128LoadAndStoreReportUnimplemented) {
 
   for (bool load : {false, true}) {
     SCOPED_TRACE(testing::Message() << "load=" << load);
-    auto decoded = decode(load, true);
+    auto decoded = decode(load, {.r128 = true});
     ASSERT_TRUE(decoded.succeeded());
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     ASSERT_NE(inst, nullptr);
