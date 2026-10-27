@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 
 _OPERATOR_BACKENDS: Tuple[str, ...] = KNOWN_ML_API_BACKENDS + ("user",)
+UNSCOPED_OPERATOR_KEY = "all_supported_backends"
 
 
 def split_selector_tokens(raw_values: List[str]) -> List[str]:
@@ -77,16 +78,19 @@ def resolve_list_selectors(raw: Optional[List[str]]) -> Optional[List[str]]:
 
 
 def _patterns_by_backend(token: str) -> Dict[str, List[str]]:
-    """Split one --operator token into backend -> glob patterns."""
+    """Split one --operator token into backend -> glob patterns.
+
+    A pattern with no framework is stored under UNSCOPED_OPERATOR_KEY until
+    analyze attaches it to the frameworks the workload actually collected.
+    """
     token = token.replace(" ", ",")
     selector_tokens = _comma_patterns(token)
     prefix: Optional[str] = None
     selections: Dict[str, List[str]] = {}
 
     def _save(backend: Optional[str], pattern: str) -> None:
-        names = (backend,) if backend else _OPERATOR_BACKENDS
-        for name in names:
-            selections.setdefault(name, []).append(pattern)
+        key = backend if backend else UNSCOPED_OPERATOR_KEY
+        selections.setdefault(key, []).append(pattern)
 
     for selector_token in selector_tokens:
         if "::" in selector_token and selector_token.find("::") <= selector_token.find(
@@ -110,8 +114,8 @@ def resolve_operator_patterns(
         return None
     token = " ".join(str(value).strip() for value in raw if str(value).strip())
     if not token:
-        return {name: ["**"] for name in _OPERATOR_BACKENDS}
+        return {UNSCOPED_OPERATOR_KEY: ["**"]}
     selections = _patterns_by_backend(token)
     if not selections:
-        return {name: ["**"] for name in _OPERATOR_BACKENDS}
+        return {UNSCOPED_OPERATOR_KEY: ["**"]}
     return selections

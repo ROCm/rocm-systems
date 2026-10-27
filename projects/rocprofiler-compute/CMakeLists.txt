@@ -595,6 +595,13 @@ add_test(
 )
 
 add_test(
+    NAME test_ml_api_selectors
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_ml_api_selectors.xml
+        ${COV_OPTION} tests/unit/utils/test_ml_api_selectors.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_list_metrics_cli
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_list_metrics_cli.xml
@@ -1121,6 +1128,7 @@ if(${ENABLE_COVERAGE})
         test_benchmark_base
         test_analysis_cli
         test_pattern_matching
+        test_ml_api_selectors
         test_list_metrics_cli
         test_memory_chart_loader
         test_memory_chart_units
