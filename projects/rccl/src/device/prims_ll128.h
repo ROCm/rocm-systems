@@ -74,10 +74,7 @@ inline __device__ void store128Fifo(uint64_t* ptr, uint64_t v0, uint64_t v1) {
   u.u64[1] = v1;
   __builtin_amdgcn_cooperative_atomic_store_8x16B((v4i_gptr)ptr, u.vi, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
 #elif RCCL_LL_FIFO_SYS_SCOPE
-  rcclB128 u;
-  u.u64[0] = v0;
-  u.u64[1] = v1;
-  __builtin_amdgcn_global_store_b128((v4u_gptr)ptr, u.v, RCCL_SYSTEM_SYNCSCOPE);
+  store128(ptr, v0, v1);
 #else
   store128Plain(ptr, v0, v1);
 #endif
@@ -595,8 +592,9 @@ public:
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
-    // The cheap post-peer fence is only safe with global DWORDX4 builtins
-    // (system-scope cache-bypassing stores); otherwise always use the full fence.
+    // The cheap post-peer fence is only safe when FIFO stores are system scope
+    // (global_store_b128, or the cooperative 8x16B store on gfx1250), which
+    // needs the global DWORDX4 builtins; otherwise always use the full fence.
     skip_fence = false;
 #endif
   }

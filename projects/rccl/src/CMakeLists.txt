@@ -1451,11 +1451,13 @@ if (NOT DWORDX4_INTRINSICS)
   target_compile_definitions(rccl PRIVATE DWORDX4_INTRINSICS_FORCE_OFF)
 endif()
 
-# Print whether gfx1250 cooperative 128-bit atomics are actually selected, once
-# per GPU target. A #pragma message in rccl_ptr.h would not show up: the device
-# linker compiles with -w, which drops it. This syntax-only compile does not.
-set(_rccl_coop_log_src "${CMAKE_CURRENT_BINARY_DIR}/rccl_coop_atomic_log.hip")
-file(WRITE "${_rccl_coop_log_src}" [=[
+# Print whether gfx1250 cooperative 128-bit atomics are actually selected, per
+# GPU target, on every build. A #pragma message in rccl_ptr.h would not show up:
+# the device linker compiles with -w, which drops it. This syntax-only compile
+# does not.
+if(REPORT_COOPERATIVE_ATOMICS)
+  set(_rccl_coop_log_src "${CMAKE_CURRENT_BINARY_DIR}/rccl_coop_atomic_log.hip")
+  file(WRITE "${_rccl_coop_log_src}" [=[
 #ifdef __HIP_DEVICE_COMPILE__
 #include "rccl_ptr.h"
 #if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
@@ -1466,29 +1468,31 @@ file(WRITE "${_rccl_coop_log_src}" [=[
 #endif
 __global__ void rcclCoopAtomicLog() {}
 ]=])
-set(_rccl_coop_log_flags
-  -x hip -std=c++17 -fsyntax-only -Wno-unused-command-line-argument
-  -I${RCCL_SOURCE_DIR}/src/include/nccl_device
-)
-if(NOT DWORDX4_INTRINSICS)
-  list(APPEND _rccl_coop_log_flags -DDWORDX4_INTRINSICS_FORCE_OFF)
-endif()
-set(_rccl_coop_log_stamps "")
-foreach(_rccl_coop_arch ${GPU_TARGETS})
-  string(MAKE_C_IDENTIFIER "${_rccl_coop_arch}" _rccl_coop_stamp_arch)
-  set(_rccl_coop_stamp "${CMAKE_CURRENT_BINARY_DIR}/rccl_coop_atomic_${_rccl_coop_stamp_arch}.stamp")
-  add_custom_command(
-    OUTPUT "${_rccl_coop_stamp}"
-    COMMAND ${CMAKE_CXX_COMPILER} --offload-arch=${_rccl_coop_arch} ${_rccl_coop_log_flags} ${_rccl_coop_log_src}
-    COMMAND ${CMAKE_COMMAND} -E touch "${_rccl_coop_stamp}"
-    DEPENDS "${RCCL_SOURCE_DIR}/src/include/nccl_device/rccl_ptr.h" "${_rccl_coop_log_src}"
-    COMMENT "RCCL cooperative atomic builtins (${_rccl_coop_arch})"
+  set(_rccl_coop_log_flags
+    -x hip -std=c++17 -fsyntax-only -Wno-unused-command-line-argument
+    -I${RCCL_SOURCE_DIR}/src/include/nccl_device
+  )
+  if(NOT DWORDX4_INTRINSICS)
+    list(APPEND _rccl_coop_log_flags -DDWORDX4_INTRINSICS_FORCE_OFF)
+  endif()
+  # Target features (e.g. :xnack+) do not change the result.
+  set(_rccl_coop_archs "")
+  foreach(_rccl_coop_arch_raw ${GPU_TARGETS})
+    string(REGEX REPLACE ":.*" "" _rccl_coop_arch "${_rccl_coop_arch_raw}")
+    list(APPEND _rccl_coop_archs "${_rccl_coop_arch}")
+  endforeach()
+  list(REMOVE_DUPLICATES _rccl_coop_archs)
+  set(_rccl_coop_log_cmds "")
+  foreach(_rccl_coop_arch ${_rccl_coop_archs})
+    list(APPEND _rccl_coop_log_cmds
+      COMMAND ${CMAKE_CXX_COMPILER} --offload-arch=${_rccl_coop_arch} ${_rccl_coop_log_flags} ${_rccl_coop_log_src})
+  endforeach()
+  add_custom_target(rccl_log_cooperative_atomics ALL
+    ${_rccl_coop_log_cmds}
+    COMMENT "RCCL cooperative atomic builtins"
     VERBATIM
   )
-  list(APPEND _rccl_coop_log_stamps "${_rccl_coop_stamp}")
-endforeach()
-add_custom_target(rccl_log_cooperative_atomics DEPENDS ${_rccl_coop_log_stamps})
-add_dependencies(rccl rccl_log_cooperative_atomics)
+endif()
 ## Set RCCL linked library directories
 target_link_directories(rccl PRIVATE ${SMI_LIB_DIR})
 
