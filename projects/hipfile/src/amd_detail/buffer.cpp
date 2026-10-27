@@ -63,9 +63,9 @@ Buffer::Buffer(const void *_buffer, size_t _length, int _flags, const PassKey<Bu
 
     type = _attrs.type;
 
-    bool hostEnabled = Context<Configuration>::get()->host();
     std::initializer_list<hipMemoryType> validTypes{hipMemoryTypeDevice, hipMemoryTypeHost};
-    auto endValid = hostEnabled? validTypes.end() : validTypes.end() - 1;
+    bool                                 hostEnabled = Context<Configuration>::get()->host();
+    auto                                 endValid    = validTypes.end() - (hostEnabled ? 0 : 1);
     if (std::find(validTypes.begin(), endValid, type) == endValid) {
         throw InvalidMemoryType();
     }
