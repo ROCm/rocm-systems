@@ -11435,6 +11435,14 @@ class CodeGenerator:
                                 access_conditions.append(
                                     'modifiers.exec_all_if_nonzero = true;'
                                 )
+                        _image_address_metadata = self._issues_image_memory(
+                            inst.name
+                        ) and self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4')
+                        _image_d16_preserves_destination = (
+                            _image_address_metadata
+                            and inst.name.upper() == 'IMAGE_LOAD'
+                            and not self.isa_spec.profile.d16_loads_zero_unselected_half
+                        )
                         result_bytes = last_result_bytes = 0xF
                         if (
                             'load' in inst_sem.semantic_class
@@ -11471,6 +11479,12 @@ class CodeGenerator:
                         elif last_result_bytes != 0xF:
                             access_conditions.append(
                                 f'modifiers.memory_result_last_bytes = {hex(last_result_bytes)};'
+                            )
+                        if _image_d16_preserves_destination:
+                            access_conditions.append(
+                                'if (inst_.d16 && '
+                                '(std::popcount(uint32_t{inst_.dmask}) & 1u)) '
+                                'modifiers.memory_result_last_bytes = 0x3;'
                             )
                         if access_conditions:
                             public_members.append(
@@ -11543,20 +11557,19 @@ class CodeGenerator:
                         and self._supports_dpp_for_instruction(inst, inst_dpp_enc_name)
                         and any(o.name == 'sdst' and o.is_output for o in inst.operands)
                     )
-                    _image_address_metadata = self._issues_image_memory(
-                        inst.name
-                    ) and self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4')
-                    _image_d16_preserves_destination = (
-                        _image_address_metadata
-                        and inst.name.upper() == 'IMAGE_LOAD'
-                        and not self.isa_spec.profile.d16_loads_zero_unselected_half
-                    )
                     if _image_address_metadata:
                         public_members.append(
                             cgen.Statement(
                                 'void implicit_uses(RegisterSet &uses) const override'
                             )
                         )
+                        if _image_d16_preserves_destination:
+                            public_members.append(
+                                cgen.Statement(
+                                    'void implicit_preservation_uses('
+                                    'RegisterSet &uses) const override'
+                                )
+                            )
                         public_members.append(
                             cgen.Statement(
                                 'bool tracks_explicit_source('
@@ -13964,8 +13977,13 @@ class CodeGenerator:
                             'std::popcount(uint32_t{inst_.dmask});\n'
                             '  if (inst_.d16 && (components & 1u))\n'
                             '    if (auto r = vdata.to_register_ref())\n'
-                            '      uses.expand(RegisterRef{r->cls,\n'
+                            '      preservation_uses.expand(RegisterRef{r->cls,\n'
                             '          static_cast<uint16_t>(r->index + components / 2), 1});\n'
+                            if _image_d16_preserves_destination
+                            else ''
+                        )
+                        image_d16_preservation_call = (
+                            '  implicit_preservation_uses(uses);\n'
                             if _image_d16_preserves_destination
                             else ''
                         )
@@ -13980,10 +13998,19 @@ class CodeGenerator:
                                 '  for (uint32_t index = 0; index < count; ++index)\n'
                                 '    uses.expand(RegisterRef{RegClass::VGPR,\n'
                                 '        static_cast<uint16_t>(registers[index]), 1});\n'
-                                f'{image_d16_preservation}'
+                                f'{image_d16_preservation_call}'
                                 '}'
                             )
                         )
+                        if _image_d16_preserves_destination:
+                            inst_impls.append(
+                                cgen.Line(
+                                    f'void {inst.fmt_name}::implicit_preservation_uses'
+                                    '(RegisterSet &preservation_uses) const {\n'
+                                    f'{image_d16_preservation}'
+                                    '}'
+                                )
+                            )
                         suppress_address = (
                             'inst_.nsa && src_operands_[operand_index] == &vaddr'
                             if self.isa_spec.arch_name in ('rdna3', 'rdna3_5')

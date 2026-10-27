@@ -100,10 +100,15 @@ void ImageLoadMimg::implicit_uses(RegisterSet &uses) const {
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
   for (uint32_t index = 0; index < count; ++index)
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+void ImageLoadMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
   const uint32_t components = std::popcount(uint32_t{inst_.dmask});
   if (inst_.d16 && (components & 1u))
     if (auto r = vdata.to_register_ref())
-      uses.expand(RegisterRef{r->cls, static_cast<uint16_t>(r->index + components / 2), 1});
+      preservation_uses.expand(
+          RegisterRef{r->cls, static_cast<uint16_t>(r->index + components / 2), 1});
 }
 
 bool ImageLoadMimg::tracks_explicit_source(uint8_t operand_index) const {

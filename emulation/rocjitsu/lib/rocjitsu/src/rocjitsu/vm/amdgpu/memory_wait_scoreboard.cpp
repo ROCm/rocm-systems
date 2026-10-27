@@ -636,9 +636,15 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         access(scratch, ~uint64_t{0}, 0xf, false);
     }
   }
-  RegisterSet implicit;
-  if (!preserves_destination)
+  RegisterSet implicit, preservation_uses;
+  inst.implicit_preservation_uses(preservation_uses);
+  // Legacy partial-destination hooks do not distinguish preservation from
+  // genuine hidden reads. Instructions that do provide the distinction retain
+  // their real implicit dependencies while dropping only preservation uses.
+  if (!preserves_destination || !preservation_uses.none()) {
     inst.implicit_uses(implicit);
+    implicit -= preservation_uses;
+  }
   implicit.for_each([&](RegisterRef reg) {
     // Operand-derived reads preserve their bank roles above.
     if (reg.cls == RegClass::VGPR && !implicit_operands.empty())

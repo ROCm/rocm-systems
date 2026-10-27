@@ -690,6 +690,106 @@ TEST(MemoryWaitExecutionTest, NsaImageChecksOnlyItsDecodedCoordinateRegisters) {
   }
 }
 
+TEST(MemoryWaitExecutionTest, D16ImageWaitsTrackPartialResultsAndRealImplicitReads) {
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    GpuMemory memory("d16_image_wait_memory");
+    L2Cache l2("d16_image_wait_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    auto cu = ComputeUnitCore::create("d16_image_wait_cu", config, &memory, &l2);
+    auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+    auto decoder = Decoder::create(arch);
+    auto decode = [&](uint8_t dmask) -> DecodeResult {
+      util::StringDiagnostic error;
+      if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+        const auto base = rdna3::build_mimg(
+            rdna3::kImageLoadMimg,
+            {.nsa = 1, .dim = 1, .unorm = 1, .dmask = dmask, .d16 = 1, .vaddr = 2, .vdata = 8});
+        const std::array<uint32_t, 3> words{base[0], base[1], 6};
+        return decoder->decode_window(words, 0, error.emitter());
+      }
+      if (arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
+        const auto base = rdna3_5::build_mimg(
+            rdna3_5::kImageLoadMimg,
+            {.nsa = 1, .dim = 1, .unorm = 1, .dmask = dmask, .d16 = 1, .vaddr = 2, .vdata = 8});
+        const std::array<uint32_t, 3> words{base[0], base[1], 6};
+        return decoder->decode_window(words, 0, error.emitter());
+      }
+      const auto words = rdna4::build_vimage(
+          rdna4::kImageLoadVimage,
+          {.dim = 1, .d16 = 1, .dmask = dmask, .vdata = 8, .vaddr0 = 2, .vaddr1 = 6});
+      return decoder->decode_window(words, 0, error.emitter());
+    };
+
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    unsigned reports = 0;
+    auto bind_reports = [&] {
+      state.bind(0x200, &reports,
+                 [](void *context, const auto &) { ++*static_cast<unsigned *>(context); });
+    };
+    for (const uint8_t dmask : {uint8_t{1}, uint8_t{7}}) {
+      SCOPED_TRACE(unsigned{dmask});
+      auto decoded = decode(dmask);
+      ASSERT_TRUE(decoded.succeeded());
+      auto &inst = *decoded.value();
+      RegisterModifiers modifiers;
+      inst.amdgpu_register_modifiers(modifiers);
+      EXPECT_EQ(modifiers.memory_result_last_bytes, 0x3);
+      const uint16_t last = static_cast<uint16_t>(8 + std::popcount(dmask) / 2);
+
+      // The image result owns only the low half of its final VGPR.
+      for (const bool write : {false, true}) {
+        state.clear();
+        reports = 0;
+        cu->track_memory_wait(inst, *wf);
+        bind_reports();
+        state.access({RegClass::VGPR, last, 1}, 1, 0xc, write);
+        EXPECT_EQ(reports, 0u);
+        state.access({RegClass::VGPR, last, 1}, 1, 0x3, write);
+        EXPECT_EQ(reports, 1u);
+      }
+
+      // Destination preservation is not a real read, but an address register is.
+      for (const uint16_t pending : {last, uint16_t{2}}) {
+        state.clear();
+        reports = 0;
+        state.add({state.issue(WaitCounterKind::Ds),
+                   0x100,
+                   1,
+                   {RegClass::VGPR, pending, 1},
+                   WaitCounterKind::Ds,
+                   pending == last ? uint8_t{0xc} : uint8_t{0xf}});
+        bind_reports();
+        state.check_instruction(inst, *wf);
+        EXPECT_EQ(reports, pending == 2 ? 1u : 0u);
+      }
+
+      // GFX11 image loads have ordered writeback within their completion class.
+      // A second partial load can supersede the first low-half result without
+      // treating its preservation of the high half as a read of the low half.
+      if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
+        state.clear();
+        reports = 0;
+        cu->track_memory_wait(inst, *wf);
+        bind_reports();
+        state.check_instruction(inst, *wf);
+        EXPECT_EQ(reports, 0u);
+        const auto diagnostics = cu->memory_wait_diagnostic_count();
+        cu->track_memory_wait(inst, *wf);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), diagnostics);
+      }
+    }
+  }
+}
+
 TEST(MemoryWaitExecutionTest, WaitIdleAndRdna4CompatibilityWaitDrainEveryFunctionalCounter) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     for (uint32_t word : {0xbf890000u, 0xbf89fc07u, 0xbf89ffffu, 0xbf8a0000u}) {

@@ -378,6 +378,13 @@ public:
   /// instruction's lifetime.
   virtual void implicit_use_operands(std::vector<const Operand *> & /*operands*/) const {}
 
+  /// @brief Add implicit uses that only preserve an unwritten destination portion.
+  ///
+  /// @details These uses matter to liveness but do not consume a pending memory
+  /// result. Keeping them separate lets memory-wait checking retain genuine
+  /// implicit reads, such as image coordinate registers.
+  virtual void implicit_preservation_uses(RegisterSet & /*uses*/) const {}
+
   /// @brief Query already-decoded modifiers only when a register may be pending.
   virtual void amdgpu_register_modifiers(amdgpu::RegisterModifiers & /*modifiers*/) const {}
 

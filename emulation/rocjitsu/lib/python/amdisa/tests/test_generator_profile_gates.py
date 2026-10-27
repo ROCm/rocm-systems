@@ -4832,13 +4832,26 @@ def test_generated_rdna_image_load_tracks_d16_destination_preservation(
     image_load_uses = _generated_function_body(
         source, f'void ImageLoad{suffix}::implicit_uses'
     )
-    assert 'std::popcount(uint32_t{inst_.dmask})' in image_load_uses
-    assert 'inst_.d16 && (components & 1u)' in image_load_uses
-    assert 'r->index + components / 2' in image_load_uses
+    assert 'implicit_preservation_uses(uses)' in image_load_uses
+    preservation_uses = _generated_function_body(
+        source, f'void ImageLoad{suffix}::implicit_preservation_uses'
+    )
+    assert 'std::popcount(uint32_t{inst_.dmask})' in preservation_uses
+    assert 'inst_.d16 && (components & 1u)' in preservation_uses
+    assert 'r->index + components / 2' in preservation_uses
     image_store_uses = _generated_function_body(
         source, f'void ImageStore{suffix}::implicit_uses'
     )
-    assert 'std::popcount(uint32_t{inst_.dmask})' not in image_store_uses
+    assert 'implicit_preservation_uses(uses)' not in image_store_uses
+
+    header = (
+        amdgpu_generated_root / _generated_dir_name(arch) / f'{stem}.h'
+    ).read_text()
+    modifiers = _generated_inline_method_body(
+        header, f'ImageLoad{suffix}', 'void amdgpu_register_modifiers'
+    )
+    assert 'std::popcount(uint32_t{inst_.dmask}) & 1u' in modifiers
+    assert 'modifiers.memory_result_last_bytes = 0x3' in modifiers
 
 
 @pytest.mark.parametrize(
