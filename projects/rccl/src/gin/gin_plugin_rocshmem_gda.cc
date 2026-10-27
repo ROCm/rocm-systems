@@ -101,11 +101,9 @@ static int ginGdaBootstrapAllgather(void* ctx, void* buf, size_t perRankSize) {
 // Vtable implementations
 ///////////////////////////////////////////////////////////////////////////////
 
-// GIN-capable NIC table, built once at init. Each entry maps a logical GIN
-// device index (what the topology enumerates via devices()/getProperties()) to
-// the physical IB-CAST device index, so getProperties() can report that NIC's
-// real name + pciPath. Without this the backend advertised a single generic
-// device and the topology collapsed every local GPU onto it.
+// GIN-capable NIC table, built once at init. Maps each logical GIN device index
+// (enumerated via devices()/getProperties()) to its physical IB-CAST device
+// index, so getProperties() reports that NIC's real name + pciPath.
 #define GIN_GDA_MAX_DEVS MAX_IB_DEVS
 static int ginGdaPhysDevIndex[GIN_GDA_MAX_DEVS];
 static int ginGdaNDevs = 0;
@@ -212,16 +210,8 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
     trafficClass = cctx->comm->config.trafficClass;
   }
 
-  // NIC affinity: select this rank's GIN-local NIC exactly as the GIN proxy path
-  // does (gin_host.cc) — ncclTopoGetLocalGinDevs queries the GIN node set
-  // (system->nodes[GIN], the gin-capable NICs), whose per-GPU rail assignment
-  // hands adjacent GPUs distinct NICs. This replaces the earlier NET-node query
-  // (ncclTopoGetLocalNet / ncclTopoGetLocal(GPU, NET)), which on some topologies
-  // collapsed every local GPU onto a single NIC (observed: all 8 GPUs landing on
-  // one bnxt device). The GIN node's net.dev is THIS backend's device index
-  // (devices()/getProperties() above), so the name is resolved through our own
-  // getProperties — not comm->ncclNet, whose dev space is the separate NET/RMA
-  // plugin. Best-effort: on failure the factory selects the first usable device.
+  // The GIN node's net.dev is this backend's own device index, so resolve the
+  // NIC name through our getProperties, not comm->ncclNet (a separate dev space).
   const char* preferredNic = nullptr;
   char preferredNicName[128] = {0};
   {

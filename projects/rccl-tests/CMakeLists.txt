@@ -219,14 +219,7 @@ endif()
 
 if (ENABLE_ROCSHMEM_GIN)
     message(STATUS "rocshmem GIN backend support enabled")
-    # GIN is consumed through roc::rccl: librccl.so is self-contained (no rocshmem
-    # host symbols to link) and its installed headers carry the full GIN surface,
-    # including the device backend headers (which self-detect via __has_include).
-    # So the tests need no -DENABLE_ROCSHMEM_GIN, no rocshmem find_package/includes,
-    # and no roc::rocshmem link. The ONE source-tree dependency left is
-    # gin/gin_rocshmem_gda_factory.h (the GIN QP C-API), which rccl does not yet
-    # install; the factory test reaches it via RCCL_SOURCE_DIR. This goes away once
-    # that test moves into rccl's own unit-test infra (or the header is installed).
+    # Factory test reaches gin_rocshmem_gda_factory.h (not yet installed) via RCCL_SOURCE_DIR.
     get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
     if (NOT RCCL_SOURCE_DIR AND EXISTS "${_mono_root}/projects/rccl/CMakeLists.txt")
         set(RCCL_SOURCE_DIR "${_mono_root}/projects/rccl")

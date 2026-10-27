@@ -1166,15 +1166,10 @@ struct verbs_context {
 	int (*query_port)(struct ibv_context *context, uint8_t port_num,
 			  struct ibv_port_attr *port_attr,
 			  size_t port_attr_len);
-	/* The 25 vtable slots between query_port and priv (upstream's
-	 * verbs_context layout). They must stay in this exact order and count so
-	 * verbs_get_ctx_op(ctx, <op>) resolves the right entry — the GIN QP factory
-	 * dispatches alloc_parent_domain / create_cq_ex through this table (both are
-	 * rdma-core verbs.h inlines, not dlsym'able libibverbs symbols). Only the two
-	 * ops rccl actually calls carry real signatures; the rest are opaque function
-	 * pointers (all entries are 8-byte fn-ptrs, so the ABI offsets are preserved)
-	 * to avoid pulling in verbs types rccl's ibvcore.h does not vendor. The
-	 * original names from upstream are kept in comments for traceability. */
+	/* The 25 verbs_context slots between query_port and priv (upstream layout).
+	 * Order and count must stay exact so verbs_get_ctx_op() resolves the right
+	 * entry. Only the ops rccl calls carry real signatures; the rest are opaque
+	 * 8-byte fn-ptrs preserving ABI offsets without vendoring unused verbs types. */
 	void (*advise_mr)(void);
 	void (*alloc_null_mr)(void);
 	void (*read_counters)(void);

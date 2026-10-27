@@ -519,9 +519,9 @@ ncclResult_t wrap_ibv_event_type_str(char** ret, enum ibv_event_type event) {
 
 ncclResult_t wrap_ibv_create_cq_ex(struct ibv_cq_ex** ret, struct ibv_context* context,
                                    struct ibv_cq_init_attr_ex* cq_attr) {
-  // ibv_create_cq_ex() is an inline in rdma-core's verbs.h that dispatches
-  // through the provider's verbs_context op table — not a dlsym'able libibverbs
-  // symbol. Mirror that inline here via verbs_get_ctx_op.
+  // create_cq_ex / alloc_parent_domain / create_qp_ex are rdma-core verbs.h
+  // inlines that dispatch through the provider's verbs_context op table, not
+  // dlsym'able symbols; these wrappers mirror the inline via verbs_get_ctx_op.
   struct verbs_context* vctx = verbs_get_ctx_op(context, create_cq_ex);
   if (vctx == NULL) {
     errno = EOPNOTSUPP;
@@ -544,9 +544,6 @@ struct ibv_cq* wrap_ibv_cq_ex_to_cq(struct ibv_cq_ex* cq) {
 
 ncclResult_t wrap_ibv_alloc_parent_domain(struct ibv_pd** ret, struct ibv_context* context,
                                           struct ibv_parent_domain_init_attr* attr) {
-  // ibv_alloc_parent_domain() is an inline in rdma-core's verbs.h, not a
-  // dlsym'able libibverbs symbol — it dispatches through the provider's
-  // verbs_context op table. Mirror that inline here via verbs_get_ctx_op.
   struct verbs_context* vctx = verbs_get_ctx_op(context, alloc_parent_domain);
   if (vctx == NULL) {
     errno = EOPNOTSUPP;
@@ -563,8 +560,7 @@ ncclResult_t wrap_ibv_alloc_parent_domain(struct ibv_pd** ret, struct ibv_contex
 
 ncclResult_t wrap_ibv_create_qp_ex(struct ibv_qp** ret, struct ibv_context* context,
                                    struct ibv_qp_init_attr_ex* qp_init_attr_ex) {
-  // Mirror libibverbs' ibv_create_qp_ex(): a PD-only request falls back to the
-  // basic create_qp path; otherwise dispatch through the provider's extended op.
+  // PD-only request falls back to the basic create_qp path.
   if (qp_init_attr_ex->comp_mask == IBV_QP_INIT_ATTR_PD) {
     return wrap_ibv_create_qp(ret, qp_init_attr_ex->pd, (struct ibv_qp_init_attr*)qp_init_attr_ex);
   }

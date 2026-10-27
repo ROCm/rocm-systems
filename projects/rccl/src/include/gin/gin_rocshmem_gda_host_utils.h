@@ -4,15 +4,11 @@
  * SPDX-License-Identifier: MIT
  ************************************************************************/
 
-// Private host-side helpers for the compiled-in rocSHMEM providers
-// (provider_gda_mlx5.cpp). NOT installed — internal to librccl.so, pulled in by
-// a build-time sed that replaces that file's rocSHMEM util.hpp include.
-//
-// These CHECK_* abort macros used to live in rocSHMEM's util.hpp, but rccl's
-// util.hpp is an INSTALLED public device header reached by user code through the
-// GIN device API (nccl_device.h -> ... -> queue_pair_mux.hpp -> util.hpp). Macros
-// with generic names like CHECK_HIP must never leak into a consumer's TU, so they
-// are quarantined here instead.
+// Private, non-installed host helpers for the compiled-in providers
+// (provider_gda_mlx5.cpp), pulled in by a build-time sed that rewrites that
+// file's rocSHMEM util.hpp include. These generically-named CHECK_* macros are
+// quarantined here so they can't leak into a consumer TU — the installed public
+// util.hpp (reached via the GIN device API) must not define them.
 
 #ifndef GIN_ROCSHMEM_GDA_HOST_UTILS_H_
 #define GIN_ROCSHMEM_GDA_HOST_UTILS_H_

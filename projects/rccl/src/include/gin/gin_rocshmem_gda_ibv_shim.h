@@ -11,11 +11,11 @@
 #include <cstddef>
 #include <sys/types.h>
 
-// rccl-side IB verbs backend for the GIN QP factory. See gin_rocshmem_gda_ibv_shim.cc for the
-// full rationale; in short: (1) it supplies the extended verbs the factory needs
-// that rccl's wrap_ibv_* layer did not expose, and (2) it is the single seam that
-// lets the factory use rccl's ibv layer despite rccl's ibvcore.h and rocSHMEM's
-// ibv_core.hpp defining clashing struct ibv_* tags.
+// rccl-side IB verbs backend for the GIN QP factory: (1) it supplies the
+// extended verbs the factory needs that rccl's wrap_ibv_* layer did not expose,
+// and (2) it is the single seam that lets the factory use rccl's ibv layer
+// despite rccl's ibvcore.h and rocSHMEM's ibv_core.hpp defining clashing
+// struct ibv_* tags.
 //
 // The declarations below use *opaque* ibv_* tags on purpose: each translation
 // unit supplies its own full struct definitions, and a C++ call mangles on the

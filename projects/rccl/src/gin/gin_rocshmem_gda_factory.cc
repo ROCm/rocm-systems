@@ -78,10 +78,6 @@
 
 using namespace rocshmem;
 
-// All IB verbs go through gin_rocshmem_gda_ibv_shim.h (rccl's wrap_ibv_* layer). The shim is
-// the only place that includes rccl's ibv headers, keeping them out of this TU
-// where they would clash with rocSHMEM's gda/ibv_core.hpp.
-
 ///////////////////////////////////////////////////////////////////////////////
 // Internal types
 ///////////////////////////////////////////////////////////////////////////////
@@ -188,17 +184,7 @@ struct rocshmem_gin_qp_set {
   uint64_t fetch_atomic_dummy;
   struct ibv_mr* fetch_atomic_dummy_mr = nullptr;
 
-  // SQ depth (max_send_wr; also sizes the CQ at 2x). Fixed like the other GIN
-  // backends — no env var. Matches GDAKI's send QP depth, which is
-  //   2 * NET_IB_MAX_REQUESTS = 2 * (NCCL_NET_MAX_REQUESTS * NCCL_NET_IB_MAX_RECVS)
-  //   = 2 * (32 * 8) = 512
-  // (net_ib connect.cc maxSendWorkRequest). The 2x covers the two messages a
-  // send uses (RDMA Write + RDMA Write-with-Immediate). Value inlined because
-  // NET_IB_MAX_REQUESTS lives in net_ib-internal headers not included here.
-  //
-  // Must be a power of two: the provider QP device logic indexes the SQ ring
-  // with a bitmask (mlx5 `wqe_idx & sq.depth_mask`, ionic `pos & sq.mask`), so a
-  // non-power-of-two depth would corrupt wraparound.
+  // SQ depth (max_send_wr; CQ sized at 2x), mirroring GDAKI's 2*NET_IB_MAX_REQUESTS.
   static constexpr uint32_t kSqSize = 512;
   static_assert((kSqSize & (kSqSize - 1)) == 0, "GIN GDA SQ size must be a power of two (ring index uses a bitmask)");
   uint32_t sq_size = kSqSize;

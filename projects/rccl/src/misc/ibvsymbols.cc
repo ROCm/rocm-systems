@@ -141,11 +141,9 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   LOAD_SYM_VERSION(ibvhandle, "ibv_set_ece", ibvSymbols->ibv_internal_set_ece, "IBVERBS_1.10");
   LOAD_SYM_VERSION(ibvhandle, "ibv_query_port_speed", ibvSymbols->ibv_internal_query_port_speed, "IBVERBS_1.16");
 
-  // Extended verb for the GIN QP factory. ibv_create_cq_ex and
-  // ibv_alloc_parent_domain are NOT here: they are rdma-core verbs.h inlines that
-  // dispatch through the provider's verbs_context op table (see ibvwrap.cc), not
-  // dlsym'able libibverbs symbols. query_gid_table IS a real exported symbol,
-  // with a leading underscore and a trailing entry-size argument.
+  // query_gid_table is exported as "_ibv_query_gid_table" (leading underscore,
+  // trailing entry-size arg). create_cq_ex/alloc_parent_domain are absent here —
+  // they are verbs.h inlines, not symbols (see ibvwrap.cc).
   LOAD_SYM_VERSION(ibvhandle, "_ibv_query_gid_table", ibvSymbols->ibv_internal_query_gid_table, "IBVERBS_1.11");
 
   return ncclSuccess;

@@ -159,13 +159,6 @@ if (ENABLE_ROCSHMEM_GIN AND RCCL_SOURCE_DIR)
         ${RCCL_SOURCE_DIR}/src/include
     )
     target_compile_options(gin_rocshmem_gda_factory_test PRIVATE -xhip)
-    # The GIN QP C-API (rocshmem_gin_*) and all QP device headers resolve from
-    # roc::rccl (its installed nccl_device/gin/rocshmem_gda/ tree). Do NOT add the
-    # rocSHMEM source/install include dirs: they ship rocshmem_config.h with
-    # USE_CONSTMEM=ON, which would compile the __constant__ constmem device path
-    # and leave rocshmem::constmem undefined at link. rccl's installed config
-    # (USE_CONSTMEM=OFF) selects the constmem-free per-instance provider path.
-    # No --whole-archive roc::rocshmem / -rdynamic needed.
     target_link_libraries(gin_rocshmem_gda_factory_test PRIVATE
         roc::rccl
         $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>)
