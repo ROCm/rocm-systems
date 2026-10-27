@@ -453,7 +453,11 @@ def test_rocprofv3_avail_pmc_check_all_agents(cli, inventory):
     if not common:
         pytest.skip("No collectable PMC counter is common to every GPU")
 
-    counter = next(name for name in inventory["basic"][logical_ids[0]] if name in common)
+    counter = next(
+        (name for name in inventory["basic"][logical_ids[0]] if name in common), None
+    )
+    if counter is None:
+        pytest.skip("No basic counter of the first GPU is common to every GPU")
     output = cli("avail", "pmc-check", counter).stdout
     assert _pmc_check_records(output) == {
         logical_id: (counter,) for logical_id in logical_ids
