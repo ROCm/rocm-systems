@@ -2281,10 +2281,6 @@ class GraphMemcpyNode : public GraphNode {
 
   GraphMemcpyNodeKind GetMemcpyNodeKind() const override { return GraphMemcpyNodeKind::ThreeD; }
 
-  //! Returns true if EnqueueCommands will perform a CPU-side staging buffer
-  //! copy (memcpy from host to staging) that reads host memory at enqueue time.
-  virtual bool NeedsCpuStagingCopy() const { return false; }
-
   virtual hipError_t CreateCommand(hip::Stream* stream) override {
     // Clear commands_ first, even if node is disabled
     hipError_t status = GraphNode::CreateCommand(stream);
@@ -2784,16 +2780,6 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   // used by KernelBlitManager::{read,write}Buffer. That flag is a process-wide
   // runtime constant, so sharing it keeps both decisions in sync without
   // introducing a separate source of truth.
-  //! H2D from unpinned host memory goes through hsaCopyStagedOrPinned which
-  //! does memcpy(staging, hostSrc) on the CPU thread at enqueue time.
-  bool NeedsCpuStagingCopy() const override {
-    size_t sOff = 0, dOff = 0;
-    amd::Memory* srcMem = getMemoryObjectForCurrentDevice(src_, sOff);
-    amd::Memory* dstMem = getMemoryObjectForCurrentDevice(dst_, dOff);
-    // srcMem == nullptr means unpinned host source; dstMem != nullptr means device dest.
-    return (srcMem == nullptr && dstMem != nullptr);
-  }
-
   virtual bool WillBypassSdmaEngine() const override {
     size_t sOffset = 0, dOffset = 0;
     amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
