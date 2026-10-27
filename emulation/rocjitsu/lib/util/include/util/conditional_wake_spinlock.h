@@ -8,6 +8,8 @@
 
 #if defined(__linux__)
 
+#include "util/host_target.h"
+
 #include <atomic>
 #include <cstdint>
 
@@ -110,9 +112,9 @@ private:
 
   // Keep this small wait-loop hint local rather than depending on simulator code.
   static void relax_cpu() noexcept {
-#if defined(__x86_64__) || defined(__i386__)
+#if RJ_HOST_HAS_GNU_X86_PAUSE_BUILTIN
     __builtin_ia32_pause();
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
     asm volatile("yield");
 #else
     std::atomic_signal_fence(std::memory_order_seq_cst);
