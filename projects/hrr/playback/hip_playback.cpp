@@ -3151,9 +3151,12 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 // the address without a free. The entry being replaced keeps a live pinned
 // buffer, so free it, and give its charge back, before the new one is charged.
 // Otherwise the old buffer would stay allocated with no charge against it.
+// A registration the runtime refuses to release is left alone, buffer and
+// charge both: freeing it would leave the registration aimed at freed heap.
 static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
     void* host_ptr = nullptr;
     void* reg_buf = nullptr;
+    size_t size = 0;
     AllocKind kind = AllocKind::Device;
     {
         std::unique_lock lk(ctx.map_mutex);
@@ -3162,7 +3165,8 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         kind = it->second.kind;
         if (kind != AllocKind::HostMalloc && kind != AllocKind::HostRegister) return;
         host_ptr = it->second.live_ptr;
-        ctx.host_budget.release(it->second.size);
+        size = it->second.size;
+        if (kind == AllocKind::HostMalloc) ctx.host_budget.release(size);
         ctx.alloc_map.erase(it);
         auto rb = ctx.host_reg_bufs.find(rec);
         if (rb != ctx.host_reg_bufs.end()) {
@@ -3175,7 +3179,8 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         return;
     }
     void* buf = reg_buf ? reg_buf : host_ptr;
-    (void)hipHostUnregister(buf);
+    if (hipHostUnregister(buf) != hipSuccess) return;
+    ctx.host_budget.release(size);
 #ifdef _WIN32
     _aligned_free(buf);
 #else
@@ -3319,13 +3324,11 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
         ctx.host_reg_bufs.erase(a->hostPtr);
     }
     ctx.remove_alloc(a->hostPtr);
-    if (buf) {
 #ifdef _WIN32
-        _aligned_free(buf);
+    _aligned_free(buf);
 #else
-        free(buf);
+    free(buf);
 #endif
-    }
     return r;
 }
 
