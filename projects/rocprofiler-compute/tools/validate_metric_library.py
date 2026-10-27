@@ -45,6 +45,7 @@ from rocprof_compute_soc.soc_base import OmniSoC_Base
 from roofline.benchmark.ceilings import measured_ceilings
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED
 from utils.metric_library import (
+    METRIC_LIBRARY_ID_RE,
     METRIC_LIBRARY_PARENT_ARCH,
     VARIABLES_FILENAME,
     MetricLibrary,
@@ -67,8 +68,6 @@ from utils.yaml_inherit_loader import (
 )
 from vendored import yaml
 
-# "{category}.{subcategory}_{name}": lowercase words joined by underscores.
-METRIC_ID_RE = re.compile(r"^[a-z][a-z0-9]*\.[a-z0-9]+(_[a-z0-9]+)*$")
 # Categories named after panels rather than hardware.
 VIEW_CATEGORIES = ("system", "memchart", "roofline", "wavefront")
 
@@ -95,9 +94,6 @@ EMPIRICAL_PEAK_RE = re.compile(r"\$(\w+)_empirical_peak")
 CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops")
 VARIABLE_FIELDS = ("formula",)
 
-ANALYSIS_CONFIGS = (
-    Path(config.rocprof_compute_home) / "rocprof_compute_soc" / "analysis_configs"
-)
 # A row's equation comes from the first of these columns it has.
 MAIN_FORMS = ("avg", "value", "expr")
 ROUND_RE = re.compile(r"^\s*ROUND\((.*),\s*\d+\s*\)\s*$", re.DOTALL)
@@ -224,7 +220,7 @@ def equivalence_errors(metric_dir: Path, analysis_dir: Path, arch: str) -> list[
 
 def main() -> int:
     """Entry point. Returns 0 on success, 1 on validation failure."""
-    errors = validate(default_metric_library_dir(), ANALYSIS_CONFIGS)
+    errors = validate(default_metric_library_dir(), config.analysis_configs_dir)
     if errors:
         print("Metric library validation failed:\n")
         for error in errors:
@@ -290,7 +286,7 @@ def _metrics_errors(document: dict[str, Any], source: str, category: str) -> lis
     errors = []
     for metric_id, entry in document.items():
         item = str(metric_id)
-        if not METRIC_ID_RE.match(item):
+        if not METRIC_LIBRARY_ID_RE.match(item):
             errors.append(
                 f"[{source}] {item}: the id must look like "
                 "'{category}.{subcategory}_{name}'"

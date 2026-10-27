@@ -20,8 +20,9 @@ from common import (
     write_metric_library_family,
     write_text_file,
 )
-from validate_metric_library import ANALYSIS_CONFIGS, main, validate
+from validate_metric_library import main, validate
 
+import config
 from utils import metric_library
 from utils.metric_library import MetricLibrary, default_metric_library_dir
 
@@ -72,7 +73,7 @@ def copy_shipped_trees(root, archs):
     configs = root / "analysis_configs"
     for arch in archs:
         shutil.copytree(default_metric_library_dir() / arch, library / arch)
-        shutil.copytree(ANALYSIS_CONFIGS / arch, configs / arch)
+        shutil.copytree(config.analysis_configs_dir / arch, configs / arch)
     return library, configs
 
 
@@ -96,7 +97,7 @@ def with_peak_empirical(metric_text, ceiling):
 
 
 def test_shipped_metric_library_is_valid():
-    assert validate(default_metric_library_dir(), ANALYSIS_CONFIGS) == []
+    assert validate(default_metric_library_dir(), config.analysis_configs_dir) == []
 
 
 def test_synthetic_tree_is_valid(tree):
@@ -107,7 +108,7 @@ def test_main_reports_errors(tree, monkeypatch, capsys):
     monkeypatch.setattr(
         validate_metric_library, "default_metric_library_dir", lambda: tree
     )
-    monkeypatch.setattr(validate_metric_library, "ANALYSIS_CONFIGS", None)
+    monkeypatch.setattr(config, "analysis_configs_dir", None)
     assert main() == 0
     write_base_metrics(tree, BASE_METRIC.replace("compute.valu_util", "Bad"))
     assert main() == 1

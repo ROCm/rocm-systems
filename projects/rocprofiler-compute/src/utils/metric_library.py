@@ -13,6 +13,7 @@ metrics for analyze and profile, so its scope grows past loading. The files are 
 by tools/validate_metric_library.py, so this module does not check them.
 """
 
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -33,6 +34,9 @@ METRIC_LIBRARY_PARENT_ARCH: dict[str, Optional[str]] = {
     "gfx1250": None,
 }
 VARIABLES_FILENAME = "variables.yaml"
+# A metric id, "{category}.{subcategory}_{name}": lowercase words joined by
+# underscores. utils_common.METRIC_ID_RE matches the numeric panel ids instead.
+METRIC_LIBRARY_ID_RE = re.compile(r"^[a-z][a-z0-9]*\.[a-z0-9]+(_[a-z0-9]+)*$")
 
 # Metric fields that may name counters.
 COUNTER_FIELDS = ("formula", "peak")
