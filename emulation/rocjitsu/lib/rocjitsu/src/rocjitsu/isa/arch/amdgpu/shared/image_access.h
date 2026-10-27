@@ -92,10 +92,12 @@ inline ImageAddressRegisters gfx12_image_address_registers(const VimageMachineIn
 /// inverts those selects the way formatted buffer stores do. D16 consumes packed
 /// half registers. DA=0 accesses layer zero without a layer coordinate.
 /// @returns Failure after reporting an unsupported operand (empty DMASK,
-/// UNORM=0 store) or an unimplemented feature (tiling, mips, cube, MSAA,
-/// RDNA linear 1D/2D-array and 3D resources whose decoded descriptors do not
-/// provide PITCH, nonzero base array, incompatible RDNA DIM, format outside the
-/// buffer table, unmodeled store selector mappings, TFE, or LWE).
+/// UNORM=0 store) or an unimplemented feature (R128, an architecture other than
+/// CDNA2/RDNA3/RDNA3.5/RDNA4, tiling, mips, cube, MSAA, RDNA linear
+/// 1D/2D-array and 3D resources whose decoded descriptors do not provide PITCH,
+/// decoded RDNA PITCH narrower than WIDTH, nonzero base array, incompatible
+/// RDNA DIM, format outside the buffer table, unmodeled store selector mappings,
+/// TFE, or LWE).
 inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
                                          uint32_t resource_reg,
                                          const ImageAddressRegisters &address_registers,
@@ -162,16 +164,18 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
 
   // DMASK packs supplied shader components into consecutive registers (or
   // halves for D16). Loads compact their selectors to produce that tuple.
-  // Stores retain the descriptor's shader-component slots and scatter their
-  // packed inputs back into those slots before applying the full mapping.
-  if (state.is_load) {
+  // RDNA stores retain the descriptor's shader-component slots and scatter
+  // their packed inputs back into those slots before applying the full
+  // mapping. CDNA2 retains its compacted-selector store behavior.
+  const uint32_t descriptor_selectors = resource.selectors;
+  if (state.is_load || gfx9) {
     uint32_t selectors = 0;
     for (uint32_t component = 0, packed = 0; component < 4; ++component)
       if (fields.dmask & (1u << component))
-        selectors |= ((resource.selectors >> (3 * component)) & 7) << (3 * packed++);
+        selectors |= ((descriptor_selectors >> (3 * component)) & 7) << (3 * packed++);
     state.buffer_selectors = selectors;
   } else {
-    state.buffer_selectors = resource.selectors;
+    state.buffer_selectors = descriptor_selectors;
     state.image_store_component_mask = fields.dmask & 15u;
   }
 
@@ -179,6 +183,8 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   if (resource.type == kImageCube || resource.type > kImage2dArray || resource.swizzle_mode != 0 ||
       resource.base_level != 0 || resource.last_level != 0 || resource.base_array != 0 ||
       resource.array_pitch != 0 || resource.pitch == 0)
+    return fail(InstructionExecutionError::UnimplementedInstruction);
+  if (!gfx9 && resource.pitch < resource.width)
     return fail(InstructionExecutionError::UnimplementedInstruction);
   // The six-bit image DFMT must fit the buffer decoder's four-bit packed key.
   if (gfx9 && resource.data_format > 15)
@@ -193,7 +199,7 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   if (!format.value())
     return util::Result::success();
   if (!state.is_load &&
-      !image_store_selectors_supported(state.decoded_buffer_format, state.buffer_selectors))
+      !image_store_selectors_supported(state.decoded_buffer_format, descriptor_selectors))
     return fail(InstructionExecutionError::UnimplementedInstruction);
 
   const bool has_y = resource.type != kImage1d && resource.type != kImage1dArray;

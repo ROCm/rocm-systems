@@ -330,6 +330,35 @@ TEST_F(Cdna2ImageAccessTest, D16StoresAndLoadsSelectComponentsFromPackedRegister
   EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x00440011u);
 }
 
+TEST_F(Cdna2ImageAccessTest, XyzOneStoresRetainCompactedSelectorBehavior) {
+  Image image;
+  image.data_format = kDfmt8888;
+  image.num_format = kNfmtUint;
+  image.selectors = 4 | (5 << 3) | (6 << 6) | (1 << 9);
+  bind(image);
+  wf->set_exec(1);
+  write_coordinates(0, {0, 0, 0});
+
+  struct Case {
+    uint8_t dmask;
+    std::array<uint32_t, 4> packed;
+    uint32_t expected;
+  };
+  const Case cases[] = {
+      {15, {0x11, 0x22, 0x33, 0x44}, 0x01332211},
+      {7, {0x11, 0x22, 0x33}, 0x00332211},
+      {9, {0x11, 0x44}, 0x00000011},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(unsigned{test.dmask});
+    memory.write32(kBase, 0xdeadbeef);
+    for (uint32_t component = 0; component < test.packed.size(); ++component)
+      cu->write_vgpr(vb + 8 + component, 0, test.packed[component]);
+    ASSERT_TRUE(issue(false, test.dmask));
+    EXPECT_EQ(memory.read32(kBase), test.expected);
+  }
+}
+
 TEST_F(Cdna2ImageAccessTest, LoadWithoutUnormStillUsesIntegerCoordinates) {
   Image image;
   image.width = 4;
@@ -636,11 +665,14 @@ protected:
     bind_resource();
   }
 
-  void bind_resource(uint32_t format = 20, uint32_t selectors = kXOne) {
-    const auto resource =
-        rdna_image_descriptor(GetParam(), {.format = format, .selectors = selectors});
+  void bind_resource(const RdnaImageDescriptor &descriptor) {
+    const auto resource = rdna_image_descriptor(GetParam(), descriptor);
     for (uint32_t i = 0; i < resource.size(); ++i)
       cu->write_sgpr(wf->sgpr_alloc().base + kResourceBase + i, resource[i]);
+  }
+
+  void bind_resource(uint32_t format = 20, uint32_t selectors = kXOne) {
+    bind_resource(RdnaImageDescriptor{.format = format, .selectors = selectors});
   }
 
   void TearDown() override {
@@ -735,6 +767,42 @@ TEST_P(RdnaDecodedImageAccessTest,
   EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x11111111u);
   EXPECT_EQ(cu->read_vgpr(vb + 8, 1), 0xdeadbeefu);
   EXPECT_EQ(cu->read_vgpr(vb + 8, 2), 0x33333333u);
+}
+
+TEST_P(RdnaDecodedImageAccessTest, NarrowRowPitchIsRejectedAndUnitWidthRemainsValid) {
+  const uint32_t vb = wf->vgpr_alloc().base;
+  wf->set_exec(1);
+  cu->write_vgpr(vb + 2, 0, 0);
+  cu->write_vgpr(vb + 6, 0, 1);
+  memory.write32(kBase, 0xaaaaaaaa);
+  memory.write32(kBase + 4, 0xbbbbbbbb);
+
+  bind_resource(RdnaImageDescriptor{.width = 64, .height = 2, .pitch = 1});
+  for (bool load : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "load=" << load);
+    cu->write_vgpr(vb + 8, 0, 0xdeadbeef);
+    auto decoded = decode(load);
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_TRUE(cu->execute_instruction(decoded.value().get(), *wf).failed());
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(decoded.value()->data(), nullptr);
+    EXPECT_EQ(memory.read32(kBase + 4), 0xbbbbbbbbu);
+    EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0xdeadbeefu);
+  }
+
+  bind_resource(RdnaImageDescriptor{.width = 64, .height = 2, .pitch = 64});
+  cu->write_vgpr(vb + 8, 0, 0x12345678);
+  issue(false);
+  EXPECT_EQ(memory.read32(kBase + 64 * 4), 0x12345678u);
+  cu->write_vgpr(vb + 8, 0, 0);
+  issue(true);
+  EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x12345678u);
+
+  bind_resource(RdnaImageDescriptor{.width = 1, .height = 2, .pitch = 1});
+  cu->write_vgpr(vb + 8, 0, 0x87654321);
+  issue(false);
+  EXPECT_EQ(memory.read32(kBase + 4), 0x87654321u);
 }
 
 TEST_P(RdnaDecodedImageAccessTest, StoreDmaskExpandsPackedInputsAndAppliesQualifiedSelectors) {
@@ -1000,23 +1068,28 @@ TEST_P(RdnaDecodedImageAccessTest, NonNsaAddressWidthFollowsDimAndA16) {
 TEST_P(RdnaDecodedImageAccessTest, R128LoadAndStoreReportUnimplemented) {
   const uint32_t sb = wf->sgpr_alloc().base;
   const uint32_t vb = wf->vgpr_alloc().base;
-  for (uint32_t reg = kResourceBase + 4; reg < kResourceBase + 8; ++reg)
-    cu->write_sgpr(sb + reg, 0xffffffffu);
-  memory.write32(kBase, 0x12345678u);
-  cu->write_vgpr(vb + 8, 0, 0xdeadbeefu);
+  for (bool poison_trailing_words : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "poison_trailing_words=" << poison_trailing_words);
+    bind_resource();
+    if (poison_trailing_words)
+      for (uint32_t reg = kResourceBase + 4; reg < kResourceBase + 8; ++reg)
+        cu->write_sgpr(sb + reg, 0xffffffffu);
 
-  for (bool load : {false, true}) {
-    SCOPED_TRACE(testing::Message() << "load=" << load);
-    auto decoded = decode(load, {.r128 = true});
-    ASSERT_TRUE(decoded.succeeded());
-    std::unique_ptr<Instruction> inst = std::move(decoded).value();
-    ASSERT_NE(inst, nullptr);
-    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
-    EXPECT_EQ(wf->instruction_execution_error(),
-              amdgpu::InstructionExecutionError::UnimplementedInstruction);
-    EXPECT_EQ(inst->data(), nullptr);
-    EXPECT_EQ(memory.read32(kBase), 0x12345678u);
-    EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0xdeadbeefu);
+    for (bool load : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "load=" << load);
+      memory.write32(kBase, 0x12345678u);
+      cu->write_vgpr(vb + 8, 0, 0xdeadbeefu);
+      auto decoded = decode(load, {.r128 = true});
+      ASSERT_TRUE(decoded.succeeded());
+      std::unique_ptr<Instruction> inst = std::move(decoded).value();
+      ASSERT_NE(inst, nullptr);
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
+      EXPECT_EQ(wf->instruction_execution_error(),
+                amdgpu::InstructionExecutionError::UnimplementedInstruction);
+      EXPECT_EQ(inst->data(), nullptr);
+      EXPECT_EQ(memory.read32(kBase), 0x12345678u);
+      EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0xdeadbeefu);
+    }
   }
 }
 
@@ -1054,7 +1127,13 @@ TEST(ImageAccessTest, RdnaLayeredAnd3dLinearImagesRejectUnknownPitch) {
       EXPECT_TRUE(
           amdgpu::prepare_image_access(
               *wf, state, 0, amdgpu::contiguous_image_address_registers(0),
-              {.dmask = 1, .a16 = false, .d16 = false, .lwe = false, .da = true, .unorm = true})
+              {.dmask = 1,
+               .dim = type == amdgpu::kImage3d ? amdgpu::kImageDim3d : amdgpu::kImageDim2dArray,
+               .a16 = false,
+               .d16 = false,
+               .lwe = false,
+               .da = true,
+               .unorm = true})
               .failed());
       EXPECT_EQ(wf->instruction_execution_error(),
                 amdgpu::InstructionExecutionError::UnimplementedInstruction);

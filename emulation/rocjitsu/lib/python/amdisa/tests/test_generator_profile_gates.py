@@ -5074,6 +5074,22 @@ def test_generated_rdna_image_execution_passes_dim_and_tfe(
     assert '.tfe = bool(inst_.tfe)' in image_load
 
 
+def test_gfx11_image_metadata_does_not_leak_when_derived_semantics_are_missing(
+    tmp_path: Path,
+) -> None:
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna3.xml'), Rdna3Profile()).parse()
+    semantics = derive_all_semantics(spec)
+    semantics.instructions.pop('IMAGE_STORE_MIP')
+
+    CodeGenerator(spec, str(tmp_path), semantics).gen_insts()
+
+    mimg = (tmp_path / 'rdna3' / 'mimg.cpp').read_text()
+    assert 'void ImageStoreMimg::implicit_uses' in mimg
+    assert 'bool ImageStoreMimg::tracks_explicit_source' in mimg
+    assert 'void ImageStoreMipMimg::implicit_uses' not in mimg
+    assert 'bool ImageStoreMipMimg::tracks_explicit_source' not in mimg
+
+
 def test_gfx1250_compact_literal_policy_precedes_extension_sizing(
     gfx1250_generated_root: Path,
 ):

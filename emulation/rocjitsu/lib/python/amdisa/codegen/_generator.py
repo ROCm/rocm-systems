@@ -10788,6 +10788,14 @@ class CodeGenerator:
                         if self.semantics
                         else None
                     )
+                    _image_address_metadata = self._issues_image_memory(
+                        inst.name
+                    ) and self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4')
+                    _image_d16_preserves_destination = (
+                        _image_address_metadata
+                        and inst.name.upper() == 'IMAGE_LOAD'
+                        and not self.isa_spec.profile.d16_loads_zero_unselected_half
+                    )
                     # Resolve the instruction's own encoding field names.
                     # Instructions from alternate sub-encodings (e.g.,
                     # VOP3_SDST_ENC under ENC_VOP3) carry their original
@@ -11518,14 +11526,6 @@ class CodeGenerator:
                                 access_conditions.append(
                                     'modifiers.exec_all_if_nonzero = true;'
                                 )
-                        _image_address_metadata = self._issues_image_memory(
-                            inst.name
-                        ) and self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4')
-                        _image_d16_preserves_destination = (
-                            _image_address_metadata
-                            and inst.name.upper() == 'IMAGE_LOAD'
-                            and not self.isa_spec.profile.d16_loads_zero_unselected_half
-                        )
                         result_bytes = last_result_bytes = 0xF
                         if (
                             'load' in inst_sem.semantic_class
