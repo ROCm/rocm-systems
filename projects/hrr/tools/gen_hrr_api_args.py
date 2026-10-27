@@ -1288,6 +1288,21 @@ DEREF_FIELDS: Dict[str, List[Deref]] = {
         Deref("attrsIdxs", "size_t", 8, count="numAttrs", max_count=16),
         Deref("failIdx", "size_t", 8, direction="out"),
     ],
+    # Same arrays as hipMemcpyBatchAsync, plus the swap partner sizes and the
+    # per-entry waits/signals, whose addr is a recorded device address.
+    "hipExtMemcpyBatchAsync": [
+        Deref("dsts", "void*", 8, count="count", max_count=16, elem_ptr=True),
+        Deref("srcs", "void*", 8, count="count", max_count=16, elem_ptr=True),
+        Deref("sizes", "size_t", 8, count="count", max_count=16),
+        Deref("sizesDst", "size_t", 8, count="count", max_count=16),
+        Deref("waits", "hipExtMemcpyWait", 64, count="count", max_count=16,
+              ptr_members=("addr",)),
+        Deref("signals", "hipExtMemcpySignal", 64, count="count", max_count=16,
+              ptr_members=("addr",)),
+        Deref("attrs", "hipExtMemcpyAttributes", 56, count="numAttrs",
+              max_count=16),
+        Deref("attrsIdxs", "size_t", 8, count="numAttrs", max_count=16),
+    ],
     # Each operand is a tagged union of a pointer and an array handle, so
     # which member holds the recorded address depends on the tag beside it —
     # a rewrite no table entry can express.
@@ -2066,8 +2081,11 @@ _HEADER_PREAMBLE = """\
  * arguments (num_snapshots was always 0). A v9 reader would not restore them.
  * v11: hipKernelSetCacheConfig was appended to HipDispatchTable, taking the
  * first compiler ID and shifting the compiler API IDs up by one.
- * A v10 reader would decode those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)11u)
+ * A v10 reader would decode those events as the wrong API.
+ * v12: hipExtMemcpyBatchAsync was appended to HipDispatchTable,
+ * shifting the compiler API IDs up by one. A v11 reader would decode
+ * those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)12u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -3156,6 +3174,7 @@ _POST_CALL_EXTRA: Dict[str, List[str]] = {
 # Add an API here when its first CI build fails to link against the SDK.
 _PLAYBACK_RUNTIME_RESOLVED_APIS = frozenset({
     "hipDeviceFlushGPUDirectRDMAWrites",   # added by #10176
+    "hipExtMemcpyBatchAsync",              # added by #9098
 })
 
 _PLAYBACK_ARG_BRIDGES: Dict[str, Dict[str, object]] = {
