@@ -24,6 +24,7 @@ Execution semantics are provided by ``SemanticsSpec`` from
 import cgen
 
 from amdisa.codegen.execute import input_policy
+from amdisa.codegen.special_register_effects import special_register_write_flags
 from amdisa.codegen.execute.conversion import share_stages
 from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_OPS,
@@ -13020,6 +13021,11 @@ class CodeGenerator:
                     # derived from the instruction's semantic AST (see
                     # _exec_mask_flag_stmts).
                     ctor_body_parts.extend(_exec_mask_flag_stmts(_mem_sem))
+                    for statement in special_register_write_flags(
+                        inst, _mem_sem, self.isa_spec.profile
+                    ):
+                        if statement not in ctor_body_parts:
+                            ctor_body_parts.append(statement)
                     # Result-combinator metadata (RESULT_COPY / RESULT_OR) for
                     # EXEC-state all-ones reasoning.
                     ctor_body_parts.extend(_result_combinator_flag_stmts(_mem_sem))
@@ -15814,6 +15820,18 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 return ('RegClass::EXEC', 0)
             case 'EXEC_HI':
                 return ('RegClass::EXEC', 1)
+            case 'VCC' | 'VCC_LO':
+                return ('RegClass::VCC', 0)
+            case 'VCC_HI':
+                return ('RegClass::VCC', 1)
+            case 'M0':
+                return ('RegClass::M0', 0)
+            case 'FLAT_SCRATCH' | 'FLAT_SCRATCH_LO':
+                return ('RegClass::FLAT_SCRATCH', 0)
+            case 'FLAT_SCRATCH_HI':
+                return ('RegClass::FLAT_SCRATCH', 1)
+            case 'SCC' | 'SRC_SCC':
+                return ('RegClass::SCC', 0)
             case _:
                 return None
 
@@ -15853,8 +15871,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     )
                     reg_class = self._reg_class_for_prefix(pattern.prefix)
                     # Only register-file prefixes tracked by RegisterSet become
-                    # register refs. Named special registers remain nullopt
-                    # until a consumer needs special-register liveness.
+                    # register refs. Named special selectors are mapped separately below;
+                    # ordinary liveness projects their classes out.
                     if reg_class is not None:
                         ref_case_lines.append(
                             f'if (encoding_value_ >= {opsel_name}::{pattern.min_enum} && '

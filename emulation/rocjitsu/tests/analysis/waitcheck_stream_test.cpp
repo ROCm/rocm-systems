@@ -272,7 +272,8 @@ TEST(WaitcheckStream, ScalarMemoryCannotUseAPartialWait) {
 
 TEST(WaitcheckStream, UntrackedScalarMemoryDestinationsStopBeforeLosingDependencies) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    // Encodings assembled for gfx942: TTMP0, VCC, FLAT_SCRATCH and XNACK_MASK.
+    // gfx942 scalar-memory results in TTMP0, VCC, FLAT_SCRATCH and XNACK_MASK
+    // must remain incomplete even with structural references.
     for (const auto &[load, consumers] :
          std::array<std::pair<uint32_t, std::array<uint32_t, 3>>, 4>{{
              {0xc0021b00u, {0xbe84006cu, 0xbeec0004u, 0xbe84006cu}},
@@ -289,6 +290,21 @@ TEST(WaitcheckStream, UntrackedScalarMemoryDestinationsStopBeforeLosingDependenc
         EXPECT_EQ(report.instructions_analyzed, 0u);
         EXPECT_FALSE(report.incomplete->reason.empty());
       }
+    }
+  }
+}
+
+TEST(WaitcheckStream, InvalidScalarMemoryExecDestinationsAreRejected) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (uint32_t load : {0xc0021f80u, 0xc0021fc0u}) {
+      // The SDATA selector namespace forbids EXEC_LO/HI, unlike SOP1's SDST.
+      // Rejection must not be confused with a successfully analyzed stream.
+      const Program program{load, 0};
+      util::StringDiagnostic error;
+      const util::FailureOr<WaitcheckStreamReport> result =
+          analyze_waitcheck_stream(program, arch, {}, error.emitter());
+      EXPECT_TRUE(result.failed());
+      EXPECT_NE(error.message().find("invalid scalar register selector"), std::string::npos);
     }
   }
 }

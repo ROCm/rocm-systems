@@ -199,6 +199,30 @@ python -m amdisa cdna5:/path/to/amdgpu_isa_cdna5.xml \
   --dbt-output /path/to/dbt-output
 ```
 
+## Special-register write coverage
+
+`codegen/special_register_effects.py` emits internal instruction metadata for
+EXEC/VCC write analysis. Coverage flags explicitly establish that decoded
+destinations plus positive implicit-write flags cover all possible writes.
+They never establish deadness, unconditional writes, or whole-register kills.
+The runtime resolves selectors and fieldless effects through structural
+operand APIs; missing coverage always preserves state.
+
+Coverage requires an audited semantic family, known helper effects, a
+non-stub derivation and matching operand directions. Empty semantics are not
+safe by default: `nop`/`true_nop` are also classifier fallbacks for unsupported
+instructions. Only explicitly audited nop/wait forms bypass the empty-block
+check. The existing profile supplies target differences such as cmpx writing
+VCC on CDNA, while VOP3 mask-result redirection follows the actual destination.
+No DBI-specific target list or raw instruction word table is generated.
+
+To extend coverage, audit the execution family and any helper/implicit effects,
+add positive and negative Python tests, regenerate every ISA, then test actual
+selectors and probe execution. A newly introduced helper or semantic class
+starts without coverage. System/HWREG, matrix/image and indirect-register
+operations remain conservative until modeled. This metadata does not enable
+DBI spill emitters or simulator features unavailable on a target.
+
 ## Generated file locations
 
 | Generated files | Location | Generator |

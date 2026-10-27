@@ -89,7 +89,17 @@ enum InstFlags : uint64_t {
   /// @brief IU DOT/WMMA has undefined NEG[2] or NEG_HI modifiers.
   INVALID_IU_MODIFIERS = (1ULL << 28),
   /// @brief A qualified scalar data tuple violates its ISA alignment requirement.
-  MISALIGNED_SCALAR_DATA = (1ULL << 29)
+
+  MISALIGNED_SCALAR_DATA = (1ULL << 29),
+  /// Generated destinations and implicit-write flags cover all possible EXEC writes.
+  /// Absence means unknown effects, never absence of writes.
+  EXEC_WRITE_EFFECTS_KNOWN = (1ULL << 30),
+  /// Generated destinations and implicit-write flags cover all possible VCC writes.
+  VCC_WRITE_EFFECTS_KNOWN = (1ULL << 31),
+  /// Writes VCC independently of the encoded destination selector.
+  WRITES_VCC = (1ULL << 32),
+  /// Transfers PC absolutely through source 0, without writing a return link.
+  ABSOLUTE_INDIRECT_BRANCH = (1ULL << 33)
 };
 
 class BasicBlock;
