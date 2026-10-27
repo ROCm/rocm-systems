@@ -22,6 +22,12 @@
 //                                pair; the only behavioral test of the fix,
 //                                requires gfx1250 DPX siblings (same PCI bus)
 
+// rccl-UnitTestsFixtures defines DWORDX4_INTRINSICS_FORCE_OFF for the gfx942
+// b128 fault (test/CMakeLists.txt), which also disables the cooperative
+// builtins. Every kernel here uses b128 or cooperative atomics only on gfx1250,
+// so restore the library's default selection before rccl_ptr.h is seen.
+#undef DWORDX4_INTRINSICS_FORCE_OFF
+
 #include "DeviceTestBase.hpp"
 
 #include "../common/ProcessIsolatedTestRunner.hpp"
