@@ -323,7 +323,7 @@ backtrace_metrics::sample(int)
     m_cpu_time        = clocks::thread_cpu::now();
     m_mem_peak        = _cache.get_peak_rss();
     m_ctx_swch        = _cache.get_num_priority_context_switch() +
-                        _cache.get_num_voluntary_context_switch();
+                 _cache.get_num_voluntary_context_switch();
     m_page_flt = _cache.get_num_major_page_faults() + _cache.get_num_minor_page_faults();
 
     if constexpr(tim::trait::is_available<hw_counters>::value)

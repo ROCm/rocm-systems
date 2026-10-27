@@ -10,6 +10,7 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/tracing.hpp"
 #include <cstdint>
+#include <optional>
 
 using rocprofsys::common::units::bytes;
 using rocprofsys::common::units::data_size_cast;

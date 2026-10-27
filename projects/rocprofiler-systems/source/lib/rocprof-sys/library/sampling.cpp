@@ -14,6 +14,7 @@
 #include "core/perf.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/utility.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
@@ -76,6 +77,7 @@
 
 #include <pthread.h>
 #include <signal.h>
+#include <unistd.h>
 
 namespace rocprofsys::sampling
 {

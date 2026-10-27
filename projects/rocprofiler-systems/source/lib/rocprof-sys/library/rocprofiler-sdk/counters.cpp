@@ -10,6 +10,7 @@
 #include <cstdint>
 
 #include <memory>
+#include <optional>
 #include <timemory/utility/types.hpp>
 
 #include "logger/debug.hpp"

@@ -11,6 +11,7 @@
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/causal/data.hpp"
 #include "library/runtime.hpp"
@@ -30,6 +31,7 @@
 #include <timemory/mpl/types.hpp>
 #include <timemory/utility/types.hpp>
 #include <tuple>
+#include <unistd.h>
 #include <vector>
 
 #include "logger/debug.hpp"

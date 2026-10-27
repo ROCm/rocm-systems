@@ -6,6 +6,7 @@
 #include "policies/agent_policy.hpp"
 
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>

@@ -3,17 +3,29 @@
 
 #include "core/trace_cache/metadata_registry.hpp"
 
+#include <cstddef>
+#include <cstdint>
 #include <gtest/gtest.h>
+#include <optional>
+#include <rocprofiler-sdk/callback_tracing.h>
 
 namespace rocprofsys::trace_cache
 {
+
+namespace
+{
+constexpr std::size_t   k_second_thread_id = 7;
+constexpr std::size_t   k_thread_id        = 42;
+constexpr std::uint64_t k_code_object_id   = 7;
+constexpr std::uint64_t k_kernel_symbol_id = 9;
+}  // namespace
 
 TEST(metadata_registry_test, ensure_track_keeps_first_registration)
 {
     metadata_registry registry;
 
     registry.ensure_track("track", std::nullopt);
-    registry.ensure_track("track", 7, "{\"second\":1}");
+    registry.ensure_track("track", k_second_thread_id, "{\"second\":1}");
 
     auto const tracks = registry.get_track_info_list();
     ASSERT_EQ(tracks.size(), 1U);
@@ -30,14 +42,14 @@ TEST(metadata_registry_test, ensure_thread_builds_only_when_unknown)
         ++builds;
         return info::thread{ .parent_process_id = 1,
                                       .process_id        = 2,
-                                      .thread_id         = 42,
+                                      .thread_id         = k_thread_id,
                                       .start             = 0,
                                       .end               = 0,
                                       .extdata           = "{}" };
     };
 
-    registry.ensure_thread(42, make);
-    registry.ensure_thread(42, make);
+    registry.ensure_thread(k_thread_id, make);
+    registry.ensure_thread(k_thread_id, make);
 
     EXPECT_EQ(builds, 1);
     EXPECT_EQ(registry.get_thread_info_list().size(), 1U);
@@ -68,12 +80,12 @@ TEST(metadata_registry_test, add_pmc_code_object_kernel_symbol_ignore_duplicates
     registry.add_pmc_info(pmc);
 
     rocprofiler_callback_tracing_code_object_load_data_t code_object{};
-    code_object.code_object_id = 7;
+    code_object.code_object_id = k_code_object_id;
     registry.add_code_object(code_object);
     registry.add_code_object(code_object);
 
     rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t symbol{};
-    symbol.kernel_id = 9;
+    symbol.kernel_id = k_kernel_symbol_id;
     registry.add_kernel_symbol(symbol);
     registry.add_kernel_symbol(symbol);
 
