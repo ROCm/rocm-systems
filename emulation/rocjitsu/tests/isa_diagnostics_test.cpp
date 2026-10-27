@@ -262,12 +262,12 @@ TEST_P(IsaDiagnosticsTest, MfmaFormatSelectorsAreNotBroadcastGroups) {
 TEST_P(IsaDiagnosticsTest, TransposeLoadsRequireFullOrEmptyEffectiveExec) {
   if (!gfx12())
     GTEST_SKIP();
-  for (uint32_t wave : {32u, 64u}) {
-    if (wave == 64 && GetParam() == ROCJITSU_CODE_ARCH_CDNA5)
+  for (uint32_t wave_size : {32u, 64u}) {
+    if (wave_size == 64 && GetParam() == ROCJITSU_CODE_ARCH_CDNA5)
       continue;
-    create(wave);
+    create(wave_size);
     ASSERT_NE(wf, nullptr);
-    const uint64_t full = ~uint64_t{0} >> (64 - wave);
+    const uint64_t full = ~uint64_t{0} >> (64 - wave_size);
     std::vector<uint16_t> ops;
     if (GetParam() == ROCJITSU_CODE_ARCH_CDNA5)
       ops = {cdna5::kGlobalLoadTr16B128Vglobal, cdna5::kGlobalLoadTr8B64Vglobal,
