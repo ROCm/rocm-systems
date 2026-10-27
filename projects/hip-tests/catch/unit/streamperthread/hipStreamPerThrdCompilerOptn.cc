@@ -752,3 +752,52 @@ HIP_TEST_CASE(Unit_hipStrmPerThrdDefault) {
 
   SECTION("Testing_hipEventQuery()") { DefaultPT2_EvtQuery(); }
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Regression test for hipStreamGetCaptureInfo_v3 under per-thread default stream semantics.
+ *  - This file is compiled with -fgpu-default-stream=per-thread, so a null stream must resolve to
+ *    the per-thread default stream. Without _spt redirection the query wrongly reports None.
+ * Test source
+ * ------------------------
+ *  - catch\unit\streamperthread\hipStreamPerThrdCompilerOptn.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipStrmPerThrdGetCaptureInfo_v3) {
+  constexpr size_t Nbytes = 1024 * sizeof(float);
+  float* A_d = nullptr;
+  HIP_CHECK(hipMalloc(&A_d, Nbytes));
+
+  hipGraph_t graph{nullptr};
+  hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
+  unsigned long long capSequenceID{};  // NOLINT
+  const hipGraphNode_t* nodelist{};
+  const hipGraphEdgeData* edgeData{};
+  size_t numDependencies{};
+
+  // A null stream here is the per-thread default stream, not the legacy null stream.
+  HIP_CHECK(hipStreamBeginCapture(nullptr, hipStreamCaptureModeRelaxed));
+  HIP_CHECK(hipMemsetAsync(A_d, 0, Nbytes, nullptr));
+
+  HIP_CHECK(hipStreamGetCaptureInfo_v3(nullptr, &captureStatus, &capSequenceID, nullptr, &nodelist,
+                                       &edgeData, &numDependencies));
+
+  // The point of the regression: without _spt this reports None.
+  REQUIRE(captureStatus == hipStreamCaptureStatusActive);
+  REQUIRE(capSequenceID > 0);
+  REQUIRE(numDependencies > 0);
+  REQUIRE(edgeData != nullptr);
+
+  for (size_t i = 0; i < numDependencies; i++) {
+    REQUIRE(edgeData[i].from_port == 0);
+    REQUIRE(edgeData[i].to_port == 0);
+    REQUIRE(edgeData[i].type == 0);
+  }
+
+  HIP_CHECK(hipStreamEndCapture(nullptr, &graph));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(A_d));
+}

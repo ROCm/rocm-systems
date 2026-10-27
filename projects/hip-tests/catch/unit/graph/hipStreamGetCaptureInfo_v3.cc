@@ -22,9 +22,8 @@
  */
 
 namespace {
-// The graph implementation records only default edge annotations, so every entry returned must be
-// fully zero-initialized. CUDA defines that value as a full serialization of the two nodes with
-// memory visibility, which is what this implementation does for every edge.
+// Only default edge annotations exist, so every entry must be fully zero-initialized - CUDA's
+// encoding for a full serialization of two nodes with memory visibility.
 void requireDefaultEdgeData(const hipGraphEdgeData& edge) {
   REQUIRE(edge.from_port == 0);
   REQUIRE(edge.to_port == 0);
@@ -38,7 +37,9 @@ void requireDefaultEdgeData(const hipGraphEdgeData& edge) {
 /**
  * Test Description
  * ------------------------
- *    - Verifies that an idle stream reports no capture and that edge data is left untouched.
+ *    - Verifies that an idle stream reports hipStreamCaptureStatusNone. Outputs other than the
+ * capture status are only guaranteed when capture is active, so they are deliberately not
+ * asserted here.
  * Test source
  * ------------------------
  *    - catch\unit\graph\hipStreamGetCaptureInfo_v3.cc
@@ -52,9 +53,9 @@ HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_v3_Positive_NotCapturing) {
   hipStream_t stream = stream_guard.stream();
 
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusActive};
-  const hipGraphNode_t* nodelist{reinterpret_cast<const hipGraphNode_t*>(0x1)};
-  const hipGraphEdgeData* edgeData{reinterpret_cast<const hipGraphEdgeData*>(0x1)};
-  size_t numDependencies{1};
+  const hipGraphNode_t* nodelist{};
+  const hipGraphEdgeData* edgeData{};
+  size_t numDependencies{};
 
   HIP_CHECK(hipStreamGetCaptureInfo_v3(stream, &captureStatus, nullptr, nullptr, &nodelist,
                                        &edgeData, &numDependencies));
@@ -109,6 +110,96 @@ HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_v3_Positive_DefaultEdgeData) {
   }
 
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Queries immediately after hipStreamBeginCapture, before any work is captured, so the
+ * dependency frontier is empty. Exercises the zero-length edge-data path.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamGetCaptureInfo_v3.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_v3_Positive_ZeroDependencies) {
+  StreamGuard stream_guard(Streams::created);
+  hipStream_t stream = stream_guard.stream();
+
+  hipGraph_t graph{nullptr};
+  hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
+  const hipGraphNode_t* nodelist{};
+  const hipGraphEdgeData* edgeData{};
+  size_t numDependencies{1};
+
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamGetCaptureInfo_v3(stream, &captureStatus, nullptr, nullptr, &nodelist,
+                                       &edgeData, &numDependencies));
+
+  REQUIRE(captureStatus == hipStreamCaptureStatusActive);
+  REQUIRE(numDependencies == 0);
+  // With a count of zero there is nothing to dereference in either array.
+
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Forks capture across two streams and rejoins, so the dependency frontier holds more than
+ * one node. Exercises edge-data sizing for a multi-node frontier.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamGetCaptureInfo_v3.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_v3_Positive_MultipleDependencies) {
+  constexpr size_t N = 1024;
+  constexpr size_t Nbytes = N * sizeof(float);
+
+  LinearAllocGuard<float> A_d(LinearAllocs::hipMalloc, Nbytes);
+  LinearAllocGuard<float> B_d(LinearAllocs::hipMalloc, Nbytes);
+
+  StreamsGuard streams(2);
+  EventsGuard events(2);
+
+  hipGraph_t graph{nullptr};
+  hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
+  const hipGraphNode_t* nodelist{};
+  const hipGraphEdgeData* edgeData{};
+  size_t numDependencies{};
+
+  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipMemsetAsync(A_d.ptr(), 0, Nbytes, streams[0]));
+
+  // Fork: streams[1] joins the capture behind streams[0].
+  HIP_CHECK(hipEventRecord(events[0], streams[0]));
+  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0));
+  HIP_CHECK(hipMemsetAsync(B_d.ptr(), 0, Nbytes, streams[1]));
+
+  // Join: the frontier of streams[0] now contains work from both branches.
+  HIP_CHECK(hipEventRecord(events[1], streams[1]));
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[1], 0));
+
+  HIP_CHECK(hipStreamGetCaptureInfo_v3(streams[0], &captureStatus, nullptr, nullptr, &nodelist,
+                                       &edgeData, &numDependencies));
+
+  REQUIRE(captureStatus == hipStreamCaptureStatusActive);
+  REQUIRE(numDependencies >= 2);
+  REQUIRE(nodelist != nullptr);
+  REQUIRE(edgeData != nullptr);
+
+  for (size_t i = 0; i < numDependencies; i++) {
+    requireDefaultEdgeData(edgeData[i]);
+  }
+
+  HIP_CHECK(hipStreamEndCapture(streams[0], &graph));
   HIP_CHECK(hipGraphDestroy(graph));
 }
 

@@ -164,11 +164,9 @@ typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
   // Deprecated
   hipErrorInvalidResourceHandle = 400,  ///< Resource handle (hipEvent_t or hipStream_t) invalid.
   hipErrorIllegalState = 401,  ///< Resource required is not in a valid state to perform operation.
-  hipErrorLossyQuery = 402,    ///< This indicates that the queried object is not in a state where
-                               ///< the requested information can be returned without loss. The
-                               ///< current AMD graph-capture implementation records only default
-                               ///< edge annotations, so no information can be discarded and this
-                               ///< is not produced on that path.
+  hipErrorLossyQuery = 402,    ///< The queried object is not in a state where the requested
+                               ///< information can be returned without loss. Not produced by the
+                               ///< AMD graph-capture path, which has only default edge data.
   hipErrorNotFound = 500,      ///< Not found
   hipErrorNotReady = 600,      ///< Indicates that asynchronous operations enqueued earlier are not
                            ///< ready.  This is not actually an error, but is used to distinguish
@@ -9020,10 +9018,13 @@ hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, hipStreamCaptureStatus
  * @param [out] dependencies_out - Pointer to an array of nodes representing the graphs
  * dependencies.
  * @param [out] edgeData_out - Pointer to an array of edge data, one entry per node returned in
- * dependencies_out. Requires dependencies_out to be non-null. On AMD every entry is
- * zero-initialized, which denotes a full-completion dependency with memory visibility.
+ * dependencies_out, which must then be non-null. The AMD graph-capture implementation has only
+ * default edge annotations, so every entry is zero-initialized.
  * @param [out] numDependencies_out - Returns size of the arrays returned in dependencies_out and
  * edgeData_out.
+ *
+ * @note dependencies_out and edgeData_out are owned by the runtime and valid only until the next
+ * API call on this stream, or until capture terminates.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorStreamCaptureImplicit
  *

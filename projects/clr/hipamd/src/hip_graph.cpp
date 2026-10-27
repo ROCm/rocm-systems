@@ -2325,11 +2325,9 @@ hipError_t hipStreamGetCaptureInfo_v3_common(hipStream_t stream,
     return status;
   }
   if (edgeData_out != nullptr) {
-    // The graph-capture implementation records no per-edge metadata, so every edge is a default
-    // (zero-initialized) annotation: full completion of the upstream node with memory visibility.
-    // Because no non-default annotation can exist, nothing can be discarded by a query that omits
-    // edgeData_out, and hipErrorLossyQuery is therefore not returned on this path. If per-edge
-    // metadata is added later, that check belongs here.
+    // No per-edge metadata exists, so every edge is a default (zero) annotation: full completion
+    // of the upstream node with memory visibility. Nothing can be discarded by a query omitting
+    // edgeData_out, so hipErrorLossyQuery is unreachable; add that check here if that changes.
     hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
     *edgeData_out = s->RefreshCapturedEdgeData().data();
   }
