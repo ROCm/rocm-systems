@@ -2573,24 +2573,12 @@ TEST(WrapMicrotestIsolated, UseReduceScatterDirect_UnsupportedNodeCountReturnsFa
       });
 }
 
-// Guards the RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD override path in
-// rcclUseReduceScatterDirect (rccl_wrap.cc). This is the only test in the whole
-// file that exercises that path -- every other test in this section relies on
-// the real default (8388608) rather than overriding it, which is precisely why
-// the sign-conversion bug below went unnoticed for so long.
+// RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD=100 must reject a 1024-byte message; the
+// old `threshold > -1` guard ignored the override and always used 8 MiB.
 //
-// The guard used to read `size_t threshold = ...; if (threshold > -1)`.
-// Comparing an unsigned size_t against the literal -1 promotes -1 to SIZE_MAX,
-// so the condition was ALWAYS FALSE, execution always fell to the `else`
-// branch, and threshold was hardcoded to 8388608 no matter what the user
-// configured. It now reads `threshold != (size_t)-1`, matching the working
-// pattern already used by rcclUseAllGatherDirect's equivalent check.
-//
-// This test keeps the override honest: set the threshold to 100 via
-// g_loadParam and pass a msgSize (1024) that is ABOVE that override but well
-// within the 8MiB hard limit. Only an override that actually takes effect can
-// reject it -- a regression back to the hardcoded 8MiB fallback would accept
-// it and turn this red.
+// These two tests are the only coverage of the override path -- every other
+// case in this section leaves the default in place, which is why that bug
+// survived. Keep both: this one pins the override, the next pins the clamp.
 TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdOverrideIsHonoured) {
   RUN_ISOLATED_TEST(
       "Wrap_UseReduceScatterDirect_ThresholdOverrideIsHonoured",
@@ -2603,6 +2591,28 @@ TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdOverrideIsHonoured) 
             << "RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD=100 must exclude a 1024-byte message. "
                "Seeing true here means the threshold is being ignored and the hardcoded "
                "8MiB fallback is back -- see the sign-conversion note above.";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The 8MiB hard limit, which the std::min above applies. Before the
+// sign-conversion fix that clamp was unreachable -- the guard was always false,
+// so the else branch hardcoded 8MiB and std::min never ran. It executes for the
+// first time now, and it is what keeps enabled message sizes inside the
+// TEMP_BUFF_SIZE headroom noted at the clamp. 8 nodes accepts anything up to
+// the threshold, so raising the override past 8MiB isolates the clamp: without
+// it, threshold stays 16MiB and this message is accepted.
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdAboveHardLimitIsClamped) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_ThresholdAboveHardLimitIsClamped",
+      []() {
+        g_loadParam = ForceParam("RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD", int64_t(16777216));
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 8;
+        size_t msgSize = 8388609; // 8MiB + 1: under the 16MiB override, over the clamp
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize))
+            << "A threshold above 8MiB must be clamped to 8388608. Seeing true here means "
+               "the hard limit is gone and messages can exceed the TEMP_BUFF_SIZE headroom.";
         DeleteCommWithArch(comm);
       });
 }
