@@ -1,485 +1,253 @@
-# Multi-Segment Integration for rocSHMEM GDA and Anvil SDMA
+# Proposal: multi-segment windows on rocSHMEM GDA and Anvil SDMA
 
-> **PROPOSED DESIGN.** Proxy GIN/RMA (classic and CAST) already splits at physical VMM segments. This document is the integration plan for the two AMD **device-initiated** GIN backends: **rocSHMEM GDA** (`NCCL_GIN_TYPE=5`) and **Anvil SDMA** (`NCCL_GIN_TYPE=6`). Neither backend implements the multi-segment contract today. Do not treat the diagrams below as the current data path.
+> [!NOTE]
+> Proposed design, not implemented. The GDA and Anvil code described under "Current code" is develop's; the multi-segment stack does not change it.
 
-**Shared facts** (16-segment cap, `UINT32_MAX` SGE clamp, independent local/remote offsets, DeepEP `[GPU][CPU…]` geometry) live in [`multi_segment_dmabuf_gin_and_netib.md`](multi_segment_dmabuf_gin_and_netib.md). Proxy GIN/RMA walkthrough: [`multi_segment_netib_cast_gin.md`](multi_segment_netib_cast_gin.md).
+The host-proxy GIN type already splits at physical segments ([GIN/RMA](multi_segment_gin_rma.md)). The two AMD device-initiated GIN backends, rocSHMEM GDA (`NCCL_GIN_TYPE=5`) and Anvil SDMA (`NCCL_GIN_TYPE=6`), do not: each issues one RDMA or SDMA operation per put from the GPU, using one key or one resolved peer address. This doc proposes how both backends would register per segment and split on the device. Both plugins compile only with `ENABLE_ROCSHMEM_GIN`. Tickets: AIRUNTIME-2351, AICOMRCCL-1526 follow-on.
 
-**Ticket:** AIRUNTIME-2351 / AICOMRCCL-1526 follow-on. **Gate:** both plugins compile only with `ENABLE_ROCSHMEM_GIN`.
+## Why these backends differ from the proxy
 
-Last updated 2026-10-12, against the wire branch `users/atulkulk/mseg/multi-segment-dmabuf-cast-gin`. The GDA and Anvil code described in §2 is develop's; the multi-segment stack does not change it.
+The proxy posts from a host thread, so per-segment MRs and a WR loop were a host-only change. GDA and Anvil are the device `ncclGinApi_Put` and `Flush` templates: the GPU issues the operation, so the split has to happen in device code, with the host only publishing per-segment tables.
 
-## What changed since the 2026-10-07 revision
-
-- The proxy references now point at the reworked layout: the classic GIN bodies are in `net_ib/gin.cc` (`rcclRmaIbProxyRegMrSymDmaBuf`, `ncclRmaBuildSegmentedWrs`), the CAST bodies in `net_ib_cast/gin.cc`, and both are reached only when `rcclRmaMultiSegEnabled()` (`NCCL_MULTI_SEGMENT_REGISTER`) is true. A GDA or Anvil integration should honor the same switch.
-- §3 drops `ncclRmaLayoutsMatch`, which no longer exists, and lists the switch reader.
-- The proposed device helper names in §6 no longer reuse the removed `ncclGinSegOf` name.
-- The comparison with other vendors' device GIN stacks was removed. §10 now describes only the device GIN types RCCL builds.
-
----
-
-## 1. Why these backends are a different problem
-
-Proxy GIN (`GIN_TYPE=2`) never posts from the GPU. The host proxy thread runs `ncclRmaBuildSegmentedWrs` (`net_ib/gin.cc`; CAST `IbCastRmaBuildSegmentedWrs`), so adding per-segment MRs and a WR loop was a host-only change, reached from develop's `gin.cc` through one-line dispatches.
-
-GDA and Anvil **are** the device `ncclGinApi_Put` / `Flush` templates. The GPU already has one destination rkey (GDA) or one resolved peer VA (Anvil) and issues **one** RDMA or SDMA operation for the whole `[srcOff, srcOff+bytes)` / `[dstOff, dstOff+bytes)` range. Multi-segment therefore has to appear on **both** sides:
-
-| Layer | Proxy GIN/RMA (done) | GDA / Anvil (this doc) |
+| Layer | Proxy GIN (done) | GDA and Anvil (proposed) |
 |---|---|---|
-| Who posts | Host proxy | GPU kernel (GDA doorbell / SDMA packet) |
-| Registration | Host, one DMA-BUF MR per physical segment | Host must still enumerate segments; GDA needs per-segment MRs, Anvil needs per-segment IPC/LSA coverage |
-| Split | Host WR chain | **Device** loop; host only publishes tables |
-| Credits | CAST `rmaWrsOutstanding` vs 575/271 | GDA: GPU SQ depth of the rocSHMEM `QueuePair`. Anvil: SDMA packet size (`kGinPutSegBytes`), not IB WQEs |
-| Symmetric layout | Host allgather + CAST transcript | Same allgather/transcript on host; device consumes the published tables |
+| Who posts | host proxy | GPU kernel: GDA doorbell or SDMA packet |
+| Registration | one DMA-BUF MR per segment | GDA: per-segment MRs; Anvil: per-segment IPC coverage |
+| Split | host WR chain | device loop over host-published tables |
+| Queue budget | IB-CAST credits against 575 and 271 | GDA: the rocSHMEM `QueuePair` send queue; Anvil: SDMA packet size |
+| Layout agreement | host consensus gather | the same gather on the host |
 
 ```mermaid
 flowchart TB
-  subgraph App["DeepEP / device communicator"]
-    PUT["ncclGin.put / iput / iget<br/>srcOff, dstOff, bytes"]
-  end
-  subgraph Proxy["GIN_TYPE=2 proxy — done"]
-    H["host ncclRmaBuildSegmentedWrs"]
-    QP1["IB QP, one WR per slice"]
-  end
-  subgraph GDA["GIN_TYPE=5 rocSHMEM GDA — proposed"]
-    D5["device Put template"]
-    QP5["GPU-mapped QP, put_nbi per slice"]
-  end
-  subgraph Anvil["GIN_TYPE=6 Anvil SDMA — proposed"]
-    D6["device Put template"]
-    SD["IPC store or SDMA copy per slice"]
-  end
-  PUT --> H --> QP1
-  PUT --> D5 --> QP5
-  PUT --> D6 --> SD
+ put["ncclGin put, iput, iget"] --> h["proxy: host ncclRmaBuildSegmentedWrs"]
+ put --> d5["GDA: device put template"]
+ put --> d6["Anvil: device put template"]
+ h --> q1["IB QP, one WR per slice"]
+ d5 --> q5["GPU-mapped QP, put_nbi per slice"]
+ d6 --> sd["IPC store or SDMA copy per slice"]
+ classDef gin fill:#e5f1ff,stroke:#007aff,color:#1d1d1f
+ classDef rma fill:#f5ebfb,stroke:#af52de,color:#1d1d1f
+ class put,d5,d6,q5,sd gin
+ class h,q1 rma
 ```
 
-The ROCm DMA-BUF rule is unchanged: `hipMemGetHandleForAddressRange` / `hsa_amd_portable_export_dmabuf` over a multi-handle VMM range describes **only the first physical segment**.
+## Current code
 
----
+**rocSHMEM GDA** (`gin_plugin_rocshmem_gda.cc`, device `gin_rocshmem_gda.h`). Registration calls `rocshmem_gin_reg_mr_vmm(qpSet, data, size)` once, which exports one DMA-BUF for the whole range and registers it. On ROCm that fd covers segment 0 only. The device handle holds one `lkey`, one `rkeys[nRanks]` array and per-peer base addresses, and the device put issues one `put_nbi(remote_vas[peer] + dstOff, rkeys[peer], local_va + srcOff, lkey, bytes)`.
 
-## 2. Current code (single-MR / single-VA)
+> [!CAUTION]
+> A DeepEP Engram IGet from a remote CPU offset into a local GPU offset that crosses a physical boundary uses segment 0's keys against an address in a later segment: `EINVAL` at registration, or `IBV_WC_REM_INV_REQ_ERR` on the GPU QP.
 
-### 2.1 rocSHMEM GDA (`gin_plugin_rocshmem_gda.cc`, device `gin_rocshmem_gda.h`)
+Signals and counters are separate fine-grained allocations registered with `IBV_ACCESS_REMOTE_ATOMIC`; they are not elastic windows and need no segment tables.
 
-Registration calls `rocshmem_gin_reg_mr_vmm(qpSet, data, size)` once. That factory path exports **one** DMA-BUF for the entire VA and `ibv_reg_dmabuf_mr`s it:
+**Anvil SDMA** (`gin_plugin_anvil_sdma.cc`, device `gin_anvil_sdma.h`). Anvil is intra-node and uses no IB MR. Registration resolves the LSA flat address (`ncclDevrGetLsaSelfAddr`), inserts one IPC-table entry covering the window, and publishes `vmmStride = devr->bigSize`, so a peer address is `base + (peer - rank) * stride + off`. The device put already splits by copy size (`kGinPutSegBytes` = 128 MiB in `gin_anvil_sdma_put_policy.h`), because the SDMA linear-copy count is 30 bits and a fused copy and signal of 256 MiB or more hangs MI355X. It does not split at physical boundaries. `ginAnvilResolvePeerVa` assumes the range sits inside one IPC entry, so a `[GPU][CPU]` window either fails the export or maps only the GPU object.
+
+> [!WARNING]
+> The IPC table is a process-global 16-slot array (`NCCL_GIN_ANVIL_IPC_MAX_BUFS` = 16, `NCCL_GIN_ANVIL_IPC_MAX_RANKS` = 16). That 16 counts registered windows, not segments, so one entry per segment would let a single 16-segment window fill it.
+
+## Shared contract to reuse
+
+Keep `net_ib/rma_multiseg.h` as the source of truth for host-side limits and predicates, and honor the same switch:
+
+| Symbol | Value | Use on GDA and Anvil |
+|---|---|---|
+| `rcclRmaMultiSegEnabled` | `NCCL_MULTI_SEGMENT_REGISTER` | gate per-segment registration; off keeps today's path |
+| `NCCL_RMA_MAX_SEGMENTS` | 16 | reject windows with more segments |
+| `ncclRmaSegmentSliceBytes` | min of remaining, local, remote, `UINT32_MAX` | GDA device loop, since the verbs SGE is 32 bits |
+| `ncclRmaSegmentCountsMatch`, `ncclRmaSegOffTableValid` | equal counts; tables start at 0 and never decrease | validate every gathered table before upload |
+| `ncclRmaSignalOffsetValid` | 8-byte aligned, inside one segment | GDA put plus atomic when the signal is in the data window |
+| `ncclRmaWrIsSignaled` | last index only | GDA: only the last `put_nbi` is signaled |
+
+Anvil's length cap is its own 128 MiB, not `UINT32_MAX`: cut at segment boundaries first, then cut each slice at 128 MiB. Do not include `net_ib/gin.h` or `gin_cast.h` from these plugins (they share an include guard) and copy no IB request types; share only the two `*multiseg.h` headers and a device-callable slice helper.
+
+## rocSHMEM GDA
+
+### Host registration
+
+`ginRocshmemGdaRegMrSym` and `ginRocshmemGdaRegMrSymDmaBuf` become the GDA analogue of `rcclRmaIbProxyRegMrSymDmaBuf`, with a per-communicator gather buffer allocated at connect when the switch is on:
 
 ```text
-rocshmem_gin_reg_mr_vmm(addr, size)
-  hipMemGetHandleForAddressRange(addr, aligned_size)   // ROCm: fd = segment 0 only
-  ibv_reg_dmabuf_mr(pd, length=aligned_size, iova=addr, fd)
+count segments with ncclCuMemGetAddressRange -> nSeg, segOff[]
+nSeg > NCCL_RMA_MAX_SEGMENTS: record a local failure, do not return before the gather
+nSeg == 1 or switch off: rocshmem_gin_reg_mr_vmm(whole range)    // today's path
+else for each segment s:
+    export segment s alone in whole pages (a complete fd)
+    rocshmem_gin_reg_mr_vmm(segAddr[s], segLen[s]); close(fd)
+allgather {magic, version, status, nSegments, segOff[17]}; any failure aborts all ranks
+check counts and tables; store each rank's segOff
+allgather per-segment VAs and rkeys into remote_vas[rank * nSeg + s], rkeys[rank * nSeg + s]
+upload the tables to the device handle
 ```
 
-The device handle is a **scalar** key plus per-peer bases:
+> [!IMPORTANT]
+> `rocshmem_gin_reg_mr_vmm` may stay one range to one MR, but the plugin must pass it only one physical segment at a time. Keep segment enumeration in RCCL, as the proxy does. A later `rocshmem_gin_reg_mr_dmabuf(fd, addr, len)` could avoid the second export.
+
+Rollback: `calloc` the handle so MR pointers start NULL, deregister only completed segments on failure, and loop `nSegments` in `DeregMrSym`.
+
+### Device handle
 
 ```c
 struct ncclGinRocshmemGdaMemHandle {
-  uintptr_t  local_va;
-  uintptr_t* remote_vas;  // [nRanks]
-  uint32_t   lkey;        // one local key
-  uint32_t*  rkeys;       // [nRanks]
+  int        nSegments;                            // 1 = today's scalar path
+  uintptr_t  local_va;                             // window base
+  size_t     segOff[NCCL_RMA_MAX_SEGMENTS + 1];
+  uint32_t   lkeys[NCCL_RMA_MAX_SEGMENTS];
+  uintptr_t* remote_vas;                           // [nRanks * nSeg]
+  uint32_t*  rkeys;                                // [nRanks * nSeg]
 };
 ```
 
-Device Put does one `put_nbi`:
+`nSegments == 1` keeps the current layout in the first slot, so the device fast path is one compare plus the old addressing. At 1024 ranks and 16 segments the tables are 64 KiB of rkeys and 128 KiB of addresses per window per rank. Do not gather per-device rkeys unless GDA gains multi-rail QPs; the factory has one PD and one rkey per MR.
 
-```text
-dstAddr = remote_vas[peer] + dstOff
-srcAddr = local_va + srcOff
-qp->put_nbi(dstAddr, rkeys[peer], srcAddr, lkey, bytes, …)
-```
-
-A DeepEP Engram IGet (remote CPU offset → local GPU offset) that crosses a physical boundary therefore uses the **segment-0** lkey/rkey against an address in a later segment: `EINVAL` at register time, or `IBV_WC_REM_INV_REQ_ERR` on the GPU QP.
-
-Signals and counters are separate fine-grained allocations registered with `IBV_ACCESS_REMOTE_ATOMIC`. They are not elastic windows and do **not** need segment tables.
-
-### 2.2 Anvil SDMA (`gin_plugin_anvil_sdma.cc`, device `gin_anvil_sdma.h`)
-
-Anvil is **intra-node**. There is no IB MR. Registration:
-
-1. Resolves the LSA flat VA (`ncclDevrGetLsaSelfAddr`).
-2. Inserts **one** IPC-table entry covering `[lsaSelf, lsaSelf+size)`.
-3. Publishes `vmmStride = devr->bigSize` so peer VA is `base + (peer − rank) × stride + off`.
-
-```c
-struct ncclGinAnvilSdmaMemHandle {
-  uintptr_t  baseAddr;
-  uintptr_t* remote_vas;  // [nRanks]
-  ptrdiff_t  vmmStride;
-};
-```
-
-Device Put already splits **by copy size** (`kGinPutSegBytes = 128 MiB`) because the SDMA linear-copy count field is 30 bits (max 1 GiB) and a fused copy+signal ≥ 256 MiB hangs MI355X. That splitter is `gin_anvil_sdma_put_policy.h`. It does **not** split at VMM physical boundaries.
-
-```text
-srcAddr = srcMh->baseAddr + srcOff
-dstAddr = resolveRemotePeerVa(dstMh, peer, dstOff)   // stride or one IPC entry
-if (bytes <= sdmaThreshold) ipcPut(dst, src, bytes)
-else SDMA copy, chunked to 128 MiB
-```
-
-`resolveRemotePeerVa` / `ginAnvilResolvePeerVa` assume the byte range sits inside **one** IPC entry. A `[GPU][CPU]` window is two (or more) physical objects. One table entry for the whole VA either fails the export or maps only the GPU object; a put into the CPU segment then writes the wrong physical pages or returns null and drops the transfer.
-
-The IPC table itself is a **global** 16-slot array (`NCCL_GIN_ANVIL_IPC_MAX_BUFS = 16`, `NCCL_GIN_ANVIL_IPC_MAX_RANKS = 16`). That 16 is “registered windows,” not “segments per window.” Registering each physical segment as its own table entry would let **one** 16-segment elastic window exhaust the table.
-
----
-
-## 3. Shared contract to reuse (do not fork the math)
-
-Keep `net_ib/rma_multiseg.h` (introduced on `users/atulkulk/mseg/05-gin-rma-multisegment`) as the source of truth for host-side limits and predicates:
-
-| Symbol | Value | Use on GDA / Anvil |
-|---|---|---|
-| `rcclRmaMultiSegEnabled` | `NCCL_MULTI_SEGMENT_REGISTER` | Gate the per-segment registration; at 0 keep today's single-MR path |
-| `NCCL_RMA_MAX_SEGMENTS` | 16 | Reject windows with more physical objects |
-| `ncclRmaSegmentSliceBytes` | min(rem, local, remote, `UINT32_MAX`) | GDA device loop (verbs SGE is still 32-bit) |
-| `ncclRmaSegmentCountsMatch` | equal `nSeg` in `[1, 16]` | GIN windows; sizes may differ per rank |
-| `ncclRmaSegOffTableValid` | peer `segOff` starts at 0, never decreases | Validate every gathered table before device upload |
-| `ncclRmaSignalOffsetValid` | 8-byte, in one segment | GDA `put`+atomic when the signal is in the **data** window (indexed signals stay on the dedicated signal MR) |
-| `ncclRmaWrIsSignaled` | last index only | GDA: only the last `put_nbi` is signaled; atomic after the chain |
-
-Anvil does **not** use `UINT32_MAX`. Its length cap is `kGinPutSegBytes` (128 MiB), already in `gin_anvil_sdma_put_policy.h`. The physical-segment split **composes** with that cap: first cut at VMM bounds, then cut each slice at 128 MiB.
-
-Do **not** include `net_ib/gin.h` or `gin_cast.h` from the GDA/Anvil plugins, or reuse code from `net_ib/gin.cc` / `net_ib_cast/gin.cc` (`gin.h` and `gin_cast.h` share an include guard, and the IB multi-segment GIN bodies are file-local to those `gin.cc` files). Copy no IB request types. Share only `rma_multiseg.h` / `multiseg.h` and a **device-callable** slice helper (see §6).
-
----
-
-## 4. rocSHMEM GDA — proposed integration
-
-### 4.1 Host registration
-
-`ginRocshmemGdaRegMrSym` / `ginRocshmemGdaRegMrSymDmaBuf` become the GDA analogue of the classic proxy's `rcclRmaIbProxyRegMrSymDmaBuf` (`net_ib/gin.cc`). As in the proxy, the fixed-size gather buffer should be allocated per communicator at connect time (the proxy's `regConsensus`), only when the switch is on, so registration cannot fail locally before its first collective:
-
-```text
-count segments: ncclCuMemGetAddressRange(data, size) → nSeg, segOff[]
-if nSeg > NCCL_RMA_MAX_SEGMENTS: record local failure (do not return before the gather)
-if nSeg == 1 or !rcclRmaMultiSegEnabled():
-    rocshmem_gin_reg_mr_vmm(whole range)     // today's path
-else:
-    for each segment s:
-        hipMemGetHandleForAddressRange(seg s alone, whole pages)   // complete fd
-        rocshmem_gin_reg_mr_vmm(segAddr[s], segLen[s])
-        close(fd)
-fixed-size allgather: {magic, version, status, nSegments, segOff[17]}
-reconcile: any rank failed → all abort, deregister complete MRs
-ncclRmaSegmentCountsMatch and ncclRmaSegOffTableValid on every record; store per-rank segOff
-allgather per-segment local VA and rkey into
-    remote_vas[rank * nSeg + s], rkeys[rank * nSeg + s]
-upload tables to the device mem handle
-```
-
-Factory change: `rocshmem_gin_reg_mr_vmm` may stay “one range → one MR,” but the **plugin** must only ever pass a single physical segment. Do not ask the factory to walk VMM; keep enumeration in RCCL (same as proxy). Optional later: a `rocshmem_gin_reg_mr_dmabuf(fd, addr, len)` so the plugin can pass the already-exported fd and avoid a second export.
-
-```mermaid
-sequenceDiagram
-  participant W as Window register
-  participant P as ginRocshmemGdaRegMrSym
-  participant F as rocshmem_gin_reg_mr_vmm
-  participant B as bootstrap AllGather
-  participant D as device mem handle
-  W->>P: [GPU][CPU] VA, size, nSeg=2
-  loop each physical segment
-    P->>F: addr_s, len_s (one complete dma-buf)
-    F-->>P: lkey_s, rkey_s, mr_s
-  end
-  P->>B: transcript magic/version/status/nSeg/segOff
-  B-->>P: every rank identical layout or abort
-  P->>B: vas[nSeg], rkeys[nSeg]
-  B-->>P: vas[nRanks*nSeg], rkeys[nRanks*nSeg]
-  P->>D: nSeg, segOff[], lkeys[], remote tables
-```
-
-Rollback: `calloc` the handle so MR pointers start NULL; on failure deregister only the segments that completed. `DeregMrSym` loops `nSegments` and frees the GPU tables.
-
-### 4.2 Device handle
-
-```c
-struct ncclGinRocshmemGdaMemHandle {
-  int        nSegments;                              // 1 = today's scalar path
-  uintptr_t  local_va;                               // window base (seg 0)
-  size_t     segOff[NCCL_RMA_MAX_SEGMENTS + 1];      // segOff[nSeg] == size
-  uint32_t   lkeys[NCCL_RMA_MAX_SEGMENTS];           // local keys
-  uintptr_t* remote_vas;                             // [nRanks * nSeg]
-  uint32_t*  rkeys;                                  // [nRanks * nSeg]
-};
-```
-
-`nSegments == 1` keeps the current layout in the first slot so the device fast path is one compare plus the old addressing.
-
-GPU memory: `remote_vas` / `rkeys` grow from `O(nRanks)` to `O(nRanks × nSeg)`. At 1024 ranks × 16 segments that is 64 KiB of rkeys plus 128 KiB of VAs **per window**, per rank. Acceptable. At 8000 ranks it is still small next to the window itself. Do not allgather per-device rkeys unless GDA grows multi-rail QPs; today’s factory is one PD / one rkey per MR.
-
-### 4.3 Device Put / PutValue / Flush
-
-PutValue (inline immediate) only needs the **destination** segment that contains `dstOff`. A 4–8 byte inline store must not straddle a boundary; reject or require containment (same rule as `ncclRmaSignalOffsetValid`).
-
-Put with windows:
+### Device put, put-value and flush
 
 ```mermaid
 flowchart TD
-  P["Put srcOff, dstOff, bytes"] --> Z{"bytes == 0?"}
-  Z -->|yes| SIG["optional atomic signal only"]
-  Z -->|no| L["ls = seg of srcOff<br/>rs = seg of dstOff"]
-  L --> C["chunk = min(rem, localRemain, remoteRemain, UINT32_MAX)"]
-  C --> W{"n >= 32?"}
-  W -->|yes| R["do not post; leave QP idle<br/>host/test treats as fatal"]
-  W -->|no| N["put_nbi(dstVA_rs, rkey[peer,rs], srcVA_ls, lkey[ls], chunk)<br/>signaled iff last && !hasSignal"]
-  N --> A{"rem > 0?"}
-  A -->|yes| L
-  A -->|no| SIG
-  SIG --> Q["atomic_add on signal MR if requested"]
+ p["put srcOff, dstOff, bytes"] --> z{"bytes == 0?"}
+ z -->|yes| sig["signal only, if requested"]
+ z -->|no| l["find local segment of srcOff and remote segment of dstOff"]
+ l --> c["chunk = min of remaining, both segment bounds, UINT32_MAX"]
+ c --> w{"64 slices already posted?"}
+ w -->|yes| r["do not post; set hasError"]
+ w -->|no| n["put_nbi with that slice's keys, signaled only if last and no signal"]
+ n --> a{"bytes left?"}
+ a -->|yes| l
+ a -->|no| sig
+ classDef gin fill:#e5f1ff,stroke:#007aff,color:#1d1d1f
+ classDef failpath fill:#ffeceb,stroke:#ff3b30,color:#1d1d1f
+ class p,sig,l,c,n gin
+ class r failpath
 ```
 
-Rules:
+- Resolve the local lkey from `srcOff` and the remote rkey and address from `dstOff`; never one offset for both.
+- Chain with RC ordering: unsignaled puts then a signaled last put, or unsignaled puts then the atomic.
+- A zero-byte put skips RDMA and still delivers the signal.
+- Put-value needs only the destination segment that holds `dstOff`; a 4- to 8-byte inline store must not straddle a boundary.
+- Flush (`quiet`) is per QP, so one quiet after a multi-slice put to one peer is enough.
+- Device code cannot WARN and unwind, so it must not post a partial chain. Reject at registration any window whose worst-case put exceeds 64 slices, or cap the loop and set `ginRocshmemGdaGinCtx::hasError`.
 
-- Resolve **local** lkey from `srcOff`, **remote** rkey/VA from `dstOff`. Never use one offset for both (Engram).
-- Chain with RC ordering: unsignaled `put_nbi` then signaled last put, or unsignaled puts then `atomic_add` (today’s `!hasSignal` flag on the data WR).
-- Zero-byte put already skips RDMA and still delivers the signal; keep that.
-- Flush (`quiet`) is per-QP, not per-MR. One quiet after a multi-slice put is enough **if** all slices went to the same peer QP. Do not emit one quiet per segment.
-- Device code cannot `WARN` and unwind host credits. If the slice count would exceed `NCCL_RMA_MAX_DATA_WRS`, **do not post a partial chain**. Prefer a host-side check at registration or a compile-time bound: with 16+16−1 plus `UINT32_MAX` cuts, a single put of a huge uniform segment can exceed 64. Host should reject such windows for GDA, or the device loop must cap and set `hasError` on the GPU context (already exists as `ginRocshmemGdaGinCtx::hasError`).
+### GPU send-queue budget
 
-### 4.4 GPU SQ credits (GDA’s analogue of 575)
+The IB-CAST proxy sized a host QP to 575 because many host IPuts can be in flight. GDA posts from one thread per put onto a provider-defined rocSHMEM queue (Ionic, BNXT and others), so do not copy 575. Instead, query the send-queue depth after `rocshmem_gin_create_qps`, treat one device put as at most 65 WQEs (64 data plus the atomic), and if `nCtas * 65` can exceed the depth, either serialize puts per peer or rely on `put_nbi` stalling for space.
 
-CAST proxy sized the **host** QP to `575 = 2×256 + 65 − 2` and reserved software credits because many host IPuts can be in flight.
+## Anvil SDMA
 
-GDA posts from **one warp thread** per Put onto a rocSHMEM `QueuePair` whose send queue is provider-defined (Ionic, BNXT and other providers), typically hundreds to a few thousand WQEs — **not** 575. The danger is different:
+### What breaks
 
-- Many CTAs can Put to the same peer concurrently (`ThreadScope::thread`).
-- One Put can expand from 1 WR to ≤64 WRs.
+1. IPC or VMM export of a multi-handle range has the same first-segment limit, so `ncclGinAnvilIpcTableRegisterVmm` must not assume one object covers the window.
+2. `vmmStride` addressing is valid only while every offset maps to the same kind of mapping on every rank.
+3. `ginAnvilResolvePeerVa` walks entries with `[local_base, local_base + length)`; one entry per window cannot describe a second physical object.
+4. GPU-to-GPU slices can use SDMA queues, but a slice into host-backed VMM may need IPC stores; each slice's memory kind must be known.
 
-Do **not** copy CAST’s 575 onto GDA. Instead:
+### Host registration
 
-1. Query SQ depth from the factory after `rocshmem_gin_create_qps` and store it in `ncclGinRocshmemGdaGPUContext`.
-2. Treat one device Put as at most `NCCL_RMA_MAX_SIGNAL_WRS` (65) WQEs.
-3. If `nCtas × 65` can exceed SQ depth, either serialize Puts per peer (existing `coop.sync` + thread 0 already serializes **within** a coop) or have `put_nbi` internally stall on SQ space (rocSHMEM QP already has doorbell/credit behavior). Document the bound: **one coop Put ≤ 65 WQEs**; overlapping coops still rely on the QP implementation.
+Register each physical segment with stride 0, so lookups go through the table, and publish `nSegments`, `segOff[]`, a per-segment kind (GPU or host) and `remote_vas[rank * nSeg + s]` on the handle. Multi-segment handles set `vmmStride = 0`.
 
-```text
-worst-case WQEs for one GDA Put = min(64 data, remaining-to-boundary cuts)
-                         + 1 atomic if signaled
-                         ≤ 65
-```
-
-That 65 is the **per-operation** budget, the same number CAST added into 575. GDA does not need `2 × NET_IB_MAX_REQUESTS` because the GPU does not keep 256 host request slots on that QP.
-
----
-
-## 5. Anvil SDMA — proposed integration
-
-### 5.1 What actually breaks
-
-Anvil never calls `ibv_reg_dmabuf_mr`. Multi-segment still matters because:
-
-1. **IPC / VMM export** of a multi-handle range on ROCm is the same first-segment limitation. `ncclGinAnvilIpcTableRegisterVmm(lsaSelf, size, …)` must not assume one object covers `[0, size)`.
-2. **`vmmStride` O(1) addressing** (`base + (peer−rank)×bigSize + off`) is valid only while every byte of `off` lands in the **same kind** of mapping on every rank. Hybrid `[GPU][CPU0][CPU1]` is still a contiguous VA with a uniform stride **if** LSA mapped the whole window. The CPU objects are different handles; a single IPC entry keyed at the GPU base does not describe the CPU range.
-3. **`ginAnvilResolvePeerVa`** walks table entries with `[local_base, local_base+length)`. One entry per window cannot contain a hole or a second physical object.
-4. SDMA vs IPC: GPU→GPU can use SDMA queues; GPU→CPU-backed VMM may need IPC stores or a host-accessible mapping. A slice’s **memory kind** must be known.
-
-```mermaid
-flowchart LR
-  subgraph Rank0["rank 0 LSA window"]
-    G0["GPU 0"]
-    C0["CPU 0 local"]
-    C1["CPU 1 imported"]
-  end
-  subgraph Rank1["rank 1 LSA window"]
-    G1["GPU 1"]
-    C0b["CPU 0 imported"]
-    C1b["CPU 1 local"]
-  end
-  G0 -.->|"today: one IPC length=whole window"| X["wrong / incomplete export"]
-  C1 -->|"Engram: remote CPU off → local GPU off"| G0
-```
-
-### 5.2 Host registration
-
-Do **not** register one IPC row for the whole window. Enumerate physical segments (same `ncclCuMemGetAddressRange` walk as GDA/proxy) and register **each** segment:
-
-```text
-for each segment s:
-    ncclGinAnvilIpcTableRegisterVmm(segBase[s], segLen[s], lsaSelf, lsaSize, 0)
-    // stride 0 → force table lookup; do not use window-level vmmStride
-publish on the mem handle:
-    nSegments, segOff[], segKind[s] (GPU vs host),
-    remote_vas[rank * nSeg + s] from LSA math per segment
-vmmStride = 0 on multi-segment handles
-```
-
-**IPC table capacity.** Today `NCCL_GIN_ANVIL_IPC_MAX_BUFS = 16` is process-global. Options (pick one before coding):
-
-| Option | Idea | Verdict |
+| Option for the 16-slot IPC table | Idea | Verdict |
 |---|---|---|
-| A | Raise `MAX_BUFS` to e.g. 64 or 256 | Simple; needed anyway if several elastic windows coexist |
-| B | One table row per **window**, with an inline `nSeg` and `segOff[]` | Avoids blowing 16 slots; lookup becomes “find window, then segment” |
-| C | Keep 16 rows = 16 windows, segments as subranges stored **in the mem handle**, IPC only for objects that need peer mapping | Best: GPU segments can stay stride-based; CPU/imported segments get explicit rows |
+| A | raise `NCCL_GIN_ANVIL_IPC_MAX_BUFS` to 64 or 256 | simple; needed anyway if several elastic windows coexist |
+| B | one row per window with inline `nSeg` and `segOff[]` | avoids filling 16 slots; lookup finds the window, then the segment |
+| C | keep rows per window, keep segments in the mem handle, add IPC rows only for objects that need peer mapping | recommended: GPU segments stay stride-based, host or imported segments get rows |
 
-**Recommended: C + a raised rank cap if hybrid jobs exceed 16 local ranks.** DeepEP hybrid on 8 GPUs/node × 2 nodes is 8 LSA ranks, under `MAX_RANKS=16`. A 2-segment non-hybrid window needs **one extra IPC row for the CPU object**, not 16.
+A two-segment non-hybrid window needs one extra row for the CPU object, not 16. DeepEP hybrid on 8 GPUs per node uses 8 LSA ranks, under `NCCL_GIN_ANVIL_IPC_MAX_RANKS` = 16, which counts LSA-local ranks, not world size.
 
-`NCCL_GIN_ANVIL_IPC_MAX_RANKS = 16` is LSA-local, not world size. Anvil is intra-node; world 1000-node jobs still have ≤16 ranks in the LSA team unless that constant is raised separately.
-
-### 5.3 Device Put
-
-Compose **two** splitters:
-
-```text
-remaining = bytes
-srcOff, dstOff independent
-while remaining:
-    ls, rs = containing physical segments
-    phys = min(remaining, localSegRemain, remoteSegRemain)
-    // existing SDMA reliability cap
-    for each 128 MiB chunk of phys:
-        srcVA = localSegVA[ls] + localOffInSeg
-        dstVA = resolve(peer, rs, remoteOffInSeg)   // table or per-seg remote_vas
-        if kind GPU→GPU and bytes > sdmaThreshold: sdma put
-        else: ipcPut (or skip/fail if CPU dest has no GPU mapping)
-    advance both offsets
-signal / quiet only after the last chunk (existing isFinal)
-```
+### Device put
 
 ```mermaid
 flowchart TD
-  PUT["Anvil Put srcOff, dstOff, bytes"] --> PHYS["cut at local and remote VMM bounds"]
-  PHYS --> SIZE["cut each physical slice at kGinPutSegBytes 128 MiB"]
-  SIZE --> KIND{"slice memory kind"}
-  KIND -->|GPU→GPU, large| SD["SDMA copy on peer queue"]
-  KIND -->|small or host-backed| IPC["ipcPut / flat store"]
-  KIND -->|unmapped host| FAIL["do not copy; hasError"]
-  SD --> FIN["isFinal: fused signal or quiet + signalPeer"]
-  IPC --> FIN
+ p["Anvil put srcOff, dstOff, bytes"] --> phys["cut at local and remote segment bounds"]
+ phys --> size["cut each slice at 128 MiB"]
+ size --> kind{"slice memory kind"}
+ kind -->|"GPU to GPU, large"| sd["SDMA copy on the peer queue"]
+ kind -->|"small or host-backed"| ipc["IPC flat store"]
+ kind -->|"unmapped host"| fail["do not copy; set hasError"]
+ sd --> fin["final slice: fused signal, or quiet then signal"]
+ ipc --> fin
+ classDef gin fill:#e5f1ff,stroke:#007aff,color:#1d1d1f
+ classDef failpath fill:#ffeceb,stroke:#ff3b30,color:#1d1d1f
+ class p,phys,size,sd,ipc,fin gin
+ class fail failpath
 ```
 
-`vmmStride` remains valid for **single-segment GPU** windows (today’s common case). Multi-segment handles set `vmmStride = 0` so `resolveRemotePeerVa` uses `remote_vas[peer * nSeg + rs] + offInSeg`, never `base + off` across a GPU/CPU join.
+`vmmStride` stays valid for single-segment GPU windows, the common case. Multi-segment handles resolve `remote_vas[peer * nSeg + rs] + offset in segment`, never `base + off` across a GPU-to-CPU join. The existing `quiet` on dirty SDMA channels is enough for flush; IPC stores still need the fence already in `fenceBeforeSignal`.
 
-Flush: existing `quiet` on dirty SDMA channels is enough; do not issue one fence per VMM segment. IPC stores still need the same agent/system fence already in `fenceBeforeSignal`.
+**Host segments on Anvil.** A CPU segment must be in the LSA map with GPU access. SDMA engines may not reach host VMM, so use IPC stores (or a CE copy) for host slices regardless of size. Without GPU access to imported host VMM (ROCM-29812), skip collectively, as the hybrid MPI tests do; never hang in `waitSignal`.
 
-### 5.4 Host VMM CPU segments on Anvil
+## Device slice helper
 
-DeepEP Engram on **one node** (LSA+GIN hybrid tests) fetches remote CPU into local GPU. For Anvil:
-
-- The CPU segment must be in the LSA map with GPU access (`hipMemAccessFlagsProtReadWrite` on the device).
-- SDMA engines may not DMA to that host VMM. Prefer **IPC flat stores** (or a CE copy) for any slice whose `segKind` is host, regardless of size.
-- If GPU access to imported host VMM is missing (ROCM-29812), **collectively skip** — same policy as the existing hybrid MPI tests. Do not hang in `waitSignal`.
-
----
-
-## 6. Device-side slice helper
-
-Host tests already cover `ncclRmaSegmentSliceBytes` and `ncclIbSplitTransferAtOffsets`. The GDA/Anvil device loops need the same arithmetic without pulling IB headers into device code.
-
-Add a HIP `__host__ __device__` helper next to Anvil’s existing `gin_anvil_sdma_put_policy.h` pattern, for example a new `gin_device_multiseg.h` (proposed; it does not exist yet):
+Add a host-and-device header (proposed `gin_device_multiseg.h`, no ibverbs) next to `gin_anvil_sdma_put_policy.h`:
 
 ```c
-// Host+device. No ibverbs. Proposed names.
 size_t rcclGinDevSegSliceBytes(size_t rem, size_t localRemain, size_t remoteRemain, size_t lenCap);
 int rcclGinDevSegOf(int nSeg, const size_t* segOff, size_t off);  // -1 if out of range
 ```
 
-GDA passes `lenCap = UINT32_MAX`. Anvil passes `lenCap = min(physRemain, kGinPutSegBytes)`.
+GDA passes `lenCap = UINT32_MAX`; Anvil passes `min(physRemain, kGinPutSegBytes)`. Test it on the host (`GIN_SDMA_HOST_ONLY`-style build) with independent offsets, `UINT32_MAX + 4096` for GDA, 128 MiB plus 1 byte with a segment boundary inside for Anvil, and over-16 rejection on the host register path.
 
-Unit-test it from the host with `GIN_SDMA_HOST_ONLY`-style compilation, including:
+## DeepEP shapes that must work
 
-- independent `srcOff` / `dstOff` (Engram)
-- `UINT32_MAX + 4096` on GDA
-- 128 MiB + 1 byte on Anvil **and** a VMM boundary inside that range
-- `nSeg > 16` rejected on the host register path before the device ever sees it
-
----
-
-## 7. DeepEP geometry (what must work)
-
-Non-hybrid elastic window:
-
-```text
-[ GPU : workspace + dispatch  |  CPU : Engram ]
-         srcOff in GPU                  dstOff in CPU   (or IGet the other way)
-```
-
-Hybrid (N local ranks; CI uses 4 per node / 8 ranks on 2 nodes):
-
-```text
-[ GPU | CPU rank0 | CPU rank1 | ... | CPU rankN-1 ]
-```
+The non-hybrid window is `[GPU][CPU]` with puts or gets between a GPU offset and a CPU offset. The hybrid window is `[GPU k][CPU 0]…[CPU N-1]`; see [hybrid DeepEP windows](multi_segment_testing.md#hybrid-deepep-windows).
 
 | Backend | Must do | Must not do |
 |---|---|---|
-| GDA | Per-segment DMA-BUF MR; device Put splits; rkey[peer,seg] | One `put_nbi` with seg0 keys |
-| Anvil | Per-object IPC; `vmmStride=0`; host slices via IPC not SDMA | One IPC length = whole window |
-| Both | Independent local/remote offsets; layout match; skip if host VMM GPU access missing | Shared `off` for src and dst |
+| GDA | per-segment DMA-BUF MRs, device put split, `rkey[peer, seg]` | one `put_nbi` with segment 0's keys |
+| Anvil | per-object IPC, `vmmStride = 0`, host slices through IPC stores | one IPC entry covering the whole window |
+| Both | independent offsets, layout agreement, collective skip without host VMM GPU access | one offset for source and destination |
 
-`NCCL_WIN_STRICT_ORDERING` stays a window flag. GDA already claims strong VA signals. Anvil signals are LSA atomics; segment splits must not reorder the trailing signal ahead of data slices (RC for GDA; SDMA `isFinal` / quiet for Anvil).
+`NCCL_WIN_STRICT_ORDERING` stays a window flag. Splits must not move the trailing signal ahead of data slices (RC ordering on GDA; SDMA final-slice handling or quiet on Anvil).
 
----
+## Implementation sequence
 
-## 8. Implementation sequence
+1. GDA host registration only, still one device put: register 2 to 16 segments, log the MR count, reject more than 16, roll back on fd failure.
+2. GDA device put loop and `gin_device_multiseg.h`: boundary-crossing IPut and IGet, Engram offsets, `UINT32_MAX` host test, signal after the chain.
+3. Anvil IPC per physical object with `vmmStride = 0` on multi-segment handles, keeping the 128 MiB splitter.
+4. Anvil host-kind slices forced to IPC stores; a CPU destination without GPU mapping skips or errors without hanging.
+5. Grow the Anvil IPC table (or option C) before enabling several multi-segment windows together.
+6. Do not wait on GDAKI (type 3) or GPI (type 4): RCCL does not build the internal GDAKI plugin on AMD, the optional IB-CAST GDAKI backend is separate work, and there is no AMD GPI plugin.
 
-1. **Host GDA registration only** (still one device Put). Tests: register 2–16 segments, log MR count, reject `nSeg>16`, rollback on fd failure. Single-segment Put still works; crossing Put still fails until step 2 — that is acceptable if tests only assert registration.
-2. **Device GDA Put loop** + `gin_device_multiseg.h`. MPI: boundary-crossing IPut/IGet, Engram offsets, `UINT32_MAX` host unit test, signal-after-chain.
-3. **Anvil IPC per physical object** + `vmmStride=0` on multi-seg handles. Keep 128 MiB splitter. MPI: same-node hybrid if host VMM GPU access exists; else collective skip.
-4. **Anvil host-kind slices** forced to `ipcPut`. Negative test: CPU dest with no GPU mapping → skip/error, no hang.
-5. Raise `NCCL_GIN_ANVIL_IPC_MAX_BUFS` (or option C) **before** enabling multi-window + multi-seg together.
-6. Do **not** block on the GDAKI (`GIN_TYPE=3`) or GPI (`GIN_TYPE=4`) device types. RCCL does not build `ncclGinIbGdaki` on AMD, the optional CAST GDAKI backend is separate work, and there is no AMD GPI plugin (§10).
+## Testing
 
----
-
-## 9. Testing
-
-Reuse `test/transport/RmaMPI/RmaMultiSegmentMPITests.cpp` patterns **without** requiring the RMA proxy. Add a GIN-device fixture that sets `NCCL_GIN_TYPE=5` or `6` and `ENABLE_ROCSHMEM_GIN`.
+Reuse the `RmaMultiSegmentMPITests.cpp` patterns without the RMA proxy, in a GIN-device fixture that sets `NCCL_GIN_TYPE=5` or `6`.
 
 | Case | GDA | Anvil |
 |---|---|---|
 | Single-segment regression | yes | yes |
-| N uniform GPU segments, crossing Put | yes | yes (intra-node) |
-| DeepEP `[GPU][CPU]` Engram IGet | yes (inter-node) | yes if CPU GPU-mapped; else skip |
-| Hybrid 8-rank `[GPU][CPU0]…[CPU3]` | yes | LSA-local only |
-| `nSeg > 16` | host reject | host reject |
+| N uniform GPU segments, crossing put | yes | yes, intra-node |
+| DeepEP `[GPU][CPU]` Engram IGet | yes, inter-node | yes if the CPU segment is GPU-mapped, else skip |
+| Hybrid 8-rank window | yes | LSA-local only |
+| More than 16 segments | host reject | host reject |
 | Layout mismatch | collective abort | collective abort |
-| Slice overflow (32 GDA / SDMA 128 MiB) | host or device hasError | existing policy test + VMM cut |
-| Signal after multi-slice | atomic last | `isFinal` / quiet |
-| ROCM-29812 no CPU access | skip | skip |
+| Slice overflow | 64 slices: host reject or `hasError` | existing 128 MiB policy plus the segment cut |
+| Signal after a multi-slice put | atomic last | final slice or quiet |
+| No host VMM GPU access (ROCM-29812) | skip | skip |
 
-Capability skips must be **collective** (existing hybrid tests already do this).
+Capability skips must be collective.
 
----
+## Other device GIN types
 
-## 10. Other device GIN types in RCCL
-
-Device GIN types as RCCL builds them on AMD:
-
-| `ncclNetDeviceType` | RCCL on AMD | Multi-segment status |
+| GIN type | RCCL on AMD | Multi-segment status |
 |---|---|---|
-| 2 | Proxy (`ncclGinProxy` over the classic or CAST RMA backend) | Done (`net_ib/gin.cc`, `net_ib_cast/gin.cc`) |
-| 3 | GDAKI: the internal `ncclGinIbGdaki` plugin is not built on `__HIP_PLATFORM_AMD__`; `IbCastGinIbGdaki` is registered only with `RCCL_NET_IB_CAST_ENABLE_GDAKI` and `NCCL_NET=IB-CAST`, and has `regMrSymDmaBuf = NULL` | Out of scope (§11) |
-| 4 | GPI: device templates only (`nccl_device/gin/gpi/gin_gpi.h`); `gin_host.cc` keeps a version table so an external `NCCL_GIN_PLUGIN` reporting type 4 can load | Not an RCCL deliverable |
-| 5 | rocSHMEM GDA | This doc §4 |
-| 6 | Anvil SDMA | This doc §5 |
+| 2 | proxy over the classic or IB-CAST RMA backend | done |
+| 3 | GDAKI: the internal plugin is not built on AMD; `IbCastGinIbGdaki` registers only with `RCCL_NET_IB_CAST_ENABLE_GDAKI` and `NCCL_NET=IB-CAST`, with `regMrSymDmaBuf = NULL` | out of scope |
+| 4 | GPI: device templates only, loadable as an external plugin | not an RCCL deliverable |
+| 5 | rocSHMEM GDA | this proposal |
+| 6 | Anvil SDMA | this proposal |
 
-Any GPU-posted RDMA backend on ROCm needs the §4 shape: per-segment MRs, and a device loop that converts `dstOff` / `srcOff` to `(segment, offset in segment)` before building the work request. Each segment's MR can use either a zero IOVA (offsets relative to that segment) or the segment's VA as IOVA (absolute addresses); mixing the two in one Put is illegal.
+Any GPU-posted RDMA backend on ROCm needs the GDA shape: per-segment MRs and a device loop that turns `srcOff` and `dstOff` into a segment and an offset within it. Each segment's MR may use a zero IOVA or the segment's VA as IOVA, but not a mix within one put. GPI descriptors name one source and one destination handle with a 32-bit size, so the same per-slice split would apply.
 
-If the GPI device templates were ever used on multi-segment memory, the same split applies: one descriptor names one source and one destination memory handle, so a Put that crosses a physical boundary must become one descriptor per slice, with the signal on the last one. The descriptor `size` field is 32-bit, which is the same `UINT32_MAX` cap as verbs SGEs.
+Out of scope: the IB-CAST P2P side table, copying IB-CAST's credit counter onto GDA, raising the 16-segment cap, multi-segment inside GDAKI or GPI, device GDAKI `regMrSymDmaBuf`, and making Anvil an inter-node path.
 
-GDA is the GPU-posted RDMA backend on AMD; Anvil's IPC table is the intra-node analogue of a NIC-owned window table.
-
-## 11. Out of scope
-
-- CAST P2P side table / 64-byte CTS / 769-WQE P2P budget.
-- Copying CAST `rmaWrsOutstanding` onto GDA.
-- Raising `NCCL_RMA_MAX_SEGMENTS` (1 GiB window still floors at 64 MiB/segment).
-- Implementing multi-segment inside the GDAKI or GPI device types (AMD does not ship those plugins).
-- Device GDAKI `regMrSymDmaBuf` on ROCm (still NULL in `IbCastGinIbGdaki`; CAST GDAKI is a separate compile flag).
-- Making Anvil an inter-node NIC path.
-
----
-
-## 12. File / symbol index (proposed)
+## Proposed file index
 
 | Concern | File | Change |
 |---|---|---|
-| GDA host reg | `src/gin/gin_plugin_rocshmem_gda.cc` | per-segment `reg_mr_vmm`, transcript, GPU tables |
-| GDA factory | `src/gin/gin_rocshmem_gda_factory.cc` | optional explicit dmabuf entry; SQ depth query |
-| GDA device handle | `gin_rocshmem_device_host_common_gda.h` | `nSegments`, `segOff`, `lkeys[]`, rank×seg tables |
-| GDA Put | `gin_rocshmem_gda.h` | slice loop, last WR / atomic |
-| Anvil host reg | `gin_plugin_anvil_sdma.cc` | enumerate segments; IPC per object; `vmmStride=0` |
-| Anvil IPC table | `gin_anvil_ipc_table.h` / `_host.cc` | capacity; per-object rows |
-| Anvil device handle | `gin_anvil_sdma_device_host_common.h` | `nSegments`, `segOff`, `segKind`, rank×seg VAs |
-| Anvil Put | `gin_anvil_sdma.h` | VMM cut then `kGinPutSegBytes`; host-kind → ipcPut |
-| Shared device math | new `gin_device_multiseg.h` | host+device slice helper |
-| Host unit tests | `test/NetIbMultiSegmentUnitTests.cpp` or `test/gin/` | GDA `UINT32_MAX` + Anvil VMM+128 MiB composition |
-| MPI | GIN_TYPE 5/6 suites next to `RmaMultiSegmentMPITests.cpp` | Engram + hybrid |
+| GDA host registration | `src/gin/gin_plugin_rocshmem_gda.cc` | per-segment `reg_mr_vmm`, consensus, GPU tables |
+| GDA factory | `src/gin/gin_rocshmem_gda_factory.cc` | optional DMA-BUF entry, send-queue depth query |
+| GDA device handle | `gin_rocshmem_device_host_common_gda.h` | `nSegments`, `segOff`, `lkeys[]`, rank-by-segment tables |
+| GDA put | `gin_rocshmem_gda.h` | slice loop, last WR or atomic |
+| Anvil host registration | `gin_plugin_anvil_sdma.cc` | per-segment IPC rows, `vmmStride = 0` |
+| Anvil IPC table | `gin_anvil_ipc_table.h`, `_host.cc` | capacity and per-object rows |
+| Anvil device handle | `gin_anvil_sdma_device_host_common.h` | `nSegments`, `segOff`, segment kind, rank-by-segment addresses |
+| Anvil put | `gin_anvil_sdma.h` | segment cut then 128 MiB cut; host slices through IPC stores |
+| Shared device math | new `gin_device_multiseg.h` | host-and-device slice helper |
+| Tests | `test/NetIbMultiSegmentUnitTests.cpp` or `test/gin/`; GIN type 5 and 6 MPI suites | slice helper; Engram and hybrid |
