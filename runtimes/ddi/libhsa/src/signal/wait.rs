@@ -70,7 +70,7 @@ pub(crate) unsafe fn signal_wait(
 ) -> SignalValue {
     // SAFETY: Callers must supply a live HSA user signal.
     unsafe {
-        with_signal(signal, |signal| {
+        with_public_signal(signal, |signal| {
             // The common satisfied path needs only one atomic load. Read the clock
             // and system frequency only once the caller actually has to wait.
             let observed = signal.value.load(order);
@@ -81,6 +81,9 @@ pub(crate) unsafe fn signal_wait(
             let frequency = system_frequency();
             loop {
                 let observed = signal.value.load(order);
+                if !crate::runtime::public_raw_handle_access_allowed() {
+                    return observed;
+                }
                 if condition_met(condition, observed, compare_value) {
                     return observed;
                 }
