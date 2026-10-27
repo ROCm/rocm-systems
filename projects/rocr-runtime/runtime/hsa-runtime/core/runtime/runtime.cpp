@@ -598,6 +598,25 @@ hsa_status_t Runtime::DeregisterReleaseNotifier(void* ptr,
   return ret;
 }
 
+/* Decide whether a pointer's reported owner may drive a blit on it.
+ *
+ * agentOwner reports where the memory physically lives, which for a VMM mapping does not imply
+ * that the owner holds a page table entry for this VA. This helper checks if the owner has a 
+ * mapping and if it is safe to execute a blit from the owner agent. A non-GPU owner defaults
+ * to returning true, and makes the caller handle the case itself */
+static bool OwnerCanBlit(hsa_agent_t owner, const hsa_agent_t* accessible, uint32_t count) {
+  if (owner.handle == 0) return false;
+
+  if (core::Agent::Convert(owner)->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+    return true;
+  }
+
+  for (uint32_t i = 0; i < count; i++)
+    if (accessible[i].handle == owner.handle) return true;
+
+  return false;
+}
+
 hsa_status_t Runtime::CopyMemory(void* dst, const void* src, size_t size) {
   void* source = const_cast<void*>(src);
 
@@ -620,10 +639,10 @@ hsa_status_t Runtime::CopyMemory(void* dst, const void* src, size_t size) {
     ptrdiff_t endPtr = (ptrdiff_t)ptr + size;
     if (info.agentBaseAddress <= ptr &&
         endPtr <= (ptrdiff_t)info.agentBaseAddress + info.sizeInBytes) {
-      if (info.agentOwner.handle == 0) {
+      if (!OwnerCanBlit(info.agentOwner, accessible, count)) {
         if (count == 0) {
           throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ALLOCATION,
-                                   "No agent owns the pointer in hsa_memory_copy.");
+                                   "No agent can access the pointer in hsa_memory_copy.");
         }
         info.agentOwner = accessible[0];
       }
@@ -771,8 +790,9 @@ hsa_status_t Runtime::FillMemory(void* ptr, uint32_t value, size_t count) {
   // Selects GPU fill for SVM and Locked allocations if a GPU address is given and is mapped.
   if (info.agentBaseAddress <= ptr &&
       endPtr <= (ptrdiff_t)info.agentBaseAddress + info.sizeInBytes) {
-    core::Agent* blit_agent =
-        (info.agentOwner.handle != 0) ? core::Agent::Convert(info.agentOwner) : nullptr;
+    core::Agent* blit_agent = OwnerCanBlit(info.agentOwner, accessible, agent_count)
+        ? core::Agent::Convert(info.agentOwner)
+        : nullptr;
     if (blit_agent == nullptr ||
         blit_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
       blit_agent = nullptr;
@@ -785,6 +805,19 @@ hsa_status_t Runtime::FillMemory(void* ptr, uint32_t value, size_t count) {
       }
     }
     if (blit_agent) return blit_agent->DmaFill(ptr, value, count);
+
+    // Verify that there is a CPU agent in the accessible list prior to falling through
+    if (info.type == HSA_EXT_POINTER_TYPE_HSA_VMEM) {
+      bool host_accessible = false;
+      for (uint32_t i = 0; i < agent_count; i++) {
+        if (core::Agent::Convert(accessible[i])->device_type() ==
+            core::Agent::DeviceType::kAmdCpuDevice) {
+          host_accessible = true;
+          break;
+        }
+      }
+      if (!host_accessible) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
   }
 
   // Host and unmapped SVM addresses copy via host.
