@@ -29,9 +29,10 @@ For every arch in src/rocprof_compute_soc/metric_library/, check that:
 import re
 import sys
 from collections import defaultdict
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Iterator, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
@@ -547,10 +548,11 @@ def _counter_errors(arch: str, library: MetricLibrary, analysis_dir: Path) -> li
     has_membw_panel = any(
         (analysis_dir / arch).glob(f"{MEMBW_ANALYSIS_PANEL_ID}_*.yaml")
     )
-    soc = _make_soc(arch, analysis_dir, has_membw_panel)
+    gpu_series = mi_gpu_specs.get_gpu_series(arch)
+    soc = _make_soc(arch, gpu_series, analysis_dir, has_membw_panel)
     expected, _ = soc.detect_counters()
     actual = soc._expand_tcc_template_counters(
-        library.get_counters_for_metrics(list(library.metrics), _gpu_series(arch))
+        library.get_counters_for_metrics(list(library.metrics), gpu_series)
     )
     errors = []
     if expected - actual:
@@ -565,9 +567,10 @@ def _builtin_var_errors(arch: str, library: MetricLibrary) -> list[str]:
         name: _canonical(variable["formula"])
         for name, variable in library.variables.items()
     }
+    gpu_series = mi_gpu_specs.get_gpu_series(arch)
     expected = {
         name: _canonical(formula)
-        for name, formula in get_build_in_vars(_gpu_series(arch)).items()
+        for name, formula in get_build_in_vars(gpu_series).items()
     }
     if actual == expected:
         return []
@@ -610,7 +613,9 @@ def _canonical(equation: object) -> Optional[str]:
     return re.sub(r"\s+", "", text)
 
 
-def _make_soc(arch: str, analysis_dir: Path, membw_analysis: bool) -> OmniSoC_Base:
+def _make_soc(
+    arch: str, gpu_series: Optional[str], analysis_dir: Path, membw_analysis: bool
+) -> OmniSoC_Base:
     args = SimpleNamespace(
         config_dir=analysis_dir,
         filter_blocks=[],
@@ -620,7 +625,7 @@ def _make_soc(arch: str, analysis_dir: Path, membw_analysis: bool) -> OmniSoC_Ba
     )
     machine_specs = SimpleNamespace(
         gpu_arch=arch,
-        gpu_series=_gpu_series(arch),
+        gpu_series=gpu_series,
         l2_banks=16,
         num_xcd=1,
         rocminfo_lines=None,
@@ -628,10 +633,6 @@ def _make_soc(arch: str, analysis_dir: Path, membw_analysis: bool) -> OmniSoC_Ba
     soc = OmniSoC_Base(args, machine_specs)
     soc.set_arch(arch)
     return soc
-
-
-def _gpu_series(arch: str) -> Optional[str]:
-    return mi_gpu_specs.get_gpu_series(arch)
 
 
 # ---------------------------------------------------------------------------
