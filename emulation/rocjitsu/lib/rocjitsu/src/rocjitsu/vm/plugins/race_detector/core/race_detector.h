@@ -38,6 +38,7 @@ namespace rocjitsu::plugins::race_detector {
 ///     with binary search (IntervalSet::overlapsRange).
 class RaceDetector {
   friend class Workgroup;
+  friend class WaveRaceState;
 
 public:
   /// ldsSizeBytes is the CU backing capacity, independent of workgroup
@@ -46,24 +47,34 @@ public:
                std::function<void(RaceViolation)> raceHandler, CounterCapacities,
                size_t ldsSizeBytes);
 
+  /// @brief Allocate a reportable event using the captured PC and encoding.
+  /// @details Empty or oversized snapshots throw std::logic_error before allocation.
+  EventId allocateEventId(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
+                          std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
+                          IntervalSet ldsIntervals,
+                          std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
+
+  /// @brief Allocate PC-only events for core analyses.
+  /// @details All CoreOnly forms omit bytes and cannot be disassembled in plugin reports.
   /// Allocate an event using the counter and ordering implied by its type.
-  EventId allocateEventId(WaveId wave, uint64_t pc, MemoryEventType type,
-                          std::vector<uint32_t> registers, uint64_t execMask) {
-    return allocateEventId(wave, pc, type, std::move(registers), execMask, 0xF, {},
-                           defaultWaitCounterType(type), defaultMemoryOrder(type));
+  EventId allocateEventIdCoreOnly(WaveId wave, uint64_t pc, MemoryEventType type,
+                                  std::vector<uint32_t> registers, uint64_t execMask) {
+    return allocateEventIdCoreOnly(wave, pc, type, std::move(registers), execMask, 0xF, {},
+                                   defaultWaitCounterType(type), defaultMemoryOrder(type));
   }
 
   /// Allocate a workgroup-global event ID and record its metadata.
+  EventId allocateEventIdCoreOnly(
+      WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers, uint64_t execMask,
+      uint8_t byteMask, IntervalSet ldsIntervals, amdgpu::WaitCounterType waitCounterType,
+      MemoryOrderClass memoryOrder,
+      std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
   EventId
-  allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
-                  uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
-                  amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
-                  std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
-  EventId allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
+  allocateEventIdCoreOnly(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
                           uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
-                          InstructionSnapshot instruction = {});
+                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);
@@ -120,6 +131,11 @@ public:
   WaveRaceState &getWaveRaceState(int waveIndex);
 
 private:
+  EventId allocateEventIdImpl(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
+                              std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
+                              IntervalSet ldsIntervals,
+                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask);
   void setProfiler(ProfilerInterface &);
 
   struct LdsChunkCounts {

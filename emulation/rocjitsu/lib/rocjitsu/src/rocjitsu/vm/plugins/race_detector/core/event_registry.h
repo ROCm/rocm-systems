@@ -34,6 +34,7 @@ namespace rocjitsu::plugins::race_detector {
 /// trimmable prefix is scanned and erased only if it covers at least half
 /// the entries, amortizing the O(n) vector shift.
 class EventRegistry {
+  friend class RaceDetector;
   struct EventInfo {
     WaveId waveId;
     InstructionSnapshot instruction;
@@ -52,37 +53,28 @@ class EventRegistry {
   };
 
 public:
-  /// Allocate a new event with every simultaneous counter obligation.
-  EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
-              uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
+  /// @brief Allocate a reportable event using its complete captured instruction.
+  /// @details Empty or oversized snapshots throw std::logic_error before allocation.
+  EventId add(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
+              std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
+              IntervalSet ldsIntervals,
               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
-              InstructionSnapshot instruction = {}) {
-    int id = base_offset_ + static_cast<int>(entries_.size());
-    assert(!counterObligations.empty());
-    assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
-    instruction.pc = pc;
-    EventInfo event{waveId,
-                    instruction,
-                    type,
-                    {},
-                    static_cast<uint8_t>(counterObligations.size()),
-                    0,
-                    memoryOrder,
-                    EventStatus::ACTIVE,
-                    byteMask,
-                    lastRegisterByteMask ? lastRegisterByteMask : byteMask,
-                    execMask,
-                    std::move(registers),
-                    std::move(ldsIntervals)};
-    std::ranges::copy(counterObligations, event.counterObligations.begin());
-    entries_.push_back(std::move(event));
+              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0) {
+    instruction.validateEncoding();
+    return addImpl(waveId, instruction, type, std::move(registers), execMask, byteMask,
+                   std::move(ldsIntervals), counterObligations, memoryOrder, lastRegisterByteMask);
+  }
 
-    // To prevent the number of events recorded growing indefinitely, we try to
-    // remove retired events from time to time.
-    if (id % kTrimAttemptInterval == kTrimAttemptInterval - 1)
-      tryTrimEvents();
-    return EventId{id};
+  /// @brief Allocate a PC-only event for core analyses.
+  /// @details This event has no encoding and cannot be disassembled in plugin reports.
+  EventId addCoreOnly(WaveId waveId, uint64_t pc, MemoryEventType type,
+                      std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
+                      IntervalSet ldsIntervals,
+                      std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                      MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0) {
+    return addImpl(waveId, InstructionSnapshot{.pc = pc}, type, std::move(registers), execMask,
+                   byteMask, std::move(ldsIntervals), counterObligations, memoryOrder,
+                   lastRegisterByteMask);
   }
 
   /// Transition ACTIVE → WAVE_COMPLETE after every counter obligation is satisfied.
@@ -189,6 +181,37 @@ public:
   static constexpr int kTrimAttemptInterval = 1000;
 
 private:
+  EventId addImpl(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
+                  std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
+                  IntervalSet ldsIntervals,
+                  std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                  MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask) {
+    int id = base_offset_ + static_cast<int>(entries_.size());
+    assert(!counterObligations.empty());
+    assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
+    EventInfo event{waveId,
+                    instruction,
+                    type,
+                    {},
+                    static_cast<uint8_t>(counterObligations.size()),
+                    0,
+                    memoryOrder,
+                    EventStatus::ACTIVE,
+                    byteMask,
+                    lastRegisterByteMask ? lastRegisterByteMask : byteMask,
+                    execMask,
+                    std::move(registers),
+                    std::move(ldsIntervals)};
+    std::ranges::copy(counterObligations, event.counterObligations.begin());
+    entries_.push_back(std::move(event));
+
+    // To prevent the number of events recorded growing indefinitely, we try to
+    // remove retired events from time to time.
+    if (id % kTrimAttemptInterval == kTrimAttemptInterval - 1)
+      tryTrimEvents();
+    return EventId{id};
+  }
+
   int index(EventId id) const { return id.value - base_offset_; }
 
   static bool isEntryTrimmable(const EventInfo &e) {

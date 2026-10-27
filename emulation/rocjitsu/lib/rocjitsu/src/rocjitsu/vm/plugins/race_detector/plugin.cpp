@@ -429,14 +429,14 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     if (obligations.empty())
       return;
     if (d.ds2_active) {
-      rs->registerLdsEvent(wf.pc, type, std::move(registers), execMask, wf.wf_size(),
+      rs->registerLdsEvent(instruction, type, std::move(registers), execMask, wf.wf_size(),
                            std::span<const uint32_t>(laneAddrs, wf.wf_size()),
                            std::span<const uint32_t>(secondLaneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder, d.elem_size, instruction);
+                           byte_mask, obligations, memoryOrder, d.elem_size);
     } else {
-      rs->registerLdsEvent(wf.pc, type, std::move(registers), execMask, wf.wf_size(),
+      rs->registerLdsEvent(instruction, type, std::move(registers), execMask, wf.wf_size(),
                            std::span<const uint32_t>(laneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder, ldsMask, d.elem_size, instruction,
+                           byte_mask, obligations, memoryOrder, ldsMask, d.elem_size,
                            access.flat_local_allocation_end);
     }
     // A mixed instruction has one counter entry, with all register lanes but
@@ -468,9 +468,9 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         ldsAddrs[lane] =
             d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * perLaneBytes;
       }
-      rs->registerLdsEvent(wf.pc, MemoryEventType::GLOBAL_TO_LDS, {}, validLaneMask, wf.wf_size(),
-                           std::span<const uint32_t>(ldsAddrs, wf.wf_size()), perLaneBytes, 0xF,
-                           obligations, memoryOrder, ~uint64_t{0}, 0, instruction);
+      rs->registerLdsEvent(instruction, MemoryEventType::GLOBAL_TO_LDS, {}, validLaneMask,
+                           wf.wf_size(), std::span<const uint32_t>(ldsAddrs, wf.wf_size()),
+                           perLaneBytes, 0xF, obligations, memoryOrder, ~uint64_t{0}, 0);
     } else if (d.is_load) {
       auto destinations = validated_load_destinations(d, wf);
       if (!destinations)
@@ -484,11 +484,11 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
                            vector_memory_byte_mask(d, wf, i), memoryOrder);
       if (obligations.empty())
         return;
-      rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), d.exec_mask,
-                        byte_mask, obligations, memoryOrder, last_byte_mask, instruction);
+      rs->registerEvent(instruction, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers),
+                        d.exec_mask, byte_mask, obligations, memoryOrder, last_byte_mask);
     } else if (!obligations.empty()) {
-      rs->registerEvent(wf.pc, MemoryEventType::VGPR_TO_GLOBAL, {}, d.exec_mask, 0xF, obligations,
-                        memoryOrder, 0, instruction);
+      rs->registerEvent(instruction, MemoryEventType::VGPR_TO_GLOBAL, {}, d.exec_mask, 0xF,
+                        obligations, memoryOrder, 0);
     }
   }
 
@@ -496,14 +496,14 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     auto &d = *inst.data_as<amdgpu::ScalarMemState>();
     if (d.is_load) {
       if (const auto reg = d.dst_register.register_ref()) {
-        rs->registerScalarLoad(wf.pc, *reg, wf.exec(), obligations, memoryOrder, instruction);
+        rs->registerScalarLoad(instruction, *reg, wf.exec(), obligations, memoryOrder);
       } else {
-        rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_SGPR, {}, wf.exec(), 0xF, obligations,
-                          memoryOrder, 0, instruction);
+        rs->registerEvent(instruction, MemoryEventType::GLOBAL_TO_SGPR, {}, wf.exec(), 0xF,
+                          obligations, memoryOrder, 0);
       }
     } else {
-      rs->registerEvent(wf.pc, MemoryEventType::SCALAR_TO_GLOBAL, {}, wf.exec(), 0xF, obligations,
-                        memoryOrder, 0, instruction);
+      rs->registerEvent(instruction, MemoryEventType::SCALAR_TO_GLOBAL, {}, wf.exec(), 0xF,
+                        obligations, memoryOrder, 0);
     }
   }
 }

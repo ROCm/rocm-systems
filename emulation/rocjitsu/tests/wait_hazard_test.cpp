@@ -132,11 +132,13 @@ public:
     const auto order = unordered ? MemoryOrderClass::UNORDERED : MemoryOrderClass::VMEM;
     const std::array obligations{MemoryCounterObligation{*domain.race, order}};
     const InstructionSnapshot instruction{.pc = pc, .words = {kProbeWord}, .word_count = 1};
-    state_->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR, {reg}, lanes, bytes, obligations,
-                          order, 0, instruction);
+    state_->registerEvent(instruction, MemoryEventType::GLOBAL_TO_VGPR, {reg}, lanes, bytes,
+                          obligations, order);
   }
   void counter_only(CounterDomain domain) {
-    state_->registerEvent(0x800, MemoryEventType::VGPR_TO_GLOBAL, {}, 1, 0xf, *domain.race,
+    const std::array obligations{MemoryCounterObligation{*domain.race, MemoryOrderClass::VMEM}};
+    const InstructionSnapshot instruction{.pc = 0x800, .words = {kProbeWord}, .word_count = 1};
+    state_->registerEvent(instruction, MemoryEventType::VGPR_TO_GLOBAL, {}, 1, 0xf, obligations,
                           MemoryOrderClass::VMEM);
   }
   void wait(uint32_t word) { wait(std::span<const uint32_t>(&word, 1)); }

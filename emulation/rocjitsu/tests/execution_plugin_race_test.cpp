@@ -47,7 +47,7 @@ void register_pending_event(WaveRaceState &race, uint64_t pc, MemoryEventType ty
                             MemoryOrderClass order) {
   const std::array obligations{MemoryCounterObligation{counter, order}};
   const InstructionSnapshot instruction{.pc = pc, .words = {S_NOP}, .word_count = 1};
-  race.registerEvent(pc, type, std::move(registers), 1, 0xf, obligations, order, 0, instruction);
+  race.registerEvent(instruction, type, std::move(registers), 1, 0xf, obligations, order);
 }
 
 void execute_wait(ExecutionPluginGroup &plugins, Wavefront &wave, uint32_t word) {
@@ -95,8 +95,8 @@ public:
 
   void registerOutstandingLoad(uint32_t logical_reg, uint64_t exec_mask, uint8_t byte_mask = 0xF) {
     ASSERT_NE(state_, nullptr);
-    state_->registerEvent(/*pc=*/0x1000, MemoryEventType::GLOBAL_TO_VGPR, {logical_reg}, exec_mask,
-                          byte_mask);
+    state_->registerEventCoreOnly(/*pc=*/0x1000, MemoryEventType::GLOBAL_TO_VGPR, {logical_reg},
+                                  exec_mask, byte_mask);
   }
 
   std::vector<RaceViolation> violations;
@@ -2441,16 +2441,24 @@ TEST(FindConflictTest, UsesRecordedConflictingEvent) {
                         1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
                         counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
                         /*ldsSizeBytes=*/64 * 1024);
-  EventId first = detector.allocateEventId(WaveId{0}, /*pc=*/0x100, MemoryEventType::GLOBAL_TO_VGPR,
-                                           {2}, /*execMask=*/1);
-  EventId second = detector.allocateEventId(WaveId{0}, /*pc=*/0x200,
-                                            MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1);
+  const std::array obligations{
+      MemoryCounterObligation{WaitCounterType::VMCNT, MemoryOrderClass::VMEM}};
+  EventId first = detector.allocateEventId(
+      WaveId{0}, InstructionSnapshot{.pc = 0x100, .words = {S_NOP}, .word_count = 1},
+      MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1, 0xf, {}, obligations,
+      MemoryOrderClass::VMEM);
+  EventId second = detector.allocateEventId(
+      WaveId{0}, InstructionSnapshot{.pc = 0x200, .words = {S_NOP}, .word_count = 1},
+      MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1, 0xf, {}, obligations,
+      MemoryOrderClass::VMEM);
   ASSERT_NE(first, second);
 
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), second};
   MarkedInstruction conflict = findConflict(violation, detector);
 
   EXPECT_EQ(conflict.instruction.pc, 0x200u);
+  ASSERT_EQ(conflict.instruction.word_count, 1u);
+  EXPECT_EQ(conflict.instruction.words[0], S_NOP);
 }
 
 TEST(FindConflictTest, RejectsUnavailableConflictingEvent) {
@@ -2468,10 +2476,10 @@ TEST(DecorateExceptionTest, UsesRecordedConflictingEvent) {
                         1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
                         counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
                         /*ldsSizeBytes=*/64 * 1024);
-  EventId first = detector.allocateEventId(WaveId{0}, /*pc=*/10, MemoryEventType::GLOBAL_TO_VGPR,
-                                           {2}, /*execMask=*/1);
-  EventId second = detector.allocateEventId(WaveId{0}, /*pc=*/20, MemoryEventType::GLOBAL_TO_VGPR,
-                                            {2}, /*execMask=*/1);
+  EventId first = detector.allocateEventIdCoreOnly(
+      WaveId{0}, /*pc=*/10, MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1);
+  EventId second = detector.allocateEventIdCoreOnly(
+      WaveId{0}, /*pc=*/20, MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1);
   ASSERT_NE(first, second);
 
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), second};
