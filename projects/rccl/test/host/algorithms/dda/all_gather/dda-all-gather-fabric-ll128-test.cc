@@ -35,9 +35,8 @@ const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
 constexpr size_t kSliceData = 1920;
 constexpr size_t kSliceWire = 2048;
 
-template <int N>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaAllGatherFabricLL128<int8_t, N>);
+  return KernelPtr(&dda::common::ddaAllGatherFabricLL128<int8_t>);
 }
 
 class DdaAllGatherFabricLL128Microtest : public ::testing::Test {
@@ -184,13 +183,11 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_UnsupportedDatatypeReturnsInvali
   EXPECT_TRUE(g_ddaLaunches.empty());
 }
 
-TEST_F(DdaAllGatherFabricLL128Microtest, Launch_FourAndEightRanksUnrolledOthersRuntime) {
-  const std::pair<int, const void*> cases[] = {
-      {4, Kernel<4>()}, {8, Kernel<8>()}, {2, Kernel<0>()}, {6, Kernel<0>()}, {144, Kernel<0>()}};
-  for (const auto& [nRanks, kernel] : cases) {
+TEST_F(DdaAllGatherFabricLL128Microtest, Launch_OneKernelForEveryRankCount) {
+  for (int nRanks : {2, 4, 6, 8, 144}) {
     comm().nRanks = nRanks;
     const DdaLaunch& launch = RunOne(4);
-    EXPECT_EQ(launch.kernel, kernel) << "nRanks " << nRanks;
+    EXPECT_EQ(launch.kernel, Kernel()) << "nRanks " << nRanks;
     EXPECT_EQ(launch.grid.x, static_cast<unsigned>(nRanks - 1));
     EXPECT_EQ(launch.Arg<int>(5), nRanks);
   }
@@ -201,7 +198,7 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_PassesBuffersBytesEpochSlicesAnd
   ASSERT_EQ(Run(1000, ncclBfloat16), ncclSuccess);
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
   const DdaLaunch& launch = g_ddaLaunches[0];
-  EXPECT_EQ(launch.kernel, Kernel<4>());
+  EXPECT_EQ(launch.kernel, Kernel());
   EXPECT_EQ(launch.stream, kStream);
   EXPECT_EQ(launch.startEvent, nullptr);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
@@ -222,9 +219,10 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_PassesBuffersBytesEpochSlicesAnd
 }
 
 // A warp per slice: 512 threads give 16 warps, so a column grows past one block at 17 slices.
+// Above 2 MiB in total the grid budget drops to RCCL_DDA_LL128_AG_MAXBLOCKS (75), 25 per peer here.
 TEST_F(DdaAllGatherFabricLL128Microtest, Launch_BlocksPerPeerFollowSlicesCappedByShareOfMaxBlocks) {
   const std::pair<size_t, unsigned> cases[] = {
-      {4, 1}, {16 * kSliceData / 4, 1}, {17 * kSliceData / 4, 2}, {100 * 16 * kSliceData / 4, 85}};
+      {4, 1}, {16 * kSliceData / 4, 1}, {17 * kSliceData / 4, 2}, {100 * 16 * kSliceData / 4, 25}};
   for (const auto& [count, bpp] : cases) {
     const DdaLaunch& launch = RunOne(count);
     EXPECT_EQ(launch.grid.x, 3u);
