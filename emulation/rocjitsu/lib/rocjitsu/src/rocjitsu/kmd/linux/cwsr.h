@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -40,21 +41,54 @@ enum class CwsrLayoutKind : uint8_t {
   Gfx12_5,
 };
 
+// The saved VGPR and LDS field encodings define these layout granules. The
+// serializer and its advertised capacity must round with the same widths.
+inline constexpr uint32_t kCwsrGfx94VgprGranule = 8;
+inline constexpr uint32_t kCwsrGfx1250VgprGranule = 16;
+inline constexpr uint32_t kCwsrGfx942LdsGranuleBytes = 512;
+inline constexpr uint32_t kCwsrGfx950LdsGranuleBytes = 1280;
+inline constexpr uint32_t kCwsrGfx1250LdsGranuleBytes = 1024;
+inline constexpr uint32_t kCwsrGfx94LdsFieldMax = 0xFFu;
+inline constexpr uint32_t kCwsrGfx1250LdsFieldMax = 0x1FFu;
+inline constexpr uint64_t kCwsrPageSize = 4096;
+inline constexpr uint64_t kCwsrMaxAlignedBytes =
+    std::numeric_limits<uint32_t>::max() - (kCwsrPageSize - 1);
+
+/// @brief Target-specific properties of a context-save ABI modelled here.
+struct CwsrAbiProperties {
+  /// Complete record layout supported by this codec.
+  CwsrLayoutKind layout_kind = CwsrLayoutKind::Unsupported;
+  /// Saved-state LDS encoding unit in bytes, independent of allocation alignment.
+  uint32_t lds_granule_bytes = 0;
+};
+
 /// @brief Select the exact context-save ABI implemented for @p arch.
-/// @details This is deliberately fail-closed. Wave width, register count, and
-/// TTMP placement are insufficient to infer compatibility with a dbgapi record.
-constexpr CwsrLayoutKind cwsr_layout_kind(rj_code_arch_t arch) {
-  // gfx908 adds an ACC-VGPR block and gfx908/gfx90a keep the packet id in
-  // TTMP6, so CDNA1/CDNA2 are deliberately excluded despite also being gfx9.
+/// @details LDS units follow ROCdbgapi's cwsr_record_t::lds_size(), not kernel
+/// LDS allocation granularity. gfx950 overrides the 512-byte gfx9 unit with
+/// 1280 bytes; gfx12.5 uses 1024 bytes.
+///
+/// CDNA1/CDNA2 and RDNA are intentionally unsupported even though their normal
+/// LDS unit is also 512 bytes. gfx908 saves a separate ACC-VGPR block and
+/// gfx908/gfx90a keep the packet id in TTMP6. RDNA changes the control stack,
+/// wave widths and register layout; RDNA4 also has a WGP-takeover LDS encoding.
+/// Supporting those targets requires their complete record layouts, not just
+/// an LDS unit. Unsupported targets have no layout or encoding unit here.
+constexpr CwsrAbiProperties cwsr_abi_properties(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
+    return {CwsrLayoutKind::Gfx9_4, kCwsrGfx942LdsGranuleBytes};
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return CwsrLayoutKind::Gfx9_4;
+    return {CwsrLayoutKind::Gfx9_4, kCwsrGfx950LdsGranuleBytes};
   case ROCJITSU_CODE_ARCH_CDNA5:
-    return CwsrLayoutKind::Gfx12_5;
+    return {CwsrLayoutKind::Gfx12_5, kCwsrGfx1250LdsGranuleBytes};
   default:
-    return CwsrLayoutKind::Unsupported;
+    return {};
   }
+}
+
+/// @brief Select the context-save record layout implemented for @p arch.
+constexpr CwsrLayoutKind cwsr_layout_kind(rj_code_arch_t arch) {
+  return cwsr_abi_properties(arch).layout_kind;
 }
 
 /// @brief Whether this module models the CWSR record layout for @p arch.
@@ -111,31 +145,9 @@ constexpr bool cwsr_layout_modelled_for_gc_ip_version(uint32_t gc_ip_version) {
   return cwsr_layout_kind_for_gc_ip_version(gc_ip_version) != CwsrLayoutKind::Unsupported;
 }
 
-// The saved VGPR and LDS field encodings define these layout granules. The
-// serializer and its advertised capacity must round with the same widths.
-inline constexpr uint32_t kCwsrGfx94VgprGranule = 8;
-inline constexpr uint32_t kCwsrGfx1250VgprGranule = 16;
-inline constexpr uint32_t kCwsrGfx942LdsGranuleBytes = 512;
-inline constexpr uint32_t kCwsrGfx950LdsGranuleBytes = 1280;
-inline constexpr uint32_t kCwsrGfx1250LdsGranuleBytes = 1024;
-inline constexpr uint32_t kCwsrGfx94LdsFieldMax = 0xFFu;
-inline constexpr uint32_t kCwsrGfx1250LdsFieldMax = 0x1FFu;
-inline constexpr uint64_t kCwsrPageSize = 4096;
-inline constexpr uint64_t kCwsrMaxAlignedBytes =
-    std::numeric_limits<uint32_t>::max() - (kCwsrPageSize - 1);
-
 /// @brief Bytes represented by one encoded LDS unit, or zero if unsupported.
 constexpr uint32_t cwsr_lds_granule_bytes(rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
-    return kCwsrGfx942LdsGranuleBytes;
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    return kCwsrGfx950LdsGranuleBytes;
-  case ROCJITSU_CODE_ARCH_CDNA5:
-    return kCwsrGfx1250LdsGranuleBytes;
-  default:
-    return 0;
-  }
+  return cwsr_abi_properties(arch).lds_granule_bytes;
 }
 
 /// @brief Largest live LDS allocation representable in one save record.
@@ -325,10 +337,14 @@ struct CwsrWaveState {
   std::vector<uint8_t> lds;
 };
 
+/// @brief The runtime-owned displaced-stepping region in a CWSR header.
+struct CwsrDebugRegion {
+  uint32_t offset = 0;
+  uint32_t size = 0;
+};
+
 /// @brief The CWSR geometry chosen for a serialized wave save area.
-///
-/// @details Returned so callers (and tests) can locate the per-register offsets
-/// dbgapi will compute. All offsets are relative to the ctx-save base.
+/// @details All offsets are relative to the ctx-save base.
 struct CwsrLayout {
   uint32_t control_stack_offset = 0; ///< Offset to the first control-stack word.
   uint32_t control_stack_size = 0;   ///< Control-stack size in bytes.
@@ -342,15 +358,7 @@ struct CwsrLayout {
 
 /// @brief Serialize a queue's stopped waves into its CWSR area.
 ///
-/// @param ctx_base Context-save-restore GPU virtual address (from the queue).
-/// @param area_size Context-save-restore area size in bytes (from the queue).
-/// @param waves The stopped waves, in the order they should appear (the first
-///        owns the workgroup's LDS region at the top of the save area).
-/// @param write32 Callback that writes one dword to a GPU virtual address.
-/// @returns The chosen layout; @ref CwsrLayout::ok is false if the waves do not
-///          fit, in which case nothing is written.
-///
-/// The written layout satisfies rocm-dbgapi's architecture-specific invariants:
+/// @details The written layout satisfies rocm-dbgapi's architecture-specific invariants:
 /// a header at the base, a control stack contiguous with the wave save area,
 /// and per-wave register blocks at the offsets the selected architecture's
 /// cwsr_record_t computes. gfx9.4 uses one relaunch state word and saves
@@ -365,27 +373,45 @@ struct CwsrLayout {
 /// serializer writes payload before the header, but cross-thread/process
 /// exclusion and any required cache maintenance remain the caller's
 /// responsibility.
+///
+/// @param ctx_base Context-save-restore GPU virtual address (from the queue).
+/// @param area_size Context-save-restore area size in bytes (from the queue).
+/// @param waves The stopped waves, in the order they should appear (the first
+///        owns the workgroup's LDS region at the top of the save area).
+/// @param write32 Callback that writes one dword to a GPU virtual address.
+/// @param control_stack_capacity Runtime control-stack boundary; zero selects compact layout.
+/// @param runtime_debug_region Existing runtime-owned debugger region. When
+///        supplied, only the first four wave-state header words are published;
+///        DebugOffset, DebugSize and the runtime error channel are left untouched.
+///        Without it, the serializer initializes a standalone synthetic test header.
+/// @returns The chosen layout; @ref CwsrLayout::ok is false if the waves do not
+///          fit, in which case nothing is written.
 CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                                 const std::vector<CwsrWaveState> &waves,
                                 const std::function<void(uint64_t, uint32_t)> &write32,
-                                rj_code_arch_t arch);
+                                rj_code_arch_t arch, uint32_t control_stack_capacity = 0,
+                                std::optional<CwsrDebugRegion> runtime_debug_region = {});
 
 /// @brief Serialize a queue using two block writes: payload first, then header.
 ///
 /// @details This is the production-oriented equivalent of
 /// @ref serialize_queue_cwsr. It constructs the same byte-exact image but
 /// publishes the contiguous control-stack/wave payload with one callback and
-/// the 40-byte ABI header with a second callback. Keeping the header write last
+/// the ABI header with a second callback (16 bytes when preserving runtime
+/// fields, otherwise 40 bytes). Keeping the header write last
 /// preserves the CWSR publication contract while avoiding a GPU page-table
 /// lookup and lock acquisition for every dword of every wave register.
 ///
 /// @param write_block Callback receiving a target address and contiguous bytes.
+/// @param control_stack_capacity Runtime control-stack boundary; zero selects compact layout.
+/// @param runtime_debug_region Existing runtime-owned region, preserved as in
+///        @ref serialize_queue_cwsr; omit only for a standalone synthetic test header.
 /// @returns The chosen layout; @ref CwsrLayout::ok is false and no callback is
 ///          made when the image is invalid or does not fit.
 CwsrLayout serialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, const std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block,
-    rj_code_arch_t arch);
+    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block, rj_code_arch_t arch,
+    uint32_t control_stack_capacity = 0, std::optional<CwsrDebugRegion> runtime_debug_region = {});
 
 /// @brief Read wave register state back from a serialized CWSR area.
 ///
@@ -406,11 +432,13 @@ CwsrLayout serialize_queue_cwsr_bulk(
 ///        call that produced the area. LDS record padding is skipped, not
 ///        returned as live data.
 /// @param read32 Callback that reads one dword from a GPU virtual address.
+/// @param control_stack_capacity Runtime control-stack boundary; zero selects compact layout.
 /// @returns True on success; false if the waves do not fit the area (in which
 ///          case @p waves is left unchanged).
 bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                             std::vector<CwsrWaveState> &waves,
-                            const std::function<uint32_t(uint64_t)> &read32, rj_code_arch_t arch);
+                            const std::function<uint32_t(uint64_t)> &read32, rj_code_arch_t arch,
+                            uint32_t control_stack_capacity = 0);
 
 /// @brief Read and deserialize a queue CWSR image using block transfers.
 ///
@@ -418,9 +446,11 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 /// reads the contiguous control-stack/wave payload once, then applies the same
 /// decoder as @ref deserialize_queue_cwsr. The queue must remain suspended for
 /// the complete operation.
+/// @param control_stack_capacity Runtime control-stack boundary; zero selects compact layout.
 bool deserialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, rj_code_arch_t arch);
+    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, rj_code_arch_t arch,
+    uint32_t control_stack_capacity = 0);
 
 } // namespace kmd
 } // namespace rocjitsu

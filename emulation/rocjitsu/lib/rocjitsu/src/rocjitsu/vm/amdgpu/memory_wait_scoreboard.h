@@ -11,12 +11,14 @@
 #include <cassert>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace rocjitsu {
 class Instruction;
 namespace amdgpu {
 class Wavefront;
+enum class WaitCounterType : uint8_t;
 struct RegisterModifiers;
 
 /// A per-wave register filter owned exclusively by the instruction issuer.
@@ -141,6 +143,15 @@ public:
 
   bool empty() const { return events_.empty(); }
   void clear();
+  /// Cancel the latest instruction's dependency and counter positions before
+  /// debugger replay, preserving older producers and coalesced source records.
+  bool cancel_last_issue(uint64_t pc, std::span<const WaitCounterType> counters,
+                         rj_code_arch_t arch, bool xcnt);
+  using IssueSnapshot = std::array<uint64_t, static_cast<size_t>(WaitCounterKind::Count)>;
+  /// Capture positions before tracking one instruction. No further instruction
+  /// may issue before cancelling that instruction with this snapshot.
+  IssueSnapshot issue_snapshot() const { return issued_; }
+  bool cancel_last_issue(uint64_t pc, const IssueSnapshot &before);
   void before(const Instruction &inst, rj_code_arch_t arch);
   void check_instruction(const Instruction &inst, Wavefront &wf);
   static uint64_t result_lanes(const Instruction &inst, Wavefront &wf);
@@ -194,6 +205,7 @@ public:
 
 private:
   static constexpr size_t kCounters = static_cast<size_t>(WaitCounterKind::Count);
+  bool cancel_issue_units(uint64_t pc, const std::array<uint32_t, kCounters> &units);
   static constexpr size_t kRegisters = MemoryWaitShadow::kRegisters;
   static size_t index(RegisterRef reg) { return MemoryWaitShadow::index(reg); }
 
@@ -240,6 +252,15 @@ private:
   bool may_overlap_ = false;
   MemoryWaitShadow &pending_;
   std::vector<Event> events_;
+  struct SupersededEvent {
+    Event event;
+    WaitCounterKind replacement_counter;
+    uint64_t replacement_sequence;
+    uint64_t replacement_pc;
+  };
+  // Keep predecessors of only the newest coalescing issue in each counter,
+  // without adding history work to the usual non-overlapping issue path.
+  std::vector<SupersededEvent> superseded_;
   uint64_t pc_ = 0;
   void *context_ = nullptr;
   Reporter reporter_ = nullptr;
