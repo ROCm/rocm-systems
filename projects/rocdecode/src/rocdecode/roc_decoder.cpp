@@ -122,15 +122,7 @@ rocDecStatus RocDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconf
         return rocdec_status;
     }
 #ifndef _WIN32
-    // Import on the decoder's device, then restore the caller's current device
-    int prev_device_id;
-    rocdec_status = SetDecoderDevice(prev_device_id);
-    if (rocdec_status != ROCDEC_SUCCESS) {
-        FunctionExitLog(g_rocdec_logger);
-        return rocdec_status;
-    }
     rocdec_status = ImportAllSurfaces();
-    CHECK_HIP(hipSetDevice(prev_device_id));
 #endif
     FunctionExitLog(g_rocdec_logger);
     return rocdec_status;
@@ -281,21 +273,28 @@ rocDecStatus RocDecoder::ImportSurface(int pic_idx) {
 // Export and map all surfaces before anything is decoded into them. The VA driver may
 // move a surface to a new buffer when it is first exported, and the decoded content
 // already in the surface is not carried over (seen with small surfaces on radeonsi).
+// The import runs on the decoder's device; the caller's current device is restored afterwards.
 rocDecStatus RocDecoder::ImportAllSurfaces() {
     FunctionEntryLogWithArgs(g_rocdec_logger, "");
+    int prev_device_id;
+    rocDecStatus rocdec_status = SetDecoderDevice(prev_device_id);
+    if (rocdec_status != ROCDEC_SUCCESS) {
+        FunctionExitLog(g_rocdec_logger);
+        return rocdec_status;
+    }
     for (int pic_idx = 0; pic_idx < hip_interop_.size(); pic_idx++) {
         if (hip_interop_[pic_idx].hip_mapped_device_mem != nullptr) {
             continue;
         }
-        rocDecStatus rocdec_status = ImportSurface(pic_idx);
+        rocdec_status = ImportSurface(pic_idx);
         if (rocdec_status != ROCDEC_SUCCESS) {
             CriticalLog(g_rocdec_logger, "Failed to set up the VA-API/HIP interop for picture idx = " + ROCDEC_TOSTR(pic_idx));
-            FunctionExitLog(g_rocdec_logger);
-            return rocdec_status;
+            break;
         }
     }
+    CHECK_HIP(hipSetDevice(prev_device_id));
     FunctionExitLog(g_rocdec_logger);
-    return ROCDEC_SUCCESS;
+    return rocdec_status;
 }
 
 // Make the decoder's device current and return the caller's current device in prev_device_id.
