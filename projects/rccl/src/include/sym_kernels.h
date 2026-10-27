@@ -74,6 +74,7 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_AllGather_RailRing_LsaST,
   ncclSymkKernelId_AllGather_RailRing_LsaSTMC,
   ncclSymkKernelId_AllGather_HierLsaST,
+  ncclSymkKernelId_AllGather_HierLsaTmaST,
 
   ncclSymkKernelId_ReduceScatter_LL,
   ncclSymkKernelId_ReduceScatter_TmaLD,
@@ -101,6 +102,7 @@ constexpr char const* ncclSymKernelStr[] = {
   "AllGather_RailRing_LsaST",
   "AllGather_RailRing_LsaSTMC",
   "AllGather_HierLsaST",
+  "AllGather_HierLsaTmaST",
   "ReduceScatter_LL",
   "ReduceScatter_TmaLD",
   "ReduceScatter_LD",
