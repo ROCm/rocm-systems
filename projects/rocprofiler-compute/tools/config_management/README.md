@@ -130,7 +130,7 @@ python tools/config_management/master_config_workflow_script.py --validate-only
 python tools/config_management/hash_manager.py --compute-all src/rocprof_compute_soc/analysis_configs
 ```
 
-The first command verifies structural conformance, including the metric library (`tools/validate_metric_library.py`). The second refreshes the hash DB so `hash_checker.py` agrees.
+The first command verifies structural conformance. The second refreshes the hash DB so `hash_checker.py` agrees.
 
 ### 3. Hash checks (fast local / CI)
 ```bash
