@@ -71,10 +71,7 @@ bool patForcedAtLaunch() {
   return algo != nullptr && strcasecmp(algo, "PAT") == 0;
 }
 
-// Rank `rank`'s input element `j`, where j / count is the owner's block. In
-// place the owner's value never equals the reduction: sum adds at least 1 per
-// peer, prod multiplies by at least 2, and the owner is lowest for max and
-// highest for min. Values stay exact in half and bf16 up to 7 ranks.
+// The owner's own value never equals the reduction, so an unwritten in-place slot fails; exact to 7 ranks.
 double inputValue(int rank, size_t j, size_t count, int nranks,
                   ncclRedOp_t op) {
   const int owner = static_cast<int>(j / count);
@@ -456,8 +453,7 @@ TEST_F(PatForcedMPITest, ReduceScatterAvgRunsWithoutPat) {
   expectNoFailuresOnAnyRank(kNumCounts * kNumPlacements);
 }
 
-// ReduceScatter, AllGather, ReduceScatter on one communicator: with shared
-// connections the second collective starts from the steps the first left.
+// RS, AG, RS on one communicator: shared connections carry steps from one collective to the next.
 TEST_F(PatForcedMPITest, ReduceScatterAllGatherInterleaveTakesPat) {
   PAT_FORCED_REQUIRE();
   ASSERT_NO_FATAL_FAILURE(createPatComm());
