@@ -497,25 +497,31 @@ unsafe fn profile(
     if local && endpoint.is_none() {
         return Err(UNSUPPORTED);
     }
+    let instance = unsafe { &*scope.instance };
     if let Some(endpoint) = endpoint {
         if endpoint.instance != scope.instance {
             return Err(INVALID);
         }
         supported_endpoint(endpoint)?;
-        if local {
-            let owner = unsafe { &*scope.endpoint };
-            if !endpoint.native.can_access_local_memory(&owner.native) {
-                return Err(UNSUPPORTED);
-            }
+    }
+    // The cached driver policy query rejects a closing native session. Keep
+    // AMDF's PRECONDITION status ahead of that query for valid handles.
+    if instance.closing {
+        return Err(PRECONDITION);
+    }
+    if local {
+        let endpoint = endpoint.ok_or(UNSUPPORTED)?;
+        let owner = unsafe { &*scope.endpoint };
+        if !instance
+            .native
+            .can_access_local_memory(&endpoint.native, &owner.native)
+        {
+            return Err(UNSUPPORTED);
         }
     }
     // Public VRAM has a different capacity from private VRAM on partial-BAR
     // devices. Separate profiles keep both placement and host-map limits exact.
     let host_visible = !local || ordinal == 1;
-    let instance = unsafe { &*scope.instance };
-    if instance.closing {
-        return Err(PRECONDITION);
-    }
     if registered
         && endpoint
             .is_some_and(|endpoint| !instance.native.supports_host_registration(&endpoint.native))
@@ -1255,6 +1261,7 @@ pub(crate) unsafe extern "C" fn create(
                 memory::device::MemoryKind::DeviceLocal {
                     host_visible: visible,
                     coherent: false,
+                    extended_coherent: false,
                     uncached: false,
                     contiguous: false,
                 }

@@ -13,7 +13,7 @@ use crate::device::{Device, DeviceResources};
 use crate::driver::{self, DriverInstance};
 use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
-use crate::topology::Endpoint;
+use crate::topology::{AttachmentKind, Endpoint, NativeNodeId, SourceId, TopologySnapshot};
 use crate::{Error, ErrorKind};
 
 /// Maximum lifetime allowed for a driver context acquired through a session.
@@ -63,6 +63,40 @@ struct DriverRegistry {
     closing: bool,
 }
 
+/// Retains an unfinished session when its native shutdown must be retried.
+///
+/// Frontends that cannot keep a public session handle after shutdown can move
+/// the session here. Dropping an unfinished retirement conservatively retains
+/// its driver owners through process exit instead of releasing native state
+/// whose cleanup has not been proved.
+#[must_use = "retry native shutdown until it succeeds or retain this owner"]
+pub struct SessionRetirement {
+    session: Option<Session>,
+}
+
+impl SessionRetirement {
+    /// Retries only the drivers that remain after earlier shutdown attempts.
+    ///
+    /// # Errors
+    /// Preserves the unfinished session for another attempt.
+    pub fn try_destroy(&mut self) -> Result<(), Error> {
+        let Some(session) = self.session.as_mut() else {
+            return Ok(());
+        };
+        session.destroy()?;
+        self.session = None;
+        Ok(())
+    }
+}
+
+impl Drop for SessionRetirement {
+    fn drop(&mut self) {
+        if let Some(session) = self.session.take() {
+            std::mem::forget(session);
+        }
+    }
+}
+
 impl Clone for Session {
     /// Shares this session's driver set, identities, and lifetime policy.
     /// A separate call to [`Session::new`] creates an independent session.
@@ -74,6 +108,13 @@ impl Clone for Session {
 }
 
 impl Session {
+    /// Moves a session into an owner that retains failed native cleanup.
+    pub fn into_retirement(self) -> SessionRetirement {
+        SessionRetirement {
+            session: Some(self),
+        }
+    }
+
     /// Populates optional information on an endpoint from its owning driver.
     /// The query reopens the endpoint without activating it and rejects a
     /// snapshot whose discovered metadata has changed. A failed query leaves
@@ -306,9 +347,65 @@ impl Session {
         Ok(())
     }
 
+    /// Publishes a passive view only after every installed driver has supplied
+    /// and validated its contribution. KFD nodes and routes share one checked
+    /// generation per driver; the host OS reader is best effort and has no
+    /// common atomic generation with KFD or another driver.
+    ///
+    /// # Errors
+    /// Reports malformed or duplicate records, native discovery failure, or
+    /// allocation failure without publishing a partial candidate.
+    pub fn topology_snapshot(&self) -> Result<TopologySnapshot, Error> {
+        self.ensure_open()?;
+        let mut snapshot = TopologySnapshot::new(crate::topology::host::snapshot())?;
+        for driver in &self.registry.drivers {
+            let start = snapshot.endpoints.len();
+            driver.contribute_topology(&mut snapshot)?;
+            for endpoint in &snapshot.endpoints[start..] {
+                Self::validate_endpoint_owner(driver, endpoint)?;
+            }
+        }
+        // DRM's NUMA attachment is an OS locality observation. It does not
+        // identify a KFD node or imply an access route between these sources.
+        #[cfg(target_os = "linux")]
+        for index in 0..snapshot.endpoints.len() {
+            let endpoint = &snapshot.endpoints[index];
+            let Some(numa) = crate::topology::platform::linux::host_numa_node(endpoint) else {
+                continue;
+            };
+            let node = snapshot
+                .nodes
+                .iter()
+                .find(|node| {
+                    node.source == SourceId(0) && node.native_id == NativeNodeId::LinuxNuma(numa)
+                })
+                .map(|node| node.id);
+            if let Some(node) = node {
+                snapshot.attach_endpoint(
+                    endpoint.id,
+                    endpoint.driver_instance,
+                    node,
+                    AttachmentKind::HostLocality,
+                )?;
+            }
+        }
+        Ok(snapshot)
+    }
+
+    /// Checks cached access evidence through the endpoint owner's installed
+    /// driver. A successful native mapping is still required for an allocation.
+    #[must_use]
+    pub fn can_access_local_memory(&self, consumer: &Endpoint, owner: &Endpoint) -> bool {
+        self.ensure_open().is_ok()
+            && consumer.driver_instance == owner.driver_instance
+            && self
+                .driver_for_endpoint(consumer)
+                .is_some_and(|driver| driver.can_access_local_memory(consumer, owner))
+    }
+
     /// Reads the exact endpoint selected by `id` and verifies its identity.
-    /// A multi-driver session first discovers which driver owns the ID and
-    /// rejects an ID collision. No execution endpoint is acquired.
+    /// A multi-driver session probes each driver's direct open path and rejects
+    /// an ID collision. No full enumeration or execution endpoint is acquired.
     ///
     /// # Errors
     /// Reports removal or identity mismatch, inconsistent discovery state,
@@ -323,27 +420,30 @@ impl Session {
             Self::validate_opened_endpoint(driver, id, &endpoint)?;
             return Ok(endpoint);
         }
-        let mut owner = None;
-        for (index, driver) in self.registry.drivers.iter().enumerate() {
-            driver.enumerate(&mut |endpoint| {
-                Self::validate_endpoint_owner(driver, &endpoint)?;
-                if endpoint.id == id && owner.replace(index).is_some() {
-                    return Err(Error::Operation {
-                        kind: ErrorKind::InvalidData,
-                        detail: "drivers reported the same endpoint ID",
-                    });
+        let mut found = None;
+        let mut stale = None;
+        for driver in &self.registry.drivers {
+            match driver.probe_endpoint(id) {
+                Ok(Some(endpoint)) => {
+                    Self::validate_opened_endpoint(driver, id, &endpoint)?;
+                    if found.replace(endpoint).is_some() {
+                        return Err(Error::Operation {
+                            kind: ErrorKind::InvalidData,
+                            detail: "drivers opened the same endpoint ID",
+                        });
+                    }
                 }
-                Ok(())
-            })?;
+                Ok(None) => {}
+                Err(error) if error.kind() == ErrorKind::DeviceLost => stale = Some(error),
+                Err(error) => return Err(error),
+            }
         }
-        let index = owner.ok_or(Error::Operation {
-            kind: ErrorKind::InvalidArgument,
-            detail: "endpoint ID is not present in this session",
-        })?;
-        let driver = &self.registry.drivers[index];
-        let endpoint = driver.open_endpoint(id)?;
-        Self::validate_opened_endpoint(driver, id, &endpoint)?;
-        Ok(endpoint)
+        found.ok_or_else(|| {
+            stale.unwrap_or(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "endpoint ID is not present in this session",
+            })
+        })
     }
 
     /// Confirms that a direct read returned the requested identity and owner.
@@ -464,6 +564,20 @@ mod tests {
     }
 
     #[test]
+    fn retirement_keeps_a_busy_session_for_a_later_shutdown_attempt() {
+        let session = Session::new(DriverContextLifetime::Session).unwrap();
+        let clone = session.clone();
+        let mut retirement = session.into_retirement();
+        assert_eq!(
+            retirement.try_destroy().unwrap_err().kind(),
+            ErrorKind::Busy
+        );
+        drop(clone);
+        retirement.try_destroy().unwrap();
+        retirement.try_destroy().unwrap();
+    }
+
+    #[test]
     fn live_reservation_lease_blocks_release_until_its_mapping_owner_finishes() {
         let mut session = Session::new(DriverContextLifetime::Session).unwrap();
         let driver = crate::memory::interop::linux::kfd_driver(&session).unwrap();
@@ -510,6 +624,8 @@ mod tests {
             probes.push(TestDriverProbe {
                 shutdowns: driver.shutdowns.clone(),
                 fail_shutdown: driver.fail_shutdown.clone(),
+                enumerations: driver.enumerations.clone(),
+                opens: driver.opens.clone(),
             });
             drivers.push(DriverInstance::Test(Shared::new(driver).unwrap()));
         }
@@ -522,6 +638,19 @@ mod tests {
     struct TestDriverProbe {
         shutdowns: std::sync::Arc<std::sync::atomic::AtomicUsize>,
         fail_shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        enumerations: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        opens: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[test]
+    fn multi_driver_direct_open_does_not_enumerate() {
+        let ids = [[0x11; 16], [0x22; 16], [0x33; 16]];
+        let (session, probes) = test_session(&ids);
+        assert_eq!(session.open_endpoint(ids[1]).unwrap().id, ids[1]);
+        for probe in probes {
+            assert_eq!(probe.enumerations.load(Ordering::Relaxed), 0);
+            assert_eq!(probe.opens.load(Ordering::Relaxed), 1);
+        }
     }
 
     #[test]
@@ -598,8 +727,10 @@ mod tests {
         assert_eq!(probes[2].shutdowns.load(Ordering::Relaxed), 0);
         drop(first);
         drop(second);
+        assert!(session.can_access_local_memory(&endpoints[0], &endpoints[0]));
         probes[1].fail_shutdown.store(true, Ordering::Relaxed);
         assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Driver);
+        assert!(!session.can_access_local_memory(&endpoints[1], &endpoints[1]));
         assert_eq!(probes[0].shutdowns.load(Ordering::Relaxed), 1);
         assert_eq!(probes[1].shutdowns.load(Ordering::Relaxed), 1);
         assert_eq!(probes[2].shutdowns.load(Ordering::Relaxed), 1);
@@ -622,6 +753,19 @@ mod tests {
         assert_eq!(probes[0].shutdowns.load(Ordering::Relaxed), 1);
         assert_eq!(probes[1].shutdowns.load(Ordering::Relaxed), 2);
         assert_eq!(probes[2].shutdowns.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn inherited_session_does_not_report_local_memory_access() {
+        let id = [0x23; 16];
+        let (mut session, _) = test_session(&[id]);
+        let endpoint = session.open_endpoint(id).unwrap();
+        assert!(session.can_access_local_memory(&endpoint, &endpoint));
+        Shared::get_mut(&mut session.registry).unwrap().process_id =
+            std::process::id().wrapping_add(1);
+        assert!(!session.can_access_local_memory(&endpoint, &endpoint));
+        Shared::get_mut(&mut session.registry).unwrap().process_id = std::process::id();
+        session.destroy().unwrap();
     }
 
     #[test]
@@ -970,6 +1114,10 @@ mod tests {
             ErrorKind::InvalidData
         );
         assert_eq!(delivered, 0);
+        assert_eq!(
+            session.topology_snapshot().unwrap_err().kind(),
+            ErrorKind::InvalidData
+        );
         assert_eq!(
             session.open_endpoint(id).unwrap_err().kind(),
             ErrorKind::InvalidData

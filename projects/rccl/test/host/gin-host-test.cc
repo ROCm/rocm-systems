@@ -41,6 +41,7 @@
 #include "plugin/nccl_net.h"
 #include "gin/gin_host.h"
 
+#include "fakes/devcomm_fakes.h"
 #include "fakes/nccl_fakes.h"
 
 namespace {
@@ -48,7 +49,6 @@ namespace {
 int g_nLocalGinDevs = 1;
 int g_peerGinCommCount = -1;  // -1: AllGather is a no-op copy; else fill other ranks
 int64_t g_paramGinType = -1;
-int g_railStride = 1;
 
 }  // namespace
 
@@ -79,13 +79,7 @@ ncclTeam_t ncclTeamWorld(ncclComm_t comm) {
   return t;
 }
 
-ncclTeam_t ncclTeamRail(ncclComm_t) {
-  ncclTeam_t t{};
-  t.nRanks = 1;
-  t.rank = 0;
-  t.stride = g_railStride;
-  return t;
-}
+// ncclTeamRail is in devcomm_fakes.cc. Its stride is g_railStride.
 
 int ncclTeamRankToWorld(ncclComm_t comm, ncclTeam_t team, int rank) {
   return comm->rank + (rank - team.rank) * team.stride;

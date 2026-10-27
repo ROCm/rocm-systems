@@ -180,9 +180,7 @@ where
                 detail: "access device belongs to another allocation session",
             });
         }
-        if allocation.is_device_local()
-            && !device.endpoint.can_access_local_memory(&origin.endpoint)
-        {
+        if allocation.is_device_local() && !device.can_access_local_memory(origin) {
             return Err(Error::Operation {
                 kind: ErrorKind::Unsupported,
                 detail: "access device has no qualified route to local memory",
@@ -455,7 +453,7 @@ impl Device {
                     detail: "peer devices must belong to one session",
                 });
             }
-            if requires_local_route && !peer.endpoint.can_access_local_memory(&self.endpoint) {
+            if requires_local_route && !peer.can_access_local_memory(self) {
                 return Err(Error::Operation {
                     kind: ErrorKind::Unsupported,
                     detail: "peer device has no qualified route to local memory",

@@ -6,6 +6,8 @@
 //! A host domain describes OS topology, not an activated device or a promise
 //! that the calling process may execute on its CPUs. Host observations come
 //! from independent OS files and are not one atomic hardware generation.
+//! The source-qualified topology model projects these observations into host
+//! nodes and caches while retaining this richer CPU and cache-sharing view.
 
 use crate::topology::CacheInfo;
 
@@ -22,6 +24,15 @@ pub struct CpuInfo {
     pub name: String,
     /// Number of processor entries reported by the OS source.
     pub compute_units: u32,
+}
+
+/// One explicit association between Linux's logical CPU ID and its APIC ID.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CpuApicId {
+    /// Logical CPU ID used by sysfs CPU lists and cache directories.
+    pub logical_cpu: u32,
+    /// APIC ID used by KFD's `cpu_core_id_base` topology property.
+    pub apic_id: u32,
 }
 
 /// Sorted, nonoverlapping CPU ID ranges without expanding large sysfs ranges.
@@ -111,6 +122,8 @@ pub struct HostTopologySnapshot {
     pub memory_bytes: Option<usize>,
     /// CPU model and processor-entry count, if both were reported.
     pub cpu: Option<CpuInfo>,
+    /// Explicit `/proc/cpuinfo` associations for cross-source CPU matching.
+    pub cpu_apic_ids: Vec<CpuApicId>,
     /// CPUs reported online when this file was read, if its list was valid.
     pub online_cpus: Option<CpuSet>,
     /// Cache records from the system CPU directory.
@@ -122,6 +135,29 @@ pub struct HostTopologySnapshot {
 }
 
 impl HostTopologySnapshot {
+    /// Resolves a KFD APIC ID only when it identifies exactly one logical CPU.
+    #[must_use]
+    pub fn logical_cpu_for_apic_id(&self, apic_id: u32) -> Option<u32> {
+        let mut matches = self
+            .cpu_apic_ids
+            .iter()
+            .filter(|cpu| cpu.apic_id == apic_id);
+        let logical_cpu = matches.next()?.logical_cpu;
+        matches.next().is_none().then_some(logical_cpu)
+    }
+
+    /// Finds an OS NUMA domain through an explicit APIC-to-logical association.
+    #[must_use]
+    pub fn domain_for_apic_id(&self, apic_id: u32) -> Option<&HostDomain> {
+        let logical_cpu = self.logical_cpu_for_apic_id(apic_id)?;
+        self.domains.iter().find(|domain| {
+            domain
+                .cpus
+                .as_ref()
+                .is_some_and(|cpus| cpus.contains(logical_cpu))
+        })
+    }
+
     /// Returns the OS NUMA domain with the selected ID, if discovered.
     #[must_use]
     pub fn domain(&self, numa_node: u32) -> Option<&HostDomain> {
