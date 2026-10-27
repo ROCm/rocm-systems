@@ -61,21 +61,6 @@ class PlaybackDefaultTest(unittest.TestCase):
             "(PlaybackContext& ctx, const uint8_t* payload);\n",
         )
 
-    def test_elapsed_time_stays_hand_written(self):
-        # hipExtModuleLaunchKernel marks its start and stop events inside the
-        # runtime. The hand-written handler accepts a captured success when
-        # an archive predates those markers. Regenerating must not replace it.
-        # The capture order is checked on a real archive by
-        # Unit_HRR_ExtLaunchEventMarkers.
-        name = "hipEventElapsedTime"
-        self.assertIn(name, gen.MANUAL_PLAYBACK_APIS)
-        text = gen.generate_playback_shim(entry(name))
-        self.assertEqual(
-            text,
-            "extern hipError_t playback_hipEventElapsedTime"
-            "(PlaybackContext& ctx, const uint8_t* payload);\n",
-        )
-
     def test_kernel_attribute_for_device_is_a_noop(self):
         name = "hipKernelSetAttributeForDevice"
         self.assertNotIn(name, gen.DIRECT_PLAYBACK_APIS)

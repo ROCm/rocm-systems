@@ -1409,28 +1409,27 @@ HRR_TEST_CASE(Unit_HRR_ExtModuleLaunchKernelRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_ExtModuleLaunchKernel_Direct", cap.path);
 }
 
-// Raw-stream view of events.bin: byte offset and event_type of each record, in
-// file order, skipping the 8-byte file header and stopping at the EOF trailer.
+// Byte offset and event_type of each record in events.bin, in file order, up to
+// the EOF trailer.
 struct RawEvent {
   size_t   offset;
   uint16_t type;
 };
 
 static std::vector<RawEvent> hrr_raw_events(const fs::path& events) {
-  std::ifstream in(events, std::ios::binary);
-  std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)),
-                             std::istreambuf_iterator<char>());
+  uint16_t version = 0;
+  FILE* f = hrr::open_record_stream(events.string(), HRR_MAGIC, HRR_VERSION, &version);
+  REQUIRE(f != nullptr);
   std::vector<RawEvent> out;
-  size_t off = sizeof(hrr_file_header);
-  while (off + sizeof(hrr_event_header) <= bytes.size()) {
-    hrr_event_header h;
-    std::memcpy(&h, bytes.data() + off, sizeof(h));
-    if (h.event_type == HRR_EOF_MARKER || h.payload_length < sizeof(h) ||
-        off + h.payload_length > bytes.size())
-      break;
-    out.push_back({off, h.event_type});
-    off += h.payload_length;
+  std::vector<uint8_t> raw;
+  long off = ftell(f);
+  while (hrr::read_raw_record(f, raw) == hrr::RecordStatus::Ok) {
+    const auto* hdr = reinterpret_cast<const hrr_event_header*>(raw.data());
+    if (hdr->event_type == HRR_EOF_MARKER) break;
+    out.push_back({static_cast<size_t>(off), hdr->event_type});
+    off = ftell(f);
   }
+  fclose(f);
   return out;
 }
 
@@ -1443,7 +1442,7 @@ static void hrr_poke_u16(const fs::path& file, size_t offset, uint16_t value) {
 /**
  * Test Description
  * ----------------
- *   - Capture Unit_HRR_ExtModuleLaunchKernelTiming_Direct, which times a
+ *   - Capture Unit_HRR_ExtModuleLaunchKernel_Direct, which times a
  *     hipExtModuleLaunchKernel with a start and a stop event and reads
  *     hipEventElapsedTime. The runtime marks both events inside the launch, so
  *     the archive must carry a hipEventRecord for the start event before the
@@ -1457,7 +1456,7 @@ static void hrr_poke_u16(const fs::path& file, size_t offset, uint16_t value) {
  */
 HRR_TEST_CASE(Unit_HRR_ExtLaunchEventMarkers) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extlaunch_markers"};
-  hrr_capture_direct("Unit_HRR_ExtModuleLaunchKernelTiming_Direct", cap.path);
+  hrr_capture_direct("Unit_HRR_ExtModuleLaunchKernel_Direct", cap.path);
 
   const std::vector<fs::path> archives = hrr_process_archives(cap.path);
   REQUIRE(archives.size() == 1);
