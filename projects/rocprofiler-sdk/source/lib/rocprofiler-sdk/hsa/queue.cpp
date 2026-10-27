@@ -1189,7 +1189,6 @@ WriteInterceptor(const void* packets,
             const auto snapshot = kernel_replay::memory_snapshot::snap(
                 kernel_replay::memory_snapshot::capture_context_t{
                     replay_agent,
-                    queue.get_agent().get_rocp_agent()->id,
                     queue.get_agent().near_cpu(),
                     queue.get_agent().gpu_pool(),
                     queue.get_agent().cpu_pool(),

@@ -119,7 +119,6 @@ capture_context(hsa_agent_t agent, msnp::capture_mode mode)
     if(!cache) return std::nullopt;
     return msnp::capture_context_t{
         agent,
-        cache->get_rocp_agent()->id,
         cache->near_cpu(),
         cache->gpu_pool(),
         cache->cpu_pool(),
