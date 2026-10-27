@@ -905,11 +905,13 @@ if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin/anvil_sdma/sdma)
 endif()
 ## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
-## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
+## librccl_device.bc, librccl_device_<arch>.bc (one per BITCODE_GPU_ARCHS entry),
+## nccl_device_wrapper.h, hipified nccl_device headers,
 ## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
 ## before install because rccl_with_ir is part of ALL.
 if(EMIT_LLVM_IR)
   rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.bc
+                           ${RCCL_IR_ARCH_BC_FILES}
                DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
   rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl_device_wrapper.h
                            ${PROJECT_BINARY_DIR}/include/nccl_device.h

@@ -102,23 +102,10 @@ COMMON_CLANG_FLAGS := \
 CLANG_FLAGS := -c -emit-llvm -O1 $(COMMON_CLANG_FLAGS)
 
 ##### opt passes #####
-# Internalize everything outside the public surface, then inline and drop
-# dead globals. opt's internalize pass takes EXACT symbol names, not globs;
-# keep this list in sync with RCCL_DEVICE_BC_PUBLIC_API in CMakeLists.txt
-# and the NCCL_IR_EXPORT entries in nccl_device_wrapper.h.
-# ReduceCopy thunks: one per op and type, matching util.h.
-RCCL_IR_ALL_TYPES      := I8 U8 I32 U32 I64 U64 F16 F32 F64 BF16
-RCCL_IR_MULTIMEM_TYPES := I32 U32 I64 U64 F16 F32 F64 BF16
-RCCL_IR_REDUCE_COPY_API := \
-	$(foreach op,ncclLsaReduceSum ncclLsaCopy ncclLsaReduceSumCopy ncclLocalReduceSumCopy,$(foreach t,$(RCCL_IR_ALL_TYPES),$(op)_$(t))) \
-	$(foreach op,ncclMultimemReduceSum ncclMultimemCopy ncclMultimemReduceSumCopy,$(foreach t,$(RCCL_IR_MULTIMEM_TYPES),$(op)_$(t)))
-RCCL_IR_EMPTY :=
-RCCL_IR_SPACE := $(RCCL_IR_EMPTY) $(RCCL_IR_EMPTY)
-RCCL_IR_COMMA := ,
-RCCL_DEVICE_BC_PUBLIC_API := ncclGetPeerPointerTeam,ncclCoopAnyInitThread,ncclCoopAnyInitWarp,ncclCoopAnyInitLanes,ncclCoopAnyInitWarpSpan,ncclCoopAnyInitCta,ncclCoopThreadRank,ncclCoopSize,ncclCoopNumThreads,ncclCoopSync,ncclLsaBarrierSessionInit,ncclLsaBarrierSessionArrive,ncclLsaBarrierSessionWait,ncclLsaBarrierSessionSync,ncclGinBarrierSessionInit,ncclGinBarrierSessionSync,ncclBarrierSessionInit,ncclBarrierSessionSync,$(subst $(RCCL_IR_SPACE),$(RCCL_IR_COMMA),$(strip $(RCCL_IR_REDUCE_COPY_API)))
-
-OPT_PASSES := --passes=internalize,inline,globaldce \
-	-internalize-public-api-list=$(RCCL_DEVICE_BC_PUBLIC_API)
+# Internalize everything that is not in @llvm.used (every NCCL_IR_EXPORT thunk
+# is, via __attribute__((used))), then inline and drop dead globals. No explicit
+# public-API list is needed.
+OPT_PASSES := --passes=internalize,inline,globaldce
 
 ##### Preflight #####
 .PHONY: check_hipify

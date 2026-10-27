@@ -47,6 +47,70 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetPeerPointerTeam(ncclWindow_t w,
     return ncclGetPeerPointer(w, offset, tm, peer);
 }
 
+static NCCL_DEVICE_INLINE ncclGin_C* rccl_gin_make(void* dev_comm, int context_index,
+                                                    unsigned char* storage) {
+    ncclGin_C* gin = reinterpret_cast<ncclGin_C*>(storage);
+    ncclGin_C_init(gin, NCCL_GIN_BACKEND_MASK_ALL,
+                   *reinterpret_cast<ncclDevComm*>(dev_comm), context_index);
+    return gin;
+}
+
+NCCL_IR_EXPORT void rccl_gin_put(void* dev_comm, int context_index, int peer,
+    void* dst_window, size_t dst_offset, void* src_window, size_t src_offset, size_t bytes) {
+    alignas(ncclGin_C) unsigned char storage[sizeof(ncclGin_C)];
+    ncclGin_C* gin = rccl_gin_make(dev_comm, context_index, storage);
+    ncclGinPut_v2(gin, ncclTeamWorld(*reinterpret_cast<ncclDevComm*>(dev_comm)), peer,
+                  reinterpret_cast<ncclWindow_t>(dst_window), dst_offset,
+                  reinterpret_cast<ncclWindow_t>(src_window), src_offset, bytes,
+                  false, 0, ncclGinSignalInc, 0, false, 0, ncclCoopThread(), false, nullptr,
+                  cuda::thread_scope_thread, cuda::thread_scope_thread, ncclGinOptFlagsDefault);
+}
+
+NCCL_IR_EXPORT void rccl_gin_put_signal(void* dev_comm, int context_index, int peer,
+    void* dst_window, size_t dst_offset, void* src_window, size_t src_offset, size_t bytes,
+    uint32_t signal, int signal_op, uint64_t signal_arg) {
+    alignas(ncclGin_C) unsigned char storage[sizeof(ncclGin_C)];
+    ncclGin_C* gin = rccl_gin_make(dev_comm, context_index, storage);
+    ncclGinPut_v2(gin, ncclTeamWorld(*reinterpret_cast<ncclDevComm*>(dev_comm)), peer,
+                  reinterpret_cast<ncclWindow_t>(dst_window), dst_offset,
+                  reinterpret_cast<ncclWindow_t>(src_window), src_offset, bytes,
+                  true, signal, static_cast<ncclGinSignalOp_t>(signal_op), signal_arg,
+                  false, 0, ncclCoopThread(), false, nullptr,
+                  cuda::thread_scope_thread, cuda::thread_scope_thread, ncclGinOptFlagsDefault);
+}
+
+NCCL_IR_EXPORT void rccl_gin_put_counter(void* dev_comm, int context_index, int peer,
+    void* dst_window, size_t dst_offset, void* src_window, size_t src_offset, size_t bytes,
+    uint32_t counter) {
+    alignas(ncclGin_C) unsigned char storage[sizeof(ncclGin_C)];
+    ncclGin_C* gin = rccl_gin_make(dev_comm, context_index, storage);
+    ncclGinPut_v2(gin, ncclTeamWorld(*reinterpret_cast<ncclDevComm*>(dev_comm)), peer,
+                  reinterpret_cast<ncclWindow_t>(dst_window), dst_offset,
+                  reinterpret_cast<ncclWindow_t>(src_window), src_offset, bytes,
+                  false, 0, ncclGinSignalInc, 0, true, counter, ncclCoopThread(), false, nullptr,
+                  cuda::thread_scope_thread, cuda::thread_scope_thread, ncclGinOptFlagsDefault);
+}
+
+NCCL_IR_EXPORT void rccl_gin_wait_signal(void* dev_comm, int context_index,
+    uint32_t signal, uint64_t least) {
+    alignas(ncclGin_C) unsigned char storage[sizeof(ncclGin_C)];
+    ncclGin_C* gin = rccl_gin_make(dev_comm, context_index, storage);
+    ncclGinWaitSignal(gin, ncclCoopThread(), signal, least, 64, cuda::memory_order_relaxed);
+}
+
+NCCL_IR_EXPORT void rccl_gin_wait_counter(void* dev_comm, int context_index,
+    uint32_t counter, uint64_t least) {
+    alignas(ncclGin_C) unsigned char storage[sizeof(ncclGin_C)];
+    ncclGin_C* gin = rccl_gin_make(dev_comm, context_index, storage);
+    ncclGinWaitCounter(gin, ncclCoopThread(), counter, least, 64, cuda::memory_order_relaxed);
+}
+
+NCCL_IR_EXPORT void rccl_gin_flush(void* dev_comm, int context_index) {
+    alignas(ncclGin_C) unsigned char storage[sizeof(ncclGin_C)];
+    ncclGin_C* gin = rccl_gin_make(dev_comm, context_index, storage);
+    ncclGinFlush(gin, ncclCoopThread(), cuda::memory_order_acquire);
+}
+
 /* coop */
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopAnyInitThread(ncclCoopAny* coop) {
     ::new (coop) ncclCoopAny(ncclCoopThread());

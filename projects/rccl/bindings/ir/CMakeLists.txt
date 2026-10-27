@@ -14,10 +14,10 @@
 #       add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
 #     endif()
 #
-# The output mirrors the standalone bindings/ir/Makefile:
-#   ${CMAKE_BINARY_DIR}/lib/librccl_device.bc          (final clean bitcode)
-#   ${CMAKE_BINARY_DIR}/obj/llvm_ir/*.bc.{un,}optimized
-#   ${CMAKE_BINARY_DIR}/obj/llvm_ir/librccl_device.ll  (textual IR)
+# The output mirrors the standalone bindings/ir/Makefile, once per target arch:
+#   ${CMAKE_BINARY_DIR}/lib/librccl_device_<arch>.bc   (final clean bitcode)
+#   ${CMAKE_BINARY_DIR}/lib/librccl_device.bc          (copy of the first arch)
+#   ${CMAKE_BINARY_DIR}/obj/llvm_ir/<arch>/*           (intermediates, textual IR)
 #   ${CMAKE_BINARY_DIR}/include/nccl_device_wrapper.h  (public C wrapper)
 
 ##### Source and output paths #####
@@ -26,18 +26,37 @@ set(OBJDIR        ${CMAKE_BINARY_DIR}/obj/llvm_ir)
 set(LIBDIR        ${CMAKE_BINARY_DIR}/lib)
 set(INCLUDEDIR    ${CMAKE_BINARY_DIR}/include)
 
-set(UNOPTIMIZED_BC ${OBJDIR}/librccl_device.bc.unoptimized)
-set(OPTIMIZED_BC   ${OBJDIR}/librccl_device.bc.optimized)
-set(LLVM_IR_FILE   ${OBJDIR}/librccl_device.ll)
 set(FINAL_BC       ${LIBDIR}/librccl_device.bc)
 
 set(WRAPPER_HEADER ${INCLUDEDIR}/nccl_device_wrapper.h)
 
 ##### Build configuration #####
-# Default GPU architecture for the bitcode artifact. Override via:
-#     cmake -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx942 ...
+# GPU architectures to emit librccl_device_<arch>.bc for. Accepts comma- or
+# semicolon-separated targets, optionally with feature suffixes
+# (gfx950:sramecc+:xnack-): the suffix is passed to --offload-arch so the
+# embedded amdhsa.target matches the HSACO the consumer loads, and is stripped
+# from the file name. The first entry also becomes the unsuffixed
+# librccl_device.bc. When empty, only BITCODE_LIB_ARCH is built:
+#     cmake -DEMIT_LLVM_IR=ON -DBITCODE_GPU_ARCHS="gfx942;gfx950" ...
+set(BITCODE_GPU_ARCHS "" CACHE STRING
+    "GPU architectures for librccl_device_<arch>.bc (empty: BITCODE_LIB_ARCH only)")
 set(BITCODE_LIB_ARCH "gfx950" CACHE STRING
-    "AMDGPU architecture for the LLVM bitcode (e.g. gfx942, gfx950)")
+    "Single AMDGPU architecture for the LLVM bitcode when BITCODE_GPU_ARCHS is empty")
+if(BITCODE_GPU_ARCHS)
+  string(REPLACE "," ";" _ir_requested "${BITCODE_GPU_ARCHS}")
+else()
+  set(_ir_requested "${BITCODE_LIB_ARCH}")
+endif()
+set(RCCL_IR_ARCHS)        # full target strings, first occurrence of each base arch
+set(RCCL_IR_ARCH_BASES)   # same, feature suffixes stripped
+foreach(_arch ${_ir_requested})
+  string(REGEX REPLACE ":.*" "" _base "${_arch}")
+  if(NOT _base IN_LIST RCCL_IR_ARCH_BASES)
+    list(APPEND RCCL_IR_ARCHS "${_arch}")
+    list(APPEND RCCL_IR_ARCH_BASES "${_base}")
+  endif()
+endforeach()
+list(GET RCCL_IR_ARCH_BASES 0 RCCL_IR_PRIMARY_ARCH)
 set(BITCODE_CXX_STD  "c++17"  CACHE STRING
     "C++ standard for the LLVM bitcode build")
 
@@ -69,7 +88,7 @@ message(STATUS "RCCL IR: clang     = ${CLANG_EXECUTABLE}")
 message(STATUS "RCCL IR: opt       = ${OPT_EXECUTABLE}")
 message(STATUS "RCCL IR: llvm-dis  = ${LLVM_DIS_EXECUTABLE}")
 message(STATUS "RCCL IR: llvm-as   = ${LLVM_AS_EXECUTABLE}")
-message(STATUS "RCCL IR: target    = ${BITCODE_LIB_ARCH} (${BITCODE_CXX_STD})")
+message(STATUS "RCCL IR: targets   = ${RCCL_IR_ARCH_BASES} (${BITCODE_CXX_STD})")
 
 ##### Device API defines #####
 # Enable all ReduceCopy type and block-size combinations in generated IR.
@@ -107,7 +126,6 @@ set(COMMON_CLANG_FLAGS
   -x hip
   --rocm-path=${ROCM_PATH}
   --offload-device-only
-  --offload-arch=${BITCODE_LIB_ARCH}
   ${RCCL_INCLUDES}
   ${ROCM_INCLUDES}
   -D__clang_llvm_bitcode_lib__
@@ -115,6 +133,20 @@ set(COMMON_CLANG_FLAGS
   ${NCCL_DEVICE_DEFINES}
   -D__HIP_PLATFORM_AMD__=1
 )
+
+# The bitcode must be compiled with the same GIN backend selection as the host
+# library: backend dispatch and the ncclDevComm/GIN context layouts depend on
+# it, so a bitcode built without these defines is ABI-incompatible with an
+# ENABLE_ROCSHMEM_GIN=ON librccl.so.
+if(ENABLE_ROCSHMEM_GIN)
+  list(APPEND COMMON_CLANG_FLAGS -DENABLE_ROCSHMEM_GIN)
+  foreach(_dir ${ROCSHMEM_INCLUDE_DIR} ${ROCSHMEM_BUILD_DIR})
+    list(APPEND COMMON_CLANG_FLAGS -I${_dir})
+  endforeach()
+  if(ROCSHMEM_SOURCE_DIR)
+    list(APPEND COMMON_CLANG_FLAGS -I${ROCSHMEM_SOURCE_DIR}/src -I${ROCSHMEM_SOURCE_DIR}/include)
+  endif()
+endif()
 
 set(CLANG_FLAGS
   -c -emit-llvm -O1
@@ -132,103 +164,103 @@ add_custom_command(
   VERBATIM
 )
 
-##### Step 1: clang -> unoptimized bitcode #####
-add_custom_command(
-  OUTPUT ${UNOPTIMIZED_BC}
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${OBJDIR}
-  COMMAND ${CLANG_EXECUTABLE} ${CLANG_FLAGS} ${LLVM_SRC} -o ${UNOPTIMIZED_BC}
-  # Track both the impl TU (clang's direct input) and the staged wrapper
-  # header it transitively includes (plus util.h's type lists). Without
-  # the WRAPPER_HEADER dep, editing nccl_device_wrapper.h would not
-  # retrigger this command.
-  DEPENDS ${LLVM_SRC} ${WRAPPER_HEADER} ${CMAKE_CURRENT_SOURCE_DIR}/util.h
-  COMMENT "Generating unoptimized LLVM bitcode for ${BITCODE_LIB_ARCH}..."
-  VERBATIM
-)
+##### Exported surface #####
+# Every NCCL_IR_EXPORT thunk carries __attribute__((used, retain)), which puts
+# it in @llvm.used; opt's `internalize` always preserves those, and everything
+# else is internalized and then inlined or dropped. No explicit public-API list
+# is needed, so adding a thunk needs no build-file change. verify_exports.cmake
+# checks that every @llvm.used entry survives with external linkage and that
+# these required thunks are among them.
+set(RCCL_IR_REQUIRED_EXPORTS
+    rccl_gin_put rccl_gin_put_signal rccl_gin_put_counter
+    rccl_gin_wait_signal rccl_gin_wait_counter rccl_gin_flush)
+string(REPLACE ";" "," RCCL_IR_REQUIRED_EXPORTS_CSV "${RCCL_IR_REQUIRED_EXPORTS}")
 
-##### Step 2: opt -> optimized bitcode #####
-# Internalize everything outside the public surface, then inline and drop
-# dead globals. NCCL's recipe uses "-internalize-public-api-list=nccl*",
-# but opt's `internalize` pass takes EXACT symbol names, not globs -- the
-# literal token "nccl*" matches no symbol, so every wrapper thunk gets
-# internalized and dropped to internal linkage. We list the public surface
-# explicitly instead; keep this set in sync with the NCCL_IR_EXTERN_C
-# entries in nccl_device_wrapper.h.
-set(RCCL_DEVICE_BC_PUBLIC_API
-    # [A] Always-on
-    ncclGetPeerPointerTeam
-    # [B] ncclCoopAny + LSA barrier session
-    ncclCoopAnyInitThread
-    ncclCoopAnyInitWarp
-    ncclCoopAnyInitLanes
-    ncclCoopAnyInitWarpSpan
-    ncclCoopAnyInitCta
-    ncclCoopThreadRank
-    ncclCoopSize
-    ncclCoopNumThreads
-    ncclCoopSync
-    ncclLsaBarrierSessionInit
-    ncclLsaBarrierSessionArrive
-    ncclLsaBarrierSessionWait
-    ncclLsaBarrierSessionSync
-    # [C] GIN + composite barrier session
-    ncclGinBarrierSessionInit
-    ncclGinBarrierSessionSync
-    ncclBarrierSessionInit
-    ncclBarrierSessionSync
-)
-# [D] ReduceCopy: one thunk per op and type, matching NCCL_IR_TYPES /
-# NCCL_IR_MULTIMEM_TYPES in util.h.
-set(RCCL_IR_ALL_TYPES      I8 U8 I32 U32 I64 U64 F16 F32 F64 BF16)
-set(RCCL_IR_MULTIMEM_TYPES I32 U32 I64 U64 F16 F32 F64 BF16)
-foreach(_op ncclLsaReduceSum ncclLsaCopy ncclLsaReduceSumCopy ncclLocalReduceSumCopy)
-  foreach(_ty ${RCCL_IR_ALL_TYPES})
-    list(APPEND RCCL_DEVICE_BC_PUBLIC_API ${_op}_${_ty})
-  endforeach()
+##### Per-architecture pipeline #####
+# clang -> opt (internalize/inline/globaldce) -> llvm-dis -> llvm-as, then check
+# that every public symbol survived with external linkage. Each arch gets its
+# own intermediates under ${OBJDIR}/<arch>/ and a librccl_device_<arch>.bc.
+# AMDGPU has no equivalent of NCCL's "nvvm-reflect-ftz" metadata, so the
+# awk/sed scrubbing pass that NCCL applies between dis and as is intentionally
+# omitted.
+set(RCCL_IR_ARCH_BC_FILES)
+function(rccl_ir_add_arch full_arch base_arch)
+  set(_dir   ${OBJDIR}/${base_arch})
+  set(_unopt ${_dir}/librccl_device.bc.unoptimized)
+  set(_opt   ${_dir}/librccl_device.bc.optimized)
+  set(_ll    ${_dir}/librccl_device.ll)
+  set(_final ${LIBDIR}/librccl_device_${base_arch}.bc)
+
+  add_custom_command(
+    OUTPUT ${_unopt}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${_dir}
+    COMMAND ${CLANG_EXECUTABLE} ${CLANG_FLAGS} --offload-arch=${full_arch} ${LLVM_SRC} -o ${_unopt}
+    # Track both the impl TU (clang's direct input) and the staged wrapper
+    # header it transitively includes (plus util.h's type lists). Without
+    # the WRAPPER_HEADER dep, editing nccl_device_wrapper.h would not
+    # retrigger this command.
+    DEPENDS ${LLVM_SRC} ${WRAPPER_HEADER} ${CMAKE_CURRENT_SOURCE_DIR}/util.h
+    COMMENT "Generating unoptimized LLVM bitcode for ${full_arch}..."
+    VERBATIM
+  )
+
+  add_custom_command(
+    OUTPUT ${_opt}
+    COMMAND ${OPT_EXECUTABLE}
+            --passes=internalize,inline,globaldce
+            ${_unopt} -o ${_opt}
+    DEPENDS ${_unopt}
+    COMMENT "Optimizing LLVM bitcode for ${base_arch} (internalize/inline/globaldce)..."
+    VERBATIM
+  )
+
+  # Textual IR is kept for inspection and is what the export check reads.
+  add_custom_command(
+    OUTPUT ${_ll}
+    COMMAND ${LLVM_DIS_EXECUTABLE} ${_opt} -o ${_ll}
+    COMMAND ${CMAKE_COMMAND} -DINPUT=${_ll} -DREQUIRED=${RCCL_IR_REQUIRED_EXPORTS_CSV}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_exports.cmake
+    DEPENDS ${_opt} ${CMAKE_CURRENT_SOURCE_DIR}/verify_exports.cmake
+    COMMENT "Disassembling and verifying exports for ${base_arch}..."
+    VERBATIM
+  )
+
+  add_custom_command(
+    OUTPUT ${_final}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${LIBDIR}
+    COMMAND ${LLVM_AS_EXECUTABLE} ${_ll} -o ${_final}
+    DEPENDS ${_ll}
+    COMMENT "Assembling final bitcode -> librccl_device_${base_arch}.bc..."
+    VERBATIM
+  )
+
+  set(RCCL_IR_ARCH_BC_FILES ${RCCL_IR_ARCH_BC_FILES} ${_final} PARENT_SCOPE)
+endfunction()
+
+list(LENGTH RCCL_IR_ARCHS _ir_n_archs)
+math(EXPR _ir_last "${_ir_n_archs} - 1")
+foreach(_i RANGE ${_ir_last})
+  list(GET RCCL_IR_ARCHS ${_i} _full)
+  list(GET RCCL_IR_ARCH_BASES ${_i} _base)
+  rccl_ir_add_arch(${_full} ${_base})
 endforeach()
-foreach(_op ncclMultimemReduceSum ncclMultimemCopy ncclMultimemReduceSumCopy)
-  foreach(_ty ${RCCL_IR_MULTIMEM_TYPES})
-    list(APPEND RCCL_DEVICE_BC_PUBLIC_API ${_op}_${_ty})
-  endforeach()
-endforeach()
-string(REPLACE ";" "," RCCL_DEVICE_BC_PUBLIC_API_CSV "${RCCL_DEVICE_BC_PUBLIC_API}")
 
-add_custom_command(
-  OUTPUT ${OPTIMIZED_BC}
-  COMMAND ${OPT_EXECUTABLE}
-          --passes=internalize,inline,globaldce
-          -internalize-public-api-list=${RCCL_DEVICE_BC_PUBLIC_API_CSV}
-          ${UNOPTIMIZED_BC} -o ${OPTIMIZED_BC}
-  DEPENDS ${UNOPTIMIZED_BC}
-  COMMENT "Optimizing LLVM bitcode (internalize/inline/globaldce)..."
-  VERBATIM
-)
-
-##### Step 3: llvm-dis -> textual IR (kept for inspection) #####
-# AMDGPU has no equivalent of NCCL's "nvvm-reflect-ftz" metadata, so
-# the awk/sed scrubbing pass that NCCL applies between dis and as is
-# intentionally omitted.
-add_custom_command(
-  OUTPUT ${LLVM_IR_FILE}
-  COMMAND ${LLVM_DIS_EXECUTABLE} ${OPTIMIZED_BC} -o ${LLVM_IR_FILE}
-  DEPENDS ${OPTIMIZED_BC}
-  COMMENT "Disassembling bitcode -> textual LLVM IR..."
-  VERBATIM
-)
-
-##### Step 4: llvm-as -> final bitcode artifact in build/lib #####
+##### Unsuffixed librccl_device.bc (first arch) #####
 add_custom_command(
   OUTPUT ${FINAL_BC}
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${LIBDIR}
-  COMMAND ${LLVM_AS_EXECUTABLE} ${LLVM_IR_FILE} -o ${FINAL_BC}
-  DEPENDS ${LLVM_IR_FILE}
-  COMMENT "Assembling final bitcode -> librccl_device.bc..."
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${LIBDIR}/librccl_device_${RCCL_IR_PRIMARY_ARCH}.bc ${FINAL_BC}
+  DEPENDS ${LIBDIR}/librccl_device_${RCCL_IR_PRIMARY_ARCH}.bc
+  COMMENT "Staging librccl_device.bc from ${RCCL_IR_PRIMARY_ARCH}..."
   VERBATIM
 )
+
+# Visible to the parent for install rules.
+set(RCCL_IR_ARCH_BC_FILES ${RCCL_IR_ARCH_BC_FILES} PARENT_SCOPE)
 
 ##### Public target #####
 add_custom_target(llvm_ir
-  DEPENDS ${FINAL_BC} ${OPTIMIZED_BC} ${WRAPPER_HEADER}
+  DEPENDS ${FINAL_BC} ${RCCL_IR_ARCH_BC_FILES} ${WRAPPER_HEADER}
   COMMENT "RCCL LLVM IR / bitcode generation"
 )
 
@@ -236,10 +268,8 @@ add_custom_target(llvm_ir
 add_custom_command(TARGET llvm_ir POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E echo "RCCL LLVM IR and bitcode generated successfully:"
   COMMAND ${CMAKE_COMMAND} -E echo "  C++ Standard:      ${BITCODE_CXX_STD}"
-  COMMAND ${CMAKE_COMMAND} -E echo "  GPU Architecture:  ${BITCODE_LIB_ARCH}"
-  COMMAND ${CMAKE_COMMAND} -E echo "  Unoptimized BC:    ${UNOPTIMIZED_BC}"
-  COMMAND ${CMAKE_COMMAND} -E echo "  Optimized BC:      ${OPTIMIZED_BC}"
-  COMMAND ${CMAKE_COMMAND} -E echo "  LLVM IR (textual): ${LLVM_IR_FILE}"
+  COMMAND ${CMAKE_COMMAND} -E echo "  GPU Architectures: ${RCCL_IR_ARCH_BASES}"
+  COMMAND ${CMAKE_COMMAND} -E echo "  Per-arch BC:       ${RCCL_IR_ARCH_BC_FILES}"
   COMMAND ${CMAKE_COMMAND} -E echo "  Final BC:          ${FINAL_BC}"
   COMMAND ${CMAKE_COMMAND} -E echo "  Wrapper Header:    ${WRAPPER_HEADER}"
   VERBATIM

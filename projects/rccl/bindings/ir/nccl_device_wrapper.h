@@ -189,6 +189,17 @@ NCCL_IR_EXTERN_C __device__ ncclMultimemHandle   ncclDevComm_LsaMultimem(ncclDev
 NCCL_IR_EXPORT void* ncclGetPeerPointerTeam(
     ncclWindow_t w, size_t offset, ncclTeam tm, int peer);
 
+/* Flat GIN ABI. These wrappers reconstruct ncclGin_C and use a single-thread
+ * cooperative group, so consumers pass only opaque pointers and scalars. */
+NCCL_IR_EXPORT void rccl_gin_put(void*, int, int, void*, size_t, void*, size_t, size_t);
+NCCL_IR_EXPORT void rccl_gin_put_signal(void*, int, int, void*, size_t, void*, size_t, size_t,
+                                        uint32_t, int, uint64_t);
+NCCL_IR_EXPORT void rccl_gin_put_counter(void*, int, int, void*, size_t, void*, size_t, size_t,
+                                         uint32_t);
+NCCL_IR_EXPORT void rccl_gin_wait_signal(void*, int, uint32_t, uint64_t);
+NCCL_IR_EXPORT void rccl_gin_wait_counter(void*, int, uint32_t, uint64_t);
+NCCL_IR_EXPORT void rccl_gin_flush(void*, int);
+
 
 /* ========================================================================
  * [B] APIs that depend on ncclCoopAny

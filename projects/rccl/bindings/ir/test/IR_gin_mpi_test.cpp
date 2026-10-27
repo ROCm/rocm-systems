@@ -10,6 +10,8 @@
  *
  *   ncclGinBarrierSessionInit / ncclGinBarrierSessionSync   (rail GIN barrier)
  *   ncclBarrierSessionInit     / ncclBarrierSessionSync     (composite barrier)
+ *   rccl_gin_put_signal / rccl_gin_wait_signal              (flat one-sided put)
+ *   rccl_gin_put_counter / rccl_gin_wait_counter            (local completion)
  *
  * It is a separate binary because a GIN barrier is inherently collective: it
  * signals peer ranks over the network, so it needs MPI (>=2 ranks on >=2
@@ -39,6 +41,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include <nccl.h>
 #include <nccl_device.h>
@@ -194,6 +197,46 @@ __global__ void k_ir_composite_barrier(int iters, struct ncclDevComm devComm) {
   }
 }
 
+/* [D] Flat one-sided put ABI (rccl_gin_*): only opaque pointers and scalars
+ * cross the boundary. Each producer drains its posted work with rccl_gin_flush
+ * before the kernel exits. */
+
+/* [D1] put_signal: one thread puts `bytes` and increments `sig` on the peer. */
+__global__ void k_ir_put_signal(void* srcWin, void* dstWin, size_t bytes,
+                                uint32_t sig, int peer,
+                                struct ncclDevComm devComm) {
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    rccl_gin_put_signal(&devComm, /*ctx=*/0, peer, dstWin, /*dstOff=*/0, srcWin,
+                        /*srcOff=*/0, bytes, sig,
+                        static_cast<int>(ncclGinSignalInc), /*arg=*/0);
+  }
+  rccl_gin_flush(&devComm, /*ctx=*/0);
+}
+
+__global__ void k_ir_wait_signal(uint32_t sig, uint64_t least,
+                                 struct ncclDevComm devComm) {
+  if (threadIdx.x == 0 && blockIdx.x == 0)
+    rccl_gin_wait_signal(&devComm, /*ctx=*/0, sig, least);
+}
+
+/* [D2] put_counter then wait_counter (local completion of chunk 0), then
+ * put_signal of chunk 1. The peer observing the signal must see both chunks:
+ * chunk 0 is complete before chunk 1 is even issued. */
+__global__ void k_ir_put_counter_then_signal(void* srcWin, void* dstWin,
+                                             size_t chunk, uint32_t counter,
+                                             uint32_t sig, int peer,
+                                             struct ncclDevComm devComm) {
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    rccl_gin_put_counter(&devComm, 0, peer, dstWin, /*dstOff=*/0, srcWin,
+                         /*srcOff=*/0, chunk, counter);
+    rccl_gin_wait_counter(&devComm, 0, counter, /*least=*/1);
+    rccl_gin_put_signal(&devComm, 0, peer, dstWin, /*dstOff=*/chunk, srcWin,
+                        /*srcOff=*/chunk, chunk, sig,
+                        static_cast<int>(ncclGinSignalInc), 0);
+  }
+  rccl_gin_flush(&devComm, /*ctx=*/0);
+}
+
 /* =====================================================================
  * Fixture — builds a 2-rank comm + GIN device comm once per test, with full
  * skip-gating. Each rank is bound to its own node-local GPU.
@@ -204,6 +247,10 @@ class IRGinBarrierMPITest : public ::testing::Test {
   hipStream_t stream_ = nullptr;
   ncclDevComm devComm_{};
   bool        devCommValid_ = false;
+  void*        dSrc_ = nullptr;
+  void*        dDst_ = nullptr;
+  ncclWindow_t srcWin_ = nullptr;
+  ncclWindow_t dstWin_ = nullptr;
   int         worldRank_ = -1, worldSize_ = -1;
 
   void SetUp() override {
@@ -233,7 +280,7 @@ class IRGinBarrierMPITest : public ::testing::Test {
   /* Try to build the GIN device comm. Returns the ncclResult_t so the caller
    * can GTEST_SKIP (vs FAIL) when device-comm creation is blocked by an
    * environment prerequisite rather than by the code under test. */
-  ncclResult_t makeGinDevComm() {
+  ncclResult_t makeGinDevComm(int signalCount = 0, int counterCount = 0) {
     ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     reqs.ginConnectionType  = NCCL_GIN_CONNECTION_FULL;
     /* ginForceEnable is required: ncclDevCommCreate only activates GIN when
@@ -243,6 +290,8 @@ class IRGinBarrierMPITest : public ::testing::Test {
     reqs.ginForceEnable     = true;
     reqs.lsaBarrierCount    = 1;   /* composite inner barrier */
     reqs.railGinBarrierCount = 1;  /* GIN + composite outer barrier (index 0) */
+    reqs.ginSignalCount     = signalCount;
+    reqs.ginCounterCount    = counterCount;
 
     ncclResult_t r = ncclDevCommCreate(comm_, &reqs, &devComm_);
     if (r == ncclSuccess) {
@@ -252,8 +301,22 @@ class IRGinBarrierMPITest : public ::testing::Test {
     return r;
   }
 
+  /* Symmetric src/dst buffers registered as collective windows. Must run on
+   * both ranks, after SetUp and before makeGinDevComm. */
+  void makeWindows(size_t bytes) {
+    NCCL_ASSERT(ncclMemAlloc(&dSrc_, bytes));
+    NCCL_ASSERT(ncclMemAlloc(&dDst_, bytes));
+    NCCL_ASSERT(ncclCommWindowRegister(comm_, dSrc_, bytes, &srcWin_, NCCL_WIN_COLL_SYMMETRIC));
+    NCCL_ASSERT(ncclCommWindowRegister(comm_, dDst_, bytes, &dstWin_, NCCL_WIN_COLL_SYMMETRIC));
+    HIP_ASSERT(hipMemset(dDst_, 0, bytes));
+  }
+
   void TearDown() override {
     if (devCommValid_) (void)ncclDevCommDestroy(comm_, &devComm_);
+    if (srcWin_)       (void)ncclCommWindowDeregister(comm_, srcWin_);
+    if (dstWin_)       (void)ncclCommWindowDeregister(comm_, dstWin_);
+    if (dSrc_)         (void)ncclMemFree(dSrc_);
+    if (dDst_)         (void)ncclMemFree(dDst_);
     if (stream_)       (void)hipStreamDestroy(stream_);
     if (comm_)         (void)ncclCommDestroy(comm_);
     if (worldSize_ == 2) MPI_Barrier(MPI_COMM_WORLD);
@@ -301,6 +364,68 @@ TEST_F(IRGinBarrierMPITest, C2_CompositeBarrierSession_TwoRanks) {
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipStreamSynchronize(stream_));
   MPI_Barrier(MPI_COMM_WORLD);
+}
+
+/* =====================================================================
+ * [D1] rccl_gin_put_signal + rccl_gin_wait_signal — rank 0 -> rank 1
+ * ==================================================================== */
+TEST_F(IRGinBarrierMPITest, D1_PutSignal_TwoRanks) {
+  constexpr size_t kBytes = 64;
+  makeWindows(kBytes);
+  if (ncclResult_t r = makeGinDevComm(/*signals=*/1); r != ncclSuccess)
+    GTEST_SKIP() << "ncclDevCommCreate failed (" << ncclGetErrorString(r) << ")";
+
+  std::vector<uint8_t> src(kBytes);
+  for (size_t i = 0; i < kBytes; ++i) src[i] = static_cast<uint8_t>(0xA0 + (i & 0x3f));
+  HIP_ASSERT(hipMemcpy(dSrc_, src.data(), kBytes, hipMemcpyHostToDevice));
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (worldRank_ == 0)
+    k_ir_put_signal<<<1, 32, 0, stream_>>>(srcWin_, dstWin_, kBytes, /*sig=*/0, /*peer=*/1, devComm_);
+  else
+    k_ir_wait_signal<<<1, 32, 0, stream_>>>(/*sig=*/0, /*least=*/1, devComm_);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipStreamSynchronize(stream_));
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (worldRank_ == 1) {
+    std::vector<uint8_t> dst(kBytes);
+    HIP_ASSERT(hipMemcpy(dst.data(), dDst_, kBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kBytes; ++i)
+      ASSERT_EQ(dst[i], src[i]) << "byte " << i << " mismatched";
+  }
+}
+
+/* =====================================================================
+ * [D2] rccl_gin_put_counter + rccl_gin_wait_counter, then put_signal
+ * ==================================================================== */
+TEST_F(IRGinBarrierMPITest, D2_PutCounterThenSignal_TwoRanks) {
+  constexpr size_t kChunk = 64;
+  constexpr size_t kBytes = 2 * kChunk;
+  makeWindows(kBytes);
+  if (ncclResult_t r = makeGinDevComm(/*signals=*/1, /*counters=*/1); r != ncclSuccess)
+    GTEST_SKIP() << "ncclDevCommCreate failed (" << ncclGetErrorString(r) << ")";
+
+  std::vector<uint8_t> src(kBytes);
+  for (size_t i = 0; i < kBytes; ++i) src[i] = static_cast<uint8_t>(0x31 + (i & 0x7f));
+  HIP_ASSERT(hipMemcpy(dSrc_, src.data(), kBytes, hipMemcpyHostToDevice));
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (worldRank_ == 0)
+    k_ir_put_counter_then_signal<<<1, 32, 0, stream_>>>(
+        srcWin_, dstWin_, kChunk, /*counter=*/0, /*sig=*/0, /*peer=*/1, devComm_);
+  else
+    k_ir_wait_signal<<<1, 32, 0, stream_>>>(/*sig=*/0, /*least=*/1, devComm_);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipStreamSynchronize(stream_));
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (worldRank_ == 1) {
+    std::vector<uint8_t> dst(kBytes);
+    HIP_ASSERT(hipMemcpy(dst.data(), dDst_, kBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kBytes; ++i)
+      ASSERT_EQ(dst[i], src[i]) << "byte " << i << " mismatched";
+  }
 }
 
 /* =====================================================================
