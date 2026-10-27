@@ -1321,11 +1321,12 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
     INFO(NCCL_ENV, "NCCL_GRAPH_FILE set by environment to %s", str);
     struct ncclXml* xml;
     NCCLCHECK(xmlAlloc(&xml, NCCL_GRAPH_XML_MAX_NODES));
-    NCCLCHECK(ncclTopoGetXmlGraphFromFile(str, xml));
-    int nChannels;
-    NCCLCHECK(ncclTopoGetGraphFromXml(xml->nodes, system, graph, &nChannels));
-    INFO(NCCL_GRAPH, "Search %d : %d channels loaded from XML graph", graph->id, nChannels);
+    int nChannels = 0;
+    ncclResult_t xmlRes = ncclTopoGetXmlGraphFromFile(str, xml);
+    if (xmlRes == ncclSuccess) xmlRes = ncclTopoGetGraphFromXml(xml->nodes, system, graph, &nChannels);
     free(xml);
+    NCCLCHECK(xmlRes);
+    INFO(NCCL_GRAPH, "Search %d : %d channels loaded from XML graph", graph->id, nChannels);
     if (graph->nChannels > 0) return ncclSuccess;
   }
 
