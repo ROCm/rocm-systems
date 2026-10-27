@@ -48,12 +48,27 @@ class CoverageRule:
 
 COVERAGE_RULES = (
     # Builds and runs test/host standalone. The in-tree BUILD_TESTS=ON build of
-    # test/host (and its CMake) is only compiled by TheRock Multi-Arch CI.
+    # test/host (and its CMake) is also compiled by TheRock Multi-Arch CI.
     CoverageRule(
         name="host-only unit tests",
         workflow=".github/workflows/rccl-host-unit-tests.yml",
         branches=("develop",),
-        patterns=("projects/rccl/test/host/*",),
+        patterns=(
+            "projects/rccl/test/host/*",
+            # CTest categories of the micro host binaries. Only the in-tree build of
+            # test/host reads them, and a parse error there is a CMake warning. The
+            # GPU suites' test_categories*.yaml do not match.
+            "projects/rccl/test/test_categories_micro.yaml",
+            "projects/rccl/test/test_categories_micro_*.yaml",
+        ),
+    ),
+    # Runs the test_runner unit tests (tests/). Its configs are run by external
+    # CI, e.g. math-ci precheckin runs ci-precheckin.json.
+    CoverageRule(
+        name="test runner",
+        workflow=".github/workflows/rccl-host-unit-tests.yml",
+        branches=("develop",),
+        patterns=("projects/rccl/tools/scripts/test_runner/*",),
     ),
 )
 
