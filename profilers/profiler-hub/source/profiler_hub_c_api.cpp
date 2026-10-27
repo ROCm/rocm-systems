@@ -600,7 +600,8 @@ known_event_type(uint32_t type)
 {
     return type == PH_EVENT_TYPE_REGION || type == PH_EVENT_TYPE_REGION_SAMPLE ||
            type == PH_EVENT_TYPE_KERNEL_DISPATCH || type == PH_EVENT_TYPE_MEMORY_COPY ||
-           type == PH_EVENT_TYPE_MEMORY_ALLOCATE;
+           type == PH_EVENT_TYPE_MEMORY_ALLOCATE || type == PH_EVENT_TYPE_PMC_COUNTER ||
+           type == PH_EVENT_TYPE_PMC_SAMPLE || type == PH_EVENT_TYPE_MEMORY_ACTIVITY;
 }
 
 std::optional<uint64_t>
@@ -724,6 +725,7 @@ ph_result_t
 ph_event_query_read(ph_event_query_t  query,
                     uint32_t          event_type,
                     uint64_t          after_id,
+                    uint64_t          last_id,
                     ph_table_event_t* rows,
                     uint32_t          capacity,
                     uint32_t*         count,
@@ -737,26 +739,56 @@ ph_event_query_read(ph_event_query_t  query,
     {
         return PH_RESULT_INVALID_CONTEXT;
     }
-    const bool known = event_type == PH_EVENT_TYPE_REGION ||
-                       event_type == PH_EVENT_TYPE_REGION_SAMPLE ||
-                       event_type == PH_EVENT_TYPE_KERNEL_DISPATCH ||
-                       event_type == PH_EVENT_TYPE_MEMORY_COPY ||
-                       event_type == PH_EVENT_TYPE_MEMORY_ALLOCATE;
-    if(rows == nullptr || count == nullptr || capacity == 0 || !known)
+    if(rows == nullptr || count == nullptr || capacity == 0 || !known_event_type(event_type))
     {
         return PH_RESULT_INVALID_ARGUMENT;
     }
 
-    return guard_call([query, event_type, after_id, rows, capacity, count, future]() {
+    return guard_call(
+        [query, event_type, after_id, last_id, rows, capacity, count, future]() {
+            if(future != nullptr && future->stop_token().stop_requested())
+            {
+                return PH_RESULT_CANCELLED;
+            }
+            *count = query->ctx->read_table_events(
+                query->query, event_type, after_id, last_id, rows, capacity);
+            if(future != nullptr && future->stop_token().stop_requested())
+            {
+                return PH_RESULT_CANCELLED;
+            }
+            return PH_RESULT_SUCCESS;
+        });
+}
+
+ph_result_t
+ph_event_query_id_span(ph_event_query_t query,
+                       uint32_t         event_type,
+                       uint64_t*        first_id,
+                       uint64_t*        last_id,
+                       ph_future_t      future)
+{
+    if(first_id != nullptr) *first_id = 0;
+    if(last_id != nullptr) *last_id = 0;
+    if(query == nullptr || query->ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(first_id == nullptr || last_id == nullptr || !known_event_type(event_type))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([query, event_type, first_id, last_id, future]() {
         if(future != nullptr && future->stop_token().stop_requested())
         {
             return PH_RESULT_CANCELLED;
         }
-        *count = query->ctx->read_table_events(
-            query->query, event_type, after_id, rows, capacity);
-        if(future != nullptr && future->stop_token().stop_requested())
+        uint64_t first = 0;
+        uint64_t last  = 0;
+        if(query->ctx->table_event_id_span(event_type, first, last))
         {
-            return PH_RESULT_CANCELLED;
+            *first_id = first;
+            *last_id  = last;
         }
         return PH_RESULT_SUCCESS;
     });

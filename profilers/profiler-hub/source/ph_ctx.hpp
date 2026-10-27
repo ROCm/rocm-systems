@@ -69,8 +69,12 @@ struct ph_ctx
         const profiler_hub::resolved_event_query& query,
         uint32_t                                  event_type,
         uint64_t                                  after_id,
+        uint64_t                                  last_id,
         ph_table_event*                           rows,
         uint32_t                                  capacity);
+    [[nodiscard]] bool table_event_id_span(uint32_t  event_type,
+                                           uint64_t& first_id,
+                                           uint64_t& last_id);
 
     [[nodiscard]] ph_schema_version_t get_schema_version();
     [[nodiscard]] ph_track_list_t     get_track_list();

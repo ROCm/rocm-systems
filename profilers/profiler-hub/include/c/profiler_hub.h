@@ -363,7 +363,9 @@ extern "C"
      *       the same track return the same storage, so the array must be
      *       treated as read-only. Samples of a whole track are ordered by
      *       ph_sample_t::timestamp. A request with a time window gets its own
-     *       private storage.
+     *       private storage and includes the nearest sample before the window
+     *       and the nearest sample after it. When no sample follows the
+     *       window, the last value is repeated at the track end.
      */
     ph_result_t ph_get_track_samples(ph_ctx_t          ctx,
                                      uint32_t          track_id,
@@ -486,6 +488,9 @@ extern "C"
      *        yields a successful empty page.
      * @param after_id Return rows whose id is greater than this. Pass 0 to
      *        start. Pass the last returned id to continue.
+     * @param last_id Return rows whose id is not greater than this. Pass
+     *        UINT64_MAX for no upper bound. Ranges from
+     *        ph_event_query_id_span() let several threads read one table.
      * @param rows Caller-owned buffer. Filled with complete values; nothing
      *        in a row points at profiler-hub memory.
      * @param capacity Number of entries @p rows can hold. Must be non-zero.
@@ -502,10 +507,28 @@ extern "C"
     ph_result_t ph_event_query_read(ph_event_query_t  query,
                                     uint32_t          event_type,
                                     uint64_t          after_id,
+                                    uint64_t          last_id,
                                     ph_table_event_t* rows,
                                     uint32_t          capacity,
                                     uint32_t*         count,
                                     ph_future_t       future);
+
+    /**
+     * @brief Reads the smallest and largest row id of the table that holds
+     *        @p event_type, ignoring the query filter.
+     * @param first_id Out parameter. Set to 0 if the table is empty.
+     * @param last_id Out parameter. Set to 0 if the table is empty.
+     * @param future Optional cancellation source, observed only.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
+     *         pointer is null or @p event_type is unknown,
+     *         PH_RESULT_INVALID_CONTEXT if the query has no trace,
+     *         PH_RESULT_CANCELLED if @p future was cancelled.
+     */
+    ph_result_t ph_event_query_id_span(ph_event_query_t query,
+                                       uint32_t         event_type,
+                                       uint64_t*        first_id,
+                                       uint64_t*        last_id,
+                                       ph_future_t      future);
 
     /**
      * @brief Looks up text the trace catalog already loaded.

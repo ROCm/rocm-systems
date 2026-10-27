@@ -170,7 +170,9 @@ duration_source_sql(const reader_catalog_t&                         catalog,
             }
             break;
         }
-        case reader_types::track_kind_t::pmc_agent: break;
+        case reader_types::track_kind_t::pmc_agent:
+        case reader_types::track_kind_t::pmc_kernel:
+        case reader_types::track_kind_t::pmc_memory: break;
     }
     return sql;
 }

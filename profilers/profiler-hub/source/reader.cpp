@@ -248,10 +248,17 @@ uint32_t
 reader_t::read_table_events(const resolved_event_query& query,
                             uint32_t                    event_type,
                             uint64_t                    after_id,
+                            uint64_t                    last_id,
                             ph_table_event*             rows,
                             uint32_t                    capacity)
 {
-    return m_impl->read_table_events(query, event_type, after_id, rows, capacity);
+    return m_impl->read_table_events(query, event_type, after_id, last_id, rows, capacity);
+}
+
+bool
+reader_t::table_event_id_span(uint32_t event_type, uint64_t& first_id, uint64_t& last_id)
+{
+    return m_impl->table_event_id_span(event_type, first_id, last_id);
 }
 
 }  // namespace profiler_hub

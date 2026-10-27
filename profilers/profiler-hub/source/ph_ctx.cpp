@@ -27,6 +27,8 @@ to_c_track_category(profiler_hub::reader_types::track_kind_t kind)
         case track_kind_t::thread: return PH_TRACK_CATEGORY_THREAD;
         case track_kind_t::thread_sample: return PH_TRACK_CATEGORY_THREAD_SAMPLE;
         case track_kind_t::pmc_agent: return PH_TRACK_CATEGORY_PMC_AGENT;
+        case track_kind_t::pmc_kernel: return PH_TRACK_CATEGORY_PMC_KERNEL;
+        case track_kind_t::pmc_memory: return PH_TRACK_CATEGORY_PMC_MEMORY;
         case track_kind_t::kernel_dispatch_agent_queue:
             return PH_TRACK_CATEGORY_KERNEL_DISPATCH_AGENT_QUEUE;
         case track_kind_t::memory_allocate_agent_queue:
@@ -108,7 +110,9 @@ track_holds_event(const profiler_hub::reader_types::track_info_ptr_t& track,
         case track_kind_t::stream: return type != event_type_t::region;
         case track_kind_t::thread:
         case track_kind_t::thread_sample: return true;
-        case track_kind_t::pmc_agent: return false;
+        case track_kind_t::pmc_agent:
+        case track_kind_t::pmc_kernel:
+        case track_kind_t::pmc_memory: return false;
     }
     return false;
 }
@@ -513,6 +517,7 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
 
     if(progress) progress(0.0, "Building reader catalog");
     populate_reader_catalog(m_thread_pool, m_connection_pool, *m_catalog);
+    m_catalog->publish_memory_activity_pmc_infos();
     if(stop_requested()) return false;
 
     if(progress) progress(0.0, "Building track list");
@@ -887,13 +892,23 @@ uint32_t
 ph_ctx::read_table_events(const profiler_hub::resolved_event_query& query,
                           uint32_t                                  event_type,
                           uint64_t                                  after_id,
+                          uint64_t                                  last_id,
                           ph_table_event*                           rows,
                           uint32_t                                  capacity)
 {
     return m_connection_pool.with_connection(
         [&](profiler_hub::common::connection& connection) {
             return connection.reader().read_table_events(
-                query, event_type, after_id, rows, capacity);
+                query, event_type, after_id, last_id, rows, capacity);
+        });
+}
+
+bool
+ph_ctx::table_event_id_span(uint32_t event_type, uint64_t& first_id, uint64_t& last_id)
+{
+    return m_connection_pool.with_connection(
+        [&](profiler_hub::common::connection& connection) {
+            return connection.reader().table_event_id_span(event_type, first_id, last_id);
         });
 }
 
@@ -1014,6 +1029,7 @@ ph_ctx::initialize_track_list()
             .thread_row_id  = track->thread_info
                                   ? static_cast<std::uint64_t>(track->thread_info->id)
                                   : 0,
+            .pmc_id = static_cast<std::uint64_t>(track->pmc_id),
         });
     }
 }
@@ -1034,9 +1050,16 @@ ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
         if(stop_requested()) return false;
 
         const auto& track = m_track_by_id.at(c_track.id);
-        if(track->category == profiler_hub::reader_types::track_kind_t::pmc_agent)
+        const auto kind = track->category;
+        if(kind == profiler_hub::reader_types::track_kind_t::pmc_agent ||
+           kind == profiler_hub::reader_types::track_kind_t::pmc_kernel ||
+           kind == profiler_hub::reader_types::track_kind_t::pmc_memory)
         {
-            std::ignore = m_track_reader.samples(track, 0, 0);
+            if(kind == profiler_hub::reader_types::track_kind_t::pmc_agent ||
+               kind == profiler_hub::reader_types::track_kind_t::pmc_memory)
+            {
+                std::ignore = m_track_reader.samples(track, 0, 0);
+            }
         }
         else
         {

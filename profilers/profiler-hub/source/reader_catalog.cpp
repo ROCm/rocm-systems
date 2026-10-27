@@ -4,12 +4,14 @@
 #include "reader_catalog.hpp"
 #include "common/debug.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <map>
 #include <memory>
 #include <optional>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace profiler_hub
@@ -284,38 +286,280 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
         sample_track_by_db_id.emplace(sample_track_id, track_info_ptr);
     }
 
-    // PMC/counter tracks: one row per (nid,agent_id,pmc_id), already grouped
-    // directly off the counter-sample tables -- naturally one track per
-    // device+counter, no per-track-id agent-split bookkeeping needed.
-    for(const auto& row : stmts.pmc_track_statement()().to_vector())
-    {
-        auto track_ptr         = std::make_shared<reader_types::track_info_t>();
-        track_ptr->id          = next_id++;
-        track_ptr->name        = row.name;
-        track_ptr->category    = reader_types::track_kind_t::pmc_agent;
-        track_ptr->agent_id    = row.agent_id;
-        track_ptr->pmc_id      = row.pmc_id;
-        track_ptr->event_count = row.count;
-        if(row.min_start.has_value())
+    // Counter tracks, one row per (nid, agent, counter). Sample, kernel, and
+    // memory activity are separate tracks because their tables do not share
+    // rows.
+    auto add_counter_tracks = [&](const auto& statement, reader_types::track_kind_t kind) {
+        for(const auto& row : statement().to_vector())
         {
-            track_ptr->start_ts = row.min_start.value();
-        }
-        if(row.max_end.has_value())
-        {
-            track_ptr->end_ts = row.max_end.value();
-        }
-        if(row.min_value.has_value() && row.max_value.has_value())
-        {
-            track_ptr->value_range = reader_types::value_range_t{ row.min_value.value(),
-                                                                  row.max_value.value() };
-        }
+            auto track_ptr         = std::make_shared<reader_types::track_info_t>();
+            track_ptr->id          = next_id++;
+            track_ptr->name        = row.name;
+            track_ptr->category    = kind;
+            track_ptr->agent_id    = row.agent_id;
+            track_ptr->pmc_id      = row.pmc_id;
+            track_ptr->event_count = row.count;
+            if(row.min_start.has_value())
+            {
+                track_ptr->start_ts = row.min_start.value();
+            }
+            if(row.max_end.has_value())
+            {
+                track_ptr->end_ts = row.max_end.value();
+            }
+            if(row.min_value.has_value() && row.max_value.has_value())
+            {
+                track_ptr->value_range = reader_types::value_range_t{
+                    row.min_value.value(), row.max_value.value() };
+            }
 
-        link_owner(*track_ptr, row.nid, row.pid);
-
-        tracks.push_back(track_ptr);
-    }
+            link_owner(*track_ptr, row.nid, row.pid);
+            tracks.push_back(track_ptr);
+        }
+    };
+    add_counter_tracks(stmts.pmc_track_statement(), reader_types::track_kind_t::pmc_agent);
+    add_counter_tracks(stmts.pmc_kernel_track_statement(),
+                       reader_types::track_kind_t::pmc_kernel);
+    add_memory_activity_tracks(stmts, next_id);
 
     add_category_tracks(stmts, next_id);
+}
+
+void
+reader_catalog_t::add_memory_activity_tracks(
+    data_storage::schema_v3::read_statements& stmts, size_t& next_synthetic_id)
+{
+    // Cumulative allocated bytes, one track per node and agent. A free takes
+    // its agent, size, and missing level from the newest still-open allocation
+    // at the same node and address. Nothing is written back to the database.
+    struct open_alloc_t
+    {
+        size_t      agent_id{};
+        uint64_t    byte_size{};
+        std::string level;
+    };
+    struct open_address_key_t
+    {
+        size_t   nid{};
+        uint64_t address{};
+
+        bool operator==(const open_address_key_t& other) const
+        {
+            return nid == other.nid && address == other.address;
+        }
+    };
+    struct open_address_key_hash_t
+    {
+        size_t operator()(const open_address_key_t& key) const
+        {
+            size_t hash = std::hash<size_t>{}(key.nid);
+            hash ^= std::hash<uint64_t>{}(key.address) + 0x9e3779b9 + (hash << 6) +
+                    (hash >> 2);
+            return hash;
+        }
+    };
+    struct activity_group
+    {
+        size_t                                 nid{};
+        size_t                                 agent_id{};
+        std::optional<size_t>                  pid;
+        std::string                            name;
+        uint64_t                               pmc_id{};
+        uint64_t                               total{ 0 };
+        uint64_t                               min_ts{ std::numeric_limits<uint64_t>::max() };
+        uint64_t                               max_ts{ 0 };
+        double                                 min_value{ 0 };
+        double                                 max_value{ 0 };
+        bool                                   has_value{ false };
+        std::vector<memory_activity_point_t>   points;
+    };
+
+    uint64_t next_pmc_id = 1;
+    for(const auto& track : tracks)
+    {
+        if(track && track->pmc_id >= next_pmc_id)
+        {
+            next_pmc_id = static_cast<uint64_t>(track->pmc_id) + 1;
+        }
+    }
+
+    std::unordered_map<open_address_key_t, std::vector<open_alloc_t>, open_address_key_hash_t>
+        open_by_address;
+    std::map<std::pair<size_t, size_t>, activity_group> groups;
+
+    for(const auto& row : stmts.memory_allocation_statement()().to_vector())
+    {
+        const bool  is_free   = row.type.has_value() && row.type.value() == "FREE";
+        const bool  is_alloc  = row.type.has_value() && row.type.value() == "ALLOC";
+        bool        has_agent = row.agent_id.has_value();
+        size_t      agent     = row.agent_id.value_or(0);
+        uint64_t    bytes     = row.byte_size.value_or(0);
+        std::string level     = row.level.value_or("");
+        if(is_free && row.address.has_value())
+        {
+            const open_address_key_t address_key{ row.nid, row.address.value() };
+            const auto found = open_by_address.find(address_key);
+            if(found != open_by_address.end() && !found->second.empty())
+            {
+                const open_alloc_t& matched = found->second.back();
+                agent     = matched.agent_id;
+                bytes     = matched.byte_size;
+                has_agent = true;
+                if(level.empty()) level = matched.level;
+                found->second.pop_back();
+                if(found->second.empty()) open_by_address.erase(found);
+            }
+        }
+        if(!has_agent) continue;
+
+        const auto key = std::make_pair(row.nid, agent);
+        auto       inserted = groups.emplace(key, activity_group{});
+        activity_group& group = inserted.first->second;
+        if(inserted.second)
+        {
+            group.nid      = row.nid;
+            group.agent_id = agent;
+            group.pid      = row.pid;
+            group.pmc_id   = next_pmc_id++;
+            group.name     = level.empty() ? "MEMORY" : level + " MEMORY";
+        }
+        if(is_alloc)
+        {
+            group.total += bytes;
+        }
+        else if(is_free)
+        {
+            group.total = bytes > group.total ? 0 : group.total - bytes;
+        }
+
+        memory_activity_point_t point;
+        point.id    = row.id;
+        point.start = row.start;
+        point.end   = row.end;
+        point.value = static_cast<double>(group.total);
+        group.min_ts = std::min(group.min_ts, point.start);
+        group.max_ts = std::max(group.max_ts, point.end);
+        if(!group.has_value)
+        {
+            group.min_value = point.value;
+            group.max_value = point.value;
+            group.has_value = true;
+        }
+        else
+        {
+            group.min_value = std::min(group.min_value, point.value);
+            group.max_value = std::max(group.max_value, point.value);
+        }
+        group.points.push_back(point);
+
+        if(is_alloc && row.address.has_value())
+        {
+            open_by_address[open_address_key_t{ row.nid, row.address.value() }].push_back(
+                open_alloc_t{ agent, bytes, level });
+        }
+    }
+
+    for(auto& entry : groups)
+    {
+        activity_group& group = entry.second;
+        if(group.points.empty()) continue;
+        std::sort(group.points.begin(),
+                  group.points.end(),
+                  [](const memory_activity_point_t& left,
+                     const memory_activity_point_t& right) { return left.id < right.id; });
+
+        auto track_ptr         = std::make_shared<reader_types::track_info_t>();
+        track_ptr->id          = next_synthetic_id++;
+        track_ptr->name        = group.name;
+        track_ptr->category    = reader_types::track_kind_t::pmc_memory;
+        track_ptr->agent_id    = group.agent_id;
+        track_ptr->pmc_id      = static_cast<size_t>(group.pmc_id);
+        track_ptr->event_count = group.points.size();
+        track_ptr->start_ts    = static_cast<size_t>(group.min_ts);
+        track_ptr->end_ts      = static_cast<size_t>(group.max_ts);
+        track_ptr->value_range =
+            reader_types::value_range_t{ group.min_value, group.max_value };
+        link_owner(*track_ptr, group.nid, group.pid);
+        tracks.push_back(track_ptr);
+
+        if(!m_memory_activity_has_ids)
+        {
+            m_memory_activity_first_id = group.points.front().id;
+            m_memory_activity_last_id  = group.points.front().id;
+            m_memory_activity_has_ids  = true;
+        }
+        for(const memory_activity_point_t& point : group.points)
+        {
+            m_memory_activity_first_id = std::min(m_memory_activity_first_id, point.id);
+            m_memory_activity_last_id  = std::max(m_memory_activity_last_id, point.id);
+        }
+        m_memory_activity.emplace(track_ptr->id, std::move(group.points));
+    }
+}
+
+const std::vector<memory_activity_point_t>*
+reader_catalog_t::memory_activity_points(size_t track_id) const
+{
+    const auto found = m_memory_activity.find(track_id);
+    if(found == m_memory_activity.end()) return nullptr;
+    return &found->second;
+}
+
+bool
+reader_catalog_t::memory_activity_id_span(uint64_t& first_id, uint64_t& last_id) const
+{
+    if(!m_memory_activity_has_ids) return false;
+    first_id = m_memory_activity_first_id;
+    last_id  = m_memory_activity_last_id;
+    return true;
+}
+
+void
+reader_catalog_t::publish_memory_activity_pmc_infos()
+{
+    uint64_t next_id = 1;
+    std::unordered_set<size_t> used_ids;
+    used_ids.reserve(pmc_infos.size());
+    for(const reader_types::pmc_info_ptr_t& info : pmc_infos)
+    {
+        if(!info) continue;
+        used_ids.insert(info->id);
+        if(info->id >= next_id) next_id = static_cast<uint64_t>(info->id) + 1;
+    }
+    for(const reader_types::track_info_ptr_t& track : tracks)
+    {
+        if(!track || track->category == reader_types::track_kind_t::pmc_memory) continue;
+        if(track->pmc_id >= next_id) next_id = static_cast<uint64_t>(track->pmc_id) + 1;
+    }
+
+    for(const reader_types::track_info_ptr_t& track : tracks)
+    {
+        if(!track || track->category != reader_types::track_kind_t::pmc_memory) continue;
+        if(track->pmc_id == 0 || used_ids.count(track->pmc_id) != 0)
+        {
+            track->pmc_id = static_cast<size_t>(next_id++);
+        }
+        used_ids.insert(track->pmc_id);
+
+        auto info                  = std::make_shared<reader_types::pmc_info_t>();
+        info->id                   = track->pmc_id;
+        info->name                 = track->name;
+        info->symbol               = track->name;
+        info->description          = track->name;
+        info->long_description     = track->name;
+        info->target_arch          = "GPU";
+        info->units                = "bytes";
+        info->event_code           = 0;
+        info->instance_id          = 0;
+        info->is_constant          = 0;
+        info->is_derived           = 0;
+        info->extdata              = "{}";
+        info->node_info            = track->node_info;
+        info->process_info         = track->process_info;
+        const auto agent           = agents_by_id.find(track->agent_id);
+        if(agent != agents_by_id.end()) info->agent_info = agent->second;
+        pmc_infos.push_back(std::move(info));
+    }
 }
 
 void
@@ -465,6 +709,8 @@ is_agent_queue_track(reader_types::track_kind_t category)
         case track_kind_t::thread:
         case track_kind_t::thread_sample:
         case track_kind_t::pmc_agent:
+        case track_kind_t::pmc_kernel:
+        case track_kind_t::pmc_memory:
         case track_kind_t::stream: break;
     }
     return false;

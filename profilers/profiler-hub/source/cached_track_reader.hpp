@@ -23,8 +23,10 @@ namespace profiler_hub
 /**
  * Serves the events and samples of a track as C API lists. A request for a whole track
  * (both bounds 0) is read once, sorted, kept and answered with the same storage on every
- * later call; a request with a time window gets storage of its own, filled from the
- * whole-track events. Everything handed out stays valid until the reader is destroyed.
+ * later call; a request with a time window gets storage of its own, filled from that
+ * whole-track read. A sample window also includes the sample before the window and the
+ * sample after it, and repeats the last value at the track end when nothing follows.
+ * Everything handed out stays valid until the reader is destroyed.
  * Events are only served for tracks that are not PMC tracks and samples only for PMC
  * tracks; any other request yields an empty list.
  *

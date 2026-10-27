@@ -83,6 +83,8 @@ extern "C"
         PH_TRACK_CATEGORY_THREAD_SAMPLE, /**< Same (nid,pid,tid) family, events
                                                tagged with a named track. */
         PH_TRACK_CATEGORY_PMC_AGENT,     /**< PMC/counter samples split by agent_id. */
+        PH_TRACK_CATEGORY_PMC_KERNEL,    /**< PMC values attached to kernel dispatches. */
+        PH_TRACK_CATEGORY_PMC_MEMORY,    /**< Memory-activity counters, one per agent. */
         PH_TRACK_CATEGORY_KERNEL_DISPATCH_AGENT_QUEUE, /**< By (nid,agent_id,queue_id). */
         PH_TRACK_CATEGORY_MEMORY_ALLOCATE_AGENT_QUEUE, /**< By (nid,agent_id,queue_id). */
         PH_TRACK_CATEGORY_MEMORY_COPY_AGENT_QUEUE,     /**< By (nid,agent_id,queue_id). */
@@ -152,6 +154,7 @@ extern "C"
                                        track has no process. */
         uint64_t thread_row_id;  /**< rocpd_info_thread.id. Not tid. 0 if this
                                        track has no thread. */
+        uint64_t pmc_id; /**< rocpd_info_pmc.id for counter tracks, else 0. */
     } ph_track_t;
 
     /**
@@ -384,6 +387,12 @@ extern "C"
         PH_EVENT_TYPE_MEMORY_ALLOCATE, /**< Memory allocation. */
         /** Sampled host code region. Used only by ph_event_query_read(). */
         PH_EVENT_TYPE_REGION_SAMPLE,
+        /** PMC value over a kernel dispatch. Used only by ph_event_query_read(). */
+        PH_EVENT_TYPE_PMC_COUNTER,
+        /** PMC sample from rocpd_sample. Used only by ph_event_query_read(). */
+        PH_EVENT_TYPE_PMC_SAMPLE,
+        /** Memory-activity counter. Used only by ph_event_query_read(). */
+        PH_EVENT_TYPE_MEMORY_ACTIVITY,
     } ph_event_type_t;
 
     /** @brief A single duration event (region/kernel dispatch/memory
@@ -502,6 +511,7 @@ extern "C"
         uint64_t src_address;
         char     mem_type[64];
         char     level[64];
+        double   value; /**< Counter value. Only set for sample-table rows. */
     } ph_table_event_t;
 
     /** @brief Which catalog ph_lookup_text reads. */

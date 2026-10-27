@@ -201,7 +201,9 @@ serves_events_of(reader_types::track_kind_t kind, event_type_t type)
         case reader_types::track_kind_t::stream: return type != event_type_t::region;
         case reader_types::track_kind_t::thread:
         case reader_types::track_kind_t::thread_sample:
-        case reader_types::track_kind_t::pmc_agent: return false;
+        case reader_types::track_kind_t::pmc_agent:
+        case reader_types::track_kind_t::pmc_kernel:
+        case reader_types::track_kind_t::pmc_memory: return false;
     }
     return false;
 }
@@ -455,7 +457,9 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
             return get_category_track_events(track, filter);
         case reader_types::track_kind_t::thread:
         case reader_types::track_kind_t::thread_sample:
-        case reader_types::track_kind_t::pmc_agent: break;
+        case reader_types::track_kind_t::pmc_agent:
+        case reader_types::track_kind_t::pmc_kernel:
+        case reader_types::track_kind_t::pmc_memory: break;
     }
 
     auto topo_it = m_catalog->topology_by_track.find(track);
@@ -651,33 +655,60 @@ reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t     
                                              const reader_types::event_filter_t& filter)
 {
     if(!track || !track->node_info) return {};
-    if(track->category != reader_types::track_kind_t::pmc_agent) return {};
+    if(track->category != reader_types::track_kind_t::pmc_agent &&
+       track->category != reader_types::track_kind_t::pmc_memory)
+    {
+        return {};
+    }
 
     const auto nid = track->node_info->node_id;
 
     const bool has_time =
         filter.time_window.start.has_value() && filter.time_window.end.has_value();
 
+    reader_types::counter_timeline_event_list_t events;
+    if(track->category == reader_types::track_kind_t::pmc_memory)
+    {
+        if(m_catalog == nullptr) return {};
+        const std::vector<memory_activity_point_t>* points =
+            m_catalog->memory_activity_points(track->id);
+        if(points == nullptr) return {};
+        events.reserve(points->size());
+        for(const memory_activity_point_t& point : *points)
+        {
+            if(has_time &&
+               (point.start < filter.time_window.start.value() ||
+                point.start > filter.time_window.end.value()))
+            {
+                continue;
+            }
+            events.push_back(
+                reader_types::counter_timeline_event_t{ .unique_identifier = {},
+                                                        .timestamp         = point.start,
+                                                        .value             = point.value,
+                                                        .track             = track });
+        }
+        return events;
+    }
+
     std::vector<data_storage::schema_v3::pmc_sample_result> results;
     if(has_time)
     {
-        results =
-            m_read_statements
-                ->pmc_sample_time_filtered_statement()(nid,
-                                                       track->agent_id,
-                                                       track->pmc_id,
-                                                       filter.time_window.start.value(),
-                                                       filter.time_window.end.value())
-                .to_vector();
+        results = m_read_statements
+                      ->pmc_sample_time_filtered_statement()(nid,
+                                                             track->agent_id,
+                                                             track->pmc_id,
+                                                             filter.time_window.start.value(),
+                                                             filter.time_window.end.value())
+                      .to_vector();
     }
     else
     {
-        results =
-            m_read_statements->pmc_sample_statement()(nid, track->agent_id, track->pmc_id)
-                .to_vector();
+        results = m_read_statements
+                      ->pmc_sample_statement()(nid, track->agent_id, track->pmc_id)
+                      .to_vector();
     }
 
-    reader_types::counter_timeline_event_list_t events;
     events.reserve(results.size());
     for(const auto& result : results)
     {

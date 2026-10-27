@@ -9,10 +9,10 @@
 #include "profiler-hub/c/profiler_hub_types.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <optional>
 #include <string>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -52,6 +52,12 @@ struct table_event_row
     std::optional<size_t>      sample_track_id;
 };
 
+struct table_id_span_row
+{
+    std::optional<size_t> first_id;
+    std::optional<size_t> last_id;
+};
+
 struct table_source
 {
     const char* table{};
@@ -84,23 +90,6 @@ reader_event_type(uint32_t event_type)
     }
 }
 
-std::optional<track_kind_t>
-agent_queue_kind(event_type_t type)
-{
-    switch(type)
-    {
-        case event_type_t::kernel_dispatch:
-            return track_kind_t::kernel_dispatch_agent_queue;
-        case event_type_t::memory_copy: return track_kind_t::memory_copy_agent_queue;
-        case event_type_t::memory_allocate:
-            return track_kind_t::memory_allocate_agent_queue;
-        case event_type_t::region:
-        case event_type_t::sample:
-        case event_type_t::pmc_event: break;
-    }
-    return std::nullopt;
-}
-
 bool
 serves(track_kind_t kind, event_type_t type)
 {
@@ -115,7 +104,9 @@ serves(track_kind_t kind, event_type_t type)
         case track_kind_t::stream: return type != event_type_t::region;
         case track_kind_t::thread:
         case track_kind_t::thread_sample: return true;
-        case track_kind_t::pmc_agent: return false;
+        case track_kind_t::pmc_agent:
+        case track_kind_t::pmc_kernel:
+        case track_kind_t::pmc_memory: return false;
     }
     return false;
 }
@@ -333,48 +324,6 @@ copy_text(char* dest, size_t size, const std::optional<std::string>& value)
     dest[count] = '\0';
 }
 
-std::optional<size_t>
-resolved_track_id(const reader_catalog_t& catalog,
-                  event_type_t            type,
-                  const table_event_row&  row)
-{
-    const size_t pid = row.pid.value_or(0);
-    const size_t tid = row.tid.value_or(0);
-    if(const auto kind = agent_queue_kind(type); kind.has_value())
-    {
-        const auto it = catalog.agent_queue_track_by_key.find(agent_queue_track_key_t{
-            kind.value(), row.nid, row.agent_id.value_or(0), row.queue_id.value_or(0) });
-        if(it != catalog.agent_queue_track_by_key.end() && it->second)
-        {
-            return it->second->id;
-        }
-    }
-    if(type != event_type_t::region && row.stream_id.has_value())
-    {
-        const auto it = catalog.stream_track_by_key.find(
-            stream_track_key_t{ row.nid, pid, row.stream_id.value() });
-        if(it != catalog.stream_track_by_key.end() && it->second)
-        {
-            return it->second->id;
-        }
-    }
-    if(row.sample_track_id.has_value())
-    {
-        const auto it = catalog.sample_track_by_db_id.find(row.sample_track_id.value());
-        if(it != catalog.sample_track_by_db_id.end() && it->second)
-        {
-            return it->second->id;
-        }
-    }
-    const auto it =
-        catalog.track_by_topology.find(topology_key_t{ row.nid, pid, tid });
-    if(it != catalog.track_by_topology.end() && it->second)
-    {
-        return it->second->id;
-    }
-    return std::nullopt;
-}
-
 void
 publish(const reader_catalog_t& catalog, const table_event_row& row, ph_table_event& out)
 {
@@ -452,16 +401,394 @@ select_list(const table_source& source)
            type_expr + ", " + level_expr + ", S.track_id";
 }
 
+struct sample_table_row
+{
+    size_t                id{};
+    size_t                start_timestamp{};
+    size_t                end_timestamp{};
+    std::optional<double> value;
+};
+
+enum class sample_table_kind
+{
+    counter,
+    pmc_sample,
+    memory
+};
+
+bool
+sample_table_of(uint32_t event_type, sample_table_kind& kind, track_kind_t& track_kind)
+{
+    switch(event_type)
+    {
+        case PH_EVENT_TYPE_PMC_COUNTER:
+            kind       = sample_table_kind::counter;
+            track_kind = track_kind_t::pmc_kernel;
+            return true;
+        case PH_EVENT_TYPE_PMC_SAMPLE:
+            kind       = sample_table_kind::pmc_sample;
+            track_kind = track_kind_t::pmc_agent;
+            return true;
+        case PH_EVENT_TYPE_MEMORY_ACTIVITY:
+            kind       = sample_table_kind::memory;
+            track_kind = track_kind_t::pmc_memory;
+            return true;
+        default: return false;
+    }
+}
+
+bool
+sqlite_table_present(data_storage::sqlite_backend& backend, const std::string& name)
+{
+    struct present_row
+    {
+        size_t one{};
+    };
+    const auto rows =
+        backend
+            .create_read_statement_executor<present_row>(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '" + name +
+                    "'",
+                &present_row::one)()
+            .to_vector();
+    return !rows.empty();
+}
+
+bool
+sqlite_table_has_row(data_storage::sqlite_backend& backend, const std::string& name)
+{
+    if(!sqlite_table_present(backend, name)) return false;
+    struct present_row
+    {
+        size_t one{};
+    };
+    const auto rows = backend
+                          .create_read_statement_executor<present_row>(
+                              "SELECT 1 FROM " + name + " LIMIT 1", &present_row::one)()
+                          .to_vector();
+    return !rows.empty();
+}
+
+std::string
+choose_sample_table(data_storage::sqlite_backend& backend)
+{
+    const std::string suffixed = "rocpd_sample_" + backend.get_uuid();
+    if(sqlite_table_has_row(backend, suffixed)) return suffixed;
+    if(sqlite_table_present(backend, "rocpd_sample")) return "rocpd_sample";
+    if(sqlite_table_present(backend, suffixed)) return suffixed;
+    return {};
+}
+
+std::string
+sample_track_clause(sample_table_kind        kind,
+                    const reader_catalog_t&  catalog,
+                    const resolved_event_query& query)
+{
+    if(query.tracks.empty()) return {};
+
+    const char* nid_column   = "PI.nid";
+    const char* agent_column = "PI.agent_id";
+    const char* pmc_column   = "PE.pmc_id";
+    track_kind_t expected    = track_kind_t::pmc_agent;
+    if(kind == sample_table_kind::counter)
+    {
+        nid_column   = "K.nid";
+        agent_column = "K.agent_id";
+        expected     = track_kind_t::pmc_kernel;
+    }
+    else if(kind == sample_table_kind::memory)
+    {
+        nid_column   = "A.nid";
+        agent_column = "A.agent_id";
+        pmc_column   = "A.pmc_id";
+        expected     = track_kind_t::pmc_memory;
+    }
+
+    std::string clause;
+    for(const uint32_t track_id : query.tracks)
+    {
+        const auto found = std::find_if(
+            catalog.tracks.begin(),
+            catalog.tracks.end(),
+            [track_id](const reader_types::track_info_ptr_t& track) {
+                return track && track->id == track_id;
+            });
+        if(found == catalog.tracks.end() || (*found)->category != expected)
+        {
+            continue;
+        }
+        const auto& track = **found;
+        std::string one = std::string(agent_column) + " = " +
+                          std::to_string(track.agent_id) + " AND " + pmc_column + " = " +
+                          std::to_string(track.pmc_id);
+        if(track.node_info != nullptr)
+        {
+            one = std::string(nid_column) + " = " +
+                  std::to_string(track.node_info->node_id) + " AND " + one;
+        }
+        if(!clause.empty()) clause += " OR ";
+        clause += "(" + one + ")";
+    }
+    if(clause.empty()) return {};
+    return "(" + clause + ")";
+}
+
+std::string
+sample_table_sql(data_storage::sqlite_backend& backend,
+                 sample_table_kind            kind,
+                 const reader_catalog_t&      catalog,
+                 const resolved_event_query&  query)
+{
+    if(kind == sample_table_kind::memory) return {};
+    const std::string tracks = sample_track_clause(kind, catalog, query);
+    if(!query.tracks.empty() && tracks.empty()) return {};
+
+    const std::string uuid = backend.get_uuid();
+    std::string       from;
+    std::string       time;
+    if(kind == sample_table_kind::counter)
+    {
+        from = "rocpd_pmc_event_" + uuid + " PE INNER JOIN rocpd_kernel_dispatch_" + uuid +
+               " K ON K.event_id = PE.event_id INNER JOIN rocpd_info_pmc PI ON PI.id = "
+               "PE.pmc_id";
+        if(query.time.has_value())
+        {
+            time = "K.start <= " + std::to_string(query.time->end) + " AND K.end >= " +
+                   std::to_string(query.time->start);
+        }
+    }
+    else if(kind == sample_table_kind::pmc_sample)
+    {
+        const std::string sample_table = choose_sample_table(backend);
+        if(sample_table.empty()) return {};
+        from = "rocpd_pmc_event_" + uuid +
+               " PE INNER JOIN rocpd_info_pmc PI ON PI.id = PE.pmc_id INNER JOIN " +
+               sample_table + " S ON S.event_id = PE.event_id";
+        if(query.time.has_value())
+        {
+            time = "S.timestamp >= " + std::to_string(query.time->start) +
+                   " AND S.timestamp <= " + std::to_string(query.time->end);
+        }
+    }
+    else
+    {
+        return {};
+    }
+
+    std::string where;
+    add_and(where, time);
+    add_and(where, tracks);
+    const char* id_column    = kind == sample_table_kind::pmc_sample ? "S.id" : "PE.id";
+    const char* value_column = "PE.value";
+    const char* start_column =
+        kind == sample_table_kind::counter ? "K.start" : "S.timestamp";
+    const char* end_column = kind == sample_table_kind::counter ? "K.end" : "S.timestamp";
+    return "SELECT " + std::string(id_column) + ", " + start_column + ", " + end_column +
+           ", " + value_column + " FROM " + from + " WHERE " +
+           (where.empty() ? std::string() : where + " AND ") + id_column +
+           " > ? AND " + id_column + " <= ? ORDER BY " + id_column + " LIMIT ?";
+}
+
+bool
+point_in_window(const memory_activity_point_t& point, const resolved_event_query& query)
+{
+    if(!query.time.has_value()) return true;
+    return point.start <= query.time->end && point.end >= query.time->start;
+}
+
+uint32_t
+read_memory_activity_events(const reader_catalog_t&     catalog,
+                            const resolved_event_query& query,
+                            uint64_t                    after_id,
+                            uint64_t                    last_id,
+                            ph_table_event*             rows,
+                            uint32_t                    capacity)
+{
+    struct cursor_t
+    {
+        const std::vector<memory_activity_point_t>* points{};
+        size_t                                      index{};
+    };
+    std::vector<cursor_t> cursors;
+    for(const uint32_t track_id : query.tracks)
+    {
+        const auto found = std::find_if(
+            catalog.tracks.begin(),
+            catalog.tracks.end(),
+            [track_id](const reader_types::track_info_ptr_t& track) {
+                return track && track->id == track_id &&
+                       track->category == track_kind_t::pmc_memory;
+            });
+        if(found == catalog.tracks.end()) continue;
+        const std::vector<memory_activity_point_t>* points =
+            catalog.memory_activity_points((*found)->id);
+        if(points == nullptr) continue;
+        const auto begin = std::lower_bound(
+            points->begin(),
+            points->end(),
+            after_id,
+            [](const memory_activity_point_t& point, uint64_t id) {
+                return point.id <= id;
+            });
+        cursors.push_back(cursor_t{ points, static_cast<size_t>(begin - points->begin()) });
+    }
+
+    uint32_t filled = 0;
+    while(filled < capacity)
+    {
+        const memory_activity_point_t* best       = nullptr;
+        cursor_t*                      best_cursor = nullptr;
+        for(cursor_t& cursor : cursors)
+        {
+            while(cursor.points != nullptr && cursor.index < cursor.points->size())
+            {
+                const memory_activity_point_t& point = (*cursor.points)[cursor.index];
+                if(point.id > last_id)
+                {
+                    cursor.index = cursor.points->size();
+                    break;
+                }
+                if(!point_in_window(point, query))
+                {
+                    ++cursor.index;
+                    continue;
+                }
+                if(best == nullptr || point.id < best->id)
+                {
+                    best        = &point;
+                    best_cursor = &cursor;
+                }
+                break;
+            }
+        }
+        if(best == nullptr || best_cursor == nullptr) break;
+        ph_table_event& out = rows[filled];
+        out                 = ph_table_event{};
+        out.id              = best->id;
+        out.start           = best->start;
+        out.end             = best->end;
+        out.value           = best->value;
+        ++filled;
+        ++best_cursor->index;
+    }
+    return filled;
+}
+
+uint32_t
+read_sample_events(data_storage::sqlite_backend& backend,
+                   const reader_catalog_t&      catalog,
+                   const resolved_event_query&  query,
+                   sample_table_kind            kind,
+                   uint64_t                     after_id,
+                   uint64_t                     last_id,
+                   ph_table_event*              rows,
+                   uint32_t                     capacity)
+{
+    if(kind == sample_table_kind::memory)
+    {
+        return read_memory_activity_events(
+            catalog, query, after_id, last_id, rows, capacity);
+    }
+    const std::string sql = sample_table_sql(backend, kind, catalog, query);
+    if(sql.empty()) return 0;
+
+    const uint64_t upper_id = std::min<uint64_t>(last_id, static_cast<uint64_t>(INT64_MAX));
+    if(after_id >= upper_id) return 0;
+
+    auto statement =
+        backend.create_read_statement_executor<sample_table_row,
+                                               bind_types<size_t, size_t, size_t>>(
+            sql,
+            &sample_table_row::id,
+            &sample_table_row::start_timestamp,
+            &sample_table_row::end_timestamp,
+            &sample_table_row::value);
+
+    uint64_t cursor = after_id;
+    uint32_t filled = 0;
+    while(filled < capacity)
+    {
+        size_t   got     = 0;
+        uint64_t scanned = cursor;
+        bool     stop    = false;
+        statement(static_cast<size_t>(cursor),
+                  static_cast<size_t>(upper_id),
+                  static_cast<size_t>(capacity))
+            .for_each([&](const sample_table_row& row) {
+                if(stop) return;
+                ++got;
+                scanned          = row.id;
+                ph_table_event& out = rows[filled];
+                out                  = ph_table_event{};
+                out.id               = row.id;
+                out.start            = row.start_timestamp;
+                out.end              = row.end_timestamp;
+                out.value            = row.value.value_or(0.0);
+                ++filled;
+                if(filled == capacity) stop = true;
+            });
+        if(got == 0 || got < capacity) break;
+        cursor = scanned;
+    }
+    return filled;
+}
+
+bool
+sample_id_span(data_storage::sqlite_backend& backend,
+               const reader_catalog_t&      catalog,
+               sample_table_kind            kind,
+               uint64_t&                    first_id,
+               uint64_t&                    last_id)
+{
+    std::string table;
+    if(kind == sample_table_kind::memory)
+    {
+        return catalog.memory_activity_id_span(first_id, last_id);
+    }
+    if(kind == sample_table_kind::pmc_sample)
+    {
+        table = choose_sample_table(backend);
+        if(table.empty()) return false;
+    }
+    else
+    {
+        table = "rocpd_pmc_event_" + backend.get_uuid();
+    }
+    const std::string sql = "SELECT MIN(id), MAX(id) FROM " + table;
+    auto statement = backend.create_read_statement_executor<table_id_span_row>(
+        sql, &table_id_span_row::first_id, &table_id_span_row::last_id);
+    bool found = false;
+    statement().for_each([&](const table_id_span_row& row) {
+        if(!row.first_id.has_value() || !row.last_id.has_value()) return;
+        first_id = static_cast<uint64_t>(row.first_id.value());
+        last_id  = static_cast<uint64_t>(row.last_id.value());
+        found    = true;
+    });
+    return found;
+}
+
 }  // namespace
 
 uint32_t
 reader_t::impl::read_table_events(const resolved_event_query& query,
                                   uint32_t                    event_type,
                                   uint64_t                    after_id,
+                                  uint64_t                    last_id,
                                   ph_table_event*             rows,
                                   uint32_t                    capacity)
 {
-    if(rows == nullptr || capacity == 0 || m_catalog == nullptr) return 0;
+    if(rows == nullptr || capacity == 0 || m_catalog == nullptr || m_backend == nullptr)
+    {
+        return 0;
+    }
+    sample_table_kind sample_kind;
+    track_kind_t      sample_track_kind;
+    if(sample_table_of(event_type, sample_kind, sample_track_kind))
+    {
+        (void) sample_track_kind;
+        return read_sample_events(*m_backend, *m_catalog, query, sample_kind, after_id,
+                                  last_id, rows, capacity);
+    }
     const auto type = reader_event_type(event_type);
     if(!type.has_value()) return 0;
     if(!query.event_types.empty() &&
@@ -525,10 +852,16 @@ reader_t::impl::read_table_events(const resolved_event_query& query,
         " INNER JOIN rocpd_event E ON E.id = " + source->alias +
         ".event_id LEFT JOIN rocpd_sample S ON S.event_id = " + source->alias +
         ".event_id WHERE " + (where.empty() ? std::string() : where + " AND ") +
-        source->alias + ".id > ? ORDER BY " + source->alias + ".id LIMIT ?";
+        source->alias + ".id > ? AND " + source->alias + ".id <= ? ORDER BY " +
+        source->alias + ".id LIMIT ?";
 
-    auto statement =
-        m_backend->create_read_statement_executor<table_event_row, bind_types<size_t, size_t>>(
+    // SQLite binds signed 64-bit integers, so an unbounded range stops at INT64_MAX.
+    const uint64_t upper_id =
+        std::min<uint64_t>(last_id, static_cast<uint64_t>(INT64_MAX));
+    if(after_id >= upper_id) return 0;
+
+    auto statement = m_backend->create_read_statement_executor<table_event_row,
+                                                               bind_types<size_t, size_t, size_t>>(
             sql,
             &table_event_row::id,
             &table_event_row::start_timestamp,
@@ -558,13 +891,6 @@ reader_t::impl::read_table_events(const resolved_event_query& query,
             &table_event_row::level,
             &table_event_row::sample_track_id);
 
-    std::unordered_set<size_t> allowed;
-    allowed.reserve(query.tracks.size());
-    for(const uint32_t track_id : query.tracks)
-    {
-        allowed.insert(track_id);
-    }
-
     uint64_t cursor = after_id;
     uint32_t filled = 0;
     while(filled < capacity)
@@ -572,19 +898,12 @@ reader_t::impl::read_table_events(const resolved_event_query& query,
         size_t   got     = 0;
         uint64_t scanned = cursor;
         bool     stop    = false;
-        statement(static_cast<size_t>(cursor), static_cast<size_t>(capacity))
+        statement(static_cast<size_t>(cursor), static_cast<size_t>(upper_id),
+                  static_cast<size_t>(capacity))
             .for_each([&](const table_event_row& row) {
                 if(stop) return;
                 ++got;
                 scanned = row.id;
-                if(!allowed.empty())
-                {
-                    const auto track = resolved_track_id(*m_catalog, type.value(), row);
-                    if(!track.has_value() || allowed.find(track.value()) == allowed.end())
-                    {
-                        return;
-                    }
-                }
                 publish(*m_catalog, row, rows[filled]);
                 ++filled;
                 if(filled == capacity)
@@ -596,6 +915,41 @@ reader_t::impl::read_table_events(const resolved_event_query& query,
         cursor = scanned;
     }
     return filled;
+}
+
+bool
+reader_t::impl::table_event_id_span(uint32_t  event_type,
+                                    uint64_t& first_id,
+                                    uint64_t& last_id)
+{
+    first_id = 0;
+    last_id  = 0;
+    sample_table_kind sample_kind;
+    track_kind_t      sample_track_kind;
+    if(sample_table_of(event_type, sample_kind, sample_track_kind))
+    {
+        (void) sample_track_kind;
+        if(m_backend == nullptr) return false;
+        if(m_catalog == nullptr) return false;
+        return sample_id_span(*m_backend, *m_catalog, sample_kind, first_id, last_id);
+    }
+    const auto type = reader_event_type(event_type);
+    if(!type.has_value()) return false;
+    const table_source* source = source_for(type.value());
+    if(source == nullptr) return false;
+
+    const std::string sql = std::string("SELECT MIN(id), MAX(id) FROM ") + source->table +
+                            "_" + m_backend->get_uuid();
+    auto statement = m_backend->create_read_statement_executor<table_id_span_row>(
+        sql, &table_id_span_row::first_id, &table_id_span_row::last_id);
+    bool found = false;
+    statement().for_each([&](const table_id_span_row& row) {
+        if(!row.first_id.has_value() || !row.last_id.has_value()) return;
+        first_id = static_cast<uint64_t>(row.first_id.value());
+        last_id  = static_cast<uint64_t>(row.last_id.value());
+        found    = true;
+    });
+    return found;
 }
 
 }  // namespace profiler_hub

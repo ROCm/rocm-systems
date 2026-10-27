@@ -289,6 +289,8 @@ enum class track_kind_t
                                   ///< explicitly tagged with a named
                                   ///< rocpd_sample.track_id.
     pmc_agent,                    ///< PMC/counter samples split by agent_id.
+    pmc_kernel,                   ///< PMC values attached to kernel dispatches.
+    pmc_memory,                   ///< Memory-activity counters, one per agent.
     kernel_dispatch_agent_queue,  ///< Kernel dispatches, by (nid,agent_id,queue_id).
     memory_allocate_agent_queue,  ///< Memory allocations, by (nid,agent_id,queue_id).
     memory_copy_agent_queue,      ///< Memory copies, by (nid,dst_agent_id,queue_id).
@@ -323,9 +325,9 @@ struct track_info_t
     // pid, not the FK.
     size_t db_pid{};
 
-    // rocpd_info_pmc.id -- which counter this track represents. Only set
-    // for track_kind_t::pmc_agent (derived directly from the counter-sample
-    // tables, not a rocpd_track row); needed to filter sample queries.
+    // rocpd_info_pmc.id for sample and kernel counters. Memory-activity
+    // tracks use a synthetic id, because that series is derived in memory
+    // from rocpd_memory_allocate and is not a rocpd_info_pmc row.
     size_t pmc_id{};
 
     size_t start_ts{};  ///< Nanosecond timestamp of the track's earliest event.

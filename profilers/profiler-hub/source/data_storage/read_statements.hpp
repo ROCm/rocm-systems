@@ -396,6 +396,22 @@ struct pmc_sample_result
     double value{};
 };
 
+struct memory_allocation_row
+{
+    size_t                     id{};
+    size_t                     nid{};
+    std::optional<size_t>      pid;
+    std::optional<size_t>      agent_id;
+    std::optional<size_t>      queue_id;
+    std::optional<size_t>      stream_id;
+    std::optional<std::string> type;
+    std::optional<std::string> level;
+    size_t                     start{};
+    size_t                     end{};
+    std::optional<size_t>      address;
+    std::optional<size_t>      byte_size;
+};
+
 struct interval_result
 {
     size_t event_id{};
@@ -449,6 +465,8 @@ struct read_statements
         initialize_track_thread_sample_statements();
         initialize_track_category_statements();
         initialize_pmc_track_statement();
+        initialize_pmc_kernel_track_statement();
+        initialize_memory_allocation_statement();
         initialize_pmc_sample_statements();
     }
     read_statements()                                  = delete;
@@ -519,6 +537,8 @@ struct read_statements
     using agent_info_statement_func_t = statement_func_t<agent_info_result>;
 
     using pmc_track_statement_func_t = statement_func_t<pmc_track_result>;
+
+    using memory_allocation_statement_func_t = statement_func_t<memory_allocation_row>;
 
     using kernel_symbol_info_statement_func_t =
         statement_func_t<kernel_symbol_info_result>;
@@ -791,6 +811,19 @@ struct read_statements
     [[nodiscard]] const pmc_track_statement_func_t& pmc_track_statement() const
     {
         return m_pmc_track_statement;
+    }
+
+    [[nodiscard]] const pmc_track_statement_func_t& pmc_kernel_track_statement() const
+    {
+        return m_pmc_kernel_track_statement;
+    }
+
+    [[nodiscard]] const std::string& sample_table_name() const { return m_sample_table; }
+
+    [[nodiscard]] const memory_allocation_statement_func_t&
+    memory_allocation_statement() const
+    {
+        return m_memory_allocation_statement;
     }
 
     [[nodiscard]] const pmc_sample_statement_func_t& pmc_sample_statement() const
@@ -1224,8 +1257,67 @@ private:
             });
     }
 
+    bool table_present(const std::string& name)
+    {
+        struct present_row
+        {
+            size_t one{};
+        };
+        const auto rows =
+            m_backend
+                ->create_read_statement_executor<present_row>(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '" +
+                        name + "'",
+                    &present_row::one)()
+                .to_vector();
+        return !rows.empty();
+    }
+
+    bool table_has_row(const std::string& name)
+    {
+        if(!table_present(name)) return false;
+        struct present_row
+        {
+            size_t one{};
+        };
+        const auto rows = m_backend
+                              ->create_read_statement_executor<present_row>(
+                                  "SELECT 1 FROM " + name + " LIMIT 1", &present_row::one)()
+                              .to_vector();
+        return !rows.empty();
+    }
+
+    // Samples live in rocpd_sample_<uuid> on hub-written databases. Older files
+    // keep an unsuffixed rocpd_sample. Prefer the table that actually has rows.
+    std::string choose_sample_table()
+    {
+        const std::string suffixed = "rocpd_sample_" + m_uuid;
+        if(table_has_row(suffixed)) return suffixed;
+        if(table_present("rocpd_sample")) return "rocpd_sample";
+        if(table_present(suffixed)) return suffixed;
+        return {};
+    }
+
     void initialize_pmc_track_statement()
     {
+        m_sample_table = choose_sample_table();
+        if(m_sample_table.empty())
+        {
+            m_pmc_track_statement =
+                m_backend->create_read_statement_executor<pmc_track_result>(
+                    "SELECT 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL WHERE 0",
+                    &pmc_track_result::nid,
+                    &pmc_track_result::pid,
+                    &pmc_track_result::agent_id,
+                    &pmc_track_result::pmc_id,
+                    &pmc_track_result::name,
+                    &pmc_track_result::count,
+                    &pmc_track_result::min_start,
+                    &pmc_track_result::max_end,
+                    &pmc_track_result::min_value,
+                    &pmc_track_result::max_value);
+            return;
+        }
         auto query =
             queries::select::table_select_query{}
                 .select("PI.nid",
@@ -1240,7 +1332,7 @@ private:
                         "MAX(PE.value) AS max_value")
                 .from(fmt::format("rocpd_pmc_event_{}", m_uuid), "PE")
                 .inner_join("rocpd_info_pmc", "PI", "PI.id = PE.pmc_id")
-                .inner_join("rocpd_sample", "S", "S.event_id = PE.event_id")
+                .inner_join(m_sample_table, "S", "S.event_id = PE.event_id")
                 .group_by("PI.nid", "PI.pid", "PI.agent_id", "PE.pmc_id", "PI.name")
                 .get_query_string();
 
@@ -1259,13 +1351,92 @@ private:
                 &pmc_track_result::max_value);
     }
 
+    void initialize_pmc_kernel_track_statement()
+    {
+        // Kernel-dispatch counters: one row per device and counter, timed by
+        // the kernel the sample was attached to.
+        auto query =
+            queries::select::table_select_query{}
+                .select("K.nid",
+                        "PI.pid",
+                        "K.agent_id",
+                        "PE.pmc_id AS counter_id",
+                        "PI.name",
+                        "COUNT(*) AS count",
+                        "MIN(K.start) AS min_start",
+                        "MAX(K.end) AS max_end",
+                        "MIN(PE.value) AS min_value",
+                        "MAX(PE.value) AS max_value")
+                .from(fmt::format("rocpd_pmc_event_{}", m_uuid), "PE")
+                .inner_join("rocpd_info_pmc", "PI", "PI.id = PE.pmc_id")
+                .inner_join(fmt::format("rocpd_kernel_dispatch_{}", m_uuid),
+                            "K",
+                            "K.event_id = PE.event_id")
+                .group_by("K.nid", "PI.pid", "K.agent_id", "PE.pmc_id", "PI.name")
+                .get_query_string();
+
+        m_pmc_kernel_track_statement =
+            m_backend->create_read_statement_executor<pmc_track_result>(
+                query,
+                &pmc_track_result::nid,
+                &pmc_track_result::pid,
+                &pmc_track_result::agent_id,
+                &pmc_track_result::pmc_id,
+                &pmc_track_result::name,
+                &pmc_track_result::count,
+                &pmc_track_result::min_start,
+                &pmc_track_result::max_end,
+                &pmc_track_result::min_value,
+                &pmc_track_result::max_value);
+    }
+
+    void initialize_memory_allocation_statement()
+    {
+        const std::string query =
+            "SELECT MA.id, MA.nid, MA.pid, MA.agent_id, MA.queue_id, MA.stream_id, "
+            "MA.type, MA.level, MA.start, MA.end, MA.address, MA.size FROM "
+            "rocpd_memory_allocate_" +
+            m_uuid + " MA ORDER BY MA.start, MA.id";
+        m_memory_allocation_statement =
+            m_backend->create_read_statement_executor<memory_allocation_row>(
+                query,
+                &memory_allocation_row::id,
+                &memory_allocation_row::nid,
+                &memory_allocation_row::pid,
+                &memory_allocation_row::agent_id,
+                &memory_allocation_row::queue_id,
+                &memory_allocation_row::stream_id,
+                &memory_allocation_row::type,
+                &memory_allocation_row::level,
+                &memory_allocation_row::start,
+                &memory_allocation_row::end,
+                &memory_allocation_row::address,
+                &memory_allocation_row::byte_size);
+    }
+
     void initialize_pmc_sample_statements()
     {
+        if(m_sample_table.empty())
+        {
+            m_pmc_sample_statement =
+                m_backend->create_read_statement_executor<pmc_sample_result,
+                                                          bind_types<size_t, size_t, size_t>>(
+                    "SELECT 0, 0.0 WHERE ? = ? AND ? = ? AND ? = ? AND 0",
+                    &pmc_sample_result::timestamp,
+                    &pmc_sample_result::value);
+            m_pmc_sample_time_filtered_statement = m_backend->create_read_statement_executor<
+                pmc_sample_result,
+                bind_types<size_t, size_t, size_t, size_t, size_t>>(
+                "SELECT 0, 0.0 WHERE ? = ? AND ? = ? AND ? = ? AND ? = ? AND ? = ? AND 0",
+                &pmc_sample_result::timestamp,
+                &pmc_sample_result::value);
+            return;
+        }
         queries::select::table_select_query query;
         auto&                               base = query.select("S.timestamp", "PE.value")
                          .from(fmt::format("rocpd_pmc_event_{}", m_uuid), "PE")
                          .inner_join("rocpd_info_pmc", "PI", "PI.id = PE.pmc_id")
-                         .inner_join("rocpd_sample", "S", "S.event_id = PE.event_id");
+                         .inner_join(m_sample_table, "S", "S.event_id = PE.event_id");
 
         m_pmc_sample_statement =
             m_backend->create_read_statement_executor<pmc_sample_result,
@@ -2120,6 +2291,9 @@ private:
     track_category_statement_set      m_track_category_statements;
 
     pmc_track_statement_func_t                m_pmc_track_statement;
+    pmc_track_statement_func_t                m_pmc_kernel_track_statement;
+    memory_allocation_statement_func_t        m_memory_allocation_statement;
+    std::string                               m_sample_table;
     pmc_sample_statement_func_t               m_pmc_sample_statement;
     pmc_sample_time_filtered_statement_func_t m_pmc_sample_time_filtered_statement;
 
