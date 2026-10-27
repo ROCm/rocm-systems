@@ -6,6 +6,8 @@ add_library(
     OBJECT
     test_cli_dispatcher.cpp
     test_delivery.cpp
+    test_dry_run.cpp
+    test_help.cpp
     test_launcher.cpp
     test_options.cpp
 )

@@ -311,6 +311,14 @@ TEST(cli_dispatcher_test, print_help_lists_subcommands_and_example)
         text.find("Documentation: "
                   "https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/"),
         std::string::npos);
+    EXPECT_NE(text.find("\nCommon options:\n"), std::string::npos);
+    EXPECT_NE(text.find("  --dry-run     Show the launch plan and exit\n"),
+              std::string::npos);
+    EXPECT_NE(
+        text.find("Common options:\n  --dry-run     Show the launch plan and exit\n"),
+        std::string::npos);
+    EXPECT_LT(text.find("Subcommands:\n"), text.find("Common options:\n"));
+    EXPECT_LT(text.find("Common options:\n"), text.find("Examples:\n"));
     EXPECT_EQ(text.find("  sample"), std::string::npos);
     EXPECT_EQ(text.find("  trace"), std::string::npos);
     const auto profile    = text.find("\n  profile       ");

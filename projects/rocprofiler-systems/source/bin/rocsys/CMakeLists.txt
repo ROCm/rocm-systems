@@ -16,6 +16,8 @@ add_library(
     cli_dispatcher.cpp
     delivery.cpp
     default_system.cpp
+    dry_run.cpp
+    help/renderer.cpp
     options/parser.cpp
     options/table.cpp
     options/validator.cpp
