@@ -1341,13 +1341,9 @@ TEST_F(SearchMicrotest, Compute_CrossNicRingEndsOnTheOtherRail) {
 
 // ---------------------------------------------------------------------------
 // ncclTopoGetChannelFromXml and its caller ncclTopoGetGraphFromXmlSub: the
-// NCCL_GRAPH_FILE XML-graph import path.
-//
-// The input is attacker-controllable: NCCL_GRAPH_FILE names an XML file that
-// ncclTopoGetXmlGraphFromFile parses into an ncclXml before these functions
-// transcribe it into an ncclTopoGraph. These tests hand that ncclXml over
-// directly rather than going through TopoScene, because what is under test is
-// the transcription of arbitrary XML, not a topology RCCL itself discovered.
+// NCCL_GRAPH_FILE XML-graph import path. The ncclXml is handed over directly
+// rather than built through TopoScene, because what is under test is the
+// transcription of arbitrary XML, not a topology RCCL itself discovered.
 // ---------------------------------------------------------------------------
 
 // A topology system with `nGpus` GPUs, each parented to a CPU node so that
@@ -1527,12 +1523,8 @@ TEST_F(SearchXmlChannelMicrotest,
 // --- Rejection tests ------------------------------------------------------
 
 TEST_F(SearchXmlChannelMicrotest, ChannelIndexBeyondMaxChannels_IsRejected) {
-  // The caller indexes channels by XML sub position, bounded only by MAX_SUBS
-  // (512), against graph->inter[MAXCHANNELS*2] (256 channels). At c ==
-  // MAXCHANNELS the inter slice starts one element past the end of the array,
-  // and the next fields of the same ncclTopoGraph are what get written --
-  // so this is invisible to AddressSanitizer and must be asserted on the
-  // clobbered fields.
+  // At c == MAXCHANNELS the write lands in the next ncclTopoGraph fields,
+  // invisible to ASan, so assert on them.
   constexpr int kChannel = MAXCHANNELS;
   graph()->nIntraChannels = 0;
   graph()->intraNets[0] = 0;
@@ -1546,9 +1538,8 @@ TEST_F(SearchXmlChannelMicrotest, ChannelIndexBeyondMaxChannels_IsRejected) {
 }
 
 TEST_F(SearchXmlChannelMicrotest, NegativeChannelIndex_IsRejected) {
-  // Defensive: the one caller cannot pass a negative c today, but the function
-  // is externally linked and a negative index would write *before* both
-  // arrays. Without this the c < 0 half of the guard is unpinned.
+  // Defensive: no caller passes a negative c today, but it would write before
+  // both arrays, and the c < 0 half of the guard would otherwise be unpinned.
   ncclXmlNode* channel = NewNode("channel");
   AddChild(channel, "net", "1");
 
@@ -1616,9 +1607,8 @@ TEST_F(SearchXmlChannelMicrotest, ExactlyTwoNetSubs_AreStillAccepted) {
 }
 
 TEST_F(SearchXmlChannelMicrotest, MoreGpuSubsThanTheSystemHasGpus_IsRejected) {
-  // A channel's intra slice is ngpus slots wide. Extra <gpu> subs run into
-  // channel 1's slots -- still inside the same ncclTopoGraph, so ASan cannot
-  // see it and the assertion has to be on the clobbered slots themselves.
+  // Extra <gpu> subs run into channel 1's slots, invisible to ASan, so assert
+  // on them.
   constexpr int kSentinel = -7;
   for (int i = 0; i < kGpus + 4; i++) graph()->intra[i] = kSentinel;
 
@@ -1646,9 +1636,8 @@ TEST_F(SearchXmlChannelMicrotest, ExactlyNgpusGpuSubs_AreStillAccepted) {
 }
 
 TEST_F(SearchXmlChannelMicrotest, RankAttributeTooWideForAnInt_IsRejected) {
-  // strtol yields a long; the assignment to int truncates. 2^32 + kRankBase is
-  // the interesting case: it truncates to kRankBase, a rank the topology really
-  // has, so only the range check can reject it, not ncclTopoRankToIndex.
+  // strtol yields a long that truncates on assignment to int: 2^32 + kRankBase
+  // truncates to a real rank, so only the range check can reject it.
   ncclXmlNode* channel = NewNode("channel");
   ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
   SetAttr(gpu, "rank", std::to_string((1LL << 32) + SearchXmlScene::kRankBase).c_str());
@@ -1658,8 +1647,7 @@ TEST_F(SearchXmlChannelMicrotest, RankAttributeTooWideForAnInt_IsRejected) {
 }
 
 TEST_F(SearchXmlChannelMicrotest, NegativeRankAttribute_IsRejected) {
-  // As above, but for the lower bound: -2^32 + kRankBase truncates to kRankBase,
-  // so the negative value only fails if rankValue itself is range-checked.
+  // The lower bound: -2^32 + kRankBase also truncates to a real rank.
   ncclXmlNode* channel = NewNode("channel");
   ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
   SetAttr(gpu, "rank", std::to_string(-(1LL << 32) + SearchXmlScene::kRankBase).c_str());
@@ -1668,10 +1656,8 @@ TEST_F(SearchXmlChannelMicrotest, NegativeRankAttribute_IsRejected) {
 }
 
 TEST_F(SearchXmlChannelMicrotest, RankAttributeNamingARankTheTopologyDoesNotHave_IsRejected) {
-  // intra[] feeds ncclTopoPreset's ringSend/ringRecv and then prev[]/next[] in
-  // connectRings, which are sized by the rank count, so a rank the topology
-  // does not contain is an out-of-bounds write there. The writer only ever
-  // emits ranks present in the system, so nothing legitimate is lost.
+  // intra[] reaches prev[]/next[] in connectRings, sized by the rank count, so
+  // an absent rank is an out-of-bounds write there.
   ncclXmlNode* channel = NewNode("channel");
   ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
   SetAttr(gpu, "rank", std::to_string(INT_MAX).c_str());

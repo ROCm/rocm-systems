@@ -4,15 +4,10 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// src/graph/topo.cc for binaries that need it real but do not test it.
-//
-// It is pulled in with #include TOPO_CC_PATH rather than listed as a source
-// file because the NETDEVS policy lives in topo.cc's file statics, and
-// TopoSetNetDevsPolicy -- which TopoScene.h declares and the other src/graph
-// tests call -- can only be defined from inside that TU.
-//
-// rccl-UnitTestsMicroTopo does NOT link this file: topo-test.cc is topo.cc's
-// own test, so it includes the TU itself and carries the same definition.
+// src/graph/topo.cc for binaries that need it real but do not test it. It is
+// #included rather than linked because TopoSetNetDevsPolicy can only be defined
+// inside topo.cc's TU, where the NETDEVS policy statics live. topo-test.cc
+// includes that TU itself, so rccl-UnitTestsMicroTopo does not link this file.
 
 #include "fakes/graph_fakes.h"
 #include "fakes/param_redirect.h"
