@@ -1366,6 +1366,9 @@ class GraphExecSegmented : public GraphExecBase {
     // it has no remaining dependency, or its first kernel carries the one dependency in its
     // ext-dispatch dep_signal. Later packets keep the barrier bit.
     bool firstPacketUnordered = false;
+    // Indices of the patch_list entries whose packet is in dispatchPackets or is
+    // fallbackDepBarrier. The patch functions below only touch these entries.
+    std::vector<size_t> ownedPatches;
     PacketBatch() {}
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);

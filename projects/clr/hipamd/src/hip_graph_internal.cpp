@@ -2018,22 +2018,11 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
 
   const bool hasMetadata = !dispatchMetadataPackets.empty();
 
-  // packet pointer -> index in the filtered flat buffer, built during the
-  // single pass below so patch_list resolution is O(patches) not O(p*n).
-  std::unordered_map<const void*, size_t> packetToFilteredIndex;
-
-  // Packets in THIS batch whose owning node is disabled (filtered out below), mapped to their
-  // index in the unfiltered buffer. A completion-signal patch pinned to one of these must be
-  // relocated, otherwise the segment never emits its signal and any consumer waiting on it
-  // deadlocks.
-  std::unordered_map<const void*, size_t> disabledBatchPackets;
-
   // The first packet carries the segment's one dependency in its dep_signal. With its node
   // disabled, the reserved standalone barrier takes over that wait ahead of the other packets.
   const bool splice_dep_barrier =
       fallbackDepBarrier != nullptr && !packetEnabled.empty() && !packetEnabled[0];
   if (splice_dep_barrier) {
-    packetToFilteredIndex[fallbackDepBarrier] = enabledPackets.size();
     enabledPackets.push_back(fallbackDepBarrier);
     enabledKernelNames.push_back(nullptr);
     appendPacketToFlatBuffer(fallbackDepBarrier, nullptr, filteredFlatPacketData,
@@ -2050,11 +2039,7 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
                                                               : nullptr;
       appendPacketToFlatBuffer(dispatchPackets[i], metadata_raw, filteredFlatPacketData,
                                filteredValidPacketFullHeaders, filteredFlatMetadataData);
-
-      packetToFilteredIndex[dispatchPackets[i]] = filteredIdx;
       filteredIndex[i] = filteredIdx;
-    } else {
-      disabledBatchPackets.emplace(dispatchPackets[i], i);
     }
   }
   // Only the original first packet carries the segment's dependency; a later packet moved to the
@@ -2064,35 +2049,33 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
   }
 
   // Re-point flat_packet pointers in patch_list into filteredFlatPacketData.
-  for (auto& patch : patch_list) {
-    auto it = packetToFilteredIndex.find(patch.packet);
-    if (it != packetToFilteredIndex.end()) {
-      patch.flat_packet =
-          filteredFlatPacketData.data() + it->second * kAqlPktSize;
-      continue;
-    }
-
-    // Reserved dependency barrier not spliced in: patch its standalone copy, which is never
-    // dispatched, rather than a stale slot of an earlier filtered buffer.
+  for (size_t patchIdx : ownedPatches) {
+    auto& patch = patch_list[patchIdx];
+    // The reserved dependency barrier sits at filtered slot 0 when spliced in. Otherwise patch
+    // its standalone copy, which is never dispatched, rather than a stale slot of an earlier
+    // filtered buffer.
     if (patch.packet == fallbackDepBarrier) {
-      patch.flat_packet = nullptr;
+      patch.flat_packet = splice_dep_barrier ? filteredFlatPacketData.data() : nullptr;
       continue;
     }
 
-    // The patch's owning packet is not in the filtered buffer. Only touch patches
-    // this batch owns whose packet was disabled; patches for other batches are
-    // resolved when those batches rebuild.
-    auto disabled_it = disabledBatchPackets.find(patch.packet);
-    if (disabled_it == disabledBatchPackets.end()) {
+    auto slot = std::find(dispatchPackets.begin(), dispatchPackets.end(), patch.packet);
+    if (slot == dispatchPackets.end()) {
+      continue;
+    }
+    const size_t idx = slot - dispatchPackets.begin();
+    if (filteredIndex[idx] != kNotFiltered) {
+      patch.flat_packet = filteredFlatPacketData.data() + filteredIndex[idx] * kAqlPktSize;
       continue;
     }
 
+    // The patch's packet was disabled.
     // Only completion signals are relocatable here. Any other patch on a disabled packet
     // (its dependency is covered by fallbackDepBarrier) goes to the unfiltered copy, which is
     // not dispatched while nodes are disabled; a pointer left in an earlier filtered buffer
     // could now land on a different packet.
     if (patch.dep_slot != amd::Device::HwEventPatch::kCompletionSignal) {
-      patch.flat_packet = flatPacketData.data() + disabled_it->second * kAqlPktSize;
+      patch.flat_packet = flatPacketData.data() + idx * kAqlPktSize;
       continue;
     }
 
@@ -2124,7 +2107,8 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
 // ================================================================================================
 void GraphExecSegmented::PacketBatch::restorePatchListPointers(
     std::vector<amd::Device::HwEventPatch>& patch_list) {
-  for (auto& patch : patch_list) {
+  for (size_t patchIdx : ownedPatches) {
+    auto& patch = patch_list[patchIdx];
     // The reserved dependency barrier is not in flatPacketData; its filtered slot is stale.
     if (patch.packet == fallbackDepBarrier) {
       patch.flat_packet = nullptr;
@@ -2311,25 +2295,32 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
   // Build flat buffers once now that all dispatchPackets are finalized
   // (capture populated them, BuildSyncPlan may have prepended/appended barriers).
   // Also build a map from dispatchPacket pointer -> flat buffer pointer so
-  // ApplyHwEventPatches can patch flatPacketData directly at launch time.
-  std::unordered_map<const uint8_t*, uint8_t*> pktToFlat;
+  // ApplyHwEventPatches can patch flatPacketData directly at launch time, and
+  // to the batch holding the packet so each batch knows the patches it owns.
+  std::unordered_map<const uint8_t*, std::pair<uint8_t*, PacketBatch*>> pktToFlat;
   for (auto& [seg_id, segBatch] : segmentBatches_) {
     for (auto& batch : segBatch.packet_batches) {
       if (!batch.dispatchPackets.empty()) {
         batch.rebuildFlatBuffer();
         for (size_t i = 0; i < batch.dispatchPackets.size(); ++i) {
-          pktToFlat[batch.dispatchPackets[i]] =
-              batch.flatPacketData.data() + i * PacketBatch::kAqlPktSize;
+          pktToFlat[batch.dispatchPackets[i]] = {
+              batch.flatPacketData.data() + i * PacketBatch::kAqlPktSize, &batch};
         }
+      }
+      // Not in flatPacketData: its patch keeps a null flat_packet until it is spliced in.
+      if (batch.fallbackDepBarrier != nullptr) {
+        pktToFlat[batch.fallbackDepBarrier] = {nullptr, &batch};
       }
     }
   }
 
   // Resolve flat_packet pointers for all HwEventPatches
-  for (auto& patch : sync_plan_.patch_list) {
+  for (size_t i = 0; i < sync_plan_.patch_list.size(); ++i) {
+    auto& patch = sync_plan_.patch_list[i];
     auto it = pktToFlat.find(patch.packet);
     if (it != pktToFlat.end()) {
-      patch.flat_packet = it->second;
+      patch.flat_packet = it->second.first;
+      it->second.second->ownedPatches.push_back(i);
     }
   }
 
@@ -2509,7 +2500,8 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
     // Update SyncPlan patch list to point to the new packet
     // ApplyHwEventPatches patches the correct packet at launch time.
     if (oldPkt != newPkt) {
-      for (auto& patch : sync_plan_.patch_list) {
+      for (size_t patchIdx : packetBatch.ownedPatches) {
+        auto& patch = sync_plan_.patch_list[patchIdx];
         if (patch.packet == oldPkt) {
           patch.packet = newPkt;
         }
