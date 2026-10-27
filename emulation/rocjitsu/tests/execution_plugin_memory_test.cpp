@@ -318,22 +318,22 @@ TEST(ExecutionPluginTest, DualOffsetCompletionRejectsBothDestinationsBeforeWrite
 TEST(ExecutionPluginTest, DualOffsetLoadsPreserveSparsePhysicalDestinations) {
   constexpr uint32_t kSentinel = 0xa55a3cc3;
   for (const auto arch : {std::string_view{"cdna4"}, std::string_view{"cdna5"}}) {
-    const uint32_t wave = arch == "cdna4" ? 64 : 32;
-    const uint64_t wave_mask = wave == 64 ? ~uint64_t{0} : 0xffffffffull;
+    const uint32_t wave_size = arch == "cdna4" ? 64 : 32;
+    const uint64_t wave_mask = wave_size == 64 ? ~uint64_t{0} : 0xffffffffull;
     PluginFixture f;
-    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, arch, wave, /*sgprs_per_wf=*/104,
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, arch, wave_size, /*sgprs_per_wf=*/104,
                                          /*vgprs_per_wf=*/256));
     auto *cu = f.cu();
-    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave);
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave_size);
     ASSERT_NE(wf, nullptr);
     ASSERT_EQ(wf->vgpr_alloc().count, 256u);
     ASSERT_EQ(cu->vgpr_allocation_block_size(), arch == "cdna4" ? 512u : 256u);
     auto *plugin = f.attach_ordering_plugin();
     std::array<uint32_t, 64 * 4> payload;
-    for (uint32_t lane = 0; lane < wave; ++lane)
+    for (uint32_t lane = 0; lane < wave_size; ++lane)
       for (uint32_t word = 0; word < 4; ++word)
         payload[lane * 4 + word] = 0x12340000 + lane * 4 + word;
-    wf->lds().write(uint32_t{0}, reinterpret_cast<const uint8_t *>(payload.data()), wave * 16);
+    wf->lds().write(uint32_t{0}, reinterpret_cast<const uint8_t *>(payload.data()), wave_size * 16);
     for (uint32_t bytes : {4u, 8u})
       for (uint32_t bank : {0u, 256u}) {
         if (arch != "cdna4" && bank != 0)
@@ -343,7 +343,7 @@ TEST(ExecutionPluginTest, DualOffsetLoadsPreserveSparsePhysicalDestinations) {
                        << arch << " bytes=" << bytes << " bank=" << bank << " mask=" << mask);
           const uint32_t first_destination = wf->vgpr_alloc().base + bank + 4;
           const uint32_t second_destination = wf->vgpr_alloc().base + bank + 12;
-          for (uint32_t lane = 0; lane < wave; ++lane)
+          for (uint32_t lane = 0; lane < wave_size; ++lane)
             for (uint32_t word = 0; word < 2; ++word) {
               cu->write_vgpr(first_destination + word, lane, kSentinel);
               cu->write_vgpr(second_destination + word, lane, kSentinel);
@@ -352,13 +352,13 @@ TEST(ExecutionPluginTest, DualOffsetLoadsPreserveSparsePhysicalDestinations) {
           state->elem_size = bytes;
           state->num_elems = 1;
           state->is_load = true;
-          state->wf_size = wave;
+          state->wf_size = wave_size;
           state->exec_mask = mask;
           state->lane_mask = mask;
           state->dst_reg_base = first_destination;
           state->ds2_active = true;
           state->ds2_dst_reg_base = second_destination;
-          for (uint32_t lane = 0; lane < wave; ++lane) {
+          for (uint32_t lane = 0; lane < wave_size; ++lane) {
             state->per_lane_addr[lane] = lane * 16;
             state->ds2_per_lane_addr[lane] = lane * 16 + 8;
           }
@@ -366,7 +366,7 @@ TEST(ExecutionPluginTest, DualOffsetLoadsPreserveSparsePhysicalDestinations) {
           LocalMemPipeline pipeline;
           EXPECT_EQ(pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf),
                     VmAccessOutcome::Complete);
-          for (uint32_t lane = 0; lane < wave; ++lane)
+          for (uint32_t lane = 0; lane < wave_size; ++lane)
             for (uint32_t word = 0; word < 2; ++word) {
               const bool written = ((mask >> lane) & 1) && word < bytes / 4;
               EXPECT_EQ(cu->read_vgpr_storage(first_destination + word, lane),
@@ -385,13 +385,13 @@ TEST(ExecutionPluginTest, DualOffsetLoadsPreserveSparsePhysicalDestinations) {
 TEST(ExecutionPluginTest, DualOffsetLoadsRejectThePhysicalBlockBoundary) {
   constexpr uint32_t kSentinel = 0xa55a'3cc3u;
   for (const auto arch : {std::string_view{"cdna4"}, std::string_view{"cdna5"}}) {
-    const uint32_t wave = arch == "cdna4" ? 64 : 32;
+    const uint32_t wave_size = arch == "cdna4" ? 64 : 32;
     PluginFixture f;
-    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2, arch, wave, /*sgprs_per_wf=*/104,
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2, arch, wave_size, /*sgprs_per_wf=*/104,
                                          /*vgprs_per_wf=*/256));
     auto *cu = f.cu();
-    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave);
-    auto *adjacent = cu->dispatch_wf(1, 0, /*sgprs=*/104, /*vgprs=*/256, wave);
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave_size);
+    auto *adjacent = cu->dispatch_wf(1, 0, /*sgprs=*/104, /*vgprs=*/256, wave_size);
     ASSERT_NE(wf, nullptr);
     ASSERT_NE(adjacent, nullptr);
     const uint32_t block_size = cu->vgpr_allocation_block_size();
@@ -407,7 +407,7 @@ TEST(ExecutionPluginTest, DualOffsetLoadsRejectThePhysicalBlockBoundary) {
       state->elem_size = bytes;
       state->num_elems = 1;
       state->is_load = true;
-      state->wf_size = wave;
+      state->wf_size = wave_size;
       state->exec_mask = 1;
       state->lane_mask = 1;
       state->dst_reg_base = first;
@@ -425,16 +425,17 @@ TEST(ExecutionPluginTest, DualOffsetLoadsRejectThePhysicalBlockBoundary) {
 }
 
 TEST(ExecutionPluginTest, EmptyDualLoadDoesNotMaterializeSecondDestination) {
-  auto check = []<typename Isa>(std::string_view arch, uint32_t wave) {
+  auto check = []<typename Isa>(std::string_view arch, uint32_t wave_size) {
     for (uint32_t bank : {0u, 256u}) {
       if (arch != "cdna4" && bank != 0)
         continue;
       PluginFixture f;
-      ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, arch, wave, /*sgprs_per_wf=*/104,
+      ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, arch, wave_size,
+                                           /*sgprs_per_wf=*/104,
                                            /*vgprs_per_wf=*/256));
       using Cu = IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
       auto *cu = static_cast<Cu *>(f.cu());
-      auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave);
+      auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave_size);
       ASSERT_NE(wf, nullptr);
       const uint32_t first = wf->vgpr_alloc().base + 4;
       const uint32_t second = wf->vgpr_alloc().base + bank + 64;
@@ -447,7 +448,7 @@ TEST(ExecutionPluginTest, EmptyDualLoadDoesNotMaterializeSecondDestination) {
         state->elem_size = 4;
         state->num_elems = 1;
         state->is_load = true;
-        state->wf_size = wave;
+        state->wf_size = wave_size;
         state->exec_mask = mask;
         state->lane_mask = mask;
         state->dst_reg_base = first;
@@ -851,7 +852,12 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   state->per_lane_addr[2] = 0x2000;
   auto load = prepare_flat_load_for_routing(*cu, *wave, std::move(state));
   ASSERT_NE(load, nullptr);
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave);
+  auto *scoreboard = wave->memory_wait_scoreboard();
+  ASSERT_NE(scoreboard, nullptr);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
+  EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave),
+            VmAccessOutcome::Faulted);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -870,16 +876,19 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   EXPECT_EQ(access.addresses[1], 0x420u);
   EXPECT_EQ(access.addresses[2], 0x2000u);
   EXPECT_EQ(access.execution_addresses, access.addresses);
-  auto *scoreboard = wave->memory_wait_scoreboard();
-  ASSERT_NE(scoreboard, nullptr);
-  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
-  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
-  scoreboard->wait(WaitCounterKind::Load, 0);
+  EXPECT_EQ(access.issued_counters,
+            (std::vector{WaitCounterType::LOADCNT, WaitCounterType::DSCNT}));
+  // DDS has no backing on this target. The fault discarded the instruction;
+  // neither domain may leave a producer that diagnoses a nonexistent result.
+  EXPECT_TRUE(wave->wait_counters().empty());
+  EXPECT_TRUE(scoreboard->empty());
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 0u);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 0u);
   const auto shared = access.flat_local_lane_mask | access.flat_dds_lane_mask;
   scoreboard->access({RegClass::VGPR, 2, 1}, access.active_lane_mask & ~shared, 0xf, false);
   EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
   scoreboard->access({RegClass::VGPR, 2, 1}, shared, 0xf, false);
-  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
 }
 
 TEST(RoutedMemoryObservationTest, MixedFlatReportsEffectiveAddressesWithoutChangingExecution) {
