@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/sopk.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -86,8 +87,10 @@ void SMulkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCbranchIForkSopk::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  const uint64_t compare = amdgpu::RegisterAccess(wf).read_scalar64(sdst);
+  const int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
+  const uint64_t target = wf.pc + 4 + static_cast<int64_t>(offset) * 4;
+  wf.pc = amdgpu::cbranch_fork(wf, compare, target, wf.pc + size_) - size_;
 }
 
 void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
