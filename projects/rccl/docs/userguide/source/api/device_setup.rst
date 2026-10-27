@@ -98,7 +98,7 @@ ncclDevCommRequirements
 
    .. c:member:: int ginContextCount
 
-      Requests a number of GIN contexts (default 4). This is a hint. The count
+      Requests a number of GIN contexts (default 4). This is a minimum request. The count
       stored on the device communicator after creation is the request rounded
       up to a multiple of the GIN connection count, so it may be larger than
       the value set here. Available since NCCL 2.28.7; the rounded-up value

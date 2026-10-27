@@ -101,14 +101,18 @@ signal tables, and ``ncclGin`` context indexes from that returned value.
 RCCL rounds the request up to a multiple of the GIN connection count
 (``devComm.ginConnectionCount``). That count follows the local GIN NICs, or
 ``NCCL_GIN_NCONNECTIONS`` when set, and is raised to ``NCCL_GIN_PROXY_NTHREADS``
-when the proxy thread count is larger. It is capped at 4. A request of 1
+when the proxy thread count is larger. It is capped at 4, then reduced to the
+minimum across ranks so every rank uses the same connection count. A request of 1
 context on 4 connections allocates 4 contexts; a request of 4 contexts on 3
 connections allocates 6. Each connection then owns
 ``devComm.ginContextCount / devComm.ginConnectionCount`` contexts. The returned
-count can be larger than the request and is never smaller. Kernels that cycle
-with ``blockIdx.x % devComm.ginContextCount``, and barriers built with
-``ncclGinAllContexts``, cover every allocated context only when they use this
-returned count. This matches NCCL 2.31.2 (NVIDIA/nccl#2301).
+count can be larger than the request and is never smaller. The signal-shadow
+region is sized from this allocated count, so a context index below
+``devComm.ginContextCount`` stays inside that region on every backend, including
+Anvil SDMA. Kernels that cycle with ``blockIdx.x % devComm.ginContextCount``,
+and barriers built with ``ncclGinAllContexts``, cover every allocated context
+only when they use this returned count. This matches NCCL 2.31.2
+(NVIDIA/nccl#2301).
 
 ``ginTrafficClass`` overrides the host communicator traffic class for this
 device communicator. The service level of the GIN connections comes from

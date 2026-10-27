@@ -406,7 +406,7 @@
       "num_gpus": 1,
       "timeout": 60,
       "tests": [
-        {"name": "GinHostMicrotests", "description": "Host-only gin/gin_host.cc microtests (no GPU, no HIP/RCCL runtime); covers GIN_PROXY_NTHREADS (NVIDIA/nccl#2279 / AICOMRCCL-2017) and proxy-thread CPU affinity (AICOMRCCL-1859)", "test_filter": "*"}
+        {"name": "GinHostMicrotests", "description": "Host-only gin/gin_host.cc microtests (no GPU, no HIP/RCCL runtime); covers GIN_PROXY_NTHREADS (NVIDIA/nccl#2279 / AICOMRCCL-2017), proxy-thread CPU affinity (AICOMRCCL-1859), and the rounded-up ginContextCount (NVIDIA/nccl#2301)", "test_filter": "*"}
       ]
     },
     "unit_tests_micro_gin_host_finalize": {

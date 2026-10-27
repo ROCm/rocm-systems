@@ -143,6 +143,10 @@ struct FakeGin {
   bool needsProxyProgress = true;
   std::atomic<int> totalProgressCalls{0};
   std::atomic<int> destroyCalls{0};
+  int createCalls = 0;
+  int nContextsSeen = -1;
+  bool contextCountMismatch = false;
+  ncclResult_t createResult = ncclSuccess;
   // Nonzero: ginProgress spins until cleared. Lets a test hold a worker inside
   // the call so HostFinalize's join is observable (the post-join memset of
   // ginState would otherwise stop progress even if the join were deleted).
@@ -181,8 +185,14 @@ struct FakeGin {
   static ncclResult_t CloseListen(void*) { return ncclSuccess; }
   static ncclResult_t CloseColl(void*) { return ncclSuccess; }
 
-  static ncclResult_t CreateContext(void*, ncclGinConfig_t*, void** ginCtx, ncclNetDeviceHandle_t** devHandle) {
+  static ncclResult_t CreateContext(void*, ncclGinConfig_t* config, void** ginCtx, ncclNetDeviceHandle_t** devHandle) {
     FakeGin& self = current();
+    self.createCalls++;
+    if (self.createResult != ncclSuccess) return self.createResult;
+    if (config != nullptr) {
+      if (self.nContextsSeen < 0) self.nContextsSeen = config->nContexts;
+      else if (self.nContextsSeen != config->nContexts) self.contextCountMismatch = true;
+    }
     auto slot = std::make_unique<FakeSlot>();
     slot->idx = static_cast<int>(self.slots.size());
     slot->handle.netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
@@ -510,6 +520,55 @@ TEST_F(GinHostTest, ProgressErrorSetsAsyncResultAndExits) {
   }
   EXPECT_EQ(ncclSystemError, gs->asyncResult);
   freeProgressList();
+}
+
+// ncclGinDevCommSetup reports ginContextCount after rounding the request up to
+// ginCommCount (NVIDIA/nccl#2301).
+TEST_F(GinHostTest, ContextCountReportsAllocated) {
+  fake_.needsProxyProgress = false;
+  const struct {
+    int requested;
+    int connections;
+    int allocated;
+  } cases[] = {
+      {1, 1, 1}, {4, 1, 4}, {3, 3, 3}, {6, 3, 6},
+      {1, 4, 4}, {4, 3, 6}, {5, 2, 6}, {3, 2, 4},
+  };
+  for (const auto& spec : cases) {
+    SCOPED_TRACE("requested=" + std::to_string(spec.requested) +
+                 " connections=" + std::to_string(spec.connections));
+    fake_.slots.clear();
+    fake_.createCalls = 0;
+    fake_.nContextsSeen = -1;
+    fake_.contextCountMismatch = false;
+    fake_.createResult = ncclSuccess;
+    gin()->backends[0].ginCommCount = spec.connections;
+
+    auto reqs = proxyReqs();
+    reqs.ginContextCount = spec.requested;
+    ncclDevComm devComm{};
+    ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &devComm, NCCL_VERSION_CODE));
+    EXPECT_EQ(spec.allocated, static_cast<int>(devComm.ginContextCount));
+    EXPECT_GE(static_cast<int>(devComm.ginContextCount), spec.requested);
+    EXPECT_EQ(0, static_cast<int>(devComm.ginContextCount) % spec.connections);
+    EXPECT_EQ(spec.connections, fake_.createCalls);
+    EXPECT_FALSE(fake_.contextCountMismatch);
+    ASSERT_GT(fake_.nContextsSeen, 0);
+    EXPECT_EQ(spec.allocated, fake_.nContextsSeen * spec.connections);
+    ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &devComm));
+  }
+}
+
+TEST_F(GinHostTest, ContextCountCreateFailureClearsReportedCount) {
+  fake_.needsProxyProgress = false;
+  fake_.createResult = ncclSystemError;
+  gin()->backends[0].ginCommCount = 3;
+  auto reqs = proxyReqs();
+  reqs.ginContextCount = 4;
+  ncclDevComm devComm{};
+  EXPECT_NE(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &devComm, NCCL_VERSION_CODE));
+  EXPECT_EQ(0u, devComm.ginContextCount);
+  EXPECT_EQ(1, fake_.createCalls);
 }
 
 // First PROXY DevCommCreate starts exactly nthreads joinable progress threads.

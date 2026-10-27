@@ -5906,9 +5906,7 @@ TEST_F(GinMPIDeviceTests, Properties_NLsaTeams) {
       << "nRanks=" << nRanks << " not divisible by nLsaTeams=" << props.nLsaTeams;
 }
 
-// NCCL 2.31.2 / NVIDIA/nccl#2301: the context count on ncclDevComm is the
-// allocation after rounding up to a multiple of the GIN connection count,
-// not the smaller count the application requested.
+// ginContextCount reported by ncclDevCommCreate is the rounded-up allocation.
 TEST_F(GinMPIDeviceTests, GinContextCount_ReportsRoundedUp) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
@@ -5926,17 +5924,12 @@ TEST_F(GinMPIDeviceTests, GinContextCount_ReportsRoundedUp) {
   ncclResult_t probeRc = ncclDevCommCreate(comm, &probeReqs, &probe);
   if (probeRc != ncclSuccess)
     GTEST_SKIP() << "GIN device communicator unavailable; rc=" << (int)probeRc;
-  int connCount = (int)probe.ginConnectionCount;
-  int minConn = 0;
-  MPI_Allreduce(&connCount, &minConn, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-  connCount = minConn;
+  // ncclGinConnectOnce already min-reduces ginCommCount across ranks.
+  const int connCount = (int)probe.ginConnectionCount;
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommDestroy(comm, &probe));
-  if (connCount <= 0)
-    GTEST_SKIP() << "GIN backend reported no connections";
+  if (connCount < 2)
+    GTEST_SKIP() << "Needs >= 2 GIN connections for the request to round up";
 
-  // One past a multiple of the connection count. ROUNDUP is a no-op only
-  // when there is a single connection; with two or more connections the
-  // returned count is strictly larger than the request.
   const int requested = connCount + 1;
   const int expected = ((requested + connCount - 1) / connCount) * connCount;
 
@@ -5956,9 +5949,7 @@ TEST_F(GinMPIDeviceTests, GinContextCount_ReportsRoundedUp) {
       << " connection(s); nccl#2301 reports the rounded-up allocation";
   EXPECT_GE((int)devComm.ginContextCount, requested);
   EXPECT_EQ(0, (int)devComm.ginContextCount % connCount);
-  if (connCount > 1) {
-    EXPECT_GT((int)devComm.ginContextCount, requested);
-  }
+  EXPECT_GT((int)devComm.ginContextCount, requested);
 }
 
 // Exclusive GIN contexts -- reqs.ginExclusiveContexts (2.29.7).

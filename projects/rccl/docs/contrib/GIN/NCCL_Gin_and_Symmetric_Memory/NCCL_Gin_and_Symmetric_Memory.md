@@ -1277,7 +1277,7 @@ Field semantics of ncclDevCommRequirements:
 | barrierCount | Number of slots to allocate for ncclBarrierSession (LSA + GIN hybrid barrier). One slot per CTA. |
 | ginSignalCount | Number of pre-allocated GIN signals. Each CTA uses one to count the number of remote puts received. |
 | ginConnectionType | FULL = build QPs to every other rank; RAIL = build per rail; NONE = disable GIN. |
-| ginContextCount | Requested number of GIN contexts (default 4). RCCL rounds this up to a multiple of the GIN connection count and reports the allocated count on `devComm.ginContextCount`. Use the returned value to index contexts. |
+| ginContextCount | Requested number of GIN contexts (default 4). Each context owns its own set of QPs and runs concurrently. RCCL treats the request as a minimum: it rounds up to a multiple of the GIN connection count and reports the allocated count on `devComm.ginContextCount`. Use the returned value to index contexts. |
 
 ### 2.4 Launch the kernel and verify
 
