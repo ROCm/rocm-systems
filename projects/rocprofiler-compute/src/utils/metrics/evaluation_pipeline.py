@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Optional
 
 import numpy as np
@@ -22,11 +23,9 @@ from utils.metrics.noise_clamper import (
     print_noise_clamp_summary,
 )
 from utils.metrics.pass_provenance import (
-    PASS_VAR_SEP,
     PassLayout,
     bind_metric_tables_to_passes,
-    ordered_scoped_builtin_bindings,
-    pass_scoped_builtins,
+    evaluate_pass_scoped_builtins,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
@@ -220,46 +219,35 @@ def _calc_pass_scoped_builtins(
     expressions: list[str],
 ) -> dict[str, Optional[str | float | int]]:
     """Compute built-ins with duplicated counters bound to each used pass."""
-    gpu_series = mi_gpu_specs.get_gpu_series(gpu_arch)
-    scoped = pass_scoped_builtins(pass_layout, gpu_series)
-    if not scoped or not used_passes:
-        return {}
-
-    _, expression_builtin_vars = extract_counters_and_variables(
-        "\n".join(expressions), gpu_series
+    return evaluate_pass_scoped_builtins(
+        pass_layout,
+        used_passes,
+        mi_gpu_specs.get_gpu_series(gpu_arch),
+        expressions,
+        partial(_eval_pass_scoped_builtin, raw_pmc_df, sys_vars),
+        key_prefix="ammolite__",
     )
-    build_in_vars = {
-        key: value
-        for key, value in get_build_in_vars(gpu_series).items()
-        if key in expression_builtin_vars and key in scoped
-    }
-    if not build_in_vars:
-        return {}
 
-    results: dict[str, Optional[str | float | int]] = {}
-    for pass_key in sorted(used_passes, key=lambda key: pass_layout.ordinal(key)):
-        ordinal = pass_layout.ordinal(pass_key)
-        pass_locals: dict[str, Optional[str | float | int]] = {}
-        for variable_key, eval_string in ordered_scoped_builtin_bindings(
-            build_in_vars, pass_key, pass_layout, scoped
-        ):
-            try:
-                combined_vars = {**sys_vars, **pass_locals}
-                temporary_evaluator = MetricEvaluator(raw_pmc_df, combined_vars, {})
-                calculation_result = temporary_evaluator.eval_expression(eval_string)
-                if np.isscalar(calculation_result) and calculation_result == "N/A":
-                    calculation_result = np.nan
-                pass_locals[f"ammolite__{variable_key}{PASS_VAR_SEP}{ordinal}"] = (
-                    calculation_result
-                )
-            except (TypeError, NameError, KeyError):
-                console_debug(
-                    "pass_provenance",
-                    f"builtin {variable_key!r} pass{ordinal}: eval failed, using nan",
-                )
-                pass_locals[f"ammolite__{variable_key}{PASS_VAR_SEP}{ordinal}"] = np.nan
-        results.update(pass_locals)
-    return results
+
+def _eval_pass_scoped_builtin(
+    raw_pmc_df: pd.DataFrame,
+    sys_vars: dict[str, int | float],
+    variable_key: str,
+    eval_string: str,
+    pass_locals: dict[str, object],
+) -> object:
+    try:
+        evaluator = MetricEvaluator(raw_pmc_df, {**sys_vars, **pass_locals}, {})
+        calculation_result = evaluator.eval_expression(eval_string)
+    except (TypeError, NameError, KeyError):
+        console_debug(
+            "pass_provenance",
+            f"builtin {variable_key!r}: pass-bound eval failed, using nan",
+        )
+        return np.nan
+    if np.isscalar(calculation_result) and calculation_result == "N/A":
+        return np.nan
+    return calculation_result
 
 
 @demarcate
