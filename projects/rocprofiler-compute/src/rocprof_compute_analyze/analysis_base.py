@@ -71,7 +71,7 @@ def _authorize_ml_api_operator_flags(
     saved_set = set(saved_selectors)
 
     list_selectors = getattr(args, "list_operators", None)
-    operator_patterns = getattr(args, "operator", None)
+    operator_patterns = getattr(args, "operator_patterns", None)
 
     if list_selectors is None and operator_patterns is None:
         return

@@ -202,7 +202,7 @@ def test_sanitize_authorizes_trace_ml_api_selectors(tmp_path, monkeypatch) -> No
                 tui=False,
                 path=[[str(workload)]],
                 list_operators=resolve_list_selectors(list_operators),
-                operator=resolve_operator_patterns(operator),
+                operator_patterns=resolve_operator_patterns(operator),
                 output_name=None,
             ),
             {},

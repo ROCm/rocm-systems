@@ -210,7 +210,7 @@ class cli_analysis(OmniAnalyze_Base):
         args = self.get_args()
 
         list_selectors = getattr(args, "list_operators", None)
-        operator_patterns = getattr(args, "operator", None)
+        operator_patterns = getattr(args, "operator_patterns", None)
         listing_requested = list_selectors is not None
         filter_requested = operator_patterns is not None and not listing_requested
         list_backends = list_selectors if listing_requested else []
@@ -341,7 +341,7 @@ class cli_analysis(OmniAnalyze_Base):
         arch_config = self._arch_configs[gpu_arch]
 
         list_selectors = getattr(args, "list_operators", None)
-        operator_patterns = getattr(args, "operator", None)
+        operator_patterns = getattr(args, "operator_patterns", None)
         if operator_patterns is not None and list_selectors is None:
             filter_backends = _operator_display_backends(operator_patterns)
             for path_info in args.path:
@@ -454,7 +454,7 @@ class cli_analysis(OmniAnalyze_Base):
         backends: list[str],
     ) -> list[tuple]:
         """Glob-filter the operator forest and return pmc group keys on the subtree."""
-        resolved = getattr(args, "operator", None)
+        resolved = getattr(args, "operator_patterns", None)
         if resolved is None:
             return []
         framewise_patterns = _framewise_from_resolved(resolved)
@@ -495,7 +495,7 @@ class cli_analysis(OmniAnalyze_Base):
         """Display the matched operator call tree."""
         if not workload.ml_api_call_trees:
             return
-        resolved = getattr(args, "operator", None)
+        resolved = getattr(args, "operator_patterns", None)
         if resolved is None:
             return
         framewise_patterns = _framewise_from_resolved(resolved)
