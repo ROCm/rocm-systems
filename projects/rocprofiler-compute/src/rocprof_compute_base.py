@@ -253,7 +253,7 @@ class RocProfCompute:
 
     def parse_args(self) -> None:
         # Detect feature gates for help text control.
-        prelim_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        prelim_parser = argparse.ArgumentParser(add_help=False)
         prelim_parser.add_argument("--experimental", action="store_true", default=False)
         prelim_parser.add_argument("--debug", action="store_true", default=False)
 

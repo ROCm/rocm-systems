@@ -315,16 +315,10 @@ def _probe_live_machine_specs(args: Optional[argparse.Namespace]) -> MachineSpec
     machine_info = _extract_machine_info()
     soc_info = _extract_soc_info()
 
-    ignore_amd_smi = bool(args and getattr(args, "ignore_amd_smi", False))
-    if ignore_amd_smi:
-        gpu_info = _empty_amd_smi_gpu_info()
-        amd_gpu_kernel_version = "N/A"
-        gpu_memory = "0"
-    else:
-        gpu_info = _extract_gpu_info(gpu_arch=soc_info["gpu_arch"])
-        with amdsmi_interface.amdsmi_ctx():
-            amd_gpu_kernel_version = amdsmi_interface.get_amdgpu_driver_version()
-            gpu_memory = amdsmi_interface.get_gpu_vram_size()
+    gpu_info = _extract_gpu_info(gpu_arch=soc_info["gpu_arch"])
+    with amdsmi_interface.amdsmi_ctx():
+        amd_gpu_kernel_version = amdsmi_interface.get_amdgpu_driver_version()
+        gpu_memory = amdsmi_interface.get_gpu_vram_size()
 
     specs = spec_family_for_arch(soc_info["gpu_arch"])(
         version=specs_version,
@@ -462,19 +456,6 @@ def _extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
     )
 
     return result
-
-
-def _empty_amd_smi_gpu_info() -> dict[str, Any]:
-    """Return machine-spec defaults when AMD-SMI probing is disabled."""
-    return {
-        "vbios": "N/A",
-        "compute_partition": "N/A",
-        "memory_partition": "N/A",
-        "num_compute_units": 0,
-        "gpu_cache_info": {},
-        "vram_bit_width": None,
-        "perf_level": None,
-    }
 
 
 @demarcate

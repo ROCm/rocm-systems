@@ -23,9 +23,7 @@ def build_args(argv, experimental=False):
     parser = argparse.ArgumentParser(
         prog="tool", usage="rocprof-compute [mode] [options]"
     )
-    omniarg_parser(
-        parser, HOME, SUPPORTED_ARCHS, VERSION, experimental, "--debug" in argv
-    )
+    omniarg_parser(parser, HOME, SUPPORTED_ARCHS, VERSION, experimental)
     return parser.parse_args(argv)
 
 
@@ -175,84 +173,67 @@ def test_profile_kernel_iteration_range():
         [],
         ["single-metric"],
         ["verify-deps"],
-        ["table-view", "ignore-amd-smi", "single-metric", "verify-deps"],
+        ["table-view", "single-metric", "verify-deps"],
     ],
 )
-def test_analyze_debug_options(selectors):
+def test_analyze_debug_options(selectors, parse_cli_args):
     flags = [f"--debug-{selector}" for selector in selectors]
     argv = ["analyze", "--debug", *flags] if selectors else ["analyze"]
-    args = build_args(argv)
-    assert args.debug == ("single-metric" in selectors)
+    args = parse_cli_args(argv)
+    assert args.debug_single_metric == ("single-metric" in selectors)
     assert args.verify_deps == ("verify-deps" in selectors)
-    assert args.ignore_amd_smi == ("ignore-amd-smi" in selectors)
     assert args.view == ("table" if "table-view" in selectors else None)
 
 
-@pytest.mark.parametrize(
-    "option", ["table-view", "ignore-amd-smi", "single-metric", "verify-deps"]
-)
-def test_analyze_debug_options_require_gate(option, capsys):
+@pytest.mark.parametrize("option", ["table-view", "single-metric", "verify-deps"])
+def test_analyze_debug_options_require_gate(option, capsys, parse_cli_args):
     with pytest.raises(SystemExit) as exc:
-        build_args(["analyze", f"--debug-{option}"])
+        parse_cli_args(["analyze", f"--debug-{option}"])
     assert exc.value.code == 2
     assert f"--debug-{option} requires --debug" in capsys.readouterr().err
 
 
-def test_analyze_debug_gate_alone():
-    args = build_args(["analyze", "--debug"])
-    assert args.debug_enabled is True
-    assert args.debug is False
-    assert args.ignore_amd_smi is False
+def test_analyze_debug_gate_alone(parse_cli_args):
+    args = parse_cli_args(["analyze", "--debug"])
+    assert args.debug is True
+    assert args.debug_single_metric is False
     assert args.verify_deps is False
     assert args.view is None
 
 
-def test_analyze_debug_help(capsys):
-    output = help_text(HOME, ["analyze"], capsys)
+def test_analyze_debug_help(capsys, parse_cli_args):
+    with pytest.raises(SystemExit) as exc:
+        parse_cli_args(["analyze", "--help"])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
     assert "--debug-single-metric" not in output
-    output = help_text(HOME, ["analyze", "--debug"], capsys)
+    with pytest.raises(SystemExit) as exc:
+        parse_cli_args(["analyze", "--debug", "--help"])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
     debug_help = output.split("Debug Options:", 1)[1].split("Roofline Options:", 1)[0]
     for option in [
         "--debug",
         "--debug-table-view",
-        "--debug-ignore-amd-smi",
         "--debug-single-metric",
         "--debug-verify-deps",
-        "--specs-correction",
     ]:
         assert option in debug_help
+    assert "--specs-correction" not in debug_help
     assert "--normal-unit" not in debug_help
     assert "--output-format" not in debug_help
 
 
 @pytest.mark.parametrize("gate_first", [False, True])
-def test_analyze_debug_option_order_and_repetition(gate_first):
+def test_analyze_debug_option_order_and_repetition(gate_first, parse_cli_args):
     flags = ["--debug-single-metric", "--debug-single-metric", "--debug-verify-deps"]
     argv = ["--debug", *flags] if gate_first else [*flags, "--debug"]
-    args = build_args(["analyze", *argv])
-    assert args.debug is True
+    args = parse_cli_args(["analyze", *argv])
+    assert args.debug_single_metric is True
     assert args.verify_deps is True
 
 
-@pytest.mark.parametrize("alias_first", [False, True])
-def test_analyze_debug_compatibility_aliases(alias_first):
-    aliases = ["--view", "table", "--verify-deps"]
-    flags = ["--debug", "--debug-table-view", "--debug-verify-deps"]
-    argv = [*aliases, *flags] if alias_first else [*flags, *aliases]
-    args = build_args(["analyze", *argv])
-    assert args.view == "table"
-    assert args.verify_deps is True
-
-
-def test_analyze_view_is_hidden_compatibility_option(capsys):
-    args = build_args(["analyze", "--view", "table"])
-    assert args.view == "table"
-
-    output = help_text(HOME, ["analyze"], capsys)
-    assert "--view" not in output
-
-
-# analyze --verify-deps
+# analyze --debug-verify-deps
 # =============================================================================
 
 
@@ -260,9 +241,9 @@ def test_analyze_verify_deps_defaults_off():
     assert build_args(["analyze", "-p", "/tmp/workload"]).verify_deps is False
 
 
-def test_analyze_verify_deps_needs_no_workload():
+def test_analyze_verify_deps_needs_no_workload(parse_cli_args):
     """The flag is a standalone environment check, so -p stays optional."""
-    assert build_args(["analyze", "--verify-deps"]).verify_deps is True
+    assert parse_cli_args(["analyze", "--debug", "--debug-verify-deps"]).verify_deps
 
 
 def test_pc_sampling_analyze_options():

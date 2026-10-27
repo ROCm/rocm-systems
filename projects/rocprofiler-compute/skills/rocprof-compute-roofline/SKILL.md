@@ -91,8 +91,7 @@ know the intent, the counters know what ran.
 HBM answers "am I limited by main memory", while L2 and vL1D show whether
 caches are absorbing the traffic.
 
-`--view table` prints one table for all kernels together instead of one per
-kernel. To compare many kernels, write the
+To compare many kernels, write the
 [analysis database](../../docs/how-to/analyze/cli.rst) with
 `--output-format db` and query it with SQL.
 

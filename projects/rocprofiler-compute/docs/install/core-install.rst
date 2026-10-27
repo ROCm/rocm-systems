@@ -135,7 +135,7 @@ To confirm the environment has everything analyze mode needs:
 
 .. code-block:: bash
 
-   rocprof-compute analyze --verify-deps
+   rocprof-compute analyze --debug --debug-verify-deps
 
 If you installed ROCm Compute Profiler from a package manager or the tarball
 rather than pip, install the dependencies from the requirements file in that

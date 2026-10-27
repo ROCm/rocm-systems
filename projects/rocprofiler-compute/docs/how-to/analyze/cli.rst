@@ -31,21 +31,23 @@ Multiple debug flags can be combined:
 
 .. code-block:: shell
 
-   rocprof-compute analyze -p workloads/vcopy/MI200/ --debug --debug-table-view --debug-ignore-amd-smi
+   rocprof-compute analyze -p workloads/vcopy/MI200/ --debug --debug-table-view --debug-single-metric
 
 * ``--debug-table-view``: Print plain tables instead of the views specified by ``cli_style``.
-* ``--debug-ignore-amd-smi``: Skip AMD-SMI queries when probing local hardware.
 * ``--debug-single-metric``: Show metric evaluation and memory chart diagnostics.
    Combine it with ``--block`` to
    isolate a metric, for example ``--block 2.1.0 --debug --debug-single-metric``.
 * ``--debug-verify-deps``: Check analyze-mode Python dependencies, then exit without
-     analyzing a workload. The standalone ``--verify-deps`` spelling also works.
+   analyzing a workload; no ``--path`` is required.
 
 The ``--debug-*`` flags require ``--debug``; their order does not matter.
 The enabling flag alone does not turn on metric diagnostics.
 
-The ``Debug Options`` help group also includes ``--specs-correction`` for
-overriding captured system specifications.
+The former ``--view table`` and standalone ``--verify-deps`` options have been
+replaced by ``--debug --debug-table-view`` and
+``--debug --debug-verify-deps``, respectively.
+``--specs-correction`` remains an Advanced Option for overriding captured system
+specifications without ``--debug``.
 Filtering, normalization, output formats, and ordinary baseline comparisons
 remain regular analysis options.
 
@@ -530,11 +532,13 @@ More analysis options
 
 **TTY output view (plain tables)**
 
-Use ``--view table`` to force plain tabular output for all sections and ignore ``cli_style`` from the analysis YAML (for example, memory charts and the per-kernel Roofline layout are shown as tables). Additional ``--view`` values may be added in future releases.
+Use ``--debug --debug-table-view`` to force plain tabular output for all sections
+and ignore ``cli_style`` from the analysis YAML (for example, memory charts and
+the per-kernel Roofline layout are shown as tables).
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 --view table
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 --debug --debug-table-view
 
 **Show System Speed-of-Light and CS_Busy blocks only**
 

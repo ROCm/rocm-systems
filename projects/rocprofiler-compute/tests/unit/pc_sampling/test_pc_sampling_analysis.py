@@ -2249,15 +2249,20 @@ def test_pc_sampling_dispatch_filter_selects_one_process(
     assert dispatch_info["PID"].tolist() == [202]
 
 
-def test_load_table_data_forwards_pc_sampling_tool_data() -> None:
+@pytest.mark.parametrize(
+    "debug, debug_single_metric", [(False, False), (True, False), (True, True)]
+)
+def test_load_table_data_forwards_pc_sampling_tool_data(
+    debug: bool, debug_single_metric: bool
+) -> None:
     """load_table_data forwards tool data to load_non_mertrics_table."""
     sentinel = [{"sentinel": True}]
-    args = argparse.Namespace(debug=False)
+    args = argparse.Namespace(debug=debug, debug_single_metric=debug_single_metric)
     workload = schema.Workload()
     workload.sys_info = pd.DataFrame([{"gpu_arch": "gfx942"}])
     with patch("utils.parser.load_non_mertrics_table") as mock_load_non_metrics:
-        with patch("utils.parser.eval_metric"):
-            with patch("utils.parser.apply_filters"):
+        with patch("utils.parser.eval_metric") as mock_eval_metric:
+            with patch("utils.parser.apply_filters") as mock_apply_filters:
                 load_table_data(
                     workload=workload,
                     dir_path="dir",
@@ -2267,6 +2272,8 @@ def test_load_table_data_forwards_pc_sampling_tool_data() -> None:
                 )
     mock_load_non_metrics.assert_called_once()
     assert mock_load_non_metrics.call_args.args[3] is sentinel
+    mock_apply_filters.assert_called_once_with(workload, debug_single_metric)
+    assert mock_eval_metric.call_args.args[-1] is debug_single_metric
 
 
 def test_load_non_mertrics_table_populates_pc_sampling_from_tool_data(

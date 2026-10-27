@@ -689,8 +689,8 @@ def load_table_data(
         dfs_expressions,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
-        apply_filters(workload, args.debug),
-        args.debug,
+        apply_filters(workload, args.debug_single_metric),
+        args.debug_single_metric,
     )
 
 
