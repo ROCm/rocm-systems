@@ -3,6 +3,14 @@
 
 include(rj_configure_target)
 
+add_executable(rj_code_mutate rj_code_mutate.cpp)
+target_link_libraries(
+    rj_code_mutate
+    PRIVATE rocjitsu_dbt_internal rocjitsu_amdgpu_isa_model_registry
+)
+rj_configure_target(rj_code_mutate PRIVATE_INCLUDES WARNINGS)
+install(TARGETS rj_code_mutate RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 set(RJ_TOOL_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
