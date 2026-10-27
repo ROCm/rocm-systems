@@ -1,5 +1,5 @@
 td.atomic_insts:
-  name: Atomic Instructions
+  name: TD Atomic Instructions
   formula: SUM(TD_ATOMIC_WAVEFRONT_sum) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
@@ -15,14 +15,14 @@ td.busy:
     Percent of the total CU cycles the data-return unit was busy processing or waiting
     on data to return to the CU.
 td.coalescable_insts:
-  name: Coalescable Instructions
+  name: TD Coalescable Instructions
   formula: SUM(TD_COALESCABLE_WAVEFRONT_sum) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
     The number of instructions submitted to the data-return unit by the address processor
     that were found to be coalescable, per normalization unit.
 td.rd_insts:
-  name: Read Instructions
+  name: TD Read Instructions
   formula: SUM(TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum - TD_ATOMIC_WAVEFRONT_sum) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
@@ -38,7 +38,7 @@ td.tc_stall:
     Percent of the total CU cycles the data-return unit was stalled on data to be
     returned from the vL1D Cache RAM.
 td.wr_insts:
-  name: Write Instructions
+  name: TD Write Instructions
   formula: SUM(TD_STORE_WAVEFRONT_sum) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-

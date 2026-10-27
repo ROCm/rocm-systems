@@ -131,7 +131,7 @@ spi.workgroup_manager_util:
     The percent of cycles in the kernel where the workgroup manager was actively doing
     any work.
 spi.workgroups_per_cu:
-  name: Workgroups
+  name: Workgroups per CU
   formula: AVG(SPI_CSN_NUM_THREADGROUPS) / $numActiveCUs
   unit: Workgroups per CU
   description: >-

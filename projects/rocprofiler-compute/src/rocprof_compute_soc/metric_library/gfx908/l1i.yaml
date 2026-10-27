@@ -1,5 +1,5 @@
 l1i.bw:
-  name: L1I BW
+  name: L1I Bandwidth
   formula: 64 * SUM(SQC_ICACHE_REQ) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
@@ -65,7 +65,7 @@ l1i.l2_bw_util:
     Calculated as the ratio of the total number of requests from the L1I to the L2
     cache over the total L1I-L2 interface cycles.
 l1i.misses_duplicated:
-  name: Misses - Duplicated
+  name: L1I Misses - Duplicated
   formula: SUM(SQC_ICACHE_MISSES_DUPLICATE) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-

@@ -9,14 +9,14 @@ compute.cu_util:
     issue.
   peak: 100
 compute.inst_mix_branch:
-  name: Branch
+  name: Branch Instructions
   formula: SUM(SQ_INSTS_BRANCH) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
     The total number of branch operations issued. These typically consist of jump
     or branch operations and are used to implement control flow.
 compute.inst_mix_salu:
-  name: SALU
+  name: SALU Instructions
   formula: SUM(SQ_INSTS_SALU) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
@@ -25,7 +25,7 @@ compute.inst_mix_salu:
     that are provably uniform across a wavefront. Although scalar memory (SMEM) operations
     are issued by the SALU, they are counted separately in this section.
 compute.inst_mix_smem:
-  name: SMEM
+  name: SMEM Instructions
   formula: SUM(SQ_INSTS_SMEM) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-

@@ -1,5 +1,5 @@
 wave.active_cycles:
-  name: Active Cycles
+  name: Wavefront Active Cycles
   formula: 4 * SUM(SQ_ACTIVE_INST_ANY) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
@@ -11,7 +11,7 @@ wave.active_cycles:
     of a precise limiter. The sum of this metric, Issue Wait Cycles and Active Wait
     Cycles should be equal to the total Wave Cycles metric.
 wave.cycles:
-  name: Wave Cycles
+  name: Wavefront Cycles
   formula: 4 * SUM(SQ_WAVE_CYCLES) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
@@ -19,7 +19,7 @@ wave.cycles:
     unit per normalization unit. This is averaged over all wavefronts in a kernel
     dispatch.
 wave.dep_wait_cycles:
-  name: Dependency Wait Cycles
+  name: Wavefront Dependency Wait Cycles
   formula: 4 * SUM(SQ_WAIT_ANY) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
@@ -27,7 +27,7 @@ wave.dep_wait_cycles:
     unit per normalization unit. This is averaged over all wavefronts in a kernel
     dispatch.
 wave.issue_wait_cycles:
-  name: Issue Wait Cycles
+  name: Wavefront Issue Wait Cycles
   formula: 4 * SUM(SQ_WAIT_INST_ANY) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
@@ -49,7 +49,7 @@ wave.occupancy:
     than 1ms).
   peak: $max_waves_per_cu * $cu_per_gpu
 wave.occupancy_pct:
-  name: Wavefront Occupancy
+  name: Wavefront Occupancy (Percent)
   formula: 100 * SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs * $max_waves_per_cu)
   unit: Percent
   description: >-

@@ -1,5 +1,5 @@
 l2.ai:
-  name: AI L2
+  name: L2 Arithmetic Intensity
   formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (64 * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum))
   unit: FLOPs/Byte
   description: >-
@@ -14,7 +14,7 @@ l2.atomic_req:
     The total number of atomic requests (with and without return) to the L2 from all
     clients.
 l2.bw:
-  name: L2 Cache BW
+  name: L2 Cache Bandwidth
   formula: 64 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
@@ -25,54 +25,54 @@ l2.bw:
     a full cache line.
   peak: $max_sclk / 1000 * 64 * TO_INT($total_l2_chan)
 l2.cc_req:
-  name: CC Req
+  name: L2 CC Requests
   formula: SUM(TCC_CC_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of requests to the L2 that go to Coherently Cacheable (CC) memory
     allocations.
 l2.chan_atomic:
-  name: L2 Atomic
+  name: L2 Atomic Requests per Channel
   formula: SUM(TO_INT(TCC_ATOMIC[::_1])) / SUM($denom)
   unit: (Requests + $normUnit)
   description: ''
 l2.chan_fabric_128b_rd_req_per_normunit:
-  name: L2-Fabric (128B read requests per normUnit)
+  name: L2-Fabric Read Requests (128B) per Channel
   formula: TO_INT(TCC_BUBBLE[::_1]) / $denom
   unit: (Requests + $normUnit)
   description: ''
 l2.chan_fabric_atomic:
-  name: L2-Fabric Atomic
+  name: L2-Fabric Atomic Requests per Channel
   formula: SUM(TO_INT(TCC_EA0_ATOMIC[::_1])) / SUM($denom)
   unit: (Requests + $normUnit)
   description: ''
 l2.chan_fabric_atomic_lat_cycles:
-  name: L2-Fabric Atomic Latency (Cycles)
+  name: L2-Fabric Atomic Latency per Channel
   formula: TCC_EA0_ATOMIC_LEVEL[::_1] / TCC_EA0_ATOMIC[::_1] if TCC_EA0_ATOMIC[::_1] != 0 else 0
   unit: Cycles
   description: ''
 l2.chan_fabric_rd:
-  name: L2-Fabric Read
+  name: L2-Fabric Read Requests per Channel
   formula: SUM(TO_INT(TCC_EA0_RDREQ[::_1])) / SUM($denom)
   unit: (Requests + $normUnit)
   description: ''
 l2.chan_fabric_rd_lat_cycles:
-  name: L2-Fabric Read Latency (Cycles)
+  name: L2-Fabric Read Latency per Channel
   formula: TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]
   unit: Cycles
   description: ''
 l2.chan_fabric_wr_atomic:
-  name: L2-Fabric Write and Atomic
+  name: L2-Fabric Write and Atomic Requests per Channel
   formula: SUM(TO_INT(TCC_EA0_WRREQ[::_1])) / SUM($denom)
   unit: (Requests + $normUnit)
   description: ''
 l2.chan_fabric_wr_atomic_lat_cycles:
-  name: L2-Fabric Write and Atomic Latency (Cycles)
+  name: L2-Fabric Write and Atomic Latency per Channel
   formula: TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]
   unit: Cycles
   description: ''
 l2.chan_fabric_wr_starve:
-  name: L2-Fabric Write Starve
+  name: L2-Fabric Write Starve per Channel
   formula: SUM(TO_INT(TCC_TOO_MANY_EA_WRREQS_STALL[::_1])) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: ''
@@ -89,29 +89,29 @@ l2.chan_hit_rate_per_chan:
   unit: Percent
   description: ''
 l2.chan_rd:
-  name: L2 Read
+  name: L2 Read Requests per Channel
   formula: SUM(TO_INT(TCC_READ[::_1])) / SUM($denom)
   unit: (Requests + $normUnit)
   description: ''
 l2.chan_req_per_normunit:
-  name: L2 Requests (per normUnit)
+  name: L2 Requests per Channel
   formula: TO_INT(TCC_REQ[::_1]) / $denom
   unit: (Requests + $normUnit)
   description: ''
 l2.chan_wr:
-  name: L2 Write
+  name: L2 Write Requests per Channel
   formula: SUM(TO_INT(TCC_WRITE[::_1])) / SUM($denom)
   unit: (Requests + $normUnit)
   description: ''
 l2.evict_internal:
-  name: Evict (Internal)
+  name: L2 Evictions (Internal)
   formula: SUM(TCC_NORMAL_EVICT_sum) / SUM($denom)
   unit: (Cachelines + $normUnit)
   description: >-
     The total number of L2 cache lines evicted from the cache due to capacity limits,
     per normalization unit.
 l2.evict_vl1d_req:
-  name: Evict (vL1D Req)
+  name: L2 Evictions (vL1D Requests)
   formula: SUM(TCC_ALL_TC_OP_INV_EVICT_sum) / SUM($denom)
   unit: (Cachelines + $normUnit)
   description: >-
@@ -133,21 +133,21 @@ l2.hits:
     The total number of requests to the L2 from all clients that hit in the cache.
     As noted in the Speed-of-Light section, this includes hit-on-miss requests.
 l2.misses:
-  name: Misses
+  name: L2 Misses
   formula: SUM(TCC_MISS_sum) / SUM($denom)
   unit: (Misses + $normUnit)
   description: >-
     The total number of requests to the L2 from all clients that miss in the cache.
     As noted in the Speed-of-Light section, these do not include hit-on-miss requests.
 l2.nc_req:
-  name: NC Req
+  name: L2 NC Requests
   formula: SUM(TCC_NC_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of requests to the L2 to Not-hardware-Coherent (NC) memory allocations,
     per normalization unit.
 l2.peak_bw:
-  name: Peak Bandwidth
+  name: L2 Peak Bandwidth
   formula: 100 * 64 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk / 1000 * 64 * TO_INT($total_l2_chan))
   unit: Percent
   description: >-
@@ -157,7 +157,7 @@ l2.peak_bw:
     value does not consider partial requests, so e.g., if only a single value is requested
     in a cache line, the data movement will still be counted as a full cache line.
 l2.probe_req:
-  name: Probe Req
+  name: L2 Probe Requests
   formula: SUM(TCC_PROBE_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -178,14 +178,14 @@ l2.req:
     The total number of incoming requests to the L2 from all clients for all request
     types, per normalization unit.
 l2.rw_req:
-  name: RW Req
+  name: L2 RW Requests
   formula: SUM(TCC_RW_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of requests to the L2 that go to Read-Write coherent memory (RW)
     allocations.
 l2.streaming_req:
-  name: Streaming Req
+  name: L2 Streaming Requests
   formula: SUM(TCC_STREAMING_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -194,7 +194,7 @@ l2.streaming_req:
     on an MI2XX this corresponds to non-temporal load or stores. The L2 cache attempts
     to evict streaming requests before normal requests when the L2 is at capacity.
 l2.uc_req:
-  name: UC Req
+  name: L2 UC Requests
   formula: SUM(TCC_UC_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -213,7 +213,7 @@ l2.wr_req:
   description: >-
     The total number of write requests to the L2 from all clients.
 l2.writeback:
-  name: Writeback
+  name: L2 Writebacks
   formula: SUM(TCC_WRITEBACK_sum) / SUM($denom)
   unit: (Cachelines + $normUnit)
   description: >-
@@ -222,14 +222,14 @@ l2.writeback:
     atomic built-ins) by the command processor's memory acquire/release fences, or
     for other internal hardware reasons.
 l2.writeback_internal:
-  name: Writeback (Internal)
+  name: L2 Writebacks (Internal)
   formula: SUM(TCC_NORMAL_WRITEBACK_sum) / SUM($denom)
   unit: (Cachelines + $normUnit)
   description: >-
     The total number of L2 cache lines written back to memory for internal hardware
     reasons, per normalization unit.
 l2.writeback_vl1d_req:
-  name: Writeback (vL1D Req)
+  name: L2 Writebacks (vL1D Requests)
   formula: SUM(TCC_ALL_TC_OP_WB_WRITEBACK_sum) / SUM($denom)
   unit: (Cachelines + $normUnit)
   description: >-

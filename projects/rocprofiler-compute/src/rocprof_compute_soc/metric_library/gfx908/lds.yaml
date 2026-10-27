@@ -1,5 +1,5 @@
 lds.access_rate:
-  name: Access Rate
+  name: LDS Access Rate
   formula: 200 * SUM(SQ_ACTIVE_INST_LDS) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
@@ -8,14 +8,14 @@ lds.access_rate:
     number of cycles spent by the scheduler issuing LDS instructions over the total
     CU cycles.
 lds.addr_conflict:
-  name: Addr Conflict
+  name: LDS Address Conflicts
   formula: SUM(SQ_LDS_ADDR_CONFLICT) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
     The total number of cycles spent in the LDS scheduler due to address conflicts
     (as determined by the conflict resolution hardware) per normalization unit.
 lds.ai:
-  name: AI LDS
+  name: LDS Arithmetic Intensity
   formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu)
   unit: FLOPs/Byte
   description: >-
@@ -24,14 +24,14 @@ lds.ai:
     within a workgroup. Lower values suggest memory-bound behavior limited by LDS
     bandwidth or bank-conflict pressure.
 lds.atomic_return_cycles:
-  name: Atomic Return Cycles
+  name: LDS Atomic Return Cycles
   formula: SUM(SQ_LDS_ATOMIC_RETURN) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
     The total number of cycles spent on LDS atomics with return per normalization
     unit.
 lds.bank_conflict:
-  name: Bank Conflict
+  name: LDS Bank Conflict Cycles
   formula: SUM(SQ_LDS_BANK_CONFLICT) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
@@ -47,7 +47,7 @@ lds.bank_conflict_rate:
     number of LDS cycles that would have been required to move the same amount of
     data in an uncontended access.
 lds.bank_conflicts_access:
-  name: LDS Bank Conflicts/Access
+  name: LDS Bank Conflicts per Access
   formula: SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
   unit: Conflicts per Access
   description: >-
@@ -57,7 +57,7 @@ lds.bank_conflicts_access:
     is the unnormalized form of the Bank Conflict Rate.
   peak: 32
 lds.index_accesses:
-  name: Index Accesses
+  name: LDS Index Accesses
   formula: SUM(SQ_LDS_IDX_ACTIVE) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
@@ -79,7 +79,7 @@ lds.lat:
     The average number of round-trip cycles (i.e., from issue to data-return acknowledgment)
     required for an LDS instruction to complete.
 lds.mem_violations:
-  name: Mem Violations
+  name: LDS Memory Violations
   formula: SUM(SQ_LDS_MEM_VIOLATIONS) / SUM($denom)
   unit: (Accesses + $normUnit)
   description: >-
@@ -97,7 +97,7 @@ lds.theoretical_bw:
     when the instruction was executed.
   peak: $max_sclk * $cu_per_gpu * 0.128
 lds.theoretical_bw_util:
-  name: Theoretical Bandwidth Utilization
+  name: Theoretical LDS Bandwidth Utilization
   formula: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / (0.00128 * SUM((End_Timestamp - Start_Timestamp) * $max_sclk * $cu_per_gpu))
   unit: Percent
   description: >-
@@ -106,7 +106,7 @@ lds.theoretical_bw_util:
     Does not take into account the execution mask of the wavefront when the instruction
     was executed.
 lds.unaligned_stall:
-  name: Unaligned Stall
+  name: LDS Unaligned Stall
   formula: SUM(SQ_LDS_UNALIGNED_STALL) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-

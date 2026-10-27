@@ -1,5 +1,5 @@
 fabric.ai_hbm:
-  name: AI HBM
+  name: HBM Arithmetic Intensity
   formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / SUM(TCC_BUBBLE_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32 + TCC_EA0_WRREQ_64B_sum * 64)
   unit: FLOPs/Byte
   description: >-
@@ -7,7 +7,7 @@ fabric.ai_hbm:
     ratio of total floating-point operations (FLOPs) to total bytes transferred between
     HBM and the L2 cache.
 fabric.atomic:
-  name: Atomic
+  name: L2-Fabric Atomic Requests
   formula: SUM(TCC_EA0_ATOMIC_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -18,7 +18,7 @@ fabric.atomic:
     memory, such as fine-grained memory allocations or uncached memory allocations
     on the MI2XX.
 fabric.atomic_lat:
-  name: Atomic Latency
+  name: L2-Fabric Atomic Latency
   formula: SUM(TCC_EA0_ATOMIC_LEVEL_sum) / SUM(TCC_EA0_ATOMIC_sum)
   unit: Cycles
   description: >-
@@ -26,7 +26,7 @@ fabric.atomic_lat:
     a completion acknowledgement (atomic without return value) or data (atomic with
     return value) was returned to the L2.
 fabric.atomic_traffic:
-  name: Atomic Traffic
+  name: L2-Fabric Atomic Traffic
   formula: 100 * SUM(TCC_EA0_ATOMIC_sum) / SUM(TCC_EA0_WRREQ_sum)
   unit: Percent
   description: >-
@@ -91,21 +91,21 @@ fabric.hbm_wr_atomic_traffic:
     Fabric if they are targeted at fine-grained memory allocations or uncached memory
     allocations.
 fabric.rd_32b:
-  name: Read (32B)
+  name: L2-Fabric Read Requests (32B)
   formula: SUM(TCC_EA0_RDREQ_32B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to read 32B of data from any
     memory location, per normalization unit.
 fabric.rd_64b:
-  name: Read (64B)
+  name: L2-Fabric Read Requests (64B)
   formula: SUM(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to read 64B of data from any
     memory location, per normalization unit.
 fabric.rd_bw:
-  name: L2-Fabric Read BW
+  name: L2-Fabric Read Bandwidth
   formula: SUM(TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
@@ -113,7 +113,7 @@ fabric.rd_bw:
     time.
   peak: $hbmBandwidth
 fabric.rd_bw_norm:
-  name: Read BW
+  name: L2-Fabric Read Bytes
   formula: SUM(TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) * 64) / SUM($denom)
   unit: (Bytes + $normUnit)
   description: >-
@@ -127,7 +127,7 @@ fabric.rd_lat:
     The time-averaged number of cycles read requests spent in Infinity Fabric before
     data was returned to the L2.
 fabric.rd_uncached:
-  name: Read (Uncached)
+  name: L2-Fabric Read Requests (Uncached)
   formula: SUM(TCC_EA0_RD_UNCACHED_32B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -135,14 +135,14 @@ fabric.rd_uncached:
     any memory location, per normalization unit. 64B requests for uncached data are
     counted as two 32B uncached data requests.
 fabric.remote_rd:
-  name: Remote Read
+  name: L2-Fabric Remote Read Requests
   formula: SUM(NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to read 32B or 64B of data
     from any source other than the accelerator's local HBM, per normalization unit.
 fabric.remote_rd_traffic:
-  name: Remote Read Traffic
+  name: L2-Fabric Remote Read Traffic
   formula: 100 * SUM(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum)
   unit: Percent
   description: >-
@@ -153,7 +153,7 @@ fabric.remote_rd_traffic:
     counted as a single request), so this metric only approximates the percent of
     the L2-Fabric Read bandwidth directed to a remote location.
 fabric.remote_wr_atomic:
-  name: Remote Write and Atomic
+  name: L2-Fabric Remote Write and Atomic Requests
   formula: SUM(NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum)) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -161,7 +161,7 @@ fabric.remote_wr_atomic:
     32B or 64B of data in any memory location other than the accelerator's local HBM,
     per normalization unit.
 fabric.remote_wr_atomic_traffic:
-  name: Remote Write and Atomic Traffic
+  name: L2-Fabric Remote Write and Atomic Traffic
   formula: 100 * SUM(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum)
   unit: Percent
   description: >-
@@ -175,7 +175,7 @@ fabric.remote_wr_atomic_traffic:
     Fabric if they are targeted at fine-grained memory allocations or uncached memory
     allocations.
 fabric.uncached_rd_traffic:
-  name: Uncached Read Traffic
+  name: L2-Fabric Uncached Read Traffic
   formula: 100 * SUM(TCC_EA0_RD_UNCACHED_32B_sum) / SUM(TCC_EA0_RDREQ_sum)
   unit: Percent
   description: >-
@@ -188,7 +188,7 @@ fabric.uncached_rd_traffic:
     only approximates the percent of the L2-Fabric read bandwidth directed to an uncached
     memory location.
 fabric.uncached_wr_atomic_traffic:
-  name: Uncached Write and Atomic Traffic
+  name: L2-Fabric Uncached Write and Atomic Traffic
   formula: 100 * SUM(TCC_EA0_WR_UNCACHED_32B_sum) / SUM(TCC_EA0_WRREQ_sum)
   unit: Percent
   description: >-
@@ -198,21 +198,21 @@ fabric.uncached_wr_atomic_traffic:
     so this metric only approximates the percent of the L2-Fabric read bandwidth directed
     to uncached memory allocations.
 fabric.wr_atomic_32b:
-  name: Write and Atomic (32B)
+  name: L2-Fabric Write and Atomic Requests (32B)
   formula: AVG(NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom, TCC_EA0_WRREQ_sum))
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to write or atomically update
     32B of data to any memory location, per normalization unit.
 fabric.wr_atomic_64b:
-  name: Write and Atomic (64B)
+  name: L2-Fabric Write and Atomic Requests (64B)
   formula: SUM(TCC_EA0_WRREQ_64B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to write or atomically update
     64B of data in any memory location, per normalization unit.
 fabric.wr_atomic_bw:
-  name: L2-Fabric Write and Atomic BW
+  name: L2-Fabric Write and Atomic Bandwidth
   formula: SUM(TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
@@ -220,7 +220,7 @@ fabric.wr_atomic_bw:
     and atomic operations per unit time.
   peak: $hbmBandwidth
 fabric.wr_atomic_bw_norm:
-  name: Write and Atomic BW
+  name: L2-Fabric Write and Atomic Bytes
   formula: SUM(TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) / SUM($denom)
   unit: (Bytes + $normUnit)
   description: >-
@@ -230,14 +230,14 @@ fabric.wr_atomic_bw_norm:
     are targeted at non-write-cacheable memory, for example, fine-grained memory allocations
     or uncached memory allocations on the MI2XX.
 fabric.wr_atomic_uncached:
-  name: Write and Atomic (Uncached)
+  name: L2-Fabric Write and Atomic Requests (Uncached)
   formula: SUM(TCC_EA0_WR_UNCACHED_32B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to write or atomically update
     32B or 64B of uncached data, per normalization unit.
 fabric.wr_credit_starvation:
-  name: Write - Credit Starvation
+  name: L2-Fabric Write Credit Starvation
   formula: 100 * SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
