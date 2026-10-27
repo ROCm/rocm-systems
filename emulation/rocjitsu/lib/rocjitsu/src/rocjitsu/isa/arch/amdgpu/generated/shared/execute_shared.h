@@ -887,10 +887,6 @@ inline void execute_s_cbranch_cdbguser_sopp([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
-inline void execute_s_cbranch_join_sop1([[maybe_unused]] Inst &inst,
-                                        [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
 inline void execute_s_ceil_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = std::ceil(
       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));

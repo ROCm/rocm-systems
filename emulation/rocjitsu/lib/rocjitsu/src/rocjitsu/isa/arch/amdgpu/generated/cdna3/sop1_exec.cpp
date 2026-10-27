@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/sop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -252,7 +253,8 @@ void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCbranchJoinSop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cbranch_join_sop1(*this, wf);
+  const uint32_t saved_csp = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  wf.pc = amdgpu::cbranch_join(wf, saved_csp, wf.pc + size_) - size_;
 }
 
 void SAbsI32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_abs_i32_sop1(*this, wf); }

@@ -59,8 +59,8 @@ namespace {
 using namespace rocjitsu;
 
 constexpr uint32_t kSNop = 0xBF800000u;
-constexpr uint32_t kSMovB32 = 0xBE800000u; // s_mov_b32 s0, s0
-constexpr uint32_t kSCbranchIFork = 0xB8000000u;
+constexpr uint32_t kSMovB32 = 0xBE800000u;        // s_mov_b32 s0, s0
+constexpr uint32_t kSRfeRestoreB64 = 0x95800000u; // s_rfe_restore_b64 s[0:1], s0
 constexpr uint64_t kProgramBase = 0x100000;
 
 struct DispatchPoolFixture {
@@ -467,7 +467,7 @@ TEST(CpuDispatchPoolTest, OneThreadFinishesBatchBeforeRethrowing) {
 TEST(CpuDispatchPoolTest, UnimplementedInstructionsHaltWithoutThrowing) {
   DispatchPoolFixture fixture(/*cu_count=*/8);
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
-  fixture.memory.write32(kProgramBase, kSCbranchIFork);
+  fixture.memory.write32(kProgramBase, kSRfeRestoreB64);
 
   EXPECT_NO_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/4));
   for (const auto &cu : fixture.cus)

@@ -123,6 +123,10 @@ _SIMM32_LITERAL_WIDENING = {
     (128, 'FMT_NUM_PK2_F64'): _Literal32Widening.F64_HIGH_BITS,
 }
 
+# S_CBRANCH_{G,I}_FORK / S_CBRANCH_JOIN stack: a 3-bit MODE.CSP indexes
+# eight 4-SGPR entries, s[0..31].
+_BRANCH_STACK_SGPRS = 32
+
 _LITERAL_ENCODING_OPERANDS = {
     'ENC_SOP1': ('Sop1InstLiteralMachineInst', ('ssrc0',)),
     'ENC_SOP2': ('Sop2InstLiteralMachineInst', ('ssrc0', 'ssrc1')),
@@ -7263,11 +7267,12 @@ class CodeGenerator:
             )
             return '\n'.join(L)
 
-        if cls == 'scalar_setpc':
+        def resolve_pc_target(source: str) -> None:
+            """Emit `target`: the 48-bit PC held in the SGPR pair @p source."""
             L.append('  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;')
             L.append('  constexpr uint64_t kPcSignBit = 1ULL << 47;')
             L.append(
-                f'  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]});'
+                f'  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64({source});'
             )
             L.append('  uint64_t target = encoded & kPcAddressMask;')
             L.append(
@@ -7278,7 +7283,44 @@ class CodeGenerator:
             )
             L.append('  else if (target & kPcSignBit)')
             L.append('    target |= ~kPcAddressMask;')
+
+        if cls == 'scalar_setpc':
+            resolve_pc_target(src_ops[0])
             L.append('  wf.pc = target - size_;')
+            return '\n'.join(L)
+
+        if cls == 'cbranch_fork':
+            # S_CBRANCH_I_FORK keeps its mask in the SOPK sdst field, which
+            # _execute_operand_roles() reports as a destination.
+            fork_srcs = [
+                o.name
+                for o in inst.operands
+                if o.is_input and self._execute_operand_participates(o)
+            ]
+            L.append(
+                f'  const uint64_t compare = amdgpu::RegisterAccess(wf).read_scalar64({fork_srcs[0]});'
+            )
+            if op == 'direct':
+                L.append(
+                    f'  const int16_t offset = static_cast<int16_t>({fork_srcs[1]}.encoding_value_);'
+                )
+                L.append(
+                    '  const uint64_t target = wf.pc + 4 + static_cast<int64_t>(offset) * 4;'
+                )
+            else:
+                resolve_pc_target(fork_srcs[1])
+            L.append(
+                '  wf.pc = amdgpu::cbranch_fork(wf, compare, target, wf.pc + size_) - size_;'
+            )
+            return '\n'.join(L)
+
+        if cls == 'cbranch_join':
+            L.append(
+                f'  const uint32_t saved_csp = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
+            )
+            L.append(
+                '  wf.pc = amdgpu::cbranch_join(wf, saved_csp, wf.pc + size_) - size_;'
+            )
             return '\n'.join(L)
 
         if cls == 'scalar_swappc':
@@ -10087,6 +10129,8 @@ class CodeGenerator:
             'endpgm',
             'branch',
             'cbranch',
+            'cbranch_fork',
+            'cbranch_join',
             'scalar_getpc',
             'scalar_setpc',
             'scalar_swappc',
@@ -11595,16 +11639,30 @@ class CodeGenerator:
                         None,
                     )
                     branch_offset_operand = None
-                    if inst_sem and inst_sem.semantic_class in (
-                        'branch',
-                        'cbranch',
-                        'scalar_call',
+                    if inst_sem and (
+                        inst_sem.semantic_class in ('branch', 'cbranch', 'scalar_call')
+                        or (
+                            inst_sem.semantic_class == 'cbranch_fork'
+                            and inst_sem.operation == 'direct'
+                        )
                     ):
                         branch_offset_operand = label_operand
                     if branch_offset_operand:
                         public_members.append(
                             cgen.Statement(
                                 'std::optional<int64_t> branch_offset_bytes() const override'
+                            )
+                        )
+                    if inst_sem and inst_sem.semantic_class == 'cbranch_fork':
+                        public_members.append(
+                            cgen.Statement(
+                                'void implicit_defs(RegisterSet &defs) const override'
+                            )
+                        )
+                    if inst_sem and inst_sem.semantic_class == 'cbranch_join':
+                        public_members.append(
+                            cgen.Statement(
+                                'void implicit_uses(RegisterSet &uses) const override'
                             )
                         )
                     # Embed the full mnemonic (with suffix) as a string literal
@@ -12935,6 +12993,22 @@ class CodeGenerator:
                         ctor_body_parts.append('flags_ |= BRANCH;')
                     if _mem_sem and _mem_sem.semantic_class == 'cbranch':
                         ctor_body_parts.append('flags_ |= COND_BRANCH;')
+                    # A fork either takes its target or falls through.
+                    # S_CBRANCH_G_FORK's target and S_CBRANCH_JOIN's resume PC
+                    # come from SGPRs, so their successor sets are not static.
+                    if _mem_sem and _mem_sem.semantic_class == 'cbranch_fork':
+                        ctor_body_parts.append(
+                            'flags_ |= COND_BRANCH;'
+                            if _mem_sem.operation == 'direct'
+                            else 'flags_ |= INDIRECT_BRANCH;'
+                        )
+                        # The pushed entry may land in any of the stack SGPRs,
+                        # so its implicit defs must never kill.
+                        ctor_body_parts.append('flags_ |= BRANCH_STACK;')
+                        ctor_body_parts.append('flags_ |= PREDICATED_DEF;')
+                    if _mem_sem and _mem_sem.semantic_class == 'cbranch_join':
+                        ctor_body_parts.append('flags_ |= INDIRECT_BRANCH;')
+                        ctor_body_parts.append('flags_ |= BRANCH_STACK;')
                     if _mem_sem and _mem_sem.semantic_class == 'setkill':
                         ctor_body_parts.append(
                             'if (inst_.simm16 & 1u) flags_ |= PROGRAM_TERMINATOR;'
@@ -14002,6 +14076,30 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
+                    # MODE.CSP picks the stack entry at run time, so report
+                    # every SGPR any entry can occupy.
+                    if inst_sem and inst_sem.semantic_class == 'cbranch_fork':
+                        inst_impls.append(
+                            cgen.Line(
+                                f'void {inst.fmt_name}::implicit_defs'
+                                f'(RegisterSet &defs) const {{\n'
+                                f'  {inst.fmt_true_enc_name}::implicit_defs(defs);\n'
+                                f'  defs.expand(RegisterRef{{RegClass::SGPR, 0, '
+                                f'{_BRANCH_STACK_SGPRS}}});\n'
+                                f'}}'
+                            )
+                        )
+                    if inst_sem and inst_sem.semantic_class == 'cbranch_join':
+                        inst_impls.append(
+                            cgen.Line(
+                                f'void {inst.fmt_name}::implicit_uses'
+                                f'(RegisterSet &uses) const {{\n'
+                                f'  {inst.fmt_true_enc_name}::implicit_uses(uses);\n'
+                                f'  uses.expand(RegisterRef{{RegClass::SGPR, 0, '
+                                f'{_BRANCH_STACK_SGPRS}}});\n'
+                                f'}}'
+                            )
+                        )
                     if tied_destination_result_name is not None:
                         inst_impls.append(
                             cgen.Line(
@@ -14377,6 +14475,16 @@ class CodeGenerator:
                             ('rocjitsu/vm/amdgpu/hwreg.h', False),
                             ('util/log.h', False),
                         ]
+                    )
+                has_branch_stack = any(
+                    self.semantics
+                    and (s := self.semantics.instructions.get(i.name))
+                    and s.semantic_class in ('cbranch_fork', 'cbranch_join')
+                    for i in all_insts
+                )
+                if has_branch_stack:
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/branch_stack.h', False)
                     )
 
                 # Include the unified shared execute template header when

@@ -510,6 +510,7 @@ _SOP1_SPECIAL = {
     'S_SWAPPC': ('scalar_swappc', None),
     'S_SWAP_PC': ('scalar_swappc', None),
     'S_ADD_PC': ('scalar_addpc', None),
+    'S_CBRANCH_JOIN': ('cbranch_join', None),
     'S_GET_SHADER_CYCLES': ('scalar_shader_cycles', None),
     'S_RFE': ('true_nop', None),
     'S_RFE_RESTORE': ('true_nop', None),
@@ -523,7 +524,6 @@ _SOP1_SPECIAL = {
     'S_SET_GPR_IDX_ON': ('gpr_idx', 'on'),
     'S_SET_GPR_IDX_IDX': ('gpr_idx', 'idx'),
     'S_BITREPLICATE': ('scalar_bitreplicate', None),
-    'S_CBRANCH_JOIN': ('true_nop', None),
     'S_BITREPL_B64_B32': ('scalar_bitreplicate', None),
     # Newer SOP1 spellings shared by RDNA3+ and gfx1250 profiles:
     'S_CTZ_I32': ('scalar_unary', 'ctz'),
@@ -696,6 +696,9 @@ _SOP2_OP_MAP = {
 
 def _derive_sop2(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SOP2 (Scalar ALU Two-operand) instruction."""
+    if name == 'S_CBRANCH_G_FORK':
+        return InstructionSemantics(name, 'cbranch_fork', operation='indirect')
+
     # CSELECT
     if name.startswith('S_CSELECT_'):
         _, dtype = _split_dtype(name)
@@ -758,7 +761,7 @@ def _derive_sop2(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'scalar_binop', operation=op, data_type=dtype, sets_scc=scc
         )
-    # Unrecognized SOP2 instructions (S_CBRANCH_G_FORK, S_RFE_RESTORE, …)
+    # Unrecognized SOP2 instructions (S_RFE_RESTORE, …)
     return InstructionSemantics(name, 'nop')
 
 
@@ -817,6 +820,8 @@ def _derive_sopk(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'scalar_mulk')
     if name in ('S_CALL_B64', 'S_CALL_I64'):
         return InstructionSemantics(name, 'scalar_call')
+    if name == 'S_CBRANCH_I_FORK':
+        return InstructionSemantics(name, 'cbranch_fork', operation='direct')
 
     # S_CMPK_<op>_<dtype>
     m = re.match(r'S_CMPK_(\w+?)_(I32|U32)$', name)
@@ -839,7 +844,7 @@ def _derive_sopk(name: str) -> InstructionSemantics | None:
     if name == 'S_SETREG_IMM32_B32':
         return InstructionSemantics(name, 'scalar_setreg_imm')
 
-    # Everything else (CBRANCH_I_FORK, …) → nop
+    # Everything else → nop
     return InstructionSemantics(name, 'nop')
 
 
