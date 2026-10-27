@@ -64,7 +64,7 @@ struct pending_payload
     uint64_t                 enqueue_ts      = 0;
 };
 
-using signal_less_hub_t = DispatchHub<pending_payload>;
+using signal_less_hub_t   = DispatchHub<pending_payload>;
 using signal_less_batch_t = std::vector<signal_less_hub_t::proven>;
 
 // Process-wide hub. Backed by common::static_object for ordered teardown.

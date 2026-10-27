@@ -339,6 +339,45 @@ TEST(dlog_drain, pending_starts_size_cap_evicts_oldest)
     EXPECT_EQ(pairing.pending_starts[k3].start_ticks, 99u) << "the newest START replaces it";
 }
 
+// The cap is enforced after the pass, never mid-pass: a START retained from an
+// earlier batch whose EOP sorts AFTER a new key's START in this batch must still
+// pair, not be evicted first and complete start-unknown.
+TEST(dlog_drain, start_cap_spares_a_start_whose_eop_is_in_the_same_batch)
+{
+    const uint32_t db      = 4100;
+    auto           pairing = pair_state{};
+    pairing.max_pending_starts = 1;
+    auto rec                   = recorder{};
+
+    const auto retained = copied_record{fw_record{100, 0, kRecStart, 9, db}, 0};
+    pair_records(&retained, 1, pairing, 1000, rec.on_record());
+    ASSERT_EQ(pairing.pending_starts.size(), 1u);
+
+    // dispatch 1 sorts before dispatch 9, so its START is processed first.
+    const auto batch = std::vector<copied_record>{{fw_record{200, 0, kRecStart, 1, db}, 0},
+                                                  {fw_record{300, 0, kRecEop, 9, db}, 0}};
+    EXPECT_EQ(pair_records(batch.data(), batch.size(), pairing, 2000, rec.on_record()), 1u);
+    ASSERT_EQ(rec.pairs.count(std::make_pair(db, 9u)), 1u);
+    EXPECT_EQ(rec.pairs[std::make_pair(db, 9u)].first, 100u);
+    EXPECT_TRUE(rec.eops_without_start.empty());
+    EXPECT_EQ(pairing.starts_cap_evicted, 0u);
+    EXPECT_EQ(pairing.pending_starts.size(), 1u) << "the new START is retained within the cap";
+}
+
+// copy_pipes records how full a region got between reads: the only observable
+// precursor of an (undetectable) lap.
+TEST(dlog_drain, copy_tracks_peak_unread_per_region)
+{
+    gpu_ring g(8, 2);
+    g.ring.wptr[0] = 5;
+    g.ring.wptr[1] = 2;
+    EXPECT_EQ(g.copy(), 7u);
+    EXPECT_EQ(g.cur.max_unread, 5u);
+    g.ring.wptr[1] = 5;
+    EXPECT_EQ(g.copy(), 3u);
+    EXPECT_EQ(g.cur.max_unread, 5u) << "a high-water mark, not the last visit";
+}
+
 TEST(dlog_drain, start_age_index_tracks_replay_completion_and_equal_tick_drop)
 {
     auto state = pair_state{};
@@ -578,7 +617,8 @@ TEST(dlog_ring_size, snap_boundaries)
         {"zero_clamps_up_to_floor", 0u, kDlogMinRingBytes},
         {"one_clamps_up_to_floor", 1u, kDlogMinRingBytes},
         {"640kb_on_lattice", 655360u, 655360u},
-        {"default_2p5mb_on_lattice", kDlogDefaultRingBytes, 2621440u},
+        {"2p5mb_on_lattice", 2621440u, 2621440u},
+        {"default_is_the_10mb_ceiling", kDlogDefaultRingBytes, kDlogMaxRingBytes},
         {"5mb_on_lattice", 5242880u, 5242880u},
         {"10mb_ceiling_on_lattice", kDlogMaxRingBytes, 10485760u},
         {"above_ceiling_clamps", 41943040u, kDlogMaxRingBytes},
@@ -1020,6 +1060,50 @@ TEST(record_pipe, fence_includes_deferred_completions_but_not_newer_epochs)
     EXPECT_TRUE(processor_drained_through(pipe, deferred_epoch, 9));
     deferred_epoch.store(UINT64_MAX, std::memory_order_release);
     EXPECT_TRUE(processor_drained_through(pipe, deferred_epoch, 10));
+}
+
+// A fence samples published_count() once; batches published after that sample
+// cannot extend it, even though the pipe never reads empty.
+TEST(record_pipe, fence_target_is_not_extended_by_newer_batches)
+{
+    auto pipe = record_pipe<4>{};
+    auto held = std::atomic<uint64_t>{UINT64_MAX};
+    ASSERT_NE(pipe.acquire(), nullptr);
+    pipe.publish();
+    const auto target = pipe.published_count();
+    ASSERT_NE(pipe.acquire(), nullptr);
+    pipe.publish();  // newer traffic, after the fence's sample
+    EXPECT_FALSE(processor_drained_through(pipe, held, 5, target));
+    pipe.pop();
+    EXPECT_TRUE(processor_drained_through(pipe, held, 5, target));
+    EXPECT_FALSE(processor_drained_through(pipe, held, 5)) << "an untargeted check wants empty";
+}
+
+// Spilling swaps the overflow batch into the slot, so the slot's old buffer comes
+// back (cleared, capacity intact) for reuse instead of being freed.
+TEST(record_pipe, spill_recycles_slot_buffers)
+{
+    auto pipe = record_pipe<2>{};
+    for(int i = 0; i < 2; ++i)
+    {
+        auto* slot = pipe.acquire();
+        ASSERT_NE(slot, nullptr);
+        slot->records.resize(64);
+        pipe.publish();
+    }
+    pipe.pop();
+    pipe.pop();
+
+    auto overflow = std::deque<record_batch>{};
+    overflow.emplace_back().gpu_id = 7;
+    auto spare = std::vector<record_batch>{};
+    EXPECT_TRUE(spill_overflow_to_pipe(pipe, overflow, nullptr, &spare));
+    ASSERT_EQ(spare.size(), 1u);
+    EXPECT_TRUE(spare.front().records.empty());
+    EXPECT_GE(spare.front().records.capacity(), 64u);
+    auto* got = pipe.peek();
+    ASSERT_NE(got, nullptr);
+    EXPECT_EQ(got->gpu_id, 7u);
 }
 
 TEST(record_pipe, idle_marker_preserves_epoch_through_overflow)

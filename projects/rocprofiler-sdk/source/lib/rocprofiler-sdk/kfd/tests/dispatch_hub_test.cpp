@@ -354,6 +354,74 @@ TEST(DispatchHub, gc_closed_windows)
     EXPECT_FALSE(end_start(hub, key_of(5, 1), 150, 200).has_value());
 }
 
+// GC leaves live-queue entries alone however many there are, and skips any entry
+// whose EOP the processor is still holding (`keep`); that entry is retired by its
+// EOP afterwards rather than ledgered as a loss.
+TEST(DispatchHub, gc_closed_windows_spares_open_windows_and_kept_keys)
+{
+    reset_disable();
+    auto hub    = hub_t{};
+    auto open   = mk_window(6, 100);
+    auto closed = mk_window(7, 100);
+    {
+        auto batch = std::vector<hub_t::registration>{};
+        batch.emplace_back(reg_of(key_of(6, 1), open, /*corr_id=*/61));
+        batch.emplace_back(reg_of(key_of(7, 1), closed, /*corr_id=*/71));
+        batch.emplace_back(reg_of(key_of(7, 2), closed, /*corr_id=*/72));
+        ASSERT_TRUE(hub.register_batch(std::move(batch)));
+    }
+    EXPECT_EQ(hub.gc_closed_windows(UINT64_MAX).second.dispatches, 0u) << "nothing closed yet";
+    EXPECT_EQ(hub.pending_count(), 3u);
+
+    closed->gc_deadline_ns = 0;
+    closed->t_close.store(500, std::memory_order_release);
+    const auto keep = hub_t::key_set{key_of(7, 2)};
+    auto [leaked, stats] = hub.gc_closed_windows(/*now_ns=*/1, &keep);
+    EXPECT_EQ(stats.dispatches, 1u) << "only the unkept closed-window entry";
+    EXPECT_TRUE(hub.is_ledgered(71));
+    EXPECT_FALSE(hub.is_ledgered(72)) << "kept: its EOP is in the processor's hands";
+    EXPECT_FALSE(hub.is_ledgered(61)) << "open window: never GC'd";
+    EXPECT_EQ(hub.pending_count(), 2u);
+
+    auto kept = end_start(hub, key_of(7, 2), 150, 600);
+    ASSERT_TRUE(kept.has_value());
+    EXPECT_EQ(kept->correlation_id, 72u);
+    EXPECT_EQ(hub.gc_closed_windows(UINT64_MAX).second.dispatches, 0u)
+        << "the closed window has no entries left";
+    EXPECT_EQ(hub.pending_count(), 1u);
+}
+
+// record_kernel_ends resolves a run of EOPs under one lock with exactly the same
+// rule as record_kernel_end: matches come back in input order, misses consume
+// nothing.
+TEST(DispatchHub, record_kernel_ends_matches_the_single_record_rule)
+{
+    reset_disable();
+    auto hub = hub_t{};
+    auto w   = mk_window(8, 100);
+    {
+        auto batch = std::vector<hub_t::registration>{};
+        for(uint32_t i = 1; i <= 3; ++i)
+            batch.emplace_back(reg_of(key_of(8, i), w, /*corr_id=*/80 + i));
+        ASSERT_TRUE(hub.register_batch(std::move(batch)));
+    }
+    auto ends = std::vector<hub_t::kernel_end>{
+        {key_of(8, 3), uint64_t{150}, 400},
+        {key_of(8, 9), uint64_t{150}, 400},  // no such dispatch
+        {key_of(8, 1), uint64_t{50}, 400},   // START precedes the window: rejected
+        {key_of(8, 2), std::nullopt, 400},   // sole candidate, first owner
+    };
+    auto out = std::vector<hub_t::proven>{};
+    out.reserve(ends.size());
+    EXPECT_EQ(hub.record_kernel_ends(ends, out), 2u);
+    ASSERT_EQ(out.size(), 2u);
+    EXPECT_EQ(out[0].correlation_id, 83u);
+    EXPECT_EQ(out[1].correlation_id, 82u);
+    EXPECT_FALSE(out[1].start_ticks.has_value());
+    EXPECT_EQ(hub.pending_count(), 1u) << "the rejected record left its entry pending";
+    EXPECT_TRUE(end_start(hub, key_of(8, 1), 150, 500).has_value());
+}
+
 // Abandon-on-timeout has two race windows the fence must close (item 2 / §2.2),
 // exercised here against the REAL register_batch / record_kernel_end /
 // ledger_abandoned / is_ledgered and the REAL process-wide disable latch (removing

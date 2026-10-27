@@ -860,8 +860,9 @@ is_dispatch_packet(const rocprofiler_packet& pkt)
 //
 // keys_out is indexed BY PACKET INDEX, so registration uses this ownership
 // snapshot instead of re-deriving keys from a second doorbell lookup. Eligibility
-// checks capacity; registration validates keys atomically before publication and
-// replays signal instrumentation on refusal.
+// checks capacity and slot quarantine (lock-free in the common case); registration
+// validates keys atomically before publication and replays signal instrumentation
+// on refusal.
 bool
 signal_less_batch_eligible(Queue*                                            queue,
                            const rocprofiler_packet*                         packets,
@@ -908,7 +909,7 @@ signal_less_batch_eligible(Queue*                                            que
     // doorbell_tls handoff process_doorbell_impl set before calling the interceptor.
     auto*      _st       = get_doorbell_tls().state;
     const bool _eligible = kfd::owner_registry().slot_uniquely_owned(_gpu, _slot) &&
-                           kfd::signal_less_hub().can_register_batch(_gpu, dispatch_count) &&
+                           kfd::signal_less_hub().can_register_batch(_gpu, _slot, dispatch_count) &&
                            !(_st != nullptr && _st->admission_closed);
 
     if(_eligible)
@@ -1521,15 +1522,14 @@ write_interceptor(Queue*                                queue,
 
         // Register the whole batch BEFORE the writer publishes any packet, so a
         // firmware record can never arrive for a dispatch the hub has not seen.
-        // Cap-evicted closed-window entries leave via _evicted, released here AFTER
-        // m_mu is dropped (the hub's no-destroy-under-lock contract).
+        // Admission never evicts, so nothing is released here.
         const auto _signal_less_count = _signal_less_regs.size();
-        auto       _evicted           = std::vector<kfd::signal_less_hub_t::leaked>{};
         if(_signal_less_batch &&
-           !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs), _evicted))
+           !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs)))
         {
-            // Reachable on a slot quarantined between eligibility and here, or the
-            // per-GPU cap exceeded with no eligible victim. The batch skipped its
+            // Reachable when concurrent submitters race past the advisory capacity
+            // hint into the last of the per-GPU cap, on a slot quarantined between
+            // eligibility and here, or on a live-key collision. The batch skipped its
             // signal instrumentation, so replay exactly the !_signal_less_batch signal
             // path per dispatch and fall through to the normal signal-path completion.
             // No id retirement here: register_batch did not consume _signal_less_regs on
@@ -1555,25 +1555,20 @@ write_interceptor(Queue*                                queue,
             }
             // Clear BEFORE the post-loop block so it builds the async waiter unchanged.
             _signal_less_batch = false;
-            ROCP_WARNING << "KFD dispatch-log: signal-less batch registration refused; falling "
-                            "back to the signal path for these dispatches";
+            // No record is lost (the signal path completes these), so this is
+            // informational, and it can fire on every batch while the hub sits at
+            // its cap: log the 1st, 2nd, 4th, 8th, ... refusal, not every one.
+            // The exact total is in the register-refused counter.
+            static auto _refusals = std::atomic<uint64_t>{0};
+            const auto  _nth      = _refusals.fetch_add(1, std::memory_order_relaxed) + 1;
+            ROCP_WARNING_IF((_nth & (_nth - 1)) == 0) << fmt::format(
+                "KFD dispatch-log: signal-less batch registration refused ({} batch(es) so far); "
+                "falling back to the signal path for these dispatches",
+                _nth);
         }
         else if(_signal_less_batch)
         {
             kfd::note_signal_less(kfd::signal_less_counter::entry_registered, _signal_less_count);
-        }
-
-        // Cap eviction is loud accepted coverage loss: count it, warn (rate-limited by
-        // the census cadence), and latch losses (INV-L1) before any finalize can see
-        // the ledgered ids. Off-lock; _evicted's payloads release at scope end.
-        if(!_evicted.empty())
-        {
-            kfd::note_signal_less(kfd::signal_less_counter::cap_evicted, _evicted.size());
-            kfd::note_signal_less_losses();
-            ROCP_WARNING << fmt::format(
-                "KFD dispatch-log: per-GPU hub cap evicted {} closed-window entry(ies); those "
-                "dispatches emit no record",
-                _evicted.size());
         }
 
         // A signal-less batch has no completion signal to wait on.

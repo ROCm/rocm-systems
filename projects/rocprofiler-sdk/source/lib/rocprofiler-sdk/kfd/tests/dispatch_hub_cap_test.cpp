@@ -88,7 +88,7 @@ reg_of(correlation_key key, window_ptr window, uint64_t corr_id)
 TEST(HubCap, cap_is_one_for_this_binary) { EXPECT_EQ(hub_max_pending_per_gpu(), 1u); }
 
 // cap 1, empty GPU: a one-entry batch is admitted; a two-entry batch is refused
-// (no eligible victim exists and it exceeds the cap) with the map unmutated.
+// (it exceeds the cap; admission never evicts) with the map unmutated.
 TEST(HubCap, admit_one_refuse_two_on_empty_gpu)
 {
     reset_disable();
@@ -158,9 +158,9 @@ TEST(HubCap, live_equals_cap_preserves_closed_window_completion)
     EXPECT_EQ(hub.pending_count(), 1u);
 }
 
-// insufficient victim: live == cap but the only entry is OPEN-window (not eligible),
-// so a new batch is refused and the map is unmutated. This is the fail-closed case.
-TEST(HubCap, insufficient_victim_refuses_and_leaves_map_unmutated)
+// live == cap with an OPEN-window entry: a new batch is refused and the map is
+// unmutated -- the live entry is neither evicted nor ledgered. Fail-closed.
+TEST(HubCap, saturated_open_window_refuses_and_leaves_map_unmutated)
 {
     reset_disable();
     auto hub        = hub_t{};
@@ -172,8 +172,7 @@ TEST(HubCap, insufficient_victim_refuses_and_leaves_map_unmutated)
     auto next = std::vector<hub_t::registration>{};
     next.emplace_back(reg_of(key_of(7, 1), mk_window(7, 300), /*corr_id=*/71));
     auto ev1 = std::vector<hub_t::leaked>{};
-    EXPECT_FALSE(hub.register_batch(std::move(next), ev1))
-        << "no eligible (closed) victim -> refuse";
+    EXPECT_FALSE(hub.register_batch(std::move(next), ev1)) << "saturated -> refuse";
     EXPECT_TRUE(ev1.empty());
     EXPECT_EQ(hub.pending_count(), 1u) << "map unmutated across the refusal";
     EXPECT_FALSE(hub.is_ledgered(61u)) << "the open-window entry was NOT evicted or ledgered";
@@ -190,21 +189,26 @@ TEST(HubCap, advisory_check_observes_retired_capacity)
     ASSERT_TRUE(hub.register_batch(std::move(batch), leaked));
 
     EXPECT_FALSE(hub.can_register_batch({key_of(8, 2)}));
-    EXPECT_FALSE(hub.can_register_batch(0, 1));
+    EXPECT_FALSE(hub.can_register_batch(0, 8, 1));
     EXPECT_TRUE(hub.can_register_batch({key_of(8, 2, 1)}));
-    EXPECT_TRUE(hub.can_register_batch(1, 1));
-    EXPECT_FALSE(hub.can_register_batch(1, 2));
+    EXPECT_TRUE(hub.can_register_batch(1, 8, 1));
+    EXPECT_FALSE(hub.can_register_batch(1, 8, 2));
     ASSERT_TRUE(hub.record_kernel_end(key_of(8, 1), uint64_t{150}, 200).has_value());
     EXPECT_TRUE(hub.can_register_batch({key_of(8, 2)}));
-    EXPECT_TRUE(hub.can_register_batch(0, 1));
+    EXPECT_TRUE(hub.can_register_batch(0, 8, 1));
 }
 
-TEST(HubCap, capacity_hint_does_not_bypass_authoritative_key_validation)
+// A permanently quarantined slot must be refused by the enqueue-side hint, not
+// only by register_batch: otherwise every batch on a queue that reuses the slot
+// would skip its signals, be refused, and replay them.
+TEST(HubCap, capacity_hint_refuses_quarantined_slot)
 {
     reset_disable();
     auto hub = hub_t{};
     hub.quarantine_slot(0, 12);
-    EXPECT_TRUE(hub.can_register_batch(0, 1));
+    EXPECT_FALSE(hub.can_register_batch(0, 12, 1)) << "quarantined slot";
+    EXPECT_TRUE(hub.can_register_batch(0, 13, 1)) << "other slot on the same GPU";
+    EXPECT_TRUE(hub.can_register_batch(1, 12, 1)) << "same slot number on another GPU";
     EXPECT_FALSE(hub.can_register_batch({key_of(12, 1)}));
     auto batch = std::vector<hub_t::registration>{};
     batch.emplace_back(reg_of(key_of(12, 1), mk_window(12, 100), 121));
@@ -220,15 +224,15 @@ TEST(HubCap, capacity_hint_observes_lifecycle_gates)
 {
     reset_disable();
     auto hub = hub_t{};
-    EXPECT_TRUE(hub.can_register_batch(0, 1));
+    EXPECT_TRUE(hub.can_register_batch(0, 1, 1));
     hub.set_mode(session_mode::stopping);
-    EXPECT_FALSE(hub.can_register_batch(0, 1));
+    EXPECT_FALSE(hub.can_register_batch(0, 1, 1));
     hub.set_mode(session_mode::running);
     signal_less_disable_latch().store(true);
-    EXPECT_FALSE(hub.can_register_batch(0, 1));
+    EXPECT_FALSE(hub.can_register_batch(0, 1, 1));
     reset_disable();
     hub.abandon_in_child();
-    EXPECT_FALSE(hub.can_register_batch(0, 1));
+    EXPECT_FALSE(hub.can_register_batch(0, 1, 1));
 }
 
 TEST(HubCap, capacity_hint_refreshes_after_gc_and_quarantine)
@@ -239,16 +243,17 @@ TEST(HubCap, capacity_hint_refreshes_after_gc_and_quarantine)
     auto leaked = std::vector<hub_t::leaked>{};
     batch.emplace_back(reg_of(key_of(13, 1), mk_window(13, 100, 200), 131));
     ASSERT_TRUE(hub.register_batch(std::move(batch), leaked));
-    EXPECT_FALSE(hub.can_register_batch(0, 1));
-    EXPECT_TRUE(hub.can_register_batch(1, 1));
+    EXPECT_FALSE(hub.can_register_batch(0, 13, 1));
+    EXPECT_TRUE(hub.can_register_batch(1, 13, 1));
     EXPECT_EQ(hub.gc_closed_windows(UINT64_MAX).second.dispatches, 1u);
-    EXPECT_TRUE(hub.can_register_batch(0, 1));
+    EXPECT_TRUE(hub.can_register_batch(0, 13, 1));
     batch.clear();
     batch.emplace_back(reg_of(key_of(14, 1), mk_window(14, 300), 141));
     ASSERT_TRUE(hub.register_batch(std::move(batch), leaked));
-    EXPECT_FALSE(hub.can_register_batch(0, 1));
+    EXPECT_FALSE(hub.can_register_batch(0, 15, 1));
     EXPECT_EQ(hub.quarantine_slot(0, 14).size(), 1u);
-    EXPECT_TRUE(hub.can_register_batch(0, 1));
+    EXPECT_TRUE(hub.can_register_batch(0, 15, 1)) << "capacity returned by the quarantine";
+    EXPECT_FALSE(hub.can_register_batch(0, 14, 1)) << "the quarantined slot itself";
 }
 
 TEST(HubCap, saturated_gpu_refuses_multi_gpu_batch_without_mutation)
@@ -295,7 +300,7 @@ TEST(HubCap, concurrent_batches_cannot_consume_the_same_capacity)
             ready.fetch_add(1, std::memory_order_release);
             while(ready.load(std::memory_order_acquire) != worker_count)
                 std::this_thread::yield();
-            hub.can_register_batch(0, 1);
+            hub.can_register_batch(0, 11, 1);
             if(hub.register_batch(std::move(batch), leaked))
             {
                 admitted.fetch_add(1, std::memory_order_relaxed);
