@@ -631,9 +631,12 @@ private:
   /// @brief Fetch AQL packets from a single AQL queue.
   void fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick now);
 
-  /// @brief Coarse writeback+invalidate of the GPU data caches (L1 K$/V$ + L2).
+  /// @brief Write back L2 and invalidate scalar, vector and instruction caches.
   /// @details Scalar and vector L1 are write-through and only need
-  /// invalidation. Dirty L2 data is published under the owning VMID.
+  /// invalidation. Dirty L2 data is published under the owning VMID. Requires
+  /// hw_queue_mutex_ and joined CU workers. CU maintenance takes each CU's
+  /// mutex to serialize with runtime snapshots, without delivering notifications
+  /// that could re-enter the CP and invalidate queue or dispatch references.
   void flush_gpu_caches();
 
   /// @brief Ask ROCr to provision scratch while leaving the head packet unconsumed.

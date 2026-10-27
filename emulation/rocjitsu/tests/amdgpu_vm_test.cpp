@@ -10037,11 +10037,60 @@ TEST(CommandProcessorTest, CacheMaintenanceSerializesWithRuntimeWaveStateFlush) 
     std::thread runtime_thread([&] {
       start.arrive_and_wait();
       for (uint32_t iteration = 0; iteration < kFlushCount; ++iteration)
-        cu->with_wave_state_locked([&] { cu->flush_l1(); });
+        cu->flush_l1();
     });
     cp_thread.join();
     runtime_thread.join();
     EXPECT_EQ(cu->instruction_cache().epoch(), initial_epoch + 2 * kFlushCount);
+  }
+}
+
+TEST(CommandProcessorTest, CacheMaintenanceLeavesPendingFailureWithItsProducer) {
+  using namespace std::chrono_literals;
+  for (uint32_t operation = 0; operation < 4; ++operation) {
+    SCOPED_TRACE(operation);
+    VmFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize());
+    constexpr uint32_t kUndecodableInstruction = 0xBFFF0000u;
+    const uint64_t kernel =
+        fixture.write_kernel(0x1000, &kUndecodableInstruction, sizeof(kUndecodableInstruction));
+    constexpr uint64_t kSignal = 0x3000;
+    init_completion_signal(fixture.mem(), kSignal);
+    test::AqlQueue queue(fixture.mem(), fixture.cp());
+    queue.submit(make_dispatch_packet(kernel, kSignal, 32, 32));
+    ASSERT_TRUE(fixture.engine->step());
+    ASSERT_TRUE(fixture.cu()->has_active_wfs());
+    const uint32_t dispatch_id = fixture.cu()->wf(0)->dispatch_id();
+
+    std::promise<void> pending, release;
+    auto pending_ready = pending.get_future();
+    auto resume = release.get_future();
+    fixture.cu()->set_notification_flush_hook_for_testing([&] {
+      // Leave the real decode-failure notification queued after releasing the
+      // CU lock, exactly where maintenance can otherwise steal its delivery.
+      pending.set_value();
+      resume.wait();
+    });
+    std::thread producer([&] { (void)fixture.cu()->step(); });
+    const bool ready = pending_ready.wait_for(5s) == std::future_status::ready;
+    EXPECT_TRUE(ready);
+    if (ready) {
+      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0));
+      if (operation < 2)
+        amdgpu::CommandProcessorCacheTestAccess::flush(*fixture.cp(), operation == 1);
+      else if (operation == 2)
+        fixture.cu()->flush_l1();
+      else
+        fixture.cu()->flush_all();
+      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0))
+          << "Cache maintenance delivered a pending dispatch failure";
+      EXPECT_TRUE(fixture.cp()->has_dispatch_for_test(1, 0, dispatch_id));
+    }
+    release.set_value();
+    producer.join();
+    EXPECT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
+    EXPECT_FALSE(fixture.cp()->has_dispatch_for_test(1, 0, dispatch_id));
+    EXPECT_EQ(completion_signal_value(fixture.mem(), kSignal), 1);
   }
 }
 
