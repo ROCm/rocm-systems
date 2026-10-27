@@ -3307,6 +3307,43 @@ TEST_F(SymWindowDestroyTest, Succeeds_ClearsTableSlotAndSortedEntry) {
   EXPECT_EQ(comm->devrState.memHead, nullptr);  // the memory went with it
 }
 
+// Destroying one of two windows at the same address removes only that entry.
+TEST_F(SymWindowDestroyTest, SameAddress_RemovesOnlyTheDestroyedEntry) {
+  void* userPtr = reinterpret_cast<void*>(0x100000);
+  ncclWindow_vidmem* first = MakeWindow(userPtr);
+  ncclWindow_vidmem* second = MakeWindow(userPtr);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  ASSERT_NE(first, second);
+
+  ncclDevrState* devr = &comm->devrState;
+  ASSERT_EQ(devr->winSortedCount, 2);
+  ASSERT_NE(devr->memHead, nullptr);
+  ASSERT_EQ(devr->memHead->next, nullptr);
+  ASSERT_EQ(devr->memHead->refCount, 2);
+  ncclDevrWindow* earlier = devr->winSorted[0].win;
+  ncclDevrWindow* later = devr->winSorted[1].win;
+  ASSERT_EQ(earlier->vidmem, first);
+  ASSERT_EQ(later->vidmem, second);
+  ASSERT_EQ(devr->winSorted[0].userAddr, reinterpret_cast<uintptr_t>(userPtr));
+  ASSERT_EQ(devr->winSorted[1].userAddr, reinterpret_cast<uintptr_t>(userPtr));
+
+  EXPECT_EQ(symWindowDestroy(comm, first, nullptr), ncclSuccess);
+  ASSERT_EQ(devr->winSortedCount, 1);
+  EXPECT_EQ(devr->winSorted[0].win, later);
+  EXPECT_EQ(devr->winSorted[0].userAddr, reinterpret_cast<uintptr_t>(userPtr));
+  ASSERT_NE(devr->memHead, nullptr);
+  EXPECT_EQ(devr->memHead->refCount, 1);
+
+  ncclDevrWindow* found = nullptr;
+  EXPECT_EQ(ncclDevrFindWindow(comm, userPtr, &found), ncclSuccess);
+  EXPECT_EQ(found, later);
+
+  EXPECT_EQ(symWindowDestroy(comm, second, nullptr), ncclSuccess);
+  EXPECT_EQ(devr->winSortedCount, 0);
+  EXPECT_EQ(devr->memHead, nullptr);
+}
+
 // Branch: the multi-segment window array is released only when one exists.
 TEST_F(SymWindowDestroyTest, MultiSegmentWins_AreFreed) {
   comm->devrState.ginEnabled = true;  // only the GIN arm attaches an array to free
