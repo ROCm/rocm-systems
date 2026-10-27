@@ -530,7 +530,8 @@ TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) 
     plugin.onShutdown();
   }
   const std::string diagnostic = testing::internal::GetCapturedStderr();
-  EXPECT_NE(diagnostic.find("wavefront slot was reset without a halt callback"), std::string::npos);
+  EXPECT_NE(diagnostic.find("wavefront slot was reset without a terminal callback"),
+            std::string::npos);
 
   const auto trace = lines(read_file(trace_.path()));
   EXPECT_EQ(line_with_prefix(trace, "begin 44 "), trace.size());
