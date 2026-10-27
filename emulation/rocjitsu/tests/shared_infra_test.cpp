@@ -5949,8 +5949,9 @@ TEST(ScratchAddrCalcTest, InterleavesPrivateDwordsAcrossTheWave) {
 }
 
 TEST(ScratchAddrCalcTest, FlatScratchUsesWavefrontBase) {
-  // Verify that FLAT with seg==1 (SCRATCH) computes:
-  //   address = scratch_base + VGPR[lane] + offset
+  // FLAT with seg==1 (SCRATCH) forms the private byte offset from
+  // VGPR[lane] + offset, then interleaves its dwords across lanes relative
+  // to the wavefront's scratch_base.
   amdgpu::GpuMemory mem("test_mem");
   amdgpu::L2Cache l2("test_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
