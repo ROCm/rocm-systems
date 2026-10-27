@@ -2199,7 +2199,7 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitsSignals_Reserved_Negative) {
 /**
  * Test Description
  * ------------------------
- * - Stream capture is not supported: calling on a capturing stream returns
+ * - Stream capture is not supported: calling on a capturing stream (origin or joined) returns
  *   hipErrorStreamCaptureUnsupported and invalidates the capture.
  * Test source
  * ------------------------
@@ -2229,6 +2229,22 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_StreamCapture_Negative) {
   HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), hipErrorStreamCaptureInvalidated);
   REQUIRE(graph == nullptr);
 
+  // On a stream that joined another stream's capture, the origin's capture is invalidated too.
+  hipStream_t side;
+  hipEvent_t fork;
+  HIP_CHECK(hipStreamCreate(&side));
+  HIP_CHECK(hipEventCreate(&fork));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
+  HIP_CHECK(hipEventRecord(fork, stream));
+  HIP_CHECK(hipStreamWaitEvent(side, fork, 0));
+  HIP_CHECK_ERROR(hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr, 1,
+                                         nullptr, nullptr, 0, side),
+                  hipErrorStreamCaptureUnsupported);
+  HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), hipErrorStreamCaptureInvalidated);
+  REQUIRE(graph == nullptr);
+
+  HIP_CHECK(hipEventDestroy(fork));
+  HIP_CHECK(hipStreamDestroy(side));
   HIP_CHECK(hipFree(d_a));
   HIP_CHECK(hipFree(d_b));
   HIP_CHECK(hipStreamDestroy(stream));
@@ -2238,8 +2254,8 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_StreamCapture_Negative) {
  * Test Description
  * ------------------------
  * - For a swap entry, sizesDst[i] must be non-zero and <= sizes[i]. Both a zero
- *   and an over-large sizesDst return hipErrorInvalidValue. Skipped where swap
- *   is unsupported.
+ *   and an over-large sizesDst return hipErrorInvalidValue, ahead of swap support
+ *   and transfer-type checks (device and host-to-host entries).
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpyBatchAsync.cc
@@ -2268,17 +2284,20 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_SizesDst_Constraint_Negative) {
   hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizesDst_zero,
                                           nullptr, nullptr, 1,
                                           &attr, attrsIdxs, 1, stream);
-  if (err == hipErrorNotSupported) {
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK(hipFree(d_a));
-    HIP_CHECK(hipFree(d_b));
-    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
-  }
   REQUIRE(err == hipErrorInvalidValue);
 
   // Case 2: sizesDst[0] > sizes[0] (invalid for a swap entry).
   size_t sizesDst_big[] = {kBytes * 2};
   err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizesDst_big,
+                               nullptr, nullptr, 1,
+                               &attr, attrsIdxs, 1, stream);
+  REQUIRE(err == hipErrorInvalidValue);
+
+  // Case 3: host-to-host swap entry, which would otherwise be hipErrorNotSupported.
+  std::vector<char> h_a(kBytes), h_b(kBytes);
+  void* h_dsts[] = {h_a.data()};
+  void* h_srcs[] = {h_b.data()};
+  err = hipExtMemcpyBatchAsync(h_dsts, h_srcs, sizes, sizesDst_zero,
                                nullptr, nullptr, 1,
                                &attr, attrsIdxs, 1, stream);
   REQUIRE(err == hipErrorInvalidValue);
@@ -2671,6 +2690,13 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_NegativeTsts) {
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dstPtr, srcPtr, nullptr, count, nullptr,
                                         attrsIdxs, numAttrs, &failIdx, stream),
                     hipErrorInvalidValue);
+  }
+  SECTION("Batch-wide error resets failIdx") {
+    failIdx = 0;
+    HIP_CHECK_ERROR(hipMemcpyBatchAsync(dstPtr, srcPtr, sizes, count, nullptr,
+                                        attrsIdxs, 1, &failIdx, stream),
+                    hipErrorInvalidValue);
+    REQUIRE(failIdx == SIZE_MAX);
   }
 #if 0 // Enable these tests when support for memcpy attributes is enabled.
   SECTION("Number of Attributes as zero") {
