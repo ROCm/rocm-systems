@@ -495,10 +495,10 @@ public:
   /// refuses a code object with a wave32 kernel, a call, an unresolved edge
   /// (code that runs off the end of .text included), such a relative access,
   /// or an RDNA4 image instruction, whose address VGPRs the decoder does not
-  /// report. It also refuses a kernel that preloads kernel arguments where
-  /// uses_kernarg_preload_firmware_skip() holds: firmware can enter one 256
-  /// bytes past its descriptor entry, and only the descriptor entry is decoded
-  /// from. These refusals set `kernel_unsupported`.
+  /// report. It also refuses a kernel that preloads kernel arguments on CDNA2 or
+  /// where uses_kernarg_preload_firmware_skip() holds: firmware can enter one
+  /// 256 bytes past its descriptor entry, which is not treated as a kernel
+  /// entry. These refusals set `kernel_unsupported`.
   ///
   /// Refuses any point whose probe reads a `LogBufferPtr*` argument: the entry
   /// prologue those need loads through a kernarg wrapper that no runtime builds

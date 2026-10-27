@@ -321,21 +321,22 @@ std::string liveness_refusal_reason(rj_code_arch_t arch, const CodeObject &obj,
   return {};
 }
 
-// Where uses_kernarg_preload_firmware_skip() holds, firmware that supports
-// kernarg preload enters a preloading kernel kKernargPreloadSkipBytes past its
-// descriptor entry, skipping a compatibility window. Only the descriptor entry
-// is decoded from, so a site in the window would not run there, and the code
-// past it may not be decoded at all. Handling that second entry is deferred, so
+// On CDNA2, and where uses_kernarg_preload_firmware_skip() holds, firmware
+// that supports kernarg preload enters a preloading kernel
+// kKernargPreloadSkipBytes past its descriptor entry, skipping a compatibility
+// window. The predicate leaves CDNA2 out because DBT does not handle its second
+// entry. Only the descriptor entry is a decode root, so a site in the window
+// would not run on that firmware. Handling that second entry is deferred, so
 // every such kernel is refused.
 std::string kernarg_preload_refusal_reason(rj_code_arch_t arch, const CodeObject &obj) {
-  if (!uses_kernarg_preload_firmware_skip(arch))
+  if (arch != ROCJITSU_CODE_ARCH_CDNA2 && !uses_kernarg_preload_firmware_skip(arch))
     return {};
   for (const KernelDescriptorInfo &kernel : scan_object_kernel_descriptors(obj)) {
     if (const uint32_t preload = kernarg_preload_length(kernel.descriptor); preload != 0)
       return "the kernel at text offset " + std::to_string(kernel.entry_text_offset) +
-             " preloads " + std::to_string(preload) +
-             " kernarg dwords, so firmware may enter it at an undecoded entry " +
-             std::to_string(kKernargPreloadSkipBytes) + " bytes past its descriptor entry";
+             " preloads " + std::to_string(preload) + " kernarg dwords, so firmware may enter it " +
+             std::to_string(kKernargPreloadSkipBytes) +
+             " bytes past its descriptor entry, which is not treated as a kernel entry";
   }
   return {};
 }

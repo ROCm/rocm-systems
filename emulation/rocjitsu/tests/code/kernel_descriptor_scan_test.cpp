@@ -389,6 +389,8 @@ TEST(KernargPreload, LengthAndOffsetDecodeIndependently) {
 TEST(KernargPreload, FirmwareEntersPastTheDescriptorEntryOnlyOnCdna3AndCdna4) {
   EXPECT_TRUE(uses_kernarg_preload_firmware_skip(ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_TRUE(uses_kernarg_preload_firmware_skip(ROCJITSU_CODE_ARCH_CDNA4));
+  // CDNA2 firmware enters the same way, but DBT does not handle that entry.
+  EXPECT_FALSE(uses_kernarg_preload_firmware_skip(ROCJITSU_CODE_ARCH_CDNA2));
   // GFX1250 preloads in hardware and has the one descriptor entry.
   EXPECT_FALSE(uses_kernarg_preload_firmware_skip(ROCJITSU_CODE_ARCH_CDNA5));
 }

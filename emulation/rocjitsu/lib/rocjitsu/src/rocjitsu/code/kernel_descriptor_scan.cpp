@@ -336,8 +336,9 @@ uint32_t kernarg_preload_offset(const KD &desc) {
 bool uses_kernarg_preload_firmware_skip(rj_code_arch_t arch) {
   // CDNA3/CDNA4 implement kernarg preloading through the legacy firmware
   // compatibility window: old firmware enters at the descriptor entry and
-  // compatible firmware enters 256 bytes later. GFX1250 supports preloading in
-  // hardware but has one entry, exactly as specified by the descriptor.
+  // compatible firmware enters 256 bytes later. CDNA2 does too, but is left out
+  // (see the header). GFX1250 supports preloading in hardware but has one
+  // entry, exactly as specified by the descriptor.
   return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
 

@@ -1236,29 +1236,36 @@ std::vector<uint8_t> with_kernarg_preload(std::vector<uint8_t> image) {
   return image;
 }
 
-// On CDNA4, firmware that supports kernarg preload can enter the kernel past
-// its descriptor entry, which is not decoded from, so patch() refuses a
-// preloading kernel. patch_with_debug_summaries() still patches it.
+// On CDNA2 and CDNA4, firmware that supports kernarg preload can enter the
+// kernel past its descriptor entry, which is not treated as a kernel entry, so
+// patch() refuses a preloading kernel. patch_with_debug_summaries() still
+// patches it. CDNA2 is refused although uses_kernarg_preload_firmware_skip()
+// leaves it out.
 TEST(InstrumentorPatch, RefusesAKernelThatPreloadsKernelArguments) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
-  const std::vector<uint8_t> image = with_kernarg_preload(make_gfx950_kernel_elf(
-      {0xBF800000u, 0xBF800000u, build_s_endpgm(arch)}, /*private_bytes=*/0));
-  AmdGpuCodeObject obj(image.data(), image.size());
+  for (const auto &[arch, e_flags] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA2, EF_AMDGPU_MACH_AMDGCN_GFX90A},
+        std::pair{ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950}}) {
+    SCOPED_TRACE(e_flags);
+    const std::vector<uint8_t> image = with_kernarg_preload(
+        make_amdgpu_kernel_elf({0xBF800000u, 0xBF800000u, build_s_endpgm(arch)},
+                               /*private_bytes=*/0, /*granulated_sgpr_count=*/3, e_flags));
+    AmdGpuCodeObject obj(image.data(), image.size());
 
-  Instrumentor refusing(obj, arch);
-  refusing.add_point_by_offset(4);
-  const InstrumentedCodeObject refused = refusing.patch();
-  EXPECT_TRUE(refused.elf_bytes.empty());
-  ASSERT_FALSE(refused.errors.empty());
-  EXPECT_NE(refused.errors.front().find("preloads 1 kernarg dwords"), std::string::npos)
-      << refused.errors.front();
-  EXPECT_TRUE(refused.kernel_unsupported);
+    Instrumentor refusing(obj, arch);
+    refusing.add_point_by_offset(4);
+    const InstrumentedCodeObject refused = refusing.patch();
+    EXPECT_TRUE(refused.elf_bytes.empty());
+    ASSERT_FALSE(refused.errors.empty());
+    EXPECT_NE(refused.errors.front().find("preloads 1 kernarg dwords"), std::string::npos)
+        << refused.errors.front();
+    EXPECT_TRUE(refused.kernel_unsupported);
 
-  Instrumentor debugging(obj, arch);
-  debugging.add_point_by_offset(4);
-  const InstrumentedCodeObjectDebug patched = debugging.patch_with_debug_summaries();
-  EXPECT_TRUE(patched.errors.empty()) << patched.errors.front();
-  EXPECT_FALSE(patched.elf_bytes.empty());
+    Instrumentor debugging(obj, arch);
+    debugging.add_point_by_offset(4);
+    const InstrumentedCodeObjectDebug patched = debugging.patch_with_debug_summaries();
+    EXPECT_TRUE(patched.errors.empty()) << patched.errors.front();
+    EXPECT_FALSE(patched.elf_bytes.empty());
+  }
 }
 
 // gfx1250 preloads kernargs in hardware and is entered only at its descriptor
