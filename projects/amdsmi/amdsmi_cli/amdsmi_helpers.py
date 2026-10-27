@@ -732,7 +732,7 @@ class AMDSMIHelpers:
                 raise ValueError(
                     f"Invalid value '{safe_value}' for insertion_priority. Valid values are: "
                     + ", ".join(amdsmi_interface.AmdSmiHawkInsertionPriority.__members__)
-                )
+                ) from None
         elif param_id in (param_ids.ENABLE, param_ids.RAMP_ENABLE):
             bool_map = {"on": 1, "true": 1, "1": 1, "off": 0, "false": 0, "0": 0}
             value = bool_map.get(raw_value.lower())
@@ -745,14 +745,18 @@ class AMDSMIHelpers:
             try:
                 value = float(raw_value)
             except ValueError:
-                raise ValueError(f"Invalid value '{safe_value}' for {key}: must be a number")
+                raise ValueError(
+                    f"Invalid value '{safe_value}' for {key}: must be a number"
+                ) from None
             if not math.isfinite(value):
                 raise ValueError(f"Invalid value '{safe_value}' for {key}: must be a finite number")
         else:
             try:
                 value = int(raw_value)
             except ValueError:
-                raise ValueError(f"Invalid value '{safe_value}' for {key}: must be an integer")
+                raise ValueError(
+                    f"Invalid value '{safe_value}' for {key}: must be an integer"
+                ) from None
             # ctypes silently truncates an out-of-int64-range value when it's
             # assigned into amdsmi_value_t.data.int64_value; reject it here
             # instead of letting the CLI report "success" for a value that
