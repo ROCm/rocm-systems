@@ -55,7 +55,7 @@ inline void push_branch_stack(Wavefront &wf, BranchStackEntry entry) {
 }
 
 /// @brief Decrement MODE.CSP, then pop the entry it points to.
-inline BranchStackEntry pop_branch_stack(Wavefront &wf) {
+[[nodiscard]] inline BranchStackEntry pop_branch_stack(Wavefront &wf) {
   // Read CSP back after the decrement so it wraps as a 3-bit field.
   wf.set_cond_stack_ptr(wf.cond_stack_ptr() - 1);
   const uint32_t physical_sgpr = branch_stack_entry_physical_sgpr(wf, wf.cond_stack_ptr());
@@ -96,8 +96,9 @@ struct BranchStackAccess {
 }
 
 /// @brief Execute S_CBRANCH_G_FORK or S_CBRANCH_I_FORK.
-/// @details Updates EXEC and the branch stack; the caller must still set the PC
-/// to the returned address to complete the instruction.
+/// @details A divergent fork updates EXEC and pushes a branch stack entry. A uniform
+/// fork leaves both unchanged. The caller must still set the PC to the returned
+/// address to complete the instruction.
 /// @param compare Per-lane branch condition: lanes whose bit is set take the
 /// branch. Only active lanes are considered.
 /// @param target Resolved branch target PC.

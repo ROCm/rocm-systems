@@ -510,6 +510,7 @@ _SOP1_SPECIAL = {
     'S_SWAPPC': ('scalar_swappc', None),
     'S_SWAP_PC': ('scalar_swappc', None),
     'S_ADD_PC': ('scalar_addpc', None),
+    'S_CBRANCH_JOIN': ('cbranch_join', None),
     'S_GET_SHADER_CYCLES': ('scalar_shader_cycles', None),
     'S_RFE': ('true_nop', None),
     'S_RFE_RESTORE': ('true_nop', None),
@@ -523,7 +524,6 @@ _SOP1_SPECIAL = {
     'S_SET_GPR_IDX_ON': ('gpr_idx', 'on'),
     'S_SET_GPR_IDX_IDX': ('gpr_idx', 'idx'),
     'S_BITREPLICATE': ('scalar_bitreplicate', None),
-    'S_CBRANCH_JOIN': ('cbranch_join', None),
     'S_BITREPL_B64_B32': ('scalar_bitreplicate', None),
     # Newer SOP1 spellings shared by RDNA3+ and gfx1250 profiles:
     'S_CTZ_I32': ('scalar_unary', 'ctz'),
