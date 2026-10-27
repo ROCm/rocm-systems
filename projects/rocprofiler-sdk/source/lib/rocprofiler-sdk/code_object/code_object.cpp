@@ -497,8 +497,9 @@ read_code_object_file(int fd)
     return buffer;
 }
 
-hip::kernel_symbol_hip_device_map_t
-get_loaded_code_object_symbol_map(const rocprofiler_callback_tracing_code_object_load_data_t& data)
+hip::code_object_metadata_t
+get_loaded_code_object_metadata(
+    const rocprofiler_callback_tracing_code_object_load_data_t& data)
 {
     if(data.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
     {
@@ -517,33 +518,41 @@ get_loaded_code_object_symbol_map(const rocprofiler_callback_tracing_code_object
             return {};
         }
 
+        // This is the one moment at which the image is known to be readable: the loader reports the
+        // application's own buffer, which the application may free once the executable is frozen.
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         const auto* executable = reinterpret_cast<const void*>(data.memory_base);
-        return hip::get_kernel_symbol_device_name_map_from_executable(
-            executable, static_cast<size_t>(data.memory_size));
+        return hip::get_metadata_from_executable(executable,
+                                                 static_cast<size_t>(data.memory_size));
     }
 
     if(data.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
     {
         auto file_data = read_code_object_file(data.storage_file);
         if(file_data.empty()) return {};
-        return hip::get_kernel_symbol_device_name_map_from_executable(file_data.data(),
-                                                                      file_data.size());
+        return hip::get_metadata_from_executable(file_data.data(), file_data.size());
     }
 
     return {};
 }
 
 void
-populate_hip_symbol_map_from_loaded_code_object(
+populate_hip_register_data_from_loaded_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& data)
 {
-    auto symbol_map = get_loaded_code_object_symbol_map(data);
-    if(symbol_map.empty()) return;
+    auto metadata = get_loaded_code_object_metadata(data);
+    if(metadata.kernel_symbol_device_map.empty() && metadata.kernarg_layout_map.empty()) return;
 
+    const auto code_object_id = data.code_object_id;
     CHECK_NOTNULL(get_hip_register_data())
-        ->wlock([&symbol_map](hip::hip_register_data& register_data) {
-            register_data.kernel_symbol_device_map.insert(symbol_map.begin(), symbol_map.end());
+        ->wlock([&metadata, code_object_id](hip::hip_register_data& register_data) {
+            register_data.kernel_symbol_device_map.insert(
+                metadata.kernel_symbol_device_map.begin(),
+                metadata.kernel_symbol_device_map.end());
+            auto& layouts = register_data.kernel_kernarg_layout_map[code_object_id];
+            // Assigned rather than inserted: should the loader ever reuse an id, the layouts of the
+            // load now taking it replace the ones the previous load left behind.
+            for(const auto& [symbol, layout] : metadata.kernarg_layout_map) layouts[symbol] = layout;
         });
 }
 
@@ -819,7 +828,7 @@ code_object_load_callback(hsa_executable_t         executable,
     // generate a unique code object id
     data.code_object_id = ++get_code_object_id();
 
-    populate_hip_symbol_map_from_loaded_code_object(data);
+    populate_hip_register_data_from_loaded_code_object(data);
 
     auto _status = ::rocprofiler::hsa::get_core_table()->hsa_executable_iterate_agent_symbols_fn(
         executable, data.hsa_agent, executable_iterate_agent_symbols_load_callback, &code_obj_v);
@@ -1169,6 +1178,22 @@ executable_destroy_internal(hsa_executable_t executable)
         });
     }
 
+    // Kernarg layouts are kept per load, keyed by the id the load reported, so that two loads
+    // defining kernels of the same name cannot supply each other's boundary. They are dropped with
+    // the load: an application that repeatedly loads and unloads modules would otherwise retain the
+    // layouts of every load it ever made. A dispatch of an already unloaded kernel cannot reach the
+    // map, because the kernel object it would be queried under is gone with the executable.
+    if(get_hip_register_data())
+    {
+        CHECK_NOTNULL(get_hip_register_data())->wlock([_unloaded](hip::hip_register_data& data) {
+            for(const auto& uitr : _unloaded)
+            {
+                if(uitr.object == nullptr) continue;
+                data.kernel_kernarg_layout_map.erase(uitr.object->rocp_data.code_object_id);
+            }
+        });
+    }
+
     if(get_code_objects())
     {
         CHECK_NOTNULL(get_code_objects())->wlock([executable](code_object_array_t& data) {
@@ -1476,6 +1501,23 @@ get_kernel_id(uint64_t kernel_object)
                 return (itr == object_map.end()) ? 0 : itr->second;
             },
             kernel_object);
+}
+
+std::optional<size_t>
+get_kernarg_explicit_arg_size(uint64_t           code_object_id,
+                              const std::string& symbol,
+                              size_t             segment_size)
+{
+    auto explicit_size = std::optional<size_t>{};
+    if(auto* register_data = get_hip_register_data())
+        register_data->rlock([&](const hip::hip_register_data& data) {
+            const auto load_itr = data.kernel_kernarg_layout_map.find(code_object_id);
+            if(load_itr == data.kernel_kernarg_layout_map.end()) return;
+            const auto symbol_itr = load_itr->second.find(symbol);
+            if(symbol_itr == load_itr->second.end()) return;
+            explicit_size = symbol_itr->second.explicit_size_for(segment_size);
+        });
+    return explicit_size;
 }
 
 void

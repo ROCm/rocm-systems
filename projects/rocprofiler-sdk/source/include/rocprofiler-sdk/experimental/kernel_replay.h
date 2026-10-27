@@ -98,9 +98,13 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  * single dispatch. HIP graph launches are not replayed, and a multi-packet submission runs once
  * without replay; each case warns once. Repeatability rests on a snapshot covering coarse-grained
  * device allocations owned by the agent plus module-scope @c __device__ / @c __constant__
- * variables. Unified or managed memory, @c hipMallocAsync and other virtual-memory-mapped
- * allocations, and host, fine-grained and kernarg memory are not captured, so a kernel writing to
- * them observes values accumulated across passes rather than identical inputs. Allocations carrying
+ * variables. Fine-grained device memory of that agent named by an explicit kernel argument is also
+ * saved and restored between passes; a host thread must not write it while the dispatch is being
+ * replayed. A dispatch whose explicit kernel arguments point at other memory outside the snapshot
+ * (unified or managed memory, host memory, another agent's memory, @c hipMallocAsync and other
+ * virtual-memory-mapped allocations) runs once without replay and warns once. A pointer stored
+ * inside other memory is not seen, so a kernel writing through one observes values accumulated
+ * across passes rather than identical inputs. Allocations carrying
  * @c HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are excluded from the snapshot (HIP kernarg pools /
  * profiler buffers share that flag). A direct-HSA application that puts ordinary writable device
  * data behind the same flag sees the same omission -- an unsupported allocation class for beta.

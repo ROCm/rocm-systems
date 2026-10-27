@@ -162,8 +162,11 @@ Stated plainly, because each one has a concrete cause in the mechanism above.
   variants are not kernel dispatches, so they bypass both the AQL queues and the per-agent replay
   gate. The source marks serializing them as a follow-up. See
   [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#what-is-not-isolated).
-- **Coarse-grained device memory only.** Kernarg, host, fine-grained and executable allocations are
-  excluded by design, as is unified and managed memory.
+- **Coarse-grained device memory only in the tracker.** Kernarg, host, fine-grained and executable
+  allocations are excluded by design, as is unified and managed memory. Before the first pass, the
+  dispatch's explicit kernel arguments are checked: fine-grained device memory of the replaying
+  agent is saved and restored between passes, and any other memory outside the snapshot runs the
+  dispatch once without replay. A pointer stored inside other memory is not seen.
 - **HIP graph launches are not replayed** (warn once, run once), as described above.
 - **Only single-packet, single-dispatch submissions are replayed.** The replay gate requires exactly
   one packet in the batch and exactly one dispatch packet in it; anything else takes the normal path.
