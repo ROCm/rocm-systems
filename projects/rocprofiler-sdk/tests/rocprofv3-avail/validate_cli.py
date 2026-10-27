@@ -554,6 +554,16 @@ def test_rocprofv3_list_avail_output_file(cli, inventory, tmp_path):
     _assert_combined_availability(_list_avail_file(output_directory), inventory)
 
 
+def test_rocprofv3_list_avail_output_directory(cli, inventory, tmp_path):
+    output_directory = tmp_path / "directory-output"
+
+    result = cli("rocprofv3", "-d", output_directory, "--list-avail", cwd=tmp_path)
+
+    # -d alone places the listing, which uses the default file name
+    assert result.stdout == ""
+    _assert_combined_availability(_list_avail_file(output_directory), inventory)
+
+
 def test_rocprofv3_list_avail_inherited_output_variables(cli, inventory, tmp_path):
     inherited = tmp_path / "inherited"
     result = cli(
@@ -587,6 +597,22 @@ def test_rocprofv3_list_avail_explicit_file_with_inherited_path(cli, inventory, 
     # where it lands, so it stays with the other artifacts of the same run
     assert result.stdout == ""
     _assert_combined_availability(_list_avail_file(inherited), inventory)
+
+
+def test_rocprofv3_list_avail_with_input_file(cli, inventory, tmp_path):
+    input_directory = tmp_path / "input-file-output"
+    input_file = tmp_path / "input.yml"
+    input_file.write_text(
+        'jobs:\n  - output_directory: "{}"\n'.format(input_directory),
+        encoding="utf-8",
+    )
+
+    result = cli("rocprofv3", "-i", input_file, "--list-avail", cwd=tmp_path)
+
+    # an input file names the output location for the run, so the listing joins the
+    # other artifacts there rather than staying on stdout
+    assert result.stdout == ""
+    _assert_combined_availability(_list_avail_file(input_directory), inventory)
 
 
 def test_rocprofv3_list_avail_with_trace(cli, inventory, request, tmp_path):
