@@ -55,7 +55,7 @@ spi.insufficient_simd_waveslots:
     The percent of total SIMD cycles in the kernel where a workgroup could not be
     scheduled to a SIMD due to lack of available waveslots.
 spi.not_scheduled_rate_scheduler_pipe:
-  name: Not-scheduled Rate (Scheduler-Pipe)
+  name: Not-Scheduled Rate (Scheduler-Pipe)
   formula: 100 * SUM(SPI_RA_REQ_NO_ALLOC) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
   unit: Percent
   description: >-
@@ -63,7 +63,7 @@ spi.not_scheduled_rate_scheduler_pipe:
     not be scheduled to a CU due to a bottleneck within the scheduler-pipes rather
     than a lack of a CU or SIMD with sufficient resources.
 spi.not_scheduled_rate_workgroup_manager:
-  name: Not-scheduled Rate (Workgroup Manager)
+  name: Not-Scheduled Rate (Workgroup Manager)
   formula: 100 * SUM(SPI_RA_REQ_NO_ALLOC_CSN) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
   unit: Percent
   description: >-
