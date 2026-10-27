@@ -40,7 +40,7 @@ TEST(metadata_registry_test, ensure_thread_builds_only_when_unknown)
     registry.ensure_thread(42, make);
 
     EXPECT_EQ(builds, 1);
-    EXPECT_TRUE(registry.get_thread_info(42).has_value());
+    EXPECT_EQ(registry.get_thread_info_list().size(), 1U);
 }
 
 TEST(metadata_registry_test, add_queue_stream_string_ignore_duplicates)
