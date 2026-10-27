@@ -1680,10 +1680,10 @@ private:
                 "atomic lock stripe count must be a power of two");
 
   // Ordinary copies hold these briefly. Waiters can also park when an owner
-  // takes a guarded host fault or allocates sparse backing. Bounded libc sleeps
-  // avoid direct futex calls and shared library waiter buckets. Release retains
-  // its store-and-load fast path; contended waiters recheck at their current
-  // backoff interval because this parking policy has no immediate wake.
+  // takes a guarded host fault or allocates sparse backing. Bounded libc
+  // condition waits permit prompt wakeups without direct futex calls. Release
+  // retains its store-and-load fast path, consulting the shared parking bucket
+  // only when this stripe has registered waiters.
   using BackingStripeLock = util::ConditionalWakeSpinlock<HostTimedParking>;
   static_assert(sizeof(BackingStripeLock) == 2 * sizeof(uint32_t));
   static auto &backing_atomic_mutexes() {

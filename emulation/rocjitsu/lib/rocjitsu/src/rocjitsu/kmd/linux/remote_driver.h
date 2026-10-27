@@ -210,6 +210,10 @@ private:
   /// @note Must be called with rpc_mutex_ held.
   int poison_stream();
 
+  /// @brief Close an unclaimed reply descriptor and poison its stream atomically
+  /// with respect to deferred cancellation. Requires rpc_mutex_ to be held.
+  int poison_reply(int received_fd);
+
   int sock_ = -1;                         ///< Unix socket connection to the daemon.
   uint32_t next_id_ = 0;                  ///< Monotonic request ID counter (for debugging).
   std::string topology_path_;             ///< Daemon's sysfs topology directory path.

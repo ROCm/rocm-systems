@@ -243,7 +243,7 @@ public:
     std::atomic<bool> invalid{false};
     std::atomic<bool> blocked{false};
     std::atomic<bool> resume{false};
-    std::atomic<uint32_t *> word{nullptr};
+    std::atomic<std::atomic<uint32_t> *> word{nullptr};
     std::array<long, 9> timeouts{};
   };
 
@@ -252,10 +252,10 @@ public:
     return value;
   }
 
-  static void wait(uint32_t *word, uint32_t expected, long timeout_ns) {
+  static void wait(std::atomic<uint32_t> *word, uint32_t expected, long timeout_ns) {
     auto &record = trace();
     const auto index = record.waits.fetch_add(1);
-    auto *unset = static_cast<uint32_t *>(nullptr);
+    auto *unset = static_cast<std::atomic<uint32_t> *>(nullptr);
     record.word.compare_exchange_strong(unset, word);
     if (word != record.word.load() || expected != 1 || timeout_ns <= 0 || timeout_ns > 2'000'000)
       record.invalid = true;
@@ -273,7 +273,7 @@ public:
     errno = errors[index % errors.size()];
   }
 
-  static void wake(uint32_t *word) {
+  static void wake(std::atomic<uint32_t> *word) {
     auto &record = trace();
     if (word != record.word.load())
       record.invalid = true;
@@ -333,12 +333,48 @@ TEST_F(ConditionalWakeSpinlockTest, ParkingUsesProvidedHostWaitAndWake) {
   EXPECT_EQ(record.timeouts, expected_timeouts);
 }
 
+TEST_F(ConditionalWakeSpinlockTest, NativeParkingWakesBeforeDeadline) {
+  std::atomic<uint32_t> word{1};
+  std::atomic<bool> entered{false}, returned{false};
+  std::thread waiter([&] {
+    entered.store(true, std::memory_order_release);
+    rocjitsu::HostTimedParking::wait(&word, 1, 2'000'000'000);
+    returned.store(true, std::memory_order_release);
+  });
+  EXPECT_TRUE(eventually([&] { return entered.load(std::memory_order_acquire); }));
+  std::this_thread::sleep_for(kParkDelay);
+  EXPECT_FALSE(returned.load(std::memory_order_acquire));
+  word.store(0, std::memory_order_release);
+  rocjitsu::HostTimedParking::wake(&word);
+  const auto limit = std::chrono::steady_clock::now() + 1s;
+  while (!returned.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < limit)
+    std::this_thread::yield();
+  const bool woke = returned.load(std::memory_order_acquire);
+  waiter.join();
+  EXPECT_TRUE(woke) << "release must interrupt parking before its deadline";
+}
+
+TEST_F(ConditionalWakeSpinlockTest, ChangedWordDoesNotPark) {
+  std::atomic<uint32_t> word{0};
+  const auto start = std::chrono::steady_clock::now();
+  rocjitsu::HostTimedParking::wait(&word, 1, 2'000'000'000);
+  EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
+}
+
+TEST_F(ConditionalWakeSpinlockTest, NativeParkingExpiresWithoutWake) {
+  std::atomic<uint32_t> word{1};
+  const auto start = std::chrono::steady_clock::now();
+  rocjitsu::HostTimedParking::wait(&word, 1, 20'000'000);
+  EXPECT_GE(std::chrono::steady_clock::now() - start, 19ms);
+}
+
 TEST_F(ConditionalWakeSpinlockTest, TimedParkingDefersCancellation) {
   bool returned_from_wait = false;
   bool survived_cancellation = false;
   std::thread waiter([&] {
     pthread_cancel(pthread_self());
-    rocjitsu::HostTimedParking::wait(nullptr, 1, 50'000);
+    std::atomic<uint32_t> word{1};
+    rocjitsu::HostTimedParking::wait(&word, 1, 50'000);
     returned_from_wait = true;
     pthread_testcancel();
     survived_cancellation = true;
@@ -363,8 +399,8 @@ TEST_F(ConditionalWakeSpinlockTest, SignalInterruptedParksKeepExclusionAndProgre
   overlap = false;
   stop_signals = false;
   release_waiters = false;
-  // Without SA_RESTART, a signal that arrives during a parked wait ends it
-  // early with EINTR.
+  // Signal delivery must preserve exclusion and progress, whether the host
+  // parking primitive resumes its wait or returns early.
   struct sigaction action {};
   struct sigaction previous {};
   action.sa_handler = [](int) {};

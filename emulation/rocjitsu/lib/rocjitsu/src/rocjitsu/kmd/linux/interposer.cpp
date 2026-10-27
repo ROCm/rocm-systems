@@ -22,6 +22,7 @@
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/scoped_cancellation_disable.h"
@@ -198,7 +199,8 @@ int open_proc_maps_snapshot(const char *path, int flags) {
   }
   int read_errno = errno;
   libc.close(source);
-  if (contents.find("/memfd:rocjitsu_remote_kfd (deleted)") == std::string::npos) {
+  if (contents.find("/memfd:rocjitsu_remote_kfd (deleted)") == std::string::npos &&
+      contents.find(rocjitsu::kmd::kDeviceBackingNamePrefix) == std::string::npos) {
     errno = read_errno;
     return -1;
   }
@@ -208,6 +210,27 @@ int open_proc_maps_snapshot(const char *path, int flags) {
   while ((position = contents.find(marker, position)) != std::string::npos) {
     contents.replace(position, marker.size(), "/dev/kfd");
     position += sizeof("/dev/kfd") - 1;
+  }
+
+  // ROCr selects device-backed regions for both full and lightweight GPU
+  // cores by their render-node path. Preserve that identity on shared backing
+  // descriptors so another process reading this map sees the same device.
+  const std::string allocation_marker =
+      "/memfd:" + std::string(rocjitsu::kmd::kDeviceBackingNamePrefix);
+  position = 0;
+  while ((position = contents.find(allocation_marker, position)) != std::string::npos) {
+    const size_t digits = position + allocation_marker.size();
+    size_t end = digits;
+    while (end < contents.size() && contents[end] >= '0' && contents[end] <= '9')
+      ++end;
+    constexpr std::string_view deleted = " (deleted)";
+    if (end != digits && contents.compare(end, deleted.size(), deleted) == 0) {
+      const std::string device = "/dev/dri/renderD" + contents.substr(digits, end - digits);
+      contents.replace(position, end + deleted.size() - position, device);
+      position += device.size();
+    } else {
+      position = end;
+    }
   }
 
   int snapshot = libc.memfd_create("rocjitsu_proc_maps", MFD_CLOEXEC);
@@ -2896,8 +2919,16 @@ public:
       if (!size || size > entry.size - relative)
         break;
       auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
-      return entry.dmabuf_fd->use(
-          [&](int fd) { return real().mmap(address, size, prot, flags, fd, relative); });
+      return entry.dmabuf_fd->use([&](int fd) {
+        void *mapped = real().mmap(address, size, prot, flags, fd, relative);
+        const int mmap_errno = errno;
+        // A PRIME import maps its BO backing, not the synthetic DRM file used
+        // to select it. Classify that pinned backing for the host core policy.
+        if (mapped != MAP_FAILED && rocjitsu::kmd::is_device_memory_backing(fd))
+          real().madvise(mapped, size, MADV_DONTDUMP);
+        errno = mmap_errno;
+        return mapped;
+      });
     }
     errno = EINVAL;
     return MAP_FAILED;
@@ -5473,9 +5504,12 @@ RJ_INTERPOSER_EXPORT int fcntl64(int fd, int cmd, ...) {
 // one implementation so the two can never drift.
 static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
 
+static void *mmap_with_dump_policy(void *addr, size_t length, int prot, int flags, int fd,
+                                   off_t offset);
+
 RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, int fd,
                                 off_t offset) {
-  return mmap_impl(addr, length, prot, flags, fd, offset);
+  return mmap_with_dump_policy(addr, length, prot, flags, fd, offset);
 }
 
 RJ_INTERPOSER_EXPORT void *mmap64(void *addr, size_t length, int prot, int flags, int fd,
@@ -5485,7 +5519,7 @@ RJ_INTERPOSER_EXPORT void *mmap64(void *addr, size_t length, int prot, int flags
   // offset truncation.
   static_assert(sizeof(off_t) == sizeof(off64_t),
                 "mmap64 would truncate its offset: off_t is narrower than off64_t");
-  return mmap_impl(addr, length, prot, flags, fd, static_cast<off_t>(offset));
+  return mmap_with_dump_policy(addr, length, prot, flags, fd, static_cast<off_t>(offset));
 }
 
 static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
@@ -5585,11 +5619,14 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
         });
         // Preserve the mmap errno across close() (which may set its own).
         int mmap_errno = errno;
+        const bool gpu_mapping = rocjitsu::kmd::is_device_memory_backing(memfd_out);
         InterposerContext::real().close(memfd_out);
         if (raw != MAP_FAILED) {
 #ifdef MADV_POPULATE_WRITE
           InterposerContext::real().madvise(raw, length, MADV_POPULATE_WRITE);
 #endif
+          if (gpu_mapping)
+            InterposerContext::real().madvise(raw, length, MADV_DONTDUMP);
           return raw;
         }
         // A daemon-shared range matched but the shared mapping failed. Fail
@@ -5607,6 +5644,34 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
   }
   return with_host_mapping_held(
       [&] { return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset); });
+}
+
+static void *mmap_with_dump_policy(void *addr, size_t length, int prot, int flags, int fd,
+                                   off_t offset) {
+  if (fd < 0 || (flags & MAP_ANONYMOUS) || !InterposerContext::real().ready() ||
+      !rj_owns_interposer_state())
+    return mmap_impl(addr, length, prot, flags, fd, offset);
+
+  // Pin both the file object and its simulated-driver metadata for the whole
+  // operation. The caller may close and reuse its descriptor as soon as mmap
+  // enters the kernel; classification must still describe the mapped file.
+  const int pinned = fcntl_impl(fd, F_DUPFD_CLOEXEC, nullptr, 0);
+  if (pinned < 0) {
+    // Dump advice is best effort, like madvise itself. Descriptor exhaustion
+    // must not turn an otherwise valid application mapping into a failure;
+    // without a pin, skip classification rather than inspect a reused fd.
+    return mmap_impl(addr, length, prot, flags, fd, offset);
+  }
+  void *mapped = mmap_impl(addr, length, prot, flags, pinned, offset);
+  const int mmap_errno = errno;
+  if (mapped != MAP_FAILED && rocjitsu::kmd::is_device_memory_backing(pinned)) {
+    // Device memory belongs in ROCr's GPU core, whose filter decides which
+    // regions to save, rather than also appearing in the host core.
+    InterposerContext::real().madvise(mapped, length, MADV_DONTDUMP);
+  }
+  ::close(pinned);
+  errno = mmap_errno;
+  return mapped;
 }
 
 RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {

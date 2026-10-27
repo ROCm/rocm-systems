@@ -8,6 +8,7 @@
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/scoped_cancellation_disable.h"
 #include "util/log.h"
@@ -470,6 +471,13 @@ int RemoteDriver::poison_stream() {
   if (sock_ >= 0)
     ::shutdown(sock_, SHUT_RDWR);
   return -EPROTO;
+}
+
+int RemoteDriver::poison_reply(int received_fd) {
+  ScopedCancellationDisable cancellation;
+  if (received_fd >= 0)
+    libc_passthrough().close(received_fd);
+  return poison_stream();
 }
 
 int RemoteDriver::open() {
@@ -1095,24 +1103,18 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // instead of returning a recoverable-looking error. Any descriptor that rode
   // in on the doomed reply is dropped here — nothing downstream runs to adopt
   // it.
-  auto poison_reply = [&] {
-    ScopedCancellationDisable cancellation;
-    if (num_fds > 0 && received_fds[0] >= 0)
-      libc_passthrough().close(received_fds[0]);
-    return poison_stream();
-  };
 
   // The request is already on the wire, so a reply we cannot take delivery of is
   // not a clean failure: EINTR aborts the receive with the daemon's answer still
   // queued, and the next call would read that answer as its own. Terminal, even
   // though the socket itself may still be healthy.
   if (bytes <= 0)
-    return poison_reply();
+    return poison_reply(num_fds > 0 ? received_fds[0] : -1);
   // rpc_recv_msg asks for MSG_WAITALL but can still come back short (a signal
   // interrupts the wait), which would leave the rest of the header in the
   // socket and decode result/payload_bytes out of uninitialized stack.
   if (static_cast<size_t>(bytes) != sizeof(RpcHeader))
-    return poison_reply();
+    return poison_reply(num_fds > 0 ? received_fds[0] : -1);
 
   auto *resp = reinterpret_cast<RpcHeader *>(resp_header_buf);
 
@@ -1121,14 +1123,14 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // reply header cannot make an interposed ioctl() attempt a multi-GiB
   // allocation and throw std::bad_alloc out of a C entry point.
   if (resp->payload_bytes > kMaxPayloadBytes)
-    return poison_reply();
+    return poison_reply(num_fds > 0 ? received_fds[0] : -1);
 
   if (resp->payload_bytes > 0) {
     std::vector<uint8_t> payload(resp->payload_bytes);
     // A partial read consumes part of the declared payload and abandons the
     // rest, which is the same misalignment as refusing it outright.
     if (!rpc_recv_exact(sock_, payload.data(), resp->payload_bytes))
-      return poison_reply();
+      return poison_reply(num_fds > 0 ? received_fds[0] : -1);
 
     size_t copy_size = std::min(arg_size, static_cast<size_t>(resp->payload_bytes));
     std::memcpy(arg, payload.data(), copy_size);
@@ -1499,6 +1501,8 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
         libc_passthrough().mmap(addr, length, PROT_READ | PROT_WRITE, mflags, mapping_memfd, 0);
     if (mapped != MAP_FAILED)
       libc_passthrough().madvise(mapped, length, MADV_POPULATE_WRITE);
+    if (mapped != MAP_FAILED && rocjitsu::kmd::is_device_memory_backing(mapping_memfd))
+      libc_passthrough().madvise(mapped, length, MADV_DONTDUMP);
 
     if (memfd >= 0 && memfd != mapping_memfd)
       libc_passthrough().close(memfd);
@@ -1596,16 +1600,10 @@ int RemoteDriver::send_mmap(void *addr, size_t length, int prot, int flags, off_
   // failure) decided by uninitialized memory. Any memfd that arrived on the
   // truncated reply is dropped: the caller sees rc != 0 with *memfd_out still
   // -1, so nothing downstream would ever close it.
-  auto poison_reply = [&] {
-    ScopedCancellationDisable cancellation;
-    if (num_fds > 0 && received_fds[0] >= 0)
-      libc_passthrough().close(received_fds[0]);
-    return poison_stream();
-  };
   if (bytes_received <= 0)
-    return poison_reply();
+    return poison_reply(num_fds > 0 ? received_fds[0] : -1);
   if (static_cast<size_t>(bytes_received) != sizeof(response_buffer))
-    return poison_reply();
+    return poison_reply(num_fds > 0 ? received_fds[0] : -1);
 
   auto *resp = reinterpret_cast<RpcHeader *>(response_buffer);
   *memfd_out = (num_fds > 0) ? received_fds[0] : -1;

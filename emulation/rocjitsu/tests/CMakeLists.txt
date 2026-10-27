@@ -1924,6 +1924,7 @@ add_dependencies(early_mmap_preload rocjitsu_shared)
 
 add_executable(early_mmap_driver early_mmap_driver_test.cpp)
 rj_configure_target(early_mmap_driver TEST)
+target_link_libraries(early_mmap_driver PRIVATE ${CMAKE_DL_LIBS})
 
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(early_mmap_driver)
@@ -1945,6 +1946,17 @@ rj_add_test(
     ENVIRONMENT
         "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:rocjitsu_shared>:$<TARGET_FILE:early_mmap_preload>"
     INSTALL_COMMAND "bin/early_mmap_driver"
+    INSTALL_ENVIRONMENT
+        "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+)
+
+rj_add_test(
+    NAME "InterposerTest.EarlyMmapWithLibcAlias"
+    COMMAND $<TARGET_FILE:early_mmap_driver> --libc-alias
+    ENVIRONMENT
+        "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:rocjitsu_shared>:$<TARGET_FILE:early_mmap_preload>"
+    TIMEOUT 30
+    INSTALL_COMMAND "bin/early_mmap_driver" --libc-alias
     INSTALL_ENVIRONMENT
         "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
 )
@@ -1983,12 +1995,12 @@ rj_add_test(
 add_dependencies(rocjitsu_tests libc_lookup_preload)
 rj_add_test(
     NAME "LibcCompatibilityTest.DebuggerWithoutPidfdWrapper"
-    COMMAND $<TARGET_FILE:rocjitsu_tests> "--gtest_filter=*DbgTrap*:*Debugger*:*RuntimeDisableReportsProcessRuntimeTransition:*RuntimeEnableRetainsMaskedProcessEventUntilEnabled:*RuntimeTrapInterruptSignalsQueueExceptionFromM0:*RuntimeExceptionTimeout*:*MissingRuntimeStatusBeforeAcknowledgmentRetainsEvent:*FailedDirectFatalDeliveryRemainsStoppedAcrossDetach:*ConcurrentNotifierFailureCannotEraseSuccessfulPublication:*BusySdmaUpdatePreservesPublishedRingGeometry:*ZeroRingSizeNormalizesAndNullBaseSuspendsAql"
+    COMMAND $<TARGET_FILE:rocjitsu_tests> "--gtest_filter=*DbgTrap*:*Debugger*:*RuntimeDisableReportsProcessRuntimeTransition:*RuntimeEnableRetainsMaskedProcessEventUntilEnabled:*RuntimeTrapInterruptSignalsQueueExceptionFromM0:*RuntimeExceptionTimeout*:*MissingRuntimeStatusBeforeAcknowledgmentRetainsEvent:*FailedDirectFatalDeliveryRemainsStoppedAcrossDetach:*ConcurrentNotifierFailureCannotEraseSuccessfulPublication:*BusySdmaUpdatePreservesPublishedRingGeometry:*ZeroRingSizeNormalizesAndNullBaseSuspendsAql:*KfdRuntimeSaveTest.*:*KfdPendingMemorySaveTest.*:*KfdMemoryFaultPcTest.*:*FailedResumeThenRuntimeSaveUsesCurrentWave"
     ENVIRONMENT
         "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:libc_lookup_preload>"
         "ROCJITSU_TEST_MISSING_LIBC_WRAPPER=pidfd_open"
     TIMEOUT 120
-    INSTALL_COMMAND "bin/rocjitsu_tests" "--gtest_filter=*DbgTrap*:*Debugger*:*RuntimeDisableReportsProcessRuntimeTransition:*RuntimeEnableRetainsMaskedProcessEventUntilEnabled:*RuntimeTrapInterruptSignalsQueueExceptionFromM0:*RuntimeExceptionTimeout*:*MissingRuntimeStatusBeforeAcknowledgmentRetainsEvent:*FailedDirectFatalDeliveryRemainsStoppedAcrossDetach:*ConcurrentNotifierFailureCannotEraseSuccessfulPublication:*BusySdmaUpdatePreservesPublishedRingGeometry:*ZeroRingSizeNormalizesAndNullBaseSuspendsAql"
+    INSTALL_COMMAND "bin/rocjitsu_tests" "--gtest_filter=*DbgTrap*:*Debugger*:*RuntimeDisableReportsProcessRuntimeTransition:*RuntimeEnableRetainsMaskedProcessEventUntilEnabled:*RuntimeTrapInterruptSignalsQueueExceptionFromM0:*RuntimeExceptionTimeout*:*MissingRuntimeStatusBeforeAcknowledgmentRetainsEvent:*FailedDirectFatalDeliveryRemainsStoppedAcrossDetach:*ConcurrentNotifierFailureCannotEraseSuccessfulPublication:*BusySdmaUpdatePreservesPublishedRingGeometry:*ZeroRingSizeNormalizesAndNullBaseSuspendsAql:*KfdRuntimeSaveTest.*:*KfdPendingMemorySaveTest.*:*KfdMemoryFaultPcTest.*:*FailedResumeThenRuntimeSaveUsesCurrentWave"
     INSTALL_ENVIRONMENT
         "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}bin/${CMAKE_SHARED_LIBRARY_PREFIX}libc_lookup_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
         "ROCJITSU_TEST_MISSING_LIBC_WRAPPER=pidfd_open"
@@ -2026,29 +2038,32 @@ if(RJ_INSTALL_TESTS)
     )
 endif()
 foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700 gfx950_mi355x_kmd_2gpu)
-    rj_add_test(
-        NAME
-            "InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity.${_config}"
-        COMMAND
-            ${RJ_CLI}
-            --config
-            "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
-            --
-            $<TARGET_FILE:interposer_dup_test>
-            "--gtest_filter=InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity"
-        ENVIRONMENT
-            "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:host_drm_preload>"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        INSTALL_COMMAND
-            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-            --config
-            "\${RJ_INSTALLED_CONFIG_DIR}/${_config}.json"
-            --
-            bin/interposer_dup_test
-            "--gtest_filter=InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity"
-        INSTALL_ENVIRONMENT
-            "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}bin/${CMAKE_SHARED_LIBRARY_PREFIX}host_drm_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    foreach(
+        _case
+        IN
+        ITEMS
+            BorrowedDisplayDescriptorUsesSimulatedIdentity
+            DumpPolicyRetainsTheMappedFileAcrossDescriptorReuse
     )
+        rj_add_test(
+            NAME "InterposerDrmTest.${_case}.${_config}"
+            COMMAND
+                ${RJ_CLI}
+                --config "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
+                -- $<TARGET_FILE:interposer_dup_test>
+                "--gtest_filter=InterposerDrmTest.${_case}"
+            ENVIRONMENT
+                "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:host_drm_preload>"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            INSTALL_COMMAND
+                "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                --config "\${RJ_INSTALLED_CONFIG_DIR}/${_config}.json"
+                -- bin/interposer_dup_test
+                "--gtest_filter=InterposerDrmTest.${_case}"
+            INSTALL_ENVIRONMENT
+                "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}bin/${CMAKE_SHARED_LIBRARY_PREFIX}host_drm_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        )
+    endforeach()
 endforeach()
 
 function(rj_add_interposer_test_suite _suite)
@@ -2124,12 +2139,14 @@ rj_add_interposer_test_suite(
     CanonicalSysfsPathsRetainSimulatedDevice
     CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinary
     DeviceInfoReportsActiveCuCount
+    DeviceMappingsFollowGpuCoreDumpPolicyAcrossDescriptorAliases
     DmabufExportKeepsADriverCpuMapping
     DmabufExportKeepsAReservedCpuMapping
     DmabufExportKeepsStoresMadeDuringTheExport
     DmabufExportLeavesPagesPastAPartialMapping
     DupRacingTheCloseOfAPrimeExportKeepsTheBoState
     ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlone
+    GemMappingsFollowGpuCoreDumpPolicy
     GemMetadataRoundTripsOnABuffer
     GemOpReportsTheCreateSize
     GemOpSetPlacementChangesTheReportedDomain
@@ -2138,6 +2155,7 @@ rj_add_interposer_test_suite(
     KfdExportFlagsSurviveDuplicationBeforeThePrimeImport
     KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
     KfdImportsRetainMetadataAfterTheOriginalOwnerCloses
+    MappingStillSucceedsAtTheDescriptorLimit
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
     PrimeImportKeepsTheBoStateAfterTheHandleCloses

@@ -15,8 +15,6 @@
 static thread_local NotificationWriteMode notification_mode = NotificationWriteMode::Disabled;
 static thread_local unsigned notification_writes = 0;
 
-// Interrupt leaves completed exports awaiting notification; Cancel requests
-// deferred cancellation at the first notification write.
 extern "C" __attribute__((visibility("default"))) void
 rj_test_notification_writes(NotificationWriteMode mode) {
   notification_mode = mode;

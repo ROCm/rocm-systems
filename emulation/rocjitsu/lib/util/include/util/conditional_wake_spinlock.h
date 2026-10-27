@@ -45,12 +45,12 @@ namespace util {
 /// can miss its wakeup; it then rechecks the lock when its park times out.
 /// Each failed recheck doubles the timeout up to kMaxParkNs; scheduling can
 /// extend any sleep beyond its timeout. A policy can wait on the lock word or
-/// simply sleep until its timeout. Keeping the policy explicit avoids the
-/// standard library's shared waiter buckets, in which one unrelated sleeper
-/// makes every release enter the kernel.
+/// simply sleep until its timeout. The per-lock waiter hint avoids entering a
+/// shared parking bucket merely because an unrelated lock has a sleeper.
 ///
 /// @tparam Parking Host wait policy with wait(word, expected, timeout_ns) and
 /// wake(word). Wait must return after its timeout even if a wake is missed.
+/// The word is a pointer to the lock's atomic uint32_t ownership state.
 /// Keeping host calls in the policy lets interposers select their native API.
 template <typename Parking> class ConditionalWakeSpinlock {
 public:
@@ -71,7 +71,7 @@ public:
 #endif
     state_.store(kFree, std::memory_order_release);
     if (parked_.load(std::memory_order_relaxed) != 0)
-      Parking::wake(futex_word());
+      Parking::wake(lock_word());
 #ifdef CONDITIONAL_WAKE_SPINLOCK_TSAN
     __tsan_mutex_post_unlock(this, 0);
 #endif
@@ -98,12 +98,10 @@ private:
   static constexpr long kFirstParkNs = 50'000;
   static constexpr long kMaxParkNs = 2'000'000;
 
-  // Native word-wait policies require a lock-free 32-bit storage location.
+  // Ownership checks must remain lock-free even when the parking policy blocks.
   static_assert(std::atomic<uint32_t>::is_always_lock_free);
-  static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t) &&
-                alignof(std::atomic<uint32_t>) == alignof(uint32_t));
 
-  uint32_t *futex_word() noexcept { return reinterpret_cast<uint32_t *>(&state_); }
+  std::atomic<uint32_t> *lock_word() noexcept { return &state_; }
 
   bool try_acquire() noexcept {
     uint32_t expected = kFree;
@@ -137,7 +135,7 @@ private:
       if (state_.load(std::memory_order_seq_cst) != kFree) {
         // One bounded wait. Wakeup, timeout, EINTR and EAGAIN all return to
         // the ownership recheck, and none of them resets the backoff.
-        Parking::wait(futex_word(), kLocked, timeout_ns);
+        Parking::wait(lock_word(), kLocked, timeout_ns);
       }
       parked_.fetch_sub(1, std::memory_order_relaxed);
       if (try_acquire())
@@ -162,7 +160,7 @@ private:
 
 namespace util {
 
-/// @brief Without futex timeouts, other hosts keep the existing parking Spinlock.
+/// @brief Other hosts keep the existing parking Spinlock.
 template <typename Parking> using ConditionalWakeSpinlock = Spinlock;
 
 } // namespace util

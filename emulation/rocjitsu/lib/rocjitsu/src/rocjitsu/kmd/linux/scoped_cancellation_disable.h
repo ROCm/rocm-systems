@@ -10,8 +10,10 @@ namespace rocjitsu {
 
 /// @brief Keep deferred pthread cancellation out of cleanup and publication.
 /// @details Restoring the caller's state leaves a deferred request pending until
-/// the next cancellation point. Do not use this to cover blocking waits. Like
-/// the surrounding C++ code, this does not support asynchronous cancellation.
+/// the next cancellation point. Bounded internal lock-acquisition parking may
+/// use this guard to preserve noexcept acquisition and waiter cleanup. Keep
+/// cancellable application waits and blocking RPCs outside the guard. Like the
+/// surrounding C++ code, this does not support asynchronous cancellation.
 class ScopedCancellationDisable {
 public:
   ScopedCancellationDisable() {

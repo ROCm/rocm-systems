@@ -165,9 +165,11 @@ Foo foo = static_cast<Foo>(bar); // OK but could use auto instead to avoid repet
 - Libc `read`, `write`, and `close` remain cancellation points. Internal cleanup
   and publication must defer cancellation across the complete ownership
   transaction, including removal of closed descriptors from tracking containers.
-  Use `ScopedCancellationDisable` for bounded cleanup; keep blocking RPCs and
-  waits outside that guard. Application forwarding retains libc cancellation
-  behavior. Asynchronous cancellation is not supported by these C++ paths.
+  Use `ScopedCancellationDisable` for bounded cleanup and bounded internal
+  lock-acquisition parking that must preserve `noexcept` acquisition and waiter
+  cleanup. Keep blocking RPCs and cancellable application waits outside that
+  guard. Application forwarding retains libc cancellation behavior.
+  Asynchronous cancellation is not supported by these C++ paths.
 - When a system call has no libc wrapper, use an equivalent library facility
   (for example, libc polling for interruptible waits). Resolve optional newer
   libc wrappers at runtime and handle their absence explicitly; never hard-code

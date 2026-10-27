@@ -582,9 +582,14 @@ __device__ __forceinline__ void reduceCopyPacksWithBias(int nThreads, int& threa
   thread = warp * WARP_SIZE + lane;
 }
 
+// System scope is required for peer visibility; non-temporal keeps remote data out of local caches.
+static constexpr CachePolicy kRcclTdmPolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
+
+#include "tdm/tdmReduce.h"
+
 template <int Unroll, int useAcc, typename RedFn, typename T, int MultimemSrcs, int MinSrcs, int MaxSrcs,
-          int MultimemDsts, int MinDsts, int MaxDsts, int PreOpSrcs, typename IntBytes, int Pipeline, typename SrcPtrFn,
-          typename DstPtrFn, typename AccPtrFn>
+          int MultimemDsts, int MinDsts, int MaxDsts, int PreOpSrcs, typename IntBytes, int Pipeline,
+          int EnableTdmReduce = 0, typename SrcPtrFn, typename DstPtrFn, typename AccPtrFn>
 __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t redArg, bool postOp, int nSrcs,
                                            SrcPtrFn const& srcPtrFn, int nDsts, DstPtrFn const& dstPtrFn,
                                            IntBytes nElts, AccPtrFn const& accPtrFn) {
@@ -632,6 +637,17 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
     if constexpr (useAcc) aligned &= 0 == cvta_to_global(accPtrFn()) % AlignedPathPackSize;
     aligned = !(__any(!aligned));
     if (aligned) {
+#if TDM_SUPPORTED && ENABLE_TDM_SIMPLE
+      if constexpr (EnableTdmReduce && !useAcc && !Pipeline && MultimemSrcs == 0 && MultimemDsts == 0) {
+        if (canUseTdmReduce<RedFn, PreOpSrcs>(thread, nThreads, postOp, nSrcs, srcPtrFn, nDsts, dstPtrFn,
+                                              nBytesAhead)) {
+          reduceCopyTdm<RedFn, T, MaxSrcs, MaxDsts, PreOpSrcs>(nThreads, /*&*/ thread, redArg, postOp, nSrcs, srcPtrFn,
+                                                               nDsts, dstPtrFn, /*&*/ nBytesBehind,
+                                                               /*&*/ nBytesAhead);
+          if (nBytesAhead == 0) return;
+        }
+      }
+#endif
 #if defined(__gfx90a__)
       if constexpr (useAcc)
         reduceCopyPacksWithBias<RedFn, T, ((MinSrcs > 1) ? 2 : Unroll), BigPackSize, MultimemSrcs, MinSrcs, MaxSrcs,
@@ -768,9 +784,6 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
                                                  dstPtrFn, /*&*/ nBytesBehind, /*&*/ nBytesAhead);
 }
 
-// System scope is required for peer visibility; non-temporal keeps remote data out of local caches.
-static constexpr CachePolicy kRcclTdmPolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
-
 #if TDM_SUPPORTED && ENABLE_TDM_SIMPLE
 // Does this slice qualify for the TDM mover? Pure gating, no side effects.
 template <int useAcc, typename RedFn, typename T, int MultimemSrcs, int MultimemDsts, int PreOpSrcs, int Pipeline,
@@ -820,7 +833,8 @@ __device__ __forceinline__ bool tryTdmCopy(int thread, int nThreads, bool postOp
 }
 
 template <int Unroll, int useAcc, typename RedFn, typename T, int MultimemSrcs, int MinSrcs, int MaxSrcs,
-          int MultimemDsts, int MinDsts, int MaxDsts, int PreOpSrcs, int Pipeline = 0, typename IntBytes>
+          int MultimemDsts, int MinDsts, int MaxDsts, int PreOpSrcs, int Pipeline = 0, int EnableTdmReduce = 0,
+          typename IntBytes>
 __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t redArg, bool postOp, int nSrcs,
                                            void** srcPtrs, int nDsts, void** dstPtrs, IntBytes nElts,
                                            void* accPtr = nullptr) {
@@ -828,7 +842,7 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
         thread, nThreads, postOp, nSrcs, srcPtrs, nDsts, dstPtrs, nElts))
     return;
   reduceCopy<Unroll, useAcc, RedFn, T, MultimemSrcs, MinSrcs, MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs,
-             IntBytes, Pipeline>(
+             IntBytes, Pipeline, EnableTdmReduce>(
     thread, nThreads, redArg, postOp, nSrcs, [=] __device__(int i) { return srcPtrs[i]; }, nDsts,
     [=] __device__(int i) { return dstPtrs[i]; }, nElts, [=] __device__() { return accPtr; });
 }

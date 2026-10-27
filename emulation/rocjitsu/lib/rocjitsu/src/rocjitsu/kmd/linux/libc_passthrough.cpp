@@ -27,24 +27,35 @@ void *bootstrap_mapping_symbol(const char *name) {
   dl_iterate_phdr(
       +[](dl_phdr_info *info, size_t, void *opaque) {
         auto &lookup = *static_cast<Lookup *>(opaque);
-        const std::string_view path(info->dlpi_name);
-        if (path != "libc.so.6" && !path.ends_with("/libc.so.6"))
-          return 0;
         const ElfW(Dyn) *dynamic = nullptr;
         for (ElfW(Half) index = 0; index < info->dlpi_phnum; ++index)
           if (info->dlpi_phdr[index].p_type == PT_DYNAMIC)
             dynamic = reinterpret_cast<const ElfW(Dyn) *>(info->dlpi_addr +
                                                           info->dlpi_phdr[index].p_vaddr);
         if (!dynamic)
-          return 1;
+          return 0;
         const ElfW(Sym) *symbols = nullptr;
         const char *strings = nullptr;
         const uint32_t *hash = nullptr, *gnu_hash = nullptr;
         const ElfW(Half) *versions = nullptr;
+        ElfW(Xword) soname = 0;
+        const auto loaded_address = [info](ElfW(Addr) address) {
+          // glibc relocates dynamic pointers in ordinary DSOs, while objects
+          // such as the vDSO can retain relative virtual addresses.
+          for (ElfW(Half) index = 0; index < info->dlpi_phnum; ++index) {
+            const ElfW(Phdr) &segment = info->dlpi_phdr[index];
+            const ElfW(Addr) begin = info->dlpi_addr + segment.p_vaddr;
+            if (segment.p_type == PT_LOAD && address >= begin && address - begin < segment.p_memsz)
+              return address;
+          }
+          return info->dlpi_addr + address;
+        };
         for (const ElfW(Dyn) *entry = dynamic; entry->d_tag != DT_NULL; ++entry) {
-          // glibc relocates these dynamic pointers in loaded ELF objects.
-          const ElfW(Addr) address = entry->d_un.d_ptr;
+          const ElfW(Addr) address = loaded_address(entry->d_un.d_ptr);
           switch (entry->d_tag) {
+          case DT_SONAME:
+            soname = entry->d_un.d_val;
+            break;
           case DT_SYMTAB:
             symbols = reinterpret_cast<const ElfW(Sym) *>(address);
             break;
@@ -62,7 +73,11 @@ void *bootstrap_mapping_symbol(const char *name) {
             break;
           }
         }
-        if (!symbols || !strings)
+        // A preload or symlink can give libc any pathname; its ELF identity
+        // remains libc.so.6 regardless of the name retained in dlpi_name.
+        if (!strings || !soname || std::string_view(strings + soname) != "libc.so.6")
+          return 0;
+        if (!symbols)
           return 1;
         uint32_t count = hash ? hash[1] : 0;
         if (!count && gnu_hash) {
