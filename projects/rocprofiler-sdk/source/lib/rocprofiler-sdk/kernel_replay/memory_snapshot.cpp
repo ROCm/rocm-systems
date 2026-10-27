@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/snapshot-plan.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/snapshot-storage.hpp"
 
 #include <fmt/format.h>
 #include <hsa/hsa.h>
@@ -290,34 +291,7 @@ release_device_copy(hsa_amd_memory_pool_t pool, block_t block) noexcept
     free_pool_block(block);
 }
 
-enum class allocation_error : uint8_t
-{
-    none,
-    unavailable,
-    out_of_resources,
-    hard_failure,
-};
-
-struct allocation_result_t
-{
-    owned_block_t    value{};
-    allocation_error error = allocation_error::none;
-
-    explicit operator bool() const { return static_cast<bool>(value); }
-};
-
 constexpr size_t arena_alignment = 16;
-
-std::optional<size_t>
-checked_align_up(size_t value, size_t alignment)
-{
-    if(alignment == 0) return std::nullopt;
-    const auto remainder = value % alignment;
-    if(remainder == 0) return value;
-    const auto padding = alignment - remainder;
-    if(value > std::numeric_limits<size_t>::max() - padding) return std::nullopt;
-    return value + padding;
-}
 
 std::optional<size_t>
 pool_allocation_max(hsa_amd_memory_pool_t pool)
@@ -406,10 +380,9 @@ host_plan_budget(const capture_context_t& ctx)
     return *maximum;
 }
 
+template <typename Storage>
 planning::plan_t
-build_storage_plan(const std::vector<snapshot_region_t>& regions,
-                   size_t                                gpu_budget,
-                   size_t                                host_budget)
+build_storage_plan(const std::vector<snapshot_region_t>& regions, Storage& storage)
 {
     auto requests = std::vector<planning::request_t>{};
     try
@@ -430,148 +403,168 @@ build_storage_plan(const std::vector<snapshot_region_t>& regions,
         return result;
     }
 
-    auto allocator = planning::snapshot_allocator{
-        planning::gpu_allocator{gpu_budget},
-        planning::pinned_allocator{host_budget},
-        planning::null_allocator{},
+    return planning::build(std::move(requests), storage, arena_alignment);
+}
+
+template <storage_kind Kind, bool Cacheable>
+class hsa_pool_allocator
+{
+public:
+    using handle_type = owned_block_t;
+
+    hsa_pool_allocator(hsa_amd_memory_pool_t pool,
+                       hsa_agent_t           agent,
+                       hsa_agent_t           peer_agent,
+                       bool                  available)
+    : m_pool{pool}
+    , m_agent{agent}
+    , m_peer_agent{peer_agent}
+    , m_available{available}
+    {}
+
+    storage::allocation_result<handle_type> allocate(size_t size)
+    {
+        if(!m_available || m_pool.handle == 0 || size == 0)
+            return {.error = storage::error_code::out_of_resources};
+
+        // A retained GPU arena consumes no fresh capacity. Consult it before querying whether a
+        // new allocation of this size is currently possible.
+        if constexpr(Cacheable)
+        {
+            if(auto cached = take_cached_device_copy(m_pool, size); cached)
+                return {.value = owned_block_t{cached, Kind, m_pool, true}};
+        }
+
+        if(!pool_accepts(m_pool, size)) return {.error = storage::error_code::out_of_resources};
+
+        auto* ext = hsa::get_amd_ext_table();
+        if(!ext || !ext->hsa_amd_memory_pool_allocate_fn || !ext->hsa_amd_agents_allow_access_fn ||
+           !ext->hsa_amd_memory_pool_free_fn)
+            return {.error = storage::error_code::hard_failure};
+
+        void* ptr    = nullptr;
+        auto  status = ext->hsa_amd_memory_pool_allocate_fn(m_pool, size, 0, &ptr);
+        if(status != HSA_STATUS_SUCCESS || !ptr)
+            return {.error = storage::error_code::out_of_resources};
+
+        if constexpr(Kind == storage_kind::pinned_host)
+        {
+            if(m_peer_agent.handle != 0)
+            {
+                status = ext->hsa_amd_agents_allow_access_fn(1, &m_peer_agent, nullptr, ptr);
+                if(status != HSA_STATUS_SUCCESS)
+                {
+                    ext->hsa_amd_memory_pool_free_fn(ptr);
+                    return {.error = storage::error_code::hard_failure};
+                }
+            }
+        }
+
+        status = ext->hsa_amd_agents_allow_access_fn(1, &m_agent, nullptr, ptr);
+        if(status == HSA_STATUS_SUCCESS)
+            return {.value = owned_block_t{block_t{size, ptr}, Kind, m_pool, Cacheable}};
+
+        ext->hsa_amd_memory_pool_free_fn(ptr);
+        return {.error = storage::error_code::hard_failure};
+    }
+
+    void release(handle_type block) noexcept { block.reset(); }
+
+private:
+    hsa_amd_memory_pool_t m_pool{};
+    hsa_agent_t           m_agent{};
+    hsa_agent_t           m_peer_agent{};
+    bool                  m_available = false;
+};
+
+using gpu_backing_allocator    = hsa_pool_allocator<storage_kind::gpu_local, true>;
+using pinned_backing_allocator = hsa_pool_allocator<storage_kind::pinned_host, false>;
+using gpu_storage              = storage::arena<planning::bounded_policy, gpu_backing_allocator>;
+using pinned_storage           = storage::arena<planning::bounded_policy, pinned_backing_allocator>;
+using snapshot_storage =
+    storage::fallback_allocator<gpu_storage, pinned_storage, storage::null_allocator>;
+
+constexpr size_t gpu_storage_index = 0;
+
+snapshot_storage
+make_snapshot_storage(const capture_context_t& ctx, storage_budgets_t budgets)
+{
+    return snapshot_storage{
+        gpu_storage{planning::bounded_policy{budgets.gpu_bytes},
+                    ctx.gpu_pool,
+                    ctx.agent,
+                    hsa_agent_t{.handle = 0},
+                    ctx.gpu_backend_available},
+        pinned_storage{planning::bounded_policy{budgets.host_bytes},
+                       ctx.pinned_pool,
+                       ctx.agent,
+                       ctx.cpu_agent,
+                       true},
+        storage::null_allocator{},
     };
-    return planning::build(std::move(requests), allocator, arena_alignment);
 }
-
-allocation_result_t
-allocate_pool_block(hsa_amd_memory_pool_t pool,
-                    hsa_agent_t           agent,
-                    hsa_agent_t           pinned_agent,
-                    size_t                size,
-                    storage_kind          kind,
-                    bool                  cacheable)
-{
-    if(size == 0) return allocation_result_t{};
-    if(!pool_accepts(pool, size))
-        return allocation_result_t{.error = allocation_error::unavailable};
-
-    if(cacheable)
-    {
-        if(auto cached = take_cached_device_copy(pool, size); cached)
-            return allocation_result_t{.value = owned_block_t{cached, kind, pool, true}};
-    }
-
-    auto* ext = hsa::get_amd_ext_table();
-    if(!ext || !ext->hsa_amd_memory_pool_allocate_fn || !ext->hsa_amd_agents_allow_access_fn ||
-       !ext->hsa_amd_memory_pool_free_fn)
-        return allocation_result_t{.error = allocation_error::hard_failure};
-
-    void* ptr    = nullptr;
-    auto  status = ext->hsa_amd_memory_pool_allocate_fn(pool, size, 0, &ptr);
-    if(status != HSA_STATUS_SUCCESS || !ptr)
-        return allocation_result_t{.error = allocation_error::out_of_resources};
-
-    if(kind == storage_kind::pinned_host && pinned_agent.handle != 0)
-    {
-        status = ext->hsa_amd_agents_allow_access_fn(1, &pinned_agent, nullptr, ptr);
-        if(status != HSA_STATUS_SUCCESS)
-        {
-            ext->hsa_amd_memory_pool_free_fn(ptr);
-            return allocation_result_t{.error = allocation_error::hard_failure};
-        }
-    }
-    status = ext->hsa_amd_agents_allow_access_fn(1, &agent, nullptr, ptr);
-    if(status == HSA_STATUS_SUCCESS)
-        return allocation_result_t{.value =
-                                       owned_block_t{block_t{size, ptr}, kind, pool, cacheable}};
-
-    ext->hsa_amd_memory_pool_free_fn(ptr);
-    return allocation_result_t{.error = allocation_error::hard_failure};
-}
-
-struct gpu_arena_allocator
-{
-    allocation_result_t operator()(size_t size, const capture_context_t& ctx) const
-    {
-        if(!ctx.gpu_backend_available || ctx.gpu_pool.handle == 0)
-            return allocation_result_t{.error = allocation_error::unavailable};
-
-        // Reusing retained GPU backing consumes no new VRAM, so check the cache before applying the
-        // current-availability admission gate.
-        if(auto cached = take_cached_device_copy(ctx.gpu_pool, size); cached)
-            return allocation_result_t{
-                .value = owned_block_t{cached, storage_kind::gpu_local, ctx.gpu_pool, true}};
-
-        if(auto available = gpu_available_bytes(ctx.agent))
-        {
-            // Keep ten percent available for runtime scratch and allocations racing this advisory
-            // query. The HSA allocation result below remains authoritative.
-            const auto budget = *available - (*available / 10);
-            if(size > budget) return allocation_result_t{.error = allocation_error::unavailable};
-        }
-        return allocate_pool_block(
-            ctx.gpu_pool, ctx.agent, hsa_agent_t{.handle = 0}, size, storage_kind::gpu_local, true);
-    }
-};
-
-struct pinned_host_arena_allocator
-{
-    allocation_result_t operator()(size_t size, const capture_context_t& ctx) const
-    {
-        if(ctx.pinned_pool.handle == 0)
-            return allocation_result_t{.error = allocation_error::unavailable};
-
-        if(auto available = host_available_bytes())
-        {
-            // Pinned storage is non-reclaimable. Never consume more than half of currently
-            // available host memory in this MVP.
-            if(size > (*available / 2))
-                return allocation_result_t{.error = allocation_error::unavailable};
-        }
-        return allocate_pool_block(
-            ctx.pinned_pool, ctx.agent, ctx.pinned_agent, size, storage_kind::pinned_host, false);
-    }
-};
 
 struct materialization_t
 {
     std::vector<storage_segment_t> segments{};
-    allocation_error               error      = allocation_error::none;
-    bool                           gpu_failed = false;
+    storage::error_code            error                = storage::error_code::none;
+    size_t                         failed_storage_index = std::numeric_limits<size_t>::max();
 
-    bool complete() const { return error == allocation_error::none; }
+    bool complete() const { return error == storage::error_code::none; }
 };
 
+template <size_t Index = 0>
+storage::error_code
+release_backings(snapshot_storage& storage_chain, std::vector<storage_segment_t>& segments)
+{
+    if constexpr(Index == snapshot_storage::allocator_count)
+    {
+        return storage::error_code::none;
+    }
+    else
+    {
+        using allocator_type = snapshot_storage::allocator_type<Index>;
+        auto& allocator      = storage_chain.template get<Index>();
+        if constexpr(allocator_type::has_backing)
+        {
+            const auto size = allocator.used();
+            if(size > 0)
+            {
+                auto backing = allocator.release_backing();
+                if(!backing) return storage::error_code::hard_failure;
+                segments.emplace_back(storage_segment_t{size, Index, std::move(*backing)});
+            }
+        }
+        return release_backings<Index + 1>(storage_chain, segments);
+    }
+}
+
 materialization_t
-materialize_plan(const planning::plan_t& plan, const capture_context_t& ctx)
+materialize(snapshot_storage& storage_chain)
 {
     auto out = materialization_t{};
     try
     {
-        out.segments.reserve(2);
+        out.segments.reserve(snapshot_storage::allocator_count);
     } catch(const std::bad_alloc&)
     {
-        out.error = allocation_error::out_of_resources;
+        out.error = storage::error_code::out_of_resources;
         return out;
     }
 
-    if(plan.gpu_bytes > 0)
+    const auto commit = storage_chain.commit();
+    if(!commit)
     {
-        auto result = gpu_arena_allocator{}(plan.gpu_bytes, ctx);
-        if(!result)
-        {
-            out.error      = result.error;
-            out.gpu_failed = true;
-            return out;
-        }
-        out.segments.emplace_back(storage_segment_t{plan.gpu_bytes, 0, std::move(result.value)});
+        out.error                = commit.error;
+        out.failed_storage_index = commit.storage_index;
+        return out;
     }
 
-    if(plan.host_bytes > 0)
+    out.error = release_backings(storage_chain, out.segments);
+    if(out.error != storage::error_code::none)
     {
-        auto result = pinned_host_arena_allocator{}(plan.host_bytes, ctx);
-        if(!result)
-        {
-            out.segments.clear();
-            out.error = result.error;
-            return out;
-        }
-        out.segments.emplace_back(storage_segment_t{plan.host_bytes, 0, std::move(result.value)});
+        out.segments.clear();
+        storage_chain.reset();
     }
     return out;
 }
@@ -593,7 +586,7 @@ capture_copy(const snapshot_t& snapshot, const snapshot_extent_t& extent)
     auto*       backing = static_cast<std::byte*>(segment.backing.block().data);
     return copy_region_t{
         extent.size,
-        static_cast<std::byte*>(region.live_address) + extent.region_offset,
+        region.live_address,
         backing + extent.segment_offset,
     };
 }
@@ -607,7 +600,7 @@ restore_copy(const snapshot_t& snapshot, const snapshot_extent_t& extent)
     return copy_region_t{
         extent.size,
         backing + extent.segment_offset,
-        static_cast<std::byte*>(region.live_address) + extent.region_offset,
+        region.live_address,
     };
 }
 }  // namespace
@@ -677,81 +670,6 @@ snapshot_t::storage() const
     return first;
 }
 
-std::optional<size_t>
-assign_logical_offsets(std::vector<snapshot_region_t>& regions)
-{
-    size_t required = 0;
-    for(auto& region : regions)
-    {
-        auto aligned = checked_align_up(required, arena_alignment);
-        if(!aligned || region.size > std::numeric_limits<size_t>::max() - *aligned)
-            return std::nullopt;
-        region.logical_offset = *aligned;
-        required              = *aligned + region.size;
-    }
-    return required;
-}
-
-std::optional<std::vector<snapshot_extent_t>>
-map_regions_to_storage(const std::vector<snapshot_region_t>& regions,
-                       const std::vector<storage_segment_t>& segments)
-{
-    auto out = std::vector<snapshot_extent_t>{};
-    try
-    {
-        out.reserve(regions.size());
-    } catch(const std::bad_alloc&)
-    {
-        return std::nullopt;
-    }
-
-    try
-    {
-        size_t previous_segment_end = 0;
-        for(const auto& segment : segments)
-        {
-            if(segment.size > std::numeric_limits<size_t>::max() - segment.logical_offset)
-                return std::nullopt;
-            if(segment.logical_offset < previous_segment_end) return std::nullopt;
-            if(segment.backing && segment.backing.block().size < segment.size) return std::nullopt;
-            previous_segment_end = segment.logical_offset + segment.size;
-        }
-
-        for(size_t region_index = 0; region_index < regions.size(); ++region_index)
-        {
-            const auto& region = regions[region_index];
-            if(region.size > std::numeric_limits<size_t>::max() - region.logical_offset)
-                return std::nullopt;
-            const auto region_end = region.logical_offset + region.size;
-            auto       cursor     = region.logical_offset;
-
-            for(size_t segment_index = 0; segment_index < segments.size(); ++segment_index)
-            {
-                const auto& segment     = segments[segment_index];
-                const auto  segment_end = segment.logical_offset + segment.size;
-                const auto  begin       = std::max(region.logical_offset, segment.logical_offset);
-                const auto  end         = std::min(region_end, segment_end);
-                if(begin >= end) continue;
-                if(begin != cursor) return std::nullopt;
-
-                out.emplace_back(snapshot_extent_t{
-                    end - begin,
-                    region_index,
-                    begin - region.logical_offset,
-                    segment_index,
-                    begin - segment.logical_offset,
-                });
-                cursor = end;
-            }
-            if(cursor != region_end) return std::nullopt;
-        }
-    } catch(const std::bad_alloc&)
-    {
-        return std::nullopt;
-    }
-    return out;
-}
-
 snapshot_t
 snap(hsa_agent_t agent)
 {
@@ -759,14 +677,12 @@ snap(hsa_agent_t agent)
     if(!cache)
     {
         auto out   = snapshot_t{};
-        out.agent  = agent;
         out.status = capture_status::unavailable;
         return out;
     }
 
     return snap(capture_context_t{
         agent,
-        cache->get_rocp_agent()->id,
         cache->near_cpu(),
         cache->gpu_pool(),
         cache->cpu_pool(),
@@ -784,10 +700,7 @@ snap(const capture_context_t& ctx)
 snapshot_t
 snap(const capture_context_t& ctx, storage_budgets_t budgets)
 {
-    auto out         = snapshot_t{};
-    out.agent        = ctx.agent;
-    out.pinned_agent = ctx.pinned_agent;
-    out.agent_id     = ctx.agent_id;
+    auto out = snapshot_t{};
 
     // Note: trackable allocations carrying HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are recorded in
     // memory_tracker::unsupported_executable() and omitted from the main inventory. Declining
@@ -829,15 +742,14 @@ snap(const capture_context_t& ctx, storage_budgets_t budgets)
     for(const auto& [ptr, size] : inventory)
     {
         if(size == 0) continue;
-        out.regions.emplace_back(
-            snapshot_region_t{size, ptr, 0, liveness_kind::tracked_allocation});
+        out.regions.emplace_back(snapshot_region_t{size, ptr, liveness_kind::tracked_allocation});
     }
 
     for(const auto& var : scan.found)
     {
         if(var.size == 0) continue;
         out.regions.emplace_back(
-            snapshot_region_t{var.size, var.gpu_addr, 0, liveness_kind::module_variable});
+            snapshot_region_t{var.size, var.gpu_addr, liveness_kind::module_variable});
     }
 
     if(out.regions.empty())
@@ -846,7 +758,8 @@ snap(const capture_context_t& ctx, storage_budgets_t budgets)
         return out;
     }
 
-    auto plan = build_storage_plan(out.regions, budgets.gpu_bytes, budgets.host_bytes);
+    auto storage_chain = make_snapshot_storage(ctx, budgets);
+    auto plan          = build_storage_plan(out.regions, storage_chain);
     if(!plan.complete())
     {
         ROCP_WARNING << fmt::format("kernel-replay snapshot: no placement for region {} requesting "
@@ -861,15 +774,24 @@ snap(const capture_context_t& ctx, storage_budgets_t budgets)
         return out;
     }
 
-    auto materialization = materialize_plan(plan, ctx);
-    if(!materialization.complete() && materialization.gpu_failed &&
+    auto materialization = materialize(storage_chain);
+    if(!materialization.complete() && materialization.failed_storage_index == gpu_storage_index &&
        ctx.mode == capture_mode::automatic)
     {
         // The capacity query raced or the single GPU arena could not be realized. No application
         // bytes have been captured, so rebuild the complete plan with pinned storage only.
-        plan            = build_storage_plan(out.regions, 0, budgets.host_bytes);
-        materialization = plan.complete() ? materialize_plan(plan, ctx) : materialization_t{};
-        if(!plan.complete()) materialization.error = allocation_error::unavailable;
+        auto pinned_chain = make_snapshot_storage(ctx, storage_budgets_t{0, budgets.host_bytes});
+        auto pinned_plan  = build_storage_plan(out.regions, pinned_chain);
+        if(pinned_plan.complete())
+        {
+            plan            = std::move(pinned_plan);
+            materialization = materialize(pinned_chain);
+        }
+        else
+        {
+            materialization       = materialization_t{};
+            materialization.error = storage::error_code::out_of_resources;
+        }
     }
     if(!materialization.complete())
     {
@@ -885,33 +807,36 @@ snap(const capture_context_t& ctx, storage_budgets_t budgets)
     try
     {
         out.extents.reserve(plan.placements.size());
-        auto gpu_segment  = std::optional<size_t>{};
-        auto host_segment = std::optional<size_t>{};
+        auto segment_for_storage =
+            std::vector<std::optional<size_t>>(snapshot_storage::allocator_count);
         for(size_t i = 0; i < out.segments.size(); ++i)
         {
-            if(out.segments[i].backing.kind() == storage_kind::gpu_local)
-                gpu_segment = i;
-            else if(out.segments[i].backing.kind() == storage_kind::pinned_host)
-                host_segment = i;
-        }
-
-        for(const auto& placement : plan.placements)
-        {
-            const auto segment_index =
-                placement.tier == storage_kind::gpu_local ? gpu_segment : host_segment;
-            if(!segment_index)
+            const auto storage_index = out.segments[i].storage_index;
+            if(storage_index >= segment_for_storage.size() ||
+               segment_for_storage[storage_index].has_value())
             {
                 out.regions.clear();
                 out.segments.clear();
                 out.status = capture_status::invalid_plan;
                 return out;
             }
-            out.regions[placement.region_index].logical_offset = placement.backing_offset;
+            segment_for_storage[storage_index] = i;
+        }
+
+        for(const auto& placement : plan.placements)
+        {
+            if(placement.storage_index >= segment_for_storage.size() ||
+               !segment_for_storage[placement.storage_index])
+            {
+                out.regions.clear();
+                out.segments.clear();
+                out.status = capture_status::invalid_plan;
+                return out;
+            }
             out.extents.emplace_back(snapshot_extent_t{
                 placement.size,
                 placement.region_index,
-                0,
-                *segment_index,
+                *segment_for_storage[placement.storage_index],
                 placement.backing_offset,
             });
         }
@@ -967,11 +892,20 @@ snap(const capture_context_t& ctx, storage_budgets_t budgets)
 
     out.status = capture_status::complete;
 
+    size_t gpu_bytes  = 0;
+    size_t host_bytes = 0;
+    for(const auto& segment : out.segments)
+    {
+        if(segment.backing.kind() == storage_kind::gpu_local)
+            gpu_bytes += segment.size;
+        else if(segment.backing.kind() == storage_kind::pinned_host)
+            host_bytes += segment.size;
+    }
     ROCP_INFO << fmt::format("kernel-replay snapshot: captured {} regions using {} GPU bytes and "
                              "{} pinned-host bytes for agent {}",
                              captured_regions,
-                             plan.gpu_bytes,
-                             plan.host_bytes,
+                             gpu_bytes,
+                             host_bytes,
                              ctx.agent.handle);
     return out;
 }
