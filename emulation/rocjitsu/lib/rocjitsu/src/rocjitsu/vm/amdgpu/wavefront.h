@@ -363,9 +363,11 @@ public:
   /// legacy memory path.
   [[nodiscard]] std::optional<GpuVmAccess> snapshot_vm_access() const;
 
-  /// Decode captured diagnostic bytes with this CU's target on its execution thread.
+  /// @brief Disassemble captured instruction bytes with this CU's target decoder.
+  /// @details Call on the CU execution thread with a complete instruction encoding.
   /// Virtual dispatch keeps the target decoder accessible to standalone plugins.
   /// Keep out-of-line virtuals off this interface so plugins can emit its type information.
+  /// @throws std::logic_error if the encoding is empty, truncated, or undecodable.
   virtual std::string disassemble_instruction(std::span<const uint32_t> encoding,
                                               uint64_t pc) const = 0;
 
