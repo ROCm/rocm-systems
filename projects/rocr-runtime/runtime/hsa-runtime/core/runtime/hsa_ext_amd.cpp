@@ -1026,18 +1026,22 @@ static hsa_status_t SelectInterruptSignal(uint32_t num_consumers, const hsa_agen
   bool use_default = (attributes & HSA_AMD_SIGNAL_IPC) ||
       (attributes & HSA_AMD_SIGNAL_AMD_GPU_ONLY) || (!core::g_use_interrupt_wait);
 
-  if ((!use_default) && (num_consumers != 0)) {
+  // A duplicated consumer list is invalid even when the signal will not be an
+  // interrupt signal (WSL, HSA_ENABLE_INTERRUPT=0, IPC, or GPU-only).
+  if (num_consumers != 0) {
     IS_BAD_PTR(consumers);
 
-    // Check for duplicates in consumers.
     std::set<hsa_agent_t, AgentHandleCompare> consumer_set(consumers, consumers + num_consumers);
     if (consumer_set.size() != num_consumers) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    use_default = true;
-    for (const core::Agent* cpu_agent : core::Runtime::runtime_singleton_->cpu_agents()) {
-      use_default &= (consumer_set.find(cpu_agent->public_handle()) == consumer_set.end());
+    // An interrupt signal is only useful if some consumer is a CPU.
+    if (!use_default) {
+      use_default = true;
+      for (const core::Agent* cpu_agent : core::Runtime::runtime_singleton_->cpu_agents()) {
+        use_default &= (consumer_set.find(cpu_agent->public_handle()) == consumer_set.end());
+      }
     }
   }
 

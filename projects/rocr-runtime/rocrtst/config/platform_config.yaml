@@ -120,6 +120,7 @@ groups:
     - rocrtstFunc.Signal_Batch_Device_Pools
     - rocrtstFunc.Signal_Batch_Async_Copy_Completion
     - rocrtstFunc.Signal_Batch_Negative
+    - rocrtstFunc.Signal_Batch_Negative_InterruptDisabled
     - rocrtstFunc.Signal_Batch_Agent_Queries
     - rocrtstFunc.Signal_Handle_Hints
 

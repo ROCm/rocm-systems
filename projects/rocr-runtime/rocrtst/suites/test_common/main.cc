@@ -527,6 +527,16 @@ TEST(rocrtstFunc, Signal_Batch_Negative) {
     RunCustomTestEpilog(&batch_test);
 }
 
+// Duplicate consumers stay invalid when interrupt waits are off. SetUp leaves
+// HSA_ENABLE_INTERRUPT alone because enable_interrupt() defaults to false.
+TEST(rocrtstFunc, Signal_Batch_Negative_InterruptDisabled) {
+    SignalBatchTest batch_test;
+    rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", "0");
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.NegativeArguments();
+    RunCustomTestEpilog(&batch_test);
+}
+
 TEST(rocrtstFunc, Signal_Batch_Agent_Queries) {
     SignalBatchTest batch_test;
     if (!RunCustomTestProlog(&batch_test)) return;
