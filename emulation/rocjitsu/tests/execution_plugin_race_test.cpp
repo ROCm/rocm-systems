@@ -6,6 +6,7 @@
 
 #include "execution_plugin_test_util.h"
 #include "mma_test_util.h"
+#include "race-detector/race_test_instruction.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
@@ -95,8 +96,8 @@ public:
 
   void registerOutstandingLoad(uint32_t logical_reg, uint64_t exec_mask, uint8_t byte_mask = 0xF) {
     ASSERT_NE(state_, nullptr);
-    state_->registerEventCoreOnly(/*pc=*/0x1000, MemoryEventType::GLOBAL_TO_VGPR, {logical_reg},
-                                  exec_mask, byte_mask);
+    state_->registerEvent(testInstruction(/*pc=*/0x1000), MemoryEventType::GLOBAL_TO_VGPR,
+                          {logical_reg}, exec_mask, byte_mask);
   }
 
   std::vector<RaceViolation> violations;
@@ -2476,10 +2477,10 @@ TEST(DecorateExceptionTest, UsesRecordedConflictingEvent) {
                         1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
                         counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
                         /*ldsSizeBytes=*/64 * 1024);
-  EventId first = detector.allocateEventIdCoreOnly(
-      WaveId{0}, /*pc=*/10, MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1);
-  EventId second = detector.allocateEventIdCoreOnly(
-      WaveId{0}, /*pc=*/20, MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1);
+  EventId first = detector.allocateEventId(WaveId{0}, testInstruction(/*pc=*/10),
+                                           MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1);
+  EventId second = detector.allocateEventId(WaveId{0}, testInstruction(/*pc=*/20),
+                                            MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1);
   ASSERT_NE(first, second);
 
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), second};

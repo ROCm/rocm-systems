@@ -25,6 +25,7 @@
 //   DualOffset_*    — dual-offset LDS events
 
 #include "race_test_builder.h"
+#include "race_test_instruction.h"
 #include <array>
 #include <gtest/gtest.h>
 #include <limits>
@@ -138,10 +139,10 @@ TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
     auto &wave = detector.getWaveRaceState(0);
     const std::array<uint32_t, 32> addresses{64, 128, 256};
     for (uint32_t reg : {1u, 2u})
-      wave.registerLdsEventCoreOnly(reg, MemoryEventType::LDS_TO_VGPR, {reg}, /*execMask=*/3,
-                                    /*waveSize=*/32, addresses, /*bytesPerLane=*/4, 0xf,
-                                    kMixedOrderGenericFlatLoadObligations,
-                                    MemoryOrderClass::UNORDERED, lds_mask);
+      wave.registerLdsEvent(
+          testInstruction(reg), MemoryEventType::LDS_TO_VGPR, {reg}, /*execMask=*/3,
+          /*waveSize=*/32, addresses, /*bytesPerLane=*/4, 0xf,
+          kMixedOrderGenericFlatLoadObligations, MemoryOrderClass::UNORDERED, lds_mask);
     const auto &events = detector.events();
     ASSERT_EQ(events.totalAllocated(), 2);
     for (const EventId event : {EventId{0}, EventId{1}}) {
@@ -185,8 +186,8 @@ TEST(RaceDetector, LdsValidationRejectsNegativeAndOverflowingRanges) {
   for (const auto type : {MemoryEventType::LDS_TO_VGPR, MemoryEventType::VGPR_TO_LDS}) {
     IntervalSet intervals;
     intervals.append(64, 68);
-    detector.allocateEventIdCoreOnly(WaveId{0}, 0, type, {}, 1, 0xf, std::move(intervals),
-                                     amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS);
+    detector.allocateEventId(WaveId{0}, testInstruction(0), type, {}, 1, 0xf, std::move(intervals),
+                             amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS);
   }
   struct Range {
     int address;
@@ -216,13 +217,13 @@ TEST(RaceDetector, InvalidLdsAddressesKeepRegisterAndCounterDependencies) {
     const std::array<uint32_t, 4> addresses{0x80000040u, UINT32_MAX, 0x7ffffffeu, 64};
     const std::array<uint32_t, 4> second_addresses{0x80000080u, UINT32_MAX, 0x7fffffffu, 96};
     if (dual_access)
-      wave.registerLdsEventCoreOnly(0, MemoryEventType::LDS_TO_VGPR, {1}, 0xf, 4, addresses,
-                                    second_addresses, 4, 0xf, kMixedOrderGenericFlatLoadObligations,
-                                    MemoryOrderClass::UNORDERED);
+      wave.registerLdsEvent(testInstruction(0), MemoryEventType::LDS_TO_VGPR, {1}, 0xf, 4,
+                            addresses, second_addresses, 4, 0xf,
+                            kMixedOrderGenericFlatLoadObligations, MemoryOrderClass::UNORDERED);
     else
-      wave.registerLdsEventCoreOnly(0, MemoryEventType::LDS_TO_VGPR, {1}, 0xf, 4, addresses, 4, 0xf,
-                                    kMixedOrderGenericFlatLoadObligations,
-                                    MemoryOrderClass::UNORDERED);
+      wave.registerLdsEvent(testInstruction(0), MemoryEventType::LDS_TO_VGPR, {1}, 0xf, 4,
+                            addresses, 4, 0xf, kMixedOrderGenericFlatLoadObligations,
+                            MemoryOrderClass::UNORDERED);
     const auto &events = detector.events();
     const EventId event{0};
     ASSERT_EQ(events.totalAllocated(), 1);
@@ -258,9 +259,9 @@ TEST(RaceDetector, PositiveOutOfBoundsLdsKeepsDependencies) {
     auto &wave = detector.getWaveRaceState(0);
     const std::array<uint32_t, 5> addresses{capacity - 4, capacity - 2, capacity, 0x100000,
                                             0x70000000};
-    wave.registerLdsEventCoreOnly(0, MemoryEventType::LDS_TO_VGPR, {1}, 0x1f, 5, addresses, 4, 0xf,
-                                  kMixedOrderGenericFlatLoadObligations,
-                                  MemoryOrderClass::UNORDERED);
+    wave.registerLdsEvent(testInstruction(0), MemoryEventType::LDS_TO_VGPR, {1}, 0x1f, 5, addresses,
+                          4, 0xf, kMixedOrderGenericFlatLoadObligations,
+                          MemoryOrderClass::UNORDERED);
     const EventId event{0};
     const auto &events = detector.events();
     EXPECT_EQ(events.ldsIntervals(event).getTotalBytes(), 4);
@@ -292,9 +293,10 @@ TEST(RaceDetector, LdsVectorIntervalsRetainOnlyCompleteElementsAtBackingEnd) {
       capacity);
   auto &wave = detector.getWaveRaceState(0);
   const std::array<uint32_t, 3> addresses{capacity - 8, capacity - 2, capacity};
-  wave.registerLdsEventCoreOnly(0, MemoryEventType::LDS_TO_VGPR, {1, 2, 3, 4}, 7, 3, addresses,
-                                /*bytesPerLane=*/16, 0xf, kMixedOrderGenericFlatLoadObligations,
-                                MemoryOrderClass::UNORDERED, /*ldsLaneMask=*/7, /*elementBytes=*/4);
+  wave.registerLdsEvent(testInstruction(0), MemoryEventType::LDS_TO_VGPR, {1, 2, 3, 4}, 7, 3,
+                        addresses,
+                        /*bytesPerLane=*/16, 0xf, kMixedOrderGenericFlatLoadObligations,
+                        MemoryOrderClass::UNORDERED, /*ldsLaneMask=*/7, /*elementBytes=*/4);
   const auto &events = detector.events();
   EXPECT_EQ(events.ldsIntervals(EventId{0}).getTotalBytes(), 8);
   EXPECT_TRUE(events.ldsIntervals(EventId{0}).contains(capacity - 1));
@@ -315,9 +317,9 @@ TEST(RaceDetector, LdsCounterAccountingIgnoresNegativeIntervals) {
     IntervalSet intervals;
     intervals.append(std::numeric_limits<int>::min() + 64, std::numeric_limits<int>::min() + 68);
     intervals.append(64, 68);
-    const auto event =
-        detector.allocateEventIdCoreOnly(WaveId{0}, 0, type, {}, 1, 0xf, std::move(intervals),
-                                         amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS);
+    const auto event = detector.allocateEventId(
+        WaveId{0}, testInstruction(0), type, {}, 1, 0xf, std::move(intervals),
+        amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS);
     detector.validateRead(64, WaveId{1}, 0, 4);
     detector.validateWrite(64, WaveId{1}, 0, 4);
     EXPECT_EQ(violations.size(), 1u);
@@ -1678,10 +1680,10 @@ TEST(RaceDetector, DualOffset_CrossWaveRace) {
   auto &rs = detector.getWaveRaceState(0);
   std::vector<uint32_t> ldsAddrs(64, 0);
   ldsAddrs[0] = 100;
-  rs.registerDualOffsetLdsEventCoreOnly(
-      /*pc=*/0, MemoryEventType::VGPR_TO_LDS, /*registers=*/{},
-      /*execMask=*/1, /*waveSize=*/64, ldsAddrs,
-      /*offset0=*/0, /*offset1=*/2);
+  rs.registerDualOffsetLdsEvent(testInstruction(/*pc=*/0), MemoryEventType::VGPR_TO_LDS,
+                                /*registers=*/{},
+                                /*execMask=*/1, /*waveSize=*/64, ldsAddrs,
+                                /*offset0=*/0, /*offset1=*/2);
   // Lane 0 wrote: [100, 108) and [116, 124)
   detector.validateRead(/*addr=*/100, WaveId{1}, /*lane=*/0, /*nBytes=*/4);
   EXPECT_EQ(violations.size(), 1u); // first interval

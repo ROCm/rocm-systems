@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "race_test_instruction.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include <algorithm>
 #include <array>
@@ -60,8 +61,8 @@ protected:
                       : order == MemoryOrderClass::VMEM ? MemoryEventType::GLOBAL_TO_LDS
                                                         : MemoryEventType::VGPR_TO_LDS;
     event.id =
-        detector_.allocateEventIdCoreOnly(WaveId{wave}, /*pc=*/0, type, {}, /*execMask=*/1,
-                                          /*byteMask=*/0xF, std::move(intervals), counter, order);
+        detector_.allocateEventId(WaveId{wave}, testInstruction(/*pc=*/0), type, {}, /*execMask=*/1,
+                                  /*byteMask=*/0xF, std::move(intervals), counter, order);
     events_.push_back(event);
   }
 

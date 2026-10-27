@@ -51,21 +51,54 @@ public:
   /// Apply backpressure to every counter incremented by a resolved issue.
   void prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &);
 
-  /// @brief Register events with complete captured instructions for plugin reports.
-  /// @details The snapshot supplies both the PC and owned encoding. Empty snapshots or
-  /// word counts outside the capture window throw std::logic_error before changing
-  /// event state or checking scalar writes. Instruction decoding is deferred to reporting.
+  /// All registration forms require a complete captured instruction. Empty or oversized
+  /// snapshots throw std::logic_error before event mutation or scalar-write checks.
+  /// The instruction is decoded only when a plugin report needs disassembly.
+  /// Register an in-flight memory event that does not involve LDS.
+  /// \param instruction Complete captured encoding and PC of the producing instruction.
+  /// \param type The type of the memory event.
+  /// \param registers The register IDs involved in the event.
+  /// \param execMask The execution mask at the time the event was produced.
+  /// \param byteMask The byte mask of the event, if this event effects only certain bytes offset
+  ///                 register(s). Defaults to 0xF (all bytes).
+  void registerEvent(InstructionSnapshot instruction, MemoryEventType type,
+                     std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask = 0xF);
+
+  /// Register an event with its architectural wait-counter obligations.
+  void
+  registerEvent(InstructionSnapshot instruction, MemoryEventType type,
+                std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
+                amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
+                std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
   /// A nonzero lastRegisterByteMask overrides byteMask for the last destination.
   void registerEvent(InstructionSnapshot instruction, MemoryEventType type,
                      std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                      std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                      MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
-  /// Register a scalar load using its architectural destination.
+
+  /// Register an in-flight scalar load using its architectural destination.
+  void registerScalarLoad(
+      InstructionSnapshot instruction, RegisterRef destination, uint64_t execMask,
+      amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
+      std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
   void registerScalarLoad(InstructionSnapshot instruction, RegisterRef destination,
                           uint64_t execMask,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                           MemoryOrderClass memoryOrder);
-  /// Each active lane contributes bytesPerLane bytes at laneBaseAddresses[lane].
+
+  /// Register an in-flight memory event that involves LDS.
+  /// The LDS memory involved is defined by `laneBaseAddresses` and `bytesPerLane`. Each active lane
+  /// contributes one interval of size `bytesPerLane`.
+  void registerLdsEvent(InstructionSnapshot instruction, MemoryEventType type,
+                        std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
+                        std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
+                        uint8_t byteMask = 0xF);
+  void
+  registerLdsEvent(InstructionSnapshot instruction, MemoryEventType type,
+                   std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
+                   std::span<const uint32_t> laneBaseAddresses, int bytesPerLane, uint8_t byteMask,
+                   amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
+                   std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
   /// ldsLaneMask restricts LDS intervals to a subset of execMask (for mixed
   /// FLAT). Register dependencies still use all execMask lanes, and the whole
   /// instruction occupies one event with one set of counter obligations.
@@ -91,80 +124,24 @@ public:
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                         MemoryOrderClass memoryOrder, int elementBytes = 0);
-  /// Each active lane contributes two 8-byte intervals at laneBaseAddresses[lane]
-  /// plus offset0*8 and offset1*8.
+
+  /// Register an LDS event with dual-offset intervals. Each active lane
+  /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8
+  /// and laneBaseAddresses[lane] + offset1*8. So each active lane contributes 2 intervals of 8
+  /// bytes each.
+  void registerDualOffsetLdsEvent(InstructionSnapshot instruction, MemoryEventType type,
+                                  std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
+                                  std::span<const uint32_t> laneBaseAddresses, int32_t offset0,
+                                  int32_t offset1);
+  void registerDualOffsetLdsEvent(
+      InstructionSnapshot instruction, MemoryEventType type, std::vector<uint32_t> registers,
+      uint64_t execMask, int waveSize, std::span<const uint32_t> laneBaseAddresses, int32_t offset0,
+      int32_t offset1, amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
+      std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
   void registerDualOffsetLdsEvent(
       InstructionSnapshot instruction, MemoryEventType type, std::vector<uint32_t> registers,
       uint64_t execMask, int waveSize, std::span<const uint32_t> laneBaseAddresses, int32_t offset0,
       int32_t offset1, std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-      MemoryOrderClass memoryOrder);
-
-  /// @brief Register PC-only events for core analyses that do not disassemble them.
-  /// @details All CoreOnly forms omit encoding bytes. Their events cannot be used
-  /// with the plugin's disassembly report path.
-  void registerEventCoreOnly(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
-                             uint64_t execMask, uint8_t byteMask = 0xF);
-
-  /// Register an event with its architectural wait-counter obligations.
-  void registerEventCoreOnly(
-      uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers, uint64_t execMask,
-      uint8_t byteMask, amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
-      std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
-  /// A nonzero lastRegisterByteMask overrides byteMask for the last destination.
-  void registerEventCoreOnly(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
-                             uint64_t execMask, uint8_t byteMask,
-                             std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                             MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
-
-  /// Register a PC-only scalar load; see registerScalarLoad() for destination handling.
-  void registerScalarLoadCoreOnly(
-      uint64_t pc, RegisterRef destination, uint64_t execMask,
-      amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
-      std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
-  void
-  registerScalarLoadCoreOnly(uint64_t pc, RegisterRef destination, uint64_t execMask,
-                             std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                             MemoryOrderClass memoryOrder);
-
-  /// Register PC-only LDS events; see registerLdsEvent() for interval handling.
-  void registerLdsEventCoreOnly(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
-                                uint64_t execMask, int waveSize,
-                                std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
-                                uint8_t byteMask = 0xF);
-  void registerLdsEventCoreOnly(
-      uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers, uint64_t execMask,
-      int waveSize, std::span<const uint32_t> laneBaseAddresses, int bytesPerLane, uint8_t byteMask,
-      amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
-      std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
-  void registerLdsEventCoreOnly(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
-                                uint64_t execMask, int waveSize,
-                                std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
-                                uint8_t byteMask,
-                                std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                                MemoryOrderClass memoryOrder, uint64_t ldsLaneMask = ~uint64_t{0},
-                                int elementBytes = 0, std::optional<uint64_t> allocationEnd = std::nullopt);
-  void registerLdsEventCoreOnly(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
-                                uint64_t execMask, int waveSize,
-                                std::span<const uint32_t> firstLaneBaseAddresses,
-                                std::span<const uint32_t> secondLaneBaseAddresses, int bytesPerLane,
-                                uint8_t byteMask,
-                                std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                                MemoryOrderClass memoryOrder, int elementBytes = 0);
-
-  /// Register PC-only dual-offset events; see registerDualOffsetLdsEvent() for intervals.
-  void registerDualOffsetLdsEventCoreOnly(uint64_t pc, MemoryEventType type,
-                                          std::vector<uint32_t> registers, uint64_t execMask,
-                                          int waveSize, std::span<const uint32_t> laneBaseAddresses,
-                                          int32_t offset0, int32_t offset1);
-  void registerDualOffsetLdsEventCoreOnly(
-      uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers, uint64_t execMask,
-      int waveSize, std::span<const uint32_t> laneBaseAddresses, int32_t offset0, int32_t offset1,
-      amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
-      std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
-  void registerDualOffsetLdsEventCoreOnly(
-      uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers, uint64_t execMask,
-      int waveSize, std::span<const uint32_t> laneBaseAddresses, int32_t offset0, int32_t offset1,
-      std::span<const amdgpu::MemoryCounterObligation> counterObligations,
       MemoryOrderClass memoryOrder);
 
   /// Dispatch the counter thresholds changed by one wait instruction.
@@ -224,33 +201,6 @@ public:
   WaveId getWaveId() const { return waveId; }
 
 private:
-  void registerEventImpl(InstructionSnapshot instruction, MemoryEventType type,
-                         std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
-                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                         MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask);
-  void registerScalarLoadImpl(InstructionSnapshot instruction, RegisterRef destination,
-                              uint64_t execMask,
-                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                              MemoryOrderClass memoryOrder);
-  void registerLdsEventImpl(InstructionSnapshot instruction, MemoryEventType type,
-                            std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
-                            std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
-                            uint8_t byteMask,
-                            std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                            MemoryOrderClass memoryOrder, uint64_t ldsLaneMask, int elementBytes,
-                            std::optional<uint64_t> allocationEnd);
-  void registerLdsEventImpl(InstructionSnapshot instruction, MemoryEventType type,
-                            std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
-                            std::span<const uint32_t> firstLaneBaseAddresses,
-                            std::span<const uint32_t> secondLaneBaseAddresses, int bytesPerLane,
-                            uint8_t byteMask,
-                            std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                            MemoryOrderClass memoryOrder, int elementBytes);
-  void registerDualOffsetLdsEventImpl(
-      InstructionSnapshot instruction, MemoryEventType type, std::vector<uint32_t> registers,
-      uint64_t execMask, int waveSize, std::span<const uint32_t> laneBaseAddresses, int32_t offset0,
-      int32_t offset1, std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-      MemoryOrderClass memoryOrder);
   void registerEventWithIntervals(InstructionSnapshot instruction, MemoryEventType,
                                   std::vector<uint32_t> registers, uint64_t execMask,
                                   uint8_t byteMask, IntervalSet ldsIntervals,

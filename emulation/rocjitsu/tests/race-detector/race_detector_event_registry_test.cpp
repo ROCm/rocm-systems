@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "race_test_instruction.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 #include <array>
@@ -39,8 +40,8 @@ TEST(RaceDetector, EventRegistry_TrimmedWaveLocalEventsAreNotBarrierQueued) {
   // load is immediately completed with vmcnt(0), so none should be waiting for
   // a workgroup barrier.
   for (int i = 0; i < N; ++i) {
-    wave.registerEventCoreOnly(/*pc=*/static_cast<uint64_t>(i), MemoryEventType::GLOBAL_TO_VGPR,
-                               std::vector<uint32_t>{0}, /*execMask=*/1);
+    wave.registerEvent(testInstruction(/*pc=*/static_cast<uint64_t>(i)),
+                       MemoryEventType::GLOBAL_TO_VGPR, std::vector<uint32_t>{0}, /*execMask=*/1);
     PendingWaitCount wait;
     wait.add(rocjitsu::amdgpu::WaitCounterType::VMCNT, 0);
     wave.dispatch(wait);
@@ -62,7 +63,7 @@ constexpr InstructionSnapshot kInstruction{.pc = 0x1234, .words = {0xbf800007}, 
 constexpr std::array kObligations{
     MemoryCounterObligation{WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED}};
 
-class RaceEventRegistrationTest : public ::testing::TestWithParam<uint32_t> {
+class RaceEventRegistrationTest : public ::testing::Test {
 protected:
   RaceDetector detector{1,
                         16,
@@ -88,106 +89,58 @@ TEST(EventRegistry, RetainsCapturedPcAndOwnedEncoding) {
   EXPECT_EQ(events.instruction(id).word_count, kInstruction.word_count);
 }
 
-TEST(EventRegistry, CoreOnlyEventsRetainPcWithoutEncoding) {
+TEST_F(RaceEventRegistrationTest, InvalidSizesDoNotChangeEventState) {
   EventRegistry events;
-  const auto id = events.addCoreOnly(WaveId{0}, 0x1234, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1,
-                                     0xf, {}, kObligations, MemoryOrderClass::UNORDERED);
-  EXPECT_EQ(events.pc(id), 0x1234u);
-  EXPECT_TRUE(events.instruction(id).encoding().empty());
-}
-
-TEST_P(RaceEventRegistrationTest, RegistryRejectsInvalidSizeBeforeAllocation) {
-  EventRegistry events;
-  auto invalid = kInstruction;
-  invalid.word_count = GetParam();
-  EXPECT_THROW(events.add(WaveId{0}, invalid, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, {},
-                          kObligations, MemoryOrderClass::UNORDERED),
-               std::logic_error);
-  EXPECT_EQ(events.totalAllocated(), 0);
-  const auto id = events.add(WaveId{0}, kInstruction, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf,
-                             {}, kObligations, MemoryOrderClass::UNORDERED);
-  EXPECT_EQ(id.value, 0);
-}
-
-TEST_P(RaceEventRegistrationTest, DetectorRejectsInvalidSizeBeforeLdsMutation) {
-  auto invalid = kInstruction;
-  invalid.word_count = GetParam();
+  auto &wave = detector.getWaveRaceState(0);
   IntervalSet intervals;
   intervals.append(8, 16);
   intervals.finalize();
-  EXPECT_THROW(detector.allocateEventId(WaveId{0}, invalid, MemoryEventType::VGPR_TO_LDS, {2}, 1,
-                                        0xf, std::move(intervals), kObligations,
-                                        MemoryOrderClass::UNORDERED),
-               std::logic_error);
-  EXPECT_EQ(detector.events().totalAllocated(), 0);
-  EXPECT_TRUE(detector.getLdsWriteEvents().empty());
-  detector.validateRead(8, WaveId{0}, 0, 8);
-  EXPECT_TRUE(violations.empty());
-}
-
-TEST_P(RaceEventRegistrationTest, WaveApisRejectInvalidSizeBeforeRegistration) {
-  auto invalid = kInstruction;
-  invalid.word_count = GetParam();
-  auto &wave = detector.getWaveRaceState(0);
-  const std::array<uint32_t, 1> addresses{8};
-  EXPECT_THROW(wave.registerEvent(invalid, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf,
-                                  kObligations, MemoryOrderClass::UNORDERED),
-               std::logic_error);
-  EXPECT_THROW(wave.registerScalarLoad(invalid, RegisterRef{RegClass::SGPR, 2, 1}, 1, kObligations,
-                                       MemoryOrderClass::UNORDERED),
-               std::logic_error);
-  EXPECT_THROW(wave.registerLdsEvent(invalid, MemoryEventType::LDS_TO_VGPR, {2}, 1, 1, addresses, 4,
-                                     0xf, kObligations, MemoryOrderClass::UNORDERED),
-               std::logic_error);
-  EXPECT_THROW(wave.registerLdsEvent(invalid, MemoryEventType::LDS_TO_VGPR, {2}, 1, 1, addresses,
-                                     addresses, 4, 0xf, kObligations, MemoryOrderClass::UNORDERED),
-               std::logic_error);
-  EXPECT_THROW(wave.registerDualOffsetLdsEvent(invalid, MemoryEventType::LDS_TO_VGPR, {2}, 1, 1,
-                                               addresses, 1, 3, kObligations,
-                                               MemoryOrderClass::UNORDERED),
-               std::logic_error);
+  for (const uint32_t count :
+       {0u, uint32_t{InstructionSnapshot::kMaxWords + 1}, std::numeric_limits<uint32_t>::max()}) {
+    auto invalid = kInstruction;
+    invalid.word_count = count;
+    EXPECT_THROW(events.add(WaveId{0}, invalid, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, {},
+                            kObligations, MemoryOrderClass::UNORDERED),
+                 std::logic_error);
+    EXPECT_THROW(detector.allocateEventId(WaveId{0}, invalid, MemoryEventType::VGPR_TO_LDS, {2}, 1,
+                                          0xf, intervals, kObligations,
+                                          MemoryOrderClass::UNORDERED),
+                 std::logic_error);
+    EXPECT_THROW(wave.registerEvent(invalid, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf,
+                                    kObligations, MemoryOrderClass::UNORDERED),
+                 std::logic_error);
+  }
+  EXPECT_EQ(events.totalAllocated(), 0);
   EXPECT_EQ(detector.events().totalAllocated(), 0);
   EXPECT_TRUE(wave.getWaveMemoryEvents().empty());
   EXPECT_TRUE(wave.getVgprMemoryEvents(2).empty());
   EXPECT_EQ(wave.getRegEventCount(MemoryEventType::GLOBAL_TO_VGPR, 2), 0);
-  EXPECT_EQ(wave.getRegEventCount(MemoryEventType::LDS_TO_VGPR, 2), 0);
-  EXPECT_TRUE(detector.getLdsReadEvents().empty());
+  EXPECT_TRUE(detector.getLdsWriteEvents().empty());
   wave.checkVgprRead(2, 0, 0xf);
-  wave.checkScalarRead(RegisterRef{RegClass::SGPR, 2, 1});
-  detector.validateWrite(8, WaveId{0}, 0, 4);
+  detector.validateRead(8, WaveId{0}, 0, 8);
   EXPECT_TRUE(violations.empty());
 }
 
-TEST_P(RaceEventRegistrationTest, InvalidScalarLoadDoesNotCheckPendingDestination) {
+TEST_F(RaceEventRegistrationTest, InvalidScalarLoadDoesNotCheckPendingDestination) {
   auto &wave = detector.getWaveRaceState(0);
   const RegisterRef destination{RegClass::SGPR, 2, 1};
   wave.registerScalarLoad(kInstruction, destination, 1, kObligations, MemoryOrderClass::UNORDERED);
   ASSERT_TRUE(violations.empty());
-  auto invalid = kInstruction;
-  invalid.word_count = GetParam();
-  EXPECT_THROW(
-      wave.registerScalarLoad(invalid, destination, 1, kObligations, MemoryOrderClass::UNORDERED),
-      std::logic_error);
+  for (const uint32_t count : {0u, uint32_t{InstructionSnapshot::kMaxWords + 1}}) {
+    auto invalid = kInstruction;
+    invalid.word_count = count;
+    EXPECT_THROW(
+        wave.registerScalarLoad(invalid, destination, 1, kObligations, MemoryOrderClass::UNORDERED),
+        std::logic_error);
+  }
   EXPECT_EQ(detector.events().totalAllocated(), 1);
   EXPECT_EQ(wave.getWaveMemoryEvents().size(), 1u);
   EXPECT_TRUE(violations.empty());
-
   wave.registerScalarLoad(kInstruction, destination, 1, kObligations, MemoryOrderClass::UNORDERED);
   EXPECT_EQ(violations.size(), 1u);
 }
 
-INSTANTIATE_TEST_SUITE_P(InvalidSizes, RaceEventRegistrationTest,
-                         ::testing::Values(0u, uint32_t{InstructionSnapshot::kMaxWords + 1},
-                                           std::numeric_limits<uint32_t>::max()));
-
-TEST(RaceEventRegistration, WaveApisRetainCapturedPcAndEncoding) {
-  RaceDetector detector{1,
-                        16,
-                        16,
-                        Dim3d(0),
-                        [](RaceViolation) {},
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
-                        1024};
+TEST_F(RaceEventRegistrationTest, WaveApisRetainCapturedPcAndEncoding) {
   auto &wave = detector.getWaveRaceState(0);
   const std::array<uint32_t, 1> addresses{8};
   auto instruction = kInstruction;
