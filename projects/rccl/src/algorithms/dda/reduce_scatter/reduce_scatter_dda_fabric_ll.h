@@ -82,7 +82,7 @@ __launch_bounds__(512)
   const size_t slot = kDdaLLRsSlotStridePkts;
   const size_t chunkWords = nPk * 2; // uint32 words per shard chunk
 
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__builtin_amdgcn_global_prefetch)
   // Prefetch the send chunks into L2 before the epoch barrier, one 128B line per 16 lanes; th 1 walks page tables.
   if ((threadIdx.x & 15) == 0 && (size_t)blockIdx.x * blockDim.x + threadIdx.x < nPk) {
     const char* base = reinterpret_cast<const char*>(sendbuff) + ((size_t)blockIdx.x * blockDim.x + threadIdx.x) * 8;
@@ -175,7 +175,7 @@ __launch_bounds__(512)
         }
       }
 #endif
-      // Re-read the batch until every line is fresh; the abort flag is checked once per pass.
+      // Re-read the batch until every line is fresh; each pass is one abort spin tick.
       int spins = 0;
       while (true) {
         uint32_t stale = 0;
