@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// AllGather under forced PAT. Each call must be correct and must report
-// algo "PAT" and proto "SIMPLE" through the profiler plugin.
+// ReduceScatter and AllGather under forced PAT. Each call must be correct and
+// must report algo "PAT" and proto "SIMPLE" through the profiler plugin.
 //
 // Launch with NCCL_PAT_ENABLE=1 NCCL_ALGO=PAT NCCL_PROTO=Simple and the paths
 // that intercept PAT turned off. PAT needs one rank per node on more than two
@@ -17,6 +17,7 @@
 #include <mpi.h>
 #include <strings.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -47,6 +48,8 @@ constexpr int kMinPatNodes = 3;
 constexpr int kSentinelByte = 0x7b;   // fills the output before every call
 constexpr size_t kNumTypes = 4;       // int32, float, half, bf16
 constexpr size_t kNumPlacements = 2;  // out of place and in place
+constexpr ncclRedOp_t kPatOps[] = {ncclSum, ncclProd, ncclMax, ncclMin};
+constexpr size_t kNumPatOps = sizeof(kPatOps) / sizeof(kPatOps[0]);
 
 // Counts per rank: a single element, odd tails, and a 4 MiB block plus a tail.
 template <typename T>
@@ -68,12 +71,39 @@ bool patForcedAtLaunch() {
   return algo != nullptr && strcasecmp(algo, "PAT") == 0;
 }
 
-// Small integers keep every op exact in half and bf16 up to dozens of ranks.
-double inputValue(int rank, size_t index, ncclRedOp_t op) {
+// The owner's own value never equals the reduction, so an unwritten in-place slot fails; exact to 7 ranks.
+double inputValue(int rank, size_t j, size_t count, int nranks,
+                  ncclRedOp_t op) {
+  const int owner = static_cast<int>(j / count);
+  const int dist = (rank - owner + nranks) % nranks;
+  const int base = static_cast<int>(1 + 2 * ((j * 3) % 5));
   if (op == ncclProd) {
-    return ((rank + index) % 3 == 0) ? 2.0 : 1.0;
+    return ((rank + j) % 3 == 0) ? 4.0 : 2.0;
   }
-  return static_cast<double>((rank * 7 + index * 3) % 11) - 5.0;
+  if (op == ncclMax) {
+    return static_cast<double>(base + dist);
+  }
+  if (op == ncclMin) {
+    return static_cast<double>(base + (nranks - 1 - dist));
+  }
+  return static_cast<double>(1 + (rank * 7 + j * 3) % 11);
+}
+
+double reduceAll(int nranks, size_t j, size_t count, ncclRedOp_t op) {
+  double acc = inputValue(0, j, count, nranks, op);
+  for (int r = 1; r < nranks; ++r) {
+    const double v = inputValue(r, j, count, nranks, op);
+    if (op == ncclProd) {
+      acc *= v;
+    } else if (op == ncclMax) {
+      acc = std::max(acc, v);
+    } else if (op == ncclMin) {
+      acc = std::min(acc, v);
+    } else {
+      acc += v;
+    }
+  }
+  return op == ncclAvg ? acc / nranks : acc;
 }
 
 template <typename T>
@@ -82,6 +112,23 @@ T fromDouble(double v) {
     return static_cast<T>(v);
   } else {
     return static_cast<T>(static_cast<float>(v));
+  }
+}
+
+const char* opName(ncclRedOp_t op) {
+  switch (op) {
+    case ncclSum:
+      return "sum";
+    case ncclProd:
+      return "prod";
+    case ncclMax:
+      return "max";
+    case ncclMin:
+      return "min";
+    case ncclAvg:
+      return "avg";
+    default:
+      return "op";
   }
 }
 
@@ -263,14 +310,43 @@ class PatForcedMPITest : public MPITestBase {
   }
 
   template <typename T>
+  bool reduceScatter(size_t count, ncclRedOp_t op, bool inPlace,
+                     bool expectPat) {
+    const int nranks = MPIEnvironment::world_size;
+    const int rank = MPIEnvironment::world_rank;
+    std::ostringstream what;
+    what << "ReduceScatter " << getTypeName<T>() << " " << opName(op)
+         << " count=" << count << (inPlace ? " in-place" : " out-of-place");
+    CallBuffers bufs;
+    auto input = [&](size_t j) {
+      return fromDouble<T>(inputValue(rank, j, count, nranks, op));
+    };
+    if (!setUpBuffers<T>(what.str(), count, inPlace, /*sendIsLarge=*/true,
+                         input, &bufs)) {
+      return false;
+    }
+    auto launch = [&]() {
+      return ncclReduceScatter(bufs.send, bufs.recv, count,
+                               getNcclDataType<T>(), op, comm_, stream_);
+    };
+    auto expected = [&](size_t i) {
+      return fromDouble<T>(reduceAll(nranks, rank * count + i, count, op));
+    };
+    const double tolerance = op == ncclAvg ? 1e-4 : 0.0;
+    return runAndCheck<T>(what.str(), "ReduceScatter", expectPat, launch,
+                          bufs.recv, count, expected, tolerance);
+  }
+
+  template <typename T>
   bool allGather(size_t count, bool inPlace) {
+    const int nranks = MPIEnvironment::world_size;
     const int rank = MPIEnvironment::world_rank;
     std::ostringstream what;
     what << "AllGather " << getTypeName<T>() << " count=" << count
          << (inPlace ? " in-place" : " out-of-place");
     CallBuffers bufs;
     auto input = [&](size_t i) {
-      return fromDouble<T>(inputValue(rank, i, ncclSum));
+      return fromDouble<T>(inputValue(rank, i, count, nranks, ncclSum));
     };
     if (!setUpBuffers<T>(what.str(), count, inPlace, /*sendIsLarge=*/false,
                          input, &bufs)) {
@@ -281,11 +357,26 @@ class PatForcedMPITest : public MPITestBase {
                            comm_, stream_);
     };
     auto expected = [&](size_t j) {
-      return fromDouble<T>(inputValue(j / count, j % count, ncclSum));
+      return fromDouble<T>(
+          inputValue(j / count, j % count, count, nranks, ncclSum));
     };
     return runAndCheck<T>(what.str(), "AllGather", /*expectPat=*/true, launch,
                           bufs.recv, MPIEnvironment::world_size * count,
                           expected, 0.0);
+  }
+
+  template <typename T>
+  bool reduceScatterMatrix() {
+    for (size_t count : patCounts<T>()) {
+      for (ncclRedOp_t op : kPatOps) {
+        for (bool inPlace : {false, true}) {
+          if (!reduceScatter<T>(count, op, inPlace, /*expectPat=*/true)) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
   }
 
   template <typename T>
@@ -327,6 +418,18 @@ class PatForcedMPITest : public MPITestBase {
     }                                   \
   } while (0)
 
+// Sum, prod, max and min over every count, type and placement take PAT.
+TEST_F(PatForcedMPITest, ReduceScatterTakesPat) {
+  PAT_FORCED_REQUIRE();
+  ASSERT_NO_FATAL_FAILURE(createPatComm());
+  bool ran = reduceScatterMatrix<int32_t>() && reduceScatterMatrix<float>() &&
+             reduceScatterMatrix<__half>() &&
+             reduceScatterMatrix<hip_bfloat16>();
+  ASSERT_TRUE(ran);
+  expectNoFailuresOnAnyRank(kNumTypes * kNumCounts * kNumPatOps *
+                            kNumPlacements);
+}
+
 // Every count, type and placement takes PAT and gathers every rank's block.
 TEST_F(PatForcedMPITest, AllGatherTakesPat) {
   PAT_FORCED_REQUIRE();
@@ -335,6 +438,37 @@ TEST_F(PatForcedMPITest, AllGatherTakesPat) {
              allGatherMatrix<__half>() && allGatherMatrix<hip_bfloat16>();
   ASSERT_TRUE(ran);
   expectNoFailuresOnAnyRank(kNumTypes * kNumCounts * kNumPlacements);
+}
+
+// PAT ReduceScatter has no scaling step, so avg runs elsewhere and stays right.
+TEST_F(PatForcedMPITest, ReduceScatterAvgRunsWithoutPat) {
+  PAT_FORCED_REQUIRE();
+  ASSERT_NO_FATAL_FAILURE(createPatComm());
+  for (size_t count : patCounts<float>()) {
+    for (bool inPlace : {false, true}) {
+      ASSERT_TRUE(reduceScatter<float>(count, ncclAvg, inPlace,
+                                       /*expectPat=*/false));
+    }
+  }
+  expectNoFailuresOnAnyRank(kNumCounts * kNumPlacements);
+}
+
+// RS, AG, RS on one communicator: shared connections carry steps from one collective to the next.
+TEST_F(PatForcedMPITest, ReduceScatterAllGatherInterleaveTakesPat) {
+  PAT_FORCED_REQUIRE();
+  ASSERT_NO_FATAL_FAILURE(createPatComm());
+  constexpr size_t kCounts[] = {1023, 65537};
+  for (size_t count : kCounts) {
+    for (bool inPlace : {false, true}) {
+      ASSERT_TRUE(reduceScatter<float>(count, ncclSum, inPlace,
+                                       /*expectPat=*/true));
+      ASSERT_TRUE(allGather<float>(count, inPlace));
+      ASSERT_TRUE(reduceScatter<float>(count, ncclMax, inPlace,
+                                       /*expectPat=*/true));
+    }
+  }
+  expectNoFailuresOnAnyRank(3 * (sizeof(kCounts) / sizeof(kCounts[0])) *
+                            kNumPlacements);
 }
 
 #endif  // MPI_TESTS_ENABLED
