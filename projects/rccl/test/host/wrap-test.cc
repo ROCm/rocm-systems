@@ -6572,6 +6572,58 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_HierCeWithoutHierarchicalSubComms) {
       });
 }
 
+// RCCL skips hierarchical CE entirely while capturing (rccl_wrap.cc
+// !ceCapturing && ncclHierCeAvailable). NCCL instead keeps hier CE selected
+// and forces numCtx=1. This pins the skip so a later policy change is
+// deliberate.
+TEST(WrapMicrotestIsolated, SelectAllGather_CaptureExcludesHierarchicalCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_CaptureExcludesHierarchicalCe",
+      []() {
+        g_hierCeAvailableValue = true;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision captured{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/true,
+                                                   &captured));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, captured.algo);
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, live.algo);
+        g_hierCeAvailableValue = false;
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_CaptureExcludesHierarchicalCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_CaptureExcludesHierarchicalCe",
+      []() {
+        g_hierCeAvailableValue = true;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision captured{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/true,
+                                                  &captured));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, captured.algo);
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                  &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, live.algo);
+        g_hierCeAvailableValue = false;
+        DeleteCommWithArch(comm);
+      });
+}
+
 // Complementary proof for AllGather's own CE-registered check (a separate
 // hasSysmemSegment computation from rcclSelectAllReduce's).
 TEST(WrapMicrotestIsolated, SelectAllGather_SysmemSegmentBlocksCeRegistered) {
@@ -6825,6 +6877,39 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricAcceptsSumOrAvg) {
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
                                                         ncclAvg, /*query=*/false, &avgDecision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, avgDecision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+namespace real_arch_thresholds {
+// The real tables, namespaced so they do not collide with fakes/rccl_arch_thresholds_fakes.cc.
+#include "rccl_arch_thresholds.cc"
+}  // namespace real_arch_thresholds
+
+// gfx1250 SPX symMaxR2[ReduceScatter] is 0: at and above symMinR2 (2 MiB) symk stays withdrawn even when requested.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_Gfx1250NeverPicksSymmetric",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        comm->symmetricSupport = 1;
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        for (size_t totalBytes : {size_t{2} << 20, size_t{256} << 20}) {
+          for (ncclRedOp_t op : {ncclSum, ncclAvg}) {
+            rcclCollDecision decision{};
+            EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, totalBytes / sizeof(float),
+                                                            ncclFloat32, op, /*query=*/false, &decision));
+            EXPECT_NE((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo) << totalBytes << " op " << op;
+            EXPECT_EQ(NCCL_ALGO_RING, decision.algo) << totalBytes << " op " << op;
+          }
+        }
         DeleteCommWithArch(comm);
       });
 }
