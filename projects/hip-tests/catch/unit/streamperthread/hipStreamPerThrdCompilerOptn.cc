@@ -753,6 +753,9 @@ HIP_TEST_CASE(Unit_hipStrmPerThrdDefault) {
   SECTION("Testing_hipEventQuery()") { DefaultPT2_EvtQuery(); }
 }
 
+// hipStreamGetCaptureInfo_v3 has no NVIDIA forwarder yet, so this file - which is built for
+// both platforms - must skip the test there.
+#if HT_AMD
 /**
  * Test Description
  * ------------------------
@@ -801,3 +804,4 @@ HIP_TEST_CASE(Unit_hipStrmPerThrdGetCaptureInfo_v3) {
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipFree(A_d));
 }
+#endif  // HT_AMD
