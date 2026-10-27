@@ -32,6 +32,7 @@ configuration. Keep that header tree at a matching revision.
 | `ROCJITSU_HOST_CPU_BASELINE` | `x86-64-v3` on Linux x86-64 with GCC/Clang; `default` otherwise | Host CPU baseline: `default`, `x86-64`, `x86-64-v3`, or `x86-64-v4` |
 | `RJ_ENABLE_ASAN` | `OFF` | Enable AddressSanitizer |
 | `RJ_ENABLE_UBSAN` | `OFF` | Enable UndefinedBehaviorSanitizer |
+| `RJ_UBSAN_VPTR` | `OFF` with GCC; `ON` otherwise | Keep UBSan's dynamic-type (vptr) check when `RJ_ENABLE_UBSAN` is on |
 | `RJ_ENABLE_TSAN` | `OFF` | Enable ThreadSanitizer |
 | `RJ_ENABLE_MSAN` | `OFF` | Enable MemorySanitizer |
 | `RJ_SANITIZER_RUNTIME` | `AUTO` | Select `AUTO`, `SHARED`, or `STATIC` sanitizer runtime linkage |

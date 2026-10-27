@@ -73,6 +73,22 @@ option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(RJ_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(RJ_ENABLE_MSAN "Enable MemorySanitizer" OFF)
+# UBSan's vptr check caches verified type pairs in a small direct-mapped table
+# shared by all threads. When hot simulator types share a slot, every member
+# access repeats the full RTTI check and threads keep rewriting that slot, which
+# can slow multi-threaded emulation several-fold. GCC UBSan builds omit the
+# check by default; Clang UBSan builds keep it.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set(_rj_ubsan_vptr_default OFF)
+else()
+    set(_rj_ubsan_vptr_default ON)
+endif()
+option(
+    RJ_UBSAN_VPTR
+    "Keep UBSan's dynamic-type (vptr) check when RJ_ENABLE_UBSAN is ON"
+    ${_rj_ubsan_vptr_default}
+)
+unset(_rj_ubsan_vptr_default)
 set(RJ_SANITIZER_RUNTIME
     "AUTO"
     CACHE STRING
@@ -244,6 +260,9 @@ if(_rj_sanitizer_count GREATER 0)
             APPEND RJ_SANITIZER_COMPILE_OPTIONS
             -fsanitize=${_rj_sanitizer_arg}
         )
+        if(undefined IN_LIST _rj_sanitizer_kinds AND NOT RJ_UBSAN_VPTR)
+            list(APPEND RJ_SANITIZER_COMPILE_OPTIONS -fno-sanitize=vptr)
+        endif()
         list(APPEND RJ_SANITIZER_LINK_OPTIONS -fsanitize=${_rj_sanitizer_arg})
         if(
             address IN_LIST _rj_sanitizer_kinds

@@ -96,7 +96,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # only vptr checks disabled; the original objects retain full UBSan
         # coverage in rocjitsu_tests, which links the simulator objects.
         set(plugin_objects ${object_lib})
-        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND RJ_ENABLE_UBSAN)
+        if(
+            CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+            AND RJ_ENABLE_UBSAN
+            AND RJ_UBSAN_VPTR
+        )
             set(plugin_objects ${object_lib}_standalone)
             get_target_property(plugin_sources ${object_lib} SOURCES)
             rj_add_object_library(${plugin_objects} ${plugin_sources})
