@@ -875,6 +875,20 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     out.errors.emplace_back("code object has multiple .text sections; currently supports only one");
     return out;
   }
+  // A join keeps its fallthrough edge, but its SGPR-held resume edge to the waiting side
+  // is unknown. G_FORK also has an unknown SGPR-held target. Liveness can miss registers
+  // needed on those paths, allowing scratch allocation to clobber them.
+  for (const auto &block : blocks_) {
+    for (const Instruction &inst : block->instructions()) {
+      if (inst.flags() & BRANCH_STACK) {
+        out.errors.push_back("code object uses the conditional branch stack (" +
+                             std::string(inst.mnemonic()) + " at .text offset " +
+                             std::to_string(inst.src_loc()) +
+                             "); liveness across fork/join is not modelled");
+        return out;
+      }
+    }
+  }
   const Section *text = obj_.text_sections().front();
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                             text->size());
@@ -1051,32 +1065,6 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
 }
 
 InstrumentedCodeObject Instrumentor::patch() {
-  // The entry prologue loads through a kernarg wrapper that only a dispatch-time
-  // runtime can build, and no runtime builds one for DBI. Without it both loads
-  // read past the kernarg allocation and the guest's kernarg pointer is
-  // overwritten, so patch() refuses any point that would need the prologue.
-  // patch_with_debug_summaries() still plans it, for callers that supply the
-  // wrapper themselves.
-  std::string readers;
-  for (const InstrumentationPoint &pt : points_) {
-    if (std::none_of(pt.probe_args.begin(), pt.probe_args.end(),
-                     [](const ProbeArgValue &arg) { return reads_entry_storage(arg.source); }))
-      continue;
-    if (readers.find("'" + pt.probe_symbol + "'") != std::string::npos)
-      continue;
-    if (!readers.empty())
-      readers += ", ";
-    readers += "'" + pt.probe_symbol + "'";
-  }
-  if (!patched_ && !readers.empty()) {
-    patched_ = true;
-    InstrumentedCodeObject result;
-    result.errors.emplace_back("a probe reads the framework's entry storage, which needs a kernarg "
-                               "wrapper that no runtime builds yet; requested by " +
-                               readers);
-    return result;
-  }
-
   // Slice off the debug summaries; move the base subobject into the return.
   auto debug = patch_with_debug_summaries();
   return std::move(static_cast<InstrumentedCodeObject &>(debug));
@@ -1095,6 +1083,32 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   if (points_.empty()) {
     result.errors.emplace_back("Instrumentor::patch requires at least one queued point; got zero");
     return result;
+  }
+
+  // The entry prologue loads through a kernarg wrapper that only a dispatch-time
+  // runtime can build, and no runtime builds one for DBI. Without it both loads
+  // read past the kernarg allocation and the guest's kernarg pointer is
+  // overwritten, so any point that would need the prologue is refused. This is a
+  // runtime-support gate: a test may skip it to exercise the prologue path, and
+  // plan_entry_prologue()'s checks below still run.
+  if (!skip_patch_gates_) {
+    std::string readers;
+    for (const InstrumentationPoint &pt : points_) {
+      if (std::none_of(pt.probe_args.begin(), pt.probe_args.end(),
+                       [](const ProbeArgValue &arg) { return reads_entry_storage(arg.source); }))
+        continue;
+      if (readers.find("'" + pt.probe_symbol + "'") != std::string::npos)
+        continue;
+      if (!readers.empty())
+        readers += ", ";
+      readers += "'" + pt.probe_symbol + "'";
+    }
+    if (!readers.empty()) {
+      result.errors.emplace_back("a probe reads the framework's entry storage, which needs a "
+                                 "kernarg wrapper that no runtime builds yet; requested by " +
+                                 readers);
+      return result;
+    }
   }
 
   ResolvedPoints resolved = resolve_points();
@@ -1180,7 +1194,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // The kernel-entry prologue, planned only for kernels whose probes ask for the
   // framework's entry storage. It runs before every site because dispatch
   // enters at it. The prologue needs a kernarg wrapper that no runtime
-  // builds yet, which patch() enforces by refusing these probes.
+  // builds yet, which the patch gate above enforces by refusing these probes.
   std::optional<EntryProloguePatch> entry_patch;
   std::optional<uint16_t> entry_storage_base;
   if (probes_read_entry_storage(resolved.probes)) {
@@ -1305,7 +1319,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.errors.emplace_back("internal: anchor instruction vanished after validation");
         continue;
       }
-      const RegisterSet &live = liveness.live_before(*anchor);
+      auto maybe_live = liveness.live_before(*anchor);
+      if (maybe_live.failed()) {
+        result.errors.emplace_back("internal: anchor liveness is unavailable");
+        continue;
+      }
+      const RegisterSet &live = *maybe_live.value();
 
       // Set the probe's offset
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);

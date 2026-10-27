@@ -59,6 +59,9 @@ def test_supported_families_have_explicit_coverage(name, encoding):
     'name,encoding',
     [
         ('S_RFE_B64', 'ENC_SOP1'),
+        ('S_CBRANCH_G_FORK', 'ENC_SOP2'),
+        ('S_CBRANCH_I_FORK', 'ENC_SOPK'),
+        ('S_CBRANCH_JOIN', 'ENC_SOP1'),
         ('S_SETPRIO', 'ENC_SOPP'),
         ('S_SENDMSG', 'ENC_SOPP'),
         ('S_TRAP', 'ENC_SOPP'),

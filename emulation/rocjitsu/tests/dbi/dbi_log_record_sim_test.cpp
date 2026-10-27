@@ -22,6 +22,7 @@
 /// DbiSim verifies actual Wave32 execution on RDNA4 from the halt snapshot.
 
 #include "../dbi_test_util.h"
+#include "../instrumentor_test_access.h"
 #include "../log_buffer_test_access.h"
 #include "dbi_sim.h"
 #include "log_record_probe.h"
@@ -145,9 +146,10 @@ protected:
         /*granulated_sgpr_count=*/kKernelSgprs / 8 - 1, /*entry_text_offset=*/0,
         /*granulated_vgpr_count=*/kKernelVgprs / 8 - 1,
         /*accum_offset=*/t_.wave32 ? 0 : kKernelVgprs / 4 - 1);
-    const auto probe = test::make_amdgpu_probe_elf(
-        kProbeSymbol, test::build_log_record_probe_body(t_.arch, kRecordType, kSlotCount),
-        t_.e_flags);
+    std::vector<uint32_t> probe_body;
+    ASSERT_NO_FATAL_FAILURE(
+        test::build_log_record_probe_body(t_.arch, kRecordType, kSlotCount, probe_body));
+    const auto probe = test::make_amdgpu_probe_elf(kProbeSymbol, probe_body, t_.e_flags);
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
     ASSERT_TRUE(obj.is_valid());
@@ -163,6 +165,8 @@ protected:
       pt.force_full_exec = force_full_exec;
       instr.add_point(pt);
     }
+    // The harness hands the CP the kernarg wrapper itself.
+    InstrumentorTestAccess::skip_patch_gates(instr);
 
     const auto result = instr.patch_with_debug_summaries();
     ASSERT_TRUE(result.errors.empty()) << result.errors.front();

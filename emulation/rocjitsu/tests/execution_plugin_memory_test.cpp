@@ -859,7 +859,12 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   state->per_lane_addr[2] = 0x2000;
   auto load = prepare_flat_load_for_routing(*cu, *wave, std::move(state));
   ASSERT_NE(load, nullptr);
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave);
+  auto *scoreboard = wave->memory_wait_scoreboard();
+  ASSERT_NE(scoreboard, nullptr);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
+  EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave),
+            VmAccessOutcome::Faulted);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -878,16 +883,19 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   EXPECT_EQ(access.addresses[1], 0x420u);
   EXPECT_EQ(access.addresses[2], 0x2000u);
   EXPECT_EQ(access.execution_addresses, access.addresses);
-  auto *scoreboard = wave->memory_wait_scoreboard();
-  ASSERT_NE(scoreboard, nullptr);
-  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
-  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
-  scoreboard->wait(WaitCounterKind::Load, 0);
+  EXPECT_EQ(access.issued_counters,
+            (std::vector{WaitCounterType::LOADCNT, WaitCounterType::DSCNT}));
+  // DDS has no backing on this target. The fault discarded the instruction;
+  // neither domain may leave a producer that diagnoses a nonexistent result.
+  EXPECT_TRUE(wave->wait_counters().empty());
+  EXPECT_TRUE(scoreboard->empty());
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 0u);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 0u);
   const auto shared = access.flat_local_lane_mask | access.flat_dds_lane_mask;
   scoreboard->access({RegClass::VGPR, 2, 1}, access.active_lane_mask & ~shared, 0xf, false);
   EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
   scoreboard->access({RegClass::VGPR, 2, 1}, shared, 0xf, false);
-  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
 }
 
 TEST(RoutedMemoryObservationTest, MixedFlatReportsEffectiveAddressesWithoutChangingExecution) {

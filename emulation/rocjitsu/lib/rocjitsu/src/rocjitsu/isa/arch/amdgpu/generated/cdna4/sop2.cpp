@@ -1507,6 +1507,11 @@ SCbranchGForkSop2::SCbranchGForkSop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
+  flags_ |= INDIRECT_BRANCH;
+  flags_ |= BRANCH_STACK;
+  flags_ |= PREDICATED_DEF;
+  flags_ |= IGNORES_EXEC;
+  flags_ |= WRITES_EXEC;
 }
 
 namespace detail {
@@ -1519,6 +1524,11 @@ DecodeResult decodeSCbranchGForkSop2(const MachineInst *opcode,
   return std::make_unique<SCbranchGForkSop2>(opcode);
 }
 } // namespace detail
+
+void SCbranchGForkSop2::implicit_defs(RegisterSet &defs) const {
+  Sop2::implicit_defs(defs);
+  defs.expand(RegisterRef{RegClass::SGPR, 0, 32});
+}
 
 SAbsdiffI32Sop2::SAbsdiffI32Sop2(const MachineInst *inst)
     : Sop2("s_absdiff_i32", reinterpret_cast<const OpEncoding *>(inst),

@@ -330,6 +330,27 @@ TEST(ProbeClobber, WaveDependentTtmpExtentNeedsWaveContext) {
   }
 }
 
+TEST(ProbeClobber, BranchStackTransfersCannotProveNoMaskWrites) {
+  for (const auto &[arch, target] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_TARGET_GFX90A},
+        std::pair{ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_TARGET_GFX942},
+        std::pair{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950}}) {
+    SCOPED_TRACE(target);
+    for (uint32_t instruction : {0xb86a0002u, 0x9480246au, 0xbe802e22u}) {
+      SCOPED_TRACE(instruction);
+      // Upstream fork/join semantics may update EXEC even without an explicit
+      // EXEC destination. Their dynamic branch-stack effects lack coverage.
+      ProbeCallable probe = make_callable({instruction, kSSetpcS30S31});
+      probe.arch = arch;
+      probe.target = target;
+      const auto summary = build_probe_clobber_summary(probe);
+      ASSERT_TRUE(summary);
+      EXPECT_EQ(summary->exec_write, ProbeWriteProof::MayWrite);
+      EXPECT_EQ(summary->vcc_write, ProbeWriteProof::Unknown);
+    }
+  }
+}
+
 struct ProofTarget {
   rj_code_arch_t arch;
   rj_code_target_id_t target;

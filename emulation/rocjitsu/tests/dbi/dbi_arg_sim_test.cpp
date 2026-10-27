@@ -155,7 +155,9 @@ protected:
   // whatever the guest happened to leave in v0. Nop the two v_mov_b32 v0, literal
   // words and the probe should read the guest's value instead.
   void expect_without_the_argument_write_probe_reads_the_guest_value() {
-    const auto arg_write = build_v_mov_b32_imm(0, kArgSentinel, a_.arch);
+    const auto maybe_arg_write = build_v_mov_b32_imm(0, kArgSentinel, a_.arch);
+    ASSERT_TRUE(maybe_arg_write.succeeded());
+    const auto arg_write = maybe_arg_write.value();
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
