@@ -245,6 +245,9 @@ static bool resolve_archive_path(const std::string& input, std::string& resolved
 // hash and the bucket slot, rounded up.
 constexpr uint64_t kMapNodeOverhead = 32;
 
+// The least a malloc takes: glibc's smallest chunk is 32 bytes on a 64-bit target.
+constexpr uint64_t kMinAllocation = 32;
+
 // Charges what a parse keeps against the load budget before it allocates it.
 // A record's bytes expand when parsed (a 3-byte argument header becomes a
 // KernelArg, a 41-byte snapshot a BufferSnapshot), so the raw-record charge
@@ -258,6 +261,12 @@ struct ParseCharge {
     if (!budget.try_charge(n)) { refused = true; return false; }
     total += n;
     return true;
+  }
+  // A non-empty vector's buffer is its own malloc, which takes at least
+  // kMinAllocation whatever it holds, so a record full of one-byte arguments
+  // is not charged its byte count alone.
+  bool charge_buffer(uint64_t n) {
+    return charge(n ? std::max<uint64_t>(n, kMinAllocation) : 0);
   }
 };
 
@@ -306,13 +315,13 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
     arg.value_kind = *p++;
     memcpy(&arg.size, p, 2); p += 2;
     if (p + arg.size > end) return false;
-    if (!pc.charge(arg.size)) return false;
+    if (!pc.charge_buffer(arg.size)) return false;
     arg.data.assign(p, p + arg.size);
     p += arg.size;
     if (arg.value_kind == 3) {  // trailing embedded-pointer offset list
       if (p + 2 > end) return false;
       uint16_t n_ptrs; memcpy(&n_ptrs, p, 2); p += 2;
-      if (!pc.charge(uint64_t(n_ptrs) * sizeof(uint16_t))) return false;
+      if (!pc.charge_buffer(uint64_t(n_ptrs) * sizeof(uint16_t))) return false;
       arg.ptr_offsets.reserve(n_ptrs);
       for (uint16_t k = 0; k < n_ptrs; k++) {
         if (p + 2 > end) return false;
@@ -346,7 +355,7 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
 // ---------------------------------------------------------------------------
 
 bool load_archive(const std::string& path, Archive& archive,
-                  const LoadLimits& limits) {
+                  ByteBudget* bytes) {
   std::string archive_dir;
   if (!resolve_archive_path(path, archive_dir))
     return false;
@@ -364,7 +373,7 @@ bool load_archive(const std::string& path, Archive& archive,
   // on success, and a failed load gives back what it charged since `start`
   // (the load is single-threaded and nothing else charges the budget meanwhile).
   ByteBudget own_budget;
-  ByteBudget& budget = limits.bytes ? *limits.bytes : own_budget;
+  ByteBudget& budget = bytes ? *bytes : own_budget;
   const uint64_t start = budget.used();
   auto fail = [&](const char* what) {
     fprintf(stderr,

@@ -204,24 +204,20 @@ struct Archive {
 // API
 // ---------------------------------------------------------------------------
 
-// What loading may spend. The archive chooses how many records it holds and how
-// big each is (up to kMaxRecordBytes), so the loader charges what it retains
-// against one byte budget instead of trusting the archive to fit. Time is not
-// limited here: the caller's wall-clock watchdog ends the process.
-struct LoadLimits {
-  // Charged for each record's raw bytes, for what is parsed out of a kernel
-  // launch (name, arguments, snapshots), for the event vector's capacity, the
-  // sort's scratch buffer and the blob and code-object maps. Null: a private
-  // budget of kDefaultMaxHostBytes. A budget the caller passes keeps the bytes
-  // of a successful load charged, since the archive still holds them; a failed
-  // load gives back what it charged.
-  ByteBudget* bytes = nullptr;
-};
-
 // Load an archive from disk. Returns false on error, including a load that
-// would take limits.bytes past its cap; the diagnostic names the option.
+// would take `bytes` past its cap; the diagnostic names --max-host-bytes.
+//
+// The archive chooses how many records it holds and how big each is (up to
+// kMaxRecordBytes), so the loader charges what it retains against a byte budget
+// instead of trusting the archive to fit: each record's raw bytes, what is
+// parsed out of a kernel launch (name, arguments, snapshots), the event
+// vector's capacity, the sort's scratch buffer and the blob and code-object
+// maps. Null: a private budget of kDefaultMaxHostBytes. A budget the caller
+// passes keeps the bytes of a successful load charged, since the archive still
+// holds them; a failed load gives back what it charged. Time is not limited
+// here: the caller's wall-clock watchdog ends the process.
 bool load_archive(const std::string& path, Archive& archive,
-                  const LoadLimits& limits = LoadLimits{});
+                  ByteBudget* bytes = nullptr);
 
 // The pid in the name of a per-process archive directory, "pid-<decimal pid>",
 // or 0 for any other name. An archive moved aside to pid-<pid>.prev-<n>, when a

@@ -646,18 +646,14 @@ HRR_TEST_CASE(Unit_HRR_Limits_LoadByteBudget) {
   arc.write_events(padded_records(kRecords, kLen));
 
   hrr::ByteBudget small(1u << 20);  // 1 MiB
-  hrr::LoadLimits tight;
-  tight.bytes = &small;
   hrr::Archive refused;
-  CHECK_FALSE(hrr::load_archive(arc.path(), refused, tight));
+  CHECK_FALSE(hrr::load_archive(arc.path(), refused, &small));
   CHECK(refused.events.size() < 11);  // 1 MiB holds ten such records
   CHECK(small.used() == 0);
 
   hrr::ByteBudget large(64u << 20);
-  hrr::LoadLimits roomy;
-  roomy.bytes = &large;
   hrr::Archive loaded;
-  CHECK(hrr::load_archive(arc.path(), loaded, roomy));
+  CHECK(hrr::load_archive(arc.path(), loaded, &large));
   CHECK(loaded.events.size() == kRecords);
   CHECK(large.used() >= uint64_t(kRecords) * kLen);
 }
@@ -709,21 +705,48 @@ HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesParsedKernelExpansion) {
   REQUIRE(expanded > 4 * raw);  // otherwise the raw-bytes cap below proves nothing
 
   hrr::ByteBudget raw_only(raw + 64 * sizeof(hrr::Event) + 4096);
-  hrr::LoadLimits tight;
-  tight.bytes = &raw_only;
   hrr::Archive refused;
-  CHECK_FALSE(hrr::load_archive(root.string(), refused, tight));
+  CHECK_FALSE(hrr::load_archive(root.string(), refused, &raw_only));
   CHECK(raw_only.used() == 0);
 
   hrr::ByteBudget roomy_budget(raw + expanded + (1u << 20));
-  hrr::LoadLimits roomy;
-  roomy.bytes = &roomy_budget;
   hrr::Archive loaded;
-  CHECK(hrr::load_archive(root.string(), loaded, roomy));
+  CHECK(hrr::load_archive(root.string(), loaded, &roomy_budget));
   REQUIRE(loaded.events.size() == 1);
   REQUIRE(loaded.events[0].kernel_launch != nullptr);
   CHECK(loaded.events[0].kernel_launch->args.size() == kArgs);
   CHECK(roomy_budget.used() >= raw + expanded);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Each non-empty argument buffer is its own allocation of at least 32 bytes,
+ *     so an argument of one byte with one pointer offset is charged for the two
+ *     allocations, not for its 3 bytes: 20000 of them hold 128 bytes each, not
+ *     the 67 their byte counts add up to. A budget that fits the byte counts
+ *     and not the allocations refuses the record.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesPerAllocationOverhead) {
+  constexpr uint16_t kArgs = 20000;
+  const auto body = make_launch_with_snapshot(0, {}, 0, kArgs, /*pointer_args=*/true);
+  TmpArchive arc("argalloc");
+  arc.write_events(body);
+  const uint64_t base = body.size() + 64 * sizeof(hrr::Event) + 4096;
+  const uint64_t by_bytes = uint64_t(kArgs) * (sizeof(hrr::KernelArg) + 1 + 2);
+  const uint64_t by_allocations = uint64_t(kArgs) * (sizeof(hrr::KernelArg) + 32 + 32);
+
+  hrr::ByteBudget bytes_only(base + by_bytes + kArgs * 16);
+  hrr::Archive refused;
+  CHECK_FALSE(hrr::load_archive(arc.path(), refused, &bytes_only));
+  CHECK(bytes_only.used() == 0);
+
+  hrr::ByteBudget roomy(base + by_allocations + (1u << 20));
+  hrr::Archive loaded;
+  REQUIRE(hrr::load_archive(arc.path(), loaded, &roomy));
+  REQUIRE(loaded.events.size() == 1);
+  CHECK(loaded.events[0].kernel_launch->args.size() == kArgs);
+  CHECK(roomy.used() >= body.size() + by_allocations);
 }
 
 /**
@@ -750,9 +773,14 @@ HRR_TEST_CASE(Unit_HRR_Limits_PlaybackInfoRefusesOverByteBudget) {
  *   - The event vector is charged at its capacity, and a growth holds the old
  *     and the new buffer at once: 5000 header-only records cost far more than
  *     5000 slots, so a budget sized for 5000 events refuses them.
+ *   - A growth takes the new buffer before it gives the old one back: 4097
+ *     events grow the vector from 4096 to 8192 slots, a peak of 12288, and a
+ *     budget of 11000 slots, which holds either buffer and the sort's scratch
+ *     but not both buffers, refuses them. A load that fits keeps the capacity
+ *     charged.
  *   - The sort's scratch buffer is charged too: 8192 events fill a vector that
  *     has just grown, and a budget that holds the growth but not the sort's
- *     N/2 scratch refuses them. A load that fits keeps the capacity charged.
+ *     N/2 scratch refuses them.
  */
 HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesEventVectorAndSort) {
   constexpr uint64_t kSlot = sizeof(hrr::Event);
@@ -763,18 +791,31 @@ HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesEventVectorAndSort) {
     TmpArchive arc("vecgrow", seqs);
     hrr::ByteBudget one_slot_each(uint64_t(kN) * (sizeof(hrr_event_header) + kSlot) +
                                   256 * kSlot);
-    hrr::LoadLimits lim;
-    lim.bytes = &one_slot_each;
     hrr::Archive refused;
-    CHECK_FALSE(hrr::load_archive(arc.path(), refused, lim));
+    CHECK_FALSE(hrr::load_archive(arc.path(), refused, &one_slot_each));
     CHECK(one_slot_each.used() == 0);
 
     hrr::ByteBudget roomy(uint64_t(kN) * sizeof(hrr_event_header) + 3 * 8192 * kSlot);
-    lim.bytes = &roomy;
     hrr::Archive loaded;
-    REQUIRE(hrr::load_archive(arc.path(), loaded, lim));
+    REQUIRE(hrr::load_archive(arc.path(), loaded, &roomy));
     CHECK(loaded.events.size() == kN);
     CHECK(roomy.used() >= uint64_t(loaded.events.capacity()) * kSlot);
+  }
+  {
+    constexpr int kN = 4097;
+    std::vector<uint64_t> seqs(kN);
+    for (int i = 0; i < kN; ++i) seqs[i] = static_cast<uint64_t>(i);
+    TmpArchive arc("vecpeak", seqs);
+    hrr::ByteBudget one_buffer(uint64_t(kN) * sizeof(hrr_event_header) + 11000 * kSlot);
+    hrr::Archive refused;
+    CHECK_FALSE(hrr::load_archive(arc.path(), refused, &one_buffer));
+    CHECK(one_buffer.used() == 0);
+
+    hrr::ByteBudget both(uint64_t(kN) * sizeof(hrr_event_header) + 13000 * kSlot);
+    hrr::Archive loaded;
+    REQUIRE(hrr::load_archive(arc.path(), loaded, &both));
+    CHECK(loaded.events.size() == kN);
+    CHECK(both.used() >= uint64_t(loaded.events.capacity()) * kSlot);
   }
   {
     constexpr int kN = 8192;
@@ -784,16 +825,13 @@ HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesEventVectorAndSort) {
     // Holds the growth to 8192 slots (4096 old + 8192 new) and the records, not
     // the sort scratch of 4097 slots on top of 8192.
     hrr::ByteBudget no_scratch(uint64_t(kN) * sizeof(hrr_event_header) + 12288 * kSlot);
-    hrr::LoadLimits lim;
-    lim.bytes = &no_scratch;
     hrr::Archive refused;
-    CHECK_FALSE(hrr::load_archive(arc.path(), refused, lim));
+    CHECK_FALSE(hrr::load_archive(arc.path(), refused, &no_scratch));
     CHECK(no_scratch.used() == 0);
 
     hrr::ByteBudget with_scratch(uint64_t(kN) * sizeof(hrr_event_header) + 13000 * kSlot);
-    lim.bytes = &with_scratch;
     hrr::Archive loaded;
-    CHECK(hrr::load_archive(arc.path(), loaded, lim));
+    CHECK(hrr::load_archive(arc.path(), loaded, &with_scratch));
   }
 }
 
@@ -813,17 +851,14 @@ HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesBlobAndCodeObjectMaps) {
       std::ofstream(arc.root / kind / (std::string("f") + std::to_string(i) + ext)).put(0);
 
     hrr::ByteBudget tight(128 * 1024);
-    hrr::LoadLimits lim;
-    lim.bytes = &tight;
     hrr::Archive refused;
     INFO(kind);
-    CHECK_FALSE(hrr::load_archive(arc.path(), refused, lim));
+    CHECK_FALSE(hrr::load_archive(arc.path(), refused, &tight));
     CHECK(tight.used() == 0);
 
     hrr::ByteBudget roomy(64u << 20);
-    lim.bytes = &roomy;
     hrr::Archive loaded;
-    REQUIRE(hrr::load_archive(arc.path(), loaded, lim));
+    REQUIRE(hrr::load_archive(arc.path(), loaded, &roomy));
     CHECK(loaded.blob_count + loaded.code_object_count == 2000);
   }
 }

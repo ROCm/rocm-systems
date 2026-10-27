@@ -503,6 +503,9 @@ HRR_TEST_CASE(Unit_HRR_Recovery_RepairRootRewritesMiscountedTrailer) {
  *     sub-archives without trailers, under a cap too small to hold either, are
  *     both refused naming the option and neither is repaired. Without the cap
  *     each pid would load under its own 16 GiB default.
+ *   - Each pid has its own budget: under a cap that fits one pid's load but not
+ *     two, both are repaired. One budget shared by the pids would keep the first
+ *     archive charged while the second loads, and refuse it.
  */
 HRR_TEST_CASE(Unit_HRR_Recovery_RepairRootHonoursMaxHostBytes) {
   TmpRootArchive root("repair_root_cap");
@@ -514,6 +517,14 @@ HRR_TEST_CASE(Unit_HRR_Recovery_RepairRootHonoursMaxHostBytes) {
   CHECK(ret != 0);
   CHECK(out.find("--max-host-bytes") != std::string::npos);
   CHECK(out.find("0 repaired, 0 already complete, 2 failed") != std::string::npos);
+
+  // One load: 5 records, 64 event slots, and the sort's scratch of 3 slots.
+  const uint64_t one_pid = 5 * sizeof(hrr_event_header) + 67 * sizeof(hrr::Event);
+  auto [fit_ret, fit_out] = hrr_playback_merged(
+      root.root, "--repair --max-host-bytes " + std::to_string(one_pid));
+  INFO("hrr-playback --repair output:\n" << fit_out);
+  CHECK(fit_ret == 0);
+  CHECK(fit_out.find("2 repaired, 0 already complete, 0 failed") != std::string::npos);
 }
 
 /**

@@ -1388,14 +1388,11 @@ static bool repair_root(const std::string& archive_path, uint64_t host_cap,
     }
 
     // Scoped per iteration so each archive's events are released before the
-    // next is read — these run to gigabytes apiece.
-    // Each pid gets the whole --max-host-bytes: its archive is released before
-    // the next is read, so sharing ctx.host_budget would keep the last one charged.
+    // next is read — these run to gigabytes apiece. Each pid gets its own
+    // --max-host-bytes budget, released with its archive.
     hrr::ByteBudget budget(host_cap);
-    hrr::LoadLimits limits;
-    limits.bytes = &budget;
     hrr::Archive archive;
-    if (!hrr::load_archive(dir.string(), archive, limits)) {
+    if (!hrr::load_archive(dir.string(), archive, &budget)) {
       fprintf(stderr, "[HRR] repair: cannot load %s; skipping\n", dir.string().c_str());
       failed++;
       continue;
@@ -1759,8 +1756,6 @@ int main(int argc, char** argv) {
         fflush(stderr);
         std::_Exit(124);
       });
-  hrr::LoadLimits load_limits;
-  load_limits.bytes = &ctx.host_budget;
 
   // --info on an archive root prints the common process summary. Direct
   // pid-<pid> paths continue through load_archive for detailed event info.
@@ -1775,7 +1770,7 @@ int main(int argc, char** argv) {
   }
 
   hrr::Archive archive;
-  if (!hrr::load_archive(archive_path, archive, load_limits)) return 1;
+  if (!hrr::load_archive(archive_path, archive, &ctx.host_budget)) return 1;
 
   // --info: print summary and exit without touching the GPU
   if (show_info) {
