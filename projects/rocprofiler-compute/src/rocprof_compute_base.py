@@ -252,9 +252,10 @@ class RocProfCompute:
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
 
     def parse_args(self) -> None:
-        # Detect if --experimental flag is present (for help text control)
-        prelim_parser = argparse.ArgumentParser(add_help=False)
+        # Detect feature gates for help text control.
+        prelim_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
         prelim_parser.add_argument("--experimental", action="store_true", default=False)
+        prelim_parser.add_argument("--debug", action="store_true", default=False)
 
         # Parse only known args (respects -- separator)
         prelim_args, _ = prelim_parser.parse_known_args()
@@ -277,6 +278,7 @@ class RocProfCompute:
             self.__supported_archs,
             self.__version,
             experimental_requested,
+            debug_enabled=prelim_args.debug,
         )
         self.__args = self.__parser.parse_args()
 
@@ -295,11 +297,6 @@ class RocProfCompute:
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
-        args.debug = "single-metric" in args.debug_options
-        args.verify_deps = args.verify_deps or "verify-deps" in args.debug_options
-        args.ignore_amd_smi = "ignore-amd-smi" in args.debug_options
-        if "table-view" in args.debug_options:
-            args.view = "table"
         if args.list_stats and args.output_format in ("csv", "db"):
             console_error(
                 "--list-stats cannot be used with --output-format "

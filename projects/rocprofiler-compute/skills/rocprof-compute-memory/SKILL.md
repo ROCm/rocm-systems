@@ -23,8 +23,8 @@ cache level, because it tells you which level to open.
 
 Always analyze one kernel at a time with `-k`.
 
-For diagnostic output, `--debug table-view` forces plain tables, and
-`--debug single-metric` enables metric evaluation and memory chart diagnostics.
+For diagnostic output, `--debug --debug-table-view` forces plain tables, and
+`--debug --debug-single-metric` enables metric evaluation and memory chart diagnostics.
 Use these only when troubleshooting; normal memory analysis needs neither.
 See [Debug options](../../docs/how-to/analyze/cli.rst#debug-options).
 

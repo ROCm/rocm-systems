@@ -745,7 +745,7 @@ def test_debug_single_metric(binary_handler_analyze_rocprof_compute):
             "--path",
             workload_dir,
             "--debug",
-            "single-metric",
+            "--debug-single-metric",
         ])
         assert code == 0
 

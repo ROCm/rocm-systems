@@ -25,20 +25,24 @@ Run ``rocprof-compute analyze -h`` for more details.
 Debug options
 =============
 
-Use ``--debug`` for diagnostic behavior rather than regular analysis settings.
-Multiple selectors can be combined:
+Use ``--debug`` to enable diagnostic options rather than regular analysis settings.
+Run ``rocprof-compute analyze --debug --help`` to show these options.
+Multiple debug flags can be combined:
 
 .. code-block:: shell
 
-    rocprof-compute analyze -p workloads/vcopy/MI200/ --debug table-view ignore-amd-smi
+   rocprof-compute analyze -p workloads/vcopy/MI200/ --debug --debug-table-view --debug-ignore-amd-smi
 
-* ``table-view``: Print plain tables instead of the views specified by ``cli_style``.
-* ``ignore-amd-smi``: Skip AMD-SMI queries when probing local hardware.
-* ``single-metric``: Show metric evaluation and memory chart diagnostics.
+* ``--debug-table-view``: Print plain tables instead of the views specified by ``cli_style``.
+* ``--debug-ignore-amd-smi``: Skip AMD-SMI queries when probing local hardware.
+* ``--debug-single-metric``: Show metric evaluation and memory chart diagnostics.
    This replaces the removed ``-g`` flag. Combine it with ``--block`` to
-   isolate a metric, for example ``--block 2.1.0 --debug single-metric``.
-* ``verify-deps``: Check analyze-mode Python dependencies, then exit without
+   isolate a metric, for example ``--block 2.1.0 --debug --debug-single-metric``.
+* ``--debug-verify-deps``: Check analyze-mode Python dependencies, then exit without
    analyzing a workload. The standalone ``--verify-deps`` spelling also works.
+
+The ``--debug-*`` flags require ``--debug``; their order does not matter.
+The enabling flag alone does not turn on metric diagnostics.
 
 The ``Debug Options`` help group also includes ``--specs-correction`` for
 overriding captured system specifications and ``--report-diff <percent>`` for

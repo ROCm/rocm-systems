@@ -23,7 +23,9 @@ def build_args(argv, experimental=False):
     parser = argparse.ArgumentParser(
         prog="tool", usage="rocprof-compute [mode] [options]"
     )
-    omniarg_parser(parser, HOME, SUPPORTED_ARCHS, VERSION, experimental)
+    omniarg_parser(
+        parser, HOME, SUPPORTED_ARCHS, VERSION, experimental, "--debug" in argv
+    )
     return parser.parse_args(argv)
 
 
@@ -34,7 +36,9 @@ def help_text(home, argv, capsys):
         description="CLI",
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    omniarg_parser(parser, home, SUPPORTED_ARCHS, VERSION)
+    omniarg_parser(
+        parser, home, SUPPORTED_ARCHS, VERSION, debug_enabled="--debug" in argv
+    )
     with pytest.raises(SystemExit):
         parser.parse_args([*argv, "--help"])
     return capsys.readouterr().out
@@ -175,37 +179,69 @@ def test_profile_kernel_iteration_range():
     ],
 )
 def test_analyze_debug_options(selectors):
-    argv = ["analyze", "--debug", *selectors] if selectors else ["analyze"]
-    assert build_args(argv).debug_options == selectors
+    flags = [f"--debug-{selector}" for selector in selectors]
+    argv = ["analyze", "--debug", *flags] if selectors else ["analyze"]
+    args = build_args(argv)
+    assert args.debug == ("single-metric" in selectors)
+    assert args.verify_deps == ("verify-deps" in selectors)
+    assert args.ignore_amd_smi == ("ignore-amd-smi" in selectors)
+    assert args.view == ("table" if "table-view" in selectors else None)
 
 
-@pytest.mark.parametrize("selector", ["unknown", "normal-unit", "output-format"])
-def test_analyze_debug_options_reject_invalid_selector(selector, capsys):
+@pytest.mark.parametrize(
+    "option", ["table-view", "ignore-amd-smi", "single-metric", "verify-deps"]
+)
+def test_analyze_debug_options_require_gate(option, capsys):
     with pytest.raises(SystemExit) as exc:
-        build_args(["analyze", "--debug", selector])
+        build_args(["analyze", f"--debug-{option}"])
     assert exc.value.code == 2
-    assert "invalid choice" in capsys.readouterr().err
+    assert f"--debug-{option} requires --debug" in capsys.readouterr().err
 
 
-def test_analyze_debug_requires_selector(capsys):
-    with pytest.raises(SystemExit) as exc:
-        build_args(["analyze", "--debug"])
-    assert exc.value.code == 2
-    assert "expected at least one argument" in capsys.readouterr().err
+def test_analyze_debug_gate_alone():
+    args = build_args(["analyze", "--debug"])
+    assert args.debug_enabled is True
+    assert args.debug is False
+    assert args.ignore_amd_smi is False
+    assert args.verify_deps is False
+    assert args.view is None
 
 
 def test_analyze_debug_help(capsys):
     output = help_text(HOME, ["analyze"], capsys)
+    assert "--debug-single-metric" not in output
+    output = help_text(HOME, ["analyze", "--debug"], capsys)
     debug_help = output.split("Debug Options:", 1)[1].split("Roofline Options:", 1)[0]
     for option in [
         "--debug",
-        "single-metric",
-        "verify-deps",
+        "--debug-table-view",
+        "--debug-ignore-amd-smi",
+        "--debug-single-metric",
+        "--debug-verify-deps",
         "--specs-correction",
     ]:
         assert option in debug_help
     assert "--normal-unit" not in debug_help
     assert "--output-format" not in debug_help
+
+
+@pytest.mark.parametrize("gate_first", [False, True])
+def test_analyze_debug_option_order_and_repetition(gate_first):
+    flags = ["--debug-single-metric", "--debug-single-metric", "--debug-verify-deps"]
+    argv = ["--debug", *flags] if gate_first else [*flags, "--debug"]
+    args = build_args(["analyze", *argv])
+    assert args.debug is True
+    assert args.verify_deps is True
+
+
+@pytest.mark.parametrize("alias_first", [False, True])
+def test_analyze_debug_compatibility_aliases(alias_first):
+    aliases = ["--view", "table", "--verify-deps"]
+    flags = ["--debug", "--debug-table-view", "--debug-verify-deps"]
+    argv = [*aliases, *flags] if alias_first else [*flags, *aliases]
+    args = build_args(["analyze", *argv])
+    assert args.view == "table"
+    assert args.verify_deps is True
 
 
 def test_analyze_view_is_hidden_compatibility_option(capsys):

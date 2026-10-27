@@ -605,6 +605,11 @@ def _make_rpc_args(
         remaining=["--", "./myapp"],
         list_stats=list_stats,
         output_format=output_format,
+        debug_enabled=False,
+        debug=False,
+        ignore_amd_smi=False,
+        verify_deps=False,
+        view=None,
         torch_operator=None,
         triton_operator=None,
         list_torch_operators=False,
@@ -761,6 +766,71 @@ def test_handle_analyze_args_list_stats_output_format(output_format, expect_erro
             instance.handle_analyze_args()
     else:
         instance.handle_analyze_args()
+
+
+@pytest.mark.parametrize(
+    "argv, diagnostics",
+    [
+        (["analyze"], False),
+        (["analyze", "--debug"], False),
+        (
+            [
+                "analyze",
+                "--debug",
+                "--debug-single-metric",
+                "--debug-table-view",
+                "--debug-ignore-amd-smi",
+                "--debug-verify-deps",
+            ],
+            True,
+        ),
+        (
+            [
+                "analyze",
+                "--debug-single-metric",
+                "--debug-table-view",
+                "--debug-ignore-amd-smi",
+                "--debug-verify-deps",
+                "--debug",
+            ],
+            True,
+        ),
+        (["profile", "--", "./app", "--debug"], False),
+    ],
+)
+def test_parse_args_debug_gate(argv, diagnostics, monkeypatch):
+    instance = _make_rpc_with_args(_make_rpc_args())
+    instance._RocProfCompute__supported_archs = common.SUPPORTED_ARCHS
+    instance._RocProfCompute__version = {"ver_pretty": "unit test"}
+    monkeypatch.setattr("config.rocprof_compute_home", Path.cwd() / "src")
+    monkeypatch.setattr(sys, "argv", ["rocprof-compute", *argv])
+    instance.parse_args()
+    args = instance.get_args()
+    assert getattr(args, "debug", False) is diagnostics
+    assert getattr(args, "ignore_amd_smi", False) is diagnostics
+    assert getattr(args, "verify_deps", False) is diagnostics
+    assert getattr(args, "view", None) == ("table" if diagnostics else None)
+    if args.mode == "profile":
+        assert args.remaining == ["--", "./app", "--debug"]
+
+
+@pytest.mark.parametrize(
+    "argv, gate",
+    [
+        (["analyze", "--debug-single-metric"], "--debug"),
+        (["analyze", "--debug", "--torch-operator", "all"], "--experimental"),
+    ],
+)
+def test_parse_args_debug_gates_are_independent(argv, gate, monkeypatch, capsys):
+    instance = _make_rpc_with_args(_make_rpc_args())
+    instance._RocProfCompute__supported_archs = common.SUPPORTED_ARCHS
+    instance._RocProfCompute__version = {"ver_pretty": "unit test"}
+    monkeypatch.setattr("config.rocprof_compute_home", Path.cwd() / "src")
+    monkeypatch.setattr(sys, "argv", ["rocprof-compute", *argv])
+    with pytest.raises(SystemExit) as exc:
+        instance.parse_args()
+    assert exc.value.code == 2
+    assert gate in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

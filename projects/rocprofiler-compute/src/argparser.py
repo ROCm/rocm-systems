@@ -4,7 +4,7 @@
 import argparse
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, List, Optional
 
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
@@ -85,6 +85,49 @@ class ExperimentalAction(argparse.Action):
             f"{self.feature_label} is experimental and may change in future releases."
         )
 
+        self._base_action_call(self, parser, namespace, values, option_string)
+
+
+class DebugAction(argparse.Action):
+    """Gate diagnostic options and delegate their argument storage."""
+
+    def __init__(
+        self,
+        option_strings: List[str],
+        help: str,
+        base_action: str,
+        debug_enabled: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        self.debug_enabled = debug_enabled
+        action_map = {
+            "store": argparse._StoreAction.__call__,
+            "store_const": argparse._StoreConstAction.__call__,
+            "store_true": argparse._StoreTrueAction.__call__,
+            "store_false": argparse._StoreFalseAction.__call__,
+            "append": argparse._AppendAction.__call__,
+            "append_const": argparse._AppendConstAction.__call__,
+            "count": argparse._CountAction.__call__,
+            "extend": argparse._ExtendAction.__call__,
+        }
+        if base_action not in action_map:
+            raise ValueError(f"Unsupported base_action: {base_action}")
+        self._base_action_call = action_map[base_action]
+        super().__init__(
+            option_strings=option_strings,
+            help=help if debug_enabled else argparse.SUPPRESS,
+            **kwargs,
+        )
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: Optional[str] = None,
+    ) -> None:
+        if not self.debug_enabled:
+            parser.error(f"{option_string} requires --debug.")
         self._base_action_call(self, parser, namespace, values, option_string)
 
 
@@ -197,6 +240,7 @@ def omniarg_parser(
     supported_archs: dict[str, str],
     rocprof_compute_version: dict[str, Optional[str]],
     experimental_enabled: bool = False,
+    debug_enabled: bool = False,
 ) -> None:
     # -----------------------------------------
     # Parse arguments (dependent on mode)
@@ -933,18 +977,53 @@ Examples:
     )
     analyze_debug_group.add_argument(
         "--debug",
-        dest="debug_options",
-        metavar="OPTION",
-        nargs="+",
-        choices=["table-view", "ignore-amd-smi", "single-metric", "verify-deps"],
-        default=[],
-        help=(
-            "\t\tEnable debug options. Can provide multiple space separated options.\n"
-            "\t\t   table-view: force plain tables and ignore cli_style from YAML.\n"
-            "\t\t   ignore-amd-smi: skip AMD-SMI queries when probing local hardware.\n"
-            "\t\t   single-metric: show metric and memory chart diagnostics.\n"
-            "\t\t   verify-deps: check analyze dependencies, then exit."
-        ),
+        dest="debug_enabled",
+        action="store_true",
+        help="\t\tEnable diagnostic options; use --debug --help to list them.",
+    )
+    analyze_debug_group.add_argument(
+        "--debug-table-view",
+        dest="view",
+        action=DebugAction,
+        base_action="store_const",
+        debug_enabled=debug_enabled,
+        nargs=0,
+        const="table",
+        default=None,
+        help="\t\tForce plain tables and ignore cli_style from YAML.",
+    )
+    analyze_debug_group.add_argument(
+        "--debug-ignore-amd-smi",
+        dest="ignore_amd_smi",
+        action=DebugAction,
+        base_action="store_true",
+        debug_enabled=debug_enabled,
+        nargs=0,
+        const=True,
+        default=False,
+        help="\t\tSkip AMD-SMI queries when probing local hardware.",
+    )
+    analyze_debug_group.add_argument(
+        "--debug-single-metric",
+        dest="debug",
+        action=DebugAction,
+        base_action="store_true",
+        debug_enabled=debug_enabled,
+        nargs=0,
+        const=True,
+        default=False,
+        help="\t\tShow metric evaluation and memory chart diagnostics.",
+    )
+    analyze_debug_group.add_argument(
+        "--debug-verify-deps",
+        dest="verify_deps",
+        action=DebugAction,
+        base_action="store_true",
+        debug_enabled=debug_enabled,
+        nargs=0,
+        const=True,
+        default=False,
+        help="\t\tCheck analyze dependencies, then exit.",
     )
     analyze_advanced_group.add_argument(
         "--view",
