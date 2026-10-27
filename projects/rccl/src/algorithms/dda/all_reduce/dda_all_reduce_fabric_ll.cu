@@ -57,7 +57,7 @@ using dda::common::kDdaLL128WireWordsPerSlice;
 static inline std::pair<dim3, dim3> ddaAllReduceFabricLLGeom(ncclComm* comm, size_t count, int typeSize) {
   const size_t nPk = ((size_t)count * (size_t)typeSize) >> 3; // 8 payload bytes per packet
   const unsigned threads = 512;
-  int nBlocksMax = comm->ddaFabricMaxBlocks;
+  int nBlocksMax = comm->ddaFabricLLOneShotMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
   }
@@ -75,17 +75,9 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3; // 8 payload bytes per packet (for logging)
 
-  const unsigned threads = 512;
-  int nBlocksMax = comm->ddaFabricMaxBlocks;
-  if (nBlocksMax < 1) {
-    nBlocksMax = 1;
-  }
-  unsigned blocks = (unsigned)std::min<size_t>((nPk + threads - 1) / threads, (size_t)nBlocksMax);
-  if (blocks == 0) {
-    blocks = 1;
-  }
-  dim3 block(threads);
-  dim3 grid(blocks);
+  const auto geom = ddaAllReduceFabricLLGeom(comm, count, (int)sizeof(T));
+  const dim3 grid = geom.first;
+  const dim3 block = geom.second;
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   // Shared epoch counter (same as AG/RS) so bank = flag & 1 is consistent

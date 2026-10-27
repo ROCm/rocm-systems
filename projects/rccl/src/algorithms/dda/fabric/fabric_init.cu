@@ -20,6 +20,7 @@
 
 #include <cuda_runtime.h>
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -204,6 +205,9 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaPeerPtrsHost = peerHost;
   comm->ddaFabricBarrierState = barrierState;
   comm->ddaFabricMaxBlocks = nBlocksMax;
+  // A one-shot grid spanning every CU starts slowly after the GPU sat mostly idle (as between decode
+  // kernels); half the CUs measured fastest in serving. An explicit RCCL_DDA_FABRIC_MAXBLOCKS is taken as-is.
+  comm->ddaFabricLLOneShotMaxBlocks = parsedOverride.valid ? nBlocksMax : std::max(1, nBlocksMax / 2);
   comm->ddaLLEpochDev = epochDev;
   comm->ddaLLEpochLen = (int)epochLen;
   INFO(NCCL_INIT,
