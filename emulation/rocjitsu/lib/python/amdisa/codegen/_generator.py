@@ -6548,6 +6548,50 @@ class CodeGenerator:
             is not None
         )
 
+    def _pc_address_format(self) -> tuple[int, str, str]:
+        pc_bits = 57 if self.isa_spec.arch_name == 'cdna5' else 48
+        return pc_bits, f'0x{(1 << pc_bits) - 1:016X}ULL', f'1ULL << {pc_bits - 1}'
+
+    def _pc_export_body(self, *, declare_mask: bool = True) -> list[str]:
+        # RDNA4 exports a zero-extended 48-bit PC. CDNA5 instead exports
+        # a sign-extended 57-bit PC; older targets sign-extend 48 bits.
+        # RDNA3/3.5 branch tables say zero extension, contradicting their
+        # architectural overview and LLVM's hasGetPCZeroExtension predicate.
+        # Follow LLVM; high-address gfx11 PCs have no hardware qualification.
+        _, pc_mask, pc_sign_bit = self._pc_address_format()
+        lines = []
+        if declare_mask:
+            lines.append(f'  constexpr uint64_t kPcAddressMask = {pc_mask};')
+        lines.append('  uint64_t next_pc = (wf.pc + size_) & kPcAddressMask;')
+        if self.isa_spec.arch_name != 'rdna4':
+            lines.extend(
+                [
+                    f'  if (next_pc & ({pc_sign_bit}))',
+                    '    next_pc |= ~kPcAddressMask;',
+                ]
+            )
+        return lines
+
+    def _pc_target_body(self, source: str, rel32_target: str) -> list[str]:
+        # Internal PCs are raw addresses, as on RFE and in page-table fetch.
+        # Sign fill belongs only to exported SGPR values. The positive rel32
+        # tag lies outside properly extended 48-bit PCs, but is valid at 57 bits.
+        # A 0xFFFFFFFF high DWORD is a normal signed PC export at either width.
+        pc_bits, _, _ = self._pc_address_format()
+        lines = [
+            f'  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64({source});',
+            '  uint64_t target = encoded & kPcAddressMask;',
+        ]
+        if pc_bits == 48:
+            lines.extend(
+                [
+                    '  if (encoded >> 32 == 0x1FFFFu && wf.code_load_bias() != 0)',
+                    f'    target = {rel32_target} + static_cast<int32_t>(encoded);',
+                ]
+            )
+        lines.append('  wf.pc = target - size_;')
+        return lines
+
     def _gen_execute_body(
         self,
         inst: Instruction,
@@ -7262,8 +7306,9 @@ class CodeGenerator:
             # At execute() time, wf.pc points to the S_GETPC itself; step() will
             # add size_ afterwards. Write wf.pc + size_ so the net result after
             # post-execute advance is correct (caller sees PC of next instruction).
+            L.extend(self._pc_export_body())
             L.append(
-                f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, wf.pc + size_);'
+                f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, next_pc);'
             )
             return '\n'.join(L)
 
@@ -7285,8 +7330,9 @@ class CodeGenerator:
             L.append('    target |= ~kPcAddressMask;')
 
         if cls == 'scalar_setpc':
-            resolve_pc_target(src_ops[0])
-            L.append('  wf.pc = target - size_;')
+            _, pc_mask, _ = self._pc_address_format()
+            L.append(f'  constexpr uint64_t kPcAddressMask = {pc_mask};')
+            L.extend(self._pc_target_body(src_ops[0], 'wf.code_load_bias()'))
             return '\n'.join(L)
 
         if cls == 'cbranch_fork':
@@ -7325,20 +7371,10 @@ class CodeGenerator:
 
         if cls == 'scalar_swappc':
             # S_SWAPPC_B64: dst = PC of next inst, then jump to src.
-            L.append('  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;')
-            L.append('  constexpr uint64_t kPcSignBit = 1ULL << 47;')
-            L.append(f'  uint64_t next_pc = wf.pc + size_;')
-            L.append(
-                f'  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]});'
-            )
-            L.append('  uint64_t target = encoded & kPcAddressMask;')
-            L.append(
-                '  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)'
-            )
-            L.append('    target = next_pc - 20 + static_cast<int32_t>(encoded);')
-            L.append('  else if (target & kPcSignBit)')
-            L.append('    target |= ~kPcAddressMask;')
-            L.append('  wf.pc = target - size_;')
+            _, pc_mask, _ = self._pc_address_format()
+            L.append(f'  constexpr uint64_t kPcAddressMask = {pc_mask};')
+            L.extend(self._pc_export_body(declare_mask=False))
+            L.extend(self._pc_target_body(src_ops[0], 'wf.pc + size_ - 20'))
             L.append(
                 f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, next_pc);'
             )
@@ -7513,8 +7549,9 @@ class CodeGenerator:
 
         if cls == 'scalar_call':
             # S_CALL_B64: dst = PC of next instruction (return address), then branch.
+            L.extend(self._pc_export_body())
             L.append(
-                f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, wf.pc + size_);'
+                f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, next_pc);'
             )
             L.append(
                 f'  int16_t offset = static_cast<int16_t>({src_ops[0]}.encoding_value_);'
