@@ -5,7 +5,6 @@
  */
 #pragma once
 
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -207,23 +206,20 @@ struct Archive {
 
 // What loading may spend. The archive chooses how many records it holds and how
 // big each is (up to kMaxRecordBytes), so the loader charges what it retains
-// against one byte budget and stops at a deadline, instead of trusting the
-// archive to fit.
+// against one byte budget instead of trusting the archive to fit. Time is not
+// limited here: the caller's wall-clock watchdog ends the process.
 struct LoadLimits {
-  // Charged for each record's raw bytes and for what is parsed out of a kernel
-  // launch (name, arguments, snapshots) and for each Event itself. Null: a
-  // private budget of kDefaultMaxHostBytes. A budget the caller passes keeps
-  // the bytes of a successful load charged, since the archive still holds them;
-  // a failed load gives back what it charged.
+  // Charged for each record's raw bytes, for what is parsed out of a kernel
+  // launch (name, arguments, snapshots), for the event vector's capacity, the
+  // sort's scratch buffer and the blob and code-object maps. Null: a private
+  // budget of kDefaultMaxHostBytes. A budget the caller passes keeps the bytes
+  // of a successful load charged, since the archive still holds them; a failed
+  // load gives back what it charged.
   ByteBudget* bytes = nullptr;
-  // Loading stops, and fails, once this time has passed. Default: never.
-  std::chrono::steady_clock::time_point deadline =
-      std::chrono::steady_clock::time_point::max();
 };
 
-// Load an archive from disk. Returns false on error, including a record that
-// would take the load past limits.bytes or a load still running at
-// limits.deadline; the diagnostic names the limit and its option.
+// Load an archive from disk. Returns false on error, including a load that
+// would take limits.bytes past its cap; the diagnostic names the option.
 bool load_archive(const std::string& path, Archive& archive,
                   const LoadLimits& limits = LoadLimits{});
 

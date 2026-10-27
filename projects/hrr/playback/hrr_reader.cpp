@@ -241,6 +241,10 @@ static bool resolve_archive_path(const std::string& input, std::string& resolved
 //   per snapshot (v10, 41 bytes): see BufferSnapshot; the attribute tail follows
 // ---------------------------------------------------------------------------
 
+// What an unordered_map node costs beyond its pair: the next pointer, the cached
+// hash and the bucket slot, rounded up.
+constexpr uint64_t kMapNodeOverhead = 32;
+
 // Charges what a parse keeps against the load budget before it allocates it.
 // A record's bytes expand when parsed (a 3-byte argument header becomes a
 // KernelArg, a 41-byte snapshot a BufferSnapshot), so the raw-record charge
@@ -356,17 +360,18 @@ bool load_archive(const std::string& path, Archive& archive,
   archive.version = file_version;
   archive.flags = file_flags;
 
-  // What this load has charged, so a failed load gives it all back. The budget
-  // is the caller's when given: the archive keeps its bytes charged on success.
+  // The budget is the caller's when given: the archive keeps its bytes charged
+  // on success, and a failed load gives back what it charged since `start`
+  // (the load is single-threaded and nothing else charges the budget meanwhile).
   ByteBudget own_budget;
   ByteBudget& budget = limits.bytes ? *limits.bytes : own_budget;
-  uint64_t charged = 0;
+  const uint64_t start = budget.used();
   auto fail = [&](const char* what) {
     fprintf(stderr,
             "[HRR] Refusing %s: %s; stopped reading after %zu events\n",
             events_path.c_str(), what, archive.events.size());
-    budget.release(charged);
-    fclose(f);
+    budget.release(budget.used() - start);
+    if (f) fclose(f);
     return false;
   };
   auto over_budget = [&] {
@@ -374,12 +379,17 @@ bool load_archive(const std::string& path, Archive& archive,
                       " bytes of host memory (--max-host-bytes)";
     return fail(why.c_str());
   };
-  // The clock is read every so many records, not each: one is cheap, fifty
-  // million are not, and a record is at most kMaxRecordBytes.
-  uint64_t polls = 0;
-  auto expired = [&] {
-    return (polls++ & 0xFF) == 0 &&
-           std::chrono::steady_clock::now() >= limits.deadline;
+  // Event slots: the vector's capacity is what is held, and a growth holds the
+  // old and the new buffer at once, so the new one is charged before the old is
+  // given back.
+  uint64_t slots_charged = 0;
+  auto grow_events = [&] {
+    const size_t cap = std::max<size_t>(archive.events.capacity() * 2, 64);
+    if (!budget.try_charge(uint64_t(cap) * sizeof(Event))) return false;
+    archive.events.reserve(cap);
+    budget.release(slots_charged);
+    slots_charged = uint64_t(cap) * sizeof(Event);
+    return true;
   };
 
   // Read events sequentially. read_raw_record handles the framing and the
@@ -393,9 +403,6 @@ bool load_archive(const std::string& path, Archive& archive,
   uint64_t trailer_count = 0;
   const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
   while (true) {
-    if (expired())
-      return fail("loading did not finish within the wall-clock limit "
-                  "(--max-wall-seconds)");
     Event ev;
     const RecordStatus st = read_raw_record(f, ev.raw_payload, &budget);
     if (st == RecordStatus::OverBudget) return over_budget();
@@ -406,10 +413,6 @@ bool load_archive(const std::string& path, Archive& archive,
       truncated = true;
       break;
     }
-
-    charged += ev.raw_payload.size();
-    if (!budget.try_charge(sizeof(Event))) return over_budget();
-    charged += sizeof(Event);
 
     const uint16_t etype = ev.header().event_type;
     const uint32_t total = ev.header().payload_length;
@@ -424,8 +427,7 @@ bool load_archive(const std::string& path, Archive& archive,
         trailer = true;
         trailer_count = er->total_events;
         // Not stored, so not held: give back what it was charged.
-        budget.release(ev.raw_payload.size() + sizeof(Event));
-        charged -= ev.raw_payload.size() + sizeof(Event);
+        budget.release(ev.raw_payload.size());
         break;  // the trailer is not a replay event, and nothing after it is
       }
     }
@@ -587,7 +589,6 @@ bool load_archive(const std::string& path, Archive& archive,
           ev.stream_handle  = sh;
           ev.kernel_launch  = kl;
           archive.kernel_count++;
-          charged += pc.total;
         } else {
           delete kl;
           budget.release(pc.total);
@@ -681,6 +682,8 @@ bool load_archive(const std::string& path, Archive& archive,
                               " events (--max-events)";
       return fail(why.c_str());
     }
+    if (archive.events.size() == archive.events.capacity() && !grow_events())
+      return over_budget();
     archive.events.push_back(std::move(ev));
   }
 
@@ -689,12 +692,8 @@ bool load_archive(const std::string& path, Archive& archive,
   // the trailer's count, so they are counted and left out of the replay.
   if (trailer) {
     std::vector<uint8_t> rest;
-    while (read_raw_record(f, rest) == RecordStatus::Ok) {
+    while (read_raw_record(f, rest) == RecordStatus::Ok)
       ++archive.skipped_after_trailer;
-      if (expired())
-        return fail("loading did not finish within the wall-clock limit "
-                    "(--max-wall-seconds)");
-    }
     if (archive.skipped_after_trailer)
       fprintf(stderr,
               "[HRR] Ignored %zu records after the clean-shutdown trailer\n",
@@ -702,6 +701,7 @@ bool load_archive(const std::string& path, Archive& archive,
   }
 
   fclose(f);
+  f = nullptr;
 
   if (trailer) {
     complete = trailer_count == archive.events.size();
@@ -727,10 +727,15 @@ bool load_archive(const std::string& path, Archive& archive,
   // Multi-threaded captures write events from different threads in file-arrival
   // order, which may differ from the logical call order. sequence_id is assigned
   // atomically by the writer, so sorting by it restores the true call sequence.
+  // stable_sort takes a scratch buffer of up to half the events, so it is
+  // charged while the sort runs.
+  const uint64_t sort_scratch = uint64_t(archive.events.size() / 2 + 1) * sizeof(Event);
+  if (!budget.try_charge(sort_scratch)) return over_budget();
   std::stable_sort(archive.events.begin(), archive.events.end(),
     [](const Event& a, const Event& b) {
       return a.header().sequence_id < b.header().sequence_id;
     });
+  budget.release(sort_scratch);
 
   archive.event_count = archive.events.size();
 
@@ -744,11 +749,20 @@ bool load_archive(const std::string& path, Archive& archive,
     }
   }
 
+  // One map node per file: the key (the stem), the value (the path) and the
+  // node itself. A file count alone can then set the memory, so it is charged.
+  auto charge_map_node = [&](const fs::path& p) {
+    return budget.try_charge(sizeof(std::pair<const std::string, std::string>) +
+                             kMapNodeOverhead + p.stem().string().size() +
+                             p.string().size());
+  };
+
   // Enumerate blobs
   std::string blobs_dir = archive_dir + "/blobs";
   if (fs::exists(blobs_dir)) {
     for (auto& entry : fs::recursive_directory_iterator(blobs_dir)) {
       if (entry.is_regular_file() && entry.path().extension() == ".blob") {
+        if (!charge_map_node(entry.path())) return over_budget();
         archive.blobs[entry.path().stem().string()] = entry.path().string();
         archive.blob_count++;
       }
@@ -760,6 +774,7 @@ bool load_archive(const std::string& path, Archive& archive,
   if (fs::exists(co_dir)) {
     for (auto& entry : fs::directory_iterator(co_dir)) {
       if (entry.is_regular_file() && entry.path().extension() == ".hsaco") {
+        if (!charge_map_node(entry.path())) return over_budget();
         archive.code_objects[entry.path().stem().string()] = entry.path().string();
         archive.code_object_count++;
       }

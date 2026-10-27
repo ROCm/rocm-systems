@@ -499,6 +499,26 @@ HRR_TEST_CASE(Unit_HRR_Recovery_RepairRootRewritesMiscountedTrailer) {
 /**
  * Test Description
  * ----------------
+ *   - hrr-playback --repair on a root loads each pid under --max-host-bytes: two
+ *     sub-archives without trailers, under a cap too small to hold either, are
+ *     both refused naming the option and neither is repaired. Without the cap
+ *     each pid would load under its own 16 GiB default.
+ */
+HRR_TEST_CASE(Unit_HRR_Recovery_RepairRootHonoursMaxHostBytes) {
+  TmpRootArchive root("repair_root_cap");
+  root.add_process(/*pid=*/111, /*parent_pid=*/0, /*records=*/5, /*trailer=*/false);
+  root.add_process(/*pid=*/222, /*parent_pid=*/111, /*records=*/5, /*trailer=*/false);
+
+  auto [ret, out] = hrr_playback_merged(root.root, "--repair --max-host-bytes 1024");
+  INFO("hrr-playback --repair output:\n" << out);
+  CHECK(ret != 0);
+  CHECK(out.find("--max-host-bytes") != std::string::npos);
+  CHECK(out.find("0 repaired, 0 already complete, 2 failed") != std::string::npos);
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - A root with two sub-archives whose manifests both say complete, one of
  *     them with a trailer that counts one record too few.
  *   - hrr-playback <root> --info shows that one as not complete, the other as

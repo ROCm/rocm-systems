@@ -1336,7 +1336,8 @@ static bool write_root_manifest(const fs::path& root,
 //
 // Returns false if this is not a multi-process root, leaving the caller to
 // handle the path as a single archive. Sets exit_code only when it returns true.
-static bool repair_root(const std::string& archive_path, int& exit_code) {
+static bool repair_root(const std::string& archive_path, uint64_t host_cap,
+                        int& exit_code) {
   fs::path root(archive_path);
   if (fs::exists(root / "events.bin")) return false;
   // The root is the path the user named, so any link in it is theirs and is
@@ -1388,8 +1389,13 @@ static bool repair_root(const std::string& archive_path, int& exit_code) {
 
     // Scoped per iteration so each archive's events are released before the
     // next is read — these run to gigabytes apiece.
+    // Each pid gets the whole --max-host-bytes: its archive is released before
+    // the next is read, so sharing ctx.host_budget would keep the last one charged.
+    hrr::ByteBudget budget(host_cap);
+    hrr::LoadLimits limits;
+    limits.bytes = &budget;
     hrr::Archive archive;
-    if (!hrr::load_archive(dir.string(), archive)) {
+    if (!hrr::load_archive(dir.string(), archive, limits)) {
       fprintf(stderr, "[HRR] repair: cannot load %s; skipping\n", dir.string().c_str());
       failed++;
       continue;
@@ -1738,16 +1744,15 @@ int main(int argc, char** argv) {
   }
 
   // Wall-clock limit for the whole run, started before the archive is read: the
-  // load is bounded by it too (--info included), and it can be blocked in a HIP
-  // call that no flag interrupts, so the watchdog ends the process. --repair
-  // keeps its own pace; it has no replay to bound and its load is still capped
-  // in bytes.
-  const auto load_start = std::chrono::steady_clock::now();
+  // load is bounded by it too (--info included), and it can be blocked in a
+  // read or a HIP call that no flag interrupts, so the watchdog ends the
+  // process. --repair keeps its own pace; it has no replay to bound and its
+  // load is still capped in bytes.
   hrr::WallClockWatchdog wall_watchdog(
       std::chrono::milliseconds(do_repair ? 0 : max_wall_secs * 1000),
       [max_wall_secs] {
         fprintf(stderr,
-                "[HRR] Fatal: replay still running after %llu s "
+                "[HRR] Fatal: still running after %llu s "
                 "(--max-wall-seconds); ending it\n",
                 (unsigned long long)max_wall_secs);
         fflush(stdout);
@@ -1756,8 +1761,6 @@ int main(int argc, char** argv) {
       });
   hrr::LoadLimits load_limits;
   load_limits.bytes = &ctx.host_budget;
-  if (!do_repair && max_wall_secs)
-    load_limits.deadline = load_start + std::chrono::seconds(max_wall_secs);
 
   // --info on an archive root prints the common process summary. Direct
   // pid-<pid> paths continue through load_archive for detailed event info.
@@ -1768,7 +1771,7 @@ int main(int argc, char** argv) {
   // Direct pid-<pid> paths fall through to the single-archive path below.
   if (do_repair) {
     int repair_exit = 0;
-    if (repair_root(archive_path, repair_exit)) return repair_exit;
+    if (repair_root(archive_path, ctx.host_budget.cap(), repair_exit)) return repair_exit;
   }
 
   hrr::Archive archive;
