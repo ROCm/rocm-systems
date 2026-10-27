@@ -1203,10 +1203,10 @@ threshold table introduced for gfx1250.
           A table entry of ``0`` (e.g. gfx1250, where the value is a placeholder)
           resolves to 256 MiB when ``NCCL_CTA_POLICY=2`` (ZERO CU policy) is active;
           without ZERO policy it stays ``0`` and 2-shot is disabled. Setting this
-          variable to ``0`` explicitly disables 2-shot and skips the 512 MiB staging
-          reservation entirely, even under ZERO CU policy.
+          variable to ``0`` explicitly disables the non-registered 2-shot path but does
+          not suppress the staging buffer reservation, which the registered-window CE AllReduce path also requires.
       - | ``-1``: Resolved from the per-arch table (default).
-        | ``0``: Disable 2-shot and skip staging reservation.
+        | ``0``: Disable 2-shot (does not disable the registered-window CE path).
         | ``N`` (bytes): Use ``N`` as the 2-shot AllReduce size cap.
 
     * - | ``RCCL_CE_AR_STAGING_BYTES``
