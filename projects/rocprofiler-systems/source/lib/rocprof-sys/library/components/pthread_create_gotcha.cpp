@@ -48,41 +48,6 @@ constexpr std::string_view k_pthread_create_region = "pthread_create";
 auto* is_shutdown   = new bool{ false };  // intentional data leak
 auto  shutdown_dtor = scope::destructor{ []() { pthread_create_gotcha::shutdown(); } };
 
-template <typename... Args>
-inline void
-start_pthread_create_region(std::int64_t _tid, Args&&... _args)
-{
-    if(!get_use_timemory())
-    {
-        return;
-    }
-    LOG_TRACE("Starting '{}' in thread {}...", k_pthread_create_region, _tid);
-    category_region_t{}.audit(quirk::config<quirk::cache_only>{}, k_pthread_create_region,
-                              _args...);
-}
-
-template <typename... Args>
-inline void
-stop_pthread_create_region(std::int64_t _tid, Args&&... _args)
-{
-    if(!get_use_timemory())
-    {
-        return;
-    }
-
-    auto const _main_manager = tim::manager::master_instance();
-    auto const _this_manager = tim::manager::instance();
-    if(!_main_manager || !_this_manager || _main_manager->is_finalized() ||
-       _this_manager->is_finalized())
-    {
-        return;
-    }
-
-    LOG_TRACE("Stopping '{}' in thread {}...", k_pthread_create_region, _tid);
-    category_region_t{}.audit(quirk::config<quirk::cache_only>{}, k_pthread_create_region,
-                              _args...);
-}
-
 using native_handle_set_t = std::set<pthread_create_gotcha::native_handle_t>;
 
 auto native_handles          = native_handle_set_t{};
@@ -451,7 +416,8 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto const use_sampling       = config::get_use_sampling();
     auto const use_causal         = config::get_use_causal();
     auto const offset             = (!enabled || !active || info->is_offset);
-    auto const record_region      = (active && !coverage && !offset && !is_paused());
+    auto const record_region =
+        (get_use_timemory() && active && !coverage && !offset && !is_paused());
     auto const enable_sampling =
         (use_sampling && sample_child && active && !coverage && !offset);
     auto const enable_causal =
@@ -516,8 +482,9 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
 
     if(record_region)
     {
-        start_pthread_create_region(info->index_data->sequent_value, audit::incoming{},
-                                    thread, attr, func, arg);
+        category_region_t{}.audit(quirk::config<quirk::cache_only>{},
+                                  k_pthread_create_region, audit::incoming{}, thread,
+                                  attr, func, arg);
     }
 
     // threads must process their delays before creating a new thread
@@ -535,8 +502,8 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
 
     if(record_region)
     {
-        stop_pthread_create_region(info->index_data->sequent_value, audit::outgoing{},
-                                   ret);
+        category_region_t{}.audit(quirk::config<quirk::cache_only>{},
+                                  k_pthread_create_region, audit::outgoing{}, ret);
     }
 
     // unblock the signals in the entire process

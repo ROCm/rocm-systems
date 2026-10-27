@@ -1466,7 +1466,7 @@ configure_settings(bool _init)
     _config->get_time_output()           = true;
     _config->get_timing_precision()      = 6;
     _config->get_max_thread_bookmarks()  = 1;
-    _config->get_timing_units()          = "sec";
+    _config->get_timing_units()          = "s";
     _config->get_memory_units()          = "MB";
 
     // settings native to timemory but critically and/or extensively used by

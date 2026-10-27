@@ -532,7 +532,7 @@ Generating a default configuration file
    ROCPROFSYS_TIMELINE_PROFILE                         = false
    ROCPROFSYS_TIMING_PRECISION                         = 6
    ROCPROFSYS_TIMING_SCIENTIFIC                        = false
-   ROCPROFSYS_TIMING_UNITS                             = sec
+   ROCPROFSYS_TIMING_UNITS                             = s
    ROCPROFSYS_TIMING_WIDTH                             = -1
    ROCPROFSYS_TREE_OUTPUT                              = true
    ROCPROFSYS_WIDTH                                    = -1
@@ -1489,7 +1489,7 @@ but do not override an existing value for the environment variable.
    ROCPROFSYS_PAPI_EVENTS           = PAPI_TOT_INS PAPI_FP_INS
    ROCPROFSYS_TIMEMORY_COMPONENTS   = wall_clock peak_rss trip_count
    ROCPROFSYS_MEMORY_UNITS          = MB
-   ROCPROFSYS_TIMING_UNITS          = sec
+   ROCPROFSYS_TIMING_UNITS          = s
 
    # sampling fields
    ROCPROFSYS_SAMPLING_FREQ         = 50
