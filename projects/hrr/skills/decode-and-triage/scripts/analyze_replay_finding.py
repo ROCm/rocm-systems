@@ -12,6 +12,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from archive_text import sanitize
+
 # --- regex library (diverse workloads) ---
 
 RE_PROGRESS = re.compile(
@@ -446,7 +448,7 @@ def finalize(finding: Finding) -> Finding:
         finding.kernel_name = finding.last_event_kernel
         finding.notes.append(
             f"kernel name taken from the last launch to start before the fault "
-            f"({finding.last_event_kernel}); the runtime fault line named no "
+            f"({sanitize(finding.last_event_kernel)}); the runtime fault line named no "
             f"kernel. Valid only for a replay run with --verbose, which is what "
             f"prints those per-event lines."
         )
@@ -463,7 +465,7 @@ def finalize(finding: Finding) -> Finding:
         finding.kernel_name = finding.archive_kernel_names[0]
         finding.notes.append(
             f"kernel name inferred from the archive, which contains exactly one "
-            f"kernel ({finding.kernel_name}); the replay log carried no "
+            f"kernel ({sanitize(finding.kernel_name)}); the replay log carried no "
             f"per-launch attribution. Re-run with --sync-after-launch to "
             f"confirm the faulting dispatch directly."
         )
@@ -511,6 +513,9 @@ def run_archive_info(archive: Path, hrr_playback: str | None) -> str:
 
 
 def render_markdown(f: Finding) -> str:
+    # Every value below came from the archive or from a log its replay wrote, so
+    # each goes through the one sanitizer before it is printed: a value is a line
+    # of the report, never a way to start another.
     d2h = (
         f"- **D2H**: pass={f.d2h_pass or 0} fail={f.d2h_fail or 0} "
         f"attempted={f.d2h_attempted or 0}"
@@ -521,10 +526,10 @@ def render_markdown(f: Finding) -> str:
         "# HRR replay finding",
         "",
         "## Summary",
-        f"- **Outcome**: {f.outcome}",
-        f"- **Fault class**: `{f.fault_class}`",
-        f"- **Kernel**: `{f.kernel_name or 'unknown'}`",
-        f"- **Kernel family**: `{f.kernel_family or 'unknown'}`",
+        f"- **Outcome**: {sanitize(f.outcome)}",
+        f"- **Fault class**: `{sanitize(f.fault_class)}`",
+        f"- **Kernel**: `{sanitize(f.kernel_name or 'unknown')}`",
+        f"- **Kernel family**: `{sanitize(f.kernel_family or 'unknown')}`",
         "",
     ]
     # A clean replay has no fault details and no fault to be at, and printing
@@ -542,42 +547,42 @@ def render_markdown(f: Finding) -> str:
     else:
         lines += [
             "## Fault details",
-            f"- **Fault address**: `{f.fault_address or 'n/a'}`",
-            f"- **Fault reason**: {f.fault_reason or 'n/a'}",
+            f"- **Fault address**: `{sanitize(f.fault_address or 'n/a')}`",
+            f"- **Fault reason**: {sanitize(f.fault_reason or 'n/a')}",
             # Both are zero-based, so 0 is the first event, not a missing one.
             f"- **Failing event seq**: {'n/a' if f.failing_event_seq is None else f.failing_event_seq}",
             f"- **Failing call index**: {'n/a' if f.failing_call_index is None else f.failing_call_index}",
-            f"- **Failing API**: {f.failing_api or 'n/a'}",
-            f"- **Kernarg address**: `{f.kernarg_address or 'n/a'}`",
-            f"- **GPU node**: {f.gpu_node or 'n/a'}",
-            f"- **Grid / workgroup**: {f.grid or 'n/a'} / {f.workgroup or 'n/a'}",
+            f"- **Failing API**: {sanitize(f.failing_api or 'n/a')}",
+            f"- **Kernarg address**: `{sanitize(f.kernarg_address or 'n/a')}`",
+            f"- **GPU node**: {sanitize(f.gpu_node or 'n/a')}",
+            f"- **Grid / workgroup**: {sanitize(f.grid or 'n/a')} / {sanitize(f.workgroup or 'n/a')}",
             "",
             "## Replay progress at fault",
             f"- **Kernels launched**: {kernels}",
             d2h,
-            f"- **Last progress kernel**: `{f.last_progress_kernel or 'n/a'}`",
-            f"- **Last launch before fault**: `{f.last_event_kernel or 'n/a'}`",
+            f"- **Last progress kernel**: `{sanitize(f.last_progress_kernel or 'n/a')}`",
+            f"- **Last launch before fault**: `{sanitize(f.last_event_kernel or 'n/a')}`",
             "",
         ]
     lines += [
         "## Archive / capture",
         f"- **Events**: {f.archive_events or 'n/a'}",
         f"- **Kernels (archive)**: {f.archive_kernels or 'n/a'}",
-        f"- **Kernel names (archive)**: {', '.join(f.archive_kernel_names) or 'n/a'}",
-        f"- **Complete**: {f.archive_complete or 'n/a'}",
+        f"- **Kernel names (archive)**: {', '.join(sanitize(n) for n in f.archive_kernel_names) or 'n/a'}",
+        f"- **Complete**: {sanitize(f.archive_complete or 'n/a')}",
         f"- **Archive / reader format**: "
         f"{f.archive_format_version if f.archive_format_version is not None else 'n/a'}"
         f" / {f.reader_format_version if f.reader_format_version is not None else 'n/a'}",
-        f"- **Capture HIP**: `{f.capture_hip_so or 'n/a'}`",
-        f"- **Capture HIP runtime**: `{f.capture_hip_runtime_version or 'n/a'}`",
-        f"- **Capture comgr**: `{f.capture_comgr_version or 'n/a'}`",
+        f"- **Capture HIP**: `{sanitize(f.capture_hip_so or 'n/a')}`",
+        f"- **Capture HIP runtime**: `{sanitize(f.capture_hip_runtime_version or 'n/a')}`",
+        f"- **Capture comgr**: `{sanitize(f.capture_comgr_version or 'n/a')}`",
         f"- **Capture device count**: {f.capture_device_count if f.capture_device_count is not None else 'n/a'}",
-        f"- **Capture GPU arch**: `{f.capture_gcn_arch or 'n/a'}`",
+        f"- **Capture GPU arch**: `{sanitize(f.capture_gcn_arch or 'n/a')}`",
         "",
         "## Sources",
     ]
     for s in f.sources:
-        lines.append(f"- `{s}`")
+        lines.append(f"- `{sanitize(s)}`")
     if f.notes:
         lines.extend(["", "## Notes"])
         lines.extend(f"- {n}" for n in f.notes)
@@ -623,7 +628,7 @@ def main() -> int:
     for log_path in args.log:
         p = Path(log_path)
         if not p.is_file():
-            finding.notes.append(f"log not found: {p}")
+            finding.notes.append(f"log not found: {sanitize(p)}")
             continue
         parse_text(p.read_text(encoding="utf-8", errors="replace"), str(p), finding)
 
