@@ -26,6 +26,14 @@ common = [
     ".github/label*.yml",
     "*CODEOWNERS",
     "*LICENSE",
+
+    # RCCL's workflows run on their own schedules/triggers and are never
+    # invoked by TheRock CI, so editing them cannot affect a TheRock build.
+    # `therock-rccl-*` is rooted at therock-rccl-ci.yml (schedule +
+    # workflow_dispatch only), so it is likewise outside TheRock PR CI.
+    ".github/workflows/rccl[-_]*.yml",
+    ".github/workflows/therock-rccl-*.yml",
+
     "*/.markdownlint-ci2.yaml",
     "tools/systems_pr_bot/*",
 
