@@ -4,6 +4,7 @@
 #pragma once
 
 #include "embedded_schema.h"
+#include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
 #include "util/diagnostic.h"
 
@@ -16,6 +17,18 @@
 #include <utility>
 
 namespace rocjitsu::test {
+
+/// Restore an expected-valid checkpoint, preserving the caller's output on failure.
+[[nodiscard]] inline testing::AssertionResult
+restore_valid_checkpoint(const std::string &path, config::LoadedConfig &output) {
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<config::LoadedConfig> result =
+      config::restore_checkpoint(path, diagnostic.emitter());
+  if (result.failed())
+    return testing::AssertionFailure() << diagnostic.message();
+  output = std::move(result).value();
+  return testing::AssertionSuccess();
+}
 
 /// Load an expected-valid config, preserving the caller's output on failure.
 /// Call with ASSERT_TRUE so a failure stops the consuming test or fixture.

@@ -329,7 +329,8 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
   f.write(reinterpret_cast<const char *>(builder.GetBufferPointer()), builder.GetSize());
 }
 
-LoadedConfig restore_checkpoint(const std::string &path) {
+util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
+                                                 util::DiagnosticEmitter emit_error) {
   // Read binary file.
   std::ifstream f(path, std::ios::binary | std::ios::ate);
   if (!f.is_open())
@@ -388,16 +389,14 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   const uint32_t capacity =
       checked_capacity(1 + uint64_t{vm_config.soc.num_xcds} * (std::max(cus, 1u) - 1));
   const uint32_t host_threads = amdgpu::available_host_threads();
-  util::StringDiagnostic allocation_diagnostic;
   util::FailureOr<ExecutionThreadAllocation> allocation = resolve_execution_threads(
       {result.cpu_thread_budget, result.requested_engine_threads, result.cpu_dispatch_threads,
        result.async_helper_threads},
       host_threads, vm_config.soc.num_xcds, std::span(&capacity, 1),
-      configured_async_mma_supported(vm_config.soc.arch), result.thread_allocations,
-      allocation_diagnostic.emitter(), result.exec_mode == simdojo::ExecMode::CLOCKED);
-  // Checkpoint loading retains its exception-based failure contract.
+      configured_async_mma_supported(vm_config.soc.arch), result.thread_allocations, emit_error,
+      result.exec_mode == simdojo::ExecMode::CLOCKED);
   if (allocation.failed())
-    throw std::invalid_argument(allocation_diagnostic.message());
+    return util::Result::failure();
   result.execution_threads = std::move(allocation).value();
   // Before allocation tables, explicit zero selected a dispatch-only host
   // budget. An absent vector identifies that policy; a present empty vector

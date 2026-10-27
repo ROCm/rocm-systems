@@ -49,10 +49,11 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 /// the same correctness guarantees but may schedule wavefronts in a different
 /// order than the original run.
 /// @param path Path to the binary checkpoint file.
-/// @returns LoadedConfig with engine parameters and a topology with restored state.
-/// @throws std::invalid_argument when execution-thread allocation metadata is invalid.
-/// Other checkpoint validation, I/O, and allocation exceptions also propagate.
-LoadedConfig restore_checkpoint(const std::string &path);
+/// @param emit_error Destination for execution-thread allocation diagnostics.
+/// @returns LoadedConfig with restored state, or failure for invalid execution-thread
+/// allocation metadata. Other checkpoint validation, I/O, and allocation exceptions propagate.
+util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
+                                                 util::DiagnosticEmitter emit_error);
 
 } // namespace config
 } // namespace rocjitsu

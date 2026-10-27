@@ -272,7 +272,8 @@ RJ_API_EXPORT rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *p
 /// @param[out] vm The restored VM handle.
 /// @retval ROCJITSU_STATUS_SUCCESS VM restored successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_INVALID_FILE The checkpoint file could not be opened.
+/// @retval ROCJITSU_STATUS_INVALID_FILE The checkpoint file could not be read or contains
+/// invalid data, including execution-thread allocation metadata.
 /// @retval ROCJITSU_STATUS_ERROR Deserialization failed.
 RJ_API_EXPORT rj_status_t rj_vm_restore_checkpoint(const char *path, rj_vm_t **vm);
 

@@ -1367,7 +1367,8 @@ TEST(ConfigLoaderTest, CdnaLocationsSurviveTopologyInitializationAndCheckpoint) 
     check_locations(soc);
     test::ScopedTempFile checkpoint("rocjitsu-cdna-location-");
     config::save_checkpoint(checkpoint.path(), *soc, 0, source.engine_config, 1);
-    auto restored = config::restore_checkpoint(checkpoint.path());
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
     auto *restored_soc = restored.soc();
     restored_soc->set_dispatch_threads(1);
     simdojo::SimulationEngine restored_engine(restored.engine_config);
@@ -3401,6 +3402,66 @@ test::ScopedTempFile write_legacy_quantum_checkpoint(uint32_t dispatch_threads =
   return file;
 }
 
+TEST(CheckpointTest, InvalidExecutionThreadAllocationsReturnFailure) {
+  struct InvalidAllocation {
+    int32_t helpers;
+    std::vector<config::ExecutionThreadChoice> choices;
+    const char *message;
+  };
+  constexpr const char *helper_message = "async_helper_threads must be -1 or between 0 and 128";
+  constexpr const char *choice_message =
+      "thread_allocations require num_threads >= 1, "
+      "cpu_dispatch_threads >= 1 and async_helper_threads <= 128";
+  const InvalidAllocation cases[] = {
+      {-2, {}, helper_message},           {129, {}, helper_message},
+      {0, {{0, 1, 0}}, choice_message},   {0, {{1, 0, 0}}, choice_message},
+      {0, {{1, 1, 129}}, choice_message},
+  };
+
+  const std::string json = functional_quantum_checkpoint_config(7, 37);
+  rj_vm_t *raw_source = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_source),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_source, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
+
+  for (const auto &invalid : cases) {
+    SCOPED_TRACE(invalid.helpers);
+    SCOPED_TRACE(invalid.message);
+    flatbuffers::FlatBufferBuilder builder;
+    auto arch = builder.CreateString("cdna3");
+    auto cu_config = fb::CreateComputeUnitConfig(builder, 1, 104, 256, 64);
+    auto se_config = fb::CreateShaderEngineConfig(builder, 1, cu_config);
+    auto xcd_config = fb::CreateXcdConfig(builder, 1, se_config);
+    auto gpu_config = fb::CreateAmdgpuConfig(builder, 1, 0, xcd_config);
+    auto vm_config = fb::CreateVirtualMachineConfig(builder, arch, gpu_config);
+    auto exec_mode = builder.CreateString("functional");
+    std::vector<flatbuffers::Offset<fb::ExecutionThreadChoice>> entries;
+    for (const auto &choice : invalid.choices)
+      entries.push_back(fb::CreateExecutionThreadChoice(builder, choice.engines, choice.dispatch,
+                                                        choice.helpers));
+    auto choices = builder.CreateVector(entries);
+    auto simulation_config = fb::CreateSimulationConfig(builder, 0, 1, exec_mode, vm_config, 0, 0,
+                                                        1, 0, choices, invalid.helpers);
+    auto checkpoint = fb::CreateSimulationCheckpoint(builder, 0, simulation_config);
+    builder.Finish(checkpoint);
+
+    test::ScopedTempFile file("rocjitsu-invalid-allocation-checkpoint-");
+    file.write(std::string_view(reinterpret_cast<const char *>(builder.GetBufferPointer()),
+                                builder.GetSize()));
+    util::StringDiagnostic diagnostic;
+    util::FailureOr<config::LoadedConfig> result =
+        config::restore_checkpoint(file.path(), diagnostic.emitter());
+    ASSERT_TRUE(result.failed());
+    EXPECT_EQ(diagnostic.message(), invalid.message);
+
+    rj_vm_t *restored = source.get();
+    EXPECT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &restored),
+              ROCJITSU_STATUS_INVALID_FILE);
+    EXPECT_EQ(restored, source.get());
+  }
+}
+
 TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   auto checkpoint_file = write_legacy_quantum_checkpoint();
   auto bytes = read_binary_file(checkpoint_file.path());
@@ -3422,7 +3483,8 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   ASSERT_EQ(checkpoint->compute_units()->size(), 1u);
   EXPECT_FALSE(checkpoint->compute_units()->Get(0)->functional_quantum_present());
 
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   auto *cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->config().functional_quantum, amdgpu::ComputeUnitCore::kFunctionalQuantum);
@@ -3458,7 +3520,8 @@ TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
   ASSERT_NE(stored_cu, nullptr);
   EXPECT_EQ(stored_cu->scratch_slots_per_cu(), 32u);
 
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   EXPECT_EQ(restored.execution_threads.dispatch, source.execution_threads.dispatch);
   EXPECT_EQ(restored.execution_threads.helpers, source.execution_threads.helpers);
   restored.apply_cpu_dispatch_threads();
@@ -3502,7 +3565,8 @@ TEST(CheckpointTest, RoundTripsCdna5WgpIds) {
   test::ScopedTempFile checkpoint_file("rocjitsu-cdna5-wgp-checkpoint-");
   config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
                           source.cpu_dispatch_threads);
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   ASSERT_EQ(restored.soc()->num_xcds(), source.soc()->num_xcds());
   auto *restored_xcd = restored.soc()->xcd(0);
   ASSERT_EQ(restored_xcd->num_shader_engines(), source_xcd->num_shader_engines());
@@ -3547,7 +3611,8 @@ TEST(CheckpointTest, LegacyAbsentShaderArrayWidthKeepsWgpIdUnsupportedAcrossResa
   test::ScopedTempFile checkpoint_file("rocjitsu-legacy-wgp-checkpoint-");
   checkpoint_file.write(std::string_view(reinterpret_cast<const char *>(builder.GetBufferPointer()),
                                          builder.GetSize()));
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   auto *cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(13);
   auto *wf = cu->dispatch_wf(0, 0, 32, 8);
   ASSERT_NE(wf, nullptr);
@@ -3557,7 +3622,8 @@ TEST(CheckpointTest, LegacyAbsentShaderArrayWidthKeepsWgpIdUnsupportedAcrossResa
   EXPECT_EQ(value, 0u);
   config::save_checkpoint(checkpoint_file.path(), *restored.soc(), 0, restored.engine_config,
                           restored.cpu_dispatch_threads);
-  auto resaved = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig resaved;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), resaved));
   auto *resaved_wf = resaved.soc()->xcd(0)->shader_engine(0)->compute_unit(13)->wf(0);
   ASSERT_NE(resaved_wf, nullptr);
   ASSERT_FALSE(resaved_wf->is_halted());
@@ -3576,7 +3642,8 @@ TEST(CheckpointTest, LegacyAbsentCpuDispatchThreadsStaysSerial) {
   EXPECT_FALSE(flatbuffers::IsFieldPresent(checkpoint->config(),
                                            fb::SimulationConfig::VT_CPU_DISPATCH_THREADS));
 
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   EXPECT_EQ(restored.cpu_dispatch_threads, 1u);
   EXPECT_EQ(restored.async_helper_threads, 0);
   EXPECT_EQ(restored.execution_threads.helpers, 0u);
@@ -3589,7 +3656,8 @@ TEST(CheckpointTest, LegacyAllocationTableRestoresWithoutHelpers) {
   ASSERT_NE(stored->thread_allocations(), nullptr);
   ASSERT_EQ(stored->thread_allocations()->size(), 1u);
   EXPECT_FALSE(flatbuffers::IsFieldPresent(stored, fb::SimulationConfig::VT_ASYNC_HELPER_THREADS));
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   EXPECT_FALSE(restored.legacy_auto_dispatch);
   EXPECT_EQ(restored.async_helper_threads, 0);
   EXPECT_EQ(restored.thread_allocations, (std::vector<config::ExecutionThreadChoice>{{1, 2, 0}}));
@@ -3606,7 +3674,8 @@ TEST(CheckpointTest, LegacyAutomaticDispatchKeepsHostSizingAcrossResaves) {
   ASSERT_EQ(stored->thread_allocations(), nullptr);
 
   const uint32_t expected = std::min(std::max(amdgpu::available_host_threads(), 1u), 8u);
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   EXPECT_EQ(restored.cpu_dispatch_threads, 0u);
   restored.apply_cpu_dispatch_threads();
   EXPECT_EQ(restored.soc()->dispatch_threads(), expected);
@@ -3619,7 +3688,8 @@ TEST(CheckpointTest, LegacyAutomaticDispatchKeepsHostSizingAcrossResaves) {
   test::ScopedTempFile resaved_file("rocjitsu-legacy-auto-resaved-");
   ASSERT_EQ(rj_vm_save_checkpoint(vm.get(), resaved_file.path().c_str(), 0),
             ROCJITSU_STATUS_SUCCESS);
-  auto resaved = config::restore_checkpoint(resaved_file.path());
+  config::LoadedConfig resaved;
+  ASSERT_TRUE(test::restore_valid_checkpoint(resaved_file.path(), resaved));
   resaved.apply_cpu_dispatch_threads();
   EXPECT_EQ(resaved.cpu_dispatch_threads, 0u);
   EXPECT_EQ(resaved.soc()->dispatch_threads(), expected);
@@ -3642,7 +3712,8 @@ TEST(CApiTest, CheckpointRoundTripPreservesAsyncHelperPolicy) {
   test::ScopedTempFile checkpoint_file("rocjitsu-helper-policy-");
   ASSERT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint_file.path().c_str(), 0),
             ROCJITSU_STATUS_SUCCESS);
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   EXPECT_EQ(restored.async_helper_threads, -1);
   EXPECT_EQ(restored.execution_threads.helpers, 2u);
   EXPECT_EQ(restored.thread_allocations, source->loaded.thread_allocations);
@@ -3661,7 +3732,8 @@ TEST(CheckpointTest, PresentEmptyAllocationTableKeepsSerialFallback) {
   const auto *stored = fb::GetSimulationCheckpoint(bytes.data())->config();
   ASSERT_NE(stored->thread_allocations(), nullptr);
   EXPECT_EQ(stored->thread_allocations()->size(), 0u);
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   restored.apply_cpu_dispatch_threads();
   EXPECT_EQ(restored.soc()->dispatch_threads(), 1u);
 }
@@ -3697,7 +3769,8 @@ TEST(CheckpointTest, RoundTripsGwsWaitLimits) {
   test::ScopedTempFile checkpoint("rocjitsu-gws-limit-");
   config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
                           source.cpu_dispatch_threads);
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
   EXPECT_EQ(restored_se->compute_unit(0)->config().gws_wait_limit, 0u);
   EXPECT_EQ(restored_se->compute_unit(1)->config().gws_wait_limit, 17u);
@@ -3730,7 +3803,8 @@ TEST(CheckpointTest, RoundTripsExplicitUnboundedFunctionalQuantum) {
   EXPECT_TRUE(first_state->functional_quantum_present());
   EXPECT_EQ(first_state->functional_quantum(), 0u);
 
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
   EXPECT_EQ(restored_se->compute_unit(0)->config().functional_quantum, 0u);
   EXPECT_EQ(restored_se->compute_unit(1)->config().functional_quantum, 0u);
@@ -3748,7 +3822,8 @@ TEST(CheckpointTest, RoundTripsHeterogeneousFunctionalQuantum) {
   config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
                           source.cpu_dispatch_threads);
 
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
   EXPECT_EQ(restored_se->compute_unit(0)->config().functional_quantum, 7u);
   EXPECT_EQ(restored_se->compute_unit(1)->config().functional_quantum, 37u);
@@ -3772,7 +3847,8 @@ TEST(CheckpointTest, RoundTripsWaitCheckingModes) {
     test::ScopedTempFile checkpoint("rocjitsu-wait-mode-checkpoint-");
     config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
                             source.cpu_dispatch_threads);
-    auto restored = config::restore_checkpoint(checkpoint.path());
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
     for (auto *xcd : restored.soc()->xcds()) {
       for (auto *se : xcd->shader_engines()) {
         for (auto *cu : se->compute_units()) {
@@ -3802,7 +3878,8 @@ TEST(CheckpointTest, RoundTripsIndependentPerCuWaitSettings) {
   test::ScopedTempFile checkpoint("rocjitsu-per-cu-wait-checkpoint-");
   config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
                           source.cpu_dispatch_threads);
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   auto *se = restored.soc()->xcd(0)->shader_engine(0);
   EXPECT_EQ(se->compute_unit(0)->config().memory_wait_diagnostics,
             amdgpu::MemoryWaitDiagnostics::Off);
@@ -3840,7 +3917,8 @@ TEST(CheckpointTest, PreservesCdnaSimdIdsWithSparseWaveSlots) {
     test::ScopedTempFile checkpoint_file("rocjitsu-simd-identity-");
     config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
                             source.cpu_dispatch_threads);
-    auto restored = config::restore_checkpoint(checkpoint_file.path());
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
     auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
     for (const auto &[cu_id, slot, simd] : residents) {
       SCOPED_TRACE(cu_id);
@@ -3905,7 +3983,8 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
                           loaded.cpu_dispatch_threads);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   EXPECT_EQ(restored.memory()->read32(0x1000), 0xDEADBEEFu);
   EXPECT_EQ(restored.memory()->read64(0x2000), 0x0123456789ABCDEFULL);
   EXPECT_EQ(restored.exec_mode, simdojo::ExecMode::CLOCKED);
@@ -3929,7 +4008,8 @@ TEST(CheckpointTest, SaveAndRestoreLazySgprs) {
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
                           loaded.cpu_dispatch_threads);
   EXPECT_EQ(cu->sgpr_file().materialized_chunk_count(), 0u);
-  auto zero_restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig zero_restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), zero_restored));
   auto *zero_cu = zero_restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   EXPECT_EQ(zero_cu->sgpr_file().materialized_chunk_count(), 0u);
   for (uint32_t slot = 0; slot < 10; ++slot) {
@@ -3945,7 +4025,8 @@ TEST(CheckpointTest, SaveAndRestoreLazySgprs) {
     cu->write_sgpr(base + reg, 0xA5000000u + reg);
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 43, loaded.engine_config,
                           loaded.cpu_dispatch_threads);
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   for (uint32_t slot = 0; slot < 10; ++slot) {
     ASSERT_FALSE(restored_cu->wf(slot)->is_halted());
@@ -4026,7 +4107,8 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   EXPECT_EQ(saved_wavefront->vgprs()->size(),
             cu->vgpr_allocation_block_size() * 64u * sizeof(uint32_t));
 
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   auto *restored_soc = restored.soc();
   ASSERT_NE(restored_soc, nullptr);
   auto *restored_cu = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0);
@@ -4124,7 +4206,8 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
   EXPECT_EQ(saved_wavefront->vgprs()->size(),
             cu->vgpr_allocation_block_size() * 64u * sizeof(uint32_t));
 
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   auto *restored_soc = restored.soc();
   ASSERT_NE(restored_soc, nullptr);
   auto *restored_cp = restored_soc->xcd(0)->command_processor();
@@ -4213,7 +4296,8 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   EXPECT_EQ(saved_wavefront->vgprs()->size(),
             cu->vgpr_allocation_block_size() * 32u * sizeof(uint32_t));
 
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   auto *restored_soc = restored.soc();
   ASSERT_NE(restored_soc, nullptr);
   auto *restored_wf = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
@@ -4271,7 +4355,8 @@ TEST(CheckpointTest, SaveAndRestoreCdnaBranchStack) {
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
                           loaded.cpu_dispatch_threads);
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   ASSERT_NE(restored.soc(), nullptr);
   auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   auto *restored_wf = restored_cu->wf(0);
@@ -4434,7 +4519,8 @@ TEST(CheckpointTest, RoundTripsWorkgroupCoordinates) {
   ASSERT_NO_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config,
                                           loaded.cpu_dispatch_threads));
 
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(restored_cu, nullptr);
   ASSERT_EQ(restored_cu->num_wfs(), 1u);
@@ -4735,14 +4821,16 @@ TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
   // source host's effective width. The legacy dispatch-only override must
   // still honor a smaller host or cap independently of the restored table.
   {
-    auto restored_for_host = config::restore_checkpoint(checkpoint_file.path());
+    config::LoadedConfig restored_for_host;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored_for_host));
     ASSERT_EQ(restored_for_host.cpu_dispatch_threads, 0u);
     restored_for_host.override_cpu_dispatch_threads(/*hardware_threads=*/2);
     ASSERT_NE(restored_for_host.soc(), nullptr);
     EXPECT_EQ(restored_for_host.soc()->dispatch_threads(), 2u);
   }
   {
-    auto restored_for_cap = config::restore_checkpoint(checkpoint_file.path());
+    config::LoadedConfig restored_for_cap;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored_for_cap));
     ASSERT_EQ(restored_for_cap.cpu_dispatch_threads, 0u);
     restored_for_cap.override_cpu_dispatch_threads(/*hardware_threads=*/128,
                                                    /*automatic_thread_cap=*/5);
