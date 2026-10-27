@@ -6,6 +6,11 @@
 
 #pragma once
 
+// size_t below; this header is included first by GinAnvilPlugin_test.cpp and by
+// sibling targets built as LANGUAGE CXX, where the HIP compilation prelude that
+// would otherwise declare it is absent.
+#include <cstddef>
+
 #include <vector>
 
 namespace GinAnvilPluginStubs {
@@ -15,6 +20,7 @@ void Reset();
 void SetProbeResult(int result);
 void SetBootstrapFail(bool fail);
 void SetBootstrapNranks(int nranks);
+void SetBootstrapPeerThreshold(size_t threshold);
 // Queue one allgather payload. Each sizeof(int) allgather consumes the front
 // entry, so a second call can inject a peer-reported missing vector.
 void SetBootstrapIntResult(const int* values, int count);
@@ -23,6 +29,16 @@ void SetFactoryNullHandles(bool nullHandles);
 void SetLsaAddrFail(bool fail);
 // Also clears the latched input base, so the next resolved address maps to `addr`.
 void SetLsaSelfAddr(void* addr);
+void SetUseFabricMem(bool use);
+void SetFabricLsaCapable(bool capable);
+void SetFabricAddSelfFail(bool fail);
+void SetFabricExchangeFail(bool fail);
+void SetFabricPeerBase(void* ptr);
+void SetFabricPeerStride(size_t stride);
+void SetFabricVmmQueryOk(bool ok);
+void SetFabricRetainOk(bool ok);
+/** ncclFabricMemHandler instances constructed and not yet destroyed. */
+int LiveFabricHandlers();
 // Positive: simulate missing for the next N verify calls. Negative: always. Zero (default): never.
 void SetConnCheckMissingCalls(int calls);
 int GetConnCheckWriteCalls();

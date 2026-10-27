@@ -8,6 +8,8 @@
 #include "common_cast.h"
 #include "connect_cast.h"
 
+#include "archinfo.h"
+#include "cudawrap.h"
 #include "gin/gin_host.h"
 #include "gin_cast.h"
 
@@ -88,7 +90,21 @@ extern ncclGin_t IbCastGinIbGdaki;
 // backend and by the IB-CAST RMA proxy backend (IbCastRmaIbProxy). Proxy GIN over
 // IB-CAST is provided generically by ncclGinProxy layered on top of the RMA
 // backend, so there is no bespoke IB-CAST GIN proxy vtable anymore.
+static bool IbCastGinIbSkipVerbsInit(int type) {
+  if (type == (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return true;
+  if (type >= 0) return false;
+  int dev = 0;
+  if (cudaGetDevice(&dev) != cudaSuccess) return false;
+  char arch[64];
+  if (GetGcnArchName(dev, arch) != 0) return false;
+  return IsArchMatch(arch, "gfx1250");
+}
+
 ncclResult_t IbCastGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction, int type) {
+  if (IbCastGinIbSkipVerbsInit(type)) {
+    INFO(NCCL_INIT | NCCL_NET, "RMA/IB-CAST: skip verbs init (NCCL_GIN_TYPE=%d)", type);
+    return ncclInternalError;
+  }
   NCCLCHECK(IbCastInitDevices(logFunction, nullptr));
   if (IbCastNDevs <= 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
 

@@ -73,6 +73,13 @@
       "args": ""
     },
     {
+      "name": "rccl-gin-fabric-ll-policy-ut",
+      "kind": "fixtures",
+      "bin": "rccl-UnitTestsGinFabricLLPolicy",
+      "env": [],
+      "args": ""
+    },
+    {
       "name": "rccl-gin-conn-check-plugin-ut",
       "kind": "fixtures",
       "bin": "rccl-UnitTestsGinAnvilPlugin",

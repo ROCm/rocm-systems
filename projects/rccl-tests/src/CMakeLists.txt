@@ -145,6 +145,68 @@ endif()
 add_rccl_test(all_gather)
 add_rccl_test(all_reduce)
 add_rccl_test(alltoall)
+if (ENABLE_DEVICE_API)
+    # RCCL_SOURCE_DIR is resolved once by the parent CMakeLists (mono-repo layout
+    # probe), so there is no second copy of that assumption here.
+    set(_rccl_device_inc "")
+    if (DEFINED ENV{RCCL_INSTALL_PREFIX})
+        set(_rccl_device_inc "$ENV{RCCL_INSTALL_PREFIX}/include")
+    else()
+        foreach(_rccl_prefix IN LISTS CMAKE_PREFIX_PATH)
+            if (EXISTS "${_rccl_prefix}/include/nccl.h")
+                set(_rccl_device_inc "${_rccl_prefix}/include")
+                break()
+            endif()
+        endforeach()
+    endif()
+    # common.cu (rccl_common) must see the same ncclDevComm as librccl. Keep
+    # the install prefix ahead of hip::device's /opt/rocm. Do not add
+    # ${RCCL_SOURCE_DIR}/src/include: it shadows rccl-tests os.h.
+    set(_rccl_dev_api_targets rccl_common alltoall_perf all_gather_perf)
+    set(_rccl_device_inc_dirs "")
+    if (_rccl_device_inc)
+        list(APPEND _rccl_device_inc_dirs "${_rccl_device_inc}")
+    endif()
+    if (RCCL_SOURCE_DIR)
+        list(APPEND _rccl_device_inc_dirs ${RCCL_SOURCE_DIR}/src)
+        if (NOT EXISTS "${RCCL_SOURCE_DIR}/src/include/nccl_device/gin/anvil_sdma/gin_fabric_ll_a2a_device.h")
+            message(FATAL_ERROR
+                "RCCL_SOURCE_DIR=${RCCL_SOURCE_DIR} is missing gin_fabric_ll_a2a_device.h")
+        endif()
+        if (NOT EXISTS "${RCCL_SOURCE_DIR}/src/include/gin/gin_fabric_a2a_host.h")
+            message(FATAL_ERROR
+                "RCCL_SOURCE_DIR=${RCCL_SOURCE_DIR} is missing gin_fabric_a2a_host.h")
+        endif()
+    endif()
+    foreach(_rccl_dev_tgt IN LISTS _rccl_dev_api_targets)
+        if (TARGET ${_rccl_dev_tgt})
+            foreach(_rccl_dev_inc IN LISTS _rccl_device_inc_dirs)
+                target_include_directories(${_rccl_dev_tgt} BEFORE PRIVATE "${_rccl_dev_inc}")
+            endforeach()
+        endif()
+    endforeach()
+endif()
+if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
+    target_compile_definitions(alltoall_perf PRIVATE ENABLE_ROCSHMEM_GIN)
+    target_compile_options(alltoall_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
+    # --whole-archive: librccl.so (ENABLE_ROCSHMEM_GIN) leaves rocshmem host
+    # symbols unresolved (--allow-shlib-undefined).  The executable must pull
+    # in ALL rocshmem symbols (not just those it references directly) so that
+    # -rdynamic exports them for librccl.so to resolve at runtime.
+    target_link_libraries(alltoall_perf PRIVATE
+        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
+    target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
+
+    # GIN-SDMA hybrid AllGather (all_gather_perf -D 3): same device-RDC link as
+    # alltoall_perf so the GinHybridAllGatherKernel resolves the GIN device backend.
+    if (ENABLE_DEVICE_API)
+      target_compile_definitions(all_gather_perf PRIVATE ENABLE_DEVICE_API)
+    endif()
+    target_compile_options(all_gather_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
+    target_link_libraries(all_gather_perf PRIVATE
+        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
+    target_link_options(all_gather_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
+endif()
 if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem AND RCCL_SOURCE_DIR)
     add_executable(gin_rocshmem_gda_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu)
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu PROPERTIES LANGUAGE CXX)
