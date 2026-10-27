@@ -16,6 +16,7 @@
  */
 
 #include "mempool_common.hh"
+#include "ipc_socket_com.hh"
 #include <hip_test_process.hh>
 
 static int DATA_SIZE() {
