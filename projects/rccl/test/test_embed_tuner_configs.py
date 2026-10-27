@@ -31,7 +31,6 @@ from pathlib import Path
 
 import pytest
 
-# test/ -> rccl root
 RCCL_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = RCCL_ROOT / "tuner" / "embed_tuner_configs.py"
 TUNER_DIR = RCCL_ROOT / "tuner"
@@ -67,6 +66,7 @@ def raw_string_contents(header):
 # Invocation errors
 # ---------------------------------------------------------------------------
 
+@pytest.mark.script
 def test_no_args_exits_nonzero():
     result = subprocess.run([sys.executable, str(SCRIPT)], capture_output=True, text=True)
     assert result.returncode != 0
@@ -74,6 +74,7 @@ def test_no_args_exits_nonzero():
     assert "usage" in combined.lower()
 
 
+@pytest.mark.script
 def test_too_many_args_exits_nonzero():
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "a", "b", "c"],
@@ -87,6 +88,7 @@ def test_too_many_args_exits_nonzero():
 # Happy-path header structure
 # ---------------------------------------------------------------------------
 
+@pytest.mark.script
 def test_single_csv_produces_valid_header(tmp_path):
     write_csv(tmp_path, "rccl_tuner_gfx950.csv", "allreduce,0,65536,tree,ll,1,1,8,-1,-1\n")
     out = tmp_path / "out.h"
@@ -103,6 +105,7 @@ def test_single_csv_produces_valid_header(tmp_path):
     assert "1 config(s)" in header
 
 
+@pytest.mark.script
 def test_empty_dir_produces_sentinel_only_header(tmp_path):
     out = tmp_path / "out.h"
     result = run(tmp_path, out)
@@ -114,6 +117,7 @@ def test_empty_dir_produces_sentinel_only_header(tmp_path):
     assert not re.search(r'"rccl_tuner[^"]+\.csv"', header)
 
 
+@pytest.mark.script
 def test_non_matching_csv_not_embedded(tmp_path):
     write_csv(tmp_path, "notes.csv", "some,data\n")
     write_csv(tmp_path, "rccl_tuner_gfx950.csv", "allreduce,0,1024,ring,ll,1,1,8\n")
@@ -126,6 +130,7 @@ def test_non_matching_csv_not_embedded(tmp_path):
     assert "rccl_tuner_gfx950.csv" in header
 
 
+@pytest.mark.script
 def test_multiple_csvs_are_sorted(tmp_path):
     write_csv(tmp_path, "rccl_tuner_gfx942.csv",  "allreduce,0,1024,ring,ll,1,1,8\n")
     write_csv(tmp_path, "rccl_tuner_gfx950.csv",  "allreduce,0,2048,tree,ll,1,1,8\n")
@@ -142,6 +147,7 @@ def test_multiple_csvs_are_sorted(tmp_path):
     assert "3 config(s)" in header
 
 
+@pytest.mark.script
 def test_output_dir_created_when_missing(tmp_path):
     write_csv(tmp_path, "rccl_tuner_gfx950.csv", "allreduce,0,1024,ring,ll,1,1,8\n")
     out = tmp_path / "subdir" / "nested" / "out.h"
@@ -155,6 +161,7 @@ def test_output_dir_created_when_missing(tmp_path):
 # Round-trip correctness
 # ---------------------------------------------------------------------------
 
+@pytest.mark.script
 def test_embedded_content_matches_source_file(tmp_path):
     csv_content = (
         "# comment line\n"
@@ -170,6 +177,7 @@ def test_embedded_content_matches_source_file(tmp_path):
     assert contents[0] == csv_content
 
 
+@pytest.mark.script
 def test_multiline_csv_with_comments_embedded_verbatim(tmp_path):
     """The script must not strip comments or blank lines -- csv_tuner.cc does that."""
     csv_content = (
@@ -191,6 +199,7 @@ def test_multiline_csv_with_comments_embedded_verbatim(tmp_path):
 # No-change guard
 # ---------------------------------------------------------------------------
 
+@pytest.mark.script
 def test_no_change_guard_does_not_rewrite(tmp_path):
     write_csv(tmp_path, "rccl_tuner_gfx950.csv", "allreduce,0,1024,ring,ll,1,1,8\n")
     out = tmp_path / "out.h"
@@ -205,6 +214,7 @@ def test_no_change_guard_does_not_rewrite(tmp_path):
     assert mtime_first == mtime_second, "file was rewritten on second run with identical inputs"
 
 
+@pytest.mark.script
 def test_change_guard_rewrites_when_content_changes(tmp_path):
     write_csv(tmp_path, "rccl_tuner_gfx950.csv", "allreduce,0,1024,ring,ll,1,1,8\n")
     out = tmp_path / "out.h"
@@ -220,6 +230,7 @@ def test_change_guard_rewrites_when_content_changes(tmp_path):
     assert mtime_second > mtime_first, "file was not rewritten after CSV content changed"
 
 
+@pytest.mark.script
 def test_change_guard_rewrites_when_csv_added(tmp_path):
     write_csv(tmp_path, "rccl_tuner_gfx950.csv", "allreduce,0,1024,ring,ll,1,1,8\n")
     out = tmp_path / "out.h"
@@ -235,10 +246,28 @@ def test_change_guard_rewrites_when_csv_added(tmp_path):
     assert mtime_second > mtime_first, "file was not rewritten after a new CSV was added"
 
 
+@pytest.mark.script
+def test_change_guard_rewrites_when_csv_removed(tmp_path):
+    write_csv(tmp_path, "rccl_tuner_gfx942.csv", "allreduce,0,1024,ring,ll,1,1,8\n")
+    write_csv(tmp_path, "rccl_tuner_gfx950.csv", "allreduce,0,2048,tree,ll,1,1,8\n")
+    out = tmp_path / "out.h"
+
+    run(tmp_path, out)
+    mtime_first = out.stat().st_mtime
+
+    time.sleep(0.05)
+    (tmp_path / "rccl_tuner_gfx942.csv").unlink()
+    run(tmp_path, out)
+    mtime_second = out.stat().st_mtime
+
+    assert mtime_second > mtime_first, "file was not rewritten after a CSV was removed"
+
+
 # ---------------------------------------------------------------------------
 # Validation / error exits
 # ---------------------------------------------------------------------------
 
+@pytest.mark.script
 def test_content_with_raw_terminator_rejected(tmp_path):
     bad_content = "allreduce,0,1024,ring,ll,1,1,8\n" + RAW_TERMINATOR + "\n"
     write_csv(tmp_path, "rccl_tuner_gfx950.csv", bad_content)
@@ -249,6 +278,7 @@ def test_content_with_raw_terminator_rejected(tmp_path):
     assert not out.exists(), "output file should not be written on validation failure"
 
 
+@pytest.mark.script
 def test_filename_with_quote_rejected(tmp_path):
     try:
         write_csv(tmp_path, 'rccl_tuner_bad"name.csv', "allreduce,0,1024,ring,ll,1,1,8\n")
@@ -271,6 +301,7 @@ def _real_csvs():
     )
 
 
+@pytest.mark.real_data
 def test_real_tuner_dir_succeeds(tmp_path):
     csvs = _real_csvs()
     if not csvs:
@@ -286,6 +317,7 @@ def test_real_tuner_dir_succeeds(tmp_path):
         assert f'"{name}"' in header
 
 
+@pytest.mark.real_data
 def test_real_tuner_content_roundtrip(tmp_path):
     """Every real CSV must survive the embed round-trip byte-for-byte.
 
@@ -310,6 +342,7 @@ def test_real_tuner_content_roundtrip(tmp_path):
         assert embedded == original, f"round-trip mismatch for {name}"
 
 
+@pytest.mark.real_data
 def test_real_header_is_reproducible(tmp_path):
     """Two consecutive runs on the real data must produce identical output."""
     csvs = _real_csvs()
