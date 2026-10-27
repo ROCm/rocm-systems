@@ -391,13 +391,14 @@ TEST_CASE("Unit_HRR_HostBudget_ManagedAllocationReturnsChargeOnFree", "[hrr]") {
 /**
  * Test Description
  * ----------------
- *   - host_landing_buffer charges only a buffer's growth, hands back the same
- *     buffer for a smaller request, and on a refusal returns null, ends the
- *     replay and leaves the buffer as it was.
+ *   - host_landing_buffer hands back the same buffer for a smaller request,
+ *     charges a larger one whole (the outgrown block stays resident for the
+ *     nodes holding it), and on a refusal returns null, ends the replay and
+ *     leaves the buffer as it was.
  */
-TEST_CASE("Unit_HRR_HostBudget_LandingBufferChargesGrowthOnly", "[hrr]") {
+TEST_CASE("Unit_HRR_HostBudget_LandingBufferChargesWholeBlock", "[hrr]") {
   PlaybackContext ctx;
-  ctx.host_budget.set_cap(100);
+  ctx.host_budget.set_cap(200);
 
   void* a = ctx.host_landing_buffer(0x10, 64);
   REQUIRE(a != nullptr);
@@ -406,15 +407,37 @@ TEST_CASE("Unit_HRR_HostBudget_LandingBufferChargesGrowthOnly", "[hrr]") {
   CHECK(ctx.host_landing_buffer(0x10, 32) == a);  // smaller: same buffer, no charge
   CHECK(ctx.host_budget.used() == 64);
 
-  void* b = ctx.host_landing_buffer(0x10, 96);  // growth of 32: fits
+  void* b = ctx.host_landing_buffer(0x10, 96);  // a new 96-byte block; the 64 stays: 160 fits
   REQUIRE(b != nullptr);
-  CHECK(ctx.host_budget.used() == 96);
+  CHECK(b != a);
+  CHECK(ctx.host_budget.used() == 160);
 
   (void)hrr_test::capture_stderr([&] { CHECK(ctx.host_landing_buffer(0x10, 200) == nullptr); });
-  CHECK(ctx.host_budget.used() == 96);
+  CHECK(ctx.host_budget.used() == 160);
   CHECK(ctx.fatal_error.load());
+  CHECK(ctx.host_landing_buffer(0x10, 96) == b);  // the refusal left the buffer as it was
 
   CHECK(ctx.host_landing_buffer(0, 8) == nullptr);  // a null recorded key stays null
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A graph node keeps the host pointer it was given, so growing the buffer
+ *     for the same recorded key must not free it: the pointer from before the
+ *     growth stays writable (AddressSanitizer aborts on a write through a freed
+ *     block).
+ */
+TEST_CASE("Unit_HRR_HostBudget_LandingBufferPointerSurvivesGrowth", "[hrr]") {
+  PlaybackContext ctx;
+
+  auto* n1 = static_cast<uint8_t*>(ctx.host_landing_buffer(0x20, 16));
+  REQUIRE(n1 != nullptr);
+  REQUIRE(ctx.host_landing_buffer(0x20, 4096) != nullptr);  // grows the same key
+
+  // Launching graph 1 now writes through the pointer node 1 was given.
+  std::memset(n1, 0x44, 16);
+  CHECK(n1[15] == 0x44);
 }
 
 /** @} */
