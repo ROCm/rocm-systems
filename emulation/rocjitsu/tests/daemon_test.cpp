@@ -269,6 +269,13 @@ protected:
     const std::string output{std::istreambuf_iterator<char>(daemon_log),
                              std::istreambuf_iterator<char>()};
     EXPECT_FALSE(rocjitsu::test::has_sanitizer_diagnostic(output)) << output;
+    if (expected_daemon_diagnostic_) {
+      const ::testing::Matcher<const std::string &> diagnostic =
+          ::testing::ContainsRegex(expected_daemon_diagnostic_);
+      EXPECT_TRUE(diagnostic.Matches(output))
+          << "expected daemon diagnostic: " << expected_daemon_diagnostic_ << '\n'
+          << output;
+    }
     if (HasFailure())
       std::fputs(output.c_str(), stderr);
     std::filesystem::remove_all(tmp_dir_);
@@ -375,6 +382,7 @@ protected:
   std::string runtime_dir_;
   std::string sock_path_;
   std::string config_path_;
+  const char *expected_daemon_diagnostic_ = nullptr;
 };
 
 // --- hip_vector_add_test ---
@@ -387,6 +395,9 @@ TEST_F(DaemonTest, HipVectorAdd) {
 #ifdef RJ_HAS_INSTRUCTION_FAILURE_TEST
 TEST_F(DaemonTest, HipUnsupportedInstructionExitsWithFailure) {
   expected_daemon_exit_ = EXIT_FAILURE;
+  expected_daemon_diagnostic_ =
+      "CU .*could not execute s_cbranch_i_fork.*pc=.*pid=.*qid=.*dispatch=.*unimplemented "
+      "instruction";
   auto r = run_hip_test(hip_instruction_failure_bin(),
                         "HipDaemonInstructionFailureTest.UnsupportedInstructionExitsWithFailure");
   EXPECT_EQ(r.exit_code, 0) << r.output;
@@ -394,6 +405,7 @@ TEST_F(DaemonTest, HipUnsupportedInstructionExitsWithFailure) {
 
 TEST_F(DaemonTest, HipDecodeFailureExitsWithFailure) {
   expected_daemon_exit_ = EXIT_FAILURE;
+  expected_daemon_diagnostic_ = "CU .*could not decode.*pc=.*pid=.*qid=.*dispatch=.*0xbfff0000";
   auto r = run_hip_test(hip_instruction_failure_bin(),
                         "HipDaemonInstructionFailureTest.DecodeFailureExitsWithFailure");
   EXPECT_EQ(r.exit_code, 0) << r.output;
@@ -444,6 +456,7 @@ TEST_F(DaemonTest, HipFatalDecodeDisconnectsValidClient) {
   ASSERT_TRUE(std::filesystem::exists(ready_path)) << "valid client did not complete its kernel";
 
   expected_daemon_exit_ = EXIT_FAILURE;
+  expected_daemon_diagnostic_ = "CU .*could not decode.*pc=.*pid=.*qid=.*dispatch=.*0xbfff0000";
   const ProcessResult faulting =
       run_hip_test(hip_instruction_failure_bin(),
                    "HipDaemonInstructionFailureTest.DecodeFailureExitsWithFailure");
