@@ -708,6 +708,7 @@ struct ncclKernelComm {
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
 #if ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+  int tdmSimpleReduceEnable; // RCCL: route reduction-shaped SIMPLE slices through the TDM mover
 #endif
 #if ENABLE_TDM_PRIM_LL128
   int tdmLl128Enable; // RCCL: route LL128 user-buffer legs through the async-to-LDS engine

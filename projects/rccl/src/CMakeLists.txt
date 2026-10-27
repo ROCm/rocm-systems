@@ -91,6 +91,7 @@ set(SRC_FILES
   device/tdm/ll128Tdm.h
   device/tdm/syncPolicy.h
   device/tdm/tdmCopy.h
+  device/tdm/tdmReduce.h
   algorithms/dda/device/device_buffer.cc
   diagnostics.cc
   diagnostics.h
