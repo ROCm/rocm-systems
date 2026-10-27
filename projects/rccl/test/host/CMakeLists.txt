@@ -206,6 +206,7 @@ function(rccl_define_micro_source_lists)
     rma-proxy-launch-test.cc            # RMA proxy queue + stream-memop coverage
     rma-proxy-progress-test.cc
     gin-plugin-init-test.cc
+    rma-plugin-init-test.cc              # src/plugin/rma.cc ncclRmaPluginInit leak fix (AICOMRCCL-3322)
     rma-test.cc
     rma-ce-test.cc
     ras-test.cc
@@ -1528,6 +1529,10 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
     # add_file_unique() renames this one. Re-check after any source-list reorder.
     RMA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc"
+    # plugin/rma.cc is the first rma.cc in SRC_FILES (src/CMakeLists.txt lists it
+    # before rma/rma.cc), so add_file_unique() keeps its name; rma/rma.cc is the
+    # one renamed to rma_tmp.cc above.
+    RMA_PLUGIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/rma.cc"
     # rma_ce.cc has no basename collision, so it keeps its own name.
     RMA_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc"
     GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
