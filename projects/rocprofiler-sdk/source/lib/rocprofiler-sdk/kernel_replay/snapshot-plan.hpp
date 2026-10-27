@@ -25,10 +25,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
-#include <new>
 #include <optional>
-#include <utility>
+#include <tuple>
 #include <vector>
 
 namespace rocprofiler
@@ -39,130 +37,98 @@ namespace memory_snapshot
 {
 namespace planning
 {
-enum class error_code : uint8_t
-{
-    none,
-    exhausted,
-    no_backing_capacity,
-    overflow,
-    metadata_failure,
-    invalid_state,
-};
-
-struct error_t
-{
-    error_code code         = error_code::none;
-    size_t     requested    = 0;
-    size_t     region_index = std::numeric_limits<size_t>::max();
-};
-
-struct slice_t
-{
-    size_t size          = 0;
-    size_t offset        = 0;
-    size_t storage_index = std::numeric_limits<size_t>::max();
-};
-
-struct result_t
-{
-    std::optional<slice_t> value{};
-    error_t                error{};
-
-    explicit       operator bool() const { return value.has_value(); }
-    slice_t&       operator*() { return *value; }
-    const slice_t& operator*() const { return *value; }
-    slice_t*       operator->() { return &*value; }
-    const slice_t* operator->() const { return &*value; }
-};
-
-class bounded_policy
-{
-public:
-    explicit bounded_policy(size_t capacity)
-    : m_capacity{capacity}
-    {}
-
-    result_t reserve(size_t size, size_t alignment)
-    {
-        if(alignment == 0) return result_t{.error = error_t{error_code::overflow, size}};
-
-        const auto remainder = m_used % alignment;
-        const auto padding   = remainder == 0 ? size_t{0} : alignment - remainder;
-        if(m_used > std::numeric_limits<size_t>::max() - padding)
-            return result_t{.error = error_t{error_code::overflow, size}};
-        const auto offset = m_used + padding;
-        if(size > std::numeric_limits<size_t>::max() - offset)
-            return result_t{.error = error_t{error_code::overflow, size}};
-        const auto end = offset + size;
-        if(end > m_capacity) return result_t{.error = error_t{error_code::exhausted, size}};
-
-        m_used = end;
-        return result_t{.value = slice_t{size, offset}};
-    }
-
-    size_t used() const { return m_used; }
-    void   reset() { m_used = 0; }
-
-private:
-    size_t m_capacity = 0;
-    size_t m_used     = 0;
-};
-
+// A piece of one region to place. Lower priority values are placed first. Callers that need
+// non-contiguous placement, such as hot or dirty pages, emit several requests for one region.
 struct request_t
 {
-    size_t    size         = 0;
-    size_t    region_index = 0;
-    uintptr_t order_key    = 0;
+    size_t   region_index  = 0;
+    size_t   region_offset = 0;
+    size_t   size          = 0;
+    uint32_t priority      = 0;
+};
+
+// The bytes one tier took from the front of a request, and where they start in its backing.
+struct reservation_t
+{
+    size_t size           = 0;
+    size_t backing_offset = 0;
 };
 
 struct placement_t
 {
-    size_t size           = 0;
     size_t region_index   = 0;
-    size_t storage_index  = std::numeric_limits<size_t>::max();
+    size_t region_offset  = 0;
+    size_t size           = 0;
+    size_t tier           = 0;
     size_t backing_offset = 0;
 };
 
-struct plan_t
-{
-    std::vector<placement_t> placements{};
-    error_t                  error{};
+// Admission policies return how many bytes from the front of a request one tier takes, at most
+// `available`. Anything they leave is offered to the next tier.
 
-    bool complete() const { return error.code == error_code::none; }
+// The request fits whole or moves on to the next tier.
+struct whole_region
+{
+    size_t admit(const request_t& request, size_t available) const
+    {
+        return request.size <= available ? request.size : 0;
+    }
 };
 
-template <typename Storage>
-plan_t
-build(std::vector<request_t> requests, Storage& storage, size_t alignment)
+// The largest prefix that fits. The split point is rounded down to a granule in region
+// coordinates, so both sides stay aligned for DMA and for the blit's 16-byte items.
+struct prefix_chunking
 {
-    auto plan = plan_t{};
-    try
-    {
-        std::sort(requests.begin(), requests.end(), [](const auto& lhs, const auto& rhs) {
-            if(lhs.order_key != rhs.order_key) return lhs.order_key < rhs.order_key;
-            return lhs.region_index < rhs.region_index;
-        });
-        plan.placements.reserve(requests.size());
+    size_t granularity = 4096;
 
-        for(const auto& request : requests)
-        {
-            auto result = storage.reserve(request.size, alignment);
-            if(!result)
-            {
-                plan.error              = result.error;
-                plan.error.region_index = request.region_index;
-                return plan;
-            }
-            plan.placements.emplace_back(placement_t{
-                request.size, request.region_index, result->storage_index, result->offset});
-        }
-    } catch(const std::bad_alloc&)
+    size_t admit(const request_t& request, size_t available) const
     {
-        plan.error = error_t{error_code::metadata_failure};
-        return plan;
+        if(request.size <= available) return request.size;
+        const auto granule = std::max<size_t>(granularity, 1);
+        const auto split   = (request.region_offset + available) / granule * granule;
+        return split > request.region_offset ? split - request.region_offset : 0;
     }
+};
 
-    return plan;
+// Places every request through `storage` in priority order. On failure the storage is reset.
+template <typename Storage>
+std::optional<std::vector<placement_t>>
+plan(Storage& storage, std::vector<request_t> requests)
+{
+    std::sort(requests.begin(), requests.end(), [](const request_t& lhs, const request_t& rhs) {
+        return std::tie(lhs.priority, lhs.region_index, lhs.region_offset) <
+               std::tie(rhs.priority, rhs.region_index, rhs.region_offset);
+    });
+
+    auto placements = std::vector<placement_t>{};
+    placements.reserve(requests.size());
+    for(const auto& request : requests)
+    {
+        if(!storage.place(request, placements))
+        {
+            storage.reset();
+            return std::nullopt;
+        }
+    }
+    return placements;
+}
+
+// Tier capacities are advisory until backing exists. If a tier cannot materialize what it was
+// given, it is disabled and every request is planned again.
+template <typename Storage>
+std::optional<std::vector<placement_t>>
+plan_and_commit(Storage& storage, const std::vector<request_t>& requests)
+{
+    for(size_t attempt = 0; attempt < Storage::tier_count; ++attempt)
+    {
+        auto placements = plan(storage, requests);
+        if(!placements) return std::nullopt;
+
+        const auto failed = storage.commit();
+        if(!failed) return placements;
+        storage.disable(*failed);
+    }
+    return std::nullopt;
 }
 }  // namespace planning
 }  // namespace memory_snapshot
