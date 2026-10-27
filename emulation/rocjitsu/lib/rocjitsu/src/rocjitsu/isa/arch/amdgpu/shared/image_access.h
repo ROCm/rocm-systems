@@ -95,7 +95,7 @@ inline ImageAddressRegisters gfx12_image_address_registers(const VimageMachineIn
 /// UNORM=0 store) or an unimplemented feature (tiling, mips, cube, MSAA,
 /// RDNA linear 1D/2D-array and 3D resources whose decoded descriptors do not
 /// provide PITCH, nonzero base array, incompatible RDNA DIM, format outside the
-/// buffer table, TFE, or LWE).
+/// buffer table, unmodeled store selector mappings, TFE, or LWE).
 inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
                                          uint32_t resource_reg,
                                          const ImageAddressRegisters &address_registers,
@@ -192,6 +192,9 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
     return fail(InstructionExecutionError::UnimplementedInstruction);
   if (!format.value())
     return util::Result::success();
+  if (!state.is_load &&
+      !image_store_selectors_supported(state.decoded_buffer_format, state.buffer_selectors))
+    return fail(InstructionExecutionError::UnimplementedInstruction);
 
   const bool has_y = resource.type != kImage1d && resource.type != kImage1dArray;
   const bool has_slice = resource.type == kImage3d || (layered && fields.da);

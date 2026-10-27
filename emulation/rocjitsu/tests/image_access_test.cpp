@@ -735,13 +735,15 @@ TEST_P(RdnaDecodedImageAccessTest,
   EXPECT_EQ(cu->read_vgpr(vb + 8, 2), 0x33333333u);
 }
 
-TEST_P(RdnaDecodedImageAccessTest, StoreDmaskExpandsPackedInputsAndUsesImagePadding) {
+TEST_P(RdnaDecodedImageAccessTest, StoreDmaskExpandsPackedInputsAndAppliesQualifiedSelectors) {
   const uint32_t vb = wf->vgpr_alloc().base;
   wf->set_exec(1);
   cu->write_vgpr(vb + 2, 0, 0);
   cu->write_vgpr(vb + 6, 0, 0);
   constexpr uint32_t kRgba32Uint = 61;
   constexpr uint32_t kBgra = 6 | (5 << 3) | (4 << 6) | (7 << 9);
+  constexpr uint32_t kXyzOne = 4 | (5 << 3) | (6 << 6) | (1 << 9);
+  constexpr uint32_t kZyxOne = 6 | (5 << 3) | (4 << 6) | (1 << 9);
   struct Case {
     uint32_t selectors;
     uint8_t dmask;
@@ -758,8 +760,13 @@ TEST_P(RdnaDecodedImageAccessTest, StoreDmaskExpandsPackedInputsAndUsesImagePadd
       // Sparse D16 inputs remain packed in VDATA but route through X/Z.
       {kIdentity, 5, true, {0x00330011}, {0x11, 0, 0x33, 0}, {0x11, 0x11, 0x33, 0x11}},
       {kBgra, 1, false, {0x11}, {0, 0, 0x11, 0}, {0x11, 0x11, 0x11, 0x11}},
-      // Image RGB1 padding retains a supplied alpha instead of forcing one.
-      {kXOne, 15, false, {1, 2, 3, 4}, {1, 0, 0, 4}, {1, 0, 0, 4}},
+      // XYZ1/ZYX1 write constant alpha independently of DMASK.
+      {kXyzOne, 15, false, {0x11, 0x22, 0x33, 0x44}, {0x11, 0x22, 0x33, 1}, {0x11, 0x22, 0x33, 1}},
+      {kXyzOne, 7, false, {0x11, 0x22, 0x33}, {0x11, 0x22, 0x33, 1}, {0x11, 0x22, 0x33, 1}},
+      {kXyzOne, 1, false, {0x11}, {0x11, 0, 0, 1}, {0x11, 0x11, 0x11, 1}},
+      {kZyxOne, 15, false, {0x11, 0x22, 0x33, 0x44}, {0x33, 0x22, 0x11, 1}, {0x33, 0x22, 0x11, 1}},
+      {kZyxOne, 7, false, {0x11, 0x22, 0x33}, {0x33, 0x22, 0x11, 1}, {0x33, 0x22, 0x11, 1}},
+      {kZyxOne, 1, false, {0x11}, {0, 0, 0x11, 1}, {0x11, 0x11, 0x11, 1}},
   };
   for (const auto &test : cases) {
     SCOPED_TRACE(testing::Message() << "selectors=" << test.selectors
@@ -774,6 +781,51 @@ TEST_P(RdnaDecodedImageAccessTest, StoreDmaskExpandsPackedInputsAndUsesImagePadd
     for (uint32_t offset = 0; offset < expected.size(); ++offset)
       EXPECT_EQ(memory.read32(kBase + offset * 4), expected[offset]) << "offset=" << offset;
   }
+}
+
+TEST_P(RdnaDecodedImageAccessTest, PackedRgbStoresWriteConstantAlpha) {
+  const uint32_t vb = wf->vgpr_alloc().base;
+  wf->set_exec(1);
+  cu->write_vgpr(vb + 2, 0, 0);
+  cu->write_vgpr(vb + 6, 0, 0);
+  constexpr uint32_t kRgba2101010Uint = 40;
+  constexpr uint32_t kXyzOne = 4 | (5 << 3) | (6 << 6) | (1 << 9);
+  constexpr uint32_t kZyxOne = 6 | (5 << 3) | (4 << 6) | (1 << 9);
+  for (const auto &[selectors, expected] :
+       {std::pair{kXyzOne, 0x11u | (0x22u << 10) | (0x33u << 20) | (1u << 30)},
+        std::pair{kZyxOne, 0x33u | (0x22u << 10) | (0x11u << 20) | (1u << 30)}}) {
+    SCOPED_TRACE(selectors);
+    bind_resource(kRgba2101010Uint, selectors);
+    for (uint32_t component = 0; component < 4; ++component)
+      cu->write_vgpr(vb + 8 + component, 0, 0x11 * (component + 1));
+    issue(false, 15);
+    EXPECT_EQ(memory.read32(kBase), expected);
+  }
+}
+
+TEST_P(RdnaDecodedImageAccessTest, UnmodeledStoreSelectorsReportUnimplemented) {
+  const uint32_t vb = wf->vgpr_alloc().base;
+  wf->set_exec(1);
+  cu->write_vgpr(vb + 2, 0, 0);
+  cu->write_vgpr(vb + 6, 0, 0);
+  constexpr uint32_t kRgba32Uint = 61;
+  constexpr uint32_t kXyzz = 4 | (5 << 3) | (6 << 6) | (6 << 9);
+  constexpr uint32_t kX000 = 4;
+  for (const uint32_t selectors : {kXyzz, kX000}) {
+    SCOPED_TRACE(selectors);
+    bind_resource(kRgba32Uint, selectors);
+    auto decoded = decode(false, {.dmask = 15});
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_TRUE(cu->execute_instruction(decoded.value().get(), *wf).failed());
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  }
+
+  // The single-channel X001 layout remains supported.
+  bind_resource(20, kXOne);
+  auto decoded = decode(false);
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_TRUE(cu->execute_instruction(decoded.value().get(), *wf).succeeded());
 }
 
 TEST_P(RdnaDecodedImageAccessTest, D16LoadPreservesAndReadsOnlyThePartialDestination) {

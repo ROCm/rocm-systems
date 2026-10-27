@@ -30,6 +30,9 @@ struct BufferFormat {
   BufferNumberFormat number = BufferNumberFormat::Uint;
 };
 
+/// @brief Whether an image store's descriptor selectors have measured inverse routing.
+bool image_store_selectors_supported(const BufferFormat &format, uint32_t selectors);
+
 /// @brief Decode @p state format/encoding, retaining channel widths and texel size.
 /// @returns False for an invalid resource format and failure for reserved encodings.
 util::FailureOr<bool> prepare_buffer_format_state(VectorMemState &state);
