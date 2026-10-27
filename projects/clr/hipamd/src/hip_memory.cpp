@@ -3320,9 +3320,31 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
 
   if (failIdx != nullptr) *failIdx = SIZE_MAX;
 
-  // Call internal batch implementation
-  hipError_t status = ihipMemcpyBatch(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs,
-                                      *hip::getStream(stream), true, failIdx);
+  // Split large batches into progressively doubling chunks so the first chunk
+  // rings the doorbell before the rest of the input is parsed.
+  constexpr size_t kChunkStart = 72;
+  constexpr size_t kChunkCap = 1024;
+  constexpr size_t kMinChunkCount = 4096;  // below this, chunking costs more than it saves
+  hip::Stream& hipStream = *hip::getStream(stream);
+  hipError_t status = hipSuccess;
+  if (GPU_BATCH_CHUNK == 0 || numAttrs > 0 || count < kMinChunkCount) {
+    status = ihipMemcpyBatch(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, hipStream, true,
+                             failIdx);
+  } else {
+    size_t off = 0;
+    size_t csz = kChunkStart;
+    while (off < count && status == hipSuccess) {
+      const size_t n = (csz < count - off) ? csz : (count - off);
+      size_t chunkFailIdx = SIZE_MAX;
+      status = ihipMemcpyBatch(dsts + off, srcs + off, sizes + off, n, nullptr, nullptr, 0,
+                               hipStream, true, &chunkFailIdx);
+      if (status != hipSuccess && failIdx != nullptr && chunkFailIdx != SIZE_MAX) {
+        *failIdx = off + chunkFailIdx;
+      }
+      off += n;
+      csz = (csz * 2 < kChunkCap) ? csz * 2 : kChunkCap;
+    }
+  }
 
   HIP_RETURN(status);
 }
