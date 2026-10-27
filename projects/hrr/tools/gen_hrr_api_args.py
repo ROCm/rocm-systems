@@ -286,6 +286,11 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipEventCreate",
     "hipEventCreateWithFlags",
     "hipEventDestroy",
+    # Elapsed time on a pair that hipExtModuleLaunchKernel marked internally.
+    # Archives from before that side effect was recorded have no hipEventRecord
+    # for the pair; HIP then returns hipErrorInvalidHandle. See
+    # playback_hipEventElapsedTime.
+    "hipEventElapsedTime",
     # Query APIs — capture only logs hipSuccess (event/stream already complete).
     # Replay may reach the same API sooner relative to GPU work; spin on
     # hipErrorNotReady until hipSuccess.  See DESIGN.md § HIP-Specific Polling.

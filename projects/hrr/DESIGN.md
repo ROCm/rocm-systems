@@ -377,7 +377,7 @@ Normal builds generate temporary files and verify them against the checked-in co
 
 The generator classifies each API:
 - **`MANUAL_CAPTURE_APIS`**: kernel launches ×4, memcpy H2D+D2H ×8, module load ×3, `__hipRegisterFatBinary`, `hipHostRegister/Unregister`, `hipMemcpy3D` variants ×4, array creation ×2, VMM, stream/memory attribute APIs, `hipMemcpyWithStream`
-- **`MANUAL_PLAYBACK_APIS`**: above plus malloc ×4, free ×2, stream create/destroy ×4, event create/destroy ×3, `hipModuleGetFunction`, the full graph chain ×4, VMM APIs ×6, and other APIs requiring non-trivial handle translation or replay logic
+- **`MANUAL_PLAYBACK_APIS`**: above plus malloc ×4, free ×2, stream create/destroy ×4, event create/destroy ×3, `hipEventElapsedTime`, `hipModuleGetFunction`, the full graph chain ×4, VMM APIs ×6, and other APIs requiring non-trivial handle translation or replay logic
 - **`NOOP_PLAYBACK_APIS`**: APIs where replay is not meaningful (stale handles, context-destroying calls, missing in ROCm SDK 6.4) — emit `return hipSuccess;` without calling the real function. These are **not replay-tested**; tests that exercise only these APIs verify capture does not crash, not that replay works.
 
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).

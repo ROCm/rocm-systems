@@ -268,9 +268,15 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipModuleLaunchKernel(fn, blocks, 1, 1, 256, 1, 1, 0, s_default,
                                   kargs, nullptr));
 
-  // 2. hipExtModuleLaunchKernel — global-work-size form, with event timing.
+  // 2. hipExtModuleLaunchKernel — global-work-size form. The runtime marks
+  //    the start and stop events itself; elapsed time must succeed on replay.
   HRR_HIP_CHECK(hipExtModuleLaunchKernel(fn, kN, 1, 1, 256, 1, 1, 0, s_default,
-                                     kargs, nullptr, nullptr, nullptr, 0));
+                                     kargs, nullptr, ev_start, ev_stop, 0));
+  HRR_HIP_CHECK(hipEventSynchronize(ev_stop));
+  {
+    float ext_ms = 0.f;
+    HRR_HIP_CHECK(hipEventElapsedTime(&ext_ms, ev_start, ev_stop));
+  }
 
   // 3. hipDrvLaunchKernelEx — Triton's default launch path since the
   //    extensible-launch migration. The config is a const-struct pointer, so
