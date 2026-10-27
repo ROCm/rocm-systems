@@ -1041,8 +1041,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroTopo -- src/graph/{xml,topo,paths,search,rome_models,connect,rings,trees}.cc, one
-  # test TU each. Own binary: rccl-UnitTestsMicroGraph links tuning_fakes.cc, which defines connect.cc's params,
+  # rccl-UnitTestsMicroTopo -- the src/graph units listed below, one test TU each.
+  # Own binary: rccl-UnitTestsMicroGraph links tuning_fakes.cc, which defines connect.cc's params,
   # and os_fakes.cc, whose CPU and sysfs seams these tests cannot drive.
   set(TEST_MICRO_TOPO_SOURCE_FILES
     xml-test.cc

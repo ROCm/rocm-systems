@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Topology fixtures for rccl-UnitTestsMicroTopo: NCCL_TOPO_FILE-style XML built in the test, parsed and
+// Topology fixtures for the src/graph microtests: NCCL_TOPO_FILE-style XML built in the test, parsed and
 // turned into a ncclTopoSystem by the real xml.cc/topo.cc, so paths and search run on real input.
 
 #ifndef RCCL_TEST_HOST_TOPO_SCENE_H_
@@ -27,7 +27,7 @@
 #include "graph/topo.h"
 #include "graph/xml.h"
 
-// Defined in topo-test.cc, which owns topo.cc's NCCL_NETDEVS_POLICY statics.
+// Defined in topo_include.cc, inside the TU owning topo.cc's NCCL_NETDEVS_POLICY statics.
 void TopoSetNetDevsPolicy(enum netDevsPolicy policy, int num);
 
 namespace topo_scene {
