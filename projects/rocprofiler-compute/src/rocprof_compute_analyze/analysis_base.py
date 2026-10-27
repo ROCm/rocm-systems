@@ -14,7 +14,6 @@ import pandas as pd
 
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -23,7 +22,10 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.expression import build_metric_value_string
-from utils.ml_api_selectors import UNSCOPED_OPERATOR_KEY
+from utils.ml_api_selectors import (
+    authorize_unscoped_operator_patterns,
+    sanitize_ml_api_selector_args,
+)
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     validate_workload,
@@ -60,61 +62,6 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
         },
     ),
 ])
-
-
-def _authorize_ml_api_operator_flags(
-    args: argparse.Namespace,
-    profiling_config: dict[str, Any],
-) -> None:
-    """Reject selectors the workload did not collect; attach unscoped patterns."""
-    saved_raw = profiling_config.get("trace_ml_api")
-    saved_selectors = [str(name) for name in saved_raw] if saved_raw else []
-    saved_set = set(saved_selectors)
-
-    list_selectors = getattr(args, "list_operators", None)
-    operator_patterns = getattr(args, "operator_patterns", None)
-
-    if list_selectors is None and operator_patterns is None:
-        return
-
-    if not saved_selectors:
-        console_error(
-            "ml api trace",
-            "Workload was not profiled with --trace-ml-api. "
-            "Cannot use --list-operators or --operator.",
-        )
-
-    requested = list(list_selectors or [])
-    if operator_patterns is not None:
-        requested.extend(
-            name for name in operator_patterns if name != UNSCOPED_OPERATOR_KEY
-        )
-    for name in requested:
-        if name in KNOWN_ML_API_BACKENDS and name not in saved_set:
-            console_error(
-                "ml api trace",
-                f'Workload was not profiled with "--trace-ml-api {name}". '
-                "Cannot use that selector with --list-operators or --operator.",
-            )
-
-    if operator_patterns is None:
-        return
-
-    bound = {}
-    unscoped = []
-    for backend, patterns in operator_patterns.items():
-        if backend == UNSCOPED_OPERATOR_KEY:
-            unscoped.extend(patterns)
-            continue
-        bound.setdefault(backend, []).extend(patterns)
-    if unscoped:
-        seen = set()
-        for name in list(saved_selectors) + ["user"]:
-            if name in seen:
-                continue
-            seen.add(name)
-            bound.setdefault(name, []).extend(unscoped)
-    args.operator_patterns = bound
 
 
 class OmniAnalyze_Base:
@@ -362,8 +309,20 @@ class OmniAnalyze_Base:
             args.path[0][0]
         )
         profiling_config = self.get_profiling_config()
-
-        _authorize_ml_api_operator_flags(args, profiling_config)
+        saved_raw = profiling_config.get("trace_ml_api")
+        saved_selectors = [str(name) for name in saved_raw] if saved_raw else []
+        list_selectors = getattr(args, "list_operators", None)
+        operator_patterns = getattr(args, "operator_patterns", None)
+        try:
+            sanitize_ml_api_selector_args(
+                list_selectors, operator_patterns, saved_selectors
+            )
+        except ValueError as error:
+            console_error("ml api trace", str(error))
+        if operator_patterns is not None:
+            args.operator_patterns = authorize_unscoped_operator_patterns(
+                operator_patterns, saved_selectors
+            )
 
         for dir_info in args.path:
             if not any([
