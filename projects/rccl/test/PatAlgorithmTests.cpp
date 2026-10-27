@@ -4,15 +4,14 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include "collectives.h"
+#include "gtest/gtest.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <sstream>
 #include <string>
 #include <vector>
-
-#include "gtest/gtest.h"
-
-#include "collectives.h"
 
 namespace RcclUnitTesting
 {
@@ -20,11 +19,9 @@ namespace RcclUnitTesting
 namespace
 {
 
-// Host model of the one-rank-per-node PAT kernels: every rank steps its own
-// PatRSAlgorithm or PatAGAlgorithm, and each step is applied the way
-// patReduce/patCopy (prims_simple.h) apply it, over FIFOs of NCCL_STEPS slots.
+// Host model of one-rank-per-node PAT: each rank's step stream applied as patReduce/patCopy apply it.
 
-using Elem = int64_t;
+using Elem = uint64_t;
 
 // One direction of a connection: the sender writes, the receiver reads.
 struct PatConn
@@ -43,12 +40,10 @@ struct PatModelConfig
     int    maxParallelFactor;
 };
 
-// Rank q's input element j. Each rank owns a hex digit, so a lost or doubled
-// contribution changes the result.
-Elem patInput(int q, size_t j, int nranks)
+// Rank q owns hex digit q (1..15, varying with j), so a lost, doubled or moved block changes the value.
+Elem patInput(int q, size_t j, int /*nranks*/)
 {
-    return (Elem{1} << (4 * q)) +
-           static_cast<Elem>(j) * (Elem{1} << (4 * nranks));
+    return static_cast<Elem>(1 + (j + 7 * q) % 15) << (4 * q);
 }
 
 class PatModel
@@ -64,7 +59,7 @@ public:
         const size_t inLen  = rs_ ? cfg.nranks * cfg.count : cfg.count;
         const size_t outLen = rs_ ? cfg.count : cfg.nranks * cfg.count;
         in_.assign(cfg.nranks, std::vector<Elem>(inLen));
-        out_.assign(cfg.nranks, std::vector<Elem>(outLen, -1));
+        out_.assign(cfg.nranks, std::vector<Elem>(outLen, ~Elem{0}));
         for(int q = 0; q < cfg.nranks; ++q)
         {
             for(size_t j = 0; j < inLen; ++j)
@@ -77,8 +72,7 @@ public:
     // Empty when every channel ran to completion without a model violation.
     std::string run()
     {
-        // An even split by element; the device aligns channel bounds to chunks,
-        // which moves where a channel starts but not the per-channel schedule.
+        // Even split; the device aligns channel bounds to chunks, which moves starts, not the schedule.
         const size_t perCh = (cfg_.count + cfg_.nChannels - 1) / cfg_.nChannels;
         for(int c = 0; c < cfg_.nChannels; ++c)
         {
@@ -169,8 +163,7 @@ private:
         {
             fail("getNextOp did not terminate");
         }
-        // Worker groups as in reduce_scatter.h: group g runs steps g,
-        // g+nGroups, ... and patBarrier keeps all groups in lockstep.
+        // As in reduce_scatter.h: group g runs steps g, g+nGroups, ... in lockstep via patBarrier.
         const int nworkers  = NCCL_PAT_NWORKERS;
         const int warp      = nworkers / cfg_.maxParallelFactor;
         const int groupSize = nworkers / (warp * pf) * warp;
@@ -182,8 +175,7 @@ private:
         st.recvAcc.assign(nDims_, 0);
     }
 
-    // FIFO slot a step uses: patReduce writes at step + stepOffset, patCopy
-    // reads there.
+    // patReduce writes at step + stepOffset; patCopy reads there.
     uint64_t sendSlot(uint64_t step, const ncclPatStep& ps) const
     {
         return rs_ ? step + ps.stepOffset : step;
@@ -206,8 +198,7 @@ private:
         return offset >= 0 && offset + nelem <= cfg_.chunkCount;
     }
 
-    // Resolves one step as patReduce/patCopy do before their first barrier.
-    // False means a wait is not met yet.
+    // Resolves one step as patReduce/patCopy do before their first barrier; false if a wait is unmet.
     bool plan(int r, const RankState& st, const ncclPatStep& ps, Op* op)
     {
         const int  nelem = ps.nelem < 0 ? 0 : ps.nelem;
@@ -307,8 +298,7 @@ private:
         return true;
     }
 
-    // Runs the next batch of rank r, one step per worker group. Every step
-    // sees the batch-start state, as all groups meet at each patBarrier.
+    // Runs rank r's next batch, one step per group, all from the batch-start state as at patBarrier.
     bool runBatch(int r, RankState& st)
     {
         std::vector<const ncclPatStep*> batch;
@@ -393,13 +383,24 @@ private:
             conns_[r][d].tail              = st.sendStep[d];
             conns_[recvPeer(r, d)][d].head = st.recvStep[d];
         }
+        int ended = 0;
         for(int g = 0; g < st.nGroups; ++g)
         {
             size_t k = st.next + g;
             if(k < st.steps.size() && st.steps[k].last != 0)
             {
                 st.groupDone[g] = true;
+                ++ended;
             }
+        }
+        // Each group leaves its loop on `last`, and patBarrier waits for every worker.
+        if(ended != 0 && ended != st.nGroups)
+        {
+            fail("rank " + std::to_string(r) + " batch at step " +
+                 std::to_string(st.next) + ": " + std::to_string(ended) +
+                 " of " + std::to_string(st.nGroups) +
+                 " worker groups end on different batches; patBarrier would hang");
+            return false;
         }
         st.next += st.nGroups;
         return true;
@@ -445,8 +446,7 @@ private:
                     break;
                 }
             }
-            // The device never runs steps past a group's last, so they must
-            // be skips.
+            // The device never runs steps past a group's last, so they must be skips.
             for(size_t k = st.next; k < st.steps.size(); ++k)
             {
                 if(!(st.steps[k].flags & PatSkipped))
@@ -470,12 +470,11 @@ private:
     std::string                       error_;
 };
 
-// Sizes that cover aggregation (count well below a chunk), several chunks per
-// channel, 1 and 2 channels, and the wave64 and wave32 parallel factors.
+// Covers aggregation, several chunks per channel, 1 and 2 channels, and wave64 and wave32 factors.
 std::vector<PatModelConfig> patModelConfigs()
 {
     std::vector<PatModelConfig> cfgs;
-    for(int nranks = 3; nranks <= 8; ++nranks)
+    for(int nranks = 3; nranks <= 16; ++nranks)
     {
         for(size_t count : {size_t{1}, size_t{5}, size_t{64}, size_t{129}})
         {
@@ -506,8 +505,7 @@ std::string describe(const PatModelConfig& c)
 
 }  // namespace
 
-// Every rank's PatRSAlgorithm stream, applied as patReduce applies it, leaves
-// each rank holding the sum of its block over all ranks.
+// Every rank's PatRSAlgorithm stream leaves each rank holding the sum of its block.
 TEST(PatRSAlgorithmTests, StepStreamsReduceScatterEveryBlock)
 {
     for(const PatModelConfig& cfg : patModelConfigs())
@@ -532,8 +530,7 @@ TEST(PatRSAlgorithmTests, StepStreamsReduceScatterEveryBlock)
     }
 }
 
-// Every rank's PatAGAlgorithm stream, applied as patCopy applies it, leaves
-// every rank holding every block, with shared and separate connections.
+// Every rank's PatAGAlgorithm stream leaves every rank holding every block.
 TEST(PatAGAlgorithmTests, StepStreamsAllGatherEveryBlock)
 {
     for(int shared = 0; shared <= 1; ++shared)

@@ -8,9 +8,9 @@
 // must report algo "PAT" and proto "SIMPLE" through the profiler plugin.
 //
 // Launch with NCCL_PAT_ENABLE=1 NCCL_ALGO=PAT NCCL_PROTO=Simple and the paths
-// that intercept PAT turned off (see the test_runner PatForced blocks). PAT
-// needs one rank per node on more than two nodes; RCCL_TEST_PAT_HOST_PER_RANK=1
-// gives every rank its own host id so ranks sharing a node also qualify.
+// that intercept PAT turned off. PAT needs one rank per node on more than two
+// nodes; RCCL_TEST_PAT_HOST_PER_RANK=1 gives every rank its own host id so
+// ranks sharing a node also qualify.
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -65,16 +65,13 @@ struct PatFunc {
 constexpr PatFunc kPatFuncs[] = {{ncclFuncReduceScatter, "ReduceScatter"},
                                  {ncclFuncAllGather, "AllGather"}};
 
-// True when the launch environment forces PAT, which this suite is built for.
+// The suite checks forced PAT, so it needs NCCL_ALGO=PAT at launch.
 bool patForcedAtLaunch() {
   const char* algo = getenv("NCCL_ALGO");
   return algo != nullptr && strcasecmp(algo, "PAT") == 0;
 }
 
-// Rank `rank`'s input element `j`, where j / count is the owner's block. In
-// place the owner's value never equals the reduction: sum adds at least 1 per
-// peer, prod multiplies by at least 2, and the owner is lowest for max and
-// highest for min. Values stay exact in half and bf16 up to 7 ranks.
+// The owner's own value never equals the reduction, so an unwritten in-place slot fails; exact to 7 ranks.
 double inputValue(int rank, size_t j, size_t count, int nranks,
                   ncclRedOp_t op) {
   const int owner = static_cast<int>(j / count);
@@ -141,8 +138,7 @@ class PatForcedMPITest : public MPITestBase {
  protected:
   void SetUp() override {
     MPITestBase::SetUp();
-    // getHostHash reads NCCL_HOSTID once per process, so this per-rank id
-    // holds for every later test in the process too.
+    // getHostHash reads NCCL_HOSTID once per process, so this id holds for later tests too.
     const char* perRank = getenv("RCCL_TEST_PAT_HOST_PER_RANK");
     if (perRank != nullptr && atoi(perRank) == 1) {
       const std::string hostId =
@@ -189,14 +185,18 @@ class PatForcedMPITest : public MPITestBase {
     return why.str();
   }
 
-  // Creates the communicator and checks the recorder and PAT preconditions.
-  // Fails rather than skips: under forced PAT, a missing PAT path is a bug.
+  // Under forced PAT a missing PAT path is a bug, so preconditions fail rather than skip.
   void createPatComm() {
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
     comm_ = getActiveCommunicator();
     stream_ = getActiveStream();
     const std::string notLoaded = recorder_.NotLoadedOnAnyRank();
     ASSERT_TRUE(notLoaded.empty()) << notLoaded;
+    const char* qps = getenv("RCCL_PAT_SHARED_QPS");
+    const bool wantShared = qps == nullptr || atoi(qps) != 0;
+    ASSERT_FALSE(MPIHelpers::anyRankTrue(comm_->patSharedQps != wantShared))
+        << "comm->patSharedQps does not match RCCL_PAT_SHARED_QPS="
+        << (qps ? qps : "unset (default 1)") << " on at least one rank";
     std::string local = patIneligibleReason(comm_);
     std::string why = mpiCoordinatedSkipReason(!local.empty(), local.c_str());
     ASSERT_TRUE(why.empty()) << why;
@@ -208,8 +208,7 @@ class PatForcedMPITest : public MPITestBase {
         comm_->nNodes);
   }
 
-  // Empty when the records since `from` hold exactly one Coll of `func` whose
-  // algo is PAT/SIMPLE (expectPat) or anything but PAT (!expectPat).
+  // Empty when the records since `from` hold one Coll of `func` with the expected algo.
   std::string checkAlgo(size_t from, const char* func, bool expectPat) {
     std::vector<RcclKchRecord> recs = recorder_.Snapshot();
     int colls = 0;
@@ -235,9 +234,7 @@ class PatForcedMPITest : public MPITestBase {
     return why.str();
   }
 
-  // Runs one collective, then checks algo and data. Returns false when the call
-  // failed on some rank. A rank whose launch fails skips the stream wait, but
-  // its peers stay inside the collective, so that case ends at the timeout.
+  // A failed local launch skips the wait, but its peers stay in the collective until the timeout.
   template <typename T, typename Launch, typename Expected>
   bool runAndCheck(const std::string& what, const char* func, bool expectPat,
                    Launch launch, const void* out, size_t outCount,
@@ -268,8 +265,7 @@ class PatForcedMPITest : public MPITestBase {
     return true;
   }
 
-  // One call's device buffers: `large` holds nranks blocks, `small` this rank's
-  // block, aliased into `large` in place.
+  // `large` holds nranks blocks; `small` holds this rank's block, aliased into `large` in place.
   struct CallBuffers {
     RCCLTestGuards::DeviceBufferAutoGuard large;
     RCCLTestGuards::DeviceBufferAutoGuard small;
@@ -277,10 +273,7 @@ class PatForcedMPITest : public MPITestBase {
     void* recv = nullptr;
   };
 
-  // Sets up `bufs` with the input in the large buffer (`sendIsLarge`) or the
-  // small one. The output is set to a sentinel before the input is written,
-  // so an output element outside the input that PAT never writes cannot match.
-  // All ranks agree on a failure.
+  // The sentinel goes in before the input, so an unwritten output element outside the input fails.
   template <typename T, typename Pattern>
   bool setUpBuffers(const std::string& what, size_t count, bool inPlace,
                     bool sendIsLarge, Pattern pattern, CallBuffers* bufs) {
@@ -460,8 +453,7 @@ TEST_F(PatForcedMPITest, ReduceScatterAvgRunsWithoutPat) {
   expectNoFailuresOnAnyRank(kNumCounts * kNumPlacements);
 }
 
-// ReduceScatter, AllGather, ReduceScatter on one communicator: with shared
-// connections the second collective starts from the steps the first left.
+// RS, AG, RS on one communicator: shared connections carry steps from one collective to the next.
 TEST_F(PatForcedMPITest, ReduceScatterAllGatherInterleaveTakesPat) {
   PAT_FORCED_REQUIRE();
   ASSERT_NO_FATAL_FAILURE(createPatComm());
