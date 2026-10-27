@@ -33,9 +33,8 @@ private:
 
 } // namespace
 
-extern "C" __attribute__((visibility("default"))) util::Result
-register_cli_plugin(util::cli::Command &root, const PluginHost &host,
-                    util::DiagnosticEmitter diagnostic) {
+util::Result register_cli_plugin_impl(util::cli::Command &root, const PluginHost &host,
+                                      util::DiagnosticEmitter diagnostic) {
   using namespace util::cli;
   auto plugin = root.add_command("plugin", diagnostic);
   if (plugin.failed())
@@ -54,4 +53,8 @@ register_cli_plugin(util::cli::Command &root, const PluginHost &host,
   }
   return inspect.value()->add_flags("Output formatting",
                                     {host.retain(host.context, new FormatFlag)}, diagnostic);
+}
+
+extern "C" __attribute__((visibility("default"))) RegisterPlugin register_cli_plugin() {
+  return register_cli_plugin_impl;
 }
