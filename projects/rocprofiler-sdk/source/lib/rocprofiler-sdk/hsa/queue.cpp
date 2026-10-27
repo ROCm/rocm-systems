@@ -1152,7 +1152,8 @@ WriteInterceptor(const void* packets,
                 transformed_packets.emplace_back(barrier);
 
                 _packet_data.orig_completion_signal = original_completion_signal;
-                // The barrier restores the caller's signal; retain its mapping until timing is cached.
+                // The barrier restores the caller's signal; retain its mapping until timing is
+                // cached.
                 track_dispatch_time(original_completion_signal,
                                     kernel_packet.kernel_dispatch.completion_signal,
                                     queue.get_agent().get_hsa_agent());
