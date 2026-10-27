@@ -250,11 +250,6 @@ jobs:
           apt install -y libopenmpi-dev
           echo "✅ MPI Installed!"
 
-      - name: Install libstdc++-16-dev (temp debug)
-        run: |
-          apt-get install -y libstdc++-16-dev
-          echo "✅ MPI Installed!"
-
       - name: Install Latest Nightly ROCm
         run: |
           set -euo pipefail
