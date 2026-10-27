@@ -48,6 +48,14 @@ inline hipError_t ihipGraphExecNodeUpdate(GraphExecBase* graphExec, GraphNode* n
   return status;
 }
 
+//! A moved graph's nodes now live in the ChildGraphNode that adopted them. Queries on the
+//! caller's handle should still see them, so resolve through before reading.
+static inline hip::Graph* ihipResolveGraphHandle(hipGraph_t graph) {
+  auto* g = reinterpret_cast<hip::Graph*>(graph);
+  return (g != nullptr) ? g->ResolveMoved() : nullptr;
+}
+
+
 // Accepts a linear 3D description (no arrays, unit height/depth, zero positions) on a 1D-family node.
 inline bool ihipMemcpy3DParmsAsLinear(const hipMemcpy3DParms* params, void** dst,
                                       const void** src, size_t* count) {
@@ -1458,6 +1466,9 @@ hipError_t hipGraphDestroy(hipGraph_t graph) {
   if (!hip::Graph::isGraphValid(g)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+  if (g->IsMoved()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   delete g;
   HIP_RETURN(hipSuccess);
 }
@@ -1640,7 +1651,8 @@ hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, hipGraph_t grap
                                      hipGraph_t childGraph) {
   HIP_INIT_API(hipGraphAddChildGraphNode, pGraphNode, pDependencies, numDependencies, childGraph);
   if (pGraphNode == nullptr || graph == nullptr ||
-      (numDependencies > 0 && pDependencies == nullptr) || childGraph == nullptr) {
+      (numDependencies > 0 && pDependencies == nullptr) || childGraph == nullptr || 
+      reinterpret_cast<hip::Graph*>(childGraph)->IsMoved()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::GraphNode* node = new hip::ChildGraphNode(reinterpret_cast<hip::Graph*>(childGraph));
@@ -1733,7 +1745,8 @@ hipError_t ihipGraphInstantiate(hip::GraphExecBase** pGraphExec, hip::Graph* gra
 hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                hipGraphNode_t* pErrorNode, char* pLogBuffer, size_t bufferSize) {
   HIP_INIT_API(hipGraphInstantiate, pGraphExec, graph);
-  if (pGraphExec == nullptr || graph == nullptr) {
+  if (pGraphExec == nullptr || graph == nullptr ||
+      reinterpret_cast<hip::Graph*>(graph)->IsMoved()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::GraphExecBase* ge;
@@ -1771,7 +1784,8 @@ hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t g
 hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                          hipGraphInstantiateParams* instantiateParams) {
   HIP_INIT_API(hipGraphInstantiateWithParams, pGraphExec, graph, instantiateParams);
-  if (pGraphExec == nullptr || graph == nullptr || instantiateParams == nullptr) {
+  if (pGraphExec == nullptr || graph == nullptr || instantiateParams == nullptr ||
+      reinterpret_cast<hip::Graph*>(graph)->IsMoved()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -1854,7 +1868,7 @@ hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* nodes, size_t* num
     HIP_RETURN(hipErrorInvalidValue);
   }
   std::vector<hip::GraphNode*> graphNodes;
-  if (false == reinterpret_cast<hip::Graph*>(graph)->TopologicalOrder(graphNodes)) {
+  if (false == ihipResolveGraphHandle(graph)->TopologicalOrder(graphNodes)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   if (nodes == nullptr) {
@@ -1883,7 +1897,7 @@ hipError_t hipGraphGetRootNodes(hipGraph_t graph, hipGraphNode_t* pRootNodes,
   if (graph == nullptr || pNumRootNodes == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  const std::vector<hip::GraphNode*> nodes = reinterpret_cast<hip::Graph*>(graph)->GetRootNodes();
+  const std::vector<hip::GraphNode*> nodes = ihipResolveGraphHandle(graph)->GetRootNodes();
   if (pRootNodes == nullptr) {
     *pNumRootNodes = nodes.size();
     HIP_RETURN(hipSuccess);
@@ -2161,7 +2175,7 @@ hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node, hipGraph_t* pGrap
 
 hipError_t validateChildGraphNodeSetParams(hip::GraphNode* n, hip::Graph* cg, bool exec = true) {
   if (cg == nullptr || n == nullptr || !hip::GraphNode::isNodeValid(n) ||
-      !hip::Graph::isGraphValid(cg) || n->GetType() != hipGraphNodeTypeGraph) {
+      !hip::Graph::isGraphValid(cg) || cg->IsMoved() || n->GetType() != hipGraphNodeTypeGraph) {
     return hipErrorInvalidValue;
   }
   // compare with parent graph fron cloned and original node
@@ -2386,7 +2400,7 @@ hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode
     HIP_RETURN(hipErrorInvalidValue);
   }
   const std::vector<std::pair<hip::GraphNode*, hip::GraphNode*>> edges =
-      reinterpret_cast<hip::Graph*>(graph)->GetEdges();
+      ihipResolveGraphHandle(graph)->GetEdges();
   // returns only the number of edges in numEdges when from and to are null
   if (from == nullptr && to == nullptr) {
     *numEdges = edges.size();
@@ -2869,7 +2883,8 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
   HIP_INIT_API(hipGraphExecUpdate, hGraphExec, hGraph, hErrorNode_out, updateResult_out);
   // parameter check
   if (hGraphExec == nullptr || hGraph == nullptr || hErrorNode_out == nullptr ||
-      updateResult_out == nullptr) {
+      updateResult_out == nullptr ||
+      reinterpret_cast<hip::Graph*>(hGraph)->IsMoved()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -3347,7 +3362,7 @@ hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path, unsigned in
   if (graph == nullptr || path == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  hip::Graph* hip_graph = reinterpret_cast<hip::Graph*>(graph);
+  hip::Graph* hip_graph = ihipResolveGraphHandle(graph);
   HIP_RETURN(ihipGraphDebugDotPrint(hip_graph, path, flags));
 }
 
@@ -3448,15 +3463,25 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                 reinterpret_cast<hip::GraphNode* const*>(pDependencies),
                                 numDependencies, false);
       break;
-    case hipGraphNodeTypeGraph:
-      if (nodeParams->graph.graph == nullptr) {
+    case hipGraphNodeTypeGraph: {
+      auto* childGraph = reinterpret_cast<hip::Graph*>(nodeParams->graph.graph);
+      const hipGraphChildGraphNodeOwnership ownership = nodeParams->graph.ownership;
+      if (childGraph == nullptr || !hip::Graph::isGraphValid(childGraph) ||
+          childGraph == reinterpret_cast<hip::Graph*>(graph) ||
+          childGraph->IsMoved() ||
+          (ownership != hipGraphChildGraphOwnershipClone &&
+           ownership != hipGraphChildGraphOwnershipMove)) {
         HIP_RETURN(hipErrorInvalidValue);
       }
-      node = new hip::ChildGraphNode(reinterpret_cast<hip::Graph*>(nodeParams->graph.graph));
+      node = new hip::ChildGraphNode(childGraph,
+                                     ownership == hipGraphChildGraphOwnershipMove
+                                         ? hip::ChildGraphNode::Ownership::kMove
+                                         : hip::ChildGraphNode::Ownership::kClone);
       status = ihipGraphAddNode(node, reinterpret_cast<hip::Graph*>(graph),
                                 reinterpret_cast<hip::GraphNode* const*>(pDependencies),
                                 numDependencies, false);
       break;
+    }
     case hipGraphNodeTypeWaitEvent:
       if (nodeParams->eventWait.event == nullptr) {
         HIP_RETURN(hipErrorInvalidValue);

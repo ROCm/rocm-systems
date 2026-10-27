@@ -151,6 +151,37 @@ void Graph::RemoveNode(const Node& node) {
 }
 
 // ================================================================================================
+void Graph::AdoptNodesFrom(Graph* src) {
+  if (src == nullptr || src == this) {
+    return;
+  }
+  for (auto* node : src->vertices_) {
+    node->SetParentGraph(this);
+    vertices_.push_back(node);
+  }
+  // Must come before ~Graph() runs on src: that destructor deletes vertices_, and these
+  // nodes are now owned by this graph.
+  src->vertices_.clear();
+
+  memAllocNodePtrs_.merge(src->memAllocNodePtrs_);
+  memalloc_nodes_ += src->memalloc_nodes_;
+  src->memalloc_nodes_ = 0;
+  capturedNodes_.merge(src->capturedNodes_);
+  src->capturedNodes_.clear();
+
+  // User objects: this graph inherits src's owned reference counts, and src stops
+  // being an owner so its destructor does not release them.
+  for (auto& userObj : src->graphUserObj_) {
+    userObj.first->owning_graphs_.insert(this);
+    userObj.first->owning_graphs_.erase(src);
+    graphUserObj_[userObj.first] += userObj.second;
+  }
+  src->graphUserObj_.clear();
+
+  MarkTopologyChanged();
+}
+
+// ================================================================================================
 std::vector<Node> Graph::GetRootNodes() const {
   // root nodes are all vertices with 0 in-degrees
   std::vector<Node> roots;
