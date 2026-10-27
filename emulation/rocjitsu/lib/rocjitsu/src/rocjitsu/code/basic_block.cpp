@@ -34,8 +34,10 @@ bool is_block_terminator(const Instruction &inst) {
 
 bool has_no_static_successor(const Instruction &inst) {
   // Indirect calls return to the fallthrough block; indirect branches do not
-  // expose a statically-known successor in this local CFG.
-  return is_program_path_terminator(inst) || (inst.flags() & INDIRECT_BRANCH);
+  // expose a statically-known successor in this local CFG, except for the
+  // fallthrough of a fork or join.
+  return is_program_path_terminator(inst) ||
+         ((inst.flags() & INDIRECT_BRANCH) && !indirect_branch_falls_through(inst));
 }
 
 bool is_unconditional_branch(const Instruction &inst) {
@@ -310,9 +312,9 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
         const bool decode_gap =
             i >= decoded.size() ? next_offset < section_end : decoded[i]->src_loc() != next_offset;
         const Instruction &last = *current->terminator();
-        const bool can_fall_through = !is_program_path_terminator(last) &&
-                                      !is_unconditional_branch(last) &&
-                                      (last.flags() & INDIRECT_BRANCH) == 0;
+        const bool can_fall_through =
+            !is_program_path_terminator(last) && !is_unconditional_branch(last) &&
+            ((last.flags() & INDIRECT_BRANCH) == 0 || indirect_branch_falls_through(last));
         // Range bounds are not evidence that a callee ends here. Apply this
         // distinction before call/return classification can prune continuations.
         const bool padding_permitted =

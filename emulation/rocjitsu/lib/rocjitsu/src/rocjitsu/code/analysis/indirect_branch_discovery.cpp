@@ -888,8 +888,9 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   // Indirect branches have no known target until this analysis recovers one.
   // Indirect calls still expose their ordinary fallthrough/return continuation
   // in the direct CFG, which is required for liveness and for callers that do
-  // not care about the callee body.
-  return is_program_path_terminator(inst) || is_indirect_branch(inst);
+  // not care about the callee body. Forks and joins also keep their fallthrough.
+  return is_program_path_terminator(inst) ||
+         (is_indirect_branch(inst) && !indirect_branch_falls_through(inst));
 }
 
 [[nodiscard]] std::optional<size_t>

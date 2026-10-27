@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
@@ -622,8 +623,21 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         access(scratch, ~uint64_t{0}, 0xf, false);
     }
   }
+  // A fork or join touches at most one branch stack entry, chosen by MODE.CSP at
+  // run time. Its implicit registers are the static superset of every entry, kept
+  // for liveness; checking them all would report unrelated pending SGPRs.
+  const bool branch_stack = inst.flags() & BRANCH_STACK;
+  std::optional<BranchStackAccess> stack_access;
+  if (branch_stack && inst.src_operand(0)) {
+    const Operand &src0 = *inst.src_operand(0);
+    stack_access = name == "s_cbranch_join" ? join_stack_access(wf, registers.read_scalar(src0))
+                                            : fork_stack_access(wf, registers.read_scalar64(src0));
+  }
+  const auto stack_entry = [&]() {
+    return RegisterRef{RegClass::SGPR, static_cast<uint16_t>(stack_access->first_wave_sgpr), 4};
+  };
   RegisterSet implicit;
-  if (!preserves_destination)
+  if (!preserves_destination && !branch_stack)
     inst.implicit_uses(implicit);
   implicit.for_each([&](RegisterRef reg) {
     // Operand-derived reads preserve their bank roles above.
@@ -633,14 +647,19 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       return;
     access(reg, reg.cls == RegClass::VGPR ? lanes : ~uint64_t{0}, 0xf, false);
   });
+  if (stack_access && !stack_access->write)
+    access(stack_entry(), ~uint64_t{0}, 0xf, false);
   if (!inst.is_memory_wait_producer()) {
     for (int i = 0; i < inst.num_dst_operands(); ++i)
       check_operand(inst.dst_operand(i), true);
     implicit = RegisterSet{};
-    inst.implicit_defs(implicit);
+    if (!branch_stack)
+      inst.implicit_defs(implicit);
     implicit.for_each([&](RegisterRef reg) {
       access(reg, reg.cls == RegClass::VGPR ? lanes : ~uint64_t{0}, 0xf, true);
     });
+    if (stack_access && stack_access->write)
+      access(stack_entry(), ~uint64_t{0}, 0xf, true);
   }
 }
 
