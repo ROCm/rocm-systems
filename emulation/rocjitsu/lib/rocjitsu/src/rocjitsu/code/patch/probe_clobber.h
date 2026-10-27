@@ -23,13 +23,15 @@ namespace rocjitsu {
 /// unproved control transfer. Neither touches_* == false nor absent flags prove NoWrite.
 enum class ProbeWriteProof { Unknown, MayWrite, NoWrite };
 
-/// @brief Registers and special state a probe body overwrites.
+/// @brief Ordinary clobbers, special-state accesses and whole-body mask-write proofs.
 ///
 /// @details `ordinary_clobbers` is derived precisely by decoding the copied
 /// probe body and unioning each instruction's ordinary defs (SGPR/VGPR/AccVGPR).
-/// The special-state booleans are best-effort: they are set when an explicit
-/// operand names that register class, but implicit effects (e.g. SCC written
-/// as a side effect of scalar ALU) are not modeled here.
+/// `touches_*` are best-effort accesses exposed as operands, including reads;
+/// they do not establish the absence of implicit effects. Independently,
+/// `exec_write` and `vcc_write` combine generated implicit-write coverage,
+/// actual destinations and body-control validation. Only NoWrite proves absence
+/// of all writes; MayWrite and Unknown do not authorize omitting preservation.
 ///
 /// This struct is intended to stay callee-only.
 struct ProbeClobberSummary {
@@ -50,9 +52,9 @@ struct ProbeClobberSummary {
 
 /// @brief Decode @p callable's copied body and summarize what it clobbers.
 ///
-/// Returns nullopt (and sets @p error_out) only on a structural decode failure
-/// e.g. a missing decoder for the arch, an instruction that fails to decode,
-/// or body that runs off its end. A successful decode always yields a summary
+/// Returns nullopt (and sets @p error_out) for a target/architecture mismatch,
+/// missing decoder or rejected/truncated encoding. Successful decoding yields
+/// a summary even when effects, the ABI or control flow cannot prove NoWrite.
 [[nodiscard]] std::optional<ProbeClobberSummary>
 build_probe_clobber_summary(const ProbeCallable &callable, std::string *error_out = nullptr);
 

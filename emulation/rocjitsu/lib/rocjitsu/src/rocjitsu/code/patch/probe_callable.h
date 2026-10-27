@@ -18,6 +18,7 @@
 namespace rocjitsu {
 
 class AmdGpuCodeObject;
+class Instruction;
 struct ResolvedProbeSymbol;
 
 /// @brief The return-link rule a verified probe body conforms to.
@@ -27,7 +28,7 @@ struct ResolvedProbeSymbol;
 /// enumerator per combination of the properties an ABI has.
 enum class ProbeCallingConvention {
   Unknown,                ///< Not yet verified / unrecognized.
-  AmdGpuFuncReturnS30S31, ///< Returns via s_setpc_b64 s[30:31].
+  AmdGpuFuncReturnS30S31, ///< Returns absolutely through s[30:31].
 };
 
 /// @brief A link-pair base no calling convention can select.
@@ -179,6 +180,12 @@ derive_probe_abi(ProbeCallingConvention cc, uint8_t num_arg_dwords = 0) {
   return RegisterRef{RegClass::SGPR, abi.link_pair_base, 2};
 }
 
+/// @brief Does @p inst return absolutely through the valid ABI's link pair?
+/// @details Classifies this instruction only; callers separately validate the
+/// body bounds, control flow and writes to the link pair. Independent of mask
+/// effect coverage and target-specific return mnemonic spelling.
+[[nodiscard]] bool is_probe_abi_return(const Instruction &inst, const ProbeAbi &abi);
+
 /// @brief The VGPRs @p abi delivers argument dwords in, empty when it passes
 ///        none.
 ///
@@ -228,13 +235,12 @@ struct ProbeCallable {
 
   /// Byte offset of the body once it has been laid out in the instrumented
   /// code object's text.
-  /// Currently zero here because that placement depends on the trampoline
-  /// size and the final cave-placement API, neither of which exists yet.
+  /// Extraction leaves this zero; Instrumentor assigns it during body layout.
   uint64_t output_text_offset = 0;
 };
 
 /// @brief Extract and verify the body of @p sym (already resolved out of
-///        @p probe_obj) as a self-contained callable probe decoded for @p arch.
+///        @p probe_obj) as a callable probe decoded for @p arch.
 ///
 /// Verification is intentionally conservative (fail-closed). The body must:
 ///   - copy in-bounds out of the code object image,
@@ -249,6 +255,8 @@ struct ProbeCallable {
 ///     operands do not name every register it reads and writes, and
 ///   - end in an absolute register return through s[30:31], identified by
 ///     generated semantics (s_setpc_b64 or the target's equivalent spelling).
+/// Internal branch bounds and writes to the link pair are checked separately
+/// by the whole-body clobber analysis before it can prove NoWrite.
 ///
 /// On success the returned ProbeCallable carries the ABI derived from
 /// AmdGpuFuncReturnS30S31 and @p num_arg_dwords. Returns std::nullopt (with a

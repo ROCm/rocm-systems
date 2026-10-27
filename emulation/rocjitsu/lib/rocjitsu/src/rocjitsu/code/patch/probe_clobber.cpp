@@ -6,6 +6,7 @@
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/error_report.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -23,7 +24,7 @@ namespace rocjitsu {
 
 namespace {
 
-// Record an explicit operand's special-state class on the summary. Ordinary
+// Record a decoder-exposed operand's special-state class on the summary. Ordinary
 // classes (SGPR/VGPR/AccVGPR) are handled precisely via InstDefUse and ignored
 // here.
 void note_special_state(ProbeClobberSummary &summary, RegClass cls) {
@@ -48,11 +49,24 @@ void note_special_state(ProbeClobberSummary &summary, RegClass cls) {
   }
 }
 
+void invalidate_no_write(ProbeWriteProof &proof) {
+  if (proof == ProbeWriteProof::NoWrite)
+    proof = ProbeWriteProof::Unknown;
+}
+
 // Generated operands expose both selector-encoded references and fieldless
 // architectural effects. An unclassified destination invalidates no-write
 // proofs; an absence in the best-effort access summary never grants one.
 bool note_operand(const Operand &op, ProbeClobberSummary &summary, bool destination) {
   const std::optional<RegisterRef> ref = op.to_register_ref();
+  // A vector mask may fit in TTMP15 on Wave32 but overflow on Wave64.
+  // This callee-only summary has no wave-size context, so it cannot use a
+  // decode-time minimum-width check to prove the maximum extent harmless.
+  if (ref && ref->cls == RegClass::TTMP &&
+      uint32_t{ref->index} + ref->width > amdgpu::kTtmpRegisterCount) {
+    invalidate_no_write(summary.exec_write);
+    invalidate_no_write(summary.vcc_write);
+  }
   const std::optional<RegClass> cls = ref ? std::optional(ref->cls) : op.to_special_reg_class();
   if (!cls)
     return !op.is_writable();
@@ -64,20 +78,16 @@ bool note_operand(const Operand &op, ProbeClobberSummary &summary, bool destinat
   return true;
 }
 
-void require_preservation(ProbeWriteProof &proof) {
-  if (proof == ProbeWriteProof::NoWrite)
-    proof = ProbeWriteProof::Unknown;
-}
-
-// Scan every explicit operand and flag special-state register classes. This is
-// best-effort: it sees operands the decoder exposes, not implicit side effects.
+// Scan decoder-exposed source/destination operands, including fieldless special
+// operands. Implicit effects not exposed as operands are covered separately by
+// the generated instruction flags in build_probe_clobber_summary().
 void scan_special_state(const Instruction &inst, rj_code_arch_t arch,
                         ProbeClobberSummary &summary) {
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const Operand *op = inst.dst_operand(i);
     if (op == nullptr) {
-      require_preservation(summary.exec_write);
-      require_preservation(summary.vcc_write);
+      invalidate_no_write(summary.exec_write);
+      invalidate_no_write(summary.vcc_write);
       continue;
     }
     // A tuple beginning in ordinary SGPRs can extend across a special selector.
@@ -94,8 +104,8 @@ void scan_special_state(const Instruction &inst, rj_code_arch_t arch,
         summary.vcc_write = ProbeWriteProof::MayWrite;
     }
     if (!note_operand(*op, summary, /*destination=*/true)) {
-      require_preservation(summary.exec_write);
-      require_preservation(summary.vcc_write);
+      invalidate_no_write(summary.exec_write);
+      invalidate_no_write(summary.vcc_write);
     }
   }
   for (int i = 0; i < inst.num_src_operands(); ++i) {
@@ -166,9 +176,9 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
     scan_special_state(*inst, callable.arch, summary);
 
     if ((inst->flags() & EXEC_WRITE_EFFECTS_KNOWN) == 0)
-      require_preservation(summary.exec_write);
+      invalidate_no_write(summary.exec_write);
     if ((inst->flags() & VCC_WRITE_EFFECTS_KNOWN) == 0)
-      require_preservation(summary.vcc_write);
+      invalidate_no_write(summary.vcc_write);
     if ((inst->flags() & WRITES_EXEC) != 0)
       summary.exec_write = ProbeWriteProof::MayWrite;
     if ((inst->flags() & WRITES_VCC) != 0)
@@ -177,13 +187,8 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
     const int64_t offset = static_cast<int64_t>(w * sizeof(uint32_t));
     instruction_offsets.push_back(offset);
     const bool final_instruction = w + inst_words == body.size();
-    const Operand *source = inst->src_operand(0);
-    const std::optional<RegisterRef> link = source ? source->to_register_ref() : std::nullopt;
-    const bool verified_return = (inst->flags() & ABSOLUTE_INDIRECT_BRANCH) != 0 && link &&
-                                 link->cls == RegClass::SGPR &&
-                                 link->index == callable.abi.link_pair_base && link->width == 2;
     if (final_instruction) {
-      self_contained &= verified_return;
+      self_contained &= is_probe_abi_return(*inst, callable.abi);
     } else if (inst->is_branch()) {
       const std::optional<int64_t> delta = inst->branch_offset_bytes();
       if (delta)
@@ -209,8 +214,8 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
           RegisterRef{RegClass::SGPR, static_cast<uint16_t>(callable.abi.link_pair_base + 1), 1}))
     self_contained = false;
   if (!self_contained) {
-    require_preservation(summary.exec_write);
-    require_preservation(summary.vcc_write);
+    invalidate_no_write(summary.exec_write);
+    invalidate_no_write(summary.vcc_write);
   }
 
   return summary;

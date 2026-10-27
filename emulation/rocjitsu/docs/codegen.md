@@ -212,9 +212,26 @@ Coverage requires an audited semantic family, known helper effects, a
 non-stub derivation and matching operand directions. Empty semantics are not
 safe by default: `nop`/`true_nop` are also classifier fallbacks for unsupported
 instructions. Only explicitly audited nop/wait forms bypass the empty-block
-check. The existing profile supplies target differences such as cmpx writing
-VCC on CDNA, while VOP3 mask-result redirection follows the actual destination.
+check. The existing profile supplies target differences in cmpx VCC writes,
+while VOP3 mask-result redirection follows the actual destination.
 No DBI-specific target list or raw instruction word table is generated.
+
+The coverage audit and `sema_properties.derive_properties()` share context-write
+facts, including compound assignments and nested destination wrappers. The
+established property emitter remains the sole producer of `WRITES_EXEC`, whose
+consumers assume a whole-mask definition. If the audit discovers an EXEC write
+that property derivation does not represent, EXEC coverage is withheld rather
+than broadening the flag. `WRITES_VCC` is a conservative possible implicit write
+and does not establish a must-write or kill, including for redirected SDWA forms.
+
+Control-flow classification is independent of write coverage. In particular,
+`ABSOLUTE_INDIRECT_BRANCH` identifies semantic SETPC forms even when mask effects
+are unknown; the ABI return predicate also checks the actual link-pair operand.
+Generated operands reject fixed tuples extending past TTMP15 before decoder
+consumers can use their effect metadata. Explicit vector wave masks validate
+their minimum 32-bit extent at decode; execution validates the actual wave
+width. A probe proof without wave-size context remains Unknown when the
+maximum extent exceeds the TTMP register file.
 
 To extend coverage, audit the execution family and any helper/implicit effects,
 add positive and negative Python tests, regenerate every ISA, then test actual

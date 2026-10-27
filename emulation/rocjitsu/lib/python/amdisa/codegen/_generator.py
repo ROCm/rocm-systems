@@ -174,11 +174,11 @@ def _exec_mask_flag_stmts(sem) -> list[str]:
     liveness/dataflow analyses do not have to know AMDGPU instruction names:
 
     * ``IGNORES_EXEC`` - branch-style instructions that run regardless of EXEC.
-    * ``WRITES_EXEC``  - the instruction writes EXEC.
+    * ``WRITES_EXEC``  - a semantic whole-mask EXEC definition.
 
     Returns an empty list when ``sem`` is None or its semantic class has no
     deriver (``derive_sema_block`` returns None) or derives to an empty stub;
-    those instructions stay flag-free and analyses treat them conservatively.
+    those instructions receive no EXEC metadata from this derivation.
     """
     if sem is None:
         return []
@@ -5135,50 +5135,44 @@ class CodeGenerator:
             and sem.semantic_class in self._D16_LOAD_CLASSES
         )
 
+    @staticmethod
+    def _is_wave_mask_operand(enc_name, opnd, sem) -> bool:
+        """Identify explicit vector masks independently of profile width overrides."""
+        if sem is None or enc_name.upper() != 'ENC_VOP3':
+            return False
+        cls = sem.semantic_class
+        if cls in ('vector_cmp', 'vector_cmp_class'):
+            return opnd.is_output and opnd.name in ('vdst', 'sdst')
+        if cls == 'vector_cndmask':
+            return not opnd.is_output and opnd.name == 'src2'
+        if cls == 'vector_add_co':
+            return opnd.name in ('sdst', 'src2')
+        return (
+            cls in ('vector_div_scale', 'vector_mad_64_32')
+            and opnd.is_output
+            and opnd.name == 'sdst'
+        )
+
     def _operand_size_override(
         self,
         enc_name: str,
         opnd: Operand,
         sem: InstructionSemantics | None,
     ) -> str | None:
-        """Return a target-specific generated operand size override."""
+        """Return the profile's explicit vector wave-mask operand width."""
         if (
-            sem is not None
-            and sem.semantic_class in ('vector_cmp', 'vector_cmp_class')
-            and enc_name.upper() == 'ENC_VOP3'
-            and opnd.is_output
-            and opnd.name in ('vdst', 'sdst')
-            and opnd.operand_type.upper() == 'OPR_SREG'
-            and self.isa_spec.profile.vop3_cmp_sdst_size_bits is not None
+            not self._is_wave_mask_operand(enc_name, opnd, sem)
+            or opnd.operand_type.upper() != 'OPR_SREG'
         ):
-            return str(self.isa_spec.profile.vop3_cmp_sdst_size_bits)
-        if (
-            sem is not None
-            and sem.semantic_class == 'vector_cndmask'
-            and enc_name.upper() == 'ENC_VOP3'
-            and not opnd.is_output
-            and opnd.name == 'src2'
-            and opnd.operand_type.upper() == 'OPR_SREG'
-            and self.isa_spec.profile.vop3_cndmask_selector_size_bits is not None
-        ):
-            return str(self.isa_spec.profile.vop3_cndmask_selector_size_bits)
-        if sem is not None and enc_name.upper() == 'ENC_VOP3':
-            is_carry_mask = sem.semantic_class == 'vector_add_co' and opnd.name in (
-                'sdst',
-                'src2',
-            )
-            is_aux_mask_output = (
-                sem.semantic_class in ('vector_div_scale', 'vector_mad_64_32')
-                and opnd.is_output
-                and opnd.name == 'sdst'
-            )
-            if (
-                (is_carry_mask or is_aux_mask_output)
-                and opnd.operand_type.upper() == 'OPR_SREG'
-                and self.isa_spec.profile.vop3_carry_mask_size_bits is not None
-            ):
-                return str(self.isa_spec.profile.vop3_carry_mask_size_bits)
-        return None
+            return None
+        profile = self.isa_spec.profile
+        if sem.semantic_class in ('vector_cmp', 'vector_cmp_class'):
+            width = profile.vop3_cmp_sdst_size_bits
+        elif sem.semantic_class == 'vector_cndmask':
+            width = profile.vop3_cndmask_selector_size_bits
+        else:
+            width = profile.vop3_carry_mask_size_bits
+        return str(width) if width is not None else None
 
     def _output_operand_is_also_source(self, inst: Instruction, opnd: Operand) -> bool:
         """Return True if a generated output operand must also be a source.
@@ -11124,6 +11118,21 @@ class CodeGenerator:
                                 )
                             elif packed_16bit_source:
                                 packed_16bit_args = ', true'
+                            scalar_extent_args = ''
+                            if (
+                                profile.wave_size == 32
+                                and opnd_size_expr == '64'
+                                and self._is_wave_mask_operand(
+                                    enc.enc_name, opnd, inst_sem
+                                )
+                            ):
+                                # Decode cannot select Wave32 versus Wave64.
+                                # Validate the minimum mask extent; execution
+                                # validates the actual wave-dependent range.
+                                assert not packed_16bit_args
+                                if profile.uses_packed_16bit_e32_source_selectors:
+                                    packed_16bit_args = ', false, false'
+                                scalar_extent_args = ', Operand::ScalarExtent::WaveMask'
                             operand_value = self._operand_encoding_value_expr(
                                 _OperandCtx(
                                     opnd_name=opnd.name,
@@ -11148,7 +11157,7 @@ class CodeGenerator:
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd_size_expr}, '
                                 f'OperandType::{opr_type}, '
-                                f'{operand_value}{packed_16bit_args})'
+                                f'{operand_value}{packed_16bit_args}{scalar_extent_args})'
                             )
                             if _needs_tied_destination_result_view:
                                 private_members.append(
@@ -12958,6 +12967,8 @@ class CodeGenerator:
                         'scalar_addpc',
                     ):
                         ctor_body_parts.append('flags_ |= INDIRECT_BRANCH;')
+                    if _mem_sem and _mem_sem.semantic_class == 'scalar_setpc':
+                        ctor_body_parts.append('flags_ |= ABSOLUTE_INDIRECT_BRANCH;')
                     if _mem_sem and _mem_sem.semantic_class in (
                         'scalar_swappc',
                         'scalar_call',
@@ -13021,11 +13032,11 @@ class CodeGenerator:
                     # derived from the instruction's semantic AST (see
                     # _exec_mask_flag_stmts).
                     ctor_body_parts.extend(_exec_mask_flag_stmts(_mem_sem))
-                    for statement in special_register_write_flags(
-                        inst, _mem_sem, self.isa_spec.profile
-                    ):
-                        if statement not in ctor_body_parts:
-                            ctor_body_parts.append(statement)
+                    ctor_body_parts.extend(
+                        special_register_write_flags(
+                            inst, _mem_sem, self.isa_spec.profile
+                        )
+                    )
                     # Result-combinator metadata (RESULT_COPY / RESULT_OR) for
                     # EXEC-state all-ones reasoning.
                     ctor_body_parts.extend(_result_combinator_flag_stmts(_mem_sem))
@@ -16106,11 +16117,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         operand_ctor_decl = (
             '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
-            '          bool packed_16bit_source = false, bool packed_16bit_dst = false);\n'
+            '          bool packed_16bit_source = false, bool packed_16bit_dst = false,\n'
+            '          ScalarExtent scalar_extent = ScalarExtent::Fixed);\n'
             '  Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,\n'
             '          bool packed_16bit_source, bool packed_16bit_dst = false);\n'
             if uses_packed_16bit_sources
-            else '  Operand(int size_bits, OperandType opr_type, int encoding_value);\n'
+            else '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
+            '          ScalarExtent scalar_extent = ScalarExtent::Fixed);\n'
         )
         literal64_decl = (
             '  std::optional<uint64_t> literal64_value() const override;\n'
@@ -16244,6 +16257,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 f'{operand_base_decl}'
                 'public:\n'
                 '  enum class Literal32Widening { ZeroExtend, SignExtend, Replicate32, F64HighBits };\n'
+                '  /// WaveMask validates the minimum 32-bit extent at decode;\n'
+                '  /// execution validates its actual wave width. size_bits() retains the maximum.\n'
+                '  enum class ScalarExtent { Fixed, WaveMask };\n'
                 '  static constexpr bool kStaticRegisterAccess = true;\n'
                 f'{operand_ctor_decl}'
                 '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
@@ -16270,9 +16286,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         operand_ctor_args = (
             'int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source, '
-            'bool packed_16bit_dst'
+            'bool packed_16bit_dst, ScalarExtent scalar_extent'
             if uses_packed_16bit_sources
-            else 'int size_bits, OperandType opr_type, int encoding_value'
+            else 'int size_bits, OperandType opr_type, int encoding_value, ScalarExtent scalar_extent'
         )
         operand_ctor_init = (
             ',\n'
@@ -16309,10 +16325,38 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 for lo, hi in intervals
             )
             decoded_vector = []
+            ttmp_validation = []
             opsel_name = 'OpSel' + ''.join(
                 x.capitalize() for x in operand_type.split('_')[1:]
             )
             for pattern in selector.name_patterns:
+                # Validate the minimum trap-temporary extent in the selector
+                # case that establishes its register class. Fixed tuples must
+                # fit wholly; wave masks retain their runtime width check.
+                ttmp_condition = None
+                ttmp_index = None
+                if (
+                    pattern.kind == OperandNamePattern.REG_RANGE
+                    and self._reg_class_for_prefix(pattern.prefix) == 'RegClass::TTMP'
+                ):
+                    ttmp_condition = (
+                        f'encoding_value >= {opsel_name}::{pattern.min_enum} && '
+                        f'encoding_value <= {opsel_name}::{pattern.max_enum}'
+                    )
+                    ttmp_index = f'static_cast<uint32_t>(encoding_value - {opsel_name}::{pattern.min_enum})'
+                elif pattern.kind == OperandNamePattern.NAMED:
+                    named_ref = self._named_reg_ref(pattern.operand_name)
+                    if named_ref and named_ref[0] == 'RegClass::TTMP':
+                        ttmp_condition = (
+                            f'encoding_value == {opsel_name}::{pattern.enum_name}'
+                        )
+                        ttmp_index = str(named_ref[1]) + 'u'
+                if ttmp_condition is not None:
+                    ttmp_validation.append(
+                        f'    if (minimum_size_bits > 32 && {ttmp_condition} && '
+                        f'{ttmp_index} + (minimum_size_bits + 31) / 32 > amdgpu::kTtmpRegisterCount)\n'
+                        '      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);\n'
+                    )
                 if pattern.kind != OperandNamePattern.REG_RANGE:
                     continue
                 reg_class = self._reg_class_for_prefix(pattern.prefix)
@@ -16349,10 +16393,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 if canonical
                 else ''
             )
-            if validation or decoded_vector:
+            if validation or decoded_vector or ttmp_validation:
                 selector_validation_cases.append(
                     f'  case OperandType::{operand_type}:\n'
                     + validation
+                    + ''.join(ttmp_validation)
                     + ''.join(decoded_vector)
                     + f'    break;\n'
                 )
@@ -16404,6 +16449,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     f'    : {operand_base_init}(size_bits, opr_type, encoding_value)'
                     f'{execution_backend_ctor_init}'
                     f'{operand_ctor_init} {{\n'
+                    '  const int minimum_size_bits = scalar_extent == ScalarExtent::WaveMask ? 32 : size_bits;\n'
                     f'{selector_validation}'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
                     '}'
@@ -17522,6 +17568,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         ),
                         False,
                     ),
+                    (
+                        'rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h',
+                        False,
+                    ),
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h', False),
                     ('format', True),
                     ('optional', True),
@@ -17578,6 +17628,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ('rocjitsu/vm/amdgpu/wavefront.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h', False),
                     ('util/except.h', False),
+                    (
+                        'rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h',
+                        False,
+                    ),
                     ('format', True),
                     ('optional', True),
                     ('stdexcept', True),

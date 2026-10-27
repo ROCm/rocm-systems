@@ -155,7 +155,11 @@ TEST_P(DbiNonwriterSim, SharedProbePreservesGuestStateAcrossSiteWindows) {
                                             0)
                       : build_s_nop(1, target.arch);
           const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
-              code, 64, 3, target.e_flags, 0, 0, false, false, false, false, target.wave32);
+              code, /*private_bytes=*/64, /*granulated_sgpr_count=*/3, target.e_flags,
+              /*granulated_vgpr_count=*/0, /*accum_offset=*/0,
+              /*unterminated_kd_name=*/false, /*wrap_section_header_table=*/false,
+              /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false,
+              /*wave32=*/target.wave32);
           const std::vector<uint8_t> probe_image = test::make_amdgpu_probe_elf(
               "nonwriter", {instruction, build_s_setpc_b64(30, target.arch)}, target.e_flags);
           AmdGpuCodeObject object(image.data(), image.size());
@@ -213,7 +217,11 @@ TEST_P(DbiNonwriterSim, RemovingWriterRestoreChangesGuestObservation) {
         build_s_mov_b64(scalar_operand_vcc_lo(target.arch), 131, target.arch),
         build_s_mov_b64(8, special, target.arch), build_s_endpgm(target.arch)};
     const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
-        code, 0, 3, target.e_flags, 0, 0, false, false, false, false, target.wave32);
+        code, /*private_bytes=*/0, /*granulated_sgpr_count=*/3, target.e_flags,
+        /*granulated_vgpr_count=*/0, /*accum_offset=*/0,
+        /*unterminated_kd_name=*/false, /*wrap_section_header_table=*/false,
+        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false,
+        /*wave32=*/target.wave32);
     const std::vector<uint8_t> probe_image = test::make_amdgpu_probe_elf(
         "writer", {build_s_mov_b64(special, 128, target.arch), build_s_setpc_b64(30, target.arch)},
         target.e_flags);

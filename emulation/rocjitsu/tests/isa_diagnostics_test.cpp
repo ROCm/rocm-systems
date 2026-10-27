@@ -6,7 +6,9 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/sop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
@@ -234,8 +236,18 @@ TEST_P(IsaDiagnosticsTest, ReservedMfmaBroadcastControlsStayInsideWave) {
 TEST_P(IsaDiagnosticsTest, CrossRegionScalarPairsReportUndefinedBehavior) {
   if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
     GTEST_SKIP();
-  execute(cdna4::build_sop2(cdna4::kSCselectB64Sop2, {.ssrc0 = 128, .ssrc1 = 129, .sdst = 123}), 1,
-          "s_cselect_b64");
+  const auto words =
+      cdna4::build_sop2(cdna4::kSCselectB64Sop2, {.ssrc0 = 128, .ssrc1 = 129, .sdst = 123});
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(decoder->decode_window(words, 0, diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("invalid scalar register selector"), std::string::npos);
+  // Direct construction intentionally bypasses decode rejection to exercise
+  // the runtime cross-region diagnostic as well.
+  ScopedIsaExecutionBackend execution_scope(&cdna4::execution_backend());
+  cdna4::SCselectB64Sop2 select(reinterpret_cast<const cdna4::MachineInst *>(words.data()));
+  const uint64_t before = cu->isa_diagnostic_count();
+  ASSERT_TRUE(cu->execute_instruction(&select, *wf).succeeded());
+  EXPECT_EQ(cu->isa_diagnostic_count() - before, 1u);
   const std::array<uint32_t, 1> setpc{0xBE801D6Bu}; // vcc_hi cannot start a pair.
   execute(setpc, 1, "s_setpc_b64");
   EXPECT_FALSE(wf->is_halted());

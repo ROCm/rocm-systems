@@ -5,8 +5,9 @@
 // ProbeCallable is a plain struct, so these tests construct it directly from
 // body words instead of parsing an ELF.
 //
-// Instruction encodings below are ground truth captured from
+// The original valid fixtures were captured with
 // `llvm-mc -arch=amdgcn -mcpu=<gfx90a|gfx1200> -show-encoding`.
+// Malformed-tuple cases below deliberately replace their register selectors.
 
 #include "../dbi_test_util.h"
 
@@ -15,6 +16,11 @@
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/isa/target_registry.h"
 
@@ -23,6 +29,7 @@
 #include <cstdint>
 #include <ostream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace rocjitsu {
@@ -49,7 +56,7 @@ constexpr uint32_t kSMovFlatScrLo_0 = 0xbee60080; // s_mov_b32 flat_scratch_lo, 
 
 // VOPC compares model their special-state write as a named destination operand:
 // v_cmp_eq_u32 exposes "vcc"; v_cmpx_eq_u32 exposes "vcc" and "exec". The summary's
-// operand-name scan therefore sees these defs (see the *WriteFromCompareIsDetected
+// structural operand scan therefore sees these defs (see the *WriteFromCompareIsDetected
 // tests), even though the write carries no explicitly-encoded operand field.
 constexpr uint32_t kVCmpEqU32 = 0x7D940000;  // v_cmp_eq_u32 vcc, s0, v0
 constexpr uint32_t kVCmpxEqU32 = 0x7DB40000; // v_cmpx_eq_u32 s0, v0
@@ -179,7 +186,7 @@ TEST(ProbeClobber, DetectsExplicitVccWrite) {
 }
 
 // VOPC compares write VCC (v_cmp) / EXEC (v_cmpx) through a named destination
-// operand the decoder exposes ("vcc", "exec"), so the summary's operand-name scan
+// operand the decoder exposes ("vcc", "exec"), so the summary's structural scan
 // catches them even though the write carries no explicitly-encoded operand field.
 // Missing effects remain Unknown and require preservation.
 TEST(ProbeClobber, VccWriteFromCompareIsDetected) {
@@ -241,6 +248,88 @@ TEST(ProbeClobber, WideSgprTupleCannotHideSpecialSelectorOverlap) {
     EXPECT_FALSE(error.empty());
 }
 
+TEST(ProbeClobber, RejectsTtmpTuplesPastTheRegisterFile) {
+  struct Target {
+    rj_code_arch_t arch;
+    rj_code_target_id_t target;
+    std::vector<uint32_t> body;
+  };
+  for (const Target &target : {Target{ROCJITSU_CODE_ARCH_CDNA3,
+                                      ROCJITSU_CODE_TARGET_GFX942,
+                                      {0xc00e1e00u, 0x00000000u, kSSetpcS30S31}},
+                               Target{ROCJITSU_CODE_ARCH_RDNA4,
+                                      ROCJITSU_CODE_TARGET_GFX1200,
+                                      {0xf4007e00u, 0xf8000000u, kGfx12SSetpcS30S31}}}) {
+    SCOPED_TRACE(target.target);
+    // Both encodings name ttmp[12:19], beyond the sixteen-register TTMP file.
+    // Reject at decode rather than infer how invalid selectors affect EXEC.
+    std::unique_ptr<Decoder> decoder =
+        Decoder::create(default_isa_target_registry(), target.target);
+    ASSERT_NE(decoder, nullptr);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(decoder->decode_window(target.body, 0, diagnostic.emitter()).failed());
+    EXPECT_NE(diagnostic.message().find("invalid scalar register selector"), std::string::npos);
+
+    ProbeCallable probe = make_callable(target.body);
+    probe.arch = target.arch;
+    probe.target = target.target;
+    std::string error;
+    EXPECT_FALSE(build_probe_clobber_summary(probe, &error));
+    EXPECT_NE(error.find("invalid scalar register selector"), std::string::npos);
+  }
+}
+
+TEST(ProbeClobber, TtmpTupleMayEndAtTheLastRegister) {
+  for (const auto &[arch, target, body] :
+       {std::tuple{ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_TARGET_GFX942,
+                   std::vector<uint32_t>{0xc00e1d00u, 0, kSSetpcS30S31}},
+        std::tuple{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1200,
+                   std::vector<uint32_t>{0xf4007d00u, 0xf8000000u, kGfx12SSetpcS30S31}}}) {
+    SCOPED_TRACE(target);
+    std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), target);
+    ASSERT_NE(decoder, nullptr);
+    DecodeResult decoded = decoder->decode_window(body);
+    ASSERT_TRUE(decoded.succeeded());
+    const std::unique_ptr<Instruction> instruction = std::move(decoded).value();
+    const std::optional<RegisterRef> destination = instruction->dst_operand(0)->to_register_ref();
+    ASSERT_TRUE(destination);
+    EXPECT_EQ(*destination, (RegisterRef{RegClass::TTMP, 8, 8}));
+    ProbeCallable probe = make_callable(body);
+    probe.arch = arch;
+    probe.target = target;
+    const std::optional<ProbeClobberSummary> summary = build_probe_clobber_summary(probe);
+    ASSERT_TRUE(summary);
+    EXPECT_EQ(summary->exec_write, ProbeWriteProof::NoWrite);
+    EXPECT_EQ(summary->vcc_write, ProbeWriteProof::NoWrite);
+  }
+}
+
+TEST(ProbeClobber, WaveDependentTtmpExtentNeedsWaveContext) {
+  for (uint8_t destination : {122, 123}) {
+    SCOPED_TRACE(unsigned(destination));
+    for (bool source_mask : {false, true}) {
+      SCOPED_TRACE(source_mask);
+      const auto words =
+          source_mask
+              ? rdna4::build_vop3(rdna4::kVCndmaskB32Vop3,
+                                  {.vdst = 0, .src0 = 129, .src1 = 128, .src2 = destination})
+              : rdna4::build_vop3(rdna4::kVCmpGtI32Vop3,
+                                  {.vdst = destination, .src0 = 129, .src1 = 128});
+      ProbeCallable probe = make_callable({words[0], words[1], kGfx12SSetpcS30S31});
+      probe.arch = ROCJITSU_CODE_ARCH_RDNA4;
+      probe.target = ROCJITSU_CODE_TARGET_GFX1200;
+      const auto summary = build_probe_clobber_summary(probe);
+      ASSERT_TRUE(summary);
+      // TTMP14 fits either wave size. TTMP15 is valid on Wave32, but this
+      // wave-independent proof cannot establish legality for Wave64.
+      const ProbeWriteProof expected =
+          destination == 122 ? ProbeWriteProof::NoWrite : ProbeWriteProof::Unknown;
+      EXPECT_EQ(summary->exec_write, expected);
+      EXPECT_EQ(summary->vcc_write, expected);
+    }
+  }
+}
+
 struct ProofTarget {
   rj_code_arch_t arch;
   rj_code_target_id_t target;
@@ -292,6 +381,27 @@ TEST_P(ProbeWriteProofTest, ConcreteTargetProbeExtractionRecognizesSemanticRetur
   ASSERT_TRUE(summary);
   EXPECT_EQ(summary->exec_write, ProbeWriteProof::NoWrite);
   EXPECT_EQ(summary->vcc_write, ProbeWriteProof::NoWrite);
+}
+
+TEST_P(ProbeWriteProofTest, AbiReturnPredicateChecksSemanticsAndLinkPair) {
+  const rj_code_arch_t arch = GetParam().arch;
+  std::unique_ptr<Decoder> decoder =
+      Decoder::create(default_isa_target_registry(), GetParam().target);
+  ASSERT_NE(decoder, nullptr);
+  const ProbeAbi abi = callable({}).abi;
+  for (const auto &[word, expected] :
+       {std::pair{GetParam().ret, true}, std::pair{build_s_setpc_b64(28, arch), false},
+        std::pair{build_s_swappc_b64(28, 30, arch), false},
+        std::pair{build_s_mov_b64(8, 30, arch), false}}) {
+    SCOPED_TRACE(word);
+    DecodeResult decoded = decoder->decode_window(std::span(&word, 1));
+    ASSERT_TRUE(decoded.succeeded());
+    const std::unique_ptr<Instruction> instruction = std::move(decoded).value();
+    EXPECT_EQ(is_probe_abi_return(*instruction, abi), expected);
+    ProbeAbi invalid_abi = abi;
+    invalid_abi.link_pair_base = 28;
+    EXPECT_FALSE(is_probe_abi_return(*instruction, invalid_abi));
+  }
 }
 
 TEST_P(ProbeWriteProofTest, OrdinaryAndReadOnlyOperationsHaveIndependentProofs) {

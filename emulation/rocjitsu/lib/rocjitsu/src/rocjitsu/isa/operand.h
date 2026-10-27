@@ -186,6 +186,9 @@ public:
   /// IDs, and other non-register operands. ISA-specific subclasses override
   /// this using generated OperandType selector ranges so analysis never has to
   /// parse the display string returned by name().
+  /// Selector-encoded EXEC, VCC, M0, SCC and FLAT_SCRATCH also have structural
+  /// references; LO/HI use positions 0/1 within their class. This representation
+  /// does not imply that a RegisterSet consumer tracks partial special writes.
   [[nodiscard]] virtual std::optional<RegisterRef> to_register_ref() const;
 
   /// @brief Whether encoding_value() belongs to the scalar/source selector namespace.

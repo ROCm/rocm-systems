@@ -22,13 +22,14 @@
 /// directly. A special register named through a *generic selector* field instead
 /// (e.g. `s_mov_b32 exec_lo, 0`, where EXEC_LO is encoding value 126 in the
 /// OPR_SDST selector) *does* decode to a special `RegisterRef` via
-/// `to_register_ref()`, but that ref collapses the LO/HI halves into one
-/// class-wide singleton — an imprecise representation — so InstDefUse drops it:
+/// `to_register_ref()`, including its LO/HI index. RegisterSet would collapse
+/// the reference into one class-wide singleton, losing partial-write precision,
+/// so InstDefUse drops it:
 /// only ordinary SGPR/VGPR/AccVGPR refs
 /// from `to_register_ref()` are recorded, and such selector-encoded specials
 /// appear in neither `defs`/`uses` nor the ordinary projection. Surfacing them
-/// precisely is follow-up work (a generator change mapping special selector
-/// values to their RegClass, plus width-aware special storage); until then,
+/// precisely still needs width-aware special storage; the generated selector
+/// mapping is available already. Until that storage is implemented,
 /// consumers must not assume selector-encoded EXEC/VCC/M0 reads or writes are
 /// visible here.
 

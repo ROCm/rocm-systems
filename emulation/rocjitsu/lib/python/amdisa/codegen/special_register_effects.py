@@ -10,6 +10,11 @@ an old value is dead. Runtime consumers must still resolve actual selectors.
 
 from amdisa.sema_ast import SemaNodeKind
 from amdisa.sema_derive import derive_sema_block
+from amdisa.sema_properties import (
+    InstructionProperty,
+    derive_context_writes,
+    derive_properties,
+)
 
 # These execution families write only their explicit destinations, SCC, and
 # the mask results identified below. Address helpers change no mask state.
@@ -129,6 +134,7 @@ def special_register_write_flags(inst, sem, profile) -> list[str]:
         return []
     cls = sem.semantic_class
     flags = ['EXEC_WRITE_EFFECTS_KNOWN', 'VCC_WRITE_EFFECTS_KNOWN']
+    exec_write_covered = True
     if cls in ('nop', 'true_nop'):
         return (
             [f'flags_ |= {flag};' for flag in flags]
@@ -141,7 +147,6 @@ def special_register_write_flags(inst, sem, profile) -> list[str]:
         if cls == 'scalar_setpc':
             if not any(op.is_input and not op.fieldless for op in inst.operands):
                 return []
-            flags.append('ABSOLUTE_INDIRECT_BRANCH')
         elif cls == 'scalar_getpc' and not any(op.is_output for op in inst.operands):
             return []
     else:
@@ -157,41 +162,22 @@ def special_register_write_flags(inst, sem, profile) -> list[str]:
             for node in nodes
         ):
             return []
-        # Track direct context writes as well as decoded destinations. Do not
-        # rely on a missing positive flag from a different metadata derivation.
-        for node in nodes:
-            if (
-                node.kind
-                not in (
-                    SemaNodeKind.ASSIGN,
-                    SemaNodeKind.ADD_ASSIGN,
-                    SemaNodeKind.SUB_ASSIGN,
-                )
-                or not node.children
-            ):
-                continue
-            lhs = node.children[0]
-            while (
-                lhs.kind in (SemaNodeKind.CAST, SemaNodeKind.ARRAYDEREF)
-                and lhs.children
-            ):
-                lhs = lhs.children[0]
-            if lhs.kind != SemaNodeKind.ID:
-                continue
-            if lhs.id_name in ('EXEC', 'EXEC_RAW'):
-                flags.append('WRITES_EXEC')
-            elif lhs.id_name == 'VCC':
+        # Share context-write facts with property derivation. Only the existing
+        # property emitter may produce WRITES_EXEC: a broader may-write audit
+        # must not strengthen the whole-mask contract used by EXEC analysis.
+        properties = derive_properties(block)
+        for write in derive_context_writes(block):
+            if write.target in ('EXEC', 'EXEC_RAW'):
+                if InstructionProperty.WRITES_EXEC not in properties:
+                    exec_write_covered = False
+            elif write.target == 'VCC':
                 redirected = (
                     cls in ('vector_cmp', 'vector_cmp_class')
                     and inst.enc_name.upper() != 'ENC_VOPC'
                 )
                 if not redirected:
                     flags.append('WRITES_VCC')
-            elif (
-                lhs.id_name
-                and lhs.id_name.isupper()
-                and lhs.id_name not in ('SCC', 'MEM', 'LDS')
-            ):
+            elif write.target not in ('SCC', 'MEM', 'LDS'):
                 return []
         # A semantic D[n] needs an actual output, not an input-only XML field.
         outputs = [op for op in inst.operands if op.is_output and not op.fieldless]
@@ -212,9 +198,12 @@ def special_register_write_flags(inst, sem, profile) -> list[str]:
     ):
         flags.append('WRITES_VCC')
     if cls in ('vector_cmpx', 'vector_cmpx_class'):
-        flags.append('WRITES_EXEC')
+        if InstructionProperty.WRITES_EXEC not in properties:
+            exec_write_covered = False
         if profile.cmpx_writes_vcc:
             flags.append('WRITES_VCC')
     if cls == 'vector_add_co' and inst.enc_name.upper() == 'ENC_VOP2':
         flags.append('WRITES_VCC')
+    if not exec_write_covered:
+        flags.remove('EXEC_WRITE_EFFECTS_KNOWN')
     return [f'flags_ |= {flag};' for flag in dict.fromkeys(flags)]

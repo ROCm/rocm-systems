@@ -55,7 +55,9 @@ enum InstFlags : uint64_t {
   PREDICATED_DEF = (1ULL << 11),
   /// @brief Executes regardless of the EXEC mask (e.g. branches).
   IGNORES_EXEC = (1ULL << 12),
-  /// @brief Writes the EXEC mask regardless of DST operands.
+  /// @brief Semantic whole-mask EXEC definition, independent of DST operands.
+  /// Partial generic writes are described by their destination operands;
+  /// a possible-write audit must not broaden this flag's extent contract.
   WRITES_EXEC = (1ULL << 13),
   /// @brief The destination value is a scalar plain copy of a single source operand
   /// (e.g. s_mov). Lets EXEC-state analysis prove an all-ones EXEC write from an
@@ -89,16 +91,17 @@ enum InstFlags : uint64_t {
   /// @brief IU DOT/WMMA has undefined NEG[2] or NEG_HI modifiers.
   INVALID_IU_MODIFIERS = (1ULL << 28),
   /// @brief A qualified scalar data tuple violates its ISA alignment requirement.
-
   MISALIGNED_SCALAR_DATA = (1ULL << 29),
   /// Generated destinations and implicit-write flags cover all possible EXEC writes.
   /// Absence means unknown effects, never absence of writes.
   EXEC_WRITE_EFFECTS_KNOWN = (1ULL << 30),
   /// Generated destinations and implicit-write flags cover all possible VCC writes.
   VCC_WRITE_EFFECTS_KNOWN = (1ULL << 31),
-  /// Writes VCC independently of the encoded destination selector.
+  /// Possible implicit VCC write; may over-approximate instance-specific
+  /// destination redirection. Does not establish a must-write or a liveness kill.
   WRITES_VCC = (1ULL << 32),
   /// Transfers PC absolutely through source 0, without writing a return link.
+  /// Independent of write-effect coverage; an ABI return also needs the right source pair.
   ABSOLUTE_INDIRECT_BRANCH = (1ULL << 33)
 };
 
