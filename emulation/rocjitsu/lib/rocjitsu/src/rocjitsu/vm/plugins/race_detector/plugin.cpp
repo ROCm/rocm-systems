@@ -161,22 +161,26 @@ MarkedInstruction findConflict(const RaceViolation &v, RaceDetector &detector) {
 std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                         const std::function<std::string(const InstructionSnapshot &)> &disassemble,
                         std::optional<MarkedInstruction> conflict, MarkedInstruction read) {
-  auto isMarked = [&](uint64_t pc) {
-    return pc == read.instruction.pc || (conflict && pc == conflict->instruction.pc);
+  auto matches = [](const InstructionSnapshot &a, const InstructionSnapshot &b) {
+    return a.pc == b.pc && std::ranges::equal(a.encoding(), b.encoding());
+  };
+  auto isMarked = [&](const InstructionSnapshot &instruction) {
+    return matches(instruction, read.instruction) ||
+           (conflict && matches(instruction, conflict->instruction));
   };
 
   size_t n = trace.size();
   size_t first = n;
   bool conflict_found = false;
   for (size_t i = 0; i < n; ++i) {
-    if (isMarked(trace[i].pc)) {
+    if (isMarked(trace[i])) {
       first = i;
       break;
     }
   }
   if (conflict) {
     for (size_t i = 0; i < n; ++i)
-      if (trace[i].pc == conflict->instruction.pc) {
+      if (matches(trace[i], conflict->instruction)) {
         conflict_found = true;
         break;
       }
@@ -198,7 +202,7 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
 
   size_t last = n;
   for (size_t i = first; i < n; ++i) {
-    if (trace[i].pc == read.instruction.pc) {
+    if (matches(trace[i], read.instruction)) {
       last = i + 1;
       break;
     }
@@ -208,14 +212,11 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
   size_t span = (last > first) ? last - first : 0;
 
   auto emit = [&](size_t i) {
-    uint64_t pc = trace[i].pc;
-    bool is_conflict = conflict && pc == conflict->instruction.pc;
-    bool is_read = pc == read.instruction.pc;
+    const auto &instruction = trace[i];
+    bool is_conflict = conflict && matches(instruction, conflict->instruction);
+    bool is_read = matches(instruction, read.instruction);
     oss << ((is_conflict || is_read) ? "  ==>  " : "       ");
-    const auto instruction = is_conflict ? conflict->instruction
-                             : is_read   ? read.instruction
-                                         : trace[i];
-    oss << "0x" << std::hex << pc << std::dec << "  " << disassemble(instruction);
+    oss << "0x" << std::hex << instruction.pc << std::dec << "  " << disassemble(instruction);
     if (is_conflict) {
       oss << "  ; <-- wave " << conflict->wave;
       if (conflict->lane >= 0)

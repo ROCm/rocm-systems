@@ -51,13 +51,14 @@ MarkedInstruction findConflict(const RaceViolation &, RaceDetector &);
 /// Format the instructions that one wave executed between a conflicting memory
 /// instruction and the access that raced with it.
 ///
-/// Marks trace entries whose PC matches `conflict` or `read` with `==>` and
+/// Marks trace entries whose PC and encoding match `conflict` or `read` with `==>` and
 /// annotates them with wave and lane. Drops entries before the first marked one
 /// and after the first match of `read` that follows it, and elides the middle of
 /// a remaining span longer than 32 rows. If the trace contains no entry at the
-/// conflict's PC, prints the conflict first with a "(before trace window)" note.
-/// Marked rows print the marked instruction's bytes; other rows print the trace
-/// entry's bytes. Calls `disassemble` only for printed rows.
+/// conflict's PC and encoding, prints the conflict first with a "(before trace window)"
+/// note. Each trace row prints its own captured bytes. Calls `disassemble` only
+/// for printed rows. Repeated executions of identical bytes at the same PC are
+/// not distinguished.
 std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                         const std::function<std::string(const InstructionSnapshot &)> &disassemble,
                         std::optional<MarkedInstruction> conflict, MarkedInstruction read);
