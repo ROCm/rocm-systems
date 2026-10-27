@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from common import write_text_file
 from format_yaml import check_file, normalize_equation
 
 
@@ -143,10 +144,7 @@ class TestMetricLibraryFiles:
     top-level keys are sorted."""
 
     def write_library_file(self, tmp_path, text):
-        path = tmp_path / "metric_library" / "gfx908" / "l2.yaml"
-        path.parent.mkdir(parents=True)
-        path.write_text(text, encoding="utf-8")
-        return path
+        return write_text_file(tmp_path / "metric_library" / "gfx908" / "l2.yaml", text)
 
     def test_unformatted_formula_fails(self, tmp_path):
         path = self.write_library_file(
@@ -212,9 +210,9 @@ class TestMetricLibraryFiles:
         )
 
     def test_analysis_config_keys_are_not_sorted(self, tmp_path):
-        path = tmp_path / "analysis_configs" / "gfx908" / "0100_x.yaml"
-        path.parent.mkdir(parents=True)
-        path.write_text("b: 1\na: 2\n", encoding="utf-8")
+        path = write_text_file(
+            tmp_path / "analysis_configs" / "gfx908" / "0100_x.yaml", "b: 1\na: 2\n"
+        )
         assert check_file(path) == (True, [])
 
 

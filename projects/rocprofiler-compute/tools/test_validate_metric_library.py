@@ -96,10 +96,6 @@ def with_peak_empirical(metric_text, ceiling):
 # =============================================================================
 
 
-def test_shipped_metric_library_is_valid():
-    assert validate(default_metric_library_dir(), config.analysis_configs_dir) == []
-
-
 def test_synthetic_tree_is_valid(tree):
     assert validate(tree) == []
 

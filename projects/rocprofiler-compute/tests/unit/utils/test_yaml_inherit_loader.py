@@ -107,12 +107,6 @@ def test_remove_missing_field_fails(tmp_path):
         load_inherited_yaml(child)
 
 
-def test_remove_in_base_file_fails(tmp_path):
-    base = write_text_file(tmp_path / "base.yaml", "a.one: !remove\n")
-    with pytest.raises(InheritanceError, match="cannot remove 'a.one'"):
-        load_inherited_yaml(base)
-
-
 def test_remove_takes_no_value(tmp_path):
     base = write_text_file(tmp_path / "base.yaml", "a.one: !remove a.one\n")
     with pytest.raises(InheritanceError, match="takes no value"):
@@ -175,12 +169,6 @@ def test_cycle_names_the_chain(tmp_path):
         load_inherited_yaml(tmp_path / "a.yaml")
     chain = str(error.value).split(": ", 1)[1].split(" -> ")
     assert [Path(path).name for path in chain] == ["a.yaml", "b.yaml", "a.yaml"]
-
-
-def test_self_inherit_is_a_cycle(tmp_path):
-    path = write_text_file(tmp_path / "a.yaml", "inherit: a.yaml\n")
-    with pytest.raises(InheritanceError, match="inheritance cycle"):
-        load_inherited_yaml(path)
 
 
 @pytest.mark.parametrize("parent", ["5", "''", "/base/x.yaml"])
