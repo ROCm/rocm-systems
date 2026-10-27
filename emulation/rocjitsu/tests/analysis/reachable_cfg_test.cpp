@@ -882,5 +882,50 @@ TEST_F(ReachableCfg, ReachableBuildPreservesExplicitTargetForTargetlessObject) {
       << "gfx1251 must not recover the bank-zero stash after MODE selects source bank one";
 }
 
+const BasicBlock *block_at(const Blocks &blocks, uint64_t offset) {
+  const auto it = std::ranges::find(blocks, offset, &BasicBlock::start_offset);
+  return it == blocks.end() ? nullptr : it->get();
+}
+
+TEST_F(ReachableCfg, JoinKeepsItsFallthroughEdge) {
+  // If/else through S_CBRANCH_I_FORK. The join's resume target comes from SGPRs,
+  // but its second arrival falls through to the code after it.
+  const auto result = build_reachable({
+      0xB8A21741u, // 0x00 s_getreg_b32 s34, hwreg(HW_REG_MODE, 29, 3)
+      0xBEA0017Eu, // 0x04 s_mov_b64 s[32:33], exec
+      0xB86A0002u, // 0x08 s_cbranch_i_fork vcc, THEN
+      0x7E000282u, // 0x0C v_mov_b32 v0, 2
+      0xBF820001u, // 0x10 s_branch JOIN
+      0x7E000281u, // 0x14 THEN: v_mov_b32 v0, 1
+      0xBE802E22u, // 0x18 JOIN: s_cbranch_join s34
+      0xBEFE0120u, // 0x1C s_mov_b64 exec, s[32:33]
+      kEnd,        // 0x20
+  });
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const Blocks &blocks = result.value();
+  ASSERT_EQ(offsets(blocks), (std::vector<uint64_t>{0x00, 0x0C, 0x14, 0x18, 0x1C}));
+  EXPECT_EQ(successors(*block_at(blocks, 0x00)), (std::vector<uint64_t>{0x0C, 0x14}));
+  const BasicBlock *join = block_at(blocks, 0x18);
+  EXPECT_EQ(successors(*join), (std::vector<uint64_t>{0x1C}));
+  // The SGPR-held resume target is still unknown.
+  EXPECT_EQ(join->successor_issue(), Issue::IndirectControlFlow);
+}
+
+TEST_F(ReachableCfg, GForkKeepsItsFallthroughEdge) {
+  const auto result = build_reachable({
+      0x9480246Au, // 0x00 s_cbranch_g_fork vcc, s[36:37]
+      0x7E000282u, // 0x04 v_mov_b32 v0, 2
+      0xBE802E22u, // 0x08 s_cbranch_join s34
+      kEnd,        // 0x0C
+  });
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const Blocks &blocks = result.value();
+  ASSERT_EQ(offsets(blocks), (std::vector<uint64_t>{0x00, 0x04, 0x0C}));
+  const BasicBlock *fork = block_at(blocks, 0x00);
+  EXPECT_EQ(successors(*fork), (std::vector<uint64_t>{0x04}));
+  EXPECT_EQ(fork->successor_issue(), Issue::IndirectControlFlow);
+  EXPECT_EQ(successors(*block_at(blocks, 0x04)), (std::vector<uint64_t>{0x0C}));
+}
+
 } // namespace
 } // namespace rocjitsu

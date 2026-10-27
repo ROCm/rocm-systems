@@ -4010,6 +4010,32 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosed) {
   EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
 }
 
+TEST(BinaryTranslatorE2E, BranchStackKernelFailsClosed) {
+  // If/else through S_CBRANCH_I_FORK / S_CBRANCH_JOIN. The join resumes at a PC
+  // held in SGPRs, so liveness across it is not modelled and relocation must
+  // refuse the kernel rather than translate it.
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({
+      0xB8A21741u, // 0x00 s_getreg_b32 s34, hwreg(HW_REG_MODE, 29, 3)
+      0xBEA0017Eu, // 0x04 s_mov_b64 s[32:33], exec
+      0xB86A0002u, // 0x08 s_cbranch_i_fork vcc, THEN
+      0x7E000282u, // 0x0C v_mov_b32 v0, 2
+      0xBF820001u, // 0x10 s_branch JOIN
+      0x7E000281u, // 0x14 THEN: v_mov_b32 v0, 1
+      0xBE802E22u, // 0x18 JOIN: s_cbranch_join s34
+      0xBEFE0120u, // 0x1C s_mov_b64 exec, s[32:33]
+      0xBF810000u, // 0x20 s_endpgm
+  });
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  EXPECT_TRUE(has_error_containing(result, DiagnosticKind::Legalization,
+                                   "conditional branch stack (fork/join) is not supported"));
+  EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
+}
+
 TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosedOnOpenPcBuilderChain) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint16_t kOpenSreg = 10;
