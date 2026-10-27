@@ -14,3 +14,4 @@ struct PluginHost {
 
 using RegisterPlugin = util::Result (*)(util::cli::Command &, const PluginHost &,
                                         util::DiagnosticEmitter);
+using RegisterPluginEntry = RegisterPlugin (*)();

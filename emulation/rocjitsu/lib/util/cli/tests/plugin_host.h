@@ -13,9 +13,12 @@ load_plugin(const char *path, util::cli::Command &root, util::DiagnosticEmitter 
   if (!handle)
     return diagnostic.emit() << "cannot load plugin '" << path << "': " << dlerror();
   std::shared_ptr<void> library(handle, [](void *p) { dlclose(p); });
-  auto registration = reinterpret_cast<RegisterPlugin>(dlsym(handle, "register_cli_plugin"));
-  if (!registration)
+  auto entry = reinterpret_cast<RegisterPluginEntry>(dlsym(handle, "register_cli_plugin"));
+  if (!entry)
     return diagnostic.emit() << "missing register_cli_plugin: " << dlerror();
+  RegisterPlugin registration = entry();
+  if (!registration)
+    return diagnostic.emit() << "invalid register_cli_plugin entry";
 
   PluginHost host{
       &library,
