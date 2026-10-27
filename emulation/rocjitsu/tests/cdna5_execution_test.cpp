@@ -224,7 +224,7 @@ TEST(Gfx1250ExecutionTest, ArchitectureDecoderScalarOffsetFailureDoesNotThrowOrC
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
-  auto *wave = sim.dispatch_scratch_wf(32);
+  auto *wave = sim.dispatch_scratch_wf();
   ASSERT_NE(wave, nullptr);
   constexpr uint32_t kSentinel = 0xa5a55a5au;
   write_wave_sgpr(*cu, *wave, 0, 0x4000);
@@ -254,7 +254,7 @@ TEST(Gfx1250ExecutionTest, ArchitectureDecoderVectorScalarSourceFailureRejectsMe
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
-  auto *wave = sim.dispatch_scratch_wf(32);
+  auto *wave = sim.dispatch_scratch_wf();
   ASSERT_NE(wave, nullptr);
   wave->set_exec(1);
   for (bool scratch : {false, true}) {
