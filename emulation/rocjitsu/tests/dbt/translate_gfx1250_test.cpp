@@ -11,6 +11,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/code/dbt/binary_translator_internal.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/dbt/semantic_translator.h"
@@ -7280,6 +7281,52 @@ TEST(BinaryTranslatorE2E, DebugContinueAfterFailureCollectsMultipleExpandDiagnos
       expand_offsets.push_back(*diagnostic.guest_offset);
   }
   EXPECT_EQ(expand_offsets, (std::vector<uint64_t>{0, 8}));
+}
+
+TEST(BinaryTranslatorE2E, InternalLivenessFailureAbortsDespiteFailurePolicies) {
+  // Cover the opcode EXPAND branch and the later registered-instruction rewrite branch.
+  constexpr auto compound = cdna4::build_vop3(cdna4::kVLshlAddU64Vop3,
+                                              {.vdst = 0, .src0 = 258, .src1 = 129, .src2 = 256});
+  constexpr auto cdna4_end = cdna4::build_sopp(cdna4::kSEndpgmSopp);
+  constexpr auto flat_scratch =
+      cdna5::build_vop3(cdna5::kVAddNcU64Vop3, {.vdst = 0, .src0 = 231, .src1 = 258});
+  constexpr auto cdna5_end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
+  for (bool registered_rewrite : {false, true}) {
+    for (bool skip_failed_kernel : {false, true}) {
+      SCOPED_TRACE(registered_rewrite ? "registered rewrite" : "opcode EXPAND");
+      SCOPED_TRACE(skip_failed_kernel ? "skip_failed_kernels" : "continue_after_failure");
+      const std::vector<uint32_t> words =
+          registered_rewrite ? std::vector<uint32_t>{flat_scratch[0], flat_scratch[1], cdna5_end[0]}
+                             : std::vector<uint32_t>{compound[0], compound[1], cdna4_end[0]};
+      auto image =
+          rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+      rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+      ASSERT_TRUE(source.is_valid());
+      rocjitsu::BinaryTranslatorOptions options;
+      if (registered_rewrite) {
+        options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
+        options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
+      }
+      options.skip_failed_kernels = skip_failed_kernel;
+      options.debug_continue_after_failure = !skip_failed_kernel;
+      rocjitsu::BinaryTranslator translator(
+          registered_rewrite ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_CDNA4,
+          registered_rewrite ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_RDNA4, 0, options);
+      rocjitsu::internal::BinaryTranslatorTestAccess::force_unavailable_liveness(translator);
+
+      const auto result = translator.translate(source);
+
+      EXPECT_FALSE(result.dispatchable());
+      EXPECT_FALSE(result.ok());
+      EXPECT_EQ(result.elf_bytes, image);
+      EXPECT_TRUE(rocjitsu::has_diagnostic_kind(result.diagnostics,
+                                                rocjitsu::DiagnosticKind::InternalError));
+      EXPECT_FALSE(rocjitsu::has_diagnostic_kind(result.diagnostics,
+                                                 rocjitsu::DiagnosticKind::KernelSkipped));
+      EXPECT_FALSE(rocjitsu::has_diagnostic_kind(result.diagnostics,
+                                                 rocjitsu::DiagnosticKind::ExpandFailed));
+    }
+  }
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250CopiesUnaffectedInstructionsForB0ToA0) {
