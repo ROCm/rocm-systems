@@ -150,7 +150,7 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
                       ((lanes[i].address + stride - 1) & transaction_mask);
   }
   if (overlap)
-    return for_each_lane_ordered_run(addrs, lane_mask, wf_size, stride, fn);
+    return detail::for_each_lane_ordered_run(addrs, lane_mask, wf_size, stride, fn);
 
   if (split_operands) {
     // A lane may contribute to two transactions. Partition contiguous bytes
@@ -254,8 +254,8 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
 /// order remain separate runs. Use this where a per-lane access costs less than sorting
 /// the operands. The callback returns false to stop.
 template <typename F>
-bool for_each_adjacent_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
-                                uint32_t stride, F &&fn) {
+bool for_each_lane_ordered_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
+                               uint32_t stride, F &&fn) {
   assert(wf_size <= 64 && stride != 0);
   return detail::for_each_lane_ordered_run(addrs, lane_mask, wf_size, stride, fn);
 }
