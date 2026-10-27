@@ -106,6 +106,8 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     ncclDevRedOp_t symkOp = symkRedOp(task->opHost, task->opDev.op);
     bool symAvailable = task->symkExtract != RCCL_SYMK_EXTRACT_DENY &&
                         ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count);
+    // [RCCL] Across trays only tasks the AllGather selector admitted may run symk.
+    if (rcclCommSpansTrays(comm) && task->symkExtract != RCCL_SYMK_EXTRACT_ALLOW) symAvailable = false;
     // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
     // algSelection for any function it forced.
     uint64_t effAlgMask = comm->tuningContext.forced[task->func] ? 0 : task->algMask;

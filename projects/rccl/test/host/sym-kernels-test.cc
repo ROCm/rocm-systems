@@ -514,4 +514,32 @@ TEST_F(SymKernelMicrotest, SymkAvailable_AllReduceFloat64_NotAvailable) {
   EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat64, /*nElts=*/1024));
 }
 
+// For AllGather, one UALink domain covering the comm stands in for all-direct links.
+TEST_F(SymKernelMicrotest, SymkAvailable_OneFabricDomainStandsInForDirectNvlink) {
+  comm_->symmetricSupport = true;
+  const size_t nElts = 1024 * 1024;
+  comm_->isAllDirectNvlink = true;
+  ASSERT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, nElts))
+    << "precondition: AllGather float has a symmetric kernel at this size";
+  ASSERT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncReduceScatter, ncclDevSum, ncclFloat32, nElts))
+    << "precondition: so is ReduceScatter";
+  comm_->isAllDirectNvlink = false;
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, nElts)) << "no fabric";
+  comm_->MNNVL = 1;
+  comm_->nvlDomainSize = comm_->nRanks;
+  EXPECT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, nElts)) << "one domain";
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncReduceScatter, ncclDevSum, ncclFloat32, nElts))
+    << "only AllGather crosses trays";
+  comm_->p2pCrossClique = true;
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, nElts))
+    << "cross-clique comms never extract symmetric tasks";
+  comm_->p2pCrossClique = false;
+  comm_->nvlDomainSize = comm_->nRanks - 1;
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, nElts))
+    << "a rank outside the domain";
+  comm_->nvlDomainSize = comm_->nRanks;
+  comm_->MNNVL = 0;
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, nElts)) << "no MNNVL";
+}
+
 }  // namespace

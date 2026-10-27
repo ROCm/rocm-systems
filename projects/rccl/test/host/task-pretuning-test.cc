@@ -153,6 +153,19 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_UnscaledColl_CopiesTheRawFiel
   EXPECT_EQ(TaskPrep_Poisoned<int>(), in.CTAPolicy);
 }
 
+// Across trays this path leaves the symmetric kernels out.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_CrossTrayLeavesOutSymmetricKernels) {
+  struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllGather);
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+  scene_.comm()->MNNVL = 1;
+  scene_.comm()->isAllDirectNvlink = true;
+  ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
+  EXPECT_EQ(NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS, in.tuningMask) << "one tray";
+  scene_.comm()->isAllDirectNvlink = false;
+  ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
+  EXPECT_EQ(NCCL_TUNING_MASK_GENERAL_KERNELS, in.tuningMask) << "across trays";
+}
+
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_AllGather_RescalesTheCountToBytesAndSwitchesToInt8) {
   struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllGather);
   ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
