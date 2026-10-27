@@ -1,5 +1,19 @@
 # Changelog for hipFile
 
+## hipFile 0.7.0 (unreleased)
+
+### Added
+
+* Added a Host backend that enables file I/O using host memory. `hipFileBufRegister` now accepts host memory.
+
+### Changed
+
+### Fixed
+
+### Removed
+
+### Known issues
+
 ## hipFile 0.6.0 for ROCm 10.2.0
 
 ### Added
@@ -8,7 +22,6 @@
 * `hipFileGetStatsL3()` now populates the `uuid` field of each `hipFilePerGpuStats` entry with the raw 16-byte GPU UUID, zero-filled when the device cannot report one.
 * Added a batch API example, `batch-roundtrip`.
 * Added reference documentation for the Stats API.
-* Added a Host backend that enables file I/O using host memory. `hipFileBufRegister` now accepts host memory.
 
 ### Changed
 
