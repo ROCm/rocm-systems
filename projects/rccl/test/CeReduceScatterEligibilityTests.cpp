@@ -544,6 +544,31 @@ TEST(RcclCeReduceScatterEligibility, RcclUseCeReduceScatter_Isolated)
          (kCeRsMaxMsgBytesDefault / (sizeof(float) * 4)) + 1, ncclSum, ncclFloat32, true, baseEnv},
     };
 
+    // Split LSA team (NCCL_LSA_TEAM_SIZE < nRanks): same topology the gate now
+    // rejects so pipelined CE cannot address world ranks via LSA slots.
+    ProcessIsolatedTestRunner::registerTest(
+        ProcessIsolatedTestRunner::TestConfig(
+            "SplitLsaTeamRejected_Isolated",
+            []()
+            {
+                CeReduceScatterMockComm mock;
+                mock.comm.nRanks            = 8;
+                mock.comm.devrState.bigSize = 1;
+                mock.comm.devrState.lsaSize = 4; // team does not span the comm
+                mock.comm.devrState.lsaSelf = 0;
+                EXPECT_FALSE(rcclUseCeReduceScatter(mock.get(), /*recvcount=*/1024, ncclFloat32, ncclSum));
+
+                // Spanning team is only positively selectable on a CE-capable driver.
+                if(isCeRuntimeDriverSupported())
+                {
+                    mock.comm.devrState.lsaSize = 8;
+                    EXPECT_TRUE(rcclUseCeReduceScatter(mock.get(), /*recvcount=*/1024, ncclFloat32, ncclSum));
+                }
+            })
+            .withEnvironment(baseEnv)
+            .withTimeout(std::chrono::seconds(30))
+            .withNumGpus(0));
+
     for(const auto& tc : cases)
     {
         auto env = tc.extraEnv;
@@ -557,10 +582,17 @@ TEST(RcclCeReduceScatterEligibility, RcclUseCeReduceScatter_Isolated)
                     mock.comm.nNodes           = tc.nNodes;
                     mock.comm.symmetricSupport = tc.symmetricSupport;
                     mock.comm.config.CTAPolicy = tc.ctaPolicy;
+                    // reset() sets a spanning LSA team for the default nRanks;
+                    // keep it consistent when the case overrides nRanks.
+                    mock.comm.devrState.lsaSize = tc.nRanks;
+                    mock.comm.devrState.lsaSelf = mock.comm.rank;
 
+                    // Eligible rows also need a CE-capable driver (the new
+                    // ncclCeImplemented gate in rcclUseCeReduceScatter).
+                    const bool expectUse = tc.expected && isCeRuntimeDriverSupported();
                     const bool result =
                         rcclUseCeReduceScatter(mock.get(), tc.recvcount, tc.datatype, tc.op);
-                    EXPECT_EQ(result, tc.expected) << tc.name;
+                    EXPECT_EQ(result, expectUse) << tc.name;
                 })
                 .withEnvironment(env)
                 .withTimeout(std::chrono::seconds(30))

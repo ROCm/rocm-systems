@@ -3593,6 +3593,12 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
                                  ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                                  struct ncclDevrWindow* recvWin, struct ncclCeCollArgs* profilerArgs) {
   ncclResult_t ret = ncclSuccess;
+  // CE ReduceScatter addresses peers by world rank, so reject before launch
+  // unless one LSA team spans the comm.
+  if (!ncclDevrIsOneLsaTeam(comm)) {
+    WARN("CE ReduceScatter requires one LSA team spanning the comm (nRanks %d, nNodes %d)", comm->nRanks, comm->nNodes);
+    return ncclInvalidUsage;
+  }
   NCCLCHECK(ncclCeEnsureAllReduceStaging(comm));
   if (comm->ceColl.ceARTmpBuf == nullptr) {
     WARN("CE ReduceScatter staging is not available");

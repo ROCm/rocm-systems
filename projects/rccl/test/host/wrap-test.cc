@@ -7136,6 +7136,22 @@ int64_t EnabledCeReduceScatterParams(const char* env, int64_t deft) {
   return deft;
 }
 
+// rcclUseCeReduceScatter requires ncclCeImplemented. Opt-in CE RS select tests
+// must flip the driver seam or every arm declines before CTA/staging checks run.
+void EnableCeReduceScatterForSelectTest() {
+  g_loadParam = EnabledCeReduceScatterParams;
+  g_ceImplemented = true;
+}
+
+// UnitTestsMicro links real computeLsaSize (dev_runtime.cc via
+// #include in dev-runtime-test.cc). Without a cached spanning team,
+// ncclDevrIsOneLsaTeam walks null rankToNode when nRanks > 1 (SIGSEGV).
+// Call after the final nRanks assignment, matching the AllReduce CE select tests.
+void ArmSpanningLsaTeam(ncclComm* comm) {
+  comm->devrState.bigSize = 1;
+  comm->devrState.lsaSize = comm->nRanks;
+}
+
 constexpr int kCeRsRegisteredArmRanks = 4;
 }  // namespace
 
@@ -7145,7 +7161,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeChosenWhenEnabledAndStagingBuf
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_CeChosenWhenEnabledAndStagingBufferReady",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t, size_t) { return 19; });
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
@@ -7167,7 +7183,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeDeclinedWithoutCtaPolicyZero) 
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_CeDeclinedWithoutCtaPolicyZero",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
@@ -7189,7 +7205,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CePassesShardCountToBlockCalcula
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_CePassesShardCountToBlockCalculator",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t type, size_t chunkElems) {
           EXPECT_EQ(ncclFloat32, type);
           EXPECT_EQ(16u, chunkElems); // recvcount, not recvcount/nRanks (4) or recvcount*nRanks (64)
@@ -7197,6 +7213,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CePassesShardCountToBlockCalcula
         });
         ncclComm* comm = MakeSelectComm();
         comm->nRanks = 4;
+        ArmSpanningLsaTeam(comm);
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
@@ -7223,8 +7240,10 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeAcceptsMessagePastAllReduceCap
           if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return int64_t(4096);
           return EnabledCeReduceScatterParams(env, deft);
         };
+        g_ceImplemented = true;
         ncclComm* comm = MakeSelectComm();
         comm->nRanks = 4;
+        ArmSpanningLsaTeam(comm);
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
@@ -7245,13 +7264,14 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CePreemptsDdaIpc) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_CePreemptsDdaIpc",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                  return true;
                                });
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 8; // rcclDdaEnabled needs >=8 for gfx942
+        ArmSpanningLsaTeam(comm);
         comm->nNodes = 1;
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -7277,6 +7297,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredPreemptsDdaFabricOnG
           if (std::strcmp(env, "RCCL_DDA_LL") == 0) return int64_t(1);
           return deft;
         };
+        g_ceImplemented = true;
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
@@ -7287,6 +7308,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredPreemptsDdaFabricOnG
                               });
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->nRanks = 1;
+        ArmSpanningLsaTeam(comm);
         comm->nNodes = 1;
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -7306,13 +7328,14 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredPreemptsDdaIpcOnNonG
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_CeRegisteredPreemptsDdaIpcOnNonGfx1250",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                  return true;
                                });
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 8;
+        ArmSpanningLsaTeam(comm);
         comm->nNodes = 1;
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -7332,7 +7355,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredChosenWhenAvailableA
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_CeRegisteredChosenWhenAvailableAndPolicyZero",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                  size_t, const void*, void*, bool) { return true; });
         ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t type, size_t chunkElems) {
@@ -7342,6 +7365,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredChosenWhenAvailableA
         });
         ncclComm* comm = MakeSelectComm();
         comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -7359,11 +7383,12 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredDeclinedWithoutPolic
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_CeRegisteredDeclinedWithoutPolicyZero",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                  size_t, const void*, void*, bool) { return true; });
         ncclComm* comm = MakeSelectComm();
         comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
         rcclCollDecision decision{};
@@ -7384,11 +7409,12 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredChosenWithNonSumOps)
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_CeRegisteredChosenWithNonSumOps",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         for (ncclRedOp_t op : {ncclProd, ncclMin, ncclMax}) {
           SCOPED_TRACE("op=" + std::to_string((int)op));
           ncclComm* comm = MakeSelectComm();
           comm->nRanks = kCeRsRegisteredArmRanks;
+          ArmSpanningLsaTeam(comm);
           comm->symmetricSupport = 1;
           comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
           // staging null -> enqueue-init CE arm (same op/datatype gates as the late arm).
@@ -7407,7 +7433,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeChosenWithNonSumOps) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_CeChosenWithNonSumOps",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t, size_t) { return 19; });
         for (ncclRedOp_t op : {ncclProd, ncclMin, ncclMax}) {
           SCOPED_TRACE("op=" + std::to_string((int)op));
@@ -7431,7 +7457,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeNotChosenWithUnsupportedOp) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_CeNotChosenWithUnsupportedOp",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -7452,11 +7478,12 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredRejectsAvg) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_LateCeRegisteredRejectsAvg",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                  size_t, const void*, void*, bool) { return true; });
         ncclComm* comm = MakeSelectComm();
         comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -7476,12 +7503,13 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SysmemSegmentBlocksCeRegistered)
       "Wrap_SelectReduceScatter_SysmemSegmentBlocksCeRegistered",
       []() {
         int sendSentinel = 0, recvSentinel = 0;
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                  size_t, const void*, void*, bool) { return true; });
         ncclComm* comm = MakeSelectComm();
         TestDevrWindows registered(comm, &sendSentinel, true, &recvSentinel, false);
         comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -7499,12 +7527,13 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_RecvWinSysmemSegmentBlocksCeRegi
       "Wrap_SelectReduceScatter_RecvWinSysmemSegmentBlocksCeRegistered",
       []() {
         int sendSentinel = 0, recvSentinel = 0;
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                  size_t, const void*, void*, bool) { return true; });
         ncclComm* comm = MakeSelectComm();
         TestDevrWindows registered(comm, &sendSentinel, false, &recvSentinel, true);
         comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -7522,7 +7551,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricEligibleExcludesEagerCe
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_SymmetricEligibleExcludesEagerCe",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                  size_t, const void*, void*, bool) { return true; });
         ncclComm* comm = MakeSelectComm();
@@ -7545,7 +7574,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricEligibleDefersToLateCe)
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_SymmetricEligibleDefersToLateCe",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                  size_t, const void*, void*, bool) { return true; });
         ncclComm* comm = MakeSelectComm();
@@ -7565,11 +7594,12 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredPreemptsSymmetri
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_LateCeRegisteredPreemptsSymmetric",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                  size_t, const void*, void*, bool) { return true; });
         ncclComm* comm = MakeSelectComm();
         comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -7586,11 +7616,12 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredDeclinedOnMultiN
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_LateCeRegisteredDeclinedOnMultiNode",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                  size_t, const void*, void*, bool) { return false; });
         ncclComm* comm = MakeSelectComm();
         comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
         comm->nNodes = 2;
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -7609,11 +7640,12 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredRejectsFloat8) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_LateCeRegisteredRejectsFloat8",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                  size_t, const void*, void*, bool) { return true; });
         ncclComm* comm = MakeSelectComm();
         comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -7632,7 +7664,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupExcludesCe) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_InsideGroupExcludesCe",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -7656,7 +7688,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LatchedGraphModeExcludesBothCeAr
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_LatchedGraphModeExcludesBothCeArms",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -7683,7 +7715,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_QueryModeCapturingHintExcludesBo
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_QueryModeCapturingHintExcludesBothCeArms",
       []() {
-        g_loadParam = EnabledCeReduceScatterParams;
+        EnableCeReduceScatterForSelectTest();
         ScopedHook graphProbe(g_cudaGetCapturingGraph,
                               [](struct ncclCudaGraph*, hipStream_t, int) { return ncclSuccess; });
         ncclComm* comm = MakeSelectComm();
@@ -7905,9 +7937,11 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeOptInSelectsRegisteredThenEage
           if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return (int64_t)268435456;
           return defaultValue;
         };
+        g_ceImplemented = true;
         alignas(16) static uint8_t staging;
         ncclComm* comm = MakeSelectComm();
         comm->nRanks = 4;
+        ArmSpanningLsaTeam(comm);
         comm->nNodes = 1;
         comm->symmetricSupport = true;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;

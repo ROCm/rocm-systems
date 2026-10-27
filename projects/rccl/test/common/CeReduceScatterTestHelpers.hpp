@@ -51,6 +51,12 @@ struct CeReduceScatterMockComm
         comm.rank             = 0;
         comm.symmetricSupport = true;
         comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        // Keep mock LSA state initialized so eligibility does not inspect absent
+        // topology (same setup as CeAllReduceMockComm). bigSize != 0 makes
+        // computeLsaSize / ncclDevrIsOneLsaTeam use the cached lsaSize.
+        comm.devrState.bigSize = 1;
+        comm.devrState.lsaSize = comm.nRanks;
+        comm.devrState.lsaSelf = comm.rank;
     }
 
     ncclComm* get() { return &comm; }

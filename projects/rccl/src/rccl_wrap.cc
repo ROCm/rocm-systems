@@ -1514,6 +1514,20 @@ bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataTyp
     return false;
   }
 
+  // Staged CE addresses every peer by world rank via ncclDevrGetLsaRankPtr, so
+  // it needs the same runtime and single-LSA topology as CE AllReduce. Without
+  // this, NCCL_LSA_TEAM_SIZE < nRanks maps world ranks into the wrong LSA
+  // slots (or returns ncclInvalidArgument) after the reducer has already
+  // launched and is spinning on signals nobody writes.
+  if (!ncclCeImplemented(ncclFuncReduceScatter, ncclDevSum, datatype)) {
+    INFO(NCCL_TUNING, "Skipping CE ReduceScatter: CE is not supported by this driver");
+    return false;
+  }
+  if (!ncclDevrIsOneLsaTeam(comm)) {
+    INFO(NCCL_TUNING, "Skipping CE ReduceScatter: LSA team does not span the comm");
+    return false;
+  }
+
   return true;
 }
 
