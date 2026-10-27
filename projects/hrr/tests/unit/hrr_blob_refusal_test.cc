@@ -22,6 +22,7 @@
 #include "hrr_reader.h"
 #include "hrr/hrr_api_args.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -188,7 +189,7 @@ TEST_CASE("Unit_HRR_Blob_WithheldArgumentsRefuseReplacedKernel", "[hrr]") {
  * Test Description
  * ----------------
  *   - A __hipRegisterFatBinary whose blob a metadata-only capture withheld is
- *     refused as a fat binary.
+ *     refused as a fat binary, in one line: no "blob not found" follows it.
  */
 TEST_CASE("Unit_HRR_Blob_WithheldFatBinaryIsNamed", "[hrr]") {
   PlaybackContext ctx;
@@ -203,6 +204,7 @@ TEST_CASE("Unit_HRR_Blob_WithheldFatBinaryIsNamed", "[hrr]") {
   INFO("stderr: " << err);
   CHECK(ctx.fatal_error.load());
   CHECK(err.find("needs a fat binary") != std::string::npos);
+  CHECK(std::count(err.begin(), err.end(), '\n') == 1);
 }
 
 /**

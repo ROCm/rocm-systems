@@ -946,11 +946,16 @@ struct PlaybackContext {
     // ---- Blob/code-object loading ----
     // Load a blob from archive_dir/blobs/<2-char-prefix>/<hash>.blob
     // Returns nullptr if not found. Memory is owned by the context (cached).
-    // `what` names the blob if it is refused as withheld.
+    // `what` names the blob if it is refused as withheld. A refusal is reported
+    // and sets fatal_error; with `api` given, an absent blob is reported as
+    // "<api>: blob <hash> not found in archive", or "<api>: no blob recorded" for
+    // a zero hash. Callers that pass `api` print nothing after a null.
     const void* load_blob(uint64_t hash_lo, uint64_t hash_hi,
                           size_t* sz_out = nullptr,
-                          const char* what = "host buffer") const;
-    // Load a code object from archive_dir/code_objects/<hash>.hsaco
+                          const char* what = "host buffer",
+                          const char* api = nullptr) const;
+    // Load a code object from archive_dir/code_objects/<hash>.hsaco, reporting
+    // a refused or absent one as load_blob does.
     // Both loaders refuse HRR_HASH_WITHHELD (see refuse_withheld).
     const void* load_code_object(uint64_t hash_lo, uint64_t hash_hi,
                                  size_t* sz_out) const;

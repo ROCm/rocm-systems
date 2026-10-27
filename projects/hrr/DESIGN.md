@@ -724,7 +724,7 @@ Setting `HIP_HRR_DEBUG_ARGS` enables arg dumps at capture time (see
 stderr that it is doing so. The dumps are a second copy of the argument bytes the
 archive already holds, outside the archive's permissions, so only a Debug build of
 the HIP runtime (no `NDEBUG`) reads the variable. A release build ignores it and
-says so on stderr. Two markers make
+says so on stderr. Three markers make
 common failure modes unambiguous:
 
 - `[TRUNCATED:no-bytes]` — the arg's bytes were unavailable at capture (the packed
@@ -733,6 +733,9 @@ common failure modes unambiguous:
   the application, **not** a capture loss. This distinction matters: a null pointer
   arg at replay (`arg[i]: ptr 0x0 -> (nil) (MISSING!)`) is expected and harmless
   when the original value was also null.
+- `[WITHHELD:metadata-only]` — a by-value arg of a capture without
+  `HIP_HRR_CAPTURE_CONTENT`: its bytes were not recorded and the archive holds
+  zeros. This is the capture mode, not a capture loss.
 - `[KBUF-TOO-SMALL]` (kbuf/`extra[]` path only) — the app-provided buffer size
   (`ksz`) is smaller than the signature extent (`need`); trailing args will be
   truncated. Triton-style launches that use `kernelParams[]` never hit this path.

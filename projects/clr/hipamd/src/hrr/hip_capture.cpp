@@ -637,7 +637,9 @@ static void serialize_kernel_launch(
       for (uint16_t o : offs) { std::snprintf(tmp, sizeof(tmp), "%u ", o); off_str += tmp; }
       LogPrintfInfo("[HRR args] %s arg[%u] kind=%u size=%u bytes=%s ptr_off=[%s]%s",
                     kernel_name, idx, kind, sz, hex.c_str(), off_str.c_str(),
-                    bytes ? "" : " [TRUNCATED:no-bytes]");
+                    bytes     ? ""
+                    : content ? " [TRUNCATED:no-bytes]"
+                              : " [WITHHELD:metadata-only]");
     }
   };
 
