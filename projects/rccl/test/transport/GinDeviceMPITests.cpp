@@ -5914,6 +5914,9 @@ TEST_F(GinMPIDeviceTests, GinContextCount_ReportsRoundedUp) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  // RAIL/NONE communicators cannot honor a FULL request. Skip together, then
+  // fail the probe create on every rank so a regression is not reported as SKIPPED.
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
 
   ncclDevCommRequirements probeReqs = defaultGinReqs();
@@ -5921,14 +5924,14 @@ TEST_F(GinMPIDeviceTests, GinContextCount_ReportsRoundedUp) {
   probeReqs.ginContextCount = 1;
   probeReqs.ginSignalCount = 1;
   ncclDevComm probe{};
-  ncclResult_t probeRc = ncclDevCommCreate(comm, &probeReqs, &probe);
-  if (probeRc != ncclSuccess)
-    GTEST_SKIP() << "GIN device communicator unavailable; rc=" << (int)probeRc;
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &probeReqs, &probe));
   // ncclGinConnectOnce already min-reduces ginCommCount across ranks.
   const int connCount = (int)probe.ginConnectionCount;
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommDestroy(comm, &probe));
-  if (connCount < 2)
-    GTEST_SKIP() << "Needs >= 2 GIN connections for the request to round up";
+  if (auto reason = mpiCoordinatedSkipReason(
+          connCount < 2, "Needs >= 2 GIN connections for the request to round up");
+      !reason.empty())
+    GTEST_SKIP() << reason;
 
   const int requested = connCount + 1;
   const int expected = ((requested + connCount - 1) / connCount) * connCount;
