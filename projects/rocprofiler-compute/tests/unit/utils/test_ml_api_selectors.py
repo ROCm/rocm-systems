@@ -29,8 +29,7 @@ def test_double_colon_stays_in_the_operator_pattern():
         "torch": ["*/aten::addmm"]
     }
     assert resolve_operator_patterns(["*/aten::addmm"]) == {
-        name: ["*/aten::addmm"]
-        for name in (*KNOWN_ML_API_BACKENDS, "user")
+        name: ["*/aten::addmm"] for name in (*KNOWN_ML_API_BACKENDS, "user")
     }
 
 

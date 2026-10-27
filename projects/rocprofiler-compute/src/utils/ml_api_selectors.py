@@ -89,9 +89,8 @@ def _patterns_by_backend(token: str) -> Dict[str, List[str]]:
             selections.setdefault(name, []).append(pattern)
 
     for selector_token in selector_tokens:
-        if (
-            "::" in selector_token
-            and selector_token.find("::") <= selector_token.find(":")
+        if "::" in selector_token and selector_token.find("::") <= selector_token.find(
+            ":"
         ):
             _save(prefix, selector_token)
             continue
@@ -116,4 +115,3 @@ def resolve_operator_patterns(
     if not selections:
         return {name: ["**"] for name in _OPERATOR_BACKENDS}
     return selections
-
