@@ -82,10 +82,6 @@ Kernel::Kernel(const std::string& name, pal::Program* prog, bool internalKernel)
 Kernel::~Kernel() {}
 
 bool Kernel::postLoad() {
-  if (codeObjectVer() == 2) {
-    symbolName_ = name();
-  }
-
   // Copy codeobject of this kernel from the program CPU segment
   hsa_agent_t agent = {amd::Device::toHandle(&(device()))};
 
@@ -140,13 +136,8 @@ bool Kernel::postLoad() {
   }
 
   // handle the printf metadata if any
-  std::vector<std::string> printfStr;
-  if (!GetPrintfStr(&printfStr)) {
-    return false;
-  }
-
-  if (!printfStr.empty()) {
-    InitPrintf(printfStr);
+  if (!prog().printfStrings().empty()) {
+    InitPrintf(prog().printfStrings());
   }
 
   return true;

@@ -11,6 +11,12 @@
 #include "platform/memory.hpp"
 #include "platform/ndrange.hpp"
 
+#include <string_view>
+
+namespace amd::codeobject {
+class MsgPackReader;
+}  // namespace amd::codeobject
+
 namespace amd {
 class Device;
 class KernelSignature;
@@ -107,30 +113,6 @@ enum class ArgField : uint8_t {
   IsPipe = 12,
   Offset = 13,
   MaxSize = 14
-};
-
-enum class AttrField : uint8_t {
-  ReqdWorkGroupSize = 0,
-  WorkGroupSizeHint = 1,
-  VecTypeHint = 2,
-  RuntimeHandle = 3,
-  MaxSize = 4,
-};
-
-enum class CodePropField : uint8_t {
-  KernargSegmentSize = 0,
-  GroupSegmentFixedSize = 1,
-  PrivateSegmentFixedSize = 2,
-  KernargSegmentAlign = 3,
-  WavefrontSize = 4,
-  NumSGPRs = 5,
-  NumVGPRs = 6,
-  MaxFlatWorkGroupSize = 7,
-  IsDynamicCallStack = 8,
-  IsXNACKEnabled = 9,
-  NumSpilledSGPRs = 10,
-  NumSpilledVGPRs = 11,
-  MaxSize = 12,
 };
 
 //  for Code Object V3
@@ -283,10 +265,10 @@ class Kernel {
   //! Returns GPU device object, associated with this kernel
   const amd::Device& device() const { return dev_; }
 
-  void setVecTypeHint(const std::string& hint) { workGroupInfo_.compileVecTypeHint_ = hint; }
+  void setVecTypeHint(std::string_view hint) { workGroupInfo_.compileVecTypeHint_.assign(hint); }
 
   const std::string& RuntimeHandle() const { return runtimeHandle_; }
-  void setRuntimeHandle(const std::string& handle) { runtimeHandle_ = handle; }
+  void setRuntimeHandle(std::string_view handle) { runtimeHandle_.assign(handle); }
 
   //! Return the build log
   const std::string& buildLog() const { return buildLog_; }
@@ -339,9 +321,9 @@ class Kernel {
   const uint32_t KernargSegmentAlignment() const { return kernargSegmentAlignment_; }
   void SetKernargSegmentAlignment(uint32_t align) { kernargSegmentAlignment_ = align; }
 
-  void SetSymbolName(const std::string& name) { symbolName_ = name; }
+  void SetSymbolName(std::string_view name) { symbolName_.assign(name); }
 
-  void SetKernelKind(const std::string& kind) {
+  void SetKernelKind(std::string_view kind) {
     kind_ = (kind == "init") ? Init : ((kind == "fini") ? Fini : Normal);
   }
 
@@ -352,14 +334,14 @@ class Kernel {
   bool isFiniKernel() const { return kind_ == Fini; }
 
  protected:
-  //! Initializes the abstraction layer kernel parameters
-  void InitParameters(const amd_comgr_metadata_node_t kernelMD);
+  //! Reads the kernel's .args array from @p reader into @p params and @p hiddenParams.
+  //! @returns false if the metadata is malformed.
+  bool InitParameters(codeobject::MsgPackReader& reader, parameters_t& params,
+                      parameters_t& hiddenParams);
 
-  //! Retrieve kernel attribute and code properties metadata
+  //! Reads the kernel's metadata map, in place in the code object: attributes, code
+  //! properties, arguments. @returns false if it is missing or malformed.
   bool GetAttrCodePropMetadata();
-
-  //! Retrieve the printf string metadata
-  bool GetPrintfStr(std::vector<std::string>* printfStr);
 
   //! Returns the kernel symbol name
   const std::string& symbolName() const { return symbolName_; }
@@ -415,6 +397,4 @@ class Kernel {
 
   KernelKind kind_{Normal};  //!< Kernel kind, is normal unless specified otherwise
 };
-
-amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta, std::string* str);
 }  // namespace amd::device

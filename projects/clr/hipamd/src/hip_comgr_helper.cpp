@@ -469,45 +469,6 @@ void GenerateUniqueFileName(std::string& name) {
           std::to_string(counter.fetch_add(1, std::memory_order_relaxed));
 }
 
-bool demangleName(const std::string& mangledName, std::string& demangledName) {
-  amd_comgr_data_t mangled_data;
-  amd_comgr_data_t demangled_data;
-
-  if (AMD_COMGR_STATUS_SUCCESS != amd::Comgr::create_data(AMD_COMGR_DATA_KIND_BYTES, &mangled_data))
-    return false;
-
-  if (AMD_COMGR_STATUS_SUCCESS !=
-      amd::Comgr::set_data(mangled_data, mangledName.size(), mangledName.c_str())) {
-    amd::Comgr::release_data(mangled_data);
-    return false;
-  }
-
-  if (AMD_COMGR_STATUS_SUCCESS != amd::Comgr::demangle_symbol_name(mangled_data, &demangled_data)) {
-    amd::Comgr::release_data(mangled_data);
-    return false;
-  }
-
-  size_t demangled_size = 0;
-  if (AMD_COMGR_STATUS_SUCCESS != amd::Comgr::get_data(demangled_data, &demangled_size, NULL)) {
-    amd::Comgr::release_data(mangled_data);
-    amd::Comgr::release_data(demangled_data);
-    return false;
-  }
-
-  demangledName.resize(demangled_size);
-
-  if (AMD_COMGR_STATUS_SUCCESS != amd::Comgr::get_data(demangled_data, &demangled_size,
-                                                       const_cast<char*>(demangledName.data()))) {
-    amd::Comgr::release_data(mangled_data);
-    amd::Comgr::release_data(demangled_data);
-    return false;
-  }
-
-  amd::Comgr::release_data(mangled_data);
-  amd::Comgr::release_data(demangled_data);
-  return true;
-}
-
 std::string handleMangledName(std::string loweredName) {
   if (loweredName.empty()) {
     return loweredName;
