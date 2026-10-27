@@ -20,6 +20,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+// This binary forks children needing an uninitialized HIP parent; opt out of
+// the test listener's last-error reset so the parent is never initialized.
+bool HipTestSkipLastErrorReset() { return true; }
+
 /**
  * Fetches Gpu device count
  */

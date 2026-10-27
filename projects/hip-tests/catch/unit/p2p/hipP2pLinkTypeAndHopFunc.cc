@@ -11,6 +11,10 @@
 #ifdef __linux__
 #include <unistd.h>
 #include <sys/wait.h>
+
+// This binary forks children needing an uninitialized HIP parent; opt out of
+// the test listener's last-error reset so the parent is never initialized.
+bool HipTestSkipLastErrorReset() { return true; }
 #endif
 #define MAX_SIZE 30
 #define VISIBLE_DEVICE 0

@@ -424,10 +424,16 @@ class MemPoolGuard {
     if (mempool_type_ == MemPools::created) {
       static_cast<void>(hipMemPoolDestroy(mempool_));
     } else {
-      // Reset max states for default mem pool, so subtests won't fail
+      // Restore the shared default mem pool to its documented defaults so later
+      // tests are not affected by attributes this test modified.
       uint64_t value = 0;
       HIP_CHECK(hipMemPoolSetAttribute(mempool_, hipMemPoolAttrUsedMemHigh, &value));
       HIP_CHECK(hipMemPoolSetAttribute(mempool_, hipMemPoolAttrReservedMemHigh, &value));
+      HIP_CHECK(hipMemPoolSetAttribute(mempool_, hipMemPoolAttrReleaseThreshold, &value));
+      int enabled = 1;
+      HIP_CHECK(hipMemPoolSetAttribute(mempool_, hipMemPoolReuseFollowEventDependencies, &enabled));
+      HIP_CHECK(hipMemPoolSetAttribute(mempool_, hipMemPoolReuseAllowOpportunistic, &enabled));
+      HIP_CHECK(hipMemPoolSetAttribute(mempool_, hipMemPoolReuseAllowInternalDependencies, &enabled));
     }
   }
 

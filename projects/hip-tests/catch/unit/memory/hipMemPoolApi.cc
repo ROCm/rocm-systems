@@ -61,11 +61,16 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Basic) {
   HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold));
 
   attr = hipMemPoolReuseFollowEventDependencies;
+  // mem_pool is the shared default pool; save and restore so later tests see the default.
+  int orig_value = -1;
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &orig_value));
   int value = 0;
 
   HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
 
   HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value));
+
+  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &orig_value));
 
   hipMemAccessDesc desc_list = {{hipMemLocationTypeDevice, 0}, hipMemAccessFlagsProtReadWrite};
   int count = 1;

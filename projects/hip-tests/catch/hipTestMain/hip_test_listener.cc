@@ -6,6 +6,7 @@
 
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
+#include <catch2/catch_test_case_info.hpp>
 #include <hip_test_params.hh>
 #include <hip_test_context.hh>
 #include <hip_test_level.hh>
@@ -48,3 +49,31 @@ class HipTestParameterListener : public Catch::EventListenerBase {
 
 // Register the listener - it will be automatically activated
 CATCH_REGISTER_LISTENER(HipTestParameterListener)
+
+// Fork-based targets whose tests require an uninitialized parent process
+// override this (strong definition) to true, opting the whole binary out of the
+// last-error reset below so it never initializes HIP in the parent.
+__attribute__((weak)) bool HipTestSkipLastErrorReset() { return false; }
+
+/**
+ * @brief Clears the sticky thread-local HIP last error after each test case so
+ * an error left unconsumed by one test cannot fail the next. Names the culprit
+ * when HT_LOG_ENABLE is set.
+ */
+class HipLastErrorResetListener : public Catch::EventListenerBase {
+ public:
+  using Catch::EventListenerBase::EventListenerBase;
+
+  void testCaseEnded(Catch::TestCaseStats const& stats) override {
+    if (HipTestSkipLastErrorReset()) {
+      return;
+    }
+    hipError_t leftover = hipGetLastError();
+    if (leftover != hipSuccess) {
+      LogPrintf("[HIP last-error] test '%s' left %d (%s)", stats.testInfo->name.c_str(),
+                static_cast<int>(leftover), hipGetErrorString(leftover));
+    }
+  }
+};
+
+CATCH_REGISTER_LISTENER(HipLastErrorResetListener)
