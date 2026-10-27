@@ -93,8 +93,9 @@ inline ImageAddressRegisters gfx12_image_address_registers(const VimageMachineIn
 /// half registers. DA=0 accesses layer zero without a layer coordinate.
 /// @returns Failure after reporting an unsupported operand (empty DMASK,
 /// UNORM=0 store) or an unimplemented feature (tiling, mips, cube, MSAA,
-/// nonzero base array, incompatible RDNA DIM, format outside the buffer table,
-/// TFE, or LWE).
+/// RDNA linear 1D/2D-array and 3D resources whose decoded descriptors do not
+/// provide PITCH, nonzero base array, incompatible RDNA DIM, format outside the
+/// buffer table, TFE, or LWE).
 inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
                                          uint32_t resource_reg,
                                          const ImageAddressRegisters &address_registers,
