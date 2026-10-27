@@ -686,8 +686,10 @@ protected:
     return decoder->decode(words.data());
   }
 
-  void issue(bool load, uint8_t dmask = 1, bool d16 = false) {
-    auto decoded = decode(load, {.dmask = dmask, .d16 = d16});
+  void issue(bool load) { issue(load, Encoding{}); }
+
+  void issue(bool load, Encoding encoding) {
+    auto decoded = decode(load, encoding);
     ASSERT_TRUE(decoded.succeeded());
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     ASSERT_NE(inst, nullptr);
@@ -776,7 +778,7 @@ TEST_P(RdnaDecodedImageAccessTest, StoreDmaskExpandsPackedInputsAndAppliesQualif
       memory.write32(kBase + offset * 4, 0xdeadbeef);
       cu->write_vgpr(vb + 8 + offset, 0, test.packed[offset]);
     }
-    issue(false, test.dmask, test.d16);
+    issue(false, {.dmask = test.dmask, .d16 = test.d16});
     const auto &expected = GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? test.gfx12 : test.gfx11;
     for (uint32_t offset = 0; offset < expected.size(); ++offset)
       EXPECT_EQ(memory.read32(kBase + offset * 4), expected[offset]) << "offset=" << offset;
@@ -798,7 +800,7 @@ TEST_P(RdnaDecodedImageAccessTest, PackedRgbStoresWriteConstantAlpha) {
     bind_resource(kRgba2101010Uint, selectors);
     for (uint32_t component = 0; component < 4; ++component)
       cu->write_vgpr(vb + 8 + component, 0, 0x11 * (component + 1));
-    issue(false, 15);
+    issue(false, {.dmask = 15});
     EXPECT_EQ(memory.read32(kBase), expected);
   }
 }
