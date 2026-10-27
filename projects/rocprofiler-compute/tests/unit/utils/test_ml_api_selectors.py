@@ -5,6 +5,7 @@
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.ml_api_selectors import (
+    UNSCOPED_OPERATOR_KEY,
     resolve_operator_patterns,
     resolve_profile_selection,
 )
@@ -29,7 +30,7 @@ def test_double_colon_stays_in_the_operator_pattern():
         "torch": ["*/aten::addmm"]
     }
     assert resolve_operator_patterns(["*/aten::addmm"]) == {
-        name: ["*/aten::addmm"] for name in (*KNOWN_ML_API_BACKENDS, "user")
+        UNSCOPED_OPERATOR_KEY: ["*/aten::addmm"]
     }
 
 
@@ -48,7 +49,5 @@ def test_operator_space_and_comma_forms_select_the_same_patterns():
         assert resolve_operator_patterns([form]) == expected
 
 
-def test_empty_operator_flag_is_double_star_on_each_backend():
-    assert resolve_operator_patterns([]) == {
-        name: ["**"] for name in (*KNOWN_ML_API_BACKENDS, "user")
-    }
+def test_empty_operator_flag_is_unscoped_double_star():
+    assert resolve_operator_patterns([]) == {UNSCOPED_OPERATOR_KEY: ["**"]}

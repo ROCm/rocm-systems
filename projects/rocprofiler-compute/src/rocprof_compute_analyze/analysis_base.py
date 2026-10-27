@@ -23,6 +23,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.expression import build_metric_value_string
+from utils.ml_api_selectors import UNSCOPED_OPERATOR_KEY
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     validate_workload,
@@ -65,7 +66,7 @@ def _authorize_ml_api_operator_flags(
     args: argparse.Namespace,
     profiling_config: dict[str, Any],
 ) -> None:
-    """Error when operator flags name a selector the workload did not collect."""
+    """Reject selectors the workload did not collect; attach unscoped patterns."""
     saved_raw = profiling_config.get("trace_ml_api")
     saved_selectors = [str(name) for name in saved_raw] if saved_raw else []
     saved_set = set(saved_selectors)
@@ -85,7 +86,9 @@ def _authorize_ml_api_operator_flags(
 
     requested = list(list_selectors or [])
     if operator_patterns is not None:
-        requested.extend(operator_patterns)
+        requested.extend(
+            name for name in operator_patterns if name != UNSCOPED_OPERATOR_KEY
+        )
     for name in requested:
         if name in KNOWN_ML_API_BACKENDS and name not in saved_set:
             console_error(
@@ -93,6 +96,25 @@ def _authorize_ml_api_operator_flags(
                 f'Workload was not profiled with "--trace-ml-api {name}". '
                 "Cannot use that selector with --list-operators or --operator.",
             )
+
+    if operator_patterns is None:
+        return
+
+    bound = {}
+    unscoped = []
+    for backend, patterns in operator_patterns.items():
+        if backend == UNSCOPED_OPERATOR_KEY:
+            unscoped.extend(patterns)
+            continue
+        bound.setdefault(backend, []).extend(patterns)
+    if unscoped:
+        seen = set()
+        for name in list(saved_selectors) + ["user"]:
+            if name in seen:
+                continue
+            seen.add(name)
+            bound.setdefault(name, []).extend(unscoped)
+    args.operator_patterns = bound
 
 
 class OmniAnalyze_Base:

@@ -197,23 +197,28 @@ def test_sanitize_authorizes_trace_ml_api_selectors(tmp_path, monkeypatch) -> No
     )
 
     def run_sanitize(list_operators=None, operator=None):
-        OmniAnalyze_Base(
-            argparse.Namespace(
-                tui=False,
-                path=[[str(workload)]],
-                list_operators=resolve_list_selectors(list_operators),
-                operator_patterns=resolve_operator_patterns(operator),
-                output_name=None,
-            ),
-            {},
-        ).sanitize()
+        args = argparse.Namespace(
+            tui=False,
+            path=[[str(workload)]],
+            list_operators=resolve_list_selectors(list_operators),
+            operator_patterns=resolve_operator_patterns(operator),
+            output_name=None,
+        )
+        OmniAnalyze_Base(args, {}).sanitize()
+        return args
 
     run_sanitize(list_operators=["torch"])
     run_sanitize(list_operators=["user"])
     run_sanitize(operator=["torch:*relu*"])
+    unscoped = run_sanitize(operator=["*relu*"])
+    assert unscoped.operator_patterns == {"torch": ["*relu*"], "user": ["*relu*"]}
+    bare = run_sanitize(operator=[])
+    assert bare.operator_patterns == {"torch": ["**"], "user": ["**"]}
 
     with pytest.raises(SystemExit):
         run_sanitize(list_operators=["triton"])
     assert errors
     assert "was not profiled" in errors[-1][1]
     assert "triton" in errors[-1][1]
+    with pytest.raises(SystemExit):
+        run_sanitize(operator=["triton:*matmul*"])
