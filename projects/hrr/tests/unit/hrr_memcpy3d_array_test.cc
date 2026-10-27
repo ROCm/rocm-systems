@@ -27,14 +27,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <string>
 #include <vector>
 
 namespace {
-
-namespace fs = std::filesystem;
 
 struct Spelling {
   hrr_api_id_t id;
@@ -77,19 +73,6 @@ std::vector<uint8_t> make_record(const Spelling& s, hipMemcpyKind kind, uint64_t
   std::memcpy(rec.data() + at, hash, sizeof(hash));
   return rec;
 }
-
-// An archive directory holding one 32-byte blob with hash (1, 2).
-struct BlobDir {
-  fs::path root = fs::temp_directory_path() / "hrr_memcpy3d_array_test";
-  BlobDir() {
-    fs::remove_all(root);
-    const std::string hex = hrr::hash_hex(1, 2);
-    fs::create_directories(root / "blobs" / hex.substr(0, 2));
-    std::ofstream(root / "blobs" / hex.substr(0, 2) / (hex + ".blob"), std::ios::binary)
-        << std::string(32, 'x');
-  }
-  ~BlobDir() { fs::remove_all(root); }
-};
 
 }  // namespace
 
@@ -134,6 +117,38 @@ TEST_CASE("Unit_HRR_Memcpy3DArray_UnknownHandleIsRefused", "[hrr]") {
 /**
  * Test Description
  * ----------------
+ *   - Once replay has freed an array, a later copy that names its recorded
+ *     handle is refused like any handle replay never created, instead of being
+ *     translated to the freed array. The live handle here is not a real array,
+ *     so the runtime refuses the free and the handler still forgets the handle:
+ *     the runtime has dropped any array a free reaches.
+ */
+TEST_CASE("Unit_HRR_Memcpy3DArray_FreedHandleIsForgotten", "[hrr]") {
+  PlaybackContext ctx;
+  ctx.record_array(kRecordedSrc, reinterpret_cast<hipArray_t>(0x1000));
+  REQUIRE(ctx.translate_array(kRecordedSrc) != nullptr);
+
+  std::vector<uint8_t> free_rec(hrr_api_min_payload_size[HRR_API_HIPFREEARRAY], 0);
+  const uint64_t handle = kRecordedSrc;
+  std::memcpy(free_rec.data() + offsetof(hrr_args_hipFreeArray, array), &handle, sizeof(handle));
+  (void)hrr_test::capture_stderr(
+      [&] { (void)hrr_test::dispatch(ctx, HRR_API_HIPFREEARRAY, free_rec.data()); });
+  CHECK(ctx.translate_array(kRecordedSrc) == nullptr);
+
+  for (const Spelling& s : kSpellings) {
+    INFO(s.api);
+    auto rec = make_record(s, hipMemcpyDeviceToDevice, kRecordedSrc, 0);
+    hipError_t r = hipSuccess;
+    const std::string err =
+        hrr_test::capture_stderr([&] { r = hrr_test::dispatch(ctx, s.id, rec.data()); });
+    CHECK(r == hipErrorInvalidValue);
+    CHECK(err.find("source array 0x7f1100000000") != std::string::npos);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - A host-to-array copy with a captured blob, which replay would otherwise
  *     issue, and an array-to-host copy, are not issued: the host rect is sized
  *     in bytes and the copy in array elements, so issuing them would read past
@@ -141,11 +156,11 @@ TEST_CASE("Unit_HRR_Memcpy3DArray_UnknownHandleIsRefused", "[hrr]") {
  *     hipErrorNotSupported and lists the API as unreplayable, in all four
  *     spellings, and nothing reaches HIP (the live handle here is not a real
  *     array).
- *   - An array-to-host copy with a D2H check counts as a failed check, as it
- *     did before replay translated arrays; one without a check does not.
+ *   - An array-to-host copy with a D2H check counts as a failed check; one
+ *     without a check does not.
  */
 TEST_CASE("Unit_HRR_Memcpy3DArray_HostCopiesAreNotIssued", "[hrr]") {
-  BlobDir dir;
+  hrr_test::BlobDir dir(std::string(32, 'x'));
   PlaybackContext ctx;
   ctx.archive_dir = dir.root.string();
   ctx.validate_d2h = true;

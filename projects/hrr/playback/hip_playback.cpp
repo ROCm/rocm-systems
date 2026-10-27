@@ -4604,8 +4604,7 @@ static bool memcpy3d_is_host_array(const hipMemcpy3DParms& p) {
 // Not issuing the copy leaves its effect out of the replay, so it is reported as
 // unreplayable and returns hipErrorNotSupported, which ends the replay (or
 // counts an event failure under --continue-on-error) instead of passing. An
-// array-to-host copy with a D2H check counts as the failed check it was before
-// replay translated arrays, when its null source failed in note_unmapped_d2h_src.
+// array-to-host copy with a D2H check counts as a failed check.
 static hipError_t refuse_host_array_copy(PlaybackContext& ctx, const char* api,
                                          const hipMemcpy3DParms& p, int32_t recorded_ret,
                                          uint64_t hash_lo, uint64_t hash_hi) {
@@ -5183,7 +5182,11 @@ hipError_t playback_hipFreeArray(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipFreeArray*>(pl);
     hipArray_t arr = ctx.translate_array(a->array);
     if (!arr) return hipSuccess;  // nooped alloc (hipMallocArray noop)
-    return hipFreeArray(arr);
+    hipError_t r = hipFreeArray(arr);
+    // A later copy naming this handle must not translate to the freed array.
+    // Dropped whatever the result: the runtime forgets an array a free reaches.
+    ctx.remove_array(a->array);
+    return r;
 }
 
 // ---------------------------------------------------------------------------
