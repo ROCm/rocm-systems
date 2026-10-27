@@ -6881,6 +6881,39 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricAcceptsSumOrAvg) {
       });
 }
 
+namespace real_arch_thresholds {
+// The real tables, namespaced so they do not collide with fakes/rccl_arch_thresholds_fakes.cc.
+#include "rccl_arch_thresholds.cc"
+}  // namespace real_arch_thresholds
+
+// gfx1250 SPX symMaxR2[ReduceScatter] is 0: at and above symMinR2 (2 MiB) symk stays withdrawn even when requested.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_Gfx1250NeverPicksSymmetric",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        comm->symmetricSupport = 1;
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        for (size_t totalBytes : {size_t{2} << 20, size_t{256} << 20}) {
+          for (ncclRedOp_t op : {ncclSum, ncclAvg}) {
+            rcclCollDecision decision{};
+            EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, totalBytes / sizeof(float),
+                                                            ncclFloat32, op, /*query=*/false, &decision));
+            EXPECT_NE((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo) << totalBytes << " op " << op;
+            EXPECT_EQ(NCCL_ALGO_RING, decision.algo) << totalBytes << " op " << op;
+          }
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLLChosenOnGfx1250) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_DdaFabricLLChosenOnGfx1250",

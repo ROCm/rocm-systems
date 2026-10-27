@@ -153,7 +153,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [0] Broadcast      -- not used on gfx1250
     0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
-    kThreshUnlimited,     // [3] ReduceScatter
+    0,                    // [3] ReduceScatter   -- symk loses 2-5x to DDA / Ring from 2M up (4 ranks)
     0,                    // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
     0,                    // [6] Send            -- not used on gfx1250
@@ -167,7 +167,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [0] Broadcast      -- not used on gfx1250
     0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
-    kThreshUnlimited,     // [3] ReduceScatter
+    0,                    // [3] ReduceScatter   -- symk loses 2-5x to DDA / Ring from 2M up (4 ranks)
     0,                    // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
     0,                    // [6] Send            -- not used on gfx1250
