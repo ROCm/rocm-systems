@@ -16,37 +16,50 @@ namespace {
 
 using rocjitsu::amdgpu::Lds;
 
-// Per-lane, per-element semantics that vector_load/vector_store must preserve:
-// an element reaching past capacity reads as zero and is not written.
-void reference_load(const Lds &lds, const std::array<uint64_t, 64> &addrs, uint64_t mask,
-                    uint32_t elem_size, uint32_t num_elems, uint8_t *dst) {
+// Model bytes rather than replaying the implementation's lane/element traversal.
+// Neither oracle calls Lds accessors or shares traversal helpers with production.
+std::vector<uint8_t> reference_load(const std::vector<uint8_t> &memory,
+                                    const std::array<uint64_t, 64> &addrs, uint64_t mask,
+                                    uint32_t elem_size, uint32_t num_elems) {
   const uint32_t stride = elem_size * num_elems;
-  for (uint32_t lane = 0; lane < 64; ++lane) {
+  std::vector<uint8_t> result(64 * stride, 0xCC);
+  for (size_t out = 0; out < result.size(); ++out) {
+    const size_t lane = out / stride;
     if (!(mask >> lane & 1))
       continue;
-    for (uint32_t e = 0; e < num_elems; ++e) {
-      const uint64_t ea = static_cast<uint32_t>(addrs[lane]) + uint64_t{e} * elem_size;
-      uint8_t *out = dst + lane * stride + e * elem_size;
-      if (ea + elem_size > lds.size_bytes())
-        std::fill_n(out, elem_size, 0);
-      else
-        lds.read(static_cast<uint32_t>(ea), out, elem_size);
-    }
+    const size_t within_lane = out % stride;
+    const uint64_t element =
+        uint64_t{static_cast<uint32_t>(addrs[lane])} + (within_lane / elem_size) * elem_size;
+    result[out] =
+        element + elem_size <= memory.size() ? memory[element + within_lane % elem_size] : 0;
   }
+  return result;
 }
 
-void reference_store(Lds &lds, const std::array<uint64_t, 64> &addrs, uint64_t mask,
-                     uint32_t elem_size, uint32_t num_elems, const uint8_t *src) {
+std::vector<uint8_t> reference_store(const std::vector<uint8_t> &memory,
+                                     const std::array<uint64_t, 64> &addrs, uint64_t mask,
+                                     uint32_t elem_size, uint32_t num_elems,
+                                     const std::vector<uint8_t> &src) {
   const uint32_t stride = elem_size * num_elems;
-  for (uint32_t lane = 0; lane < 64; ++lane) {
-    if (!(mask >> lane & 1))
-      continue;
-    for (uint32_t e = 0; e < num_elems; ++e) {
-      const uint64_t ea = static_cast<uint32_t>(addrs[lane]) + uint64_t{e} * elem_size;
-      if (ea + elem_size <= lds.size_bytes())
-        lds.write(static_cast<uint32_t>(ea), src + lane * stride + e * elem_size, elem_size);
+  auto result = memory;
+  // For each LDS byte, find the highest active lane with a valid element covering it.
+  // This defines the winner directly, independently of the store traversal order.
+  for (size_t address = 0; address < result.size(); ++address) {
+    for (int lane = 63; lane >= 0; --lane) {
+      if (!(mask >> lane & 1))
+        continue;
+      const uint64_t base = uint64_t{static_cast<uint32_t>(addrs[lane])};
+      if (address < base || address - base >= stride)
+        continue;
+      const size_t within_lane = address - base;
+      const uint64_t element = base + (within_lane / elem_size) * elem_size;
+      if (element + elem_size <= memory.size()) {
+        result[address] = src[lane * stride + within_lane];
+        break;
+      }
     }
   }
+  return result;
 }
 
 std::vector<uint8_t> contents(const Lds &lds) {
@@ -130,6 +143,55 @@ TEST(LdsTest, WritesGrowBackingAndOutOfBoundsWritesDoNot) {
   EXPECT_EQ(untouched.materialized_size_bytes(), 0u);
 }
 
+TEST(LdsTest, ContiguousAndSparseLanesMatchExplicitBytes) {
+  constexpr std::array<uint8_t, 16> initial{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+  constexpr std::array<uint8_t, 16> values{16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1};
+  struct Case {
+    uint64_t mask;
+    std::array<uint8_t, 16> loaded;
+    std::array<uint8_t, 16> stored;
+  };
+  const std::array<Case, 2> cases{{
+      {0b1111, initial, values},
+      {0b1011,
+       {1, 2, 3, 4, 5, 6, 7, 8, 0xCC, 0xCC, 0xCC, 0xCC, 13, 14, 15, 16},
+       {16, 15, 14, 13, 12, 11, 10, 9, 9, 10, 11, 12, 4, 3, 2, 1}},
+  }};
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.mask);
+    Lds lds(1);
+    lds.write(0u, initial.data(), initial.size());
+    std::array<uint64_t, 64> addrs{0, 4, 8, 12};
+    std::array<uint8_t, 64 * 4> loaded;
+    loaded.fill(0xCC);
+    lds.vector_load(addrs.data(), test.mask, 2, 2, loaded.data());
+    std::array<uint8_t, 64 * 4> expected_load;
+    expected_load.fill(0xCC);
+    std::copy(test.loaded.begin(), test.loaded.end(), expected_load.begin());
+    EXPECT_EQ(loaded, expected_load);
+
+    std::array<uint8_t, 64 * 4> src{};
+    std::copy(values.begin(), values.end(), src.begin());
+    lds.vector_store(addrs.data(), test.mask, 2, 2, src.data());
+    std::vector<uint8_t> expected_store(lds.size_bytes(), 0);
+    std::copy(test.stored.begin(), test.stored.end(), expected_store.begin());
+    EXPECT_EQ(contents(lds), expected_store);
+  }
+}
+
+TEST(LdsTest, EmptyMaskLeavesMemoryAndOutputUntouched) {
+  Lds lds(1);
+  std::array<uint64_t, 64> addrs{};
+  std::array<uint8_t, 64 * 4> bytes;
+  bytes.fill(0xCC);
+  const auto expected = bytes;
+  lds.vector_load(addrs.data(), 0, 4, 1, bytes.data());
+  EXPECT_EQ(bytes, expected);
+  lds.vector_store(addrs.data(), 0, 4, 1, bytes.data());
+  EXPECT_EQ(lds.materialized_size_bytes(), 0u);
+  EXPECT_EQ(contents(lds), std::vector<uint8_t>(lds.size_bytes(), 0));
+}
+
 TEST(LdsTest, OverlappingVectorStoresKeepTheHighestLane) {
   Lds lds(4);
   std::array<uint64_t, 64> addrs{};
@@ -158,16 +220,21 @@ TEST(LdsTest, DescendingLanesAtCapacityKeepPerElementBounds) {
     src[i] = static_cast<uint8_t>(i + 1);
 
   lds.vector_store(addrs.data(), 0b111, 8, 2, src.data());
-  Lds expected(1);
-  reference_store(expected, addrs, 0b111, 8, 2, src.data());
-  EXPECT_EQ(contents(lds), contents(expected));
-  EXPECT_EQ(lds.read32(static_cast<uint32_t>(cap - 4)), 0u);
+  std::vector<uint8_t> expected(cap, 0);
+  std::copy_n(src.begin(), 8, expected.begin() + cap - 12);
+  std::copy_n(src.begin() + 16, 16, expected.begin() + cap - 28);
+  std::copy_n(src.begin() + 32, 16, expected.begin() + cap - 44);
+  EXPECT_EQ(contents(lds), expected);
 
-  std::array<uint8_t, 64 * 16> loaded{};
-  std::array<uint8_t, 64 * 16> reference{};
+  // A straddling element must zero-fill even when its in-range prefix is nonzero.
+  lds.write32(static_cast<uint32_t>(cap - 4), 0xA5A5A5A5u);
+  std::array<uint8_t, 64 * 16> loaded;
+  loaded.fill(0xCC);
   lds.vector_load(addrs.data(), 0b111, 8, 2, loaded.data());
-  reference_load(expected, addrs, 0b111, 8, 2, reference.data());
-  EXPECT_EQ(loaded, reference);
+  auto expected_load = src;
+  std::fill(expected_load.begin() + 8, expected_load.begin() + 16, 0);
+  std::fill(expected_load.begin() + 48, expected_load.end(), 0xCC);
+  EXPECT_EQ(loaded, expected_load);
 }
 
 // Compare the block-copy path with per-element semantics across contiguous,
@@ -175,6 +242,9 @@ TEST(LdsTest, DescendingLanesAtCapacityKeepPerElementBounds) {
 TEST(LdsTest, VectorAccessesMatchPerElementSemantics) {
   constexpr std::array<std::pair<uint32_t, uint32_t>, 8> kShapes{
       {{1, 1}, {2, 1}, {4, 1}, {8, 1}, {4, 2}, {4, 3}, {4, 4}, {8, 2}}};
+  enum class Pattern { Contiguous, Permuted, Descending, Strided, Overlapping };
+  constexpr std::array kPatterns{Pattern::Contiguous, Pattern::Permuted, Pattern::Descending,
+                                 Pattern::Strided, Pattern::Overlapping};
   std::mt19937_64 rng(0x1d5c0a1e5ce);
   for (int iteration = 0; iteration < 4000; ++iteration) {
     const auto [elem_size, num_elems] = kShapes[rng() % kShapes.size()];
@@ -182,25 +252,25 @@ TEST(LdsTest, VectorAccessesMatchPerElementSemantics) {
     Lds lds(2);
     const uint64_t cap = lds.size_bytes();
     std::array<uint64_t, 64> addrs{};
-    const uint32_t pattern = rng() % 5;
-    const uint64_t window = pattern == 4 ? 64 : 64 * stride;
+    const Pattern pattern = kPatterns[rng() % kPatterns.size()];
+    const uint64_t window = pattern == Pattern::Overlapping ? 64 : 64 * stride;
     const uint64_t base =
         rng() % 2 ? cap - window + rng() % (2 * stride) - stride : rng() % (cap / 2);
     for (uint32_t lane = 0; lane < 64; ++lane) {
       switch (pattern) {
-      case 0: // contiguous
+      case Pattern::Contiguous:
         addrs[lane] = base + uint64_t{lane} * stride;
         break;
-      case 1: // permuted within groups of eight lanes
+      case Pattern::Permuted: // permuted within groups of eight lanes
         addrs[lane] = base + uint64_t{(lane & ~7u) | ((lane ^ 5u) & 7u)} * stride;
         break;
-      case 2: // descending
+      case Pattern::Descending:
         addrs[lane] = base + uint64_t{63 - lane} * stride;
         break;
-      case 3: // strided with gaps
+      case Pattern::Strided: // strided with gaps
         addrs[lane] = base + uint64_t{lane} * stride * 2;
         break;
-      default: // random, frequently overlapping
+      case Pattern::Overlapping:
         addrs[lane] = base + rng() % window;
         break;
       }
@@ -208,29 +278,30 @@ TEST(LdsTest, VectorAccessesMatchPerElementSemantics) {
     const uint64_t mask = rng() % 3 == 0 ? rng() & rng() : ~uint64_t{0};
 
     // Leave some iterations unmaterialized so block copies cross the lazy backing.
-    Lds expected(2);
+    std::vector<uint8_t> initial(cap, 0);
     if (rng() % 4 != 0) {
-      std::vector<uint8_t> initial(cap);
       for (auto &b : initial)
         b = static_cast<uint8_t>(rng());
       lds.write(0u, initial.data(), static_cast<uint32_t>(cap));
-      expected.write(0u, initial.data(), static_cast<uint32_t>(cap));
     }
+
+    // Test loads before stores so matching load/store mistakes cannot cancel out.
+    std::vector<uint8_t> loaded(64 * stride, 0xCC);
+    lds.vector_load(addrs.data(), mask, elem_size, num_elems, loaded.data());
+    ASSERT_EQ(loaded, reference_load(initial, addrs, mask, elem_size, num_elems))
+        << "initial load iteration " << iteration;
 
     std::vector<uint8_t> src(64 * stride);
     for (auto &b : src)
       b = static_cast<uint8_t>(rng());
+    const auto expected = reference_store(initial, addrs, mask, elem_size, num_elems, src);
     lds.vector_store(addrs.data(), mask, elem_size, num_elems, src.data());
-    reference_store(expected, addrs, mask, elem_size, num_elems, src.data());
-    ASSERT_EQ(contents(lds), contents(expected)) << "store iteration " << iteration;
-    ASSERT_EQ(lds.materialized_size_bytes(), expected.materialized_size_bytes())
-        << "store iteration " << iteration;
+    ASSERT_EQ(contents(lds), expected) << "store iteration " << iteration;
 
-    std::vector<uint8_t> loaded(64 * stride, 0xCC);
-    std::vector<uint8_t> reference(64 * stride, 0xCC);
+    std::fill(loaded.begin(), loaded.end(), 0xCC);
     lds.vector_load(addrs.data(), mask, elem_size, num_elems, loaded.data());
-    reference_load(expected, addrs, mask, elem_size, num_elems, reference.data());
-    ASSERT_EQ(loaded, reference) << "load iteration " << iteration;
+    ASSERT_EQ(loaded, reference_load(expected, addrs, mask, elem_size, num_elems))
+        << "load after store iteration " << iteration;
   }
 }
 
