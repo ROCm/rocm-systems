@@ -260,6 +260,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `.deb` and `.rpm` packages now install the `amdsmi` Python package directly into the system Python's `site-packages` (or `dist-packages`) instead of running `pip install` during installation, so `pip list` no longer shows it.
   - The new `-DBUILD_PYTHON_WHEEL=ON` CMake option builds a standalone pip wheel. It bundles its own `libamd_smi_python.so`, which can be loaded in the same process as the system `libamd_smi.so`.
 
+- **`amdsmi_enumeration_info_t` grew by 4 bytes** (breaking).  
+  - The new `physical_acc_id` field makes it 280 bytes instead of 276, and `amdsmi_get_gpu_enumeration_info()` always writes that field. Rebuild applications against the 10.1.0 headers: a binary built against an earlier header passes a buffer that is 4 bytes too small.
+
 ### Resolved Issues
 
 - **Fixed `amdsmi_get_gpu_reg_table_info()` failing on register-state images with no SMN entries**.  
