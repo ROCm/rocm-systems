@@ -9,6 +9,7 @@
 #include <hip/hip_runtime.h>
 #include <algorithm>
 #include <iterator>
+#include <memory>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -873,11 +874,17 @@ struct PlaybackContext {
         return alloc_map.find(rec) != alloc_map.end();
     }
 
-    // A graph node's host operand has to stay alive until the graph is
-    // launched, which is long after the call that built the node returned.
+    // A graph node keeps the host pointer it was given, so a block is never
+    // moved or freed before teardown.
     // Keyed by the recorded host address so the same recorded destination
-    // reuses one buffer instead of growing a new one per event.
-    std::unordered_map<uint64_t, std::vector<uint8_t>> host_landing_buffers;
+    // reuses one block until a later event asks for more room.
+    struct LandingBuffer {
+        std::unique_ptr<uint8_t[]> cur;   // the block new nodes are given
+        size_t size = 0;
+        // Blocks an earlier node may still point into, outgrown but not freed.
+        std::vector<std::unique_ptr<uint8_t[]>> retired;
+    };
+    std::unordered_map<uint64_t, LandingBuffer> host_landing_buffers;
 
     // A recorded key of 0 is a null host pointer the capturing process passed,
     // and the call it belonged to failed there. Handing back a real buffer
@@ -887,13 +894,15 @@ struct PlaybackContext {
         if (!rec) return nullptr;
         std::unique_lock lk(map_mutex);
         auto& buf = host_landing_buffers[rec];
-        if (buf.size() < sz) {
-            // Charge only the growth; a refusal leaves the buffer as it was.
-            if (!charge_host(sz - buf.size(), "graph host operand buffer"))
-                return nullptr;
-            buf.resize(sz);
+        if (!buf.cur || buf.size < sz) {
+            // Charged whole, since the outgrown block stays resident.
+            if (!charge_host(sz, "graph host operand buffer")) return nullptr;
+            auto next = std::make_unique<uint8_t[]>(sz ? sz : 1);
+            if (buf.cur) buf.retired.push_back(std::move(buf.cur));
+            buf.cur = std::move(next);
+            buf.size = sz;
         }
-        return buf.data();
+        return buf.cur.get();
     }
 
     // ---- Symbol registration and lookup ----

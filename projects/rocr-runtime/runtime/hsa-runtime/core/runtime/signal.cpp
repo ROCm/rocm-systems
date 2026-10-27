@@ -203,7 +203,7 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
                               const hsa_signal_condition_t* conds, const hsa_signal_value_t* values,
                               uint64_t timeout, hsa_wait_state_t wait_hint,
                               std::vector<hsa_signal_value_t>& satisfying_values,
-                              bool wait_on_all) {
+                              bool wait_on_all, bool wake_async_monitor) {
   hsa_signal_handle* signals =
       reinterpret_cast<hsa_signal_handle*>(const_cast<hsa_signal_t*>(hsa_signals));
 
@@ -342,6 +342,17 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
       time_remaining).count();
     wait_ms = (ct>0xFFFFFFFEu) ? 0xFFFFFFFEu : ct;
     HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(evts, unique_evts, wait_on_all, wait_ms, event_age));
+
+    // As in InterruptSignal::WaitRelaxed(), this wait may have taken the notification the
+    // async event monitor is parked on.
+    if (wake_async_monitor && !core::Runtime::runtime_singleton_->KfdVersion().supports_event_age) {
+      for (uint32_t i = 0; i < signal_count; i++) {
+        if (signals[i]->waiting_ > 1) {
+          core::Runtime::runtime_singleton_->WakeAsyncSignalMonitor();
+          break;
+        }
+      }
+    }
   }
 }
 
