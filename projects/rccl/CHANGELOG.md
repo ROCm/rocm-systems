@@ -62,6 +62,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * The AMD Pensando 'ionic' RDMA provider for the rocSHMEM GDA GIN backend (`NCCL_GIN_TYPE=6`) now properly enforces the required support for creation of 'collapsed' single-entry completion queues. If network driver and firmware support for this feature is unavailable, an initialization failure will occur rather than a silent fallback to plain completion queues.
 
 * A graph XML file supplied through `NCCL_GRAPH_FILE` is now rejected with `ncclInvalidUsage` if its `nchannels` attribute does not match the number of `<channel>` elements present, instead of reading uninitialized channel data.
+* A `<gpu>` element in an `NCCL_GRAPH_FILE` graph naming a `dev` the topology does not contain now returns `ncclInvalidUsage` rather than `ncclSystemError`, matching the other rejections of malformed graph files.
 
 ### Removed
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.

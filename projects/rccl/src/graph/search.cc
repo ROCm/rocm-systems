@@ -1035,7 +1035,8 @@ ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, st
         }
         if (rank == -1) {
           WARN("XML Import Channel : dev %ld not found.", dev);
-          return ncclSystemError;
+          // RCCL: upstream returns ncclSystemError here; bad user XML is invalid usage.
+          return ncclInvalidUsage;
         }
       }
       if (g >= ngpus) {
