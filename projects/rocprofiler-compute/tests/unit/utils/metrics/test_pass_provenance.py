@@ -11,9 +11,9 @@ import pytest
 from utils import utils_analysis
 from utils.file_io import load_df_pmc
 from utils.metrics.evaluation_pipeline import eval_metric
+from utils.metrics.pass_layout import PassLayout
 from utils.metrics.pass_provenance import (
     METRIC_ROW_PASS_ATTR,
-    PassLayout,
     bind_expression,
     bind_expression_dataframe,
     bind_metric_tables_to_passes,

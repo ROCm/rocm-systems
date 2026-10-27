@@ -28,6 +28,11 @@ import pandas as pd
 
 from utils.logger import console_warning
 from utils.metrics.expression import build_eval_string
+from utils.metrics.pass_layout import (
+    PASS_COLUMN_SEP,
+    PassLayout,
+    require_safe_pass_key,
+)
 from utils.utils_counter_defs import (
     SUPPORTED_DENOM,
     UNIT_COUNTER,
@@ -35,7 +40,6 @@ from utils.utils_counter_defs import (
     get_build_in_vars,
 )
 
-PASS_COLUMN_SEP = "@pass:"
 PASS_VAR_SEP = "__pass"
 PASS_KEY_COLUMN = "Pass_Key"
 
@@ -68,8 +72,6 @@ _NON_PMC_FRAME_COLUMNS = (
     })
     | KERNEL_LAUNCH_COLUMNS
 )
-
-_PASS_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 # System / unit variables that never take a pass suffix.
 _SYSTEM_LIKE_VARS = frozenset({
@@ -107,51 +109,11 @@ def raw_pmc_column_names(expr: str) -> List[str]:
     return _COUNTER_COL_RE.findall(expr)
 
 
-def _require_safe_pass_key(pass_key: str) -> str:
-    """Reject a pass key that cannot be spliced into a quoted expression."""
-    if _PASS_KEY_RE.fullmatch(pass_key) is None:
-        raise ValueError(
-            f"pass key {pass_key!r} is not safe to splice into an expression"
-        )
-    return pass_key
-
-
 def _pmc_column_base(column: str) -> str:
     """Strip a pass qualifier so a second bind sees the hardware counter."""
     if PASS_COLUMN_SEP in column:
         return column.split(PASS_COLUMN_SEP, 1)[0]
     return column
-
-
-@dataclass(frozen=True)
-class PassLayout:
-    """Counters observed per profiling pass (from results, not perfmon YAML)."""
-
-    pass_keys: Tuple[str, ...]
-    counters_by_pass: Mapping[str, FrozenSet[str]]
-    duplicated: FrozenSet[str]
-
-    @property
-    def has_duplicates(self) -> bool:
-        return bool(self.duplicated)
-
-    def ordinal(self, pass_key: str) -> int:
-        return self.pass_keys.index(pass_key)
-
-    def qualified_column(self, counter: str, pass_key: str) -> str:
-        _require_safe_pass_key(pass_key)
-        return f"{counter}{PASS_COLUMN_SEP}{pass_key}"
-
-    def passes_containing(self, counters: FrozenSet[str]) -> List[str]:
-        return [
-            pass_key
-            for pass_key in self.pass_keys
-            if counters <= self.counters_by_pass[pass_key]
-        ]
-
-    @classmethod
-    def empty(cls) -> "PassLayout":
-        return cls(pass_keys=(), counters_by_pass={}, duplicated=frozenset())
 
 
 @dataclass(frozen=True)
@@ -167,7 +129,7 @@ def build_pass_layout(long_df: pd.DataFrame) -> PassLayout:
 
     counters_by_pass: Dict[str, FrozenSet[str]] = {}
     for pass_key, group in long_df.groupby(PASS_KEY_COLUMN, sort=False):
-        key = _require_safe_pass_key(str(pass_key))
+        key = require_safe_pass_key(str(pass_key))
         counters_by_pass[key] = frozenset(
             str(name) for name in group["Counter_Name"].dropna().unique()
         )
