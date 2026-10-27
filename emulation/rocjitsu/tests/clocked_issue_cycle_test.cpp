@@ -47,6 +47,22 @@ std::unique_ptr<ComputeUnitCore> make_cu(GpuMemory &memory, L2Cache &l2,
   return ComputeUnitCore::create("clocked_cu", config, &memory, &l2);
 }
 
+/// Identity translation whose instruction fetches can be made to retry.
+class RetryingFetchTranslator final : public AddressSpaceTranslator {
+public:
+  VmTranslationResult translate(uint64_t address, std::size_t size,
+                                VmAccessKind access) const override {
+    if (access == VmAccessKind::Execute && fetch_unavailable)
+      return {.outcome = VmAccessOutcome::Unavailable, .translation = {}};
+    return identity_.translate(address, size, access);
+  }
+
+  bool fetch_unavailable = true;
+
+private:
+  IdentityAddressSpaceTranslator identity_;
+};
+
 class ClockedIssueCycleTest : public ::testing::Test {
 protected:
   void SetUp() override {
@@ -124,41 +140,6 @@ TEST_F(ClockedIssueCycleTest, WaitingWavesProgressWithNothingSelected) {
   EXPECT_TRUE(waves[1]->is_halted());
 }
 
-TEST(ClockedIssueCycleVskipTest, SkippedInstructionDoesNotIssue) {
-  GpuMemory memory{"vskip_memory"};
-  L2Cache l2{"vskip_l2"};
-  // VSKIP is a CDNA mode bit.
-  std::unique_ptr<ComputeUnitCore> cu = make_cu(memory, l2, ROCJITSU_CODE_ARCH_CDNA3);
-  ASSERT_NE(cu, nullptr);
-  for (size_t i = 0; i < 4; ++i)
-    memory.write32(kVectorProgram + i * 4, i == 0 ? kMoveVector : kNop);
-  Wavefront *wave = cu->dispatch_wf(/*wg_id=*/0, kVectorProgram, kSgprs, kVgprs);
-  ASSERT_NE(wave, nullptr);
-  wave->set_mode_raw(wave->mode_raw() | Wavefront::VSKIP_BIT);
-  EXPECT_EQ(cu->run_issue_cycle(0b01), 0u);
-  EXPECT_EQ(wave->pc, kVectorProgram + 4);
-  wave->set_mode_raw(wave->mode_raw() & ~Wavefront::VSKIP_BIT);
-  EXPECT_EQ(cu->run_issue_cycle(0b01), 0b01u);
-  EXPECT_EQ(wave->pc, kVectorProgram + 8);
-  wave->halt();
-}
-
-/// Identity translation whose instruction fetches can be made to retry.
-class RetryingFetchTranslator final : public AddressSpaceTranslator {
-public:
-  VmTranslationResult translate(uint64_t address, std::size_t size,
-                                VmAccessKind access) const override {
-    if (access == VmAccessKind::Execute && fetch_unavailable)
-      return {.outcome = VmAccessOutcome::Unavailable, .translation = {}};
-    return identity_.translate(address, size, access);
-  }
-
-  bool fetch_unavailable = true;
-
-private:
-  IdentityAddressSpaceTranslator identity_;
-};
-
 TEST_F(ClockedIssueCycleTest, RetriedFetchDoesNotIssue) {
   GpuVm vm;
   auto translator = std::make_shared<RetryingFetchTranslator>();
@@ -176,6 +157,25 @@ TEST_F(ClockedIssueCycleTest, RetriedFetchDoesNotIssue) {
   EXPECT_EQ(cu->run_issue_cycle(0b01), 0b01u);
   EXPECT_EQ(waves[0]->pc, kProgram + 4);
   EXPECT_EQ(cu->read_sgpr(waves[0]->sgpr_alloc().base + 5), 7u);
+}
+
+TEST(ClockedIssueCycleVskipTest, SkippedInstructionDoesNotIssue) {
+  GpuMemory memory{"vskip_memory"};
+  L2Cache l2{"vskip_l2"};
+  // VSKIP is a CDNA mode bit.
+  std::unique_ptr<ComputeUnitCore> cu = make_cu(memory, l2, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(cu, nullptr);
+  for (size_t i = 0; i < 4; ++i)
+    memory.write32(kVectorProgram + i * 4, i == 0 ? kMoveVector : kNop);
+  Wavefront *wave = cu->dispatch_wf(/*wg_id=*/0, kVectorProgram, kSgprs, kVgprs);
+  ASSERT_NE(wave, nullptr);
+  wave->set_mode_raw(wave->mode_raw() | Wavefront::VSKIP_BIT);
+  EXPECT_EQ(cu->run_issue_cycle(0b01), 0u);
+  EXPECT_EQ(wave->pc, kVectorProgram + 4);
+  wave->set_mode_raw(wave->mode_raw() & ~Wavefront::VSKIP_BIT);
+  EXPECT_EQ(cu->run_issue_cycle(0b01), 0b01u);
+  EXPECT_EQ(wave->pc, kVectorProgram + 8);
+  wave->halt();
 }
 
 TEST(ClockedIssueCycleLaunchTest, LaunchHandlerSeesEachDispatchedWave) {

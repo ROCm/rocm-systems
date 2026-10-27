@@ -116,8 +116,9 @@ struct FunctionalQuantumResult {
 /// hardware reclaims a wave's resources at termination (there is no separate lazy
 /// retirement pass).
 ///
-/// Each step() call picks the next active wavefront (round-robin) and executes
-/// one instruction using the ISA-specific decoder.
+/// Each step() call issues one instruction from every RUNNING wavefront, in slot
+/// order, using the ISA-specific decoder. A clocked driver that issues from only
+/// some of them uses run_issue_cycle().
 ///
 /// The execution shell (event scheduling, activation, idle detection) is
 /// provided by ExecComputeUnit<Mode> below. ISA-specific parts (VGPR register
@@ -258,10 +259,16 @@ public:
   /// the command processor's dispatch pool may issue for it while the driver
   /// calls this. To take ownership, call set_pool_driven(true), which retires
   /// the serial tick and routes the CU's wakeups to its pool-ready callback,
-  /// then replace that callback with set_on_pool_ready(). This holds only while
-  /// the command processor keeps one dispatch thread: with more, its dispatch
-  /// pool can run run_quantum() on pool-driven CUs, and changing the count with
-  /// set_dispatch_threads() rewrites every CU's pool-driven mode.
+  /// then replace that callback with set_on_pool_ready(). Do both after
+  /// CommandProcessor::add_compute_unit(), which sets both itself. This holds
+  /// only while the command processor keeps one dispatch thread: with more, its
+  /// dispatch pool can run run_quantum() on pool-driven CUs, and changing the
+  /// count with set_dispatch_threads() rewrites every CU's pool-driven mode.
+  ///
+  /// Dispatch invokes the pool-ready callback synchronously, before the command
+  /// processor has finished initializing the wave, so the callback must only
+  /// schedule a later cycle and return. Calling this from it can execute a wave
+  /// whose EXEC, identity and initial registers are not yet set.
   /// @param selected_slots Bit i selects the wave in slot i.
   /// @returns The selected slots whose wave issued an instruction.
   uint64_t run_issue_cycle(uint64_t selected_slots);
@@ -463,10 +470,20 @@ public:
   using AluExceptionHandler = std::function<bool(Wavefront &wf)>;
   void set_alu_exception_handler(AluExceptionHandler cb) { alu_exception_handler_ = std::move(cb); }
 
-  /// @brief Notify a clocked driver when a dispatch launches a wave into a slot.
+  /// @brief Notify a clocked driver when a dispatch reserves a wave slot.
   /// @details Install before execution. Called on the dispatching engine thread,
-  /// under the CU wave-state lock, once the wave is initialized and before the CU
-  /// schedules work. The handler must not take locks or dispatch.
+  /// under the CU wave-state lock, before the CU schedules work. The wave's slot,
+  /// PC, wave size, register allocation and dispatch generation are set. Its
+  /// dispatch and process identity, EXEC, MODE, address space and initial
+  /// registers are not: the command processor and checkpoint restore apply them
+  /// after this returns.
+  ///
+  /// A reservation is not a launch. A command-processor dispatch that fails
+  /// after this call frees the slot without halting the wave, and a wave in
+  /// ENDING can retire in a cycle that selects nothing. Track occupancy from
+  /// each slot's state and dispatch generation after dispatch and after every
+  /// cycle, not from this callback, halts or issued bits. The handler must not
+  /// take locks or dispatch.
   using WaveLaunchHandler = std::function<void(Wavefront &wf)>;
   void set_wave_launch_handler(WaveLaunchHandler cb) { wave_launch_handler_ = std::move(cb); }
 
