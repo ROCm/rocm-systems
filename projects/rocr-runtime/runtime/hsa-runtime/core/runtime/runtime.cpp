@@ -518,18 +518,17 @@ hsa_status_t Runtime::FindDriverMemoryHandle(const void* ptr, const Agent* reque
   }
 
   // Check VMM-mapped allocations (hsa_amd_vmem_map). These are mapped at a reserved VA and do not
-  // appear in allocation_map_. A locally created allocation's handle lives on the backing
-  // MemoryHandle; for an imported allocation, or an agent on a different driver, the handle
-  // imported for that agent by hsa_amd_vmem_set_access lives in the MappedHandle's per-agent
-  // allowed_agents entry.
+  // appear in allocation_map_. The owner's handle lives on the backing MemoryHandle; for an agent
+  // on a different driver, the handle imported for that agent by hsa_amd_vmem_set_access lives in
+  // the MappedHandle's per-agent allowed_agents entry.
   auto mapped_it = mapped_handle_map_.upper_bound(ptr);
   if (mapped_it != mapped_handle_map_.begin()) {
     --mapped_it;
     const MappedHandle& mappedHandle = mapped_it->second;
     const auto* mapped_base = reinterpret_cast<const uint8_t*>(mapped_it->first);
     if (ptr >= mapped_base && ptr < mapped_base + mappedHandle.size) {
-      const MemoryRegion* owner_region =
-          mappedHandle.mem_handle->imported ? nullptr : mappedHandle.mem_handle->region;
+      // Imported handles have no owning region, so resolve the owner null-safely.
+      const MemoryRegion* owner_region = mappedHandle.mem_handle->region;
       const Agent* owner = owner_region ? owner_region->owner() : nullptr;
       if (owner != nullptr && owner->driver().kernel_driver_type_ == requesting_driver) {
         *base = const_cast<void*>(mapped_it->first);
@@ -598,22 +597,6 @@ hsa_status_t Runtime::DeregisterReleaseNotifier(void* ptr,
   return ret;
 }
 
-/* Decide whether a pointer's reported owner may drive a blit on it. agentOwner reports where
- * the memory physically lives, which for a VMM mapping does not imply the owner holds a page
- * table entry for this VA. A non-GPU owner returns true for the caller to handle. */
-static bool OwnerCanBlit(hsa_agent_t owner, const hsa_agent_t* accessible, uint32_t count) {
-  if (owner.handle == 0) return false;
-
-  if (core::Agent::Convert(owner)->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
-    return true;
-  }
-
-  for (uint32_t i = 0; i < count; i++)
-    if (accessible[i].handle == owner.handle) return true;
-
-  return false;
-}
-
 hsa_status_t Runtime::CopyMemory(void* dst, const void* src, size_t size) {
   void* source = const_cast<void*>(src);
 
@@ -636,13 +619,7 @@ hsa_status_t Runtime::CopyMemory(void* dst, const void* src, size_t size) {
     ptrdiff_t endPtr = (ptrdiff_t)ptr + size;
     if (info.agentBaseAddress <= ptr &&
         endPtr <= (ptrdiff_t)info.agentBaseAddress + info.sizeInBytes) {
-      if (!OwnerCanBlit(info.agentOwner, accessible, count)) {
-        if (count == 0) {
-          throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ALLOCATION,
-                                   "No agent can access the pointer in hsa_memory_copy.");
-        }
-        info.agentOwner = accessible[0];
-      }
+      if (info.agentOwner.handle == 0) info.agentOwner = accessible[0];
       agent = core::Agent::Convert(info.agentOwner);
       need_lock = false;
       return agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice;
@@ -787,11 +764,8 @@ hsa_status_t Runtime::FillMemory(void* ptr, uint32_t value, size_t count) {
   // Selects GPU fill for SVM and Locked allocations if a GPU address is given and is mapped.
   if (info.agentBaseAddress <= ptr &&
       endPtr <= (ptrdiff_t)info.agentBaseAddress + info.sizeInBytes) {
-    core::Agent* blit_agent = OwnerCanBlit(info.agentOwner, accessible, agent_count)
-        ? core::Agent::Convert(info.agentOwner)
-        : nullptr;
-    if (blit_agent == nullptr ||
-        blit_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+    core::Agent* blit_agent = core::Agent::Convert(info.agentOwner);
+    if (blit_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
       blit_agent = nullptr;
       for (uint32_t i = 0; i < agent_count; i++) {
         if (core::Agent::Convert(accessible[i])->device_type() ==
@@ -802,19 +776,6 @@ hsa_status_t Runtime::FillMemory(void* ptr, uint32_t value, size_t count) {
       }
     }
     if (blit_agent) return blit_agent->DmaFill(ptr, value, count);
-
-    // Verify that there is a CPU agent in the accessible list prior to falling through
-    if (info.type == HSA_EXT_POINTER_TYPE_HSA_VMEM) {
-      bool host_accessible = false;
-      for (uint32_t i = 0; i < agent_count; i++) {
-        if (core::Agent::Convert(accessible[i])->device_type() ==
-            core::Agent::DeviceType::kAmdCpuDevice) {
-          host_accessible = true;
-          break;
-        }
-      }
-      if (!host_accessible) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-    }
   }
 
   // Host and unmapped SVM addresses copy via host.
@@ -1155,27 +1116,19 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
       info->sizeInBytes = mappedHandleIt->second.size;
       info->registered = true;
 
-      const MemoryHandle* memHandle = mappedHandleIt->second.mem_handle;
-
+      // Handles imported from another process (dmabuf or fabric) carry no local region: the
+      // owning agent and the allocation's memory flags belong to the exporter. Report those as
+      // unset instead of resolving them through MemoryHandle::region, which is NULL here.
       const AMD::MemoryRegion* memRegion =
-          memHandle->imported ? nullptr
-                              : static_cast<const AMD::MemoryRegion*>(memHandle->region);
+          mappedHandleIt->second.mem_handle->imported
+              ? nullptr
+              : static_cast<const AMD::MemoryRegion*>(mappedHandleIt->second.mem_handle->region);
       info->agentOwner = {};
       info->global_flags = 0;
       info->alloc_flags = 0;
 
-      // Return the public handle for imported memory, so copy paths can find a peer-resident
-      // mapping for copy operations
-      if (memHandle->imported && memHandle->region != nullptr &&
-          flag().enable_vmem_import_owner()) {
-        const auto* importRegion = static_cast<const AMD::MemoryRegion*>(memHandle->region);
-        if (importRegion->IsLocalMemory()) {
-          info->agentOwner = memHandle->agentOwner()->public_handle();
-        }
-      }
-
       if (memRegion != nullptr) {
-        info->agentOwner = memHandle->agentOwner()->public_handle();
+        info->agentOwner = mappedHandleIt->second.mem_handle->agentOwner()->public_handle();
 
         // Populate global_flags from the backing region's mem_flags.
         const HsaMemFlags& regionFlags = memRegion->mem_flags();
@@ -1199,7 +1152,7 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
       }
 
       // Populate alloc_flags from AllocateFlags stored in MemoryHandle.
-      MemoryRegion::AllocateFlags af = memHandle->alloc_flag;
+      MemoryRegion::AllocateFlags af = mappedHandleIt->second.mem_handle->alloc_flag;
       if (af & core::MemoryRegion::AllocateExecutable)
         info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE;
       if (af & core::MemoryRegion::AllocateContiguous)
@@ -1607,12 +1560,6 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       assert(err == HSA_STATUS_SUCCESS && "Region inconsistent with address map.");
     }
     return err;
-  }
-
-  // A VMM mapping can report no owner due to an import or dmabuf whose GPU the driver
-  // could not name
-  if (info.agentOwner.handle == 0) {
-    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
   // User ptr as dmabuf FD handle ID for client to request the actual dmabuf FD.
