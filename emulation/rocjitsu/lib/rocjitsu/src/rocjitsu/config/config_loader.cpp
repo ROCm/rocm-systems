@@ -3,6 +3,7 @@
 
 #include "rocjitsu/config/config_loader.h"
 
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
 
 #include "rocjitsu/config/config_common.h"
@@ -521,6 +522,17 @@ using FactoryFn = std::function<std::unique_ptr<simdojo::Component>(
 
 using FactoryMap = std::unordered_map<std::string, FactoryFn>;
 
+class ValidatedComputeUnit final : public simdojo::CompositeComponent {
+public:
+  ValidatedComputeUnit(const std::string &name, amdgpu::ComputeUnitCore::Config config)
+      : simdojo::CompositeComponent(name), config_(std::move(config)) {}
+
+  const amdgpu::ComputeUnitCore::Config &config() const { return config_; }
+
+private:
+  amdgpu::ComputeUnitCore::Config config_;
+};
+
 const FactoryMap &factories(BuildMode build_mode) {
   static const FactoryMap full_factories = [] {
     std::unordered_map<std::string, FactoryFn> f;
@@ -605,9 +617,10 @@ const FactoryMap &factories(BuildMode build_mode) {
         [](const std::string &name, const CfgMap &cfg, simdojo::ExecMode, rj_code_arch_t arch,
            rj_code_target_id_t target, amdgpu::GpuMemory *,
            const AsyncResources &resources) -> std::unique_ptr<simdojo::Component> {
-      amdgpu::ComputeUnitCore::validate(parse_compute_unit_config(cfg, arch, target, resources));
-      // Keep declarative children under a CU without constructing its execution state.
-      return std::make_unique<simdojo::CompositeComponent>(name);
+      const auto cu_config = parse_compute_unit_config(cfg, arch, target, resources);
+      amdgpu::ComputeUnitCore::validate(cu_config);
+      // Preserve the parsed CU config and declarative children without execution state.
+      return std::make_unique<ValidatedComputeUnit>(name, cu_config);
     };
     return result;
   }();
@@ -659,6 +672,38 @@ void build_children(simdojo::CompositeComponent *parent,
   }
 }
 
+const amdgpu::ComputeUnitCore::Config *
+topology_compute_unit_config(const simdojo::Component *component) {
+  if (const auto *cu = dynamic_cast<const amdgpu::ComputeUnitCore *>(component))
+    return &cu->config();
+  if (const auto *cu = dynamic_cast<const ValidatedComputeUnit *>(component))
+    return &cu->config();
+  return nullptr;
+}
+
+// Match CP wiring in both build modes, including direct CUs when no SE exists.
+template <typename Fn> void for_each_cp_compute_unit(simdojo::CompositeComponent *parent, Fn &&fn) {
+  uint32_t shader_engine_id = 0;
+  bool found_shader_engine = false;
+  for (auto &child : parent->children()) {
+    auto *se = dynamic_cast<amdgpu::ShaderEngine *>(child.get());
+    if (!se)
+      continue;
+    found_shader_engine = true;
+    uint32_t cu_index = 0;
+    for (auto &se_child : se->children())
+      if (topology_compute_unit_config(se_child.get()))
+        fn(se_child.get(), shader_engine_id, cu_index++);
+    ++shader_engine_id;
+  }
+  if (!found_shader_engine) {
+    uint32_t cu_index = 0;
+    for (auto &child : parent->children())
+      if (topology_compute_unit_config(child.get()))
+        fn(child.get(), 0, cu_index++);
+  }
+}
+
 void do_wire_cps(simdojo::CompositeComponent *root, uint32_t cus_per_shader_array,
                  uint32_t shader_arrays_per_engine) {
   std::vector<simdojo::Component *> all;
@@ -697,38 +742,15 @@ void do_wire_cps(simdojo::CompositeComponent *root, uint32_t cus_per_shader_arra
     // Preserve the physical SE/CU hierarchy when flattening the XCD's CUs into
     // the command processor. gfx12 CWSR records identify scratch with a shader
     // engine plus a per-SE scoreboard slot, so a flat CU ordinal is not enough.
-    uint32_t shader_engine_id = 0;
-    bool found_shader_engine = false;
-    for (auto &child : par->children()) {
-      auto *se = dynamic_cast<amdgpu::ShaderEngine *>(child.get());
-      if (!se)
-        continue;
-      found_shader_engine = true;
-      uint32_t cu_index = 0;
-      for (auto &se_child : se->children()) {
-        auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(se_child.get());
-        if (!cu)
-          continue;
-        cu->set_shader_engine_location(shader_engine_id, cu_index++, cus_per_shader_array,
-                                       cus_per_shader_array ? expected_cus : 0);
-        cp->add_compute_unit(cu);
-      }
-      ++shader_engine_id;
-    }
-
-    // Keep custom topologies with CUs directly below the XCD working. They
-    // form one shader engine and retain their child order as scoreboard order.
-    if (!found_shader_engine) {
-      uint32_t cu_index = 0;
-      for (auto &child : par->children()) {
-        auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(child.get());
-        if (!cu)
-          continue;
-        cu->set_shader_engine_location(0, cu_index++, cus_per_shader_array,
-                                       cus_per_shader_array ? expected_cus : 0);
-        cp->add_compute_unit(cu);
-      }
-    }
+    for_each_cp_compute_unit(
+        par, [&](simdojo::Component *component, uint32_t shader_engine_id, uint32_t cu_index) {
+          auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component);
+          if (!cu)
+            throw std::logic_error("Full-mode CP wiring requires a constructed compute unit");
+          cu->set_shader_engine_location(shader_engine_id, cu_index, cus_per_shader_array,
+                                         cus_per_shader_array ? expected_cus : 0);
+          cp->add_compute_unit(cu);
+        });
   }
 }
 
@@ -1112,6 +1134,57 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
                      cu_overrides, build_mode);
   if (manifest && result.soc() == nullptr)
     throw std::invalid_argument("system topology root must be an SoC");
+  // The CWSR capacity uses device fields for LDS and wave slots, while wave
+  // admission uses each CU's configured limits. Reject a producer that could
+  // exceed its advertised save area (or the LDS field in the save record).
+  if (result.soc() && kmd::cwsr_layout_modelled(arch)) {
+    auto validate_cwsr = [&](const KfdDeviceConfig &device) -> const char * {
+      // Partial device identities do not publish a modelled CWSR area.
+      if (!device.present || !kmd::cwsr_capacity_eligible_device(device, arch))
+        return nullptr;
+      const uint64_t advertised_lds = uint64_t{device.lds_size_kb} * 1024;
+      if (advertised_lds > kmd::cwsr_max_encoded_lds_bytes(arch))
+        return "CWSR advertised LDS capacity exceeds the save record field";
+      const auto limits = kmd::cwsr_producer_limits_for_device(device, result.soc()->num_xcds());
+      if (limits.cus_per_xcc == 0)
+        return "CWSR advertised CU wave capacity is invalid";
+      bool cu_exceeds_advertised = false;
+      bool cu_count_exceeds_advertised = false;
+      bool wave_slots_exceed_advertised = false;
+      for (auto *xcd : result.soc()->xcds()) {
+        if (!xcd->command_processor())
+          continue;
+        uint64_t cu_count = 0;
+        uint64_t wave_slots = 0;
+        for_each_cp_compute_unit(xcd, [&](simdojo::Component *component, uint32_t, uint32_t) {
+          ++cu_count;
+          const auto &cu_config = *topology_compute_unit_config(component);
+          if (uint64_t{cu_config.lds_size_kb} * 1024 > advertised_lds)
+            cu_exceeds_advertised = true;
+          if (cu_config.num_wf_slots > limits.waves_per_xcc - wave_slots)
+            wave_slots_exceed_advertised = true;
+          else
+            wave_slots += cu_config.num_wf_slots;
+        });
+        // Capacity reserves LDS per CU even if the total wave slots still fit.
+        cu_count_exceeds_advertised |= cu_count > limits.cus_per_xcc;
+      }
+      if (cu_exceeds_advertised)
+        return "CWSR CU LDS capacity exceeds advertised device LDS capacity";
+      if (cu_count_exceeds_advertised)
+        return "CWSR CU count exceeds advertised device CU capacity";
+      return wave_slots_exceed_advertised
+                 ? "CWSR CU wave slots exceed advertised device wave capacity"
+                 : nullptr;
+    };
+    if (manifest) {
+      for (const auto &device : result.devices)
+        if (const char *error = validate_cwsr(device))
+          return emit_error.emit() << error;
+    } else if (const char *error = validate_cwsr(result.device)) {
+      return emit_error.emit() << error;
+    }
+  }
   if (result.device.present)
     if (SoC *soc = result.soc())
       soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
