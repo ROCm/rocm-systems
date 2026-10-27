@@ -1874,35 +1874,8 @@ extern hipError_t playback_hipGraphInstantiate(PlaybackContext& ctx, const uint8
 
 extern hipError_t playback_hipGraphInstantiateWithFlags(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipGraphKernelNodeCopyAttributes(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphKernelNodeCopyAttributes*>(payload);
-  if (a->hSrc != 0 && ctx.translate_graph_node(a->hSrc) == nullptr) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipGraphKernelNodeCopyAttributes: hSrc 0x%llx was "
-              "never built at replay, so this call is skipped.\n",
-              (unsigned long long)a->hSrc);
-    }
-    return hipSuccess;
-  }
-  if (a->hDst != 0 && ctx.translate_graph_node(a->hDst) == nullptr) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipGraphKernelNodeCopyAttributes: hDst 0x%llx was "
-              "never built at replay, so this call is skipped.\n",
-              (unsigned long long)a->hDst);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipGraphKernelNodeCopyAttributes((hipGraphNode_t)ctx.translate_graph_node(a->hSrc), (hipGraphNode_t)ctx.translate_graph_node(a->hDst));
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipGraphKernelNodeCopyAttributes", a->ret);
-    return hipSuccess;
-  }
-  return _r;
-}
+extern hipError_t playback_hipGraphKernelNodeCopyAttributes(PlaybackContext& ctx, const uint8_t* payload);
+
 
 static hipError_t playback_hipGraphKernelNodeGetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
@@ -2046,29 +2019,8 @@ static hipError_t playback_hipGraphMemsetNodeGetParams(PlaybackContext& ctx, con
   return hipSuccess;
 }
 
-static hipError_t playback_hipGraphMemsetNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphMemsetNodeSetParams*>(payload);
-  if (a->node != 0 && ctx.translate_graph_node(a->node) == nullptr) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipGraphMemsetNodeSetParams: node 0x%llx was "
-              "never built at replay, so this call is skipped.\n",
-              (unsigned long long)a->node);
-    }
-    return hipSuccess;
-  }
-  hipMemsetParams _d_pNodeParams{};
-  if (a->pNodeParams_present)
-    std::memcpy(&_d_pNodeParams, a->pNodeParams_bytes, sizeof(_d_pNodeParams));
-  _d_pNodeParams.dst = ctx.translate_ptr(reinterpret_cast<uint64_t>(_d_pNodeParams.dst));
-  hipError_t _r = (hipError_t)hipGraphMemsetNodeSetParams((hipGraphNode_t)ctx.translate_graph_node(a->node), (a->pNodeParams_present ? (const hipMemsetParams*)&_d_pNodeParams : (const hipMemsetParams*)nullptr));
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipGraphMemsetNodeSetParams", a->ret);
-    return hipSuccess;
-  }
-  return _r;
-}
+extern hipError_t playback_hipGraphMemsetNodeSetParams(PlaybackContext& ctx, const uint8_t* payload);
+
 
 static hipError_t playback_hipGraphNodeFindInClone(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipGraphNodeFindInClone*>(payload);

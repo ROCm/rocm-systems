@@ -2048,8 +2048,9 @@ hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node, hipMemsetParams* pNo
 
 hipError_t hipGraphMemsetNodeSetParams(hipGraphNode_t node, const hipMemsetParams* pNodeParams) {
   HIP_INIT_API(hipGraphMemsetNodeSetParams, node, pNodeParams);
-  if (!hip::GraphNode::isNodeValid(reinterpret_cast<hip::GraphNode*>(node)) ||
-      pNodeParams == nullptr) {
+  hip::GraphNode* n = reinterpret_cast<hip::GraphNode*>(node);
+  if (!hip::GraphNode::isNodeValid(n) || pNodeParams == nullptr ||
+      n->GetType() != hipGraphNodeTypeMemset) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   if (pNodeParams->height > 1 &&
@@ -3312,11 +3313,14 @@ hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object, u
 
 hipError_t hipGraphKernelNodeCopyAttributes(hipGraphNode_t hSrc, hipGraphNode_t hDst) {
   HIP_INIT_API(hipGraphKernelNodeCopyAttributes, hSrc, hDst);
-  if (hSrc == nullptr || hDst == nullptr) {
+  hip::GraphNode* src = reinterpret_cast<hip::GraphNode*>(hSrc);
+  hip::GraphNode* dst = reinterpret_cast<hip::GraphNode*>(hDst);
+  if (!hip::GraphNode::isNodeValid(src) || !hip::GraphNode::isNodeValid(dst) ||
+      src->GetType() != hipGraphNodeTypeKernel || dst->GetType() != hipGraphNodeTypeKernel) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  HIP_RETURN(reinterpret_cast<hip::GraphKernelNode*>(hDst)->CopyAttr(
-      reinterpret_cast<hip::GraphKernelNode*>(hSrc)));
+  HIP_RETURN(reinterpret_cast<hip::GraphKernelNode*>(dst)->CopyAttr(
+      reinterpret_cast<hip::GraphKernelNode*>(src)));
 }
 
 hipError_t ihipGraphDebugDotPrint(hip::Graph* graph, const char* path, unsigned int flags) {

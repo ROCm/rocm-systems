@@ -132,6 +132,29 @@ HIP_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Negative_Parameters) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *   - hipGraphMemsetNodeSetParams on an empty node must fail. The node is not a
+ *     memset node, so the runtime must not downcast it.
+ */
+HIP_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_WrongKind) {
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphNode_t empty = nullptr;
+  HIP_CHECK(hipGraphAddEmptyNode(&empty, graph, nullptr, 0));
+
+  LinearAllocGuard<int> alloc(LinearAllocs::hipMalloc, 4 * sizeof(int));
+  hipMemsetParams params = {};
+  params.dst = alloc.ptr();
+  params.elementSize = sizeof(int);
+  params.width = 1;
+  params.height = 1;
+
+  HIP_CHECK_ERROR(hipGraphMemsetNodeSetParams(empty, &params), hipErrorInvalidValue);
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
  * End doxygen group GraphTest.
  * @}
  */

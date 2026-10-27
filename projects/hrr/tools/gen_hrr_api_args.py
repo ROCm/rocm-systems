@@ -307,6 +307,10 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipHostMalloc",
     "hipMallocHost",
     "hipFreeHost",
+    # Kind-specific graph node updates. An archive can name a node of another
+    # kind; the handler checks before the runtime downcasts it.
+    "hipGraphKernelNodeCopyAttributes",
+    "hipGraphMemsetNodeSetParams",
     # Host memory registration — need handle map + blob restore + device ptr recording
     "hipHostRegister",
     "hipHostUnregister",

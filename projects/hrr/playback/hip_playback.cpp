@@ -3140,6 +3140,66 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
     return r;
 }
 
+// Skip a kind-specific graph call when the recorded node is a different kind.
+// The runtime also rejects the downcast; this keeps replay from depending on
+// that check and from aborting on a node it can simply skip.
+static bool graph_node_is_kind(hipGraphNode_t node, hipGraphNodeType kind) {
+    hipGraphNodeType got = hipGraphNodeTypeCount;
+    if (!node || hipGraphNodeGetType(node, &got) != hipSuccess) return false;
+    return got == kind;
+}
+
+hipError_t playback_hipGraphKernelNodeCopyAttributes(PlaybackContext& ctx,
+                                                     const uint8_t* payload) {
+    const auto* a = reinterpret_cast<const hrr_args_hipGraphKernelNodeCopyAttributes*>(payload);
+    hipGraphNode_t src = ctx.translate_graph_node(a->hSrc);
+    hipGraphNode_t dst = ctx.translate_graph_node(a->hDst);
+    if ((a->hSrc != 0 && !src) || (a->hDst != 0 && !dst)) {
+        fprintf(stderr, "[HRR] hipGraphKernelNodeCopyAttributes: a node was never "
+                "built at replay, so this call is skipped.\n");
+        return hipSuccess;
+    }
+    if (!graph_node_is_kind(src, hipGraphNodeTypeKernel) ||
+        !graph_node_is_kind(dst, hipGraphNodeTypeKernel)) {
+        fprintf(stderr, "[HRR] hipGraphKernelNodeCopyAttributes: node is not a kernel "
+                "node, so this call is skipped.\n");
+        return hipSuccess;
+    }
+    hipError_t r = hipGraphKernelNodeCopyAttributes(src, dst);
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipGraphKernelNodeCopyAttributes", a->ret);
+        return hipSuccess;
+    }
+    return r;
+}
+
+hipError_t playback_hipGraphMemsetNodeSetParams(PlaybackContext& ctx,
+                                                const uint8_t* payload) {
+    const auto* a = reinterpret_cast<const hrr_args_hipGraphMemsetNodeSetParams*>(payload);
+    hipGraphNode_t node = ctx.translate_graph_node(a->node);
+    if (a->node != 0 && !node) {
+        fprintf(stderr, "[HRR] hipGraphMemsetNodeSetParams: node was never built at "
+                "replay, so this call is skipped.\n");
+        return hipSuccess;
+    }
+    if (!graph_node_is_kind(node, hipGraphNodeTypeMemset)) {
+        fprintf(stderr, "[HRR] hipGraphMemsetNodeSetParams: node is not a memset "
+                "node, so this call is skipped.\n");
+        return hipSuccess;
+    }
+    hipMemsetParams params{};
+    if (a->pNodeParams_present)
+        std::memcpy(&params, a->pNodeParams_bytes, sizeof(params));
+    params.dst = ctx.translate_ptr(reinterpret_cast<uint64_t>(params.dst));
+    hipError_t r = hipGraphMemsetNodeSetParams(
+        node, a->pNodeParams_present ? &params : nullptr);
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipGraphMemsetNodeSetParams", a->ret);
+        return hipSuccess;
+    }
+    return r;
+}
+
 // ---------------------------------------------------------------------------
 // Manual playback: hipHostMalloc / hipMallocHost
 // ---------------------------------------------------------------------------
