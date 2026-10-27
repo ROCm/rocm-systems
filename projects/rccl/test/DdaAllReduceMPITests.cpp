@@ -79,9 +79,9 @@ bool launchesOnUserStream(int algo)
     }
 }
 
-void fillRankScalar(void* buf, size_t nElem, int rank)
+void fillRankScalar(void* buf, size_t nElem, int rank, float scale = 1.0f)
 {
-    std::vector<float> host(nElem, static_cast<float>(rank + 1));
+    std::vector<float> host(nElem, static_cast<float>(rank + 1) * scale);
     HIP_CHECK(hipMemcpy(buf, host.data(), nElem * sizeof(float), hipMemcpyHostToDevice));
 }
 
@@ -478,11 +478,7 @@ TEST_F(DdaMPI_AllReduce, LLOneShotBitIdenticalAcrossRanks)
                                "DdaMPI_AllReduce/LLOneShotBitIdenticalAcrossRanks");
 }
 
-// Comm init zeroes the LL scratch and epoch cells on the null stream, which a non-blocking stream
-// does not wait for, and the fixture's blocking stream plus MPI barrier hide that. Each iteration
-// creates a fresh comm with staggered rank arrival and issues two LL calls right away: a zero fill
-// landing after a rank's first call leaves that rank on a stale epoch, so the second call hangs or
-// returns the first call's data.
+// Fresh comms, staggered arrival, two LL calls on a non-blocking stream right after init: a late init zero fill hangs.
 TEST_F(DdaMPI_AllReduce, LLFreshCommNonBlockingStream)
 {
     if(!validateTestPrerequisites(kMinProcessesForMPI))
@@ -512,13 +508,8 @@ TEST_F(DdaMPI_AllReduce, LLFreshCommNonBlockingStream)
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvB, bytes));
     DeviceBufferAutoGuard recvBGuard(recvB);
 
-    std::vector<float> host(kCount, static_cast<float>(rank + 1));
-    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendA, host.data(), bytes, hipMemcpyHostToDevice));
-    std::fill(host.begin(), host.end(), static_cast<float>(2 * (rank + 1)));
-    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendB, host.data(), bytes, hipMemcpyHostToDevice));
-
-    const float sumA = static_cast<float>(nRanks * (nRanks + 1) / 2);
-    const float sumB = 2.0f * sumA;
+    std::vector<float> host(kCount);
+    const float        rankSum = static_cast<float>(nRanks * (nRanks + 1) / 2);
 
     std::mt19937                       rng(1234u + static_cast<unsigned>(rank));
     std::uniform_int_distribution<int> staggerMs(0, kMaxStaggerMs);
@@ -527,14 +518,22 @@ TEST_F(DdaMPI_AllReduce, LLFreshCommNonBlockingStream)
     {
         SCOPED_TRACE("iteration " + std::to_string(iter));
 
+        // Per-iteration values, so stale packets from an earlier comm can't pass the check.
+        const float scaleA = static_cast<float>(2 * iter + 1);
+        const float scaleB = static_cast<float>(2 * iter + 2);
+        fillRankScalar(sendA, kCount, rank, scaleA);
+        fillRankScalar(sendB, kCount, rank, scaleB);
+        const float sumA = rankSum * scaleA;
+        const float sumB = rankSum * scaleB;
+
         ncclUniqueId id{};
         if(rank == 0)
             ASSERT_EQ(ncclSuccess, ncclGetUniqueId(&id));
         ASSERT_EQ(MPI_SUCCESS, MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD));
 
         // Stream-ordered, so it cannot drain the null stream the way a blocking call after init would.
-        ASSERT_EQ(hipSuccess, hipMemsetAsync(recvA, 0, bytes, stream));
-        ASSERT_EQ(hipSuccess, hipMemsetAsync(recvB, 0, bytes, stream));
+        ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(recvA, 0, bytes, stream));
+        ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(recvB, 0, bytes, stream));
 
         std::this_thread::sleep_for(std::chrono::milliseconds(staggerMs(rng)));
 
@@ -543,17 +542,26 @@ TEST_F(DdaMPI_AllReduce, LLFreshCommNonBlockingStream)
         auto commGuard = makeScopeGuard([&]() { (void)ncclCommDestroy(comm); });
 
         // Nothing between init and these launches may synchronize the device or the ranks.
-        ASSERT_EQ(ncclSuccess, ncclAllReduce(sendA, recvA, kCount, ncclFloat32, ncclSum, comm, stream));
-        ASSERT_EQ(ncclSuccess, ncclAllReduce(sendB, recvB, kCount, ncclFloat32, ncclSum, comm, stream));
-        DdaFabricMPI::abortJobUnlessAllRanksDrained(
-            DdaFabricMPI::waitStreamBounded(stream, std::chrono::seconds(30)),
-            "LL AllReduce pair on a fresh communicator");
+        const ncclResult_t launchA = ncclAllReduce(sendA, recvA, kCount, ncclFloat32, ncclSum, comm, stream);
+        const ncclResult_t launchB = ncclAllReduce(sendB, recvB, kCount, ncclFloat32, ncclSum, comm, stream);
+        hipError_t         drained = DdaFabricMPI::waitStreamBounded(stream, std::chrono::seconds(30));
+        if(launchA != ncclSuccess || launchB != ncclSuccess)
+        {
+            ADD_FAILURE() << "Rank " << rank << ": ncclAllReduce failed: " << ncclGetErrorString(launchA) << ", "
+                          << ncclGetErrorString(launchB);
+            if(drained == hipSuccess)
+                drained = hipErrorLaunchFailure;
+        }
+        DdaFabricMPI::abortJobUnlessAllRanksDrained(drained, "LL AllReduce pair on a fresh communicator");
 
         if(iter == 0)
-        {
-            DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(comm->ddaFabricBarrierState == nullptr,
-                                                             "DDA fabric path did not initialize"));
-        }
+            DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason(comm));
+
+        int                algo = -1, protocol = -1, maxChannels = -1;
+        const ncclResult_t query = rcclGetCollImplInfo(comm, ncclFuncAllReduce, kCount, ncclFloat32, ncclSum, sendA,
+                                                       recvA, /*graphCapturing=*/0, &algo, &protocol, &maxChannels);
+        EXPECT_EQ(ncclSuccess, query) << "Rank " << rank << ": rcclGetCollImplInfo failed";
+        EXPECT_EQ(RCCL_DDA_FABRIC_LL, algo) << "Rank " << rank << ": this comm did not select DDA fabric LL";
 
         int64_t bad = 0;
         ASSERT_MPI_EQ(hipSuccess, hipMemcpy(host.data(), recvA, bytes, hipMemcpyDeviceToHost));
@@ -564,7 +572,7 @@ TEST_F(DdaMPI_AllReduce, LLFreshCommNonBlockingStream)
         EXPECT_EQ(0, bad) << "Rank " << rank << ": " << bad << " wrong elements (" << badB
                           << " in the second AllReduce, first sample " << host[0] << ", expected " << sumB << ")";
 
-        int64_t totalBad = bad;
+        int64_t totalBad = bad + ((query == ncclSuccess && algo == RCCL_DDA_FABRIC_LL) ? 0 : 1);
         MPI_Allreduce(MPI_IN_PLACE, &totalBad, 1, MPI_INT64_T, MPI_SUM, MPI_COMM_WORLD);
         if(totalBad != 0)
             break;

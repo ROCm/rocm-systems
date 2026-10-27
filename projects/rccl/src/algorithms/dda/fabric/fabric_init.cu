@@ -170,14 +170,13 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 
   {
     auto cudaOk = [](cudaError_t err, const char* what) {
-      if (err != cudaSuccess) {
+      if (CUDACLEARERROR(err) != cudaSuccess) {
         WARN("ncclDdaFabricCommInit: %s failed: %s", what, cudaGetErrorString(err));
         return false;
       }
       return true;
     };
-    // The barrier's pointer exchange is the last collective before the allgather below, so every
-    // rank-local failure from here on records !ready instead of leaving peers blocked in the allgather.
+    // Past the barrier's pointer exchange, failures set !ready so every rank still reaches the allgather.
     bool ready = true;
     auto barrierPair =
       dda::common::FabricGpuBarrier::mallocAndInit(nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager,
@@ -193,16 +192,19 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
       barrierState->barrierHost = barrierPair.second;
     }
 
-    // Zero the scratch once so the first epoch (>= 1) across all LL operations
-    // never false-matches leftover flag words. Subsequent LL calls rely on
-    // monotonic epochs + the 2-bank layout rather than re-zeroing.
-    // Device epoch cells for the LL collectives: zero-initialised
-    // so the first device-derived flag is 1. Bumped on the device every LL launch.
-    // Null-stream memsets don't order with non-blocking streams; sync, then agree before any rank's first LL kernel.
-    ready = ready && cudaOk(cudaMemset(scratch, 0, bytes), "scratch memset") &&
-            cudaOk(cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), "epoch alloc") &&
-            cudaOk(cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)), "epoch memset") &&
-            cudaOk(cudaStreamSynchronize(nullptr), "zero-fill sync");
+    // Own stream: syncing the null stream would also consume async errors from the app's blocking streams.
+    cudaStream_t zeroStream = nullptr;
+    ready = ready && cudaOk(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), "zero-fill stream create");
+    // Zeroed once; later LL calls rely on monotonic epochs (>= 1) and two banks, not re-zeroing.
+    ready = ready && cudaOk(cudaMemsetAsync(scratch, 0, bytes, zeroStream), "scratch memset");
+    // Zeroed epoch cells make the first device-derived LL flag 1.
+    ready = ready && cudaOk(cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), "epoch alloc") &&
+            cudaOk(cudaMemsetAsync(epochDev, 0, epochLen * sizeof(uint32_t), zeroStream), "epoch memset");
+    // Fills must land before any rank's first LL kernel (and before `fail` frees scratch); the allgather orders ranks.
+    if (zeroStream != nullptr) {
+      ready = cudaOk(cudaStreamSynchronize(zeroStream), "zero-fill sync") && ready;
+      CUDACHECKIGNORE(cudaStreamDestroy(zeroStream));
+    }
 
     std::vector<int> allReady(nRanks, 0);
     allReady[comm->rank] = ready ? 1 : 0;
