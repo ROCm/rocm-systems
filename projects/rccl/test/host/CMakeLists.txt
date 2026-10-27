@@ -1253,20 +1253,20 @@ function(rccl_standalone_setup)
     message(FATAL_ERROR "Hipified sources not found at ${RCCL_HIPIFY_DIR}. Run the RCCL build first.")
   endif()
 
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
   # csv_tuner.cc needs the embedded-tuner header. The RCCL build normally emits
   # it; generate it here so a standalone test build works against an older tree.
   if(NOT EXISTS "${RCCL_BUILD_DIR}/include/rccl_tuner_embedded_configs.h")
-    # No COMMAND_ERROR_IS_FATAL here: that needs CMake 3.19 and this project
-    # declares 3.16, so check the result explicitly or a FATAL_ERROR from the
-    # generator is swallowed and the build fails later on a missing include.
-    execute_process(COMMAND ${CMAKE_COMMAND}
-      -DTUNER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../../tuner
-      -DOUT_FILE=${RCCL_BUILD_DIR}/include/rccl_tuner_embedded_configs.h
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/GenerateEmbeddedTunerConfigs.cmake
+    execute_process(
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/../../tuner/embed_tuner_configs.py
+              ${CMAKE_CURRENT_SOURCE_DIR}/../../tuner
+              ${RCCL_BUILD_DIR}/include/rccl_tuner_embedded_configs.h
       RESULT_VARIABLE _gen_tuner_result
       ERROR_VARIABLE _gen_tuner_error)
     if(_gen_tuner_result)
-      message(FATAL_ERROR "GenerateEmbeddedTunerConfigs.cmake failed: ${_gen_tuner_error}")
+      message(FATAL_ERROR "embed_tuner_configs.py failed: ${_gen_tuner_error}")
     endif()
   endif()
   message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER}")
