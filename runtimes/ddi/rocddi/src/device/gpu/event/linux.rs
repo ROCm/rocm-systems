@@ -25,6 +25,8 @@ struct ProcessPage {
     host_address: Option<usize>,
     mappings: EventPageMappings,
     confirmed: bool,
+    /// The offering service retired without proving that KFD installed it.
+    retired_unconfirmed: bool,
 }
 
 struct ProcessPageSlot {
@@ -53,6 +55,7 @@ fn process_page_slot() -> &'static ProcessPageSlot {
                 host_address: None,
                 mappings: Vec::new(),
                 confirmed: false,
+                retired_unconfirmed: false,
             }),
         }));
         match PROCESS_PAGE_SLOT.compare_exchange(
@@ -84,8 +87,9 @@ impl ProcessSignalEventPageGuard {
     /// Whether a process-lifetime device could currently install or use a page.
     #[must_use]
     fn can_create_for(&self, endpoint_id: [u8; 16]) -> bool {
-        self.0.host_address.is_none()
-            || (self.0.confirmed && self.device_address(endpoint_id).is_some())
+        !self.0.retired_unconfirmed
+            && (self.0.host_address.is_none()
+                || (self.0.confirmed && self.device_address(endpoint_id).is_some()))
     }
 
     fn compatible_mappings(
@@ -93,6 +97,12 @@ impl ProcessSignalEventPageGuard {
         endpoints: impl IntoIterator<Item = [u8; 16]>,
         require_identity: bool,
     ) -> Result<Option<(usize, u64)>, Error> {
+        if self.0.retired_unconfirmed {
+            return Err(Error::Operation {
+                kind: ErrorKind::DriverContract,
+                detail: "KFD signal page installation was never confirmed",
+            });
+        }
         let Some(host) = self.0.host_address else {
             return Ok(None);
         };
@@ -123,6 +133,12 @@ impl ProcessSignalEventPageGuard {
         host_address: usize,
         mappings: EventPageMappings,
     ) -> Result<(), Error> {
+        if self.0.retired_unconfirmed {
+            return Err(Error::Operation {
+                kind: ErrorKind::DriverContract,
+                detail: "retired KFD signal page cannot be offered again",
+            });
+        }
         if host_address == 0 || mappings.is_empty() {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
@@ -146,6 +162,14 @@ impl ProcessSignalEventPageGuard {
     /// Marks the process page as installed after a valid event was created.
     fn confirm(&mut self) {
         self.0.confirmed = true;
+    }
+
+    /// Prevents another frontend from assuming that an offered page was
+    /// installed after its last owner has retired.
+    fn retire_unconfirmed(&mut self) {
+        if !self.0.confirmed {
+            self.0.retired_unconfirmed = true;
+        }
     }
 }
 
@@ -551,9 +575,20 @@ impl SignalEventService {
     /// Retains the page for a retry if native transfer fails.
     pub fn release(&mut self) -> Result<bool, Error> {
         self.ensure_process()?;
-        let unresolved = self.page.as_ref().is_some_and(|page| page.attempted) && !self.confirmed;
+        let mut process = if self.lifetime == DriverContextLifetime::Process {
+            Some(lock_process_signal_event_page()?)
+        } else {
+            None
+        };
+        let unresolved = self.page.as_ref().is_some_and(|page| page.attempted)
+            && !process
+                .as_ref()
+                .map_or(self.confirmed, |page| page.0.confirmed);
         if let Some(page) = self.page.as_mut() {
             page.retain_for_process()?;
+        }
+        if unresolved && let Some(process) = process.as_mut() {
+            process.retire_unconfirmed();
         }
         self.page = None;
         Ok(unresolved)
@@ -636,11 +671,19 @@ mod tests {
         host_address: None,
         mappings: Vec::new(),
         confirmed: false,
+        retired_unconfirmed: false,
     });
     static TEST_COMPATIBLE_PAGE: Mutex<ProcessPage> = Mutex::new(ProcessPage {
         host_address: None,
         mappings: Vec::new(),
         confirmed: false,
+        retired_unconfirmed: false,
+    });
+    static TEST_RETIRED_PAGE: Mutex<ProcessPage> = Mutex::new(ProcessPage {
+        host_address: None,
+        mappings: Vec::new(),
+        confirmed: false,
+        retired_unconfirmed: false,
     });
 
     #[test]
@@ -668,6 +711,9 @@ mod tests {
         page.record_offer(0x1000, vec![(first, 0x1000), (second, 0x2000)])
             .unwrap();
         page.confirm();
+        // A second frontend may confirm an earlier owner's offered page.
+        page.retire_unconfirmed();
+        assert!(!page.0.retired_unconfirmed);
         assert_eq!(
             page.compatible_mappings([first], true).unwrap(),
             Some((0x1000, 0x1000))
@@ -678,6 +724,17 @@ mod tests {
         );
         assert!(page.compatible_mappings([second], true).is_err());
         assert!(page.compatible_mappings([first, late], true).is_err());
+    }
+
+    #[test]
+    fn unconfirmed_page_cannot_be_reused_after_its_owner_retires() {
+        let endpoint = [4; 16];
+        let mut page = ProcessSignalEventPageGuard(TEST_RETIRED_PAGE.lock().unwrap());
+        page.record_offer(0x1000, vec![(endpoint, 0x2000)]).unwrap();
+        page.retire_unconfirmed();
+        assert!(!page.can_create_for(endpoint));
+        assert!(page.compatible_mappings([endpoint], false).is_err());
+        assert!(page.record_offer(0x1000, vec![(endpoint, 0x2000)]).is_err());
     }
 
     #[test]

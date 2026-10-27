@@ -962,10 +962,18 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
 // field dropped in the loader, or a wrong default for an omitted section, would
 // leave every test green while a guest saw the wrong device.
 TEST(ConfigLoaderTest, LoadsThePciSectionThroughBothEntryPoints) {
+  const std::string shipped_path = CONFIG_DIR_PATH + "/gfx1250_mi455x.json";
+  std::string partial_json = read_config_file_or_throw(shipped_path);
+  const std::string gpu_marker = "\"gpu\": {";
+  const auto gpu_position = partial_json.find(gpu_marker);
+  ASSERT_NE(gpu_position, std::string::npos);
+  partial_json.insert(gpu_position + gpu_marker.size(),
+                      "\n      \"pci\": {\"vram_aperture_bytes\": 268435456},");
+  const auto partial_file = write_temp_config(partial_json);
+  const std::string &partial_path = partial_file.path();
   util::StringDiagnostic identity_diagnostic;
-  auto identity_result =
-      config::load_device_identity(CONFIG_DIR_PATH + "/gfx1250_mi455x.json",
-                                   rocjitsu::kEmbeddedSchema, identity_diagnostic.emitter());
+  auto identity_result = config::load_device_identity(partial_path, rocjitsu::kEmbeddedSchema,
+                                                      identity_diagnostic.emitter());
   ASSERT_TRUE(identity_result.succeeded()) << identity_diagnostic.message();
   const auto identity = std::move(identity_result).value();
   EXPECT_EQ(identity.pci.vram_aperture_bytes, 268435456u);
@@ -973,9 +981,16 @@ TEST(ConfigLoaderTest, LoadsThePciSectionThroughBothEntryPoints) {
       << "the identity must come from the same file as the bus shape";
 
   config::LoadedConfig loaded;
-  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", loaded));
+  ASSERT_TRUE(test::load_valid_config(partial_path, loaded));
   EXPECT_EQ(loaded.pci.vram_aperture_bytes, identity.pci.vram_aperture_bytes)
       << "the two entry points disagree about the same file";
+
+  auto shipped_result = config::load_device_identity(shipped_path, rocjitsu::kEmbeddedSchema,
+                                                     identity_diagnostic.emitter());
+  ASSERT_TRUE(shipped_result.succeeded()) << identity_diagnostic.message();
+  const auto &shipped = shipped_result.value();
+  EXPECT_EQ(shipped.pci.vram_aperture_bytes, 0u);
+  EXPECT_EQ(gpu_pci_spec_from_config(shipped.device, shipped.pci).vram_aperture_bytes, 268435456u);
 }
 
 TEST(ConfigLoaderTest, ResolvesGenerationTopologyThroughBothFileEntryPoints) {
