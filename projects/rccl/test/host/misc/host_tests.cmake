@@ -85,6 +85,9 @@ rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscArgcheck argcheck-test.cc)
 
 rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscCrypt crypt-test.cc)
 
+# crypt.cc with the OpenSSL 3 TLS backend; crypt-test.cc covers the build without TLS support.
+rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscCryptOpenssl3 crypt-openssl3-test.cc)
+
 rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscDvsymbols dvsymbols-test.cc
   PROCESS_ISOLATED
   SOURCES
