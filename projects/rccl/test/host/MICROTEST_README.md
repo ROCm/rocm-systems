@@ -122,6 +122,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `transport/net_ib*/reg.cc` copies by configure-time `rccl_assert_source_line`
     checks in `CMakeLists.txt`, so a flag change in `reg.cc` fails the configure
     until the probe and the test are updated to match.
+  - `misc/crypt.cc` (`CRYPT_CC_PATH`, from `crypt-test.cc`); suite
+    `CryptPskHandshakeTest.*`. Compiles the OpenSSL 3 TLS backend when the
+    OpenSSL 3 headers are present (the suite skips otherwise; libssl is dlopened
+    at run time) and drives real PSK handshakes over a socketpair: two PSK peers
+    connect, and a certificate-only server that ignores the PSK is refused.
+    `crypt-test.cc` supplies crypt.cc's socket, poll and dl* seams itself.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
