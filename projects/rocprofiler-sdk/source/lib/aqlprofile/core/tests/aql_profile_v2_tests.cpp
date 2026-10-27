@@ -694,6 +694,14 @@ protected:
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
+    static hsa_status_t record_memory_copy(void* dst, const void* src, size_t size, void* userdata)
+    {
+        auto*       copies = static_cast<std::vector<std::vector<uint8_t>>*>(userdata);
+        const auto* bytes  = static_cast<const uint8_t*>(src);
+        copies->emplace_back(bytes, bytes + size);
+        return memory_copy_mock(dst, src, size, nullptr);
+    }
+
     static hsa_status_t capture_spm_configurations(
         const aqlprofile_spm_available_configuration_t* cfg,
         size_t                                          count,
@@ -910,5 +918,47 @@ TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedNonSqDepthOptions)
 
     event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_32_BITS;
     EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmRepeatedCreateEmitsIdenticalCommandStreams)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx950";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI;
+    event.event_id   = 1;
+
+    auto create_command_streams = [&]() {
+        std::vector<std::vector<uint8_t>> copies{};
+        aqlprofile_spm_profile_t          profile{};
+        profile.aql_agent   = agent;
+        profile.events      = &event;
+        profile.event_count = 1;
+        profile.alloc_cb    = memory_alloc_mock;
+        profile.dealloc_cb  = memory_dealloc_mock;
+        profile.memcpy_cb   = record_memory_copy;
+        profile.userdata    = &copies;
+
+        aqlprofile_handle_t          handle{};
+        aqlprofile_spm_buffer_desc_t desc{};
+        aqlprofile_spm_aql_packets_t packets{};
+        EXPECT_EQ(aqlprofile_spm_create_packets(&handle, &desc, &packets, profile, 0),
+                  HSA_STATUS_SUCCESS);
+        aqlprofile_spm_delete_packets(handle);
+        return copies;
+    };
+
+    const auto first  = create_command_streams();
+    const auto second = create_command_streams();
+    ASSERT_EQ(first.size(), 2u);
+    EXPECT_EQ(second, first);
 }
 }  // namespace aql_profile_v2_tests
