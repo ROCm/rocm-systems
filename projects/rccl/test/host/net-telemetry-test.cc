@@ -2720,9 +2720,14 @@ TEST_F(NetTelemetryFlushMicrotest, Flush_SamplerRunning_StopsSamplerFirst) {
     SetMicroEnv("RCCL_TELEMETRY_SAMPLE_MS", "1");
     Enable();
     ASSERT_TRUE(rcclTelemetrySamplerRunning);
+    ScopedHook reportOpen(g_fopen, [](const char* path, const char* mode) {
+      EXPECT_FALSE(rcclTelemetrySamplerRunning);
+      return FakeFopen(path, mode);
+    });
 
     ASSERT_EQ(rcclTelemetryFlush(), 0);
 
+    EXPECT_EQ(reportOpen.calls, 1);
     EXPECT_FALSE(rcclTelemetrySamplerRunning);
   });
 }
