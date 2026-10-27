@@ -902,6 +902,7 @@ static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* me
   }
 }
 
+// RCCL: upstream has no GIN activation rollback; keep these helpers on a sync.
 // Undo a partial GIN activation; any GIN state on existing memories and windows came from it.
 static void symGinActivationRollbackWindows(struct ncclDevrState* devr, cudaStream_t stream) {
   for (int i = 0; i < devr->winSortedCount; i++) {
@@ -2391,7 +2392,11 @@ fail_stream_mem:
   }
   symMemoryDropRef(comm, mem);
 fail_stream:
-  if (ginActivated && !ginActivationDone) symGinActivationRollbackWindows(devr, stream);
+  if (ginActivated && !ginActivationDone) {
+    symGinActivationRollbackWindows(devr, stream);
+    // A retry rebuilds these windows on a new stream, which is not ordered after this one.
+    CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+  }
   CUDACHECKIGNORE(cudaStreamDestroy(stream));
 fail:
   // Destroy the GIN contexts this call created. Without this, a failure between
@@ -2401,7 +2406,7 @@ fail:
   if (ginDevCommSetupDone && ncclGinDevCommFree(comm, outDevComm) == ncclSuccess) {
     ncclGinDevCommClearFields(outDevComm);
   }
-  // A retry skips activation once ginEnabled is set, so roll back a partial one.
+  // RCCL: a retry skips activation once ginEnabled is set, so roll back a partial one.
   if (ginActivated && !ginActivationDone) symGinActivationRollbackMemories(comm);
   CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
   return ret;
