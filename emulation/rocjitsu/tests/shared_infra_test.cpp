@@ -95,6 +95,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"
 #include "rocjitsu/isa/decoder.h"
@@ -6001,6 +6002,7 @@ TEST(ScratchAddrCalcTest, FlatScratchUsesWavefrontBase) {
   EXPECT_TRUE(d.scratch_swizzle);
   EXPECT_TRUE(d.requires_scratch_backing);
   EXPECT_EQ(d.scratch_addr_stride, 64u * sizeof(uint32_t));
+  EXPECT_EQ(d.scratch_swizzle_unit, amdgpu::kScratchInterleaveBytes);
 }
 
 TEST(ScratchAddrCalcTest, FlatScratchSignExtendsScalarStackOffset) {
@@ -6174,6 +6176,7 @@ void expect_rdna3_scratch_layout(rj_code_arch_t arch, CalculateAddresses calcula
     EXPECT_TRUE(d.requires_scratch_backing);
     EXPECT_EQ(d.scratch_lane_mask, 0x3u);
     EXPECT_EQ(d.scratch_addr_stride, wave_size * sizeof(uint32_t));
+    EXPECT_EQ(d.scratch_swizzle_unit, amdgpu::kScratchInterleaveBytes);
 
     cu->write_sgpr(sbase + 4, 0x70);
     cu->write_vgpr(vbase, 0, 0x200);
@@ -6216,6 +6219,7 @@ void expect_rdna3_scratch_layout(rj_code_arch_t arch, CalculateAddresses calcula
     EXPECT_TRUE(flat_private.requires_scratch_backing);
     EXPECT_EQ(flat_private.scratch_lane_mask, 0x5u);
     EXPECT_EQ(flat_private.scratch_addr_stride, wave_size * sizeof(uint32_t));
+    EXPECT_EQ(flat_private.scratch_swizzle_unit, amdgpu::kScratchInterleaveBytes);
   }
 }
 
@@ -6593,6 +6597,7 @@ TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
   EXPECT_TRUE(d.requires_scratch_backing);
   EXPECT_EQ(d.scratch_lane_mask, 0x3u);
   EXPECT_EQ(d.scratch_addr_stride, 32u * sizeof(uint32_t));
+  EXPECT_EQ(d.scratch_swizzle_unit, amdgpu::kScratchInterleaveBytes);
 
   cu->write_sgpr(wf->sgpr_alloc().base + 4, 0x7000);
   cu->write_vgpr(vbase, 0, 0x60);
@@ -6630,6 +6635,7 @@ TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
   EXPECT_TRUE(flat_private.requires_scratch_backing);
   EXPECT_EQ(flat_private.scratch_lane_mask, 0x5u);
   EXPECT_EQ(flat_private.scratch_addr_stride, 32u * sizeof(uint32_t));
+  EXPECT_EQ(flat_private.scratch_swizzle_unit, amdgpu::kScratchInterleaveBytes);
 }
 
 // RDNA4 ISA 11.2: SWIZZLE(SGPR_offset I32 + VGPR_offset I32 + IOFFSET I24, ThreadID).
@@ -6748,6 +6754,7 @@ TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
   EXPECT_TRUE(d.requires_scratch_backing);
   EXPECT_EQ(d.scratch_lane_mask, 0x7u);
   EXPECT_EQ(d.scratch_addr_stride, 32u * sizeof(uint32_t));
+  EXPECT_EQ(d.scratch_swizzle_unit, amdgpu::kScratchInterleaveBytes);
 }
 
 TEST(Gfx12AddrCalcTest, ScratchSignedOffsetsAreWidenedBeforeScalingAndAddressing) {
@@ -6889,6 +6896,7 @@ TEST(Gfx1250AddrCalcTest, ScratchUsesDwordInterleavedWave32Layout) {
   EXPECT_TRUE(d.requires_scratch_backing);
   EXPECT_EQ(d.scratch_lane_mask, 0x3u);
   EXPECT_EQ(d.scratch_addr_stride, 32u * sizeof(uint32_t));
+  EXPECT_EQ(d.scratch_swizzle_unit, amdgpu::kScratchInterleaveBytes);
 }
 
 // CDNA5 ISA 10.2: SWIZZLE(SGPR_offset I32 + VGPR_offset I32 * ScaleFactor + IOFFSET I24, TID).

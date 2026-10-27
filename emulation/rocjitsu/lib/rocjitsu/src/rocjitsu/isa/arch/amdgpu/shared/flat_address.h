@@ -30,12 +30,12 @@ constexpr uint64_t scratch_lane_address(uint64_t scratch_base, uint64_t private_
 /// @brief Add private lanes whose transfers follow the dword-interleaved scratch layout.
 /// @details OR the mask so mixed FLAT requests retain every private lane. BUFFER
 /// descriptor swizzling has different address-space provenance and must not use this helper.
-inline void add_private_scratch_lanes(VectorMemState &d, uint32_t wave_size, uint64_t lanes) {
-  d.scratch_swizzle = true;
-  d.requires_scratch_backing = true;
-  d.scratch_addr_stride = scratch_unit_stride(wave_size);
-  d.scratch_swizzle_unit = kScratchInterleaveBytes;
-  d.scratch_lane_mask |= lanes;
+inline void add_private_scratch_lanes(VectorMemState &state, uint32_t wave_size, uint64_t lanes) {
+  state.scratch_swizzle = true;
+  state.requires_scratch_backing = true;
+  state.scratch_addr_stride = scratch_unit_stride(wave_size);
+  state.scratch_swizzle_unit = kScratchInterleaveBytes;
+  state.scratch_lane_mask |= lanes;
 }
 
 enum class FlatPrivateLayout { None, Interleaved, EncodedLane };
