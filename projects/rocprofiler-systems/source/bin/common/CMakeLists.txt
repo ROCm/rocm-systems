@@ -53,6 +53,7 @@ add_library(
     json_config.cpp
     preset_registry.cpp
     common_utils.cpp
+    runtime_table.cpp
 )
 
 target_include_directories(

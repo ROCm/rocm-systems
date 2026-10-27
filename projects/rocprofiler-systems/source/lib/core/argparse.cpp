@@ -4,6 +4,7 @@
 #include "argparse.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
+#include "common/runtime_table.hpp"
 #include "common/string_utility.hpp"
 #include "config.hpp"
 #include "exception.hpp"
@@ -551,10 +552,14 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                         update_env(_data, _opt, true);
                     }
                 };
-                _update(env_vars::USE_KOKKOSP, _v.contains("kokkosp"));
-                _update(env_vars::USE_MPIP, _v.contains("mpip"));
-                _update(env_vars::USE_OMPT, _v.contains("ompt"));
-                _update(env_vars::USE_RCCLP, _v.contains("rcclp"));
+                for(const auto& spec : runtime_table::rows())
+                {
+                    if(!spec.include_token.empty())
+                    {
+                        _update(spec.env_key,
+                                _v.contains(std::string{ spec.include_token }));
+                    }
+                }
                 _update(env_vars::USE_AMD_SMI, _v.contains("amd-smi"));
                 _update(env_vars::TRACE_THREAD_LOCKS, _v.contains("mutex-locks"));
                 _update(env_vars::TRACE_THREAD_RW_LOCKS, _v.contains("rw-locks"));
@@ -585,10 +590,14 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                         update_env(_data, _opt, false);
                     }
                 };
-                _update(env_vars::USE_KOKKOSP, _v.contains("kokkosp"));
-                _update(env_vars::USE_MPIP, _v.contains("mpip"));
-                _update(env_vars::USE_OMPT, _v.contains("ompt"));
-                _update(env_vars::USE_RCCLP, _v.contains("rcclp"));
+                for(const auto& spec : runtime_table::rows())
+                {
+                    if(!spec.include_token.empty())
+                    {
+                        _update(spec.env_key,
+                                _v.contains(std::string{ spec.include_token }));
+                    }
+                }
                 _update(env_vars::USE_AMD_SMI, _v.contains("amd-smi"));
                 _update(env_vars::TRACE_THREAD_LOCKS, _v.contains("mutex-locks"));
                 _update(env_vars::TRACE_THREAD_RW_LOCKS, _v.contains("rw-locks"));

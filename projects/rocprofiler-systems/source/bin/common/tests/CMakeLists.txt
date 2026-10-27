@@ -8,6 +8,13 @@ add_library(
     test_json_config.cpp
     test_help_system.cpp
     test_print_output.cpp
+    test_runtime_table.cpp
+)
+
+target_compile_definitions(
+    bin-common-tests
+    PRIVATE
+        "ROCPROFSYS_CONFIG_SOURCE=\"${PROJECT_SOURCE_DIR}/source/lib/core/config.cpp\""
 )
 
 target_include_directories(bin-common-tests PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../..)
