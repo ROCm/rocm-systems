@@ -9,9 +9,11 @@ run_amdsmi_pkg_conflict_test.py
 Sanity-check that the system-package shared object and the pip wheel's
 bundled shared object ship under DIFFERENT SONAMEs, so a process that
 somehow has both installed cannot accidentally double-load the same
-library and crash during static C++ initialisation.
+library and crash during static C++ initialisation. Also check that
+neither library resolves its own exports at runtime, which would let
+another libamd_smi loaded earlier with RTLD_GLOBAL capture those calls.
 
-This is the only multi-package invariant we still validate. amd-smi
+These are the only multi-package invariants we still validate. amd-smi
 follows an "either you install the rpm/deb OR you install the wheel"
 model -- the loader in py-interface/amdsmi_wrapper.py picks one .so
 based solely on whether libamd_smi_python.so sits next to the wrapper
@@ -43,17 +45,38 @@ def _version_key(lib_path: Path) -> tuple:
     return tuple(int(d) for d in digits)
 
 
-def soname(lib_path: Path) -> str:
+def _readelf(lib_path: Path, *args: str) -> str:
     if shutil.which("readelf") is None:
         sys.exit("readelf not found; install binutils to run this check.")
     try:
-        out = subprocess.check_output(["readelf", "-d", str(lib_path)], text=True)
+        return subprocess.check_output(["readelf", *args, str(lib_path)], text=True)
     except subprocess.CalledProcessError as exc:
         sys.exit(f"readelf failed on {lib_path} (exit {exc.returncode}): {exc}")
-    for line in out.splitlines():
+
+
+def soname(lib_path: Path) -> str:
+    for line in _readelf(lib_path, "-d").splitlines():
         if "(SONAME)" in line:
             return line.split("[", 1)[1].rstrip("]\n ")
     return ""
+
+
+def self_bound_exports(lib_path: Path) -> list:
+    """Exported functions that the library's own dynamic relocations name.
+
+    The dynamic linker resolves those to the first loaded library exporting
+    the name; -Bsymbolic-functions resolves them inside the library instead.
+    """
+    exports = set()
+    for fields in (line.split() for line in _readelf(lib_path, "--dyn-syms", "-W").splitlines()):
+        if len(fields) >= 8 and fields[3] == "FUNC" and fields[4] in ("GLOBAL", "WEAK"):
+            if fields[6] != "UND":
+                exports.add(fields[7].split("@")[0])
+    referenced = set()
+    for fields in (line.split() for line in _readelf(lib_path, "-r", "-W").splitlines()):
+        if len(fields) >= 5 and fields[2].startswith("R_"):
+            referenced.add(fields[4].split("@")[0])
+    return sorted(exports & referenced)
 
 
 def _rocm_lib_dir() -> Path:
@@ -127,6 +150,15 @@ def main() -> int:
         )
 
     print("PASS: distinct SONAMEs; system and wheel cannot accidentally double-load.")
+
+    for lib in (sys_lib, wheel_lib):
+        bound = self_bound_exports(lib)
+        if bound:
+            sys.exit(
+                f"{lib} resolves {len(bound)} of its own exports at runtime "
+                f"(e.g. {', '.join(bound[:3])}); link it with -Bsymbolic-functions."
+            )
+    print("PASS: neither library resolves its own exports at runtime.")
     return 0
 
 
