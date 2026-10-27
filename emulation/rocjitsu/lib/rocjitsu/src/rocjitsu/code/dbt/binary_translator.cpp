@@ -3332,9 +3332,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       liveness_options.live_before_instructions = std::span<const Instruction *const>(
           live_before_instructions.data(), live_before_instructions.size());
     }
+    // Model rules that query liveness without declaring that requirement.
+    if (force_unavailable_liveness_)
+      scope_requires_liveness = false;
     LivenessAnalysis liveness = LivenessAnalysis::unavailable();
     std::vector<ScopedCfgEdge> scope_analysis_edges;
-    if (scope_requires_liveness && !force_unavailable_liveness_) {
+    if (scope_requires_liveness) {
       scope_analysis_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
       // DBT runs liveness without EXEC-state analysis: with a null ExecMaskAnalysis
       // every EXEC-masked vector def is treated as `Unknown` and so is never
