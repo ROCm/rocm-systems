@@ -6,6 +6,7 @@
 ///
 /// Requires the simulator interposer via LD_PRELOAD=librocjitsu.so.
 
+#include "instruction_failure_test_util.h"
 #include "sanitizer_diagnostic_test_util.h"
 
 #include <chrono>
@@ -67,11 +68,12 @@ private:
 } // namespace
 
 __global__ void unsupported_instruction() {
-  // s_rfe_restore_b64 is decoded but has no execution implementation on CDNA3/4.
-  asm volatile(".long 0x95800000");
+  asm volatile(".long %0" : : "n"(rocjitsu::test::kUnimplementedInstruction));
 }
 
-__global__ void undecodable_instruction() { asm volatile(".long 0xbfff0000"); }
+__global__ void undecodable_instruction() {
+  asm volatile(".long %0" : : "n"(rocjitsu::test::kUndecodableInstruction));
+}
 
 __global__ void valid_instruction(int *output) { *output = 17; }
 

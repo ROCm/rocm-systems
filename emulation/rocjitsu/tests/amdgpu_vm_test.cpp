@@ -4,6 +4,7 @@
 #include "aql_queue.h"
 #include "config_test_util.h"
 #include "halt_snapshot_plugin.h"
+#include "instruction_failure_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
 #include "throwing_instruction_test_util.h"
 
@@ -9640,11 +9641,11 @@ TEST(AqlDispatchTest, WorkerExceptionPropagatesThroughEngineStep) {
 }
 
 TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
-  constexpr uint32_t kSRfeRestoreB64 = 0x95800000u; // s_rfe_restore_b64 s[0:1], s0
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", /*num_cus=*/2));
   f.cp()->set_dispatch_threads(2);
-  uint64_t kernel = f.write_kernel(0x1000, &kSRfeRestoreB64, sizeof(kSRfeRestoreB64));
+  uint64_t kernel = f.write_kernel(0x1000, &test::kUnimplementedInstruction,
+                                   sizeof(test::kUnimplementedInstruction));
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
 
@@ -9653,7 +9654,7 @@ TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
   const auto &exit = f.engine->last_exit();
   EXPECT_EQ(exit.reason, simdojo::ExitReason::EXIT_REQUEST);
   EXPECT_EQ(exit.code, 1);
-  EXPECT_NE(exit.message.find("s_rfe_restore_b64"), std::string::npos);
+  EXPECT_NE(exit.message.find(test::kUnimplementedInstructionMnemonic), std::string::npos);
   EXPECT_NE(exit.message.find("pc=0x1040"), std::string::npos);
   EXPECT_NE(exit.message.find("unimplemented instruction"), std::string::npos);
   EXPECT_TRUE(f.cu(0)->is_idle());
@@ -9669,8 +9670,10 @@ TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
   constexpr uint64_t kCompletionSignal = 0x3000;
   constexpr uint64_t kBarrierSignal = 0x3040;
   for (const auto instruction :
-       {InstructionCase{0x95800000u, "s_rfe_restore_b64", "unimplemented instruction"},
-        InstructionCase{0xBFFF0000u, "0xbfff0000", "could not decode"}}) {
+       {InstructionCase{test::kUnimplementedInstruction, test::kUnimplementedInstructionMnemonic,
+                        "unimplemented instruction"},
+        InstructionCase{test::kUndecodableInstruction, test::kUndecodableInstructionText,
+                        "could not decode"}}) {
     SCOPED_TRACE(instruction.diagnostic);
     for (uint32_t threads : {1u, 2u}) {
       // The larger grid leaves queued workgroups behind the resident waves.
@@ -9729,7 +9732,6 @@ TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
 }
 
 TEST(AqlDispatchTest, DebuggerCanHandleDecodeRejectionWithoutCancellingDispatch) {
-  constexpr uint32_t kUndecodable = 0xBFFF0000u;
   constexpr uint64_t kCompletionSignal = 0x3000;
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", /*num_cus=*/1));
@@ -9740,7 +9742,8 @@ TEST(AqlDispatchTest, DebuggerCanHandleDecodeRejectionWithoutCancellingDispatch)
     wf.set_debug_halted(true);
     return true;
   });
-  const uint64_t kernel = f.write_kernel(0x1000, &kUndecodable, sizeof(kUndecodable));
+  const uint64_t kernel =
+      f.write_kernel(0x1000, &test::kUndecodableInstruction, sizeof(test::kUndecodableInstruction));
   test::AqlQueue queue(f.mem(), f.cp());
   init_completion_signal(f.mem(), kCompletionSignal);
   queue.submit(make_dispatch_packet(kernel, kCompletionSignal));
@@ -9760,7 +9763,6 @@ TEST(AqlDispatchTest, DebuggerCanHandleDecodeRejectionWithoutCancellingDispatch)
 }
 
 TEST(AqlDispatchTest, RuntimeDecodeClaimStillFailsDispatchAndPreservesBarrier) {
-  constexpr uint32_t kUndecodable = 0xBFFF0000u;
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", 2));
   auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
@@ -9782,7 +9784,8 @@ TEST(AqlDispatchTest, RuntimeDecodeClaimStillFailsDispatchAndPreservesBarrier) {
       return true;
     });
   }
-  const uint64_t kernel = f.write_kernel(0x1000, &kUndecodable, sizeof(kUndecodable));
+  const uint64_t kernel =
+      f.write_kernel(0x1000, &test::kUndecodableInstruction, sizeof(test::kUndecodableInstruction));
   test::AqlQueue queue(f.mem(), f.cp());
   init_completion_signal(f.mem(), 0x3000);
   init_completion_signal(f.mem(), 0x4000);
@@ -9829,9 +9832,8 @@ TEST(AqlDispatchTest, FatalFailureUsesNonRetainingExceptionDelivery) {
         EXPECT_TRUE(failed_wave->is_halted());
         return true;
       });
-  constexpr uint32_t kUnsupportedInstruction = 0x95800000u; // s_rfe_restore_b64 s[0:1], s0
-  const uint64_t kernel =
-      fixture.write_kernel(0x1000, &kUnsupportedInstruction, sizeof(kUnsupportedInstruction));
+  const uint64_t kernel = fixture.write_kernel(0x1000, &test::kUnimplementedInstruction,
+                                               sizeof(test::kUnimplementedInstruction));
   init_completion_signal(fixture.mem(), 0x3000);
   test::AqlQueue queue(fixture.mem(), fixture.cp());
   queue.submit(make_dispatch_packet(kernel, 0x3000, 32, 32));
@@ -9953,8 +9955,7 @@ TEST_P(AqlQueueFailureConcurrencyTest, DefersCacheFlushUntilWorkersJoin) {
 
   std::array<uint32_t, 34> failing_code;
   failing_code.fill(SOPP_S_NOP);
-  constexpr uint32_t kSRfeRestoreB64 = 0x95800000u; // s_rfe_restore_b64 s[0:1], s0
-  failing_code[32] = vm_fault ? SOPP_S_NOP : kSRfeRestoreB64;
+  failing_code[32] = vm_fault ? SOPP_S_NOP : test::kUnimplementedInstruction;
   failing_code.back() = SOPP_S_ENDPGM;
   const uint64_t failing_kernel =
       fixture.write_kernel(0x1000, failing_code.data(), sizeof(failing_code));
@@ -10051,9 +10052,8 @@ TEST(CommandProcessorTest, CacheMaintenanceLeavesPendingFailureWithItsProducer) 
     SCOPED_TRACE(operation);
     VmFixture fixture;
     ASSERT_NO_FATAL_FAILURE(fixture.initialize());
-    constexpr uint32_t kUndecodableInstruction = 0xBFFF0000u;
-    const uint64_t kernel =
-        fixture.write_kernel(0x1000, &kUndecodableInstruction, sizeof(kUndecodableInstruction));
+    const uint64_t kernel = fixture.write_kernel(0x1000, &test::kUndecodableInstruction,
+                                                 sizeof(test::kUndecodableInstruction));
     constexpr uint64_t kSignal = 0x3000;
     init_completion_signal(fixture.mem(), kSignal);
     test::AqlQueue queue(fixture.mem(), fixture.cp());
