@@ -407,17 +407,34 @@ def _register_handlers() -> None:
         opsel_exprs=c.opsel_exprs,
         use_cdna5_helpers=c.arch_name == 'cdna5',
     )
-    DISPATCH['dot2'] = lambda c: gen_dot2(
-        c.dst_ops,
-        c.src_ops,
-        c.cls,
-        opsel_exprs=c.opsel_exprs,
-        arch_name=c.arch_name,
-    )
-    DISPATCH['dot2_f16_f16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)
-    DISPATCH['dot2_bf16_bf16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)
-    DISPATCH['dot4'] = lambda c: gen_dot4(c.dst_ops, c.src_ops, c.cls)
-    DISPATCH['dot8'] = lambda c: gen_dot8(c.dst_ops, c.src_ops, c.cls)
+    # DOT: every semantic class routes here, so the generator keeps no
+    # dot2_/dot4_/dot8_ fallback. test_dot_dispatch_covers_every_semantic_class
+    # fails if a new class arrives without an entry.
+    for _cls in ('dot2_f32_f16', 'dot2_f32_bf16', 'dot2_i32_i16', 'dot2_u32_u16'):
+        DISPATCH[_cls] = lambda c: gen_dot2(
+            c.dst_ops,
+            c.src_ops,
+            c.cls,
+            opsel_exprs=c.opsel_exprs,
+            dot_accumulation=c.profile.float_dot_accumulation,
+        )
+    for _cls in ('dot2_f16_f16', 'dot2_bf16_bf16'):
+        DISPATCH[_cls] = lambda c: gen_dot2_true16(
+            c.dst_ops, c.src_ops, c.cls, c.profile.float_dot_accumulation
+        )
+    for _cls in ('dot4_i32_i8', 'dot4_i32_iu8', 'dot4_u32_u8', 'dot4_f32_fp8'):
+        DISPATCH[_cls] = lambda c: gen_dot4(
+            c.dst_ops,
+            c.src_ops,
+            c.cls,
+            operation=c.sem.operation,
+            dot_accumulation=c.profile.float_dot_accumulation,
+            opsel_exprs=c.opsel_exprs,
+        )
+    for _cls in ('dot8_i32_i4', 'dot8_i32_iu4', 'dot8_u32_u4'):
+        DISPATCH[_cls] = lambda c: gen_dot8(
+            c.dst_ops, c.src_ops, c.cls, opsel_exprs=c.opsel_exprs
+        )
 
     # Matrix
     DISPATCH['accvgpr_read'] = lambda c: gen_accvgpr_read(c.dst_ops, c.src_ops)

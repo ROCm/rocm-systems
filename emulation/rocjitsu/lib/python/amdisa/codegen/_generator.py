@@ -79,11 +79,6 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_cvt_pk,
     gen_vector_cvt_scale,
 )
-from amdisa.codegen.execute.packed import (
-    gen_dot2,
-    gen_dot4,
-    gen_dot8,
-)
 
 
 class _Literal32Widening(Enum):
@@ -2185,7 +2180,9 @@ class CodeGenerator:
                     ('VopdSubF32',),
                     '''
                     {
-                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                      // The ISA defines VOPD by the VOP2 instructions (16.11): add the
+                      // negated subtrahend, keeping the sources in operand order.
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(std::bit_cast<float>(src0), std::bit_cast<float>(src1 ^ 0x80000000u), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2194,7 +2191,7 @@ class CodeGenerator:
                     ('VopdSubrevF32',),
                     '''
                     {
-                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(std::bit_cast<float>(src1), std::bit_cast<float>(src0), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(std::bit_cast<float>(src0 ^ 0x80000000u), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -6665,6 +6662,12 @@ class CodeGenerator:
                     ):
                         ef |= {'clamp', 'omod'} & inst_fields
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
+                elif is_vop3 and cls == 'vector_cndmask':
+                    from amdisa.sema_enrich import enrich_block
+
+                    # The select has source modifiers but no output modifiers.
+                    ef = {'neg', 'abs'} if has_abs else {'neg'}
+                    sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
                 # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand
                 # bit widths (op_widths) subsume the old src_width/dst_width name
                 # heuristics: mixed-width instructions (e.g. the f64<->32-bit
@@ -6780,6 +6783,9 @@ class CodeGenerator:
                             f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, (({selector_read} >> lane) & 1) ? src1_value : src0_value);\n'
                             '  }\n'
                         )
+                    # ABS/NEG modify the selected half's sign bit, as for F16.
+                    # Measured on gfx1201 and gfx1100; RDNA3.5 and CDNA5 inherit it.
+                    lctx.source_modifier_format = 'F16'
                 true16_special_vop3_ops = {
                     'V_ASHRREV_I16': (
                         2,
@@ -7751,25 +7757,7 @@ class CodeGenerator:
                 arch_name=self.isa_spec.arch_name,
             )
 
-        # ----- VOP3P: packed / dot / mix / MFMA -----
-        if cls.startswith('dot2_'):
-            return gen_dot2(
-                dst_ops,
-                src_ops,
-                cls,
-                opsel_exprs=self._vop3p_opsel_exprs(),
-                dot_accumulation=self.isa_spec.profile.float_dot_accumulation,
-            )
-
-        if cls.startswith('dot4_'):
-            if cls == 'dot4_f32_fp8':
-                formats = sem.name.rsplit('_', 2)[1:]
-                return gen_dot4(dst_ops, src_ops, cls, input_formats=tuple(formats))
-            return gen_dot4(dst_ops, src_ops, cls)
-
-        if cls.startswith('dot8_'):
-            return gen_dot8(dst_ops, src_ops, cls)
-
+        # ----- VOP3P: packed / mix / MFMA (DOT routes through DISPATCH) -----
         if cls == 'smem_load':
             return self._gen_smem_load(dst_ops, src_ops, sem)
 
@@ -7839,12 +7827,7 @@ class CodeGenerator:
             'ds_read_tr_b4',
             'ds_read_tr_b6',
         ):
-            gds_guard = ''
-            if self._enc_has_field('gds'):
-                gds_guard = (
-                    '  if (inst_.gds)\n'
-                    '    throw util::UnimplementedInst(mnemonic());\n'
-                )
+            gds_guard = self._gen_ds_gds_guard()
             if cls == 'ds_read':
                 return gds_guard + self._gen_ds_read(dst_ops, src_ops, sem)
             if cls == 'ds_read2':
@@ -7915,8 +7898,6 @@ class CodeGenerator:
                 else '(8u << ((inst_.offset1 >> 4) & 3u))'
             )
             flags = '(1u | ((inst_.offset1 & 3u) << 1))' if modern else '0u'
-            if not modern:
-                L.append('  if (inst_.gds) throw util::UnimplementedInst(mnemonic());')
             L.append(
                 '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
             )
@@ -7926,26 +7907,16 @@ class CodeGenerator:
                 f'inst_.vdst, {push}, {sem.num_elems}, {size}, {flags});'
             )
             L.append('  set_data(std::move(d));')
-            return '\n'.join(L)
+            return self._gen_ds_gds_guard() + '\n'.join(L)
 
         if cls in ('ds_atomic', 'ds_atomic2'):
-            gds_guard = ''
-            if self._enc_has_field('gds'):
-                gds_guard = (
-                    '  if (inst_.gds)\n'
-                    '    throw util::UnimplementedInst(mnemonic());\n'
-                )
+            gds_guard = self._gen_ds_gds_guard()
             if cls == 'ds_atomic2':
                 return gds_guard + self._gen_ds_atomic2(dst_ops, src_ops, sem)
             return gds_guard + self._gen_ds_atomic(dst_ops, src_ops, sem)
 
         if cls in ('ds_mskor', 'ds_append_consume', 'ds_barrier_arrive'):
-            gds_guard = ''
-            if self._enc_has_field('gds'):
-                gds_guard = (
-                    '  if (inst_.gds)\n'
-                    '    throw util::UnimplementedInst(mnemonic());\n'
-                )
+            gds_guard = self._gen_ds_gds_guard()
             if cls == 'ds_mskor':
                 return gds_guard + self._gen_ds_mskor(dst_ops, src_ops, sem)
             if cls == 'ds_append_consume':
@@ -7960,16 +7931,9 @@ class CodeGenerator:
             # classified as LDS and omits the GDS EXPCNT obligation, so the stateful
             # behavior and the memory-wait accounting would disagree. ISAs whose DS
             # encoding carries no gds field always target GDS, so no guard is emitted.
-            gds_guard = ''
-            if self._enc_has_field('gds'):
-                gds_guard = (
-                    '  if (!inst_.gds) {\n'
-                    '    wf.report_instruction_execution_error(\n'
-                    '        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);\n'
-                    '    return;\n'
-                    '  }\n'
-                )
-            return gds_guard + self._gen_ds_gws(dst_ops, src_ops, sem)
+            return self._gen_ds_gds_guard(require_gds=True) + self._gen_ds_gws(
+                dst_ops, src_ops, sem
+            )
 
         if cls in ('ds_permute', 'ds_swizzle'):
             is_swizzle = cls == 'ds_swizzle'
@@ -9113,6 +9077,26 @@ class CodeGenerator:
         # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
+
+    def _gen_ds_gds_guard(self, *, require_gds: bool = False) -> str:
+        """Generate a DS/GDS rejection prefix before execution side effects.
+
+        By default, reject unsupported GDS mode (gds=1). With require_gds=True,
+        generate the GWS guard that rejects gds=0 instead.
+        """
+        if not self._enc_has_field('gds'):
+            return ''
+        condition = '!inst_.gds' if require_gds else 'inst_.gds'
+        error = (
+            'InvalidInstructionEncoding' if require_gds else 'UnimplementedInstruction'
+        )
+        return (
+            f'  if ({condition}) {{\n'
+            '    wf.report_instruction_execution_error(\n'
+            f'        amdgpu::InstructionExecutionError::{error});\n'
+            '    return;\n'
+            '  }\n'
+        )
 
     def _gen_ds_atomic(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
@@ -14768,8 +14752,15 @@ class CodeGenerator:
                 'optional': 'std::optional',
                 'rocjitsu/base/rj_compiler.h': 'RJ_NOINLINE',
                 'rocjitsu/isa/arch/amdgpu/shared/fp_mode.h': 'fp_mode::',
-                'rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h': 'gfx11_dot2_f32',
-                'rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h': 'gfx12_dot2_f32',
+                'rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h': (
+                    'gfx11_dot2_f32',
+                    'gfx11_dot2_packed16',
+                ),
+                'rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h': (
+                    'gfx12_dot2_f32',
+                    'gfx12_dot2_packed16',
+                    'gfx12_dot4_f32_fp8',
+                ),
                 'rocjitsu/isa/arch/amdgpu/shared/cube.h': 'cube::',
                 'rocjitsu/isa/arch/amdgpu/shared/division.h': (
                     'div_scale(',

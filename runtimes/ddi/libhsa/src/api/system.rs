@@ -12,11 +12,32 @@ use crate::api_trace;
 use crate::ffi::{self, *};
 use crate::runtime::{boundary, lock, map_error};
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64", not(test))))]
-use crate::{image_abi, loader, pc_sampling};
+use crate::{image_abi, loader};
 use crate::{image_gfx12, runtime};
 
 /// Minor version of the HSA runtime ABI reported to clients.
 pub(crate) const HSA_RUNTIME_VERSION_MINOR: u16 = 21;
+
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_enable_high_precision_timestamps")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Enables high precision timestamp sampling for profiling.
+pub extern "C" fn hsa_amd_enable_high_precision_timestamps() -> Status {
+    boundary(|| {
+        let guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        if guard.as_ref().is_none() {
+            return NOT_INITIALIZED;
+        }
+        runtime::enable_high_precision_timestamps();
+        SUCCESS
+    })
+}
+
 /// # Safety
 /// Any non-null `value` must address aligned, writable storage for the type
 /// selected by `attribute`.
@@ -73,7 +94,7 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
                         runtime
                             .gpus
                             .iter()
-                            .any(|gpu| image_gfx12::supported_gpu(&gpu.info)),
+                            .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
                         runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported),
                     ),
                 ),
@@ -94,7 +115,7 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
                         && runtime
                             .gpus
                             .iter()
-                            .all(|gpu| gpu.info.fabric_handles_supported),
+                            .all(|gpu| gpu.info().fabric_handles_supported),
                 ),
                 AMD_SYSTEM_INFO_HOST_ALLOC_DMABUF_SUPPORTED => {
                     write_value(value, host_alloc_dmabuf_supported(runtime.gpus.len()))
@@ -248,7 +269,7 @@ pub unsafe extern "C" fn hsa_system_extension_supported(
                 EXTENSION_IMAGES => runtime
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info)),
+                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
                 EXTENSION_AMD_PC_SAMPLING => {
                     runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported)
                 }
@@ -290,7 +311,7 @@ pub unsafe extern "C" fn hsa_system_major_extension_supported(
                 EXTENSION_IMAGES => runtime
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info)),
+                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
                 EXTENSION_AMD_PC_SAMPLING => {
                     runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported)
                 }
@@ -370,7 +391,7 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
                 if !runtime
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info))
+                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info()))
                 {
                     return NOT_SUPPORTED;
                 }
@@ -415,7 +436,7 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
                 #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
                 let functions = api_trace::pc_sampling_extension_table();
                 #[cfg(not(all(target_os = "linux", target_arch = "x86_64", not(test))))]
-                let functions = pc_sampling::extension_table();
+                let functions = super::pc_sampling::extension_table();
                 #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
                 if functions.contains(&0) {
                     return ERROR;
