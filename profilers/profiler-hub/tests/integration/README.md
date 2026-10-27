@@ -63,11 +63,12 @@ Note: if pytest picks up the wrong Python, invoke it explicitly, e.g.
 ### Running via CTest
 
 The build also registers this suite with CTest. When the project is configured
-with tests enabled (`PROFILER_HUB_BUILD_TESTS`), the
-`generate-profiler-hub-pytest-ctests` target runs `generate_ctest.py`, which
-collects the pytest modules and emits one CTest entry per `test_*.py` file
-(named `integration.<module>`). After building, run them from the build
-directory:
+with tests enabled (`PROFILER_HUB_BUILD_TESTS`) and pytest is importable, the
+`generate-profiler-hub-pytest-ctests` target runs pytest with
+`--ctest-mode=generate` and writes one CTest entry per `test_*.py` file
+(named `integration.<module>`) into the integration build directory. A
+configure without pytest skips those CTest entries and still builds the example
+binaries. After building, run them from the build directory:
 
 ```bash
 ctest --test-dir build --output-on-failure
@@ -84,7 +85,7 @@ environment setup is required.
 | ---------- | ------------- | --------- |
 | `PHUB_EXAMPLE_BIN_DIR` | Directory containing the `profiler-hub_<name>` example binaries | `<repo>/build/bin/examples` |
 
-If `PHUB_EXAMPLE_BIN_DIR` is unset, the harness looks under `<repo>/build/bin/examples` and then falls back to a repo-wide search.
+If `PHUB_EXAMPLE_BIN_DIR` is unset, the harness looks under `<repo>/build/bin/examples`.
 
 ### Per-test timeout
 
@@ -108,16 +109,20 @@ tests requests.
 
 ## How It Works
 
-1. `conftest.py` exposes a `run_launcher_db(name, db_path)` fixture that locates
+1. `conftest.py` exposes `run_launcher_db(name, db_path)` and
+   `read_example_db(example, reader, filename)`. The launcher fixture locates
    `profiler-hub_<name>`, runs it with the requested SQLite path, checks the exit
-   code, and verifies the launcher printed the same `db_path`.
+   code, and verifies the launcher printed the same `db_path`. The database stays
+   in the pytest temporary directory.
 2. `profiler_hub_db.py` opens the generated database and reads the relevant
-   schema_v3 tables into a flat `dict`.
-3. Each `test_*.py` defines an `EXPECTED` dict of persisted values and asserts
-   the database readback against it.
-4. `generate_ctest.py` (run by the CMake `generate-profiler-hub-pytest-ctests`
-   target) collects the suite in `--ctest-mode=generate` and writes a
-   `CTestTestfile.cmake` so each module is also runnable through `ctest`.
+   schema_v3 tables into a flat `dict`. Node, process, thread, and schema
+   metadata that every example shares live in `COMMON_METADATA_EXPECTED`.
+3. Each `test_*.py` defines an `EXPECTED` dict of the record-specific values,
+   merges the shared metadata, and asserts the database readback against it.
+4. Building `generate-profiler-hub-pytest-ctests` runs pytest with
+   `--ctest-mode=generate`, the same step rocprofiler-systems uses. Pytest
+   writes `tests/integration/CTestTestfile.cmake` in the build tree. A stamp
+   file is the build output, so that write does not replace the unit-test list.
 
 ## Test Files
 

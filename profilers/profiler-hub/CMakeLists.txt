@@ -521,10 +521,15 @@ else()
 endif()
 
 # ------------------------------------------------------------ #
-# Tests and Benchmarks
+# Tests, benchmarks, and integration examples
 # ------------------------------------------------------------ #
 
+# tests/ turns on unit tests, benchmarks, or both from the options above.
 if(PROFILER_HUB_BUILD_TESTS OR PROFILER_HUB_BUILD_BENCHMARKS)
     add_subdirectory(tests)
+endif()
+
+# The examples are the launchers for the pytest integration suite.
+if(PROFILER_HUB_BUILD_TESTS)
     add_subdirectory(examples)
 endif()

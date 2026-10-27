@@ -5,9 +5,48 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
+
+# Values shared by every example's node, process, thread, and schema metadata.
+# Record-specific fields stay in each test_*.py.
+COMMON_METADATA_EXPECTED: dict[str, Any] = {
+    "node_info.node_id": 1,
+    "node_info.hash": 123456789,
+    "node_info.machine_id": "integration-machine",
+    "node_info.system_name": "Linux",
+    "node_info.hostname": "integration-host",
+    "node_info.release": "6.0.0",
+    "node_info.version": "#1 SMP",
+    "node_info.hardware_name": "x86_64",
+    "node_info.domain_name": "integration",
+    "process_info.pid": 1000,
+    "process_info.ppid": 1,
+    "process_info.node_info.node_id": 1,
+    "thread_info.parent_process_id": 1000,
+    "thread_info.node_info.node_id": 1,
+    "thread_info.process_info.pid": 1000,
+    "metadata.schema_version": "3.0.1",
+    "metadata.schema_version_major": "3",
+    "metadata.schema_version_minor": "0",
+    "metadata.schema_version_patch": "1",
+    "metadata.uuid": "_integration",
+    "metadata.guid": "integration",
+}
+
+# Examples that do not fill a call stack or source context persist "{}".
+EMPTY_EVENT_CONTEXT: dict[str, Any] = {
+    "event.call_stack": {},
+    "event.line_info": {},
+}
+
+
+def _as_json(value: Any) -> Any:
+    if isinstance(value, bytes):
+        value = value.decode()
+    return json.loads(value)
 
 
 class ProfilerHubDb:
@@ -82,12 +121,15 @@ class ProfilerHubDb:
                 A.vendor_name as agent_vendor_name,
                 A.product_name as agent_product_name,
                 A.user_name as agent_user_name,
+                A.nid as agent_node_id,
                 AP.pid as agent_process_id,
                 Q.id as queue_id,
                 Q.name as queue_name,
+                Q.nid as queue_node_id,
                 QP.pid as queue_process_id,
                 S.id as stream_id,
                 S.name as stream_name,
+                S.nid as stream_node_id,
                 SP.pid as stream_process_id
             from {self.table('rocpd_memory_allocate')} MA
             join {self.table('rocpd_info_process')} P on MA.pid = P.id
@@ -119,15 +161,15 @@ class ProfilerHubDb:
             "agent_info.vendor_name": row["agent_vendor_name"],
             "agent_info.product_name": row["agent_product_name"],
             "agent_info.user_name": row["agent_user_name"],
-            "agent_info.node_info.node_id": row["nid"],
+            "agent_info.node_info.node_id": row["agent_node_id"],
             "agent_info.process_info.pid": row["agent_process_id"],
             "queue_info.db_id": row["queue_id"],
             "queue_info.name": row["queue_name"],
-            "queue_info.node_info.node_id": row["nid"],
+            "queue_info.node_info.node_id": row["queue_node_id"],
             "queue_info.process_info.pid": row["queue_process_id"],
             "stream_info.db_id": row["stream_id"],
             "stream_info.name": row["stream_name"],
-            "stream_info.node_info.node_id": row["nid"],
+            "stream_info.node_info.node_id": row["stream_node_id"],
             "stream_info.process_info.pid": row["stream_process_id"],
         }
         read_info.update(self._read_event_info(row["event_id"]))
@@ -153,6 +195,8 @@ class ProfilerHubDb:
                 SRC.vendor_name as src_agent_vendor_name,
                 SRC.product_name as src_agent_product_name,
                 SRC.user_name as src_agent_user_name,
+                SRC.nid as src_agent_node_id,
+                SRCP.pid as src_agent_process_id,
                 DST.type as dst_agent_type,
                 DST.absolute_index as dst_agent_absolute_index,
                 DST.logical_index as dst_agent_logical_index,
@@ -163,11 +207,15 @@ class ProfilerHubDb:
                 DST.vendor_name as dst_agent_vendor_name,
                 DST.product_name as dst_agent_product_name,
                 DST.user_name as dst_agent_user_name,
+                DST.nid as dst_agent_node_id,
+                DSTP.pid as dst_agent_process_id,
                 Q.id as queue_id,
                 Q.name as queue_name,
+                Q.nid as queue_node_id,
                 QP.pid as queue_process_id,
                 S.id as stream_id,
                 S.name as stream_name,
+                S.nid as stream_node_id,
                 SP.pid as stream_process_id
             from {self.table('rocpd_memory_copy')} MC
             join {self.table('rocpd_info_process')} P on MC.pid = P.id
@@ -175,7 +223,9 @@ class ProfilerHubDb:
             join {self.table('rocpd_string')} N on MC.name_id = N.id
             join {self.table('rocpd_string')} RN on MC.region_name_id = RN.id
             join {self.table('rocpd_info_agent')} SRC on MC.src_agent_id = SRC.id
+            join {self.table('rocpd_info_process')} SRCP on SRC.pid = SRCP.id
             join {self.table('rocpd_info_agent')} DST on MC.dst_agent_id = DST.id
+            join {self.table('rocpd_info_process')} DSTP on DST.pid = DSTP.id
             join {self.table('rocpd_info_queue')} Q on MC.queue_id = Q.id
             join {self.table('rocpd_info_process')} QP on Q.pid = QP.id
             join {self.table('rocpd_info_stream')} S on MC.stream_id = S.id
@@ -202,8 +252,8 @@ class ProfilerHubDb:
             "src_agent_info.vendor_name": row["src_agent_vendor_name"],
             "src_agent_info.product_name": row["src_agent_product_name"],
             "src_agent_info.user_name": row["src_agent_user_name"],
-            "src_agent_info.node_info.node_id": row["nid"],
-            "src_agent_info.process_info.pid": row["process_id"],
+            "src_agent_info.node_info.node_id": row["src_agent_node_id"],
+            "src_agent_info.process_info.pid": row["src_agent_process_id"],
             "dst_agent_info.agent_type": row["dst_agent_type"],
             "dst_agent_info.absolute_index": row["dst_agent_absolute_index"],
             "dst_agent_info.logical_index": row["dst_agent_logical_index"],
@@ -214,15 +264,15 @@ class ProfilerHubDb:
             "dst_agent_info.vendor_name": row["dst_agent_vendor_name"],
             "dst_agent_info.product_name": row["dst_agent_product_name"],
             "dst_agent_info.user_name": row["dst_agent_user_name"],
-            "dst_agent_info.node_info.node_id": row["nid"],
-            "dst_agent_info.process_info.pid": row["process_id"],
+            "dst_agent_info.node_info.node_id": row["dst_agent_node_id"],
+            "dst_agent_info.process_info.pid": row["dst_agent_process_id"],
             "queue_info.db_id": row["queue_id"],
             "queue_info.name": row["queue_name"],
-            "queue_info.node_info.node_id": row["nid"],
+            "queue_info.node_info.node_id": row["queue_node_id"],
             "queue_info.process_info.pid": row["queue_process_id"],
             "stream_info.db_id": row["stream_id"],
             "stream_info.name": row["stream_name"],
-            "stream_info.node_info.node_id": row["nid"],
+            "stream_info.node_info.node_id": row["stream_node_id"],
             "stream_info.process_info.pid": row["stream_process_id"],
         }
         read_info.update(self._read_event_info(row["event_id"]))
@@ -274,14 +324,21 @@ class ProfilerHubDb:
                 A.vendor_name as agent_vendor_name,
                 A.product_name as agent_product_name,
                 A.user_name as agent_user_name,
+                A.nid as agent_node_id,
                 AP.pid as agent_process_id,
                 Q.id as queue_id,
                 Q.name as queue_name,
+                Q.nid as queue_node_id,
                 QP.pid as queue_process_id,
                 S.id as stream_id,
                 S.name as stream_name,
+                S.nid as stream_node_id,
                 SP.pid as stream_process_id,
                 CO.id as code_object_original_id,
+                CO.nid as code_object_node_id,
+                COP.pid as code_object_process_id,
+                COA.type as code_object_agent_type,
+                COA.type_index as code_object_agent_type_index,
                 CO.uri as code_object_uri,
                 CO.load_base as code_object_load_base,
                 CO.load_size as code_object_load_size,
@@ -297,7 +354,9 @@ class ProfilerHubDb:
                 KS.private_segment_size as kernel_symbol_private_segment_size,
                 KS.sgpr_count as kernel_symbol_sgpr_count,
                 KS.arch_vgpr_count as kernel_symbol_arch_vgpr_count,
-                KS.accum_vgpr_count as kernel_symbol_accum_vgpr_count
+                KS.accum_vgpr_count as kernel_symbol_accum_vgpr_count,
+                KS.nid as kernel_symbol_node_id,
+                KSP.pid as kernel_symbol_process_id
             from {self.table('rocpd_kernel_dispatch')} KD
             join {self.table('rocpd_info_process')} P on KD.pid = P.id
             join {self.table('rocpd_info_thread')} T on KD.tid = T.id
@@ -309,7 +368,10 @@ class ProfilerHubDb:
             join {self.table('rocpd_info_stream')} S on KD.stream_id = S.id
             join {self.table('rocpd_info_process')} SP on S.pid = SP.id
             join {self.table('rocpd_info_kernel_symbol')} KS on KD.kernel_id = KS.id
+            join {self.table('rocpd_info_process')} KSP on KS.pid = KSP.id
             join {self.table('rocpd_info_code_object')} CO on KS.code_object_id = CO.id
+            join {self.table('rocpd_info_process')} COP on CO.pid = COP.id
+            join {self.table('rocpd_info_agent')} COA on CO.agent_id = COA.id
             """)
         read_info = {
             "dispatch_id": row["dispatch_id"],
@@ -337,15 +399,15 @@ class ProfilerHubDb:
             "agent_info.vendor_name": row["agent_vendor_name"],
             "agent_info.product_name": row["agent_product_name"],
             "agent_info.user_name": row["agent_user_name"],
-            "agent_info.node_info.node_id": row["nid"],
+            "agent_info.node_info.node_id": row["agent_node_id"],
             "agent_info.process_info.pid": row["agent_process_id"],
             "queue_info.db_id": row["queue_id"],
             "queue_info.name": row["queue_name"],
-            "queue_info.node_info.node_id": row["nid"],
+            "queue_info.node_info.node_id": row["queue_node_id"],
             "queue_info.process_info.pid": row["queue_process_id"],
             "stream_info.db_id": row["stream_id"],
             "stream_info.name": row["stream_name"],
-            "stream_info.node_info.node_id": row["nid"],
+            "stream_info.node_info.node_id": row["stream_node_id"],
             "stream_info.process_info.pid": row["stream_process_id"],
             "code_object_info.id": row["code_object_original_id"],
             "code_object_info.uri": row["code_object_uri"],
@@ -353,10 +415,12 @@ class ProfilerHubDb:
             "code_object_info.load_size": row["code_object_load_size"],
             "code_object_info.load_delta": row["code_object_load_delta"],
             "code_object_info.storage_type": row["code_object_storage_type"],
-            "code_object_info.node_info.node_id": row["nid"],
-            "code_object_info.process_info.pid": row["process_id"],
-            "code_object_info.agent_info.agent_type": row["agent_type"],
-            "code_object_info.agent_info.type_index": row["agent_type_index"],
+            "code_object_info.node_info.node_id": row["code_object_node_id"],
+            "code_object_info.process_info.pid": row["code_object_process_id"],
+            "code_object_info.agent_info.agent_type": row["code_object_agent_type"],
+            "code_object_info.agent_info.type_index": row[
+                "code_object_agent_type_index"
+            ],
             "kernel_symbol_info.id": row["kernel_symbol_original_id"],
             "kernel_symbol_info.name": row["kernel_symbol_name"],
             "kernel_symbol_info.display_name": row["kernel_symbol_display_name"],
@@ -378,8 +442,8 @@ class ProfilerHubDb:
             "kernel_symbol_info.accum_vgpr_count": row[
                 "kernel_symbol_accum_vgpr_count"
             ],
-            "kernel_symbol_info.node_info.node_id": row["nid"],
-            "kernel_symbol_info.process_info.pid": row["process_id"],
+            "kernel_symbol_info.node_info.node_id": row["kernel_symbol_node_id"],
+            "kernel_symbol_info.process_info.pid": row["kernel_symbol_process_id"],
             "kernel_symbol_info.code_object_info.id": row["code_object_original_id"],
         }
         read_info.update(self._read_event_info(row["event_id"]))
@@ -417,6 +481,7 @@ class ProfilerHubDb:
                 A.vendor_name as agent_vendor_name,
                 A.product_name as agent_product_name,
                 A.user_name as agent_user_name,
+                A.nid as agent_node_id,
                 AP.pid as agent_process_id
             from {self.table('rocpd_pmc_event')} PE
             join {self.table('rocpd_info_pmc')} PMC on PE.pmc_id = PMC.id
@@ -456,7 +521,7 @@ class ProfilerHubDb:
             "agent_info.vendor_name": row["agent_vendor_name"],
             "agent_info.product_name": row["agent_product_name"],
             "agent_info.user_name": row["agent_user_name"],
-            "agent_info.node_info.node_id": row["pmc_node_id"],
+            "agent_info.node_info.node_id": row["agent_node_id"],
             "agent_info.process_info.pid": row["agent_process_id"],
         }
         read_info.update(self._read_event_info(row["event_id"]))
@@ -480,6 +545,8 @@ class ProfilerHubDb:
             "event.correlation_id": row["correlation_id"],
             "event.event_category": row["category"],
             "event.extdata": row["extdata"],
+            "event.call_stack": _as_json(row["call_stack"]),
+            "event.line_info": _as_json(row["line_info"]),
         }
 
     def _read_common_metadata_info(self) -> dict[str, Any]:
@@ -523,7 +590,16 @@ class ProfilerHubDb:
             "thread_info.end": thread["end"],
             "thread_info.node_info.node_id": thread["nid"],
             "thread_info.process_info.pid": thread["process_id"],
+            **self._read_schema_metadata(),
         }
+
+    def _read_schema_metadata(self) -> dict[str, Any]:
+        rows = self.rows(
+            f"select tag, value from {self.table('rocpd_metadata')} "
+            "where tag in ('schema_version', 'schema_version_major', "
+            "'schema_version_minor', 'schema_version_patch', 'uuid', 'guid')"
+        )
+        return {f"metadata.{row['tag']}": row["value"] for row in rows}
 
     def _read_region_arg_info(self, event_id: int) -> dict[str, Any]:
         args = self.rows(

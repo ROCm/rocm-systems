@@ -9,6 +9,7 @@
 // Python.
 //
 
+#include <profiler-hub/shared_types.hpp>
 #include <profiler-hub/storage.hpp>
 #include <profiler-hub/writer.hpp>
 #include <profiler-hub/writer_types.hpp>
@@ -21,6 +22,7 @@
 
 namespace
 {
+namespace st = profiler_hub::shared_types;
 namespace wt = profiler_hub::writer_types;
 
 const std::string g_uuid = "integration";
@@ -86,6 +88,41 @@ make_event()
     event.correlation_id  = 3;
     event.event_category  = "region";
     event.extdata         = "{test data event}";
+
+    st::program_counter_info_t frame_pc{};
+    frame_pc.function    = "integration_region";
+    frame_pc.filename    = "region_writer.cpp";
+    frame_pc.line_number = 42;
+    frame_pc.extdata     = "";
+
+    st::address_range_info_t frame_range{};
+    frame_range.address_base = 4096;
+    frame_range.address_low  = 4096;
+    frame_range.address_high = 8192;
+    frame_range.extdata      = "";
+
+    st::stack_frame_t frame{};
+    frame.program_counter = frame_pc;
+    frame.address_range   = frame_range;
+    frame.extdata         = "";
+    event.call_stack.push_back(frame);
+
+    st::program_counter_info_t line_pc{};
+    line_pc.function    = "integration_region";
+    line_pc.filename    = "region_writer.cpp";
+    line_pc.line_number = 40;
+    line_pc.extdata     = "";
+
+    st::source_code_info_t source{};
+    source.filename             = "region_writer.cpp";
+    source.starting_line_number = 40;
+    source.source_code_lines.push_back("insert_region");
+    source.extdata = "";
+
+    st::line_info_entry_t line{};
+    line.program_counter = line_pc;
+    line.source_code     = source;
+    event.line_info_list.push_back(line);
     return event;
 }
 

@@ -18,13 +18,13 @@ It removes any pre-existing file at `<db_path>`, writes its record, flushes, and
 - `memory_copy_writer.cpp` - Writes one memory copy between two agents. Registers `node`, `process`, `thread`, a source and a destination `agent`, `queue`, and `stream`.
 - `kernel_dispatch_writer.cpp` - Writes one kernel dispatch. Registers the full dependency chain: `node`, `process`, `thread`, `agent`, `queue`, `stream`, `code_object`, and `kernel_symbol`.
 - `pmc_event_writer.cpp` - Writes one PMC event. Registers `node`, `process`, `thread`, `agent`, `track`, and `pmc_info`, plus a correlated `event` and a `sample`.
-- `region_writer.cpp` - Writes one region with one argument. Registers `node`, `process`, `thread`, and `track`.
+- `region_writer.cpp` - Writes one region with one argument, one call-stack frame, and one line-info entry. Registers `node`, `process`, `thread`, and `track`.
 - `CMakeLists.txt` - Builds each example listed in `PROFILER_HUB_SCHEMA_V3_EXAMPLES` into an executable named `profiler-hub_<name>`, links the profiler-hub library, and emits the binaries to `<build>/bin/examples`. When tests are enabled it also generates CTest definitions from the pytest suite.
 
 ## Prerequisites
 
-- CMake 3.21+
-- C++17 compiler
+- CMake 3.25+
+- C++20 compiler
 - profiler-hub library (the in-tree `profiler-hub` target, an installed `profiler-hub::profiler-hub` package, or an existing build tree)
 
 ## Building
@@ -64,7 +64,7 @@ The executables are placed under `<build>/bin/examples`.
 | `profiler-hub_memory_copy_writer` | Memory copy | node, process, thread, src+dst agent, queue, stream |
 | `profiler-hub_kernel_dispatch_writer` | Kernel dispatch | node, process, thread, agent, queue, stream, code_object, kernel_symbol |
 | `profiler-hub_pmc_event_writer` | PMC event | node, process, thread, agent, track, pmc_info |
-| `profiler-hub_region_writer` | Region | node, process, thread, track |
+| `profiler-hub_region_writer` | Region, with a call stack and line info | node, process, thread, track |
 
 ## Running
 
@@ -81,7 +81,7 @@ Output is a single `key=value` line echoing the database path:
 db_path=/tmp/memory_alloc.db
 ```
 
-The launcher does not delete the database it writes; the pytest suite owns cleanup of the files it requests.
+The launcher does not delete the database it writes. Pytest leaves that file in its temporary directory.
 
 ## Validating with pytest
 

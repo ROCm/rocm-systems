@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from profiler_hub_db import ProfilerHubDb
+from profiler_hub_db import COMMON_METADATA_EXPECTED, EMPTY_EVENT_CONTEXT
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -62,37 +62,16 @@ EXPECTED = {
     "sample.track.node_info.node_id": 1,
     "sample.track.process_info.pid": 1000,
     "sample.track.thread_id": 100,
-    "node_info.node_id": 1,
-    "node_info.hash": 123456789,
-    "node_info.machine_id": "integration-machine",
-    "node_info.system_name": "Linux",
-    "node_info.hostname": "integration-host",
-    "node_info.release": "6.0.0",
-    "node_info.version": "#1 SMP",
-    "node_info.hardware_name": "x86_64",
-    "node_info.domain_name": "integration",
-    "process_info.pid": 1000,
-    "process_info.ppid": 1,
-    "process_info.node_info.node_id": 1,
-    "thread_info.parent_process_id": 1000,
     "thread_info.start": 1000000,
     "thread_info.end": 2000000,
-    "thread_info.node_info.node_id": 1,
-    "thread_info.process_info.pid": 1000,
+    **EMPTY_EVENT_CONTEXT,
+    **COMMON_METADATA_EXPECTED,
 }
 
 
 @pytest.fixture(scope="module")
-def read_info(run_launcher_db, tmp_path_factory):
-    db_path = tmp_path_factory.mktemp("profiler_hub") / "pmc_event.db"
-    db_path = run_launcher_db("pmc_event_writer", db_path)
-    database = ProfilerHubDb.open(db_path)
-    try:
-        info = database.read_pmc_event_info()
-    finally:
-        database.close()
-    yield info
-    database.delete()
+def read_info(read_example_db):
+    return read_example_db("pmc_event_writer", "read_pmc_event_info", "pmc_event.db")
 
 
 def test_pmc_event_db_matches_writer_fixture(read_info):

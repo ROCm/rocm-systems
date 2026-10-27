@@ -13,6 +13,8 @@ from typing import Dict, List, Optional
 
 import pytest
 
+from profiler_hub_db import ProfilerHubDb
+
 # This file lives at tests/integration/, so the repo root is two levels up.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # Default spot the build drops the example binaries.
@@ -150,11 +152,6 @@ def _find_launcher(name: str) -> Optional[Path]:
     if _runnable(cand):
         return cand
 
-    # 3. Search for it anywhere in the tree.
-    for found in sorted(REPO_ROOT.rglob(binary_name)):
-        if _runnable(found):
-            return found
-
     return None
 
 
@@ -173,6 +170,22 @@ def _parse_kv(stdout: str) -> Dict[str, str]:
         )
         out[key] = value
     return out
+
+
+@pytest.fixture(scope="module")
+def read_example_db(run_launcher_db, tmp_path_factory):
+    """Run one example and return its readback. The database stays in the pytest temp dir."""
+
+    def _read(example_name: str, reader_name: str, db_filename: str):
+        db_path = tmp_path_factory.mktemp("profiler_hub") / db_filename
+        written = run_launcher_db(example_name, db_path)
+        database = ProfilerHubDb.open(written)
+        try:
+            return getattr(database, reader_name)()
+        finally:
+            database.close()
+
+    return _read
 
 
 @pytest.fixture(scope="session")
