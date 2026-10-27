@@ -21,6 +21,7 @@
 #include "device/devhostcall.hpp"
 #include "device/rocm/rocdevice.hpp"
 #include "device/rocm/rocblit.hpp"
+#include "device/rocm/rocblitelf.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rocprogram.hpp"
 #include "device/rocm/rockernel.hpp"
@@ -809,9 +810,15 @@ bool Device::createBlitProgram() {
     extraKernel = SchedulerSourceCode;
   }
 
+  // The kernels built offline for this device, if any; else they are compiled here
+  const void* image = nullptr;
+  size_t imageSize = 0;
+  FindOfflineBlitProgram(*this, &image, &imageSize);
+
   blitProgram_ = new BlitProgram(context_);
   // Create blit programs
-  if (blitProgram_ == nullptr || !blitProgram_->create(this, extraKernel, "")) {
+  if (blitProgram_ == nullptr ||
+      !blitProgram_->create(this, extraKernel, "", image, imageSize)) {
     delete blitProgram_;
     blitProgram_ = nullptr;
     LogError("Couldn't create blit kernels!");

@@ -272,6 +272,18 @@ TEST_CASE("Target compatibility follows comgr's isCompatibleIsaName", "[bundle]"
   CHECK_FALSE(IsCompatibleTarget(kGfx1100, "x86_64-amd-amdhsa--gfx1100"));
 }
 
+TEST_CASE("A processor maps to its generic target with its features", "[bundle]") {
+  CHECK(TargetToGeneric(kGfx1100) == kGfx11Generic);
+  CHECK(TargetToGeneric("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-") ==
+        "amdgcn-amd-amdhsa--gfx9-4-generic:sramecc+:xnack-");
+  CHECK(TargetToGeneric("amdgcn-amd-amdhsa--gfx1250") == "amdgcn-amd-amdhsa--gfx12-5-generic");
+  // gfx908 and gfx90a have no generic target; a generic target has none either
+  CHECK(TargetToGeneric(kGfx90aXnackOn).empty());
+  CHECK(TargetToGeneric(kGfx11Generic).empty());
+  // The generic target runs the device: what the blit kernel and bundle selection rely on
+  CHECK(IsCompatibleTarget(TargetToGeneric(kGfx1100), kGfx11Generic));
+}
+
 TEST_CASE("Bundle size covers the header and every entry", "[bundle]") {
   const auto bundle = MakeBundle({{"hipv4-a", MakeElf(ELF::EF_AMDGPU_MACH_AMDGCN_GFX1100)},
                                   {"hipv4-b", MakeElf(ELF::EF_AMDGPU_MACH_AMDGCN_GFX90A)}});

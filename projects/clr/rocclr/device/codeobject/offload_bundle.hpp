@@ -62,4 +62,11 @@ bool LookupCodeObjects(const void* bundle, size_t headerBound, size_t imageBound
  */
 bool IsCompatibleTarget(const std::string& target, const std::string& codeObjectTarget);
 
+/**
+ * @returns The generic target that runs on @p target, with the same sramecc and xnack settings,
+ *          e.g. "amdgcn-amd-amdhsa--gfx11-generic" for "amdgcn-amd-amdhsa--gfx1100"; empty if
+ *          the processor has none.
+ */
+std::string TargetToGeneric(const std::string& target);
+
 }  // namespace amd::codeobject

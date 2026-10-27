@@ -1807,10 +1807,13 @@ class Device : public RuntimeObject {
     BlitProgram(Context* context) : program_(NULL), context_(context) {}
     ~BlitProgram();
 
-    //! Creates blit program for this device
-    bool create(Device* device,                  //!< Device object
-                const std::string& extraKernel,  //!< Extra kernels from the device layer
-                const std::string& extraOptions  //!< Extra compilation options
+    //! Creates blit program for this device: compiled from source, or loaded from @p image
+    //! when the device layer has the blit kernels built offline
+    bool create(Device* device,                   //!< Device object
+                const std::string& extraKernel,   //!< Extra kernels from the device layer
+                const std::string& extraOptions,  //!< Extra compilation options
+                const void* image = nullptr,      //!< Code object built offline, or null
+                size_t imageSize = 0              //!< Size of @p image
     );
   };
 

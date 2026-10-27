@@ -108,89 +108,6 @@ void ListAllDeviceWithNoCOFromBundle(
   }
 }
 
-static std::string TargetGenericMap(const std::string& input) {
-  const static std::unordered_map<std::string, std::string> target_map{
-      // clang-format off
-      {"amdgcn-amd-amdhsa--gfx900" , "amdgcn-amd-amdhsa--gfx9-generic"   },
-      {"amdgcn-amd-amdhsa--gfx902" , "amdgcn-amd-amdhsa--gfx9-generic"   },
-      {"amdgcn-amd-amdhsa--gfx904" , "amdgcn-amd-amdhsa--gfx9-generic"   },
-      {"amdgcn-amd-amdhsa--gfx906" , "amdgcn-amd-amdhsa--gfx9-generic"   },
-      {"amdgcn-amd-amdhsa--gfx909" , "amdgcn-amd-amdhsa--gfx9-generic"   },
-      {"amdgcn-amd-amdhsa--gfx90c" , "amdgcn-amd-amdhsa--gfx9-generic"   },
-      {"amdgcn-amd-amdhsa--gfx942" , "amdgcn-amd-amdhsa--gfx9-4-generic" },
-      {"amdgcn-amd-amdhsa--gfx950" , "amdgcn-amd-amdhsa--gfx9-4-generic" },
-      {"amdgcn-amd-amdhsa--gfx1010", "amdgcn-amd-amdhsa--gfx10-1-generic"},
-      {"amdgcn-amd-amdhsa--gfx1011", "amdgcn-amd-amdhsa--gfx10-1-generic"},
-      {"amdgcn-amd-amdhsa--gfx1012", "amdgcn-amd-amdhsa--gfx10-1-generic"},
-      {"amdgcn-amd-amdhsa--gfx1013", "amdgcn-amd-amdhsa--gfx10-1-generic"},
-      {"amdgcn-amd-amdhsa--gfx1030", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1031", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1032", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1033", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1034", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1035", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1036", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1100", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1101", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1102", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1103", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1150", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1151", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1152", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1153", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1170", "amdgcn-amd-amdhsa--gfx11-7-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1171", "amdgcn-amd-amdhsa--gfx11-7-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1200", "amdgcn-amd-amdhsa--gfx12-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1201", "amdgcn-amd-amdhsa--gfx12-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1250", "amdgcn-amd-amdhsa--gfx12-5-generic"},
-      // clang-format on
-  };
-  if (auto i = target_map.find(input); i != target_map.end()) {
-    return i->second;
-  }
-  return {};
-}
-
-// For sramecc and xnack
-static std::string TargetFeatureCheck(const std::string& input, const std::string &feature) {
-  if (input.find(feature) != std::string::npos) {
-    auto feature_p = feature + "+";  // feature present eg: xnack+
-    auto feature_m = feature + "-";  // feature absent eg: xnack-
-    if (input.find(feature_p) != std::string::npos) {
-      return feature_p;
-    } else if (input.find(feature_m) != std::string::npos) {
-      return feature_m;
-    }
-  }
-  return "";
-}
-
-static std::string TargetToGeneric(const std::string &input) {
-  auto sramecc = TargetFeatureCheck(input, "sramecc");
-  auto xnack = TargetFeatureCheck(input, "xnack");
-
-  // Remove all features
-  size_t index = input.find_first_of(":");
-  std::string name_without_feature = input.substr(0, index);
-
-  // Look up generic name
-  auto generic_name = TargetGenericMap(name_without_feature);
-  if (generic_name.empty()) {
-    return generic_name;  // No generic exists
-  }
-
-  // reappend feature
-  if (!sramecc.empty()) {
-    generic_name += ":";
-    generic_name += sramecc;
-  }
-  if (!xnack.empty()) {
-    generic_name += ":";
-    generic_name += xnack;
-  }
-  return generic_name;
-}
-
 static bool IsCodeObjectElf(const void* image, size_t image_size) {
   if (image_size < sizeof(amd::Elf64_Ehdr)) {
     return false;
@@ -479,7 +396,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   for (auto device : devices) {
     std::string device_name = device->devices()[0]->isa().isaName();
     unique_isa_names.insert(device_name);
-    auto generic_name = TargetToGeneric(device_name);
+    auto generic_name = amd::codeobject::TargetToGeneric(device_name);
     if (!generic_name.empty()) {
       unique_isa_names.insert(generic_name);
     }
@@ -522,7 +439,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
                            code_obj_map.find(spirv_isa_name_empty) != code_obj_map.end();
     for (auto device : devices) {
       std::string device_name = device->devices()[0]->isa().isaName();
-      auto generic_target_name = TargetToGeneric(device_name);   // Generic Code Object
+      auto generic_target_name = amd::codeobject::TargetToGeneric(device_name);   // Generic Code Object
       auto native_co = code_obj_map.find(device_name);           // Native Code Object
       auto generic_co = code_obj_map.find(generic_target_name);  // generic Code Object
 
@@ -753,7 +670,7 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
     arch_list.push_back(device_name);
 
     // Add generic fallback arch-name
-    auto generic_name = TargetToGeneric(device_name);
+    auto generic_name = amd::codeobject::TargetToGeneric(device_name);
     if (!generic_name.empty()) {
       arch_list.push_back(generic_name);
     }

@@ -782,9 +782,27 @@ Device::BlitProgram::~BlitProgram() {
 }
 
 bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKernels,
-                                 const std::string& extraOptions) {
+                                 const std::string& extraOptions, const void* image,
+                                 size_t imageSize) {
   std::vector<amd::Device*> devices{device};
   int32_t retval = CL_SUCCESS;
+
+  // The blit kernels built offline: load the code object, nothing to compile
+  if (image != nullptr) {
+    program_ = new Program(*context_);
+    if ((retval = program_->addDeviceProgram(*device, image, imageSize, false)) != CL_SUCCESS ||
+        (retval = program_->build(devices, "-cl-internal-kernel", nullptr, nullptr, false)) !=
+            CL_SUCCESS) {
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+              "Build failed for the offline blit kernels with error code %d", retval);
+      return false;
+    }
+    if (!program_->load()) {
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Could not load the offline blit kernels");
+      return false;
+    }
+    return true;
+  }
   std::string kernels(device::BlitLinearSourceCode);
   std::string image_kernels(device::BlitImageSourceCode);
 
