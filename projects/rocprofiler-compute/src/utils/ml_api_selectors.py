@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Parse ML API selector flags and apply them to a collected workload."""
+"""Parse --trace-ml-api, --list-operators, and --operator."""
 
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -12,7 +12,7 @@ UNSCOPED_OPERATOR_KEY = "all_supported_backends"
 
 
 def split_selector_tokens(raw_values: List[str]) -> List[str]:
-    """Split argv tokens on commas and drop empty pieces."""
+    """Split on commas and drop empty pieces."""
     tokens: List[str] = []
     for value in raw_values:
         for piece in str(value).split(","):
@@ -38,7 +38,7 @@ def _comma_patterns(text: str) -> List[str]:
 
 
 def resolve_profile_selection(raw: Optional[List[str]]) -> List[str]:
-    """Resolve --trace-ml-api. An empty list means the flag is absent."""
+    """Resolve --trace-ml-api."""
     if raw is None:
         return []
     if not raw:
@@ -64,7 +64,7 @@ def resolve_profile_selection(raw: Optional[List[str]]) -> List[str]:
 
 
 def resolve_list_selectors(raw: Optional[List[str]]) -> Optional[List[str]]:
-    """Resolve --list-operators. Empty means every collected selector."""
+    """Resolve --list-operators."""
     if raw is None:
         return None
     tokens = split_selector_tokens(raw)
@@ -78,11 +78,7 @@ def resolve_list_selectors(raw: Optional[List[str]]) -> Optional[List[str]]:
 
 
 def _patterns_by_backend(token: str) -> Dict[str, List[str]]:
-    """Split one --operator token into backend -> glob patterns.
-
-    A pattern with no framework is stored under UNSCOPED_OPERATOR_KEY until
-    analyze attaches it to the frameworks the workload actually collected.
-    """
+    """Split one --operator token into backend glob patterns."""
     token = token.replace(" ", ",")
     selector_tokens = _comma_patterns(token)
     prefix: Optional[str] = None
@@ -109,7 +105,7 @@ def _patterns_by_backend(token: str) -> Dict[str, List[str]]:
 def resolve_operator_patterns(
     raw: Optional[List[str]],
 ) -> Optional[Dict[str, List[str]]]:
-    """Resolve --operator into backend -> glob patterns."""
+    """Resolve --operator into backend glob patterns."""
     if raw is None:
         return None
     token = " ".join(str(value).strip() for value in raw if str(value).strip())

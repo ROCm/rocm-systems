@@ -35,7 +35,7 @@ _OPERATOR_BACKENDS = KNOWN_ML_API_BACKENDS + ("user",)
 
 
 def _labels_for_backends(backends: list[str]) -> str:
-    """Join display names for the given backends."""
+    """Join backend display names."""
     if not backends:
         return "ML API"
     return ", ".join(_ML_API_LABELS.get(backend, backend) for backend in backends)
@@ -44,7 +44,7 @@ def _labels_for_backends(backends: list[str]) -> str:
 def _framewise_from_resolved(
     selections: dict[str, list[str]],
 ) -> dict[str, list[str]]:
-    """Keep patterns whose backend is a known framework or user."""
+    """Keep known-backend patterns."""
     return {
         backend: list(patterns)
         for backend, patterns in selections.items()
@@ -53,12 +53,12 @@ def _framewise_from_resolved(
 
 
 def _operator_display_backends(selections: dict[str, list[str]]) -> list[str]:
-    """Backends named by an --operator request, for display labels."""
+    """Backends named by --operator."""
     return list(_framewise_from_resolved(selections))
 
 
 def _unique_pattern_text(framewise_patterns: dict[str, list[str]]) -> str:
-    """Join glob patterns in first-seen order."""
+    """Join unique glob patterns."""
     seen: set[str] = set()
     ordered: list[str] = []
     for patterns in framewise_patterns.values():
@@ -74,7 +74,7 @@ def _collect_glob_matched_nodes(
     forest: dict[str, list[CallTreeNode]],
     framewise_patterns: dict[str, list[str]],
 ) -> list[CallTreeNode]:
-    """Return nodes whose backend matches and whose path or name glob-matches."""
+    """Return nodes matching a backend glob."""
     return [
         node
         for roots in forest.values()
@@ -90,7 +90,7 @@ def _collect_glob_matched_nodes(
 def _assign_kernel_ids_from_top(
     node: CallTreeNode, name_to_id: dict[str, int]
 ) -> set[int]:
-    """Set KernelStats.kernel_id on this node and descendants; return those ids."""
+    """Set kernel ids on this subtree and return them."""
     kernel_ids: set[int] = set()
     for kernel_name, stats in node.kernels.items():
         kernel_id = name_to_id.get(str(kernel_name).strip())
