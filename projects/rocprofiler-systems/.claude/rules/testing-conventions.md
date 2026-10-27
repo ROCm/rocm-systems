@@ -8,9 +8,11 @@ description: Testing conventions for rocprofiler-systems — unit, integration, 
 ## C++ unit tests
 
 - Unit tests live beside their module in a `tests/` subdirectory.
-- Each module builds an `OBJECT` library. Add it to `UNIT_TEST_OBJECTS` in
+- Each module builds an `OBJECT` library that links
+  `rocprofiler-systems-googletest-library`. Add it to `UNIT_TEST_OBJECTS` in
   `source/tests/CMakeLists.txt`; do not register a standalone unit-test
-  executable.
+  executable. Do not link a target that pulls in the external library
+  (for example a backend target); the test must build without it installed.
 - Run unit tests through the aggregated GTest binary:
 
 ```bash

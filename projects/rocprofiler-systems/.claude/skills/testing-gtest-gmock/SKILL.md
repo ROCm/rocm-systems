@@ -44,11 +44,7 @@ EXPECT_CALL(*m_db, save(Field(&record::id, Eq(k_id)))).Times(1).WillOnce(Return(
   `MOCK_METHOD(..., (override))`.
 - **Library-mirroring names** in mocks go inside `NOLINTBEGIN(readability-identifier-naming)`
   with a reason.
-- **CMake:** an `OBJECT` library next to the test linking
-  `rocprofiler-systems-googletest-library`, appended to `UNIT_TEST_OBJECTS` in
-  `source/tests/CMakeLists.txt`. Link nothing that pulls in the external library.
-- **Naming:** `lower_case` suites and tests, `<unit>_<scenario>_<exact_result>`; members
-  `m_`; constants `k_`. Literals other than 0-4 are `constexpr k_` constants.
+- **Naming:** `lower_case` suites and tests, `<unit>_<scenario>_<exact_result>`.
 - **Proof:** build the whole project, run `rocprof-sys-unit-tests --gtest_filter=<pattern>`,
   paste the output before claiming a pass.
 
