@@ -1617,8 +1617,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       // LL channel plan, capped by the channel bound * P2P_LL_THRESHOLD.
       // Single-node all-XGMI gfx942/gfx950 widens that cap to p2pChunkSize/8, capped at 64 KiB/peer
       // (the measured crossover; the stock cap stops at 32 KiB/peer). The LL fit check still applies.
-      // A set NCCL_P2P_LL_THRESHOLD, and the LL128 path, keep the stock cap.
-      static bool const userSetP2pLLThreshold = ncclGetEnv("NCCL_P2P_LL_THRESHOLD") != nullptr;
+      // A set NCCL_P2P_LL_THRESHOLD, and the LL128 path, keep the stock cap. The env is read on
+      // each call so a later set or unset is visible.
+      bool const userSetP2pLLThreshold = ncclGetEnv("NCCL_P2P_LL_THRESHOLD") != nullptr;
       ssize_t llEligibleMax = (ssize_t)p2pChMax[dir] * p2pLlThreshold;
       if (comm->nNodes <= 1 && comm->isAllNvlink && (comm->cudaArch == 940 || comm->cudaArch == 950) &&
           !userSetP2pLLThreshold) {
