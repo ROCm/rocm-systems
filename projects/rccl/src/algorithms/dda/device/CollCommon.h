@@ -402,9 +402,19 @@ __device__ __forceinline__ bool ddaLLWaitLineFlags(const volatile LLPacket16* sr
   return false;
 }
 
-__device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict__ epochDev, int flatBlockId, uint32_t inc) {
+// The epoch read of ddaGetLLEpochInc without its barrier. A kernel that uses it must end with
+// ddaLLEpochCommit, whose barrier orders every thread's read before the cell is rewritten; the
+// read then overlaps the kernel's first loads instead of waiting for the whole block.
+__device__ __forceinline__ uint32_t ddaLLEpochLoad(const uint32_t* __restrict__ epochDev, int flatBlockId,
+                                                   uint32_t inc) {
   uint32_t flag = epochDev[flatBlockId] + inc;
   if (flag == 0u) flag = 2u; // skip 0 sentinel; keep bank parity
+  return flag;
+}
+
+__device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict__ epochDev, int flatBlockId,
+                                                     uint32_t inc) {
+  const uint32_t flag = ddaLLEpochLoad(epochDev, flatBlockId, inc);
   __syncthreads();
   return flag;
 }
@@ -420,6 +430,23 @@ __device__ __forceinline__ void ddaSetLLEpoch(uint32_t* __restrict__ epochDev, i
        e += total * (int)blockDim.x) {
     epochDev[e] = flag;
   }
+}
+
+// End of a kernel that read its epoch with ddaLLEpochLoad: the barrier is the one that read
+// deferred, so every thread of the block has read its cell before ddaSetLLEpoch rewrites it.
+__device__ __forceinline__ void ddaLLEpochCommit(uint32_t* __restrict__ epochDev, int epochLen, int flatBlockId,
+                                                 int total, uint32_t flag) {
+  __syncthreads();
+  ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag);
+}
+
+// Copies `bytes` (a multiple of 16) from src to dst in 16-byte vectors, thread `gtid` of
+// `gstride` threads taking every gstride-th vector, so the whole grid shares the copy.
+__device__ __forceinline__ void ddaGridCopy16B(const void* src, void* dst, size_t bytes, size_t gtid, size_t gstride) {
+  const v4u* s4 = reinterpret_cast<const v4u*>(src);
+  v4u* d4 = reinterpret_cast<v4u*>(dst);
+  const size_t nVec = bytes >> 4;
+  for (size_t i = gtid; i < nVec; i += gstride) d4[i] = s4[i];
 }
 
 } // namespace dda::common
