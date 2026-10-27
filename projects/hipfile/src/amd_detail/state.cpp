@@ -182,13 +182,6 @@ DriverState::deregisterStream(const hipStream_t hip_stream)
     }
 }
 
-shared_ptr<IStream>
-DriverState::getStream(hipStream_t hip_stream)
-{
-    shared_lock<shared_mutex> slock{state_mutex};
-    return stream_map->getStream(hip_stream);
-}
-
 //
 // Buffer and file calls
 //
@@ -229,13 +222,18 @@ DriverState::getFileBufferAndStream(hipFileHandle_t fh, const void *buf, hipStre
 
         file   = file_map->getFile(fh);
         buffer = buffer_map->getBuffer(buf);
-        stream =
-            isDefaultStream(hipStream) ? stream_map->getStream(hipStream) : stream_map->findStream(hipStream);
+        if (!isDefaultStream(hipStream)) {
+            stream = stream_map->findStream(hipStream);
+        }
     }
 
-    if (!stream) {
-        // Implicit registration on first async use, as cuFile does. Built outside state_mutex: it makes HIP
-        // calls. A candidate that loses the race is dropped after the lock is released.
+    // Built outside state_mutex: it makes HIP calls.
+    if (isDefaultStream(hipStream)) {
+        stream = StreamMap::makeDefaultStream(hipStream);
+    }
+    else if (!stream) {
+        // Implicit registration on first async use, as cuFile does. A candidate that loses the race is
+        // dropped after the lock is released.
         auto candidate = StreamMap::makeImplicitStream(hipStream);
 
         unique_lock<shared_mutex> ulock{state_mutex};

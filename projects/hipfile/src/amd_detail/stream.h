@@ -25,11 +25,10 @@ public:
     virtual hipDevice_t                  getHipDevice() const = 0;
     virtual std::unique_lock<std::mutex> getLock()            = 0;
 
-    virtual bool      isManaged() const             = 0;
     virtual bool      canUseStreamWaitValue() const = 0;
     virtual uint64_t *signalSlot() const            = 0;
 
-    // A managed stream's caller must hold getLock() for these; a default stream's never change.
+    // The caller must hold getLock() for these, except on a default stream, whose flags never change.
     virtual bool fixedBufferOffset() const = 0;
     virtual bool fixedFileOffset() const   = 0;
     virtual bool fixedIOSize() const       = 0;
@@ -60,7 +59,6 @@ public:
     hipDevice_t                  getHipDevice() const override;
     std::unique_lock<std::mutex> getLock() override;
 
-    bool      isManaged() const override;
     bool      canUseStreamWaitValue() const override;
     uint64_t *signalSlot() const override;
 
@@ -76,7 +74,7 @@ public:
     void applyFlags(uint32_t flags) override;
     void drainAndRelease() override;
 
-    Stream(const hipStream_t hip_stream, uint32_t flags, bool managed, const PassKey<StreamMap> &k);
+    Stream(const hipStream_t hip_stream, uint32_t flags, const PassKey<StreamMap> &k);
 
 private:
     Stream(const Stream &)             = delete;
@@ -88,7 +86,6 @@ private:
 
     hipStream_t hip_stream;
     hipDevice_t device_id;
-    bool        managed;
     bool        can_use_stream_wait_value;
     std::mutex  mutex; // Guards the flags after construction, retired, and signal_counter.
     bool        fixed_buf_offset{false};
@@ -116,17 +113,16 @@ public:
     ///         default stream, which is never registered
     std::shared_ptr<IStream> deregisterStream(const hipStream_t hip_stream);
 
-    /// @brief Lookup a stream using the hipStream
-    /// @param hip_stream A HIP stream
-    /// @return The registered stream, or a new unmanaged stream if it isn't registered
-    std::shared_ptr<IStream> getStream(hipStream_t hip_stream);
+    /// @brief Build the stream object for a default stream, which is never registered
+    /// @param hip_stream The null stream or hipStreamPerThread
+    static std::shared_ptr<IStream> makeDefaultStream(hipStream_t hip_stream);
 
     /// @brief Lookup a registered stream
     /// @param hip_stream A HIP stream
     /// @return The registered stream, or null if it isn't registered
     std::shared_ptr<IStream> findStream(hipStream_t hip_stream) const;
 
-    /// @brief Build a managed stream for implicit registration without touching any map
+    /// @brief Build a stream for implicit registration without touching any map
     /// @param hip_stream A non-default HIP stream
     static std::shared_ptr<IStream> makeImplicitStream(hipStream_t hip_stream);
 

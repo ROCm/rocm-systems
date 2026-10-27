@@ -133,7 +133,7 @@ thread_function(int id)
     mt19937       gen{rd()};
 
     // Distribution for the operation selection
-    uniform_int_distribution<int> op_dist{1, 13};
+    uniform_int_distribution<int> op_dist{1, 12};
 
     while (run_flag) {
         for (int i{0}; i < N_CYCLES; i++) {
@@ -294,20 +294,8 @@ thread_function(int id)
                     //       on the data
                 } break;
 
-                // Case 10: Get a random stream
+                // Case 10: Get a file and a buffer
                 case 10: {
-                    if (hip_streams.empty()) {
-                        break;
-                    }
-                    uniform_int_distribution<size_t> vec_dist{0, hip_streams.size() - 1};
-                    size_t                           idx = vec_dist(gen);
-
-                    auto stream = ds->getStream(hip_streams[idx]);
-
-                } break;
-
-                // Case 11: Get a file and a buffer
-                case 11: {
                     if (buffers.size() == 0 || files.size() == 0) {
                         break;
                     }
@@ -328,9 +316,9 @@ thread_function(int id)
                     //       on the data
                 } break;
 
-                // Case 12: Get a file, buffer, and a stream
+                // Case 11: Get a file, buffer, and a stream
                 //
-                case 12: {
+                case 11: {
                     if (buffers.empty() || files.empty() || hip_streams.empty()) {
                         break;
                     }
@@ -352,9 +340,9 @@ thread_function(int id)
                     auto [file, buffer, stream] = ds->getFileBufferAndStream(fh, buf, hip_stream);
                 } break;
 
-                // Case 13: Get a file, a buffer, and a new stream that isn't registered, which
+                // Case 12: Get a file, a buffer, and a new stream that isn't registered, which
                 //          registers it implicitly
-                case 13: {
+                case 12: {
                     if (buffers.empty() || files.empty()) {
                         break;
                     }

@@ -42,7 +42,7 @@ hipFileFlagsPowerSet()
                               ::testing::Values(0, HIPFILE_STREAM_PAGE_ALIGNED_INPUTS));
 }
 
-// A managed (registered) stream allocates one signal slot under a DeviceGuard and frees it when
+// A registered stream allocates one signal slot under a DeviceGuard and frees it when
 // released. Point the mocked allocation at real storage so the ctor's zero-init write is valid.
 static void
 expectSignalMemory(StrictMock<MHip> &mhip, uint64_t *storage)
@@ -87,16 +87,18 @@ TEST_P(HipFileStreamValidParams, register_stream_valid_flags_internal)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     stream_map.registerStream(nonnull_stream, flags);
-    auto stream = stream_map.getStream(nonnull_stream);
+    auto stream = stream_map.findStream(nonnull_stream);
     ASSERT_EQ(stream->getHipStream(), nonnull_stream);
 }
 
 INSTANTIATE_TEST_SUITE_P(StreamSuite, HipFileStreamValidParams, hipFileFlagsPowerSet());
 
-TEST_F(HipFileStream, get_stream_with_unregistered_stream_works)
+TEST_F(HipFileStream, find_stream_returns_registered_stream)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
-    auto stream = stream_map.getStream(nonnull_stream);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto stream = stream_map.findStream(nonnull_stream);
+    ASSERT_NE(stream, nullptr);
     ASSERT_EQ(nonnull_stream, stream->getHipStream());
 }
 
@@ -137,11 +139,8 @@ TEST_F(HipFileStream, register_default_stream_is_noop)
 {
     stream_map.registerStream(nullptr, 0);
     stream_map.registerStream(hipStreamPerThread, 0);
-    EXPECT_CALL(mhip, hipStreamGetDevice).Times(2);
-    auto null_stream = stream_map.getStream(nullptr);
-    auto per_thread  = stream_map.getStream(hipStreamPerThread);
-    EXPECT_FALSE(null_stream->isManaged());
-    EXPECT_FALSE(per_thread->isManaged());
+    EXPECT_EQ(stream_map.findStream(nullptr), nullptr);
+    EXPECT_EQ(stream_map.findStream(hipStreamPerThread), nullptr);
 }
 
 TEST_F(HipFileStream, deregister_default_stream_is_noop)
@@ -172,7 +171,7 @@ TEST(HipFileStreamDestructor, destructor_with_streams_in_use_logs)
         EXPECT_CALL(mhip, hipStreamGetDevice);
         stream_map.registerStream(reinterpret_cast<hipStream_t>(1), 0);
         EXPECT_CALL(msys, syslog);
-        stream = stream_map.getStream(reinterpret_cast<hipStream_t>(1));
+        stream = stream_map.findStream(reinterpret_cast<hipStream_t>(1));
     }
 }
 
@@ -209,31 +208,34 @@ TEST_F(HipFileStreamExternal, register_and_deregister_default_stream_succeed)
     ASSERT_EQ(hipFileStreamDeregister(nullptr), HIPFILE_SUCCESS);
 }
 
-TEST_F(HipFileStream, registered_stream_is_managed_with_signal_slot)
+TEST_F(HipFileStream, registered_stream_has_signal_slot)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     stream_map.registerStream(nonnull_stream, 0);
-    auto stream = stream_map.getStream(nonnull_stream);
-    EXPECT_TRUE(stream->isManaged());
+    auto stream = stream_map.findStream(nonnull_stream);
     EXPECT_TRUE(stream->canUseStreamWaitValue());
     EXPECT_NE(stream->signalSlot(), nullptr);
     EXPECT_FALSE(stream->isRetired());
 }
 
-TEST_F(HipFileStream, unregistered_stream_is_unmanaged_without_signal_slot)
+TEST_F(HipFileStream, default_streams_have_no_signal_slot)
 {
-    EXPECT_CALL(mhip, hipStreamGetDevice);
-    auto stream = stream_map.getStream(nonnull_stream);
-    EXPECT_FALSE(stream->isManaged());
-    EXPECT_FALSE(stream->canUseStreamWaitValue());
-    EXPECT_EQ(stream->signalSlot(), nullptr);
+    EXPECT_CALL(mhip, hipStreamGetDevice).Times(2);
+    EXPECT_CALL(mhip, hipDeviceGetAttribute).Times(0);
+    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
+    for (auto hip_stream : {static_cast<hipStream_t>(nullptr), hipStreamPerThread}) {
+        auto stream = StreamMap::makeDefaultStream(hip_stream);
+        EXPECT_EQ(stream->getHipStream(), hip_stream);
+        EXPECT_FALSE(stream->canUseStreamWaitValue());
+        EXPECT_EQ(stream->signalSlot(), nullptr);
+    }
 }
 
 TEST_F(HipFileStream, next_and_release_signal_target)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     stream_map.registerStream(nonnull_stream, 0);
-    auto stream = stream_map.getStream(nonnull_stream);
+    auto stream = stream_map.findStream(nonnull_stream);
     EXPECT_EQ(stream->nextSignalTarget(), 1u);
     EXPECT_EQ(stream->nextSignalTarget(), 2u);
     EXPECT_EQ(stream->releaseSignalTarget(), 1u);
@@ -243,7 +245,7 @@ TEST_F(HipFileStream, drain_and_release_retires_syncs_and_frees)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     stream_map.registerStream(nonnull_stream, 0);
-    auto stream = stream_map.getStream(nonnull_stream);
+    auto stream = stream_map.findStream(nonnull_stream);
     EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
     stream->drainAndRelease();
     EXPECT_TRUE(stream->isRetired());
@@ -254,7 +256,7 @@ TEST_F(HipFileStream, drain_and_release_waits_for_reserved_targets)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     stream_map.registerStream(nonnull_stream, 0);
-    auto stream = stream_map.getStream(nonnull_stream);
+    auto stream = stream_map.findStream(nonnull_stream);
     EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
     {
         // A reserved target that no stream wait covers, like an op whose wait failed to arm.
@@ -281,8 +283,8 @@ TEST_F(HipFileStream, registered_stream_without_wait_value_support_has_no_signal
     EXPECT_CALL(mhip, hipDeviceGetAttribute).WillOnce(::testing::Return(0));
     EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
     stream_map.registerStream(nonnull_stream, 0);
-    auto stream = stream_map.getStream(nonnull_stream);
-    EXPECT_TRUE(stream->isManaged());
+    auto stream = stream_map.findStream(nonnull_stream);
+    ASSERT_NE(stream, nullptr);
     EXPECT_FALSE(stream->canUseStreamWaitValue());
     EXPECT_EQ(stream->signalSlot(), nullptr);
 }
@@ -291,7 +293,7 @@ TEST_F(HipFileStream, apply_flags_updates_and_validates_flags)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     stream_map.registerStream(nonnull_stream, 0);
-    auto stream = stream_map.getStream(nonnull_stream);
+    auto stream = stream_map.findStream(nonnull_stream);
     stream->applyFlags(HIPFILE_STREAM_FIXED_FILE_SIZE);
     EXPECT_TRUE(stream->fixedIOSize());
     EXPECT_FALSE(stream->fixedFileOffset());
@@ -311,7 +313,7 @@ TEST_F(HipFileStream, adopt_registers_implicit_stream)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     auto candidate = StreamMap::makeImplicitStream(nonnull_stream);
-    EXPECT_TRUE(candidate->isManaged());
+    EXPECT_NE(candidate->signalSlot(), nullptr);
     EXPECT_EQ(stream_map.adoptImplicitStream(nonnull_stream, candidate), candidate);
     EXPECT_EQ(stream_map.findStream(nonnull_stream), candidate);
 }
@@ -392,15 +394,15 @@ TEST_F(HipFileStreamImplicit, first_async_lookup_registers_stream_implicitly)
     auto first  = lookup(nonnull_stream);
     auto second = lookup(nonnull_stream);
     ASSERT_NE(first.stream, nullptr);
-    EXPECT_TRUE(first.stream->isManaged());
+    EXPECT_NE(first.stream->signalSlot(), nullptr);
     EXPECT_EQ(first.stream, second.stream);
 }
 
 TEST_F(HipFileStreamImplicit, default_streams_are_not_registered_implicitly)
 {
     EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
-    EXPECT_FALSE(lookup(nullptr).stream->isManaged());
-    EXPECT_FALSE(lookup(hipStreamPerThread).stream->isManaged());
+    EXPECT_EQ(lookup(nullptr).stream->signalSlot(), nullptr);
+    EXPECT_EQ(lookup(hipStreamPerThread).stream->signalSlot(), nullptr);
 }
 
 TEST_F(HipFileStreamImplicit, register_after_implicit_registration_succeeds)

@@ -40,15 +40,15 @@ SignalSlotDeleter::operator()(uint64_t *slot) const noexcept
     }
 }
 
-Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, bool _managed, const PassKey<StreamMap> &)
-    : hip_stream{_hip_stream}, device_id{0}, managed{_managed}, can_use_stream_wait_value{false},
+Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<StreamMap> &)
+    : hip_stream{_hip_stream}, device_id{0}, can_use_stream_wait_value{false},
       signal_slot{nullptr, SignalSlotDeleter{0}}
 {
     setFlags(flags);
 
     device_id = Context<Hip>::get()->hipStreamGetDevice(hip_stream);
 
-    if (!managed) {
+    if (isDefaultStream(hip_stream)) {
         return;
     }
 
@@ -92,11 +92,6 @@ std::unique_lock<std::mutex>
 Stream::getLock()
 {
     return std::unique_lock<std::mutex>{mutex};
-}
-bool
-Stream::isManaged() const
-{
-    return managed;
 }
 bool
 Stream::canUseStreamWaitValue() const
@@ -152,9 +147,6 @@ Stream::applyFlags(uint32_t flags)
 void
 Stream::drainAndRelease()
 {
-    if (!managed) {
-        return;
-    }
     uint64_t reserved;
     {
         std::lock_guard<std::mutex> lock{mutex};
@@ -191,7 +183,7 @@ StreamMap::registerStream(hipStream_t hip_stream, uint32_t flags)
         return;
     }
 
-    auto stream = std::shared_ptr<Stream>(new Stream(hip_stream, flags, true, PassKey<StreamMap>{}));
+    auto stream = std::shared_ptr<Stream>(new Stream(hip_stream, flags, PassKey<StreamMap>{}));
     StreamMap::from_ptr[hip_stream] = Entry{stream, false};
 }
 
@@ -213,14 +205,9 @@ StreamMap::deregisterStream(hipStream_t hip_stream)
 }
 
 std::shared_ptr<IStream>
-StreamMap::getStream(hipStream_t hip_stream)
+StreamMap::makeDefaultStream(hipStream_t hip_stream)
 {
-    auto itr = StreamMap::from_ptr.find(hip_stream);
-    if (StreamMap::from_ptr.end() == itr) {
-        return std::shared_ptr<Stream>(new Stream(hip_stream, 0, false, PassKey<StreamMap>{}));
-    }
-
-    return itr->second.stream;
+    return std::shared_ptr<Stream>(new Stream(hip_stream, 0, PassKey<StreamMap>{}));
 }
 
 std::shared_ptr<IStream>
@@ -237,7 +224,7 @@ StreamMap::findStream(hipStream_t hip_stream) const
 std::shared_ptr<IStream>
 StreamMap::makeImplicitStream(hipStream_t hip_stream)
 {
-    return std::shared_ptr<Stream>(new Stream(hip_stream, 0, true, PassKey<StreamMap>{}));
+    return std::shared_ptr<Stream>(new Stream(hip_stream, 0, PassKey<StreamMap>{}));
 }
 
 std::shared_ptr<IStream>

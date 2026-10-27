@@ -83,7 +83,6 @@ struct AsyncTest : public ::testing::Test {
     {
         ON_CALL(*stream, getHipStream).WillByDefault(Return(hip_stream));
         ON_CALL(*stream, getHipDevice).WillByDefault(Return(0));
-        ON_CALL(*stream, isManaged).WillByDefault(Return(true));
         ON_CALL(*stream, isRetired).WillByDefault(Return(false));
         ON_CALL(*stream, canUseStreamWaitValue).WillByDefault(Return(wait_value_capable));
         ON_CALL(*stream, signalSlot).WillByDefault(Return(wait_value_capable ? &slot : nullptr));
