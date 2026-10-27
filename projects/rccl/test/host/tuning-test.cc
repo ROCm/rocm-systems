@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/tuning/tuning.cc.
+// Host-only microtests for src/tuning/tuning.cc and the symmetric LSA cost model it ranks.
 
 #include <gtest/gtest.h>
 
@@ -206,6 +206,53 @@ void TuningFree(void* pointer) {
 #undef ncclTunerPluginLoad
 #undef free
 #undef ncclCalloc
+
+// The symmetric cost model (sym_model.cc, sym_model/lsa*.cc), scripted for the one kernel the tests below price:
+// AllGather_LL, an LSA kernel with no TMA or GIN variant. Keep all declaring headers before this block.
+int SymModelAllGatherLlMask() { return 1 << ncclSymkKernelId_AllGather_LL; }
+int SymModelNoKernelMask() { return 0; }
+bool SymModelAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; }
+uint32_t SymModelMask(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, bool) {
+  return SymModelAllGatherLlMask();
+}
+bool SymModelNoTma(struct ncclComm*) { return false; }
+bool SymModelNoTmaDeep(struct ncclComm*, ncclSymkKernelId, size_t, int) { return false; }
+ncclResult_t SymModelGin(struct ncclTuningInput_t*, enum ncclSymkKernelId, size_t, float*, int*) {
+  return ncclInternalError;
+}
+
+#define ncclSymkAvailable SymModelAvailable
+#define ncclSymkMask SymModelMask
+#define ncclSymkLLKernelMask SymModelAllGatherLlMask
+#define ncclSymkAGKernelMask SymModelAllGatherLlMask
+#define ncclSymkARKernelMask SymModelNoKernelMask
+#define ncclSymkRSKernelMask SymModelNoKernelMask
+#define ncclSymkGinKernelMask SymModelNoKernelMask
+#define ncclSymkTmaKernelMask SymModelNoKernelMask
+#define ncclSymkTmaAvailable SymModelNoTma
+#define ncclSymkTmaForced SymModelNoTma
+#define ncclSymkTmaDeepEligible SymModelNoTmaDeep
+#define ncclSymkGinModel SymModelGin
+#define ncclSymkKernelIdToString TuningSymkKernelIdToString
+
+#include SYM_MODEL_CC_PATH
+#include SYM_MODEL_LSA_CC_PATH
+#include SYM_MODEL_LSA_A2A_CC_PATH
+#include SYM_MODEL_LSA_BASE_CC_PATH
+
+#undef ncclSymkKernelIdToString
+#undef ncclSymkGinModel
+#undef ncclSymkTmaDeepEligible
+#undef ncclSymkTmaForced
+#undef ncclSymkTmaAvailable
+#undef ncclSymkTmaKernelMask
+#undef ncclSymkGinKernelMask
+#undef ncclSymkRSKernelMask
+#undef ncclSymkARKernelMask
+#undef ncclSymkAGKernelMask
+#undef ncclSymkLLKernelMask
+#undef ncclSymkMask
+#undef ncclSymkAvailable
 
 namespace {
 
@@ -1252,6 +1299,71 @@ TEST_F(TuningMicrotest, NoValidTuningDistinguishesConfigurationErrors) {
     EXPECT_TRUE(RcclUnitTesting::LogHas(log, name)) << log;
     EXPECT_TRUE(RcclUnitTesting::LogHas(log, value)) << log;
   }
+}
+
+constexpr int symLsaCtas = 16;
+constexpr int symLsaAllGatherLl = NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_LL;
+
+// AllGather_LL on 8 ranks at a pinned CTA count, priced by the real symmetric model (on AMD there is no A2A table,
+// so this is the LSA base model) and ranked against a Ring/Simple candidate.
+class SymmetricLsaTuningMicrotest : public TuningMicrotest {
+ protected:
+  void SetUp() override {
+    TuningMicrotest::SetUp();
+    comm_->nRanks = 8;
+    comm_->WarpSize = 64;
+    input_ = MakeInput();
+    input_.func = ncclFuncAllGather;
+    input_.winRegType = ncclSymSendRegRecvReg;
+    input_.minCTAs = input_.maxCTAs = symLsaCtas;
+    input_.tuningMask = TuningBit(GeneralId(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE)) | TuningBit(symLsaAllGatherLl);
+    sym_.valid = 1;
+    sym_.symKernelId = ncclSymkKernelId_AllGather_LL;
+    ASSERT_EQ(ncclSuccess, ncclTuningSymkModelSim(&input_, &sym_));
+  }
+
+  ncclTuningResult_t ComputeAgainstRing(float ringTimeUs) {
+    ScopedHook model(g_tuningCostModelSimModel, [=](int id, ncclTuningInput_t* input, ncclTuningResult_t* tuning) {
+      if (id == symLsaAllGatherLl) return ncclTuningSymkModelSim(input, tuning);
+      tuning->timeUs = ringTimeUs;
+      return ncclSuccess;
+    });
+    ncclTuningResult_t best = EmptyResult();
+    EXPECT_EQ(ncclSuccess, TuningMicroCompute(&input_, &best));
+    return best;
+  }
+
+  ncclTuningInput_t input_{};
+  ncclTuningResult_t sym_ = EmptyResult();
+};
+
+// NCCL 2.32.3: the model reports the modeled kernel time and charges the 2.5%-per-CTA resource cost only to
+// selectionTimeUs, which ncclTuningCompute ranks by.
+TEST_F(SymmetricLsaTuningMicrotest, CtaCostIsChargedToSelectionNotToReportedTime) {
+  ncclSymkLsaEstimate modeled{};
+  ASSERT_TRUE(ncclSymkLsaBaseModel(&input_, ncclSymkKernelId_AllGather_LL, input_.nBytes, symLsaCtas, &modeled));
+  EXPECT_FLOAT_EQ(static_cast<float>(modeled.ctaSelectionTimeUs), sym_.timeUs);
+  EXPECT_FLOAT_EQ(sym_.timeUs * (1.0f + 0.025f * symLsaCtas), sym_.selectionTimeUs);
+
+  // Slower than the kernel but cheaper than its selection cost: the general candidate wins.
+  const float between = 0.5f * (sym_.timeUs + sym_.selectionTimeUs);
+  EXPECT_EQ(GeneralId(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE), ComputeAgainstRing(between).id);
+  // When the kernel wins, the time reported for it still leaves the CTA cost out.
+  ncclTuningResult_t best = ComputeAgainstRing(2.0f * sym_.selectionTimeUs);
+  EXPECT_EQ(symLsaAllGatherLl, best.id);
+  EXPECT_FLOAT_EQ(sym_.timeUs, best.timeUs);
+}
+
+// Control for the test above: the same model and ranking, with candidates far enough apart that where the CTA cost
+// is charged cannot change the winner.
+TEST_F(SymmetricLsaTuningMicrotest, ModelPinsCtasAndRanksClearWinners) {
+  EXPECT_EQ(1, sym_.valid);
+  EXPECT_EQ(symLsaCtas, sym_.nChannels);
+  EXPECT_EQ(symLsaCtas, sym_.maxChannels);
+  EXPECT_GT(sym_.timeUs, 0.0f);
+  EXPECT_GE(sym_.selectionTimeUs, sym_.timeUs);
+  EXPECT_EQ(symLsaAllGatherLl, ComputeAgainstRing(100.0f * sym_.selectionTimeUs).id);
+  EXPECT_EQ(GeneralId(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE), ComputeAgainstRing(0.01f * sym_.timeUs).id);
 }
 
 }  // namespace
