@@ -9640,11 +9640,11 @@ TEST(AqlDispatchTest, WorkerExceptionPropagatesThroughEngineStep) {
 }
 
 TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
-  constexpr uint32_t kSCbranchIFork = 0xB8000000u;
+  constexpr uint32_t kSRfeRestoreB64 = 0x95800000u; // s_rfe_restore_b64 s[0:1], s0
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", /*num_cus=*/2));
   f.cp()->set_dispatch_threads(2);
-  uint64_t kernel = f.write_kernel(0x1000, &kSCbranchIFork, sizeof(kSCbranchIFork));
+  uint64_t kernel = f.write_kernel(0x1000, &kSRfeRestoreB64, sizeof(kSRfeRestoreB64));
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
 
@@ -9653,7 +9653,7 @@ TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
   const auto &exit = f.engine->last_exit();
   EXPECT_EQ(exit.reason, simdojo::ExitReason::EXIT_REQUEST);
   EXPECT_EQ(exit.code, 1);
-  EXPECT_NE(exit.message.find("s_cbranch_i_fork"), std::string::npos);
+  EXPECT_NE(exit.message.find("s_rfe_restore_b64"), std::string::npos);
   EXPECT_NE(exit.message.find("pc=0x1040"), std::string::npos);
   EXPECT_NE(exit.message.find("unimplemented instruction"), std::string::npos);
   EXPECT_TRUE(f.cu(0)->is_idle());
@@ -9669,7 +9669,7 @@ TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
   constexpr uint64_t kCompletionSignal = 0x3000;
   constexpr uint64_t kBarrierSignal = 0x3040;
   for (const auto instruction :
-       {InstructionCase{0xB8000000u, "s_cbranch_i_fork", "unimplemented instruction"},
+       {InstructionCase{0x95800000u, "s_rfe_restore_b64", "unimplemented instruction"},
         InstructionCase{0xBFFF0000u, "0xbfff0000", "could not decode"}}) {
     SCOPED_TRACE(instruction.diagnostic);
     for (uint32_t threads : {1u, 2u}) {
@@ -9829,7 +9829,7 @@ TEST(AqlDispatchTest, FatalFailureUsesNonRetainingExceptionDelivery) {
         EXPECT_TRUE(failed_wave->is_halted());
         return true;
       });
-  constexpr uint32_t kUnsupportedInstruction = 0xb8000000;
+  constexpr uint32_t kUnsupportedInstruction = 0x95800000u; // s_rfe_restore_b64 s[0:1], s0
   const uint64_t kernel =
       fixture.write_kernel(0x1000, &kUnsupportedInstruction, sizeof(kUnsupportedInstruction));
   init_completion_signal(fixture.mem(), 0x3000);
@@ -9953,8 +9953,8 @@ TEST_P(AqlQueueFailureConcurrencyTest, DefersCacheFlushUntilWorkersJoin) {
 
   std::array<uint32_t, 34> failing_code;
   failing_code.fill(SOPP_S_NOP);
-  constexpr uint32_t kSCbranchIFork = 0xB8000000u;
-  failing_code[32] = vm_fault ? SOPP_S_NOP : kSCbranchIFork;
+  constexpr uint32_t kSRfeRestoreB64 = 0x95800000u; // s_rfe_restore_b64 s[0:1], s0
+  failing_code[32] = vm_fault ? SOPP_S_NOP : kSRfeRestoreB64;
   failing_code.back() = SOPP_S_ENDPGM;
   const uint64_t failing_kernel =
       fixture.write_kernel(0x1000, failing_code.data(), sizeof(failing_code));

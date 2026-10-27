@@ -66,8 +66,8 @@ private:
 } // namespace
 
 __global__ void unsupported_instruction() {
-  // s_cbranch_i_fork is decoded but has no execution implementation on CDNA3/4.
-  asm volatile(".long 0xb8000000");
+  // s_rfe_restore_b64 is decoded but has no execution implementation on CDNA3/4.
+  asm volatile(".long 0x95800000");
 }
 
 __global__ void undecodable_instruction() { asm volatile(".long 0xbfff0000"); }
@@ -97,7 +97,7 @@ TEST(HipInstructionFailureTest, UnsupportedInstructionExitsWithFailure) {
   EXPECT_EXIT(
       wait_for_instruction_failure(FailureKind::Unsupported), native_instruction_failure,
       rocjitsu::test::SanitizerFreeDiagnostic(
-          "CU .*could not execute s_cbranch_i_fork.*pc=.*pid=.*qid=.*dispatch=.*unimplemented "
+          "CU .*could not execute s_rfe_restore_b64.*pc=.*pid=.*qid=.*dispatch=.*unimplemented "
           "instruction"));
 }
 

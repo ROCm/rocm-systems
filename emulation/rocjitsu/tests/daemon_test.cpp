@@ -413,7 +413,7 @@ constexpr char kDaemonDecodeDiagnostic[] =
 TEST_F(DaemonTest, HipUnsupportedInstructionExitsWithFailure) {
   expected_daemon_exit_ = EXIT_FAILURE;
   expected_daemon_diagnostic_ =
-      "CU .*could not execute s_cbranch_i_fork.*pc=.*pid=.*qid=.*dispatch=.*unimplemented "
+      "CU .*could not execute s_rfe_restore_b64.*pc=.*pid=.*qid=.*dispatch=.*unimplemented "
       "instruction";
   auto r = run_hip_test(hip_instruction_failure_bin(),
                         "HipDaemonInstructionFailureTest.UnsupportedInstructionExitsWithFailure");
