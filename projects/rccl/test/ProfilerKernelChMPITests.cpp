@@ -24,6 +24,15 @@
 // events at all, so the suite runs with RCCL_DDA_ENABLE=0; otherwise a full
 // single-node communicator takes DDA for AllReduce and records nothing.
 
+#include "MPITestBase.hpp"
+#include "TestChecks.hpp"
+#include "ProfilerRecorderHelpers.hpp"
+
+#include "comm.h"
+#include "transport.h"
+#include "plugin/nccl_profiler.h"
+#include "plugin/profiler_kernelch_recorder.h"
+
 #include <hip/hip_runtime.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -37,13 +46,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-#include "MPITestBase.hpp"
-#include "ProfilerRecorderHelpers.hpp"
-#include "TestChecks.hpp"
-#include "comm.h"
-#include "plugin/nccl_profiler.h"
-#include "transport.h"
 
 #ifdef MPI_TESTS_ENABLED
 
