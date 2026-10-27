@@ -1828,12 +1828,13 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
             if (!ready) {
               // When data is in sysmem, we need to wait until all flags are correct since the GPU only
               // called threadfence()
-              uint64_t flag = sub->base + sub->transmitted + 1;
+              uint64_t flag = RCCL_LL128_FLAG_OF(sub->base + sub->transmitted + 1);
               int nFifoLines = DIVUP(connFifo[buffSlot].size, sizeof(uint64_t) * proxyState->ll128LineElems);
               volatile uint64_t* lines = (volatile uint64_t*)buff;
               ready = 1;
               for (int i = 0; i < nFifoLines; i++) {
-                if (lines[i * proxyState->ll128LineElems + proxyState->ll128DataElems] != flag) {
+                if ((lines[i * proxyState->ll128LineElems + proxyState->ll128DataElems] >> RCCL_LL128_FLAG_SHIFT) !=
+                    flag) {
                   ready = 0;
                   break;
                 }
