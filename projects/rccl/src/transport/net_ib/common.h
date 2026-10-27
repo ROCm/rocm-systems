@@ -253,6 +253,7 @@ struct ncclIbRequest {
       // Aggregates the size of a send request when sender does not write to the
       // completion records array.
       int aggSize;
+      bool flagFlush; // The sender writes the GDR flush flag for this request
     } recv;
     struct {
       int rank;
@@ -280,14 +281,18 @@ static inline void ncclIbGidInfoSnapshot(struct ncclIbNetCommDevBase* base, stru
   base->gidInfo = ibDev->gidInfo;
 }
 
+// The sender polls idx and then reads the other fields, so every field must share
+// idx's 64-byte line: a field in a second line can still be stale when idx is seen.
 struct alignas(64) ncclIbSendFifo {
   uint64_t addr;
   uint64_t size;
   uint32_t rkeys[NCCL_IB_MAX_DEVS_PER_NIC];
-  uint32_t nreqs;
+  uint16_t nreqs;
+  uint16_t flagFlush; // Receiver asks for the GDR flush flag write after this payload
   uint32_t tag;
   uint64_t idx;
 };
+static_assert(sizeof(struct ncclIbSendFifo) == 64, "ncclIbSendFifo must fit in one 64-byte line");
 
 struct ncclIbQpInitAttr {
   ibv_qp_state state;
@@ -365,6 +370,7 @@ struct alignas(8) ncclIbSendCommDev {
   struct ibv_mr* ctsFifoMr;
   struct ibv_mr* putSignalScratchpadMr;
   struct ibv_mr* cmplsRecordsMr;
+  struct ibv_mr* flagFlushSrcMr;
   struct ibv_sge sge;
 };
 
@@ -533,7 +539,8 @@ struct ncclIbSendComm {
   // on the receiver side.
   struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   struct ibv_sge sges[NCCL_NET_IB_MAX_RECVS];
-  struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 1];
+  // Data writes, plus the completion records write and the GDR flush flag write.
+  struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 2];
   // Each dev correlates to a mergedIbDev
   struct ncclIbSendCommDev devs[NCCL_IB_MAX_DEVS_PER_NIC];
   // Array of pointers to store the send requests for faster access. The
@@ -556,6 +563,14 @@ struct ncclIbSendComm {
   struct ncclIbRemoteSpeedBuf remoteSpeedBuf;
   struct ibv_mr* remoteSpeedMr;
   uint64_t remoteSpeedCounter;
+  // GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG): after the payload of a slot, every
+  // QP that carried it writes the slot sequence number from flagFlushSrc[slot]
+  // into its own RO=0 GPU flag, at flagFlushRemAddr + qpIndex * NCCL_GDR_FLUSH_FLAG_STRIDE.
+  int flagFlush;
+  uint64_t flagFlushRemAddr;
+  uint32_t flagFlushRkey;
+  struct ibv_sge flagFlushSge;
+  uint64_t flagFlushSrc[NET_IB_MAX_REQUESTS];
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
@@ -637,6 +652,19 @@ struct ncclIbRecvComm {
   int flushQpSl;
   int flushQpTc;
   bool flushQpsCreated;
+  // GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG): the sender writes an RO=0 flag in
+  // GPU memory after the payload and the GPU kernel waits on it, replacing
+  // the RDMA read flush.
+  int flagFlush;
+  // Whether the next receives need the flag (only SIMPLE GDR receives are
+  // flushed); set by net.cc before each irecv.
+  int flagFlushHint;
+  uint64_t* flagFlushGpuMem;
+  struct ibv_mr* flagFlushMr;
+  int flagFlushDmabufFd;
+  // Packed gdrFlushSeq entry of the receive that requested the flag and was
+  // completed last: its sequence and the per-QP flags that carried it.
+  uint64_t flagFlushLastDesc;
   bool prepostReceiveWorkRequests;
   // To avoid allocation and memset on the data-path a single structure is used
   // and only the wr_id is updated before posting a receive work request.
@@ -663,6 +691,8 @@ struct ncclIbListenComm {
   int dev;
   struct ncclSocket sock;
   struct ncclIbCommStage* stage;
+  // Accepted receivers set up the GDR flush flag (ncclNetIb only, see ncclIbNetCtx).
+  int gdrFlushFlag;
 };
 
 static inline void ncclIbCheckSpeedChanges(struct ncclIbSendComm* sendComm, struct ncclIbNetCommBase* base) {
@@ -738,6 +768,17 @@ ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int 
 
 int ncclIbGetTrafficClass(void* ctx);
 void ncclIbSetTrafficClass(void* ctx, int trafficClass);
+
+// ncclNetIb per-communicator context. config stays first: the traffic class
+// accessors cast the context to it. Any context passed to ncclNetIb.listen,
+// including GIN/RMA's, must be a full ncclIbNetCtx.
+struct ncclIbNetCtx {
+  ncclNetCommConfig_t config;
+  // Every rank of the communicator can use RCCL_IB_GDR_FLUSH_FLAG (set at init).
+  int gdrFlushFlag;
+};
+// ncclNetIb listen: ncclIbListen plus the context's GDR flush flag decision.
+ncclResult_t ncclIbNetListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
 
 // Net IB plugin entry functions.
 ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction);

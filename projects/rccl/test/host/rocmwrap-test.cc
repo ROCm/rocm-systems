@@ -65,10 +65,12 @@ std::function<int64_t(const char*, int64_t)> g_loadParam = [](const char* env, i
 
 #include "fakes/param_redirect.h"
 
-// --- HSA: the three ROCr entry points rocmwrap.cc calls.
+// --- HSA: the four ROCr entry points rocmwrap.cc calls.
 namespace {
 std::function<hsa_status_t(hsa_system_info_t, void*)> g_hsaSystemGetInfo;
 int g_hsaInitCalls = 0;
+hsa_status_t g_hsaInitResult = HSA_STATUS_SUCCESS;
+int g_hsaShutDownCalls = 0;
 }  // namespace
 
 extern "C" hsa_status_t hsa_system_get_info(hsa_system_info_t attribute, void* value) {
@@ -76,6 +78,10 @@ extern "C" hsa_status_t hsa_system_get_info(hsa_system_info_t attribute, void* v
 }
 extern "C" hsa_status_t hsa_init() {
   ++g_hsaInitCalls;
+  return g_hsaInitResult;
+}
+extern "C" hsa_status_t hsa_shut_down() {
+  ++g_hsaShutDownCalls;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -154,6 +160,9 @@ protected:
     g_logged.clear();
     g_params.clear();
     g_hsaInitCalls = 0;
+    g_hsaInitResult = HSA_STATUS_SUCCESS;
+    g_hsaShutDownCalls = 0;
+    rocrRefHeld = false;
     fopenPaths_.clear();
     unsetenv("CUDA_LAUNCH_BLOCKING");
 
@@ -758,6 +767,32 @@ TEST_F(RocmwrapMicrotest, Init_ForceEnableSkipsTheParamAndKernelChecks) {
   EXPECT_FALSE(configRead);
   EXPECT_TRUE(fopenPaths_.empty());
   EXPECT_EQ(g_hsaInitCalls, 1);
+}
+
+// The library destructor drops the one ROCr reference init took, and only once.
+TEST_F(RocmwrapMicrotest, Fini_ReleasesTheReferenceInitTookOnce) {
+  initOnceFunc();
+  ASSERT_EQ(g_hsaInitCalls, 1);
+  rocmLibraryFini();
+  EXPECT_EQ(g_hsaShutDownCalls, 1);
+  rocmLibraryFini();
+  EXPECT_EQ(g_hsaShutDownCalls, 1);
+}
+
+// No reference to drop when hsa_init() was never called or failed.
+TEST_F(RocmwrapMicrotest, Fini_WithoutAReferenceDoesNotShutDown) {
+  g_exportDmabuf = nullptr;
+  initOnceFunc();
+  ASSERT_EQ(g_hsaInitCalls, 0);
+  rocmLibraryFini();
+  EXPECT_EQ(g_hsaShutDownCalls, 0);
+
+  Reset();
+  g_hsaInitResult = HSA_STATUS_ERROR;
+  initOnceFunc();
+  ASSERT_EQ(g_hsaInitCalls, 1);
+  rocmLibraryFini();
+  EXPECT_EQ(g_hsaShutDownCalls, 0);
 }
 
 // pthread_once state is process-wide, so check the once-only behaviour in a forked child.
