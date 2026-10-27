@@ -22,7 +22,9 @@ order_records(std::vector<record>& records, record_order order)
         case record_order::by_name: std::ranges::sort(records, {}, &record::name); return;
         case record_order::by_time: std::ranges::sort(records, {}, &record::time); return;
         case record_order::by_size: std::ranges::sort(records, {}, &record::size); return;
-        default: throw std::invalid_argument{ "invalid record order" };
+        default:
+            throw std::logic_error(
+                fmt::format("record_order {} not handled", static_cast<int>(order)));
     }
 }
 ```

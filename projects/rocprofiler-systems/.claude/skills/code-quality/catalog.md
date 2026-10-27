@@ -562,49 +562,63 @@ Excessive coupling between classes or excessive delegation.
 
 ```cpp
 // BEFORE
-void print_invoice(const Invoice& inv) {
+void
+print_invoice(const invoice& inv)
+{
     // Print header
-    std::cout << "================\n";
-    std::cout << "INVOICE #" << inv.number << "\n";
-    std::cout << "Date: " << inv.date << "\n";
-    std::cout << "================\n";
+    LOG_INFO("================");
+    LOG_INFO("INVOICE #{}", inv.number);
+    LOG_INFO("Date: {}", inv.date);
+    LOG_INFO("================");
 
     // Print items
-    for (const auto& item : inv.items) {
-        std::cout << item.name << ": $" << item.price << "\n";
+    for(const auto& item : inv.items)
+    {
+        LOG_INFO("{}: ${}", item.name, item.price);
     }
 
     // Calculate and print total
-    double total = 0;
-    for (const auto& item : inv.items) {
+    double total = 0.0;
+    for(const auto& item : inv.items)
+    {
         total += item.price;
     }
-    std::cout << "Total: $" << total << "\n";
+    LOG_INFO("Total: ${}", total);
 }
 
 // AFTER
-void print_header(const Invoice& inv) {
-    std::cout << "================\n";
-    std::cout << "INVOICE #" << inv.number << "\n";
-    std::cout << "Date: " << inv.date << "\n";
-    std::cout << "================\n";
+void
+print_header(const invoice& inv)
+{
+    LOG_INFO("================");
+    LOG_INFO("INVOICE #{}", inv.number);
+    LOG_INFO("Date: {}", inv.date);
+    LOG_INFO("================");
 }
 
-void print_items(const std::vector<Item>& items) {
-    for (const auto& item : items) {
-        std::cout << item.name << ": $" << item.price << "\n";
+void
+print_items(const std::vector<line_item>& items)
+{
+    for(const auto& item : items)
+    {
+        LOG_INFO("{}: ${}", item.name, item.price);
     }
 }
 
-double calculate_total(const std::vector<Item>& items) {
-    return std::accumulate(items.begin(), items.end(), 0.0,
-        [](double sum, const Item& item) { return sum + item.price; });
+[[nodiscard]] double
+calculate_total(const std::vector<line_item>& items)
+{
+    return std::accumulate(
+        items.begin(), items.end(), 0.0,
+        [](double sum, const line_item& item) { return sum + item.price; });
 }
 
-void print_invoice(const Invoice& inv) {
+void
+print_invoice(const invoice& inv)
+{
     print_header(inv);
     print_items(inv.items);
-    std::cout << "Total: $" << calculate_total(inv.items) << "\n";
+    LOG_INFO("Total: ${}", calculate_total(inv.items));
 }
 ```
 
@@ -621,17 +635,37 @@ void print_invoice(const Invoice& inv) {
 
 ```cpp
 // BEFORE
-int get_rating() {
-    return more_than_five_late_deliveries() ? 2 : 1;
-}
-bool more_than_five_late_deliveries() {
-    return m_late_deliveries > 5;
-}
+class supplier
+{
+public:
+    [[nodiscard]] int get_rating() const
+    {
+        return more_than_five_late_deliveries() ? 2 : 1;
+    }
+
+private:
+    [[nodiscard]] bool more_than_five_late_deliveries() const
+    {
+        return m_late_deliveries > k_max_late_deliveries;
+    }
+
+    static constexpr int k_max_late_deliveries = 5;
+    int                  m_late_deliveries     = 0;
+};
 
 // AFTER
-int get_rating() {
-    return m_late_deliveries > 5 ? 2 : 1;
-}
+class supplier
+{
+public:
+    [[nodiscard]] int get_rating() const
+    {
+        return m_late_deliveries > k_max_late_deliveries ? 2 : 1;
+    }
+
+private:
+    static constexpr int k_max_late_deliveries = 5;
+    int                  m_late_deliveries     = 0;
+};
 ```
 
 ---
@@ -647,19 +681,28 @@ int get_rating() {
 
 ```cpp
 // BEFORE
-if (platform.find("MAC") != std::string::npos &&
-    browser.find("IE") != std::string::npos &&
-    was_initialized() && resize > 0) {
-    // ...
+void
+handle_resize(const std::string& platform, const std::string& browser, int resize)
+{
+    if(platform.find("MAC") != std::string::npos &&
+       browser.find("IE") != std::string::npos && was_initialized() && resize > 0)
+    {
+        // ...
+    }
 }
 
 // AFTER
-bool is_mac = platform.find("MAC") != std::string::npos;
-bool is_ie = browser.find("IE") != std::string::npos;
-bool was_resized = resize > 0;
+void
+handle_resize(const std::string& platform, const std::string& browser, int resize)
+{
+    const bool is_mac      = platform.find("MAC") != std::string::npos;
+    const bool is_ie       = browser.find("IE") != std::string::npos;
+    const bool was_resized = resize > 0;
 
-if (is_mac && is_ie && was_initialized() && was_resized) {
-    // ...
+    if(is_mac && is_ie && was_initialized() && was_resized)
+    {
+        // ...
+    }
 }
 ```
 
@@ -675,26 +718,48 @@ if (is_mac && is_ie && was_initialized() && was_resized) {
 **Solution:** Move the expression to a new method and call the method instead.
 
 ```cpp
+constexpr double k_bulk_threshold   = 1000.0;
+constexpr double k_bulk_discount    = 0.95;
+constexpr double k_regular_discount = 0.98;
+
 // BEFORE
-double calculate_total() {
-    double base_price = m_quantity * m_item_price;
-    if (base_price > 1000) {
-        return base_price * 0.95;
+class order
+{
+public:
+    [[nodiscard]] double calculate_total() const
+    {
+        const double base_price = m_quantity * m_item_price;
+        if(base_price > k_bulk_threshold)
+        {
+            return base_price * k_bulk_discount;
+        }
+        return base_price * k_regular_discount;
     }
-    return base_price * 0.98;
-}
+
+private:
+    int    m_quantity   = 0;
+    double m_item_price = 0.0;
+};
 
 // AFTER
-double base_price() const {
-    return m_quantity * m_item_price;
-}
-
-double calculate_total() {
-    if (base_price() > 1000) {
-        return base_price() * 0.95;
+class order
+{
+public:
+    [[nodiscard]] double calculate_total() const
+    {
+        if(base_price() > k_bulk_threshold)
+        {
+            return base_price() * k_bulk_discount;
+        }
+        return base_price() * k_regular_discount;
     }
-    return base_price() * 0.98;
-}
+
+private:
+    [[nodiscard]] double base_price() const { return m_quantity * m_item_price; }
+
+    int    m_quantity   = 0;
+    double m_item_price = 0.0;
+};
 ```
 
 ---
@@ -710,16 +775,24 @@ double calculate_total() {
 
 ```cpp
 // BEFORE
-double temp = 2 * (m_height + m_width);
-std::cout << "Perimeter: " << temp << "\n";
-temp = m_height * m_width;
-std::cout << "Area: " << temp << "\n";
+void
+log_shape(double height, double width)
+{
+    double temp = 2 * (height + width);
+    LOG_INFO("Perimeter: {}", temp);
+    temp = height * width;
+    LOG_INFO("Area: {}", temp);
+}
 
 // AFTER
-double perimeter = 2 * (m_height + m_width);
-std::cout << "Perimeter: " << perimeter << "\n";
-double area = m_height * m_width;
-std::cout << "Area: " << area << "\n";
+void
+log_shape(double height, double width)
+{
+    const double perimeter = 2 * (height + width);
+    LOG_INFO("Perimeter: {}", perimeter);
+    const double area = height * width;
+    LOG_INFO("Area: {}", area);
+}
 ```
 
 ---
@@ -734,18 +807,26 @@ std::cout << "Area: " << area << "\n";
 **Solution:** Use a local variable instead of the parameter.
 
 ```cpp
+constexpr int k_bulk_quantity = 50;
+
 // BEFORE
-int discount(int input_val, int quantity) {
-    if (quantity > 50) {
+[[nodiscard]] int
+discount(int input_val, int quantity)
+{
+    if(quantity > k_bulk_quantity)
+    {
         input_val -= 2;  // Modifying parameter!
     }
     return input_val;
 }
 
 // AFTER
-int discount(int input_val, int quantity) {
+[[nodiscard]] int
+discount(int input_val, int quantity)
+{
     int result = input_val;
-    if (quantity > 50) {
+    if(quantity > k_bulk_quantity)
+    {
         result -= 2;
     }
     return result;
@@ -773,43 +854,56 @@ int discount(int input_val, int quantity) {
 
 ```cpp
 // BEFORE
-class Order {
+class order
+{
 public:
-    double calculate_price() {
-        double primary_base = // complex calculation
-        double secondary = // uses primary_base
-        double tertiary = // uses secondary
+    [[nodiscard]] double calculate_price() const
+    {
+        const double primary_base = compute_primary_base(*this);
+        const double secondary    = compute_secondary(primary_base);
+        const double tertiary     = compute_tertiary(secondary);
         // 100 more lines using all these variables...
-        return result;
+        return primary_base + secondary + tertiary;
     }
 };
 
 // AFTER
-class PriceCalculator {
-    Order& m_order;
-    double m_primary_base;
-    double m_secondary;
-    double m_tertiary;
+class order;
 
+class price_calculator
+{
 public:
-    PriceCalculator(Order& order) : m_order(order) {}
+    explicit price_calculator(const order& source)
+    : m_order{ source }
+    {}
 
-    double compute() {
-        m_primary_base = // complex calculation
-        m_secondary = // uses m_primary_base
-        m_tertiary = // uses m_secondary
+    [[nodiscard]] double compute()
+    {
+        m_primary_base = compute_primary_base(m_order);
+        m_secondary    = compute_secondary(m_primary_base);
+        m_tertiary     = compute_tertiary(m_secondary);
         // Can now Extract Method freely!
         return calculate_final();
     }
 
 private:
-    double calculate_final() { /*...*/ }
+    [[nodiscard]] double calculate_final() const
+    {
+        return m_primary_base + m_secondary + m_tertiary;
+    }
+
+    const order& m_order;
+    double       m_primary_base = 0.0;
+    double       m_secondary    = 0.0;
+    double       m_tertiary     = 0.0;
 };
 
-class Order {
+class order
+{
 public:
-    double calculate_price() {
-        return PriceCalculator(*this).compute();
+    [[nodiscard]] double calculate_price() const
+    {
+        return price_calculator{ *this }.compute();
     }
 };
 ```
@@ -834,28 +928,47 @@ public:
 
 ```cpp
 // BEFORE
-std::string find_person(const std::vector<std::string>& people) {
-    for (const auto& person : people) {
-        if (person == "Don") return "Don";
+[[nodiscard]] std::string_view
+find_person(const std::vector<std::string>& people)
+{
+    for(const auto& person : people)
+    {
+        if(person == "Don")
+        {
+            return "Don";
+        }
     }
-    for (const auto& person : people) {
-        if (person == "John") return "John";
+    for(const auto& person : people)
+    {
+        if(person == "John")
+        {
+            return "John";
+        }
     }
-    for (const auto& person : people) {
-        if (person == "Kent") return "Kent";
+    for(const auto& person : people)
+    {
+        if(person == "Kent")
+        {
+            return "Kent";
+        }
     }
-    return "";
+    return {};
 }
 
 // AFTER
-std::string find_person(const std::vector<std::string>& people) {
-    static const std::vector<std::string> candidates = {"Don", "John", "Kent"};
-    for (const auto& candidate : candidates) {
-        if (std::find(people.begin(), people.end(), candidate) != people.end()) {
+[[nodiscard]] std::string_view
+find_person(const std::vector<std::string>& people)
+{
+    static constexpr std::array<std::string_view, 3> k_candidates = { "Don", "John",
+                                                                      "Kent" };
+    for(const auto candidate : k_candidates)
+    {
+        if(std::ranges::find(people, candidate) != people.end())
+        {
             return candidate;
         }
     }
-    return "";
+    return {};
 }
 ```
 
@@ -882,42 +995,66 @@ std::string find_person(const std::vector<std::string>& people) {
 6. Update all callers
 
 ```cpp
+constexpr double k_premium_base_charge  = 10.0;
+constexpr int    k_grace_days           = 7;
+constexpr double k_premium_daily_charge = 0.85;
+constexpr double k_regular_daily_charge = 1.75;
+
 // BEFORE
-class Account {
-    AccountType m_type;
+class account
+{
 public:
-    double overdraft_charge() {
-        if (m_type.is_premium()) {
-            double result = 10;
-            if (m_days_overdrawn > 7) {
-                result += (m_days_overdrawn - 7) * 0.85;
+    [[nodiscard]] double overdraft_charge() const
+    {
+        if(m_type.is_premium())
+        {
+            double result = k_premium_base_charge;
+            if(m_days_overdrawn > k_grace_days)
+            {
+                result += (m_days_overdrawn - k_grace_days) * k_premium_daily_charge;
             }
             return result;
         }
-        return m_days_overdrawn * 1.75;
+        return m_days_overdrawn * k_regular_daily_charge;
     }
+
+private:
+    account_type m_type;
+    int          m_days_overdrawn = 0;
 };
 
-// AFTER - Method moved to AccountType where it belongs
-class AccountType {
+// AFTER - method moved to account_type where it belongs
+class account_type
+{
 public:
-    double overdraft_charge(int days_overdrawn) {
-        if (is_premium()) {
-            double result = 10;
-            if (days_overdrawn > 7) {
-                result += (days_overdrawn - 7) * 0.85;
+    [[nodiscard]] bool is_premium() const;
+
+    [[nodiscard]] double overdraft_charge(int days_overdrawn) const
+    {
+        if(is_premium())
+        {
+            double result = k_premium_base_charge;
+            if(days_overdrawn > k_grace_days)
+            {
+                result += (days_overdrawn - k_grace_days) * k_premium_daily_charge;
             }
             return result;
         }
-        return days_overdrawn * 1.75;
+        return days_overdrawn * k_regular_daily_charge;
     }
 };
 
-class Account {
+class account
+{
 public:
-    double overdraft_charge() {
+    [[nodiscard]] double overdraft_charge() const
+    {
         return m_type.overdraft_charge(m_days_overdrawn);
     }
+
+private:
+    account_type m_type;
+    int          m_days_overdrawn = 0;
 };
 ```
 
@@ -941,23 +1078,30 @@ public:
 
 ```cpp
 // BEFORE
-class Account {
-    AccountType m_type;
-    double m_interest_rate;
+class account
+{
+    account_type m_type;
+    double       m_interest_rate = 0.0;
 };
 
-// AFTER - interest_rate moved to AccountType
-class AccountType {
-    double m_interest_rate;
+// AFTER - m_interest_rate moved to account_type
+class account_type
+{
 public:
-    double interest_rate() const { return m_interest_rate; }
-    void set_interest_rate(double rate) { m_interest_rate = rate; }
+    [[nodiscard]] double interest_rate() const { return m_interest_rate; }
+    void                 set_interest_rate(double rate) { m_interest_rate = rate; }
+
+private:
+    double m_interest_rate = 0.0;
 };
 
-class Account {
-    AccountType m_type;
+class account
+{
 public:
-    double interest_rate() const { return m_type.interest_rate(); }
+    [[nodiscard]] double interest_rate() const { return m_type.interest_rate(); }
+
+private:
+    account_type m_type;
 };
 ```
 
@@ -983,33 +1127,45 @@ public:
 
 ```cpp
 // BEFORE
-class Person {
+class person
+{
+public:
+    [[nodiscard]] std::string telephone_number() const
+    {
+        return "(" + m_office_area_code + ") " + m_office_number;
+    }
+
+private:
     std::string m_name;
     std::string m_office_area_code;
     std::string m_office_number;
-public:
-    std::string telephone_number() {
-        return "(" + m_office_area_code + ") " + m_office_number;
-    }
 };
 
 // AFTER
-class TelephoneNumber {
-    std::string m_area_code;
-    std::string m_number;
+class phone_number
+{
 public:
-    std::string format() const {
+    [[nodiscard]] std::string format() const
+    {
         return "(" + m_area_code + ") " + m_number;
     }
+
+private:
+    std::string m_area_code;
+    std::string m_number;
 };
 
-class Person {
-    std::string m_name;
-    TelephoneNumber m_office_telephone;
+class person
+{
 public:
-    std::string telephone_number() {
+    [[nodiscard]] std::string telephone_number() const
+    {
         return m_office_telephone.format();
     }
+
+private:
+    std::string  m_name;
+    phone_number m_office_telephone;
 };
 ```
 
@@ -1025,24 +1181,33 @@ public:
 **Solution:** Move all features to another class and delete the empty class.
 
 ```cpp
-// BEFORE - TelephoneNumber is too thin
-class TelephoneNumber {
-    std::string m_number;
+// BEFORE - phone_number is too thin
+class phone_number
+{
 public:
-    std::string number() const { return m_number; }
+    [[nodiscard]] std::string number() const { return m_number; }
+
+private:
+    std::string m_number;
 };
 
-class Person {
-    TelephoneNumber m_phone;
+class person
+{
 public:
-    std::string phone_number() { return m_phone.number(); }
+    [[nodiscard]] std::string telephone_number() const { return m_phone.number(); }
+
+private:
+    phone_number m_phone;
 };
 
 // AFTER
-class Person {
-    std::string m_phone_number;
+class person
+{
 public:
-    std::string phone_number() const { return m_phone_number; }
+    [[nodiscard]] std::string telephone_number() const { return m_telephone_number; }
+
+private:
+    std::string m_telephone_number;
 };
 ```
 
@@ -1058,21 +1223,27 @@ public:
 **Solution:** Create a method in A that delegates to B, hiding B from the client.
 
 ```cpp
-// BEFORE - Client knows about Department
-class Person {
-    Department* m_department;
+// BEFORE - client knows about department
+class person
+{
 public:
-    Department* department() { return m_department; }
-};
-// Client: manager = john.department()->manager();
+    [[nodiscard]] department* get_department() const { return m_department; }
 
-// AFTER - Department hidden
-class Person {
-    Department* m_department;
-public:
-    Person* manager() { return m_department->manager(); }
+private:
+    department* m_department = nullptr;
 };
-// Client: manager = john.manager();
+// Client: auto* manager = john.get_department()->manager();
+
+// AFTER - department hidden
+class person
+{
+public:
+    [[nodiscard]] person* manager() const { return m_department->manager(); }
+
+private:
+    department* m_department = nullptr;
+};
+// Client: auto* manager = john.manager();
 ```
 
 ---
@@ -1087,23 +1258,29 @@ public:
 **Solution:** Delete delegation methods; have clients call the delegate directly.
 
 ```cpp
-// BEFORE - Person delegates everything
-class Person {
-    Department* m_department;
+// BEFORE - person delegates everything
+class person
+{
 public:
-    Person* manager() { return m_department->manager(); }
-    std::string budget() { return m_department->budget(); }
-    std::string team_size() { return m_department->team_size(); }
+    [[nodiscard]] person* manager() const { return m_department->manager(); }
+    [[nodiscard]] double  budget() const { return m_department->budget(); }
+    [[nodiscard]] int     team_size() const { return m_department->team_size(); }
     // ... 10 more delegation methods
+
+private:
+    department* m_department = nullptr;
 };
 
-// AFTER - Expose delegate
-class Person {
-    Department* m_department;
+// AFTER - expose delegate
+class person
+{
 public:
-    Department* department() { return m_department; }
+    [[nodiscard]] department* get_department() const { return m_department; }
+
+private:
+    department* m_department = nullptr;
 };
-// Client: auto budget = john.department()->budget();
+// Client: auto budget = john.get_department()->budget();
 ```
 
 ---
@@ -1118,11 +1295,13 @@ public:
 **Solution:** Create the method in your client class, taking the utility object as parameter.
 
 ```cpp
-// Can't modify Date class
-class Report {
-    // Foreign method - ideally should be in Date class
-    static Date next_day(const Date& date) {
-        return Date(date.year(), date.month(), date.day() + 1);
+// Cannot modify the date class
+class report
+{
+    // Foreign method - ideally should be in date
+    [[nodiscard]] static date next_day(const date& current)
+    {
+        return date{ current.year(), current.month(), current.day() + 1 };
     }
 };
 ```
@@ -1139,30 +1318,38 @@ class Report {
 **Solution:** Create a new class (subclass or wrapper) containing the methods.
 
 ```cpp
+constexpr int k_sunday   = 0;
+constexpr int k_saturday = 6;
+
 // Subclass approach
-class ExtendedDate : public Date {
+class extended_date : public date
+{
 public:
-    using Date::Date;
-    Date next_day() const {
-        return Date(year(), month(), day() + 1);
-    }
-    bool is_weekend() const {
-        int dow = day_of_week();
-        return dow == 0 || dow == 6;
+    using date::date;
+
+    [[nodiscard]] date next_day() const { return date{ year(), month(), day() + 1 }; }
+    [[nodiscard]] bool is_weekend() const
+    {
+        const int weekday = day_of_week();
+        return weekday == k_sunday || weekday == k_saturday;
     }
 };
 
-// Wrapper approach (when inheritance not possible)
-class DateWrapper {
-    Date m_date;
+// Wrapper approach (when inheritance is not possible)
+class date_wrapper
+{
 public:
-    explicit DateWrapper(const Date& d) : m_date(d) {}
-    int year() const { return m_date.year(); }
-    int month() const { return m_date.month(); }
-    int day() const { return m_date.day(); }
-    Date next_day() const {
-        return Date(year(), month(), day() + 1);
-    }
+    explicit date_wrapper(const date& source)
+    : m_date{ source }
+    {}
+
+    [[nodiscard]] int  year() const { return m_date.year(); }
+    [[nodiscard]] int  month() const { return m_date.month(); }
+    [[nodiscard]] int  day() const { return m_date.day(); }
+    [[nodiscard]] date next_day() const { return date{ year(), month(), day() + 1 }; }
+
+private:
+    date m_date;
 };
 ```
 
@@ -1181,23 +1368,33 @@ public:
 
 ```cpp
 // BEFORE
-class IntRange {
-    int m_low, m_high;
+class int_range
+{
 public:
-    bool includes(int arg) {
+    [[nodiscard]] bool includes(int arg) const
+    {
         return arg >= m_low && arg <= m_high;  // Direct access
     }
+
+private:
+    int m_low  = 0;
+    int m_high = 0;
 };
 
 // AFTER
-class IntRange {
-    int m_low, m_high;
+class int_range
+{
 public:
-    int low() const { return m_low; }
-    int high() const { return m_high; }
-    bool includes(int arg) {
+    [[nodiscard]] int  low() const { return m_low; }
+    [[nodiscard]] int  high() const { return m_high; }
+    [[nodiscard]] bool includes(int arg) const
+    {
         return arg >= low() && arg <= high();  // Via getters
     }
+
+private:
+    int m_low  = 0;
+    int m_high = 0;
 };
 ```
 
@@ -1214,24 +1411,29 @@ public:
 
 ```cpp
 // BEFORE
-class Order {
+class order
+{
     std::string m_customer_name;
     std::string m_customer_email;
     std::string m_customer_phone;
 };
 
 // AFTER
-class Customer {
+class customer
+{
+public:
+    [[nodiscard]] bool        is_valid_email() const;
+    [[nodiscard]] std::string formatted_phone() const;
+
+private:
     std::string m_name;
     std::string m_email;
     std::string m_phone;
-public:
-    bool is_valid_email() const;
-    std::string formatted_phone() const;
 };
 
-class Order {
-    Customer m_customer;
+class order
+{
+    customer m_customer;
 };
 ```
 
@@ -1245,14 +1447,18 @@ class Order {
 
 ```cpp
 // BEFORE
-double potential_energy(double mass, double height) {
+[[nodiscard]] double
+potential_energy(double mass, double height)
+{
     return mass * 9.81 * height;
 }
 
 // AFTER
 constexpr double k_gravitational_acceleration = 9.81;  // m/s^2
 
-double potential_energy(double mass, double height) {
+[[nodiscard]] double
+potential_energy(double mass, double height)
+{
     return mass * k_gravitational_acceleration * height;
 }
 ```
@@ -1267,17 +1473,21 @@ double potential_energy(double mass, double height) {
 
 ```cpp
 // BEFORE
-class Person {
+class person
+{
 public:
     std::string name;  // Public field!
 };
 
 // AFTER
-class Person {
-    std::string m_name;
+class person
+{
 public:
-    const std::string& name() const { return m_name; }
-    void set_name(const std::string& name) { m_name = name; }
+    [[nodiscard]] const std::string& name() const { return m_name; }
+    void set_name(const std::string& value) { m_name = value; }
+
+private:
+    std::string m_name;
 };
 ```
 
@@ -1294,23 +1504,25 @@ public:
 
 ```cpp
 // BEFORE
-class Person {
-    std::vector<Course> m_courses;
+class person
+{
 public:
-    std::vector<Course>& courses() { return m_courses; }  // Dangerous!
+    std::vector<course>& courses() { return m_courses; }  // Dangerous!
+
+private:
+    std::vector<course> m_courses;
 };
 
 // AFTER
-class Person {
-    std::vector<Course> m_courses;
+class person
+{
 public:
-    const std::vector<Course>& courses() const { return m_courses; }
-    void add_course(const Course& c) { m_courses.push_back(c); }
-    void remove_course(const Course& c) {
-        m_courses.erase(
-            std::remove(m_courses.begin(), m_courses.end(), c),
-            m_courses.end());
-    }
+    [[nodiscard]] const std::vector<course>& courses() const { return m_courses; }
+    void add_course(const course& entry) { m_courses.push_back(entry); }
+    void remove_course(const course& entry) { std::erase(m_courses, entry); }
+
+private:
+    std::vector<course> m_courses;
 };
 ```
 
@@ -1324,28 +1536,38 @@ public:
 
 ```cpp
 // BEFORE
-class Person {
-    int m_blood_type;  // 0=O, 1=A, 2=B, 3=AB
-    static constexpr int k_o = 0;
-    static constexpr int k_a = 1;
+class person
+{
+    static constexpr int k_o  = 0;
+    static constexpr int k_a  = 1;
+    static constexpr int k_b  = 2;
+    static constexpr int k_ab = 3;
+
+    int m_blood_type = k_o;
 };
 
 // AFTER
-class BloodType {
-    int m_code;
-    BloodType(int code) : m_code(code) {}
+class blood_type
+{
 public:
-    static const BloodType k_o;
-    static const BloodType k_a;
-    static const BloodType k_b;
-    static const BloodType k_ab;
-    bool operator==(const BloodType& other) const {
-        return m_code == other.m_code;
-    }
+    static const blood_type k_o;
+    static const blood_type k_a;
+    static const blood_type k_b;
+    static const blood_type k_ab;
+
+    bool operator==(const blood_type& other) const = default;
+
+private:
+    explicit blood_type(int code)
+    : m_code{ code }
+    {}
+
+    int m_code = 0;
 };
 
-class Person {
-    BloodType m_blood_type;
+class person
+{
+    blood_type m_blood_type = blood_type::k_o;
 };
 ```
 
@@ -1358,32 +1580,62 @@ class Person {
 | High | High | Switch Statements, Primitive Obsession (type codes with behavior) |
 
 ```cpp
+constexpr int k_engineer_bonus = 100;
+constexpr int k_manager_bonus  = 500;
+constexpr int k_salesman_bonus = 200;
+
 // BEFORE
-class Employee {
-    int m_type;
+enum class employee_kind
+{
+    engineer,
+    manager,
+    salesman
+};
+
+class employee
+{
 public:
-    int bonus() {
-        switch (m_type) {
-            case ENGINEER: return 100;
-            case MANAGER: return 500;
-            case SALESMAN: return 200;
+    [[nodiscard]] int bonus() const
+    {
+        switch(m_kind)
+        {
+            case employee_kind::engineer: return k_engineer_bonus;
+            case employee_kind::manager: return k_manager_bonus;
+            case employee_kind::salesman: return k_salesman_bonus;
+            default:
+                throw std::logic_error(fmt::format("employee_kind {} not handled",
+                                                   static_cast<int>(m_kind)));
         }
-        return 0;
     }
+
+private:
+    employee_kind m_kind = employee_kind::engineer;
 };
 
 // AFTER
-class Employee {
+class employee_interface
+{
 public:
-    virtual int bonus() = 0;
+    virtual ~employee_interface()           = default;
+    [[nodiscard]] virtual int bonus() const = 0;
 };
-class Engineer : public Employee {
+
+class engineer final : public employee_interface
+{
 public:
-    int bonus() override { return 100; }
+    [[nodiscard]] int bonus() const override { return k_engineer_bonus; }
 };
-class Manager : public Employee {
+
+class manager final : public employee_interface
+{
 public:
-    int bonus() override { return 500; }
+    [[nodiscard]] int bonus() const override { return k_manager_bonus; }
+};
+
+class salesman final : public employee_interface
+{
+public:
+    [[nodiscard]] int bonus() const override { return k_salesman_bonus; }
 };
 ```
 
@@ -1397,38 +1649,69 @@ public:
 
 ```cpp
 // BEFORE
-class Employee {
-    int m_type;
+enum class employee_kind
+{
+    engineer,
+    salesman,
+    manager
+};
+
+class employee
+{
 public:
-    int pay_amount() {
-        switch (m_type) {
-            case ENGINEER: return m_monthly_salary;
-            case SALESMAN: return m_monthly_salary + m_commission;
-            case MANAGER: return m_monthly_salary + m_bonus;
+    [[nodiscard]] int pay_amount() const
+    {
+        switch(m_kind)
+        {
+            case employee_kind::engineer: return m_monthly_salary;
+            case employee_kind::salesman: return m_monthly_salary + m_commission;
+            case employee_kind::manager: return m_monthly_salary + m_bonus;
+            default:
+                throw std::logic_error(fmt::format("employee_kind {} not handled",
+                                                   static_cast<int>(m_kind)));
         }
     }
+
+private:
+    employee_kind m_kind           = employee_kind::engineer;
+    int           m_monthly_salary = 0;
+    int           m_commission     = 0;
+    int           m_bonus          = 0;
 };
 
 // AFTER
-class EmployeeType {
+class employee;
+
+class employee_type_interface
+{
 public:
-    virtual int pay_amount(const Employee& emp) = 0;
+    virtual ~employee_type_interface()                              = default;
+    [[nodiscard]] virtual int pay_amount(const employee& emp) const = 0;
 };
 
-class Engineer : public EmployeeType {
+class employee
+{
 public:
-    int pay_amount(const Employee& emp) override {
+    [[nodiscard]] int monthly_salary() const { return m_monthly_salary; }
+
+    void set_type(std::unique_ptr<employee_type_interface> next)
+    {
+        m_type = std::move(next);  // Can change at runtime
+    }
+    [[nodiscard]] int pay_amount() const { return m_type->pay_amount(*this); }
+
+private:
+    std::unique_ptr<employee_type_interface> m_type;
+    int                                      m_monthly_salary = 0;
+};
+
+class engineer final : public employee_type_interface
+{
+public:
+    [[nodiscard]] int pay_amount(const employee& emp) const override
+    {
         return emp.monthly_salary();
     }
-};
-
-class Employee {
-    std::unique_ptr<EmployeeType> m_type;
-public:
-    void set_type(std::unique_ptr<EmployeeType> t) {
-        m_type = std::move(t);  // Can change at runtime
-    }
-    int pay_amount() { return m_type->pay_amount(*this); }
 };
 ```
 
@@ -1446,26 +1729,55 @@ public:
 **Solution:** Extract condition, then-block, and else-block into separate methods.
 
 ```cpp
+constexpr int k_summer_start = 152;  // day of year
+constexpr int k_summer_end   = 243;
+
 // BEFORE
-double calculate_charge(const Date& date, int quantity) {
-    if (date < SUMMER_START || date > SUMMER_END) {
-        return quantity * m_winter_rate + m_winter_service_charge;
-    } else {
+class tariff
+{
+public:
+    [[nodiscard]] double calculate_charge(int day_of_year, int quantity) const
+    {
+        if(day_of_year < k_summer_start || day_of_year > k_summer_end)
+        {
+            return quantity * m_winter_rate + m_winter_service_charge;
+        }
         return quantity * m_summer_rate;
     }
-}
+
+private:
+    double m_winter_rate           = 0.0;
+    double m_winter_service_charge = 0.0;
+    double m_summer_rate           = 0.0;
+};
 
 // AFTER
-bool is_summer(const Date& date) {
-    return date >= SUMMER_START && date <= SUMMER_END;
-}
-double summer_charge(int quantity) { return quantity * m_summer_rate; }
-double winter_charge(int quantity) {
-    return quantity * m_winter_rate + m_winter_service_charge;
-}
-double calculate_charge(const Date& date, int quantity) {
-    return is_summer(date) ? summer_charge(quantity) : winter_charge(quantity);
-}
+class tariff
+{
+public:
+    [[nodiscard]] double calculate_charge(int day_of_year, int quantity) const
+    {
+        return is_summer(day_of_year) ? summer_charge(quantity) : winter_charge(quantity);
+    }
+
+private:
+    [[nodiscard]] static bool is_summer(int day_of_year)
+    {
+        return day_of_year >= k_summer_start && day_of_year <= k_summer_end;
+    }
+    [[nodiscard]] double summer_charge(int quantity) const
+    {
+        return quantity * m_summer_rate;
+    }
+    [[nodiscard]] double winter_charge(int quantity) const
+    {
+        return quantity * m_winter_rate + m_winter_service_charge;
+    }
+
+    double m_winter_rate           = 0.0;
+    double m_winter_service_charge = 0.0;
+    double m_summer_rate           = 0.0;
+};
 ```
 
 ---
@@ -1480,22 +1792,62 @@ double calculate_charge(const Date& date, int quantity) {
 **Solution:** Combine into a single expression and extract to a method.
 
 ```cpp
+constexpr int k_max_months_disabled = 12;
+
 // BEFORE
-double disability_amount() {
-    if (m_seniority < 2) return 0;
-    if (m_months_disabled > 12) return 0;
-    if (m_is_part_time) return 0;
-    return calculate_disability();
-}
+class employee
+{
+public:
+    [[nodiscard]] double disability_amount() const
+    {
+        if(m_seniority < 2)
+        {
+            return 0.0;
+        }
+        if(m_months_disabled > k_max_months_disabled)
+        {
+            return 0.0;
+        }
+        if(m_is_part_time)
+        {
+            return 0.0;
+        }
+        return calculate_disability();
+    }
+
+private:
+    [[nodiscard]] double calculate_disability() const;
+
+    int  m_seniority       = 0;
+    int  m_months_disabled = 0;
+    bool m_is_part_time    = false;
+};
 
 // AFTER
-bool is_not_eligible_for_disability() {
-    return m_seniority < 2 || m_months_disabled > 12 || m_is_part_time;
-}
-double disability_amount() {
-    if (is_not_eligible_for_disability()) return 0;
-    return calculate_disability();
-}
+class employee
+{
+public:
+    [[nodiscard]] double disability_amount() const
+    {
+        if(is_not_eligible_for_disability())
+        {
+            return 0.0;
+        }
+        return calculate_disability();
+    }
+
+private:
+    [[nodiscard]] bool is_not_eligible_for_disability() const
+    {
+        return m_seniority < 2 || m_months_disabled > k_max_months_disabled ||
+               m_is_part_time;
+    }
+    [[nodiscard]] double calculate_disability() const;
+
+    int  m_seniority       = 0;
+    int  m_months_disabled = 0;
+    bool m_is_part_time    = false;
+};
 ```
 
 ---
@@ -1510,18 +1862,36 @@ double disability_amount() {
 **Solution:** Move it outside the conditional.
 
 ```cpp
+constexpr double k_special_discount = 0.95;
+constexpr double k_regular_discount = 0.98;
+
 // BEFORE
-if (is_special_deal()) {
-    total = price * 0.95;
-    send_notification();  // Duplicated!
-} else {
-    total = price * 0.98;
-    send_notification();  // Duplicated!
+[[nodiscard]] double
+checkout(double price)
+{
+    double total = 0.0;
+    if(is_special_deal())
+    {
+        total = price * k_special_discount;
+        send_notification();  // Duplicated!
+    }
+    else
+    {
+        total = price * k_regular_discount;
+        send_notification();  // Duplicated!
+    }
+    return total;
 }
 
 // AFTER
-total = is_special_deal() ? price * 0.95 : price * 0.98;
-send_notification();  // Moved outside
+[[nodiscard]] double
+checkout(double price)
+{
+    const double total =
+        price * (is_special_deal() ? k_special_discount : k_regular_discount);
+    send_notification();  // Moved outside
+    return total;
+}
 ```
 
 ---
@@ -1537,31 +1907,79 @@ send_notification();  // Moved outside
 
 ```cpp
 // BEFORE
-double get_pay_amount() {
-    double result;
-    if (m_is_dead) {
-        result = dead_amount();
-    } else {
-        if (m_is_separated) {
-            result = separated_amount();
-        } else {
-            if (m_is_retired) {
-                result = retired_amount();
-            } else {
-                result = normal_pay_amount();
+class payroll
+{
+public:
+    [[nodiscard]] double get_pay_amount() const
+    {
+        double result = 0.0;
+        if(m_is_dead)
+        {
+            result = dead_amount();
+        }
+        else
+        {
+            if(m_is_separated)
+            {
+                result = separated_amount();
+            }
+            else
+            {
+                if(m_is_retired)
+                {
+                    result = retired_amount();
+                }
+                else
+                {
+                    result = normal_pay_amount();
+                }
             }
         }
+        return result;
     }
-    return result;
-}
+
+private:
+    [[nodiscard]] double dead_amount() const;
+    [[nodiscard]] double separated_amount() const;
+    [[nodiscard]] double retired_amount() const;
+    [[nodiscard]] double normal_pay_amount() const;
+
+    bool m_is_dead      = false;
+    bool m_is_separated = false;
+    bool m_is_retired   = false;
+};
 
 // AFTER
-double get_pay_amount() {
-    if (m_is_dead) return dead_amount();
-    if (m_is_separated) return separated_amount();
-    if (m_is_retired) return retired_amount();
-    return normal_pay_amount();
-}
+class payroll
+{
+public:
+    [[nodiscard]] double get_pay_amount() const
+    {
+        if(m_is_dead)
+        {
+            return dead_amount();
+        }
+        if(m_is_separated)
+        {
+            return separated_amount();
+        }
+        if(m_is_retired)
+        {
+            return retired_amount();
+        }
+        return normal_pay_amount();
+    }
+
+private:
+    [[nodiscard]] double dead_amount() const;
+    [[nodiscard]] double separated_amount() const;
+    [[nodiscard]] double retired_amount() const;
+    [[nodiscard]] double normal_pay_amount() const;
+
+    bool m_is_dead      = false;
+    bool m_is_separated = false;
+    bool m_is_retired   = false;
+};
 ```
 
 ---
@@ -1582,40 +2000,76 @@ double get_pay_amount() {
 
 ```cpp
 // BEFORE
-class Bird {
-    std::string m_type;
+enum class bird_kind
+{
+    european,
+    african,
+    norwegian_blue
+};
+
+class bird
+{
 public:
-    double get_speed() {
-        switch (m_type) {
-            case "European": return get_base_speed();
-            case "African":
-                return get_base_speed() - m_load_factor * m_num_coconuts;
-            case "NorwegianBlue":
-                return m_is_nailed ? 0 : get_base_speed(m_voltage);
+    [[nodiscard]] double get_speed() const
+    {
+        switch(m_kind)
+        {
+            case bird_kind::european: return base_speed();
+            case bird_kind::african: return base_speed() - m_load_factor * m_num_coconuts;
+            case bird_kind::norwegian_blue:
+                return m_is_nailed ? 0.0 : base_speed(m_voltage);
+            default:
+                throw std::logic_error(
+                    fmt::format("bird_kind {} not handled", static_cast<int>(m_kind)));
         }
     }
+
+private:
+    bird_kind m_kind         = bird_kind::european;
+    double    m_load_factor  = 0.0;
+    int       m_num_coconuts = 0;
+    bool      m_is_nailed    = false;
+    double    m_voltage      = 0.0;
 };
 
 // AFTER
-class Bird {
+class bird_interface
+{
 public:
-    virtual double get_speed() = 0;
+    virtual ~bird_interface()                      = default;
+    [[nodiscard]] virtual double get_speed() const = 0;
 };
-class European : public Bird {
+
+class european final : public bird_interface
+{
 public:
-    double get_speed() override { return get_base_speed(); }
+    [[nodiscard]] double get_speed() const override { return base_speed(); }
 };
-class African : public Bird {
+
+class african final : public bird_interface
+{
 public:
-    double get_speed() override {
-        return get_base_speed() - m_load_factor * m_num_coconuts;
+    [[nodiscard]] double get_speed() const override
+    {
+        return base_speed() - m_load_factor * m_num_coconuts;
     }
+
+private:
+    double m_load_factor  = 0.0;
+    int    m_num_coconuts = 0;
 };
-class NorwegianBlue : public Bird {
+
+class norwegian_blue final : public bird_interface
+{
 public:
-    double get_speed() override {
-        return m_is_nailed ? 0 : get_base_speed(m_voltage);
+    [[nodiscard]] double get_speed() const override
+    {
+        return m_is_nailed ? 0.0 : base_speed(m_voltage);
     }
+
+private:
+    bool   m_is_nailed = false;
+    double m_voltage   = 0.0;
 };
 ```
 
@@ -1631,21 +2085,31 @@ public:
 **Solution:** Return a null object that exhibits default behavior.
 
 ```cpp
-// BEFORE -- scattered null checks
-if (customer != nullptr) {
-    plan = customer->plan();
-} else {
-    plan = BillingPlan::basic();
+// BEFORE - scattered null checks
+[[nodiscard]] billing_plan
+plan_for(const customer* buyer)
+{
+    if(buyer != nullptr)
+    {
+        return buyer->plan();
+    }
+    return billing_plan::basic();
 }
 
 // AFTER
-class NullCustomer : public Customer {
+class null_customer final : public customer
+{
 public:
-    bool is_null() override { return true; }
-    BillingPlan* plan() override { return &BillingPlan::basic(); }
+    [[nodiscard]] bool         is_null() const override { return true; }
+    [[nodiscard]] billing_plan plan() const override { return billing_plan::basic(); }
 };
-// Usage -- no null checks:
-plan = customer->plan();
+
+// Usage, no null checks: the lookup returns a null_customer instead of nullptr
+[[nodiscard]] billing_plan
+plan_for(const customer& buyer)
+{
+    return buyer.plan();
+}
 ```
 
 ---
@@ -1661,19 +2125,41 @@ plan = customer->plan();
 
 ```cpp
 // BEFORE
-double get_expense_limit() {
-    return (m_expense_limit != k_null_expense)
-        ? m_expense_limit
-        : m_primary_project->member_expense_limit();
-}
+class employee
+{
+public:
+    [[nodiscard]] double get_expense_limit() const
+    {
+        return m_expense_limit != k_null_expense
+                   ? m_expense_limit
+                   : m_primary_project->member_expense_limit();
+    }
+
+private:
+    static constexpr double k_null_expense = -1.0;
+
+    double         m_expense_limit   = k_null_expense;
+    const project* m_primary_project = nullptr;
+};
 
 // AFTER
-double get_expense_limit() {
-    assert(m_expense_limit != k_null_expense || m_primary_project != nullptr);
-    return (m_expense_limit != k_null_expense)
-        ? m_expense_limit
-        : m_primary_project->member_expense_limit();
-}
+class employee
+{
+public:
+    [[nodiscard]] double get_expense_limit() const
+    {
+        assert(m_expense_limit != k_null_expense || m_primary_project != nullptr);
+        return m_expense_limit != k_null_expense
+                   ? m_expense_limit
+                   : m_primary_project->member_expense_limit();
+    }
+
+private:
+    static constexpr double k_null_expense = -1.0;
+
+    double         m_expense_limit   = k_null_expense;
+    const project* m_primary_project = nullptr;
+};
 ```
 
 ---
@@ -1688,9 +2174,24 @@ double get_expense_limit() {
 
 ```cpp
 // BEFORE
-std::string get_tlp() { return m_telephone; }
+class person
+{
+public:
+    [[nodiscard]] std::string get_tlp() const { return m_telephone; }
+
+private:
+    std::string m_telephone;
+};
+
 // AFTER
-std::string get_telephone_number() { return m_telephone; }
+class person
+{
+public:
+    [[nodiscard]] std::string get_telephone_number() const { return m_telephone; }
+
+private:
+    std::string m_telephone;
+};
 ```
 
 ---
@@ -1704,9 +2205,24 @@ std::string get_telephone_number() { return m_telephone; }
 ```cpp
 // Remove Parameter
 // BEFORE
-void set_value(int value, int unused) { m_value = value; }
+class counter
+{
+public:
+    void set_value(int value, int unused) { m_value = value; }
+
+private:
+    int m_value = 0;
+};
+
 // AFTER
-void set_value(int value) { m_value = value; }
+class counter
+{
+public:
+    void set_value(int value) { m_value = value; }
+
+private:
+    int m_value = 0;
+};
 ```
 
 ---
@@ -1722,15 +2238,32 @@ void set_value(int value) { m_value = value; }
 
 ```cpp
 // BEFORE
-int get_total_and_clear() {
-    int result = calculate_total();
-    clear_items();  // Side effect!
-    return result;
-}
+class cart
+{
+public:
+    [[nodiscard]] int get_total_and_clear()
+    {
+        const int result = calculate_total();
+        clear_items();  // Side effect!
+        return result;
+    }
+
+private:
+    [[nodiscard]] int calculate_total() const;
+    void              clear_items();
+};
 
 // AFTER
-int get_total() const { return calculate_total(); }  // Query
-void clear() { clear_items(); }                       // Modifier
+class cart
+{
+public:
+    [[nodiscard]] int get_total() const { return calculate_total(); }  // Query
+    void              clear() { clear_items(); }                       // Modifier
+
+private:
+    [[nodiscard]] int calculate_total() const;
+    void              clear_items();
+};
 ```
 
 ---
@@ -1743,11 +2276,28 @@ void clear() { clear_items(); }                       // Modifier
 
 ```cpp
 // BEFORE
-void five_percent_raise() { m_salary *= 1.05; }
-void ten_percent_raise() { m_salary *= 1.10; }
+class employee
+{
+public:
+    void five_percent_raise() { m_salary *= k_five_percent_factor; }
+    void ten_percent_raise() { m_salary *= k_ten_percent_factor; }
+
+private:
+    static constexpr double k_five_percent_factor = 1.05;
+    static constexpr double k_ten_percent_factor  = 1.10;
+
+    double m_salary = 0.0;
+};
 
 // AFTER
-void raise(double factor) { m_salary *= (1 + factor); }
+class employee
+{
+public:
+    void raise(double rate) { m_salary *= (1 + rate); }
+
+private:
+    double m_salary = 0.0;
+};
 ```
 
 ---
@@ -1763,21 +2313,38 @@ void raise(double factor) { m_salary *= (1 + factor); }
 
 ```cpp
 // BEFORE
-void amount_invoiced(Date start, Date end);
-void amount_received(Date start, Date end);
-void amount_overdue(Date start, Date end);
+[[nodiscard]] double
+amount_invoiced(const date& start, const date& end);
+[[nodiscard]] double
+amount_received(const date& start, const date& end);
+[[nodiscard]] double
+amount_overdue(const date& start, const date& end);
 
 // AFTER
-class DateRange {
-    Date m_start, m_end;
+class date_range
+{
 public:
-    DateRange(Date start, Date end) : m_start(start), m_end(end) {}
-    bool includes(Date d) const { return d >= m_start && d <= m_end; }
+    date_range(const date& start, const date& end)
+    : m_start{ start }
+    , m_end{ end }
+    {}
+
+    [[nodiscard]] bool includes(const date& when) const
+    {
+        return when >= m_start && when <= m_end;
+    }
+
+private:
+    date m_start;
+    date m_end;
 };
 
-void amount_invoiced(DateRange range);
-void amount_received(DateRange range);
-void amount_overdue(DateRange range);
+[[nodiscard]] double
+amount_invoiced(const date_range& range);
+[[nodiscard]] double
+amount_received(const date_range& range);
+[[nodiscard]] double
+amount_overdue(const date_range& range);
 ```
 
 ---
@@ -1790,12 +2357,20 @@ void amount_overdue(DateRange range);
 
 ```cpp
 // BEFORE
-int low = days_temp_range.low();
-int high = days_temp_range.high();
-bool within_plan = plan.within_range(low, high);
+[[nodiscard]] bool
+is_within_plan(const heating_plan& plan, const temp_range& days_temp_range)
+{
+    const int low  = days_temp_range.low();
+    const int high = days_temp_range.high();
+    return plan.within_range(low, high);
+}
 
 // AFTER
-bool within_plan = plan.within_range(days_temp_range);
+[[nodiscard]] bool
+is_within_plan(const heating_plan& plan, const temp_range& days_temp_range)
+{
+    return plan.within_range(days_temp_range);
+}
 ```
 
 ---
@@ -1808,19 +2383,46 @@ bool within_plan = plan.within_range(days_temp_range);
 
 ```cpp
 // AFTER
-class Employee {
-protected:
-    Employee() = default;
-public:
-    static std::unique_ptr<Employee> create(int type) {
-        switch (type) {
-            case ENGINEER: return std::make_unique<Engineer>();
-            case MANAGER: return std::make_unique<Manager>();
-            case SALESMAN: return std::make_unique<Salesman>();
-        }
-        throw std::invalid_argument("Invalid employee type");
-    }
+enum class employee_kind
+{
+    engineer,
+    manager,
+    salesman
 };
+
+class employee
+{
+public:
+    virtual ~employee() = default;
+
+    [[nodiscard]] static std::unique_ptr<employee> create(employee_kind kind);
+
+protected:
+    employee() = default;
+};
+
+class engineer final : public employee
+{};
+
+class manager final : public employee
+{};
+
+class salesman final : public employee
+{};
+
+std::unique_ptr<employee>
+employee::create(employee_kind kind)
+{
+    switch(kind)
+    {
+        case employee_kind::engineer: return std::make_unique<engineer>();
+        case employee_kind::manager: return std::make_unique<manager>();
+        case employee_kind::salesman: return std::make_unique<salesman>();
+        default:
+            throw std::logic_error(
+                fmt::format("employee_kind {} not handled", static_cast<int>(kind)));
+    }
+}
 ```
 
 ---
@@ -1833,19 +2435,39 @@ public:
 
 ```cpp
 // BEFORE
-int withdraw(int amount) {
-    if (amount > m_balance) return -1;  // Error code
-    m_balance -= amount;
-    return 0;
-}
+class account
+{
+public:
+    [[nodiscard]] int withdraw(int amount)
+    {
+        if(amount > m_balance)
+        {
+            return -1;  // Error code
+        }
+        m_balance -= amount;
+        return 0;
+    }
+
+private:
+    int m_balance = 0;
+};
 
 // AFTER
-void withdraw(int amount) {
-    if (amount > m_balance) {
-        throw std::runtime_error("Insufficient funds");
+class account
+{
+public:
+    void withdraw(int amount)
+    {
+        if(amount > m_balance)
+        {
+            throw std::runtime_error("Insufficient funds");
+        }
+        m_balance -= amount;
     }
-    m_balance -= amount;
-}
+
+private:
+    int m_balance = 0;
+};
 ```
 
 ---
@@ -1858,19 +2480,40 @@ void withdraw(int amount) {
 
 ```cpp
 // BEFORE
-double m_valuefor_period(int period) {
-    try {
-        return m_values.at(period);
-    } catch (std::out_of_range&) {
-        return 0;
+class ledger
+{
+public:
+    [[nodiscard]] double value_for_period(std::size_t period) const
+    {
+        try
+        {
+            return m_values.at(period);
+        } catch(const std::out_of_range&)
+        {
+            return 0.0;
+        }
     }
-}
+
+private:
+    std::vector<double> m_values;
+};
 
 // AFTER
-double m_valuefor_period(int period) {
-    if (period < 0 || period >= m_values.size()) return 0;
-    return m_values[period];
-}
+class ledger
+{
+public:
+    [[nodiscard]] double value_for_period(std::size_t period) const
+    {
+        if(period >= m_values.size())
+        {
+            return 0.0;
+        }
+        return m_values[period];
+    }
+
+private:
+    std::vector<double> m_values;
+};
 ```
 
 ---
@@ -1885,11 +2528,18 @@ double m_valuefor_period(int period) {
 
 ```cpp
 // BEFORE
-class Salesman : public Employee { std::string m_name; };  // Duplicated
-class Engineer : public Employee { std::string m_name; };  // Duplicated
+class salesman : public employee
+{
+    std::string m_name;  // Duplicated
+};
+class engineer : public employee
+{
+    std::string m_name;  // Duplicated
+};
 
 // AFTER
-class Employee {
+class employee
+{
 protected:
     std::string m_name;  // Moved to parent
 };
@@ -1904,24 +2554,44 @@ protected:
 | Medium | Low | Duplicate constructor code |
 
 ```cpp
-// BEFORE -- duplicate init in each subclass
-class Manager : public Employee {
+// BEFORE - duplicate init in each subclass
+class manager : public employee
+{
 public:
-    Manager(std::string name, std::string id, int grade) {
-        m_name = name; m_id = id; m_grade = grade;
+    manager(std::string name, std::string employee_id, int grade)
+    {
+        m_name        = std::move(name);
+        m_employee_id = std::move(employee_id);
+        m_grade       = grade;
     }
+
+private:
+    int m_grade = 0;
 };
 
 // AFTER
-class Employee {
+class employee
+{
 protected:
-    Employee(std::string name, std::string id)
-        : m_name(name), m_id(id) {}
+    employee(std::string name, std::string employee_id)
+    : m_name{ std::move(name) }
+    , m_employee_id{ std::move(employee_id) }
+    {}
+
+    std::string m_name;
+    std::string m_employee_id;
 };
-class Manager : public Employee {
+
+class manager : public employee
+{
 public:
-    Manager(std::string name, std::string id, int grade)
-        : Employee(name, id), m_grade(grade) {}
+    manager(std::string name, std::string employee_id, int grade)
+    : employee{ std::move(name), std::move(employee_id) }
+    , m_grade{ grade }
+    {}
+
+private:
+    int m_grade = 0;
 };
 ```
 
@@ -1934,16 +2604,28 @@ public:
 | Medium | Low | Superclass has irrelevant members |
 
 ```cpp
-// BEFORE - get_quota only relevant to Salesman
-class Employee {
+// BEFORE - get_quota only relevant to salesman
+class employee
+{
 public:
-    virtual double get_quota() { return 0; }  // Not relevant to all
+    virtual ~employee() = default;
+    [[nodiscard]] virtual double get_quota() const { return 0.0; }  // Not relevant to all
 };
 
 // AFTER
-class Salesman : public Employee {
+class employee
+{
 public:
-    double get_quota() { return m_quota; }  // Moved here
+    virtual ~employee() = default;
+};
+
+class salesman : public employee
+{
+public:
+    [[nodiscard]] double get_quota() const { return m_quota; }  // Moved here
+
+private:
+    double m_quota = 0.0;
 };
 ```
 
@@ -1957,30 +2639,44 @@ public:
 
 ```cpp
 // BEFORE
-class JobItem {
-    double m_unit_price;
-    Employee* m_employee;  // Only for labor items
-    bool m_is_labor;
+class job_item
+{
 public:
-    double unit_price() {
+    [[nodiscard]] double unit_price() const
+    {
         return m_is_labor ? m_employee->rate() : m_unit_price;
     }
+
+private:
+    double          m_unit_price = 0.0;
+    const employee* m_employee   = nullptr;  // Only for labor items
+    bool            m_is_labor   = false;
 };
 
 // AFTER
-class JobItem {
+class job_item_interface
+{
 public:
-    virtual double unit_price() = 0;
+    virtual ~job_item_interface()                   = default;
+    [[nodiscard]] virtual double unit_price() const = 0;
 };
-class PartsItem : public JobItem {
-    double m_unit_price;
+
+class parts_item final : public job_item_interface
+{
 public:
-    double unit_price() override { return m_unit_price; }
+    [[nodiscard]] double unit_price() const override { return m_unit_price; }
+
+private:
+    double m_unit_price = 0.0;
 };
-class LaborItem : public JobItem {
-    Employee* m_employee;
+
+class labor_item final : public job_item_interface
+{
 public:
-    double unit_price() override { return m_employee->rate(); }
+    [[nodiscard]] double unit_price() const override { return m_employee->rate(); }
+
+private:
+    const employee* m_employee = nullptr;
 };
 ```
 
@@ -1993,19 +2689,40 @@ public:
 | High | Medium | Duplicate Code, similar classes |
 
 ```cpp
-// BEFORE -- Department and Employee both have m_name and annual cost
-class Department { std::string m_name; /* ... */ };
-class Employee { std::string m_name; /* ... */ };
+// BEFORE - department and employee both have m_name and an annual cost
+class department
+{
+    std::string m_name;
+    /* ... */
+};
+class employee
+{
+    std::string m_name;
+    /* ... */
+};
 
 // AFTER
-class Party {
+class party_interface
+{
+public:
+    virtual ~party_interface()                       = default;
+    [[nodiscard]] virtual double annual_cost() const = 0;
+
 protected:
     std::string m_name;
-public:
-    virtual double annual_cost() = 0;
 };
-class Department : public Party { /* ... */ };
-class Employee : public Party { /* ... */ };
+
+class department final : public party_interface
+{
+public:
+    [[nodiscard]] double annual_cost() const override;
+};
+
+class employee final : public party_interface
+{
+public:
+    [[nodiscard]] double annual_cost() const override;
+};
 ```
 
 ---
@@ -2017,19 +2734,21 @@ class Employee : public Party { /* ... */ };
 | Medium | Low | Tight coupling, untestable code |
 
 ```cpp
-class IBillable {
+class billable_interface
+{
 public:
-    virtual double rate() = 0;
-    virtual bool has_special_skill() = 0;
-    virtual ~IBillable() = default;
+    virtual ~billable_interface()                          = default;
+    [[nodiscard]] virtual double rate() const              = 0;
+    [[nodiscard]] virtual bool   has_special_skill() const = 0;
 };
 
-class Employee : public IBillable {
+class employee final : public billable_interface
+{
 public:
-    double rate() override;
-    bool has_special_skill() override;
+    [[nodiscard]] double rate() const override;
+    [[nodiscard]] bool   has_special_skill() const override;
 };
-// Client depends only on IBillable -- can mock for testing
+// Client depends only on billable_interface -- can mock for testing
 ```
 
 ---
@@ -2042,11 +2761,29 @@ public:
 
 ```cpp
 // BEFORE
-class Employee { virtual double rate() { return m_base_rate; } };
-class Salesman : public Employee { /* adds nothing */ };
+class employee
+{
+public:
+    virtual ~employee() = default;
+    [[nodiscard]] virtual double rate() const { return m_base_rate; }
 
-// AFTER -- Salesman class deleted
-class Employee { double rate() { return m_base_rate; } };
+private:
+    double m_base_rate = 0.0;
+};
+class salesman : public employee
+{
+    // adds nothing
+};
+
+// AFTER - salesman class deleted
+class employee
+{
+public:
+    [[nodiscard]] double rate() const { return m_base_rate; }
+
+private:
+    double m_base_rate = 0.0;
+};
 ```
 
 ---
@@ -2058,27 +2795,55 @@ class Employee { double rate() { return m_base_rate; } };
 | High | Medium | Similar algorithms in subclasses |
 
 ```cpp
+constexpr double k_tax_rate            = 0.2;
+constexpr double k_lifeline_base_share = 0.5;
+constexpr double k_lifeline_tax_share  = 0.2;
+
 // AFTER -- Template Method pattern
-class Site {
+class site_interface
+{
 public:
-    double bill_amount() {  // Template method
+    virtual ~site_interface() = default;
+
+    [[nodiscard]] double bill_amount() const  // Template method
+    {
         return get_base_amount() + get_tax_amount();
     }
+
 protected:
-    virtual double get_base_amount() = 0;
-    virtual double get_tax_amount() = 0;
+    [[nodiscard]] virtual double get_base_amount() const = 0;
+    [[nodiscard]] virtual double get_tax_amount() const  = 0;
 };
 
-class ResidentialSite : public Site {
+class residential_site final : public site_interface
+{
 protected:
-    double get_base_amount() override { return m_units * m_rate; }
-    double get_tax_amount() override { return get_base_amount() * TAX_RATE; }
+    [[nodiscard]] double get_base_amount() const override { return m_units * m_rate; }
+    [[nodiscard]] double get_tax_amount() const override
+    {
+        return get_base_amount() * k_tax_rate;
+    }
+
+private:
+    double m_units = 0.0;
+    double m_rate  = 0.0;
 };
 
-class LifelineSite : public Site {
+class lifeline_site final : public site_interface
+{
 protected:
-    double get_base_amount() override { return m_units * m_rate * 0.5; }
-    double get_tax_amount() override { return get_base_amount() * TAX_RATE * 0.2; }
+    [[nodiscard]] double get_base_amount() const override
+    {
+        return m_units * m_rate * k_lifeline_base_share;
+    }
+    [[nodiscard]] double get_tax_amount() const override
+    {
+        return get_base_amount() * k_tax_rate * k_lifeline_tax_share;
+    }
+
+private:
+    double m_units = 0.0;
+    double m_rate  = 0.0;
 };
 ```
 
@@ -2091,23 +2856,28 @@ protected:
 | High | Medium | Refused Bequest, wrong hierarchy |
 
 ```cpp
-// BEFORE - Stack shouldn't inherit from Vector
-class Stack : public std::vector<int> {
+// BEFORE - stack should not inherit from std::vector
+class stack : public std::vector<int>
+{
     // Exposes ALL vector methods!
 };
 
-// AFTER - Composition
-class Stack {
-    std::vector<int> m_data;
+// AFTER - composition
+class stack
+{
 public:
     void push(int element) { m_data.push_back(element); }
-    int pop() {
-        int result = m_data.back();
+    int  pop()
+    {
+        const int result = m_data.back();
         m_data.pop_back();
         return result;
     }
-    bool empty() const { return m_data.empty(); }
+    [[nodiscard]] bool empty() const { return m_data.empty(); }
     // Only exposes stack operations
+
+private:
+    std::vector<int> m_data;
 };
 ```
 
@@ -2120,19 +2890,23 @@ public:
 | Medium | Medium | Excessive delegation (opposite of above) |
 
 ```cpp
-// BEFORE - Too much delegation
-class Employee {
-    Person m_person;
+// BEFORE - too much delegation
+class employee
+{
 public:
-    std::string name() { return m_person.name(); }
-    void set_name(std::string n) { m_person.set_name(n); }
-    std::string address() { return m_person.address(); }
+    [[nodiscard]] std::string name() const { return m_person.name(); }
+    void set_name(std::string value) { m_person.set_name(std::move(value)); }
+    [[nodiscard]] std::string address() const { return m_person.address(); }
     // ... 10 more delegation methods
+
+private:
+    person m_person;
 };
 
 // AFTER
-class Employee : public Person {
-    // Inherits all Person methods directly
+class employee : public person
+{
+    // Inherits all person methods directly
 };
 ```
 

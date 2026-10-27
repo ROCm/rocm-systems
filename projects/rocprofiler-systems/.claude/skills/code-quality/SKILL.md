@@ -33,6 +33,10 @@ the reason a listed technique was not used.
 ## Project constraints
 
 - C++20. Follow `cpp-conventions.md` while writing.
+- Catalog samples show shape only. Repository rules win: `cpp-conventions.md`
+  naming, `LOG_*` instead of `std::cout`, and an unhandled enum value throws
+  `std::logic_error` (`architecture-conventions.md`), even when the catalog
+  suggests replacing the switch.
 - Keep linkage unchanged unless the chosen technique requires a new type in
   another target; then follow `cmake-conventions.md`.
 - Run the affected unit tests when a build already exists.
