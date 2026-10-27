@@ -177,6 +177,13 @@ store_dispatch_time(hsa_signal_t _signal, hsa_signal_t _pending)
         });
 }
 
+void
+clear_dispatch_time_map()
+{
+    if(auto* _map = get_dispatch_time_map())
+        _map->wlock([](dispatch_time_map_t& _data) { _data.clear(); });
+}
+
 template <size_t TableIdx, size_t OpIdx>
 auto&
 get_next_dispatch()
@@ -191,6 +198,9 @@ get_dispatch_time_impl(hsa_agent_t                        _agent,
                        hsa_signal_t                       _signal,
                        hsa_amd_profiling_dispatch_time_t* _time)
 {
+    // Cached timing is invalid after profiler finalization and must not fall through to stale data.
+    if(registration::get_fini_status() > 0) return HSA_STATUS_ERROR_NOT_INITIALIZED;
+
     if(auto* _map = get_dispatch_time_map(); _map && _time)
     {
         auto _status = std::optional<hsa_status_t>{};
@@ -1802,6 +1812,8 @@ queue_init()
 void
 queue_fini()
 {
+    // Synchronize map users before signal_pool_fini() destroys profiler-owned signals.
+    clear_dispatch_time_map();
     signal_pool_fini();
 }
 
