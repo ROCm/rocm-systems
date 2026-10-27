@@ -687,7 +687,9 @@ class AMDSMIHelpers:
         return sanitized
 
     @staticmethod
-    def parse_power_stabilization_token(token, ignore_host_control):
+    def parse_power_stabilization_token(
+        token: str, ignore_host_control: bool
+    ) -> Optional[Tuple["amdsmi_interface.AmdSmiPowerStabilizationParamId", Union[int, float]]]:
         """Parse a single 'KEY=VALUE' Power Stabilization token into
         (AmdSmiPowerStabilizationParamId, value).
 

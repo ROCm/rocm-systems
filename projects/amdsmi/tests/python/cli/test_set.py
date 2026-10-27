@@ -309,7 +309,7 @@ class TestSet(TestCliBase):
         return
 
     def test_power_stabilization_configure_case_sensitive_path(self):
-        """End-to-end regression test for the '@<path>' case-preservation bug (F-4/G-1).
+        """End-to-end regression test for the '@<path>' case-preservation bug.
 
         The CLI's argv-lowercasing pass must leave an `@<path>` value from
         --power-stabilization-configure untouched in *both* legal spellings:
@@ -324,8 +324,8 @@ class TestSet(TestCliBase):
 
         This exercises the real CLI binary end-to-end, but self-skips below
         when the GPU does not report Power Stabilization support -- i.e. on
-        every hardware-free CI runner (review finding F-3). The guard that is
-        actually CI-reachable regardless of hardware is
+        every hardware-free CI runner. The guard that is actually
+        CI-reachable regardless of hardware is
         tests/python/unit/system/test_cli_argv_case_normalization.py, which
         unit-tests amdsmi_cli.normalize_argv() directly with no GPU
         dependency. Keep both: this one additionally proves the fix holds
