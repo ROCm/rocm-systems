@@ -100,29 +100,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added `amdsmi_get_gpu_cpu_links()` to report a GPU's directly-connected CPU link(s) (package id and link type)**.  
   - On MI450, `amd-smi xgmi --metric` and `--link-status` now show a `CPU(PKG<n>)` column per connected CPU package; `--metric`'s JSON/CSV output carries the same data in a new `cpu_links` field, separate from the existing `links` array.
 
-- **Added Component Unified ID (CUID) reporting APIs**.  
-  - `amdsmi_get_gpu_cuid_info()` returns a device's primary and derived CUIDs together with the Component Type, the lookup stage that answered, and whether the value is auxiliary (a temporary CUID), in the new `amdsmi_cuid_info_t`. The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.
-  - `amdsmi_get_gpu_device_cuid()` now returns the device's derived CUID.
-  - `amdsmi_get_cuid_components()` lists every component on the node that has a CUID (platform, CPU packages, GPUs and their compute partitions, NPUs, one entry per NIC function; a NIC's UnitID is its PCI function number) in the new `amdsmi_cuid_component_t`, with its BDF and sysfs path. It needs no processor handle.
-  - The entry points are exported whether or not the build links `libamdcuid`; without it they return `AMDSMI_STATUS_NOT_SUPPORTED`.
-  - Every CUID is a temporary CUID, built from the machine ID and world-readable device information, the same for every caller and on any kernel. A GPU handle in SPX reports the whole GPU's CUID; in DPX and above each handle reports its own partition's, with the partition's UnitID taken from amdgpu's `cuid_unit_id` or, on a kernel without it, from the KFD topology.
-  - CLI: `amd-smi static --cuid` reports the CUID block and `--cuid-primary` adds the serial-bearing primary CUID (requires elevation). `amd-smi node --cuid` (`--cuid-primary` for root) lists every component's CUID. `--cuid` is opt-in.
-  - `amd-smi list` adds `cuid`, `identifier_kind`, `source`, `auxiliary` and `cuid_metadata_status`. The existing `uuid`/`gpu_uuid` fields keep reporting the CUID when available and the legacy UUID otherwise.
-  - Build: `BUILD_CUID` takes `AUTO` (default), `ON` or `OFF`. Without an installed `libamdcuid` package, the in-tree `shared/cuid` sources are built and absorbed into `libamd_smi`.
-
-  ```shell
-  $ amd-smi static --cuid
-  GPU: 0
-      CUID:
-          DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
-          PRIMARY_CUID: N/A (not requested)
-          COMPONENT_TYPE: GPU
-          AUXILIARY: True
-          SOURCE: LIBRARY
-          IDENTIFIER_KIND: cuid
-          CUID_METADATA_STATUS: available
-  ```
-
 - **Added `amdsmi_get_gpu_enumeration_info()` to the Rust API**.  
   - Returns the DRM render node and card, HSA and HIP IDs, HIP UUID, OAM ID and physical accelerator ID; the HIP UUID is read with `hip_uuid()`.
   - IDs the library cannot determine are `0xFFFFFFFF`, as in the C API.
@@ -309,9 +286,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed wrong values from PM metrics and register table queries in the Python library**.  
   - The record names were correct, but every value was wrong.
 
-- **Fixed GPU metrics returning no data on integrated GPUs**.  
-  - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
-
 - **Fixed the `amdsmi` Python module from TheRock's `rocm-sdk-core` wheel failing outside `share/amd_smi`**.  
   - Copied into site-packages, the module could not load `libamd_smi.so.27` unless `torch` was imported first. It now loads the library from the `_rocm_sdk_core` package on `sys.path` when no usable system library is found, and reuses the copy PyTorch already loaded instead of mapping a second one.
   - The copy TheRock ships in `rocm-sdk-core` loads only that wheel's library, never a system `libamd_smi.so` from another ROCm release.
@@ -345,9 +319,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed APU core and skin temperatures showing `0.0 °C` when the sensor is not measured**.  
   - On APUs such as Ryzen AI Max (Strix Halo), `amd-smi metric` and the library now report these readings as not available instead of a false 0 °C.
 
-- **Fixed APU video engine (VCN) utilization reading 100 times too high**.  
-  - On APUs such as Ryzen AI Max (Strix Halo), `amdsmi_get_gpu_metrics_info()` returned `apu_metrics.average_vcn_activity` in hundredths of a percent (6067 for 61 %), so Python reported it as N/A and `amd-smi metric --usage` left it out. It is now whole percent.
-
 - **Fixed `amd-smi list`/`amd-smi static` reporting a placeholder UUID instead of `N/A` on WSL APUs without an ASIC serial**.  
   - On WSL2/DXG with APUs such as Ryzen AI Max (Strix Halo / gfx1151), HSA-KMT reports its "unavailable" sentinel for `UniqueID`, which was packed into a UUID-shaped string instead of surfacing `N/A`. `amdsmi_get_gpu_device_uuid()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` for that case.
 
@@ -359,20 +330,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amdsmi_get_gpu_cper_entries()` failing the page after a large CPER record**.  
   - The next call returned `AMDSMI_STATUS_OUT_OF_RESOURCES` when its buffers were too small for a record an earlier call had already returned.
-
-- **Fixed `amdsmi_get_gpu_total_ecc_count()` reading RAS state up to 39 times per call, and reporting `0` instead of an error when that read failed**.  
-  - RAS state is now read once per call instead of once per block, avoiding the repeated `.../ras/features` reads that could trip host-side RAS request throttling on SR-IOV guests with RAS enabled.
-  - A failed RAS state read is now reported as an error (`N/A` in the CLI) instead of a misleading `0`. `amdsmi_get_gpu_total_ecc_count()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` when `ras/features` cannot be opened and `AMDSMI_STATUS_API_FAILED` when it cannot be parsed. It previously returned `AMDSMI_STATUS_SUCCESS` with a zero total in both cases.
-  - `amdsmi_get_gpu_ras_block_features_enabled()` shares that read, so an unparsable `ras/features` now returns `AMDSMI_STATUS_API_FAILED` instead of `AMDSMI_STATUS_SUCCESS` with every block reported as disabled.
-  - A GPU with RAS present but genuinely disabled (a cleanly-read, all-zero RAS state) still correctly reports `0`, not `N/A` -- only an actual read/parse failure reports `N/A`.
-  - Affects the default `amd-smi` output (`UEC` column), `amd-smi monitor --ecc`, and `amd-smi metric --ecc`.
-  - Example default output, one GPU where the read succeeds (`UEC: 0`) next to one where it fails (`UEC: N/A`), instead of both previously reading `0`:
-    ```
-    | 0000:0c:00.0            AMD Instinct MI...  | 12 %     45 °C   0       300/750 W    |
-    | 1     0       0       NA                    | 34 %     30 %    2048/196608 MB       |
-    | 0000:2f:00.0           AMD Radeon RX ...    | 8 %      41 °C   N/A     280/300 W    |
-    | 2     1       1       NA                    | 22 %     28 %    1024/32768 MB        |
-    ```
 
 - **Fixed `amd-smi static --clock` printing a Python traceback for an unknown clock name**.  
   - It now reports the invalid parameter and exits `195` (`INVALID_PARAMETER`).
@@ -388,12 +345,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi set --memory-partition` advising a driver reload when the partition is already current**.  
   - It now reports that nothing changed, and notes when an earlier, different request still applies at the next reload.
-
-- **Fixed `amd-smi event` hanging when GPU event notifications can't start**.  
-  - The command now reports GPUs whose event notifications can't start and keeps listening on the others, or exits with the error when none can, for example on WSL or without access to `/dev/kfd`.
-
-- **Fixed `amd-smi event -g` listening on the wrong GPU**.  
-  - Events now come from the GPUs you select.
 
 - **Fixed `amdsmi_get_gpu_driver_info()` reporting `0` as the driver date**.  
   - Kernels that no longer use the DRM driver date report it as `0`. `driver_date` is now empty in the C API and `N/A` in Python.
@@ -412,9 +363,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed misleading errors when a GPU, CPU, or AI NIC driver is not loaded**.  
   - When the device is present, `amd-smi` now names the missing driver (exit code 206) instead of reporting "not supported" or an invalid parameter, and `list`, `static`, `metric`, `firmware`, `monitor`, and `topology` show the available devices with a note about the rest on stderr.
-
-- **Fixed `amd-smi metric --fan` reporting `0.0 %` on Navi3x/4x GPUs with OverDrive enabled**.  
-  - Fan speed and maximum fan speed are read from the live hwmon fan duty cycle again, and `amd-smi set --fan --help` shows the range the GPU accepts.
 
 - **Fixed `amd-smi` using the `amdsmi` Python library of another ROCm install**.  
   - When `ROCM_PATH` or `ROCM_HOME` named a different ROCm install, `amd-smi` loaded that install's library, so it either failed with an `AttributeError` or reported the other install's library and ROCm versions. `ROCM_PATH` and `ROCM_HOME` no longer redirect which `amdsmi` Python package `amd-smi` loads.
@@ -547,14 +495,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - On the WSL backend `rev_id` read as `0x0`, and elsewhere an unavailable `rev_id` showed as `0xffffffff` in Python. Python and the CLI now show `N/A`.
   - Other fields a backend cannot supply now keep their not-supported value instead of reading as zero.
 
-- **Fixed several WSL backend metrics reporting a raw driver sentinel or zero instead of `N/A`**.  
-  - `amdsmi_get_clock_info()`, `amdsmi_get_clk_freq()`, `amdsmi_get_gpu_busy_percent()`, `amdsmi_get_gpu_activity()`, `amdsmi_get_gpu_fan_speed()`, `amdsmi_get_pcie_info()` and `amdsmi_get_power_cap_info()` returned a raw PMLog sentinel, a zero-filled struct field, or (for `amdsmi_get_gpu_busy_percent()`) fell through to the bare-metal-only sysfs path and failed, when the underlying WDDM/dxg sensor was unavailable or rocdxg had no data source at all.
-  - Affected fields now report `N/A`; `amdsmi_get_clk_freq()` and `amdsmi_get_gpu_fan_speed()` return `AMDSMI_STATUS_NOT_SUPPORTED` instead, since they have no downstream `N/A` translation. `amdsmi_get_gpu_busy_percent()` is now routed through the WSL backend.
-
 ### Upcoming Changes
-
-- **`uuid`/`gpu_uuid` in `amd-smi list` will report only the legacy UUID**.  
-  - In a future release they will no longer report the CUID. Use `cuid` and `identifier_kind` instead. GPU selection accepts both identifiers, and the legacy UUID API is unchanged.
 
 - **UUIDs will be replaced by CUIDs (Component Unified IDs) in an upcoming release**.  
   - CUIDs identify a device consistently across AMD tools.
