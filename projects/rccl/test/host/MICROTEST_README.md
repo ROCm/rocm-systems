@@ -734,8 +734,8 @@ symbol.
 | `src/rma/*.cc` | `fakes/rma_fakes.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
-| `src/transport/net_ib/connect.cc` params (`ncclParamIbQpsPerConn`) and `ncclIbGidInfoQuery` | `fakes/transport_net_ib_fakes.cc` |
-| `src/transport/net_ib/connect.cc`'s `rcclNetP2pPolicy`, for `net.cc` (targets that do not compile the real file) | `fakes/transport_net_ib_p2p_policy_fakes.cc` |
+| `src/transport/net_ib/` (`ncclParamIbQpsPerConn`, `ncclIbGidInfoQuery`, `ncclNetIb`, GDR flush-flag support and enable) | `fakes/transport_net_ib_fakes.cc` |
+| `src/transport/net_ib/connect.cc`'s `rcclNetP2pPolicy` and GDR flush-flag accessors (targets that do not compile the real file) | `fakes/transport_net_ib_connect_net_fakes.cc` |
 | `src/transport/net_ib_cast/common.cc` (targets that do not compile the real file) | `fakes/net_ib_cast_common_fakes.cc` |
 | `src/transport/net_ib_cast/{connect,p2p,p2p_resiliency,p2p_resiliency_recovery,qp_sharing,scheduler}.cc` (targets that do not compile the real file) | `fakes/net_ib_cast_<file>_fakes.cc` |
 | `src/transport/net_ib_cast/init.cc` (targets that do not compile the real file) | `fakes/net_ib_cast_init_fakes.cc` |

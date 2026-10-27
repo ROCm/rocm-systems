@@ -902,8 +902,8 @@ function(rccl_define_micro_source_lists)
     fakes/rccl_wrap_fakes.cc             # NET registration segment count / commit
     fakes/rocmwrap_fakes.cc
     fakes/topo_stubs.cc
-    fakes/transport_net_ib_fakes.cc      # ncclNetIb, ncclIbGidInfoQuery
-    fakes/transport_net_ib_p2p_policy_fakes.cc  # rcclNetP2pPolicy
+    fakes/transport_net_ib_connect_net_fakes.cc  # rcclNetP2pPolicy, GDR flush-flag accessors
+    fakes/transport_net_ib_fakes.cc
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real parseStringList/matchIfList for NCCL_IB_HCA

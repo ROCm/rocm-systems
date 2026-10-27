@@ -39,8 +39,8 @@
 #include "fakes/rocmwrap_fakes.h"
 #include "fakes/topo_net_stubs.h"
 #include "fakes/topo_stubs.h"
+#include "fakes/transport_net_ib_connect_net_fakes.h"
 #include "fakes/transport_net_ib_fakes.h"
-#include "fakes/transport_net_ib_p2p_policy_fakes.h"
 #include "fakes/transport_p2p_fakes.h"
 
 // Routes every NCCL_PARAM / RCCL_PARAM in net.cc through g_loadParam on each call.
@@ -341,9 +341,10 @@ class NetMicrotestBase : public ::testing::Test {
   ncclNet_t savedNetIb_{};
   bool usingNetIb_ = false;
 
-  // Runs the proxy on ncclNetIb, wired to the fake net. net.cc keys IB-only paths off that address.
+  // Runs the proxy on ncclNetIb, wired to the fake net (a copy of vtable_ as it is now). net.cc keys
+  // IB-only paths off that address.
   void UseIbPlugin() {
-    savedNetIb_ = ncclNetIb;
+    if (!usingNetIb_) savedNetIb_ = ncclNetIb;
     usingNetIb_ = true;
     ncclNetIb = vtable_;
     proxyState_.ncclNet = &ncclNetIb;
@@ -381,8 +382,8 @@ class NetMicrotestBase : public ::testing::Test {
     ResetTopoStubs();
     ResetNetIbCastCommonFakes();
     ResetNetIbCastConnectFakes();
+    ResetTransportNetIbConnectNetFakes();
     ResetTransportNetIbFakes();
-    ResetTransportNetIbP2pPolicyFakes();
     ResetTransportP2pFakes();
     ResetEnvFakes();
   }
@@ -3067,7 +3068,7 @@ TEST_F(NetRecvProxyConnectMicrotest, IbGdrFlushFlag_EachMissingPreconditionKeeps
   uint64_t flags[8] = {};
   bool haveFlags = true;
   ScopedHook flag(g_ibGetGpuFlushFlag, [&](void*) { return haveFlags ? flags : nullptr; });
-  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);  // used only where GDRCOPY_FLUSH_ENABLE is on
+  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);  // only the GDRCOPY_FLUSH_ENABLE row gets a flush word
   struct Case {
     const char* name;
     bool ib;
@@ -3108,7 +3109,10 @@ TEST_F(NetRecvProxyConnectMicrotest, IbGdrFlushFlag_SeqAllocFails_KeepsRdmaReadF
   uint64_t flags[8] = {};
   ScopedHook flag(g_ibGetGpuFlushFlag, [&](void*) { return flags; });
   ScopedHook alloc(g_hipExtMallocWithFlags, [this](void** p, size_t n, unsigned) {
-    if (n == NCCL_STEPS * sizeof(uint64_t)) return hipErrorOutOfMemory;
+    if (n == NCCL_STEPS * sizeof(uint64_t)) {
+      *p = reinterpret_cast<void*>(0x1);  // the proxy must not keep what a failed allocation left
+      return hipErrorOutOfMemory;
+    }
     ++devAllocs_;
     *p = Alloc(n);
     return hipSuccess;
@@ -5002,29 +5006,24 @@ TEST_F(NetRecvProgressMicrotest, Post_Dedicated_PostsSliceSizedSlot) {
 
 TEST_F(NetRecvProgressMicrotest, Post_GdrFlushFlag_HintsWhetherTheReceiveIsSimple) {
   uint64_t flags[8] = {};
+  auto post = [&](int protocol, uint64_t* flag) {
+    args_ = std::make_unique<ncclProxyArgs>();
+    args_->state = ncclProxyOpReady;
+    args_->protocol = protocol;
+    args_->sliceSteps = args_->chunkSteps = 1;
+    args_->collAPI = ncclFuncRecv;
+    args_->nPeers = args_->nChannels = 1;
+    res_.gdrFlushFlag = flag;
+    AddSub(1);
+    return Progress();
+  };
   for (int p : {NCCL_PROTO_SIMPLE, NCCL_PROTO_LL}) {
     SCOPED_TRACE(p);
     g_ibSetGpuFlushFlagHintCalls.clear();
-    args_ = std::make_unique<ncclProxyArgs>();
-    args_->state = ncclProxyOpReady;
-    args_->protocol = p;
-    args_->sliceSteps = args_->chunkSteps = 1;
-    args_->collAPI = ncclFuncRecv;
-    args_->nPeers = args_->nChannels = 1;
-    res_.gdrFlushFlag = nullptr;
-    AddSub(1);
-    ASSERT_EQ(Progress(), ncclSuccess);
+    ASSERT_EQ(post(p, nullptr), ncclSuccess);
     EXPECT_TRUE(g_ibSetGpuFlushFlagHintCalls.empty());  // no flags, no hint
 
-    args_ = std::make_unique<ncclProxyArgs>();
-    args_->state = ncclProxyOpReady;
-    args_->protocol = p;
-    args_->sliceSteps = args_->chunkSteps = 1;
-    args_->collAPI = ncclFuncRecv;
-    args_->nPeers = args_->nChannels = 1;
-    res_.gdrFlushFlag = flags;
-    AddSub(1);
-    ASSERT_EQ(Progress(), ncclSuccess);
+    ASSERT_EQ(post(p, flags), ncclSuccess);
     ASSERT_EQ(g_ibSetGpuFlushFlagHintCalls.size(), 1u);
     EXPECT_EQ(g_ibSetGpuFlushFlagHintCalls[0].first, &net_.recvComm);
     EXPECT_EQ(g_ibSetGpuFlushFlagHintCalls[0].second, p == NCCL_PROTO_SIMPLE ? 1 : 0);
@@ -5268,6 +5267,31 @@ TEST_F(NetRecvProgressMicrotest, Receive_GpuFlagWait_SkipsGroupedSubPastItsLastS
     uint64_t wantB = i == (int)(b.base % NCCL_STEPS) ? 1 : i == (int)((b.base + 1) % NCCL_STEPS) ? 2 : 0;
     EXPECT_EQ(seqB[i], wantB);
   }
+}
+
+TEST_F(NetRecvProgressMicrotest, Receive_GpuFlagWait_NothingToFlush_PublishesNothing) {
+  uint64_t flags[8] = {}, seq[NCCL_STEPS] = {};
+  ScopedHook flagSeq(g_ibGetGpuFlushFlagSeq, [](void*) { return uint64_t{0x123456}; });
+  for (bool emptyStep : {true, false}) {
+    SCOPED_TRACE(emptyStep ? "empty step" : "no flush needed");
+    args_ = std::make_unique<ncclProxyArgs>();
+    args_->state = ncclProxyOpReady;
+    args_->protocol = NCCL_PROTO_SIMPLE;
+    args_->sliceSteps = args_->chunkSteps = 1;
+    args_->collAPI = ncclFuncRecv;
+    args_->nPeers = args_->nChannels = 1;
+    res_.useGdr = ncclTopoGdrModeDefault;
+    res_.needFlush = emptyStep ? ncclTopoFlushAlways : ncclTopoFlushNone;
+    res_.gdrFlushFlag = flags;
+    res_.gdrFlushSeq = seq;
+    ncclProxySubArgs& sub = AddSub(1);
+
+    ASSERT_NO_FATAL_FAILURE(PostAndReceive(emptyStep ? 0 : 64));
+
+    EXPECT_EQ(sub.received, 1u);
+  }
+  EXPECT_EQ(flagSeq.calls, 0);
+  for (uint64_t v : seq) EXPECT_EQ(v, 0u);
 }
 
 TEST_F(NetRecvProgressMicrotest, Receive_GroupedSubWithoutFlagSeq_FlushesInstead) {
