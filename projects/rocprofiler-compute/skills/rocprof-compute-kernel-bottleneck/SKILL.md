@@ -1,6 +1,6 @@
 ---
 name: rocprof-compute-kernel-bottleneck
-description: Profiles an AMD GPU application with rocprof-compute and finds which kernel is slow and why, using performance metrics and PC sampling. Collects counters and selects kernels and dispatches, then analyzes GPU memory throughput, compute efficiency, wavefront occupancy and wavefront limits, scheduler stalls, etc. Use when the user asks to profile, benchmark, or speed up a HIP/ROCm kernel or application, or asks where a kernel's bottleneck is. Not for CUDA tools, Windows, system-wide CPU/MPI tracing, or writing kernel source.
+description: Profiles an AMD GPU application with rocprof-compute and finds which kernel is slow and why, using performance metrics and PC sampling. Collects counters and selects kernels and dispatches, then analyzes GPU memory throughput, compute efficiency, wavefront occupancy and wavefront limits, scheduler stalls, etc. Use when the user asks to profile, benchmark, or speed up a HIP/ROCm kernel or application, or asks where a kernel's bottleneck is. Not for CUDA tools, Windows even when the user names rocprof-compute, system-wide CPU/MPI tracing, or writing kernel source.
 ---
 
 # Profile an AMD GPU application and find the kernel bottleneck
@@ -8,6 +8,14 @@ description: Profiles an AMD GPU application with rocprof-compute and finds whic
 Start here for any "profile this" or "why is this kernel slow" request. This
 skill collects counters, narrows a workload down to one kernel, and identifies
 what limits it. Hand off to a focused skill once the limit is clear.
+
+## Prerequisites
+
+Install, supported GPUs, and which GPU the application runs on are in
+[Install ROCm Compute Profiler](../../docs/install/core-install.rst),
+[source install](../../docs/install/source-install.rst),
+[compatible accelerators](../../docs/reference/compatible-accelerators.rst),
+and [Selecting a GPU](../../docs/how-to/profile/mode.rst).
 
 Run `rocprof-compute profile --help` and `rocprof-compute analyze --help`
 before choosing flags. Options change between releases; do not guess one.
@@ -25,7 +33,8 @@ different questions. Choose by what the user is asking, not by difficulty.
 Counters are the default starting point because they cover the whole kernel
 cheaply. Go straight to `rocprof-compute-pc-sampling` when the user asks about instructions,
 source lines, or stall reasons, and use both when an architectural limit needs
-to be traced back to the code that causes it.
+to be traced back to the code that causes it. A request to run `rocprofv3`
+itself is neither this skill nor `rocprof-compute-pc-sampling`.
 
 ## 1. Check the environment
 
@@ -73,9 +82,10 @@ MPI. Change it with `--output-directory`, which replaces `--name` for building
 the path. Re-profiling into a non-empty directory needs `--overwrite`; prefer a
 fresh directory.
 
-To restrict which GPU the application uses, set `HIP_VISIBLE_DEVICES`. Under
-Slurm, derive it from `ROCR_VISIBLE_DEVICES`, not from `SLURM_STEP_GPUS`; the
-indices differ.
+Which GPU the application runs on is in
+[Selecting a GPU](../../docs/how-to/profile/mode.rst). Under Slurm, derive
+`HIP_VISIBLE_DEVICES` from `ROCR_VISIBLE_DEVICES`, not from `SLURM_STEP_GPUS`;
+the indices differ.
 
 See [profile mode](../../docs/how-to/profile/mode.rst) for output layout,
 filtering, and the full option list. To profile a process that is already

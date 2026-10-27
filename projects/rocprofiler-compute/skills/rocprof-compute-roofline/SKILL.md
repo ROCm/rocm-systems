@@ -13,6 +13,16 @@ Run `rocprof-compute profile --help` and `rocprof-compute analyze --help`
 before choosing flags. Do not open the generated HTML chart. The analyze table
 carries the same numbers in readable form.
 
+## Prerequisites
+
+Install, supported GPUs, and which GPU the application runs on are in
+[Install ROCm Compute Profiler](../../docs/install/core-install.rst),
+[source install](../../docs/install/source-install.rst),
+[compatible accelerators](../../docs/reference/compatible-accelerators.rst),
+and [Selecting a GPU](../../docs/how-to/profile/mode.rst).
+Roofline support by GPU is in
+[supported hardware](../../docs/what-is-rocprof-compute.rst).
+
 ## 1. Collect
 
 Roofline is collected by default, so an ordinary profile already has it:
@@ -25,16 +35,13 @@ Collecting it runs microbenchmarks in addition to profiling the application,
 which takes extra time. `--no-roof` skips them when the user only wants
 counters.
 
-MI100 (gfx908) does not support the roofline microbenchmarks. Every other
-supported architecture does. On MI100 the benchmark is skipped and the profile
-still succeeds, so a missing roofline there is not a mistake in how the profile
-was run. Never tell an MI100 user to re-profile without `--no-roof`; use
-Speed-of-Light and the `rocprof-compute-memory` skill instead. Confirm support
-for a new architecture against
-[compatible-accelerators.rst](../../docs/reference/compatible-accelerators.rst).
+On MI100 (gfx908), the roofline microbenchmarks are skipped and the profile
+still succeeds. When [supported hardware](../../docs/what-is-rocprof-compute.rst)
+shows no roofline support, do not ask the user to re-profile without
+`--no-roof`. Use Speed-of-Light and the `rocprof-compute-memory` skill instead.
 
-`--device` selects the GPU for the roofline microbenchmarks. It does not
-choose which GPU the application runs on; use `HIP_VISIBLE_DEVICES` for that.
+`--device` and `HIP_VISIBLE_DEVICES` are different selections. See
+[Selecting a GPU](../../docs/how-to/profile/mode.rst).
 
 See [standalone roofline](../../docs/how-to/profile/mode.rst) for `--roof-only`
 and `--bench-only`, which run the microbenchmarks without profiling an
