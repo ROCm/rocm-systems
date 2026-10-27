@@ -5,11 +5,10 @@ for experiments with synchronization failures. It runs offline on the host:
 callers supply an image, select a qualified operation, and receive a mutant
 image or a typed error. It neither initializes HSA nor dispatches GPU work.
 
-The current interface is an internal C++ library. A mutation CLI is planned
-separately. Persistent selection files and replay bundles are not provided and
-have no committed delivery scope. ConSan is an optional consumer of the output;
-the library builds and runs its host tests with the ConSan compiler, runtime,
-and analyzer disabled.
+The internal C++ library and `rj_code_mutate` CLI perform the same mutation.
+ConSan is an optional consumer of the output; both the library and CLI build
+and run host tests with the ConSan compiler, runtime, and analyzer disabled.
+There is no persistent selection, manifest, or replay-bundle format.
 
 ## Architecture and lifetime
 
@@ -84,7 +83,7 @@ Generic mechanics and recipe semantics have separate responsibilities:
 | Exact and logical-ordinal selection | Implemented. Exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Default ordinal zero deterministically chooses the first barrier in first-member source order; there is no race ranking or legacy physical-index adapter. | [`DropBarrierSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [`select_drop_barrier`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [selection regressions](../tests/patch/fault_drop_barrier_test.cpp) |
 | Multiple kernels in one text section | Limited support for independent sibling kernels. Discovery checks all entries before exposing one exact kernel's inventory; shared blocks, calls, aliased entries, and unresolved owners are rejected. | [`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [ownership analysis](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [sibling preservation tests](../tests/patch/fault_drop_barrier_test.cpp) |
 | Shared checked text edits | Implemented. One transaction handles nonoverlapping, equal-length replacements of complete 4/8/12-byte instructions. This does not widen Instrumentor's trampoline-anchor admission. | [contract](../lib/rocjitsu/src/rocjitsu/code/patch/checked_text_edits.h), [implementation](../lib/rocjitsu/src/rocjitsu/code/patch/checked_text_edits.cpp), [edit tests](../tests/patch/checked_text_edits_test.cpp), [Instrumentor tests](../tests/patch/instrumentor_test.cpp) |
-| Mutation CLI | Planned separately; this library does not provide an executable. | — |
+| Offline CLI | Implemented: list current-input sites and emit one complete Drop using the same selector and library. | [usage](#command-line-usage), [frontend](../tools/rj_code_mutate.cpp), [integration tests](../tests/patch/fault_mutation_cli_test.cpp) |
 | Persistent selection files and replay bundles | Not provided; no durable replay format is committed. | — |
 | Helper, indirect-flow and firmware-preload ownership | Planned extensions; these inputs are not admitted by the current ownership profile. | — |
 | Other mutation recipes and composition | Planned. Barrier movement, address/order/scope changes, grouped or destructive partial Drop, and multi-mutation composition are not implemented here. | — |
@@ -234,3 +233,74 @@ ctest --test-dir emulation/rocjitsu/build -R '^FaultDropBarrier\.CompiledCorpusC
 
 These digests document fixture provenance; they are not a production mutation
 request requirement or evidence of physical GPU or detector qualification.
+
+## Command-line usage
+
+Build the executable and host integration tests from this checkout:
+
+```bash
+cmake --build emulation/rocjitsu/build --target rj_code_mutate rocjitsu_fault_mutation_cli_tests
+emulation/rocjitsu/build/tools/rj_code_mutate --help
+emulation/rocjitsu/build/tools/rj_code_mutate --capabilities
+```
+
+List complete logical barriers for one exact kernel entry, then create a new
+mutant file:
+
+```bash
+emulation/rocjitsu/build/tools/rj_code_mutate \
+  --input original.hsaco --kernel my_kernel --list
+emulation/rocjitsu/build/tools/rj_code_mutate \
+  --input original.hsaco --kernel my_kernel --kind DropBarrier \
+  --ordinal 0 --output mutant.hsaco
+```
+
+`DropBarrier` is currently the only kind and is also the default. Each listing
+line includes the zero-based logical `ordinal`, `exact` first-member byte offset
+relative to `.text`, concrete target, section index, form, ID, scope, and ordered
+`members=offset:size,...`. A singleton has one member; a split pair has two.
+Coordinates describe only this input and exact entry. They are not reusable
+handles for another image or legacy physical instruction indices.
+
+Discovery rejects trap-handler forms (-2 on RDNA4/CDNA5 and -4 on CDNA5)
+instead of assigning them a logical ordinal, including when an admitted user
+barrier follows them. CDNA5 cluster ID -3 remains admitted subject to the
+dispatch assumptions described above; listing or mutation does not establish
+that cluster semantics are active.
+
+Use `--exact TEXT-OFFSET` to resolve that coordinate into a context-bound library
+selection. Exact takes precedence over `--ordinal`, including an out-of-range
+ordinal; invalid exact requests fail without fallback. Without either selector,
+ordinal zero selects the first complete barrier. Numbers accept unsigned decimal
+or `0x` hexadecimal. `--target gfx1250`, if supplied, asserts the parsed identity
+and never selects a different decoder. Input ABI and wave admission are the
+library's shared DBI checks, without another CLI version gate.
+
+The input must be a regular extracted code-object file of 1 through 256 MiB.
+The CLI refuses host executables, bundles, archives, relocatable objects, and
+other inputs rejected by the library. Output creation is exclusive: existing
+files, directories, symlinks and hard links (including input aliases) are
+refused. There is no overwrite flag. A failed write or close removes the
+incomplete new output. This is single-file I/O, without a multi-file publication
+protocol or a crash-durability guarantee.
+
+Exit status is 0 for successful listing/mutation/help, 2 for argument, read,
+admission, selection or mutation errors, and 3 for output I/O errors. Diagnostics
+go to stderr; successful mutation prints the kind, concrete target, exact
+coordinate, logical/member counts and output byte count. It emits only the
+mutant file and does not load HSA or a capture plugin. Mutation success and the
+capability listing make no execution or detector qualification claim.
+
+The [CLI tests](../tests/patch/fault_mutation_cli_test.cpp) exercise all ten
+rows above using the built executable, compare library and CLI bytes, decode
+selected members independently, reparse the mutant and check unchanged bytes,
+sibling kernels, deterministic repeat output and rejection/I/O paths. The
+symbol-boundary test checks the actual executable for runtime and execution
+provider dependencies. To run the focused suites:
+
+```bash
+ctest --test-dir emulation/rocjitsu/build --show-only \
+  -R 'FaultMutationCli|FaultDropBarrier|CheckedTextEdits'
+ctest --test-dir emulation/rocjitsu/build --output-on-failure --no-tests=error \
+  -R 'FaultMutationCli|FaultDropBarrier|CheckedTextEdits'
+```
