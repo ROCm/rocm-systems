@@ -231,6 +231,7 @@ function(rccl_define_micro_source_lists)
     ras-diagnostics-env-test.cc          # src/ras/diagnostics_env.cc
     ras-param-test.cc                    # src/ras/ras_param.cc
     net-telemetry-test.cc                # src/transport/net_telemetry.cc, src/include/net_telemetry.h
+    net-socket-test.cc                   # src/transport/net_socket.cc, src/transport/net_socket/common.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
     csv-tuner-test.cc                    # src/plugin/tuner/csv_tuner.cc
@@ -275,6 +276,8 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/utils_fakes.cc
     fakes/collective_stubs.cc
+    fakes/os_fakes.cc
+    fakes/socket_fakes.cc
     fakes/devcomm_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
@@ -1570,6 +1573,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroBootstrap
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     BOOTSTRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/bootstrap.cc"
+    RCCL_OS_FAKES_OMIT_ncclSocketClose   # fakes/bootstrap_micro_fakes.cc defines it
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_bootstrap.yaml")
 
 # ---------------------------------------------------------------------------
@@ -1599,6 +1603,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     RAS_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras_param.cc"
     COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
     NET_TELEMETRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc"
+    NET_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket.cc"
+    # common_tmp.cc: src/CMakeLists.txt lists transport/net_ib/common.cc first.
+    NET_SOCKET_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket/common_tmp.cc"
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
@@ -2184,6 +2191,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroProxy
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/proxy.cc"
+    RCCL_OS_FAKES_OMIT_ncclSocketClose   # fakes/proxy_micro_fakes.cc defines it
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_proxy.yaml")
 
 # ---------------------------------------------------------------------------
