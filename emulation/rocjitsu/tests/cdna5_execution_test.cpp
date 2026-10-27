@@ -3,6 +3,7 @@
 
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/isa_features.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
@@ -10,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/target_provider.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "util/host_target.h"
 
@@ -216,6 +218,72 @@ TEST(Gfx1250ExecutionTest, GlobalTransposePreservesZeroExecAndDestination) {
   for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
     EXPECT_EQ(compute_unit->read_vgpr(wave->vgpr_alloc().base + kDestination, lane), kSentinel);
     EXPECT_EQ(compute_unit->read_vgpr(wave->vgpr_alloc().base + kDestination + 1, lane), kSentinel);
+  }
+}
+
+TEST(Gfx1250ExecutionTest, ArchitectureDecoderScalarOffsetFailureDoesNotThrowOrCreateMemoryState) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wave = sim.dispatch_scratch_wf();
+  ASSERT_NE(wave, nullptr);
+  constexpr uint32_t kSentinel = 0xa5a55a5au;
+  write_wave_sgpr(*cu, *wave, 0, 0x4000);
+  write_wave_sgpr(*cu, *wave, 1, 0);
+  write_wave_sgpr(*cu, *wave, 4, kSentinel);
+  for (uint8_t selector : {amdgpu::kExecSelectorFirst, amdgpu::kExecSelectorLast}) {
+    SCOPED_TRACE(selector);
+    const auto words =
+        cdna5::build_smem(cdna5::kSLoadB32Smem, {.sbase = 0, .sdata = 4, .soffset = selector});
+    // The architecture decoder precedes the factory decoder's operand validation.
+    DecodeResult decoded = cdna5::Decoder::decode(words.data(), {});
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> &load = decoded.value();
+    ASSERT_NE(load->execute, nullptr);
+    wave->clear_instruction_execution_error();
+    // Bypass the CU's legacy catch so restoring the throw fails this test.
+    ASSERT_NO_THROW(load->execute(*load, wave));
+    EXPECT_EQ(wave->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(load->data(), nullptr);
+    EXPECT_EQ(read_wave_sgpr(*cu, *wave, 4), kSentinel);
+    EXPECT_TRUE(cu->execute_instruction(load.get(), *wave).failed());
+  }
+}
+
+TEST(Gfx1250ExecutionTest, ArchitectureDecoderVectorScalarSourceFailureRejectsMemoryState) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wave = sim.dispatch_scratch_wf();
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1);
+  for (bool scratch : {false, true}) {
+    SCOPED_TRACE(scratch ? "VSCRATCH direct scalar read" : "VGLOBAL split 64-bit scalar read");
+    const auto words =
+        scratch ? cdna5::build_vscratch(cdna5::kScratchLoadB32Vscratch,
+                                        {.saddr = amdgpu::kExecSelectorFirst, .vdst = 4, .sve = 1})
+                : cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                       {.saddr = amdgpu::kModernM0Selector, .vdst = 4});
+    // Bypass factory operand validation to exercise the shared resolver's callers.
+    DecodeResult decoded = cdna5::Decoder::decode(words.data(), {});
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> &load = decoded.value();
+    ASSERT_NE(load->execute, nullptr);
+    wave->clear_instruction_execution_error();
+    ASSERT_NO_THROW(load->execute(*load, wave));
+    EXPECT_EQ(wave->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    ASSERT_NE(load->data(), nullptr);
+    const auto *state = load->data_as<amdgpu::VectorMemState>();
+    EXPECT_EQ(state->lane_mask, 0u);
+    wave->clear_instruction_execution_error();
+    EXPECT_TRUE(cu->execute_instruction(load.get(), *wave).failed());
+    EXPECT_EQ(wave->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    ASSERT_NE(load->data(), nullptr);
+    state = load->data_as<amdgpu::VectorMemState>();
+    EXPECT_EQ(state->lane_mask, 0u);
   }
 }
 
