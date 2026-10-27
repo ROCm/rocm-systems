@@ -68,8 +68,7 @@
 // --- Link-satisfying stubs for rma_proxy.cc's non-static externals ---------
 //
 // Defined here rather than in a shared fakes/ .cc because none of them has an
-// owning fakes file today and this is the only binary that needs them (same
-// reasoning as p2p-test.cc's allocTracker and ras-test.cc's ncclSetThreadName).
+// owning fakes file today and this is the only binary that needs them.
 // They must precede the #include of the unit under test.
 // NCCL_PARAM(IbDataDirect, "IB_DATA_DIRECT", 1), declared by src/transport/net_ib/init.cc.
 int64_t ncclParamIbDataDirect() { return 1; }
@@ -88,9 +87,10 @@ gdr_t ncclGdrCopy = NULL;
 // reachable. Must come after the stubs and headers above are in scope.
 #include RMA_PROXY_CC_PATH
 
-// alloc.h data symbol, referenced by the ncclCudaCalloc templates the
-// GDRCopy-on arm walks through. Must follow the include, which brings
-// allocationTracker into scope. Zero-initialised.
+// alloc.h data symbol owned by src/init.cc, referenced by the ncclCudaCalloc
+// templates the GDRCopy-on arm walks through. Local because this target does
+// not link fakes/comm_fakes.cc.
+// Must follow the include, which brings allocationTracker into scope.
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
 namespace {

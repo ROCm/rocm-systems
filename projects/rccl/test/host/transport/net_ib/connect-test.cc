@@ -59,6 +59,9 @@ ncclResult_t TestConnectMemAlloc(void** ptr, size_t size) { return g_connectMemA
 #define ncclParamIbQpsPerConn NetIbConnectParamIbQpsPerConn
 #define ncclIbGidInfoQuery NetIbConnectGidInfoQuery
 #define ncclIbListen NetIbConnectListen
+#define ncclIbNetListen NetIbConnectNetListen
+#define ncclIbGdrFlushFlagLocalSupport NetIbConnectGdrFlushFlagLocalSupport
+#define ncclIbSetGdrFlushFlag NetIbConnectSetGdrFlushFlag
 #define ncclIbConnect NetIbConnectConnect
 #define ncclIbAccept NetIbConnectAccept
 #define ncclIbCloseSend NetIbConnectCloseSend
@@ -82,6 +85,9 @@ ncclResult_t TestConnectMemAlloc(void** ptr, size_t size) { return g_connectMemA
 #undef ncclIbCloseSend
 #undef ncclIbAccept
 #undef ncclIbConnect
+#undef ncclIbSetGdrFlushFlag
+#undef ncclIbGdrFlushFlagLocalSupport
+#undef ncclIbNetListen
 #undef ncclIbListen
 #undef ncclIbGidInfoQuery
 #undef ncclParamIbQpsPerConn

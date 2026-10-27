@@ -49,7 +49,7 @@ struct RpcHeader {
 };
 
 /// @brief RPC protocol version. Increment when making breaking changes.
-inline constexpr uint32_t kRpcProtocolVersion = 5;
+inline constexpr uint32_t kRpcProtocolVersion = 6;
 
 /// @brief Largest payload the daemon accepts after an RpcHeader.
 /// @details The daemon rejects — and disconnects — any client whose header
@@ -101,8 +101,8 @@ struct RpcMunmapRequest {
 };
 
 static_assert(sizeof(RpcHeader) == 16);
-static_assert(sizeof(RpcGpuInfo) == 312);
-static_assert(sizeof(RpcHandshakeResponse) == 336);
+static_assert(sizeof(RpcGpuInfo) == 328);
+static_assert(sizeof(RpcHandshakeResponse) == 352);
 static_assert(sizeof(RpcIoctlRequest) == 8);
 static_assert(sizeof(RpcMmapRequest) == 32);
 static_assert(sizeof(RpcMmapResponse) == 8);
