@@ -431,8 +431,14 @@ public:
     execution_failure_handler_ = std::move(cb);
   }
 
+  /// @brief Offer an architectural memory fault to its runtime or debugger owner.
+  /// @details Fetch and debugger probes supply the access address and direction.
+  /// Deferred data and tensor-DMA faults supply zero/false when lane metadata is
+  /// unavailable. The issue PC identifies the faulting instruction in all cases;
+  /// data-fault callbacks see the advanced resume PC and may rewind it for XNACK.
+  /// @returns True if the frontend owns the fault and retains the wave.
   using MemoryViolationHandler =
-      std::function<bool(Wavefront &wf, uint64_t address, bool is_write)>;
+      std::function<bool(Wavefront &wf, uint64_t address, bool is_write, uint64_t issue_pc)>;
   void set_memory_violation_handler(MemoryViolationHandler cb) {
     memory_violation_handler_ = std::move(cb);
   }
@@ -845,6 +851,11 @@ public:
     WaveStateGuard lock(*this);
     return std::forward<F>(fn)();
   }
+
+  /// @brief Retry retained memory of a paused queue without issuing instructions.
+  /// @details Flushes resulting fault notifications before returning. Snapshot
+  /// callers must still reject memory that remains unavailable after this pass.
+  void retry_paused_queue_memory(uint32_t process_id, uint32_t queue_id, bool replay_loads = false);
 
   /// @brief Pause once after releasing the wave-state lock but before flushing
   /// command-processor notifications.
@@ -1446,7 +1457,10 @@ protected:
     QueueExceptionDeliveryPolicy delivery_policy;
   };
 
-  /// @brief Cancel local dispatch state and queue one terminal VM fault for CP delivery.
+  /// @brief Offer an architectural data fault to its owner, otherwise cancel it.
+  /// @param issue_pc Original instruction PC, before advancing to the resume PC.
+  void handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome, uint64_t issue_pc);
+  /// @brief Cancel a terminal VM failure and notify the CP without offering it again.
   void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
   /// @brief Fault a dispatch for an exhausted GWS inactivity budget or a barrier before INIT.
   void fail_gws_wait(Wavefront &wf, std::string_view reason);
