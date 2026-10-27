@@ -3211,12 +3211,33 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   EXPECT_EQ(cu->config().vgprs_per_wf, 1024u);
 }
 
+TEST(ConfigLoaderTest, RejectsMissingOrInvalidArchitecture) {
+  const std::array<const char *, 3> configs{R"({})", R"({"vm":{}})",
+                                            R"({"vm":{"arch":"invalid"}})"};
+  for (const char *json : configs) {
+    SCOPED_TRACE(json);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(
+        config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, diagnostic.emitter())
+            .failed());
+    EXPECT_EQ(diagnostic.message(), "Missing or invalid 'arch' in vm configuration");
+  }
+}
+
+TEST(ConfigLoaderTest, RejectsInvalidTarget) {
+  util::StringDiagnostic diagnostic;
+  const char *json = R"({"vm":{"arch":"cdna4","target":"invalid"}})";
+  EXPECT_TRUE(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "Missing or invalid 'target' in vm configuration: invalid");
+}
+
 TEST(ConfigLoaderTest, RejectsTargetFromDifferentArchitecture) {
-  util::StringDiagnostic config_diagnostic;
+  util::StringDiagnostic diagnostic;
   const char *json = R"({"vm":{"arch":"cdna4","target":"gfx1250"}})";
-  EXPECT_THROW((void)config::load_config_from_string(json, rocjitsu::kEmbeddedSchema,
-                                                     config_diagnostic.emitter()),
-               std::runtime_error);
+  EXPECT_TRUE(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "vm target does not belong to the selected architecture");
 }
 
 TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
@@ -3244,13 +3265,11 @@ TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
       replace_exactly_once(mismatches[0], R"("target": "gfx1251")", R"("target": "gfx1250")"));
   ASSERT_TRUE(replace_exactly_once(mismatches[1], "120501", "120500"));
   for (const std::string &json : mismatches) {
-    EXPECT_THAT(
-        [&] {
-          (void)config::load_config_from_string(json, rocjitsu::kEmbeddedSchema,
-                                                config_diagnostic.emitter());
-        },
-        testing::ThrowsMessage<std::runtime_error>(
-            "vm target does not match device.gfx_target_version"));
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(
+        config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, diagnostic.emitter())
+            .failed());
+    EXPECT_EQ(diagnostic.message(), "vm target does not match device.gfx_target_version");
   }
 }
 
