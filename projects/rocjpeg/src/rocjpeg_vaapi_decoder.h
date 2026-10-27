@@ -107,7 +107,7 @@ typedef enum {
  *
  * This structure holds information about a memory pool entry used by the RocJpegVaapiDecoder.
  * It contains the image width and height, the entry status, an array of VA surface IDs,
- * and an array of HipInteropDeviceMem objects.
+ * an array of HipInteropDeviceMem objects, and the status of each VA surface.
  */
 struct RocJpegVaapiMemPoolEntry {
     uint32_t image_width;
