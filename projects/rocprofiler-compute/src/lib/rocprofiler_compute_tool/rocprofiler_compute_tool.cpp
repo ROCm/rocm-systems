@@ -3,14 +3,19 @@
 
 #include "rocprofiler_compute_tool.h"
 
+#include "agent_writer.h"
 #include "counters_writer.h"
+#include "dispatch_writer.h"
 #include "input_parameters.h"
+#include "kernel_symbols_writer.h"
+#include "output_registry.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
 
 #include <unistd.h>
 
 #include <atomic>
+#include <exception>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -28,11 +33,10 @@ static std::shared_ptr<SdkWrapper>& g_sdk_wrapper = *new std::shared_ptr<SdkWrap
     std::make_shared<SdkWrapperImpl>());
 static std::shared_ptr<SdkCallbacks>& g_sdk_callbacks = *new std::shared_ptr<SdkCallbacks>(
     std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper));
-static std::shared_ptr<CountersWriter>& g_counters_writer = *new std::shared_ptr<CountersWriter>(
-    std::make_shared<CsvCountersWriter>());
 static std::shared_ptr<rocprofiler_tool_configure_result_t>& g_cfg =
     *new std::shared_ptr<rocprofiler_tool_configure_result_t>();
-static std::unique_ptr<tool_data_t>& g_tool_data = *new std::unique_ptr<tool_data_t>();
+static std::unique_ptr<tool_data_t>& g_tool_data       = *new std::unique_ptr<tool_data_t>();
+static OutputRegistry&               g_output_registry = *new OutputRegistry{};
 static std::atomic<bool>             g_tool_shutting_down{false};
 static std::atomic<bool>             g_hsa_intercept_done{false};
 
@@ -46,15 +50,16 @@ void test_knobs::set_sdk_wrapper(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
     g_sdk_wrapper = sdk_wrapper;
 }
 
-void test_knobs::set_csv_writer(const std::shared_ptr<CountersWriter>& csv_writer)
+bool test_knobs::replace_writer(std::string_view name, const std::shared_ptr<OutputWriter>& writer)
 {
-    g_counters_writer = csv_writer;
+    return g_output_registry.replace_writer(name, writer);
 }
 
 void test_knobs::reset_cfg()
 {
     g_cfg.reset();
     g_tool_data.reset();
+    g_output_registry.reset();
     g_tool_shutting_down.store(false, std::memory_order_release);
     g_hsa_intercept_done.store(false, std::memory_order_release);
 }
@@ -101,12 +106,56 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     g_sdk_callbacks->tool_tracing_callback(record, callback_data);
 }
 
+void kernel_dispatch_callback(rocprofiler_callback_tracing_record_t record,
+                              rocprofiler_user_data_t* /*user_data*/,
+                              void* callback_data)
+{
+    g_sdk_callbacks->kernel_dispatch_callback(record, callback_data);
+}
+
+rocprofiler_status_t collect_gpu_agents(rocprofiler_agent_version_t /*version*/,
+                                        const void** agents,
+                                        size_t       num_agents,
+                                        void*        user_data)
+{
+    auto& gpu_agents = *static_cast<std::unordered_map<uint64_t, agent_record_t>*>(user_data);
+    for (size_t i = 0; i < num_agents; ++i)
+    {
+        const auto* agent = static_cast<const rocprofiler_agent_t*>(agents[i]);
+        if (agent->type != ROCPROFILER_AGENT_TYPE_GPU)
+            continue;
+
+        gpu_agents[agent->id.handle] = agent_record_t{agent->node_id,
+                                                      agent->name ? agent->name : "",
+                                                      agent->product_name ? agent->product_name : ""};
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+void record_gpu_agents(tool_data_t* tool_data)
+{
+    std::unordered_map<uint64_t, agent_record_t> gpu_agents;
+    try
+    {
+        g_sdk_wrapper->query_available_agents(collect_gpu_agents, &gpu_agents);
+    }
+    catch (const std::exception& error)
+    {
+        // Profiling goes on without the agent table, analyze will skip this process
+        std::cerr << "[rocprofiler-compute] " << error.what() << std::endl;
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(tool_data->mut);
+    tool_data->agents = std::move(gpu_agents);
+}
+
 void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
                            uint64_t /*lib_version*/,
                            uint64_t /*lib_instance*/,
                            void** /*tables*/,
                            uint64_t /*num_tables*/,
-                           void* /*user_data*/)
+                           void* user_data)
 {
     // Defer start_context until HSA loads: it starts HSA worker threads, which
     // would deadlock on fork() in non-GPU LD_PRELOAD'd shells.
@@ -116,6 +165,7 @@ void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
     if (g_hsa_intercept_done.exchange(true, std::memory_order_acq_rel))
         return;
 
+    record_gpu_agents(static_cast<std::unique_ptr<tool_data_t>*>(user_data)->get());
     g_sdk_wrapper->start_context(get_client_ctx());
 }
 
@@ -130,6 +180,15 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
                                                       nullptr,
                                                       0,
                                                       tool_tracing_callback,
+                                                      user_data);
+
+    // Always on, so a run without counters still records its dispatches.
+    rocprofiler_tracing_operation_t dispatch_complete = ROCPROFILER_KERNEL_DISPATCH_COMPLETE;
+    g_sdk_wrapper->configure_callback_tracing_service(get_client_ctx(),
+                                                      ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                                      &dispatch_complete,
+                                                      1,
+                                                      kernel_dispatch_callback,
                                                       user_data);
 
     // Declare counters before HSA loads so the SDK picks the legacy intercept path;
@@ -148,28 +207,7 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
 
 void generate_output(tool_data_t* tool_data)
 {
-    // Dispatches before the kernel to be filtered was registered may have been
-    // profiled. Remove any records whose kernel id does not match the
-    // target_kernel_ids
-    if (!tool_data->target_kernel_ids.empty())
-    {
-        tool_data->counter_records.erase(std::remove_if(tool_data->counter_records.begin(),
-                                                        tool_data->counter_records.end(),
-                                                        [tool_data](const counter_info_record_t& record)
-                                                        {
-                                                            return tool_data->target_kernel_ids.find(
-                                                                       record.kernel_id) ==
-                                                                   tool_data->target_kernel_ids.end();
-                                                        }),
-                                         tool_data->counter_records.end());
-    }
-    if (!tool_data->counter_records.empty() && !tool_data->output_filename.empty())
-    {
-        g_counters_writer->write_counters(tool_data);
-    }
-
-    if (tool_data->pc_sampling.enabled())
-        tool_data->pc_sampling.finalize();
+    g_output_registry.generate_all(*tool_data);
 }
 
 void tool_fini(void* user_data)
@@ -206,15 +244,19 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 
     const auto output_path = g_input_parameters->get_output_path();
     tool_data->output_filename = generate_output_filename(output_path, CsvCountersWriter::kFileSuffix);
+    tool_data->dispatch_filename = generate_output_filename(output_path, DispatchWriter::kFileSuffix);
+    tool_data->kernel_symbols_filename = generate_output_filename(output_path,
+                                                                  KernelSymbolsWriter::kFileSuffix);
+    tool_data->agents_filename = generate_output_filename(output_path, AgentWriter::kFileSuffix);
 
     const auto pc_sampling_method = g_input_parameters->get_pc_sampling_method();
     if (!pc_sampling_method.empty())
     {
-        const auto pc_mode = parse_pc_sampling_mode(std::string{pc_sampling_method});
-        tool_data->pc_sampling =
-            pc_sampling_feature_t{pc_mode,
-                                  generate_output_filename(output_path, "_code_obj_info.json"),
-                                  generate_output_directory(output_path, "src")};
+        const auto pc_mode     = parse_pc_sampling_mode(std::string{pc_sampling_method});
+        tool_data->pc_sampling = std::make_shared<pc_sampling_feature_t>(
+            pc_mode,
+            generate_output_filename(output_path, "_code_obj_info.json"),
+            generate_output_directory(output_path, "src"));
     }
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
@@ -294,7 +336,14 @@ rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t             
     {
         g_tool_data         = create_tool_data(id);
         auto* tool_data_ptr = &g_tool_data;
-        g_cfg               = std::make_shared<rocprofiler_tool_configure_result_t>(
+
+        g_output_registry.register_writer(std::make_shared<CsvCountersWriter>());
+        g_output_registry.register_writer(std::make_shared<DispatchWriter>());
+        g_output_registry.register_writer(std::make_shared<KernelSymbolsWriter>());
+        g_output_registry.register_writer(std::make_shared<AgentWriter>());
+        g_output_registry.register_writer(g_tool_data->pc_sampling);
+
+        g_cfg = std::make_shared<rocprofiler_tool_configure_result_t>(
             rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
                                                 &tool_init,
                                                 &tool_fini,

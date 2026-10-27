@@ -1142,9 +1142,7 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 // Get Staging or Pinned memory buffer
 void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePin, bool first_tx,
                                DmaBlitManager::BufferState& buffState) const {
-  // Pinning is slower than staging on unified-memory devices; skip it there.
-  bool doHostPinning =
-      enablePin && (size > MinSizeForPinnedXfer) && !dev().info().hostUnifiedMemory_;
+  bool doHostPinning = enablePin && (size > MinSizeForPinnedXfer);
   size_t copyChunkSize = doHostPinning ? PinXferSize : StagingXferSize;
   size_t xferSize = std::min(size, copyChunkSize);
 
@@ -2907,9 +2905,14 @@ struct CopyBufferBatchDescriptor {
 bool KernelBlitManager::useShaderCopyBufferPath(const Memory& srcMemory, const Memory& dstMemory,
                                                 size_t size, amd::CopyMetadata copyMetadata,
                                                 bool* useLimitedP2pBlitWg) const {
-  bool isP2pOrIpc = (&srcMemory.dev() != &dstMemory.dev()) ||
-                    srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared() ||
-                    srcMemory.owner()->vmmImported() || dstMemory.owner()->vmmImported();
+  // Imported (VMM/IPC) memory can be reached through another device's view, and a local view can
+  // map a peer's pages, so compare the physical owners. Other memory keeps the view comparison:
+  // host-backed allocations are owned by the CPU agent, which would make every host copy P2P.
+  const bool imported = srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared() ||
+                        srcMemory.owner()->vmmImported() || dstMemory.owner()->vmmImported();
+  bool isP2pOrIpc = imported
+      ? srcMemory.getOwningAgent().handle != dstMemory.getOwningAgent().handle
+      : &srcMemory.dev() != &dstMemory.dev();
   const bool smallP2pOrIpc = isP2pOrIpc && size <= dev().settings().sdma_p2p_threshold_;
   if (useLimitedP2pBlitWg != nullptr) {
     *useLimitedP2pBlitWg = smallP2pOrIpc;

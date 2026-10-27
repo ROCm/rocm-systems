@@ -917,6 +917,12 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
     }
   }
 
+  ProcessSignalTiming(signal);
+  return true;
+}
+
+// ================================================================================================
+void VirtualGPU::HwQueueTracker::ProcessSignalTiming(ProfilingSignal* signal) {
   // Process this signal's timing before signal reuse
   // This copies timing to the Timestamp
   if (signal->ts_ != nullptr) {
@@ -928,8 +934,6 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
     std::scoped_lock lock(signal->LockSignalOps());
     signal->flags_.done_ = true;
   }
-
-  return true;
 }
 
 // ================================================================================================
@@ -5164,11 +5168,36 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     }
 
     if (dev().settings().groupMemCarveout_) {
+      uint8_t percent;
+
       const int requestedPercent = devKernel->workGroupInfo()->groupMemCarveout_;
       // Signed storage preserves -1 (device default) and explicit 0; cast only resolved 0..100.
-      const uint8_t percent = requestedPercent >= 0
-                                  ? static_cast<uint8_t>(requestedPercent)
-                                  : dev().GetGroupMemCarveout();
+      percent = requestedPercent >= 0 ?
+                    static_cast<uint8_t>(requestedPercent) :
+                    dev().GetGroupMemCarveout();
+
+      if (!devKernel->workGroupInfo()->hasFuncPreferredShmemCarveout_) {
+        // hipFuncSetCacheConfig() has priority (regardless of being called before of after this
+        // function), so only use the coarse carveout if the former was not called
+        switch (devKernel->workGroupInfo()->coarseMemCarveout_) {
+        case 0:
+          // hipFuncCachePreferNone; the coarse setting is "off"
+          break;
+        case 1: // hipFuncCachePreferShared
+          percent = 100;
+          break;
+        case 2: // hipFuncCachePreferL1
+          percent = 0;
+          break;
+        case 3: // hipFuncCachePreferEqual
+          percent = 50;
+          break;
+        default:
+          assert(false && "Unexpected hipFuncCache_t value");
+          percent = 0;
+        }
+      }
+
       auto& dispatchPacketExt = dispatchPacketUnion.extKernelDispatch;
       // Encodings [1, 127] represent a range from 0% (no group memory) to 100% (maximum
       // group memory)
@@ -5394,10 +5423,12 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
   std::scoped_lock lock(execution());
   if (vcmd.CpuWaitRequested()) {
     if (IS_WINDOWS) SetStateFlag(kForceIrq);
-    // It should be safe to call flush directly if there are not pending dispatches without
-    // HSA signal callback
     AcquireHwQueueIfNeeded();
-    flush(vcmd.GetBatchHead());
+    // Make sure the last signal covers all submitted work, but don't wait for it here. The wait
+    // would hold the execution() lock and block all other threads, which submit to this queue.
+    // The caller waits for the attached signal and completes the batch in CompleteCpuWait().
+    releaseGpuMemoryFence(kSkipCpuWait);
+    AttachHwEvent(&vcmd, Barriers().GetLastSignal());
     SetCoalesceWindow(0, nullptr);
   } else {
     profilingBegin(vcmd);
@@ -5424,14 +5455,15 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
         ClearStateFlag(kForceIrq);
         return;
       }
-      // IPC event record: if ipc_s is non-zero, first dispatch a NOP barrier with
-      // the IPC signal as completion_signal; it fires when prior work completes.
+      // IPC event record: the IPC barrier must resolve pending SDMA/blit
+      // dependency signals so that ipc_s fires only after all prior work
+      // (including cross-engine copies) has completed. (ROCM-30067)
       if (ipc_s.handle != 0) {
         if (settings.barrier_value_packet_) {
-          dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, false, hsa_signal_t{0}, 0,
+          dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true, hsa_signal_t{0}, 0,
                                      0, HSA_SIGNAL_CONDITION_EQ, true, ipc_s);
         } else {
-          dispatchBarrierPacket(kNopPacketHeader, true, ipc_s);
+          dispatchBarrierPacket(kNopPacketHeader, false, ipc_s);
         }
       }
 
@@ -5463,6 +5495,35 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     profilingEnd();
   }
   ClearStateFlag(kForceIrq);
+}
+
+// ================================================================================================
+void VirtualGPU::CompleteCpuWait(amd::Command& cmd) {
+  auto* signal = reinterpret_cast<ProfilingSignal*>(cmd.HwEvent());
+  assert((signal != nullptr) && "Marker with CPU wait must have a HW event!");
+
+  // Wait without the execution() lock. The marker holds a reference to the signal,
+  // so the tracker can't reuse it in the meantime
+  WaitForSignal(signal->signal_, ActiveWait());
+
+  // The wait returns early, with the signal not completed normally, if the device is in an error
+  // state (HIP_SKIP_ABORT_ON_GPU_ERROR). The signal timing and the queue states can't be used then,
+  // since the GPU may still run. The batch is completed anyway, as before, because otherwise the
+  // threads waiting for its commands would hang
+  if (Hsa::signal_load_relaxed(signal->signal_) == 0) {
+    std::scoped_lock lock(execution());
+    Barriers().ProcessSignalTiming(signal);
+    // Kernel arguments and memory dependencies can be released only if the wait covered all
+    // submitted work, otherwise newer submissions may still use them
+    if ((Barriers().GetLastSignal() == signal) && !IsPendingDispatch()) {
+      ResetQueueStates();
+    }
+  }
+  // Complete the batch without the lock: it belongs to the marker only, and the user callbacks
+  // it runs must not block the other threads submitting to this queue. It uses no VirtualGPU or
+  // tracker state, and the commands' Timestamps serialize with the tracker the same way as in
+  // HsaAmdSignalHandler
+  updateCommandsState(cmd.GetBatchHead());
 }
 
 // ================================================================================================
