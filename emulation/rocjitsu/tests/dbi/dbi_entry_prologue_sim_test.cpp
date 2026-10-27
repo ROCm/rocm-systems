@@ -107,6 +107,7 @@
 
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
+#include "scalar_builders.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -142,31 +143,10 @@ constexpr uint32_t kGuestKernargSize = 20;
 // descriptor grants (see dbi_arg_sim_test.cpp on the AGPR window at v4).
 constexpr uint16_t kVgprSrcBase = 256; // VGPR n is scalar-source code 256 + n.
 
-// s_cbranch_scc0 / s_cbranch_scc1, which the shared builders do not cover.
-uint32_t build_s_cbranch_scc(bool scc1, int16_t offset_dwords, rj_code_arch_t arch) {
-  uint16_t op = 0;
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
-    op = scc1 ? cdna3::kSCbranchScc1Sopp : cdna3::kSCbranchScc0Sopp;
-    break;
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    op = scc1 ? cdna4::kSCbranchScc1Sopp : cdna4::kSCbranchScc0Sopp;
-    break;
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    op = scc1 ? rdna4::kSCbranchScc1Sopp : rdna4::kSCbranchScc0Sopp;
-    break;
-  default:
-    ADD_FAILURE() << "no s_cbranch_scc opcode for this target";
-    break;
-  }
-  return build_sopp_encoding(arch, op, static_cast<uint16_t>(offset_dwords));
-}
-
 // Scalar-source codes for inline integer constants.
 constexpr uint16_t kInline1 = 129;
 constexpr uint16_t kInline2 = 130;
 constexpr uint16_t kInlineMinus1 = 193;
-constexpr uint16_t kLiteral = 255;
 
 struct PrologueSimArch {
   const char *sim_arch;
@@ -253,7 +233,7 @@ protected:
     const uint32_t second_pass = build_s_cmp_lg_u32(6, kInline2, a_.arch);
     const uint32_t read_s0 = build_v_mov_b32_src(2, 0, a_.arch);
     const uint32_t read_s1 = build_v_mov_b32_src(3, 1, a_.arch);
-    const uint32_t loop_to_entry = build_s_cbranch_scc(/*scc1=*/true, -4, a_.arch);
+    const uint32_t loop_to_entry = test::build_s_cbranch_scc(/*scc1=*/true, -4, a_.arch);
     ASSERT_NO_FATAL_FAILURE(patch({count_pass, guest_anchor, second_pass, loop_to_entry, endpgm},
                                   /*anchor_offset=*/4, probe_obj, loop_delivery_));
     ASSERT_NO_FATAL_FAILURE(
@@ -262,13 +242,13 @@ protected:
 
     // The helper subtracts the call's return offset from the saved address, so
     // it returns to the entry instead of the continuation.
-    const std::vector<uint32_t> rewrite_return{build_s_add_u32(4, 4, kLiteral, a_.arch),
-                                               static_cast<uint32_t>(-20),
-                                               build_s_addc_u32(5, 5, kInlineMinus1, a_.arch), ret};
+    const std::vector<uint32_t> rewrite_return{
+        build_s_add_u32(4, 4, test::kScalarSrcLiteral, a_.arch), static_cast<uint32_t>(-20),
+        build_s_addc_u32(5, 5, kInlineMinus1, a_.arch), ret};
     std::vector<uint32_t> words{count_pass,
                                 guest_anchor,
                                 second_pass,
-                                build_s_cbranch_scc(/*scc1=*/false, 1, a_.arch),
+                                test::build_s_cbranch_scc(/*scc1=*/false, 1, a_.arch),
                                 build_s_call_b64(4, 1, a_.arch),
                                 endpgm};
     words.insert(words.end(), rewrite_return.begin(), rewrite_return.end());
@@ -276,7 +256,7 @@ protected:
     words = {count_pass,
              guest_anchor,
              second_pass,
-             build_s_cbranch_scc(/*scc1=*/false, 1, a_.arch),
+             test::build_s_cbranch_scc(/*scc1=*/false, 1, a_.arch),
              build_s_call_b64(4, 3, a_.arch),
              read_s0,
              read_s1,
@@ -286,13 +266,14 @@ protected:
 
     // A plain indirect jump to the entry: the address comes from s_getpc_b64,
     // not from a call's saved return address.
-    const std::vector<uint32_t> jump_to_entry{build_s_cmp_lg_u32(6, kInline2, a_.arch),
-                                              build_s_cbranch_scc(/*scc1=*/false, 5, a_.arch),
-                                              build_s_getpc_b64(4, a_.arch),
-                                              build_s_add_u32(4, 4, kLiteral, a_.arch),
-                                              static_cast<uint32_t>(-20),
-                                              build_s_addc_u32(5, 5, kInlineMinus1, a_.arch),
-                                              ret};
+    const std::vector<uint32_t> jump_to_entry{
+        build_s_cmp_lg_u32(6, kInline2, a_.arch),
+        test::build_s_cbranch_scc(/*scc1=*/false, 5, a_.arch),
+        build_s_getpc_b64(4, a_.arch),
+        build_s_add_u32(4, 4, test::kScalarSrcLiteral, a_.arch),
+        static_cast<uint32_t>(-20),
+        build_s_addc_u32(5, 5, kInlineMinus1, a_.arch),
+        ret};
     words = {count_pass, guest_anchor};
     words.insert(words.end(), jump_to_entry.begin(), jump_to_entry.end());
     words.push_back(endpgm);
@@ -343,11 +324,10 @@ protected:
     out.entry = *entry;
   }
 
-  test::DbiSim make_sim(const PatchedKernel &kernel) {
-    test::DbiSim sim(a_.sim_arch, a_.wave_size);
+  void initialize_sim(test::DbiSim &sim, const PatchedKernel &kernel) {
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(a_.sim_arch, a_.wave_size));
     sim.set_kernarg(wrapper_);
     sim.set_entry_offset(kernel.entry);
-    return sim;
   }
 
   // The kernarg pair is destroyed between the prologue and the site, and the
@@ -357,7 +337,8 @@ protected:
   }
 
   void expect_probe_receives_the_payload_pointer(const PatchedKernel &kernel) {
-    test::DbiSim sim = make_sim(kernel);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, kernel));
     const std::vector<std::vector<uint32_t>> regs =
         sim.run_and_read_vgprs(kernel.text, kernel.scratch, {/*v2=*/2, /*v3=*/3});
     ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";
@@ -377,7 +358,8 @@ protected:
     std::vector<uint32_t> sabotaged = delivery_.text;
     ASSERT_NO_FATAL_FAILURE(nop_payload_load(sabotaged));
 
-    test::DbiSim sim = make_sim(delivery_);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, delivery_));
     const std::vector<std::vector<uint32_t>> regs =
         sim.run_and_read_vgprs(sabotaged, delivery_.scratch, {/*v2=*/2, /*v3=*/3});
     ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";
@@ -398,7 +380,8 @@ protected:
   }
 
   void expect_guest_kernarg_pointer_is_restored(const PatchedKernel &kernel) {
-    test::DbiSim sim = make_sim(kernel);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, kernel));
     const uint64_t seen = read_guest_kernarg_pointer(sim, kernel.text, kernel.scratch);
     EXPECT_EQ(seen, kGuestKernargSentinel)
         << "the guest's kernarg pointer was not restored at entry";
@@ -436,7 +419,8 @@ protected:
     }
     ASSERT_EQ(replaced, 2u) << "did not find both kernarg-pointer restores";
 
-    test::DbiSim sim = make_sim(restore_);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, restore_));
     EXPECT_EQ(read_guest_kernarg_pointer(sim, sabotaged, restore_.scratch),
               test::DbiSim::KERNARG_ADDR)
         << "without the restore the guest must still see the CP's wrapper pointer";
@@ -445,7 +429,8 @@ protected:
   // The kernel really comes back to the entry, so the re-entry tests are not
   // passing on one that never did.
   void expect_two_passes_through_the_entry(const PatchedKernel &kernel) {
-    test::DbiSim sim = make_sim(kernel);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, kernel));
     const auto s6 = sim.run_and_read_sgpr64(kernel.text, kernel.scratch, 6);
     ASSERT_TRUE(s6.has_value()) << "kernel did not run to completion";
     EXPECT_EQ(static_cast<uint32_t>(*s6), 2u);
@@ -460,15 +445,17 @@ protected:
     // The backedge is the fourth word; its branch base is offset 16.
     const auto to_stub = compute_sopp_branch_simm16(12, loop_restore_.entry);
     ASSERT_TRUE(to_stub.has_value());
-    sabotaged[3] = build_s_cbranch_scc(/*scc1=*/true, *to_stub, a_.arch);
+    sabotaged[3] = test::build_s_cbranch_scc(/*scc1=*/true, *to_stub, a_.arch);
 
     // The kernel has to finish and take both passes, or a fault or a hang
     // would pass this control as readily as a second prologue run.
-    test::DbiSim sim = make_sim(loop_restore_);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, loop_restore_));
     const std::vector<std::vector<uint32_t>> regs =
         sim.run_and_read_vgprs(sabotaged, loop_restore_.scratch, {/*v2=*/2, /*v3=*/3});
     ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";
-    test::DbiSim count_sim = make_sim(loop_restore_);
+    test::DbiSim count_sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(count_sim, loop_restore_));
     const auto s6 = count_sim.run_and_read_sgpr64(sabotaged, loop_restore_.scratch, 6);
     ASSERT_TRUE(s6.has_value()) << "kernel did not run to completion";
     ASSERT_EQ(static_cast<uint32_t>(*s6), 2u);
@@ -484,7 +471,8 @@ protected:
   void expect_dispatch_at_the_original_entry_skips_the_prologue() {
     PatchedKernel original = delivery_;
     original.entry = 0;
-    test::DbiSim sim = make_sim(original);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, original));
     const std::vector<std::vector<uint32_t>> regs =
         sim.run_and_read_vgprs(original.text, original.scratch, {/*v2=*/2, /*v3=*/3});
     ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";
@@ -511,8 +499,10 @@ protected:
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     for (uint16_t sdst = 0; sdst < REGISTER_SET_ALLOCATABLE_SGPRS - 1; sdst += 2) {
-      const auto load =
+      const auto load_result =
           build_s_load_dwordx2(sdst, /*sbase=*/0, layout->payload_offsets.front(), a_.arch);
+      ASSERT_TRUE(load_result.succeeded());
+      const auto load = load_result.value();
       for (size_t i = 0; i + 1 < words.size(); ++i) {
         if (words[i] != load[0] || words[i + 1] != load[1])
           continue;

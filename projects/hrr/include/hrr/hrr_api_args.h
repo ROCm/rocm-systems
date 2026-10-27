@@ -83,8 +83,13 @@
  * reader decodes those events as the wrong API.
  * v9: hipKernelSetAttributeForDevice was appended to HipDispatchTable,
  * taking the first compiler ID and shifting the compiler API IDs up by one.
- * A v8 reader would decode those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)9u)
+ * A v8 reader would decode those events as the wrong API.
+ * v10: a kernel launch event carries pinned host snapshot records after its
+ * arguments (num_snapshots was always 0). A v9 reader would not restore them.
+ * v11: hipKernelSetCacheConfig was appended to HipDispatchTable, taking the
+ * first compiler ID and shifting the compiler API IDs up by one.
+ * A v10 reader would decode those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)11u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -5866,6 +5871,15 @@ typedef struct {
     int32_t device;
 } hrr_args_hipKernelSetAttributeForDevice;
 
+/* hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t kernel;
+    int32_t config;
+    uint64_t dev;
+} hrr_args_hipKernelSetCacheConfig;
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -6416,16 +6430,17 @@ typedef enum hrr_api_id {
     HRR_API_HIPDEVICEFLUSHGPUDIRECTRDMAWRITES = 545,
     HRR_API_HIPLIBRARYGETMODULE = 546,
     HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE = 547,
-    HRR_API_HIPPOPCALLCONFIGURATION = 548,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 549,
-    HRR_API_HIPREGISTERFATBINARY = 550,
-    HRR_API_HIPREGISTERFUNCTION = 551,
-    HRR_API_HIPREGISTERMANAGEDVAR = 552,
-    HRR_API_HIPREGISTERSURFACE = 553,
-    HRR_API_HIPREGISTERTEXTURE = 554,
-    HRR_API_HIPREGISTERVAR = 555,
-    HRR_API_HIPUNREGISTERFATBINARY = 556,
-    HRR_API_COUNT = 557
+    HRR_API_HIPKERNELSETCACHECONFIG = 548,
+    HRR_API_HIPPOPCALLCONFIGURATION = 549,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 550,
+    HRR_API_HIPREGISTERFATBINARY = 551,
+    HRR_API_HIPREGISTERFUNCTION = 552,
+    HRR_API_HIPREGISTERMANAGEDVAR = 553,
+    HRR_API_HIPREGISTERSURFACE = 554,
+    HRR_API_HIPREGISTERTEXTURE = 555,
+    HRR_API_HIPREGISTERVAR = 556,
+    HRR_API_HIPUNREGISTERFATBINARY = 557,
+    HRR_API_COUNT = 558
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -6979,6 +6994,7 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipDeviceFlushGPUDirectRDMAWrites",
     "hipLibraryGetModule",
     "hipKernelSetAttributeForDevice",
+    "hipKernelSetCacheConfig",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",

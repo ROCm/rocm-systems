@@ -16,10 +16,7 @@ from common.common import stub_modules_at_import
 _DRIVER_INFO = {
     "driver_name": "amdgpu",
     "driver_date": "2026/09/16 00:00",
-    "driver_kernel_version": "6.19.14",
     "driver_version": "6.19.14.31400000",
-    "driver_build_version": "2370381",
-    "driver_full_version": "6.19.14.31400000-2370381",
 }
 
 
@@ -106,32 +103,21 @@ class TestVersionDriverOutput(unittest.TestCase):
         if not path.is_file():
             raise unittest.SkipTest(f"amd-smi CLI version.py not found at {path}")
 
-    def test_json_reports_driver_fields(self) -> None:
+    def test_json_reports_driver_version(self) -> None:
         output = _run_version()
-        self.assertEqual(output["amdgpu_version"], "6.19.14.31400000-2370381")
-        self.assertNotIn("driver_kernel_version", output)
-        self.assertNotIn("driver_version", output)
-        self.assertNotIn("driver_build_version", output)
-        self.assertNotIn("driver_full_version", output)
-        self.assertNotIn("amdgpu_dkms_version", output)
+        self.assertEqual(output["amdgpu_version"], "6.19.14.31400000")
 
-    def test_human_readable_reports_driver_fields_in_order(self) -> None:
+    def test_human_readable_reports_driver_version(self) -> None:
         stdout = io.StringIO()
         with redirect_stdout(stdout):
             _run_version(human_readable=True)
 
         line = stdout.getvalue()
-        self.assertIn("amdgpu version: 6.19.14.31400000-2370381", line)
-        self.assertNotIn("Kernel version:", line)
-        self.assertNotIn("Driver version:", line)
-        self.assertNotIn("Build version:", line)
+        self.assertIn("amdgpu version: 6.19.14.31400000", line)
 
     def test_gpu_fields_are_na_when_gpu_version_is_disabled(self) -> None:
         output = _run_version(gpu_version=False)
         self.assertEqual(output["amdgpu_version"], "N/A")
-        self.assertNotIn("driver_kernel_version", output)
-        self.assertNotIn("driver_version", output)
-        self.assertNotIn("driver_build_version", output)
 
     def test_empty_gpu_list_reports_amdgpu_version_as_na(self) -> None:
         interface = _default_interface()

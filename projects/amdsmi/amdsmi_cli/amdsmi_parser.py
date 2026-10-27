@@ -1705,6 +1705,18 @@ class AMDSMIParser(argparse.ArgumentParser):
         soc_pstate_help = "The available soc pstate policy"
         xgmi_plpd_help = "The available XGMI per-link power down policy"
         process_isolation_help = "The process isolation status"
+        cuid_help = (
+            "Component Unified ID: the derived CUID, its component type, whether it is a\n"
+            "temporary (auxiliary) identifier, and which layer answered.\n"
+            "Not part of the default `amd-smi static` output; ask for it.\n"
+            "The primary CUID is not shown by default either: its payload embeds the raw\n"
+            "serial number. Add --cuid-primary, as root, to include it."
+        )
+        cuid_primary_help = (
+            "Include the primary CUID in the CUID output, implying --cuid. Requires\n"
+            "privilege, and prints a value that embeds the device serial number. Do not\n"
+            "paste it into a bug report."
+        )
         profile_help = "Display current and available power profiles"
         clk_options = self.helpers.get_clock_types()[0]
         clk_options.remove("PCIE")
@@ -1784,6 +1796,12 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
             static_parser.add_argument(
                 "-r", "--ras", action="store_true", required=False, help=ras_help
+            )
+            static_parser.add_argument(
+                "-Y", "--cuid", action="store_true", required=False, help=cuid_help
+            )
+            static_parser.add_argument(
+                "-y", "--cuid-primary", action="store_true", required=False, help=cuid_primary_help
             )
             static_parser.add_argument(
                 "-C",
@@ -3555,7 +3573,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         node_help = "Gets power and baseboard information for the node"
         node_subcommand_help = f"{self.description}\n\nReturns information for node 0 (OAM_ID 0) on the system.\
-                                \nIf no node argument is provided, all node information will be displayed."
+                                \nIf no node argument is provided, all node information except CUIDs will be displayed."
         node_optionals_title = "Node arguments"
 
         # Help text for Node arguments
@@ -3563,6 +3581,13 @@ class AMDSMIParser(argparse.ArgumentParser):
         base_board_temps_help = "Displays baseboard temperatures"
         gtt_help = "Displays GTT (shared GPU memory) size"
         tray_help = "Displays compute tray type and accelerator count"
+        node_cuid_help = (
+            "Lists the CUID of every component on the node: the platform, CPU\n"
+            "packages, GPUs, NPUs and NICs. Every CUID is temporary."
+        )
+        node_cuid_primary_help = (
+            "Include each component's primary CUID, implying --cuid. Requires root."
+        )
 
         node_parser = subparsers.add_parser(
             "node", help=node_help, description=node_subcommand_help
@@ -3589,6 +3614,12 @@ class AMDSMIParser(argparse.ArgumentParser):
         node_parser.add_argument("-G", "--gtt", action="store_true", required=False, help=gtt_help)
         node_parser.add_argument(
             "-T", "--tray", action="store_true", required=False, help=tray_help
+        )
+        node_parser.add_argument(
+            "-Y", "--cuid", action="store_true", required=False, help=node_cuid_help
+        )
+        node_parser.add_argument(
+            "-y", "--cuid-primary", action="store_true", required=False, help=node_cuid_primary_help
         )
 
         # Add Universal Arguments
