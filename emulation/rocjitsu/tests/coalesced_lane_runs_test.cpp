@@ -86,6 +86,56 @@ void expect_same_runs(const LaneRuns &actual, const LaneRuns &expected) {
   }
 }
 
+TEST(CoalescedLaneRunsTest, LaneOrderedScanMatchesMaximalRuns) {
+  constexpr uint32_t kStride = 16;
+  for (const uint32_t wf_size : {32u, 64u}) {
+    const uint64_t full = wf_size == 64 ? UINT64_MAX : UINT32_MAX;
+    // Contiguous, permuted, descending and wrapping addresses all retain lane order.
+    std::array<std::vector<uint64_t>, 4> patterns;
+    for (auto &addrs : patterns)
+      addrs.resize(wf_size);
+    for (uint32_t lane = 0; lane < wf_size; ++lane) {
+      patterns[0][lane] = 0x1000 + uint64_t{lane} * kStride;
+      patterns[1][lane] = 0x1000 + uint64_t{lane ^ 4u} * kStride;
+      patterns[2][lane] = 0x1000 + uint64_t{wf_size - 1 - lane} * kStride;
+      patterns[3][lane] = UINT64_MAX - 127 + uint64_t{lane} * kStride;
+    }
+    for (const auto &addrs : patterns) {
+      for (const uint64_t mask :
+           {full, full & ~uint64_t{0x100}, full & 0x5555555555555555, uint64_t{0}}) {
+        SCOPED_TRACE(::testing::Message() << wf_size << ' ' << mask << ' ' << addrs[0]);
+        LaneRuns actual;
+        EXPECT_TRUE(amdgpu::for_each_lane_ordered_run(addrs.data(), mask, wf_size, kStride,
+                                                      [&](const amdgpu::CoalescedLaneRun &run) {
+                                                        actual.push_back(run);
+                                                        return true;
+                                                      }));
+        expect_same_runs(actual, lane_ordered_runs(addrs, mask, kStride));
+      }
+    }
+  }
+}
+
+TEST(CoalescedLaneRunsTest, LaneOrderedScanStopsWhenCallbackReturnsFalse) {
+  for (const uint32_t wf_size : {32u, 64u}) {
+    SCOPED_TRACE(wf_size);
+    std::vector<uint64_t> addrs(wf_size);
+    for (uint32_t lane = 0; lane < wf_size; ++lane)
+      addrs[lane] = 0x1000 + uint64_t{lane ^ 4u} * 16;
+    const uint64_t full = wf_size == 64 ? UINT64_MAX : UINT32_MAX;
+    LaneRuns actual;
+    EXPECT_FALSE(amdgpu::for_each_lane_ordered_run(addrs.data(), full, wf_size, 16,
+                                                   [&](const amdgpu::CoalescedLaneRun &run) {
+                                                     actual.push_back(run);
+                                                     return false;
+                                                   }));
+    auto expected = lane_ordered_runs(addrs, full, 16);
+    ASSERT_GT(expected.size(), 1u);
+    expected.resize(1);
+    expect_same_runs(actual, expected);
+  }
+}
+
 TEST(CoalescedLaneRunsTest, BroadcastLaneOperandsKeepLaneOrderedRuns) {
   constexpr uint64_t kBase = 0x7ffe8e600000;
   constexpr uint32_t kStride = 16;
