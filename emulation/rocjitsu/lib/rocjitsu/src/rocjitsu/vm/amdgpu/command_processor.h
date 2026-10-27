@@ -315,9 +315,8 @@ public:
   /// @brief Cancel all replicas of a failed queue, then request engine exit.
   /// @details Thread-safe publication; callbacks and cancellation execute on
   /// each CP's engine partition after its current worker batch rejoins.
-  /// Used by GWS failures: this method requests failure exit only after every
-  /// replica acknowledges cancellation. Callers rely on this method to request
-  /// exit instead of requesting it earlier.
+  /// Used by GWS failures. Exit is requested only after every replica
+  /// acknowledges cancellation, so callers must not request it themselves.
   void notify_execution_failure(uint32_t queue_id, uint32_t process_id, std::string reason);
 
   /// @brief Terminate a dispatch after a CU observes a non-retryable VM fault.
