@@ -35,6 +35,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   instead of under the `pthread_create` call that spawned it. The report is written
   whenever `ROCPROFSYS_PROFILE` is enabled; `wall_clock` in
   `ROCPROFSYS_TIMEMORY_COMPONENTS` is accepted but no longer needed.
+- `ROCPROFSYS_TIMING_UNITS` now defaults to `s` instead of `sec`. The `wall_clock` profile
+  accepts and prints the `std::chrono` literal names `ns`, `us`, `ms`, `s`, `min`, and `h`;
+  any other name, such as `sec` or `msec`, logs a warning and the profile uses seconds.
 
 ### Resolved issues
 
