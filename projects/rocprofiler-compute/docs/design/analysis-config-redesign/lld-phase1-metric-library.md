@@ -536,9 +536,7 @@ compares the library with today's analysis configs:
   Bytes/s.
 - **Counters:** the counters the whole library selects equal the counters
   `detect_counters()` selects with no filter (with `--membw-analysis` where the arch has
-  panel 3000). `detect_counters()` scans the panel text, so it also takes the counter
-  name a raw-counter row is labeled with (`TA_TA_BUSY`, whose formula reads
-  `TA_TA_BUSY_sum`); those names are not missing from the library.
+  panel 3000).
 - **Built-in variables:** the library variables equal `get_build_in_vars()`.
 - **Peaks:** every row's `peak` is its metric's `peak` or `peak_empirical`, and every
   library peak is the peak of some row that shows the metric (a measured peak on an arch
@@ -703,6 +701,10 @@ panel that shows it:
 - A per-channel metric ends with `per Channel`.
 - It is in title case; short words (`and`, `by`, `of`, `on`, `over`, `per`, `to`,
   `under`, `vs`) stay lowercase.
+- A metric that shows one raw counter is named after the counter (`TCC_BUSY`).
+- A metric shown only by panel 3000 (memory bandwidth analysis) keeps that model's block
+  words (`EA` for the L2-Fabric interface, `L1 Cache` and `TCP` for the vL1D, `TD -`,
+  `Normalized`); its abbreviations are spelled out like any other name.
 - Names are unique on an arch, ignoring case; the validator rejects two metrics with the
   same name. Two quantities that panels show under one label get names that tell them
   apart (`Wavefront Occupancy`, `Wavefront Occupancy (Percent)`).
