@@ -1373,40 +1373,41 @@ class SearchXmlScene {
 
 constexpr int kGpus = 8;
 
-class SearchXmlChannelMicrotest : public ::testing::Test {
+class SearchXmlChannelMicrotest : public SearchMicrotest {
  protected:
+  // MAXCHANNELS channels of one GPU each, plus their <graph> parent.
+  static constexpr int kMaxXmlNodes = 2 * MAXCHANNELS + 2;
+
   void SetUp() override {
+    SearchMicrotest::SetUp();
     scene_ = std::make_unique<SearchXmlScene>(kGpus);
-    graph_ = std::make_unique<ncclTopoGraph>();
-    std::memset(graph_.get(), 0, sizeof(*graph_));
-    // ncclXml's `nodes[1]` is a flexible array sized by xmlAlloc, so the nodes
-    // are held in a deque instead: it never reallocates, keeping every
-    // previously handed-out ncclXmlNode* stable as more nodes are added.
-    nodes_.clear();
+    xml_ = NewXml(kMaxXmlNodes);
+    graph_ = NewGraph(/*id=*/0, NCCL_TOPO_PATTERN_RING);
   }
 
-  // Allocate a zeroed node from the fixture's arena.
+  // A parentless node, as the importer's callers hand it one <channel> at a time.
   ncclXmlNode* NewNode(const char* name) {
-    nodes_.emplace_back();
-    ncclXmlNode* node = &nodes_.back();
-    std::memset(node, 0, sizeof(*node));
-    std::snprintf(node->name, sizeof(node->name), "%s", name);
+    ncclXmlNode* node = nullptr;
+    EXPECT_EQ(ncclSuccess, xmlAddNode(xml_.get(), nullptr, name, &node));
+    return node;
+  }
+
+  // Append an attribute-less <name> child to `parent`.
+  ncclXmlNode* AddSub(ncclXmlNode* parent, const char* name) {
+    ncclXmlNode* node = nullptr;
+    EXPECT_EQ(ncclSuccess, xmlAddNode(xml_.get(), parent, name, &node));
     return node;
   }
 
   // Append a <name dev="..."> child to `parent`.
   ncclXmlNode* AddChild(ncclXmlNode* parent, const char* name, const char* dev) {
-    ncclXmlNode* node = NewNode(name);
-    node->parent = parent;
-    parent->subs[parent->nSubs++] = node;
+    ncclXmlNode* node = AddSub(parent, name);
     SetAttr(node, "dev", dev);
     return node;
   }
 
   static void SetAttr(ncclXmlNode* node, const char* key, const char* value) {
-    int index = node->nAttrs++;
-    std::snprintf(node->attrs[index].key, sizeof(node->attrs[index].key), "%s", key);
-    std::snprintf(node->attrs[index].value, sizeof(node->attrs[index].value), "%s", value);
+    EXPECT_EQ(ncclSuccess, xmlSetAttr(node, key, value));
   }
 
   ncclTopoSystem* system() { return scene_->system(); }
@@ -1414,8 +1415,8 @@ class SearchXmlChannelMicrotest : public ::testing::Test {
 
  private:
   std::unique_ptr<SearchXmlScene> scene_;
-  std::unique_ptr<ncclTopoGraph> graph_;
-  std::deque<ncclXmlNode> nodes_;
+  XmlPtr xml_;
+  GraphPtr graph_;
 };
 
 TEST_F(SearchXmlChannelMicrotest, WellFormedChannel_TranscribesGpuDevsToRanksInOrder) {
@@ -1533,6 +1534,7 @@ TEST_F(SearchXmlChannelMicrotest, ChannelIndexBeyondMaxChannels_IsRejected) {
   AddChild(channel, "net", "1122334455667788");
 
   EXPECT_EQ(ncclTopoGetChannelFromXml(channel, kChannel, system(), graph()), ncclInvalidUsage);
+  EXPECT_TRUE(Logged("channel 256 out of range"));
   EXPECT_EQ(graph()->nIntraChannels, 0);
   EXPECT_EQ(graph()->intraNets[0], 0);
 }
@@ -1589,6 +1591,7 @@ TEST_F(SearchXmlChannelMicrotest, MoreNetSubsThanTheChannelHolds_IsRejected) {
   for (const char* dev : {"1", "2", "3", "4"}) AddChild(channel, "net", dev);
 
   EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+  EXPECT_TRUE(Logged("too many net subnodes"));
   EXPECT_EQ(graph()->inter[2], kSentinel);
   EXPECT_EQ(graph()->inter[3], kSentinel);
 }
@@ -1618,6 +1621,7 @@ TEST_F(SearchXmlChannelMicrotest, MoreGpuSubsThanTheSystemHasGpus_IsRejected) {
   }
 
   EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+  EXPECT_TRUE(Logged("too many gpu subnodes"));
   EXPECT_EQ(graph()->intra[kGpus], kSentinel);
   EXPECT_EQ(graph()->intra[kGpus + 1], kSentinel);
 }
@@ -1663,6 +1667,7 @@ TEST_F(SearchXmlChannelMicrotest, RankAttributeNamingARankTheTopologyDoesNotHave
   SetAttr(gpu, "rank", std::to_string(INT_MAX).c_str());
 
   EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+  EXPECT_TRUE(Logged("not found in topology"));
   EXPECT_EQ(graph()->intra[0], 0);  // nothing was written
 }
 
@@ -1718,10 +1723,7 @@ class SearchXmlGraphMicrotest : public SearchXmlChannelMicrotest {
     SetAttr(g, "typeinter", "PHB");
     SetAttr(g, "samechannels", "1");
     for (int i = 0; i < nSubs; i++) {
-      ncclXmlNode* channel = NewNode("channel");
-      channel->parent = g;
-      g->subs[g->nSubs++] = channel;
-      AddChild(channel, "gpu", std::to_string(i % kGpus).c_str());
+      AddChild(AddSub(g, "channel"), "gpu", std::to_string(i % kGpus).c_str());
     }
     return g;
   }
@@ -1734,6 +1736,7 @@ TEST_F(SearchXmlGraphMicrotest, NchannelsClaimingMoreChannelsThanArePresent_IsRe
 
   EXPECT_EQ(ncclTopoGetGraphFromXmlSub(MakeGraph(999999, 1), system(), graph(), &nChannels),
             ncclInvalidUsage);
+  EXPECT_TRUE(Logged("does not match the 1 channels present"));
 }
 
 TEST_F(SearchXmlGraphMicrotest, NchannelsOneMoreThanThePresentChannels_IsRejected) {
