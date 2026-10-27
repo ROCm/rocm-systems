@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
+#include <cassert>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -80,17 +81,24 @@ void expand_operand_register(RegisterSet &set, const Instruction &inst, const Op
 
 } // namespace
 
-InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vgpr_msb,
+InstDefUse::InstDefUse(const Instruction &inst, uint8_t wave_size,
+                       const Gfx1250VgprMsbAnalysis *vgpr_msb,
                        UnknownVgprDefPolicy unknown_vgpr_defs) {
+  assert(wave_size == 32 || wave_size == 64);
   has_predicated_def = inst.flags() & PREDICATED_DEF;
   const bool ignores_exec = inst.flags() & IGNORES_EXEC;
   bool has_vector_def = false;
+  // A Wave32 wave mask is one SGPR, but RDNA decoders name the Wave64 pair. A
+  // def of the pair would kill an SGPR the instruction does not write.
+  const bool wave32 = wave_size == 32;
 
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto *op = inst.dst_operand(i);
     if (op == nullptr)
       continue;
     if (auto ref = ordinary_register_ref(*op)) {
+      if (wave32 && ref->cls == RegClass::SGPR && op->is_wave_mask())
+        ref->width = 1;
       expand_operand_register(defs, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Def,
                               unknown_vgpr_defs);
       has_vector_def |= is_vector_def(*ref);
@@ -114,11 +122,14 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
     const auto *op = inst.src_operand(i);
     if (op == nullptr)
       continue;
-    if (auto ref = ordinary_register_ref(*op))
+    if (auto ref = ordinary_register_ref(*op)) {
+      if (wave32 && ref->cls == RegClass::SGPR && op->is_wave_mask())
+        ref->width = 1;
       expand_operand_register(uses, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Use,
                               unknown_vgpr_defs);
-    else if (auto sc = op->to_special_reg_class())
+    } else if (auto sc = op->to_special_reg_class()) {
       uses.expand(RegisterRef{*sc, 0, 1}); // singleton special use
+    }
   }
 
   if (vgpr_msb == nullptr) {

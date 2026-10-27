@@ -144,7 +144,10 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
   // Only the entry block's live-in is needed, so skip materializing
   // per-instruction snapshots for the whole scope.
   options.restrict_live_before_to_instructions = true;
-  const LivenessAnalysis liveness{KernelBlockScope(scope), nullptr, options};
+  // Wave-mask operands keep their decoded pair width. For a Wave32 probe that
+  // can hide a read of the SGPR above a compare's destination; using the
+  // target kernel's wave size is deferred.
+  const LivenessAnalysis liveness{KernelBlockScope(scope), /*wave_size=*/64, nullptr, options};
 
   // Relative and GPR-indexed access displace an encoded VGPR index at runtime,
   // so the decoded operands no longer name every register the body reads. That

@@ -249,7 +249,7 @@ constexpr uint16_t kGfx1250ScratchBaseSgprEnd = 104;
 /// high-bank operand conservatively forbids its low-bank alias. Supporting
 /// high-bank scratch requires physicalizing this set first.
 [[nodiscard]] RegisterSet gfx1250_instruction_registers(const Instruction &inst) {
-  const InstDefUse def_use(inst);
+  const InstDefUse def_use(inst, /*wave_size=*/64);
   return (def_use.uses | def_use.defs).ordinary_only();
 }
 

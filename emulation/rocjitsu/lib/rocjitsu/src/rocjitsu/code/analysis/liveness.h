@@ -203,12 +203,16 @@ public:
   /// object. The pointed-to BasicBlocks and their Instructions must outlive this
   /// analysis because deferred CFG queries retain and later dereference them.
   /// @param blocks Blocks in one kernel CFG scope.
+  /// @param wave_size Wave width in lanes the scope executes at, 32 or 64.
+  /// Forwarded to InstDefUse. A Wave32 RDNA scope analyzed at 64 can report a
+  /// live SGPR dead.
   /// @param exec Optional program-point EXEC-state analysis over the same
   /// @p blocks scope; lets EXEC-masked vector defs count as kills where EXEC is
   /// provably full. Ownership is moved into the analysis. Defaults to null: with
   /// no EXEC analysis every EXEC-masked vector def is treated as `Unknown`, so
   /// the conservative behavior (never promote such a def to a kill) is preserved.
-  LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<ExecMaskAnalysis> exec = nullptr,
+  LivenessAnalysis(KernelBlockScope blocks, uint8_t wave_size,
+                   std::unique_ptr<ExecMaskAnalysis> exec = nullptr,
                    LivenessAnalysisOptions options = {},
                    std::span<const ScopedCfgEdge> extra_edges = {});
   ~LivenessAnalysis();
@@ -351,6 +355,7 @@ private:
   bool global_vgpr_usage_is_complete_ = true;
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;
+  uint8_t wave_size_ = 0;
   std::unique_ptr<Gfx1250VgprMsbAnalysis> gfx1250_vgpr_msb_;
   // EXEC-state analysis over the same scope, captured at construction so the
   // deferred backward dataflow can treat an EXEC-masked vector def as a kill
