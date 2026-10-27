@@ -4,21 +4,21 @@
  * SPDX-License-Identifier: MIT
  */
 
-// Regression test for rocm-systems#12528: hipMemcpy from mmap'd pageable memory
-// stalls under host memory pressure because hsa_amd_memory_lock triggers KFD
-// queue evictions during reclaim.
+// Tests for rocm-systems#12528: hipMemcpy from mmap'd pageable memory stalls
+// under host memory pressure because hsa_amd_memory_lock triggers KFD queue
+// evictions during reclaim. Under pressure the runtime now uses its staging path.
 //
-// The test drives the host into reclaim with an anonymous-memory hog, checks that
-// the runtime's pressure detector inputs (available memory and PSI, computed the
-// same way the runtime computes them) are met, then streams a file-backed mmap to
-// the GPU. It asserts the copy completes with correct data and without a stall.
-// It skips, rather than passing vacuously, when it cannot create those conditions
-// within a bounded time and memory budget.
+// The default-level tests run hipMemcpyMmapPressureHelper in a child process with
+// GPU_* flags that force the detector's decision, and read the runtime's copy log
+// to check which path each copy took. They are deterministic and independent of
+// host memory size. The stress-level test creates real reclaim pressure.
 
 #include <hip_test_common.hh>
+#include <hip_test_process.hh>
 
 #if defined(__linux__)
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <linux/magic.h>
 #include <sys/mman.h>
@@ -32,6 +32,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <map>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -171,6 +174,56 @@ bool detectorWouldTrigger(const Cgroup& cg, const Thresholds& t) {
   return t.psi_percent <= 0 || psiSomeAvg10(cg) > t.psi_percent;
 }
 
+// Runs hipMemcpyMmapPressureHelper with the given environment and returns its
+// exit code and the runtime's copy log (AMD_LOG_LEVEL 5, LOG_COPY mask).
+struct HelperRun {
+  int exit_code;
+  std::string log;
+};
+
+HelperRun runHelper(const std::map<std::string, std::string>& env) {
+  // The runtime appends _<pid> to AMD_LOG_LEVEL_FILE, so log into a private dir.
+  char log_dir[] = "/tmp/hip_mmap_pressure_log_XXXXXX";
+  REQUIRE(mkdtemp(log_dir) != nullptr);
+
+  hip::SpawnProc proc("hipMemcpyMmapPressureHelper", true);
+  proc.setEnv("AMD_LOG_LEVEL", "5");   // copy-path messages are LOG_DETAIL_DEBUG
+  proc.setEnv("AMD_LOG_MASK", "256");  // amd::LOG_COPY
+  proc.setEnv("AMD_LOG_LEVEL_FILE", std::string(log_dir) + "/log");
+  for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
+  HelperRun r;
+  r.exit_code = proc.run("256");
+
+  std::stringstream ss;
+  if (DIR* dir = opendir(log_dir)) {
+    while (dirent* entry = readdir(dir)) {
+      if (entry->d_name[0] == '.') continue;
+      std::string path = std::string(log_dir) + "/" + entry->d_name;
+      ss << std::ifstream(path).rdbuf();
+      unlink(path.c_str());
+    }
+    closedir(dir);
+  }
+  rmdir(log_dir);
+  r.log = ss.str();
+  INFO("helper output: " << proc.getOutput());
+  return r;
+}
+
+size_t countOf(const std::string& haystack, const std::string& needle) {
+  size_t n = 0;
+  for (size_t pos = haystack.find(needle); pos != std::string::npos;
+       pos = haystack.find(needle, pos + needle.size())) {
+    ++n;
+  }
+  return n;
+}
+
+constexpr const char* kPinnedCopy = "HSA Copy Using Pinned resource";
+constexpr const char* kStagedCopy = "HSA Copy Using Staging resource";
+constexpr const char* kDetectorOn = "Pinning under memory pressure: using staging";
+constexpr const char* kDetectorOff = "Pinning under memory pressure: detector off";
+
 // Creates the test file on a disk-backed filesystem so the mmap is file-backed
 // page cache, as in the issue. Returns -1 if no suitable directory exists.
 int createDiskBackedFile(size_t size) {
@@ -284,23 +337,54 @@ CopyResult copyMappedFile(int fd, size_t size) {
 
 }  // namespace
 
-// Copies a file-backed mapping to the GPU without memory pressure.
-HIP_TEST_CASE(Unit_hipMemcpyMmapPressure_Baseline) {
-  int fd = createDiskBackedFile(kFileSize);
-  if (fd < 0) HIP_SKIP_TEST("No disk-backed directory with enough free space");
-  CopyResult r = copyMappedFile(fd, kFileSize);
-  close(fd);
+// With the detector forced to report pressure, large pageable copies use the
+// staging path instead of pinning. The control run, with the feature disabled,
+// must pin the same copies, so the test cannot pass without a change in path.
+HIP_TEST_CASE(Unit_hipMemcpyMmapPressure_UsesStagingUnderPressure) {
+  HelperRun control = runHelper({{"GPU_SKIP_PIN_UNDER_PRESSURE", "0"}});
+  REQUIRE(control.exit_code == 0);
+  if (countOf(control.log, kPinnedCopy) == 0) {
+    HIP_SKIP_TEST("Pageable copies of this size are not pinned here (device policy or "
+                  "pinning unavailable), so the pressure detector cannot change the copy path");
+  }
 
-  INFO("Baseline: " << r.total_s << " s, worst chunk " << r.worst_chunk_ms << " ms");
-  REQUIRE(r.data_ok);
-  CHECK(r.worst_chunk_ms < kMaxChunkMs);
-  CHECK(r.total_s < kMaxTotalS);
+  // PSI threshold 0 selects available-memory-only detection; a threshold far
+  // above any host's memory makes the detector always report pressure.
+  HelperRun forced = runHelper({{"GPU_PIN_PRESSURE_PSI_THRESHOLD", "0"},
+                                {"GPU_PIN_PRESSURE_THRESHOLD_MB", "1073741824"}});
+  INFO("control: " << countOf(control.log, kPinnedCopy) << " pinned copies");
+  INFO("forced: " << countOf(forced.log, kPinnedCopy) << " pinned, "
+                  << countOf(forced.log, kStagedCopy) << " staged copies");
+  REQUIRE(forced.exit_code == 0);  // nonzero means a HIP error or a data mismatch
+  REQUIRE(countOf(forced.log, kDetectorOn) == 1);
+  REQUIRE(countOf(forced.log, kStagedCopy) > 0);
+  REQUIRE(countOf(forced.log, kPinnedCopy) == 0);
 }
 
-// Regression test: copies a file-backed mapping to the GPU while the host is in
-// reclaim and the runtime's pressure detector conditions hold. Without the fix,
-// pinning that memory triggers KFD queue evictions and single chunks stall for
-// tens of seconds.
+// With default settings, the detector is on exactly when memory PSI is available
+// to the runtime, and off otherwise (so hosts without PSI keep pinning).
+HIP_TEST_CASE(Unit_hipMemcpyMmapPressure_DetectorFollowsPsiAvailability) {
+  if (getenv("GPU_SKIP_PIN_UNDER_PRESSURE") || getenv("GPU_PIN_PRESSURE_PSI_THRESHOLD")) {
+    HIP_SKIP_TEST("GPU_SKIP_PIN_UNDER_PRESSURE or GPU_PIN_PRESSURE_PSI_THRESHOLD is set");
+  }
+  HelperRun run = runHelper({});
+  REQUIRE(run.exit_code == 0);
+  size_t on = countOf(run.log, kDetectorOn);
+  size_t off = countOf(run.log, kDetectorOff);
+  if (on + off == 0) {
+    HIP_SKIP_TEST("This device does not pin pageable copies of this size, so the "
+                  "pressure detector is never consulted");
+  }
+  bool psi_available = psiSomeAvg10(findLimitingCgroup()) >= 0;
+  INFO("PSI available: " << psi_available);
+  REQUIRE(on + off == 1);
+  REQUIRE((on == 1) == psi_available);
+}
+
+// Stress-level end-to-end test: copies a file-backed mapping to the GPU while the
+// host is in real reclaim and the runtime's detector conditions hold. Without the
+// fix, pinning that memory triggers KFD queue evictions and single chunks stall
+// for tens of seconds. Skips when it cannot create pressure within its budget.
 HIP_TEST_CASE(Unit_hipMemcpyMmapPressure_UnderPressure) {
   const char* skip = getenv("GPU_SKIP_PIN_UNDER_PRESSURE");
   if (skip && atoi(skip) == 0) {

@@ -259,6 +259,15 @@ hip_add_exe_to_target(NAME MemoryTest2
   TEST_SRC ${TEST_SRC}
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
+if(HIP_PLATFORM MATCHES "amd" AND UNIX)
+  set_source_files_properties(hipMemcpyMmapPressure_Exe.cc PROPERTIES LANGUAGE HIP)
+  add_executable(hipMemcpyMmapPressureHelper EXCLUDE_FROM_ALL hipMemcpyMmapPressure_Exe.cc)
+  set_target_properties(hipMemcpyMmapPressureHelper PROPERTIES LINKER_LANGUAGE HIP)
+  add_dependencies(MemoryTest2 hipMemcpyMmapPressureHelper)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipMemcpyMmapPressureHelper)
+  target_link_libraries(hipMemcpyMmapPressureHelper hip::host hip::device)
+endif()
+
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
   inlineVar.cc
