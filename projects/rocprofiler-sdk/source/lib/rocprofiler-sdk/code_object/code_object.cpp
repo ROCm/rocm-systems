@@ -60,6 +60,7 @@
 #include <utility>
 #include <vector>
 
+#include <dlfcn.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -170,7 +171,7 @@ get_names()
 
 namespace
 {
-using hsa_loader_table_t             = hsa_ven_amd_loader_1_01_pfn_t;
+using hsa_loader_table_t             = hsa_ven_amd_loader_1_03_pfn_t;
 using context_t                      = context::context;
 using user_data_t                    = rocprofiler_user_data_t;
 using context_array_t                = context::context_array_t;
@@ -399,7 +400,7 @@ std::atomic<bool> is_shutdown{false};
 auto&
 get_destroy_mutex()
 {
-    static auto _v = std::mutex{};
+    static auto _v = std::recursive_mutex{};
     return _v;
 }
 
@@ -677,6 +678,12 @@ executable_iterate_agent_symbols_unload_callback(hsa_executable_t        executa
     return HSA_STATUS_SUCCESS;
 }
 
+struct code_object_load_callback_data
+{
+    code_object_array_t* code_object_array       = nullptr;
+    bool                 populate_hip_symbol_map = true;
+};
+
 hsa_status_t
 code_object_load_callback(hsa_executable_t         executable,
                           hsa_loaded_code_object_t loaded_code_object,
@@ -703,7 +710,8 @@ code_object_load_callback(hsa_executable_t         executable,
     code_obj_v.hsa_executable  = executable;
     code_obj_v.hsa_code_object = loaded_code_object;
 
-    auto* code_obj_vec = static_cast<code_object_array_t*>(cb_data);
+    auto*  cb_data_v    = static_cast<code_object_load_callback_data*>(cb_data);
+    auto*& code_obj_vec = cb_data_v->code_object_array;
     auto exists = std::any_of(code_obj_vec->begin(), code_obj_vec->end(), [&code_obj_v](auto& itr) {
         return (itr && code_obj_v == *itr);
     });
@@ -819,7 +827,8 @@ code_object_load_callback(hsa_executable_t         executable,
     // generate a unique code object id
     data.code_object_id = ++get_code_object_id();
 
-    populate_hip_symbol_map_from_loaded_code_object(data);
+    if(cb_data_v && cb_data_v->populate_hip_symbol_map)
+        populate_hip_symbol_map_from_loaded_code_object(data);
 
     auto _status = ::rocprofiler::hsa::get_core_table()->hsa_executable_iterate_agent_symbols_fn(
         executable, data.hsa_agent, executable_iterate_agent_symbols_load_callback, &code_obj_v);
@@ -970,23 +979,28 @@ initialize_hip_binary_data()
 }
 
 // Contains all operations for tracing we do after a successful executable_freeze
-// Can be called directly for code objects which have already been frozen
+// Can be called repeatedly for already frozen code objects to notify newly active contexts.
 // Used for attachment to capture code objects created before attachment time
 hsa_status_t
-executable_freeze_internal(hsa_executable_t executable)
+executable_freeze_internal(hsa_executable_t executable, bool populate_hip_symbol_map = true)
 {
     ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
     (void) initialize_hip_binary_data();
-
     CHECK_NOTNULL(get_executables())->wlock([executable](executable_array_t& data) {
-        data.emplace_back(executable);
+        if(std::find(data.begin(), data.end(), executable) == data.end())
+            data.emplace_back(executable);
     });
 
     auto* code_obj_vec = get_code_objects();
-    CHECK_NOTNULL(code_obj_vec)->wlock([executable](code_object_array_t& _vec) {
-        get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
-            executable, code_object_load_callback, &_vec);
-    });
+    CHECK_NOTNULL(code_obj_vec)
+        ->wlock(
+            [executable](code_object_array_t& _vec, bool _populate_hip) {
+                auto _cb_data = code_object_load_callback_data{
+                    .code_object_array = &_vec, .populate_hip_symbol_map = _populate_hip};
+                get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
+                    executable, code_object_load_callback, &_cb_data);
+            },
+            populate_hip_symbol_map);
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
     constexpr auto CODE_OBJECT_LOAD = ROCPROFILER_CODE_OBJECT_LOAD;
@@ -1007,17 +1021,19 @@ executable_freeze_internal(hsa_executable_t executable)
     {
         code_obj_vec->wlock([](code_object_array_t& data) {
             auto tidx = common::get_tid();
-            // set the contexts for each code object
-            for(const auto& ditr : data)
-                ditr->contexts = ctxs;
-
             for(const auto& ditr : data)
             {
-                for(const auto* citr : ditr->contexts)
+                for(const auto* citr : ctxs)
                 {
+                    // Retain earlier recipients even if they are no longer active.
+                    if(std::find(ditr->contexts.begin(), ditr->contexts.end(), citr) ==
+                       ditr->contexts.end())
+                        ditr->contexts.emplace_back(citr);
+
                     if(citr->callback_tracer->domains(CODE_OBJECT_KIND, CODE_OBJECT_LOAD))
                     {
-                        if(!ditr->beg_notified)
+                        if(ditr->beg_notified.wlock(
+                               [citr](auto& notified) { return notified.emplace(citr).second; }))
                         {
                             auto co_data = ditr->rocp_data;
                             auto record  = rocprofiler_callback_tracing_record_t{
@@ -1044,7 +1060,9 @@ executable_freeze_internal(hsa_executable_t executable)
                         if(sitr && citr->callback_tracer->domains(CODE_OBJECT_KIND,
                                                                   CODE_OBJECT_KERNEL_SYMBOL))
                         {
-                            if(!sitr->beg_notified)
+                            if(sitr->beg_notified.wlock([citr](auto& notified) {
+                                   return notified.emplace(citr).second;
+                               }))
                             {
                                 auto sym_data = sitr->rocp_data;
                                 auto record   = rocprofiler_callback_tracing_record_t{
@@ -1118,13 +1136,6 @@ executable_freeze_internal(hsa_executable_t executable)
                         }
                     }
                 }
-            }
-
-            for(const auto& ditr : data)
-            {
-                ditr->beg_notified = true;
-                for(auto& sitr : ditr->symbols)
-                    sitr->beg_notified = true;
             }
         });
     }
@@ -1201,10 +1212,15 @@ executable_destroy_internal(hsa_executable_t executable)
 hsa_status_t
 executable_destroy(hsa_executable_t executable)
 {
+    // destroy mutex is recursive so it is safe for executable_destroy_internal to acquire it.
+    // this higher level lock was introduced to prevent the internal HSA executable_destroy
+    // (get_destroy_function) from running concurrently with the report_code_object_data function.
+    auto _lk = std::unique_lock{get_destroy_mutex()};
+
     // Serialize all executable_destroy calls to prevent:
     // 1. Concurrent access to code objects in shutdown()
     // 2. Use-after-free when multiple threads destroy same executable
-    // 3. Race on end_notified flags (now atomic, but still need serialization for callbacks)
+    // 3. Interleaved unload callbacks for the same code object and context
     executable_destroy_internal(executable);
     return CHECK_NOTNULL(get_destroy_function())(executable);
 }
@@ -1332,7 +1348,10 @@ shutdown(hsa_executable_t executable)
         {
             if(citr->callback_tracer->domains(CODE_OBJECT_KIND, CODE_OBJECT_LOAD))
             {
-                if(!itr.object->end_notified)
+                if(itr.object->beg_notified.rlock(
+                       [citr](const auto& notified) { return notified.count(citr) > 0; }) &&
+                   itr.object->end_notified.wlock(
+                       [citr](auto& notified) { return notified.emplace(citr).second; }))
                 {
                     auto record = rocprofiler_callback_tracing_record_t{
                         .context_id     = rocprofiler_context_id_t{citr->context_idx},
@@ -1359,7 +1378,10 @@ shutdown(hsa_executable_t executable)
             {
                 for(auto& sitr : itr.symbols)
                 {
-                    if(!sitr->end_notified)
+                    if(sitr->beg_notified.rlock(
+                           [citr](const auto& notified) { return notified.count(citr) > 0; }) &&
+                       sitr->end_notified.wlock(
+                           [citr](auto& notified) { return notified.emplace(citr).second; }))
                     {
                         auto record = rocprofiler_callback_tracing_record_t{
                             .context_id     = rocprofiler_context_id_t{citr->context_idx},
@@ -1380,13 +1402,6 @@ shutdown(hsa_executable_t executable)
                 }
             }
         }
-    }
-
-    for(auto& itr : _unloaded)
-    {
-        itr.object->end_notified = true;
-        for(auto& sitr : itr.symbols)
-            sitr->end_notified = true;
     }
 
     return _unloaded;
@@ -1423,11 +1438,32 @@ initialize(HsaApiTable* table)
 
     get_status_string_function() = core_table.hsa_status_string_fn;
 
-    auto _status = core_table.hsa_system_get_major_extension_table_fn(
-        HSA_EXTENSION_AMD_LOADER, 1, sizeof(hsa_loader_table_t), &get_loader_table());
+    // rocr-runtime currently returns an error if anything other than major_version==1 is passed,
+    // although it copies all the later versions symbols into it if the passed sizeof(...) is large
+    // enough. However, we query whether major_version==3 exists just in case that ever changes.
+    auto amd_loader_major_version = 1;
+    for(auto _major_version : {3, 2, 1})
+    {
+        uint16_t _minor_version = 0;
+        auto     _supported     = false;
+        auto     _ret           = core_table.hsa_system_major_extension_supported_fn(
+            HSA_EXTENSION_AMD_LOADER, _major_version, &_minor_version, &_supported);
+        if(_ret == HSA_STATUS_SUCCESS && _supported)
+        {
+            amd_loader_major_version = _major_version;
+            break;
+        }
+    }
+
+    auto _status = core_table.hsa_system_get_major_extension_table_fn(HSA_EXTENSION_AMD_LOADER,
+                                                                      amd_loader_major_version,
+                                                                      sizeof(hsa_loader_table_t),
+                                                                      &get_loader_table());
 
     ROCP_ERROR_IF(_status != HSA_STATUS_SUCCESS)
-        << "hsa_system_get_major_extension_table failed: " << get_status_string(_status);
+        << fmt::format("hsa_system_get_major_extension_table failed with ec={}: {}",
+                       static_cast<int>(_status),
+                       get_status_string(_status));
 
     if(_status == HSA_STATUS_SUCCESS)
     {
@@ -1529,5 +1565,67 @@ initialize(RocAttachDispatchTable* attach_table)
     *(get_attach_table()) = attach_table;
 }
 
+void
+report_code_object_data()
+{
+    // HSA has not been initialized yet
+    if(!get_loader_table().hsa_ven_amd_loader_iterate_executables) return;
+
+    // block hsa_executable_destroy while this function is executing
+    auto _lk = std::unique_lock{get_destroy_mutex()};
+
+    auto _executables = executable_array_t{};
+    // Replaying a previously unseen kernel inside this callback deadlocks. ROCr's
+    // AmdHsaCodeLoader::IterateExecutables holds the loader's writer lock while invoking callbacks
+    // (projects/rocr-runtime/runtime/hsa-runtime/loader/executable.cpp:432–437).
+    // executable_freeze_internal then reaches get_kernel_descriptor →
+    // hsa_ven_amd_loader_query_host_address → FindHostAddress, which requests a reader lock on the
+    // same non-recursive lock. Late rocprofiler_force_configure() therefore never returns. Collect
+    // handles in the iterator callback and replay afterward, with synchronization that prevents
+    // executable destruction during replay.
+    //
+    // Thus, we acquire the destroy mutex before iterating and operating on the executables to
+    // prevent them from being destroyed while this function runs.
+    auto ret = get_loader_table().hsa_ven_amd_loader_iterate_executables(
+        [](hsa_executable_t executable, void* data) -> hsa_status_t {
+            constexpr auto null_hsa_executable = hsa_executable_t{0};
+            if(executable != null_hsa_executable)
+                static_cast<executable_array_t*>(data)->emplace_back(executable);
+            return HSA_STATUS_SUCCESS;
+        },
+        &_executables);
+
+    for(auto exe : _executables)
+    {
+        auto _state  = HSA_EXECUTABLE_STATE_UNFROZEN;
+        auto _status = ::rocprofiler::hsa::get_core_table()->hsa_executable_get_info_fn(
+            exe, HSA_EXECUTABLE_INFO_STATE, &_state);
+        if(_status == HSA_STATUS_SUCCESS && _state == HSA_EXECUTABLE_STATE_FROZEN)
+        {
+            constexpr auto populate_hip_symbol_map = false;
+            // For an executable first discovered during late configuration, being live and frozen
+            // does not guarantee its original ELF buffer is still valid. HSA only requires that
+            // buffer to outlive its code-object reader, so the application may already have
+            // destroyed the reader and freed the buffer. Without an attach-owned snapshot, this
+            // call reaches populate_hip_symbol_map_from_loaded_code_object(), which passes the
+            // loader's original memory_base to amd_comgr_set_data(), potentially reading freed
+            // memory and crashing. Replay must use retained ELF storage or avoid parsing the
+            // original buffer when its lifetime cannot be guaranteed. We elect to avoid parsing the
+            // original buffer -- thus, clients/tools must rely on code object / kernel symbol for
+            // kernel information and cannot use the HIP information.
+            auto _ret = executable_freeze_internal(exe, populate_hip_symbol_map);
+            ROCP_WARNING_IF(_ret != HSA_STATUS_SUCCESS) << fmt::format(
+                "Failed to parse code object info for hsa_executable_t{{.handle={}}}: "
+                "ec={} :: {}",
+                exe.handle,
+                static_cast<std::underlying_type_t<hsa_status_t>>(_ret),
+                get_status_string(_ret));
+        }
+    }
+
+    ROCP_WARNING_IF(ret != HSA_STATUS_SUCCESS)
+        << fmt::format("Failed to iterate HSA executables for code object information: {}",
+                       get_status_string(ret));
+}
 }  // namespace code_object
 }  // namespace rocprofiler

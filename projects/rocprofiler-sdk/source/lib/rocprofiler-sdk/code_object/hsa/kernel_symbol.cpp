@@ -49,8 +49,12 @@ kernel_symbol::operator=(kernel_symbol&& rhs) noexcept
 {
     if(this != &rhs)
     {
-        beg_notified.store(rhs.beg_notified.load());
-        end_notified.store(rhs.end_notified.load());
+        rhs.beg_notified.wlock([this](auto& rhs_notified) {
+            beg_notified.wlock([&](auto& notified) { notified = std::move(rhs_notified); });
+        });
+        rhs.end_notified.wlock([this](auto& rhs_notified) {
+            end_notified.wlock([&](auto& notified) { notified = std::move(rhs_notified); });
+        });
         host_function_id.store(rhs.host_function_id.load());
         name           = rhs.name;
         hsa_executable = rhs.hsa_executable;
