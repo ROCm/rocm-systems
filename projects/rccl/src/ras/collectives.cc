@@ -576,11 +576,29 @@ static ncclResult_t rasCollConnsInit(struct rasCollRequest** pReq, size_t* pReqL
 static ncclResult_t rasCollConnsMerge(struct rasCollective* coll, struct rasMsg* msg) {
   struct rasCollConns* collData;
   struct rasCollConns* msgData;
+  int avail; // Payload bytes available after the fixed part of rasCollConns.
   int dataOffset = rasMsgLength(RAS_MSG_COLLRESP) + msg->collResp.nPeers * sizeof(*msg->collResp.peers);
   ALIGN_SIZE(dataOffset, alignof(int64_t));
 
   msgData = (struct rasCollConns*)(((char*)msg) + dataOffset);
   collData = (struct rasCollConns*)coll->data;
+
+  // nData is the authority for how much of the payload was actually received, so it has to cover the fixed
+  // part before any field of it may be read.
+  avail = msg->collResp.nData - (int)sizeof(*msgData);
+  if (avail < 0) {
+    WARN("RAS received a COLLRESP message with truncated connection data (%d bytes)", msg->collResp.nData);
+    return ncclRemoteError;
+  }
+
+  // The count inside the payload comes from the peer, and it sizes both the merged buffer and the copy
+  // below, so it must fit within what the peer actually sent.
+  if (msgData->nNegativeMins < 0 ||
+      (int64_t)msgData->nNegativeMins * sizeof(*msgData->negativeMins) > avail) {
+    WARN("RAS received a COLLRESP message with an invalid negative minimums count (%d for %d bytes of data)",
+         msgData->nNegativeMins, msg->collResp.nData);
+    return ncclRemoteError;
+  }
 
   // Merge the stats.
   if (collData->travelTimeMin > msgData->travelTimeMin) collData->travelTimeMin = msgData->travelTimeMin;
@@ -809,6 +827,34 @@ fail:
   goto ret;
 }
 
+// Verifies that the peer-supplied comm records of a RAS_COLL_COMMS payload stay within the nData bytes the
+// peer actually sent.  The merge below sizes its copies from these counts, so a count that is negative or
+// that overruns the payload has to be rejected before it is used.
+static ncclResult_t rasCollCommsCheck(const struct rasCollComms* data, int nData) {
+  int offset = offsetof(struct rasCollComms, comms);
+
+  if (nData < offset || data->nComms < 0) return ncclRemoteError;
+
+  for (int commIdx = 0; commIdx < data->nComms; commIdx++) {
+    const struct rasCollComms::comm* comm;
+    int64_t commBytes;
+
+    if (nData - offset < (int)sizeof(*comm)) return ncclRemoteError;
+    comm = (const struct rasCollComms::comm*)(((const char*)data) + offset);
+    if (comm->nRanks < 0 || comm->nMissingRanks < 0) return ncclRemoteError;
+    // commNRanks is what the merge clamps a rank count to, and it ends up in the merged buffer that the
+    // reporting code iterates, so hold the peer to the invariant the struct documents.
+    if (comm->commNRanks < comm->nRanks + comm->nMissingRanks) return ncclRemoteError;
+
+    commBytes = (int64_t)sizeof(*comm) + (int64_t)comm->nRanks * sizeof(*comm->ranks) +
+                (int64_t)comm->nMissingRanks * sizeof(struct rasCollCommsMissingRank);
+    if (commBytes > nData - offset) return ncclRemoteError;
+    offset += (int)commBytes;
+  }
+
+  return ncclSuccess;
+}
+
 // Merges incoming collective RAS_COLL_COMMS response message into the local accumulated data.
 static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg* msg) {
   struct rasCollComms* collData; // Data previously stored (locally) by our process.
@@ -820,6 +866,11 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
 
   msgData = (struct rasCollComms*)(((char*)msg) + dataOffset);
   collData = (struct rasCollComms*)coll->data;
+
+  if (rasCollCommsCheck(msgData, msg->collResp.nData) != ncclSuccess) {
+    WARN("RAS received a COLLRESP message with malformed communicator data (%d bytes)", msg->collResp.nData);
+    return ncclRemoteError;
+  }
 
   if (msgData->nComms > 0) {
     struct rasCollComms* newData = nullptr; // Destination buffer for the merged data.
@@ -857,7 +908,8 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
                                           msgComm->nMissingRanks * sizeof(struct rasCollCommsMissingRank) -
                                           (char*)msgData >
                                         msg->collResp.nData) {
-        // Should never happen.
+        // Should never happen: rasCollCommsCheck has already walked exactly this chain and rejected the
+        // message if any record overran nData.  Kept as a belt-and-braces guard on the loop's own arithmetic.
         INFO(NCCL_RAS, "RAS overflow of msgData: msgIdx %d, nComms %d, nData %d, needs %td -- internal error?", msgIdx,
              msgData->nComms, msg->collResp.nData,
              (char*)(msgComm + 1) + msgComm->nRanks * sizeof(*msgComm->ranks) +

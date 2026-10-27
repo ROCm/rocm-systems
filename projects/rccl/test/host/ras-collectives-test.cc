@@ -1115,6 +1115,75 @@ TEST_F(RasCollectivesMicrotest, MsgHandleCollResp_ConnsMergeAppendsNegativeMins)
   EXPECT_EQ(htons(1), collData->negativeMins[1].source.sin.sin_port);
 }
 
+// Delivers a CONNS response whose payload has been tampered with, and asserts that nothing of the local
+// accumulated data was touched -- rejection has to happen before the stat merge, not after it.
+void ExpectConnsPayloadRejected(const std::function<void(struct rasCollConns*)>& tamper) {
+  union ncclSocketAddress root = MakeAddr(9);
+  auto* respConn = MakeConn(2);
+  auto* coll = MakeCollective(RAS_COLL_CONNS, root, 5);
+  coll->fwdConns[coll->nFwdSent++] = respConn;
+  SetData(coll, BuildConnsData(1, 2, 3, 1, 1, {{MakeAddr(10), MakeAddr(11)}}, -5));
+  auto msgData = BuildConnsData(100, 200, 300, 7, 9, {{MakeAddr(1), MakeAddr(2)}}, -7);
+  tamper(reinterpret_cast<struct rasCollConns*>(msgData.data()));
+  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgData);
+
+  EXPECT_EQ(ncclRemoteError, DeliverResp(msg, respConn));
+  auto* collData = reinterpret_cast<struct rasCollConns*>(coll->data);
+  EXPECT_EQ(1, collData->nNegativeMins);
+  EXPECT_EQ(1, collData->travelTimeMin);
+  EXPECT_EQ(2, collData->travelTimeMax);
+  EXPECT_EQ(3, collData->travelTimeSum);
+  EXPECT_EQ(1, collData->travelTimeCount);
+  EXPECT_EQ(1, collData->nConns);
+}
+
+// The count drives both the realloc size and the memcpy length in rasCollConnsMerge, and this value is
+// large enough that its sizeof(negativeMin) multiplication wraps the int byte count back to zero.
+TEST_F(RasCollectivesMicrotest, MsgHandleCollResp_ConnsMergeRejectsNegativeMinsCountThatOverflowsByteCount) {
+  ExpectConnsPayloadRejected([](struct rasCollConns* data) { data->nNegativeMins = 1 << 26; });
+}
+
+// The realistic off-by-one, which a bound derived from the wrong struct offset would let through.
+TEST_F(RasCollectivesMicrotest, MsgHandleCollResp_ConnsMergeRejectsNegativeMinsCountOneBeyondMessage) {
+  ExpectConnsPayloadRejected([](struct rasCollConns* data) { data->nNegativeMins = 2; });
+}
+
+TEST_F(RasCollectivesMicrotest, MsgHandleCollResp_ConnsMergeRejectsNegativeCountOfNegativeMins) {
+  ExpectConnsPayloadRejected([](struct rasCollConns* data) { data->nNegativeMins = -1; });
+}
+
+TEST_F(RasCollectivesMicrotest, MsgHandleCollResp_ConnsMergeRejectsDataTruncatedBeforeFixedPart) {
+  union ncclSocketAddress root = MakeAddr(9);
+  auto* respConn = MakeConn(2);
+  auto* coll = MakeCollective(RAS_COLL_CONNS, root, 5);
+  coll->fwdConns[coll->nFwdSent++] = respConn;
+  SetData(coll, BuildConnsData(1, 2, 3, 1, 1, {}));
+  auto msgData = BuildConnsData(100, 200, 300, 7, 9, {});
+  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgData);
+  // nData no longer covers the fixed part of rasCollConns, so none of its fields may be read.
+  msg->collResp.nData = 4;
+
+  EXPECT_EQ(ncclRemoteError, DeliverResp(msg, respConn));
+  EXPECT_EQ(1, reinterpret_cast<struct rasCollConns*>(coll->data)->nConns);
+}
+
+// The boundary on the accepting side: a payload sized exactly as rasCollConnsInit sizes it must merge.
+// This is what would catch a bound derived from the wrong struct offset (notably on Windows, where
+// negativeMins is declared [1] rather than [0]).
+TEST_F(RasCollectivesMicrotest, MsgHandleCollResp_ConnsMergeAcceptsNegativeMinsCountFillingMessageExactly) {
+  union ncclSocketAddress root = MakeAddr(9);
+  auto* respConn = MakeConn(2);
+  auto* coll = MakeCollective(RAS_COLL_CONNS, root, 5);
+  coll->fwdConns[coll->nFwdSent++] = respConn;
+  SetData(coll, BuildConnsData(1, 2, 3, 1, 1, {{MakeAddr(10), MakeAddr(11)}}, -5));
+  auto msgData = BuildConnsData(1, 2, 3, 1, 1, {{MakeAddr(1), MakeAddr(2)}, {MakeAddr(3), MakeAddr(4)}}, -7);
+  ASSERT_EQ(sizeof(struct rasCollConns) + 2 * sizeof(struct rasCollConns::negativeMin), msgData.size());
+  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgData);
+
+  EXPECT_EQ(ncclSuccess, DeliverResp(msg, respConn));
+  EXPECT_EQ(3, reinterpret_cast<struct rasCollConns*>(coll->data)->nNegativeMins);
+}
+
 TEST_F(RasCollectivesMicrotest, MsgHandleCollResp_DiagTypeDispatchesToDiagMerge) {
   union ncclSocketAddress root = MakeAddr(9);
   auto* respConn = MakeConn(2);
@@ -1874,30 +1943,103 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_RankCountOverflowClampsToCommNRanks) 
   EXPECT_EQ(2, merged->comms[0].nRanks);  // Clamped to commNRanks; the extra rank was skipped.
 }
 
-TEST_F(RasCollectivesMicrotest, CommsMerge_MalformedBuffersStopAtTheirBounds) {
+// Delivers a COMMS response whose payload has been tampered with, and asserts that the local accumulated
+// data came through untouched.
+void ExpectCommsPayloadRejected(const std::function<void(struct rasCollComms*)>& tamper) {
   union ncclSocketAddress root = MakeAddr(9);
+  auto* respConn = MakeConn(2);
+  auto* coll = MakeCollective(RAS_COLL_COMMS, root, 5);
+  coll->fwdConns[coll->nFwdSent++] = respConn;
+  SetPeers(coll, {});
+  SetData(coll, BuildRasCollComms({MakeCommSpec(0x9000, 2, {{0, 0}})}));
+  auto msgBlob = BuildRasCollComms({MakeCommSpec(0x9000, 2, {{1, 0}})});
+  tamper(reinterpret_cast<struct rasCollComms*>(msgBlob.data()));
+  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
+
+  EXPECT_EQ(ncclRemoteError, DeliverResp(msg, respConn));
+  auto* merged = reinterpret_cast<struct rasCollComms*>(coll->data);
+  ASSERT_EQ(1, merged->nComms);
+  EXPECT_EQ(1, merged->comms[0].nRanks);
+  EXPECT_EQ(0, merged->comms[0].ranks[0].commRank);
+}
+
+// A negative count walks the record pointers backwards, so the existing bounds checks accept it and the
+// rank copies below run against a count that is huge once it reaches a size_t.
+TEST_F(RasCollectivesMicrotest, CommsMerge_RejectsNegativeRankCount) {
+  ExpectCommsPayloadRejected([](struct rasCollComms* data) { data->comms[0].nRanks = -1; });
+}
+
+TEST_F(RasCollectivesMicrotest, CommsMerge_RejectsNegativeMissingRankCount) {
+  ExpectCommsPayloadRejected([](struct rasCollComms* data) { data->comms[0].nMissingRanks = -1; });
+}
+
+// The positive overrun that commBytes exists for: the record claims more ranks than the payload holds.
+TEST_F(RasCollectivesMicrotest, CommsMerge_RejectsRankCountBeyondMessage) {
+  ExpectCommsPayloadRejected([](struct rasCollComms* data) {
+    data->comms[0].commNRanks = 64;
+    data->comms[0].nRanks = 64;
+  });
+}
+
+TEST_F(RasCollectivesMicrotest, CommsMerge_RejectsMissingRankCountBeyondMessage) {
+  ExpectCommsPayloadRejected([](struct rasCollComms* data) {
+    data->comms[0].commNRanks = 64;
+    data->comms[0].nMissingRanks = 63;
+  });
+}
+
+TEST_F(RasCollectivesMicrotest, CommsMerge_RejectsCommCountBeyondMessage) {
+  ExpectCommsPayloadRejected([](struct rasCollComms* data) { data->nComms = 1 << 20; });
+}
+
+// commNRanks is what the merge clamps a rank count to, and it lands in the merged buffer, so a value that
+// contradicts the struct's documented commNRanks >= nRanks + nMissingRanks invariant must not be accepted.
+TEST_F(RasCollectivesMicrotest, CommsMerge_RejectsCommSizeSmallerThanItsRankCounts) {
+  ExpectCommsPayloadRejected([](struct rasCollComms* data) { data->comms[0].commNRanks = 0; });
+}
+
+// Runs rasCollCommsMerge directly so that each side's nData can be shrunk independently of its buffer.
+ncclResult_t RunCommsMergeWithSizes(std::vector<char> collBlob, int collDataSize, std::vector<char> msgBlob,
+                                    int msgDataSize, int* mergedNComms) {
+  union ncclSocketAddress root = MakeAddr(9);
+  auto* coll = MakeCollective(RAS_COLL_COMMS, root, 5);
+  SetData(coll, collBlob);
+  coll->nData = collDataSize;
+  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
+  msg->collResp.nData = msgDataSize;
+  const ncclResult_t result = rasCollCommsMerge(coll, msg);
+  EXPECT_NE(coll->data, nullptr);
+  if (coll->data) *mergedNComms = reinterpret_cast<struct rasCollComms*>(coll->data)->nComms;
+  FreeAllocatedMsg(msg);
+  rasCollFree(coll);
+  return result;
+}
+
+// A comm record that runs past the message's own nData is the peer's doing, so the message is rejected.
+TEST_F(RasCollectivesMicrotest, CommsMerge_RejectsCommRecordTruncatedByMessageNData) {
   constexpr int headerSize = static_cast<int>(offsetof(struct rasCollComms, comms));
-
-  auto runMerge = [&](std::vector<char> collBlob, int collDataSize, std::vector<char> msgBlob, int msgDataSize) {
-    auto* coll = MakeCollective(RAS_COLL_COMMS, root, 5);
-    SetData(coll, collBlob);
-    coll->nData = collDataSize;
-    auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
-    msg->collResp.nData = msgDataSize;
-    EXPECT_EQ(ncclSuccess, rasCollCommsMerge(coll, msg));
-    ASSERT_NE(coll->data, nullptr);
-    EXPECT_EQ(0, reinterpret_cast<struct rasCollComms*>(coll->data)->nComms);
-    FreeAllocatedMsg(msg);
-    rasCollFree(coll);
-  };
-
   auto empty = BuildRasCollComms({});
-  auto malformed = BuildRasCollComms({MakeCommSpec(0xA000, 1)});
   auto valid = BuildRasCollComms({MakeCommSpec(0xA100, 1)});
+  auto truncated = BuildRasCollComms({MakeCommSpec(0xA000, 1)});
+  int mergedNComms = -1;
 
-  runMerge(empty, static_cast<int>(empty.size()), malformed, headerSize);
-  runMerge(malformed, headerSize, valid, static_cast<int>(valid.size()));
-  runMerge(valid, static_cast<int>(valid.size()), malformed, headerSize);
+  EXPECT_EQ(ncclRemoteError, RunCommsMergeWithSizes(empty, static_cast<int>(empty.size()), truncated, headerSize,
+                                                    &mergedNComms));
+  EXPECT_EQ(ncclRemoteError, RunCommsMergeWithSizes(valid, static_cast<int>(valid.size()), truncated, headerSize,
+                                                    &mergedNComms));
+}
+
+// The same truncation in the locally accumulated data is not something a peer controls, so rather than
+// rejecting a well-formed message the merge stops where the local buffer ends.
+TEST_F(RasCollectivesMicrotest, CommsMerge_LocalTruncationStopsAtItsBounds) {
+  constexpr int headerSize = static_cast<int>(offsetof(struct rasCollComms, comms));
+  auto valid = BuildRasCollComms({MakeCommSpec(0xA100, 1)});
+  auto truncated = BuildRasCollComms({MakeCommSpec(0xA000, 1)});
+  int mergedNComms = -1;
+
+  EXPECT_EQ(ncclSuccess,
+            RunCommsMergeWithSizes(truncated, headerSize, valid, static_cast<int>(valid.size()), &mergedNComms));
+  EXPECT_EQ(0, mergedNComms);
 }
 
 TEST_F(RasCollectivesMicrotest, CommsMerge_UnfilledMissingRankRetainsMetadata) {
