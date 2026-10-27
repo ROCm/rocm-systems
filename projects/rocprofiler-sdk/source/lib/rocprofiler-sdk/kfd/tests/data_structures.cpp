@@ -27,6 +27,9 @@
 
 #include <gtest/gtest.h>
 
+#include <unordered_map>
+#include <unordered_set>
+
 namespace
 {
 using namespace rocprofiler::kfd;
@@ -53,6 +56,45 @@ TEST(correlation_key, equality_hash_and_per_gpu_scoping)
     EXPECT_NE(a, (correlation_key{8, 100, 0})) << "different slot";
     EXPECT_NE(a, (correlation_key{7, 101, 0})) << "different dispatch index";
 }
+
+TEST(correlation_key, sequential_multi_queue_hash_distribution)
+{
+    constexpr uint32_t queue_count          = 128;
+    constexpr uint32_t dispatches_per_queue = 1024;
+    constexpr size_t   entry_count          = queue_count * dispatches_per_queue;
+
+    for(uint32_t gpu : {0u, 56179u})
+    {
+        for(uint32_t first : {0u, UINT32_MAX - dispatches_per_queue + 1})
+        {
+            auto hashes  = std::unordered_set<size_t>{};
+            auto entries = std::unordered_map<correlation_key, uint32_t, correlation_key_hash>{};
+            hashes.reserve(entry_count);
+            entries.reserve(entry_count);
+            for(uint32_t queue = 0; queue < queue_count; ++queue)
+            {
+                for(uint32_t dispatch = 0; dispatch < dispatches_per_queue; ++dispatch)
+                {
+                    const auto key = correlation_key{queue * 2, first + dispatch, gpu};
+                    hashes.insert(correlation_key_hash{}(key));
+                    entries.emplace(key, dispatch);
+                }
+            }
+            EXPECT_GT(hashes.size(), entry_count * 99 / 100);
+            ASSERT_EQ(entries.size(), entry_count);
+            for(uint32_t queue = 0; queue < queue_count; ++queue)
+            {
+                for(uint32_t dispatch = 0; dispatch < dispatches_per_queue; ++dispatch)
+                {
+                    const auto found = entries.find({queue * 2, first + dispatch, gpu});
+                    ASSERT_NE(found, entries.end());
+                    EXPECT_EQ(found->second, dispatch);
+                }
+            }
+        }
+    }
+}
+
 // Time-as-generation window bookkeeping: open/resolve/close, max, the overlap
 // verdict, first_owner, the disable latch, and the page-slot helpers.
 TEST(DoorbellMap, window_open_resolve_close_and_slot_helpers)

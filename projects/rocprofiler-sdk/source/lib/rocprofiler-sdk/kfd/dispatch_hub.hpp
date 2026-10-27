@@ -92,20 +92,10 @@ struct loss_stats
 // default via D8's parse contract; the upper limit keeps cap far below SIZE_MAX so
 // the register_batch comparisons cannot be defeated by an absurd value.
 //
-// Sizing (empirically validated, not the original ~100 B "few MB" estimate): a
-// graph-launch burst workload (hipGraphLaunch, e.g. 1024-node graph x 1000 iters)
-// legitimately keeps hundreds of thousands of dispatches in flight relative to the
-// reader/processor retirement rate -- an order of magnitude above the old 65536
-// default, which refused 16-41% of dispatches and forced the slower signal path,
-// erasing most of the signal-less speedup. At ~100 B/entry the 2M default costs
-// ~190-200 MB per GPU at worst. Why not a "medium" cap: collect_cap_victims_locked
-// is an O(live-entries-for-that-GPU) scan+sort under the single hub mutex, so a cap
-// a realistic workload still exceeds is WORSE than a small cap (cheap scans) or a
-// large one (scans essentially never fire) -- a mid cap that trips constantly cost
-// +408% in the benchmark. Residual (accepted, not re-engineered here): a workload
-// whose genuine peak concurrency exceeds 2M, or a real EOP-loss leak growing
-// unboundedly toward the cap, still pays that eviction-scan cost; a proper fix needs
-// a per-GPU secondary index for eligible-victim lookup, out of scope for this fix.
+// Graph bursts can leave many dispatches pending relative to the processor's
+// retirement rate. At capacity, new batches use signals without scanning or
+// evicting existing entries: their completion records may still be in the ring
+// or the processor backlog. Only completion and lifecycle cleanup reclaim them.
 inline size_t
 hub_max_pending_per_gpu()
 {
@@ -181,12 +171,23 @@ public:
     // batch, so refusing here would leave dispatches that skipped their signals
     // with nothing to complete them.
     //
-    // Cap-evicted payloads leave via evicted_out for the caller to release AFTER
-    // it drops m_mu (the hub's standing no-destroy-under-lock contract). On false
-    // the map is UNMUTATED across every GPU and evicted_out is empty.
-    bool register_batch(std::vector<registration>&& batch, std::vector<leaked>& evicted_out)
+    // Admission never evicts existing entries. The output argument is retained
+    // for callers; on refusal the batch and every GPU's pending map are unmutated.
+    bool register_batch(std::vector<registration>&& batch, std::vector<leaked>&)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
+
+        auto batch_by_gpu = std::unordered_map<uint32_t, size_t>{};
+        auto unique_keys  = std::unordered_set<correlation_key, correlation_key_hash>{};
+        if(batch.size() > 1)
+        {
+            unique_keys.reserve(batch.size());
+            for(const auto& reg : batch)
+            {
+                if(!unique_keys.insert(reg.key).second) return false;
+                ++batch_by_gpu[reg.key.gpu_id];
+            }
+        }
 
         auto lk = std::lock_guard<std::mutex>{m_mu};
         // reject on the process-wide disable latch, checked under
@@ -196,42 +197,18 @@ public:
         // swept by the drain; one that acquires m_mu after it observes the latch.
         if(signal_less_disabled()) return false;
 
-        for(size_t i = 0; i < batch.size(); ++i)
-        {
-            if(!key_admissible_locked(batch[i].key)) return false;
-            for(size_t j = 0; j < i; ++j)
-                if(batch[j].key == batch[i].key) return false;
-        }
-
-        // Per-GPU cap, evaluated for the WHOLE batch in this one critical section
-        // so two batches cannot each observe headroom only one has. Eligibility uses
-        // the same clock domain (steady_now_ns) as gc_deadline_ns / gc_closed_windows.
-        const size_t   cap          = hub_max_pending_per_gpu();
-        const uint64_t now_ns       = steady_now_ns();
-        auto           batch_by_gpu = std::unordered_map<uint32_t, size_t>{};
-        for(const auto& reg : batch)
-            ++batch_by_gpu[reg.key.gpu_id];
-
-        // Read-only victim selection across ALL GPUs first; evict only once every
-        // GPU's shortfall is satisfied, so a shortfall on a later GPU leaves the
-        // map unmutated. Checked comparisons only -- never live+batch-cap, which
-        // overflows the add and underflows a healthy GPU into a huge `need`.
-        auto victims = std::vector<typename pending_entry_map::iterator>{};
+        // Check the whole batch under the same lock as insertion and retirement,
+        // so concurrent submitters cannot both consume the same headroom.
+        const size_t cap = hub_max_pending_per_gpu();
+        if(batch.size() == 1 && pending_count_for_gpu_locked(batch.front().key.gpu_id) >= cap)
+            return false;
         for(const auto& [gpu, bcount] : batch_by_gpu)
         {
             const size_t live = pending_count_for_gpu_locked(gpu);
-            const size_t need = hub_cap_need(live, bcount, cap);
-            if(need == 0) continue;  // fits: no shortfall for this GPU
-
-            if(!collect_cap_victims_locked(gpu, need, now_ns, victims))
-                return false;  // insufficient eligible victims -> refuse, map unmutated
+            if(hub_cap_need(live, bcount, cap) != 0) return false;
         }
-
-        for(auto it : victims)
-        {
-            evicted_out.emplace_back(leak_locked(it));
-            erase_entry_locked(it);
-        }
+        for(const auto& reg : batch)
+            if(!key_admissible_locked(reg.key)) return false;
 
         for(auto& reg : batch)
         {
@@ -243,7 +220,23 @@ public:
             m_entries.emplace(reg.key, std::move(e));
             ++m_pending_by_gpu[reg.key.gpu_id];
         }
+        m_pending_total.store(m_entries.size(), std::memory_order_release);
         return true;
+    }
+
+    bool can_register_batch(uint32_t gpu_id, size_t count) const
+    {
+        if(m_abandoned.load(std::memory_order_acquire)) return false;
+        if(signal_less_disabled() ||
+           m_mode.load(std::memory_order_acquire) != session_mode::running)
+            return false;
+        const size_t cap = hub_max_pending_per_gpu();
+        if(count > cap) return false;
+        if(hub_cap_need(m_pending_total.load(std::memory_order_acquire), count, cap) == 0)
+            return true;
+        auto lock = std::lock_guard<std::mutex>{m_mu};
+        if(signal_less_disabled() || m_mode != session_mode::running) return false;
+        return hub_cap_need(pending_count_for_gpu_locked(gpu_id), count, cap) == 0;
     }
 
     // Would register_batch() accept these keys right now? Advisory only: the
@@ -252,15 +245,28 @@ public:
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
 
+        auto batch_by_gpu = std::unordered_map<uint32_t, size_t>{};
+        auto unique_keys  = std::unordered_set<correlation_key, correlation_key_hash>{};
+        if(keys.size() > 1)
+        {
+            unique_keys.reserve(keys.size());
+            for(const auto& key : keys)
+            {
+                if(!unique_keys.insert(key).second) return false;
+                ++batch_by_gpu[key.gpu_id];
+            }
+        }
+
         auto lk = std::lock_guard<std::mutex>{m_mu};
         if(signal_less_disabled()) return false;
         if(m_mode != session_mode::running) return false;
-        for(size_t i = 0; i < keys.size(); ++i)
-        {
-            if(!key_admissible_locked(keys[i])) return false;
-            for(size_t j = 0; j < i; ++j)
-                if(keys[j] == keys[i]) return false;
-        }
+        const size_t cap = hub_max_pending_per_gpu();
+        if(keys.size() == 1 && pending_count_for_gpu_locked(keys.front().gpu_id) >= cap)
+            return false;
+        for(const auto& [gpu, count] : batch_by_gpu)
+            if(hub_cap_need(pending_count_for_gpu_locked(gpu), count, cap) != 0) return false;
+        for(const auto& key : keys)
+            if(!key_admissible_locked(key)) return false;
         return true;
     }
 
@@ -441,7 +447,7 @@ public:
         return m_entries.size();
     }
 
-    // Next insertion seq to be assigned. D9 cap eviction orders victims by it. Under m_mu.
+    // Next insertion sequence to be assigned, read under m_mu.
     uint64_t current_seq() const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return 0;
@@ -477,8 +483,7 @@ private:
         uint64_t   correlation_id = 0;
         window_ptr window         = {};
         PayloadT   payload        = {};
-        // Monotonic insertion order, assigned under m_mu. Ages the cap's eviction
-        // selection (oldest-first).
+        // Monotonic insertion order, assigned under m_mu.
         uint64_t seq = 0;
     };
 
@@ -518,35 +523,6 @@ private:
         return it == m_pending_by_gpu.end() ? 0 : it->second;
     }
 
-    // Caller holds m_mu. Collect up to `need` oldest-by-seq ELIGIBLE victims on one
-    // GPU into `out` (appended). Eligible == gc_closed_windows()'s own predicate:
-    // window closed AND now_ns >= gc_deadline_ns -- never open-window, never in-grace,
-    // so no admission guard is lost and no still-running kernel is ledgered. Returns
-    // false (collecting nothing usable for the caller to act on) if fewer than `need`
-    // eligible entries exist; the caller then refuses and leaves the map unmutated.
-    bool collect_cap_victims_locked(uint32_t                                           gpu_id,
-                                    size_t                                             need,
-                                    uint64_t                                           now_ns,
-                                    std::vector<typename pending_entry_map::iterator>& out)
-    {
-        auto eligible = std::vector<typename pending_entry_map::iterator>{};
-        for(auto it = m_entries.begin(); it != m_entries.end(); ++it)
-        {
-            if(it->first.gpu_id != gpu_id) continue;
-            const auto& w = it->second.window;
-            if(w && w->t_close.load(std::memory_order_acquire) != kWindowOpen &&
-               now_ns >= w->gc_deadline_ns)
-                eligible.push_back(it);
-        }
-        if(eligible.size() < need) return false;
-        std::sort(eligible.begin(), eligible.end(), [](const auto& a, const auto& b) {
-            return a->second.seq < b->second.seq;  // oldest first
-        });
-        out.insert(
-            out.end(), eligible.begin(), eligible.begin() + static_cast<std::ptrdiff_t>(need));
-        return true;
-    }
-
     // Caller holds m_mu. Insert into the bounded ledger; once it saturates,
     // is_ledgered() answers true unconditionally at O(1) memory.
     void ledger_locked(uint64_t correlation_id)
@@ -578,6 +554,7 @@ private:
         }
         m_entries.clear();
         m_pending_by_gpu.clear();
+        m_pending_total.store(0, std::memory_order_release);
         auto stats            = loss_stats{};
         stats.dispatches      = out.size();
         stats.correlation_ids = ids.size();
@@ -589,7 +566,8 @@ private:
     // inherited mutex or map.
     std::atomic<bool> m_abandoned = {false};
 
-    session_mode       m_mode             = session_mode::running;
+    std::atomic<session_mode> m_mode             = {session_mode::running};
+    std::atomic<size_t>       m_pending_total    = {0};
     pending_entry_map  m_entries          = {};
     correlation_id_set m_ledger           = {};
     bool               m_ledger_saturated = false;
@@ -610,7 +588,9 @@ private:
         {
             if(--_g->second == 0) m_pending_by_gpu.erase(_g);
         }
-        return m_entries.erase(it);
+        auto next = m_entries.erase(it);
+        m_pending_total.store(m_entries.size(), std::memory_order_release);
+        return next;
     }
 };
 }  // namespace kfd

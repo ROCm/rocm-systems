@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/kfd/env_parse.hpp"
 #include "lib/rocprofiler-sdk/kfd/owner_registry.hpp"
 #include "lib/rocprofiler-sdk/kfd/record_pipe.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 
 #include <gtest/gtest.h>
 
@@ -45,6 +46,26 @@
 
 #include <sys/wait.h>
 #include <unistd.h>
+
+TEST(SubmitGate, unavailable_emitter_preserves_batch_ownership)
+{
+    using namespace rocprofiler::kfd;
+    auto batch = signal_less_batch_t{};
+    for(uint64_t correlation = 1; correlation <= 3; ++correlation)
+    {
+        auto record           = signal_less_hub_t::proven{};
+        record.correlation_id = correlation;
+        batch.emplace_back(std::move(record));
+    }
+    auto* storage = batch.data();
+    EXPECT_FALSE(submit_complete_signal_less_dispatch(batch));
+    EXPECT_EQ(batch.data(), storage);
+    ASSERT_EQ(batch.size(), 3u);
+    for(size_t index = 0; index < batch.size(); ++index)
+        EXPECT_EQ(batch[index].correlation_id, index + 1);
+    batch.clear();
+    EXPECT_TRUE(submit_complete_signal_less_dispatch(batch));
+}
 
 namespace
 {

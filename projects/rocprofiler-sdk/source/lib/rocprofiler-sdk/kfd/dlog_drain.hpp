@@ -41,6 +41,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <set>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -165,6 +166,26 @@ struct ring_cursors
 // point of the split is that the copier never touches this.
 struct pair_state
 {
+    struct pending_record
+    {
+        copied_record record     = {};
+        uint64_t      seen_at_ns = 0;
+        uint64_t      epoch      = 0;
+    };
+
+    struct work_item
+    {
+        uint64_t key;
+        uint64_t tick;
+        uint32_t kind;
+        size_t   index;
+    };
+
+    std::vector<pending_record> deferred_records      = {};
+    std::vector<pending_record> next_deferred_records = {};
+    std::vector<work_item>      pairing_work          = {};
+    uint64_t                    deferred_epoch        = UINT64_MAX;
+
     struct pending_start
     {
         uint64_t start_ticks = 0;  // GPU ticks from the dispatch_start record
@@ -172,7 +193,9 @@ struct pair_state
     };
     // dispatch_start records awaiting their matching eop, keyed by
     // (doorbell_off << 32 | dispatch_id).
-    std::unordered_map<uint64_t, pending_start> pending_starts = {};
+    using pending_start_map = std::unordered_map<uint64_t, pending_start>;
+    pending_start_map                       pending_starts = {};
+    std::set<std::pair<uint64_t, uint64_t>> start_ages     = {};
 
     uint64_t unmatched_eops = 0;  // EOPs whose START was lost (shape ii)
 
@@ -181,6 +204,7 @@ struct pair_state
     uint64_t starts_seen        = 0;
     uint64_t eops_seen          = 0;
     uint64_t starts_overwritten = 0;  // a second START arrived on a retained key
+    uint64_t starts_out_of_order = 0;
     uint64_t equal_tick_drops   = 0;  // EOP tick == retained START tick (fail-closed)
     uint64_t stale_eop_drops    = 0;  // EOP tick < retained START tick (belongs earlier)
     uint64_t starts_evicted     = 0;  // retained STARTs aged out by the watermark
@@ -195,23 +219,49 @@ struct pair_state
     // reader; the default stands for a unit test that never sets it.
     size_t max_pending_starts = 2'000'000;
 
-    // Drop the single oldest retained START, counting it as lost (the dispatch
-    // will now complete start-unknown -- coverage loss, not a wrong record).
-    // RESIDUAL, accepted: this is an O(live) scan, paid on every insert while the
-    // map sits AT the cap. Reaching the cap already means EOPs are being lost at a
-    // rate no sane workload produces, and the alternative there is memory
-    // exhaustion; a cheap victim lookup would need a second index ordered by
-    // seen_at_ns, the same secondary-index work deferred from the hub cap.
+    void erase_start(pending_start_map::iterator start)
+    {
+        start_ages.erase({start->second.seen_at_ns, start->first});
+        pending_starts.erase(start);
+    }
+
+    void record_start(uint64_t key, uint64_t ticks, uint64_t copied_at)
+    {
+        ++starts_seen;
+        auto start = pending_starts.find(key);
+        if(start != pending_starts.end())
+        {
+            ++starts_overwritten;
+            if(ticks <= start->second.start_ticks)
+            {
+                ++starts_out_of_order;
+                return;
+            }
+            start_ages.emplace(copied_at, key);
+            if(copied_at != start->second.seen_at_ns)
+                start_ages.erase({start->second.seen_at_ns, key});
+            start->second = pending_start{ticks, copied_at};
+            return;
+        }
+        if(pending_starts.size() >= max_pending_starts) evict_oldest_start();
+        auto inserted = pending_starts.emplace(key, pending_start{ticks, copied_at}).first;
+        try
+        {
+            start_ages.emplace(copied_at, key);
+        } catch(...)
+        {
+            pending_starts.erase(inserted);
+            throw;
+        }
+    }
+
+    // Drop the single oldest retained START using the same index as age cleanup.
     void evict_oldest_start()
     {
-        auto _oldest = pending_starts.end();
-        for(auto it = pending_starts.begin(); it != pending_starts.end(); ++it)
-            if(_oldest == pending_starts.end() ||
-               it->second.seen_at_ns < _oldest->second.seen_at_ns)
-                _oldest = it;
-        if(_oldest == pending_starts.end()) return;
+        if(start_ages.empty()) return;
+        auto oldest = pending_starts.find(start_ages.begin()->second);
         ++starts_cap_evicted;
-        pending_starts.erase(_oldest);
+        erase_start(oldest);
     }
 
     // Stream-driven eviction watermark: the copy timestamp of the last batch that
@@ -224,17 +274,12 @@ struct pair_state
     size_t evict_stale(uint64_t now_ns, uint64_t max_age_ns)
     {
         size_t removed = 0;
-        for(auto it = pending_starts.begin(); it != pending_starts.end();)
+        while(!start_ages.empty())
         {
-            if(now_ns > it->second.seen_at_ns && now_ns - it->second.seen_at_ns > max_age_ns)
-            {
-                ++removed;
-                it = pending_starts.erase(it);
-            }
-            else
-            {
-                ++it;
-            }
+            const auto oldest = *start_ages.begin();
+            if(now_ns <= oldest.first || now_ns - oldest.first <= max_age_ns) break;
+            erase_start(pending_starts.find(oldest.second));
+            ++removed;
         }
         return removed;
     }
@@ -320,75 +365,73 @@ pair_records(const copied_record* records,
              size_t               count,
              pair_state&          state,
              uint64_t             now_ns,
-             OnRecord&&           on_record)
+             OnRecord&&           on_record,
+             bool                 lookahead = false,
+             uint64_t             epoch     = 0)
 {
     uint64_t seen = 0;
 
-    // Pair in TICK order, not batch/region position. Each record carries its own
-    // per-agent GPU-clock tick (the stream is per-GPU, so all ticks in a batch are
-    // comparable), so tick order == temporal order regardless of which region an
-    // HWS remap copied a record from. Only THIS batch's records are ordered; the
-    // retained cross-batch pending_starts map is the state the pass runs against
-    // and is never re-fed into the work list (re-appending it would push a second
-    // START transition on every retained key).
-    struct work_item
-    {
-        uint64_t tick;         // start_ticks for a START, end_ticks for an EOP
-        uint32_t kind;         // 0 = EOP, 1 = START: equal ticks run all EOPs first
-        uint32_t arrival_seq;  // region-ordered merge index; ordering only, never a pairing input
-        size_t   idx;          // record index in `records`
+    // Order each key by GPU tick across adjacent full-ring snapshots. Fresh
+    // events and subsequent events on their key wait for the next snapshot:
+    // both an earlier START and an earlier EOP may be in an already-sampled region.
+    const size_t deferred_count = state.deferred_records.size();
+    auto         record_at      = [&](size_t index) -> const copied_record& {
+        return index < deferred_count ? state.deferred_records[index].record
+                                                   : records[index - deferred_count];
     };
-    std::vector<work_item> work;
-    work.reserve(count);
-    for(size_t i = 0; i < count; ++i)
+    auto& work = state.pairing_work;
+    work.clear();
+    work.reserve(deferred_count + count);
+    for(size_t index = 0; index < deferred_count + count; ++index)
     {
-        const auto& rec = records[i].rec;
+        const auto& rec = record_at(index).rec;
         if(rec.record_type == kRecPadding || rec.doorbell_off == 0) continue;
         if(rec.record_type != kRecStart && rec.record_type != kRecEop) continue;
 
         const uint64_t ts =
             static_cast<uint64_t>(rec.ts_lo) | (static_cast<uint64_t>(rec.ts_hi) << 32);
-        work.push_back(work_item{
-            ts, rec.record_type == kRecStart ? 1u : 0u, static_cast<uint32_t>(work.size()), i});
+        const uint64_t key = (static_cast<uint64_t>(rec.doorbell_off) << 32) | rec.dispatch_id;
+        work.push_back(
+            pair_state::work_item{key, ts, rec.record_type == kRecStart ? 1u : 0u, index});
     }
 
     // EOP-before-START at equal ticks (the `kind` term) is what makes ties
     // order-independent AND keeps ordinary doorbell reuse intact: {E_A(t),S_B(t)}
-    // pairs E_A with the outstanding S_A, then installs S_B cleanly. arrival_seq
+    // pairs E_A with the outstanding S_A, then installs S_B cleanly. The index
     // only completes the strict weak ordering; it never decides a pairing.
-    std::sort(work.begin(), work.end(), [](const work_item& a, const work_item& b) {
-        if(a.tick != b.tick) return a.tick < b.tick;
-        if(a.kind != b.kind) return a.kind < b.kind;
-        return a.arrival_seq < b.arrival_seq;
+    std::sort(work.begin(), work.end(), [](const auto& left, const auto& right) {
+        if(left.key != right.key) return left.key < right.key;
+        if(left.tick != right.tick) return left.tick < right.tick;
+        if(left.kind != right.kind) return left.kind < right.kind;
+        return left.index < right.index;
     });
 
+    state.next_deferred_records.clear();
+    state.deferred_epoch  = UINT64_MAX;
+    uint64_t previous_key = 0;
+    bool     defer_key    = false;
     for(const auto& w : work)
     {
-        const auto&    rec = records[w.idx].rec;
+        const auto&    copied       = record_at(w.index);
+        const auto&    rec          = copied.rec;
         const uint64_t ts  = w.tick;
-        const uint64_t key = (static_cast<uint64_t>(rec.doorbell_off) << 32) |
-                             static_cast<uint64_t>(rec.dispatch_id);
+        const uint64_t key          = w.key;
+        const bool     ready        = w.index < deferred_count;
+        const uint64_t copied_at    = ready ? state.deferred_records[w.index].seen_at_ns : now_ns;
+        const uint64_t copied_epoch = ready ? state.deferred_records[w.index].epoch : epoch;
+        if(key != previous_key) defer_key = false;
+        previous_key = key;
+        if(defer_key || (lookahead && !ready))
+        {
+            defer_key = true;
+            state.next_deferred_records.push_back({copied, copied_at, copied_epoch});
+            state.deferred_epoch = std::min(state.deferred_epoch, copied_epoch);
+            continue;
+        }
 
         if(rec.record_type == kRecStart)
         {
-            ++state.starts_seen;
-            // Hard size cap. Only an insert that GROWS the map can breach it, so a
-            // recurring key is exempt -- evicting there could pick the very key
-            // about to be refreshed. The size test short-circuits, so the normal
-            // path pays no extra lookup.
-            if(state.pending_starts.size() >= state.max_pending_starts &&
-               state.pending_starts.find(key) == state.pending_starts.end())
-                state.evict_oldest_start();
-            // A second START on a live key is the same dispatch processed again: CP
-            // replays a dispatch it discarded on a queue switch, so the newest
-            // START is the one that reached the shader engines.
-            auto [it, ins] =
-                state.pending_starts.try_emplace(key, pair_state::pending_start{ts, now_ns});
-            if(!ins)
-            {
-                ++state.starts_overwritten;
-                it->second = pair_state::pending_start{ts, now_ns};
-            }
+            state.record_start(key, ts, copied_at);
             continue;
         }
 
@@ -411,7 +454,7 @@ pair_records(const copied_record* records,
             // (2) equal tick -- no HW contract that start_ticks < end_ticks for a
             // real pair, so fail closed: drop rather than form a zero-length pair.
             ++state.equal_tick_drops;
-            state.pending_starts.erase(it);
+            state.erase_start(it);
         }
         else if(ts < it->second.start_ticks)
         {
@@ -430,11 +473,14 @@ pair_records(const copied_record* records,
             out.end_ticks    = ts;
             out.start_ticks  = it->second.start_ticks;
             out.start_known  = true;
-            state.pending_starts.erase(it);
+            state.erase_start(it);
             ++seen;
             on_record(out);
         }
     }
+    state.deferred_records.swap(state.next_deferred_records);
+    state.next_deferred_records.clear();
+    work.clear();
     return seen;
 }
 }  // namespace kfd

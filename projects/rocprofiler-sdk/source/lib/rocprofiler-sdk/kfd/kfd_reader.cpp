@@ -177,6 +177,14 @@ struct processor_state
 {
     std::unordered_map<uint32_t, pair_state> by_gpu = {};
 
+    uint64_t oldest_deferred_epoch() const
+    {
+        uint64_t oldest = UINT64_MAX;
+        for(const auto& [gpu, pairing] : by_gpu)
+            oldest = std::min(oldest, pairing.deferred_epoch);
+        return oldest;
+    }
+
     pair_state& for_gpu(uint32_t gpu_id)
     {
         auto [it, ins] = by_gpu.try_emplace(gpu_id);
@@ -242,6 +250,7 @@ struct dlog_session
     // is what keeps the firmware from lapping us, so it must never be skipped.
     std::deque<record_batch> overflow        = {};
     bool                     overflow_warned = false;
+    bool                     pairing_flush_pending = false;
 
     // Per-session, so one GPU failing to arm never disables another.
     std::atomic<bool> ready = {false};
@@ -277,6 +286,7 @@ struct reader_state
     // reader's hand but not yet published. Reader is the sole writer. Covers only
     // COPIED EOPs (F4); EOPs still in the ring remain the accepted R10 residual.
     std::atomic<uint64_t> reader_copied_unpublished = {0};
+    std::atomic<uint64_t> processor_deferred_epoch  = {UINT64_MAX};
     // Read by nudge_reader() (from wait_for_reader_quiesce, ~500 Hz) while
     // stop_reader() writes them; atomic so those overlap without a data race and a
     // nudge never writes into a recycled fd.
@@ -506,6 +516,7 @@ teardown_session(dlog_session* s)
         s->overflow.size());
     s->overflow.clear();
     s->overflow_warned        = false;
+    s->pairing_flush_pending  = false;
     s->quarantined            = false;
     s->pollerr_active         = false;
     s->notify_read_err_logged = false;
@@ -534,8 +545,8 @@ note_overflow_depth(reader_state& st, dlog_session& s)
     s.overflow_warned = true;
     ROCP_WARNING << fmt::format(
         "KFD dispatch-log (gpu_id={}): the record processor is not keeping up -- {} batch(es) "
-        "queued. Records are still being read, so nothing is lost, but memory grows until it "
-        "catches up.",
+        "queued. Copied records are retained, but memory grows until it catches up. "
+        "This ABI cannot detect ring overruns.",
         s.gpu_id,
         _depth);
 }
@@ -574,6 +585,7 @@ copy_records(reader_state& st)
 
         _batch->now_ns     = common::timestamp_ns();
         _batch->gpu_id     = _s.gpu_id;
+        _batch->drain_epoch = st.drain_epoch.load(std::memory_order_relaxed) + 1;
         const auto _copied = copy_pipes(recs,
                                         _s.info.num_regions,
                                         _s.info.region_record_count,
@@ -582,6 +594,8 @@ copy_records(reader_state& st)
                                         _batch->records,
                                         &st.reader_copied_unpublished);
 
+        const bool publish       = _copied > 0 || _s.pairing_flush_pending;
+        _s.pairing_flush_pending = _copied > 0;
         if(_direct)
         {
             // Release-store inside publish() orders the copy above before the
@@ -589,7 +603,7 @@ copy_records(reader_state& st)
             // batch made (_copied == _batch->records.size() on the direct path)
             // right after publish, so a copied EOP is counted continuously from
             // copy_pipes' reserve until the processor can see it.
-            if(_copied > 0)
+            if(publish)
             {
                 st.pipe.publish();
                 st.reader_copied_unpublished.fetch_sub(_copied, std::memory_order_release);
@@ -597,7 +611,7 @@ copy_records(reader_state& st)
         }
         else
         {
-            if(_copied == 0) _s.overflow.pop_back();
+            if(!publish) _s.overflow.pop_back();
             // Records parked in overflow stay reserved until their spill publishes
             // them, so window (1) is covered by the same counter.
             spill_overflow_to_pipe(st.pipe, _s.overflow, &st.reader_copied_unpublished);
@@ -637,9 +651,9 @@ session_has_pending(const dlog_session& s)
 // STAGE 2, processor thread: pairs start/eop and drives the hub's time-as-
 // generation resolution. All the lock-taking work lives here, off
 // the ring-reading path. It runs no client callback itself; hand_off_proven()
-// submits to the task group. Exactly one hub lock per record, no map, no clock.
+// submits to the task group. Deferred completions are published before pipe.pop().
 uint64_t
-process_batch(processor_state& proc, const record_batch& batch)
+process_batch(reader_state& st, processor_state& proc, const record_batch& batch)
 {
     const uint32_t _gpu     = batch.gpu_id;
     auto&          _pairing = proc.for_gpu(_gpu);
@@ -649,18 +663,23 @@ process_batch(processor_state& proc, const record_batch& batch)
     // Ordering it ahead of pairing keeps a START the watermark has condemned from
     // binding this batch's recycled EOP first; watermarking by batch.now_ns means a
     // backlogged processor ages nothing. starts_evicted is an R1 source counter.
-    if(batch.now_ns - _pairing.last_evict_ns >= kProcessorEvictIntervalNs)
+    if(_pairing.deferred_records.empty() &&
+       batch.now_ns - _pairing.last_evict_ns >= kProcessorEvictIntervalNs)
     {
         _pairing.starts_evicted += _pairing.evict_stale(batch.now_ns, start_max_age_ns());
         _pairing.last_evict_ns = batch.now_ns;
     }
 
-    return pair_records(
+    constexpr size_t completion_batch_limit = 256;
+    const size_t     completion_capacity =
+        std::min(completion_batch_limit, batch.records.size() + _pairing.deferred_records.size());
+    auto       completed = signal_less_batch_t{};
+    const auto seen      = pair_records(
         batch.records.data(),
         batch.records.size(),
         _pairing,
         batch.now_ns,
-        [_gpu](const drained_record& rec) {
+        [_gpu, &completed, completion_capacity](const drained_record& rec) {
             // gpu_id stamped from the ring this record came from: a record can only
             // ever match a dispatch enqueued on the same GPU. No generation.
             auto key =
@@ -672,11 +691,22 @@ process_batch(processor_state& proc, const record_batch& batch)
             if(auto _proven = signal_less_hub().record_kernel_end(key, _start, rec.end_ticks))
             {
                 note_signal_less(signal_less_counter::eop_proven);
-                hand_off_proven(std::move(*_proven));
+                if(completed.empty()) completed.reserve(completion_capacity);
+                completed.emplace_back(std::move(*_proven));
+                if(completed.size() == completion_batch_limit)
+                {
+                    hand_off_proven(std::move(completed));
+                    completed.clear();
+                }
                 return;
             }
             note_signal_less(signal_less_counter::eop_unmatched);
-        });
+        },
+        true,
+        batch.drain_epoch);
+    hand_off_proven(std::move(completed));
+    st.processor_deferred_epoch.store(proc.oldest_deferred_epoch(), std::memory_order_release);
+    return seen;
 }
 
 // A processor backlog peak is not a loss: those batches were copied out of the
@@ -691,8 +721,8 @@ report_backlog(uint32_t gpu_id, uint64_t overflow_peak)
     if(overflow_peak > 0 && overflow_peak != _prev)
         ROCP_INFO << fmt::format(
             "KFD dispatch-log (gpu_id={}): processor backlog peaked at {} batch(es); the "
-            "processor briefly fell behind. No records are lost -- backlogged batches are "
-            "delivered as it catches up.",
+            "processor fell behind. Copied batches are retained; ring overruns cannot be "
+            "detected by this ABI.",
             gpu_id,
             overflow_peak);
     _prev = overflow_peak;
@@ -847,6 +877,7 @@ disable_reader_in_child()
         // any later re-arm in the child reuses these slots. Reset the drain cursors
         // so a reused slot cannot inherit a stale rptr and drain nothing.
         st.sessions[i].cursors = {};
+        st.sessions[i].pairing_flush_pending = false;
     }
     st.session_count.store(0, std::memory_order_relaxed);
 }
@@ -857,6 +888,7 @@ processor_loop()
 {
     auto& st   = state();
     auto  proc = processor_state{};
+    st.processor_deferred_epoch.store(UINT64_MAX, std::memory_order_release);
 
     uint64_t last_gc_ns = common::timestamp_ns();
 
@@ -886,7 +918,7 @@ processor_loop()
         const uint64_t _gc_now      = common::timestamp_ns();
         const uint64_t _unpublished = st.reader_copied_unpublished.load(std::memory_order_acquire);
         const bool     _pipe_empty  = st.pipe.empty();
-        if(gc_gate_open(_unpublished, _pipe_empty) &&
+        if(gc_gate_open(_unpublished, _pipe_empty) && proc.oldest_deferred_epoch() == UINT64_MAX &&
            _gc_now - last_gc_ns >= kProcessorEvictIntervalNs)
         {
             last_gc_ns = _gc_now;
@@ -911,7 +943,7 @@ processor_loop()
             continue;
         }
 
-        process_batch(proc, *_batch);
+        process_batch(st, proc, *_batch);
         st.pipe.pop();
 
         // Retained-start eviction is stream-driven inside process_batch (at its
@@ -922,8 +954,17 @@ processor_loop()
     // Drain whatever the reader published on its way out.
     while(auto* _batch = st.pipe.peek())
     {
-        process_batch(proc, *_batch);
+        process_batch(st, proc, *_batch);
         st.pipe.pop();
+    }
+
+    for(const auto& [gpu, pairing] : proc.by_gpu)
+    {
+        if(pairing.deferred_records.empty()) continue;
+        auto final_batch   = record_batch{};
+        final_batch.gpu_id = gpu;
+        final_batch.now_ns = common::timestamp_ns();
+        process_batch(st, proc, final_batch);
     }
 
     for(const auto& _gpu_itr : proc.by_gpu)
@@ -946,6 +987,10 @@ processor_loop()
             _p.starts_evicted,
             _p.starts_cap_evicted,
             _p.pending_starts.size());
+        ROCP_INFO_IF(_p.starts_out_of_order > 0) << fmt::format(
+            "KFD dispatch-log (gpu_id={}): {} late or duplicate START record(s) ignored",
+            _gpu_itr.first,
+            _p.starts_out_of_order);
     }
 }
 
@@ -1222,7 +1267,8 @@ reader_loop()
                 // Drain-first: defer while records remain (the top-of-loop drain
                 // already ran this pass; firmware produces nothing more after
                 // FATAL, so this converges) so no already-published record is lost.
-                if(session_has_pending(_s) || !_s.overflow.empty()) continue;
+                if(session_has_pending(_s) || !_s.overflow.empty() || _s.pairing_flush_pending)
+                    continue;
                 log_stream_status(_s);
                 ROCP_WARNING << fmt::format(
                     "KFD dispatch-log: gpu_id={} stream FATAL (revents=0x{:x}); GPU reset, "
@@ -1251,11 +1297,16 @@ reader_loop()
                 // disable proceeds exactly as it did before.
                 signal_less_disable_latch().store(true, std::memory_order_release);
                 const uint64_t _pipe_deadline = common::timestamp_ns() + close_drain_budget_ns();
-                while(!gc_gate_open(st.reader_copied_unpublished.load(std::memory_order_acquire),
-                                    st.pipe.empty()) &&
+                const uint64_t through_epoch  = st.drain_epoch.load(std::memory_order_acquire);
+                while((st.reader_copied_unpublished.load(std::memory_order_acquire) != 0 ||
+                       !processor_drained_through(
+                           st.pipe, st.processor_deferred_epoch, through_epoch)) &&
                       common::timestamp_ns() < _pipe_deadline &&
                       !st.stop.load(std::memory_order_acquire))
+                {
+                    copy_records(st);
                     std::this_thread::sleep_for(std::chrono::microseconds{200});
+                }
                 signal_less_disable_permanently();
                 continue;
             }
@@ -1294,7 +1345,8 @@ reader_loop()
             // reader-owned overflow deque but not yet spilled to the pipe would be
             // stranded by quarantine (copy_records skips !ready sessions), so defer
             // while overflow is non-empty too.
-            if(session_has_pending(_s) || !_s.overflow.empty()) continue;
+            if(session_has_pending(_s) || !_s.overflow.empty() || _s.pairing_flush_pending)
+                continue;
 
             log_stream_status(_s);
             ROCP_INFO << fmt::format(
@@ -1320,10 +1372,10 @@ reader_loop()
         }
     }
 
-    // Final copy to catch late records; the processor drains the pipe after us.
+    // Final bounded drain includes the lookahead marker for a sparse tail.
     if(st.any_session_ready.load(std::memory_order_acquire))
     {
-        total_seen += copy_records(st);
+        total_seen += drain_sessions_bounded(st);
         for(size_t i = 0, _n = st.session_count.load(std::memory_order_acquire); i < _n; ++i)
         {
             report_backlog(st.sessions[i].gpu_id, st.overflow_peak.load(std::memory_order_relaxed));
@@ -1566,21 +1618,21 @@ wait_for_reader_quiesce(uint64_t timeout_ns)
         std::this_thread::sleep_for(std::chrono::microseconds{200});
     }
 
-    // STAGE 2 (processor): poll pipe.empty() until true -- every batch published
-    // before the request has been popped and fully processed. The
-    // pipe's acquire loads make this safe from this thread; the processor is not
-    // blocked on a wake, so nothing is nudged.
-    while(!st.pipe.empty())
+    // STAGE 2 includes EOPs held for lookahead. Observe pipe.empty() before the
+    // deferred epoch: the processor stores that epoch before releasing its slot.
+    // Only pre-fence epochs must complete; newer traffic cannot prolong the fence.
+    while(!processor_drained_through(st.pipe, st.processor_deferred_epoch, _start + 2))
     {
         if(!st.running.load(std::memory_order_acquire)) return true;
         if(common::timestamp_ns() >= _deadline)
         {
             ROCP_WARNING << fmt::format(
-                "KFD dispatch-log fence: Stage 2 did not reach an empty pipe{}",
+                "KFD dispatch-log fence: Stage 2 did not drain the pipe and pending EOPs{}",
                 st.reader_unavailable.load(std::memory_order_acquire) ? ", reader unavailable"
                                                                       : "");
             return false;
         }
+        nudge_reader();
         std::this_thread::sleep_for(std::chrono::microseconds{200});
     }
     return true;

@@ -34,6 +34,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <string>
 #include <thread>
@@ -291,8 +292,8 @@ TEST(dlog_drain, pairing_core)
 TEST(dlog_drain, evict_stale_starts)
 {
     drain_state st;
-    st.pairing.pending_starts[1] = pair_state::pending_start{100, 1000};  // old
-    st.pairing.pending_starts[2] = pair_state::pending_start{200, 5000};  // fresh
+    st.pairing.record_start(1, 100, 1000);
+    st.pairing.record_start(2, 200, 5000);
     EXPECT_EQ(st.pairing.evict_stale(/*now_ns=*/6000, /*max_age_ns=*/2000), 1u);
     EXPECT_EQ(st.pairing.pending_starts.count(1), 0u);
     EXPECT_EQ(st.pairing.pending_starts.count(2), 1u);
@@ -336,6 +337,28 @@ TEST(dlog_drain, pending_starts_size_cap_evicts_oldest)
     EXPECT_EQ(pairing.starts_cap_evicted, 1u) << "no eviction for a recurring key";
     ASSERT_EQ(pairing.pending_starts.count(k3), 1u);
     EXPECT_EQ(pairing.pending_starts[k3].start_ticks, 99u) << "the newest START replaces it";
+}
+
+TEST(dlog_drain, start_age_index_tracks_replay_completion_and_equal_tick_drop)
+{
+    auto state = pair_state{};
+    auto sink  = recorder{};
+    state.record_start((uint64_t{4100} << 32) | 7, 100, 1000);
+    state.record_start((uint64_t{4100} << 32) | 7, 200, 1000);
+    EXPECT_EQ(state.start_ages.size(), 1u);
+    state.record_start((uint64_t{4100} << 32) | 7, 300, 500);
+    ASSERT_EQ(state.start_ages.size(), 1u);
+    EXPECT_EQ(state.start_ages.begin()->first, 500u);
+    const auto completion = copied_record{fw_record{400, 0, kRecEop, 7, 4100}, 0};
+    EXPECT_EQ(pair_records(&completion, 1, state, 2000, sink.on_record()), 1u);
+    EXPECT_TRUE(state.start_ages.empty());
+    EXPECT_TRUE(state.pending_starts.empty());
+
+    state.record_start((uint64_t{4100} << 32) | 7, 400, 3000);
+    pair_records(&completion, 1, state, 4000, sink.on_record());
+    EXPECT_EQ(state.equal_tick_drops, 1u);
+    EXPECT_TRUE(state.start_ages.empty());
+    EXPECT_TRUE(state.pending_starts.empty());
 }
 
 // Invalid geometry (0 regions, too many, or non-power-of-two rrc) is rejected.
@@ -735,6 +758,40 @@ TEST(dlog_drain, retained_start_replaced_across_batches)
     EXPECT_TRUE(e.st.pairing.pending_starts.empty());
 }
 
+TEST(dlog_drain, older_cross_batch_start_does_not_replace_newest)
+{
+    constexpr uint32_t doorbell    = 4100;
+    auto               environment = env{2, 2048};
+    environment.ring.put(1, 0, kRecStart, 7, doorbell, 200);
+    environment.ring.wptr[1] = 1;
+    EXPECT_EQ(environment.drain(), 0u);
+    environment.ring.put(0, 0, kRecStart, 7, doorbell, 100);
+    environment.ring.put(1, 1, kRecEop, 7, doorbell, 300);
+    environment.ring.wptr[0] = 1;
+    environment.ring.wptr[1] = 2;
+    EXPECT_EQ(environment.drain(), 1u);
+    EXPECT_EQ(environment.rec.pairs[std::make_pair(doorbell, 7u)].first, 200u);
+    EXPECT_EQ(environment.rec.pairs[std::make_pair(doorbell, 7u)].second, 300u);
+    EXPECT_EQ(environment.st.pairing.starts_out_of_order, 1u);
+    EXPECT_TRUE(environment.st.pairing.pending_starts.empty());
+}
+
+TEST(dlog_drain, older_or_duplicate_start_does_not_refresh_age)
+{
+    auto state = pair_state{};
+    auto sink  = recorder{};
+    auto start = copied_record{fw_record{200, 0, kRecStart, 7, 4100}, 0};
+    pair_records(&start, 1, state, 1000, sink.on_record());
+    pair_records(&start, 1, state, 2000, sink.on_record());
+    start.rec.ts_lo = 100;
+    pair_records(&start, 1, state, 3000, sink.on_record());
+    ASSERT_EQ(state.pending_starts.size(), 1u);
+    EXPECT_EQ(state.pending_starts.begin()->second.start_ticks, 200u);
+    EXPECT_EQ(state.pending_starts.begin()->second.seen_at_ns, 1000u);
+    EXPECT_EQ(state.starts_out_of_order, 2u);
+    EXPECT_EQ(state.evict_stale(4000, 2000), 1u);
+}
+
 // A replayed START refreshes the key's age along with its ticks: the key ages
 // from the NEWEST START.
 TEST(dlog_drain, replayed_start_ages_from_newest)
@@ -794,6 +851,205 @@ TEST(dlog_drain, per_gpu_isolation)
     EXPECT_EQ(pair_b.unmatched_eops, 0u);
     EXPECT_EQ(a.cur.rptr[0], 2u);
     EXPECT_EQ(b.cur.rptr[0], 2u);
+}
+
+TEST(dlog_drain, snapshot_lookahead_pairs_eop_with_late_copied_start)
+{
+    auto       state      = pair_state{};
+    auto       sink       = recorder{};
+    const auto completion = copied_record{fw_record{200, 0, kRecEop, 7, 4100}, 1};
+    const auto start      = copied_record{fw_record{100, 0, kRecStart, 7, 4100}, 0};
+
+    EXPECT_EQ(pair_records(&completion, 1, state, 1000, sink.on_record(), true, 1), 0u);
+    EXPECT_EQ(sink.records, 0u);
+    EXPECT_EQ(state.deferred_epoch, 1u);
+    EXPECT_EQ(pair_records(&start, 1, state, 2000, sink.on_record(), true, 2), 0u);
+    EXPECT_EQ(pair_records(nullptr, 0, state, 3000, sink.on_record(), true, 3), 1u);
+    EXPECT_EQ(sink.pairs[std::make_pair(4100u, 7u)].first, 100u);
+    EXPECT_EQ(sink.pairs[std::make_pair(4100u, 7u)].second, 200u);
+    EXPECT_TRUE(sink.eops_without_start.empty());
+    EXPECT_TRUE(state.pending_starts.empty());
+    EXPECT_TRUE(state.deferred_records.empty());
+    EXPECT_EQ(state.deferred_epoch, UINT64_MAX);
+}
+
+TEST(dlog_drain, snapshot_lookahead_recovers_latest_replay_before_completion)
+{
+    auto       state  = pair_state{};
+    auto       sink   = recorder{};
+    const auto first  = std::vector<copied_record>{{fw_record{100, 0, kRecStart, 7, 4100}, 0},
+                                                  {fw_record{300, 0, kRecEop, 7, 4100}, 1}};
+    const auto replay = copied_record{fw_record{200, 0, kRecStart, 7, 4100}, 0};
+    pair_records(first.data(), first.size(), state, 1000, sink.on_record(), true, 1);
+    EXPECT_EQ(sink.records, 0u);
+    EXPECT_EQ(pair_records(&replay, 1, state, 2000, sink.on_record(), true, 2), 0u);
+    EXPECT_EQ(pair_records(nullptr, 0, state, 3000, sink.on_record(), true, 3), 1u);
+    EXPECT_EQ(sink.pairs[std::make_pair(4100u, 7u)].first, 200u);
+    EXPECT_EQ(state.starts_seen, 2u);
+    EXPECT_EQ(state.eops_seen, 1u);
+    EXPECT_TRUE(state.pending_starts.empty());
+}
+
+TEST(dlog_drain, snapshot_lookahead_preserves_reused_keys_and_equal_tick_order)
+{
+    auto       state      = pair_state{};
+    auto       emitted    = std::vector<drained_record>{};
+    auto       sink       = [&](const drained_record& record) { emitted.push_back(record); };
+    const auto first      = std::vector<copied_record>{{fw_record{200, 0, kRecEop, 7, 4100}, 1},
+                                                  {fw_record{200, 0, kRecStart, 7, 4100}, 1},
+                                                  {fw_record{400, 0, kRecEop, 7, 4100}, 1}};
+    const auto late_start = copied_record{fw_record{100, 0, kRecStart, 7, 4100}, 0};
+    pair_records(first.data(), first.size(), state, 1000, sink, true, 1);
+    EXPECT_TRUE(emitted.empty());
+    EXPECT_EQ(pair_records(&late_start, 1, state, 2000, sink, true, 2), 0u);
+    EXPECT_EQ(pair_records(nullptr, 0, state, 3000, sink, true, 3), 2u);
+    ASSERT_EQ(emitted.size(), 2u);
+    EXPECT_EQ(emitted[0].start_ticks, 100u);
+    EXPECT_EQ(emitted[0].end_ticks, 200u);
+    EXPECT_EQ(emitted[1].start_ticks, 200u);
+    EXPECT_EQ(emitted[1].end_ticks, 400u);
+    EXPECT_TRUE(state.pending_starts.empty());
+    EXPECT_TRUE(state.deferred_records.empty());
+}
+
+TEST(dlog_drain, snapshot_lookahead_idle_marker_flushes_unknown_start_once)
+{
+    auto       state      = pair_state{};
+    auto       sink       = recorder{};
+    const auto completion = copied_record{fw_record{200, 0, kRecEop, 7, 4100}, 1};
+    pair_records(&completion, 1, state, 1000, sink.on_record(), true, 1);
+    EXPECT_EQ(sink.records, 0u);
+    pair_records(nullptr, 0, state, 2000, sink.on_record(), true, 2);
+    EXPECT_EQ(sink.records, 1u);
+    EXPECT_EQ(state.unmatched_eops, 1u);
+    EXPECT_EQ(state.eops_seen, 1u);
+    EXPECT_EQ(state.deferred_epoch, UINT64_MAX);
+    pair_records(nullptr, 0, state, 3000, sink.on_record(), true, 3);
+    EXPECT_EQ(sink.records, 1u);
+}
+
+TEST(dlog_drain, snapshot_lookahead_handles_producer_progress_during_copy)
+{
+    struct copy_output
+    {
+        std::vector<copied_record> records;
+        std::function<void()>      publish;
+
+        void emplace_back(copied_record record)
+        {
+            records.push_back(record);
+            publish();
+        }
+    };
+
+    constexpr uint32_t dispatch_count = 4096;
+    constexpr uint32_t doorbell       = 4100;
+    for(uint32_t regions : {2u, 4u})
+    {
+        auto ring          = fake_ring{regions, 65536};
+        auto cursors       = ring_cursors{};
+        cursors.rptr_init  = true;
+        auto     pairing   = pair_state{};
+        auto     writes    = std::vector<uint64_t>(regions, 0);
+        auto     emitted   = std::vector<drained_record>{};
+        uint32_t published = 0;
+        uint64_t copied    = 0;
+        ring.put(0, writes[0]++, kRecPadding, 0, 0, 0);
+        ring.wptr[0] = writes[0];
+
+        auto publish = [&]() {
+            for(uint32_t step = 0; step < 3 && published < dispatch_count * 3; ++step)
+            {
+                const uint32_t dispatch = published / 3;
+                const uint32_t event    = published % 3;
+                const uint32_t region   = (dispatch + event) % regions;
+                const uint32_t kind     = event == 2 ? kRecEop : kRecStart;
+                const uint64_t ticks    = uint64_t{dispatch} * 10 + (event == 2 ? 9 : event + 1);
+                ring.put(region, writes[region]++, kind, dispatch % 17 + 1, doorbell, ticks);
+                ring.wptr[region] = writes[region];
+                ++published;
+            }
+        };
+
+        for(uint64_t epoch = 1; epoch < dispatch_count * 3; ++epoch)
+        {
+            auto       output = copy_output{{}, publish};
+            const auto count  = copy_pipes(
+                ring.records.data(), regions, ring.rrc, ring.wptr.data(), cursors, output);
+            copied += count;
+            pair_records(
+                output.records.data(),
+                output.records.size(),
+                pairing,
+                epoch * 1000,
+                [&](const drained_record& record) { emitted.push_back(record); },
+                true,
+                epoch);
+            if(count == 0 && published == dispatch_count * 3) break;
+        }
+
+        EXPECT_EQ(copied, dispatch_count * 3 + 1);
+        ASSERT_EQ(emitted.size(), dispatch_count) << "regions=" << regions;
+        auto completions = std::set<uint64_t>{};
+        for(const auto& record : emitted)
+        {
+            EXPECT_TRUE(record.start_known);
+            EXPECT_EQ(record.start_ticks, record.end_ticks - 7);
+            EXPECT_EQ(record.dispatch_id, (record.end_ticks / 10) % 17 + 1);
+            EXPECT_TRUE(completions.insert(record.end_ticks).second);
+        }
+        EXPECT_EQ(pairing.starts_seen, dispatch_count * 2);
+        EXPECT_EQ(pairing.eops_seen, dispatch_count);
+        EXPECT_TRUE(pairing.pending_starts.empty());
+        EXPECT_TRUE(pairing.start_ages.empty());
+        EXPECT_TRUE(pairing.deferred_records.empty());
+        EXPECT_EQ(pairing.unmatched_eops, 0u);
+    }
+}
+
+TEST(record_pipe, fence_includes_deferred_completions_but_not_newer_epochs)
+{
+    auto pipe           = record_pipe<2>{};
+    auto deferred_epoch = std::atomic<uint64_t>{UINT64_MAX};
+    ASSERT_NE(pipe.acquire(), nullptr);
+    pipe.publish();
+    EXPECT_FALSE(processor_drained_through(pipe, deferred_epoch, 10));
+    deferred_epoch.store(10, std::memory_order_release);
+    pipe.pop();
+    EXPECT_FALSE(processor_drained_through(pipe, deferred_epoch, 10));
+    EXPECT_TRUE(processor_drained_through(pipe, deferred_epoch, 9));
+    deferred_epoch.store(UINT64_MAX, std::memory_order_release);
+    EXPECT_TRUE(processor_drained_through(pipe, deferred_epoch, 10));
+}
+
+TEST(record_pipe, idle_marker_preserves_epoch_through_overflow)
+{
+    auto  pipe        = record_pipe<2>{};
+    auto  overflow    = std::deque<record_batch>{};
+    auto  unpublished = std::atomic<uint64_t>{1};
+    auto& data        = overflow.emplace_back();
+    data.records.push_back({fw_record{200, 0, kRecEop, 7, 4100}, 1});
+    data.drain_epoch   = 1;
+    auto& marker       = overflow.emplace_back();
+    marker.drain_epoch = 2;
+    EXPECT_TRUE(spill_overflow_to_pipe(pipe, overflow, &unpublished));
+    EXPECT_EQ(unpublished.load(), 0u);
+    auto state = pair_state{};
+    auto sink  = recorder{};
+    while(auto* batch = pipe.peek())
+    {
+        pair_records(batch->records.data(),
+                     batch->records.size(),
+                     state,
+                     1000,
+                     sink.on_record(),
+                     true,
+                     batch->drain_epoch);
+        pipe.pop();
+    }
+    EXPECT_EQ(sink.records, 1u);
+    EXPECT_TRUE(state.deferred_records.empty());
+    EXPECT_EQ(state.deferred_epoch, UINT64_MAX);
 }
 
 // --- Bounded SPSC handoff between the ring-copier and the record processor ---
