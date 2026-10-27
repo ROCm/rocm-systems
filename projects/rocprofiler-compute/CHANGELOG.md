@@ -68,6 +68,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed the `analyze --sort`, `analyze --mem-level`, and `analyze --roofline-data-type` options.
   * These options were utilized solely by roofline plot in CLI analyze output block 4.3, which has been removed. The roofline HTML output shows every memory level and precision, and you can filter them in the browser.
 
+* Removed the `--include-cols` and `--cols` analyze options.
+
 ### Optimized
 
 * Profile mode collects only the counters that metric equations use, which can reduce the number of profiling passes.

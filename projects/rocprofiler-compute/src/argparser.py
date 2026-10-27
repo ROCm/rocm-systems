@@ -908,29 +908,6 @@ Examples:
         help="\t\tSpecify desired decimal precision of analysis results. (DEFAULT: 2)",
     )
     analyze_advanced_group.add_argument(
-        "--cols",
-        type=int,
-        dest="cols",
-        metavar="",
-        nargs="+",
-        help=(
-            "\t\tSpecify column indices to display.\n"
-            "\t\tDefaults to display all columns."
-        ),
-    )
-    analyze_advanced_group.add_argument(
-        "--include-cols",
-        dest="include_cols",
-        metavar="",
-        nargs="+",
-        help=(
-            "\t\tSpecify which hidden column names should be included in cli output.\n"
-            '\t\tFor example, to show "Description" column which is hidden by '
-            "default in cli output,\n"
-            "\t\tuse the option --include-cols Description."
-        ),
-    )
-    analyze_advanced_group.add_argument(
         "-g", dest="debug", action="store_true", help="\t\tDebug single metric."
     )
     analyze_advanced_group.add_argument(

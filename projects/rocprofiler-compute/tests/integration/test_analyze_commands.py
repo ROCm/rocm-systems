@@ -685,57 +685,6 @@ def test_decimal_3(binary_handler_analyze_rocprof_compute):
         common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.col
-def test_col_1(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--cols",
-            "0",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.col
-def test_col_2(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--cols",
-            "2",
-            "--include-cols",
-            "Description",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.col
-def test_col_3(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--cols",
-            "0",
-            "2",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
 @pytest.mark.misc
 def test_g(binary_handler_analyze_rocprof_compute):
     for dir in indirs:

@@ -1259,7 +1259,6 @@ class db_analysis(OmniAnalyze_Base):
         non_expression_columns = {
             "Metric",
             "Unit",
-            "Description",
             "Type",
             "Xfer",
             "Coherency",
@@ -1274,18 +1273,24 @@ class db_analysis(OmniAnalyze_Base):
             # Build table_id -> title map
             # (e.g. 700 -> "Wavefront", 701 -> "Wavefront Launch Stats").
             table_names_map: dict[int, str] = {}
+            descriptions_map: dict[int, dict[str, str]] = {}
             for panel_config in arch_config.panel_configs.values():
                 table_names_map[panel_config["id"]] = panel_config["title"]
                 for source in panel_config["data source"]:
                     for table in source.values():
                         table_names_map[table["id"]] = table["title"]
+                        descriptions_map[table["id"]] = panel_config.get(
+                            "metrics_description", {}
+                        )
 
             # Collect metric tables with table-level fields (table_name,
-            # sub_table_name, value_columns) and rows computed once per table.
+            # sub_table_name, descriptions, value_columns) and rows computed once
+            # per table.
             metric_tables = [
                 (
                     table_names_map[table_id // 100 * 100],
                     table_names_map[table_id],
+                    descriptions_map[table_id],
                     [c for c in metric_df.columns if c not in non_expression_columns],
                     list(metric_df.iterrows()),
                 )
@@ -1298,13 +1303,19 @@ class db_analysis(OmniAnalyze_Base):
                 MetricInfoRow(
                     name=row["Metric"],
                     metric_id=metric_id,
-                    description=row.get("Description"),
+                    description=descriptions.get(row["Metric"]),
                     unit=row.get("Unit"),
                     pct_of_peak=row.get("Percent of Peak") is True,
                     table_name=table_name,
                     sub_table_name=sub_table_name,
                 )
-                for table_name, sub_table_name, _value_columns, rows in metric_tables
+                for (
+                    table_name,
+                    sub_table_name,
+                    descriptions,
+                    _value_columns,
+                    rows,
+                ) in metric_tables
                 for metric_id, row in rows
             ]
             expression_rows = [
@@ -1313,7 +1324,13 @@ class db_analysis(OmniAnalyze_Base):
                     value_name=value_name,
                     value=row[value_name].strip(),
                 )
-                for _table_name, _sub_table_name, value_columns, rows in metric_tables
+                for (
+                    _table_name,
+                    _sub_table_name,
+                    _descriptions,
+                    value_columns,
+                    rows,
+                ) in metric_tables
                 for metric_id, row in rows
                 for value_name in value_columns
             ]
