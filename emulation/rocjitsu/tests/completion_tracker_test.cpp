@@ -260,6 +260,103 @@ TEST(CompletionTrackerTest, RetriesUnavailableMailboxAfterExactlyOneSignalDecrem
                                  CompletionFixture::kMailbox);
 }
 
+TEST(CompletionTrackerTest, SuspendedQueueFinishesOnlyStartedNonHeadPublications) {
+  for (uint64_t failure_address : {CompletionFixture::kSignal + CompletionFixture::kStartOffset,
+                                   CompletionFixture::kMailbox}) {
+    SCOPED_TRACE(failure_address);
+    CompletionFixture fixture;
+    auto &queue = fixture.queues.front();
+    auto &kernel = queue.entries.front();
+    kernel.completed_wgs = 0;
+    kernel.dispatched_wgs = 1;
+    kernel.completion_signal = 0;
+    DispatchEntry barrier = kernel;
+    barrier.dispatch_id = 8;
+    barrier.kind = DispatchPacketKind::NonKernel;
+    barrier.total_wgs = barrier.dispatched_wgs = barrier.completed_wgs = 0;
+    barrier.completion_signal = CompletionFixture::kSignal;
+    queue.push_entry(std::move(barrier));
+    queue.next_dispatch_idx = 1;
+    queue.debug_suspended = true;
+
+    // An accepted packet whose body has not finished must not start publication.
+    const auto unstarted = fixture.tracker.drain_completions(fixture.queues);
+    EXPECT_FALSE(unstarted.retry_pending);
+    EXPECT_FALSE(unstarted.terminal_fault);
+    EXPECT_EQ(queue.entries[1].completion_publication.phase,
+              CompletionPublicationPhase::ExecutionEnd);
+    EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 0u);
+    EXPECT_EQ(fixture.interrupts, 0u);
+
+    queue.debug_suspended = false;
+    fixture.memory->fail_next(CompletionRetryMemory::Operation::AtomicStore, failure_address);
+    ASSERT_EQ(fixture.tracker.complete_non_kernel(queue.entries[1]), VmAccessOutcome::Unavailable);
+    queue.debug_suspended = true;
+    for (unsigned retry = 0; retry < 3; ++retry) {
+      fixture.memory->fail_next(CompletionRetryMemory::Operation::AtomicStore, failure_address);
+      const auto stalled = fixture.tracker.drain_completions(fixture.queues);
+      EXPECT_TRUE(stalled.retry_pending);
+      EXPECT_FALSE(stalled.terminal_fault);
+      EXPECT_FALSE(queue.entries[1].completion_notified);
+      EXPECT_EQ(fixture.retired, 0u);
+      EXPECT_EQ(fixture.interrupts, 0u);
+    }
+    const auto completed = fixture.tracker.drain_completions(fixture.queues);
+    EXPECT_FALSE(completed.retry_pending);
+    EXPECT_FALSE(completed.terminal_fault);
+    ASSERT_EQ(queue.entries.size(), 2u);
+    EXPECT_EQ(queue.entries.front().completed_wgs, 0u);
+    EXPECT_EQ(queue.next_dispatch_idx, 1u);
+    EXPECT_TRUE(queue.debug_suspended);
+    EXPECT_TRUE(queue.entries[1].completion_notified);
+    EXPECT_EQ(fixture.retired, 0u);
+    EXPECT_EQ(fixture.interrupts, 1u);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(CompletionFixture::kSignal +
+                                             CompletionFixture::kValueOffset),
+              0u);
+    EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 1u);
+    EXPECT_EQ(fixture.memory->successful_stores(CompletionFixture::kMailbox), 1u);
+    EXPECT_EQ(fixture.end_counter->calls, 0u);
+
+    // Retirement still follows queue order and must not repeat the notification.
+    queue.debug_suspended = false;
+    queue.entries.front().completed_wgs = 1;
+    const auto retired = fixture.tracker.drain_completions(fixture.queues);
+    EXPECT_FALSE(retired.retry_pending);
+    EXPECT_FALSE(retired.terminal_fault);
+    EXPECT_TRUE(queue.entries.empty());
+    EXPECT_EQ(fixture.retired, 2u);
+    EXPECT_EQ(fixture.interrupts, 1u);
+    EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 1u);
+  }
+}
+
+TEST(CompletionTrackerTest, ReportsTerminalNonHeadPublicationFailureWhileSuspended) {
+  CompletionFixture fixture;
+  auto &queue = fixture.queues.front();
+  queue.entries.front().completed_wgs = 0;
+  DispatchEntry barrier = queue.entries.front();
+  barrier.dispatch_id = 8;
+  barrier.kind = DispatchPacketKind::NonKernel;
+  barrier.total_wgs = barrier.dispatched_wgs = barrier.completed_wgs = 0;
+  queue.push_entry(std::move(barrier));
+  fixture.memory->fail_next(CompletionRetryMemory::Operation::AtomicStore,
+                            CompletionFixture::kMailbox);
+  ASSERT_EQ(fixture.tracker.complete_non_kernel(queue.entries[1]), VmAccessOutcome::Unavailable);
+  queue.debug_suspended = true;
+  fixture.memory->fail_next(CompletionRetryMemory::Operation::AtomicStore,
+                            CompletionFixture::kMailbox, VmAccessOutcome::Faulted);
+  const auto result = fixture.tracker.drain_completions(fixture.queues);
+  ASSERT_TRUE(result.terminal_fault);
+  EXPECT_EQ(result.terminal_fault->dispatch_id, 8u);
+  EXPECT_EQ(result.terminal_fault->outcome, VmAccessOutcome::Faulted);
+  EXPECT_TRUE(queue.entries[1].terminal_faulted);
+  EXPECT_EQ(queue.entries.front().completed_wgs, 0u);
+  EXPECT_EQ(fixture.retired, 0u);
+  EXPECT_EQ(fixture.interrupts, 0u);
+  EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 1u);
+}
+
 TEST(CompletionTrackerTest, RetryKeepsTheAddressSpaceSnapshotThatStartedPublication) {
   CompletionFixture fixture;
   fixture.memory->fail_next(CompletionRetryMemory::Operation::CompareExchange,
