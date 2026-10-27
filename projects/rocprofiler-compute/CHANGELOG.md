@@ -100,8 +100,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed `analyze -b` crashing when only the gfx950 LDS bandwidth metrics are selected.
 
-* Fixed `rocprof-compute` failing to start when run through a symlink in another directory, such as `/usr/bin`.
-
 ### Upcoming changes
 
 * The analyze-mode `--gui` and `--tui` options are deprecated and will be removed in a future release. Use the default CLI analysis instead.
