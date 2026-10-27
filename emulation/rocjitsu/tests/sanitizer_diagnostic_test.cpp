@@ -5,46 +5,45 @@
 
 #include <gtest/gtest-spi.h>
 
-#include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 
 namespace {
 
-void expect_diagnosed_exit(const std::string &output, bool abort_process) {
-  const auto fatal_exit = [](int status) {
-    return ::testing::ExitedWithCode(EXIT_FAILURE)(status) ||
-           ::testing::KilledBySignal(SIGABRT)(status);
-  };
-  EXPECT_EXIT(
-      {
-        std::fputs(output.c_str(), stderr);
-        std::fflush(stderr);
-        if (abort_process)
-          std::abort();
-        std::_Exit(EXIT_FAILURE);
-      },
-      fatal_exit, rocjitsu::test::SanitizerFreeDiagnostic("rocjitsu: daemon connection lost"));
-}
+constexpr char kExpectedDiagnostic[] = "rocjitsu: daemon connection lost";
 
-TEST(SanitizerDiagnosticDeathTest, AcceptsExpectedDiagnostic) {
-  expect_diagnosed_exit("rocjitsu: daemon connection lost\n", false);
-}
-
-TEST(SanitizerDiagnosticDeathTest, RejectsReportsAfterExpectedDiagnostic) {
+TEST(SanitizerFreeDiagnosticTest, RequiresDiagnosticWithoutSanitizerReports) {
+  const ::testing::Matcher<const std::string &> matcher =
+      rocjitsu::test::SanitizerFreeDiagnostic(kExpectedDiagnostic);
+  const std::string expected = std::string(kExpectedDiagnostic) + "\n";
+  EXPECT_TRUE(matcher.Matches(expected));
+  EXPECT_FALSE(matcher.Matches("rocjitsu: unrelated failure\n"));
   for (const char *report :
        {"ERROR: AddressSanitizer: heap-use-after-free", "WARNING: ThreadSanitizer: data race",
         "MemorySanitizer: use-of-uninitialized-value",
         "ERROR: LeakSanitizer: detected memory leaks", "UndefinedBehaviorSanitizer:DEADLYSIGNAL",
         "test.cpp:42: runtime error: signed integer overflow"}) {
-    for (bool abort_process : {false, true}) {
-      SCOPED_TRACE(report);
-      SCOPED_TRACE(abort_process);
-      const std::string output = std::string("rocjitsu: daemon connection lost\n") + report;
-      EXPECT_NONFATAL_FAILURE(expect_diagnosed_exit(output, abort_process),
-                              "without sanitizer diagnostics");
-    }
+    SCOPED_TRACE(report);
+    EXPECT_FALSE(matcher.Matches(expected + report));
   }
+}
+
+[[noreturn]] void exit_after_sanitizer_report() {
+  std::fputs("rocjitsu: daemon connection lost\n"
+             "ERROR: AddressSanitizer: heap-use-after-free\n",
+             stderr);
+  std::fflush(stderr);
+  std::_Exit(EXIT_FAILURE);
+}
+
+// A sanitizer can exit with the same status as a fatal GPU failure. The report
+// in the child's captured output must still fail the death test.
+TEST(SanitizerFreeDiagnosticDeathTest, RejectsReportAfterAcceptedExit) {
+  EXPECT_NONFATAL_FAILURE(EXPECT_EXIT(exit_after_sanitizer_report(),
+                                      ::testing::ExitedWithCode(EXIT_FAILURE),
+                                      rocjitsu::test::SanitizerFreeDiagnostic(kExpectedDiagnostic)),
+                          "without sanitizer diagnostics");
 }
 
 } // namespace
