@@ -412,6 +412,8 @@ add_executable(
     sparse_memory_test.cpp
     cpu_dispatch_pool_test.cpp
     simdojo_sim_test.cpp
+    simdojo_pipe_latch_test.cpp
+    simdojo_issue_queue_test.cpp
     partitioning_test.cpp
     simulated_kfd_test.cpp
     kfd_events_test.cpp
@@ -507,6 +509,7 @@ add_executable(
     pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
     vskip_test.cpp
+    cbranch_fork_join_test.cpp
     isa_diagnostics_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
@@ -1938,29 +1941,32 @@ if(RJ_INSTALL_TESTS)
     )
 endif()
 foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700 gfx950_mi355x_kmd_2gpu)
-    rj_add_test(
-        NAME
-            "InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity.${_config}"
-        COMMAND
-            ${RJ_CLI}
-            --config
-            "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
-            --
-            $<TARGET_FILE:interposer_dup_test>
-            "--gtest_filter=InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity"
-        ENVIRONMENT
-            "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:host_drm_preload>"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        INSTALL_COMMAND
-            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-            --config
-            "\${RJ_INSTALLED_CONFIG_DIR}/${_config}.json"
-            --
-            bin/interposer_dup_test
-            "--gtest_filter=InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity"
-        INSTALL_ENVIRONMENT
-            "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}bin/${CMAKE_SHARED_LIBRARY_PREFIX}host_drm_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    foreach(
+        _case
+        IN
+        ITEMS
+            BorrowedDisplayDescriptorUsesSimulatedIdentity
+            DumpPolicyRetainsTheMappedFileAcrossDescriptorReuse
     )
+        rj_add_test(
+            NAME "InterposerDrmTest.${_case}.${_config}"
+            COMMAND
+                ${RJ_CLI}
+                --config "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
+                -- $<TARGET_FILE:interposer_dup_test>
+                "--gtest_filter=InterposerDrmTest.${_case}"
+            ENVIRONMENT
+                "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:host_drm_preload>"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            INSTALL_COMMAND
+                "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                --config "\${RJ_INSTALLED_CONFIG_DIR}/${_config}.json"
+                -- bin/interposer_dup_test
+                "--gtest_filter=InterposerDrmTest.${_case}"
+            INSTALL_ENVIRONMENT
+                "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}bin/${CMAKE_SHARED_LIBRARY_PREFIX}host_drm_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        )
+    endforeach()
 endforeach()
 
 function(rj_add_interposer_test_suite _suite)
@@ -2036,12 +2042,14 @@ rj_add_interposer_test_suite(
     CanonicalSysfsPathsRetainSimulatedDevice
     CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinary
     DeviceInfoReportsActiveCuCount
+    DeviceMappingsFollowGpuCoreDumpPolicyAcrossDescriptorAliases
     DmabufExportKeepsADriverCpuMapping
     DmabufExportKeepsAReservedCpuMapping
     DmabufExportKeepsStoresMadeDuringTheExport
     DmabufExportLeavesPagesPastAPartialMapping
     DupRacingTheCloseOfAPrimeExportKeepsTheBoState
     ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlone
+    GemMappingsFollowGpuCoreDumpPolicy
     GemMetadataRoundTripsOnABuffer
     GemOpReportsTheCreateSize
     GemOpSetPlacementChangesTheReportedDomain
@@ -2050,6 +2058,7 @@ rj_add_interposer_test_suite(
     KfdExportFlagsSurviveDuplicationBeforeThePrimeImport
     KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
     KfdImportsRetainMetadataAfterTheOriginalOwnerCloses
+    MappingStillSucceedsAtTheDescriptorLimit
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
     PrimeImportKeepsTheBoStateAfterTheHandleCloses
@@ -2058,6 +2067,39 @@ rj_add_interposer_test_suite(
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
     TimestampUsesAdvertisedNanosecondClock
+)
+# Keep the partial-aperture regression on the shipped gfx1250 topology while
+# leaving its KFD visibility default unchanged. Reconfigure when that source
+# config changes, and install the generated variant with installed tests.
+set(_rj_gfx1250_config "${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json")
+set_property(
+    DIRECTORY
+    APPEND
+    PROPERTY CMAKE_CONFIGURE_DEPENDS "${_rj_gfx1250_config}"
+)
+file(READ "${_rj_gfx1250_config}" _rj_gfx1250_json)
+string(
+    JSON _rj_partial_vram_json
+    SET "${_rj_gfx1250_json}"
+    vm
+    gpu
+    pci
+    "{\"vram_aperture_bytes\":268435456}"
+)
+set(_rj_partial_vram_config
+    "${CMAKE_CURRENT_BINARY_DIR}/gfx1250_mi455x_partial_vram_test.json"
+)
+file(WRITE "${_rj_partial_vram_config}" "${_rj_partial_vram_json}\n")
+if(RJ_INSTALL_TESTS)
+    install(
+        FILES "${_rj_partial_vram_config}"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+    )
+endif()
+rj_add_interposer_test_suite(
+    InterposerDrmTest
+    CONFIG "${_rj_partial_vram_config}"
+    PartialVramApertureLimitsCpuAccessibleQueries
 )
 
 set(_rj_interposer_pm4_tests

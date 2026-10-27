@@ -43,6 +43,13 @@ extern int64_t g_rcclParamDirectReduceScatterThreshold;  // UNDRIVEN
 extern int g_rcclUpdateCollectiveProtocolCalls;
 extern int g_rcclUpdateCollectiveAlgorithmCalls;
 extern bool g_rcclUpdateCollectiveAlgorithmBeforeProtocol;
+extern int g_rcclUpdateRemoteFlushAlgoProtoCalls;
+extern bool g_rcclUpdateRemoteFlushAlgoProtoAfterProtocol;
+// Channel count the rcclUpdateRemoteFlushAlgoProto fake returns (0: keep RCCL's own).
+extern int g_rcclUpdateRemoteFlushAlgoProtoChannels;
+// rcclScaleCollLl128BuffSize fake: counts calls and multiplies buffSizes[NCCL_PROTO_LL128] by the factor.
+extern int g_rcclScaleCollLl128BuffSizeCalls;
+extern int g_rcclScaleCollLl128BuffSizeFactor;
 extern int g_rcclUpdateCollectiveChannelsCalls;
 extern int g_rcclSetPipeliningCalls;
 extern int g_rcclUpdateThreadThresholdCalls;
@@ -131,6 +138,16 @@ extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseAllGatherDirect;
 extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseReduceScatterDirect;
 // RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1).
 extern int64_t g_rcclParamDdaEnable;
+
+// -------------------------------------------------------------------------
+// DDA params and thresholds. Defaults match rccl_wrap.cc with no arch table.
+// -------------------------------------------------------------------------
+extern int64_t g_rcclParamDdaLL;      // 1
+extern int64_t g_rcclParamDdaLL128;   // kDdaThresholdUnset
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold;  // kDdaLLBaseDefault, UNDRIVEN
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold;  // 0
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaVmmThreshold;  // kDdaVmmBaseDefault, UNDRIVEN
+extern std::function<size_t(const struct ncclComm*)> g_rcclDdaScratchPayloadCap;
 
 void ResetRcclWrapFakes();
 
