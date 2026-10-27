@@ -193,9 +193,9 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   IGPUBackend* backend_ = nullptr;
   uint32_t gpu_id_;
   std::string path_;
-  amdsmi_bdf_t bdf_;
+  amdsmi_bdf_t bdf_{};
   FabricBDFList_t fabric_bdf_list_;
-  uint32_t vendor_id_;
+  uint32_t vendor_id_{};
   AMDSmiDrm& drm_;
   uint32_t card_index_;
   uint32_t drm_render_minor_;

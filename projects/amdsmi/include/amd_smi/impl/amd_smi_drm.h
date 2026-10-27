@@ -20,7 +20,7 @@ namespace amd::smi {
 
 class AMDSmiDrm {
  public:
-  amdsmi_status_t init();
+  amdsmi_status_t init(const std::vector<const char*>& libdrm_names = libdrm_amdgpu_sonames());
   amdsmi_status_t cleanup();
   amdsmi_status_t get_bdf_by_index(uint32_t gpu_index, amdsmi_bdf_t* bdf_info) const;
   amdsmi_status_t get_drm_path_by_index(uint32_t gpu_index, std::string* drm_path) const;
