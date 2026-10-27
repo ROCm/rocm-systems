@@ -4,7 +4,6 @@
  */
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 #include <hip/hip_runtime_api.h>
 #include <memory>
@@ -40,9 +39,7 @@ public:
     virtual bool     isRetired() const     = 0;
     virtual uint64_t nextSignalTarget()    = 0;
     virtual uint64_t releaseSignalTarget() = 0;
-    virtual void     addOutstanding()      = 0;
 
-    virtual void finishOutstanding()        = 0; // Lock-free; safe from pool and host-function threads.
     virtual void applyFlags(uint32_t flags) = 0; // Takes the lock.
     virtual void drainAndRelease()          = 0; // Takes the lock; must not be called with it held.
 };
@@ -75,9 +72,7 @@ public:
     bool     isRetired() const override;
     uint64_t nextSignalTarget() override;
     uint64_t releaseSignalTarget() override;
-    void     addOutstanding() override;
 
-    void finishOutstanding() override;
     void applyFlags(uint32_t flags) override;
     void drainAndRelease() override;
 
@@ -91,19 +86,18 @@ private:
 
     void setFlags(uint32_t flags);
 
-    hipStream_t           hip_stream;
-    hipDevice_t           device_id;
-    bool                  managed;
-    bool                  can_use_stream_wait_value;
-    std::mutex            mutex; // Guards the flags after construction, retired, and signal_counter.
-    bool                  fixed_buf_offset{false};
-    bool                  fixed_file_offset{false};
-    bool                  fixed_io_size{false};
-    bool                  page_aligned{false};
-    bool                  retired{false};
-    uint64_t              signal_counter{0};
-    std::atomic<uint64_t> outstanding{0}; // Ops that may still touch signal_slot; drained before it's freed.
-    SignalSlot            signal_slot;    // Device signal memory; freed by drainAndRelease or the dtor.
+    hipStream_t hip_stream;
+    hipDevice_t device_id;
+    bool        managed;
+    bool        can_use_stream_wait_value;
+    std::mutex  mutex; // Guards the flags after construction, retired, and signal_counter.
+    bool        fixed_buf_offset{false};
+    bool        fixed_file_offset{false};
+    bool        fixed_io_size{false};
+    bool        page_aligned{false};
+    bool        retired{false};
+    uint64_t    signal_counter{0}; // Targets reserved; each is bumped into signal_slot exactly once.
+    SignalSlot  signal_slot;       // Device signal memory; freed by drainAndRelease or the dtor.
 };
 
 class StreamMap {

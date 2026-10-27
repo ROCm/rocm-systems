@@ -174,7 +174,7 @@ TEST_F(AsyncTest, GatedStreamDispatchesThenArmsWait)
 {
     {
         InSequence seq;
-        EXPECT_CALL(*stream, addOutstanding);
+        EXPECT_CALL(*stream, nextSignalTarget).WillOnce(Return(1));
         captureDispatch();
         EXPECT_CALL(mhip,
                     hipStreamWaitValue64(nonnull_stream(), &slot, 1u, hipStreamWaitValueGte, UINT64_MAX));
@@ -213,7 +213,6 @@ TEST_F(AsyncTest, ArmFailureBeforeStartAbandonsOp)
     AsyncMonitor                   monitor{std::make_unique<InlinePool>()};
     ContextOverride<IAsyncMonitor> co{&monitor};
     EXPECT_CALL(*backend, io).Times(0);
-    EXPECT_CALL(*stream, finishOutstanding);
     async_dispatch(queued.get());
     EXPECT_EQ(slot, 1u);
     EXPECT_EQ(bytes, 0);
@@ -239,11 +238,9 @@ TEST_F(AsyncTest, ArmFailureAfterStartWaitsForIo)
 
 TEST_F(AsyncTest, LaunchFailureReleasesReservation)
 {
-    EXPECT_CALL(*stream, addOutstanding);
     EXPECT_CALL(*stream, nextSignalTarget).WillOnce(Return(1));
     EXPECT_CALL(mhip, hipLaunchHostFunc).WillOnce(Throw(Hip::RuntimeError(hipErrorInvalidValue)));
     EXPECT_CALL(*stream, releaseSignalTarget);
-    EXPECT_CALL(*stream, finishOutstanding);
     EXPECT_CALL(mhip, hipStreamWaitValue64).Times(0);
 
     EXPECT_THROW(enqueue(), Hip::RuntimeError);
@@ -252,7 +249,7 @@ TEST_F(AsyncTest, LaunchFailureReleasesReservation)
 TEST_F(AsyncTest, RetiredStreamThrows)
 {
     ON_CALL(*stream, isRetired).WillByDefault(Return(true));
-    EXPECT_CALL(*stream, addOutstanding).Times(0);
+    EXPECT_CALL(*stream, nextSignalTarget).Times(0);
     EXPECT_CALL(mhip, hipLaunchHostFunc).Times(0);
 
     EXPECT_THROW(enqueue(), std::invalid_argument);
@@ -300,7 +297,6 @@ TEST_F(AsyncTest, DispatchSubmitFailureFinishesOpWithError)
     op->block        = true;
     op->self         = op;
     EXPECT_CALL(monitor, submitIo).WillOnce(Throw(std::runtime_error("no workers")));
-    EXPECT_CALL(*stream, finishOutstanding);
 
     async_dispatch(op.get());
     EXPECT_EQ(bytes, -hipFileInternalError);
@@ -313,7 +309,6 @@ TEST_F(AsyncTest, MonitorSubmitIoRunsOpAndSignals)
     AsyncMonitor monitor{std::make_unique<InlinePool>()};
     bool         ran{false};
     auto         op = makeOp([&ran](AsyncOp *) { ran = true; });
-    EXPECT_CALL(*stream, finishOutstanding);
 
     monitor.submitIo(op);
     EXPECT_TRUE(ran);
@@ -327,7 +322,6 @@ TEST_F(AsyncTest, MonitorSkipsAbandonedOp)
     bool         ran{false};
     auto         op = makeOp([&ran](AsyncOp *) { ran = true; });
     op->state.store(AsyncOpState::Abandoned);
-    EXPECT_CALL(*stream, finishOutstanding);
 
     monitor.submitIo(op);
     EXPECT_FALSE(ran);

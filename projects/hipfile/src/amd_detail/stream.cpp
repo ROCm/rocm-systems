@@ -11,11 +11,13 @@
 #include "sys.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <hip/hip_runtime_api.h>
 #include <mutex>
 #include <syslog.h>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 
 namespace hipFile {
@@ -142,18 +144,6 @@ Stream::releaseSignalTarget()
     return --signal_counter;
 }
 void
-Stream::addOutstanding()
-{
-    outstanding.fetch_add(1, std::memory_order_acq_rel);
-}
-void
-Stream::finishOutstanding()
-{
-    if (outstanding.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        outstanding.notify_all();
-    }
-}
-void
 Stream::applyFlags(uint32_t flags)
 {
     std::lock_guard<std::mutex> lock{mutex};
@@ -165,14 +155,20 @@ Stream::drainAndRelease()
     if (!managed) {
         return;
     }
+    uint64_t reserved;
     {
         std::lock_guard<std::mutex> lock{mutex};
-        retired = true;
+        retired  = true;
+        reserved = signal_counter;
     }
     Context<Hip>::get()->hipStreamSynchronize(hip_stream);
-    for (auto n = outstanding.load(std::memory_order_acquire); n != 0;
-         n      = outstanding.load(std::memory_order_acquire)) {
-        outstanding.wait(n, std::memory_order_acquire);
+    if (signal_slot) {
+        // The synchronize covers every op whose wait armed. An op whose arm failed still bumps the slot once,
+        // but the stream never waited for it, so it may still be running. This only loops in that case.
+        std::atomic_ref<uint64_t> slot{*signal_slot};
+        while (slot.load(std::memory_order_acquire) < reserved) {
+            std::this_thread::sleep_for(std::chrono::microseconds{100});
+        }
     }
     signal_slot.reset();
 }

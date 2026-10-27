@@ -250,15 +250,16 @@ TEST_F(HipFileStream, drain_and_release_retires_syncs_and_frees)
     EXPECT_EQ(stream->signalSlot(), nullptr);
 }
 
-TEST_F(HipFileStream, drain_and_release_waits_for_outstanding_ops)
+TEST_F(HipFileStream, drain_and_release_waits_for_reserved_targets)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     stream_map.registerStream(nonnull_stream, 0);
     auto stream = stream_map.getStream(nonnull_stream);
     EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
     {
+        // A reserved target that no stream wait covers, like an op whose wait failed to arm.
         auto lock = stream->getLock();
-        stream->addOutstanding();
+        stream->nextSignalTarget();
     }
 
     std::atomic<bool> drained{false};
@@ -268,7 +269,7 @@ TEST_F(HipFileStream, drain_and_release_waits_for_outstanding_ops)
     }};
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     EXPECT_FALSE(drained);
-    stream->finishOutstanding();
+    std::atomic_ref<uint64_t>{signal_storage}.fetch_add(1, std::memory_order_release);
     drainer.join();
     EXPECT_TRUE(drained);
     EXPECT_EQ(stream->signalSlot(), nullptr);

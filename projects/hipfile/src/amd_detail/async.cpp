@@ -32,7 +32,6 @@ signalOffloadComplete(AsyncOp *op)
     if (uint64_t *slot = op->stream->signalSlot()) {
         std::atomic_ref<uint64_t>{*slot}.fetch_add(1, std::memory_order_release);
     }
-    op->stream->finishOutstanding();
 }
 
 // Finishes an op exactly once. An abandoned op only releases its stream signal and touches no caller memory.
@@ -157,18 +156,17 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType io_type, std::shared_ptr<I
                                        buffer_offset, bytes_transferred, async_run_io, std::move(backend));
         op->block       = !gated;
         uint64_t target = gated ? stream->nextSignalTarget() : 0;
-        stream->addOutstanding();
 
         op->self = op;
         try {
             Context<Hip>::get()->hipLaunchHostFunc(stream->getHipStream(), async_dispatch, op.get());
         }
         catch (...) {
+            // Nothing will bump the slot for this target, so give it back.
             op->self.reset();
             if (gated) {
                 stream->releaseSignalTarget();
             }
-            stream->finishOutstanding();
             throw;
         }
 
