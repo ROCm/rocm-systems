@@ -35,6 +35,8 @@ hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl);
+hipError_t playback_hipMallocManaged(PlaybackContext& ctx, const uint8_t* pl);
+hipError_t playback_hipMemCreate(PlaybackContext& ctx, const uint8_t* pl);
 
 namespace fs = std::filesystem;
 
@@ -276,6 +278,114 @@ TEST_CASE("Unit_HRR_HostBudget_DispatchFreesReplacedHostAllocation", "[hrr]") {
   run(HRR_API_HIPHOSTMALLOC, hm);
   hrr_test::ExactRecord<hrr_args_hipMallocHost> mh;
   run(HRR_API_HIPMALLOCHOST, mh);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - hipMallocManaged refuses a recorded size the budget cannot hold before it
+ *     calls HIP (managed memory can be backed from host memory): the
+ *     hipHostMalloc refusal, so hipErrorMemoryAllocation, the replay ended,
+ *     the message names --max-host-bytes, nothing charged, no mapping recorded.
+ *     It does so through the dispatch table too, and a size that would wrap a
+ *     naive sum is refused the same way.
+ */
+TEST_CASE("Unit_HRR_HostBudget_ManagedAllocationRefusedOverBudget", "[hrr]") {
+  CHECK(hrr_playback_dispatch[HRR_API_HIPMALLOCMANAGED] == &playback_hipMallocManaged);
+  for (uint64_t size : {uint64_t{101}, uint64_t{1} << 32, UINT64_MAX - 4096}) {
+    PlaybackContext ctx;
+    ctx.host_budget.set_cap(100);
+    hrr_test::ExactRecord<hrr_args_hipMalloc> rec;
+    rec.get()->ptr = 0x6000;
+    rec.get()->size = size;
+    hipError_t r = hipSuccess;
+    const std::string err = hrr_test::capture_stderr(
+        [&] { r = hrr_playback_dispatch[HRR_API_HIPMALLOCMANAGED](ctx, rec.bytes()); });
+    CHECK(r == hipErrorMemoryAllocation);
+    CHECK(ctx.fatal_error.load());
+    CHECK(ctx.host_budget.used() == 0);
+    CHECK_FALSE(ctx.has_alloc(0x6000));
+    CHECK(err.find("hipMallocManaged") != std::string::npos);
+    CHECK(err.find("--max-host-bytes") != std::string::npos);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - hipMemCreate with a host location (Host, HostNuma or HostNumaCurrent)
+ *     refuses a size the budget cannot hold before it calls HIP: the same
+ *     refusal as hipHostMalloc, nothing charged, no handle recorded. This holds
+ *     through the dispatch table too.
+ */
+TEST_CASE("Unit_HRR_HostBudget_HostMemCreateRefusedOverBudget", "[hrr]") {
+  CHECK(hrr_playback_dispatch[HRR_API_HIPMEMCREATE] == &playback_hipMemCreate);
+  for (hipMemLocationType loc : {hipMemLocationTypeHost, hipMemLocationTypeHostNuma,
+                                 hipMemLocationTypeHostNumaCurrent}) {
+    PlaybackContext ctx;
+    ctx.host_budget.set_cap(100);
+    hrr_test::ExactRecord<hrr_args_hipMemCreate> rec;
+    hipMemAllocationProp prop{};
+    prop.type = hipMemAllocationTypePinned;
+    prop.location.type = loc;
+    prop.location.id = 0;
+    rec.get()->handle = 0x7000;
+    rec.get()->size = uint64_t{4} << 30;
+    rec.get()->prop_present = 1;
+    std::memcpy(rec.get()->prop_bytes, &prop, sizeof(prop));
+    hipError_t r = hipSuccess;
+    const std::string err = hrr_test::capture_stderr(
+        [&] { r = hrr_playback_dispatch[HRR_API_HIPMEMCREATE](ctx, rec.bytes()); });
+    CHECK(r == hipErrorMemoryAllocation);
+    CHECK(ctx.fatal_error.load());
+    CHECK(ctx.host_budget.used() == 0);
+    CHECK(ctx.translate_vmm_handle(0x7000) == hipMemGenericAllocationHandle_t{});
+    CHECK(err.find("hipMemCreate") != std::string::npos);
+    CHECK(err.find("--max-host-bytes") != std::string::npos);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A managed entry holds its charge until it is removed: remove_alloc (what
+ *     hipFree calls) returns it, a device entry returns nothing, and removing
+ *     the same address twice does not give back more than was charged.
+ *   - A managed allocation recorded again at an address that still holds one
+ *     frees the old entry and gives its charge back before the new one is
+ *     charged. The new allocation is over budget here so no HIP allocation is
+ *     made: only the replaced entry's release is observed.
+ */
+TEST_CASE("Unit_HRR_HostBudget_ManagedAllocationReturnsChargeOnFree", "[hrr]") {
+  {
+    PlaybackContext ctx;
+    ctx.host_budget.set_cap(100);
+    REQUIRE(ctx.charge_host(60, "seed managed"));
+    ctx.record_alloc(0x8000, nullptr, 60, AllocKind::Managed);
+    REQUIRE(ctx.charge_host(30, "seed device-side"));  // unrelated charge stays
+    ctx.record_alloc(0x9000, nullptr, 30, AllocKind::Device);
+    CHECK(ctx.host_budget.used() == 90);
+
+    ctx.remove_alloc(0x9000);  // a device entry was never charged here
+    CHECK(ctx.host_budget.used() == 90);
+    ctx.remove_alloc(0x8000);
+    CHECK(ctx.host_budget.used() == 30);
+    ctx.remove_alloc(0x8000);  // already gone
+    CHECK(ctx.host_budget.used() == 30);
+  }
+  {
+    PlaybackContext ctx;
+    ctx.host_budget.set_cap(100);
+    REQUIRE(ctx.charge_host(60, "seed"));
+    ctx.record_alloc(0xA000, nullptr, 60, AllocKind::Managed);
+    hrr_test::ExactRecord<hrr_args_hipMalloc> rec;
+    rec.get()->ptr = 0xA000;
+    rec.get()->size = 101;
+    (void)hrr_test::capture_stderr(
+        [&] { (void)hrr_playback_dispatch[HRR_API_HIPMALLOCMANAGED](ctx, rec.bytes()); });
+    CHECK_FALSE(ctx.has_alloc(0xA000));
+    CHECK(ctx.host_budget.used() == 0);
+  }
 }
 
 /**

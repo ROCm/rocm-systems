@@ -177,7 +177,8 @@ inline thread_local HrrUnmappedNote hrr_unmapped_note;
 // release it at teardown. Mixing them up (e.g. hipFree on a host pointer)
 // returns errors and can corrupt allocator bookkeeping.
 enum class AllocKind : uint8_t {
-    Device,        // hipMalloc / hipMallocManaged / hipMallocPitch -> hipFree
+    Device,        // hipMalloc / hipMallocPitch                    -> hipFree
+    Managed,       // hipMallocManaged: host-backed, charged to host_budget -> hipFree
     HostMalloc,    // hipHostMalloc / hipMallocHost                 -> hipHostFree
     HostRegister,  // hipHostRegister backing buffer  -> hipHostUnregister + free
                    //   (released via host_reg_bufs; skipped in the alloc_map loop)
@@ -432,8 +433,11 @@ struct PlaybackContext {
 
     // VMM replay maps (guarded by map_mutex):
     //   vmm_handle_map: recorded hipMemGenericAllocationHandle_t (as u64) -> live handle
+    //                   and the host bytes charged for it (0 for a device-located
+    //                   handle), which hipMemRelease gives back
     //   vmm_va_map    : recorded reserved-VA base (u64) -> {live_va, size}
-    std::unordered_map<uint64_t, hipMemGenericAllocationHandle_t> vmm_handle_map;
+    struct VmmHandle { hipMemGenericAllocationHandle_t live; uint64_t host_charge; };
+    std::unordered_map<uint64_t, VmmHandle> vmm_handle_map;
     struct VmmVA { void* live; size_t size; };
     std::unordered_map<uint64_t, VmmVA> vmm_va_map;
 
@@ -449,7 +453,7 @@ struct PlaybackContext {
         if (rec == 0) return {};
         std::shared_lock lk(map_mutex);
         auto it = vmm_handle_map.find(rec);
-        return it != vmm_handle_map.end() ? it->second : hipMemGenericAllocationHandle_t{};
+        return it != vmm_handle_map.end() ? it->second.live : hipMemGenericAllocationHandle_t{};
     }
 
     // ---- External region annotations (regions/*.hrrr, see hrr_regions.h) ----
@@ -721,6 +725,7 @@ struct PlaybackContext {
             case AllocKind::HostMalloc:     return "pinned host";
             case AllocKind::HostRegister:   return "registered host";
             case AllocKind::DevicePtrAlias: return "pinned host alias";
+            case AllocKind::Managed:        return "managed";
             default:                        return "device";
         }
     }
@@ -856,9 +861,11 @@ struct PlaybackContext {
         std::unique_lock lk(map_mutex);
         auto it = alloc_map.find(rec);
         if (it == alloc_map.end()) return;
-        // Host allocations were charged to host_budget before they were made.
+        // Host allocations (and managed memory, which the runtime may back
+        // from host memory) were charged to host_budget before they were made.
         if (it->second.kind == AllocKind::HostMalloc ||
-            it->second.kind == AllocKind::HostRegister)
+            it->second.kind == AllocKind::HostRegister ||
+            it->second.kind == AllocKind::Managed)
             host_budget.release(it->second.size);
         alloc_map.erase(it);
     }
