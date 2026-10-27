@@ -1918,7 +1918,7 @@ struct RdnaVopdExecutionCase {
 
 class RdnaVopdExecutionSmokeTest : public ::testing::TestWithParam<RdnaVopdExecutionCase> {};
 
-TEST_P(RdnaVopdExecutionSmokeTest, RejectsWave64Execution) {
+TEST_P(RdnaVopdExecutionSmokeTest, HandlesWave64ExecutionAccordingToArchitecture) {
   const auto &tc = GetParam();
   const auto words = make_vopdxy_pair(9, 8);
 
@@ -1943,7 +1943,16 @@ TEST_P(RdnaVopdExecutionSmokeTest, RejectsWave64Execution) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
 
-  EXPECT_THROW((void)cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst);
+  const auto result = cu->execute_instruction(inst.get(), *wf);
+  if (tc.arch == ROCJITSU_CODE_ARCH_RDNA4) {
+    EXPECT_TRUE(result.failed());
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+  } else {
+    // RDNA3 and RDNA3.5 explicitly skip VOPD when the wave is in wave64 mode.
+    EXPECT_TRUE(result.succeeded());
+    EXPECT_EQ(wf->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
+  }
 }
 
 TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {

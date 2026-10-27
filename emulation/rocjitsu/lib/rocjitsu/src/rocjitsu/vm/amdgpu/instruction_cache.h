@@ -146,6 +146,19 @@ public:
     return true;
   }
 
+  /// @brief Read a resident hint in the retained access's translated namespace.
+  /// @details Like the VMID overload, this only selects an execution path and
+  /// may return a stale word. Ordinary fetch must validate execution access,
+  /// including revocation, and synchronize cache and debugger coherence.
+  bool peek_word(const GpuVmAccess &access, uint64_t pc, uint32_t &word) const {
+    const uint64_t addr = pc & ~uint64_t{kLineSize - 1};
+    const auto &line = lines_[(addr / kLineSize) & (kNumLines - 1)];
+    if ((pc & 3) || !is_translated_hit(line, addr, access.cache_namespace()))
+      return false;
+    std::memcpy(&word, line.data + (pc & (kLineSize - 1)), sizeof(word));
+    return true;
+  }
+
 private:
   void synchronize_coherence_epoch() {
     const uint64_t current_epoch = coherence_->current_instruction_epoch();

@@ -35,23 +35,24 @@ graph:
     tags: [node]
   Unit_hipGraphAddEventRecordNode_Functional_WithoutFlags:
     <<: *level_default
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAddEventRecordNode_Functional_ElapsedTime:
     <<: *level_default
-    # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
-    # (amd_wsl) Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAddEventRecordNode_Functional_WithFlags:
     <<: *level_default
     tags: [node]
   Unit_hipGraphAddEventRecordNode_MultipleRun:
     <<: *level_default
-    # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
-    # (amd_wsl) Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAddEventRecordNode_Functional_TimingDisabled:
     <<: *level_default
@@ -94,8 +95,9 @@ graph:
     tags: [node, image]
   Unit_hipGraphAddMemcpyNode_Negative_Parameters:
     <<: *level_default
-    # NOTE: The following test is disabled due to defect - EXSWHTEC-245
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-245; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device; needs to be re-triaged. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [node, image]
   Unit_hipGraphClone_Negative:
     <<: *level_default
@@ -114,45 +116,54 @@ graph:
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg:
     <<: *level_default
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips because there are fewer than two GPUs (numDevices < 2); needs to be re-triaged"
     tags: [lifecycle, multigpu]
-    disabled: [amd_wsl]
   Unit_hipGraphInstantiateWithFlags_StreamCapture:
     <<: *level_default
     tags: [lifecycle, multigpu]
   Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg:
     <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-445928: self-skips because it requires >1 GPU (device-context change) -- not locally verifiable on single-GPU; further investigation needed; gfx1201 (amd_wsl) self-skips because there are fewer than two GPUs (numDevices < 2); needs to be re-triaged on amd_linux"
     tags: [lifecycle, multigpu]
-    # SWDEV-445928: These tests fail in PSDB stress test on 09/02/2024
-    disabled: [amd_linux, amd_wsl]
   Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check:
     <<: *level_default
-    # SWDEV-402082 - PAL Backend fails to reserve address on GPU except first one
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop:
     <<: *level_default
-    # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel:
     <<: *level_default
-    # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel:
     <<: *level_default
-    # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_WithDefaultAndAutoFreeOnLaunch:
     <<: *level_default
-    # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithParams_Negative:
     <<: *level_default
-    # Unit_hipGraphInstantiateWithParams_Negative
-    disabled: [nvidia_windows]
+    disabled:
+      targets: [nvidia_windows]
+      reason: "AIRUNTIME-2744 - Unit_hipGraphInstantiateWithParams_Negative needs to be re-triaged"
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithParams_DependencyGraph:
     <<: *level_default
@@ -246,19 +257,18 @@ graph:
     tags: [node]
   Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic:
     <<: *level_default
-    disabled: [amd_wsl]
   Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node:
     <<: *level_default
-    # Note: Test disabled due to defect - EXSWHTEC-207
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [exec]
   Unit_hipGraphMemsetNodeSetParams_FlatAlloc_2D_Positive: *level_default
   Unit_hipGraphMemsetNodeSetParams_PitchedAlloc_OverExtent_Negative:
     <<: *level_default
-    disabled: [amd_wsl]
   Unit_hipGraphExecUpdate_FlatAlloc_2DMemset_Idempotent: *level_default
   Unit_hipGraphExecUpdate_2DMemset_ShapeChange_Negative: *level_default
   Unit_hipGraphExecUpdate_2DMemset_ValueAndDst_Positive: *level_default
@@ -271,8 +281,9 @@ graph:
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic:
     <<: *level_default
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative_Parameters:
     <<: *level_default
@@ -288,18 +299,21 @@ graph:
     tags: [lifecycle]
   Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep:
     <<: *level_default
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ClonedGrph:
     <<: *level_default
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ChldNode:
     <<: *level_default
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphGetNodes_Positive_Functional:
     <<: *level_default
@@ -357,8 +371,9 @@ graph:
     tags: [node]
   Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph:
     <<: *level_default
-    # Disabling tests which no longer behave the same on nvidia platform
-    disabled: [nvidia_windows]
+    disabled:
+      targets: [nvidia_windows]
+      reason: "AIRUNTIME-2744 - disabled because the tests no longer behave the same on the nvidia platform; needs to be re-triaged"
     tags: [node]
   Unit_hipGraphAddChildGraphNode_ExecuteChildGraph:
     <<: *level_default
@@ -386,8 +401,6 @@ graph:
     tags: [node]
   Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun_Clone:
     <<: *level_default
-    # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92
-    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerDim:
     <<: *level_default
@@ -406,8 +419,9 @@ graph:
     tags: [node]
   Unit_hipGraphAddChildGraphNode_MultGraphsAsSingleGraph:
     <<: *level_default
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU:
     <<: *level_default
@@ -441,8 +455,6 @@ graph:
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParams1D_Negative:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_wsl]
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParams1D_Positive_Basic:
     <<: *level_default
@@ -521,9 +533,10 @@ graph:
     tags: [exec]
   Unit_hipGraphExecUpdate_Negative_MultiDevice_Context_Changed:
     <<: *level_default
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-446588: disable graph multi-GPU testcases until graph has support for it; gfx1201 (amd_windows) and gfx1201 (amd_wsl) self-skip because peer access is not available between devices; needs to be re-triaged"
     tags: [exec, multigpu]
-    # SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
-    disabled: [amd_windows, amd_wsl]
   Unit_hipGraphExecUpdate_Functional_KernelFunction_Changed:
     <<: *level_default
     tags: [exec]
@@ -577,19 +590,20 @@ graph:
     tags: [node]
   Unit_hipGraphMemsetNodeGetParams_Negative_Parameters:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGraphMemsetNodeSetParams_Positive_Basic:
     <<: *level_default
-    # Note: Following four tests disabled due to defect - EXSWHTEC-203
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
   Unit_hipGraphMemsetNodeSetParams_Negative_Parameters:
     <<: *level_default
     tags: [node]
   Unit_hipGraphMultiDevice:
     <<: *level_default
-    # ROCM-22772: Temporarily disabled until multi-device graph is added
-    disabled: [amd_linux]
+    disabled:
+      targets: [amd_linux]
+      reason: "AIRUNTIME-2744 - ROCM-22772: self-skips because there are fewer than two GPUs (multi-device) -- not locally verifiable; further investigation needed; needs to be re-triaged"
     tags: [multigpu]
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative:
     <<: *level_default
@@ -599,13 +613,12 @@ graph:
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Positive_Basic:
     <<: *level_default
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative_Parameters:
     <<: *level_default
-    # SWDEV-396617 ExecMemcpyNodeSetParamsFromSymbol fails in direction
-    disabled: [amd_wsl]
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_CaptureDemotion:
     <<: *level_default
@@ -645,6 +658,9 @@ graph:
     tags: [exec, image]
   Unit_hipGraphExecMemcpyNodeSetParams_Functional:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [exec, image]
   Unit_hipStreamBeginCapture_Positive_Functional:
     <<: *level_default
@@ -760,6 +776,9 @@ graph:
   Unit_hipStreamBeginCapture_Negative_WaitDoesNotJoinInvalidatedCapture:
     <<: *level_default
     tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_LegacyStreamWaitIsRejected:
+    <<: *level_default
+    tags: [capture]
   Unit_hipStreamBeginCapture_Negative_StreamOffenceInvalidatesWholeCapture:
     <<: *level_default
     tags: [capture]
@@ -855,9 +874,9 @@ graph:
     tags: [capture]
   Unit_hipStreamBeginCapture_captureComplexGraph:
     <<: *level_default
-    # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
-    # (amd_wsl) Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [capture]
   Unit_hipStreamBeginCapture_captureEmptyStreams:
     <<: *level_default
@@ -885,7 +904,6 @@ graph:
     tags: [query]
   Unit_hipGraphMemFreeNodeGetParams_InvalidArgs:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGraphUserObj_Int_float_Objects:
     <<: *level_default
@@ -898,8 +916,9 @@ graph:
     tags: [userobj]
   Unit_hipGraphUserObj_ClonedGraph:
     <<: *level_default
-    # Test Unit_hipGraphUserObj_ClonedGraph disabled due to SWDEV-483112
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [userobj]
   Unit_hipGraphUserObj_ManualGraph:
     <<: *level_default
@@ -912,15 +931,18 @@ graph:
     tags: [exec]
   Unit_hipGraphExecBatchMemOpNodeSetParams_UpdateTakesEffect:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - PAL does not implement batch memory operations; gfx1201 (amd_windows) fails: launch_and_read() == 1000 -> 0 == 1000 (0x3e8); needs to be re-triaged"
     tags: [exec]
-    # PAL does not implement batch memory operations
-    disabled: [amd_windows]
   Unit_hipGraphAddBatchMemOpNode_NegativeTsts:
     <<: *level_default
     tags: [node]
   Unit_hipGraphBatchMemOpNode_WriteAndWait:
     <<: *level_default
-    disabled: [amd_windows, amd_wsl, nvidia]
+    disabled:
+      targets: [amd_windows, nvidia]
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 1000 -> 0 == 1000 (0x3e8); needs to be re-triaged on nvidia"
     tags: [node]
   Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts:
     <<: *level_default
@@ -951,8 +973,9 @@ graph:
     tags: [capture]
   Unit_hipStreamBeginCaptureToGraph_CaptureDepGraph:
     <<: *level_default
-    # SWDEV-454245, SWDEV-454247 : Below tests fail on 29/03/24
-    disabled: [amd_windows, amd_wsl]
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - Linux-only test (wrapped in #ifdef __linux__ in unit/graph/hipStreamBeginCaptureToGraph.cc); never built or run on native Windows"
     tags: [capture]
   Unit_hipStreamBeginCaptureToGraph_ComplexGraph:
     <<: *level_default
@@ -992,8 +1015,9 @@ graph:
     tags: [capture]
   Unit_hipStreamBeginCaptureToGraph_IndepGraphsThreads:
     <<: *level_default
-    # SWDEV-454245, SWDEV-454247 : Below tests fail on 29/03/24
-    disabled: [amd_windows, amd_wsl]
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - Linux-only test (wrapped in #ifdef __linux__ in unit/graph/hipStreamBeginCaptureToGraph.cc); never built or run on native Windows"
     tags: [capture]
   Unit_hipGetProcAddress_GraphAPIs_StreamCapture:
     <<: *level_default
@@ -1003,11 +1027,9 @@ graph:
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams:
     <<: *level_default
@@ -1026,11 +1048,12 @@ graph:
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_MemAllocAndFree:
     <<: *level_default
-    disabled: [amd_linux]
+    disabled:
+      targets: [amd_linux]
+      reason: "AIRUNTIME-2744 - needs to be re-triaged"
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGraphExecNodeSetParams_Negative_Parameters:
     <<: *level_default
@@ -1104,8 +1127,9 @@ graph:
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Positive_Basic:
     <<: *level_default
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative_Parameters:
     <<: *level_default
@@ -1121,25 +1145,20 @@ graph:
     tags: [exec]
   Unit_hipGraphAddMemsetNode_Positive_Basic:
     <<: *level_default
-    disabled: [amd_wsl]
   Unit_hipGraphAddMemsetNode_Negative_Parameters:
     <<: *level_default
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMallocPitch_2D:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMallocPitch_1D:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMalloc3D_2D:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMalloc3D_1D:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMalloc_1D:
     <<: *level_default
@@ -1164,7 +1183,6 @@ graph:
     tags: [node]
   Unit_hipGraphMemcpyNodeGetParams_Negative_Parameters:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGraphMemcpyNodeGetParams_Negative:
     <<: *level_default
@@ -1177,7 +1195,6 @@ graph:
     tags: [node, image]
   Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParams_CrossKind:
     <<: *level_default
@@ -1237,13 +1254,15 @@ graph:
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Functional:
     <<: *level_default
-    # (amd_wsl) Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - needs to be re-triaged"
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Positive_Basic:
     <<: *level_default
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters:
     <<: *level_default
@@ -1283,9 +1302,9 @@ graph:
     tags: [exec]
   Unit_hipGraphExecChildGraphNodeSetParams_ChildTopology:
     <<: *level_default
-    # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
-    # (amd_wsl) Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [exec]
   Unit_hipStreamGetCaptureInfo_v2_Positive_Functional:
     <<: *level_default
@@ -1310,8 +1329,9 @@ graph:
     tags: [lifecycle]
   Unit_hipStreamSetCaptureDependencies_Positive_Functional:
     <<: *level_default
-    # Note: Following four tests disabled due to defect - EXSWHTEC-203
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [capture]
   Unit_hipStreamAddCaptureDependencies_Positive_Functional:
     <<: *level_default
@@ -1342,10 +1362,10 @@ graph:
     tags: [capture]
   Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [capture]
-    # Hangs on Windows (PAL), hitting CI timeout; passes on Linux.
-    # https://github.com/ROCm/rocm-systems/issues/7148
-    disabled: [amd_windows, amd_wsl]
   Unit_hipLaunchHostFunc_BlitDtoHHostCallbackVisibility:
     <<: *level_default
     tags: [capture]
@@ -1396,10 +1416,15 @@ graph:
     tags: [userobj]
   Unit_hipGraphRetainUserObject_Negative_Basic:
     <<: *level_default
-    disabled: [asan]
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2744 - needs to be re-triaged"
     tags: [userobj]
   Unit_hipGraphDebugDotPrint_Functional:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [query, image]
   Unit_hipGraphDebugDotPrint_Argument_Check:
     <<: *level_default
@@ -1418,13 +1443,12 @@ graph:
     tags: [lifecycle, image]
   Unit_hipGraphClone_Test_hipGraphExecMemcpyNodeSetParams:
     <<: *level_default
-    # Below tests fail in stress test on 23/06/23
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - fails in stress test on 23/06/23; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device; needs to be re-triaged"
     tags: [lifecycle, image]
   Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec:
     <<: *level_default
-    # Below tests fail in stress test on 23/06/23
-    disabled: [amd_wsl]
     tags: [lifecycle]
   Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec:
     <<: *level_default
@@ -1497,34 +1521,37 @@ graph:
     tags: [exec]
   Unit_hipGraphUpload_Functional_multidevice_test:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [exec]
-    # (amd_windows) SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
-    disabled: [amd_windows, amd_wsl]
   Unit_hipGraphUpload_Functional_With_Priority_Stream:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphUpload_Negative_Parameters:
     <<: *level_default
-    # SWDEV-434878: Below tests failed in stress test on 24/11/23
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [exec]
   Unit_hipGraphCrossDeviceLaunch_CrossStreamDependencyOrdering:
     <<: *level_default
+    disabled:
+      targets: [amd_windows, amd_linux]
+      reason: "AIRUNTIME-2744 - ROCM-22772: self-skips because there are fewer than two GPUs (cross-device) -- not locally verifiable; further investigation needed; gfx1201 (amd_windows) self-skips because there are fewer than two GPUs (numDevices < 2); needs to be re-triaged on amd_linux"
     tags: [exec]
-    # ROCM-22772: Temporarily disabled until multi-device graph is added
-    disabled: [amd_windows, amd_linux]
   Unit_hipGraphCrossDeviceLaunch_ExplicitNodes:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_windows) self-skips because there are fewer than two GPUs (numDevices < 2); needs to be re-triaged"
     tags: [exec]
-    disabled: [amd_windows]
   Unit_hipGraphStreamPool_InstantiateFootprint:
     <<: *level_default
+    disabled:
+      targets: [amd_windows, asan]
+      reason: "AIRUNTIME-2744 - stream allocation at instantiate, so the footprint is unmeasurable there; asan quarantines freed gpu allocations, so hipMemGetInfo does not immediately report memory released by hipGraphExecDestroy; needs to be re-triaged on asan. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [exec]
-    # (amd_windows) PAL backend does not charge device memory for eager internal
-    # stream allocation at instantiate, so the footprint is unmeasurable there.
-    # asan quarantines freed gpu allocations, so hipMemGetInfo does not
-    # immediately report memory released by hipGraphExecDestroy.
-    disabled: [amd_windows, asan]
   Unit_hipGraphSegmentOrdering_SameLevelPeers:
     <<: *level_2
     tags: [exec]
@@ -1662,32 +1689,36 @@ graph:
     tags: [node]
   Unit_hipGraphKernelNodePriority_ForkJoinWithFlag:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: false -> false; needs to be re-triaged"
     tags: [node]
-    disabled: [amd_windows]
   Unit_hipGraphKernelNodePriority_ChildGraphWithFlag:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: false -> false; needs to be re-triaged"
     tags: [node]
-    disabled: [amd_windows]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional:
     <<: *level_default
     tags: [query]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [query]
-    # SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
-    disabled: [amd_windows, amd_wsl]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2:
     <<: *level_default
     tags: [query]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [query]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative:
     <<: *level_default
-    # (amd_wsl) SWDEV-430116:Below tests failed in stress test on 27/10/23
-    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGraphAddMemAllocNode_Negative_Params:
     <<: *level_default
@@ -1703,8 +1734,9 @@ graph:
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideStream:
     <<: *level_default
@@ -1735,7 +1767,9 @@ graph:
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again:
     <<: *level_default
-    disabled: [amd_windows]
+    disabled:
+      targets: [amd_wsl, amd_windows]
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_wsl) fails: ret == hipErrorInvalidValue -> 0 == 1; needs to be re-triaged. amd_windows disabled (AIRUNTIME-2892): flaky - same REQUIRE(ret == hipErrorInvalidValue) failure (0 == 1) with intermittent SEH on gfx110X; re-triage."
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph:
     <<: *level_default
@@ -1745,29 +1779,30 @@ graph:
     tags: [node]
   Unit_hipGraphAddMemFreeNode_Negative_NotSupported:
     <<: *level_default
-    # SWDEV-457316 Below tests are disabled temporarily to avoid combined PSDB
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAddMemFreeNode_Functional:
     <<: *level_default
     tags: [node]
   Unit_hipDrvGraphMemcpyNodeGetParams_Negative_Parameters:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [query]
   Unit_hipDrvGraphMemcpyNodeGetParams_Positive:
     <<: *level_default
     tags: [query]
   Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic:
     <<: *level_default
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_wsl) fails: false -> false; needs to be re-triaged"
     tags: [node]
   Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array:
     <<: *level_default
     tags: [node, image]
   Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [node]
   Unit_hipDeviceSetGraphMemAttribute_Positive_Default:
     <<: *level_default
@@ -1801,19 +1836,15 @@ graph:
     tags: [exec]
   Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [exec]
   Unit_hipDrvGraphExecMemsetNodeSetParams_Negative:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [exec]
   Unit_hipDrvGraphExecMemsetNodeSetParams_WrongNodeType:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [exec]
   Unit_hipGraphAddNodeTypeMemset_Positive_Basic:
     <<: *level_default
-    disabled: [amd_wsl]
   Unit_hipGraphAddNodeTypeKernel_Positive_Basic:
     <<: *level_default
     tags: [node]
@@ -1840,39 +1871,44 @@ graph:
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_Positive_Basic:
     <<: *level_default
-    disabled: [amd_wsl]
   Unit_hipDrvGraphAddMemsetNode_Negative_Parameters:
     <<: *level_default
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMalloc_1D:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMallocManaged:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node, managed_memory]
   Unit_hipDrvGraphAddMemcpyNode_Negative:
     <<: *level_default
@@ -1891,7 +1927,6 @@ graph:
     tags: [node, image]
   Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [node]
   Unit_hipEventQuery_GlobalCapture_DefaultMode_NormalEvent: *level_default
   Unit_hipEventQuery_GlobalCapture_DefaultMode_CapturedEvent: *level_default
@@ -1927,7 +1962,9 @@ graph:
     tags: [node]
   Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse:
     <<: *level_default
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse:
     <<: *level_default

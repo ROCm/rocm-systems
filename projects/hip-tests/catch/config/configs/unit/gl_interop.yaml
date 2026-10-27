@@ -2,72 +2,89 @@
 gl_interop:
   Unit_hipGLGetDevices_Positive_Basic:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: fails randomly in CQE staging; needs to be re-triaged"
   Unit_hipGLGetDevices_Positive_Parameters:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: fails randomly in CQE staging; needs to be re-triaged"
   Unit_hipGLGetDevices_Negative_Parameters:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: fails randomly in CQE staging; needs to be re-triaged"
   Unit_hipGraphicsGLRegisterBuffer_Positive_Basic:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: fails randomly in CQE staging; needs to be re-triaged"
   Unit_hipGraphicsGLRegisterBuffer_Positive_Register_Twice:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: fails randomly in CQE staging; needs to be re-triaged"
   Unit_hipGraphicsGLRegisterBuffer_Negative_Parameters:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: fails randomly in CQE staging; needs to be re-triaged"
   Unit_hipGraphicsGLRegisterImage_Positive_Basic:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: fails randomly in CQE staging; needs to be re-triaged"
   Unit_hipGraphicsGLRegisterImage_Positive_Register_Twice:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: fails randomly in CQE staging; needs to be re-triaged"
   Unit_hipGraphicsGLRegisterImage_Negative_Parameters:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: fails randomly in CQE staging; needs to be re-triaged"
   Unit_hipGraphicsMapResources_Positive_Basic:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: fails randomly in CQE staging; needs to be re-triaged"
   Unit_hipGraphicsMapResources_Negative_Parameters:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_linux, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: requires GL and a display; exe not built in headless Docker -- not locally verifiable on gfx1030; further investigation needed; needs to be re-triaged"
   Unit_hipGraphicsResourceGetMappedPointer_Positive_Basic:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: fails randomly in CQE staging; needs to be re-triaged"
   Unit_hipGraphicsResourceGetMappedPointer_Negative_Parameters:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_linux, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: requires GL and a display; exe not built in headless Docker -- not locally verifiable on gfx1030; further investigation needed; needs to be re-triaged"
   Unit_hipGraphicsSubResourceGetMappedArray_Positive_Basic:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: fails randomly in CQE staging; needs to be re-triaged"
   Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_linux, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: requires GL and a display; exe not built in headless Docker -- not locally verifiable on gfx1030; further investigation needed; needs to be re-triaged"
   Unit_hipGraphicsUnmapResources_Negative_Parameters:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_linux, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: requires GL and a display; exe not built in headless Docker -- not locally verifiable on gfx1030; further investigation needed; needs to be re-triaged"
   Unit_hipGraphicsUnregisterResource_Negative_Parameters:
     <<: *level_default
-    # SWDEV-439004: Below tests failing randomly in CQE staging
-    disabled: [amd_linux, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-439004: requires GL and a display; exe not built in headless Docker -- not locally verifiable on gfx1030; further investigation needed; needs to be re-triaged"
   Unit_hipGraphicsResourceGetMappedPointer_Null_Parameters: *level_default
   Unit_hipGL_ContextSwitch_Basic: *level_default
   Unit_hipGL_ContextSwitch_SeparateContextSetups: *level_default

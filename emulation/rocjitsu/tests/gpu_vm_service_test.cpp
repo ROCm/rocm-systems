@@ -56,13 +56,49 @@ public:
     return true;
   }
 
+  static VmAccessOutcome retire_first_packet(CommandProcessor &cp) {
+    std::lock_guard<std::recursive_mutex> lock(cp.hw_queue_mutex_);
+    auto &queue = cp.compute_queues_.front();
+    if (queue.entries.empty())
+      return VmAccessOutcome::Malformed;
+    return cp.retire_aql_packet(queue, queue.entries.front());
+  }
+
+  static bool retain_replica_work(CommandProcessor &cp) {
+    std::lock_guard lock(cp.hw_queue_mutex_);
+    if (cp.compute_queues_.size() != 1 || !cp.compute_queues_.front().fanout_replica)
+      return false;
+    auto &queue = cp.compute_queues_.front();
+    DispatchEntry shard{};
+    shard.queue_id = queue.queue_id;
+    shard.process_id = queue.process_id;
+    shard.fanout_peer = true;
+    queue.entries.push_back(std::move(shard));
+    return true;
+  }
+
+  static std::pair<uint64_t, uint32_t> first_ring(CommandProcessor &cp) {
+    std::lock_guard lock(cp.hw_queue_mutex_);
+    const auto &queue = cp.compute_queues_.front();
+    return {queue.ring_base_va, queue.ring_size};
+  }
+
   static bool retain_cursor_publication(CommandProcessor &command_processor, GpuVmAccess access,
                                         uint64_t cursor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
     if (command_processor.compute_queues_.size() != 1)
       return false;
-    command_processor.compute_queues_.front().read_pointer_journal.retire(cursor, cursor,
-                                                                          std::move(access));
+    auto &queue = command_processor.compute_queues_.front();
+    DispatchEntry entry{};
+    entry.queue_id = queue.queue_id;
+    entry.process_id = queue.process_id;
+    entry.aql_packet_id = cursor - 1;
+    entry.owns_aql_ring_slot = true;
+    entry.total_wgs = entry.completed_wgs = 1;
+    entry.completion_notified = true;
+    queue.entries.push_back(std::move(entry));
+    // The completed entry remains retained while its consumer store is pending.
+    queue.read_pointer_journal.retire(cursor, cursor, std::move(access));
     return true;
   }
 
@@ -72,8 +108,11 @@ public:
       return false;
     ComputeQueueRecord &queue = command_processor.compute_queues_.front();
     queue.faulted = true;
-    command_processor.fetch_from_queue(queue, 0);
-    return !queue.read_pointer_journal.publication_pending();
+    if (queue.entries.empty() || command_processor.retire_aql_packet(
+                                     queue, queue.entries.front()) != VmAccessOutcome::Complete)
+      return false;
+    queue.entries.pop_front();
+    return true;
   }
 
   static bool retain_idle_completion_publication(CommandProcessor &command_processor) {
@@ -973,7 +1012,7 @@ TEST(CommandProcessorPacketFetch, UnretiredPacketDoesNotRepublishUnchangedCursor
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
 }
 
-TEST(CommandProcessorPacketFetch, AqlSlotReleasePrecedesCursorAndRetriesItsAdmissionSnapshot) {
+TEST(CommandProcessorPacketFetch, AqlSlotReleasePrecedesCursorAndRetriesItsRetirementSnapshot) {
   for (const auto outcome :
        {VmAccessOutcome::Complete, VmAccessOutcome::Unavailable, VmAccessOutcome::Faulted}) {
     SCOPED_TRACE(static_cast<int>(outcome));
@@ -1015,6 +1054,11 @@ TEST(CommandProcessorPacketFetch, AqlSlotReleasePrecedesCursorAndRetriesItsAdmis
     backing->store_outcome = outcome;
     ASSERT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
     EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 1u);
+    EXPECT_EQ(gpu_vm.atomic_load(address_space, read_pointer, 8).value, 0u);
+    EXPECT_EQ(gpu_vm.atomic_load(address_space, ring, 4).value, first_word);
+    // Admission retains the packet. Explicitly complete this component's
+    // non-kernel entry to exercise retirement and its durable retry.
+    EXPECT_EQ(CommandProcessorCloseTestAccess::retire_first_packet(cp), outcome);
     EXPECT_EQ(gpu_vm.atomic_load(address_space, read_pointer, 8).value,
               outcome == VmAccessOutcome::Complete ? 1u : 0u);
     EXPECT_EQ(gpu_vm.atomic_load(address_space, ring, 4).value,
@@ -1025,7 +1069,8 @@ TEST(CommandProcessorPacketFetch, AqlSlotReleasePrecedesCursorAndRetriesItsAdmis
       auto replacement = std::make_shared<ByteAddressSpace>(0);
       ASSERT_TRUE(gpu_vm.replace_translated(address_space, replacement, replacement));
       backing->store_outcome = VmAccessOutcome::Complete;
-      ASSERT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+      ASSERT_EQ(CommandProcessorCloseTestAccess::retire_first_packet(cp),
+                VmAccessOutcome::Complete);
       EXPECT_EQ(backing->atomic_load(VmMemoryDomain::System, ring, 4).value,
                 (first_word & ~0xffu) | 1);
       EXPECT_EQ(backing->atomic_load(VmMemoryDomain::System, read_pointer, 8).value, 1u);
@@ -1034,13 +1079,107 @@ TEST(CommandProcessorPacketFetch, AqlSlotReleasePrecedesCursorAndRetriesItsAdmis
       EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 1u);
       EXPECT_FALSE(cp.queue_faulted_for_test(1, 7));
     } else if (outcome == VmAccessOutcome::Faulted) {
-      EXPECT_TRUE(cp.queue_faulted_for_test(1, 7));
       EXPECT_EQ(cp.prepare_unregister_queue_registration(registration),
                 QueuePrepareCloseStatus::Faulted);
     }
     EXPECT_TRUE(cp.unregister_queue_registration(registration));
     EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
   }
+}
+
+TEST(CommandProcessorPacketFetch, RingReplacementWaitsForAdmissionAndPublicationRetirement) {
+  for (const bool replace_before_retry : {false, true}) {
+    SCOPED_TRACE(replace_before_retry);
+    GpuVm gpu_vm;
+    auto backing = std::make_shared<ByteAddressSpace>(0);
+    const auto address_space = gpu_vm.register_translated(7, backing, backing);
+    ASSERT_TRUE(address_space);
+    constexpr uint64_t ring = 0x100, replacement = 0x400, read_pointer = 0x80;
+    constexpr uint32_t word = 0xbeef1503;
+    hsa_barrier_and_packet_t packet{};
+    packet.header = word & 0xffff;
+    packet.reserved0 = word >> 16;
+    ASSERT_EQ(gpu_vm.write(address_space, ring, std::as_bytes(std::span(&packet, 1))),
+              VmAccessOutcome::Complete);
+    ASSERT_EQ(gpu_vm.atomic_store(address_space, replacement, 4, word), VmAccessOutcome::Complete);
+    ASSERT_EQ(gpu_vm.atomic_store(address_space, 0x88, 8, 1), VmAccessOutcome::Complete);
+    CommandProcessor cp("cp");
+    cp.set_gpu_vm(&gpu_vm);
+    const auto registration = cp.register_queue({
+        .address_space = address_space,
+        .process_id = 7,
+        .queue_id = 1,
+        .ring_base_va = ring,
+        .ring_size = kAqlPacketBytes,
+        .read_ptr_va = read_pointer,
+        .write_ptr_va = 0x88,
+        .doorbell_va = 0x90,
+        .doorbell_mode = QueueDoorbellMode::VmPolled,
+    });
+    ASSERT_NE(registration, 0u);
+    ASSERT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+    ASSERT_EQ(cp.accepted_entry_count_for_test(1, 7), 1u);
+    if (replace_before_retry) {
+      backing->unavailable_store_address = ring;
+      backing->store_outcome = VmAccessOutcome::Unavailable;
+      ASSERT_EQ(CommandProcessorCloseTestAccess::retire_first_packet(cp),
+                VmAccessOutcome::Unavailable);
+      backing->store_outcome = VmAccessOutcome::Complete;
+    }
+    EXPECT_EQ(
+        cp.reconfigure_queue_registration(registration, {.ring_base_address = replacement,
+                                                         .ring_size_bytes = 2 * kAqlPacketBytes,
+                                                         .scheduling_percentage = 100}),
+        QueueReconfigureStatus::Busy);
+    EXPECT_FALSE(cp.update_queue_registration(registration, replacement, 2 * kAqlPacketBytes, 100));
+    ASSERT_TRUE(CommandProcessorCloseTestAccess::retry_cursor_publication(cp));
+    // A faulted queue must still accept a scheduling-only pause for core capture.
+    EXPECT_EQ(cp.reconfigure_queue_registration(registration, {.ring_base_address = ring,
+                                                               .ring_size_bytes = kAqlPacketBytes,
+                                                               .scheduling_percentage = 0}),
+              QueueReconfigureStatus::Disabled);
+    EXPECT_EQ(gpu_vm.atomic_load(address_space, ring, 4).value, (word & ~0xffu) | 1u);
+    EXPECT_EQ(gpu_vm.atomic_load(address_space, replacement, 4).value, word);
+    EXPECT_EQ(gpu_vm.atomic_load(address_space, read_pointer, 8).value, 1u);
+    EXPECT_TRUE(cp.unregister_queue_registration(registration));
+    EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+  }
+}
+
+TEST(CommandProcessorPacketFetch, RetainedReplicaShardAcceptsOwnerGeometryAndSuspension) {
+  test::LegacyGpuMemoryFixture memory("memory");
+  LegacyPageTable page_table;
+  util::DistributedSharedMutex mutex;
+  memory.register_process(7, &page_table, &mutex);
+  CommandProcessor owner("owner"), peer("peer");
+  owner.set_gpu_vm(&memory.gpu_vm());
+  peer.set_gpu_vm(&memory.gpu_vm());
+  owner.set_xcd_topology(0, {&owner, &peer});
+  peer.set_xcd_topology(1, {&owner, &peer});
+  const auto registration = owner.register_queue({.address_space = *memory.gpu_vm().find_vmid(7),
+                                                  .process_id = 7,
+                                                  .queue_id = 1,
+                                                  .ring_base_va = 0x1000,
+                                                  .ring_size = 4096,
+                                                  .read_ptr_va = 0x3000,
+                                                  .write_ptr_va = 0x3008,
+                                                  .doorbell_va = 0x3010,
+                                                  .doorbell_mode = QueueDoorbellMode::VmPolled,
+                                                  .xcd_fanout = true});
+  ASSERT_NE(registration, 0u);
+  // A peer may still be releasing its last shard after the owner's cursor has
+  // retired. It never reads the ring or publishes the owner's consumer pointer.
+  ASSERT_TRUE(CommandProcessorCloseTestAccess::retain_replica_work(peer));
+  EXPECT_EQ(owner.reconfigure_queue_registration(
+                registration,
+                {.ring_base_address = 0x4000, .ring_size_bytes = 8192, .scheduling_percentage = 0}),
+            QueueReconfigureStatus::Disabled);
+  EXPECT_EQ(CommandProcessorCloseTestAccess::first_ring(owner),
+            CommandProcessorCloseTestAccess::first_ring(peer));
+  EXPECT_EQ(CommandProcessorCloseTestAccess::first_ring(peer).first, 0x4000u);
+  EXPECT_EQ(CommandProcessorCloseTestAccess::first_ring(peer).second, 8192u);
+  EXPECT_TRUE(peer.queue_runtime_suspended_for_test(1, 7));
+  EXPECT_TRUE(owner.unregister_queue_registration(registration));
 }
 
 TEST(CommandProcessorPacketFetch, ConcurrentHeaderPublishersMakeThePacketBodyVisible) {
@@ -1100,6 +1239,8 @@ TEST(CommandProcessorPacketFetch, ConcurrentHeaderPublishersMakeThePacketBodyVis
     std::atomic_ref<uint64_t>(gate[1]).store(0, std::memory_order_release);
     ASSERT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
     EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 1u);
+    EXPECT_EQ(read_pointer, 0u) << "an admitted packet is still owned until completion";
+    ASSERT_EQ(CommandProcessorCloseTestAccess::retire_first_packet(cp), VmAccessOutcome::Complete);
     EXPECT_EQ(read_pointer, 1u);
     EXPECT_TRUE(cp.unregister_queue_registration(registration));
   }
@@ -1473,6 +1614,117 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
   new_access.reset();
   cache.clear();
   EXPECT_EQ(policy->epoch.use_count(), 2);
+}
+
+TEST(GpuVmService, PolicyCacheReusesStridedPagesAndRevalidatesPrivateHints) {
+  constexpr uint64_t kRowStride = 256 * 1024;
+  class StridedPagePolicy final : public AddressSpaceTranslator {
+  public:
+    VmTranslationResult translate(uint64_t, std::size_t, VmAccessKind) const override { return {}; }
+
+    VmMtypeSnapshot snapshot_mtype(uint64_t address) const override {
+      ++queries;
+      const uint64_t captured_epoch = epoch->load();
+      const bool private_uc = (address / kRowStride + captured_epoch) % 2 == 0;
+      return {.mtype = private_uc ? Mtype::UC : Mtype::RW,
+              .may_batch_private_uc = private_uc,
+              .may_batch_private_ram = private_uc,
+              .begin = address & ~uint64_t{4095},
+              .size = 4096,
+              .mutation_epoch = epoch,
+              .captured_epoch = captured_epoch};
+    }
+
+    std::shared_ptr<std::atomic<uint64_t>> epoch = std::make_shared<std::atomic<uint64_t>>(0);
+    mutable uint32_t queries = 0;
+  };
+
+  GpuVm vm;
+  auto policy = std::make_shared<StridedPagePolicy>();
+  auto backing = std::make_shared<ByteAddressSpace>(0);
+  const auto handle = vm.register_translated(77, policy, backing);
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  VmMtypeCache cache;
+
+  // Interleaved rows separated by 256 KiB collided in the original page-indexed
+  // table. Keep their different policies and hints resident across revisits.
+  for (uint32_t repeat = 0; repeat < 3; ++repeat) {
+    for (uint64_t row = 0; row < 8; ++row) {
+      const uint64_t address = 0x100000000 + row * kRowStride;
+      const bool private_uc = row % 2 == 0;
+      EXPECT_EQ(access->query_mtype(address, cache), private_uc ? Mtype::UC : Mtype::RW);
+      EXPECT_EQ(access->cached_private_uc_hint(address + 128, cache), private_uc);
+      EXPECT_EQ(access->cached_private_ram_mtype(address + 128, cache),
+                private_uc ? std::optional{Mtype::UC} : std::nullopt);
+    }
+  }
+  EXPECT_EQ(policy->queries, 8u);
+
+  // Cached hints must reject stale policy before a fresh lookup replaces it.
+  policy->epoch->fetch_add(1);
+  for (uint64_t row = 0; row < 8; ++row) {
+    const uint64_t address = 0x100000000 + row * kRowStride;
+    EXPECT_FALSE(access->cached_private_uc_hint(address, cache));
+    EXPECT_FALSE(access->cached_private_ram_mtype(address, cache));
+    const bool private_uc = row % 2 != 0;
+    EXPECT_EQ(access->query_mtype(address, cache), private_uc ? Mtype::UC : Mtype::RW);
+    EXPECT_EQ(access->cached_private_uc_hint(address, cache), private_uc);
+    EXPECT_EQ(access->cached_private_ram_mtype(address, cache),
+              private_uc ? std::optional{Mtype::UC} : std::nullopt);
+  }
+  EXPECT_EQ(policy->queries, 16u);
+}
+
+TEST(GpuVmService, PolicyCacheReusesContiguousAndTiledPages) {
+  class PagePolicy final : public AddressSpaceTranslator {
+  public:
+    VmTranslationResult translate(uint64_t, std::size_t, VmAccessKind) const override { return {}; }
+
+    VmMtypeSnapshot snapshot_mtype(uint64_t address) const override {
+      ++queries;
+      return {.mtype = Mtype::RW,
+              .begin = address & ~uint64_t{4095},
+              .size = 4096,
+              .mutation_epoch = epoch,
+              .captured_epoch = epoch->load()};
+    }
+
+    std::shared_ptr<std::atomic<uint64_t>> epoch = std::make_shared<std::atomic<uint64_t>>(0);
+    mutable uint32_t queries = 0;
+  };
+
+  GpuVm vm;
+  auto policy = std::make_shared<PagePolicy>();
+  const auto handle = vm.register_translated(77, policy, std::make_shared<ByteAddressSpace>(0));
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  VmMtypeCache cache;
+  auto check_reuse = [&](uint64_t base, uint64_t rows, uint64_t columns, uint64_t stride) {
+    SCOPED_TRACE(base);
+    SCOPED_TRACE(rows);
+    SCOPED_TRACE(columns);
+    SCOPED_TRACE(stride);
+    cache.clear();
+    policy->queries = 0;
+    for (uint32_t repeat = 0; repeat < 3; ++repeat)
+      for (uint64_t row = 0; row < rows; ++row)
+        for (uint64_t column = 0; column < columns; ++column)
+          EXPECT_EQ(access->query_mtype(base + row * stride + column * 4096, cache), Mtype::RW);
+    EXPECT_EQ(policy->queries, rows * columns);
+  };
+
+  // Preserve contiguous locality across allocation and index-block boundaries.
+  constexpr uint64_t kRegionBase = 0x100000000;
+  for (uint64_t offset : {512 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 64 * 1024 * 1024})
+    check_reuse(kRegionBase + offset - 32 * 4096, 1, 64, 0);
+
+  // Tiled rows must spread without limiting a larger row set to the same slots.
+  // The 4 MiB pitch also requires indexing bits beyond the initial block offset.
+  constexpr uint64_t kRowStride = 256 * 1024;
+  check_reuse(kRegionBase, 8, 8, kRowStride);
+  check_reuse(kRegionBase, 32, 1, kRowStride);
+  check_reuse(kRegionBase, 8, 1, 4 * 1024 * 1024);
 }
 
 TEST(GpuVmService, GenerationsShareFaultReporterWithoutCopyingItsTarget) {
@@ -2227,8 +2479,9 @@ TEST(GpuVmService, AqlReconfigureRejectsInvalidRingGeometry) {
 
 TEST(GpuVmService, GracefulAqlCloseWaitsForRetiredCursorPublication) {
   GpuVm gpu_vm;
-  GpuQueueRegistry queues(gpu_vm);
   CommandProcessor command_processor("cp");
+  // Registry teardown must release its binding before the CP, even on failure.
+  GpuQueueRegistry queues(gpu_vm);
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
   const QueueHandle queue =
