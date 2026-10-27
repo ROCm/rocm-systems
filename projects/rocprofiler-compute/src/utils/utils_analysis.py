@@ -1990,35 +1990,44 @@ def _merge_counters_with_pass_provenance(
 ) -> dict[str, Any]:
     """Build base + shadow counter columns for one dispatch group.
 
-    A duplicated counter gets a column for every layout pass that collects it.
-    A dispatch missing that pass stores NaN so later dispatches still align.
+    The group is pivoted once into a counter by pass table. The base column
+    is the first pass in natural order that has a value. A duplicated counter
+    also gets a column for every layout pass that collects it, and a dispatch
+    missing that pass stores NaN so later dispatches still align.
     """
-    merged: dict[str, Any] = {}
+    by_pass = _pivot_counters_by_pass(group_df)
+    merged: dict[str, Any] = by_pass.bfill(axis=1).iloc[:, 0].to_dict()
+    shadow = by_pass.reindex(columns=list(pass_layout.pass_keys))
     missing = 0
-    for counter_name, counter_rows in group_df.groupby("Counter_Name", sort=False):
-        values_by_pass: dict[str, Any] = {}
-        for pass_key, value in zip(
-            counter_rows["Pass_Key"], counter_rows["Counter_Value"]
-        ):
-            values_by_pass[str(pass_key)] = value
-        ordered_passes = sorted(values_by_pass, key=natural_pass_sort_key)
-        first_pass = ordered_passes[0]
-        name = str(counter_name)
-        merged[name] = values_by_pass[first_pass]
-        if name not in pass_layout.duplicated:
-            continue
+    for name in shadow.index.intersection(list(pass_layout.duplicated)):
         for pass_key in pass_layout.pass_keys:
-            if name not in pass_layout.counters_by_pass.get(pass_key, frozenset()):
+            if name not in pass_layout.counters_by_pass[pass_key]:
                 continue
-            column = pass_layout.qualified_column(name, pass_key)
-            if pass_key in values_by_pass:
-                merged[column] = values_by_pass[pass_key]
-            else:
-                merged[column] = np.nan
-                missing += 1
+            value = shadow.at[name, pass_key]
+            merged[pass_layout.qualified_column(name, pass_key)] = value
+            missing += bool(pd.isna(value))
     if missing:
         missing_dispatches.append(missing)
     return merged
+
+
+def _pivot_counters_by_pass(group_df: pd.DataFrame) -> pd.DataFrame:
+    """One dispatch's values as a counter by pass table, passes in natural order.
+
+    Rows keep the order counters first appear in. A repeated (counter, pass)
+    row keeps its last value.
+    """
+    cells = group_df.assign(
+        Counter_Name=group_df["Counter_Name"].astype(str),
+        Pass_Key=group_df["Pass_Key"].astype(str),
+    ).drop_duplicates(["Counter_Name", "Pass_Key"], keep="last")
+    by_pass = cells.pivot(
+        index="Counter_Name", columns="Pass_Key", values="Counter_Value"
+    )
+    return by_pass.reindex(
+        index=cells["Counter_Name"].unique(),
+        columns=sorted(by_pass.columns, key=natural_pass_sort_key),
+    )
 
 
 def get_matrix_ops_type(gpu_series: str) -> str:
