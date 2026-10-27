@@ -2450,6 +2450,10 @@ class GraphMemcpyNode : public GraphNode {
   // Default false (conservatively assumes SDMA) preserves existing behavior
   // for generic 3D memcpys; GraphMemcpyNode1D overrides with a precise check
   // based on MemcpyType and copy size.
+  //! Returns true if EnqueueCommands will perform a CPU-side staging buffer
+  //! copy (memcpy from host to staging) that reads host memory at enqueue time.
+  virtual bool NeedsCpuStagingCopy() const { return false; }
+
   virtual bool WillBypassSdmaEngine() const { return false; }
 };
 
@@ -2761,6 +2765,16 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
       return (hipCopyBuffer == ihipGetMemcpyType(srcMemory, dstMemory, kind_));
     }
     return false;
+  }
+
+  //! H2D from unpinned host memory goes through hsaCopyStagedOrPinned which
+  //! does memcpy(staging, hostSrc) on the CPU thread at enqueue time.
+  bool NeedsCpuStagingCopy() const override {
+    size_t sOff = 0, dOff = 0;
+    amd::Memory* srcMem = getMemoryObjectForCurrentDevice(src_, sOff);
+    amd::Memory* dstMem = getMemoryObjectForCurrentDevice(dst_, dOff);
+    // srcMem == nullptr means unpinned host source; dstMem != nullptr means device dest.
+    return (srcMem == nullptr && dstMem != nullptr);
   }
 
   // Predicts whether this 1D memcpy will bypass the SDMA engine so the
