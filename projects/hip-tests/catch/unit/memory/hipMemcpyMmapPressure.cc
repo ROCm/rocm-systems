@@ -8,109 +8,110 @@
 // stalls under host memory pressure because hsa_amd_memory_lock triggers KFD
 // queue evictions during reclaim.
 //
-// The test creates deterministic memory pressure (via cgroup memory.max if
-// available, otherwise by allocating most of host RAM), then streams a
-// file-backed mmap to the GPU and asserts on completion time and per-chunk
-// latency.
+// The test drives the host into reclaim with an anonymous-memory hog, checks that
+// the runtime's pressure detector inputs (available memory and PSI, computed the
+// same way the runtime computes them) are met, then streams a file-backed mmap to
+// the GPU. It asserts the copy completes with correct data and without a stall.
+// It skips, rather than passing vacuously, when it cannot create those conditions
+// within a bounded time and memory budget.
 
 #include <hip_test_common.hh>
 
 #if defined(__linux__)
 
 #include <fcntl.h>
+#include <linux/magic.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <sys/vfs.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
 #include <thread>
 #include <vector>
 
 namespace {
 
-constexpr size_t kFileSizeMiB = 512;
-constexpr size_t kFileSize = kFileSizeMiB * 1024 * 1024;
-constexpr size_t kChunkSize = 32 * 1024 * 1024;  // 32 MiB, matches default PinXferSize
+constexpr int64_t kMiB = 1024LL * 1024;
+constexpr int64_t kGiB = 1024 * kMiB;
+constexpr size_t kFileSize = 512 * kMiB;
+constexpr size_t kChunkSize = 32 * kMiB;  // matches the default pinned transfer size
 
-// Maximum allowed time for the full copy, as a multiple of the no-pressure baseline.
-// Under pressure with the bug, copies take 10-100x longer; with the fix, <3x.
-constexpr double kMaxSlowdown = 5.0;
+// Budgets that keep the test bounded on large CI hosts.
+constexpr int64_t kMaxHogBytes = 32 * kGiB;
+constexpr auto kHogBudget = std::chrono::seconds(60);
+constexpr auto kPsiWait = std::chrono::seconds(20);
 
-// Maximum allowed single-chunk latency in milliseconds.
-// Under pressure with the bug, single chunks can take 60+ seconds.
-constexpr double kMaxChunkMs = 5000.0;
+// Stall guards. With the bug, single chunks took over 60 s and full copies timed out.
+constexpr double kMaxChunkMs = 30000.0;
+constexpr double kMaxTotalS = 120.0;
 
-int64_t readMemAvailable() {
-  FILE* f = fopen("/proc/meminfo", "r");
+using Clock = std::chrono::steady_clock;
+
+int64_t readSingleInt(const std::string& path) {
+  FILE* f = fopen(path.c_str(), "r");
+  if (!f) return -1;
+  char buf[64];
+  int64_t val = -1;
+  if (fgets(buf, sizeof(buf), f)) val = atoll(buf);
+  fclose(f);
+  return val;
+}
+
+int64_t readKeyedValue(const std::string& path, const char* key, int64_t scale) {
+  FILE* f = fopen(path.c_str(), "r");
   if (!f) return -1;
   char line[256];
-  int64_t avail_kb = -1;
+  size_t key_len = strlen(key);
+  int64_t val = -1;
   while (fgets(line, sizeof(line), f)) {
-    if (strncmp(line, "MemAvailable:", 13) == 0) {
-      avail_kb = atoll(line + 13);
+    if (strncmp(line, key, key_len) == 0) {
+      val = atoll(line + key_len) * scale;
       break;
     }
   }
   fclose(f);
-  return avail_kb * 1024LL;
+  return val;
 }
 
-// Creates a temporary file with random-ish content and returns its fd.
-// The file is unlinked immediately so it's cleaned up on close.
-int createTempFile(size_t size) {
-  char path[] = "/tmp/hip_pressure_test_XXXXXX";
-  int fd = mkstemp(path);
-  REQUIRE(fd >= 0);
-  unlink(path);
+// The cgroup v2 directory holding the tightest memory.max in this process's
+// ancestry, mirroring the runtime's detector. Empty dir means unconstrained.
+struct Cgroup {
+  std::string dir;
+  int64_t limit = 0;
+};
 
-  // Write in chunks to avoid needing a huge buffer
-  std::vector<char> buf(1024 * 1024);
-  for (size_t i = 0; i < buf.size(); i += sizeof(uint64_t)) {
-    // Simple pseudo-random fill so pages aren't all zeros
-    uint64_t val = i ^ (i << 13) ^ (i >> 7);
-    memcpy(&buf[i], &val, sizeof(val));
-  }
-  size_t written = 0;
-  while (written < size) {
-    size_t chunk = std::min(buf.size(), size - written);
-    ssize_t n = write(fd, buf.data(), chunk);
-    REQUIRE(n > 0);
-    written += n;
-  }
-  fsync(fd);
-  return fd;
-}
-
-// Returns the effective cgroup memory limit, or 0 if unconstrained.
-int64_t readCgroupMemLimit() {
+Cgroup findLimitingCgroup() {
+  Cgroup cg;
   FILE* f = fopen("/proc/self/cgroup", "r");
-  if (!f) return 0;
+  if (!f) return cg;
   char line[512];
-  std::string cg_path;
+  std::string path;
   while (fgets(line, sizeof(line), f)) {
     if (strncmp(line, "0::", 3) == 0) {
-      cg_path = line + 3;
-      while (!cg_path.empty() && (cg_path.back() == '\n' || cg_path.back() == ' '))
-        cg_path.pop_back();
+      path = line + 3;
+      while (!path.empty() && (path.back() == '\n' || path.back() == ' ')) path.pop_back();
       break;
     }
   }
   fclose(f);
-  if (cg_path.empty()) return 0;
-
-  // Walk ancestry for the tightest limit
-  int64_t effective = 0;
-  std::string path = cg_path;
   while (!path.empty()) {
-    std::string max_path = "/sys/fs/cgroup" + path + "/memory.max";
-    FILE* mf = fopen(max_path.c_str(), "r");
+    std::string dir = "/sys/fs/cgroup" + path;
+    FILE* mf = fopen((dir + "/memory.max").c_str(), "r");
     if (mf) {
       char buf[64];
       if (fgets(buf, sizeof(buf), mf) && strncmp(buf, "max", 3) != 0) {
         int64_t val = atoll(buf);
-        if (val > 0 && (effective == 0 || val < effective)) effective = val;
+        if (val > 0 && (cg.limit == 0 || val < cg.limit)) {
+          cg.limit = val;
+          cg.dir = dir;
+        }
       }
       fclose(mf);
     }
@@ -118,28 +119,110 @@ int64_t readCgroupMemLimit() {
     if (pos == std::string::npos || pos == 0) break;
     path = path.substr(0, pos);
   }
-  return effective;
+  if (!cg.dir.empty() && readSingleInt(cg.dir + "/memory.current") < 0) cg = Cgroup{};
+  return cg;
 }
 
-struct MemoryHog {
-  std::vector<void*> blocks_;
-  static constexpr size_t kBlockSize = 128 * 1024 * 1024;
+// Available memory as the runtime's detector computes it.
+int64_t availableBytes(const Cgroup& cg) {
+  if (cg.dir.empty()) return readKeyedValue("/proc/meminfo", "MemAvailable:", 1024);
+  int64_t current = readSingleInt(cg.dir + "/memory.current");
+  int64_t inactive_file = std::max<int64_t>(readKeyedValue(cg.dir + "/memory.stat",
+                                                           "inactive_file ", 1), 0);
+  return cg.limit - std::max<int64_t>(current - inactive_file, 0);
+}
 
-  // Allocate anonymous memory until MemAvailable drops below target_bytes.
-  // Respects cgroup memory limits to avoid OOM kills in containers.
-  void start(int64_t target_bytes) {
-    int64_t cg_limit = readCgroupMemLimit();
-    while (readMemAvailable() > target_bytes + static_cast<int64_t>(kBlockSize)) {
-      // In a cgroup, don't allocate past 90% of the limit
-      if (cg_limit > 0) {
-        int64_t cg_current = 0;
-        FILE* f = fopen("/sys/fs/cgroup/memory.current", "r");
-        if (f) {
-          char buf[64];
-          if (fgets(buf, sizeof(buf), f)) cg_current = atoll(buf);
-          fclose(f);
-        }
-        if (cg_current + static_cast<int64_t>(kBlockSize) > cg_limit * 9 / 10) break;
+// PSI "some avg10" in percent, or -1 if PSI is unavailable.
+double psiSomeAvg10(const Cgroup& cg) {
+  std::string path = cg.dir.empty() ? "/proc/pressure/memory" : cg.dir + "/memory.pressure";
+  FILE* f = fopen(path.c_str(), "r");
+  if (!f) return -1;
+  char line[256];
+  double val = -1;
+  if (fgets(line, sizeof(line), f)) {
+    const char* p = strstr(line, "avg10=");
+    if (p) val = atof(p + 6);
+  }
+  fclose(f);
+  return val;
+}
+
+// The runtime's thresholds, honoring the same GPU_PIN_PRESSURE_* overrides.
+struct Thresholds {
+  int64_t avail_bytes;
+  double psi_percent;  // 0 = available memory only
+};
+
+Thresholds detectorThresholds(const Cgroup& cg) {
+  Thresholds t{};
+  if (const char* mb = getenv("GPU_PIN_PRESSURE_THRESHOLD_MB")) {
+    t.avail_bytes = atoll(mb) * kMiB;
+  } else {
+    int64_t total = cg.dir.empty() ? readKeyedValue("/proc/meminfo", "MemTotal:", 1024) : cg.limit;
+    t.avail_bytes = std::max(std::min(2 * kGiB, total / 4), total * 5 / 100);
+  }
+  const char* psi = getenv("GPU_PIN_PRESSURE_PSI_THRESHOLD");
+  t.psi_percent = psi ? atof(psi) : 5.0;
+  return t;
+}
+
+bool detectorWouldTrigger(const Cgroup& cg, const Thresholds& t) {
+  if (availableBytes(cg) >= t.avail_bytes) return false;
+  return t.psi_percent <= 0 || psiSomeAvg10(cg) > t.psi_percent;
+}
+
+// Creates the test file on a disk-backed filesystem so the mmap is file-backed
+// page cache, as in the issue. Returns -1 if no suitable directory exists.
+int createDiskBackedFile(size_t size) {
+  std::vector<std::string> dirs;
+  if (const char* tmpdir = getenv("TMPDIR")) dirs.push_back(tmpdir);
+  dirs.push_back("/var/tmp");
+  dirs.push_back(".");
+  for (const auto& dir : dirs) {
+    struct statfs fs;
+    struct statvfs vfs;
+    if (statfs(dir.c_str(), &fs) != 0 || fs.f_type == TMPFS_MAGIC) continue;
+    if (statvfs(dir.c_str(), &vfs) != 0 ||
+        static_cast<uint64_t>(vfs.f_bavail) * vfs.f_frsize < 2 * size) {
+      continue;
+    }
+    std::string path = dir + "/hip_mmap_pressure_XXXXXX";
+    int fd = mkstemp(&path[0]);
+    if (fd < 0) continue;
+    unlink(path.c_str());
+    std::vector<uint64_t> buf(kMiB / sizeof(uint64_t));
+    for (size_t written = 0; written < size; written += kMiB) {
+      for (size_t i = 0; i < buf.size(); ++i) {
+        uint64_t x = written / sizeof(uint64_t) + i;
+        buf[i] = x * 0x9E3779B97F4A7C15ULL ^ (x >> 7);
+      }
+      if (write(fd, buf.data(), kMiB) != static_cast<ssize_t>(kMiB)) {
+        close(fd);
+        return -1;
+      }
+    }
+    fsync(fd);
+    return fd;
+  }
+  return -1;
+}
+
+// Anonymous memory that drives the host (or cgroup) toward a target of available
+// memory, within a time and size budget.
+struct MemoryHog {
+  static constexpr size_t kBlockSize = 128 * kMiB;
+  std::vector<void*> blocks_;
+
+  // Returns true if available memory reached target_avail within budget.
+  bool fill(const Cgroup& cg, int64_t target_avail) {
+    auto deadline = Clock::now() + kHogBudget;
+    while (availableBytes(cg) > target_avail + static_cast<int64_t>(kBlockSize)) {
+      if (Clock::now() > deadline) return false;
+      if (static_cast<int64_t>(blocks_.size() * kBlockSize) >= kMaxHogBytes) return false;
+      // Leave headroom under a cgroup limit so the cgroup OOM killer never fires.
+      if (!cg.dir.empty() && readSingleInt(cg.dir + "/memory.current") +
+                                     static_cast<int64_t>(kBlockSize) > cg.limit * 9 / 10) {
+        break;
       }
       void* block =
           mmap(nullptr, kBlockSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -147,165 +230,136 @@ struct MemoryHog {
       memset(block, 0x42, kBlockSize);
       blocks_.push_back(block);
     }
+    return availableBytes(cg) <= target_avail + static_cast<int64_t>(kBlockSize);
   }
 
-  void stop() {
-    for (void* block : blocks_) {
-      munmap(block, kBlockSize);
-    }
+  void release() {
+    for (void* block : blocks_) munmap(block, kBlockSize);
     blocks_.clear();
   }
 
-  ~MemoryHog() { stop(); }
+  ~MemoryHog() { release(); }
 };
 
 struct CopyResult {
-  double total_s;
-  double worst_chunk_ms;
-  size_t chunks;
-  bool completed;
+  double total_s = 0;
+  double worst_chunk_ms = 0;
+  bool data_ok = false;
 };
 
-CopyResult runMmapCopy(int fd, size_t file_size) {
-  void* mapped = mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+// Streams the file-backed mapping to the GPU in chunks, after evicting it from
+// the page cache, and verifies the last chunk against the file contents.
+CopyResult copyMappedFile(int fd, size_t size) {
+  void* mapped = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
   REQUIRE(mapped != MAP_FAILED);
-
-  // Evict file pages before the test
-  posix_fadvise(fd, 0, file_size, POSIX_FADV_DONTNEED);
-  madvise(mapped, file_size, MADV_DONTNEED);
+  posix_fadvise(fd, 0, size, POSIX_FADV_DONTNEED);
+  madvise(mapped, size, MADV_DONTNEED);
 
   void* d_buf = nullptr;
   HIP_CHECK(hipMalloc(&d_buf, kChunkSize));
-
   const char* src = static_cast<const char*>(mapped);
-  size_t total_copied = 0;
-  size_t n_chunks = 0;
-  double worst_ms = 0;
 
-  auto t0 = std::chrono::steady_clock::now();
-
-  while (total_copied < file_size) {
-    size_t this_chunk = std::min(kChunkSize, file_size - total_copied);
-
-    auto tc0 = std::chrono::steady_clock::now();
-    hipError_t err = hipMemcpy(d_buf, src + total_copied, this_chunk, hipMemcpyHostToDevice);
-    auto tc1 = std::chrono::steady_clock::now();
-
-    if (err != hipSuccess) {
-      HIP_CHECK(hipFree(d_buf));
-      munmap(mapped, file_size);
-      FAIL("hipMemcpy failed: " << hipGetErrorString(err));
-    }
-
-    double ms = std::chrono::duration<double, std::milli>(tc1 - tc0).count();
-    worst_ms = std::max(worst_ms, ms);
-    n_chunks++;
-    total_copied += this_chunk;
+  CopyResult r;
+  auto t0 = Clock::now();
+  size_t offset = 0;
+  size_t last_chunk = 0;
+  while (offset < size) {
+    last_chunk = std::min(kChunkSize, size - offset);
+    auto c0 = Clock::now();
+    HIP_CHECK(hipMemcpy(d_buf, src + offset, last_chunk, hipMemcpyHostToDevice));
+    double ms = std::chrono::duration<double, std::milli>(Clock::now() - c0).count();
+    r.worst_chunk_ms = std::max(r.worst_chunk_ms, ms);
+    offset += last_chunk;
   }
+  r.total_s = std::chrono::duration<double>(Clock::now() - t0).count();
 
-  auto t1 = std::chrono::steady_clock::now();
-  double total_s = std::chrono::duration<double>(t1 - t0).count();
+  std::vector<char> check(last_chunk);
+  HIP_CHECK(hipMemcpy(check.data(), d_buf, last_chunk, hipMemcpyDeviceToHost));
+  r.data_ok = memcmp(check.data(), src + size - last_chunk, last_chunk) == 0;
 
   HIP_CHECK(hipFree(d_buf));
-  munmap(mapped, file_size);
-
-  return {total_s, worst_ms, n_chunks, true};
+  munmap(mapped, size);
+  return r;
 }
 
-bool canCreatePressure() {
-  int64_t avail = readMemAvailable();
-  // Need at least 4 GiB to create meaningful pressure (leave ~2 GiB free)
-  return avail > 4LL * 1024 * 1024 * 1024;
-}
+}  // namespace
 
-}  // anonymous namespace
-
-// Baseline: copy mmap'd file to GPU without pressure. Establishes the reference time.
+// Copies a file-backed mapping to the GPU without memory pressure.
 HIP_TEST_CASE(Unit_hipMemcpyMmapPressure_Baseline) {
-  int fd = createTempFile(kFileSize);
-  auto result = runMmapCopy(fd, kFileSize);
+  int fd = createDiskBackedFile(kFileSize);
+  if (fd < 0) HIP_SKIP_TEST("No disk-backed directory with enough free space");
+  CopyResult r = copyMappedFile(fd, kFileSize);
   close(fd);
 
-  double mibps = (kFileSize / (1024.0 * 1024.0)) / result.total_s;
-  INFO("Baseline: " << kFileSizeMiB << " MiB in " << result.total_s << " s (" << mibps
-                    << " MiB/s), worst chunk: " << result.worst_chunk_ms << " ms");
-  REQUIRE(result.completed);
-  // Sanity: should complete in a reasonable time without pressure
-  REQUIRE(result.total_s < 30.0);
+  INFO("Baseline: " << r.total_s << " s, worst chunk " << r.worst_chunk_ms << " ms");
+  REQUIRE(r.data_ok);
+  CHECK(r.worst_chunk_ms < kMaxChunkMs);
+  CHECK(r.total_s < kMaxTotalS);
 }
 
-// Regression test: copy mmap'd file to GPU under memory pressure.
-// Without the fix (rocm-systems#12528), this stalls for minutes.
-// With the fix, it completes within kMaxSlowdown of the baseline.
+// Regression test: copies a file-backed mapping to the GPU while the host is in
+// reclaim and the runtime's pressure detector conditions hold. Without the fix,
+// pinning that memory triggers KFD queue evictions and single chunks stall for
+// tens of seconds.
 HIP_TEST_CASE(Unit_hipMemcpyMmapPressure_UnderPressure) {
-  if (!canCreatePressure()) {
-    HIP_SKIP_TEST("Not enough memory to create pressure (need >4 GiB available)");
+  const char* skip = getenv("GPU_SKIP_PIN_UNDER_PRESSURE");
+  if (skip && atoi(skip) == 0) {
+    HIP_SKIP_TEST("GPU_SKIP_PIN_UNDER_PRESSURE=0 disables the behavior under test");
+  }
+  Cgroup cg = findLimitingCgroup();
+  Thresholds t = detectorThresholds(cg);
+  if (t.psi_percent > 0 && psiSomeAvg10(cg) < 0) {
+    HIP_SKIP_TEST("Memory PSI is unavailable, so the runtime's pressure detector is off");
+  }
+  int64_t to_allocate = availableBytes(cg) - t.avail_bytes * 3 / 4;
+  if (to_allocate > kMaxHogBytes) {
+    HIP_SKIP_TEST("Creating pressure would need " << to_allocate / kGiB
+                                                  << " GiB of allocations (budget "
+                                                  << kMaxHogBytes / kGiB << " GiB)");
   }
 
-  // Step 1: baseline without pressure
-  int fd = createTempFile(kFileSize);
-  auto baseline = runMmapCopy(fd, kFileSize);
-  INFO("Baseline: " << baseline.total_s << " s");
+  int fd = createDiskBackedFile(kFileSize);
+  if (fd < 0) HIP_SKIP_TEST("No disk-backed directory with enough free space");
+  CopyResult baseline = copyMappedFile(fd, kFileSize);
 
-  // Step 2: create pressure — target 2 GiB available
-  constexpr int64_t kTargetAvail = 2LL * 1024 * 1024 * 1024;
+  // Aim a quarter below the detector threshold so reclaim is active.
   MemoryHog hog;
-  hog.start(kTargetAvail);
-
-  int64_t actual_avail = readMemAvailable();
-  INFO("MemAvailable after hog: " << (actual_avail / (1024 * 1024)) << " MiB");
-  if (actual_avail > 4LL * 1024 * 1024 * 1024) {
-    hog.stop();
+  bool reached = hog.fill(cg, t.avail_bytes * 3 / 4);
+  INFO("Available after hog: " << availableBytes(cg) / kMiB << " MiB, threshold "
+                               << t.avail_bytes / kMiB << " MiB");
+  if (!reached) {
+    hog.release();
     close(fd);
-    HIP_SKIP_TEST("Could not reduce MemAvailable below 4 GiB");
+    HIP_SKIP_TEST("Could not reach the target available memory within the budget");
   }
 
-  // Verify the pressure detector's conditions are actually met before testing.
-  // The detector uses max(2 GiB, 5% of total) as its threshold and PSI > 5%.
-  // If these aren't met, the test would pass vacuously without exercising the fix.
-  int64_t mem_total = 0;
-  {
-    FILE* f = fopen("/proc/meminfo", "r");
-    if (f) {
-      char line[256];
-      while (fgets(line, sizeof(line), f)) {
-        if (strncmp(line, "MemTotal:", 9) == 0) {
-          mem_total = atoll(line + 9) * 1024LL;
-          break;
-        }
-      }
-      fclose(f);
+  // Touch the evicted file through the page cache until PSI reflects reclaim stalls.
+  auto deadline = Clock::now() + kPsiWait;
+  std::vector<char> scratch(kChunkSize);
+  while (!detectorWouldTrigger(cg, t) && Clock::now() < deadline) {
+    posix_fadvise(fd, 0, kFileSize, POSIX_FADV_DONTNEED);
+    for (off_t off = 0; off < static_cast<off_t>(kFileSize); off += kChunkSize) {
+      if (pread(fd, scratch.data(), kChunkSize, off) <= 0) break;
     }
   }
-  int64_t cg_limit = readCgroupMemLimit();
-  int64_t effective_total = cg_limit > 0 ? cg_limit : mem_total;
-  int64_t threshold = std::max<int64_t>(2LL * 1024 * 1024 * 1024, effective_total * 5 / 100);
-  INFO("Pressure detector threshold: " << (threshold / (1024 * 1024)) << " MiB"
-                                       << " (effective_total: " << (effective_total / (1024 * 1024))
-                                       << " MiB)");
-  if (actual_avail >= threshold) {
-    hog.stop();
+  if (!detectorWouldTrigger(cg, t)) {
+    hog.release();
     close(fd);
-    HIP_SKIP_TEST("MemAvailable ("
-                  << (actual_avail / (1024 * 1024)) << " MiB) is above the pressure threshold ("
-                  << (threshold / (1024 * 1024)) << " MiB); cannot exercise the fix");
+    HIP_SKIP_TEST("Detector conditions not met (PSI some avg10 " << psiSomeAvg10(cg)
+                                                                 << "%, threshold "
+                                                                 << t.psi_percent << "%)");
   }
 
-  // Step 3: copy under pressure
-  auto pressure = runMmapCopy(fd, kFileSize);
-  hog.stop();
+  CopyResult pressure = copyMappedFile(fd, kFileSize);
+  hog.release();
   close(fd);
 
-  double mibps = (kFileSize / (1024.0 * 1024.0)) / pressure.total_s;
-  double slowdown = pressure.total_s / baseline.total_s;
-  INFO("Under pressure: " << pressure.total_s << " s (" << mibps << " MiB/s)"
-                          << ", slowdown: " << slowdown << "x"
-                          << ", worst chunk: " << pressure.worst_chunk_ms << " ms");
-
-  // Assert: should complete without catastrophic slowdown
-  REQUIRE(pressure.completed);
-  CHECK(slowdown < kMaxSlowdown);
+  INFO("Baseline " << baseline.total_s << " s; under pressure " << pressure.total_s
+                   << " s (" << pressure.total_s / baseline.total_s << "x), worst chunk "
+                   << pressure.worst_chunk_ms << " ms");
+  REQUIRE(pressure.data_ok);
   CHECK(pressure.worst_chunk_ms < kMaxChunkMs);
+  CHECK(pressure.total_s < kMaxTotalS);
 }
 
 #endif  // __linux__
