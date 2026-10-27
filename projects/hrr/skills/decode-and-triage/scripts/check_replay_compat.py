@@ -273,6 +273,16 @@ def _parse_rocm_smi(text: str) -> tuple[int, list[str], list[str]]:
     return len(gpu_ids), archs, names
 
 
+def _parse_amd_smi_static(text: str) -> tuple[int, list[str], list[str]]:
+    """Parse `amd-smi static --asic`: a `GPU: N` heading per device."""
+    count = len(re.findall(r"^GPU: \d+\s*$", text, re.M))
+    # amd-smi prints N/A when the ASIC query fails; "" keeps the index and skips the arch check.
+    archs = ["" if a == "N/A" else a.lower()
+             for a in re.findall(r"^\s*TARGET_GRAPHICS_VERSION: (\S+)", text, re.M)]
+    names = [n.strip() for n in re.findall(r"^\s*MARKET_NAME: (.+)$", text, re.M)]
+    return count, archs, names
+
+
 # ---------------------------------------------------------------------------
 # Windows: amd-smi / hipDeviceGetProperties based GPU enumeration
 # ---------------------------------------------------------------------------
@@ -310,26 +320,22 @@ if rc != 0:
 n = count.value
 print(f"gpu_count={n}")
 
-# hipDeviceGetAttribute for arch
-hipDeviceAttributeGcnArch = 57   # HIP attribute enum value
-for i in range(n):
-    val = ctypes.c_int(0)
-    rc = lib.hipDeviceGetAttribute(ctypes.byref(val), hipDeviceAttributeGcnArch, i)
-    if rc == 0:
-        print(f"gpu_{i}_gcn={val.value}")
-
-# hipGetDeviceProperties for name
-class hipDevicePropFields(ctypes.Structure):
+# The exported hipGetDeviceProperties fills hipDeviceProp_tR0000
+# (hip_deprecated.h), whose gcnArchName starts at offset 396 on x86_64.
+class hipDeviceProp_tR0000(ctypes.Structure):
     _fields_ = [
         ("name", ctypes.c_char * 256),
-        ("_pad", ctypes.c_uint8 * (4096 - 256)),
+        ("_pad", ctypes.c_uint8 * (396 - 256)),
+        ("gcnArchName", ctypes.c_char * 256),
+        ("_rest", ctypes.c_uint8 * 4096),
     ]
 
 for i in range(n):
-    props = hipDevicePropFields()
+    props = hipDeviceProp_tR0000()
     rc = lib.hipGetDeviceProperties(ctypes.byref(props), i)
     if rc == 0:
         print(f"gpu_{i}_name={props.name.decode(errors='replace')}")
+        print(f"gpu_{i}_arch={props.gcnArchName.decode(errors='replace')}")
 """
 
 _PROBE_HIP_VERSION_WIN_PY = r"""
@@ -356,9 +362,6 @@ for c in dll_candidates:
 if lib is None:
     sys.exit(1)
 
-major = ctypes.c_int(0)
-minor = ctypes.c_int(0)
-patch = ctypes.c_int(0)
 lib.hipRuntimeGetVersion.restype = ctypes.c_int
 lib.hipRuntimeGetVersion.argtypes = [ctypes.POINTER(ctypes.c_int)]
 flat = ctypes.c_int(0)
@@ -367,8 +370,8 @@ if rc == 0:
     v = flat.value
     maj = v // 10000000
     min_ = (v // 100000) % 100
-    pat = (v // 100) % 1000
-    print(f"{maj}.{min_}.{pat:05d}")
+    pat = v % 100000
+    print(f"{maj}.{min_}.{pat}")
     sys.exit(0)
 sys.exit(1)
 """
@@ -383,11 +386,9 @@ def _parse_win_gpu_probe(text: str) -> tuple[int, list[str], list[str]]:
         m = re.match(r"gpu_count=(\d+)", line)
         if m:
             count = int(m.group(1))
-        m = re.match(r"gpu_(\d+)_gcn=(\d+)", line)
+        m = re.match(r"gpu_(\d+)_arch=(.+)", line)
         if m:
-            gcn = int(m.group(2))
-            # Map integer GCN arch to string (e.g. 0x942 → gfx942)
-            archs.append(f"gfx{gcn:x}")
+            archs.append(_normalize_arch(m.group(2)))
         m = re.match(r"gpu_(\d+)_name=(.+)", line)
         if m:
             names.append(m.group(2).strip())
@@ -400,15 +401,17 @@ def _parse_win_gpu_probe(text: str) -> tuple[int, list[str], list[str]]:
 
 def probe_host_replay_env_linux() -> ReplayEnvironment:
     env = ReplayEnvironment(source="host:linux")
-    smi = shutil.which("rocm-smi") or shutil.which("amd-smi")
-    if smi:
-        proc = _run([smi, "--showid", "--showproductname"], timeout=30)
-        out = proc.stdout + proc.stderr
-        count, archs, names = _parse_rocm_smi(out)
-        if count > 0:
-            env.visible_gpus = count
-            env.gpu_archs = archs
-            env.gpu_names = names
+    count, archs, names = 0, [], []
+    if rocm_smi := shutil.which("rocm-smi"):
+        proc = _run([rocm_smi, "--showid", "--showproductname"], timeout=30)
+        count, archs, names = _parse_rocm_smi(proc.stdout + proc.stderr)
+    elif amd_smi := shutil.which("amd-smi"):
+        proc = _run([amd_smi, "static", "--asic"], timeout=30)
+        count, archs, names = _parse_amd_smi_static(proc.stdout)
+    if count > 0:
+        env.visible_gpus = count
+        env.gpu_archs = archs
+        env.gpu_names = names
 
     hip_config = shutil.which("hipconfig")
     if hip_config:
@@ -768,7 +771,7 @@ def render_report(report: CompatReport) -> str:
             f"- comgr_version: {r.comgr_version or 'n/a'}",
         ]
         if r.gpu_archs:
-            lines.append(f"- gpu_archs: {', '.join(r.gpu_archs)}")
+            lines.append(f"- gpu_archs: {', '.join(a or 'n/a' for a in r.gpu_archs)}")
     if report.blocks:
         lines += ["", "## Blocking issues"]
         lines += [f"- {b}" for b in report.blocks]

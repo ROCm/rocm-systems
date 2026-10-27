@@ -309,11 +309,12 @@ class Primitives<T, RedOp, Fan, Direct,
           if (Send && Dst && ncclShmem.groups[group].dsts[1] == nullptr) {
             // this case should only be directCopySend() with registered buffers and send to net peer
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, Recv + Src, Recv * MaxRecv + Src, 0, 1, 1, PreOpSrcs,
-                       Pipeline>(tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv * fan.nrecv() + Src,
-                                 ncclShmem.groups[group].srcs, 1, ncclShmem.groups[group].dsts, workSize);
+                       Pipeline, /*EnableTdmReduce=*/1>(tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp,
+                                                        Recv * fan.nrecv() + Src, ncclShmem.groups[group].srcs, 1,
+                                                        ncclShmem.groups[group].dsts, workSize);
           } else {
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, MultimemSrcs, Recv + Src, Recv * MaxRecv + Src, MultimemDsts,
-                       Send + Dst, Send * MaxSend + Dst, PreOpSrcs, Pipeline>(
+                       Send + Dst, Send * MaxSend + Dst, PreOpSrcs, Pipeline, /*EnableTdmReduce=*/1>(
               tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv * fan.nrecv() + Src,
               ncclShmem.groups[group].srcs, Send * fan.nsend() + Dst, ncclShmem.groups[group].dsts, workSize,
               ncclShmem.groups[group].acc);
