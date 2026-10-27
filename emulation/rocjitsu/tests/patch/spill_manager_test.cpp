@@ -8,6 +8,7 @@
 #include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -294,32 +295,23 @@ TEST(SpillManager, AccVgprIs4Bytes) {
   EXPECT_EQ(m.total_private_bytes() - before, 4u);
 }
 
-// Pins the contract that allocate_slot returns a per-lane *byte offset* that
-// composes additively with the per-lane flat-scratch addressing formula
-//   flat_scratch_base_byte_addr[lane] = FLAT_SCRATCH_INIT
-//                                     + lane * private_segment_fixed_size
-// If this test ever needs editing, the trampoline emitter (Phase 6) is also
-// broken. We use a *non-zero* slot so the `+ slot_offset` term is exercised
-// (the lane=0/slot=0 case alone is a tautology).
-TEST(SpillManager, SlotAddressMatchesFlatScratchFormula) {
+// Spill slots are logical per-lane byte offsets. Execution maps them to
+// dword-interleaved backing addresses; increasing the private reservation
+// must not turn it into a physical per-lane address stride. This checks the
+// allocator-to-address-mapping contract, not the trampoline's instruction encoding.
+TEST(SpillManager, SlotOffsetsMapToInterleavedScratchBacking) {
   SpillManager m(/*orig=*/0, /*limit=*/16384);
   ASSERT_TRUE(m.allocate_slot(sgpr(0)).has_value());
   auto slot1 = m.allocate_slot(sgpr(1));
   ASSERT_TRUE(slot1.has_value());
   EXPECT_EQ(*slot1, 4u);
 
-  constexpr uint64_t kFlatScratchInit = 0xCAFEBA5Eull;
-  const uint32_t per_lane_bytes = m.total_private_bytes();
-
-  {
-    constexpr uint32_t lane = 0;
-    const uint64_t addr = kFlatScratchInit + lane * per_lane_bytes + *slot1;
-    EXPECT_EQ(addr, kFlatScratchInit + 4u);
-  }
-  {
-    constexpr uint32_t lane = 1;
-    const uint64_t addr = kFlatScratchInit + lane * per_lane_bytes + *slot1;
-    EXPECT_EQ(addr, kFlatScratchInit + per_lane_bytes + 4u);
+  constexpr uint64_t kScratchBase = 0x1000;
+  for (uint32_t wave_size : {32u, 64u}) {
+    SCOPED_TRACE(wave_size);
+    const uint64_t expected_lane0 = wave_size == 32 ? 0x1080 : 0x1100;
+    EXPECT_EQ(amdgpu::scratch_lane_address(kScratchBase, *slot1, 0, wave_size), expected_lane0);
+    EXPECT_EQ(amdgpu::scratch_lane_address(kScratchBase, *slot1, 1, wave_size), expected_lane0 + 4);
   }
 }
 

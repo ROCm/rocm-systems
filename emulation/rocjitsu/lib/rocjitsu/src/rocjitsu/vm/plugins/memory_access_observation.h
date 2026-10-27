@@ -181,9 +181,12 @@ struct MemoryAccessObservation {
   /// `TR16_B128` -- where one lane fetches on behalf of several. Every other
   /// access, transpose or not, requests from every valid lane.
   uint64_t request_lane_mask = 0;
-  /// @brief Lanes whose addresses are swizzled scratch; see
-  ///        @ref scratch_element_stride_bytes. A FLAT wave can mix these with
-  ///        global lanes.
+  /// @brief Requesting lanes whose addresses use an interleaved layout; see
+  ///        @ref scratch_element_stride_bytes. Includes private scratch and
+  ///        swizzled global BUFFER accesses. A FLAT wave can mix interleaved
+  ///        private lanes with contiguous global lanes.
+  /// @details This mask describes the transfer layout, not scratch backing
+  /// provenance. A nonzero mask alone does not identify private memory.
   uint64_t scratch_lane_mask = 0;
   /// @brief Requesting FLAT lanes whose original addresses resolve to LDS.
   ///
@@ -204,12 +207,15 @@ struct MemoryAccessObservation {
   /// @ref scratch_lane_mask and @ref flat_local_lane_mask, and always zero for
   /// non-FLAT instructions.
   uint64_t flat_dds_lane_mask = 0;
-  /// @brief Byte stride between consecutive elements of a scratch lane. Zero
-  ///        when the access is contiguous, which every non-scratch access is.
+  /// @brief Byte stride between consecutive swizzle units of an interleaved
+  ///        lane. Zero when the access is contiguous. Private scratch uses
+  ///        four-byte units; global BUFFER descriptors can also request an
+  ///        interleaved layout, with an architecture-specific unit size.
   ///
   /// @details Reported from the instruction's own state, so it is set on an
-  /// atomic whose lanes are swizzled scratch even though the atomic path
-  /// applies no stride.
+  /// atomic with interleaved lanes even though the atomic handlers apply no
+  /// stride. Unsupported private FLAT atomic64 requests are rejected before
+  /// reaching those handlers.
   uint32_t scratch_element_stride_bytes = 0;
 
   bool non_temporal = false;    ///< Documented not to allocate in a cache honouring it.

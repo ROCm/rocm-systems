@@ -36,8 +36,9 @@ enum class ScratchAddressMode { VectorEnable, LegacyCdna, Rdna1, Rdna2 };
 /// @details Populates d.per_lane_addr, d.lane_mask, and d.exec_mask.
 /// Handles all three segments:
 /// - FLAT (seg==0): 64-bit VGPR pair + unsigned 12-bit offset.
-/// - SCRATCH (seg==1): scratch_base + 32-bit VGPR + saddr + signed 12-bit (RDNA) or 13-bit (CDNA)
-/// offset.
+/// - SCRATCH (seg==1): 32-bit VGPR + saddr + signed 12-bit (RDNA) or 13-bit
+///   (CDNA) immediate forms the private byte offset. scratch_lane_address()
+///   interleaves that offset across lanes and adds the wave's scratch_base.
 /// - GLOBAL (seg==2): 64-bit saddr + unsigned 32-bit VGPR offset + signed 13-bit offset,
 ///   or 64-bit VGPR pair when saddr==0x7F.
 ///

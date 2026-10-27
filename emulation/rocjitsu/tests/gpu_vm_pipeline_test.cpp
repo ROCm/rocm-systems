@@ -2240,7 +2240,7 @@ TEST(GpuVmPipeline, TranslatedAtomic64RejectsPrivateButPreservesBufferSwizzling)
     state->scratch_swizzle = true;
     state->requires_scratch_backing = private_backing;
     state->scratch_lane_mask = 1;
-    state->scratch_addr_stride = state->wf_size * 4;
+    state->scratch_addr_stride = state->wf_size * sizeof(uint32_t);
     state->per_lane_addr[0] = address;
     const uint32_t dst = context.wf->vgpr_alloc().base + 12;
     state->dst_reg_base = dst;
