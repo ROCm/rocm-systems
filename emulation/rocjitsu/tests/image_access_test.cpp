@@ -71,7 +71,8 @@ std::array<uint32_t, 8> descriptor(const Image &image) {
   return r;
 }
 
-std::array<uint32_t, 8> rdna_r32_descriptor(rj_code_arch_t arch, uint32_t type = amdgpu::kImage2d) {
+std::array<uint32_t, 8> rdna_image_descriptor(rj_code_arch_t arch, uint32_t type = amdgpu::kImage2d,
+                                              uint32_t format = 20, uint32_t selectors = kXOne) {
   std::array<uint32_t, 8> words{};
   const auto set = [&](uint32_t bit, uint32_t width, uint64_t value) {
     for (uint32_t i = 0; i < width; ++i)
@@ -79,10 +80,10 @@ std::array<uint32_t, 8> rdna_r32_descriptor(rj_code_arch_t arch, uint32_t type =
   };
   const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
   set(0, 40, kBase >> 8);
-  set(gfx12 ? 49 : 52, 8, 20); // R32_UINT.
+  set(gfx12 ? 49 : 52, 8, format);
   set(62, gfx12 ? 16 : 14, 2); // Width 3.
   set(78, gfx12 ? 16 : 14, 1); // Height 2.
-  set(96, 12, kXOne);
+  set(96, 12, selectors);
   set(124, 4, type);
   if (amdgpu::image_resource_encodes_pitch(type))
     set(128, gfx12 ? 16 : 14, 63); // Pitch 64.
@@ -519,6 +520,27 @@ TEST_F(Cdna2ImageAccessTest, ImageOnlySrgbFormatStopsAsUnimplemented) {
             amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
+TEST(ImageAccessTest, InstructionDimCoordinatesShareA16PackingContract) {
+  struct Case {
+    uint8_t dim;
+    uint32_t coordinates;
+  };
+  for (const Case test : {
+           Case{amdgpu::kImageDim1d, 1},
+           Case{amdgpu::kImageDim2d, 2},
+           Case{amdgpu::kImageDim3d, 3},
+           Case{amdgpu::kImageDimCube, 3},
+           Case{amdgpu::kImageDim1dArray, 2},
+           Case{amdgpu::kImageDim2dArray, 3},
+           Case{amdgpu::kImageDim2dMsaa, 3},
+           Case{amdgpu::kImageDim2dMsaaArray, 4},
+       }) {
+    EXPECT_EQ(amdgpu::image_coordinate_count(test.dim), test.coordinates);
+    EXPECT_EQ(amdgpu::image_coordinate_register_count(test.dim, false), test.coordinates);
+    EXPECT_EQ(amdgpu::image_coordinate_register_count(test.dim, true), (test.coordinates + 1) / 2);
+  }
+}
+
 TEST(ImageAccessTest, RdnaLinearR32DescriptorsPrepareTheExpectedMemoryAccess) {
   for (auto arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
@@ -562,7 +584,7 @@ TEST(ImageAccessTest, RdnaLinearR32DescriptorsPrepareTheExpectedMemoryAccess) {
     ASSERT_TRUE(amdgpu::prepare_image_access(*wf, state, 0,
                                              amdgpu::contiguous_image_address_registers(0),
                                              {.dmask = 15,
-                                              .dim = 1,
+                                              .dim = amdgpu::kImageDim2d,
                                               .a16 = false,
                                               .d16 = false,
                                               .lwe = false,
@@ -600,7 +622,11 @@ protected:
     decoder = Decoder::create(GetParam());
     ASSERT_NE(decoder, nullptr);
 
-    const auto resource = rdna_r32_descriptor(GetParam());
+    bind_resource();
+  }
+
+  void bind_resource(uint32_t format = 20, uint32_t selectors = kXOne) {
+    const auto resource = rdna_image_descriptor(GetParam(), amdgpu::kImage2d, format, selectors);
     for (uint32_t i = 0; i < resource.size(); ++i)
       cu->write_sgpr(wf->sgpr_alloc().base + kResourceBase + i, resource[i]);
   }
@@ -610,8 +636,9 @@ protected:
       wf->halt();
   }
 
-  DecodeResult decode(bool load, bool r128 = false, uint8_t dim = 1, bool a16 = false,
-                      bool nsa = true, uint8_t dmask = 1, bool d16 = false, bool tfe = false) {
+  DecodeResult decode(bool load, bool r128 = false, uint8_t dim = amdgpu::kImageDim2d,
+                      bool a16 = false, bool nsa = true, uint8_t dmask = 1, bool d16 = false,
+                      bool tfe = false) {
     if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
       const auto base =
           rdna3::build_mimg(load ? rdna3::kImageLoadMimg : rdna3::kImageStoreMimg, {.nsa = nsa,
@@ -662,8 +689,8 @@ protected:
     return decoder->decode(words.data());
   }
 
-  void issue(bool load) {
-    auto decoded = decode(load);
+  void issue(bool load, uint8_t dmask = 1, bool d16 = false) {
+    auto decoded = decode(load, false, amdgpu::kImageDim2d, false, true, dmask, d16);
     ASSERT_TRUE(decoded.succeeded());
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     ASSERT_NE(inst, nullptr);
@@ -711,6 +738,47 @@ TEST_P(RdnaDecodedImageAccessTest,
   EXPECT_EQ(cu->read_vgpr(vb + 8, 2), 0x33333333u);
 }
 
+TEST_P(RdnaDecodedImageAccessTest, StoreDmaskExpandsPackedInputsAndUsesImagePadding) {
+  const uint32_t vb = wf->vgpr_alloc().base;
+  wf->set_exec(1);
+  cu->write_vgpr(vb + 2, 0, 0);
+  cu->write_vgpr(vb + 6, 0, 0);
+  constexpr uint32_t kRgba32Uint = 61;
+  constexpr uint32_t kBgra = 6 | (5 << 3) | (4 << 6) | (7 << 9);
+  struct Case {
+    uint32_t selectors;
+    uint8_t dmask;
+    bool d16;
+    std::array<uint32_t, 4> packed;
+    std::array<uint32_t, 4> gfx11;
+    std::array<uint32_t, 4> gfx12;
+  };
+  const Case cases[] = {
+      {kIdentity, 1, false, {0x11}, {0x11, 0, 0, 0}, {0x11, 0x11, 0x11, 0x11}},
+      {kIdentity, 3, false, {0x11, 0x22}, {0x11, 0x22, 0, 0}, {0x11, 0x22, 0x11, 0x11}},
+      // GFX12 replicates X only when DMASK supplies X.
+      {kIdentity, 2, false, {0x22}, {0, 0x22, 0, 0}, {0, 0x22, 0, 0}},
+      // Sparse D16 inputs remain packed in VDATA but route through X/Z.
+      {kIdentity, 5, true, {0x00330011}, {0x11, 0, 0x33, 0}, {0x11, 0x11, 0x33, 0x11}},
+      {kBgra, 1, false, {0x11}, {0, 0, 0x11, 0}, {0x11, 0x11, 0x11, 0x11}},
+      // Image RGB1 padding retains a supplied alpha instead of forcing one.
+      {kXOne, 15, false, {1, 2, 3, 4}, {1, 0, 0, 4}, {1, 0, 0, 4}},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(testing::Message() << "selectors=" << test.selectors
+                                    << " dmask=" << unsigned{test.dmask} << " d16=" << test.d16);
+    bind_resource(kRgba32Uint, test.selectors);
+    for (uint32_t offset = 0; offset < 4; ++offset) {
+      memory.write32(kBase + offset * 4, 0xdeadbeef);
+      cu->write_vgpr(vb + 8 + offset, 0, test.packed[offset]);
+    }
+    issue(false, test.dmask, test.d16);
+    const auto &expected = GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? test.gfx12 : test.gfx11;
+    for (uint32_t offset = 0; offset < expected.size(); ++offset)
+      EXPECT_EQ(memory.read32(kBase + offset * 4), expected[offset]) << "offset=" << offset;
+  }
+}
+
 TEST_P(RdnaDecodedImageAccessTest, D16LoadPreservesAndReadsOnlyThePartialDestination) {
   const uint32_t vb = wf->vgpr_alloc().base;
   wf->set_exec(1);
@@ -724,7 +792,7 @@ TEST_P(RdnaDecodedImageAccessTest, D16LoadPreservesAndReadsOnlyThePartialDestina
       for (uint32_t reg = 8; reg < 12; ++reg)
         cu->write_vgpr(vb + reg, 0, 0xabcdffff);
 
-      auto decoded = decode(true, false, 1, false, true, dmask, d16);
+      auto decoded = decode(true, false, amdgpu::kImageDim2d, false, true, dmask, d16);
       ASSERT_TRUE(decoded.succeeded());
       std::unique_ptr<Instruction> inst = std::move(decoded).value();
       ASSERT_NE(inst, nullptr);
@@ -770,7 +838,7 @@ TEST_P(RdnaDecodedImageAccessTest, TfeLoadReportsUnimplementedBeforeProducingDat
   cu->write_vgpr(vb + 9, 0, 0xdeadbeef);
   memory.write32(kBase, 0x12345678);
 
-  auto decoded = decode(true, false, 1, false, true, 1, false, true);
+  auto decoded = decode(true, false, amdgpu::kImageDim2d, false, true, 1, false, true);
   ASSERT_TRUE(decoded.succeeded());
   std::unique_ptr<Instruction> inst = std::move(decoded).value();
   ASSERT_NE(inst, nullptr);
@@ -786,7 +854,7 @@ TEST_P(RdnaDecodedImageAccessTest, TfeLoadReportsUnimplementedBeforeProducingDat
 }
 
 TEST_P(RdnaDecodedImageAccessTest, OneDimensionalDimRejectsTwoDimensionalResource) {
-  for (const uint8_t dim : {0, 4}) {
+  for (const uint8_t dim : {amdgpu::kImageDim1d, amdgpu::kImageDim1dArray}) {
     for (const bool load : {false, true}) {
       for (const bool a16 : {false, true}) {
         for (const bool nsa : {false, true}) {
@@ -824,7 +892,7 @@ TEST_P(RdnaDecodedImageAccessTest, TwoDimensionalArrayDimUsesTwoDimensionalResou
       cu->write_vgpr(vb + 8, 0, value);
 
       for (const bool load : {false, true}) {
-        auto decoded = decode(load, false, 5, a16, nsa);
+        auto decoded = decode(load, false, amdgpu::kImageDim2dArray, a16, nsa);
         ASSERT_TRUE(decoded.succeeded());
         std::unique_ptr<Instruction> inst = std::move(decoded).value();
         ASSERT_NE(inst, nullptr);
@@ -860,10 +928,10 @@ TEST_P(RdnaDecodedImageAccessTest, NonNsaAddressWidthFollowsDimAndA16) {
     bool a16;
     uint32_t expected_bits;
   };
-  for (const Case test : {Case{.dim = 0, .a16 = false, .expected_bits = 32},
-                          Case{.dim = 0, .a16 = true, .expected_bits = 32},
-                          Case{.dim = 1, .a16 = false, .expected_bits = 64},
-                          Case{.dim = 1, .a16 = true, .expected_bits = 32}}) {
+  for (const Case test : {Case{.dim = amdgpu::kImageDim1d, .a16 = false, .expected_bits = 32},
+                          Case{.dim = amdgpu::kImageDim1d, .a16 = true, .expected_bits = 32},
+                          Case{.dim = amdgpu::kImageDim2d, .a16 = false, .expected_bits = 64},
+                          Case{.dim = amdgpu::kImageDim2d, .a16 = true, .expected_bits = 32}}) {
     for (bool load : {false, true}) {
       SCOPED_TRACE(testing::Message()
                    << "dim=" << unsigned{test.dim} << " a16=" << test.a16 << " load=" << load);
@@ -923,7 +991,7 @@ TEST(ImageAccessTest, RdnaLayeredAnd3dLinearImagesRejectUnknownPitch) {
       ASSERT_NE(wf, nullptr);
       wf->set_exec(1);
 
-      const auto resource = rdna_r32_descriptor(arch, type);
+      const auto resource = rdna_image_descriptor(arch, type);
       for (uint32_t i = 0; i < resource.size(); ++i)
         cu->write_sgpr(wf->sgpr_alloc().base + i, resource[i]);
       cu->write_vgpr(wf->vgpr_alloc().base, 0, 0);

@@ -34,9 +34,30 @@ struct ImageFields {
 
 using ImageAddressRegisters = std::array<uint32_t, 4>;
 
-inline uint32_t image_coordinate_register_count(uint32_t dim, bool a16) {
+/// MIMG/VIMAGE DIM encodings. These are instruction fields (0-7), distinct
+/// from the SQ_RSRC_IMG_* descriptor TYPE encodings (8-15) in image_resource.h.
+inline constexpr uint8_t kImageDim1d = 0;
+inline constexpr uint8_t kImageDim2d = 1;
+inline constexpr uint8_t kImageDim3d = 2;
+inline constexpr uint8_t kImageDimCube = 3;
+inline constexpr uint8_t kImageDim1dArray = 4;
+inline constexpr uint8_t kImageDim2dArray = 5;
+inline constexpr uint8_t kImageDim2dMsaa = 6;
+inline constexpr uint8_t kImageDim2dMsaaArray = 7;
+
+/// @brief Number of logical coordinates encoded by an instruction DIM.
+/// @details In DIM order the coordinates are X; X/Y; X/Y/Z; cube X/Y/Z;
+/// X/layer; X/Y/layer; X/Y/sample; and X/Y/sample/layer.
+inline uint32_t image_coordinate_count(uint32_t dim) {
   static constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
-  const uint32_t count = coordinates[dim & 7u];
+  return coordinates[dim & 7u];
+}
+
+/// @brief Number of VGPRs containing the DIM's coordinates.
+/// @details A16 packs each adjacent pair of logical 16-bit coordinates into
+/// one VGPR; an odd final coordinate occupies the low half of its VGPR.
+inline uint32_t image_coordinate_register_count(uint32_t dim, bool a16) {
+  const uint32_t count = image_coordinate_count(dim);
   return a16 ? (count + 1) / 2 : count;
 }
 
@@ -48,6 +69,8 @@ inline ImageAddressRegisters gfx11_image_address_registers(bool nsa, uint32_t fi
                                                            const uint32_t *raw_encoding) {
   if (!nsa)
     return contiguous_image_address_registers(first);
+  // GFX11's NSA extension stores VADDR1-3 selectors in encoding word 2.
+  // These are coordinate VGPR numbers, not a width, and need not be consecutive.
   return {first, raw_encoding[2] & 0xffu, (raw_encoding[2] >> 8) & 0xffu,
           (raw_encoding[2] >> 16) & 0xffu};
 }
@@ -59,8 +82,8 @@ inline ImageAddressRegisters gfx12_image_address_registers(const VimageMachineIn
 
 /// @brief Set up IMAGE_LOAD or IMAGE_STORE as a formatted vector access.
 /// @details Each active lane addresses one texel of a linear, single-level
-/// GFX9, GFX11 or GFX12 image with unnormalized coordinates read from @p vaddr.
-/// Lanes outside the
+/// GFX9, GFX11 or GFX12 image with unnormalized coordinates read from
+/// @p address_registers. Lanes outside the
 /// image are left out of the lane mask, so a load returns zero and a store is
 /// dropped. A null resource drops every lane. The texel layout is the one
 /// addrlib gives a linear surface: rows of PITCH elements, one row per 1D slice
@@ -136,14 +159,20 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   if (resource.type < kImage1d || resource.data_format == 0)
     return util::Result::success();
 
-  // DMASK selects memory components; D16 packs their values into consecutive
-  // half registers. The ambiguous GFX9 word-count wording also appears in
-  // RDNA2, whose Table 41 explicitly illustrates sparse R/A selection.
-  uint32_t selectors = 0;
-  for (uint32_t component = 0, packed = 0; component < 4; ++component)
-    if (fields.dmask & (1u << component))
-      selectors |= ((resource.selectors >> (3 * component)) & 7) << (3 * packed++);
-  state.buffer_selectors = selectors;
+  // DMASK packs supplied shader components into consecutive registers (or
+  // halves for D16). Loads compact their selectors to produce that tuple.
+  // Stores retain the descriptor's shader-component slots and scatter their
+  // packed inputs back into those slots before applying the full mapping.
+  if (state.is_load) {
+    uint32_t selectors = 0;
+    for (uint32_t component = 0, packed = 0; component < 4; ++component)
+      if (fields.dmask & (1u << component))
+        selectors |= ((resource.selectors >> (3 * component)) & 7) << (3 * packed++);
+    state.buffer_selectors = selectors;
+  } else {
+    state.buffer_selectors = resource.selectors;
+    state.image_store_component_mask = fields.dmask & 15u;
+  }
 
   const bool layered = resource.type == kImage1dArray || resource.type == kImage2dArray;
   if (resource.type == kImageCube || resource.type > kImage2dArray || resource.swizzle_mode != 0 ||
@@ -170,15 +199,15 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
     const uint32_t dim = fields.dim & 7u;
     uint32_t dim_spatial_coordinates = 0;
     switch (dim) {
-    case 0: // 1D
-    case 4: // 1D_ARRAY
+    case kImageDim1d:
+    case kImageDim1dArray:
       dim_spatial_coordinates = 1;
       break;
-    case 1: // 2D
-    case 5: // 2D_ARRAY
+    case kImageDim2d:
+    case kImageDim2dArray:
       dim_spatial_coordinates = 2;
       break;
-    case 2: // 3D
+    case kImageDim3d:
       dim_spatial_coordinates = 3;
       break;
     default: // CUBE and MSAA dimensions are not implemented.

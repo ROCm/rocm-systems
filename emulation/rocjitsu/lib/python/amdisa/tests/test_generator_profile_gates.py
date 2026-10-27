@@ -4795,6 +4795,8 @@ def test_generated_gfx11_image_address_width_uses_dim_and_preserves_fixed_bvh(
     amdgpu_generated_root: Path, arch: str
 ):
     mimg = (amdgpu_generated_root / _generated_dir_name(arch) / 'mimg.cpp').read_text()
+    assert 'amdgpu::image_coordinate_count(dim)' in mimg
+    assert 'static constexpr uint8_t coords[]' not in mimg
     for class_name in ('ImageLoadMimg', 'ImageStoreMimg'):
         constructor = _generated_constructor_body(mimg, class_name)
         assert (

@@ -207,6 +207,10 @@ public:
   uint32_t buffer_selectors = 0;
   uint32_t buffer_components = 0;
   bool buffer_d16 = false;
+  // Image DMASK packs only enabled shader components into the data tuple.
+  // A nonzero mask asks store capture to scatter that tuple back into its
+  // original X/Y/Z/W slots before applying image selector/padding semantics.
+  uint32_t image_store_component_mask = 0;
   // Some accesses use an interleaved ("swizzled") layout: consecutive units
   // of a lane are separated rather than contiguous. Units are 4 bytes for
   // scratch and GFX9 buffers, and 4 or 16 bytes for RDNA buffers.

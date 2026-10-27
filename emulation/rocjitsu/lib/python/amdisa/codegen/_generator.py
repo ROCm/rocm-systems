@@ -5773,7 +5773,6 @@ class CodeGenerator:
 
             template <typename MimgMachineInst>
             uint32_t mimg_vaddr_bits(const MimgMachineInst *inst, std::string_view name) {
-              static constexpr uint8_t coords[] = {1, 2, 3, 3, 2, 3, 3, 4};
               static constexpr uint8_t gradients[] = {2, 4, 6, 4, 2, 4, 4, 4};
               const uint32_t dim = inst->dim & 7u;
               const bool resinfo = name == "image_get_resinfo";
@@ -5786,7 +5785,8 @@ class CodeGenerator:
               uint32_t words = mimg_name_has_token(name, "c") ? 1u : 0u;
               words += mimg_name_has_token(name, "o") ? 1u : 0u;
               words += mimg_name_has_token(name, "b") ? 1u : 0u;
-              const uint32_t coord_words = (resinfo ? 0u : coords[dim]) + (lod ? 1u : 0u);
+              const uint32_t coord_words =
+                  (resinfo ? 0u : amdgpu::image_coordinate_count(dim)) + (lod ? 1u : 0u);
               words += inst->a16 ? (coord_words + 1) / 2 : coord_words;
               if (gradient) {
                 const uint32_t gradient_words = gradients[dim];
