@@ -80,7 +80,7 @@ amdsmi_status_t AMDSmiDrm::init(const std::vector<const char*>& libdrm_names) {
     status = lib_loader_.load_symbol(reinterpret_cast<drmFreeDevice_t*>(&drm_free_device),
                                      "drmFreeDevice");
   }
-  const bool have_libdrm = (status == AMDSMI_STATUS_SUCCESS);
+  has_libdrm_ = (status == AMDSMI_STATUS_SUCCESS);
 
   /* Need to map the /dev/dri/render* file to /sys/class/drm/card*
      The former is for drm fd and the latter is used for rocm-smi gpu index.
@@ -102,7 +102,7 @@ amdsmi_status_t AMDSmiDrm::init(const std::vector<const char*>& libdrm_names) {
     drm_paths_.push_back(render_name);
 
     amdsmi_bdf_t bdf;
-    if (have_libdrm) {
+    if (has_libdrm_) {
       std::string name = "/dev/dri/" + render_name;
       ScopedFD fd(name.c_str(), O_RDWR | O_CLOEXEC | O_NONBLOCK);
       if (fd.valid()) {
@@ -143,6 +143,7 @@ amdsmi_status_t AMDSmiDrm::cleanup() {
     drm_bdfs_.clear();
   }
   lib_loader_.unload();
+  has_libdrm_ = false;
   return AMDSMI_STATUS_SUCCESS;
 }
 

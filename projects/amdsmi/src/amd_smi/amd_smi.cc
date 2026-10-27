@@ -2152,7 +2152,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
 
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
   std::string render_name = gpu_device->get_gpu_path();
-  if (render_name.empty()) {
+  if (render_name.empty() || !gpu_device->has_libdrm()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
@@ -2979,7 +2979,7 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   }
 
   std::string render_name = gpu_device->get_gpu_path();
-  if (render_name.empty()) {
+  if (render_name.empty() || !gpu_device->has_libdrm()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
   std::string path = "/dev/dri/" + render_name;
@@ -3264,7 +3264,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handl
   amdsmi_status_t drm_status = [&]() -> amdsmi_status_t {
     std::string render_name = gpu_device->get_gpu_path();
     std::string path = "/dev/dri/" + render_name;
-    if (render_name.empty()) {
+    if (render_name.empty() || !gpu_device->has_libdrm()) {
       return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
@@ -5457,7 +5457,7 @@ amdsmi_status_t amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_hand
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
   std::string render_name = gpu_device->get_gpu_path();
   std::string path = "/dev/dri/" + render_name;
-  if (render_name.empty()) {
+  if (render_name.empty() || !gpu_device->has_libdrm()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
@@ -6173,7 +6173,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
   std::string render_name = gpu_device->get_gpu_path();
   std::string path = "/dev/dri/" + render_name;
-  if (render_name.empty()) {
+  if (render_name.empty() || !gpu_device->has_libdrm()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
@@ -6682,7 +6682,7 @@ amdsmi_status_t amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle proce
 
   std::string render_name = gpu_device->get_gpu_path();
   std::string path = "/dev/dri/" + render_name;
-  if (render_name.empty()) {
+  if (render_name.empty() || !gpu_device->has_libdrm()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
