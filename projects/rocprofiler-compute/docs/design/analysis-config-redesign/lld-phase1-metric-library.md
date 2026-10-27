@@ -5,8 +5,8 @@ Parent: [LLD index](lld-index.md)
 
 ## Stage 1 -- Layer 2 schema + inheritance loader
 
-> Layer 1.5 collectables moved out of Phase A into a separate epic. The collectables
-> section below is kept as input to that epic.
+> Layer 1.5 collectables are a separate epic, not part of Phase A. The collectables
+> section below is the input to that epic.
 
 ### Layer 2 metric schema
 
@@ -14,22 +14,20 @@ New developer tool `tools/validate_metric_library.py`, following the existing
 `tools/validate_*.py` checks: it loads each arch's metric library through the
 inheritance loader, collects every schema error, and exits 1 if there are any. It runs
 as a pre-commit hook on `metric_library/` files and from
-`master_config_workflow_script.py --validate-only`. It lands in the same PR as the
-first metric library files (Stage 4), not with the loader. As with today's panel files, the runtime
-does not re-validate the files it loads.
+`master_config_workflow_script.py --validate-only`. As with today's panel files, the
+runtime does not re-validate the files it loads.
 
 `MetricDefinition` fields:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `id` | str | yes | Stable hierarchical string, e.g. `l2.hit_rate` |
-| `name` | str | yes | Canonical display name, e.g. `"L2 Cache Hit Rate"` |
+| `name` | str | yes | Canonical display name, unique on the arch, e.g. `"L2 Cache Hit Rate"`. See [Metric names](#metric-names). |
 | `formula` | str | yes | The expression of the row's main column (`avg`, `value` or `expr`), aggregation included; never empty, in the canonical form of `tools/format_yaml.py`. A metric an arch cannot compute does not exist on that arch; a later arch adds it. |
-| `unit` | str | yes | One canonical spelling per unit (e.g. `"GB/s"`, `"GFLOP/s"`; aliases such as `Gbps` are rejected); a display scale such as Bytes/s is a view concern (D8 Kind 2); may be empty |
+| `unit` | str | yes | One canonical spelling per unit (e.g. `"GB/s"`, `"GFLOP/s"`, `"Cycles per Wavefront"`; aliases such as `Gbps` or `Cycles/wave` are rejected); a display scale such as Bytes/s is not an alias but a view concern (D8 Kind 2); may be empty |
 | `description` | str | yes | Human-readable metric description: what the metric is, never how a view shows it (a view adds that as `description_note`, [Phase 2](lld-phase2-display-view.md)); may be empty |
 | `peak` | str (formula) or number | no | Theoretical ceiling expression, from the hardware specs, e.g. `$max_sclk * $cu_per_gpu * 512 / 1000`. Required for speed-of-light metrics. Never a measured peak. |
 | `peak_empirical` | str | no | Measured ceiling: `$<ceiling>_empirical_peak`, where `<ceiling>` is a roofline benchmark column (`roofline/benchmark/ceilings.py`), e.g. `$MFMAF16Flops_empirical_peak`. See [Measured peaks](#measured-peaks). |
-| `coll_level` | str | no | Accumulation level, e.g. `SQ_LEVEL_WAVES` |
 | `avg_mode` | str | no | Phase 2, with runtime wrapper generation; not in Phase A. Default `weighted` (`SUM(X)/SUM(Y)`). Set to `simple` for metrics that use `AVG()` instead. |
 
 `name`, `unit` and `description` are plain ASCII, as every config file is: `->` for an
@@ -213,7 +211,6 @@ REQ is measured in pass 1 (low-traffic phase, REQ = 1000) and MISS in pass 2
 |---|---|---|
 | `same_bucket_priority_metric_ids` | Greedy bin-packing that tries to keep priority metrics' counters in one pass | Falls through silently when counters don't fit; only 4 metrics configured (gfx115x only) |
 | `_metric_aware_coalesce_pass` | Best-effort: sorts metrics by counter count, tries to pack each metric's counters into one bucket | No guarantee; logs a debug message and defers to first-fit when it fails |
-| `coll_level` | Marks accumulator counters that need dedicated pass files | Only for ACCUM counters, not for general ratio metrics |
 | `NOISE_CLAMP` | Display-time clamp that suppresses results with high noise indicators | Mitigation, not prevention -- the wrong value is still computed |
 
 #### What a collectable formalizes
@@ -299,8 +296,7 @@ uses two different mechanisms:
 - `!reference [...]` is a custom tag on a value. `!remove` follows that pattern: it tags
   a value (`key: !remove`), never a whole document.
 
-A first-line `!inherit <path>` tag, as first proposed, mixes the two and is not valid
-YAML: a document has one root node, so a tagged scalar cannot be followed by a mapping.
+A first-line `!inherit <path>` tag would mix the two and is not valid YAML: a document has one root node, so a tagged scalar cannot be followed by a mapping.
 Keeping a tag would need either a loader that strips the first line, which makes the
 files unreadable to other YAML tools (`check-yaml`, `format_yaml.py`, `safe_load`), or a
 tag on the whole root mapping, which needs a custom constructor and is harder to edit.
@@ -393,8 +389,8 @@ cutover; it would only add a second path to maintain. The risk is covered instea
 ### Tests
 
 - Schema validation (`tools/validate_metric_library.py`): valid files pass; missing
-  required fields, unknown fields, bad ids, duplicate ids and a child file that does not
-  inherit from its parent's file are reported.
+  required fields, unknown fields, bad ids, duplicate ids, names shared on an arch and a
+  child file that does not inherit from its parent's file are reported.
 - Inheritance loader: single-level inheritance, multi-level chain (4+ deep, matching
   the real `gfx908 -> gfx90a -> gfx940 -> gfx942` chain), cycle detection error.
 - Merge operations: key modification (override), key addition (new metric in child),
@@ -473,13 +469,9 @@ class MetricLibrary:
    would be parsed as variable `collect` + stray text `.l2_hit_miss`.
 2. **Concatenate formula strings** for the requested metrics (including expanded
    collectables).
-3. **Include `coll_level` and `peak` values** in the text passed to the extractor. The current
-   `detect_counters()` scans raw YAML text which incidentally picks up
-   `coll_level: SQ_LEVEL_WAVES` as a counter name. The MetricLibrary approach must
-   explicitly add `coll_level` values to maintain equivalence. The raw-text scan also
-   picks up counter names mentioned only in YAML comments or descriptions (on gfx115x
-   and gfx1250); the formula-based extraction does not, and the equivalence check lists
-   those names as known differences.
+3. **Include `peak` values** in the text passed to the extractor, as `detect_counters()`
+   does for the panel equations. In both paths, comments, descriptions and labels add no
+   counters, so the two counter sets are equal on every arch.
 4. **Delegate to `extract_counters_and_variables()`** in `utils_counter_defs.py` for
    regex-based HW counter extraction and transitive built-in variable resolution.
 
@@ -488,8 +480,8 @@ class MetricLibrary:
 - Integration test: load a synthetic family (a base and a four-deep chain of children)
   from test fixtures. Verify: correct number of metrics, inheritance
   overrides applied, variable definitions present, duplicate id raises error.
-- Counter extraction: `get_counters_for_metrics()` takes counters from `formula`,
-  `peak` and `coll_level`, and resolves built-in variables. Equivalence with
+- Counter extraction: `get_counters_for_metrics()` takes counters from `formula` and
+  `peak`, and resolves built-in variables. Equivalence with
   `detect_counters()` over the whole library is the Stage 3 counter check.
 - String metric IDs follow the hierarchical convention
   (`{category}.{subcategory}_{name}`).
@@ -531,13 +523,15 @@ At the cutover, counters come from the metrics that the selected views place
 `tools/validate_metric_library.py`, for every arch that has a metric library tree, also
 compares the library with today's analysis configs:
 
-- **Formulas:** every equation a row shows (its `avg`, `value` or `expr` form, or each
-  column of a multi-column row, without display-only `ROUND()`) is a library formula;
+- **Formulas:** every equation a row shows (its `avg`, `value` or `expr` form; for a row
+  with none of these, each of its table's value columns; without display-only `ROUND()`)
+  is a library formula;
   every library formula is shown by some row. Display variants, listed by positional id
   and label, show a formula in Bytes/s or write it differently; the validator checks
   each one's equation against its metric.
 - **Units:** every row's unit is its metric's unit, after unit aliases, except the rows
-  listed as unit variants.
+  listed as unit variants. A display variant that shows a GB/s metric in seconds says
+  Bytes/s.
 - **Counters:** the counters the whole library selects equal the counters
   `detect_counters()` selects with no filter (with `--membw-analysis` where the arch has
   panel 3000).
@@ -564,8 +558,8 @@ AIPROFCOMP-820 (marked by TODOs in `tools/validate_metric_library.py`):
 | Variables equal `get_build_in_vars()` | At the cutover (Stage 8) | `get_build_in_vars()` loads from the library, so the check would compare the library with itself |
 | Row equations, units and peaks match the library, with `DISPLAY_VARIANTS` and `UNIT_VARIANTS` | When the old panel files are deleted, after the one-release fallback | The fallback still reads the old files, so they must stay equal to the library |
 
-The schema checks (file loading, inheritance, fields, id rules, shared formulas, measured
-peaks, unit spelling and key order) stay.
+The schema checks (file loading, inheritance, fields, id rules, shared formulas and names,
+measured peaks and unit spelling) stay.
 
 ### Dependencies
 
@@ -618,7 +612,7 @@ their own categories.
 Top-level keys are sorted in every file (after `inherit`): metric ids, and the variable
 names in `variables.yaml`. Where a metric is shown no longer orders the library, and the
 `{category}.{subcategory}_{name}` form keeps related metrics together. `format_yaml.py
---fix` sorts the keys and the validator rejects unsorted files. The order of
+--fix` sorts the keys, and its pre-commit hook rejects unsorted files. The order of
 `variables.yaml` does not affect evaluation (see `VariableDefinition`).
 
 No abstract `_base/` directories. The first architecture in each family (gfx908 for
@@ -688,6 +682,24 @@ they are merged into one id (each panel's label becomes a view label in Phase 2)
 The numeric positional IDs (e.g. `"11.2.2"`) are row positions in `analysis_configs`;
 the metric library does not store them.
 
+### Metric names
+
+A metric's `name` says which hardware it measures, so it reads correctly outside the
+panel that shows it:
+
+- It starts with the block: `L2 Misses`, `L2-Fabric Atomic Requests`, `vL1D-L2 Read
+  Requests`, `UTCL1 Hits`, `LDS Bank Conflict Cycles`, `TA Address Stall`. A metric of
+  the vL1D's address translation is named `UTCL1`, after the counters it reads.
+- It spells out abbreviations: `Requests`, `Bandwidth`, `Address`, `Memory`,
+  `Arithmetic Intensity`.
+- A per-channel metric ends with `per Channel`.
+- Names are unique on an arch, ignoring case; the validator rejects two metrics with the
+  same name. Two quantities that panels show under one label get names that tell them
+  apart (`Wavefront Occupancy`, `Wavefront Occupancy (Percent)`).
+
+A row keeps its panel label (`Hits`, `Req`) in the analysis configs; a Phase 2 view sets
+it as the view's label.
+
 ### OQ3 resolution -- metrics with both description and formula drift
 
 The HLD analysis counted 39 such metrics by grouping on metric name alone. Grouping by
@@ -711,9 +723,11 @@ today's YAMLs differ between tables:
   display unit is a view concern: the scaled form stays in the analysis configs until
   Phase 2, where a view may request its own display unit (see `ViewMetricRef.unit`).
 - **The same quantity with a different formula** (e.g. the gfx1250 cache hit rates,
-  HITS/REQ vs HITS/(HITS+MISSES)) is unified to one formula in both the old and the new
-  files. Each case is approved individually and listed in the CHANGELOG, because it
-  changes displayed values.
+  HITS/REQ vs HITS/(HITS+MISSES)): the library keeps each formula as its own id, and the
+  panels stay unchanged. The parent arch's formula keeps the id; the other gets a new,
+  descriptive id, or an existing id that already means that formula. The metric owners
+  choose one formula for each pair; a separate change then fixes the panels, merges the
+  ids and lists the value change in the CHANGELOG.
 
 ### OQ4 resolution -- same description under different names
 
@@ -733,9 +747,10 @@ descriptions are shared by more than one name.
 | Read latency | `L2-Fabric Read Latency`, `Read Latency` | `L2-Fabric Read Latency` |
 | INT8 MFMA ops | `MFMA IOPs (INT8)`, `MFMA IOPs (Int8)` | `MFMA IOPs (INT8)` |
 
-Two groups share a description only because of documentation errors: `L1I Hit Rate` and
-`L1I BW` have swapped descriptions on gfx908-gfx942, and `Dependency Wait Cycles` reuses
-the `Wave Cycles` description. These keep separate ids.
+Two groups share a description only because of documentation errors: the rows
+`L1I Hit Rate` and `L1I BW` (`l1i.hit_rate_excl_dup`, `l1i.bw`) have swapped descriptions
+on gfx908-gfx942, and `Dependency Wait Cycles` (`wave.dep_wait_cycles`) reuses the
+`Wave Cycles` (`wave.cycles`) description. These keep separate ids.
 
 ### Sets migration
 
@@ -797,8 +812,8 @@ unchanged -- it receives the same `dict[str, str]` regardless of source.
 | Tool | What changes |
 |---|---|
 | `validate_sets_metric_ids.py` | Validate `metric_library/{arch}/sets.yaml`: references resolve through `MetricLibrary`, and each set fits one pass. The numeric files keep their positional check until the cutover. |
-| `format_yaml.py` | Also checks `metric_library/gfx*` files (its pre-commit hook covers them): the `formula`, `peak` and `peak_empirical` keys, with the `!remove` tag accepted, and sorts their top-level keys. Core equation formatting logic (factoring constants out of aggregation) is unchanged. Done with the gfx908 library. |
-| `hash_manager.py` | Include base arch directories in hash database. Path discovery expands to cover `gfx908/*.yaml` and `gfx115x/*.yaml` as base arch files. |
+| `format_yaml.py` | Also checks `metric_library/gfx*` files (its pre-commit hook covers them): the `formula`, `peak` and `peak_empirical` keys, with the `!remove` tag accepted, and sorts their top-level keys. Core equation formatting logic (factoring constants out of aggregation) is unchanged. |
+| `hash_manager.py` | No change: it keeps hashing the analysis configs, and `tools/validate_metric_library.py` checks the metric library files. |
 | `verify_against_config_template.py` | No change: `tools/validate_metric_library.py` checks the metric library files, and this script keeps checking the old panel files until the cutover. |
 | `metric_description_manager.py` | No change in Phase A: the old panel YAMLs stay the documentation source until the cutover (Stage 8), when it reads descriptions from Layer 2. Output format for docs YAMLs is unchanged. |
 
