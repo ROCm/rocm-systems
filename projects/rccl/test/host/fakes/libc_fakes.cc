@@ -275,6 +275,8 @@ static int DefaultGethostname(char* name, size_t len) { return ::gethostname(nam
 
 static int DefaultAccess(const char* path, int mode) { return ::access(path, mode); }
 
+static int DefaultClockGettime(clockid_t clock, struct timespec* ts) { return ::clock_gettime(clock, ts); }
+
 static void* DefaultMalloc(size_t size) { return std::malloc(size); }
 
 static void* DefaultCalloc(size_t nmemb, size_t size) { return std::calloc(nmemb, size); }
@@ -310,6 +312,7 @@ std::function<void(const char*)> g_perror = DefaultPerror;
 std::function<void(int)> g_exit = DefaultExit;
 std::function<int(char*, size_t)> g_gethostname = DefaultGethostname;
 std::function<int(const char*, int)> g_access = DefaultAccess;
+std::function<int(clockid_t, struct timespec*)> g_clockGettime = DefaultClockGettime;
 std::function<void*(size_t)> g_malloc = DefaultMalloc;
 std::function<void*(size_t, size_t)> g_calloc = DefaultCalloc;
 std::function<void(void*)> g_free = DefaultFree;
@@ -361,6 +364,7 @@ void ResetLibcFakes() {
   g_exit = DefaultExit;
   g_gethostname = DefaultGethostname;
   g_access = DefaultAccess;
+  g_clockGettime = DefaultClockGettime;
   g_malloc = DefaultMalloc;
   g_calloc = DefaultCalloc;
   g_free = DefaultFree;
@@ -456,6 +460,7 @@ int micro_fflush(FILE* stream) { return g_fflush(stream); }
 void micro_perror(const char* prefix) { g_perror(prefix); }
 int micro_gethostname(char* name, size_t len) { return g_gethostname(name, len); }
 int micro_access(const char* path, int mode) { return g_access(path, mode); }
+int micro_clock_gettime(clockid_t clock, struct timespec* ts) { return g_clockGettime(clock, ts); }
 void* micro_malloc(size_t size) { return g_malloc(size); }
 void* micro_calloc(size_t nmemb, size_t size) { return g_calloc(nmemb, size); }
 void micro_free(void* ptr) { g_free(ptr); }

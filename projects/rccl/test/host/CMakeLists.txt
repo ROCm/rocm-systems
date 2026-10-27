@@ -1027,6 +1027,7 @@ function(rccl_define_micro_source_lists)
     fakes/hsa_fakes.cc
     fakes/ibv_ops_fakes.cc
     fakes/ibvwrap_fakes.cc
+    fakes/libc_fakes.cc
     fakes/mlx5dvwrap_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc

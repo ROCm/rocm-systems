@@ -31,6 +31,8 @@
 // it changes nothing. free() is seamed too so a test can assert the failing
 // path released what it had already taken.
 //
+// clock_gettime is seamed so a unit's elapsed-time arithmetic sees exact values; its default reads the real clock.
+//
 // fprintf is seamed but not swappable per test: it always forwards to the real vfprintf so stderr output still
 // happens, and only records the call count and the FILE* argument, never the formatted text.
 
@@ -40,6 +42,7 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <cstdio>
@@ -72,6 +75,7 @@ void micro_free(void*);
 int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)));
 int micro_gethostname(char*, size_t);
 int micro_access(const char*, int);
+int micro_clock_gettime(clockid_t, struct timespec*);
 }  // extern "C"
 
 #define write micro_write
@@ -100,3 +104,4 @@ int micro_access(const char*, int);
 #define fprintf micro_fprintf
 #define gethostname micro_gethostname
 #define access micro_access
+#define clock_gettime micro_clock_gettime

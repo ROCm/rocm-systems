@@ -15,6 +15,8 @@
 #include <deque>
 #include <vector>
 
+#include "ScopedHook.h"
+#include "fakes/libc_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "fakes/socket_fakes.h"
@@ -58,9 +60,9 @@ int TestWqeClockGettime(clockid_t clockId, struct timespec* ts) {
 #define ncclIbWqeLatHandleCompletion NetIbWqeLatHandleCompletion
 #define ncclIbWqeLatScanStalls NetIbWqeLatScanStalls
 #define ncclIbWqeLatReportQpSummary NetIbWqeLatReportQpSummary
-#define clock_gettime TestWqeClockGettime
+#include "fakes/libc_seam.h"
 #include NET_IB_WQE_LAT_MON_CC_PATH
-#undef clock_gettime
+#include "fakes/libc_seam_undef.h"
 #undef ncclIbWqeLatReportQpSummary
 #undef ncclIbWqeLatScanStalls
 #undef ncclIbWqeLatHandleCompletion
@@ -111,32 +113,38 @@ bool RecordSample(struct ncclIbWqeLatMon* monitor, uint64_t postNs, uint64_t del
   return NetIbWqeLatMonOnComplete(monitor, postNs + deltaNs, nullptr, nullptr, stats);
 }
 
+// Two devices with their QPs interleaved across them: QP i belongs to device i % 2.
 struct WqeCompletionScene {
   ncclIbSendComm send{};
-  std::array<ibv_qp, 2> verbsQps{};
+  std::array<ibv_qp, 4> verbsQps{};
 
-  WqeCompletionScene() {
+  explicit WqeCompletionScene(int nqps = 2) {
     send.base.isSend = true;
-    send.base.nqps = 2;
+    send.base.nqps = nqps;
     send.base.vProps.ndevs = 2;
     send.base.nRemDevs = 1;
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < nqps; ++i) {
       verbsQps[i].qp_num = 100 + i;
       send.base.qps[i].qp = &verbsQps[i];
-      send.base.qps[i].devIndex = i;
+      send.base.qps[i].devIndex = i % 2;
       send.base.qps[i].remDevIdx = 0;
       send.base.qps[i].rtrAttr.localIbPort = i + 1;
       send.base.activeQps[i] = &send.base.qps[i];
-      send.devs[i].base.ibDevN = i;
       InitMonitor(&send.base.qps[i].latMon);
     }
+    for (int i = 0; i < 2; ++i) send.devs[i].base.ibDevN = i;
   }
 };
+
+// Every slow, stall and summary report resolves the peer through ncclSocketGetAddr first, so a hook's call count
+// is the number of reports.
+ncclResult_t NoPeerAddress(ncclSocket*, ncclSocketAddress*) { return ncclSystemError; }
 
 class NetIbWqeLatMonMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     for (int i = 0; i < 2; ++i) savedPortAttrs_[i] = ncclIbDevs[i].portAttr;
+    g_clockGettime = TestWqeClockGettime;
   }
 
   void TearDown() override {
@@ -147,6 +155,7 @@ class NetIbWqeLatMonMicrotest : public ::testing::Test {
     NetIbWqeLatEnabled = false;
     NetIbWqeLatThresholdNs = 0;
     NetIbWqeLatReportEnabled = false;
+    ResetLibcFakes();
     ResetSocketFakes();
     ResetNcclFakes();
   }
@@ -435,46 +444,29 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_FiveSamplesReportWelfordStatisticsAndOr
   EXPECT_LE(stats.p999Ns, stats.maxNs);
 }
 
-TEST_F(NetIbWqeLatMonMicrotest, Snapshot_AscendingSamplesProduceBoundedOrderedPercentiles) {
-  ncclIbWqeLatMon monitor{};
-  InitMonitor(&monitor);
+TEST_F(NetIbWqeLatMonMicrotest, Snapshot_MonotoneSamplesProduceBoundedOrderedPercentiles) {
   NetIbWqeLatThresholdNs = UINT64_MAX;
-  for (uint64_t delta = 1; delta <= 30; ++delta) {
-    RecordSample(&monitor, kBaseNs + delta * (kSecondNs + 100), delta);
+  for (bool ascending : {true, false}) {
+    SCOPED_TRACE(ascending ? "ascending" : "descending");
+    ncclIbWqeLatMon monitor{};
+    InitMonitor(&monitor);
+    for (uint64_t i = 1; i <= 30; ++i) {
+      RecordSample(&monitor, kBaseNs + i * (kSecondNs + 100), ascending ? i : 31 - i);
+    }
+    ncclIbWqeLatStats stats{};
+
+    NetIbWqeLatMonSnapshot(&monitor, &stats);
+
+    EXPECT_EQ(stats.count, 30u);
+    EXPECT_EQ(stats.maxNs, 30u);
+    EXPECT_NEAR(stats.meanNs, 15.5, 1e-9);
+    EXPECT_GE(stats.p50Ns, 12u);
+    EXPECT_LE(stats.p50Ns, 18u);
+    EXPECT_GE(stats.p90Ns, stats.p50Ns);
+    EXPECT_GE(stats.p99Ns, stats.p90Ns);
+    EXPECT_GE(stats.p999Ns, stats.p99Ns);
+    EXPECT_LE(stats.p999Ns, stats.maxNs);
   }
-  ncclIbWqeLatStats stats{};
-
-  NetIbWqeLatMonSnapshot(&monitor, &stats);
-
-  EXPECT_EQ(stats.count, 30u);
-  EXPECT_EQ(stats.maxNs, 30u);
-  EXPECT_NEAR(stats.meanNs, 15.5, 1e-9);
-  EXPECT_GE(stats.p50Ns, 12u);
-  EXPECT_LE(stats.p50Ns, 18u);
-  EXPECT_GE(stats.p90Ns, stats.p50Ns);
-  EXPECT_LE(stats.p999Ns, stats.maxNs);
-}
-
-TEST_F(NetIbWqeLatMonMicrotest, Snapshot_DescendingSamplesProduceBoundedOrderedPercentiles) {
-  ncclIbWqeLatMon monitor{};
-  InitMonitor(&monitor);
-  NetIbWqeLatThresholdNs = UINT64_MAX;
-  for (uint64_t delta = 30; delta > 0; --delta) {
-    RecordSample(&monitor, kBaseNs + (31 - delta) * (kSecondNs + 100), delta);
-  }
-  ncclIbWqeLatStats stats{};
-
-  NetIbWqeLatMonSnapshot(&monitor, &stats);
-
-  EXPECT_EQ(stats.count, 30u);
-  EXPECT_EQ(stats.maxNs, 30u);
-  EXPECT_NEAR(stats.meanNs, 15.5, 1e-9);
-  EXPECT_GE(stats.p50Ns, 12u);
-  EXPECT_LE(stats.p50Ns, 18u);
-  EXPECT_GE(stats.p90Ns, stats.p50Ns);
-  EXPECT_GE(stats.p99Ns, stats.p90Ns);
-  EXPECT_GE(stats.p999Ns, stats.p99Ns);
-  EXPECT_LE(stats.p999Ns, stats.maxNs);
 }
 
 TEST_F(NetIbWqeLatMonMicrotest, Snapshot_MixedUniformSamplesSeparateMedianAndTailPercentiles) {
@@ -557,40 +549,37 @@ TEST_F(NetIbWqeLatMonMicrotest, HandleCompletion_SlowSendRecordsSampleAndEmitsRe
   ArmTracking(&monitor, kBaseNs, 1);
   NetIbWqeLatThresholdNs = 1;
   g_wqeClockValues.push_back(kBaseNs + 10);
-  g_ncclSocketGetAddr = [](ncclSocket*, ncclSocketAddress*) { return ncclSystemError; };
+  ScopedHook reports(g_ncclSocketGetAddr, NoPeerAddress);
   uint64_t pollNs = 0;
   bool pollNsValid = false;
   ibv_wc completion{};
   completion.opcode = IBV_WC_SEND;
   completion.qp_num = scene.verbsQps[0].qp_num;
 
-  RcclUnitTesting::ScopedDebugLogging logging(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = RcclUnitTesting::CaptureLog(
-    [&] { NetIbWqeLatHandleCompletion(&scene.send.base, 0, &completion, &pollNs, &pollNsValid); });
+  NetIbWqeLatHandleCompletion(&scene.send.base, 0, &completion, &pollNs, &pollNsValid);
 
   EXPECT_EQ(monitor.count, 1u);
   EXPECT_EQ(monitor.slowCount, 1u);
   EXPECT_EQ(monitor.maxNs, 10u);
   EXPECT_FALSE(monitor.tracking);
-  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "WQE slow:"));
-  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "delta=10ns"));
+  EXPECT_EQ(reports.calls, 1);
 }
 
 TEST_F(NetIbWqeLatMonMicrotest, ScanStalls_VisitsOnlyRequestedInterleavedDevice) {
-  WqeCompletionScene scene;
+  WqeCompletionScene scene(/*nqps=*/4);
   for (auto& qp : scene.send.base.qps) ArmTracking(&qp.latMon, kBaseNs, 1);
   NetIbWqeLatThresholdNs = 1;
   g_wqeClockValues.push_back(kBaseNs + 10);
-  g_ncclSocketGetAddr = [](ncclSocket*, ncclSocketAddress*) { return ncclSystemError; };
+  ScopedHook reports(g_ncclSocketGetAddr, NoPeerAddress);
 
-  RcclUnitTesting::ScopedDebugLogging logging(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = RcclUnitTesting::CaptureLog([&] { NetIbWqeLatScanStalls(&scene.send.base, 1); });
+  NetIbWqeLatScanStalls(&scene.send.base, 1);
 
   EXPECT_EQ(g_wqeClockCalls, 1);
   EXPECT_EQ(scene.send.base.qps[0].latMon.lastStallWarnNs, 0u);
   EXPECT_EQ(scene.send.base.qps[1].latMon.lastStallWarnNs, kBaseNs + 10);
-  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "WQE stall (no CQE):"));
-  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "qpn=101"));
+  EXPECT_EQ(scene.send.base.qps[2].latMon.lastStallWarnNs, 0u);
+  EXPECT_EQ(scene.send.base.qps[3].latMon.lastStallWarnNs, kBaseNs + 10);
+  EXPECT_EQ(reports.calls, 2);
 }
 
 // AICOMRCCL-3131: stall scans should inspect the active failover QP, not a
@@ -627,19 +616,17 @@ TEST_F(NetIbWqeLatMonMicrotest, ReportSummary_EitherGlobalGateDisabledEmitsNothi
   InitMonitor(&monitor);
   NetIbWqeLatThresholdNs = UINT64_MAX;
   RecordSample(&monitor, kBaseNs, 25);
+  ScopedHook reports(g_ncclSocketGetAddr, NoPeerAddress);
 
-  RcclUnitTesting::ScopedDebugLogging logging(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = RcclUnitTesting::CaptureLog([&] {
-    NetIbWqeLatReportEnabled = true;
-    NetIbWqeLatEnabled = false;
-    NetIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]);
-    NetIbWqeLatEnabled = true;
-    NetIbWqeLatReportEnabled = false;
-    NetIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]);
-  });
+  NetIbWqeLatReportEnabled = true;
+  NetIbWqeLatEnabled = false;
+  NetIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]);
+  NetIbWqeLatEnabled = true;
+  NetIbWqeLatReportEnabled = false;
+  NetIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]);
 
   EXPECT_EQ(monitor.count, 1u);
-  EXPECT_FALSE(RcclUnitTesting::LogHas(log, "WQE latency summary"));
+  EXPECT_EQ(reports.calls, 0);
 }
 
 TEST_F(NetIbWqeLatMonMicrotest, ReportSummary_NullVerbsOrEmptyQpEmitsNothing) {
@@ -649,15 +636,13 @@ TEST_F(NetIbWqeLatMonMicrotest, ReportSummary_NullVerbsOrEmptyQpEmitsNothing) {
   nullVerbsQp.latMon.count = 1;
   NetIbWqeLatEnabled = true;
   NetIbWqeLatReportEnabled = true;
+  ScopedHook reports(g_ncclSocketGetAddr, NoPeerAddress);
 
-  RcclUnitTesting::ScopedDebugLogging logging(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = RcclUnitTesting::CaptureLog([&] {
-    NetIbWqeLatReportQpSummary(&scene.send.base, 0, nullptr);
-    NetIbWqeLatReportQpSummary(&scene.send.base, 0, &nullVerbsQp);
-    NetIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]);
-  });
+  NetIbWqeLatReportQpSummary(&scene.send.base, 0, nullptr);
+  NetIbWqeLatReportQpSummary(&scene.send.base, 0, &nullVerbsQp);
+  NetIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]);
 
-  EXPECT_FALSE(RcclUnitTesting::LogHas(log, "WQE latency summary"));
+  EXPECT_EQ(reports.calls, 0);
 }
 
 TEST_F(NetIbWqeLatMonMicrotest, ReportSummary_EnabledSampleEmitsStatistics) {

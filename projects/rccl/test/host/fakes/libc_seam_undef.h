@@ -10,6 +10,7 @@
 // real libc again; a test that wants a seamed call can name micro_* directly.
 // No include guard on purpose: the push/pop pair is positional.
 
+#undef clock_gettime
 #undef access
 #undef gethostname
 #undef free
