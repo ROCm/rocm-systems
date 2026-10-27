@@ -144,8 +144,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Removed the `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
   - They were internal to the CLI, not part of the `amdsmi` Python library, and are replaced by the reworked exit codes.
 
-### Optimized
-
 ### Resolved Issues
 
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
@@ -243,6 +241,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amdsmi_set_clk_freq()` falsely returning `AMDSMI_STATUS_INVAL` on Navi48 (gfx1201)**.  
   - Requested levels outside the settable range are now skipped instead of failing the whole request. It returns `AMDSMI_STATUS_INVAL` only when no requested level can be set.
+
+- **Fixed `go get` failing for the amd-smi Go module**.  
+  - `go get github.com/ROCm/rocm-systems/projects/amdsmi` fetched the whole repository and failed with `module source tree too large`. `projects/amdsmi` now has its own `go.mod`, so only the amd-smi sources are fetched.
+
+- **Fixed LeakSanitizer reporting memory leaks in programs that use AMD SMI**.  
+  - Programs that read the GPU process list, or exit without calling `amdsmi_shut_down()`, no longer report leaked library objects at exit.
 
 ## amd_smi_lib for ROCm 10.1.0
 
