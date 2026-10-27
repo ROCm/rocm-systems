@@ -717,6 +717,14 @@ HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT
 HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_handle_release, hsa_amd_vmem_handle_release, hsa_amd_vmem_handle_release_fn)
 // clang-format on
 
+#elif defined(ROCPROFILER_LIB_ROCPROFILER_HSA_QUEUE_CPP_IMPL) &&                                   \
+    ROCPROFILER_LIB_ROCPROFILER_HSA_QUEUE_CPP_IMPL == 1
+
+// clang-format off
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_get_dispatch_time, hsa_amd_profiling_get_dispatch_time, hsa_amd_profiling_get_dispatch_time_fn)
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy, hsa_signal_destroy, hsa_signal_destroy_fn)
+// clang-format on
+
 #else
 #    error "Do not compile this file directly. It is included by lib/rocprofiler/hsa/hsa.cpp"
 #endif
