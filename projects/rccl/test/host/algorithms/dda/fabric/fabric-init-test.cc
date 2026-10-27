@@ -511,7 +511,8 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_PublishesLocalCapForThePeers) {
   int published = -1;
   auto homogeneous = g_bootstrapAllGather;
   ScopedHook gather(g_bootstrapAllGather, [&published, homogeneous](void* state, void* allData, int size) {
-    if (size == static_cast<int>(sizeof(int))) published = static_cast<int*>(allData)[kRank];
+    // The first int gather publishes the cap; the device-setup vote that follows is also an int.
+    if (size == static_cast<int>(sizeof(int)) && published < 0) published = static_cast<int*>(allData)[kRank];
     return homogeneous(state, allData, size);
   });
   SetMicroEnv("RCCL_DDA_FABRIC_MAXBLOCKS", "7");
