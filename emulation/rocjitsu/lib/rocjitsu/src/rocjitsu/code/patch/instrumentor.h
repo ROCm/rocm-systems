@@ -19,9 +19,12 @@
 ///         |  make_trampoline_plan() + TrampolineBuilder::build()
 ///         v
 ///   (preflight: per-site plan + built bytes, accumulated locally)
-///         |  splice anchors + append trampoline caves into .text + emit()
+///         |  splice anchors + append probe bodies, entry stub and trampolines
+///         |  into .text + redirect the entry to the stub + emit()
 ///         v
-///   InstrumentedCodeObject      -- patched ELF + per-site InstrumentationPatch
+///   InstrumentedCodeObject      -- patch(): patched ELF + diagnostics
+///   InstrumentedCodeObjectDebug -- patch_with_debug_summaries(): same result
+///                                  + per-site InstrumentationPatch (test/debug)
 ///
 /// Current pipeline is all-or-nothing across all queued points: any per-site
 /// failure aborts the whole patch.
@@ -39,6 +42,7 @@
 
 #pragma once
 
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -266,16 +270,39 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 // The two inputs come from different owners: `probe_clobbers` is the callee fact
 // from ProbeClobberSummary (probe_clobber.h); `builder_clobbers` is the
 // call-envelope fact the builder's resource plan reports (link pair,
-// target-address pair, SCC temp, ...). That builder plan and its dead-register
-// selection land in a later slice; these helpers take `builder_clobbers` as a
-// plain RegisterSet so the formula and v0 policy are testable now. Combining the
-// two and applying policy is the Instrumentor's job, so it lives here rather
-// than in the callee-only probe_clobber unit.
+// target-address pair, SCC temp, ...). These helpers take `builder_clobbers` as
+// a plain RegisterSet rather than reaching into the builder's plan, so the
+// formula is testable on its own. Combining the two and applying policy is the
+// Instrumentor's job, so it lives here rather than in the callee-only
+// probe_clobber unit.
 //==============================================================================
 
 /// @brief instrument_clobbers = probe body clobbers | builder envelope clobbers.
 [[nodiscard]] RegisterSet compute_instrumentation_clobbers(const ProbeClobberSummary &probe_summary,
                                                            const RegisterSet &builder_clobbers);
+
+/// @brief Registers a probe call overwrites independently of any per-site
+///        choice: every probe body's ordinary clobbers, plus the link pair each
+///        one returns through.
+///
+/// @details The set framework storage that must outlive a probe call has to
+/// avoid. The envelope's own temps are absent because they are picked per site,
+/// after this set has already constrained such storage.
+///
+/// Unioned over *every* probe in the patch rather than the ones a given site
+/// calls: storage written at kernel entry and read at a later site has to
+/// survive each probe call in between, whichever probe that is.
+///
+/// @param probes    The patch's probe registry.
+/// @param summaries One clobber summary per entry of @p probes, in the same
+///                  order. A size mismatch is a caller error and fails closed.
+/// @param out       Filled with the union on success; untouched on failure.
+/// @returns false when the inputs disagree in size or a probe's ABI names no
+///          usable link pair.
+[[nodiscard]] bool compute_probe_reserved_registers(std::span<const ProbeCallable> probes,
+                                                    std::span<const ProbeClobberSummary> summaries,
+                                                    RegisterSet &out,
+                                                    std::string *error_out = nullptr);
 
 /// @brief spill_set = live_at_anchor & instrumentation_clobbers.
 [[nodiscard]] RegisterSet compute_spill_set(const RegisterSet &live_at_anchor,
@@ -420,9 +447,16 @@ public:
   /// Requires at least one queued InstrumentationPoint; queuing zero is a fatal
   /// error. Shares the single-attempt budget with patch_with_debug_summaries();
   /// see the class-level note.
+  ///
+  /// Refuses any point whose probe reads a `LogBufferPtr*` argument: the entry
+  /// prologue those need loads through a kernarg wrapper that no runtime builds
+  /// yet.
   [[nodiscard]] InstrumentedCodeObject patch();
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
+  ///
+  /// Unlike patch(), accepts `LogBufferPtr*` arguments, for callers that supply
+  /// the kernarg wrapper themselves.
   ///
   /// Currently intended for tests and debugging, although could eventually
   /// be used to communicate important information for the host (an ordering
@@ -454,6 +488,26 @@ private:
   // is reported instead of crashing in BasicBlock::build.
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
+
+  // The DBI entry prologue as a dispatch-only stub in the cave: the descriptor
+  // is redirected to it, and it branches to the untouched original entry. Not
+  // one of the caller's points: it exists because a probe asked for the
+  // framework's entry storage, and it is what defines that storage.
+  struct EntryProloguePatch {
+    uint64_t padding_bytes = 0;  ///< s_nop fill ahead of the stub, for entry alignment.
+    uint64_t stub_offset = 0;    ///< .text offset the descriptor enters at.
+    uint16_t storage_base = 0;   ///< Persistent pair every later site reads.
+    std::vector<uint32_t> words; ///< Prologue, then s_branch to the original entry.
+  };
+
+  // Gate the kernel, choose the storage, and build the stub for a cave that
+  // currently ends at @p cave_offset. Fails closed with a diagnostic rather
+  // than patching a kernel the prologue could not cover.
+  [[nodiscard]] std::optional<EntryProloguePatch> plan_entry_prologue(
+      const std::vector<KernelDescriptorInfo> &kernels, std::optional<uint32_t> kernel_sgpr_count,
+      const std::vector<BasicBlock *> &scope, const std::vector<ProbeCallable> &probes,
+      const std::vector<ProbeClobberSummary> &summaries, uint64_t cave_offset,
+      std::string *error_out);
 
   // Everything one resolution pass produces.
   struct ResolvedPoints {

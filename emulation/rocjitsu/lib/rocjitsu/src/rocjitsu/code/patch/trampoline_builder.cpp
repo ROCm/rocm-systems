@@ -7,7 +7,9 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/builders/vector_builders.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/error_report.h"
+#include "rocjitsu/isa/isa_traits.h"
 
 #include <algorithm>
 #include <array>
@@ -46,6 +48,24 @@ void append_word(std::vector<uint8_t> &dst, uint32_t w) {
   dst.insert(dst.end(), buf, buf + sizeof(w));
 }
 
+// GFX9 (CDNA1-4) does not interlock a VALU write of an SGPR against a later
+// vector-memory read or lane select of it, nor a SALU write of M0 against a later
+// M0 reader; software spaces them with wait states (s_nop N supplies N+1, any other
+// instruction 1).
+[[nodiscard]] constexpr bool needs_restore_wait_states(rj_code_arch_t arch) {
+  return arch_is_cdna_4_or_lower(arch);
+}
+
+// After the v_readlane_b32 that restores an SGPR: a vector-memory read of it
+// (resource, soffset, saddr) needs 5, which also covers a v_readlane/v_writelane
+// lane select (4) and a gfx94x VALU read (2). LLVM GCNHazardRecognizer's
+// checkVMEMHazards, checkRWLaneHazards and checkVALUHazards.
+constexpr uint32_t kSgprRestoreWaitStates = 5;
+
+// After the s_mov_b32 that restores M0: s_movrel*, s_sendmsg, GDS, LDS DMA and
+// LDS-direct reads of M0 need 1 (LLVM GCNHazardRecognizer::checkReadM0Hazards).
+constexpr uint32_t kM0RestoreWaitStates = 1;
+
 // Spill/fill bracket. prologue saves each register before the call; epilogue
 // restores each after the call and waits for the loads before the original runs.
 // SGPRs bridge through one VGPR (writelane/readlane); since the single bridge is
@@ -53,6 +73,9 @@ void append_word(std::vector<uint8_t> &dst, uint32_t w) {
 struct SpillBracket {
   std::vector<uint32_t> prologue;
   std::vector<uint32_t> epilogue;
+  // Instructions, not words, the epilogue emits after its last v_readlane_b32.
+  // emit_probe_call counts them toward the SGPR restore's wait states.
+  uint32_t instructions_after_sgpr_restore = 0;
 };
 
 [[nodiscard]] SpillBracket build_spill_bracket(const std::vector<SpillSlot> &vgpr_spills,
@@ -119,13 +142,17 @@ struct SpillBracket {
   for (const SpillSlot &slot : vgpr_spills) {
     const std::vector<uint32_t> load = build_scratch_load_dword(slot.reg, slot.byte_offset, arch);
     bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
+    ++bracket.instructions_after_sgpr_restore;
   }
   for (const SpillSlot &slot : acc_spills) {
     const auto load = build_scratch_load_dword(slot.reg, slot.byte_offset, arch, /*acc=*/true);
     bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
+    ++bracket.instructions_after_sgpr_restore;
   }
-  if (has_vgpr || has_acc)
+  if (has_vgpr || has_acc) {
     bracket.epilogue.push_back(build_wait_loads_complete(arch));
+    ++bracket.instructions_after_sgpr_restore;
+  }
 
   // Drain all scratch stores before the call: the store's async read of the source
   // register must finish before the probe clobbers it, which also orders each store
@@ -215,6 +242,47 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   }
   const RegisterSet arg_regs = arg_registers(abi);
 
+  // Target/scc/special-state selection stays within the kernel's ordinary SGPRs,
+  // so a temp never lands past the patched kernel's actual .sgpr_count (a wider
+  // kernel is not synthesized) or in a CDNA kernel's special-register tail. The
+  // orchestrator sets plan.kernel_sgpr_count; it defaults to the conservative
+  // cross-ISA allocatable limit.
+  const uint32_t sgpr_bound = ordinary_sgpr_bound(plan.arch, plan.kernel_sgpr_count);
+
+  // The entry-storage pair holds a value produced once at kernel entry and read
+  // at arbitrary later sites, so both lanes must be inside the range the temps
+  // are drawn from.
+  RegisterSet entry_storage;
+  if (plan.entry_storage_base) {
+    const uint32_t last = static_cast<uint32_t>(*plan.entry_storage_base) + 1u;
+    if (last >= sgpr_bound) {
+      report(error_out, ("probe-call resource planning: entry-storage pair s[" +
+                         std::to_string(*plan.entry_storage_base) + ":" + std::to_string(last) +
+                         "] is not below s" + std::to_string(sgpr_bound) +
+                         ", where the kernel's ordinary SGPRs end")
+                            .c_str());
+      return false;
+    }
+    entry_storage.expand(RegisterRef{RegClass::SGPR, *plan.entry_storage_base, 2});
+    // Excluding the pair from the envelope's temps is not enough on its own: the
+    // probe body runs with the pair still holding the pointer, and a body that
+    // writes it destroys the value for every site after this one. Nothing saves
+    // and restores it, so such a probe is rejected rather than bracketed.
+    if (probe_body_clobbers.intersects(entry_storage)) {
+      report(error_out,
+             ("probe-call resource planning: the probe body writes the framework's "
+              "entry-storage pair s[" +
+              std::to_string(*plan.entry_storage_base) + ":" + std::to_string(last) + "]")
+                 .c_str());
+      return false;
+    }
+  } else if (std::any_of(plan.probe_args.begin(), plan.probe_args.end(),
+                         [](const ProbeArgValue &a) { return reads_entry_storage(a.source); })) {
+    report(error_out, "probe-call resource planning: an argument reads the framework's entry "
+                      "storage, but the plan names no entry-storage pair");
+    return false;
+  }
+
   // Reject if either lane of the link pair is live at the anchor; saving a live
   // link pair is deferred.
   if (live_at_anchor.intersects(probe_link_pair(abi))) {
@@ -228,17 +296,10 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   RegisterSet link_pair;
   link_pair.expand(probe_link_pair(abi));
 
-  // Target/scc/special-state selection is capped at plan.kernel_sgpr_count so a
-  // temp never lands past the patched kernel's actual .sgpr_count (a wider kernel
-  // is not synthesized). The orchestrator sets the bound; it defaults to the
-  // conservative cross-ISA allocatable limit.
-  const uint32_t sgpr_bound =
-      std::min<uint32_t>(plan.kernel_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
-
   // Target-address pair: dead, even-aligned, and not the link pair. It is
   // read by s_swappc before the probe body runs, so it may overlap
   // probe_body_clobbers.
-  const RegisterSet target_unavail = live_at_anchor | link_pair;
+  const RegisterSet target_unavail = live_at_anchor | link_pair | entry_storage;
   const std::optional<uint16_t> target_pair = find_free_sgpr_pair(target_unavail, sgpr_bound);
   if (!target_pair) {
     report(error_out, "probe-call resource planning: no dead SGPR pair available for the probe "
@@ -268,9 +329,10 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     reserved.expand(RegisterRef{RegClass::SGPR, *scc_temp, 1});
   }
 
-  // Special-state temps: one dead SGPR (pair for the wave64 EXEC/VCC masks,
-  // single for M0) per register the probe clobbers. Shared reserve path so EXEC,
-  // VCC, and M0 differ only by their row below, not by a branch each.
+  // Allocate a dead SGPR temp per register that must be preserved: a pair for
+  // EXEC/VCC, one for M0. The preserve_* inputs request saves; a full-mask window
+  // additionally requires EXEC. Shared reserve path so EXEC, VCC, and M0 differ
+  // only by their row below, not by a branch each.
   std::vector<SpecialStateSlot> special_saves;
   auto reserve_special = [&](bool requested, uint16_t operand, uint8_t width,
                              const char *name) -> bool {
@@ -338,6 +400,8 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
       break;
     case ProbeArgSource::AnchorExecLo:
     case ProbeArgSource::AnchorExecHi:
+    case ProbeArgSource::LogBufferPtrLo:
+    case ProbeArgSource::LogBufferPtrHi:
       before_words += 1;
       break;
     }
@@ -434,6 +498,17 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     return std::nullopt;
   }
 
+  // Same shape as the EXEC temp above: planning rejects this combination, so
+  // reaching it means the plan came from somewhere else. Checked once here rather
+  // than dereferenced per argument in the loop below.
+  if (!plan.entry_storage_base &&
+      std::any_of(plan.probe_args.begin(), plan.probe_args.end(),
+                  [](const ProbeArgValue &a) { return reads_entry_storage(a.source); })) {
+    report(error_out, "probe-call emission: an argument reads the framework's entry storage, but "
+                      "the plan names no entry-storage pair");
+    return std::nullopt;
+  }
+
   // Special-state saves: copy each preserved EXEC/VCC/M0 into its dead temp. Before
   // the stores so EXEC is captured before we force it to -1. Plain s_mov, SCC-safe.
   for (const SpecialStateSlot &s : plan.special_state_saves)
@@ -487,6 +562,16 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
       break;
     case ProbeArgSource::AnchorExecHi:
       env.push_back(build_v_mov_b32_src(vdst, static_cast<uint16_t>(exec_temp + 1), plan.arch));
+      break;
+    // The pair is read, never written, so it needs no save/restore here: the
+    // prologue defined it at kernel entry and planning kept the envelope and the
+    // probe body off it.
+    case ProbeArgSource::LogBufferPtrLo:
+      env.push_back(build_v_mov_b32_src(vdst, *plan.entry_storage_base, plan.arch));
+      break;
+    case ProbeArgSource::LogBufferPtrHi:
+      env.push_back(build_v_mov_b32_src(vdst, static_cast<uint16_t>(*plan.entry_storage_base + 1),
+                                        plan.arch));
       break;
     }
   }
@@ -555,13 +640,39 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     env.push_back(s.width == 2 ? build_s_mov_b64(s.operand, s.temp_base, plan.arch)
                                : build_s_mov_b32(s.operand, s.temp_base, plan.arch));
 
+  // GFX9 wait states the restores still owe the relocated original, topped up with
+  // one s_nop covering the larger shortfall. Counted rather than fixed, so a site
+  // whose reloads and restores already fill the gap pays nothing. The guest code
+  // the return branch reaches is further away still, so it is covered too.
+  uint32_t owed_wait_states = 0;
+  if (needs_restore_wait_states(plan.arch)) {
+    if (!plan.sgpr_spills.empty()) {
+      const uint32_t provided = spill.instructions_after_sgpr_restore +
+                                static_cast<uint32_t>(plan.special_state_saves.size());
+      if (provided < kSgprRestoreWaitStates)
+        owed_wait_states = kSgprRestoreWaitStates - provided;
+    }
+    // Nothing is counted after the M0 restore: plan_probe_call reserves M0 last,
+    // so its restore is the final instruction above. A plan ordering it earlier
+    // is only over-padded.
+    const bool restores_m0 =
+        std::ranges::any_of(plan.special_state_saves, [&](const SpecialStateSlot &s) {
+          return s.operand == scalar_operand_m0(plan.arch);
+        });
+    if (restores_m0)
+      owed_wait_states = std::max(owed_wait_states, kM0RestoreWaitStates);
+  }
+  const size_t wait_state_pad_words = owed_wait_states > 0 ? 1 : 0;
+  if (owed_wait_states > 0)
+    env.push_back(build_s_nop(static_cast<uint16_t>(owed_wait_states - 1), plan.arch));
+
   // Plan/emit drift guard: the planner committed to this many envelope words and
   // the orchestrator sized the layout around it. A mismatch means the two
   // disagree about the envelope shape. before_word_count is the arch-agnostic
-  // envelope; the spill bracket and the two boundary drains are accounted
-  // separately since their sizes are arch- and site-specific.
+  // envelope; the spill bracket, the two boundary drains and the wait-state pad
+  // are accounted separately since their sizes are arch- and site-specific.
   if (env.size() != plan.before_word_count + spill.prologue.size() + spill.epilogue.size() +
-                        2 * boundary_drain.size()) {
+                        2 * boundary_drain.size() + wait_state_pad_words) {
     report(error_out, "emit_probe_call: synthesized envelope word count does not match the planned "
                       "before_word_count");
     return std::nullopt;

@@ -7,7 +7,6 @@
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/node_info.hpp"
-#include "core/output_file_registry.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -60,7 +59,6 @@ using rocprofsys::agent_manager;
 using rocprofsys::agent_type;
 using rocprofsys::function_args_t;
 using rocprofsys::get_args_string;
-using rocprofsys::output_file_registry;
 using rocprofsys::trace_cache::ainic_pmc_sample;
 using rocprofsys::trace_cache::backtrace_region_sample;
 using rocprofsys::trace_cache::gpu_perf_counter_sample;
@@ -365,14 +363,15 @@ expect_stored_json_matches(const std::string& stored, const std::string& expecte
 class rocpd_write_read_test_interface : public ::testing::Test
 {
 protected:
-    static constexpr size_t k_node_id       = 1;
-    static constexpr size_t k_pid           = 200;
-    static constexpr size_t k_ppid          = 100;
-    static constexpr size_t k_thread_id     = 300;
-    static constexpr size_t k_queue_id      = 10;
-    static constexpr size_t k_stream_id     = 20;
-    static constexpr size_t k_process_start = 1000;
-    static constexpr size_t k_process_end   = 9000;
+    static constexpr size_t k_node_id   = 1;
+    static constexpr size_t k_pid       = 200;
+    static constexpr size_t k_ppid      = 100;
+    static constexpr size_t k_thread_id = 300;
+    static constexpr size_t k_queue_id  = 10;
+    static constexpr size_t k_stream_id = 20;
+    // Above UINT32_MAX, so 32-bit truncation is caught.
+    static constexpr size_t k_process_start = 1'000'000'000'001'000;
+    static constexpr size_t k_process_end   = 1'000'000'000'009'000;
 
     void SetUp() override
     {
@@ -1007,11 +1006,10 @@ protected:
             mgr->insert_agent(agent_entry);
         }
 
-        const int            pid  = static_cast<int>(k_pid);
-        const int            ppid = static_cast<int>(k_ppid);
-        output_file_registry registry;
+        const int pid  = static_cast<int>(k_pid);
+        const int ppid = static_cast<int>(k_ppid);
         {
-            rocpd_processor_t processor{ metadata, mgr, pid, ppid, registry };
+            rocpd_processor_t processor{ metadata, mgr, pid, ppid };
             processor.prepare_for_processing();
             if(on_processor)
             {
@@ -1289,9 +1287,8 @@ TEST_F(rocpd_write_read_test_interface, nic_pmc_info_invalid_target_arch_rejecte
     agent nic = nic_agent();
     mgr->insert_agent(nic);
 
-    output_file_registry registry;
-    rocpd_processor_t    processor{ metadata, mgr, static_cast<int>(k_pid),
-                                 static_cast<int>(k_ppid), registry };
+    rocpd_processor_t processor{ metadata, mgr, static_cast<int>(k_pid),
+                                 static_cast<int>(k_ppid) };
 
     EXPECT_THROW(processor.prepare_for_processing(), std::invalid_argument);
     EXPECT_TRUE(find_rocpd_database_in_directory(out_dir).empty())

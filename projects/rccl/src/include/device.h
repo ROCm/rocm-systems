@@ -708,6 +708,10 @@ struct ncclKernelComm {
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
 #if ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+  int tdmSimpleReduceEnable; // RCCL: route reduction-shaped SIMPLE slices through the TDM mover
+#endif
+#if ENABLE_TDM_PRIM_LL128
+  int tdmLl128Enable; // RCCL: route LL128 user-buffer legs through the async-to-LDS engine
 #endif
   int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
@@ -761,6 +765,28 @@ inline __host__ __device__ int countOneBits(struct channelMasks const& x) {
   int n = 0;
   for (int i = 0; i < (int)(MAXCHANNELS / CHANNELS_PER_MASK_WORD); i++) n += countOneBits(x.masks[i]);
   return n;
+}
+
+// Channel of the channelOrdinal-th set bit of mask, or -1; needs 0 <= lane < WARP_SIZE.
+// Lane checks bits lane and WARP_SIZE + lane (wave32) per word.
+__device__ __forceinline__ int ncclChannelMaskNthChannelId(struct channelMasks const& mask, int channelOrdinal,
+                                                           int lane) {
+  int total = 0;
+  for (int i = 0; i < (int)(MAXCHANNELS / CHANNELS_PER_MASK_WORD); i++) {
+    const uint64_t word = mask.masks[i];
+    int bit = lane;
+    if ((word & (1ull << bit)) && total + __popcll(word & ((1ull << bit) - 1)) == channelOrdinal) {
+      return bit + i * CHANNELS_PER_MASK_WORD;
+    }
+    if (WARP_SIZE < 64) {
+      bit = WARP_SIZE + lane;
+      if ((word & (1ull << bit)) && total + __popcll(word & ((1ull << bit) - 1)) == channelOrdinal) {
+        return bit + i * CHANNELS_PER_MASK_WORD;
+      }
+    }
+    total += __popcll(word);
+  }
+  return -1;
 }
 
 struct alignas(16) ncclDevKernelArgs {
@@ -948,7 +974,7 @@ extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
 // Arch each unroll factor's device functions were compiled for, or nullptr when
 // the unroll carries no arch restriction. Neither table implies the other, so both
 // have to be consulted: an entry names its arch even for an unroll this build left
-// out, and BUILD_ALL_UNROLLS clears every entry because it compiles them all.
+// out. BUILD_ALL_UNROLLS does not clear the pin.
 extern char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS];
 
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py

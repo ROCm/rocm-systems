@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <limits>
 
 namespace rocjitsu::amdgpu {
 
@@ -95,6 +96,19 @@ RegisterAccess::buffer_resource_registers(const Operand &op, unsigned scalar_wor
     if (const auto range = resolve_scalar_register_range(wf, selector + word, 1))
       result[word] = range->register_ref();
   return result;
+}
+
+std::optional<RegisterRef> RegisterAccess::block_data_register(const Operand &op, uint32_t word,
+                                                               bool write) const {
+  assert(word < kBlockDwordCount);
+  const auto &wf = wavefront();
+  const auto base = write ? op.simd_vgpr_base_mut(mutable_wavefront()) : op.simd_vgpr_base(wf);
+  if (!base)
+    return std::nullopt;
+  const uint32_t physical = write ? *base + word : block_store_source_vgpr(*base + word);
+  if (!owns_vgpr_range(physical, 1))
+    return std::nullopt;
+  return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(physical - wf.vgpr_alloc().base), 1};
 }
 
 bool MemoryWaitScoreboard::result_is_written(const Instruction &inst, Wavefront &wf) {
@@ -428,6 +442,11 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     const bool split = name.starts_with("s_movrelsd_2");
     const bool source_relative = name.starts_with("s_movrels");
     const bool destination_relative = split || name.starts_with("s_movreld");
+    const auto &destination = *inst.dst_operand(0);
+    if (destination_relative &&
+        !relative_scalar_selector(wf, destination.encoding_value(), wf.m0(),
+                                  std::max(1, destination.size_bits() / 32), true, split))
+      return;
     auto check_relative = [&](const Operand &operand, bool relative, bool write) {
       if (!relative) {
         if (auto reg = resolve(operand, write))
@@ -436,19 +455,11 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       }
       const unsigned width = std::max(1, operand.size_bits() / 32);
       const auto selector =
-          relative_scalar_selector(operand.encoding_value(), width, wf.m0(), write, split);
-      if (auto range = resolve_scalar_register_range(wf, selector, width)) {
+          relative_scalar_selector(wf, operand.encoding_value(), wf.m0(), width, write, split)
+              .value_or(0);
+      if (auto range = resolve_scalar_register_range(wf, selector, width))
         if (auto reg = range->register_ref())
           access(*reg, ~uint64_t{0}, 0xf, write);
-      } else if (!write) {
-        // Indexed sources can select scalar condition aliases or constants.
-        if (selector == 251 || selector == 252)
-          access({selector == 251 ? RegClass::VCC : RegClass::EXEC, 0,
-                  static_cast<uint8_t>(wf.wf_size() / 32)},
-                 ~uint64_t{0}, 0xf, false);
-        else if (selector == 253)
-          access({RegClass::SCC, 0, 1}, ~uint64_t{0}, 0xf, false);
-      }
     };
     check_relative(*inst.src_operand(0), source_relative, false);
     check_relative(*inst.dst_operand(0), destination_relative, true);
@@ -535,6 +546,13 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     if (mix_preservation || !op || op == hwreg || op == modifiers.buffer_resource ||
         (!pending_scalar_ && !op->is_vgpr()))
       return;
+    if (op == modifiers.block_data) {
+      for (uint32_t word = 0; word < kBlockDwordCount; ++word)
+        if (block_dword_enabled(wf.m0(), word))
+          if (const auto reg = registers.block_data_register(*op, word, write))
+            access(*reg, lanes, 0xf, write);
+      return;
+    }
     const auto reg = resolve(*op, write);
     if (!reg || reg->cls == RegClass::ACC_VGPR)
       return;
@@ -633,11 +651,21 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
   const RegisterAccess registers(wf);
   if (!result_is_written(inst, wf))
     return;
-  std::array<RegisterRef, 3> results{};
+  std::array<RegisterRef, kBlockDwordCount> results{};
   unsigned count = 0;
   bool pending = false;
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto &operand = *inst.dst_operand(i);
+    if (&operand == modifiers.block_data) {
+      for (uint32_t word = 0; word < kBlockDwordCount; ++word)
+        if (block_dword_enabled(wf.m0(), word))
+          if (const auto reg = registers.block_data_register(operand, word, /*write=*/true)) {
+            assert(count < results.size());
+            results[count++] = *reg;
+            pending |= pending_.pending(*reg, true);
+          }
+      continue;
+    }
     auto reg = registers.destination_register(operand);
     if (!reg && operand.is_fieldless())
       if (auto special = operand.to_special_reg_class())
@@ -706,6 +734,7 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
 
 void MemoryWaitScoreboard::clear() {
   events_.clear();
+  superseded_.clear();
   pending_scalar_ = false;
   may_overlap_ = false;
   pending_.reset();
@@ -719,10 +748,83 @@ void MemoryWaitScoreboard::clear() {
   translations_.clear();
 }
 
+bool MemoryWaitScoreboard::cancel_last_issue(uint64_t pc, std::span<const WaitCounterType> counters,
+                                             rj_code_arch_t arch, bool xcnt) {
+  const auto model = waitcnt_model(arch);
+  if (model.failed())
+    return false;
+  std::array<uint32_t, kCounters> units{};
+  for (const auto counter : counters)
+    ++units[static_cast<size_t>(canonical_wait_counter(counter, model.value()))];
+  if (xcnt)
+    units[static_cast<size_t>(WaitCounterKind::X)] = 1;
+  return cancel_issue_units(pc, units);
+}
+
+bool MemoryWaitScoreboard::cancel_last_issue(uint64_t pc, const IssueSnapshot &before) {
+  std::array<uint32_t, kCounters> units{};
+  for (size_t i = 0; i < kCounters; ++i) {
+    if (before[i] > issued_[i] || issued_[i] - before[i] > std::numeric_limits<uint32_t>::max())
+      return false;
+    units[i] = static_cast<uint32_t>(issued_[i] - before[i]);
+  }
+  return cancel_issue_units(pc, units);
+}
+
+bool MemoryWaitScoreboard::cancel_issue_units(uint64_t pc,
+                                              const std::array<uint32_t, kCounters> &units) {
+  const auto sequences = issued_;
+  for (size_t i = 0; i < kCounters; ++i)
+    if (units[i] > issued_[i] - retired_[i])
+      return false;
+
+  std::erase_if(events_, [&](const Event &event) {
+    const auto i = static_cast<size_t>(event.counter);
+    return units[i] && event.pc == pc && event.sequence == sequences[i];
+  });
+  for (size_t i = 0; i < kCounters; ++i) {
+    if (!units[i])
+      continue;
+    issued_[i] -= units[i];
+    if (last_order_[i] != kUnordered)
+      orders_[last_order_[i]].issued -= units[i];
+    if (issued_[i] == retired_[i]) {
+      unordered_[i] = false;
+      ordering_kinds_[i] = 0;
+    }
+  }
+  std::erase_if(translations_, [&](const auto &entry) {
+    const auto xcounter = static_cast<size_t>(WaitCounterKind::X);
+    return units[xcounter] && entry.sequence == sequences[xcounter];
+  });
+  std::erase_if(superseded_, [&](const auto &old) {
+    const auto i = static_cast<size_t>(old.replacement_counter);
+    if (!units[i] || old.replacement_sequence != sequences[i] || old.replacement_pc != pc)
+      return false;
+    const auto &event = old.event;
+    if (!completed(event.counter, event.sequence, event.order, event.order_sequence))
+      events_.push_back(event);
+    return true;
+  });
+  // Rebuild all shadow bytes so overlapping, unrelated producers survive.
+  pending_.reset();
+  pending_scalar_ = false;
+  may_overlap_ = false;
+  for (const auto &event : events_) {
+    pending_scalar_ |= event.reg.cls != RegClass::VGPR;
+    may_overlap_ |= pending_.mark(event.reg, event.counter == WaitCounterKind::X
+                                                 ? MemoryWaitShadow::kReplaySource
+                                                 : MemoryWaitShadow::kResult);
+  }
+  return true;
+}
+
 uint64_t MemoryWaitScoreboard::issue(WaitCounterKind counter, bool unordered,
                                      uint32_t ordering_kind, uint32_t units,
                                      bool backpressure_ordered) {
   auto i = static_cast<size_t>(counter);
+  std::erase_if(superseded_,
+                [counter](const auto &event) { return event.replacement_counter == counter; });
   ordering_kinds_[i] |= ordering_kind;
   unordered_[i] |= unordered || std::popcount(ordering_kinds_[i]) > 1;
   issued_[i] += units;
@@ -783,31 +885,10 @@ uint32_t MemoryWaitScoreboard::issue_units(const Instruction &inst,
                                            rj_code_arch_t arch) {
   using namespace waitcheck_detail;
   const auto model = waitcnt_model(arch).value();
-  const auto counter_kind = [model](WaitCounterType counter) {
-    switch (counter) {
-    case WaitCounterType::VMCNT:
-    case WaitCounterType::LOADCNT:
-      return WaitCounterKind::Load;
-    case WaitCounterType::VSCNT:
-    case WaitCounterType::STORECNT:
-      return vmem_store_wait_counter(model);
-    case WaitCounterType::LGKMCNT:
-    case WaitCounterType::DSCNT:
-      return WaitCounterKind::Ds;
-    case WaitCounterType::KMCNT:
-      return smem_wait_counter(model);
-    case WaitCounterType::EXPCNT:
-      return WaitCounterKind::Exp;
-    case WaitCounterType::ASYNCCNT:
-      return WaitCounterKind::Async;
-    case WaitCounterType::TENSORCNT:
-      return WaitCounterKind::Tensor;
-    }
-    return WaitCounterKind::Count;
-  };
+
   if (const auto *info = inst.amdgpu_memory_issue_info())
     for (const auto &obligation : info->counter_obligations())
-      if (counter_kind(obligation.wait_counter_type()) == event.counter)
+      if (canonical_wait_counter(obligation.wait_counter_type(), model) == event.counter)
         return obligation.counter_increment();
   // Inline message returns are outside the memory-pipeline metadata: one
   // completion acknowledges the send, the other the returned register value.
@@ -888,10 +969,19 @@ void MemoryWaitScoreboard::add(Event event) {
       // drains their entire X group, so its newest covering source is enough.
       const bool scalar_replay =
           xcnt_scalar_ && old.counter == WaitCounterKind::X && event.counter == WaitCounterKind::X;
-      return (ordered || scalar_replay) && old.reg.cls == event.reg.cls &&
-             event.reg.index <= old.reg.index &&
-             event.reg.index + event.reg.width >= old.reg.index + old.reg.width &&
-             (event.lanes & old.lanes) == old.lanes && (event.bytes & old.bytes) == old.bytes;
+      const bool superseded = (ordered || scalar_replay) && old.reg.cls == event.reg.cls &&
+                              event.reg.index <= old.reg.index &&
+                              event.reg.index + event.reg.width >= old.reg.index + old.reg.width &&
+                              (event.lanes & old.lanes) == old.lanes &&
+                              (event.bytes & old.bytes) == old.bytes;
+      if (superseded && old.sequence < event.sequence) {
+        std::erase_if(superseded_, [&](const auto &saved) {
+          return saved.replacement_counter == event.counter &&
+                 saved.replacement_sequence != event.sequence;
+        });
+        superseded_.push_back({old, event.counter, event.sequence, event.pc});
+      }
+      return superseded;
     });
   events_.push_back(event);
   pending_scalar_ |= event.reg.cls != RegClass::VGPR;
@@ -1014,7 +1104,8 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
   const bool full =
       inst.is_memory_wait_producer() && model.succeeded() &&
       std::ranges::any_of(orders_, [&](const Order &order) {
-        const auto maximum = WaitcheckTarget::maximum_dependency_wait(model.value(), order.counter);
+        const auto maximum =
+            WaitCounterPolicy::maximum_dependency_wait(model.value(), order.counter);
         return order.issued - order.retired + MemoryCounterObligation::MAX_COUNTER_INCREMENT >
                maximum + 1;
       });
@@ -1031,7 +1122,7 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
         if (event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst ||
             event.counter == WaitCounterKind::Depctr)
           continue;
-        const auto maximum = WaitcheckTarget::maximum_dependency_wait(arch, event.counter);
+        const auto maximum = WaitCounterPolicy::maximum_dependency_wait(arch, event.counter);
         if (maximum.succeeded())
           backpressure(event.counter, maximum.value() + 1, issue_units(inst, event, arch));
       }
@@ -1041,7 +1132,7 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
     wait(WaitCounterKind::X, 0);
   if (!inst.is_waitcnt() && !inst.has_embedded_memory_wait())
     return;
-  const auto fields = inst.is_waitcnt() ? WaitcheckTarget::explicit_wait_fields(inst, arch)
+  const auto fields = inst.is_waitcnt() ? WaitCounterPolicy::explicit_wait_fields(inst, arch)
                                         : WaitcheckTarget::embedded_wait_fields(inst, arch);
   if (fields.failed() || !fields.value())
     return;

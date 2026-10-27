@@ -281,6 +281,9 @@ QueuePrepareCloseStatus SdmaQueueScheduler::detach(Handle handle, bool force) no
     if (slot.generation == 0)
       ++slot.generation;
     free_slots_.push_back(handle.slot_);
+    // Service is quiescent and the queue cannot be selected again. Worker or
+    // management references may outlive detach, but must not keep the VM bound.
+    queue->address_space_lease_ = {};
     condition_.notify_all();
   }
   return QueuePrepareCloseStatus::Ready;
@@ -296,7 +299,9 @@ void SdmaQueueScheduler::set_process_doorbell_base(uint32_t process_id, void *ba
   condition_.notify_all();
 }
 
-bool SdmaQueueScheduler::synchronize_host_queue_for_test(uint32_t process_id, uint32_t queue_id) {
+bool SdmaQueueScheduler::synchronize_host_queue_for_test(uint32_t process_id, uint32_t queue_id,
+                                                         std::chrono::milliseconds timeout) {
+  const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + timeout;
   std::unique_lock lock(mutex_);
   scan_host_doorbells_locked();
 
@@ -308,16 +313,19 @@ bool SdmaQueueScheduler::synchronize_host_queue_for_test(uint32_t process_id, ui
   if (!queue->service_active_ && queue->ring_consumer_.cursor() < producer_cursor)
     queue->ready_ = true;
   condition_.notify_all();
-  condition_.wait(lock, [&queue, producer_cursor]() {
-    return queue->closing_ || queue->terminal_ || !queue->enabled_ ||
-           (!queue->service_active_ && queue->ring_consumer_.cursor() >= producer_cursor);
-  });
+  if (!condition_.wait_until(lock, deadline, [&queue, producer_cursor]() {
+        return queue->closing_ || queue->terminal_ || !queue->enabled_ ||
+               (!queue->service_active_ && queue->ring_consumer_.cursor() >= producer_cursor);
+      }))
+    return false;
   return !queue->closing_ && !queue->terminal_ && queue->enabled_ && !queue->service_active_ &&
          queue->ring_consumer_.cursor() >= producer_cursor;
 }
 
 bool SdmaQueueScheduler::synchronize_queue_for_test(
-    uint32_t process_id, uint32_t queue_id, const std::function<void()> &service_dependencies) {
+    uint32_t process_id, uint32_t queue_id, const std::function<void()> &service_dependencies,
+    std::chrono::milliseconds timeout) {
+  const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + timeout;
   uint64_t producer_cursor = 0;
   {
     const std::lock_guard lock(mutex_);
@@ -337,15 +345,18 @@ bool SdmaQueueScheduler::synchronize_queue_for_test(
       return false;
     if (!queue->service_active_ && queue->ring_consumer_.cursor() >= producer_cursor)
       return true;
+    if (std::chrono::steady_clock::now() >= deadline)
+      return false;
 
     const uint64_t completed_service_turns = queue->completed_service_turns_;
     queue->ready_ = true;
     queue->retry_pending_ = false;
     condition_.notify_all();
-    condition_.wait(lock, [&queue, completed_service_turns]() {
-      return queue->closing_ || queue->terminal_ || !queue->enabled_ ||
-             queue->completed_service_turns_ != completed_service_turns;
-    });
+    if (!condition_.wait_until(lock, deadline, [&queue, completed_service_turns]() {
+          return queue->closing_ || queue->terminal_ || !queue->enabled_ ||
+                 queue->completed_service_turns_ != completed_service_turns;
+        }))
+      return false;
   }
 }
 

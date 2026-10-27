@@ -81,7 +81,15 @@ enum InstFlags : uint64_t {
   /// @brief Memory result lanes depend on controls beyond EXEC and issue masking.
   CONDITIONAL_MEMORY_LANES = (1ULL << 24),
   /// @brief Matrix execution accesses register lanes independently of EXEC.
-  MATRIX_REGISTER_ACCESSES = (1ULL << 25)
+  MATRIX_REGISTER_ACCESSES = (1ULL << 25),
+  /// @brief Decoded MFMA broadcast size exceeds its architectural block count.
+  INVALID_MFMA_BROADCAST = (1ULL << 26),
+  /// @brief Decoded VOPD operands violate a qualified bank or source restriction.
+  INVALID_VOPD_OPERANDS = (1ULL << 27),
+  /// @brief IU DOT/WMMA has undefined NEG[2] or NEG_HI modifiers.
+  INVALID_IU_MODIFIERS = (1ULL << 28),
+  /// @brief A qualified scalar data tuple violates its ISA alignment requirement.
+  MISALIGNED_SCALAR_DATA = (1ULL << 29)
 };
 
 class BasicBlock;
@@ -397,7 +405,7 @@ public:
       bool first = true;
       // TODO: Include explicit fieldless operands (and/or implicit ones too).
       for (uint8_t operand_index = 0; operand_index < num_dst_; ++operand_index) {
-        if (dst_operands_[operand_index]->is_fieldless())
+        if (!should_print_dst_operand(operand_index))
           continue;
         disassembly_ += (first ? " " : ", ");
         append_dst_operand(disassembly_, operand_index);
@@ -410,7 +418,8 @@ public:
         if (omit_repeated_destination_sources_) {
           bool repeats_dst = false;
           for (uint8_t dst_index = 0; dst_index < num_dst_; ++dst_index)
-            repeats_dst |= src_operands_[operand_index] == dst_operands_[dst_index];
+            repeats_dst |= should_print_dst_operand(dst_index) &&
+                           src_operands_[operand_index] == dst_operands_[dst_index];
           if (repeats_dst)
             continue;
         }
@@ -470,6 +479,11 @@ protected:
   /// Overridden by encoding bases that have instruction attributes to display.
   /// Default: no modifiers. Called lazily by disassemble().
   virtual void build_modifiers(std::string & /*out*/) const {}
+  /// @brief Whether a destination has its own textual operand.
+  /// Analysis-only result views may share an encoded source operand.
+  virtual bool should_print_dst_operand(uint8_t operand_index) const {
+    return !dst_operands_[operand_index]->is_fieldless();
+  }
   /// @brief Append one destination operand to textual disassembly.
   virtual void append_dst_operand(std::string &out, uint8_t operand_index) const {
     out += dst_operands_[operand_index]->name();

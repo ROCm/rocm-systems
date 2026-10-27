@@ -544,6 +544,8 @@ hipMemGetMemPool
 hipMipmappedArrayGetMemoryRequirements
 hipKernelGetAttribute
 hipKernelSetAttribute
+hipKernelSetAttributeForDevice
+hipKernelSetCacheConfig
 hipKernelGetFunction
 hipOccupancyMaxPotentialClusterSize
 hipOccupancyMaxActiveClusters

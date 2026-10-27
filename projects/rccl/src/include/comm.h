@@ -273,6 +273,7 @@ struct ncclTaskColl {
     ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
   size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
   bool useDda; // true if CE is using DDA staging
+  bool ceAllReduceFastPath; // direct receive-window path, set during launch preparation
   void** ddaPeerBases; // host-side table of every rank's DDA scratch base pointer
   void* sendMhandle;
   void* recvMhandle;
@@ -645,6 +646,9 @@ struct ncclPeerInfo {
   bool gpuCftMulticastSupport;
   bool gpuCftCountedSupport;
   uint32_t gitVersionHash;
+  // [RCCL] The rcclTuningPartition this rank asks for (RCCL_TUNING_PARTITION_MODE). The comm
+  // uses DPX only when every rank asks for it. Append later fields after this one.
+  int tuningPartition;
 };
 
 typedef enum ncclGroupTaskType {
@@ -719,6 +723,10 @@ struct ncclComm {
   // Device-resident per-block epoch cells for the LL-protocol DDA collectives,
   uint32_t* ddaLLEpochDev;
   int ddaLLEpochLen;
+  // [RCCL] Set by ncclCommShrink(NCCL_SHRINK_ABORT). An abort can leave ranks with
+  // different LL epochs and unconsumed barrier mailbox slots, so DDA must not
+  // run on this comm again until that state is resynchronized.
+  bool ddaDisabledAfterAbort;
 
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;
@@ -743,6 +751,7 @@ struct ncclComm {
   int64_t busId; // my PCI bus ID in int format
   bool sideStreamAcquired; // whether this comm holds a side-stream scope ref
   int sideStreamPriority;  // priority key of the side stream this comm acquired
+  bool fabricTelemetryAcquired; // whether this comm holds a fabric telemetry session ref
   ncclAffinity cpuAffinity; // CPU affinity of the GPU
   int WarpSize;
   int cudaArch; // matches __CUDA_ARCH__ of device
@@ -759,6 +768,10 @@ struct ncclComm {
   int cheapPostSendFenceOff; // RCCL: true if cheap post-send fence is disabled
 #if ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+  int tdmSimpleReduceEnable; // RCCL: route reduction-shaped SIMPLE slices through the TDM mover
+#endif
+#if ENABLE_TDM_PRIM_LL128
+  int tdmLl128Enable; // RCCL: route LL128 user-buffer legs through the async-to-LDS engine
 #endif
   int localRank;
   int localRanks;

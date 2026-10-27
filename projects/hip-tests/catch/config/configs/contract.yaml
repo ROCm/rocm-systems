@@ -1284,6 +1284,12 @@ contract:
   Contract_VmmHandle_HipMemGetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported:
     <<: *level_0
     tags: [vmm_handle, P0]
+  Contract_VmmHandle_HipMemGetHandleForAddressRange_PcieMappingFlag_IsAcceptedOrReportsNotSupported:
+    <<: *level_0
+    tags: [vmm_handle, P0]
+  Contract_VmmHandle_HipMemGetHandleForAddressRange_HostPointer_ReturnsInvalidValue:
+    <<: *level_0
+    tags: [vmm_handle, P0]
   Contract_VmmHandle_HipMemExportToShareableHandle_ExportImportShareableHandle_RoundTrips:
     <<: *level_0
     tags: [vmm_handle, P0]
@@ -1501,6 +1507,9 @@ contract:
     <<: *level_0
     tags: [device_config, P0]
   Contract_DeviceConfig_HipDeviceSetLimit_Default_RoundTripsOrIsUnsupported:
+    <<: *level_0
+    tags: [device_config, P0]
+  Contract_DeviceConfig_HipDeviceSetLimit_PersistingL2_RoundTripsAndRejectsOverMax:
     <<: *level_0
     tags: [device_config, P0]
   Contract_DeviceConfig_HipGetDeviceFlags_AndStreamPriorityRange_AreConsistent:
@@ -1855,6 +1864,18 @@ contract:
     <<: *level_0
     tags: [kernel_object_attributes, P0]
   Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [kernel_object_attributes, P0]
+  Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NonCurrentDevice_PreservesCurrentAndReadsBack:
+    <<: *level_0
+    tags: [kernel_object_attributes, P0]
+  Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NvidiaPre128Unsupported_IsSkipped:
+    <<: *level_0
+    tags: [kernel_object_attributes, P0]
+  Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_AreSupported:
+    <<: *level_0
+    tags: [kernel_object_attributes, P0]
+  Contract_KernelObjectAttributes_HipKernelSetCacheConfig_NvidiaPre120Unsupported_IsSkipped:
     <<: *level_0
     tags: [kernel_object_attributes, P0]
   Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_ReturnsFirstParamLayout:

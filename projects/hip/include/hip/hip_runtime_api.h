@@ -30,8 +30,8 @@
 #include <hip/hip_common.h>
 #include <hip/linker_types.h>
 
-#if HIP_FORCE_API_VERSION > HIP_API_VERSION
-#  error "HIP_FORCE_API_VERSION is newer than the installed HIP headers"
+#if HIP_TARGET_API_VERSION > HIP_API_VERSION
+#  error "HIP_TARGET_API_VERSION is newer than the installed HIP headers"
 #endif
 
 enum {
@@ -243,7 +243,7 @@ typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
  ensure ABI compatibility, we must typedef the actual struct name here.
 */
 
-#if HIP_FORCE_API_VERSION < 600
+#if HIP_TARGET_API_VERSION < 600
 
 #include <hip/hip_deprecated.h>
 // Legacy version, HIP_ABI_IMPL is on the latest version, so it must not see this.
@@ -253,7 +253,7 @@ typedef struct hipDeviceProp_tR0600 {} hipDeviceProp_tR0600;
 
 #endif
 
-#if HIP_FORCE_API_VERSION >= 600
+#if HIP_TARGET_API_VERSION >= 600
 // Latest version.
 
 /**
@@ -330,7 +330,10 @@ typedef struct hipDeviceProp_t {
   int memoryClockRate;              ///< Max global memory clock frequency in khz.
   int memoryBusWidth;               ///< Global memory bus width in bits.
   int l2CacheSize;                  ///< L2 cache size.
-  int persistingL2CacheMaxSize;     ///< Device's max L2 persisting lines in bytes
+  int persistingL2CacheMaxSize;     ///< Maximum L2 cache size in bytes available for persisting
+                                    ///< accesses. 0 when the device does not support L2 persistence.
+                                    ///< Applications should check this value before calling
+                                    ///< hipDeviceSetLimit with hipLimitPersistingL2CacheSize.
   int maxThreadsPerMultiProcessor;  ///< Maximum resident threads per multi-processor.
   int streamPrioritiesSupported;    ///< Device supports stream priority
   int globalL1CacheSupported;       ///< Indicates globals are cached in L1
@@ -877,6 +880,9 @@ enum hipLimit_t {
                                    ///< device. Currently not supported
   hipLimitMallocHeapSize = 0x02,   ///< Limit of heap size in bytes on the current device, should
                                    ///< be less than the global memory size on the device
+  hipLimitPersistingL2CacheSize = 0x03, ///< Requested persisting L2 cache size in bytes for the
+                                        ///< current device. This size can be set to a value up to
+                                        ///< persistingL2CacheMaxSize reported in hipDeviceProp_t.
   hipExtLimitScratchMin = 0x1000,  ///< Minimum allowed value in bytes for scratch limit on this
                                    ///< device. Valid only on Rocm device. This is read only.
   hipExtLimitScratchMax = 0x1001,  ///< Maximum allowed value in bytes for scratch limit on this
@@ -2616,9 +2622,9 @@ hipError_t hipDeviceSetMemPool(int device, hipMemPool_t mem_pool);
 hipError_t hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device);
 
 // hipDeviceProp_t and hipGetDeviceProperties/hipChooseDevice are versioned.
-// See HIP_FORCE_API_VERSION in hip_common.h.
+// See HIP_TARGET_API_VERSION in hip_common.h.
 
-#if HIP_FORCE_API_VERSION >= 600
+#if HIP_TARGET_API_VERSION >= 600
 
 hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600* prop, int deviceId);
 
@@ -2687,8 +2693,9 @@ hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig);
  * @brief Gets resource limits of current device
  *
  * The function queries the size of limit value, as required by the input enum value hipLimit_t,
- * which can be either #hipLimitStackSize, or #hipLimitMallocHeapSize. Any other input as
- * default, the function will return #hipErrorUnsupportedLimit.
+ * which can be either #hipLimitStackSize, #hipLimitMallocHeapSize, or
+ * #hipLimitPersistingL2CacheSize. Any other input as default, the function will return
+ * #hipErrorUnsupportedLimit.
  *
  * @param [out] pValue Returns the size of the limit in bytes
  * @param [in]  limit The limit to query
@@ -2707,6 +2714,10 @@ hipError_t hipDeviceGetLimit(size_t* pValue, enum hipLimit_t limit);
  *
  * #hipLimitMallocHeapSize sets the limit value of the heap used by the malloc()/free()
  * calls. For limit size, use the #hipDeviceGetLimit API.
+ *
+ * #hipLimitPersistingL2CacheSize sets the persisting L2 cache size in bytes for the current device.
+ * The value must not exceed hipDeviceProp_t::persistingL2CacheMaxSize. Applications should verify
+ * that persistingL2CacheMaxSize is greater than 0 before using this limit.
  *
  * Any other input as default, the funtion will return hipErrorUnsupportedLimit.
  *
@@ -2782,7 +2793,7 @@ hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config);
  */
 hipError_t hipSetDeviceFlags(unsigned flags);
 
-#if HIP_FORCE_API_VERSION >= 600
+#if HIP_TARGET_API_VERSION >= 600
 hipError_t hipChooseDeviceR0600(int* device, const hipDeviceProp_tR0600* prop);
 
 /**
@@ -3002,6 +3013,35 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
 hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev);
 
 /**
+ * @brief Set a device-wide attribute for a kernel on a specific device.
+ *
+ * Sets @p attr for @p kernel on @p device without requiring @p device to be
+ * current. Supported attributes are #hipFuncAttributeMaxDynamicSharedMemorySize,
+ * #hipFuncAttributePreferredSharedMemoryCarveout,
+ * #hipFuncAttributeRequiredClusterWidth,
+ * #hipFuncAttributeRequiredClusterHeight,
+ * #hipFuncAttributeRequiredClusterDepth,
+ * #hipFuncAttributeNonPortableClusterSizeAllowed, and
+ * #hipFuncAttributeClusterSchedulingPolicyPreference.
+ *
+ * Attributes set with #hipFuncSetAttribute override values set by this function
+ * for the corresponding device, regardless of call order.
+ *
+ * @note On AMD devices, non-portable cluster size and cluster scheduling policy
+ * are stored for readback but may not affect dispatch.
+ *
+ * @param [in] kernel Kernel to set the attribute for
+ * @param [in] attr Attribute to set
+ * @param [in] value Value to set
+ * @param [in] device Device ordinal on which to set the attribute
+ *
+ * @returns #hipSuccess, #hipErrorInvalidResourceHandle, #hipErrorInvalidValue,
+ * #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction
+ */
+hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value,
+                                          int device);
+
+/**
  * @brief Function will be extracted for specific kernel
  *
  * @param [out] pFunc  Pointer to function handle for the kernel
@@ -3010,6 +3050,40 @@ hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKer
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotFound
  */
 hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
+
+/**
+ * @brief Sets the preferred carveout setting for the specific kernel on a device
+ *
+ * On devices that allow setting a L1/shared memory split, this function allows to specify a
+ * preference:
+ * - hipFuncCachePreferNone no preference for shared memory or L1 (default)
+ * - hipFuncCachePreferShared prefer larger shared memory and smaller L1 cache
+ * - hipFuncCachePreferL1 prefer larger L1 cache and smaller shared memory
+ * - hipFuncCachePreferEqual prefer equal size L1 cache and shared memory
+ * This is only a hint and the underlying driver might not honor the setting. Additionally,
+ * a call to hipFuncSetCacheConfig(), referring to the same symbol and device, would override the
+ * value passed here, regardless of the relative execution order between the calls.
+ *
+ * hipKernelSetAttributeForDevice() can also be used to set a L1/shared memory split preference,
+ * in a more fine grained fashion. All AMD devices that support setting the carveout support this
+ * function too.
+ *
+ * As not all Nvidia devices allow setting a fine grained (numeric percentage) carveout
+ * value, when having a mixture of devices, where some support and others do not support numeric
+ * carveouts, hipKernelSetCacheConfig could be use to establish a baseline.
+ *
+ * The call does nothing on devices whose carveout is fixed.
+ *
+ * @param [in] kernel  The kernel whose carveout will be specified
+ * @param [in] config  The enumeration specifying the L1/shared memory split
+ * @param [in] device  The device where change the carveout for the specific kernel
+ *
+ * @returns #hipErrorInvalidResourceHandle, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction,
+ * #hipErrorMissingConfiguration, #hipErrorInvalidValue
+ *
+ * @see hipKernelSetAttributeForDevice
+ */
+hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t device);
 
 /**
  * @brief Set Cache configuration for a specific function
@@ -3184,6 +3258,7 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags);
  * @param[out] stream  Pointer to new stream
  * @param[in] flags  Parameters to control stream creation
  * @param[in] priority  Priority of the stream. Lower numbers represent higher priorities.
+ * Stream priority is disabled at this time.
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  * Creates a new asynchronous stream with the specified priority, with its associated current
@@ -3196,6 +3271,9 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags);
  * The @p flags parameter controls behavior of the stream. The valid values are #hipStreamDefault
  * and #hipStreamNonBlocking.
  *
+ * @warning Stream priority is currently disabled to avoid queue-priority-related
+ * issues in KFD.
+ *
  * @see hipStreamCreate, hipStreamSynchronize, hipStreamWaitEvent, hipStreamDestroy
  *
  */
@@ -3205,8 +3283,8 @@ hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, 
  *
  * @param[in, out] leastPriority  Pointer in which a value corresponding to least priority
  * is returned.
- * @param[in, out] greatestPriority  Pointer in which a value corresponding to greatest priority
- * is returned.
+ * @param[in, out] greatestPriority  Pointer in which a value corresponding to
+ * greatest priority. Stream priority is disabled at this time.
  * @returns #hipSuccess
  *
  * Returns in *leastPriority and *greatestPriority the numerical values that correspond to the
@@ -3216,7 +3294,8 @@ hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, 
  * value that is outside the meaningful range as specified by this API, the priority is
  * automatically clamped to within the valid range.
  *
- * @warning This API is under development on AMD GPUs and simply returns #hipSuccess.
+ * @warning Stream priority is currently disabled to avoid queue-priority-related
+ * issues in KFD.
  */
 hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPriority);
 /**
@@ -3329,6 +3408,9 @@ hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId);
  * @param[in] stream  Stream to be queried
  * @param[in,out] priority  Pointer to an unsigned integer in which the stream's priority is
  * returned
+ *
+ * @warning Stream priority is currently disabled by default to avoid queue-priority-related
+ * issues in KFD.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle.
  *
@@ -4400,7 +4482,7 @@ hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* 
                                                  unsigned long long flags, hipStream_t stream);
 
 // Deprecated since 800. Introduced in 700.
-#if (HIP_FORCE_API_VERSION >= 700 && HIP_FORCE_API_VERSION < 800) || defined(HIP_ABI_IMPL)
+#if (HIP_TARGET_API_VERSION >= 700 && HIP_TARGET_API_VERSION < 800) || defined(HIP_ABI_IMPL)
 
 /**
  * @brief Advise about the usage of a given memory range to HIP.
@@ -4427,7 +4509,7 @@ hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise ad
 #endif
 
 // Deprecated since 800.
-#if HIP_FORCE_API_VERSION < 800 || defined(HIP_ABI_IMPL)
+#if HIP_TARGET_API_VERSION < 800 || defined(HIP_ABI_IMPL)
 
 /**
  * @brief Advise about the usage of a given memory range to HIP.
@@ -4453,7 +4535,7 @@ hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advic
 #endif
 
 // Latest
-#if HIP_FORCE_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)
+#if HIP_TARGET_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)
 
 hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                            hipMemLocation location);
