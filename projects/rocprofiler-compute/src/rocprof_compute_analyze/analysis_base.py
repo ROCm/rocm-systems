@@ -309,19 +309,19 @@ class OmniAnalyze_Base:
             args.path[0][0]
         )
         profiling_config = self.get_profiling_config()
-        saved_raw = profiling_config.get("trace_ml_api")
-        saved_selectors = [str(name) for name in saved_raw] if saved_raw else []
+        trace_ml_api = profiling_config.get("trace_ml_api")
+        traced_frameworks = [str(name) for name in trace_ml_api] if trace_ml_api else []
         list_selectors = getattr(args, "list_operators", None)
         operator_patterns = getattr(args, "operator_patterns", None)
         try:
             sanitize_ml_api_selector_args(
-                list_selectors, operator_patterns, saved_selectors
+                list_selectors, operator_patterns, traced_frameworks
             )
         except ValueError as error:
             console_error("ml api trace", str(error))
         if operator_patterns is not None:
             args.operator_patterns = authorize_unscoped_operator_patterns(
-                operator_patterns, saved_selectors
+                operator_patterns, traced_frameworks
             )
 
         for dir_info in args.path:

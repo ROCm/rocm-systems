@@ -124,7 +124,7 @@ def resolve_operator_patterns(
 def sanitize_ml_api_selector_args(
     list_selectors: Optional[List[str]],
     operator_patterns: Optional[Dict[str, List[str]]],
-    saved_selectors: List[str],
+    traced_frameworks: List[str],
 ) -> None:
     """Reject user-named backends the workload did not collect.
 
@@ -133,20 +133,20 @@ def sanitize_ml_api_selector_args(
     if list_selectors is None and operator_patterns is None:
         return
 
-    if not saved_selectors:
+    if not traced_frameworks:
         raise ValueError(
             "Workload was not profiled with --trace-ml-api. "
             "Cannot use --list-operators or --operator."
         )
 
-    saved_set = set(saved_selectors)
+    traced_framework_set = set(traced_frameworks)
     requested = list(list_selectors or [])
     if operator_patterns is not None:
         requested.extend(
             name for name in operator_patterns if name != UNSCOPED_OPERATOR_KEY
         )
     for name in requested:
-        if name in KNOWN_ML_API_BACKENDS and name not in saved_set:
+        if name in KNOWN_ML_API_BACKENDS and name not in traced_framework_set:
             raise ValueError(
                 f'Workload was not profiled with "--trace-ml-api {name}". '
                 "Cannot use that selector with --list-operators or --operator."
@@ -155,7 +155,7 @@ def sanitize_ml_api_selector_args(
 
 def authorize_unscoped_operator_patterns(
     operator_patterns: Dict[str, List[str]],
-    saved_selectors: List[str],
+    traced_frameworks: List[str],
 ) -> Dict[str, List[str]]:
     """Copy prefix-less patterns onto collected frameworks and user."""
     bound: Dict[str, List[str]] = {}
@@ -166,6 +166,6 @@ def authorize_unscoped_operator_patterns(
             continue
         bound.setdefault(backend, []).extend(patterns)
     if unscoped:
-        for name in list(dict.fromkeys(saved_selectors + ["user"])):
+        for name in list(dict.fromkeys(traced_frameworks + ["user"])):
             bound.setdefault(name, []).extend(unscoped)
     return bound
