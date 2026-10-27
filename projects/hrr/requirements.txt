@@ -1,3 +1,4 @@
 # Python requirements of the HRR helper scripts, the api-matrix tools and the
-# CI workflows (.github/workflows/hrr-ci.yml, hrr-gpu.yml). Change a pin here.
+# CPU jobs of .github/workflows/hrr-ci.yml. hrr-gpu.yml takes PyYAML from
+# TheRock's requirements.txt instead; keep both pins equal.
 PyYAML==6.0.2

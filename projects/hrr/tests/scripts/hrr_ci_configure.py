@@ -5,7 +5,7 @@
 
 Writes these GitHub Actions outputs:
 
-  run_cpu           "true" when the generated-source, script and unit jobs run.
+  run_cpu           "true" when the API check, script and unit jobs run.
   run_gpu           "true" when the capture-enabled build and the GPU suite run.
   families          JSON list of {family, runner, backend, arch, config}.
   simulator_families

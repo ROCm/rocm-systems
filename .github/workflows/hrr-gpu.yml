@@ -223,8 +223,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m venv "${RUNNER_TEMP}/hrr-venv"
-          "${RUNNER_TEMP}/hrr-venv/bin/python" -m pip install --no-cache-dir \
-            -r therock/requirements.txt -r projects/hrr/requirements.txt
+          "${RUNNER_TEMP}/hrr-venv/bin/python" -m pip install --no-cache-dir -r therock/requirements.txt
           echo "${RUNNER_TEMP}/hrr-venv/bin" >> "${GITHUB_PATH}"
 
       - name: Download rocJitsu

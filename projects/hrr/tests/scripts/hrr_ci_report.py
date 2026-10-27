@@ -36,7 +36,7 @@ from pathlib import Path
 import summarize_junit
 
 JOB_PATTERNS = (
-    ("Generated sources", re.compile(r"^Generated sources$")),
+    ("API checks", re.compile(r"^API IDs and workloads$")),
     ("Script tests", re.compile(r"^HRR script tests$")),
     ("Unit", re.compile(r"(?:^|/ )Unit \((?P<name>[^)]+)\)$")),
     ("Build", re.compile(r"(?:^|/ )Build capture-enabled HIP and HRR$")),
@@ -46,7 +46,7 @@ JOB_PATTERNS = (
 # Anything else (queued, in_progress, waiting, unknown) has not finished.
 TERMINAL_OK = {"success", "neutral"}
 BAD_NEEDS = {"failure", "cancelled"}
-CPU_NEEDS = ("codegen", "scripts", "unit")
+CPU_NEEDS = ("api-checks", "scripts", "unit")
 
 
 def classify_jobs(jobs: list[dict]) -> list[dict]:

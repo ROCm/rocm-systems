@@ -152,7 +152,7 @@ the generator, and the [api-matrix](../tools/api-matrix/README.md) scripts.
 [`config/ci.yaml`](config/ci.yaml) is the policy the configure job of `hrr-ci.yml`
 applies (`scripts/hrr_ci_configure.py`):
 
-- `paths.cpu`: a change under one of these runs the generated-source, script and unit
+- `paths.cpu`: a change under one of these runs the API check, script and unit
   jobs. `paths.capture` also runs the capture-enabled build and the GPU suite.
   `paths.excluded` counts for neither. The `paths` filter of `hrr-ci.yml` is the same
   lists, so a pull request that touches none of them starts no HRR CI run;

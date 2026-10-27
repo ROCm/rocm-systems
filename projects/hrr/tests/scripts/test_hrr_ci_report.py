@@ -20,7 +20,7 @@ import hrr_ci_report as rpt  # noqa: E402
 
 JOBS = [
     {"name": "Configure", "conclusion": "success", "html_url": "u0"},
-    {"name": "Generated sources", "conclusion": "success", "html_url": "c0"},
+    {"name": "API IDs and workloads", "conclusion": "success", "html_url": "c0"},
     {"name": "Unit (ubuntu-24.04)", "conclusion": "success", "html_url": "u1"},
     {"name": "Unit (windows-2022)", "conclusion": "failure", "html_url": "u2"},
     {"name": "gpu / Build capture-enabled HIP and HRR", "conclusion": "success", "html_url": "u3"},
@@ -37,7 +37,7 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(
             [(r["kind"], r["name"]) for r in rows],
             [
-                ("Generated sources", ""),
+                ("API checks", ""),
                 ("Unit", "ubuntu-24.04"),
                 ("Unit", "windows-2022"),
                 ("Build", ""),
@@ -93,6 +93,23 @@ class RocJitsuJobTest(unittest.TestCase):
         missing = rpt.missing_families([{"family": "gfx90a"}], rows)
         self.assertEqual(missing, ["gfx90a"])
         self.assertFalse(rpt.overall_ok(rows, missing))
+
+
+class GpuDispatchTest(unittest.TestCase):
+    def test_skipped_rocjitsu_build_does_not_fail_a_gpu_dispatch(self):
+        # A gpu dispatch runs the real-GPU jobs; "Build rocJitsu" is skipped.
+        # It is no HRR job row, so the green Integration rows must pass.
+        rows = rpt.classify_jobs(
+            [
+                {"name": "GPU / Build rocJitsu", "conclusion": "skipped"},
+                {"name": "GPU / Integration (gfx94x)", "conclusion": "success", "html_url": "u1"},
+                {"name": "GPU / Integration (gfx950)", "conclusion": "success", "html_url": "u2"},
+            ]
+        )
+        families = [{"family": "gfx94x"}, {"family": "gfx950"}]
+        missing = rpt.missing_families(families, rows)
+        self.assertEqual(missing, [])
+        self.assertTrue(rpt.overall_ok(rows, missing))
 
 
 class OverallTest(unittest.TestCase):
@@ -175,7 +192,7 @@ class RenderTest(unittest.TestCase):
         JUnit file already contained Unit_HRR_PinnedHostFork. All three must
         fail the summary; any one of them is enough."""
         jobs = [
-            {"name": "Generated sources", "conclusion": "success", "html_url": "u0"},
+            {"name": "API IDs and workloads", "conclusion": "success", "html_url": "u0"},
             {"name": "HRR script tests", "conclusion": "success"},
             {"name": "Unit (ubuntu-24.04)", "conclusion": "success"},
             {"name": "Unit (windows-2022)", "conclusion": "success"},
@@ -184,7 +201,7 @@ class RenderTest(unittest.TestCase):
         ]
         needs = {
             "configure": {"result": "success"},
-            "codegen": {"result": "success"},
+            "api-checks": {"result": "success"},
             "scripts": {"result": "success"},
             "unit": {"result": "success"},
             "gpu": {"result": "failure"},
@@ -212,13 +229,13 @@ class RenderTest(unittest.TestCase):
 
     def test_junit_failure_fails_when_jobs_and_needs_succeeded(self):
         jobs = [
-            {"name": "Generated sources", "conclusion": "success"},
+            {"name": "API IDs and workloads", "conclusion": "success"},
             {"name": "HRR script tests", "conclusion": "success"},
             {"name": "Unit (ubuntu-24.04)", "conclusion": "success"},
             {"name": "GPU / rocJitsu (gfx94x)", "conclusion": "success"},
         ]
         needs = {name: {"result": "success"} for name in (
-            "configure", "codegen", "scripts", "unit", "gpu")}
+            "configure", "api-checks", "scripts", "unit", "gpu")}
         failed = (
             '<?xml version="1.0"?><testsuites><testsuite>'
             '<testcase name="Unit_HRR_PinnedHostFork"><failure message="failed"/>'
@@ -239,7 +256,7 @@ class RenderTest(unittest.TestCase):
     def test_a_selected_cpu_job_that_was_skipped_fails(self):
         needs = {
             "configure": {"result": "success"},
-            "codegen": {"result": "skipped"},
+            "api-checks": {"result": "skipped"},
             "scripts": {"result": "success"},
             "unit": {"result": "success"},
             "gpu": {"result": "skipped"},
@@ -250,18 +267,18 @@ class RenderTest(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()) as out:
             rc = rpt.main(["--results-dir", tmp, "--needs-json", json.dumps(needs)])
         self.assertEqual(rc, 1)
-        self.assertIn("codegen is skipped", out.getvalue())
+        self.assertIn("api-checks is skipped", out.getvalue())
 
     def test_green_needs_jobs_and_junit_pass(self):
         jobs = [
-            {"name": "Generated sources", "conclusion": "success"},
+            {"name": "API IDs and workloads", "conclusion": "success"},
             {"name": "HRR script tests", "conclusion": "success"},
             {"name": "Unit (ubuntu-24.04)", "conclusion": "success"},
             {"name": "Unit (windows-2022)", "conclusion": "success"},
             {"name": "GPU / rocJitsu (gfx94x)", "conclusion": "success"},
         ]
         needs = {name: {"result": "success"} for name in (
-            "configure", "codegen", "scripts", "unit", "gpu")}
+            "configure", "api-checks", "scripts", "unit", "gpu")}
         passed = (
             '<?xml version="1.0"?><testsuites><testsuite>'
             '<testcase name="Unit_HRR_Ok"/></testsuite></testsuites>'
@@ -312,7 +329,7 @@ class PassThroughTest(unittest.TestCase):
     # What a run whose configure selected nothing lists: its jobs, skipped.
     LABEL_ONLY = [
         {"name": "Configure", "conclusion": "success", "html_url": "u0"},
-        {"name": "Generated sources", "conclusion": "skipped", "html_url": "k1"},
+        {"name": "API IDs and workloads", "conclusion": "skipped", "html_url": "k1"},
         {"name": "HRR script tests", "conclusion": "skipped", "html_url": "k2"},
         {"name": "Unit (${{ matrix.os }})", "conclusion": "skipped", "html_url": "k3"},
         {"name": "GPU", "conclusion": "skipped", "html_url": "k4"},
@@ -348,7 +365,7 @@ class PassThroughTest(unittest.TestCase):
         rc, text = self.run_main([(99, 1, "2026-10-15T10:00:00Z", self.GREEN)])
         self.assertEqual(rc, 0, text)
         self.assertIn("[run 99 attempt 1](r99)", text)
-        self.assertIn("| Generated sources | — | [success](c0) |", text)
+        self.assertIn("| API checks | — | [success](c0) |", text)
 
     def test_fails_when_the_earlier_run_failed(self):
         rc, text = self.run_main([(99, 1, "2026-10-15T10:00:00Z", JOBS + [self.SUMMARY_RED])])

@@ -10,7 +10,7 @@ rocm_sdk_version: "10.1.0a20260822"
 # Path prefixes, relative to the repository root. A path ending in "/" matches
 # everything under it; any other path matches only itself.
 paths:
-  # A change under any of these runs the generated-source, script and unit jobs.
+  # A change under any of these runs the API check, script and unit jobs.
   # Changes under emulation/rocjitsu, runtimes/api-headers and
   # shared/machine-readable-isa are not path triggers; the nightly schedule and
   # workflow_dispatch cover them.
@@ -24,7 +24,7 @@ paths:
     - .github/workflows/hrr-gpu.yml
   # A change under any of these also runs the capture-enabled build and the GPU
   # suite. hip_runtime_api.h is deliberately absent: almost every HIP API change
-  # touches it, and the generated-source job already checks HRR against it.
+  # touches it, and the API check job already checks HRR against it.
   # amdhip.def.in is absent for the same reason (cpu only).
   capture:
     - projects/clr/hipamd/src/hrr/

@@ -173,8 +173,8 @@ jobs:
           --backend "${BACKEND}"
           --therock-dir therock
 
-  codegen:
-    name: Generated sources
+  api-checks:
+    name: API IDs and workloads
     needs: configure
     if: ${{ needs.configure.outputs.run_cpu == 'true' }}
     runs-on: ubuntu-24.04
@@ -378,7 +378,7 @@ jobs:
 
   summary:
     name: HRR CI Summary
-    needs: [configure, codegen, scripts, unit, gpu]
+    needs: [configure, api-checks, scripts, unit, gpu]
     # Also when configure failed: then nothing else ran, and this job fails.
     if: >-
       ${{ always() && (needs.configure.result != 'success'
