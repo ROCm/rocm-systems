@@ -407,13 +407,9 @@ TEST_F(DaemonTest, HipVectorAdd) {
 }
 
 #ifdef RJ_HAS_INSTRUCTION_FAILURE_TEST
-constexpr char kDaemonDecodeDiagnostic[] =
-    rocjitsu::test::kDecodeFailureDiagnostic;
-
 TEST_F(DaemonTest, HipUnsupportedInstructionExitsWithFailure) {
   expected_daemon_exit_ = EXIT_FAILURE;
-  expected_daemon_diagnostic_ =
-      rocjitsu::test::kUnimplementedInstructionDiagnostic;
+  expected_daemon_diagnostic_ = rocjitsu::test::kUnimplementedInstructionDiagnostic;
   auto r = run_hip_test(hip_instruction_failure_bin(),
                         "HipDaemonInstructionFailureTest.UnsupportedInstructionExitsWithFailure");
   EXPECT_EQ(r.exit_code, 0) << r.output;
@@ -421,7 +417,7 @@ TEST_F(DaemonTest, HipUnsupportedInstructionExitsWithFailure) {
 
 TEST_F(DaemonTest, HipDecodeFailureExitsWithFailure) {
   expected_daemon_exit_ = EXIT_FAILURE;
-  expected_daemon_diagnostic_ = kDaemonDecodeDiagnostic;
+  expected_daemon_diagnostic_ = rocjitsu::test::kDecodeFailureDiagnostic;
   auto r = run_hip_test(hip_instruction_failure_bin(),
                         "HipDaemonInstructionFailureTest.DecodeFailureExitsWithFailure");
   EXPECT_EQ(r.exit_code, 0) << r.output;
@@ -469,7 +465,7 @@ TEST_F(DaemonTest, HipFatalDecodeDisconnectsValidClient) {
   ASSERT_TRUE(std::filesystem::exists(ready_path)) << "valid client did not complete its kernel";
 
   expected_daemon_exit_ = EXIT_FAILURE;
-  expected_daemon_diagnostic_ = kDaemonDecodeDiagnostic;
+  expected_daemon_diagnostic_ = rocjitsu::test::kDecodeFailureDiagnostic;
   const ProcessResult faulting =
       run_hip_test(hip_instruction_failure_bin(),
                    "HipDaemonInstructionFailureTest.DecodeFailureExitsWithFailure");

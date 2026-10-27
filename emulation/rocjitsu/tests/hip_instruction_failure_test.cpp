@@ -95,10 +95,9 @@ __global__ void valid_instruction(int *output) { *output = 17; }
 TEST(HipInstructionFailureTest, UnsupportedInstructionExitsWithFailure) {
   // Re-exec so the child owns its HIP runtime and interposer engine threads.
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_EXIT(
-      wait_for_instruction_failure(FailureKind::Unsupported), native_instruction_failure,
-      rocjitsu::test::ExpectedFailureDiagnostic(
-          rocjitsu::test::kUnimplementedInstructionDiagnostic));
+  EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Unsupported), native_instruction_failure,
+              rocjitsu::test::ExpectedFailureDiagnostic(
+                  rocjitsu::test::kUnimplementedInstructionDiagnostic));
 }
 
 TEST(HipInstructionFailureTest, DecodeFailureExitsWithFailure) {
