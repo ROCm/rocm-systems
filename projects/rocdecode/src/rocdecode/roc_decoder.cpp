@@ -124,8 +124,11 @@ rocDecStatus RocDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconf
 #ifndef _WIN32
     // Import on the decoder's device, then restore the caller's current device
     int prev_device_id;
-    CHECK_HIP(hipGetDevice(&prev_device_id));
-    CHECK_HIP(hipSetDevice(decoder_create_info_.device_id));
+    rocdec_status = SetDecoderDevice(prev_device_id);
+    if (rocdec_status != ROCDEC_SUCCESS) {
+        FunctionExitLog(g_rocdec_logger);
+        return rocdec_status;
+    }
     rocdec_status = ImportAllSurfaces();
     CHECK_HIP(hipSetDevice(prev_device_id));
 #endif
@@ -292,6 +295,20 @@ rocDecStatus RocDecoder::ImportAllSurfaces() {
         }
     }
     FunctionExitLog(g_rocdec_logger);
+    return ROCDEC_SUCCESS;
+}
+
+// Make the decoder's device current and return the caller's current device in prev_device_id.
+// On failure, the caller's current device is left unchanged.
+rocDecStatus RocDecoder::SetDecoderDevice(int &prev_device_id) {
+    CHECK_HIP(hipGetDevice(&prev_device_id));
+    hipError_t hip_status = hipSetDevice(decoder_create_info_.device_id);
+    if (hip_status != hipSuccess) {
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("HIP failure: hipSetDevice failed with status: ") + ROCDEC_STR(hipGetErrorName(hip_status)) +
+                    " for device id = " + ROCDEC_TOSTR(decoder_create_info_.device_id));
+        (void)hipSetDevice(prev_device_id);
+        return ROCDEC_RUNTIME_ERROR;
+    }
     return ROCDEC_SUCCESS;
 }
 #endif

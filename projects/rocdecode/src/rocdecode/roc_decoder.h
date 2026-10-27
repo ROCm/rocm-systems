@@ -71,6 +71,7 @@ private:
 #ifndef _WIN32
     rocDecStatus ImportSurface(int pic_idx);
     rocDecStatus ImportAllSurfaces();
+    rocDecStatus SetDecoderDevice(int &prev_device_id);
 #endif
     VaapiVideoDecoder va_video_decoder_;
     RocDecoderCreateInfo decoder_create_info_;
