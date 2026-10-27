@@ -293,8 +293,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - ``--brcm_nic``, ``--brcm_switch``, ``--switch``, ``--nic_switch``, ``topology --nic_topo``, the ``BRCM_NIC`` CMake option and the Python and ``rsmi_*`` Broadcom NIC and switch functions are gone. Broadcom NICs appear through ``--nic`` like every other NIC.
   - The Python enum members ``AmdSmiDeviceType.BRCM_NIC_DEVICE``, ``AmdSmiDeviceType.BRCM_SWITCH_DEVICE``, ``AmdSmiProcessorType.AMD_BRCM_NIC`` and ``AmdSmiProcessorType.AMD_BRCM_SWITCH`` are removed, so code that still names them raises ``AttributeError``.
 
-### Optimized
-
 ### Resolved Issues
 
 - **Fixed GPU BDFs and sysfs-based queries when `libdrm_amdgpu` cannot be loaded**.  
@@ -423,6 +421,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amdsmi_set_clk_freq()` falsely returning `AMDSMI_STATUS_INVAL` on Navi48 (gfx1201)**.  
   - Requested levels outside the settable range are now skipped instead of failing the whole request. It returns `AMDSMI_STATUS_INVAL` only when no requested level can be set.
+
+- **Fixed `go get` failing for the amd-smi Go module**.  
+  - `go get github.com/ROCm/rocm-systems/projects/amdsmi` fetched the whole repository and failed with `module source tree too large`. `projects/amdsmi` now has its own `go.mod`, so only the amd-smi sources are fetched.
+
+- **Fixed LeakSanitizer reporting memory leaks in programs that use AMD SMI**.  
+  - Programs that read the GPU process list, or exit without calling `amdsmi_shut_down()`, no longer report leaked library objects at exit.
 
 - **Fixed AI-NICs missing from ``amd-smi list --nic`` and ``amd-smi metric --nic``**.  
   - A host whose cards present a different upstream bridge device ID listed one NIC, or only the UALoE endpoints, instead of one per card. Every card present is now listed.
