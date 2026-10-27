@@ -387,6 +387,307 @@ def test_content_hash_is_fnv1a64():
     assert content_hash(b"foobar") == "fnv1a64:85944171f73967e8"
 
 
+def test_pc_sampling_support_public_imports():
+    from rocpd import importer, pc_sampling_support, query
+
+    for name in (
+        "add_decode_args",
+        "get_decode_args",
+        "setup_blob_views",
+        "setup_isa_decode_views",
+    ):
+        assert getattr(importer, name) is getattr(pc_sampling_support, name)
+    assert (
+        query.update_query_for_blob_views
+        is pc_sampling_support.update_query_for_blob_views
+    )
+
+
+@pytest.mark.parametrize("command", ["convert", "query", "summary"])
+def test_pc_sampling_cli_group_is_last(monkeypatch, capsys, command):
+    import argparse
+    from rocpd.__main__ import main
+
+    parsers = []
+    parse_args = argparse.ArgumentParser.parse_args
+
+    def record_parser(parser, *args, **kwargs):
+        parsers.append(parser)
+        return parse_args(parser, *args, **kwargs)
+
+    monkeypatch.setattr(argparse.ArgumentParser, "parse_args", record_parser)
+    with pytest.raises(SystemExit) as result:
+        main([command, "--help"])
+    assert result.value.code == 0
+    subparsers = next(
+        action.choices
+        for action in parsers[0]._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    group = subparsers[command]._action_groups[-1]
+    assert group.title == "PC Sampling - ISA decode options"
+    options = {
+        option for action in group._group_actions for option in action.option_strings
+    }
+    assert {"--no-cache-disassembly", "--codeobj-path-prefix-map"} <= options
+    assert ("--blob-view-profile" in options) == (command == "query")
+    assert group.title in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("disable_cache", [False, True])
+def test_pc_sampling_cli_defaults(disable_cache):
+    import argparse
+    from rocpd.pc_sampling_support import add_decode_args, get_decode_args
+
+    parser = argparse.ArgumentParser()
+    add_decode_args(parser, query_profile=True)
+    arguments = (
+        [
+            "--no-cache-disassembly",
+            "--blob-view-profile",
+            "--codeobj-path-prefix-map",
+            "/container/app=/host/app",
+        ]
+        if disable_cache
+        else []
+    )
+    args = parser.parse_args(arguments)
+    assert get_decode_args(args) == {
+        "cache_disassembly": not disable_cache,
+        "codeobj_path_prefix_map": (
+            ["/container/app=/host/app"] if disable_cache else None
+        ),
+    }
+    assert args.blob_view_profile is disable_cache
+
+
+@pytest.mark.parametrize("error_type", [TypeError, sqlite3.NotSupportedError])
+def test_blob_decode_without_deterministic_support(tmp_path, error_type):
+    from rocpd.importer import setup_blob_views
+
+    registrations = []
+
+    class LegacyConnection(sqlite3.Connection):
+        def create_function(self, name, num_params, func, **kwargs):
+            registrations.append((name, kwargs.get("deterministic", False)))
+            if kwargs.get("deterministic"):
+                raise error_type("deterministic functions are not supported")
+            return super().create_function(name, num_params, func, **kwargs)
+
+    db = tmp_path / "legacy.db"
+    build_db(db, samples=[{"timestamp": 100}])
+    with contextlib.closing(
+        sqlite3.connect(str(db), factory=LegacyConnection)
+    ) as connection:
+        setup_blob_views(connection)
+        assert connection.execute(
+            "SELECT hw_id_wave_id FROM rocpd_gpu_pc_sample_blob_decoded"
+        ).fetchall() == [(1,)]
+    assert registrations == [("rocpd_blob_field", True), ("rocpd_blob_field", False)]
+
+
+@pytest.mark.parametrize("byte_order", ["little", "big"])
+@pytest.mark.parametrize("second_offset", [0, 4, 8])
+def test_blob_layout_cache_preserves_field_values(tmp_path, byte_order, second_offset):
+    from rocpd.pc_sampling_support import setup_blob_views
+
+    endian = "<" if byte_order == "little" else ">"
+    db = tmp_path / "layout.db"
+    guid = build_db(db, samples=[{"timestamp": index} for index in range(5)])
+    suffix = "_" + guid.replace("-", "_")
+    payload = bytearray(second_offset + 8)
+    struct.pack_into(endian + "I", payload, 0, 42)
+    struct.pack_into(endian + "Q", payload, second_offset, int(FULL_EXEC_MASK))
+    blobs = [bytes(payload), bytes(payload), bytes(payload[:4]), None, b""]
+
+    def expected_value(blob, offset, fmt):
+        try:
+            value = struct.unpack_from(endian + fmt, blob, offset)[0]
+        except (struct.error, TypeError):
+            return None
+        return str(value) if fmt == "Q" and value > 0x7FFFFFFFFFFFFFFF else value
+
+    expected = [
+        (expected_value(blob, 0, "I"), expected_value(blob, second_offset, "Q"))
+        for blob in blobs
+    ]
+    with contextlib.closing(sqlite3.connect(str(db))) as connection:
+        connection.execute(
+            f'UPDATE "rocpd_info_blob_schema{suffix}" '
+            "SET byte_order = ?, alignment = 4, struct_size = ?",
+            (byte_order, len(payload)),
+        )
+        connection.execute(
+            f'INSERT INTO "rocpd_info_blob_field{suffix}" '
+            "(guid, schema_id, name, offset, size, data_type, is_signed) "
+            "VALUES (?, ?, 'active_mask', ?, 8, 'uint64_t', 0)",
+            (guid, PC_SCHEMA_ID, second_offset),
+        )
+        connection.executemany(
+            f'UPDATE "rocpd_blob_event{suffix}" SET blob = ? WHERE event_id = ?',
+            [
+                (blob, index)
+                for index, blob in enumerate(blobs, start=1)
+                if blob is not None
+            ],
+        )
+        connection.execute(f'DELETE FROM "rocpd_blob_event{suffix}" WHERE event_id = 4')
+        setup_blob_views(connection)
+        assert (
+            connection.execute(
+                "SELECT hw_id_wave_id, active_mask "
+                "FROM rocpd_gpu_pc_sample_blob_decoded ORDER BY id"
+            ).fetchall()
+            == expected
+        )
+
+
+def test_blob_row_is_unpacked_once(tmp_path, monkeypatch):
+    from rocpd.pc_sampling_support import setup_blob_views
+
+    db = tmp_path / "cache.db"
+    guid = build_db(db, samples=[{"timestamp": index} for index in range(5)])
+    suffix = "_" + guid.replace("-", "_")
+    values = [(1, 2), (1, 2), (3, 4), (1, 2), (5, 6)]
+    unpack_calls = []
+    original_struct = struct.Struct
+    original_unpack_from = struct.unpack_from
+
+    class CountingStruct:
+        def __init__(self, fmt):
+            self.unpacker = original_struct(fmt)
+
+        def unpack_from(self, *args):
+            unpack_calls.append(self.unpacker.format)
+            return self.unpacker.unpack_from(*args)
+
+    def count_unpack_from(fmt, *args):
+        unpack_calls.append(fmt)
+        return original_unpack_from(fmt, *args)
+
+    monkeypatch.setattr(struct, "Struct", CountingStruct)
+    monkeypatch.setattr(struct, "unpack_from", count_unpack_from)
+    with contextlib.closing(sqlite3.connect(str(db))) as connection:
+        connection.execute(f'UPDATE "rocpd_info_blob_schema{suffix}" SET struct_size = 8')
+        connection.execute(
+            f'INSERT INTO "rocpd_info_blob_field{suffix}" '
+            "(guid, schema_id, name, offset, size, data_type, is_signed) "
+            "VALUES (?, ?, 'second_field', 4, 4, 'uint32_t', 0)",
+            (guid, PC_SCHEMA_ID),
+        )
+        connection.executemany(
+            f'UPDATE "rocpd_blob_event{suffix}" SET blob = ? WHERE event_id = ?',
+            [
+                (struct.pack("<II", *row), index)
+                for index, row in enumerate(values, start=1)
+            ],
+        )
+        setup_blob_views(connection)
+        assert (
+            connection.execute(
+                "SELECT hw_id_wave_id, second_field "
+                "FROM rocpd_gpu_pc_sample_blob_decoded ORDER BY id"
+            ).fetchall()
+            == values
+        )
+        assert unpack_calls == ["<II"] * 4
+
+
+@pytest.mark.parametrize("byte_order", ["little", "big"])
+def test_blob_cache_preserves_numeric_types(tmp_path, byte_order):
+    from rocpd.pc_sampling_support import setup_blob_views
+
+    fields = [
+        ("signed8", "b", "int8_t", 1, -128),
+        ("unsigned8", "B", "uint8_t", 0, 255),
+        ("signed16", "h", "int16_t", 1, -32768),
+        ("unsigned16", "H", "uint16_t", 0, 65535),
+        ("signed32", "i", "int32_t", 1, -(2**31)),
+        ("unsigned32", "I", "uint32_t", 0, 2**32 - 1),
+        ("signed64", "q", "int64_t", 1, -(2**63)),
+        ("unsigned64", "Q", "uint64_t", 0, int(FULL_EXEC_MASK)),
+        ("single", "f", "float", 0, 1.5),
+        ("double", "d", "double", 0, -3.25),
+        ("enabled", "?", "bool", 0, True),
+    ]
+    endian = "<" if byte_order == "little" else ">"
+    payload = struct.pack(
+        endian + "".join(field[1] for field in fields),
+        *(field[4] for field in fields),
+    )
+    db = tmp_path / "numeric.db"
+    guid = build_db(db, samples=[{"timestamp": 1}])
+    suffix = "_" + guid.replace("-", "_")
+    with contextlib.closing(sqlite3.connect(str(db))) as connection:
+        connection.execute(f'DELETE FROM "rocpd_info_blob_field{suffix}"')
+        connection.execute(
+            f'UPDATE "rocpd_info_blob_schema{suffix}" SET byte_order = ?, struct_size = ?',
+            (byte_order, len(payload)),
+        )
+        offset = 0
+        for name, fmt, data_type, signed, value in fields:
+            size = struct.calcsize(fmt)
+            connection.execute(
+                f'INSERT INTO "rocpd_info_blob_field{suffix}" '
+                "(guid, schema_id, name, offset, size, data_type, is_signed) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (guid, PC_SCHEMA_ID, name, offset, size, data_type, signed),
+            )
+            offset += size
+        connection.execute(f'UPDATE "rocpd_blob_event{suffix}" SET blob = ?', (payload,))
+        setup_blob_views(connection)
+        columns = ", ".join(f'"{field[0]}"' for field in fields)
+        expected = tuple(
+            str(field[4]) if field[1] == "Q" else field[4] for field in fields
+        )
+        for repetition in range(2):
+            assert connection.execute(
+                f"SELECT {columns} FROM rocpd_gpu_pc_sample_blob_decoded"
+            ).fetchall() == [expected]
+
+
+def test_blob_cache_isolated_by_schema_and_recording(tmp_path):
+    paths = [tmp_path / "first.db", tmp_path / "second.db"]
+    guids = []
+    payload = struct.pack("<I", 1)
+    for path, byte_order in zip(paths, ("little", "big")):
+        guid = build_db(
+            path,
+            samples=[{"timestamp": 1}],
+            regions=[{"event_id": 2, "start": 1, "end": 2}],
+        )
+        guids.append(guid)
+        suffix = "_" + guid.replace("-", "_")
+        with contextlib.closing(sqlite3.connect(str(path))) as connection:
+            connection.execute(
+                f'UPDATE "rocpd_info_blob_schema{suffix}" SET byte_order = ?',
+                (byte_order,),
+            )
+            connection.execute(
+                f'UPDATE "rocpd_blob_event{suffix}" SET blob = ?', (payload,)
+            )
+            connection.commit()
+
+    data = open_db(paths)
+    for guid, expected in ((guids[0], 1), (guids[1], 1 << 24), (guids[0], 1)):
+        for schema_id, name in (
+            (PC_SCHEMA_ID, "hw_id_wave_id"),
+            (REGION_SCHEMA_ID, "region_flag"),
+            (PC_SCHEMA_ID, "hw_id_wave_id"),
+        ):
+            assert data.execute(
+                "SELECT rocpd_blob_field(?, ?, ?, ?)", (payload, guid, schema_id, name)
+            ).fetchone() == (expected,)
+        for blob, schema_id, name in (
+            (payload, PC_SCHEMA_ID, "absent"),
+            (payload, 999, "hw_id_wave_id"),
+            ("not a blob", PC_SCHEMA_ID, "hw_id_wave_id"),
+        ):
+            assert data.execute(
+                "SELECT rocpd_blob_field(?, ?, ?, ?)", (blob, guid, schema_id, name)
+            ).fetchone() == (None,)
+
+
 @pytest.mark.parametrize("storage_type", ["FILE", "MEMORY"])
 def test_verified_decode_is_written_back(tmp_path, code_object, storage_type):
     path, data = code_object
@@ -410,10 +711,10 @@ def test_verified_decode_is_written_back(tmp_path, code_object, storage_type):
 def test_cached_comment_matches_lazy_decode(
     tmp_path, monkeypatch, counting_decoder, code_object, comment
 ):
-    import rocpd.importer as importer
+    from rocpd import pc_sampling_support
 
     callbacks = []
-    monkeypatch.setattr(importer.atexit, "register", callbacks.append)
+    monkeypatch.setattr(pc_sampling_support.atexit, "register", callbacks.append)
     decode = counting_decoder.decode
 
     def decode_with_comment(self, *args):
@@ -813,7 +1114,7 @@ def test_time_window_without_timed_records_reports_error(tmp_path):
     ],
 )
 def test_sql_tokenizer_preserves_quoted_spans(text, kind):
-    from rocpd.query import _sql_tokens
+    from rocpd.pc_sampling_support import _sql_tokens
 
     query = f"SELECT {text}\nFROM rocpd_gpu_pc_sample"
     tokens = list(_sql_tokens(query))
@@ -823,7 +1124,7 @@ def test_sql_tokenizer_preserves_quoted_spans(text, kind):
 
 
 def test_cte_names_include_quoted_nested_definitions():
-    from rocpd.query import _cte_names, _sql_tokens
+    from rocpd.pc_sampling_support import _cte_names, _sql_tokens
 
     query = (
         'WITH RECURSIVE "Outer"(value) AS NOT MATERIALIZED ('
@@ -1005,7 +1306,7 @@ def test_shared_event_blobs_do_not_multiply_rows(tmp_path):
 def test_failed_isa_setup_publishes_no_partial_view(
     tmp_path, monkeypatch, capsys, bypass_column_check
 ):
-    import rocpd.importer as importer
+    from rocpd import pc_sampling_support
     from rocpd import csv as rocpd_csv
 
     db = tmp_path / "pc.db"
@@ -1022,7 +1323,7 @@ def test_failed_isa_setup_publishes_no_partial_view(
     if bypass_column_check:
         # Let the view body reference the missing column so only the zero-row
         # validation can reject it.
-        table_columns = importer._table_columns
+        table_columns = pc_sampling_support._table_columns
 
         def report_instruction_column(conn, name):
             columns = table_columns(conn, name)
@@ -1030,7 +1331,9 @@ def test_failed_isa_setup_publishes_no_partial_view(
                 return columns + ["instruction"]
             return columns
 
-        monkeypatch.setattr(importer, "_table_columns", report_instruction_column)
+        monkeypatch.setattr(
+            pc_sampling_support, "_table_columns", report_instruction_column
+        )
 
     out_dir = tmp_path / "out"
     with open_db([db]) as connection:
@@ -1150,11 +1453,11 @@ def test_open_without_decoding_does_not_scan_samples(tmp_path, monkeypatch, code
 def test_each_pc_is_decoded_once(
     tmp_path, monkeypatch, counting_decoder, cache_disassembly
 ):
-    import rocpd.importer as importer
+    from rocpd import pc_sampling_support
 
     if cache_disassembly:
         # Results evicted from a small LRU must come from the pending write-back.
-        monkeypatch.setattr(importer, "_MAX_DECODED_INSTRUCTIONS", 16)
+        monkeypatch.setattr(pc_sampling_support, "_MAX_DECODED_INSTRUCTIONS", 16)
     data = bytes(range(256)) * 20
     path = tmp_path / "kernel.co"
     path.write_bytes(data)
@@ -1178,10 +1481,10 @@ def test_each_pc_is_decoded_once(
 
 
 def test_decoder_cache_is_bounded_by_bytes(tmp_path, monkeypatch, counting_decoder):
-    import rocpd.importer as importer
+    from rocpd import pc_sampling_support
 
     # Two 64-byte code objects under a 100-byte budget: one decoder at a time.
-    monkeypatch.setattr(importer, "_MAX_DECODER_CACHE_BYTES", 100)
+    monkeypatch.setattr(pc_sampling_support, "_MAX_DECODER_CACHE_BYTES", 100)
     code_objects = []
     for code_object_id in (1, 2):
         data = bytes([code_object_id]) * 64
