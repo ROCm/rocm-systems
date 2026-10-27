@@ -7,7 +7,7 @@ vl1d.bw_util:
 vl1d.cache_bw:
   peak: !remove
 vl1d.cache_bw_128b:
-  name: vL1D Cache BW (128-Byte Accesses)
+  name: vL1D Cache Bandwidth (128-Byte Accesses)
   formula: 128 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
@@ -18,7 +18,7 @@ vl1d.cache_bw_128b:
     movement will still be counted as a full cache line.
   peak: $max_sclk / 1000 * 128 * $cu_per_gpu
 vl1d.l2_bw_by_size:
-  name: vL1D-L2 Bandwidth (by Request Size)
+  name: vL1D-L2 Bandwidth (By Request Size)
   formula: SUM(128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-

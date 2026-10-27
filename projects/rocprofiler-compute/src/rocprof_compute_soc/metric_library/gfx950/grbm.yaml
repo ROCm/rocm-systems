@@ -10,7 +10,7 @@ grbm.ea_busy:
   unit: (Cycles + $normUnit)
   description: ''
 grbm.ea_util:
-  name: EA utilization
+  name: EA Utilization
   formula: 100 * SUM(GRBM_EA_BUSY) / SUM(GRBM_GUI_ACTIVE)
   unit: Percent
   description: >-

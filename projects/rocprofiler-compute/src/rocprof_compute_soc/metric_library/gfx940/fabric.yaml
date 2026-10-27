@@ -12,7 +12,7 @@ fabric.hbm_bw:
 fabric.hbm_rd:
   formula: SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM($denom)
 fabric.hbm_rd_bw_est:
-  name: Estimated HBM Read BW
+  name: Estimated HBM Read Bandwidth
   formula: 64 * SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
@@ -23,7 +23,7 @@ fabric.hbm_rd_traffic:
 fabric.hbm_wr_atomic:
   formula: SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM($denom)
 fabric.hbm_wr_atomic_bw_est:
-  name: Estimated HBM Write and Atomic BW
+  name: Estimated HBM Write and Atomic Bandwidth
   formula: 64 * SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
@@ -40,7 +40,7 @@ fabric.rd_bw:
   formula: SUM(TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)
   peak: !remove
 fabric.rd_bw_incl_128b:
-  name: L2-Fabric Read BW (Including 128-Byte Reads)
+  name: L2-Fabric Read Bandwidth (Including 128-Byte Reads)
   formula: SUM(128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-

@@ -1,6 +1,6 @@
 inherit: ../gfx940/fabric.yaml
 fabric.rd_128b:
-  name: Read (128B)
+  name: L2-Fabric Read Requests (128B)
   formula: SUM(TCC_BUBBLE_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-

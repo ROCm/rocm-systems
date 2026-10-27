@@ -1,6 +1,6 @@
 inherit: ../gfx942/compute.yaml
 compute.dual_issue_valu_util:
-  name: Dual-issue VALU Utilization
+  name: Dual-Issue VALU Utilization
   formula: 100 * SUM(SQ_ACTIVE_INST_VALU2) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
@@ -22,7 +22,7 @@ compute.f8_ops:
 compute.flops_per_norm:
   formula: SUM(64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F8 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32 + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4) / SUM($denom)
 compute.inst_mix_mfma_f6f4:
-  name: MFMA-F6F4
+  name: MFMA-F6F4 Instructions
   formula: SUM(SQ_INSTS_VALU_MFMA_F6F4) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
@@ -30,7 +30,7 @@ compute.inst_mix_mfma_f6f4:
     normalization unit. This is supported in AMD Instinct MI350 series (gfx950) and
     later only.
 compute.l1_cache_vmem_stalled_by_l1_cache:
-  name: L1 Cache - VMEM stalled by L1 Cache
+  name: L1 Cache - VMEM Stalled by L1 Cache
   formula: 100 * SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / SUM(SQ_BUSY_CYCLES)
   unit: Percent
   description: >-
@@ -65,7 +65,7 @@ compute.mfma_flops_mxf8:
 compute.mfma_iops_int8:
   peak: $max_sclk * $cu_per_gpu * 8192 / 1000
 compute.normalized_l1_cache_vmem_stalled_by_l1_cache:
-  name: Normalized L1 Cache - VMEM stalled by L1 Cache
+  name: Normalized L1 Cache - VMEM Stalled by L1 Cache
   formula: 100 * SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
   unit: Percent
   description: >-
@@ -73,7 +73,7 @@ compute.normalized_l1_cache_vmem_stalled_by_l1_cache:
     the L1 Cache (TCP) command FIFO was full. Averaged across all CUs. High values
     mean L1 cache cannot keep up with memory instruction demand.
 compute.num_cus:
-  name: Num CUs
+  name: Number of CUs
   formula: $cu_per_gpu
   unit: Count
   description: ''
@@ -101,7 +101,7 @@ compute.valu_co_issue_efficiency:
     of total time, this metric can exceed 100% when dual-issue cycles outnumber single-issue
     cycles.
 compute.vmem_issue_rate:
-  name: VMEM issue rate
+  name: VMEM Issue Rate
   formula: SUM(SQ_INSTS_VMEM) / SUM(SQ_WAVE_CYCLES)
   unit: Instructions per Cycle
   description: >-
