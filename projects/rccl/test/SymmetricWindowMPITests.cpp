@@ -240,8 +240,9 @@ protected:
     {
         for (auto it = allocatedBufs_.begin(); it != allocatedBufs_.end(); ++it) {
             if (it->ptr != ptr) continue;
-            allocatedBufs_.erase(it);
-            ASSERT_MPI_EQ(ncclSuccess, ncclMemFree(ptr));
+            const ncclResult_t freed = ncclMemFree(ptr);
+            if (freed == ncclSuccess) allocatedBufs_.erase(it);
+            ASSERT_MPI_EQ(ncclSuccess, freed);
             return;
         }
     }
@@ -653,7 +654,7 @@ protected:
         return (padded / align) * align;
     }
 
-    // Same rule as ncclDevrInitOnce: a positive NCCL_WIN_STRIDE is the size,
+    // Must stay in sync with ncclDevrInitOnce: a positive NCCL_WIN_STRIDE is the size,
     // otherwise the largest GPU. Round up to 4 GiB.
     size_t symmetricVaLimit()
     {
