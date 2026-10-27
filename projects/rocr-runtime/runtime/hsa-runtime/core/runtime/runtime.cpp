@@ -598,12 +598,9 @@ hsa_status_t Runtime::DeregisterReleaseNotifier(void* ptr,
   return ret;
 }
 
-/* Decide whether a pointer's reported owner may drive a blit on it.
- *
- * agentOwner reports where the memory physically lives, which for a VMM mapping does not imply
- * that the owner holds a page table entry for this VA. This helper checks if the owner has a 
- * mapping and if it is safe to execute a blit from the owner agent. A non-GPU owner defaults
- * to returning true, and makes the caller handle the case itself */
+/* Decide whether a pointer's reported owner may drive a blit on it. agentOwner reports where
+ * the memory physically lives, which for a VMM mapping does not imply the owner holds a page
+ * table entry for this VA. A non-GPU owner returns true for the caller to handle. */
 static bool OwnerCanBlit(hsa_agent_t owner, const hsa_agent_t* accessible, uint32_t count) {
   if (owner.handle == 0) return false;
 

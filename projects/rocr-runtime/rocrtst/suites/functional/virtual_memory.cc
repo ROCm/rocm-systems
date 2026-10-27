@@ -2918,12 +2918,9 @@ static bool FabricHandlesSupported() {
   return supported;
 }
 
-// Reports whether the runtime resolves an owning agent for an imported handle in
-// hsa_amd_pointer_info. HSA_ENABLE_VMEM_IMPORT_OWNER=0 restores the legacy behaviour of
-// reporting no owner, so the expectation has to follow the flag. The runtime latches this at
-// the first hsa_init and these tests never change it afterwards, so reading the environment
-// here sees the value core::Flag did. Mirrors its parsing: any value but "0", including
-// unset, leaves the feature on.
+// HSA_ENABLE_VMEM_IMPORT_OWNER=0 makes pointer_info report no owner for imports, so the
+// expectation has to follow the flag. ROCr latches it at the first hsa_init and these tests
+// never change it, so getenv here agrees with core::Flag. Mirrors its parsing.
 [[nodiscard]] static bool VmemImportOwnerEnabled() {
   const char* var = getenv("HSA_ENABLE_VMEM_IMPORT_OWNER");
   return var == nullptr || strcmp(var, "0") != 0;
@@ -3221,10 +3218,9 @@ void VirtMemoryTestBasic::TestImportedHandlePointerInfo(void) {
   return true;
 }
 
-// An imported mapping that was never given access to any agent is reported as owned by the
-// device that physically backs it, but nothing in this process can touch the VA. Both blit
-// paths must say so instead of dispatching on the owner, which would fault the GPU, or falling
-// back to the host, which would segfault.
+// An import never given access to any agent still reports an owner, but nothing in this
+// process can touch the VA. Both blit paths must error rather than dispatch on the owner
+// (GPU fault) or fall back to the host (segfault).
 void VirtMemoryTestBasic::ImportedBlitWithNoAccess(hsa_agent_t owner_gpu,
                                                    hsa_amd_memory_pool_t owner_pool) {
   size_t alloc_size = 0;
@@ -3254,9 +3250,9 @@ void VirtMemoryTestBasic::ImportedBlitWithNoAccess(hsa_agent_t owner_gpu,
   EXPECT_SUCCESS(hsa_amd_vmem_address_free(addr, alloc_size));
 }
 
-// The regression this guards: memory physically on owner_gpu, imported and mapped for peer_gpu
-// only. agentOwner names owner_gpu, which holds no mapping for this VA, so both blit paths have
-// to fall back to peer_gpu rather than trusting the owner.
+// The regression this guards: memory on owner_gpu, imported and mapped for peer_gpu only.
+// agentOwner names owner_gpu, which holds no mapping for this VA, so both blit paths must
+// fall back to peer_gpu rather than trusting the owner.
 void VirtMemoryTestBasic::ImportedBlitWithPeerAccessOnly(hsa_agent_t owner_gpu,
                                                          hsa_amd_memory_pool_t owner_pool,
                                                          hsa_agent_t peer_gpu) {

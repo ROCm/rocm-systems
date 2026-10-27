@@ -1197,72 +1197,36 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
   return (success = (deviceMemory_ != nullptr));
 }
 
-// Resolve an imported VMM buffer's owning agent from its physical memory handle, since
-// pointer_info reports a null owner for imports. Returns false for non-VMM memory.
-static bool vmmOwningAgent(const Memory* self, hsa_agent_t* agent) {
-  amd::Memory* owner = self->owner();
-  if (owner == nullptr || !owner->vmmImported() || owner->getUserData().phys_mem_obj == nullptr) {
-    return false;
-  }
-  hsa_amd_vmem_alloc_handle_t handle{owner->getUserData().phys_mem_obj->getUserData().hsa_handle};
-  hsa_amd_vmem_handle_info_t info = {};
-  info.size = sizeof(info);
-  if (Hsa::vmem_get_vmem_info(handle, &info) != HSA_STATUS_SUCCESS || info.agent.handle == 0) {
-    return false;
-  }
-  *agent = info.agent;
-  return true;
-}
-
-// Recompute the owning agent. Called once the virtual address is actually backed (post
-// hsa_amd_vmem_map), which is the only point where the true owner of VMM-mapped / imported
-// memory can be resolved, and from computeAndSetOwningAgent() for IPC-shared memory.
-//
-// Two queries reach the same field in ROCr, so prefer the one keyed by what we already hold:
-// vmem_get_vmem_info takes the allocation handle, needs no VA lookup, and answers on a ROCr
-// that predates import-owner reporting in pointer_info. pointer_info covers everything the
-// handle query cannot key - IPC-shared and non-VMM memory - so it is the fallback, never a
-// second query for the same object.
+// Recompute the owning agent once the VA is backed (post hsa_amd_vmem_map), the first point
+// where the true owner of VMM-mapped / imported memory is knowable. Also called from
+// computeAndSetOwningAgent() for IPC-shared memory.
 void Memory::refreshOwningAgentFromPointerInfo() {
   if (deviceMemory_ == nullptr) {
     return;
   }
 
-  hsa_agent_t agent;
-  if (!vmmOwningAgent(this, &agent)) {
-    hsa_amd_pointer_info_t info = {};
-    info.size = sizeof(info);
-    hsa_status_t err = hsa_amd_pointer_info(reinterpret_cast<address>(deviceMemory_), &info,
-                                            nullptr, nullptr, nullptr);
+  hsa_amd_pointer_info_t info = {};
+  info.size = sizeof(info);
+  hsa_status_t err = hsa_amd_pointer_info(reinterpret_cast<address>(deviceMemory_), &info, nullptr,
+                                          nullptr, nullptr);
 
-    // info.agentOwner is the agent that actually owns the backing pages (a peer device for
-    // IPC memory). Note ROCr does not always tag IPC-opened memory with
-    // HSA_EXT_POINTER_TYPE_IPC, so key off a valid agentOwner rather than the pointer type.
-    //
-    // A zero handle is not a failure: a fabric-backed import carries no dma-buf, so its
-    // placement is never recoverable and ROCr correctly reports no owner.
-    //
-    // computeAndSetOwningAgent() calls this before anything is cached, so an unresolvable
-    // owner must still land on a usable agent rather than leaving the handle at its 0
-    // initializer: getOwningAgent() feeds the copy agents in rocblit.
-    agent = (err == HSA_STATUS_SUCCESS && info.agentOwner.handle != 0) ? info.agentOwner
-                                                                       : dev().getBackendDevice();
-  }
-  setOwningAgent(agent);
+  // ROCr does not always tag IPC-opened memory with HSA_EXT_POINTER_TYPE_IPC, so key off a
+  // valid agentOwner rather than the pointer type. A zero handle is expected for a fabric
+  // import, whose placement is never recoverable. Always set an agent: computeAndSetOwningAgent()
+  // calls this with nothing cached, and getOwningAgent() feeds the copy agents in rocblit.
+  setOwningAgent((err == HSA_STATUS_SUCCESS && info.agentOwner.handle != 0)
+                     ? info.agentOwner
+                     : dev().getBackendDevice());
 }
 
 // Helper function to compute and cache the owning agent
 void Buffer::computeAndSetOwningAgent() {
   hsa_agent_t agent;
 
-  // Sub-buffers must inherit agent from parent, not recompute it.
-  //
-  // This branch also swallows VMM sub-objects, whose parent is the reserved VA range: at
-  // create() time the VA is not yet backed, so there is nothing for the vmmImported arm of
-  // the branch below to query even if it were reached (setVmmImported runs later, in
-  // FinalizeMapMemObjBookkeeping). Those objects are resolved post-map instead, by
-  // Memory::refreshOwningAgentFromPointerInfo via Device::RefreshMappedMemoryOwner.
-  // IPC-shared memory is not a sub-buffer, so it does reach that branch.
+  // Sub-buffers must inherit agent from parent, not recompute it. That includes VMM
+  // sub-objects, whose VA is not yet backed here; they are resolved post-map by
+  // Device::RefreshMappedMemoryOwner. IPC-shared memory is not a sub-buffer, so it falls
+  // through to the vmmImported/ipcShared branch below.
   if (owner() != nullptr && owner()->parent() != nullptr) {
     const Memory* parentMemory = static_cast<const Memory*>(
         owner()->parent()->getDeviceMemory(dev_));
