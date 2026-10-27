@@ -1,14 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from types import SimpleNamespace
-
 import pytest
 
 from rocprof_compute_soc.counter_grouping_buckets import (
     count_multi_bucket_metrics,
     count_single_pass_metrics_split_across_buckets,
     counters_fit_one_bucket,
+    iter_metric_groups,
     rebuild_counter_file,
 )
 from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
@@ -60,21 +59,14 @@ def test_rebuild_counter_file_round_trip():
     assert set(flat_counters_in_perfmon_file(rebuilt)) == counters
 
 
-class _FormulaSoc:
+class FormulaSoc:
     """Serves a fixed metric list without reading analysis YAML."""
 
     def __init__(self, rows):
-        self._mspec = SimpleNamespace(gpu_series="MI300")
-        self._rows = rows
+        self.rows = rows
 
-    def _same_bucket_priority_metric_ids(self):
-        return ()
-
-    def _expand_tcc_template_counters(self, counters):
-        return set(counters)
-
-    def _iter_arch_analysis_yaml_metrics(self):
-        return iter(self._rows)
+    def metric_groups(self, profile_counters):
+        return iter_metric_groups((), self.rows, "MI300", profile_counters)
 
 
 @pytest.mark.misc
@@ -85,7 +77,7 @@ def test_copied_counter_is_not_counted_as_split():
         rebuild_counter_file("1", PERFMON_CONFIG, {"SQ_WAVES", "TA_BUSY"}),
     ]
     assert all(counter_file is not None for counter_file in files)
-    soc = _FormulaSoc([
+    soc = FormulaSoc([
         ("1", 1, 0, "waves and grbm", ["SQ_WAVES / GRBM_GUI_ACTIVE"]),
         ("1", 1, 1, "waves and ta", ["SQ_WAVES / TA_BUSY"]),
         ("1", 1, 2, "grbm and ta", ["GRBM_GUI_ACTIVE / TA_BUSY"]),
@@ -99,3 +91,21 @@ def test_copied_counter_is_not_counted_as_split():
         == 1
     )
     assert count_multi_bucket_metrics(files, soc, profile) == 1
+
+
+@pytest.mark.misc
+def test_iter_metric_groups_reads_only_the_given_inputs():
+    """Priority ids, YAML rows, GPU series and expanded counters are enough."""
+    rows = [
+        ("1700", 1701, 1, "waves", ["SQ_WAVES / GRBM_GUI_ACTIVE"]),
+        ("2", 2, 1, "tcc hits", ["TCC_HIT[ + SQ_WAVES"]),
+        ("3", 3, 2, "not profiled", ["TA_BUSY"]),
+    ]
+    profile = {"SQ_WAVES", "GRBM_GUI_ACTIVE", "TCC_HIT[0]", "TCC_HIT[1]"}
+
+    groups = iter_metric_groups(["17.1.1"], iter(rows), "MI300", profile)
+
+    assert [(counters, label) for _key, counters, label in groups] == [
+        (frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"}), "1700.1701.1 (waves)"),
+        (frozenset({"SQ_WAVES", "TCC_HIT[0]", "TCC_HIT[1]"}), "2.2.1 (tcc hits)"),
+    ]
