@@ -1056,6 +1056,14 @@ void* hrr_runtime_symbol(const char* name);
 bool hrr_replayed_recorded_error(PlaybackContext& ctx, const char* api,
                                  int32_t recorded_ret, hipError_t replayed);
 
+// hrr_decode_kernel_args — the kernel-argument decoder a launch and a graph
+// kernel node share, for a handler test to look at what it hands to HIP: each
+// argument's storage ends with 8 zeroed bytes past the recorded size.
+void hrr_decode_kernel_args(PlaybackContext& ctx, const uint8_t* p,
+                            const uint8_t* end, uint16_t num_args,
+                            std::vector<void*>& arg_ptrs,
+                            std::vector<std::vector<uint8_t>>& arg_storage);
+
 // ---------------------------------------------------------------------------
 // hrr_live_ctx — a usable hipCtx_t for a recorded one.
 //

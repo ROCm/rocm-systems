@@ -738,8 +738,10 @@ are never read. After resolving the kernel, replay reads its signature with
 `hipKernelGetParamInfo` and refuses the launch (`hipErrorInvalidValue`, one
 `[HRR] ... seq=<n> ... launch refused` line naming the mismatch) unless the decoded
 record has at least as many arguments and each is at least as wide as its
-parameter. A payload that ends before its declared arguments decodes fewer or
-narrower ones and is refused the same way. The read ends on a call one index past
+parameter. A payload that ends before its declared arguments decodes fewer of them: an
+argument the payload cuts short is dropped whole, never stored narrower, so
+truncation is refused only when it leaves fewer arguments than the kernel
+declares. The read ends on a call one index past
 the last parameter, which answers `hipErrorInvalidValue`; replay clears it so it
 does not stay as HIP's last error. The graph kernel-node paths apply the same check: an add skips the node and
 marks its graph incomplete; a set-params call (graph or exec) returns

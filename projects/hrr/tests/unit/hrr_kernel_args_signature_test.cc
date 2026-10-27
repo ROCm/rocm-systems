@@ -41,15 +41,15 @@ struct Payload {
   void put(const void* d, size_t n) {
     b.insert(b.end(), static_cast<const uint8_t*>(d), static_cast<const uint8_t*>(d) + n);
   }
-  // One argument record: value_kind 0 (by value), size, then `present` bytes.
-  void arg(uint16_t size, size_t present) {
+  // One argument record: value_kind 0 (by value), size, then `size` bytes.
+  void arg(uint16_t size) {
     const uint8_t kind = 0;
     put(&kind, 1);
     put(&size, 2);
-    b.insert(b.end(), present, 0xab);
+    b.insert(b.end(), size, 0xab);
   }
   void args(const Sizes& sizes) {
-    for (size_t s : sizes) arg(static_cast<uint16_t>(s), s);
+    for (size_t s : sizes) arg(static_cast<uint16_t>(s));
   }
   void finish(hrr_api_id_t id) {
     auto* h = reinterpret_cast<hrr_event_header*>(b.data());
@@ -59,14 +59,14 @@ struct Payload {
   }
 };
 
-// A hipModuleLaunchKernel event that declares `declared` arguments and carries
-// the records `fill` writes.
-template <typename Fill>
-Payload launch(const char* name, uint16_t declared, Fill&& fill) {
+// A hipModuleLaunchKernel event for kernel "k" that declares and carries one
+// argument per size.
+Payload launch(const Sizes& sizes) {
   Payload records;
-  fill(records);
+  records.args(sizes);
   Payload p;
-  p.b = hrr_test::make_launch_event(kSeq, name, declared, /*num_snapshots=*/0, records.b);
+  p.b = hrr_test::make_launch_event(kSeq, "k", static_cast<uint16_t>(sizes.size()),
+                                    /*num_snapshots=*/0, records.b);
   return p;
 }
 
@@ -109,7 +109,7 @@ void check_refused(PlaybackContext& ctx, const Payload& p, const char* what) {
 TEST_CASE("Unit_HRR_KernelArgsSignature_TooFewArguments", "[hrr]") {
   PlaybackContext ctx;
   declare(ctx, {8, 8, 4});
-  auto p = launch("k", 2, [](Payload& p) { p.args({8, 8}); });
+  auto p = launch({8, 8});
   check_refused(ctx, p, "carries 2 arguments, the kernel declares 3");
 }
 
@@ -123,7 +123,7 @@ TEST_CASE("Unit_HRR_KernelArgsSignature_TooFewArguments", "[hrr]") {
 TEST_CASE("Unit_HRR_KernelArgsSignature_NarrowArgument", "[hrr]") {
   PlaybackContext ctx;
   declare(ctx, {8, 16});
-  auto narrow = launch("k", 2, [](Payload& p) { p.args({8, 4}); });
+  auto narrow = launch({8, 4});
   check_refused(ctx, narrow, "argument 1 is 4 bytes, the kernel declares 16");
 }
 
@@ -219,6 +219,83 @@ TEST_CASE("Unit_HRR_KernelArgsSignature_GraphSetParams", "[hrr]") {
   tail(exec);
   exec.finish(HRR_API_HIPGRAPHEXECKERNELNODESETPARAMS);
   run(exec, HRR_API_HIPGRAPHEXECKERNELNODESETPARAMS);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Every decoded argument is followed by 8 zeroed bytes past its recorded
+ *     size, so CLR's 8-byte read of a pointer parameter stays inside the
+ *     allocation for a 4-byte argument and for an empty one (whose data() would
+ *     otherwise be null). kernelParams[i] points at that storage.
+ */
+TEST_CASE("Unit_HRR_KernelArgsSignature_ArgumentsCarryReadPadding", "[hrr]") {
+  PlaybackContext ctx;
+  Payload records;
+  records.args({4, 0, 16});
+  std::vector<void*> ptrs;
+  std::vector<std::vector<uint8_t>> storage;
+  const uint8_t* begin = records.b.data();
+  hrr_decode_kernel_args(ctx, begin, begin + records.b.size(), 3, ptrs, storage);
+
+  const Sizes recorded = {4, 0, 16};
+  REQUIRE(storage.size() == recorded.size());
+  REQUIRE(ptrs.size() == recorded.size());
+  for (size_t i = 0; i < recorded.size(); i++) {
+    INFO("argument " << i);
+    REQUIRE(storage[i].size() == recorded[i] + 8);
+    CHECK(ptrs[i] == storage[i].data());
+    for (size_t b = 0; b < recorded[i]; b++) CHECK(storage[i][b] == 0xab);
+    for (size_t b = recorded[i]; b < recorded[i] + 8; b++) CHECK(storage[i][b] == 0);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A kernel set-params record with no parameters, as capture writes it for a
+ *     call the runtime refused with hipErrorInvalidValue, replays as that
+ *     recorded failure: hipSuccess, one note. The same record with a recorded
+ *     success still fails with hipErrorInvalidValue. Covers
+ *     hipGraphKernelNodeSetParams and hipGraphExecKernelNodeSetParams.
+ */
+TEST_CASE("Unit_HRR_KernelArgsSignature_SetParamsWithoutParameters", "[hrr]") {
+  const int32_t refused = static_cast<int32_t>(hipErrorInvalidValue);
+  auto run = [](hrr_api_id_t id, int32_t recorded, std::string* err) {
+    PlaybackContext ctx;
+    ctx.graph_node_map[0x88] = reinterpret_cast<hipGraphNode_t>(uintptr_t{0x3000});
+    ctx.graph_exec_map[0x99] = reinterpret_cast<hipGraphExec_t>(uintptr_t{0x4000});
+    Payload p;
+    if (id == HRR_API_HIPGRAPHKERNELNODESETPARAMS) {
+      p.b.assign(sizeof(hrr_args_hipGraphKernelNodeSetParams), 0);
+      auto* a = reinterpret_cast<hrr_args_hipGraphKernelNodeSetParams*>(p.b.data());
+      a->ret = recorded;
+      a->node = 0x88;
+    } else {
+      p.b.assign(sizeof(hrr_args_hipGraphExecKernelNodeSetParams), 0);
+      auto* a = reinterpret_cast<hrr_args_hipGraphExecKernelNodeSetParams*>(p.b.data());
+      a->ret = recorded;
+      a->hGraphExec = 0x99;
+      a->node = 0x88;
+    }
+    p.finish(id);
+    hipError_t r = hipErrorUnknown;
+    *err = hrr_test::capture_stderr([&] {
+      hrr_dispatch_seq = kSeq;
+      r = hrr_playback_dispatch[id](ctx, p.b.data());
+    });
+    return r;
+  };
+
+  for (hrr_api_id_t id : {HRR_API_HIPGRAPHKERNELNODESETPARAMS,
+                          HRR_API_HIPGRAPHEXECKERNELNODESETPARAMS}) {
+    INFO("api id " << id);
+    std::string err;
+    CHECK(run(id, refused, &err) == hipSuccess);
+    CHECK(err.find("what it returned at capture") != std::string::npos);
+    CHECK(run(id, 0, &err) == hipErrorInvalidValue);
+    CHECK(err.find("what it returned at capture") == std::string::npos);
+  }
 }
 
 /** @} */
