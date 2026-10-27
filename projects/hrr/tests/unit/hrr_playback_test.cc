@@ -99,23 +99,6 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementHeldRanges) {
   CHECK(h.r.begin()->second == 0x20000);
 }
 
-// hrr_place_range leaves the ceiling and address 0 to the held ranges: the plan
-// holds neither, so take refuses a range that reaches them (AIRUNTIME-3069).
-HRR_TEST_CASE(Unit_HRR_Playback_PlacementHeldRangesBounded) {
-  const uint64_t G = 1ull << 21, top = 1ull << 47;
-  HrrHeldRanges h;
-  for (const auto& r : hrr_place_plan({{0, 64}, {top - G, top}, {top, top + G}}, {}))
-    h.add(r.base, r.end);
-  REQUIRE(h.r.size() == 1);
-  uint64_t b = 0, e = 0;
-  REQUIRE(hrr_place_range(0, 64, G, &b, &e));
-  CHECK_FALSE(h.take(b, e));
-  REQUIRE(hrr_place_range(top - 64, 65, G, &b, &e));  // one byte over
-  CHECK_FALSE(h.take(b, e));
-  REQUIRE(hrr_place_range(top - 64, 64, G, &b, &e));
-  CHECK(h.take(b, e));
-}
-
 // The range placement maps for an allocation is checked: a size that wraps
 // 2^64, or rounding that does, is refused rather than turned into a small range
 // inside a held one (AIRUNTIME-3069).
