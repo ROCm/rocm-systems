@@ -1740,6 +1740,8 @@ rocprofiler_set_api_table(const char* name,
             if(enable_queue_interposition)
                 rocprofiler::hsa::queue_interposition::interposition_init(
                     hsa_api_table->core_, enable_queue_interposition);
+            else if(!registered_contexts.empty())
+                rocprofiler::hsa::dispatch_time_init(hsa_api_table, lib_instance);
         }
 
         // Replay device thread trace contexts started before hsa_init(). Must run
