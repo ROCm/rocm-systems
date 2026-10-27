@@ -16,18 +16,17 @@ from amdsmi import amdsmi_exception, amdsmi_interface
 class ResetCommands:
     @staticmethod
     def _restore_fclk_cap(gpu):
-        """Raise a lowered FCLK cap back to the top DPM level.
-
-        Switching to AUTO restores the GFX and memory clock ranges but not FCLK, so
-        a cap from ``set --clk-limit FCLK MAX`` would otherwise outlive the reset.
-
-        Returns:
-            bool: True when the cap was raised.
-        """
+        """Return whether a lowered FCLK cap was raised; AUTO alone leaves it set."""
         clk_type = amdsmi_interface.AmdSmiClkType.DF
-        levels = amdsmi_interface.amdsmi_get_clk_freq(gpu, clk_type)["frequency"]
+        try:
+            levels = amdsmi_interface.amdsmi_get_clk_freq(gpu, clk_type)["frequency"]
+            current_max = amdsmi_interface.amdsmi_get_clock_info(gpu, clk_type)["max_clk"]
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            if e.get_error_code() != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                raise
+            logging.debug("FCLK cap is not available | %s", e.get_error_info())
+            return False
         top_mhz = max((hz for hz in levels if hz > 0), default=0) // 1_000_000
-        current_max = amdsmi_interface.amdsmi_get_clock_info(gpu, clk_type)["max_clk"]
         if not top_mhz or not isinstance(current_max, int) or current_max >= top_mhz:
             return False
         amdsmi_interface.amdsmi_set_gpu_clk_limit(gpu, "fclk", "max", top_mhz)
@@ -253,12 +252,10 @@ class ResetCommands:
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e
-                    # A GPU without an FCLK table has no cap to restore.
-                    if (
-                        e.get_error_code()
-                        != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
-                    ):
-                        self.helpers.error_collector.record_library_error(e.get_error_code())
+                    reset_clocks_results["fclk"] = (
+                        f"[{e.get_error_info(detailed=False)}] Unable to restore FCLK cap"
+                    )
+                    self.helpers.error_collector.record_library_error(e.get_error_code())
                     logging.debug(
                         "Failed to restore fclk cap on gpu %s | %s", gpu_id, e.get_error_info()
                     )

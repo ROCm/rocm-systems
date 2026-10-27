@@ -395,6 +395,9 @@ amdsmi_status_t smi_amdgpu_parse_dpm_ranges(std::istream& dpm_stream,
       dpm = dpm_level > dpm ? dpm_level : dpm;
     }
   }
+  if (dpm_stream.bad() || (dpm_stream.fail() && !dpm_stream.eof())) {
+    return AMDSMI_STATUS_IO;
+  }
   // Nothing to report a range from: answer as for a missing pp_dpm_* file.
   if (!has_levels && !od_range.present) {
     return AMDSMI_STATUS_NOT_SUPPORTED;

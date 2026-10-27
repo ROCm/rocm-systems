@@ -48,6 +48,9 @@ class _FakeLibraryException(Exception):
     def get_error_code(self):
         return self._err_code
 
+    def get_error_info(self, detailed=True):
+        return f"status {self._err_code}"
+
 
 def _build_fake_amdsmi():
     amdsmi_pkg = types.ModuleType("amdsmi")
@@ -112,11 +115,9 @@ class TestRestoreFclkCap(unittest.TestCase):
         self.assertFalse(self._restore([], 1550))
         self.assertEqual(self.writes, [])
 
-    def test_unsupported_clock_raises(self):
-        # The caller treats NOT_SUPPORTED as "no FCLK table" and moves on.
+    def test_unsupported_clock_is_skipped(self):
         def _raise(_gpu, _clk):
             raise _FakeLibraryException(_STATUS_NOT_SUPPORTED)
 
         self.interface.amdsmi_get_clk_freq = _raise
-        with self.assertRaises(_FakeLibraryException):
-            self.module.ResetCommands._restore_fclk_cap(None)
+        self.assertFalse(self.module.ResetCommands._restore_fclk_cap(None))

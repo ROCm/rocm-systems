@@ -1281,6 +1281,11 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type, std::vector<std::string>*
   while (std::getline(fs, line)) {
     retVec->push_back(line);
   }
+  if (fs.bad() || (fs.fail() && !fs.eof())) {
+    ss << "Failed to read devInfoMultiLineStr for DevInfoType (" << get_type_string(type) << ")";
+    LOG_ERROR(ss);
+    return EIO;
+  }
   fs.close();
 
   if (retVec->empty()) {

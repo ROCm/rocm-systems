@@ -82,6 +82,17 @@ graph TD
 All three share the same option set and the same GTest-style summary, because
 they all delegate to `common.run_test_dir()`.
 
+The `set` sweep runs each setting with a numeric `--gpu` selector and derives
+clock and power values from that GPU. Each device's exit code is checked
+independently; aggregate errors are not added to the allowed codes.
+
+The sweep explicitly excludes memory-partition changes. A request can remain
+queued until driver reload, and requesting the currently active mode does not
+cancel it. Cleanup therefore does not claim to restore the original memory
+partition. Test NPS transitions only in a separate, controlled driver-reload
+workflow; the generic sweep neither reloads the driver nor clears changes
+queued before the test.
+
 ### Invocation
 
 From an installed package (recommended — avoids a shadowing `site-packages` copy):

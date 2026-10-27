@@ -121,7 +121,10 @@ class TestCliBase(unittest.TestCase):
     # TODO(amdsmi_team): drop these once the CLI tests supports automated
     #                     input
     SWEEP_EXCLUDED_ARGS = {
-        "set": {"--compute-partition": "waits for confirmation"},
+        "set": {
+            "--compute-partition": "waits for confirmation",
+            "--memory-partition": "cannot cancel a queued change by restoring the active mode",
+        },
         "reset": {
             # --gtt reaches reset.py's prompt_reboot(), which calls `systemctl reboot` on "y"
             "--gtt": "prompts to reboot the host",
@@ -570,7 +573,7 @@ class TestCliBase(unittest.TestCase):
     def CreateCmds(self, cmd_name, list1_name, list2_name, list3_name, list4_name):
         cmd = f"amd-smi {cmd_name} --help"
         list1_args = self._order_sweep_args(cmd_name, self.FindArgs(cmd, list1_name))
-        list2_args = self.FindArgs(cmd, list2_name)
+        list2_args = ["pass"] if cmd_name == "set" else self.FindArgs(cmd, list2_name)
         list3_args = self.FindArgs(cmd, list3_name)
         list4_args = self.FindArgs(cmd, list4_name)
         if self.Debug:
@@ -623,6 +626,14 @@ class TestCliBase(unittest.TestCase):
                                     ok,
                                 )
                             )
+
+        if cmd_name == "set":
+            # Select the device before resolving its clock and power limits.
+            cmds = [
+                (f"{command} --gpu {gpu_index}", condition)
+                for command, condition in cmds
+                for gpu_index in range(len(self.common.processors))
+            ]
 
         # Calculate and substitute in dependent values
         # Removes cmds that are invalid
@@ -843,7 +854,7 @@ class TestCliBase(unittest.TestCase):
                     sub_arg = items[2]
                     if sub_arg != found_sub_arg:
                         # Whole word matches only: i.e. remove "--gpu", not "--gpureset"
-                        if "--gpu" in items:
+                        if "--gpu" in items and cmd_name != "set":
                             cmd = ""
 
                 # Remove all file and watch modifiers except for gpu 0
