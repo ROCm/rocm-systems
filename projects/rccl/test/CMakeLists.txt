@@ -79,6 +79,7 @@ if(BUILD_TESTS)
   # -fprofile-instr-generate on TUs with dynamic initializers.
   set(RCCL_TEST_GPU_RDC_COMPILE_OPTIONS -fgpu-rdc)
   if (ENABLE_CODE_COVERAGE)
+    # Revert once the coverage nightly moves to ROCm 10.3, which has the clang fix.
     list(APPEND RCCL_TEST_GPU_RDC_COMPILE_OPTIONS -fno-profile-instr-generate -fno-coverage-mapping)
   endif()
 
