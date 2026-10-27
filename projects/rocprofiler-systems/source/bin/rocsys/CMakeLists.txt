@@ -10,7 +10,13 @@
 #
 # ------------------------------------------------------------------------------#
 
-add_library(rocprofiler-systems-rocsys-core STATIC cli_dispatcher.cpp)
+add_library(
+    rocprofiler-systems-rocsys-core
+    STATIC
+    cli_dispatcher.cpp
+    delivery.cpp
+    default_system.cpp
+)
 
 target_include_directories(
     rocprofiler-systems-rocsys-core
