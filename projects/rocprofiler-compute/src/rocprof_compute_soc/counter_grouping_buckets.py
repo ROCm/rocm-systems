@@ -3,7 +3,17 @@
 
 """Shared helpers for single-pass, legacy, and inspector bucket packing."""
 
-from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+)
 
 from utils.utils_common import (
     METRIC_ID_RE,
@@ -17,6 +27,8 @@ if TYPE_CHECKING:
     from .soc_base import OmniSoC_Base
 
 _MetricGroup = Tuple[Tuple[Any, ...], FrozenSet[str], str]
+# (stem_id, panel_id, metric_idx, metric_name, expressions)
+_YamlMetric = Tuple[str, Any, int, str, List[str]]
 
 
 def counters_fit_one_bucket(
@@ -51,35 +63,25 @@ def rebuild_counter_file(
 
 
 def iter_metric_groups(
-    soc: "OmniSoC_Base",
+    priority_metric_ids: Iterable[str],
+    yaml_metrics: Iterable[_YamlMetric],
+    gpu_series: str,
     profile_counters: Set[str],
 ) -> List[_MetricGroup]:
-    """Metric PMC groups in priority-tier order for the profiled counters."""
-    priority_keys: Set[Tuple[str, Any, int]] = set()
-    for token in soc._same_bucket_priority_metric_ids():
-        tid = token.strip()
-        if not METRIC_ID_RE.match(tid):
-            continue
-        file_id, panel_id, metric_idx = convert_metric_id_to_panel_info(tid)
-        if metric_idx is None:
-            continue
-        priority_keys.add((file_id, panel_id, metric_idx))
+    """Metric PMC groups in priority-tier order for the profiled counters.
 
+    profile_counters is already expanded, so a TCC channel template in a
+    formula matches the channel counters it holds.
+    """
+    priority_keys = _priority_metric_keys(priority_metric_ids)
     rows: List[_MetricGroup] = []
-    for (
-        stem_id,
-        panel_id,
-        metric_idx,
-        metric_name,
-        expressions,
-    ) in soc._iter_arch_analysis_yaml_metrics():
+    for stem_id, panel_id, metric_idx, metric_name, expressions in yaml_metrics:
         formula_hw, _ = extract_counters_and_variables(
             "\n".join(expressions),
-            soc._mspec.gpu_series,
+            gpu_series,
             include_supported_denom=False,
         )
-        hw = soc._expand_tcc_template_counters(formula_hw)
-        counters = frozenset(hw & profile_counters)
+        counters = _profiled_counters(formula_hw, profile_counters)
         if not counters:
             continue
         tier = 0 if (stem_id, panel_id, metric_idx) in priority_keys else 1
@@ -98,7 +100,7 @@ def count_single_pass_metrics_split_across_buckets(
     perfmon_config: Dict[str, int],
 ) -> int:
     """Metrics that span buckets but whose PMC set fits one hardware bucket."""
-    metric_groups = iter_metric_groups(soc, profile_counters)
+    metric_groups = soc.metric_groups(profile_counters)
     bucket_sets = _bucket_counter_sets(output_files)
     return _single_pass_metrics_split_across_buckets_count(
         metric_groups, bucket_sets, perfmon_config
@@ -111,13 +113,46 @@ def count_multi_bucket_metrics(
     profile_counters: Set[str],
 ) -> int:
     """Metrics with in-profile PMCs spanning 2+ perfmon buckets."""
-    metric_groups = iter_metric_groups(soc, profile_counters)
+    metric_groups = soc.metric_groups(profile_counters)
     bucket_sets = _bucket_counter_sets(output_files)
     count = 0
     for _sort_key, group, _label in metric_groups:
         if _group_bucket_span(group, bucket_sets) > 1:
             count += 1
     return count
+
+
+def _priority_metric_keys(
+    priority_metric_ids: Iterable[str],
+) -> Set[Tuple[str, Any, int]]:
+    priority_keys: Set[Tuple[str, Any, int]] = set()
+    for token in priority_metric_ids:
+        tid = token.strip()
+        if not METRIC_ID_RE.match(tid):
+            continue
+        file_id, panel_id, metric_idx = convert_metric_id_to_panel_info(tid)
+        if metric_idx is None:
+            continue
+        priority_keys.add((file_id, panel_id, metric_idx))
+    return priority_keys
+
+
+def _profiled_counters(
+    formula_counters: Set[str],
+    profile_counters: Set[str],
+) -> FrozenSet[str]:
+    """Formula counters in the profile, with TCC templates matched by prefix."""
+    templates = [
+        name
+        for name in formula_counters
+        if name.startswith("TCC") and name.endswith("[")
+    ]
+    channels = {
+        counter
+        for counter in profile_counters
+        if any(counter.startswith(template) for template in templates)
+    }
+    return frozenset((formula_counters & profile_counters) | channels)
 
 
 def _bucket_counter_sets(output_files: List[CounterFile]) -> List[Set[str]]:

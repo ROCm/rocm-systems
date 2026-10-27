@@ -20,6 +20,7 @@ from rocprof_compute_soc.counter_file import (
 from rocprof_compute_soc.counter_file import (
     LimitedSet as LimitedSet,
 )
+from rocprof_compute_soc.counter_grouping_buckets import iter_metric_groups
 from rocprof_compute_soc.counter_grouping_single_pass import (
     try_allocate_single_pass_metrics,
 )
@@ -367,6 +368,20 @@ class OmniSoC_Base:
             return ()
         policy_arch = canonical_config_arch(arch)
         return _load_same_bucket_priority_policy_map().get(policy_arch, ())
+
+    def metric_groups(
+        self, profile_counters: set[str]
+    ) -> list[tuple[tuple[Any, ...], frozenset[str], str]]:
+        """Metric PMC groups for already expanded profile_counters.
+
+        Rows are in priority-tier order. See iter_metric_groups.
+        """
+        return iter_metric_groups(
+            self._same_bucket_priority_metric_ids(),
+            self._iter_arch_analysis_yaml_metrics(),
+            self._mspec.gpu_series,
+            profile_counters,
+        )
 
     def _metric_aware_coalesce_pass(
         self,
