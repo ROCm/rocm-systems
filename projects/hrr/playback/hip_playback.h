@@ -626,6 +626,56 @@ struct PlaybackContext {
         return nullptr;
     }
 
+    // Live pointer plus the bytes from it to the end of the allocation it
+    // landed in. An interior (range) hit has fewer bytes than the allocation.
+    struct PtrSpan {
+        void*  live   = nullptr;
+        size_t remain = 0;
+    };
+    PtrSpan lookup_span(uint64_t rec) const {
+        PtrSpan s;
+        if (rec == 0) return s;
+        std::shared_lock lk(map_mutex);
+        auto exact = alloc_map.find(rec);
+        if (exact != alloc_map.end()) {
+            s.live = exact->second.live_ptr;
+            s.remain = exact->second.size;
+            return s;
+        }
+        const AllocEntry* best = nullptr;
+        for (auto& [base, entry] : alloc_map) {
+            if (rec >= base && rec < base + entry.size &&
+                (!best || base > best->rec_base))
+                best = &entry;
+        }
+        if (best) {
+            const size_t off = static_cast<size_t>(rec - best->rec_base);
+            s.live = static_cast<char*>(best->live_ptr) + static_cast<ptrdiff_t>(off);
+            s.remain = best->size - off;
+            return s;
+        }
+        auto vit = vmm_va_map.find(rec);
+        if (vit != vmm_va_map.end()) {
+            s.live = vit->second.live;
+            s.remain = vit->second.size;
+            return s;
+        }
+        uint64_t best_base = 0;
+        const VmmVA* vbest = nullptr;
+        for (auto& [base, va] : vmm_va_map) {
+            if (rec >= base && rec < base + va.size && (!vbest || base > best_base)) {
+                vbest = &va;
+                best_base = base;
+            }
+        }
+        if (vbest) {
+            const size_t off = static_cast<size_t>(rec - best_base);
+            s.live = static_cast<char*>(vbest->live) + static_cast<ptrdiff_t>(off);
+            s.remain = vbest->size - off;
+        }
+        return s;
+    }
+
     // Does v fall inside a pinned host allocation replay made?
     bool in_pinned_host(uint64_t v) const {
         std::shared_lock lk(map_mutex);

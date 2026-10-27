@@ -4491,6 +4491,10 @@ static HrrHostRect memcpy3d_host_dst(const hipMemcpy3DParms& p) {
 static const void* drvmemcpy_h2d_src_blob(PlaybackContext& ctx, const char* api,
                                           uint64_t hash_lo, uint64_t hash_hi,
                                           size_t need);
+static void* translate_pitched(PlaybackContext& ctx, const char* api, uint64_t rec,
+                               size_t pitch, size_t pitch_height, size_t x, size_t y,
+                               size_t z, size_t width, size_t height, size_t depth,
+                               bool* refused);
 
 // Points a hipMemcpy3D H2D source at its captured blob, which must span the
 // whole source rect in the layout the copy reads it with: dense for a packed
@@ -4521,7 +4525,13 @@ static hipError_t replay_memcpy3d(PlaybackContext& ctx, const uint8_t* pl, bool 
     if (parms.kind == hipMemcpyHostToDevice) {
         if (!memcpy3d_h2d_src(ctx, "hipMemcpy3D", a->blob_hash_lo, a->blob_hash_hi, parms))
             return hipSuccess;
-        parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
+        bool refused = false;
+        parms.dstPtr.ptr = translate_pitched(
+            ctx, "hipMemcpy3D", reinterpret_cast<uint64_t>(parms.dstPtr.ptr),
+            parms.dstPtr.pitch, parms.dstPtr.ysize, parms.dstPos.x, parms.dstPos.y,
+            parms.dstPos.z, parms.extent.width, parms.extent.height, parms.extent.depth,
+            &refused);
+        if (refused) return hipErrorInvalidValue;
         hipError_t r = copy(&parms);
         if (r == hipSuccess)
             r = hrr_sync_after_replayed_h2d(ctx, "replayed 3D H2D memcpy");
@@ -4544,9 +4554,21 @@ static hipError_t replay_memcpy3d(PlaybackContext& ctx, const uint8_t* pl, bool 
                                       return copy(&parms);
                                   });
     }
-    // D2D: translate both pointers
-    parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
-    parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
+    // D2D: translate both pointers, and refuse a pitch that runs past either
+    // allocation. An interior pointer's remaining bytes are what the copy may use.
+    bool refused = false;
+    parms.srcPtr.ptr = translate_pitched(
+        ctx, "hipMemcpy3D", reinterpret_cast<uint64_t>(parms.srcPtr.ptr),
+        parms.srcPtr.pitch, parms.srcPtr.ysize, parms.srcPos.x, parms.srcPos.y,
+        parms.srcPos.z, parms.extent.width, parms.extent.height, parms.extent.depth,
+        &refused);
+    if (refused) return hipErrorInvalidValue;
+    parms.dstPtr.ptr = translate_pitched(
+        ctx, "hipMemcpy3D", reinterpret_cast<uint64_t>(parms.dstPtr.ptr),
+        parms.dstPtr.pitch, parms.dstPtr.ysize, parms.dstPos.x, parms.dstPos.y,
+        parms.dstPos.z, parms.extent.width, parms.extent.height, parms.extent.depth,
+        &refused);
+    if (refused) return hipErrorInvalidValue;
     return copy(&parms);
 }
 
@@ -4573,7 +4595,13 @@ static hipError_t replay_memcpy3d_async(PlaybackContext& ctx, const uint8_t* pl,
         if (!memcpy3d_h2d_src(ctx, "hipMemcpy3DAsync", a->blob_hash_lo, a->blob_hash_hi,
                               parms))
             return hipSuccess;
-        parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
+        bool refused = false;
+        parms.dstPtr.ptr = translate_pitched(
+            ctx, "hipMemcpy3DAsync", reinterpret_cast<uint64_t>(parms.dstPtr.ptr),
+            parms.dstPtr.pitch, parms.dstPtr.ysize, parms.dstPos.x, parms.dstPos.y,
+            parms.dstPos.z, parms.extent.width, parms.extent.height, parms.extent.depth,
+            &refused);
+        if (refused) return hipErrorInvalidValue;
         hipError_t r = hipMemcpy3DAsync(&parms, stream);
         if (r == hipSuccess)
             r = hrr_sync_after_replayed_h2d(ctx, "replayed 3D async H2D memcpy");
@@ -4596,9 +4624,19 @@ static hipError_t replay_memcpy3d_async(PlaybackContext& ctx, const uint8_t* pl,
                                       return hipMemcpy3DAsync(&parms, stream);
                                   });
     }
-    // D2D: translate both pointers
-    parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
-    parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
+    bool refused = false;
+    parms.srcPtr.ptr = translate_pitched(
+        ctx, "hipMemcpy3DAsync", reinterpret_cast<uint64_t>(parms.srcPtr.ptr),
+        parms.srcPtr.pitch, parms.srcPtr.ysize, parms.srcPos.x, parms.srcPos.y,
+        parms.srcPos.z, parms.extent.width, parms.extent.height, parms.extent.depth,
+        &refused);
+    if (refused) return hipErrorInvalidValue;
+    parms.dstPtr.ptr = translate_pitched(
+        ctx, "hipMemcpy3DAsync", reinterpret_cast<uint64_t>(parms.dstPtr.ptr),
+        parms.dstPtr.pitch, parms.dstPtr.ysize, parms.dstPos.x, parms.dstPos.y,
+        parms.dstPos.z, parms.extent.width, parms.extent.height, parms.extent.depth,
+        &refused);
+    if (refused) return hipErrorInvalidValue;
     return hipMemcpy3DAsync(&parms, stream);
 }
 
@@ -4614,6 +4652,38 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
 // expected blob. Keyed off srcMemoryType/dstMemoryType. Host and device memory
 // types are in scope; array-typed rects are declined (see below).
 // ---------------------------------------------------------------------------
+
+// True when the pitched rectangle HIP will stride, measured from `sp.live`,
+// fits in the bytes that allocation still has. A miss is not this function's
+// answer: the caller keeps the ordinary translate-or-refuse path.
+static bool hrr_span_covers(const PlaybackContext::PtrSpan& sp, size_t pitch,
+                            size_t pitch_height, size_t x, size_t y, size_t z,
+                            size_t width, size_t height, size_t depth) {
+    if (!sp.live) return false;
+    const size_t need = hrr_host_rect_extent(pitch, pitch_height, x, y, z,
+                                             width, height, depth);
+    return need != static_cast<size_t>(-1) && need <= sp.remain;
+}
+
+// Translate `rec` for a pitched copy. Sets *refused when the pointer is in an
+// allocation and the rectangle runs past the end of it; the caller must not
+// call HIP. A pointer in no map is returned through translate_ptr, unchanged.
+static void* translate_pitched(PlaybackContext& ctx, const char* api, uint64_t rec,
+                               size_t pitch, size_t pitch_height, size_t x, size_t y,
+                               size_t z, size_t width, size_t height, size_t depth,
+                               bool* refused) {
+    *refused = false;
+    const PlaybackContext::PtrSpan sp = ctx.lookup_span(rec);
+    if (!sp.live) return ctx.translate_ptr(rec);
+    if (!hrr_span_covers(sp, pitch, pitch_height, x, y, z, width, height, depth)) {
+        fprintf(stderr,
+                "[HRR] %s: pitched rectangle does not fit the translated allocation, "
+                "refused\n", api);
+        *refused = true;
+        return nullptr;
+    }
+    return sp.live;
+}
 
 // Resolve the H2D source blob for a driver copy, a hipMemcpy3D or a hipMemcpy2D.
 // Returns nullptr when there is nothing faithful to substitute: no blob
@@ -4681,8 +4751,12 @@ static hipError_t replay_drvmemcpy3d(PlaybackContext& ctx, HIP_MEMCPY3D& parms,
         const void* blob = drvmemcpy_h2d_src_blob(ctx, api, blob_hash_lo, blob_hash_hi, need);
         if (!blob) return hipSuccess;
         parms.srcHost = blob;
-        parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
-            ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+        bool refused = false;
+        parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(translate_pitched(
+            ctx, api, reinterpret_cast<uint64_t>(parms.dstDevice), parms.dstPitch,
+            parms.dstHeight, parms.dstXInBytes, parms.dstY, parms.dstZ,
+            parms.WidthInBytes, parms.Height, parms.Depth, &refused));
+        if (refused) return hipErrorInvalidValue;
         hipError_t r = is_async ? hipDrvMemcpy3DAsync(&parms, stream)
                                 : hipDrvMemcpy3D(&parms);
         if (r == hipSuccess)
@@ -4709,10 +4783,17 @@ static hipError_t replay_drvmemcpy3d(PlaybackContext& ctx, HIP_MEMCPY3D& parms,
                                                       : hipDrvMemcpy3D(&parms);
                                   });
     }
-    parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(
-        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcDevice)));
-    parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
-        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+    bool refused = false;
+    parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(translate_pitched(
+        ctx, api, reinterpret_cast<uint64_t>(parms.srcDevice), parms.srcPitch,
+        parms.srcHeight, parms.srcXInBytes, parms.srcY, parms.srcZ,
+        parms.WidthInBytes, parms.Height, parms.Depth, &refused));
+    if (refused) return hipErrorInvalidValue;
+    parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(translate_pitched(
+        ctx, api, reinterpret_cast<uint64_t>(parms.dstDevice), parms.dstPitch,
+        parms.dstHeight, parms.dstXInBytes, parms.dstY, parms.dstZ,
+        parms.WidthInBytes, parms.Height, parms.Depth, &refused));
+    if (refused) return hipErrorInvalidValue;
     return is_async ? hipDrvMemcpy3DAsync(&parms, stream) : hipDrvMemcpy3D(&parms);
 }
 
@@ -4778,8 +4859,12 @@ static hipError_t replay_drvmemcpy2d(PlaybackContext& ctx, const T* a,
                                                   a->blob_hash_hi, need);
         if (!blob) return hipSuccess;
         parms.srcHost = blob;
-        parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
-            ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+        bool refused = false;
+        parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(translate_pitched(
+            ctx, api, reinterpret_cast<uint64_t>(parms.dstDevice), parms.dstPitch, 0,
+            parms.dstXInBytes, parms.dstY, 0, parms.WidthInBytes, parms.Height, 1,
+            &refused));
+        if (refused) return hipErrorInvalidValue;
         hipError_t r = issue(&parms);
         if (r == hipSuccess)
             r = hrr_sync_after_replayed_h2d(ctx, "replayed driver 2D H2D memcpy");
@@ -4805,10 +4890,15 @@ static hipError_t replay_drvmemcpy2d(PlaybackContext& ctx, const T* a,
                                       return issue(&parms);
                                   });
     }
-    parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(
-        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcDevice)));
-    parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
-        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+    bool refused = false;
+    parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(translate_pitched(
+        ctx, api, reinterpret_cast<uint64_t>(parms.srcDevice), parms.srcPitch, 0,
+        parms.srcXInBytes, parms.srcY, 0, parms.WidthInBytes, parms.Height, 1, &refused));
+    if (refused) return hipErrorInvalidValue;
+    parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(translate_pitched(
+        ctx, api, reinterpret_cast<uint64_t>(parms.dstDevice), parms.dstPitch, 0,
+        parms.dstXInBytes, parms.dstY, 0, parms.WidthInBytes, parms.Height, 1, &refused));
+    if (refused) return hipErrorInvalidValue;
     return issue(&parms);
 }
 
@@ -4913,7 +5003,11 @@ static hipError_t replay_memcpy2d(PlaybackContext& ctx, const T* a,
             ctx, is_async ? "hipMemcpy2DAsync" : "hipMemcpy2D", a->blob_hash_lo,
             a->blob_hash_hi, need);
         if (!blob) return hipSuccess;
-        void* dst = ctx.translate_ptr(a->dst);
+        bool refused = false;
+        void* dst = translate_pitched(ctx, is_async ? "hipMemcpy2DAsync" : "hipMemcpy2D",
+                                      a->dst, dpitch, 0, 0, 0, 0, width, height, 1,
+                                      &refused);
+        if (refused) return hipErrorInvalidValue;
         hipError_t r = hipSuccess;
         if (is_async)
             r = hipMemcpy2DAsync(dst, dpitch, blob, spitch, width, height,
@@ -4957,9 +5051,16 @@ static hipError_t replay_memcpy2d(PlaybackContext& ctx, const T* a,
 
     // D2D / H2H: translate both ends. An end that is in no map is an address
     // from the capturing process: it is not used as is, since the archive would
-    // be choosing where the copy reads or writes.
-    void* dst = ctx.translate_ptr(a->dst);
-    void* src = ctx.translate_ptr(a->src);
+    // be choosing where the copy reads or writes. A range-translated interior
+    // pointer is refused when the recorded pitch runs past that allocation.
+    const char* api2 = is_async ? "hipMemcpy2DAsync" : "hipMemcpy2D";
+    bool refused = false;
+    void* dst = translate_pitched(ctx, api2, a->dst, dpitch, 0, 0, 0, 0, width, height, 1,
+                                  &refused);
+    if (refused) return hipErrorInvalidValue;
+    void* src = translate_pitched(ctx, api2, a->src, spitch, 0, 0, 0, 0, width, height, 1,
+                                  &refused);
+    if (refused) return hipErrorInvalidValue;
     if (!dst || !src) {
         fprintf(stderr,
                 "[HRR] hipMemcpy2D%s: %s 0x%llx is not mapped at replay, so the copy "
