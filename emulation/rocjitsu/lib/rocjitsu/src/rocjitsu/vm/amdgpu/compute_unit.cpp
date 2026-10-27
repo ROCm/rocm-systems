@@ -2517,6 +2517,11 @@ uint64_t ComputeUnitCore::run_issue_cycle(uint64_t selected_slots) {
   return issued;
 }
 
+// Clang 17 and 18 do not emit this specialization for the local class in
+// create_functional_cu; keep it explicit for the supported toolchain floor.
+template bool ComputeUnitCore::step_impl<true>(MmaAdmissionCache *, uint32_t, bool, uint64_t,
+                                               uint64_t *);
+
 // Explicit template instantiations for all AMDGPU ISAs and execution modes.
 #define ROCJITSU_CU_INSTANTIATE(ISA_TYPE)                                                          \
   template class IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, ISA_TYPE>;                      \

@@ -420,6 +420,8 @@ add_executable(
     decode_smoke_test.cpp
     rdna4_dot_dpp_test.cpp
     readlane_selector_test.cpp
+    pc_extension_test.cpp
+    pc_fetch_test.cpp
     decoder_c_api_test.cpp
     buffer_operand_test.cpp
     buffer_descriptor_vcc_test.cpp
@@ -509,6 +511,7 @@ add_executable(
     pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
     vskip_test.cpp
+    cbranch_fork_join_test.cpp
     isa_diagnostics_test.cpp
     clocked_issue_cycle_test.cpp
     cdna3_predicate_mask_test.cpp
