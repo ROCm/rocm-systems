@@ -46,6 +46,15 @@ class TuningGeneralMicrotest : public ::testing::Test {
     }
   }
 
+  // Thread budgets and thresholds as ncclTuningInit() leaves them, on a one-rank-per-node comm.
+  void InitThreadThresholds(int channels) {
+    comm_->nRanks = 4;
+    comm_->nChannels = channels;
+    comm_->isOneRPN = true;
+    SetMicroEnvAbsent("NCCL_THREAD_THRESHOLDS");
+    ASSERT_EQ(ncclSuccess, ncclTuningSetThreadThresholds(comm_.get()));
+  }
+
   ncclTuningResult_t GetChannels(int algo, int proto, size_t bytes, int maxChannels = -1) {
     ncclTuningInput_t input{};
     input.comm = comm_.get();
@@ -369,6 +378,35 @@ TEST_F(TuningGeneralMicrotest, ChannelSelectionHandlesTreeNvlsPatAndCollnet) {
   EXPECT_EQ(NCCL_MAX_NTHREADS / WARP_SIZE, smallCollnet.nWarps);
   ncclTuningResult_t midCollnet = GetChannels(NCCL_ALGO_COLLNET_DIRECT, NCCL_PROTO_SIMPLE, 50000);
   EXPECT_EQ(3, midCollnet.nChannels);
+}
+
+// NCCL 2.32.3 (ced24261) gives PAT its own thread budget, so one-RPN PAT sheds channels for small
+// messages like Ring. Without it the budget is 0 and PAT runs on every channel at any size.
+TEST_F(TuningGeneralMicrotest, OneRpnPatChannelsScaleWithDefaultThreads) {
+  InitThreadThresholds(8);
+  EXPECT_EQ(NCCL_MAX_NTHREADS, comm_->tuningContext.maxThreads[NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE]);
+
+  const size_t fourChannels = 4ull * NCCL_MAX_NTHREADS * NCCL_SIMPLE_THREAD_THRESHOLD;
+  ncclTuningResult_t tiny = GetChannels(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE, 1);
+  EXPECT_EQ(1, tiny.nChannels);
+  EXPECT_EQ(NCCL_MAX_NTHREADS / WARP_SIZE, tiny.nWarps);
+  ncclTuningResult_t mid = GetChannels(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE, fourChannels);
+  EXPECT_EQ(4, mid.nChannels);
+  EXPECT_EQ(NCCL_MAX_NTHREADS / WARP_SIZE, mid.nWarps);
+  ncclTuningResult_t large = GetChannels(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE, 1ull << 30);
+  EXPECT_EQ(8, large.nChannels);
+  EXPECT_EQ(NCCL_MAX_NTHREADS / WARP_SIZE, large.nWarps);
+}
+
+// Control for the test above: Ring has the same default budget, so it scales the same way on any tree.
+TEST_F(TuningGeneralMicrotest, RingChannelsScaleWithDefaultThreads) {
+  InitThreadThresholds(8);
+  ASSERT_EQ(NCCL_MAX_NTHREADS, comm_->tuningContext.maxThreads[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE]);
+
+  const size_t fourChannels = 4ull * NCCL_MAX_NTHREADS * NCCL_SIMPLE_THREAD_THRESHOLD;
+  EXPECT_EQ(1, GetChannels(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 1).nChannels);
+  EXPECT_EQ(4, GetChannels(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, fourChannels).nChannels);
+  EXPECT_EQ(8, GetChannels(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 1ull << 30).nChannels);
 }
 
 TEST_F(TuningGeneralMicrotest, ExpandIdDecodesEveryRangeAndRejectsBadInputs) {
