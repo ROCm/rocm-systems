@@ -800,6 +800,11 @@ private:
   /// transient retry is recorded on only the affected ComputeQueueRecord so unrelated
   /// queues remain runnable.
   [[nodiscard]] bool drain_completions();
+  /// @brief Cancel all outstanding work on the identified queue.
+  /// @details A supplied failed_dispatch_id must be admitted or still in transit;
+  /// otherwise a delayed fault is ignored so it cannot cancel a reused queue.
+  /// std::nullopt skips this identity check. The ID does not limit cancellation
+  /// to one dispatch: either accepted form cancels the queue's outstanding work.
   bool fault_queue_local(uint32_t queue_id, uint32_t process_id,
                          std::optional<uint32_t> failed_dispatch_id = std::nullopt);
   /// @brief Drop cluster LDS pins collected under cluster_placements_mutex_.
