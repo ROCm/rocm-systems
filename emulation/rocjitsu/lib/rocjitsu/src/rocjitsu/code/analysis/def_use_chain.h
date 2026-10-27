@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file def_use_chain.h
-/// @brief Instruction-level register def/use extraction for DBT dataflow.
+/// @brief Instruction-level register def/use extraction for DBT and DBI analyses.
 ///
 /// @details This is the bridge between decoded instructions and CFG-aware
 /// liveness. Operand membership determines direction: dst operands define

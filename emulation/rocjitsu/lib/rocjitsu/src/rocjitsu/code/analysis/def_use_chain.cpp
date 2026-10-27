@@ -88,17 +88,15 @@ InstDefUse::InstDefUse(const Instruction &inst, uint8_t wave_size,
   has_predicated_def = inst.flags() & PREDICATED_DEF;
   const bool ignores_exec = inst.flags() & IGNORES_EXEC;
   bool has_vector_def = false;
-  // A Wave32 wave mask is one SGPR, but RDNA decoders name the Wave64 pair. A
-  // def of the pair would kill an SGPR the instruction does not write.
-  const bool wave32 = wave_size == 32;
 
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto *op = inst.dst_operand(i);
     if (op == nullptr)
       continue;
     if (auto ref = ordinary_register_ref(*op)) {
-      if (wave32 && ref->cls == RegClass::SGPR && op->is_wave_mask())
-        ref->width = 1;
+      // A def of a Wave32 wave mask's decoded pair would kill an SGPR the
+      // instruction does not write.
+      ref = wave_sized_register(*op, *ref, wave_size);
       expand_operand_register(defs, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Def,
                               unknown_vgpr_defs);
       has_vector_def |= is_vector_def(*ref);
@@ -123,8 +121,7 @@ InstDefUse::InstDefUse(const Instruction &inst, uint8_t wave_size,
     if (op == nullptr)
       continue;
     if (auto ref = ordinary_register_ref(*op)) {
-      if (wave32 && ref->cls == RegClass::SGPR && op->is_wave_mask())
-        ref->width = 1;
+      ref = wave_sized_register(*op, *ref, wave_size);
       expand_operand_register(uses, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Use,
                               unknown_vgpr_defs);
     } else if (auto sc = op->to_special_reg_class()) {

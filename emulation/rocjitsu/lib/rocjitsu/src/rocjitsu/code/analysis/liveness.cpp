@@ -216,6 +216,8 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, uint8_t wave_size,
                                    LivenessAnalysisOptions options,
                                    std::span<const ScopedCfgEdge> extra_edges) {
   assert(wave_size == 32 || wave_size == 64);
+  assert((!exec || exec->wave_size() == wave_size) &&
+         "the EXEC analysis must be computed for the same wave size");
   min_free_vgpr_ = options.min_free_vgpr;
   max_free_vgpr_ =
       static_cast<uint16_t>(std::min<size_t>(options.max_free_vgpr, REGISTER_SET_MAX_VGPRS));

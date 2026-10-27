@@ -342,10 +342,13 @@ std::span<const uint8_t> text_span(const CodeObject &co) {
   return {reinterpret_cast<const uint8_t *>(text->data()), text->size()};
 }
 
+constexpr uint8_t kScopeWaveSize = 64;
+
 LivenessAnalysis analyze_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   auto scope = block_scope(blocks);
-  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  return LivenessAnalysis(KernelBlockScope(scope), 64, std::make_unique<ExecMaskAnalysis>(exec));
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), kScopeWaveSize);
+  return LivenessAnalysis(KernelBlockScope(scope), kScopeWaveSize,
+                          std::make_unique<ExecMaskAnalysis>(exec));
 }
 
 // Wire the same scoped call/return edges into BOTH analyses, as BinaryTranslator
@@ -353,9 +356,9 @@ LivenessAnalysis analyze_scope(const std::vector<std::unique_ptr<BasicBlock>> &b
 LivenessAnalysis analyze_scope_with_edges(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                                           std::span<const ScopedCfgEdge> extra_edges) {
   auto scope = block_scope(blocks);
-  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64, extra_edges);
-  return LivenessAnalysis(KernelBlockScope(scope), 64, std::make_unique<ExecMaskAnalysis>(exec),
-                          /*options=*/{}, extra_edges);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), kScopeWaveSize, extra_edges);
+  return LivenessAnalysis(KernelBlockScope(scope), kScopeWaveSize,
+                          std::make_unique<ExecMaskAnalysis>(exec), /*options=*/{}, extra_edges);
 }
 
 // CFG/liveness tests care about decoded register effects, not the physical
@@ -6760,6 +6763,24 @@ TEST(ExecMaskAnalysis, Wave32ExecLoWriteCoversFullMask) {
   EXPECT_EQ(exec.before(*insts[1]), ExecState::Full);
 }
 
+// An EXEC analysis must share the liveness wave size: at 32 an exec_lo write
+// is the whole mask, which would let Wave64 liveness kill inactive upper lanes.
+TEST(LivenessAnalysisDeathTest, ExecAnalysisMustMatchTheWaveSize) {
+  auto blocks =
+      build_test_blocks({TestOpcode::WriteExecLoHalf, TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  auto analyze = [&](uint8_t exec_wave_size, uint8_t wave_size) {
+    const LivenessAnalysis liveness(
+        KernelBlockScope(scope), wave_size,
+        std::make_unique<ExecMaskAnalysis>(KernelBlockScope(scope), exec_wave_size));
+  };
+  EXPECT_DEBUG_DEATH(analyze(32, 64), "same wave size");
+  EXPECT_DEBUG_DEATH(analyze(64, 32), "same wave size");
+  analyze(32, 32);
+  analyze(64, 64);
+  const LivenessAnalysis without_exec(KernelBlockScope(scope), 32);
+}
+
 TEST(ExecMaskAnalysis, ExecHiWriteNeverEstablishesFull) {
   // s_mov_b32 exec_hi, -1 writes bits [32,64), which never cover the active
   // lanes. It must not establish Full from Unknown on either wave size — on
@@ -7432,8 +7453,8 @@ TEST(GeneratedInstDefUse, Gfx1250Vop3CompareDefinesOneSgpr) {
 
 TEST(GeneratedInstDefUse, Gfx1250VopdCndmaskMaskIsOneSgprInWave32) {
   // v_dual_cndmask_b32 in either VOPD3 slot, its mask in s8, paired with
-  // v_dual_fmac_f32. VOPD3 decodes the mask as an SGPR pair, so only Wave32
-  // narrows it.
+  // v_dual_fmac_f32. The VOPD3 decoder declares the mask as a 64-bit SGPR
+  // operand, and Wave32 narrows it to s8.
   for (const bool x_slot : {true, false}) {
     SCOPED_TRACE(x_slot ? "X slot" : "Y slot");
     const uint32_t opx = x_slot ? 9u : 0u;
@@ -7449,9 +7470,6 @@ TEST(GeneratedInstDefUse, Gfx1250VopdCndmaskMaskIsOneSgprInWave32) {
     const InstDefUse wave32(*inst, 32);
     EXPECT_TRUE(wave32.uses.contains({RegClass::SGPR, 8, 1}));
     EXPECT_FALSE(wave32.uses.contains({RegClass::SGPR, 9, 1}));
-
-    const InstDefUse wave64(*inst, 64);
-    EXPECT_TRUE(wave64.uses.contains({RegClass::SGPR, 8, 2}));
   }
 }
 

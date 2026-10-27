@@ -211,10 +211,11 @@ public:
   /// Forwarded to InstDefUse. A Wave32 RDNA scope analyzed at 64 can report a
   /// live SGPR dead.
   /// @param exec Optional program-point EXEC-state analysis over the same
-  /// @p blocks scope; lets EXEC-masked vector defs count as kills where EXEC is
-  /// provably full. Ownership is moved into the analysis. Defaults to null: with
-  /// no EXEC analysis every EXEC-masked vector def is treated as `Unknown`, so
-  /// the conservative behavior (never promote such a def to a kill) is preserved.
+  /// @p blocks scope and @p wave_size; lets EXEC-masked vector defs count as
+  /// kills where EXEC is provably full. Ownership is moved into the analysis.
+  /// Defaults to null: with no EXEC analysis every EXEC-masked vector def is
+  /// treated as `Unknown`, so the conservative behavior (never promote such a
+  /// def to a kill) is preserved.
   LivenessAnalysis(KernelBlockScope blocks, uint8_t wave_size,
                    std::unique_ptr<ExecMaskAnalysis> exec = nullptr,
                    LivenessAnalysisOptions options = {},
