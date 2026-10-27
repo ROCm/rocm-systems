@@ -106,3 +106,18 @@ target_include_directories(
     state-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
 )
+
+add_library(wall-clock-report-tests OBJECT test_wall_clock_report.cpp)
+
+target_link_libraries(
+    wall-clock-report-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-json
+)
+
+target_include_directories(
+    wall-clock-report-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib
+)

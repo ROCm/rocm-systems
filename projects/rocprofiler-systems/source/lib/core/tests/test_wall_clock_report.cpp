@@ -1,60 +1,55 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// The report is rendered into a stream and parsed back into rows.
-
-#include "core/trace_cache/metadata_registry.hpp"
-#include "core/trace_cache/sample_type.hpp"
-#include "core/trace_cache/wall_clock_processor.hpp"
-#include "core/trace_cache/wall_clock_report.hpp"
+#include "core/wall_clock_report.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <utility>
 #include <vector>
 
-using rocprofsys::trace_cache::kernel_dispatch_sample;
-using rocprofsys::trace_cache::metadata_registry;
-using rocprofsys::trace_cache::wall_clock_interval;
-using rocprofsys::trace_cache::wall_clock_layout;
-using rocprofsys::trace_cache::wall_clock_nanoseconds;
-using rocprofsys::trace_cache::wall_clock_processor_t;
-using rocprofsys::trace_cache::wall_clock_report;
+using rocprofsys::find_wall_clock_unit;
+using rocprofsys::wall_clock_interval;
+using rocprofsys::wall_clock_nanoseconds;
+using rocprofsys::wall_clock_report;
+using rocprofsys::wall_clock_settings;
+using rocprofsys::wall_clock_unit;
 
 namespace
 {
-constexpr std::uint64_t k_main_thread  = 1;
-constexpr std::uint64_t k_other_thread = 2;
-constexpr std::uint64_t k_launch_id    = 7;
+constexpr std::uint64_t               k_main_thread  = 1;
+constexpr std::uint64_t               k_other_thread = 2;
+constexpr std::uint64_t               k_launch_id    = 7;
+constexpr rocprofsys::wall_clock_unit k_milliseconds{ "ms",
+                                                      std::chrono::milliseconds{ 1 } };
 
-// Timeline
 constexpr wall_clock_nanoseconds k_start        = {};
 constexpr wall_clock_nanoseconds k_ms           = std::chrono::milliseconds{ 1 };
 constexpr wall_clock_nanoseconds k_launch_begin = k_start;
 constexpr wall_clock_nanoseconds k_launch_end   = k_ms;
-constexpr wall_clock_nanoseconds k_kernel_begin =
-    5 * k_ms;  // after the launch has returned
-constexpr wall_clock_nanoseconds k_kernel_end = 7 * k_ms;
+constexpr wall_clock_nanoseconds k_kernel_begin = 5 * k_ms;
+constexpr wall_clock_nanoseconds k_kernel_end   = 7 * k_ms;
 
-// Column positions of a table row
 constexpr std::size_t k_columns_per_row = 12;
 constexpr std::size_t k_count_column    = 1;
 constexpr std::size_t k_depth_column    = 2;
+constexpr std::size_t k_units_column    = 4;
 constexpr std::size_t k_sum_column      = 5;
 constexpr std::size_t k_min_column      = 7;
 constexpr std::size_t k_max_column      = 8;
+constexpr std::size_t k_var_column      = 9;
 constexpr std::size_t k_self_column     = 11;
 
 struct time_span
@@ -86,9 +81,11 @@ struct report_row
     std::string   thread;  // "0" for the label prefix "|0>>>", empty when collapsed
     std::uint64_t count;
     std::uint64_t depth;
+    std::string   units;
     std::string   sum;
     std::string   min;
     std::string   max;
+    std::string   var;
     std::string   self_percent;
 };
 
@@ -139,19 +136,19 @@ parse_row(const std::string& line, report_row& row)
     }
     row.count        = std::stoull(cells[k_count_column]);
     row.depth        = std::stoull(cells[k_depth_column]);
+    row.units        = cells[k_units_column];
     row.sum          = cells[k_sum_column];
     row.min          = cells[k_min_column];
     row.max          = cells[k_max_column];
+    row.var          = cells[k_var_column];
     row.self_percent = cells[k_self_column];
     return true;
 }
 
 std::vector<std::string>
-lines_of(const wall_clock_report& report)
+text_lines(const wall_clock_report& report)
 {
-    std::ostringstream out;
-    report.write_text(out);
-    std::istringstream       input{ out.str() };
+    std::istringstream       input{ report.text() };
     std::vector<std::string> lines;
     for(std::string line; std::getline(input, line);)
     {
@@ -161,10 +158,10 @@ lines_of(const wall_clock_report& report)
 }
 
 std::vector<report_row>
-rows_of(const wall_clock_report& report)
+parse_rows(const wall_clock_report& report)
 {
     std::vector<report_row> rows;
-    for(const auto& line : lines_of(report))
+    for(const auto& line : text_lines(report))
     {
         if(report_row row{}; parse_row(line, row))
         {
@@ -183,14 +180,23 @@ expect_node(const report_row& row, std::string_view name, std::uint64_t depth)
 
 struct intervals
 {
-    std::vector<wall_clock_interval> regions      = {};
-    std::vector<wall_clock_interval> gpu_activity = {};
+    std::vector<wall_clock_interval> regions;
+    std::vector<wall_clock_interval> gpu_activity;
 };
 
 [[nodiscard]] wall_clock_report
-report_of(const intervals& input, wall_clock_layout layout = {})
+make_report(const intervals& input, wall_clock_settings settings = {})
 {
-    return { layout, input.regions, input.gpu_activity };
+    wall_clock_report report{ settings };
+    for(const auto& region : input.regions)
+    {
+        report.add_region(region);
+    }
+    for(const auto& activity : input.gpu_activity)
+    {
+        report.add_gpu_activity(activity);
+    }
+    return report;
 }
 
 /// A launch at the start of the timeline and the kernel it started, after it returned.
@@ -213,7 +219,7 @@ TEST(wall_clock_report, kernel_nests_under_launch_with_same_correlation_id)
     input.gpu_activity.push_back(interval("tiny", span(k_kernel_begin, k_kernel_end),
                                           k_launch_id, k_other_thread));
 
-    auto const rows = rows_of(report_of(input));
+    auto const rows = parse_rows(make_report(input));
     ASSERT_EQ(rows.size(), 2U);
     expect_node(rows[0], "hipLaunchKernel", 0);
     expect_node(rows[1], "tiny", 1);
@@ -229,7 +235,7 @@ TEST(wall_clock_report, kernel_without_matching_launch_is_top_level)
     input.gpu_activity.push_back(
         interval("tiny", span(k_kernel_begin, k_kernel_end), k_launch_id + 1));
 
-    auto const rows = rows_of(report_of(input));
+    auto const rows = parse_rows(make_report(input));
     ASSERT_EQ(rows.size(), 2U);
     expect_node(rows[0], "hipLaunchKernel", 0);
     expect_node(rows[1], "tiny", 0);
@@ -250,7 +256,7 @@ TEST(wall_clock_report, repeated_launches_aggregate_into_one_row)
                      k_first_launch + i));
     }
 
-    auto const rows = rows_of(report_of(input));
+    auto const rows = parse_rows(make_report(input));
     ASSERT_EQ(rows.size(), 2U);
     EXPECT_EQ(rows[0].count, 3U);
     EXPECT_EQ(rows[0].sum, "0.006000");
@@ -269,7 +275,7 @@ TEST(wall_clock_report, contained_regions_nest_and_later_ones_do_not)
                                         interval("after", k_after),
                                         interval("outer", k_outer) } };
 
-    auto const rows = rows_of(report_of(input));
+    auto const rows = parse_rows(make_report(input));
     ASSERT_EQ(rows.size(), 3U);
     expect_node(rows[0], "outer", 0);
     expect_node(rows[1], "inner", 1);
@@ -289,7 +295,7 @@ TEST(wall_clock_report, self_percent_excludes_only_cpu_children)
             .gpu_activity = { interval("tiny", k_long_kernel, k_launch_id) }
     };
 
-    auto const rows = rows_of(report_of(input));
+    auto const rows = parse_rows(make_report(input));
     ASSERT_EQ(rows.size(), 4U);
     EXPECT_EQ(rows[0].name, "outer");
     EXPECT_EQ(rows[0].self_percent, "75.0");
@@ -304,7 +310,7 @@ TEST(wall_clock_report, each_thread_gets_its_own_ordinal_tree)
                                         k_other_thread),
                                interval("work", span(k_launch_begin, k_launch_end)) } };
 
-    auto const rows = rows_of(report_of(input));
+    auto const rows = parse_rows(make_report(input));
     ASSERT_EQ(rows.size(), 2U);
     EXPECT_EQ(rows[0].thread, "0");
     EXPECT_EQ(rows[1].thread, "1");
@@ -318,7 +324,7 @@ TEST(wall_clock_report, flat_layout_puts_every_row_directly_under_its_thread)
                                             interval("inner", k_inner) } };
     add_launch_with_kernel(input);
 
-    auto const rows = rows_of(report_of(input, { .flat = true }));
+    auto const rows = parse_rows(make_report(input, { .flat = true }));
     ASSERT_EQ(rows.size(), 4U);
     for(const auto& row : rows)
     {
@@ -333,7 +339,7 @@ TEST(wall_clock_report, flat_layout_still_merges_repeated_calls)
                                interval("work", span(k_launch_begin, k_launch_end)),
                                interval("work", span(k_kernel_begin, k_kernel_end)) } };
 
-    auto const rows = rows_of(report_of(input, { .flat = true }));
+    auto const rows = parse_rows(make_report(input, { .flat = true }));
     ASSERT_EQ(rows.size(), 1U);
     EXPECT_EQ(rows[0].count, 2U);
 }
@@ -348,7 +354,7 @@ TEST(wall_clock_report, timeline_layout_keeps_one_row_per_call_in_call_order)
     input.regions.push_back(interval("hipLaunchKernel", k_second_begin, k_second_launch));
     input.gpu_activity.push_back(interval("tiny", k_second_kernel, k_second_launch));
 
-    auto const rows = rows_of(report_of(input, { .timeline = true }));
+    auto const rows = parse_rows(make_report(input, { .timeline = true }));
     ASSERT_EQ(rows.size(), 4U);
     expect_node(rows[0], "hipLaunchKernel", 0);
     expect_node(rows[1], "tiny", 1);
@@ -366,7 +372,7 @@ TEST(wall_clock_report, flat_and_timeline_together_give_one_top_level_row_per_ca
                                interval("work", span(k_launch_begin, k_launch_end)),
                                interval("work", span(k_kernel_begin, k_kernel_end)) } };
 
-    auto const rows = rows_of(report_of(input, { .flat = true, .timeline = true }));
+    auto const rows = parse_rows(make_report(input, { .flat = true, .timeline = true }));
     ASSERT_EQ(rows.size(), 2U);
     expect_node(rows[0], "work", 0);
     expect_node(rows[1], "work", 0);
@@ -378,17 +384,15 @@ TEST(wall_clock_report, collapsed_threads_share_one_tree_without_thread_number)
                                interval("work", span(k_launch_begin, k_launch_end), 0,
                                         k_other_thread),
                                interval("work", span(k_launch_begin, k_launch_end)) } };
-    auto const      report = report_of(input, { .collapse_threads = true });
+    auto const      report = make_report(input, { .collapse_threads = true });
 
-    auto const rows = rows_of(report);
+    auto const rows = parse_rows(report);
     ASSERT_EQ(rows.size(), 1U);
     EXPECT_EQ(rows[0].thread, "");
     EXPECT_EQ(rows[0].count, 2U);
 
-    std::ostringstream out;
-    report.write_json(out, 0, 1);
-    auto const  json = nlohmann::json::parse(out.str());
-    auto const& wall = json.at("timemory").at("wall_clock");
+    auto const  json = nlohmann::json::parse(report.json());
+    auto const& wall = json.at("rocprofiler-systems").at("wall_clock");
     EXPECT_EQ(wall.at("thread_count"), 2);
     EXPECT_EQ(wall.at("ranks").at(0).at("graph").at(0).at("prefix"), ">>> work");
 }
@@ -398,7 +402,7 @@ TEST(wall_clock_report, has_timemory_table_layout)
     intervals input;
     add_launch_with_kernel(input);
 
-    auto const lines = lines_of(report_of(input));
+    auto const lines = text_lines(make_report(input));
     // banner, title, banner, header, column separator, two rows, closing banner
     ASSERT_EQ(lines.size(), 8U);
     EXPECT_THAT(lines[1],
@@ -410,16 +414,33 @@ TEST(wall_clock_report, has_timemory_table_layout)
     }
 }
 
+TEST(wall_clock_report, value_columns_grow_to_fit_long_values)
+{
+    constexpr wall_clock_nanoseconds k_twelve_seconds = std::chrono::seconds{ 12 };
+    intervals const                  input{
+                         .regions = { interval("long", span(k_start, k_twelve_seconds)),
+                                      interval("short", span(k_twelve_seconds, k_twelve_seconds + k_ms)) }
+    };
+
+    auto const lines = text_lines(make_report(input));
+    ASSERT_FALSE(lines.empty());
+    for(const auto& line : lines)
+    {
+        EXPECT_EQ(line.size(), lines.front().size()) << line;
+    }
+    auto const rows = parse_rows(make_report(input));
+    ASSERT_EQ(rows.size(), 2U);
+    EXPECT_EQ(rows[0].sum, "12.000000");
+}
+
 TEST(wall_clock_report, json_graph_has_the_rows_the_timemory_validator_reads)
 {
     intervals input;
     add_launch_with_kernel(input);
-    std::ostringstream out;
-    report_of(input).write_json(out, 0, 1);
 
-    auto const  json = nlohmann::json::parse(out.str());
-    auto const& wall = json.at("timemory").at("wall_clock");
-    EXPECT_EQ(wall.at("unit_repr"), "sec");
+    auto const  json = nlohmann::json::parse(make_report(input).json());
+    auto const& wall = json.at("rocprofiler-systems").at("wall_clock");
+    EXPECT_EQ(wall.at("unit_repr"), "s");
     EXPECT_EQ(wall.at("unit_value"), 1'000'000'000);
     auto const& graph = wall.at("ranks").at(0).at("graph");
     ASSERT_EQ(graph.size(), 2U);
@@ -433,9 +454,9 @@ TEST(wall_clock_report, json_graph_has_the_rows_the_timemory_validator_reads)
     EXPECT_EQ(graph[1].at("entry").at("value"), (k_kernel_end - k_kernel_begin).count());
 }
 
-/// The stats object of the only row of a report with three calls of 1, 2 and 3 ms.
-nlohmann::json
-merged_calls_stats()
+/// Three calls of 1, 2 and 3 ms that merge into one row.
+intervals
+merged_calls()
 {
     intervals input;
     for(std::uint64_t i = 0; i < 3; ++i)
@@ -443,16 +464,25 @@ merged_calls_stats()
         auto const begin = i * 10 * k_ms;
         input.regions.push_back(interval("work", span(begin, begin + (i + 1) * k_ms)));
     }
-    std::ostringstream out;
-    report_of(input).write_json(out, 0, 1);
-    return nlohmann::json::parse(out.str())
-        .at("timemory")
+    return input;
+}
+
+nlohmann::json
+merged_calls_row(wall_clock_settings settings = {})
+{
+    return nlohmann::json::parse(make_report(merged_calls(), settings).json())
+        .at("rocprofiler-systems")
         .at("wall_clock")
         .at("ranks")
         .at(0)
         .at("graph")
-        .at(0)
-        .at("stats");
+        .at(0);
+}
+
+nlohmann::json
+merged_calls_stats()
+{
+    return merged_calls_row().at("stats");
 }
 
 TEST(wall_clock_report, json_stats_total_and_extremes_of_the_merged_calls)
@@ -474,20 +504,110 @@ TEST(wall_clock_report, json_stats_spread_of_the_merged_calls)
 
 TEST(wall_clock_report, intervals_ending_before_they_begin_throw)
 {
-    auto const broken = interval("broken", span(k_launch_end, k_launch_begin));
-    EXPECT_THROW(std::ignore = report_of({ .regions = { broken } }), std::runtime_error);
-    EXPECT_THROW(std::ignore = report_of({ .gpu_activity = { broken } }),
-                 std::runtime_error);
+    auto const        broken = interval("broken", span(k_launch_end, k_launch_begin));
+    wall_clock_report report{ {} };
+    EXPECT_THROW(report.add_region(broken), std::runtime_error);
+    EXPECT_THROW(report.add_gpu_activity(broken), std::runtime_error);
+    EXPECT_TRUE(report.empty());
 }
 
-TEST(wall_clock_processor, kernel_with_unregistered_symbol_throws)
+TEST(wall_clock_report,
+     max_depth_drops_deeper_rows_and_their_parent_shows_all_time_as_self)
 {
-    constexpr std::uint64_t k_unknown_kernel = 999;
-    wall_clock_processor_t  processor{
-        std::make_shared<metadata_registry>(), nullptr, 1, {}
+    intervals const input{ .regions = { interval("outer", span(k_start, 4 * k_ms)),
+                                        interval("inner", span(k_start, k_ms)) } };
+
+    auto const rows = parse_rows(make_report(input, { .max_depth = 1 }));
+    ASSERT_EQ(rows.size(), 1U);
+    expect_node(rows[0], "outer", 0);
+    EXPECT_EQ(rows[0].self_percent, "100.0");
+    EXPECT_TRUE(make_report(input, { .max_depth = 0 }).text().empty());
+}
+
+TEST(wall_clock_report, text_label_is_cut_to_max_width_and_json_keeps_it)
+{
+    constexpr std::string_view k_long_name = "abcdefghijklmnopqrstuvwxyz0123";
+    struct width_case
+    {
+        std::int32_t     max_width;
+        std::string_view name;
     };
-    EXPECT_THROW(processor.handle(kernel_dispatch_sample{
-                     k_launch_begin.count(), k_launch_end.count(), k_main_thread, 0,
-                     k_unknown_kernel, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0 }),
-                 std::runtime_error);
+    // The label "|0>>> abcdefghijklmnopqrstuvwxyz0123" has 36 characters
+    constexpr std::array k_cases{ width_case{ 25, "abcdefghijklmnop..." },
+                                  width_case{ 10, "abcd" },
+                                  width_case{ 0, k_long_name } };
+    intervals const      input{ .regions = { interval(std::string{ k_long_name },
+                                                      span(k_start, k_ms)) } };
+    for(const auto& [max_width, name] : k_cases)
+    {
+        SCOPED_TRACE(max_width);
+        auto const report = make_report(input, { .max_width = max_width });
+
+        auto const rows = parse_rows(report);
+        ASSERT_EQ(rows.size(), 1U);
+        EXPECT_EQ(rows[0].name, name);
+        auto const json = nlohmann::json::parse(report.json());
+        EXPECT_EQ(json.at("rocprofiler-systems")
+                      .at("wall_clock")
+                      .at("ranks")
+                      .at(0)
+                      .at("graph")
+                      .at(0)
+                      .at("prefix"),
+                  "|0>>> abcdefghijklmnopqrstuvwxyz0123");
+    }
+}
+
+TEST(wall_clock_report, timing_units_scale_text_columns_and_square_the_variance)
+{
+    auto const rows = parse_rows(make_report(merged_calls(), { .unit = k_milliseconds }));
+    ASSERT_EQ(rows.size(), 1U);
+    EXPECT_EQ(rows[0].units, "ms");
+    EXPECT_EQ(rows[0].sum, "6.000000");
+    EXPECT_EQ(rows[0].min, "1.000000");
+    EXPECT_EQ(rows[0].var, "1.000000");
+}
+
+TEST(wall_clock_report, timing_units_scale_json_display_and_stats_but_not_raw_values)
+{
+    auto const row = merged_calls_row({ .unit = k_milliseconds });
+    EXPECT_EQ(row.at("entry").at("value"), (6 * k_ms).count());
+    EXPECT_NEAR(row.at("entry").at("repr_data").get<double>(), 6.0, 1e-9);
+    EXPECT_NEAR(row.at("stats").at("sum").get<double>(), 6.0, 1e-9);
+    EXPECT_NEAR(row.at("stats").at("sqr").get<double>(), 14.0, 1e-9);
+    EXPECT_NEAR(row.at("stats").at("stddev").get<double>(), 1.0, 1e-9);
+
+    auto const document = nlohmann::json::parse(
+        make_report(merged_calls(), { .unit = k_milliseconds }).json());
+    EXPECT_EQ(document.at("rocprofiler-systems").at("wall_clock").at("unit_repr"), "ms");
+    EXPECT_EQ(document.at("rocprofiler-systems").at("wall_clock").at("unit_value"),
+              1'000'000);
+}
+
+TEST(wall_clock_report, timing_precision_sets_the_decimals_of_value_columns)
+{
+    auto const rows = parse_rows(make_report(merged_calls(), { .precision = 3 }));
+    ASSERT_EQ(rows.size(), 1U);
+    EXPECT_EQ(rows[0].sum, "0.006");
+    EXPECT_EQ(rows[0].self_percent, "100.0");
+}
+
+TEST(wall_clock_report, timing_unit_lookup_finds_the_chrono_literal_names)
+{
+    for(std::string_view const name : { "ns", "us", "ms", "s", "min", "h" })
+    {
+        SCOPED_TRACE(name);
+        EXPECT_EQ(find_wall_clock_unit(name).value_or(wall_clock_unit{}).name, name);
+    }
+    EXPECT_EQ(find_wall_clock_unit("h").value_or(wall_clock_unit{}).length,
+              std::chrono::hours{ 1 });
+}
+
+TEST(wall_clock_report, timing_unit_lookup_rejects_other_names)
+{
+    for(std::string_view const name : { "sec", "msec", "MS", "", "fortnight" })
+    {
+        SCOPED_TRACE(name);
+        EXPECT_FALSE(find_wall_clock_unit(name).has_value());
+    }
 }
