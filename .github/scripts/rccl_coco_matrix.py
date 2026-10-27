@@ -39,7 +39,7 @@ SCHEDULED_CATALOGUE = [
     ("nightly", "oci-nixl-nightly", "oci", "nixl", 120),
     # ext-plugins has no dedicated scheduled slot: it runs as the ext-plugins
     # lane of ruby64-rccl-unit-nightly (above). configs/jobs/
-    # ruby64-rccl-ext-plugins-nightly.yaml stays in tRCCL for manual `coco run`.
+    # ruby64-rccl-ext-plugins.yaml stays in tRCCL for manual `coco run`.
     ("weekly", "ruby64-rccl-perf-weekly", "ruby", "perf", 2880),
     ("weekly", "oci-rccl-perf-weekly", "oci", "perf", 2880),
     ("monthly", "ruby64-rccl-perf-monthly", "ruby", "perf", 2880),
