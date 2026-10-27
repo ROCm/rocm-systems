@@ -4,7 +4,7 @@
 Artifact splitter for separating host and device code in TheRock artifacts.
 
 This module provides functionality to split TheRock build artifacts into:
-- Generic artifacts: Host-only binaries with kpack manifest references
+- Host artifacts: Host-only binaries with kpack references (generic by default)
 - Architecture-specific artifacts: Device code (kpack files and kernel databases)
 """
 
@@ -256,6 +256,7 @@ class ArtifactSplitter:
         database_handlers: Optional[List[DatabaseHandler]] = None,
         verbose: bool = False,
         gpu_targets: Optional[List[str]] = None,
+        host_artifact_target: str = "generic",
     ):
         """
         Initialize the artifact splitter.
@@ -267,7 +268,13 @@ class ArtifactSplitter:
             verbose: Enable verbose output
             gpu_targets: If set, only create per-arch artifacts for these GPU targets.
                          Target feature flags are stripped (e.g. 'gfx942:sramecc+:xnack-' -> 'gfx942').
+            host_artifact_target: Output suffix for host files. Use the producing build
+                bundle when host code depends on its GPU configuration. Consumers must
+                select one such bundle; these hosts cannot be overlaid across bundles.
         """
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", host_artifact_target):
+            raise ValueError(f"Invalid host artifact target: {host_artifact_target!r}")
+        self.host_artifact_target = host_artifact_target
         self.artifact_prefix = artifact_prefix
         self.toolchain = toolchain
         self.database_handlers = database_handlers or []
@@ -740,6 +747,9 @@ class ArtifactSplitter:
         """
         input_dir = Path(input_dir)
         output_dir = Path(output_dir)
+        host_artifact_dir = (
+            output_dir / f"{self.artifact_prefix}_{self.host_artifact_target}"
+        )
 
         if not input_dir.exists():
             raise FileNotFoundError(f"Input directory does not exist: {input_dir}")
@@ -821,17 +831,15 @@ class ArtifactSplitter:
                     classifier.database_files_by_arch, prefix, prefix_path, output_dir
                 )
 
-            # Phase 3: Create generic artifact (excluding database files)
-            generic_artifact_name = f"{self.artifact_prefix}_generic"
-            generic_artifact_dir = output_dir / generic_artifact_name
-            generic_prefix_dir = generic_artifact_dir / prefix
+            # Phase 3: Copy host files, excluding database files.
+            host_prefix_dir = host_artifact_dir / prefix
 
             if self.verbose:
-                print(f"Creating generic artifact: {generic_artifact_name}")
+                print(f"Creating host artifact: {host_artifact_dir.name}")
 
             # Copy files excluding those marked for exclusion
             self.copy_generic_artifact(
-                prefix_path, generic_prefix_dir, classifier.exclude_from_generic
+                prefix_path, host_prefix_dir, classifier.exclude_from_generic
             )
 
             # Track this prefix for the manifest
@@ -847,17 +855,17 @@ class ArtifactSplitter:
                 for arch, kernels in kernels_by_arch.items():
                     all_kernels_by_arch[arch].extend(kernels)
 
-                # Track fat binaries in the generic artifact for later processing
-                fat_binaries_in_generic = []
+                # Track host copies for kpack reference injection.
+                host_fat_binaries = []
                 for binary_path in classifier.fat_binaries:
-                    generic_binary_path = generic_prefix_dir / binary_path.relative_to(
+                    host_binary_path = host_prefix_dir / binary_path.relative_to(
                         prefix_path
                     )
-                    if generic_binary_path.exists():
-                        fat_binaries_in_generic.append(generic_binary_path)
+                    if host_binary_path.exists():
+                        host_fat_binaries.append(host_binary_path)
 
-                if fat_binaries_in_generic:
-                    fat_binaries_by_prefix[prefix] = fat_binaries_in_generic
+                if host_fat_binaries:
+                    fat_binaries_by_prefix[prefix] = host_fat_binaries
 
         # Phase 5: Create kpack files from all accumulated kernels
         kpack_info_by_arch = {}
@@ -883,17 +891,13 @@ class ArtifactSplitter:
 
         # Phase 6: Inject kpack references and strip device code from fat binaries
         if fat_binaries_by_prefix and kpack_info_by_arch:
-            generic_artifact_dir = output_dir / f"{self.artifact_prefix}_generic"
             self.inject_kpack_references(
-                fat_binaries_by_prefix, generic_artifact_dir, kpack_info_by_arch
+                fat_binaries_by_prefix, host_artifact_dir, kpack_info_by_arch
             )
 
-        # Phase 7: Write artifact manifest for generic artifact with all prefixes
-        # Always write manifest, even if empty (ensures downstream tools find it)
-        generic_artifact_dir = output_dir / f"{self.artifact_prefix}_generic"
-        if not generic_artifact_dir.exists():
-            generic_artifact_dir.mkdir(parents=True, exist_ok=True)
-        write_artifact_manifest(generic_artifact_dir, processed_prefixes)
+        # Always write the host manifest, even for an empty artifact.
+        host_artifact_dir.mkdir(parents=True, exist_ok=True)
+        write_artifact_manifest(host_artifact_dir, processed_prefixes)
 
         if self.verbose:
             print(f"\nSplitting complete. Output in: {output_dir}")

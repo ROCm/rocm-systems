@@ -103,6 +103,7 @@ def single_split(args, toolchain: Toolchain):
         database_handlers=database_handlers,
         verbose=args.verbose,
         gpu_targets=args.gpu_targets,
+        host_artifact_target=args.host_artifact_target,
     )
 
     print(f"Splitting artifact: {args.input_dir}")
@@ -273,6 +274,14 @@ Batch Mode:
     )
 
     parser.add_argument(
+        "--host-artifact-target",
+        default="generic",
+        help="Single mode: suffix for host files, usually the producing build bundle "
+        "when host code depends on GPU configuration (default: generic). "
+        "Consumers must select one host bundle instead of merging them.",
+    )
+
+    parser.add_argument(
         "--split-databases",
         nargs="+",
         choices=available_handlers,
@@ -314,6 +323,9 @@ Batch Mode:
             raise ValueError(
                 "--artifact-prefix cannot be used with --batch-artifact-parent-dir"
             )
+
+        if is_batch_mode and args.host_artifact_target != "generic":
+            raise ValueError("--host-artifact-target requires single artifact mode")
 
         if not is_batch_mode and not args.artifact_prefix:
             raise ValueError("--artifact-prefix is required with --artifact-dir")

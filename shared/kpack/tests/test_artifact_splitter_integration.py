@@ -244,7 +244,10 @@ class TestArtifactSplitterIntegration:
         assert (generic_prefix / "lib" / "libtest1.so").exists()
         assert (generic_prefix / "lib" / "libtest2.so").exists()
 
-    def test_artifact_with_fat_binaries(self, test_assets_dir, toolchain, tmp_path):
+    @pytest.mark.parametrize("host_target", ["generic", "gfx110X-all", "gfx1100"])
+    def test_artifact_with_fat_binaries(
+        self, test_assets_dir, toolchain, tmp_path, host_target
+    ):
         """Test splitting artifact with real fat binaries from test assets."""
         # Create test artifact structure
         input_dir = tmp_path / "test_artifact"
@@ -279,13 +282,14 @@ class TestArtifactSplitterIntegration:
             toolchain=toolchain,
             database_handlers=[],
             verbose=True,
+            host_artifact_target=host_target,
         )
 
         # Run the full split operation
         splitter.split(input_dir, output_dir)
 
         # Verify generic artifact was created
-        generic_dir = output_dir / "test_lib_generic"
+        generic_dir = output_dir / f"test_lib_{host_target}"
         assert generic_dir.exists()
 
         # Check that both libraries were copied to generic
@@ -296,7 +300,9 @@ class TestArtifactSplitterIntegration:
         # Verify fat binary was detected and kernels extracted
         # Should have created architecture-specific artifacts
         # The test binary has gfx1100 and gfx1101 kernels
-        arch_artifacts = list(output_dir.glob("test_lib_gfx*"))
+        arch_artifacts = [
+            output_dir / f"test_lib_{arch}" for arch in ("gfx1100", "gfx1101")
+        ]
         assert (
             len(arch_artifacts) >= 1
         ), "Should have created at least one architecture-specific artifact"
@@ -324,6 +330,12 @@ class TestArtifactSplitterIntegration:
         assert (
             stripped_size < original_size
         ), "Stripped binary should be smaller than original"
+
+        assert read_artifact_manifest(generic_dir) == [prefix]
+        marker = read_kpack_ref_marker(generic_lib_dir / "libtest.so")
+        assert marker is not None
+        if host_target != "generic":
+            assert not (output_dir / "test_lib_generic").exists()
 
         # Run the artifact verifier to check all invariants
         verifier = ArtifactVerifier(output_dir, toolchain, verbose=False)
@@ -2107,3 +2119,79 @@ class TestArtifactSplitterIntegration:
             "failed to inspect COFF binary" in detail
             for detail in fat_binary_result.details
         )
+
+
+@pytest.mark.parametrize(
+    "target", ["", ".", "..", "../gfx942", "a/b", "a\\b", "gfx_942"]
+)
+def test_invalid_host_artifact_target(toolchain, target):
+    with pytest.raises(ValueError, match="Invalid host artifact target"):
+        ArtifactSplitter("miopen_test", toolchain, host_artifact_target=target)
+
+
+def test_host_artifacts_preserve_producing_bundle(tmp_path, toolchain):
+    output = tmp_path / "output"
+    prefix = "ml-libs/miopen/stage"
+    for bundle, arch in [("gfx94X-dcgpu", "gfx942"), ("gfx950-dcgpu", "gfx950")]:
+        source = tmp_path / bundle
+        host = source / prefix / "bin/test_gemm"
+        host.parent.mkdir(parents=True)
+        host.write_text(f"host built for {bundle}")
+        (host.parent / "gemm").symlink_to("test_gemm")
+        db = source / prefix / "share/miopen/db"
+        db.mkdir(parents=True)
+        for db_arch in ["gfx942", "gfx950"]:
+            (db / f"{db_arch}_40.kdb").write_text(db_arch)
+        write_artifact_manifest(source, [prefix])
+        ArtifactSplitter(
+            "miopen_test",
+            toolchain,
+            database_handlers=[MIOpenHandler()],
+            gpu_targets=[arch],
+            host_artifact_target=bundle,
+        ).split(source, output)
+    assert not (output / "miopen_test_generic").exists()
+    for bundle, arch in [("gfx94X-dcgpu", "gfx942"), ("gfx950-dcgpu", "gfx950")]:
+        host_dir = output / f"miopen_test_{bundle}"
+        assert read_artifact_manifest(host_dir) == [prefix]
+        assert (host_dir / prefix / "bin/gemm").is_symlink()
+        assert (
+            host_dir / prefix / "bin/test_gemm"
+        ).read_text() == f"host built for {bundle}"
+        assert not (host_dir / prefix / "share/miopen/db" / f"{arch}_40.kdb").exists()
+        device_dir = output / f"miopen_test_{arch}"
+        assert (
+            device_dir / prefix / "share/miopen/db" / f"{arch}_40.kdb"
+        ).read_text() == arch
+
+
+@pytest.mark.parametrize("batch", [False, True])
+def test_host_artifact_target_cli(tmp_path, monkeypatch, batch):
+    from rocm_kpack.tools.split_artifacts import main
+
+    source = tmp_path / "input"
+    source.mkdir()
+    write_artifact_manifest(source, ["stage"])
+    (source / "stage").mkdir()
+    (source / "stage/host").write_text("host bytes")
+    output = tmp_path / "output"
+    args = [
+        "split_artifacts",
+        "--output-dir",
+        str(output),
+        "--host-artifact-target",
+        "gfx94X-dcgpu",
+    ]
+    if batch:
+        args += ["--batch-artifact-parent-dir", str(source)]
+    else:
+        args += ["--artifact-dir", str(source), "--artifact-prefix", "miopen_test"]
+    monkeypatch.setattr("sys.argv", args)
+    assert main() == (1 if batch else 0)
+    if batch:
+        assert not output.exists()
+    else:
+        assert (
+            output / "miopen_test_gfx94X-dcgpu/stage/host"
+        ).read_text() == "host bytes"
+        assert not (output / "miopen_test_generic").exists()
