@@ -17,20 +17,17 @@ from rocprof_compute_soc.counter_grouping_single_pass import (
 )
 from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
 
-ITER_METRIC_GROUPS = (
-    "rocprof_compute_soc.counter_grouping_single_pass.iter_metric_groups"
-)
 TCC_BUDGET_CONFIG = {"TCC": 4, "SQ": 8}
 
 
 class MinimalSoC:
     """Minimum interface required by the single-pass metric allocator."""
 
-    def _same_bucket_priority_metric_ids(self):
-        return ()
+    def __init__(self, groups=()):
+        self.groups = metric_rows(*groups)
 
-    def _iter_arch_analysis_yaml_metrics(self):
-        return []
+    def metric_groups(self, profile_counters):
+        return self.groups
 
 
 def metric_rows(*groups):
@@ -296,48 +293,42 @@ def test_ensure_keeps_bucket_count_when_an_existing_bucket_fits():
     assert set(group) <= set(flat_counters_in_perfmon_file(files[0]))
 
 
-def test_collect_orders_larger_sets_first(monkeypatch):
+def test_collect_orders_larger_sets_first():
     small = {"SQ_A"}
     large = {"SQ_B", "SQ_C", "SQ_D"}
     middle = {"SQ_E", "SQ_F"}
-    monkeypatch.setattr(
-        ITER_METRIC_GROUPS,
-        lambda soc, counters: metric_rows(small, large, middle),
-    )
 
     groups, single_pass_metric_count = collect_unique_single_pass_metric_sets(
-        MinimalSoC(), small | large | middle, {"SQ": 4}
+        MinimalSoC([small, large, middle]), small | large | middle, {"SQ": 4}
     )
 
     assert single_pass_metric_count == 3
     assert [len(group) for group in groups] == [3, 2, 1]
 
 
-def test_collect_leaves_sets_without_tcc_series_unchanged(monkeypatch):
+def test_collect_leaves_sets_without_tcc_series_unchanged():
     sets = [{"SQ_A", "GRBM_COUNT"}, {"SQ_B"}]
-    monkeypatch.setattr(ITER_METRIC_GROUPS, lambda soc, counters: metric_rows(*sets))
     profile = {"SQ_A", "SQ_B", "GRBM_COUNT", "TCC_EA0_RDREQ[0]"}
 
     groups, _count = collect_unique_single_pass_metric_sets(
-        MinimalSoC(), profile, {"SQ": 4, "GRBM": 2, "TCC": 4}
+        MinimalSoC(sets), profile, {"SQ": 4, "GRBM": 2, "TCC": 4}
     )
 
     assert set(groups) == {frozenset(group) for group in sets}
 
 
-def test_collect_adds_request_channels_to_a_level_set(monkeypatch):
+def test_collect_adds_request_channels_to_a_level_set():
     level = channels("TCC_EA0_RDREQ_LEVEL")
     request = channels("TCC_EA0_RDREQ")
-    monkeypatch.setattr(ITER_METRIC_GROUPS, lambda soc, counters: metric_rows(level))
 
     groups, _count = collect_unique_single_pass_metric_sets(
-        MinimalSoC(), level | request, TCC_BUDGET_CONFIG
+        MinimalSoC([level]), level | request, TCC_BUDGET_CONFIG
     )
 
     assert groups == [frozenset(level | request)]
 
 
-def test_allocator_keeps_tcc_request_row_and_level_pairs(monkeypatch):
+def test_allocator_keeps_tcc_request_row_and_level_pairs():
     read = channels("TCC_EA0_RDREQ")
     write = channels("TCC_EA0_WRREQ")
     atomic = channels("TCC_EA0_ATOMIC")
@@ -346,13 +337,11 @@ def test_allocator_keeps_tcc_request_row_and_level_pairs(monkeypatch):
     atomic_level = channels("TCC_EA0_ATOMIC_LEVEL")
     request_row = read | write | atomic
     latency_sets = [read_level | read, write_level | write, atomic_level | atomic]
-    monkeypatch.setattr(
-        ITER_METRIC_GROUPS,
-        lambda soc, counters: metric_rows(request_row, *latency_sets),
-    )
     work_set = request_row | read_level | write_level | atomic_level
 
-    result = try_allocate_single_pass_metrics(MinimalSoC(), work_set, TCC_BUDGET_CONFIG)
+    result = try_allocate_single_pass_metrics(
+        MinimalSoC([request_row, *latency_sets]), work_set, TCC_BUDGET_CONFIG
+    )
 
     assert result is not None
     files, _file_count, stats = result
