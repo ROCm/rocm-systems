@@ -76,7 +76,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
     }
   }
 #endif
-  memcpy_wg<Kind>(dst, src, size);
+  memcpy_wg<Kind, 4>(dst, src, size);
 }
 
 // Wave counterpart of memcpy_wg_tdm: lane 0 of the calling wave drives TDM,
@@ -96,7 +96,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
       : tdm::make_cache_policy(tdm::StoreTemporalHint::Default, tdm::Scope::Wgp);
 
   if (size < (is_put(Kind) ? constmem.tdm_put_threshold : constmem.tdm_get_threshold)) {
-    memcpy_wave<Kind>(dst, src, size);
+    memcpy_wave<Kind, 4>(dst, src, size);
     return;
   }
   const tdm::LdsRegistration reg = tdm::get_lds();
@@ -131,14 +131,14 @@ template <MemcpyKind Kind = MemcpyKind::Put>
       }
       const size_t covered = tdm::covered_bytes(size, tile_bytes);
       if (covered < size) {
-        memcpy_wave<Kind>(static_cast<char*>(dst) + covered,
+        memcpy_wave<Kind, 4>(static_cast<char*>(dst) + covered,
                           static_cast<char*>(src) + covered, size - covered);
       }
       return;
     }
   }
 #endif
-  memcpy_wave<Kind>(dst, src, size);
+  memcpy_wave<Kind, 4>(dst, src, size);
 }
 
 }  // namespace rocshmem
