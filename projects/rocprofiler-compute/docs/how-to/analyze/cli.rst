@@ -45,8 +45,7 @@ The ``--debug-*`` flags require ``--debug``; their order does not matter.
 The enabling flag alone does not turn on metric diagnostics.
 
 The ``Debug Options`` help group also includes ``--specs-correction`` for
-overriding captured system specifications and ``--report-diff <percent>`` for
-warning when metric differences exceed a regression-check threshold.
+overriding captured system specifications.
 Filtering, normalization, output formats, and ordinary baseline comparisons
 remain regular analysis options.
 
