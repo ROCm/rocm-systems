@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Parse ML API selector flags for profile and analyze."""
+"""Parse ML API selector flags and apply them to a collected workload."""
 
 from typing import Dict, List, Optional, Tuple
 
@@ -119,3 +119,53 @@ def resolve_operator_patterns(
     if not selections:
         return {UNSCOPED_OPERATOR_KEY: ["**"]}
     return selections
+
+
+def sanitize_ml_api_selector_args(
+    list_selectors: Optional[List[str]],
+    operator_patterns: Optional[Dict[str, List[str]]],
+    saved_selectors: List[str],
+) -> None:
+    """Reject user-named backends the workload did not collect.
+
+    Prefix-less --operator patterns are not a named-backend request.
+    """
+    if list_selectors is None and operator_patterns is None:
+        return
+
+    if not saved_selectors:
+        raise ValueError(
+            "Workload was not profiled with --trace-ml-api. "
+            "Cannot use --list-operators or --operator."
+        )
+
+    saved_set = set(saved_selectors)
+    requested = list(list_selectors or [])
+    if operator_patterns is not None:
+        requested.extend(
+            name for name in operator_patterns if name != UNSCOPED_OPERATOR_KEY
+        )
+    for name in requested:
+        if name in KNOWN_ML_API_BACKENDS and name not in saved_set:
+            raise ValueError(
+                f'Workload was not profiled with "--trace-ml-api {name}". '
+                "Cannot use that selector with --list-operators or --operator."
+            )
+
+
+def authorize_unscoped_operator_patterns(
+    operator_patterns: Dict[str, List[str]],
+    saved_selectors: List[str],
+) -> Dict[str, List[str]]:
+    """Copy prefix-less patterns onto collected frameworks and user."""
+    bound: Dict[str, List[str]] = {}
+    unscoped: List[str] = []
+    for backend, patterns in operator_patterns.items():
+        if backend == UNSCOPED_OPERATOR_KEY:
+            unscoped.extend(patterns)
+            continue
+        bound.setdefault(backend, []).extend(patterns)
+    if unscoped:
+        for name in list(dict.fromkeys(saved_selectors + ["user"])):
+            bound.setdefault(name, []).extend(unscoped)
+    return bound
