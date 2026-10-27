@@ -813,11 +813,61 @@ memory:
   Unit_hipMemcpy2DArrayToArray_BasicPositive:
     <<: *level_default
     tags: [transfer, image]
-  Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps: *level_default
-  Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps:
+  Unit_hipMemcpy3DBatchAsync_PointerToPointer_MatchesSourceAfterSync:
     <<: *level_default
-    tags: [image]
-  Unit_hipMemcpy3DBatchAsync_NegativeTests:
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_PointerToArray_MatchesSourceAfterSync:
+    <<: *level_default
+    tags: [transfer, image]
+  Unit_hipMemcpy3DBatchAsync_ArrayToPointer_MatchesSourceAfterSync:
+    <<: *level_default
+    tags: [transfer, image]
+  Unit_hipMemcpy3DBatchAsync_ArrayToArray_MatchesSourceAfterSync:
+    <<: *level_default
+    tags: [transfer, image]
+  Unit_hipMemcpy3DBatchAsync_AllocationKinds_MatchesSourceAfterSync:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_PeerDeviceCopy_MatchesSourceAfterSync:
+    <<: *level_default
+    tags: [transfer, multigpu]
+  Unit_hipMemcpy3DBatchAsync_Stream_OrdersBatchBetweenPriorAndLaterWork:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_HostToHost_IsVisibleOnReturn:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_Any_MatchesSourceAfterSync:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_DuringApiCall_IgnoresSourceWritesAfterReturn:
+    <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "ROCM-31101 - DuringApiCall on an ephemeral host source is not applied on the 3D batch path yet."
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_NonZeroFlags_SetsFailIdxToSizeMax:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_NullOpList_SetsFailIdxToSizeMax:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_InvalidSrcAccessOrder_ReportsThatOp:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_ZeroExtent_IsRejected:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_RowLengthShorterThanWidth_IsRejected:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_LayerHeightShorterThanHeight_IsRejected:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_MismatchedArrayElementSize_ReportsThatOp:
+    <<: *level_default
+    tags: [transfer, image]
+  Unit_hipMemcpy3DBatchAsync_PartiallyRegisteredHostSource_IsRejected:
     <<: *level_default
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_Functional: *level_default
@@ -1071,8 +1121,8 @@ memory:
   Unit_hipMemVmm_Basic:
     <<: *level_default
     disabled:
-      targets: [amd_windows, amd_linux]
-      reason: "AIRUNTIME-2291 - temporarily disabled because it hangs in CI 942; hipMemMap returns an invalid error (SWDEV-396616); re-triage on amd_linux is still pending. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
+      targets: [amd_windows]
+      reason: "amd_windows disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [virtualMemoryManagement, P1]
   Unit_hipMemVmm_Uncached:
     <<: *level_default
@@ -1630,6 +1680,9 @@ memory:
     tags: [transfer, P1]
   Unit_hipMemcpyAsync_Capture:
     <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpyAsync_Regression_PageableStaging_ConsecutiveSmallCopies:
+    <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem:
     <<: *level_default
@@ -2294,8 +2347,8 @@ memory:
   Unit_hipMemAdvise_TstAccessedByFlg4:
     <<: *level_default
     disabled:
-      targets: [amd_windows, amd_wsl, amd_linux]
-      reason: "AIRUNTIME-2291 - temporarily disabled because it hangs in CI 942; also disabled on Windows, where gfx1201 (amd_windows) and gfx1201 (amd_wsl) self-skip because the GPU does not support managed memory; re-triage on amd_linux is still pending."
+      targets: [amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2291 - disabled on Windows, where gfx1201 (amd_windows) and gfx1201 (amd_wsl) self-skip because the GPU does not support managed memory"
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_TstAlignedAllocMem:
     <<: *level_default

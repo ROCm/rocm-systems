@@ -33,6 +33,7 @@ using bf16 = __nv_bfloat16;
 using bf162 = __nv_bfloat162;
 #endif
 
+#include "algorithms/dda/device/dda_kernel_params.h"
 #include "nccl_device/rccl_ptr.h"
 
 namespace dda::common {
@@ -317,6 +318,10 @@ constexpr size_t ddaLLSlotPkts(size_t bankSize, size_t div, size_t align) {
   return (slotUnits / align) * align;
 }
 
+// Peers staged in one pass. A runtime-sized array, or a runtime index into
+// one, is placed in scratch. 8 covers rank counts 4 and 8 in a single pass.
+constexpr int kDdaLLPeerBatch = 8;
+
 // 16-byte LL line: two (4B data, 4B flag) pairs carrying 8B of payload.
 union LLPacket16 {
   struct {
@@ -381,6 +386,20 @@ __device__ __forceinline__ void ddaLLLoadLineB128(const uint32_t* src, uint32_t&
   o2 = __builtin_nontemporal_load((u32_gptr)src + 2);
   o3 = __builtin_nontemporal_load((u32_gptr)src + 3);
 #endif
+}
+
+// Poll one 16B LL line until both flags match, or the comm abort flag is set.
+// Returns false if the wait was aborted so the kernel can exit.
+__device__ __forceinline__ bool ddaLLWaitLineFlags(const volatile LLPacket16* src, uint32_t flag,
+                                                   DdaKernelParams params, uint32_t& d0, uint32_t& f0, uint32_t& d1,
+                                                   uint32_t& f1) {
+  const uint32_t* line = reinterpret_cast<const uint32_t*>(const_cast<const LLPacket16*>(src));
+  int spins = 0;
+  do {
+    ddaLLLoadLineB128(line, d0, f0, d1, f1);
+    if (f0 == flag && f1 == flag) return true;
+  } while (!params.abortSpinTick(spins));
+  return false;
 }
 
 __device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict__ epochDev, int flatBlockId, uint32_t inc) {

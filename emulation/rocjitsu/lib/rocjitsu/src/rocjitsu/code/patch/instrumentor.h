@@ -22,7 +22,9 @@
 ///         |  splice anchors + append probe bodies, entry stub and trampolines
 ///         |  into .text + redirect the entry to the stub + emit()
 ///         v
-///   InstrumentedCodeObject      -- patched ELF + per-site InstrumentationPatch
+///   InstrumentedCodeObject      -- patch(): patched ELF + diagnostics
+///   InstrumentedCodeObjectDebug -- patch_with_debug_summaries(): same result
+///                                  + per-site InstrumentationPatch (test/debug)
 ///
 /// Current pipeline is all-or-nothing across all queued points: any per-site
 /// failure aborts the whole patch.
