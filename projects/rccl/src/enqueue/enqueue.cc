@@ -1523,8 +1523,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       ssize_t latencyBytesMax = nChannels[dir] * latencyThreshold;
       // SIMPLE's channel count is 1 here, so the per-channel LL threshold never selects LL on
       // single-node gfx942/gfx950. Allow LL up to p2pChunkSize/8, capped at 64 KiB/peer. A set
-      // NCCL_P2P_LL_THRESHOLD, and the LL128 path, keep the stock rule.
-      static bool const userSetP2pLLThreshold = ncclGetEnv("NCCL_P2P_LL_THRESHOLD") != nullptr;
+      // NCCL_P2P_LL_THRESHOLD, and the LL128 path, keep the stock rule. The env is read on
+      // each call so a later set or unset is visible.
+      bool const userSetP2pLLThreshold = ncclGetEnv("NCCL_P2P_LL_THRESHOLD") != nullptr;
       if (comm->nNodes <= 1 && comm->isAllNvlink && !useLL128OptIn &&
           (comm->cudaArch == 940 || comm->cudaArch == 950) && !userSetP2pLLThreshold) {
         latencyBytesMax = std::max<ssize_t>(latencyBytesMax, std::min<ssize_t>(comm->p2pChunkSize / 8, 65536));
