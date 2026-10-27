@@ -37,7 +37,8 @@ description: C++ hard rules for rocprofiler-systems — standard, formatting, li
   - An abstract class is `lower_case` and ends in `_interface`.
   - Template parameters are `CamelCase`. Macros are `UPPER_CASE`.
   - Parameters, local variables, bindings, and exception names are at least
-    3 characters. A loop counter may be `i`, `j`, or `k`.
+    3 characters. Allowed short names: loop counters `i`, `j`, `k`; a
+    parameter `n`; an exception `e`.
   - Keep a library's own names: `SetUp`, `TearDown`, and `is_transparent`.
   - In `source/lib/backends/<library>/` and its `tests/mock_*.hpp`, a name
     that mirrors an external library name (a constant like

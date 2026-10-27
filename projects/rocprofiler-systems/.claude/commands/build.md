@@ -3,8 +3,7 @@ description: Configure and build rocprofiler-systems with a CMake preset
 argument-hint: [preset=debug]
 ---
 
-Preset: `${1:-debug}` (one of `ci`, `debug`, `debug-optimized`, `release`, `debug-mpi`, `release-mpi`,
-`coverage`).
+Preset: `${1:-debug}`. List the available presets with `cmake --list-presets`.
 
 1. Confirm cwd is `projects/rocprofiler-systems/` (has `CMakeLists.txt` +
    `CMakePresets.json`), not the monorepo root.
