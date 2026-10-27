@@ -252,8 +252,8 @@ public:
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront & /*wf*/) {}
 
-  /// Called once when a dispatched wave incarnation is cancelled, before its
-  /// registers and plugin state are freed. The wave's instruction-execution
+  /// Called once when a dispatched wave incarnation is cancelled, while its
+  /// registers and plugin state are still available. The wave's instruction-execution
   /// error, if present, is still available. May precede its first instruction.
   /// Cancellation also covers committed cluster placements rolled back after
   /// a later peer fails setup. That dispatch may retry and complete normally;

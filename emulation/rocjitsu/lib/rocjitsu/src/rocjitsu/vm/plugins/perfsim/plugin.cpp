@@ -1324,9 +1324,8 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
   const uint64_t physical_key = physical_wave_key(compute_unit_id, wf.wf_id());
 
   // Wavefront slots are reused and plugin state deliberately survives the
-  // generic Wavefront::reset(). A terminal dispatch fault resets the wave
-  // without a halt callback, so retire that incarnation while its state still
-  // owns the raw pointer recorded in physical_waves.
+  // generic Wavefront::reset(). If an incarnation missed both terminal hooks,
+  // retire it while its state still owns the raw pointer in physical_waves.
   if (wf.has_plugin_state(slot_index())) {
     auto *previous = static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()));
     const uint32_t previous_dispatch = static_cast<uint32_t>(
@@ -1344,7 +1343,7 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
         dispatch != impl_->dispatches.end()) {
       if (dispatch->second.live_waves != 0)
         --dispatch->second.live_waves;
-      impl_->reject(previous_dispatch, "wavefront slot was reset without a halt callback");
+      impl_->reject(previous_dispatch, "wavefront slot was reset without a terminal callback");
     }
     wf.clear_plugin_state(slot_index());
   } else if (const auto existing = impl_->physical_waves.find(physical_key);
