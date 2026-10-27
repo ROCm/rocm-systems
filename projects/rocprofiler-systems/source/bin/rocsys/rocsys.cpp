@@ -2,27 +2,32 @@
 // SPDX-License-Identifier: MIT
 
 #include "cli_dispatcher.hpp"
-#include "common/common_utils.hpp"
 #include "common/defines.h"
-#include "common/path.hpp"
-#include "common/tool_runner.hpp"
+#include "delivery.hpp"
+#include "diagnostic.hpp"
+#include "launcher.hpp"
 
 #include <timemory/utility/argparse.hpp>
 
 #include <array>
-#include <cerrno>
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <string>
 #include <string_view>
-#include <system_error>
-#include <unistd.h>
+#include <vector>
 
 namespace
 {
-constexpr int k_exec_failure_status = 127;
+void
+print_diagnostic(std::ostream& out, const rocprofsys::rocsys::diagnostic& diag)
+{
+    out << "error: " << diag.error << '\n';
+    if(!diag.hint.empty())
+    {
+        out << "hint: " << diag.hint << '\n';
+    }
+}
 
 // enable_version exits on success. The exit below runs only if that action did not.
 [[noreturn]] int
@@ -39,64 +44,36 @@ exit_with_version(std::string_view program)
     std::exit(EXIT_FAILURE);
 }
 
-[[nodiscard]] std::string
-executable_directory()
+[[nodiscard]] std::vector<std::string>
+copy_argv(int argc, char** argv)
 {
-    // Resolve symlinks. A /usr/bin/rocsys link must find siblings next to the
-    // real binary, not next to the link. Same /proc/self/exe assumption as
-    // get_rocprofsys_root().
-    std::error_code error;
-    const auto      canon = std::filesystem::canonical("/proc/self/exe", error);
-    if(error)
+    std::vector<std::string> tokens;
+    tokens.reserve(static_cast<std::size_t>(argc));
+    for(int index = 0; index < argc; ++index)
     {
-        return {};
+        tokens.emplace_back(argv[index]);
     }
-    return rocprofsys::common::path::parent_path(canon.string());
+    return tokens;
 }
 
 [[nodiscard]] int
-dispatch_in_process(int argc, char** argv, const rocprofsys::cli::dispatch_result& parsed)
-{
-    if(parsed.spec == nullptr || !parsed.spec->mode.has_value())
-    {
-        return EXIT_FAILURE;
-    }
-    auto forwarded = rocprofsys::cli::make_forwarded_argv(
-        argc, argv,
-        rocprofsys::cli::forward_options{ .strip_subcommand = parsed.strip_subcommand });
-    auto pointers = rocprofsys::common_utils::to_c_argv(forwarded);
-    return rocprofsys::common_utils::run_tool(static_cast<int>(forwarded.size()),
-                                              pointers.data(), *parsed.spec->mode);
-}
-
-[[nodiscard]] int
-dispatch_exec(int argc, char** argv, const rocprofsys::cli::dispatch_result& parsed,
-              std::string_view program)
+launch_command(const rocprofsys::cli::dispatch_result& parsed,
+               const std::vector<std::string>& argv, std::string_view program)
 {
     if(parsed.spec == nullptr)
     {
-        return k_exec_failure_status;
+        return EXIT_FAILURE;
     }
-    const auto& spec      = *parsed.spec;
-    const auto  directory = executable_directory();
-    if(directory.empty())
+    // No rocsys options yet, so the env plan is empty. Options append ops in a later
+    // change.
+    const auto planned =
+        rocprofsys::rocsys::plan(*parsed.spec, parsed.strip_subcommand, argv, {});
+    if(!planned)
     {
-        std::cerr << program << ": failed to resolve install directory\n";
-        return k_exec_failure_status;
+        print_diagnostic(std::cerr, planned.error());
+        return EXIT_FAILURE;
     }
-    const auto path = (std::filesystem::path{ directory } / spec.binary_name).string();
-    auto       forwarded = rocprofsys::cli::make_forwarded_argv(
-        argc, argv,
-        rocprofsys::cli::forward_options{ .strip_subcommand = parsed.strip_subcommand,
-                                                .argv0_override = spec.binary_name,
-                                                .extra_flag     = spec.extra_flag });
-    auto pointers = rocprofsys::common_utils::to_c_argv(forwarded);
-    // path is absolute (sibling of this binary); no PATH search.
-    execv(path.c_str(), pointers.data());
-    const int exec_error = errno;
-    std::cerr << program << ": failed to execute '" << path
-              << "': " << std::strerror(exec_error) << '\n';
-    return k_exec_failure_status;
+    return rocprofsys::rocsys::launcher<>{}.launch(planned.value(), program);
 }
 }  // namespace
 
@@ -117,9 +94,8 @@ main(int argc, char** argv)
             std::cerr << parsed.error_message << '\n';
             return EXIT_FAILURE;
         case rocprofsys::cli::dispatch_kind::in_process:
-            return dispatch_in_process(argc, argv, parsed);
         case rocprofsys::cli::dispatch_kind::exec_tool:
-            return dispatch_exec(argc, argv, parsed, program);
+            return launch_command(parsed, copy_argv(argc, argv), program);
         default: return EXIT_FAILURE;
     }
 }

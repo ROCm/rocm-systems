@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "cli_dispatcher.hpp"
-#include "common/tool_runner.hpp"
+#include "verb.hpp"
 
 #include <gtest/gtest.h>
 
@@ -14,13 +14,13 @@
 #include <vector>
 
 using rocprofsys::cli::dispatch_kind;
-using rocprofsys::cli::forward_options;
-using rocprofsys::cli::k_subcommands;
-using rocprofsys::cli::make_forwarded_argv;
 using rocprofsys::cli::parse_dispatch;
 using rocprofsys::cli::print_help;
-using rocprofsys::cli::subcommand_spec;
 using rocprofsys::common_utils::tool_mode;
+using rocprofsys::rocsys::capability;
+using rocprofsys::rocsys::has_capability;
+using rocprofsys::rocsys::k_verbs;
+using rocprofsys::rocsys::verb_spec;
 
 namespace
 {
@@ -54,25 +54,15 @@ struct argv_builder
     [[nodiscard]] char** argv() noexcept { return ptrs.data(); }
 };
 
-[[nodiscard]] forward_options
-instrument_forward(std::string_view extra_flag = {})
-{
-    return {
-        .strip_subcommand = true,
-        .argv0_override   = "rocprof-sys-instrument",
-        .extra_flag       = extra_flag,
-    };
-}
-
 [[nodiscard]] int
 invalid_subcommand_count()
 {
     int invalid = 0;
-    for(const auto& spec : k_subcommands)
+    for(const auto& spec : k_verbs)
     {
         const bool unnamed = spec.name.empty();
         const bool duplicate =
-            std::ranges::count(k_subcommands, spec.name, &subcommand_spec::name) > 1;
+            std::ranges::count(k_verbs, spec.name, &verb_spec::name) > 1;
         if(unnamed || duplicate)
         {
             ++invalid;
@@ -85,20 +75,14 @@ invalid_subcommand_count()
 in_process_verb_count()
 {
     int count = 0;
-    for(const auto& spec : k_subcommands)
+    for(const auto& spec : k_verbs)
     {
-        if(spec.mode.has_value())
+        if(has_capability(spec.caps, capability::in_process))
         {
             ++count;
         }
     }
     return count;
-}
-
-std::vector<std::string>
-forwarded_args(int argc, char** argv, forward_options options)
-{
-    return make_forwarded_argv(argc, argv, options);
 }
 
 void
@@ -194,7 +178,7 @@ TEST(cli_dispatcher_test, instrument_execs_sibling_binary)
     EXPECT_EQ(result.kind, dispatch_kind::exec_tool);
     EXPECT_TRUE(result.strip_subcommand);
     EXPECT_EQ(result.spec->binary_name, "rocprof-sys-instrument");
-    EXPECT_TRUE(result.spec->extra_flag.empty());
+    EXPECT_FALSE(has_capability(result.spec->caps, capability::embeds_env_in_binary));
     EXPECT_FALSE(result.spec->mode.has_value());
 }
 
@@ -206,7 +190,8 @@ TEST(cli_dispatcher_test, rewrite_execs_instrument_with_output_flag)
     EXPECT_EQ(result.kind, dispatch_kind::exec_tool);
     EXPECT_TRUE(result.strip_subcommand);
     EXPECT_EQ(result.spec->binary_name, "rocprof-sys-instrument");
-    EXPECT_EQ(result.spec->extra_flag, "-o");
+    EXPECT_TRUE(has_capability(result.spec->caps, capability::embeds_env_in_binary));
+    EXPECT_TRUE(has_capability(result.spec->caps, capability::honours_rocm_tracing));
     EXPECT_FALSE(result.spec->mode.has_value());
 }
 
@@ -250,8 +235,9 @@ TEST(cli_dispatcher_test, attach_execs_sibling_binary)
 TEST(cli_dispatcher_test, subcommand_names_are_unique_and_nonempty)
 {
     EXPECT_EQ(invalid_subcommand_count(), 0);
-    EXPECT_EQ(k_subcommands.front().name, "profile");
-    EXPECT_EQ(k_subcommands.front().mode, tool_mode::run);
+    EXPECT_EQ(k_verbs.front().name, "profile");
+    EXPECT_EQ(k_verbs.front().mode, tool_mode::run);
+    EXPECT_TRUE(has_capability(k_verbs.front().caps, capability::in_process));
     EXPECT_EQ(in_process_verb_count(), 1);
 }
 
@@ -288,67 +274,20 @@ TEST(cli_dispatcher_test, profile_help_is_forwarded)
     EXPECT_TRUE(result.strip_subcommand);
 }
 
-TEST(cli_dispatcher_test, make_forwarded_argv_strips_subcommand)
+TEST(cli_dispatcher_test, attach_needs_an_operand_but_not_an_application)
 {
-    auto args = argv_builder{ "rocsys", "profile", "--preset=quick", "--", "./app" };
-    auto fwd  = forwarded_args(args.argc(), args.argv(),
-                               forward_options{ .strip_subcommand = true });
-    ASSERT_EQ(fwd.size(), 4U);
-    EXPECT_EQ(fwd[0], "rocsys");
-    EXPECT_EQ(fwd[1], "--preset=quick");
-    EXPECT_EQ(fwd[2], "--");
-    EXPECT_EQ(fwd[3], "./app");
-}
+    const auto* attach =
+        std::ranges::find(k_verbs, std::string_view{ "attach" }, &verb_spec::name);
+    ASSERT_NE(attach, k_verbs.end());
+    EXPECT_TRUE(has_capability(attach->caps, capability::needs_operand));
+    EXPECT_TRUE(has_capability(attach->caps, capability::honours_rocm_tracing));
+    EXPECT_FALSE(has_capability(attach->caps, capability::takes_app));
 
-TEST(cli_dispatcher_test, make_forwarded_argv_prepends_rewrite_output_flag)
-{
-    auto args = argv_builder{ "rocsys", "rewrite", "--", "./app" };
-    auto fwd  = forwarded_args(args.argc(), args.argv(), instrument_forward("-o"));
-    ASSERT_EQ(fwd.size(), 4U);
-    EXPECT_EQ(fwd[0], "rocprof-sys-instrument");
-    EXPECT_EQ(fwd[1], "-o");
-    EXPECT_EQ(fwd[2], "--");
-    EXPECT_EQ(fwd[3], "./app");
-}
-
-TEST(cli_dispatcher_test, make_forwarded_argv_skips_rewrite_flag_if_output_present)
-{
-    auto args = argv_builder{ "rocsys", "rewrite", "-o", "app.inst", "--", "./app" };
-    auto fwd  = forwarded_args(args.argc(), args.argv(), instrument_forward("-o"));
-    ASSERT_EQ(fwd.size(), 5U);
-    EXPECT_EQ(fwd[0], "rocprof-sys-instrument");
-    EXPECT_EQ(fwd[1], "-o");
-    EXPECT_EQ(fwd[2], "app.inst");
-    EXPECT_EQ(fwd[3], "--");
-    EXPECT_EQ(fwd[4], "./app");
-}
-
-TEST(cli_dispatcher_test, make_forwarded_argv_skips_rewrite_flag_if_long_output_present)
-{
-    auto args = argv_builder{ "rocsys", "rewrite", "--output=app.inst", "--", "./app" };
-    auto fwd  = forwarded_args(args.argc(), args.argv(), instrument_forward("-o"));
-    ASSERT_EQ(fwd.size(), 4U);
-    EXPECT_EQ(fwd[0], "rocprof-sys-instrument");
-    EXPECT_EQ(fwd[1], "--output=app.inst");
-}
-
-TEST(cli_dispatcher_test, make_forwarded_argv_keeps_implicit_args)
-{
-    auto args = argv_builder{ "rocsys", "--", "./app" };
-    auto fwd  = forwarded_args(args.argc(), args.argv(), forward_options{});
-    ASSERT_EQ(fwd.size(), 3U);
-    EXPECT_EQ(fwd[0], "rocsys");
-    EXPECT_EQ(fwd[1], "--");
-    EXPECT_EQ(fwd[2], "./app");
-}
-
-TEST(cli_dispatcher_test, make_forwarded_argv_overrides_argv0)
-{
-    auto args = argv_builder{ "rocsys", "instrument", "--help" };
-    auto fwd  = forwarded_args(args.argc(), args.argv(), instrument_forward());
-    ASSERT_EQ(fwd.size(), 2U);
-    EXPECT_EQ(fwd[0], "rocprof-sys-instrument");
-    EXPECT_EQ(fwd[1], "--help");
+    const auto* avail =
+        std::ranges::find(k_verbs, std::string_view{ "avail" }, &verb_spec::name);
+    ASSERT_NE(avail, k_verbs.end());
+    EXPECT_TRUE(has_capability(avail->caps, capability::query_only));
+    EXPECT_FALSE(has_capability(avail->caps, capability::needs_operand));
 }
 
 TEST(cli_dispatcher_test, print_help_lists_subcommands_and_example)

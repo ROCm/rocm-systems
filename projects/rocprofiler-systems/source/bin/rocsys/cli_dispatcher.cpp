@@ -3,7 +3,6 @@
 
 #include "cli_dispatcher.hpp"
 
-#include <fmt/base.h>
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -11,7 +10,6 @@
 #include <ostream>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace rocprofsys::cli
 {
@@ -22,20 +20,21 @@ constexpr std::string_view k_help_alt_short  = "-?";
 constexpr std::string_view k_help_long       = "--help";
 constexpr std::string_view k_help_long_eq    = "--help=";
 constexpr std::string_view k_version_long    = "--version";
-constexpr std::string_view k_output_short    = "-o";
-constexpr std::string_view k_output_long     = "--output";
-constexpr std::string_view k_output_long_eq  = "--output=";
-constexpr std::string_view k_output_short_eq = "-o=";
 constexpr std::size_t      k_min_name_column = 14;
 constexpr std::string_view k_docs_url =
     "https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/";
+
+using rocprofsys::rocsys::capability;
+using rocprofsys::rocsys::has_capability;
+using rocprofsys::rocsys::k_verbs;
+using rocprofsys::rocsys::verb_spec;
 
 // One column width for every help row so descriptions stay aligned.
 [[nodiscard]] constexpr std::size_t
 subcommand_name_column() noexcept
 {
     auto width = k_min_name_column;
-    for(const auto& spec : k_subcommands)
+    for(const auto& spec : k_verbs)
     {
         width = std::max(width, spec.name.size() + 1);
     }
@@ -55,14 +54,6 @@ help_hint(std::string_view program)
                        make_usage(program), program);
 }
 
-[[nodiscard]] constexpr int
-payload_index(bool strip_subcommand) noexcept
-{
-    constexpr int k_after_argv0      = 1;
-    constexpr int k_index_after_verb = 2;
-    return strip_subcommand ? k_index_after_verb : k_after_argv0;
-}
-
 [[nodiscard]] bool
 is_help_flag(std::string_view token) noexcept
 {
@@ -71,42 +62,18 @@ is_help_flag(std::string_view token) noexcept
 }
 
 [[nodiscard]] dispatch_kind
-tool_kind(const subcommand_spec& spec) noexcept
+tool_kind(const verb_spec& spec) noexcept
 {
-    return spec.mode.has_value() ? dispatch_kind::in_process : dispatch_kind::exec_tool;
+    return has_capability(spec.caps, capability::in_process) ? dispatch_kind::in_process
+                                                             : dispatch_kind::exec_tool;
 }
 
 [[nodiscard]] dispatch_result
-make_tool_result(const subcommand_spec* spec, bool strip_subcommand) noexcept
+make_tool_result(const verb_spec* spec, bool strip_subcommand) noexcept
 {
     return { .kind             = tool_kind(*spec),
              .spec             = spec,
              .strip_subcommand = strip_subcommand };
-}
-
-// Scan the tool's own options (tokens after argv0 / the verb, before "--").
-// When @p flag is "-o", also treat --output, --output=…, and -o=… as present.
-[[nodiscard]] bool
-option_present_before_separator(int argc, char** argv, int start, std::string_view flag)
-{
-    for(int idx = start; idx < argc; ++idx)
-    {
-        const auto arg = std::string_view{ argv[idx] };
-        if(arg.empty() || arg == "--")
-        {
-            return false;
-        }
-        const auto same_flag = arg == flag;
-        const auto output_alias =
-            flag == k_output_short &&
-            (arg == k_output_long || arg.starts_with(k_output_long_eq) ||
-             arg.starts_with(k_output_short_eq));
-        if(same_flag || output_alias)
-        {
-            return true;
-        }
-    }
-    return false;
 }
 
 }  // namespace
@@ -125,11 +92,11 @@ parse_dispatch(int argc, char** argv, std::string_view program)
         return { .kind = dispatch_kind::show_version };
     }
 
-    const auto found = std::ranges::find(k_subcommands, first, &subcommand_spec::name);
-    if(found != k_subcommands.end())
+    const auto found = std::ranges::find(k_verbs, first, &verb_spec::name);
+    if(found != k_verbs.end())
     {
-        // argv = { rocsys, <verb>, ... }: requires_app needs a token after the verb.
-        if(found->requires_app && argc < 3)
+        // argv = { rocsys, <verb>, ... }. needs_operand requires a token after the verb.
+        if(has_capability(found->caps, capability::needs_operand) && argc < 3)
         {
             return { .kind          = dispatch_kind::error,
                      .error_message = fmt::format(
@@ -146,33 +113,7 @@ parse_dispatch(int argc, char** argv, std::string_view program)
     }
 
     // Implicit default: first token is a flag or "--". Keep it in the forwarded argv.
-    const auto* chosen = &k_subcommands.front();
-    return make_tool_result(chosen, false);
-}
-
-std::vector<std::string>
-make_forwarded_argv(int argc, char** argv, forward_options options)
-{
-    std::vector<std::string> args;
-    const int                start = payload_index(options.strip_subcommand);
-    if(!options.argv0_override.empty())
-    {
-        args.emplace_back(options.argv0_override);
-    }
-    else
-    {
-        args.emplace_back(argv[0]);
-    }
-    if(!options.extra_flag.empty() &&
-       !option_present_before_separator(argc, argv, start, options.extra_flag))
-    {
-        args.emplace_back(options.extra_flag);
-    }
-    if(start < argc)
-    {
-        args.insert(args.end(), argv + start, argv + argc);
-    }
-    return args;
+    return make_tool_result(&k_verbs.front(), false);
 }
 
 void
@@ -180,7 +121,7 @@ print_help(std::ostream& out, std::string_view program)
 {
     constexpr auto k_name_column = subcommand_name_column();
     std::string    subcommands;
-    for(const auto& spec : k_subcommands)
+    for(const auto& spec : k_verbs)
     {
         subcommands +=
             fmt::format("  {:<{}}{}\n", spec.name, k_name_column, spec.description);
