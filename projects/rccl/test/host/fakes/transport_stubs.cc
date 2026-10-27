@@ -37,14 +37,16 @@ struct ncclTopoGraph;
 // NCCL_PARAM does not cover it.
 int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
 
-// src/plugin/net.cc: initTransportsRank's GDR probe.
+// src/plugin/net.cc: initTransportsRank's GDR probe. Omitted for rccl-UnitTestsMicroPlugin, which compiles net.cc.
 int g_gdrSupportValue = 0;
 int g_gdrSupportCalls = 0;
+#ifndef RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport
 ncclResult_t ncclGpuGdrSupport(struct ncclComm*, int* gdrSupport) {
   ++g_gdrSupportCalls;
   if (gdrSupport) *gdrSupport = g_gdrSupportValue;
   return ncclSuccess;
 }
+#endif
 
 // src/transport/net.cc:343. Was a fail-loud stub in nccl_stubs.cc, which forced
 // the enqueue target to omit it via a macro and supply its own; a seam here

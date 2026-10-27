@@ -19,7 +19,9 @@ mechanisms, while
 executable state. Final shutdown waits for outstanding native calls and stops
 runtime workers. On Linux KFD, a primary process context may remain after
 shutdown; later runtime generations use an instance-owned context when KFD
-supports it.
+supports it. If final native session shutdown fails after HSA objects retire,
+another `hsa_shut_down` retries that cleanup. `hsa_init` cannot publish a new
+generation until it succeeds.
 
 The single HSA CPU agent is frontend policy built from rocddi's passive host
 topology snapshot. It does not activate a CPU device. HSA prefers CPU cache

@@ -195,14 +195,14 @@
       },
       "tests": [
         {
-          "name": "UBR_MultiSegment_Generic",
-          "description": "Out-of-place AllReduce on a buffer spanning multiple VMM segments (multi-segment registration branch on Ring AllReduce)",
-          "test_filter": "UBR_MultiSegment.Generic"
-        },
-        {
           "name": "UBR_MultiSegment_Generic_Reuse",
           "description": "Register once, AllReduce twice - exercises the multi-segment registration reuse fast path (IPC or NET reuse)",
           "test_filter": "UBR_MultiSegment.Generic_Reuse"
+        },
+        {
+          "name": "UBR_MultiSegment_NetSegmentCountOddSizedHipMalloc",
+          "description": "NET segment count of an odd-sized hipMalloc registration must not walk past the allocation into the page-rounded tail",
+          "test_filter": "UBR_MultiSegment.NetSegmentCountOddSizedHipMalloc"
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa",
@@ -238,6 +238,36 @@
         "RCCL_MPI_LOG_ALL_RANKS": "1"
       },
       "tests": [
+        {
+          "name": "UBR_MultiSegment_Generic",
+          "description": "Out-of-place AllReduce on an 8-segment VMM buffer; asserts the NET cache rcclNet.nSegments",
+          "test_filter": "UBR_MultiSegment.Generic"
+        },
+        {
+          "name": "UBR_MultiSegment_GenericGraph",
+          "description": "Graph-captured AllReduce reusing a wider 8-segment graph record; asserts the NET cache counts the whole record",
+          "test_filter": "UBR_MultiSegment.GenericGraph",
+          "env_variables": {
+            "NCCL_GRAPH_REGISTER": "1"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_MultiSegmentRegisterOff_SliceSkipsNet",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: a one-segment slice of an 8-segment registration skips NET and the AllReduce is correct",
+          "test_filter": "UBR_MultiSegment.MultiSegmentRegisterOff_SliceSkipsNet",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_MultiSegmentRegisterOff_GraphSliceSkipsNet",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: graph registration of a one-segment slice reusing an 8-segment record skips NET and drops its reference",
+          "test_filter": "UBR_MultiSegment.MultiSegmentRegisterOff_GraphSliceSkipsNet",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0",
+            "NCCL_GRAPH_REGISTER": "1"
+          }
+        },
         {
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
           "description": "Cross-node ReduceScatter over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
@@ -1030,6 +1060,7 @@
         {"name": "HostApi_PutSignalNullWindow", "description": "Host API: put signal null window", "test_filter": "HostApiTest.PutSignalNullWindow"},
         {"name": "HostApi_PutSignalOffsetOutOfBounds", "description": "Host API: put signal offset out of bounds", "test_filter": "HostApiTest.PutSignalOffsetOutOfBounds"},
         {"name": "HostApi_PutSignalInvalidSigIdx", "description": "Host API: put signal invalid sig idx", "test_filter": "HostApiTest.PutSignalInvalidSigIdx"},
+        {"name": "HostApi_PutSignalMultiSigIdx", "description": "Host API: two independent signal indexes on numRmaSig=2", "test_filter": "HostApiMultiSigTest.PutSignalMultiSigIdx"},
         {"name": "HostApi_SignalCumulativeFence", "description": "Host API: signal cumulative fence", "test_filter": "HostApiTest.SignalCumulativeFence"},
         {"name": "HostApi_MultipleSendersOneReceiver", "description": "Host API: multiple senders one receiver", "test_filter": "HostApiTest.MultipleSendersOneReceiver"},
         {"name": "HostApi_WaitSignalMultipleDescriptors", "description": "Host API: wait signal multiple descriptors", "test_filter": "HostApiTest.WaitSignalMultipleDescriptors"},
@@ -1038,6 +1069,7 @@
         {"name": "HostApi_DenseAllToAllPutSignal", "description": "Host API: dense all-to-all put/signal, uniform and uneven sizes", "test_filter": "HostApiTest.DenseAllToAllPutSignal"},
         {"name": "HostApi_SignalImpliesPriorPutsDelivered", "description": "Host API: signal implies prior puts delivered", "test_filter": "HostApiTest.SignalImpliesPriorPutsDelivered"},
         {"name": "HostApi_PutSignalInvalidCtx", "description": "Host API: put signal invalid ctx", "test_filter": "HostApiTest.PutSignalInvalidCtx"},
+        {"name": "HostApi_PutSignalMultiCtx", "description": "Host API: striped puts across ctx 0 and 1 on numRmaCtx=2", "test_filter": "HostApiMultiCtxTest.PutSignalMultiCtx"},
         {"name": "HostApi_WaitSignalNullDescs", "description": "Host API: wait signal null descs", "test_filter": "HostApiTest.WaitSignalNullDescs"},
         {"name": "HostApi_WaitSignalZeroDesc", "description": "Host API: wait signal zero desc", "test_filter": "HostApiTest.WaitSignalZeroDesc"},
         {"name": "HostApi_TwoCommunicatorsIndependentWindows", "description": "Host API: two communicators independent windows", "test_filter": "HostApiTest.TwoCommunicatorsIndependentWindows"},
@@ -5458,6 +5490,18 @@
       "name": "UBR Concurrent Registration Hang Tests",
       "description": "Tests demonstrating UBR concurrent registration hang with separate buffers and fix with contiguous buffers. Includes one test expected to hang (run with timeout).",
       "config": "ubr_concurrent_reg_hang",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Registration and LSA",
+      "description": "Single-node UBR multi-segment registration tests",
+      "config": "ubr_multisegment_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - LSA plus GIN (Multi-Node)",
+      "description": "Two-node UBR multi-segment tests including Generic rcclNet.nSegments",
+      "config": "ubr_multisegment_lsagin_multinode",
       "enabled": true
     },
     {

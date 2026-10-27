@@ -5,6 +5,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 RJ_DIAGNOSTIC_PUSH
@@ -12,6 +13,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "uapi/linux/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
+#include <algorithm>
 #include <cerrno>
 #include <charconv>
 #include <csignal>
@@ -31,6 +33,10 @@ namespace rocjitsu {
 namespace fs = std::filesystem;
 
 namespace {
+
+// HSA_HEAPTYPE_FRAME_BUFFER_{PUBLIC,PRIVATE} in libhsakmt's public types.
+constexpr uint32_t kFramebufferPublicHeap = 1;
+constexpr uint32_t kFramebufferPrivateHeap = 2;
 
 /// @brief Create a process-tagged scratch directory under the XDG runtime root.
 /// @details Replaces raw mkdtemp("/tmp/...") so synthetic sysfs trees live under
@@ -268,6 +274,8 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   std::string node_dir = nodes_dir + "/" + std::to_string(node_idx);
   make_dir(node_dir);
   make_dir(node_dir + "/mem_banks/0");
+  const uint64_t visible_vram = std::min(gpu.visible_vram_size, gpu.local_mem_size);
+  const bool fully_visible = visible_vram == gpu.local_mem_size && visible_vram != 0;
   make_dir(node_dir + "/caches/0");
   make_dir(node_dir + "/caches/1");
 
@@ -326,6 +334,8 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "num_sdma_xgmi_engines " << gpu.num_sdma_xgmi_engines << "\n"
         << "num_sdma_queues_per_engine " << gpu.num_sdma_queues_per_engine << "\n"
         << "num_cp_queues " << gpu.num_cp_queues << "\n"
+        << "cwsr_size " << gpu.context_save_size << "\n"
+        << "ctl_stack_size " << gpu.control_stack_size << "\n"
         << "max_engine_clk_fcompute " << gpu.max_engine_clk_fcompute << "\n"
         << "max_engine_clk_ccompute 0\n"
         << "local_mem_size " << gpu.local_mem_size << "\n"
@@ -336,7 +346,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "sdma_fw_version " << gpu.sdma_fw_version << "\n"
         << "unique_id " << gpu.unique_id << "\n"
         << "num_xcc " << num_xcc << "\n"
-        << "vram_public 1\n"
+        << "vram_public " << fully_visible << "\n"
         << "vram_size " << gpu.local_mem_size << "\n";
 
   if (gpu.family_id > 0)
@@ -344,14 +354,21 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
 
   write_file(node_dir + "/properties", props.str());
 
-  std::ostringstream mem;
-  mem << "heap_type 1\n"
-      << "size_in_bytes " << gpu.local_mem_size << "\n"
-      << "flags 0\n"
-      << "width " << gpu.mem_width << "\n"
-      << "mem_clk_max " << gpu.mem_clk_max << "\n";
-  write_file(node_dir + "/mem_banks/0/properties", mem.str());
-  write_file(node_dir + "/mem_banks/0/used_memory", "0\n");
+  const auto write_bank = [&](uint32_t index, uint32_t heap_type, uint64_t size) {
+    const std::string bank_dir = node_dir + "/mem_banks/" + std::to_string(index);
+    std::ostringstream mem;
+    mem << "heap_type " << heap_type << "\n"
+        << "size_in_bytes " << size << "\n"
+        << "flags 0\n"
+        << "width " << gpu.mem_width << "\n"
+        << "mem_clk_max " << gpu.mem_clk_max << "\n";
+    write_file(bank_dir + "/properties", mem.str());
+    write_file(bank_dir + "/used_memory", "0\n");
+  };
+  // KFD publishes one framebuffer bank for the entire allocation pool.
+  // The separate DRM attribute reports the CPU-visible byte count.
+  write_bank(0, fully_visible ? kFramebufferPublicHeap : kFramebufferPrivateHeap,
+             gpu.local_mem_size);
 
   std::ostringstream l1;
   l1 << "processor_id_low 0\n"
@@ -485,6 +502,11 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
       write_file(device_dir + "/revision", revision_hex.str());
       write_file(device_dir + "/subsystem_vendor", vendor_hex.str());
       write_file(device_dir + "/subsystem_device", device_hex.str());
+      // Match DRM's memory-size attributes so runtime topology readers can
+      // discover local and CPU-visible VRAM through the sysfs overlay.
+      write_file(device_dir + "/mem_info_vram_total", std::to_string(gpu.local_mem_size) + "\n");
+      write_file(device_dir + "/mem_info_vis_vram_total",
+                 std::to_string(gpu.visible_vram_size) + "\n");
       for (const auto &block : gpu.ip_versions) {
         std::string instance_dir =
             device_dir + "/ip_discovery/die/0/" + std::to_string(block.hardware_id) + "/0";
@@ -538,7 +560,8 @@ std::string Sysfs::generate(const std::vector<GpuInfo> &gpus, bool publish_peer_
   return topology_dir_;
 }
 
-Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc) {
+Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
+                                    const config::PciDeviceConfig &pci) {
   Sysfs::GpuInfo gpu{};
   gpu.gpu_id = dev.gpu_id;
   gpu.gfx_target_version = dev.gfx_target_version;
@@ -566,6 +589,13 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.wave_front_size = dev.wave_front_size;
   gpu.max_slots_scratch_cu = dev.max_slots_scratch_cu;
   gpu.local_mem_size = dev.local_mem_size;
+  // The KFD, DRM, RPC, and C API views share one clamped visible extent.
+  // The PCI front end still resolves its own default BAR independently.
+  gpu.visible_vram_size = std::min(
+      pci.vram_aperture_bytes ? pci.vram_aperture_bytes : dev.local_mem_size, dev.local_mem_size);
+  const auto context = kmd::cwsr_capacity_for_device(dev, num_xcc);
+  gpu.control_stack_size = context.control_stack_size;
+  gpu.context_save_size = context.context_save_size;
   gpu.vram_type = dev.vram_type;
   gpu.lds_size_kb = dev.lds_size_kb;
   gpu.mem_width = dev.mem_width;

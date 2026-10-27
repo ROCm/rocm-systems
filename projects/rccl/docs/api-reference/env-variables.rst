@@ -116,6 +116,17 @@ in the following table.
         | ``1``: Build them on the first AllGather eligible for hierarchical
           AllGather, outside graph capture.
 
+    * - | ``NCCL_NVLS_ENABLE``
+        | Controls NVLink SHARP (NVLS), an NVIDIA NVSwitch multicast feature.
+          RCCL accepts this variable for compatibility with NCCL but does not
+          implement NVLS, so it has no effect on AMD GPUs. Because RCCL never
+          creates NVLS multicast buffers, the multicast bind failure that NCCL
+          2.29 and later reports as a ``WARN`` and an initialization error
+          cannot occur in RCCL.
+      - | ``0``, ``1``, ``2``: All values behave the same. Communicator
+          initialization does not use NVLS and does not fail because of it.
+        | Default: ``2``
+
 Logging and debugging
 =====================
 
@@ -666,6 +677,30 @@ in the following table.
       - | Remapping specification string
         | Used with Rome 4P2H topology
 
+    * - | ``RCCL_PCIE_ORDERED_RING``
+        | This varilable applies only to gfx1250 scale-up single-host communicators.
+          Pins ring graph search to the order GPUs appear in the topology
+          array, so every channel uses the same ring. Without it the search
+          picks a different permutation per channel, so a device exchanges
+          with many different peers; pinning the order reduces fan-out to
+          one peer per direction per device across all rings. On
+          partitioned (DPX) GPUs the unpinned search also mixes scale-up
+          and scale-in hops between channels, though ring throughput is
+          bounded by its slowest hop either way. This
+          constrains GPU visitation order only; path validation, bandwidth
+          constraints, and backtracking are unchanged, and the ring still
+          travels whatever paths the search validates. Applies to gfx1250
+          ring graphs on a single host where every rank is a GPU of that
+          topology; trees, CollNet, other architectures, and multi-host
+          communicators are unaffected. ``NCCL_GRAPH_FILE`` and
+          ``NCCL_RINGS`` take precedence. Also accepted as
+          ``NCCL_PCIE_ORDERED_RING``.
+      - | ``0``: Disabled, use the unconstrained permutation search.
+        | ``1``: Enabled (default). If no ordered ring passes validation,
+          warn and fall back to the default ordering.
+        | ``2``: Enabled, strict. If no ordered ring passes validation,
+          fail communicator initialization instead of falling back.
+
     * - | ``NCCL_GIN_PLUGIN``
         | Selects external GIN (GPU-Initiated Networking) plugins.
       - | Comma-separated list of paths or short names
@@ -1105,6 +1140,18 @@ threshold table introduced for gfx1250.
       - | ``-1``: Use the compile-time default of 256 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
 
+    * - | ``RCCL_TDM_LL128_ENABLE``
+        | Routes the LL128 user destination buffer through the gfx1250 tensor data
+          mover: each warp's slice is staged in LDS and pushed out as one bulk
+          transfer instead of per-lane vector stores. Gains are concentrated in
+          large messages under LL128 (AllGather is the best case); below roughly
+          32 MiB the staging overhead makes it a small loss. The library must also
+          be built with ``--enable-tdm-prim-ll128``, and the path only compiles on
+          gfx1250 with an SDK providing the tensor data mover builtins. On any
+          other architecture, or without the build flag, this variable has no
+          effect.
+      - | ``0``: Disabled (default). The LL128 store uses the per-lane vector path.
+        | ``1``: Enabled, where the build and architecture support it.
     * - | ``RCCL_CE_AR_2SHOT_MIN_BYTES``
         | Overrides the minimum message size for the CE 2-shot AllReduce path.
           When ``-1`` (default), the value is resolved from ``ceNonRegMin[AllReduce]``
