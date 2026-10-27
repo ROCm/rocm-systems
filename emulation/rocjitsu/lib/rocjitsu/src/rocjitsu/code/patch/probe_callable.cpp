@@ -221,10 +221,8 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     return std::nullopt;
   }
 
-  // Use strings to hold info between iterations (currently deleting inst)
-  std::string_view last_mnemonic;
-  std::string last_src0_name;
-  bool last_has_src0 = false;
+  // Retain the return classification after releasing each decoded instruction.
+  bool last_is_return = false;
   const std::span<const uint32_t> body(words);
   size_t w = 0;
   while (w < num_words) {
@@ -256,15 +254,16 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
                         "does not fully model");
       return std::nullopt;
     }
-    last_mnemonic = m;
     const Operand *src0 = inst->src_operand(0);
-    last_has_src0 = src0 != nullptr;
-    last_src0_name = last_has_src0 ? src0->name() : std::string();
+    const std::optional<RegisterRef> link = src0 ? src0->to_register_ref() : std::nullopt;
+    last_is_return = (inst->flags() & ABSOLUTE_INDIRECT_BRANCH) != 0 && link &&
+                     link->cls == RegClass::SGPR && link->index == abi->link_pair_base &&
+                     link->width == 2;
     w += inst_words;
   }
 
   // Must return through the s[30:31] link pair
-  if (last_mnemonic != "s_setpc_b64" || !last_has_src0 || last_src0_name != "s[30:31]") {
+  if (!last_is_return) {
     report(error_out, "probe body does not return via s_setpc_b64 s[30:31]");
     return std::nullopt;
   }

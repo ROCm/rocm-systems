@@ -8,6 +8,8 @@
 #include "rocjitsu/code/builders/vector_builders.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 
 #include <gtest/gtest.h>
 
@@ -907,6 +909,111 @@ TrampolinePlan make_probe_plan(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA2,
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
   return plan;
+}
+
+// Independent preservation flags must feed allocation and emission together,
+// including the window the builder requires even when the caller waives EXEC.
+TEST(TrampolineBuilderEmit, PreservationFlagMatrixWithFullMaskWindows) {
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (int mode = 0; mode < 6; ++mode) {
+      if (mode == 5 && arch == ROCJITSU_CODE_ARCH_RDNA4)
+        continue; // RDNA has no accumulator register file.
+      for (int flags = 0; flags < 4; ++flags) {
+        SCOPED_TRACE(::testing::Message()
+                     << "arch=" << arch << " mode=" << mode << " flags=" << flags);
+        TrampolinePlan plan = make_probe_plan(arch);
+        plan.original_words = {build_s_nop(0, arch)};
+        plan.preserve_exec = flags & 1;
+        plan.preserve_vcc = flags & 2;
+        if (mode == 1)
+          plan.probe_args = {probe_arg_imm(7)};
+        plan.force_full_exec = mode == 2;
+        RegisterSet live;
+        RegisterSet clobbers;
+        if (mode >= 3) {
+          const RegClass cls = mode == 3   ? RegClass::VGPR
+                               : mode == 4 ? RegClass::SGPR
+                                           : RegClass::ACC_VGPR;
+          live.expand(RegisterRef{cls, 8, 1});
+          clobbers = live;
+        }
+        std::string error;
+        ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(mode == 1 ? 1 : 0), live,
+                                                       clobbers, &error))
+            << error;
+        if (mode == 3)
+          plan.vgpr_spills = {{RegClass::VGPR, 8, 64}};
+        if (mode == 4)
+          plan.sgpr_spills = {{RegClass::SGPR, 8, 64}};
+        if (mode == 5)
+          plan.acc_spills = {{RegClass::ACC_VGPR, 8, 64}};
+        RegisterSet reserved;
+        reserved.expand(RegisterRef{RegClass::SGPR, plan.link_pair_base, 2});
+        reserved.expand(RegisterRef{RegClass::SGPR, plan.target_pair_base, 2});
+        reserved.expand(RegisterRef{RegClass::SGPR, plan.scc_temp, 1});
+        bool exec_saved = false;
+        bool vcc_saved = false;
+        for (const SpecialStateSlot &slot : plan.special_state_saves) {
+          const RegisterRef temp{RegClass::SGPR, slot.temp_base, slot.width};
+          RegisterSet temp_set;
+          temp_set.expand(temp);
+          EXPECT_FALSE(reserved.intersects(temp_set));
+          EXPECT_FALSE(live.intersects(temp_set));
+          reserved |= temp_set;
+          exec_saved |= slot.operand == scalar_operand_exec_lo(arch);
+          vcc_saved |= slot.operand == scalar_operand_vcc_lo(arch);
+        }
+        EXPECT_EQ(exec_saved, plan.preserve_exec || mode != 0);
+        EXPECT_EQ(vcc_saved, plan.preserve_vcc);
+        const std::optional<TrampolineBytes> emitted =
+            TrampolineBuilder::emit_probe_call(plan, &error);
+        ASSERT_TRUE(emitted) << error;
+        std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+        ASSERT_NE(decoder, nullptr);
+        const std::span<const uint32_t> words(emitted->trampoline_words);
+        size_t offset = 0;
+        while (offset < words.size()) {
+          DecodeResult decoded = decoder->decode_window(words.subspan(offset));
+          ASSERT_TRUE(decoded.succeeded());
+          std::unique_ptr<Instruction> instruction = std::move(decoded).value();
+          offset += instruction->size() / sizeof(uint32_t);
+        }
+        EXPECT_EQ(offset, words.size());
+        EXPECT_EQ(
+            resolve_sopp_target(plan.anchor_offset, word_at(emitted->patched_anchor_bytes, 0)),
+            plan.trampoline_offset);
+        EXPECT_EQ(
+            resolve_sopp_target(plan.trampoline_offset + (words.size() - 1) * 4, words.back()),
+            plan.return_target);
+      }
+    }
+  }
+}
+
+TEST(TrampolineBuilderPlan, WaivingSavesCanFitATightDeadSgprBudget) {
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
+    RegisterSet live;
+    // Only the address pair, SCC temp, and return-link pair remain free.
+    for (uint16_t reg = 3; reg < REGISTER_SET_ALLOCATABLE_SGPRS; ++reg) {
+      if (reg != 30 && reg != 31)
+        live.expand(RegisterRef{RegClass::SGPR, reg, 1});
+    }
+    TrampolinePlan plan;
+    plan.arch = arch;
+    std::string error;
+    plan.preserve_exec = true;
+    plan.preserve_vcc = true;
+    EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, live, {}, &error));
+    EXPECT_NE(error.find("EXEC"), std::string::npos) << error;
+    plan.preserve_exec = false;
+    plan.preserve_vcc = false;
+    EXPECT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, live, {}, &error)) << error;
+    plan.force_full_exec = true;
+    EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, live, {}, &error));
+    EXPECT_NE(error.find("EXEC"), std::string::npos) << error;
+  }
 }
 
 // Emission screens the sources too rather than trusting that planning did: the

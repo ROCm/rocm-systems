@@ -3708,15 +3708,27 @@ protected:
     expect_special_preserved(cave, sop1_op_mov_b32(arch()), m0);
   }
 
-  // EXEC and VCC are preserved unconditionally, even when the probe body touches
-  // neither explicitly. The clobber summary sees only explicit operands, so implicit
-  // defs (v_cmp->VCC, v_cmpx->EXEC) would otherwise slip through; always saving both
-  // closes that hole. Probe body here is a bare s_nop (no special-state operand).
-  void expect_preserves_exec_and_vcc_unconditionally() {
-    const std::vector<uint32_t> cave = patch_probe_clobbering(build_s_nop(0, arch()));
+  // System effects are not modeled by the write proof. Missing exposed
+  // EXEC/VCC writes must not waive preservation for an unknown instruction.
+  void expect_preserves_exec_and_vcc_for_unknown_effects() {
+    const std::vector<uint32_t> cave = patch_probe_clobbering(build_sopp_encoding(
+        arch(), arch() == ROCJITSU_CODE_ARCH_RDNA4 ? rdna4::kSSetprioSopp : cdna4::kSSetprioSopp,
+        0));
     ASSERT_FALSE(cave.empty());
     expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_exec_lo(arch()));
     expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_vcc_lo(arch()));
+  }
+
+  // A fully audited nop/return body needs neither special-state pair. Unlike
+  // patch_probe_clobbering(), this body has no vector setup outside that set.
+  void expect_omits_proven_nonwriter_saves() {
+    const Caved caved = patch_spill({kMovV3V2, endpgm()}, {build_s_nop(0, arch()), setpc()}, 0);
+    ASSERT_FALSE(caved.cave.empty());
+    for (uint16_t operand : {scalar_operand_exec_lo(arch()), scalar_operand_vcc_lo(arch())}) {
+      EXPECT_FALSE(cave_has_special_mov(caved.cave, sop1_op_mov_b64(arch()), operand, true));
+      EXPECT_FALSE(cave_has_special_mov(caved.cave, sop1_op_mov_b64(arch()), operand, false));
+    }
+    EXPECT_EQ(caved.scratch, 0u);
   }
 
   // Every probe-call envelope -- including a no-spill site -- opens with a load drain
@@ -3976,23 +3988,26 @@ TEST_F(Cdna3ProbeSpill, PreservesClobberedM0) { expect_preserves_clobbered_m0();
 TEST_F(Cdna4ProbeSpill, PreservesClobberedM0) { expect_preserves_clobbered_m0(); }
 TEST_F(Rdna4ProbeSpill, PreservesClobberedM0) { expect_preserves_clobbered_m0(); }
 
-TEST_F(Cdna3ProbeSpill, PreservesExecAndVccUnconditionally) {
-  expect_preserves_exec_and_vcc_unconditionally();
+TEST_F(Cdna3ProbeSpill, PreservesExecAndVccForUnknownEffects) {
+  expect_preserves_exec_and_vcc_for_unknown_effects();
 }
-TEST_F(Cdna4ProbeSpill, PreservesExecAndVccUnconditionally) {
-  expect_preserves_exec_and_vcc_unconditionally();
+TEST_F(Cdna4ProbeSpill, PreservesExecAndVccForUnknownEffects) {
+  expect_preserves_exec_and_vcc_for_unknown_effects();
 }
-TEST_F(Rdna4ProbeSpill, PreservesExecAndVccUnconditionally) {
-  expect_preserves_exec_and_vcc_unconditionally();
+TEST_F(Rdna4ProbeSpill, PreservesExecAndVccForUnknownEffects) {
+  expect_preserves_exec_and_vcc_for_unknown_effects();
 }
+
+TEST_F(Cdna3ProbeSpill, OmitsProvenNonwriterSaves) { expect_omits_proven_nonwriter_saves(); }
+TEST_F(Cdna4ProbeSpill, OmitsProvenNonwriterSaves) { expect_omits_proven_nonwriter_saves(); }
+TEST_F(Rdna4ProbeSpill, OmitsProvenNonwriterSaves) { expect_omits_proven_nonwriter_saves(); }
 
 TEST_F(Cdna3ProbeSpill, BoundaryDrainsAtNoSpillSite) { expect_boundary_drains_at_no_spill_site(); }
 TEST_F(Cdna4ProbeSpill, BoundaryDrainsAtNoSpillSite) { expect_boundary_drains_at_no_spill_site(); }
 TEST_F(Rdna4ProbeSpill, BoundaryDrainsAtNoSpillSite) { expect_boundary_drains_at_no_spill_site(); }
 
-// Compare-based coverage: v_cmp writes VCC and v_cmpx writes EXEC. The always-on
-// preservation brackets the call regardless of the summary, so VCC/EXEC round-trip
-// even for a probe whose special-state write the summary might miss. The VOPC
+// Compare-based coverage: v_cmp writes VCC and v_cmpx writes EXEC. Neither
+// possible writes nor unknown effects can waive preservation. The VOPC
 // encodings are arch-specific single words, so each test passes its own.
 TEST_F(Cdna3ProbeSpill, PreservesVccFromImplicitCompare) {
   const std::vector<uint32_t> cave =
@@ -4077,9 +4092,9 @@ TEST_F(Cdna4ProbeSpill, SgprRestoreCountsAnAccVgprReloadAsOneWaitState) {
   EXPECT_EQ(gap->nops, 1u) << gap->trace;
 }
 
-// Two reloads (v0, and v2 which the guest reads after the anchor), their wait, and
-// the EXEC and VCC restores already supply all 5, so no s_nop is emitted.
-TEST_F(Cdna4ProbeSpill, SgprRestoreAfterTwoReloadsAddsNoNop) {
+// Two reloads, their wait and the EXEC restore supply four wait states.
+// Omitting VCC must make the existing hazard planner add the missing fifth.
+TEST_F(Cdna4ProbeSpill, SgprRestoreAfterTwoReloadsPadsForOmittedVcc) {
   const Caved caved = patch_spill(
       {kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], kMovV3V2, endpgm()},
       {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), kMovV0Zero, kMovV2Zero, setpc()},
@@ -4087,12 +4102,12 @@ TEST_F(Cdna4ProbeSpill, SgprRestoreAfterTwoReloadsAddsNoNop) {
   const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
   ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
   EXPECT_EQ(gap->wait_states, 5u) << gap->trace;
-  EXPECT_EQ(gap->nops, 0u) << gap->trace;
+  EXPECT_EQ(gap->nops, 1u) << gap->trace;
 }
 
 // One s_nop serves both restores, sized by the larger shortfall rather than their
-// sum: the EXEC, VCC and M0 restores give the SGPR 3 of its 5, the M0 restore has
-// none of its 1, so s_nop 1.
+// sum: EXEC and M0 restores supply two of the SGPR's five wait states.
+// Without VCC, s_nop 2 supplies three and also covers M0's one-state hazard.
 TEST_F(Cdna4ProbeSpill, SgprAndM0RestoresShareOneNop) {
   const Caved caved =
       patch_spill({kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], endpgm()},
@@ -4105,7 +4120,7 @@ TEST_F(Cdna4ProbeSpill, SgprAndM0RestoresShareOneNop) {
   EXPECT_EQ(sgpr_gap->nops, 1u) << sgpr_gap->trace;
   const std::optional<WaitGap> m0_gap = m0_restore_gap(caved.cave, kGlobalLoadV1V0S8);
   ASSERT_TRUE(m0_gap) << "no s_mov_b32 restoring M0 before the anchor";
-  EXPECT_EQ(m0_gap->wait_states, 2u) << m0_gap->trace;
+  EXPECT_EQ(m0_gap->wait_states, 3u) << m0_gap->trace;
   EXPECT_EQ(m0_gap->nops, 1u) << m0_gap->trace;
 }
 

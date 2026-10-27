@@ -25,6 +25,9 @@
 #include "../log_buffer_test_access.h"
 #include "dbi_sim.h"
 #include "log_record_probe.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/operand.h"
 #include "scalar_builders.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -169,6 +172,32 @@ protected:
     ASSERT_TRUE(patched.is_valid());
     out.text = test::section_words(patched, ".text");
     ASSERT_FALSE(out.text.empty());
+    // The production orchestrator must consume the generated proof for this
+    // memory-writing probe. Its argument window still saves EXEC, but no site
+    // needs a VCC save/restore. Check instruction boundaries, not literal words.
+    std::unique_ptr<Decoder> decoder = Decoder::create(t_.arch);
+    ASSERT_NE(decoder, nullptr);
+    const std::span<const uint32_t> words(out.text);
+    size_t word_offset = 0;
+    size_t exec_saves = 0;
+    while (word_offset < words.size()) {
+      DecodeResult decoded = decoder->decode_window(words.subspan(word_offset));
+      ASSERT_TRUE(decoded.succeeded());
+      std::unique_ptr<Instruction> instruction = std::move(decoded).value();
+      if (instruction->mnemonic() == "s_mov_b64") {
+        const Operand *source = instruction->src_operand(0);
+        const Operand *destination = instruction->dst_operand(0);
+        const std::optional<RegisterRef> src = source ? source->to_register_ref() : std::nullopt;
+        const std::optional<RegisterRef> dst =
+            destination ? destination->to_register_ref() : std::nullopt;
+        if (src && src->cls == RegClass::EXEC)
+          ++exec_saves;
+        EXPECT_FALSE(src && src->cls == RegClass::VCC);
+        EXPECT_FALSE(dst && dst->cls == RegClass::VCC);
+      }
+      word_offset += instruction->size() / sizeof(uint32_t);
+    }
+    EXPECT_GE(exec_saves, anchors.size());
     out.scratch = test::patched_private_segment_size(patched);
     const auto entry = test::patched_entry_text_offset(patched);
     ASSERT_TRUE(entry.has_value());

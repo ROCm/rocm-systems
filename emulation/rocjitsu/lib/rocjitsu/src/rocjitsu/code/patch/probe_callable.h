@@ -247,7 +247,8 @@ struct ProbeCallable {
 ///     descriptor, is not statically detectable here and is not rejected,
 ///   - contain no RDNA4 image instruction (VIMAGE / VSAMPLE), whose decoded
 ///     operands do not name every register it reads and writes, and
-///   - end in `s_setpc_b64 s[30:31]`.
+///   - end in an absolute register return through s[30:31], identified by
+///     generated semantics (s_setpc_b64 or the target's equivalent spelling).
 ///
 /// On success the returned ProbeCallable carries the ABI derived from
 /// AmdGpuFuncReturnS30S31 and @p num_arg_dwords. Returns std::nullopt (with a

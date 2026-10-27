@@ -8,14 +8,20 @@
 // Instruction encodings below are ground truth captured from
 // `llvm-mc -arch=amdgcn -mcpu=<gfx90a|gfx1200> -show-encoding`.
 
+#include "../dbi_test_util.h"
+
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
+#include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -34,9 +40,8 @@ constexpr uint32_t kGfx12GlobalLoadW1 = 0x00000001; // ... (word 1)
 constexpr uint32_t kGfx12GlobalLoadW2 = 0x00000000; // ... (word 2)
 constexpr uint32_t kGfx12SSetpcS30S31 = 0xbe80481e; // s_setpc_b64 s[30:31]
 
-// Explicit special-state writes. to_register_ref() currently returns nullopt
-// for these operand forms, so the summary must recognize them via the operand
-// name.
+// Explicit special-state writes. Generated selector references and fieldless
+// special effects must identify these structurally, without display-name parsing.
 constexpr uint32_t kSMovExecLo_0 = 0xbefe0080;    // s_mov_b32 exec_lo, 0
 constexpr uint32_t kSMovM0_0 = 0xbefc0080;        // s_mov_b32 m0, 0
 constexpr uint32_t kSMovVccLo_0 = 0xbeea0080;     // s_mov_b32 vcc_lo, 0
@@ -136,10 +141,8 @@ TEST(ProbeClobber, ReturnLinkIsNotAProbeClobber) {
   EXPECT_FALSE(has_sgpr(summary->ordinary_clobbers, 31));
 }
 
-// A body that writes EXEC via an explicit operand must set touches_exec, even
-// though to_register_ref() does not map the OPR_SDST_EXEC operand form. This is
-// the decoder-gap regression guard: if the name fallback ever silently breaks,
-// touches_exec goes false and this fails.
+// An explicit EXEC destination must be visible through the generated
+// structural operand model and set touches_exec.
 TEST(ProbeClobber, DetectsExplicitExecWrite) {
   const auto callable = make_callable({kSMovExecLo_0, kSSetpcS30S31});
   std::string err;
@@ -178,8 +181,7 @@ TEST(ProbeClobber, DetectsExplicitVccWrite) {
 // VOPC compares write VCC (v_cmp) / EXEC (v_cmpx) through a named destination
 // operand the decoder exposes ("vcc", "exec"), so the summary's operand-name scan
 // catches them even though the write carries no explicitly-encoded operand field.
-// (Genuinely operand-less implicit defs would still be invisible here; the
-// trampoline preserves EXEC/VCC unconditionally to cover that case.)
+// Missing effects remain Unknown and require preservation.
 TEST(ProbeClobber, VccWriteFromCompareIsDetected) {
   const auto callable = make_callable({kVCmpEqU32, kSSetpcS30S31});
   std::string err;
@@ -223,6 +225,213 @@ TEST(ProbeClobber, SpecialWritesDoNotLeakIntoOrdinaryClobbers) {
   EXPECT_FALSE(summary->ordinary_clobbers.has_specials());
   EXPECT_TRUE(summary->touches_exec);
 }
+
+TEST(ProbeClobber, WideSgprTupleCannotHideSpecialSelectorOverlap) {
+  // llvm-mc's s_load_dwordx16 s[0:15], s[0:1], 0 with SDATA changed to
+  // 96. A decoder may reject the out-of-range tuple; if it accepts it, the
+  // interval crosses VCC even though the first selector names an ordinary SGPR.
+  ProbeCallable probe = make_callable({0xc0121800u, 0, kSSetpcS30S31});
+  probe.arch = ROCJITSU_CODE_ARCH_CDNA3;
+  probe.target = ROCJITSU_CODE_TARGET_GFX942;
+  std::string error;
+  const std::optional<ProbeClobberSummary> summary = build_probe_clobber_summary(probe, &error);
+  if (summary)
+    EXPECT_NE(summary->vcc_write, ProbeWriteProof::NoWrite);
+  else
+    EXPECT_FALSE(error.empty());
+}
+
+struct ProofTarget {
+  rj_code_arch_t arch;
+  rj_code_target_id_t target;
+  uint32_t wait;
+  uint32_t ret;
+};
+
+void PrintTo(const ProofTarget &target, std::ostream *out) {
+  *out << "Target" << static_cast<int>(target.target);
+}
+
+class ProbeWriteProofTest : public ::testing::TestWithParam<ProofTarget> {
+protected:
+  ProbeCallable callable(std::vector<uint32_t> words) const {
+    ProbeCallable probe = make_callable(std::move(words));
+    probe.arch = GetParam().arch;
+    probe.target = GetParam().target;
+    return probe;
+  }
+};
+
+TEST_P(ProbeWriteProofTest, ExactAuditedBodiesHaveNoWrites) {
+  for (const std::vector<uint32_t> &words :
+       {std::vector<uint32_t>{GetParam().ret},
+        std::vector<uint32_t>{kSNop0, GetParam().wait, GetParam().ret}}) {
+    const std::optional<ProbeClobberSummary> summary = build_probe_clobber_summary(callable(words));
+    ASSERT_TRUE(summary);
+    EXPECT_EQ(summary->exec_write, ProbeWriteProof::NoWrite);
+    EXPECT_EQ(summary->vcc_write, ProbeWriteProof::NoWrite);
+  }
+}
+
+TEST_P(ProbeWriteProofTest, ConcreteTargetProbeExtractionRecognizesSemanticReturn) {
+  const IsaGpuTargetDescription *target =
+      default_isa_target_registry().find_gpu_target(GetParam().target);
+  ASSERT_NE(target, nullptr);
+  const std::vector<uint8_t> image =
+      test::make_amdgpu_probe_elf("proof", {kSNop0, GetParam().ret}, target->elf_machine);
+  AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  std::string error;
+  const std::optional<ResolvedProbeSymbol> symbol = resolve_probe_symbol(object, "proof", &error);
+  ASSERT_TRUE(symbol) << error;
+  const std::optional<ProbeCallable> extracted =
+      build_probe_callable(object, *symbol, GetParam().arch, 0, &error);
+  ASSERT_TRUE(extracted) << error;
+  EXPECT_EQ(extracted->target, GetParam().target);
+  const std::optional<ProbeClobberSummary> summary = build_probe_clobber_summary(*extracted);
+  ASSERT_TRUE(summary);
+  EXPECT_EQ(summary->exec_write, ProbeWriteProof::NoWrite);
+  EXPECT_EQ(summary->vcc_write, ProbeWriteProof::NoWrite);
+}
+
+TEST_P(ProbeWriteProofTest, OrdinaryAndReadOnlyOperationsHaveIndependentProofs) {
+  const rj_code_arch_t arch = GetParam().arch;
+  const uint32_t ret = GetParam().ret;
+  for (uint32_t instruction : {build_s_nop(1, arch), build_s_mov_b32(5, 128, arch),
+                               build_s_mov_b32(5, scalar_operand_exec_lo(arch), arch),
+                               build_s_mov_b32(5, scalar_operand_vcc_lo(arch), arch)}) {
+    const std::optional<ProbeClobberSummary> summary =
+        build_probe_clobber_summary(callable({instruction, ret}));
+    ASSERT_TRUE(summary);
+    EXPECT_EQ(summary->exec_write, ProbeWriteProof::NoWrite);
+    EXPECT_EQ(summary->vcc_write, ProbeWriteProof::NoWrite);
+  }
+  const std::optional<ProbeClobberSummary> exec = build_probe_clobber_summary(
+      callable({build_s_mov_b32(scalar_operand_exec_lo(arch), 128, arch), ret}));
+  ASSERT_TRUE(exec);
+  EXPECT_EQ(exec->exec_write, ProbeWriteProof::MayWrite);
+  EXPECT_EQ(exec->vcc_write, ProbeWriteProof::NoWrite);
+  const std::optional<ProbeClobberSummary> vcc = build_probe_clobber_summary(
+      callable({build_s_mov_b32(scalar_operand_vcc_lo(arch), 128, arch), ret}));
+  ASSERT_TRUE(vcc);
+  EXPECT_EQ(vcc->exec_write, ProbeWriteProof::NoWrite);
+  EXPECT_EQ(vcc->vcc_write, ProbeWriteProof::MayWrite);
+}
+
+TEST_P(ProbeWriteProofTest, InternalDirectBranchesHaveNoWrites) {
+  const std::optional<ProbeClobberSummary> summary =
+      build_probe_clobber_summary(callable({build_s_branch(0, GetParam().arch), GetParam().ret}));
+  ASSERT_TRUE(summary);
+  EXPECT_EQ(summary->exec_write, ProbeWriteProof::NoWrite);
+  EXPECT_EQ(summary->vcc_write, ProbeWriteProof::NoWrite);
+}
+
+TEST_P(ProbeWriteProofTest, UncoveredEffectsAndControlTransfersStayUnknown) {
+  const rj_code_arch_t arch = GetParam().arch;
+  const uint32_t ret = GetParam().ret;
+  const std::vector<std::vector<uint32_t>> bodies{
+      {},
+      {kSNop0},
+      {arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4 ? 0xbfb50000u
+                                                                            : 0xbf8f0000u,
+       ret},
+
+      {build_s_branch(-2, arch), ret},
+      {build_s_branch(1, arch), ret},
+      {build_s_branch(1, arch), build_s_mov_b32(5, 255, arch), 0, ret},
+      {ret, ret},
+      {build_s_setpc_b64(28, arch), ret},
+      {build_s_swappc_b64(28, 30, arch), ret}};
+  for (const std::vector<uint32_t> &body : bodies) {
+    SCOPED_TRACE(::testing::PrintToString(body));
+    const std::optional<ProbeClobberSummary> summary = build_probe_clobber_summary(callable(body));
+    ASSERT_TRUE(summary);
+    EXPECT_EQ(summary->exec_write, ProbeWriteProof::Unknown);
+    EXPECT_EQ(summary->vcc_write, ProbeWriteProof::Unknown);
+  }
+}
+
+TEST_P(ProbeWriteProofTest, SelectorWritesIncludingBothHalvesCannotBecomeNoWrite) {
+  const rj_code_arch_t arch = GetParam().arch;
+  for (uint16_t half : {0, 1}) {
+    for (bool exec : {false, true}) {
+      const uint16_t selector =
+          (exec ? scalar_operand_exec_lo(arch) : scalar_operand_vcc_lo(arch)) + half;
+      const std::optional<ProbeClobberSummary> summary = build_probe_clobber_summary(
+          callable({build_s_mov_b32(selector, 128, arch), GetParam().ret}));
+      ASSERT_TRUE(summary);
+      EXPECT_EQ(exec ? summary->exec_write : summary->vcc_write, ProbeWriteProof::MayWrite);
+      EXPECT_EQ(exec ? summary->vcc_write : summary->exec_write, ProbeWriteProof::NoWrite);
+    }
+  }
+}
+
+TEST_P(ProbeWriteProofTest, CompareAndCmpxCannotBecomeNoWrite) {
+  const bool rdna =
+      GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4 || GetParam().arch == ROCJITSU_CODE_ARCH_CDNA5;
+  const uint32_t cmp = rdna ? 0x7c940080u : 0x7d940080u;
+  const uint32_t cmpx = rdna ? 0x7d940080u : 0x7db40080u;
+  const std::optional<ProbeClobberSummary> vcc =
+      build_probe_clobber_summary(callable({cmp, GetParam().ret}));
+  ASSERT_TRUE(vcc);
+  EXPECT_EQ(vcc->vcc_write, ProbeWriteProof::MayWrite);
+  const std::optional<ProbeClobberSummary> exec =
+      build_probe_clobber_summary(callable({cmpx, GetParam().ret}));
+  ASSERT_TRUE(exec);
+  EXPECT_EQ(exec->exec_write, ProbeWriteProof::MayWrite);
+  EXPECT_EQ(exec->vcc_write, rdna ? ProbeWriteProof::NoWrite : ProbeWriteProof::MayWrite);
+}
+
+TEST_P(ProbeWriteProofTest, Vop3CompareUsesActualScalarDestination) {
+  const bool gfx12 =
+      GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4 || GetParam().arch == ROCJITSU_CODE_ARCH_CDNA5;
+  // llvm-mc: v_cmp_eq_u32_e64 s[8:9], v0, v1 (GFX9), s8 (GFX12).
+  const uint32_t first = gfx12 ? 0xd44a0008u : 0xd0ca0008u;
+  const uint32_t second = gfx12 ? 0x02020300u : 0x00020300u;
+  const std::optional<ProbeClobberSummary> summary =
+      build_probe_clobber_summary(callable({first, second, GetParam().ret}));
+  ASSERT_TRUE(summary);
+  EXPECT_EQ(summary->exec_write, ProbeWriteProof::NoWrite);
+  EXPECT_EQ(summary->vcc_write, ProbeWriteProof::NoWrite);
+  EXPECT_TRUE(summary->ordinary_clobbers.contains(RegisterRef{RegClass::SGPR, 8, 1}));
+}
+
+TEST_P(ProbeWriteProofTest, MissingTargetOrInvalidAbiCannotProveNoWrite) {
+  ProbeCallable probe = callable({kSNop0, GetParam().ret});
+  probe.target = ROCJITSU_CODE_TARGET_INVALID;
+  const std::optional<ProbeClobberSummary> missing_target = build_probe_clobber_summary(probe);
+  ASSERT_TRUE(missing_target);
+  EXPECT_EQ(missing_target->exec_write, ProbeWriteProof::Unknown);
+  EXPECT_EQ(missing_target->vcc_write, ProbeWriteProof::Unknown);
+  probe = callable({kSNop0, GetParam().ret});
+  probe.abi.link_pair_base = 28;
+  const std::optional<ProbeClobberSummary> invalid_abi = build_probe_clobber_summary(probe);
+  ASSERT_TRUE(invalid_abi);
+  EXPECT_EQ(invalid_abi->exec_write, ProbeWriteProof::Unknown);
+  EXPECT_EQ(invalid_abi->vcc_write, ProbeWriteProof::Unknown);
+}
+
+TEST(ProbeClobber, Gfx1201UsesItsGeneratedEffectModel) {
+  ProbeCallable probe = make_callable({kSNop0, kGfx12SSetpcS30S31});
+  probe.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  probe.target = ROCJITSU_CODE_TARGET_GFX1201;
+  const std::optional<ProbeClobberSummary> summary = build_probe_clobber_summary(probe);
+  ASSERT_TRUE(summary);
+  EXPECT_EQ(summary->exec_write, ProbeWriteProof::NoWrite);
+  EXPECT_EQ(summary->vcc_write, ProbeWriteProof::NoWrite);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AuditedTargets, ProbeWriteProofTest,
+    ::testing::Values(
+        ProofTarget{ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_TARGET_GFX90A, 0xbf8c0000, 0xbe801d1e},
+        ProofTarget{ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_TARGET_GFX942, 0xbf8c0000, 0xbe801d1e},
+        ProofTarget{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950, 0xbf8c0000, 0xbe801d1e},
+        ProofTarget{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1200, 0xbf890000, 0xbe80481e},
+        ProofTarget{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201, 0xbf890000, 0xbe80481e},
+        ProofTarget{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250, 0xbfc00000, 0xbe80481e},
+        ProofTarget{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1251, 0xbfc00000,
+                    0xbe80481e}));
 
 } // namespace
 } // namespace rocjitsu

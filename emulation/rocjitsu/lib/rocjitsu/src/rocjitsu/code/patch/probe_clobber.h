@@ -17,6 +17,12 @@
 
 namespace rocjitsu {
 
+/// @brief Per-register proof for the entire copied probe body.
+/// @details Only NoWrite permits omitting preservation. MayWrite records a
+/// modeled possible write; Unknown includes missing effect coverage or an
+/// unproved control transfer. Neither touches_* == false nor absent flags prove NoWrite.
+enum class ProbeWriteProof { Unknown, MayWrite, NoWrite };
+
 /// @brief Registers and special state a probe body overwrites.
 ///
 /// @details `ordinary_clobbers` is derived precisely by decoding the copied
@@ -28,11 +34,12 @@ namespace rocjitsu {
 /// This struct is intended to stay callee-only.
 struct ProbeClobberSummary {
   RegisterSet ordinary_clobbers;
-  // touches_exec/touches_vcc are set from the special-state writes the decoder
-  // exposes as operands (see probe_clobber.cpp), but the preserve decision currently
-  // ignores them: the orchestrator saves EXEC/VCC unconditionally as a conservative
-  // policy, so correctness never rests on per-opcode implicit-def coverage. They are
-  // kept for a future refinement that preserves only when set.
+  // Cached once per distinct probe, before resource planning or layout.
+  // Each proof uses generated coverage plus actual destinations independently.
+  ProbeWriteProof exec_write = ProbeWriteProof::Unknown;
+  ProbeWriteProof vcc_write = ProbeWriteProof::Unknown;
+  // Best-effort access information, including reads. These flags are not
+  // no-write proofs and do not control EXEC/VCC preservation.
   bool touches_exec = false;
   bool touches_vcc = false;
   bool touches_scc = false;
