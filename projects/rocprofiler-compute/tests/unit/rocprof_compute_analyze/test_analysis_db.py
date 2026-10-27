@@ -3369,12 +3369,16 @@ def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
 
 
 def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path):
-    """The per-source-line file sits beside the source copy and has ISA references."""
+    """The per-source-line file sits beside the source copy and has ISA references.
+
+    The instruction without a line number goes to the unattributable row, which
+    comes first.
+    """
     workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
     tool_data_records = make_source_workload_tool_data_records(
         workload_path,
         {"/s/a.cpp": "int first;\nint second;\nint third;\n"},
-        ["/s/a.cpp:1", "/s/a.cpp:2"],
+        ["/s/a.cpp:1", "/s/a.cpp:?"],
     )
     # Both offsets belong to one kernel, so both ISA references point into the
     # ISA file of that kernel.
@@ -3422,6 +3426,7 @@ def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path)
         "ISA references",
     ]
     assert rows == [
+        ["", "Unattributable instructions", "1", "", "", "", "", "", f"{isa_file}:2"],
         [
             "1",
             "int first;",
@@ -3433,17 +3438,7 @@ def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path)
             "1",
             f"{isa_file}:1",
         ],
-        [
-            "2",
-            "int second;",
-            "1",
-            "1",
-            "0",
-            "",
-            "",
-            "",
-            f"{isa_file}:2",
-        ],
+        ["2", "int second;", "", "", "", "", "", "", ""],
         ["3", "int third;", "", "", "", "", "", "", ""],
     ]
 

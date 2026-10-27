@@ -1151,6 +1151,8 @@ def test_per_source_line_rows_read_each_lines_state_and_instructions(db_session)
 
     empty_counts = (None,) * 7
     assert rows == [
+        # The "?" source line comes first, with the instruction that has no line.
+        ("w", "s", "/s/a.cpp", None, None, *empty_counts, [7]),
         ("w", "s", "/s/a.cpp", 1, "line 1", *empty_counts, []),
         ("w", "s", "/s/a.cpp", 2, "line 2", 8, 5, 3, 25.0, 80.0, 1, 2, [5, 6]),
         ("w", "s", "/s/a.cpp", 3, "line 3", *empty_counts, []),

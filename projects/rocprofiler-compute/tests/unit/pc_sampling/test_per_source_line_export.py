@@ -187,6 +187,44 @@ def test_write_per_source_line_files_writes_header_and_rows(tmp_path):
     ]
 
 
+def test_write_per_source_line_files_keeps_only_total_count_of_unattributable_row(
+    tmp_path,
+):
+    """The "?" source line becomes a labeled row with its total count only."""
+    source_line_rows = [
+        make_source_line_row(
+            line_number=None,
+            content=None,
+            stall_reason_counts=(4,),
+            instruction_uuids=(100, 101),
+        ),
+    ]
+
+    _write_per_source_line_files(
+        tmp_path, iter(source_line_rows), ["WAITCNT"], ISA_LINE_LOCATIONS
+    )
+
+    exported_rows = read_exported_rows(
+        tmp_path
+        / "vector_copy"
+        / "MI300X_A1"
+        / "source"
+        / "s"
+        / "a.cpp_pc_sampling.csv"
+    )
+    assert exported_rows[1] == [
+        "",
+        "Unattributable instructions",
+        "3",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "vecCopy_uuid_7/isa_code_object_id_5_pid_42.csv:1-2",
+    ]
+
+
 def test_write_per_source_line_files_writes_nothing_without_rows(tmp_path):
     """A workload without captured source files leaves no folder behind."""
     file_count = _write_per_source_line_files(
