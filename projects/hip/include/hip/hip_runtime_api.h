@@ -9038,29 +9038,6 @@ hipError_t hipStreamGetCaptureInfo_v3(hipStream_t stream, hipStreamCaptureStatus
  * @brief Get stream's capture state
  *
  * @param [in] stream - Stream of which to get capture status from.
- * @param [out] captureStatus_out - Returns current capture status.
- * @param [out] id_out - Unique capture ID.
- * @param [out] graph_out - Returns the graph being captured into.
- * @param [out] dependencies_out - Pointer to an array of nodes representing the graphs
- * dependencies.
- * @param [out] edgeData_out - Pointer to an array of edges representing ---
- * @param [out] numDependencies_out - Returns size of the array returned in dependencies_out.
- *
- * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorStreamCaptureImplicit
- *
- */
-hipError_t hipStreamGetCaptureInfo_v3(hipStream_t stream,
-                                      hipStreamCaptureStatus* captureStatus_out,
-                                      unsigned long long* id_out __dparm(0),
-                                      hipGraph_t* graph_out __dparm(0),
-                                      const hipGraphNode_t** dependencies_out __dparm(0),
-                                      const hipGraphEdgeData** edgeData_out __dparm(0),
-                                      size_t* numDependencies_out __dparm(0));
-
-/**
- * @brief Get stream's capture state
- *
- * @param [in] stream - Stream of which to get capture status from.
  * @param [out] pCaptureStatus - Returns current capture status.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorStreamCaptureImplicit
