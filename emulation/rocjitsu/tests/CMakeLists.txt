@@ -473,7 +473,6 @@ add_executable(
     patch/kernarg_extension_test.cpp
     patch/sidecar_metadata_test.cpp
     patch/trampoline_builder_test.cpp
-    patch/checked_text_edits_test.cpp
     patch/instrumentor_test.cpp
     code/amdhsa_metadata_test.cpp
     patch/probe_symbol_test.cpp
@@ -1013,6 +1012,51 @@ endif()
 
 # These existing suites exercise ELF inspection, CFG construction, kernel
 # reachability, and register queries using only the static-analysis composition.
+add_executable(
+    rocjitsu_fault_injection_tests
+    patch/checked_text_edits_test.cpp
+    patch/fault_drop_barrier_test.cpp
+)
+target_include_directories(
+    rocjitsu_fault_injection_tests
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(
+    rocjitsu_fault_injection_tests
+    PRIVATE
+        rocjitsu_dbt_internal
+        rocjitsu_amdgpu_isa_model_registry
+        simdojo_headers
+        GTest::gtest_main
+)
+rj_configure_target(rocjitsu_fault_injection_tests PRIVATE_INCLUDES WARNINGS)
+set(RJ_FAULT_INJECTION_CORPUS_OBJECT
+    ""
+    CACHE FILEPATH
+    "Pinned fa_barrier_epoch device ELF for host mutation qualification"
+)
+if(RJ_FAULT_INJECTION_CORPUS_OBJECT)
+    if(NOT EXISTS "${RJ_FAULT_INJECTION_CORPUS_OBJECT}")
+        message(FATAL_ERROR "RJ_FAULT_INJECTION_CORPUS_OBJECT does not exist")
+    endif()
+    target_compile_definitions(
+        rocjitsu_fault_injection_tests
+        PRIVATE
+            RJ_FAULT_CORPUS_OBJECT="${RJ_FAULT_INJECTION_CORPUS_OBJECT}"
+            RJ_FAULT_CORPUS_MUTANT="${CMAKE_CURRENT_BINARY_DIR}/fa_barrier_epoch.mutant.hsaco"
+    )
+endif()
+rj_add_gtest_tests(rocjitsu_fault_injection_tests)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME FaultDropBarrier.SymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_fault_injection_tests> -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/patch/check_fault_injection_symbols.cmake
+    )
+endif()
+
 add_executable(
     rocjitsu_analysis_tests
     analysis/decoder_window_test.cpp
