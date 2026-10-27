@@ -87,6 +87,10 @@ test_categories:
       - "TuningMicrotest.*"
       # plugin/tuner/csv_tuner.cc
       - "CsvTunerMicrotest.*"
+      # commDump.cc
+      - "CommDumpMicrotest.*"
+      # include/timer.h
+      - "TimerMicrotest.*"
       # include/param/utils.h, include/param/parser_common.h
       - "ParamUtilsMicrotest.*"
       # include/param/parser_{default,enum,bitset,list}.h
@@ -113,6 +117,8 @@ test_categories:
       - "WrapMicrotestIsolated.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
+      # transport/nvls.cc (rccl-UnitTestsMicroNvls)
+      - "NvlsHipStubTest.*"
       # misc/ionicdvsymbols.cc, misc/mlx5dvsymbols.cc
       - "DvSymbolsTestIsolated.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)

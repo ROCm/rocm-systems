@@ -3,6 +3,7 @@
 
 #include "rocjitsu/config/config_loader.h"
 
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
 
 #include "rocjitsu/config/config_common.h"
@@ -32,6 +33,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <charconv>
 #include <cstdlib>
 #include <limits>
 #include <regex>
@@ -205,44 +207,47 @@ class Lexer {
 public:
   explicit Lexer(const std::string &e) : e_(e) {}
 
-  Tok next() {
+  util::FailureOr<Tok> next(util::DiagnosticEmitter emit_error) {
     skip();
     if (pos_ >= e_.size())
-      return {TokType::END_TOK, 0, "", '\0'};
+      return Tok{TokType::END_TOK, 0, "", '\0'};
     char c = e_[pos_];
     if (c == '(') {
       ++pos_;
-      return {TokType::LPAREN, 0, "", '('};
+      return Tok{TokType::LPAREN, 0, "", '('};
     }
     if (c == ')') {
       ++pos_;
-      return {TokType::RPAREN, 0, "", ')'};
+      return Tok{TokType::RPAREN, 0, "", ')'};
     }
     if (pos_ + 1 < e_.size()) {
       std::string s2 = e_.substr(pos_, 2);
       if (s2 == "==" || s2 == "!=" || s2 == "<=" || s2 == ">=" || s2 == "&&" || s2 == "||") {
         pos_ += 2;
-        return {TokType::OP2, 0, s2, '\0'};
+        return Tok{TokType::OP2, 0, s2, '\0'};
       }
     }
     if (c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '<' || c == '>') {
       ++pos_;
-      return {TokType::OP1, 0, "", c};
+      return Tok{TokType::OP1, 0, "", c};
     }
     if (std::isdigit(static_cast<unsigned char>(c))) {
-      int32_t v = 0;
+      const size_t start = pos_;
       while (pos_ < e_.size() && std::isdigit(static_cast<unsigned char>(e_[pos_])))
-        v = v * 10 + (e_[pos_++] - '0');
-      return {TokType::NUMBER, v, "", '\0'};
+        ++pos_;
+      int32_t v = 0;
+      if (std::from_chars(e_.data() + start, e_.data() + pos_, v).ec != std::errc{})
+        return emit_error.emit() << "Integer literal out of range in: " << e_;
+      return Tok{TokType::NUMBER, v, "", '\0'};
     }
     if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
       std::string id;
       while (pos_ < e_.size() &&
              (std::isalnum(static_cast<unsigned char>(e_[pos_])) || e_[pos_] == '_'))
         id += e_[pos_++];
-      return {TokType::IDENT, 0, id, '\0'};
+      return Tok{TokType::IDENT, 0, id, '\0'};
     }
-    throw std::runtime_error("Bad char in expr: '" + std::string(1, c) + "'");
+    return emit_error.emit() << "Bad char in expr: '" << c << "'";
   }
 
 private:
@@ -256,84 +261,131 @@ private:
 
 class Parser {
 public:
-  Parser(const std::string &e, const std::unordered_map<std::string, int32_t> &v)
-      : lex_(e), vars_(v), e_(e) {
-    adv();
-  }
-  int32_t run() {
+  Parser(const std::string &e, const std::unordered_map<std::string, int32_t> &v,
+         util::DiagnosticEmitter emit_error)
+      : lex_(e), vars_(v), e_(e), emit_error_(emit_error) {}
+  util::FailureOr<int32_t> run() {
+    if (adv().failed())
+      return util::Result::failure();
     auto r = p_or();
+    if (r.failed())
+      return util::Result::failure();
     if (cur_.type != TokType::END_TOK)
-      throw std::runtime_error("Extra tokens in: " + e_);
+      return emit_error_.emit() << "Extra tokens in: " << e_;
     return r;
   }
 
 private:
-  void adv() { cur_ = lex_.next(); }
+  util::Result adv() {
+    auto next = lex_.next(emit_error_);
+    if (next.failed())
+      return util::Result::failure();
+    cur_ = std::move(next.value());
+    return util::Result::success();
+  }
   bool is1(char c) { return cur_.type == TokType::OP1 && cur_.ch == c; }
   bool is2(const std::string &s) { return cur_.type == TokType::OP2 && cur_.str == s; }
 
-  int32_t p_or() {
+  util::FailureOr<int32_t> p_or() {
     auto l = p_and();
+    if (l.failed())
+      return util::Result::failure();
     while (is2("||")) {
-      adv();
-      l = (l || p_and()) ? 1 : 0;
+      if (adv().failed())
+        return util::Result::failure();
+      auto r = p_and();
+      if (r.failed())
+        return util::Result::failure();
+      l = (l.value() || r.value()) ? 1 : 0;
     }
     return l;
   }
-  int32_t p_and() {
+  util::FailureOr<int32_t> p_and() {
     auto l = p_cmp();
+    if (l.failed())
+      return util::Result::failure();
     while (is2("&&")) {
-      adv();
-      l = (l && p_cmp()) ? 1 : 0;
+      if (adv().failed())
+        return util::Result::failure();
+      auto r = p_cmp();
+      if (r.failed())
+        return util::Result::failure();
+      l = (l.value() && r.value()) ? 1 : 0;
     }
     return l;
   }
-  int32_t p_cmp() {
-    auto l = p_add();
-    if (is2("==")) {
-      adv();
-      return (l == p_add()) ? 1 : 0;
-    }
-    if (is2("!=")) {
-      adv();
-      return (l != p_add()) ? 1 : 0;
-    }
-    if (is2("<=")) {
-      adv();
-      return (l <= p_add()) ? 1 : 0;
-    }
-    if (is2(">=")) {
-      adv();
-      return (l >= p_add()) ? 1 : 0;
-    }
-    if (is1('<')) {
-      adv();
-      return (l < p_add()) ? 1 : 0;
-    }
-    if (is1('>')) {
-      adv();
-      return (l > p_add()) ? 1 : 0;
-    }
+  util::FailureOr<int32_t> p_cmp() {
+    auto maybe_l = p_add();
+    if (maybe_l.failed())
+      return util::Result::failure();
+    auto l = maybe_l.value();
+    auto compare = [&](auto op) -> util::FailureOr<int32_t> {
+      if (adv().failed())
+        return util::Result::failure();
+      auto r = p_add();
+      if (r.failed())
+        return util::Result::failure();
+      return op(l, r.value()) ? 1 : 0;
+    };
+    if (is2("=="))
+      return compare([](int32_t lhs, int32_t rhs) { return lhs == rhs; });
+    if (is2("!="))
+      return compare([](int32_t lhs, int32_t rhs) { return lhs != rhs; });
+    if (is2("<="))
+      return compare([](int32_t lhs, int32_t rhs) { return lhs <= rhs; });
+    if (is2(">="))
+      return compare([](int32_t lhs, int32_t rhs) { return lhs >= rhs; });
+    if (is1('<'))
+      return compare([](int32_t lhs, int32_t rhs) { return lhs < rhs; });
+    if (is1('>'))
+      return compare([](int32_t lhs, int32_t rhs) { return lhs > rhs; });
     return l;
   }
-  int32_t p_add() {
-    auto l = p_mul();
+  util::FailureOr<int32_t> p_add() {
+    auto maybe_l = p_mul();
+    if (maybe_l.failed())
+      return util::Result::failure();
+    auto l = maybe_l.value();
     while (is1('+') || is1('-')) {
       char o = cur_.ch;
-      adv();
-      auto r = p_mul();
-      l = (o == '+') ? l + r : l - r;
+      if (adv().failed())
+        return util::Result::failure();
+      auto maybe_r = p_mul();
+      if (maybe_r.failed())
+        return util::Result::failure();
+      auto r = maybe_r.value();
+      const int64_t result = (o == '+') ? int64_t{l} + r : int64_t{l} - r;
+      if (result < std::numeric_limits<int32_t>::min() ||
+          result > std::numeric_limits<int32_t>::max())
+        return emit_error_.emit() << "Arithmetic result out of range in: " << e_;
+      l = static_cast<int32_t>(result);
     }
     return l;
   }
-  int32_t p_mul() {
-    auto l = p_unary();
+  util::FailureOr<int32_t> p_mul() {
+    auto maybe_l = p_unary();
+    if (maybe_l.failed())
+      return util::Result::failure();
+    auto l = maybe_l.value();
     while (is1('*') || is1('/') || is1('%')) {
       char o = cur_.ch;
-      adv();
-      auto r = p_unary();
-      if (o == '*')
-        l *= r;
+      if (adv().failed())
+        return util::Result::failure();
+      auto maybe_r = p_unary();
+      if (maybe_r.failed())
+        return util::Result::failure();
+      auto r = maybe_r.value();
+      // Division and remainder by zero retain the previous result of 0. Reject
+      // INT_MIN / -1 and INT_MIN % -1: both native operations are undefined
+      // because the quotient is unrepresentable, even though the remainder is 0.
+      if (o == '*') {
+        const int64_t result = int64_t{l} * r;
+        if (result < std::numeric_limits<int32_t>::min() ||
+            result > std::numeric_limits<int32_t>::max())
+          return emit_error_.emit() << "Arithmetic result out of range in: " << e_;
+        l = static_cast<int32_t>(result);
+      } else if (l == std::numeric_limits<int32_t>::min() && r == -1)
+        return emit_error_.emit() << "Arithmetic result out of range in: " << e_;
       else if (o == '/')
         l = r ? l / r : 0;
       else
@@ -341,67 +393,94 @@ private:
     }
     return l;
   }
-  int32_t p_unary() {
+  util::FailureOr<int32_t> p_unary() {
     if (is1('-')) {
-      adv();
-      return -p_atom();
+      if (adv().failed())
+        return util::Result::failure();
+      auto maybe_v = p_atom();
+      if (maybe_v.failed())
+        return util::Result::failure();
+      auto v = maybe_v.value();
+      if (v == std::numeric_limits<int32_t>::min())
+        return emit_error_.emit() << "Arithmetic result out of range in: " << e_;
+      return -v;
     }
     return p_atom();
   }
-  int32_t p_atom() {
+  util::FailureOr<int32_t> p_atom() {
     if (cur_.type == TokType::NUMBER) {
       auto v = cur_.num;
-      adv();
+      if (adv().failed())
+        return util::Result::failure();
       return v;
     }
     if (cur_.type == TokType::IDENT) {
       auto it = vars_.find(cur_.str);
       if (it == vars_.end())
-        throw std::runtime_error("Unknown var '" + cur_.str + "' in: " + e_);
-      adv();
+        return emit_error_.emit() << "Unknown var '" << cur_.str << "' in: " << e_;
+      if (adv().failed())
+        return util::Result::failure();
       return it->second;
     }
     if (cur_.type == TokType::LPAREN) {
-      adv();
+      if (adv().failed())
+        return util::Result::failure();
       auto v = p_or();
+      if (v.failed())
+        return util::Result::failure();
       if (cur_.type != TokType::RPAREN)
-        throw std::runtime_error("Missing ')' in: " + e_);
-      adv();
+        return emit_error_.emit() << "Missing ')' in: " << e_;
+      if (adv().failed())
+        return util::Result::failure();
       return v;
     }
-    throw std::runtime_error("Unexpected token in: " + e_);
+    return emit_error_.emit() << "Unexpected token in: " << e_;
   }
 
   Lexer lex_;
   const std::unordered_map<std::string, int32_t> &vars_;
   std::string e_;
+  util::DiagnosticEmitter emit_error_;
   Tok cur_;
 };
 
-int32_t eval_expr(const std::string &expr, const std::unordered_map<std::string, int32_t> &vars) {
-  Parser p(expr, vars);
+util::FailureOr<int32_t> eval_expr(const std::string &expr,
+                                   const std::unordered_map<std::string, int32_t> &vars,
+                                   util::DiagnosticEmitter emit_error) {
+  Parser p(expr, vars, emit_error);
   return p.run();
 }
 
-bool eval_where(const std::string &w, const std::unordered_map<std::string, int32_t> &vars) {
+util::FailureOr<bool> eval_where(const std::string &w,
+                                 const std::unordered_map<std::string, int32_t> &vars,
+                                 util::DiagnosticEmitter emit_error) {
   if (w.empty())
     return true;
-  return eval_expr(w, vars) != 0;
+  auto value = eval_expr(w, vars, emit_error);
+  if (value.failed())
+    return util::Result::failure();
+  return value.value() != 0;
 }
 
-std::string subst_vars(const std::string &pat, const std::unordered_map<std::string, int32_t> &v) {
+util::FailureOr<std::string> subst_vars(const std::string &pat,
+                                        const std::unordered_map<std::string, int32_t> &v,
+                                        util::DiagnosticEmitter emit_error) {
   std::string r;
   size_t i = 0;
   while (i < pat.size()) {
     if (pat[i] == '[') {
       auto j = pat.find(']', i);
       if (j == std::string::npos)
-        throw std::runtime_error("Unmatched '[' in: " + pat);
+        return emit_error.emit() << "Unmatched '[' in: " << pat;
       auto e = pat.substr(i + 1, j - i - 1);
       if (e.find(':') != std::string::npos)
         r += pat.substr(i, j - i + 1);
-      else
-        r += std::to_string(eval_expr(e, v));
+      else {
+        auto value = eval_expr(e, v, emit_error);
+        if (value.failed())
+          return util::Result::failure();
+        r += std::to_string(value.value());
+      }
       i = j + 1;
     } else {
       r += pat[i++];
@@ -410,29 +489,41 @@ std::string subst_vars(const std::string &pat, const std::unordered_map<std::str
   return r;
 }
 
-std::vector<std::string> expand_range(const std::string &pat) {
+util::FailureOr<std::vector<std::string>> expand_range(const std::string &pat,
+                                                       util::DiagnosticEmitter emit_error) {
   static const std::regex re(R"(^(\w*)\[(\d+):(\d+)\](.*)$)");
   std::smatch m;
   if (!std::regex_match(pat, m, re))
-    return {pat};
+    return std::vector<std::string>{pat};
   auto pfx = m[1].str();
-  auto s = static_cast<uint32_t>(std::stoul(m[2].str()));
-  auto e = static_cast<uint32_t>(std::stoul(m[3].str()));
+  unsigned long parsed_start = 0, parsed_end = 0;
+  auto s_text = m[2].str(), e_text = m[3].str();
+  if (std::from_chars(s_text.data(), s_text.data() + s_text.size(), parsed_start).ec !=
+          std::errc{} ||
+      std::from_chars(e_text.data(), e_text.data() + e_text.size(), parsed_end).ec != std::errc{})
+    return emit_error.emit() << "Range bound out of unsigned long range in: " << pat;
+  // Preserve the old stoul-to-uint32_t narrowing behavior for component ranges.
+  auto range_start = static_cast<uint32_t>(parsed_start);
+  auto range_end = static_cast<uint32_t>(parsed_end);
   auto sfx = m[4].str();
   std::vector<std::string> out;
-  for (uint32_t i = s; i < e; ++i)
+  for (uint32_t i = range_start; i < range_end; ++i)
     out.push_back(pfx + std::to_string(i) + sfx);
   return out;
 }
 
-void iterate_for(const flatbuffers::Vector<flatbuffers::Offset<fb::ForRange>> *ranges,
-                 const std::string &where,
-                 std::function<void(const std::unordered_map<std::string, int32_t> &)> fn) {
+util::Result
+iterate_for(const flatbuffers::Vector<flatbuffers::Offset<fb::ForRange>> *ranges,
+            const std::string &where, util::DiagnosticEmitter emit_error,
+            std::function<util::Result(const std::unordered_map<std::string, int32_t> &)> fn) {
   if (!ranges || ranges->size() == 0) {
     std::unordered_map<std::string, int32_t> empty;
-    if (eval_where(where, empty))
-      fn(empty);
-    return;
+    auto condition = eval_where(where, empty, emit_error);
+    if (condition.failed())
+      return util::Result::failure();
+    if (condition.value())
+      return fn(empty);
+    return util::Result::success();
   }
   struct R {
     std::string name;
@@ -443,22 +534,28 @@ void iterate_for(const flatbuffers::Vector<flatbuffers::Offset<fb::ForRange>> *r
     rv.push_back({fr->var_name() ? fr->var_name()->str() : "", fr->start(), fr->end()});
 
   std::unordered_map<std::string, int32_t> vars;
-  std::function<void(size_t)> go = [&](size_t d) {
+  std::function<util::Result(size_t)> go = [&](size_t d) -> util::Result {
     if (d == rv.size()) {
-      if (eval_where(where, vars))
-        fn(vars);
-      return;
+      auto condition = eval_where(where, vars, emit_error);
+      if (condition.failed())
+        return util::Result::failure();
+      if (condition.value())
+        return fn(vars);
+      return util::Result::success();
     }
     for (uint32_t v = rv[d].lo; v < rv[d].hi; ++v) {
       vars[rv[d].name] = static_cast<int32_t>(v);
-      go(d + 1);
+      if (go(d + 1).failed())
+        return util::Result::failure();
     }
     vars.erase(rv[d].name);
+    return util::Result::success();
   };
-  go(0);
+  return go(0);
 }
 
-std::vector<simdojo::LinkSpec> expand_link(const fb::LinkDef *ld) {
+util::FailureOr<std::vector<simdojo::LinkSpec>> expand_link(const fb::LinkDef *ld,
+                                                            util::DiagnosticEmitter emit_error) {
   std::vector<simdojo::LinkSpec> out;
   auto lat = ld->latency();
   auto wt = ld->weight();
@@ -466,12 +563,23 @@ std::vector<simdojo::LinkSpec> expand_link(const fb::LinkDef *ld) {
     auto p = ld->pattern()->str();
     auto ar = p.find(" -> ");
     if (ar == std::string::npos)
-      throw std::runtime_error("Link pattern missing ' -> ': " + p);
+      return emit_error.emit() << "Link pattern missing ' -> ': " << p;
     auto sp = p.substr(0, ar), dp = p.substr(ar + 4);
     std::string we = (ld->where_expr() && ld->where_expr()->size()) ? ld->where_expr()->str() : "";
-    iterate_for(ld->for_ranges(), we, [&](const std::unordered_map<std::string, int32_t> &v) {
-      out.push_back({subst_vars(sp, v), subst_vars(dp, v), lat, wt});
-    });
+    auto result =
+        iterate_for(ld->for_ranges(), we, emit_error,
+                    [&](const std::unordered_map<std::string, int32_t> &v) -> util::Result {
+                      auto src = subst_vars(sp, v, emit_error);
+                      if (src.failed())
+                        return util::Result::failure();
+                      auto dst = subst_vars(dp, v, emit_error);
+                      if (dst.failed())
+                        return util::Result::failure();
+                      out.push_back({std::move(src.value()), std::move(dst.value()), lat, wt});
+                      return util::Result::success();
+                    });
+    if (result.failed())
+      return util::Result::failure();
   } else if (ld->src() && ld->dst()) {
     out.push_back({ld->src()->str(), ld->dst()->str(), lat, wt});
   }
@@ -520,6 +628,17 @@ using FactoryFn = std::function<std::unique_ptr<simdojo::Component>(
     rj_code_target_id_t target, amdgpu::GpuMemory *mem, const AsyncResources &resources)>;
 
 using FactoryMap = std::unordered_map<std::string, FactoryFn>;
+
+class ValidatedComputeUnit final : public simdojo::CompositeComponent {
+public:
+  ValidatedComputeUnit(const std::string &name, amdgpu::ComputeUnitCore::Config config)
+      : simdojo::CompositeComponent(name), config_(std::move(config)) {}
+
+  const amdgpu::ComputeUnitCore::Config &config() const { return config_; }
+
+private:
+  amdgpu::ComputeUnitCore::Config config_;
+};
 
 const FactoryMap &factories(BuildMode build_mode) {
   static const FactoryMap full_factories = [] {
@@ -605,9 +724,10 @@ const FactoryMap &factories(BuildMode build_mode) {
         [](const std::string &name, const CfgMap &cfg, simdojo::ExecMode, rj_code_arch_t arch,
            rj_code_target_id_t target, amdgpu::GpuMemory *,
            const AsyncResources &resources) -> std::unique_ptr<simdojo::Component> {
-      amdgpu::ComputeUnitCore::validate(parse_compute_unit_config(cfg, arch, target, resources));
-      // Keep declarative children under a CU without constructing its execution state.
-      return std::make_unique<simdojo::CompositeComponent>(name);
+      const auto cu_config = parse_compute_unit_config(cfg, arch, target, resources);
+      amdgpu::ComputeUnitCore::validate(cu_config);
+      // Preserve the parsed CU config and declarative children without execution state.
+      return std::make_unique<ValidatedComputeUnit>(name, cu_config);
     };
     return result;
   }();
@@ -623,13 +743,14 @@ void apply_cu_overrides(CfgMap &cfg, const CfgMap &overrides) {
   }
 }
 
-void build_children(simdojo::CompositeComponent *parent,
-                    const flatbuffers::Vector<flatbuffers::Offset<fb::ComponentDef>> *children,
-                    simdojo::ExecMode mode, rj_code_arch_t arch, rj_code_target_id_t target,
-                    amdgpu::GpuMemory *&mem, const AsyncResources &resources,
-                    const CfgMap &cu_overrides, BuildMode build_mode) {
+util::Result
+build_children(simdojo::CompositeComponent *parent,
+               const flatbuffers::Vector<flatbuffers::Offset<fb::ComponentDef>> *children,
+               simdojo::ExecMode mode, rj_code_arch_t arch, rj_code_target_id_t target,
+               amdgpu::GpuMemory *&mem, const AsyncResources &resources, const CfgMap &cu_overrides,
+               BuildMode build_mode, util::DiagnosticEmitter emit_error) {
   if (!children)
-    return;
+    return util::Result::success();
   for (auto *cd : *children) {
     auto np = cd->name() ? cd->name()->str() : "";
     auto tp = cd->type() ? cd->type()->str() : "composite";
@@ -641,8 +762,10 @@ void build_children(simdojo::CompositeComponent *parent,
     if (tp == "compute_unit")
       apply_cu_overrides(cfg, cu_overrides);
 
-    auto names = expand_range(np);
-    for (auto &n : names) {
+    auto names = expand_range(np, emit_error);
+    if (names.failed())
+      return util::Result::failure();
+    for (auto &n : names.value()) {
       auto &fmap = factories(build_mode);
       auto it = fmap.find(tp);
       if (it == fmap.end())
@@ -653,9 +776,44 @@ void build_children(simdojo::CompositeComponent *parent,
         mem = gm;
       parent->add_child(std::move(comp));
       if (cd->children() && cd->children()->size() > 0 && raw->is_composite())
-        build_children(static_cast<simdojo::CompositeComponent *>(raw), cd->children(), mode, arch,
-                       target, mem, resources, cu_overrides, build_mode);
+        if (build_children(static_cast<simdojo::CompositeComponent *>(raw), cd->children(), mode,
+                           arch, target, mem, resources, cu_overrides, build_mode, emit_error)
+                .failed())
+          return util::Result::failure();
     }
+  }
+  return util::Result::success();
+}
+
+const amdgpu::ComputeUnitCore::Config *
+topology_compute_unit_config(const simdojo::Component *component) {
+  if (const auto *cu = dynamic_cast<const amdgpu::ComputeUnitCore *>(component))
+    return &cu->config();
+  if (const auto *cu = dynamic_cast<const ValidatedComputeUnit *>(component))
+    return &cu->config();
+  return nullptr;
+}
+
+// Match CP wiring in both build modes, including direct CUs when no SE exists.
+template <typename Fn> void for_each_cp_compute_unit(simdojo::CompositeComponent *parent, Fn &&fn) {
+  uint32_t shader_engine_id = 0;
+  bool found_shader_engine = false;
+  for (auto &child : parent->children()) {
+    auto *se = dynamic_cast<amdgpu::ShaderEngine *>(child.get());
+    if (!se)
+      continue;
+    found_shader_engine = true;
+    uint32_t cu_index = 0;
+    for (auto &se_child : se->children())
+      if (topology_compute_unit_config(se_child.get()))
+        fn(se_child.get(), shader_engine_id, cu_index++);
+    ++shader_engine_id;
+  }
+  if (!found_shader_engine) {
+    uint32_t cu_index = 0;
+    for (auto &child : parent->children())
+      if (topology_compute_unit_config(child.get()))
+        fn(child.get(), 0, cu_index++);
   }
 }
 
@@ -697,38 +855,15 @@ void do_wire_cps(simdojo::CompositeComponent *root, uint32_t cus_per_shader_arra
     // Preserve the physical SE/CU hierarchy when flattening the XCD's CUs into
     // the command processor. gfx12 CWSR records identify scratch with a shader
     // engine plus a per-SE scoreboard slot, so a flat CU ordinal is not enough.
-    uint32_t shader_engine_id = 0;
-    bool found_shader_engine = false;
-    for (auto &child : par->children()) {
-      auto *se = dynamic_cast<amdgpu::ShaderEngine *>(child.get());
-      if (!se)
-        continue;
-      found_shader_engine = true;
-      uint32_t cu_index = 0;
-      for (auto &se_child : se->children()) {
-        auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(se_child.get());
-        if (!cu)
-          continue;
-        cu->set_shader_engine_location(shader_engine_id, cu_index++, cus_per_shader_array,
-                                       cus_per_shader_array ? expected_cus : 0);
-        cp->add_compute_unit(cu);
-      }
-      ++shader_engine_id;
-    }
-
-    // Keep custom topologies with CUs directly below the XCD working. They
-    // form one shader engine and retain their child order as scoreboard order.
-    if (!found_shader_engine) {
-      uint32_t cu_index = 0;
-      for (auto &child : par->children()) {
-        auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(child.get());
-        if (!cu)
-          continue;
-        cu->set_shader_engine_location(0, cu_index++, cus_per_shader_array,
-                                       cus_per_shader_array ? expected_cus : 0);
-        cp->add_compute_unit(cu);
-      }
-    }
+    for_each_cp_compute_unit(
+        par, [&](simdojo::Component *component, uint32_t shader_engine_id, uint32_t cu_index) {
+          auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component);
+          if (!cu)
+            throw std::logic_error("Full-mode CP wiring requires a constructed compute unit");
+          cu->set_shader_engine_location(shader_engine_id, cu_index, cus_per_shader_array,
+                                         cus_per_shader_array ? expected_cus : 0);
+          cp->add_compute_unit(cu);
+        });
   }
 }
 
@@ -775,11 +910,12 @@ void set_cu_l2(simdojo::CompositeComponent *root) {
   }
 }
 
-TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode,
-                                   rj_code_arch_t arch, rj_code_target_id_t target,
-                                   const AsyncResources &resources, uint32_t cus_per_shader_array,
-                                   uint32_t shader_arrays_per_engine, const CfgMap &cu_overrides,
-                                   BuildMode build_mode) {
+util::FailureOr<TopologyBuildResult>
+build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode, rj_code_arch_t arch,
+               rj_code_target_id_t target, const AsyncResources &resources,
+               uint32_t cus_per_shader_array, uint32_t shader_arrays_per_engine,
+               const CfgMap &cu_overrides, BuildMode build_mode,
+               util::DiagnosticEmitter emit_error) {
   if (!topology_def || !topology_def->root())
     throw std::runtime_error("TopologyDef missing root ComponentDef");
 
@@ -808,8 +944,10 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
       static_cast<simdojo::CompositeComponent *>(root_comp.release()));
 
   amdgpu::GpuMemory *mem = nullptr;
-  build_children(root, rd->children(), mode, arch, target, mem, resources, cu_overrides,
-                 build_mode);
+  if (build_children(root, rd->children(), mode, arch, target, mem, resources, cu_overrides,
+                     build_mode, emit_error)
+          .failed())
+    return util::Result::failure();
 
   if (!mem) {
     std::vector<simdojo::Component *> all;
@@ -839,9 +977,13 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
     do_wire_cps(root, cus_per_shader_array, shader_arrays_per_engine);
 
   if (topology_def->links())
-    for (auto *ld : *topology_def->links())
-      for (auto &ls : expand_link(ld))
+    for (auto *ld : *topology_def->links()) {
+      auto links = expand_link(ld, emit_error);
+      if (links.failed())
+        return util::Result::failure();
+      for (auto &ls : links.value())
         result.link_specs.push_back(std::move(ls));
+    }
 
   {
     std::vector<simdojo::Component *> all;
@@ -906,12 +1048,16 @@ struct ExecutionTopology {
   uint32_t dispatch_capacity = 1;
 };
 
-ExecutionTopology execution_topology(const fb::ComponentDef *root) {
+util::FailureOr<ExecutionTopology> execution_topology(const fb::ComponentDef *root,
+                                                      util::DiagnosticEmitter emit_error) {
   auto type = [](const fb::ComponentDef *c) -> std::string_view {
     return c->type() ? c->type()->string_view() : "composite";
   };
-  auto count = [](const fb::ComponentDef *c) -> uint64_t {
-    return expand_range(c->name() ? c->name()->str() : "").size();
+  auto count = [emit_error](const fb::ComponentDef *c) -> util::FailureOr<uint64_t> {
+    auto names = expand_range(c->name() ? c->name()->str() : "", emit_error);
+    if (names.failed())
+      return util::Result::failure();
+    return names.value().size();
   };
   auto checked = [](uint64_t n) {
     if (n > std::numeric_limits<uint32_t>::max())
@@ -919,17 +1065,20 @@ ExecutionTopology execution_topology(const fb::ComponentDef *root) {
     return static_cast<uint32_t>(n);
   };
   ExecutionTopology result;
-  auto visit = [&](auto &&self, const fb::ComponentDef *node, uint64_t copies) -> void {
+  auto visit = [&](auto &&self, const fb::ComponentDef *node, uint64_t copies) -> util::Result {
     if (!copies)
-      return;
+      return util::Result::success();
     if (type(node) == "xcd")
       result.xcds = checked(result.xcds + copies);
     if (!node->children())
-      return;
+      return util::Result::success();
     bool has_cp = false, has_se = false;
     uint64_t direct_cus = 0, se_cus = 0;
     for (auto *child : *node->children()) {
-      const uint64_t n = count(child);
+      auto child_count = count(child);
+      if (child_count.failed())
+        return util::Result::failure();
+      const uint64_t n = child_count.value();
       has_cp |= type(child) == "command_processor" && n != 0;
       if (type(child) == "compute_unit")
         direct_cus += n;
@@ -937,10 +1086,15 @@ ExecutionTopology execution_topology(const fb::ComponentDef *root) {
         has_se = true;
         if (child->children())
           for (auto *cu : *child->children())
-            if (type(cu) == "compute_unit")
-              se_cus += n * count(cu);
+            if (type(cu) == "compute_unit") {
+              auto cu_count = count(cu);
+              if (cu_count.failed())
+                return util::Result::failure();
+              se_cus += n * cu_count.value();
+            }
       }
-      self(self, child, checked(copies * n));
+      if (self(self, child, checked(copies * n)).failed())
+        return util::Result::failure();
     }
     // Match do_wire_cps(): sibling CPs share the same CUs. Each XCD caller can
     // use at most CUs-1 pool workers, but concurrent XCDs share the whole pool.
@@ -950,9 +1104,10 @@ ExecutionTopology execution_topology(const fb::ComponentDef *root) {
       if (cus)
         result.dispatch_capacity = checked(result.dispatch_capacity + copies * (cus - 1));
     }
+    return util::Result::success();
   };
-  if (root)
-    visit(visit, root, 1);
+  if (root && visit(visit, root, 1).failed())
+    return util::Result::failure();
   return result;
 }
 
@@ -968,8 +1123,9 @@ const SystemNode &selected_node(const fb::SimulationConfig *config, const System
   return graph.select_node(requested_node.empty() ? configured_node : requested_node);
 }
 
-ExecutionThreadSettings execution_thread_settings(const fb::SimulationConfig *config,
-                                                  uint32_t gpus) {
+util::FailureOr<ExecutionThreadSettings>
+execution_thread_settings(const fb::SimulationConfig *config, uint32_t gpus,
+                          util::DiagnosticEmitter emit_error) {
   ExecutionThreadSettings settings;
   settings.request = {
       config->cpu_thread_budget(), config->num_threads(),
@@ -982,7 +1138,10 @@ ExecutionThreadSettings execution_thread_settings(const fb::SimulationConfig *co
   settings.arch = parse_arch(config->vm()->arch()->str());
   if (settings.arch == ROCJITSU_CODE_ARCH_INVALID)
     throw std::invalid_argument("Invalid vm.arch for thread allocation");
-  const auto dimensions = execution_topology(config->topology()->root());
+  auto topology = execution_topology(config->topology()->root(), emit_error);
+  if (topology.failed())
+    return util::Result::failure();
+  const auto &dimensions = topology.value();
   if (uint64_t{dimensions.xcds} * gpus > std::numeric_limits<uint32_t>::max())
     throw std::invalid_argument("Total XCD count exceeds uint32 range");
   settings.xcds = dimensions.xcds * gpus;
@@ -996,10 +1155,12 @@ ExecutionThreadSettings execution_thread_settings(const fb::SimulationConfig *co
   return settings;
 }
 
-util::FailureOr<LoadedConfig> build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config,
-                                            uint32_t host_threads, std::string_view node_id,
-                                            util::DiagnosticEmitter emit_error,
-                                            BuildMode build_mode = BuildMode::Full) {
+util::FailureOr<LoadedConfig>
+build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_threads,
+              std::string_view node_id, util::DiagnosticEmitter emit_error,
+              BuildMode build_mode = BuildMode::Full,
+              std::optional<std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>>
+                  async_resources_override = std::nullopt) {
   CfgMap cu_overrides;
   if (const auto *setting = fb_config->wait_checking()) {
     const auto mode = parse_wait_checking(setting->string_view());
@@ -1090,19 +1251,83 @@ util::FailureOr<LoadedConfig> build_from_fb(const rocjitsu::fb::SimulationConfig
   result.num_gpus = static_cast<uint32_t>(node.gpus.size());
   // The node projection is fixed before accounting for engines, dispatch pools,
   // async helpers, or any simulator components.
-  const auto thread_settings =
-      execution_thread_settings(fb_config, static_cast<uint32_t>(node.gpus.size()));
+  auto maybe_thread_settings =
+      execution_thread_settings(fb_config, static_cast<uint32_t>(node.gpus.size()), emit_error);
+  if (maybe_thread_settings.failed())
+    return util::Result::failure();
+  const auto &thread_settings = maybe_thread_settings.value();
   result.thread_allocations = thread_settings.choices;
   result.execution_threads = thread_settings.resolve(host_threads);
   if (!result.engine_config.num_threads)
     result.engine_config.num_threads = result.execution_threads.engines;
-  result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
-  result.build_result =
+  if (async_resources_override) {
+    result.async_resources = std::move(*async_resources_override);
+    result.execution_threads.helpers =
+        result.async_resources ? result.async_resources->helpers() : 0;
+    result.async_helper_threads = static_cast<int32_t>(result.execution_threads.helpers);
+  } else {
+    result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
+  }
+  auto primary_build =
       build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources,
                      result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine,
-                     cu_overrides, build_mode);
+                     cu_overrides, build_mode, emit_error);
+  if (primary_build.failed())
+    return util::Result::failure();
+  result.build_result = std::move(primary_build.value());
   if (manifest && result.soc() == nullptr)
     throw std::invalid_argument("system topology root must be an SoC");
+  // The CWSR capacity uses device fields for LDS and wave slots, while wave
+  // admission uses each CU's configured limits. Reject a producer that could
+  // exceed its advertised save area (or the LDS field in the save record).
+  if (result.soc() && kmd::cwsr_layout_modelled(arch)) {
+    auto validate_cwsr = [&](const KfdDeviceConfig &device) -> const char * {
+      // Partial device identities do not publish a modelled CWSR area.
+      if (!device.present || !kmd::cwsr_capacity_eligible_device(device, arch))
+        return nullptr;
+      const uint64_t advertised_lds = uint64_t{device.lds_size_kb} * 1024;
+      if (advertised_lds > kmd::cwsr_max_encoded_lds_bytes(arch))
+        return "CWSR advertised LDS capacity exceeds the save record field";
+      const auto limits = kmd::cwsr_producer_limits_for_device(device, result.soc()->num_xcds());
+      if (limits.cus_per_xcc == 0)
+        return "CWSR advertised CU wave capacity is invalid";
+      bool cu_exceeds_advertised = false;
+      bool cu_count_exceeds_advertised = false;
+      bool wave_slots_exceed_advertised = false;
+      for (auto *xcd : result.soc()->xcds()) {
+        if (!xcd->command_processor())
+          continue;
+        uint64_t cu_count = 0;
+        uint64_t wave_slots = 0;
+        for_each_cp_compute_unit(xcd, [&](simdojo::Component *component, uint32_t, uint32_t) {
+          ++cu_count;
+          const auto &cu_config = *topology_compute_unit_config(component);
+          if (uint64_t{cu_config.lds_size_kb} * 1024 > advertised_lds)
+            cu_exceeds_advertised = true;
+          if (cu_config.num_wf_slots > limits.waves_per_xcc - wave_slots)
+            wave_slots_exceed_advertised = true;
+          else
+            wave_slots += cu_config.num_wf_slots;
+        });
+        // Capacity reserves LDS per CU even if the total wave slots still fit.
+        cu_count_exceeds_advertised |= cu_count > limits.cus_per_xcc;
+      }
+      if (cu_exceeds_advertised)
+        return "CWSR CU LDS capacity exceeds advertised device LDS capacity";
+      if (cu_count_exceeds_advertised)
+        return "CWSR CU count exceeds advertised device CU capacity";
+      return wave_slots_exceed_advertised
+                 ? "CWSR CU wave slots exceed advertised device wave capacity"
+                 : nullptr;
+    };
+    if (manifest) {
+      for (const auto &device : result.devices)
+        if (const char *error = validate_cwsr(device))
+          return emit_error.emit() << error;
+    } else if (const char *error = validate_cwsr(result.device)) {
+      return emit_error.emit() << error;
+    }
+  }
   if (result.device.present)
     if (SoC *soc = result.soc())
       soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
@@ -1132,10 +1357,13 @@ util::FailureOr<LoadedConfig> build_from_fb(const rocjitsu::fb::SimulationConfig
       }
     }
     for (uint32_t i = 1; i < result.num_gpus; ++i) {
-      result.extra_gpu_builds.push_back(
+      auto extra_build =
           build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources,
                          result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine,
-                         cu_overrides, build_mode));
+                         cu_overrides, build_mode, emit_error);
+      if (extra_build.failed())
+        return util::Result::failure();
+      result.extra_gpu_builds.push_back(std::move(extra_build.value()));
       if (auto *soc = dynamic_cast<SoC *>(result.extra_gpu_builds.back().root.get()))
         soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
           cp->set_scratch_slots_per_cu(result.device.max_slots_scratch_cu);
@@ -1286,7 +1514,8 @@ util::FailureOr<ExecutionThreadSettings> load_execution_thread_settings_from_str
         if (graph.failed())
           return util::Result::failure();
         const SystemNode &node = selected_node(config, graph.value(), node_id);
-        return execution_thread_settings(config, static_cast<uint32_t>(node.gpus.size()));
+        return execution_thread_settings(config, static_cast<uint32_t>(node.gpus.size()),
+                                         emit_error);
       });
 }
 
@@ -1367,6 +1596,19 @@ util::FailureOr<LoadedConfig> load_config_from_string_for_node(const std::string
                                                                util::DiagnosticEmitter emit_error) {
   return load_config_from_string_for_node(json, schema_text, node_id, emit_error,
                                           amdgpu::available_host_threads());
+}
+
+util::FailureOr<LoadedConfig> load_config_from_string(
+    const std::string &json, const std::string &schema_text, util::DiagnosticEmitter emit_error,
+    uint32_t host_threads,
+    std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> async_resources) {
+  return with_config_json(json, schema_text, emit_error,
+                          [host_threads, emit_error, async_resources = std::move(async_resources)](
+                              const fb::SimulationConfig *fb_config) mutable {
+                            return build_from_fb(fb_config, host_threads, {}, emit_error,
+                                                 BuildMode::Full,
+                                                 std::optional{std::move(async_resources)});
+                          });
 }
 
 } // namespace config

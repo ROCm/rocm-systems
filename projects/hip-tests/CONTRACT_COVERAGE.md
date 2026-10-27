@@ -13,17 +13,17 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 627
+contract_tests: 630
 contract_domains: 118
-declared_apis: 503
-covered_apis: 490
+declared_apis: 504
+covered_apis: 491
 uncovered_allowlisted: 13
 coverage_pct: 97.4
 -->
 
 - Snapshot date: 2026-08-26
 - Snapshot commit: `920418c484`
-- Contract tests: 627
+- Contract tests: 630
 - Contract domains: 118
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 503
 - Declared HIP runtime APIs directly exercised by contract tests: 490
@@ -160,7 +160,7 @@ binaries instead of exposing portable state to assert.
 | `kernel` | 4 |
 | `kernel_launch` | 7 |
 | `kernel_name_ref` | 3 |
-| `kernel_object_attributes` | 3 |
+| `kernel_object_attributes` | 5 |
 | `library` | 14 |
 | `library_file` | 3 |
 | `logging` | 3 |
