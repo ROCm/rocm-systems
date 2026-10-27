@@ -1,17 +1,13 @@
 ---
 name: programming-cpp-naming-rules
-description: Use when creating or renaming a C++ file, type, namespace, or identifier — folder matches namespace, no redundant prefixes, private members m_, constants k_, abstract types end in _interface
+description: Use when creating or renaming a C++ file, type, or namespace — folder matches namespace, no redundant prefixes
 ---
 
 # C++ Naming Rules
 
 Use this skill when creating new C++ files or refactoring file structure.
-Identifier spelling is the `.clang-tidy` configuration in `cpp-conventions`:
-`lower_case` types and functions, private members `m_mem` (never `mem_`),
-`constexpr` and other constants `k_`, globals `g_`, function-local statics
-`s_`, abstract classes ending in `_interface`, template parameters
-`CamelCase`, macros `UPPER_CASE`. Parameters, locals, bindings, and
-exception names are at least 3 characters.
+Identifier spelling (case, prefixes, minimum length) is enforced by
+`.clang-tidy` and summarized in `.claude/rules/cpp-conventions.md`.
 
 ## Folder Structure = Namespace
 
