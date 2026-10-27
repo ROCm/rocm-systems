@@ -33,6 +33,7 @@
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/proxy_fakes.h"
+#include "fakes/rccl_wrap_fakes.h"
 #include "fakes/rocmwrap_fakes.h"
 #include "fakes/topo_net_stubs.h"
 #include "fakes/topo_stubs.h"
@@ -362,6 +363,7 @@ class NetMicrotestBase : public ::testing::Test {
     ResetNcclFakes();
     ResetHipFakes();
     ResetProxyFakes();
+    ResetRcclWrapFakes();
     ResetTopoStubs();
     ResetTransportNetIbFakes();
     ResetTransportP2pFakes();
@@ -3624,6 +3626,8 @@ TEST_F(NetRegisterMicrotest, LocalRegister_ValidRecord_RegistersWholeRecordWithE
   EXPECT_EQ(handles_[0], reinterpret_cast<void*>(0x1001));
   EXPECT_EQ(handles_[1], reinterpret_cast<void*>(0x1002));
   EXPECT_TRUE(reg_.state & NET_REG_COMPLETE);
+  EXPECT_EQ(g_rcclNetRegCommitCalls, 1);
+  EXPECT_EQ(g_rcclNetRegCommitLastSegments, 1);
   std::set<std::pair<ncclProxyConnector*, void*>> remembered;
   for (ncclRegNetHandles* h = reg_.netHandleHead; h; h = h->next) remembered.insert({h->proxyConn, h->handle});
   EXPECT_EQ(remembered, (std::set<std::pair<ncclProxyConnector*, void*>>{
@@ -3684,6 +3688,7 @@ TEST_F(NetRegisterMicrotest, LocalRegister_ProxyDeclines_LeavesBufferUnregistere
 
   EXPECT_EQ(flag_, 0);
   EXPECT_EQ(reg_.netHandleHead, nullptr);
+  EXPECT_EQ(g_rcclNetRegCommitCalls, 0);
 }
 
 TEST_F(NetRegisterMicrotest, LocalRegister_DependencyFails_ReturnsErrorUnregistered) {
@@ -3716,6 +3721,37 @@ TEST_F(NetRegisterMicrotest, LocalRegister_MultiSegmentBuffer_RegisteredOnlyWhen
   EXPECT_EQ(registered_[0].numSegments, 2);
 }
 
+// The whole record's segment count, not the buffer's, decides and is what gets registered.
+TEST_F(NetRegisterMicrotest, LocalRegister_RecordSegmentCount_DecidesAndIsRegistered) {
+  ncclReg* counted = nullptr;
+  ScopedHook count(g_rcclNetRegSegmentCount, [&](ncclComm*, ncclReg* r, int* n) {
+    counted = r;
+    *n = 2;
+    return ncclSuccess;
+  });
+  ASSERT_EQ(LocalRegister(mem_.data(), 64), ncclSuccess);
+  EXPECT_EQ(counted, &reg_);
+  EXPECT_EQ(flag_, 0);
+  EXPECT_TRUE(registered_.empty());
+
+  ScopedHook param(g_loadParam, ParamOverride({{"MULTI_SEGMENT_REGISTER", 1}}));
+  ASSERT_EQ(LocalRegister(mem_.data(), 64), ncclSuccess);
+  EXPECT_EQ(flag_, 1);
+  ASSERT_FALSE(registered_.empty());
+  EXPECT_EQ(registered_[0].numSegments, 2);
+  EXPECT_EQ(g_rcclNetRegCommitCalls, 1);
+  EXPECT_EQ(g_rcclNetRegCommitLastSegments, 2);
+}
+
+TEST_F(NetRegisterMicrotest, LocalRegister_SegmentCountFails_ReturnsErrorUnregistered) {
+  ScopedHook count(g_rcclNetRegSegmentCount, [](auto...) { return ncclInternalError; });
+
+  EXPECT_EQ(LocalRegister(mem_.data(), 64), ncclInternalError);
+
+  EXPECT_EQ(flag_, 0);
+  EXPECT_TRUE(registered_.empty());
+}
+
 TEST_F(NetRegisterMicrotest, GraphRegister_Registered_QueuesCleanupThatDeregisters) {
   void* graphBase = nullptr;
   size_t graphSize = 0;
@@ -3741,6 +3777,7 @@ TEST_F(NetRegisterMicrotest, GraphRegister_Registered_QueuesCleanupThatDeregiste
   EXPECT_EQ(graphSize, kSegment);
   EXPECT_EQ(nElts, 1);
   EXPECT_EQ(graphDereg.calls, 0);
+  EXPECT_EQ(g_rcclNetRegCommitCalls, 1);
   ncclCommCallback* cb = ncclIntruQueueDequeue(&cleanup_);
   ASSERT_NE(cb, nullptr);
   // The callback must use the comm it recorded, not the one it is handed.
@@ -3784,6 +3821,41 @@ TEST_F(NetRegisterMicrotest, GraphRegister_NoGraphRecord_LeavesBufferUnregistere
   ScopedHook graphDereg(g_commGraphDeregister, [](ncclComm*, ncclReg*) { return ncclSuccess; });
 
   ASSERT_EQ(GraphRegister(mem_.data(), 64), ncclSuccess);
+
+  EXPECT_EQ(flag_, 0);
+  EXPECT_TRUE(registered_.empty());
+}
+
+// ncclRegister may hand back a wider record; its segment count decides.
+TEST_F(NetRegisterMicrotest, GraphRegister_MultiSegmentRecord_Skipped) {
+  ScopedHook graphReg(g_commGraphRegister, [this](ncclComm*, void*, size_t, void** handle) {
+    *handle = &reg_;
+    return ncclSuccess;
+  });
+  ncclReg* counted = nullptr;
+  ScopedHook count(g_rcclNetGraphRegSegmentCount, [&](ncclComm*, ncclReg* r, int* n) {
+    counted = r;
+    *n = 2;
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(GraphRegister(mem_.data(), 64), ncclSuccess);
+
+  EXPECT_EQ(counted, &reg_);
+  EXPECT_EQ(flag_, 0);
+  EXPECT_TRUE(registered_.empty());
+  EXPECT_EQ(g_rcclNetRegCommitCalls, 0);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&cleanup_));
+}
+
+TEST_F(NetRegisterMicrotest, GraphRegister_SegmentCountFails_ReturnsErrorUnregistered) {
+  ScopedHook graphReg(g_commGraphRegister, [this](ncclComm*, void*, size_t, void** handle) {
+    *handle = &reg_;
+    return ncclSuccess;
+  });
+  ScopedHook count(g_rcclNetGraphRegSegmentCount, [](auto...) { return ncclInternalError; });
+
+  EXPECT_EQ(GraphRegister(mem_.data(), 64), ncclInternalError);
 
   EXPECT_EQ(flag_, 0);
   EXPECT_TRUE(registered_.empty());

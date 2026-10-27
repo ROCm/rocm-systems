@@ -182,6 +182,9 @@ extern std::function<ncclResult_t(size_t /*size*/, bool /*legacy*/,
                                   void** /*hptr*/, void** /*dptr*/)>
     g_shmAllocateShareableBuffer;
 
+// ncclSetThreadName(pthread_t, fmt, ...) hands the formatted name here.
+extern std::function<void(pthread_t, const char* /*name*/)> g_ncclSetThreadName;
+
 // ncclShmImportShareableBuffer / ncclShmIpcClose: a transport maps (and later
 // closes) a host buffer a proxy in another process created. Import fails by
 // default; close succeeds.

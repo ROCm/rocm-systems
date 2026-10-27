@@ -917,6 +917,82 @@ TEST(InstrumentorPatch, PatchesEightByteAnchorEndToEnd) {
       << "mnemonic was: " << relocated->mnemonic();
 }
 
+TEST(InstrumentorPatch, RejectsUnsupportedElfTableStridesBeforePatching) {
+  enum class Table { SectionHeaders, ProgramHeaders, Symbols, DynamicSymbols, Rela, Rel };
+  for (const auto table : {Table::SectionHeaders, Table::ProgramHeaders, Table::Symbols,
+                           Table::DynamicSymbols, Table::Rela, Table::Rel}) {
+    SCOPED_TRACE(static_cast<int>(table));
+    auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+    Elf64_Ehdr header{};
+    std::memcpy(&header, image.data(), sizeof(header));
+    const uint64_t strided_offset = image.size();
+    if (table == Table::SectionHeaders) {
+      constexpr uint16_t kStride = 2 * sizeof(Elf64_Shdr);
+      image.resize(image.size() + static_cast<size_t>(header.e_shnum) * kStride, 0);
+      for (size_t index = 0; index < header.e_shnum; ++index)
+        std::memcpy(image.data() + strided_offset + index * kStride,
+                    image.data() + header.e_shoff + index * sizeof(Elf64_Shdr), sizeof(Elf64_Shdr));
+      header.e_shoff = strided_offset;
+      header.e_shentsize = kStride;
+    } else if (table == Table::ProgramHeaders) {
+      constexpr uint16_t kStride = 2 * sizeof(Elf64_Phdr);
+      image.resize(image.size() + static_cast<size_t>(header.e_phnum) * kStride, 0);
+      for (size_t index = 0; index < header.e_phnum; ++index)
+        std::memcpy(image.data() + strided_offset + index * kStride,
+                    image.data() + header.e_phoff + index * sizeof(Elf64_Phdr), sizeof(Elf64_Phdr));
+      header.e_phoff = strided_offset;
+      header.e_phentsize = kStride;
+    } else if (table == Table::Rela || table == Table::Rel) {
+      std::vector<Elf64_Shdr> sections(header.e_shnum);
+      std::memcpy(sections.data(), image.data() + header.e_shoff,
+                  sections.size() * sizeof(Elf64_Shdr));
+      Elf64_Shdr relocations{};
+      relocations.sh_type = table == Table::Rela ? SHT_RELA : SHT_REL;
+      relocations.sh_offset = image.size();
+      relocations.sh_entsize = 2 * (table == Table::Rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel));
+      relocations.sh_size = relocations.sh_entsize;
+      image.resize(image.size() + relocations.sh_size, 0);
+      sections.push_back(relocations);
+      header.e_shoff = image.size();
+      header.e_shnum = static_cast<uint16_t>(sections.size());
+      image.resize(image.size() + sections.size() * sizeof(Elf64_Shdr));
+      std::memcpy(image.data() + header.e_shoff, sections.data(),
+                  sections.size() * sizeof(Elf64_Shdr));
+    } else {
+      std::vector<Elf64_Shdr> sections(header.e_shnum);
+      std::memcpy(sections.data(), image.data() + header.e_shoff,
+                  sections.size() * sizeof(Elf64_Shdr));
+      const auto symbols = std::find_if(sections.begin(), sections.end(), [](const auto &section) {
+        return section.sh_type == SHT_SYMTAB;
+      });
+      ASSERT_NE(symbols, sections.end());
+      const uint64_t old_offset = symbols->sh_offset;
+      const size_t count = symbols->sh_size / sizeof(Elf64_Sym);
+      constexpr uint64_t kStride = 2 * sizeof(Elf64_Sym);
+      image.resize(image.size() + count * kStride, 0);
+      for (size_t index = 0; index < count; ++index)
+        std::memcpy(image.data() + strided_offset + index * kStride,
+                    image.data() + old_offset + index * sizeof(Elf64_Sym), sizeof(Elf64_Sym));
+      symbols->sh_type = table == Table::DynamicSymbols ? SHT_DYNSYM : SHT_SYMTAB;
+      symbols->sh_offset = strided_offset;
+      symbols->sh_size = count * kStride;
+      symbols->sh_entsize = kStride;
+      std::memcpy(image.data() + header.e_shoff, sections.data(),
+                  sections.size() * sizeof(Elf64_Shdr));
+    }
+    std::memcpy(image.data(), &header, sizeof(header));
+
+    AmdGpuCodeObject obj(image.data(), image.size());
+    EXPECT_FALSE(obj.is_valid());
+    Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+    instrumentor.add_point_by_offset(0);
+    const auto result = instrumentor.patch();
+    EXPECT_TRUE(result.elf_bytes.empty());
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors.front(), "cannot instrument an invalid code object");
+  }
+}
+
 TEST(InstrumentorPatch, RejectsZeroQueuedPoints) {
   auto image = make_gfx950_elf_with_two_nops();
   AmdGpuCodeObject obj(image.data(), image.size());
@@ -2755,11 +2831,15 @@ TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampol
 
   // Both loads address through the kernarg pair at s[0:1], the only enabled
   // user SGPR in this descriptor.
-  const auto load_payload = build_s_load_dwordx2(
+  const auto load_payload_result = build_s_load_dwordx2(
       *storage_base, /*sbase=*/0, layout->payload_offsets.front(), ROCJITSU_CODE_ARCH_CDNA4);
-  const auto load_guest_ptr =
+  ASSERT_TRUE(load_payload_result.succeeded());
+  const auto load_payload = load_payload_result.value();
+  const auto load_guest_ptr_result =
       build_s_load_dwordx2(static_cast<uint16_t>(*storage_base + 2), /*sbase=*/0,
                            layout->original_kernarg_pointer_offset, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(load_guest_ptr_result.succeeded());
+  const auto load_guest_ptr = load_guest_ptr_result.value();
   EXPECT_TRUE(contains_words(prologue, load_payload))
       << "the prologue does not load the payload the record declares";
   EXPECT_TRUE(contains_words(prologue, load_guest_ptr));
@@ -2777,7 +2857,9 @@ TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampol
   // flight against, so a wait placed only ahead of the reads below it would be
   // too late. Both bounds are asserted, since either alone admits a placement
   // that would not work.
-  const uint32_t wait = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto wait_result = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(wait_result.succeeded());
+  const auto wait = wait_result.value();
   const auto wait_it = std::find(prologue.begin(), prologue.end(), wait);
   ASSERT_NE(wait_it, prologue.end()) << "the prologue does not wait for its loads";
   const auto guest_ptr_load_it =

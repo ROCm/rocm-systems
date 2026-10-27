@@ -46,14 +46,16 @@ int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
 int64_t ncclParamGdrCopySyncEnable() { return g_loadParam("GDRCOPY_SYNC_ENABLE", 1); }
 int64_t ncclParamGdrCopyFlushEnable() { return g_loadParam("GDRCOPY_FLUSH_ENABLE", 0); }
 
-// src/plugin/net.cc: initTransportsRank's GDR probe.
+// src/plugin/net.cc: initTransportsRank's GDR probe. Omitted for rccl-UnitTestsMicroPlugin, which compiles net.cc.
 int g_gdrSupportValue = 0;
 int g_gdrSupportCalls = 0;
+#ifndef RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport
 ncclResult_t ncclGpuGdrSupport(struct ncclComm*, int* gdrSupport) {
   ++g_gdrSupportCalls;
   if (gdrSupport) *gdrSupport = g_gdrSupportValue;
   return ncclSuccess;
 }
+#endif
 
 // src/transport/net.cc:343. Was a fail-loud stub in nccl_stubs.cc, which forced
 // the enqueue target to omit it via a macro and supply its own; a seam here
@@ -63,6 +65,9 @@ bool g_rcclUseAinicValue = false;
 static bool DefaultUseAinic() { return g_rcclUseAinicValue; }
 std::function<bool()> g_useAinic = DefaultUseAinic;
 bool rcclUseAinic() { return g_useAinic(); }
+
+// src/transport/net.cc:212, read by net_ib_cast/common.cc.
+int64_t ncclParamNetOptionalRecvCompletion() { return g_loadParam("NET_OPTIONAL_RECV_COMPLETION", 1); }
 
 static int DefaultPxnDisable(struct ncclComm*) { return 0; }
 std::function<int(struct ncclComm*)> g_pxnDisable = DefaultPxnDisable;

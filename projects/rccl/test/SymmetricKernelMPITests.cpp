@@ -293,8 +293,9 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedAllGather_VaryingSizes)
         ASSERT_TRUE(verifyBufferData<float>(
             recvBufs[i]->ptr, count * nRanks,
             [count, i](size_t idx) {
-                int srcRank = static_cast<int>(idx / count);
-                return static_cast<float>((srcRank + 1) * 100 + i * 10 + (idx % 10));
+                int    srcRank = static_cast<int>(idx / count);
+                size_t srcIdx  = idx % count;
+                return static_cast<float>((srcRank + 1) * 100 + i * 10 + (srcIdx % 10));
             },
             0, 1e-5, &errIdx, &expVal, &actVal))
             << "GroupedAllGather op=" << i << " count=" << count

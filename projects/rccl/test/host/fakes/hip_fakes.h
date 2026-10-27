@@ -122,9 +122,11 @@ extern int g_hipMemoryPoolsSupported;     // hipDeviceAttributeMemoryPoolsSuppor
 // A call count alone cannot tell one device copy's operands from another's, so record them per call.
 extern int g_hipMemcpyAsyncCalls;
 struct HipMemcpyAsyncRecord {
-    void*       dst;
-    const void* src;
-    size_t      bytes;
+    void*         dst;
+    const void*   src;
+    size_t        bytes;
+    hipMemcpyKind kind;
+    hipStream_t   stream;
 };
 extern std::vector<HipMemcpyAsyncRecord> g_hipMemcpyAsyncArgs;
 
@@ -176,6 +178,13 @@ extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/, 
 // hipSuccess -- the allocation seams hand out std::malloc'd host memory, so a
 // buffer production zeroes is genuinely zero when a test reads it back.
 extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/)> g_hipMemset;
+// The DMA-BUF export, where CMake's hipMemGetHandleForAddressRange probe found it (rocmwrap.h's
+// NCCL_CUMEM_DMABUF_EXPORT_PROBE). The default fails with hipErrorInvalidValue.
+#if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
+extern std::function<hipError_t(void* /*handle*/, hipDeviceptr_t /*ptr*/, size_t /*size*/,
+                                hipMemRangeHandleType /*type*/, unsigned long long /*flags*/)>
+    g_hipMemGetHandleForAddressRange;
+#endif
 
 extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/)> g_hipStreamCreateWithFlags;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;
@@ -187,6 +196,10 @@ extern std::function<hipError_t(const void* /*function*/, dim3 /*grid*/, dim3 /*
                                 size_t /*sharedMemBytes*/, hipStream_t /*stream*/, hipEvent_t /*startEvent*/,
                                 hipEvent_t /*stopEvent*/, int /*flags*/)>
     g_hipExtLaunchKernel;
+// The <<<>>> launch path. Same fail-loud default as g_hipExtLaunchKernel.
+extern std::function<hipError_t(const void* /*fn*/, dim3 /*grid*/, dim3 /*block*/, void** /*args*/,
+                                size_t /*shmem*/, hipStream_t /*stream*/)>
+    g_hipLaunchKernel;
 
 // Event-record seam. The default delegates to g_hipAsyncOpsResult so the CE
 // proxy-progress tests keep the existing behaviour, but exposing it as a hook
@@ -229,13 +242,6 @@ extern std::function<hipError_t(hipStream_t /*stream*/, void* /*ptr*/,
                                 std::uint64_t /*value*/, unsigned int /*flags*/,
                                 std::uint64_t /*mask*/)>
     g_hipStreamWaitValue64;
-#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
-// cuMem DMA-BUF export (hipMemGetHandleForAddressRange). In-RCCL builds inherit the define;
-// standalone ones compile the callers out. Defaults to hipErrorInvalidValue.
-extern std::function<hipError_t(void* /*handle*/, hipDeviceptr_t /*dptr*/, size_t /*size*/,
-                                hipMemRangeHandleType /*handleType*/, unsigned long long /*flags*/)>
-    g_hipMemGetHandleForAddressRange;
-#endif
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 extern std::function<hipError_t(void** /*dsts*/, void** /*srcs*/, size_t* /*sizes*/, size_t /*count*/,
                                 hipMemcpyAttributes* /*attrs*/, size_t* /*attrsIdxs*/, size_t /*numAttrs*/,

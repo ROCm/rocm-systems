@@ -21,6 +21,7 @@ impl CallbackArg {
         Self(pointer)
     }
 
+    /// Returns the stored callback argument as an opaque C pointer.
     pub(crate) const fn as_ptr(self) -> *mut c_void {
         self.0
     }
