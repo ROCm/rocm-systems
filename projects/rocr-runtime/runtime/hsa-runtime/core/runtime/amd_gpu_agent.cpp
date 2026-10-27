@@ -3505,7 +3505,7 @@ void GpuAgent::BindTrapHandler() {
       // an ErrorReason, so there is no way left to deliver a queue exception. Say so once
       // per agent rather than failing silently - a device-side abort then parks its wave
       // forever and presents as an unexplained hang rather than as an error.
-      log_warning_n(10,
+      log_warning_n(0,
                     "No trap handler bound for GPU node %u (%s): the kernel driver does not "
                     "report support for exception debugging. Queue exceptions such as a "
                     "device-side abort will not be reported, and a kernel that aborts will "
