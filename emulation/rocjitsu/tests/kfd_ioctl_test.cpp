@@ -3,6 +3,7 @@
 
 #include "aql_queue.h"
 #include "config_test_util.h"
+#include "instruction_failure_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -2541,13 +2542,13 @@ TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
 
   // Cover decode errors, unsupported operands, and decoded instructions with no
   // implementation. Only decode errors represent an illegal GPU instruction.
-  std::array<uint32_t, 3> words{0xffffffffu, 0, 0};
+  std::array<uint32_t, 3> words{rocjitsu::test::kUndecodableInstruction, 0, 0};
   auto expected_error = rocjitsu::amdgpu::InstructionExecutionError::DecodeFailure;
   if (GetParam().kind == RejectionKind::Operand) {
     words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
     expected_error = rocjitsu::amdgpu::InstructionExecutionError::UnsupportedOperandValue;
   } else if (GetParam().kind == RejectionKind::Unimplemented) {
-    words = {0x95800000u, 0, 0}; // s_rfe_restore_b64 on CDNA4.
+    words = {rocjitsu::test::kUnimplementedInstruction, 0, 0};
     expected_error = rocjitsu::amdgpu::InstructionExecutionError::UnimplementedInstruction;
   }
   using namespace rocjitsu::amdhsa;

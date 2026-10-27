@@ -6,6 +6,7 @@
 
 #include "execution_plugin_test_util.h"
 #include "halt_snapshot_plugin.h"
+#include "instruction_failure_test_util.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -1139,8 +1140,7 @@ TEST(InstructionMixPluginTest, CancellationKeepsAttemptedInstructionsWithoutComp
   f.soc->set_plugin_group(f.plugin_group_);
   f.plugin_group_->onInit();
 
-  constexpr uint32_t kSRfeRestoreB64 = 0x95800000u; // s_rfe_restore_b64 s[0:1], s0
-  const uint32_t code[] = {S_NOP, kSRfeRestoreB64, S_ENDPGM};
+  const uint32_t code[] = {S_NOP, test::kUnimplementedInstruction, S_ENDPGM};
   f.run_kernel(code, std::size(code));
   ASSERT_EQ(f.engine->last_exit().code, 1);
   EXPECT_TRUE(f.cu()->is_idle());
@@ -1157,8 +1157,8 @@ TEST(InstructionMixPluginTest, CancellationKeepsAttemptedInstructionsWithoutComp
   EXPECT_EQ(summary.mnemonic_executions.count("s_endpgm"), 0u);
   ASSERT_EQ(summary.mnemonic_executions.count("s_nop"), 1u);
   EXPECT_EQ(summary.mnemonic_executions.at("s_nop"), 1u);
-  ASSERT_EQ(summary.mnemonic_executions.count("s_rfe_restore_b64"), 1u);
-  EXPECT_EQ(summary.mnemonic_executions.at("s_rfe_restore_b64"), 1u);
+  ASSERT_EQ(summary.mnemonic_executions.count(test::kUnimplementedInstructionMnemonic), 1u);
+  EXPECT_EQ(summary.mnemonic_executions.at(test::kUnimplementedInstructionMnemonic), 1u);
 }
 
 // The instruction-mix report is only joinable with the throughput report if

@@ -4028,7 +4028,9 @@ if(RJ_ENABLE_HIP_TESTS)
             rj_add_hip_test(
                 hip_instruction_failure_test
                 ARCH ${RJ_HIP_TEST_ARCH}
-                DEPENDENCIES sanitizer_diagnostic_test_util.h
+                DEPENDENCIES
+                    instruction_failure_test_util.h
+                    sanitizer_diagnostic_test_util.h
             )
             rj_add_hip_test_case(
                 hip_instruction_failure_test

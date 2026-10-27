@@ -8,6 +8,7 @@
 /// LD_PRELOAD as a subprocess, verifies the result, and tears down the
 /// daemon. CMake's rj_add_test_path stores paths in a generated data object.
 
+#include "instruction_failure_test_util.h"
 #include "sanitizer_diagnostic_test_util.h"
 
 #include <gtest/gtest.h>
@@ -409,7 +410,7 @@ TEST_F(DaemonTest, HipVectorAdd) {
 #ifdef RJ_HAS_INSTRUCTION_FAILURE_TEST
 TEST_F(DaemonTest, HipUnsupportedInstructionExitsWithFailure) {
   expected_daemon_exit_ = EXIT_FAILURE;
-  expected_daemon_diagnostic_ = rocjitsu::test::kUnimplementedInstructionDiagnostic;
+  expected_daemon_diagnostic_ = rocjitsu::test::kUnimplementedInstructionDiagnostic.c_str();
   auto r = run_hip_test(hip_instruction_failure_bin(),
                         "HipDaemonInstructionFailureTest.UnsupportedInstructionExitsWithFailure");
   EXPECT_EQ(r.exit_code, 0) << r.output;
@@ -417,7 +418,7 @@ TEST_F(DaemonTest, HipUnsupportedInstructionExitsWithFailure) {
 
 TEST_F(DaemonTest, HipDecodeFailureExitsWithFailure) {
   expected_daemon_exit_ = EXIT_FAILURE;
-  expected_daemon_diagnostic_ = rocjitsu::test::kDecodeFailureDiagnostic;
+  expected_daemon_diagnostic_ = rocjitsu::test::kDecodeFailureDiagnostic.c_str();
   auto r = run_hip_test(hip_instruction_failure_bin(),
                         "HipDaemonInstructionFailureTest.DecodeFailureExitsWithFailure");
   EXPECT_EQ(r.exit_code, 0) << r.output;
@@ -465,7 +466,7 @@ TEST_F(DaemonTest, HipFatalDecodeDisconnectsValidClient) {
   ASSERT_TRUE(std::filesystem::exists(ready_path)) << "valid client did not complete its kernel";
 
   expected_daemon_exit_ = EXIT_FAILURE;
-  expected_daemon_diagnostic_ = rocjitsu::test::kDecodeFailureDiagnostic;
+  expected_daemon_diagnostic_ = rocjitsu::test::kDecodeFailureDiagnostic.c_str();
   const ProcessResult faulting =
       run_hip_test(hip_instruction_failure_bin(),
                    "HipDaemonInstructionFailureTest.DecodeFailureExitsWithFailure");
