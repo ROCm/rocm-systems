@@ -201,13 +201,9 @@ def build_agent_id_string(agent_index_value, prefix=""):
 
     if agent_index_value == bindings.agent_indexing.node:  # absolute
         return f"'Agent ' || {agent_prefix}agent_abs_index"
-    elif (
-        agent_index_value == bindings.agent_indexing.logical_node
-    ):  # relative (default)
+    elif agent_index_value == bindings.agent_indexing.logical_node:  # relative (default)
         return f"'Agent ' || {agent_prefix}agent_log_index"
-    elif (
-        agent_index_value == bindings.agent_indexing.logical_node_type
-    ):  # type-relative
+    elif agent_index_value == bindings.agent_indexing.logical_node_type:  # type-relative
         return f"{agent_prefix}agent_type || ' ' || {agent_prefix}agent_type_index"
     else:
         return ""

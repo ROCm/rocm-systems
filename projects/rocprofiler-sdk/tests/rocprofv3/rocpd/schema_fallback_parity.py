@@ -41,12 +41,17 @@ def main():
     lib = bindings.libpyrocpd
     errors = []
 
-    cpp_versions = [str(v) for v in lib.query_supported_schema_versions(lib.sql_engine.sqlite3)]
+    cpp_versions = [
+        str(v) for v in lib.query_supported_schema_versions(lib.sql_engine.sqlite3)
+    ]
     py_versions = [
-        ".".join(str(x) for x in v) for v in bindings._py_query_supported_schema_versions()
+        ".".join(str(x) for x in v)
+        for v in bindings._py_query_supported_schema_versions()
     ]
     if cpp_versions != py_versions:
-        errors.append(f"supported versions differ: C++={cpp_versions} python={py_versions}")
+        errors.append(
+            f"supported versions differ: C++={cpp_versions} python={py_versions}"
+        )
 
     print(f"C++ versions: {cpp_versions}")
     print(f"Python versions: {py_versions}\n")
@@ -70,7 +75,11 @@ def main():
             for opt in options:
                 try:
                     expected = lib.load_schema(
-                        lib.sql_engine.sqlite3, kind, opt, lib.schema_version(ver), variables
+                        lib.sql_engine.sqlite3,
+                        kind,
+                        opt,
+                        lib.schema_version(ver),
+                        variables,
                     )
                 except Exception:
                     # C++ rejects this combination: python must reject it too
@@ -80,14 +89,18 @@ def main():
                         )
                     except RuntimeError:
                         continue
-                    errors.append(f"python accepted {ver}/{kind}/{opt} but C++ rejected it")
+                    errors.append(
+                        f"python accepted {ver}/{kind}/{opt} but C++ rejected it"
+                    )
                     continue
 
                 actual = bindings._py_load_schema(
                     lib.sql_engine.sqlite3, int(kind), int(opt), ver, variables
                 )
                 if expected != actual:
-                    errors.append(f"schema mismatch for version={ver} kind={kind} options={opt}")
+                    errors.append(
+                        f"schema mismatch for version={ver} kind={kind} options={opt}"
+                    )
 
     for err in errors:
         print(f"ERROR: {err}", file=sys.stderr)
