@@ -1074,8 +1074,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // The entry prologue loads through a kernarg wrapper that only a dispatch-time
   // runtime can build, and no runtime builds one for DBI. Without it both loads
   // read past the kernarg allocation and the guest's kernarg pointer is
-  // overwritten, so any point that would need the prologue is refused unless a
-  // test that supplies the wrapper skips the patch gates.
+  // overwritten, so any point that would need the prologue is refused. This is a
+  // runtime-support gate: a test may skip it to exercise the prologue path, and
+  // plan_entry_prologue()'s checks below still run.
   if (!skip_patch_gates_) {
     std::string readers;
     for (const InstrumentationPoint &pt : points_) {

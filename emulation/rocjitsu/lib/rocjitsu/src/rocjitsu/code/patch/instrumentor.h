@@ -469,9 +469,10 @@ private:
   std::vector<InstrumentationPoint> points_;
   bool patched_ = false;
 
-  // The patch gates refuse points no runtime can support yet. A test that
-  // supplies the missing piece itself (e.g. the kernarg wrapper) skips them
-  // through the InstrumentorTestAccess friend; production callers cannot.
+  // The patch gates refuse points that need runtime support no runtime provides
+  // yet. Tests skip them through the InstrumentorTestAccess friend to exercise
+  // the gated path, whether or not they provide that support themselves; the
+  // planner's checks after the gates still run. Production callers cannot skip.
   friend struct InstrumentorTestAccess;
   bool skip_patch_gates_ = false;
 
