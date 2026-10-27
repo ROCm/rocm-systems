@@ -228,7 +228,7 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
   const auto kill_defs = [&](const Instruction &inst, PairState &state) {
     if (state.pointer.empty() && state.loaded.empty())
       return;
-    const InstDefUse def_use(inst);
+    const InstDefUse def_use(inst, /*wave_size=*/64);
     // Only the pairs actually being tracked can be killed, and there are a handful at most.
     // Sweeping the whole SGPR file instead cost two RegisterSet::contains() calls per register per
     // instruction per sweep, which profiled as half of all translation time.
@@ -2516,7 +2516,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   const uint64_t text_vaddr = obj.text_sections().front()->vaddr();
   const auto relocation_pair_analysis =
-      analyze_relocation_pairs(blocks, relocation_function_tables, text_vaddr);
+      analyze_relocation_pairs(blocks, relocation_function_tables, text_vaddr, /*wave_size=*/64);
   const auto &relocation_table_dispatches = relocation_pair_analysis.dispatches;
   const auto relocation_table_calls = attach_relocation_table_call_edges(
       block_index, relocation_function_tables, relocation_table_dispatches);
@@ -3349,8 +3349,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       // entry at +256, which hardware enters with unknown EXEC) and pass it to
       // LivenessAnalysis so EXEC-masked vector defs can be promoted to kills where
       // EXEC is provably full, freeing more scratch registers. Reference issue #9733.
-      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), /*exec=*/nullptr,
-                                  liveness_options, scope_analysis_edges);
+      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), /*wave_size=*/64,
+                                  /*exec=*/nullptr, liveness_options, scope_analysis_edges);
     }
 
     std::unique_ptr<Gfx1250VgprMsbAnalysis> wmma_completion_wait_vgpr_msb;

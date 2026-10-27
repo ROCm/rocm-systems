@@ -239,6 +239,8 @@ Kernel-scoped backward register liveness over the CFG embedded in `BasicBlock`. 
 
 Ordinary SGPRs, VGPRs, and AccVGPRs via `RegisterSet`. `InstDefUse` records explicit operand defs and uses plus instruction-level implicit hooks; the only implicit hook today is the FLAT `saddr` SGPR-pair use that does not appear as an explicit operand.
 
+A wave-mask SGPR operand (a compare or carry-out result, a conditional-move selector, a carry-in) is one SGPR in Wave32 and a pair in Wave64, but RDNA decoders name the pair; the decoder marks it with `Operand::is_wave_mask()`, generated from the ISA's `FMT_NUM_M64` data format. `InstDefUse` and `LivenessAnalysis` therefore take the wave size the code executes at as a required argument and narrow these operands to the low SGPR at 32. Every caller passes 64, so a Wave32 kernel's wave-mask destinations are over-killed; passing the kernel's wave size is deferred.
+
 #### What it does NOT track
 
 - EXEC, VCC, SCC, M0, FLAT_SCRATCH, TTMP — special architectural state. The `RegClass` enum names these, but they are excluded from the backward-liveness dataflow by the ordinary-register projection of `RegisterSet`. See the special-state note below for how they are still preserved, and for what a probe that *reads* them gets.

@@ -1133,7 +1133,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   liveness_scope.reserve(blocks_.size());
   for (const auto &block : blocks_)
     liveness_scope.push_back(block.get());
-  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope)};
+  // Every kernel is analyzed at Wave64, where a wave-mask destination is an
+  // SGPR pair. In a Wave32 kernel that over-kills the register above a compare's
+  // destination; using the kernel's wave size is deferred.
+  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope), /*wave_size=*/64};
 
   // Lay out the appended region as [probe bodies][s_nop padding][entry stub]
   // [trampolines], the padding and stub only when the kernel has an entry

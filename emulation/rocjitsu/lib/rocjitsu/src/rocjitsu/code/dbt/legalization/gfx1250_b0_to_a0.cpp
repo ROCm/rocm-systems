@@ -173,7 +173,8 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
     const std::unordered_map<uint64_t, const Instruction *> &source_instruction_by_offset,
     const Gfx1250VgprMsbAnalysis &vgpr_msb) {
   RegisterSet pending_defs =
-      InstDefUse(inst, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll).defs.ordinary_only();
+      InstDefUse(inst, /*wave_size=*/64, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll)
+          .defs.ordinary_only();
   uint64_t next_offset = inst.src_loc() + inst.size();
   while (true) {
     const auto next_it = source_instruction_by_offset.find(next_offset);
@@ -198,7 +199,7 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
     if (!canonical_split_scaffolding && !gfx1250_b0_to_a0_requires_wmma_completion_wait(next))
       return false;
 
-    const InstDefUse access(next, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll);
+    const InstDefUse access(next, /*wave_size=*/64, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll);
     if (access.uses.intersects(pending_defs))
       return false;
     pending_defs |= access.defs.ordinary_only();
