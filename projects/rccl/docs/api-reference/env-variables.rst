@@ -1129,6 +1129,18 @@ threshold table introduced for gfx1250.
       - | ``-1``: Use the compile-time default of 256 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
 
+    * - | ``RCCL_TDM_LL128_ENABLE``
+        | Routes the LL128 user destination buffer through the gfx1250 tensor data
+          mover: each warp's slice is staged in LDS and pushed out as one bulk
+          transfer instead of per-lane vector stores. Gains are concentrated in
+          large messages under LL128 (AllGather is the best case); below roughly
+          32 MiB the staging overhead makes it a small loss. The library must also
+          be built with ``--enable-tdm-prim-ll128``, and the path only compiles on
+          gfx1250 with an SDK providing the tensor data mover builtins. On any
+          other architecture, or without the build flag, this variable has no
+          effect.
+      - | ``0``: Disabled (default). The LL128 store uses the per-lane vector path.
+        | ``1``: Enabled, where the build and architecture support it.
     * - | ``RCCL_CE_AR_2SHOT_MIN_BYTES``
         | Overrides the minimum message size for the CE 2-shot AllReduce path.
           When ``-1`` (default), the value is resolved from ``ceNonRegMin[AllReduce]``
