@@ -17,6 +17,7 @@
 #include "core/trace_cache/unified_memory_processor.hpp"
 #include "core/trace_cache/wall_clock_processor.hpp"
 #include "core/track_registry.hpp"
+#include "core/wall_clock_report.hpp"
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
@@ -24,8 +25,10 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -59,29 +62,69 @@ sum_storage_bytes(const std::vector<std::shared_ptr<data::processor_config_t>>& 
     return total;
 }
 
-wall_clock_options
+[[nodiscard]] wall_clock_settings
+make_wall_clock_settings()
+{
+    constexpr wall_clock_settings k_defaults{};
+    auto const                    units =
+        config::get_setting_value<std::string>(env_vars::TIMING_UNITS).value_or("");
+    auto const unit = find_wall_clock_unit(units);
+    if(!unit.has_value())
+    {
+        LOG_WARNING("Unknown {} '{}'; the wall_clock report uses {}",
+                    env_vars::TIMING_UNITS, units, k_defaults.unit.name);
+    }
+    // A negative precision is timemory's "use the default" value
+    auto const precision =
+        config::get_setting_value<std::int16_t>(env_vars::TIMING_PRECISION)
+            .value_or(k_defaults.precision);
+    return wall_clock_settings{
+        .flat = config::get_setting_value<bool>(env_vars::FLAT_PROFILE)
+                    .value_or(k_defaults.flat),
+        .timeline = config::get_setting_value<bool>(env_vars::TIMELINE_PROFILE)
+                        .value_or(k_defaults.timeline),
+        .collapse_threads = config::get_setting_value<bool>(env_vars::COLLAPSE_THREADS)
+                                .value_or(k_defaults.collapse_threads),
+        .max_depth = config::get_setting_value<std::uint16_t>(env_vars::MAX_DEPTH)
+                         .value_or(k_defaults.max_depth),
+        .max_width = config::get_setting_value<std::int32_t>(env_vars::MAX_WIDTH)
+                         .value_or(k_defaults.max_width),
+        .unit      = unit.value_or(k_defaults.unit),
+        .precision = precision >= 0 ? precision : k_defaults.precision,
+        .rank      = static_cast<std::int32_t>(
+            config::get_mpi_rank_from_env().value_or(k_defaults.rank)),
+        .mpi_size = static_cast<std::int32_t>(
+            config::get_mpi_world_size_from_env().value_or(k_defaults.mpi_size)),
+    };
+}
+
+[[nodiscard]] wall_clock_options
 make_wall_clock_options(const data::processor_config_t& process)
 {
-    auto const is_on = [](const char* name, bool fallback) {
-        return config::get_setting_value<bool>(std::string{ name }).value_or(fallback);
-    };
+    auto const settings = make_wall_clock_settings();
+    auto const shown    = settings.max_depth > 0;
     auto const files =
-        is_on(env_vars::FILE_OUTPUT, true) &&
-        config::output_filtering::is_file_output_enabled_for_current_mpi_rank();
-    auto const suffix = process._pid == process._ppid
-                            ? config::get_output_process_suffix()
-                            : std::to_string(process._pid);
+        shown && config::get_setting_value<bool>(env_vars::FILE_OUTPUT).value_or(true);
+    auto const suffix         = process._pid == process._ppid
+                                    ? config::get_output_process_suffix()
+                                    : std::to_string(process._pid);
+    auto const output_path_if = [&suffix](bool enabled, std::string_view extension) {
+        return enabled ? std::optional{ get_output_absolute_path("wall_clock", extension,
+                                                                 suffix, "") }
+                       : std::nullopt;
+    };
     return wall_clock_options{
-        .layout = { .flat             = is_on(env_vars::FLAT_PROFILE, false),
-                    .timeline         = is_on(env_vars::TIMELINE_PROFILE, false),
-                    .collapse_threads = is_on(env_vars::COLLAPSE_THREADS, false) },
-        .text   = files && is_on(env_vars::TEXT_OUTPUT, true),
-        .json   = files && is_on(env_vars::JSON_OUTPUT, true),
-        .cout   = is_on(env_vars::COUT_OUTPUT, false),
-        .rank   = static_cast<std::int32_t>(config::get_mpi_rank_from_env().value_or(0)),
-        .mpi_size =
-            static_cast<std::int32_t>(config::get_mpi_world_size_from_env().value_or(1)),
-        .suffix = suffix,
+        .settings  = settings,
+        .text_path = output_path_if(
+            files &&
+                config::get_setting_value<bool>(env_vars::TEXT_OUTPUT).value_or(true),
+            "txt"),
+        .json_path = output_path_if(
+            files &&
+                config::get_setting_value<bool>(env_vars::JSON_OUTPUT).value_or(true),
+            "json"),
+        .cout = shown &&
+                config::get_setting_value<bool>(env_vars::COUT_OUTPUT).value_or(false),
     };
 }
 
@@ -135,7 +178,7 @@ configure_processors(
     if(_formats.is_wall_clock_enabled())
     {
         auto const options = make_wall_clock_options(*_config);
-        if(options.text || options.json || options.cout)
+        if(options.text_path || options.json_path || options.cout)
         {
             _coordinator->add_handler(std::make_shared<wall_clock_processor_t>(
                 _config->_metadata_registry, _config->_agent_manager, _config->_pid,

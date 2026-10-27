@@ -69,7 +69,7 @@ enabled_formats_t::enabled_formats_t()
              .enabled          = get_use_unified_memory_profiling(),
              .name             = "unified_memory" },
            { .kind             = format_kind::wall_clock,
-             .process_parallel = false,
+             .process_parallel = true,
              .enabled          = get_use_timemory(),
              .name             = "wall_clock" } }
 {}
