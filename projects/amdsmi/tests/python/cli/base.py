@@ -314,7 +314,10 @@ class TestCliBase(unittest.TestCase):
                     try:
                         info = amdsmi.amdsmi_get_clock_info(processor, clk_type)
                         freq["has_deep_sleep"] = info["clk_deep_sleep"] != "N/A"
-                    except amdsmi.AmdSmiLibraryException:
+                    except amdsmi.AmdSmiLibraryException as error:
+                        if error.get_error_code() != amdsmi.AmdSmiStatus.NOT_SUPPORTED:
+                            entry[name] = None
+                            continue
                         # No gpu_metrics (e.g. an iGPU), yet the table is still settable.
                         freq["has_deep_sleep"] = False
                     entry[name] = freq

@@ -153,6 +153,29 @@ class TestCliSweepMixedGpus(unittest.TestCase):
         self.assertEqual(tables[1]["SOCCLK"], {"num_supported": 3, "has_deep_sleep": False})
         self.assertIsNone(tables[1]["FCLK"])
 
+    def test_clock_table_is_dropped_when_clock_info_fails(self) -> None:
+        for status in (
+            amdsmi.AmdSmiStatus.IO,
+            amdsmi.AmdSmiStatus.NO_PERM,
+            amdsmi.AmdSmiStatus.BUSY,
+            amdsmi.AmdSmiStatus.UNEXPECTED_DATA,
+        ):
+            with self.subTest(status=status):
+                library = mock.patch.multiple(
+                    amdsmi,
+                    amdsmi_get_processor_handles=lambda: [object()],
+                    amdsmi_get_clk_freq=lambda *_: {"num_supported": 3},
+                    amdsmi_get_clock_info=mock.Mock(
+                        side_effect=amdsmi.AmdSmiLibraryException(status)
+                    ),
+                    amdsmi_shut_down=lambda: None,
+                )
+                with library, mock.patch.object(TestCliBase, "common", mock.Mock(), create=True):
+                    tables = TestCliBase._read_clk_freq()
+                self.assertEqual(
+                    tables, [{name: None for name in ("SCLK", "MCLK", "FCLK", "SOCCLK")}]
+                )
+
 
 @unittest.skipIf(_CLI_SKIP, _CLI_SKIP)
 class TestCliClockCommandGeneration(unittest.TestCase):
