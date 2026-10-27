@@ -91,6 +91,22 @@ union alignas(16) rcclB128 {
   uint64_t u64[2];
 };
 
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+// Returns its argument. Pass every cooperative_atomic_load_8x16B result through
+// it before use. Before ROCm 10.2 the compiler lowers that builtin to an i128
+// ATOMIC_LOAD whose computed known bits have the wrong width, which crashes
+// instruction selection (APInt::andAssignSlowCase) or silently miscompiles masks
+// of the result. llvm.amdgcn.softwqm has no clang builtin; outside WQM it lowers
+// to a copy, but the SelectionDAG cannot see through it.
+#if ROCM_VERSION < 100200
+extern "C" __device__ __attribute__((const, noconvergent)) v4i rcclSoftWqmV4i(v4i)
+    __asm("llvm.amdgcn.softwqm.v4i32");
+__device__ inline __attribute__((always_inline)) v4i rcclIdentity(v4i x) { return rcclSoftWqmV4i(x); }
+#else
+__device__ inline __attribute__((always_inline)) v4i rcclIdentity(v4i x) { return x; }
+#endif
+#endif
+
 // "" means system scope, "agent" means device.  Adding this here because I don't think it's obvious otherwise that
 // "" means system scope.
 #define RCCL_SYSTEM_SYNCSCOPE ""

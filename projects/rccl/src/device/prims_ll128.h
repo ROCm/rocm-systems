@@ -41,11 +41,11 @@ inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1
 inline __device__ void load128Fifo(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
 #if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
   rcclB128 u;
-  u.vi = __builtin_amdgcn_cooperative_atomic_load_8x16B((v4i_gptr)ptr, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
-  // Pin the pun in VGPRs. At -O1, folding this bitcast into the narrow masks
-  // of an fp8 reduction crashes AMDGPU instruction selection
-  // (APInt::andAssignSlowCase) in the tree LL128 kernels.
-  asm volatile("" : "=v"(v0), "=v"(v1) : "v"(u.u64[0]), "v"(u.u64[1]));
+  // See rcclIdentity in rccl_ptr.h.
+  u.vi = rcclIdentity(
+    __builtin_amdgcn_cooperative_atomic_load_8x16B((v4i_gptr)ptr, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE));
+  v0 = u.u64[0];
+  v1 = u.u64[1];
 #else
   load128NT(ptr, v0, v1);
 #endif
@@ -70,8 +70,8 @@ inline __device__ void store128Plain(uint64_t* ptr, uint64_t v0, uint64_t v1) {
 inline __device__ void store128Fifo(uint64_t* ptr, uint64_t v0, uint64_t v1) {
 #if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
   rcclB128 u;
-  // Same ISel workaround as load128Fifo.
-  asm volatile("" : "=v"(u.u64[0]), "=v"(u.u64[1]) : "v"(v0), "v"(v1));
+  u.u64[0] = v0;
+  u.u64[1] = v1;
   __builtin_amdgcn_cooperative_atomic_store_8x16B((v4i_gptr)ptr, u.vi, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
 #elif RCCL_LL_FIFO_SYS_SCOPE
   rcclB128 u;
