@@ -39,6 +39,7 @@
 // Signature-drift watchdog: assert each hook still matches the production
 // symbol it shadows (templates + macro live in fakes/signature-drift.h).
 #include "signature-drift.h"
+#include "fail_loud.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_proxyConnect,              ncclProxyConnect);
 ASSERT_HOOK_MATCHES_PROD(g_proxyCallBlocking,         ncclProxyCallBlocking);
@@ -253,6 +254,12 @@ ncclResult_t ncclShmImportShareableBuffer(struct ncclComm*  /*comm*/,
 ncclResult_t ncclShmIpcClose(ncclShmIpcDesc_t* /*desc*/)
 {
     return ncclSuccess;
+}
+
+// src/plugin/profiler.cc, which has no fakes file yet. plugin/net.cc only hands its address to a plugin's init.
+ncclResult_t ncclProfilerCallback(void**, int, void*, int64_t, void*)
+{
+    FailLoudUnfaked("nccl_fakes", "ncclProfilerCallback");
 }
 
 // ---------------------------------------------------------------------------
