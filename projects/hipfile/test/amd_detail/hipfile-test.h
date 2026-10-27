@@ -113,6 +113,13 @@ struct HipFileUnopened : public ::testing::Test {
 /// @brief Set up mocks for buffer registration
 void expect_buffer_registration(hipFile::MHip &mhip, hipMemoryType memory_type);
 
+namespace hipFile {
+struct MConfiguration;
+}
+/// @brief Set up mocks for buffer registration
+void expect_buffer_registration(hipFile::MHip &mhip, hipFile::MConfiguration &mcfg,
+                                hipMemoryType memory_type);
+
 // ***********************************************************************
 //  FILE FUNCTIONALITY
 // ***********************************************************************

@@ -9,6 +9,7 @@
 #include "hipfile.h"
 #include "hipfile-test.h"
 #include "hipfile-warnings.h"
+#include "mconfiguration.h"
 #include "mhip.h"
 #include "state.h"
 
@@ -30,8 +31,8 @@ using ::testing::StrictMock;
 // warnings
 HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 
-void
-expect_buffer_registration(MHip &mhip, hipMemoryType memory_type)
+static void
+expect_buffer_registration(MHip &mhip, MConfiguration *mcfg, hipMemoryType memory_type)
 {
     hipPointerAttribute_t attrs{};
     attrs.type = memory_type;
@@ -40,6 +41,21 @@ expect_buffer_registration(MHip &mhip, hipMemoryType memory_type)
         HipMemAddressRange range{reinterpret_cast<void *>(0x1), UINT64_MAX - 1};
         EXPECT_CALL(mhip, hipMemGetAddressRange).WillOnce(testing::Return(range));
     }
+    if (mcfg) {
+        EXPECT_CALL(*mcfg, host()).WillOnce(testing::Return(memory_type == hipMemoryTypeHost));
+    }
+}
+
+void
+expect_buffer_registration(MHip &mhip, hipMemoryType memory_type)
+{
+    expect_buffer_registration(mhip, nullptr, memory_type);
+}
+
+void
+expect_buffer_registration(MHip &mhip, MConfiguration &mcfg, hipMemoryType memory_type)
+{
+    expect_buffer_registration(mhip, &mcfg, memory_type);
 }
 
 struct HipFileBuffer : public HipFileOpened {

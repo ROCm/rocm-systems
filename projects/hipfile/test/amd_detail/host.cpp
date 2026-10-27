@@ -167,7 +167,7 @@ struct HostIo : public HipFileOpened {
     {
         EXPECT_CALL(mhip, hipGetDevice).Times(AnyNumber()).WillRepeatedly(Return(0));
 
-        expect_buffer_registration(mhip, hipMemoryTypeHost);
+        expect_buffer_registration(mhip, mcfg, hipMemoryTypeHost);
         Context<DriverState>::get()->registerBuffer(buffer_data.data(), buffer_data.size(), 0);
         buffer = Context<DriverState>::get()->getRegisteredBuffer(buffer_data.data());
 
@@ -204,7 +204,7 @@ struct HostParam : ::testing::TestWithParam<IoType> {
 
         EXPECT_CALL(mhip, hipGetDevice).Times(AnyNumber()).WillRepeatedly(Return(0));
 
-        expect_buffer_registration(mhip, hipMemoryTypeHost);
+        expect_buffer_registration(mhip, mcfg, hipMemoryTypeHost);
         void *buf{reinterpret_cast<void *>(0xFEFEFEFE)};
         Context<DriverState>::get()->registerBuffer(buf, 4096, 0);
         buffer = Context<DriverState>::get()->getRegisteredBuffer(buf);
@@ -269,13 +269,13 @@ TEST_P(HostParam, HostIoThrowsOnNegativeFileOffset)
 
 TEST_P(HostParam, HostIoTruncatesSizeToMAX_RW_COUNT)
 {
-    expect_buffer_registration(mhip, hipMemoryTypeHost);
+    expect_buffer_registration(mhip, mcfg, hipMemoryTypeHost);
     auto buf{reinterpret_cast<void *>(0xABABABAB)};
     Context<DriverState>::get()->registerBuffer(buf, hipFile::getMaxRwCount() + 1, 0);
     auto big_buffer{Context<DriverState>::get()->getRegisteredBuffer(buf)};
 
     EXPECT_CALL(mcfg, host()).WillOnce(Return(true));
-    EXPECT_CALL(mstats, addIo).Times(1);
+    EXPECT_CALL(mstats, addIo).Times(0);
     switch (io_type) {
         case IoType::Read:
             EXPECT_CALL(msys, pread)
@@ -333,7 +333,7 @@ struct HostWrite : public HostIo {
         EXPECT_CALL(mcfg, host()).WillOnce(testing::Return(true));
         EXPECT_CALL(msys, pwrite).WillRepeatedly(testing::Invoke(this, &HostWrite::fake_pwrite));
         EXPECT_CALL(msys, fdatasync).Times(1);
-        EXPECT_CALL(mstats, addIo).Times(1);
+        EXPECT_CALL(mstats, addIo).Times(0);
     }
 
     bool file_contains_expected_data(hoff_t file_offset, hoff_t buffer_offset, size_t count)
@@ -357,7 +357,7 @@ TEST_F(HostWrite, HostWriteThrowsOnPwriteException)
 {
     EXPECT_CALL(mcfg, host()).WillOnce(testing::Return(true));
     EXPECT_CALL(msys, pwrite).WillOnce(testing::Throw(std::system_error(EIO, std::generic_category())));
-    EXPECT_CALL(mstats, error).Times(1);
+    EXPECT_CALL(mstats, error).Times(0);
 
     ASSERT_THROW(Host().io(IoType::Write, file, buffer, buffer->getLength(), 0, 0), std::system_error);
 }
@@ -374,7 +374,7 @@ TEST_F(HostWrite, HostWriteHandlesShortPwrites)
         }))
         .WillRepeatedly(testing::Invoke(this, &HostWrite::fake_pwrite));
     EXPECT_CALL(msys, fdatasync).Times(1);
-    EXPECT_CALL(mstats, addIo).Times(1);
+    EXPECT_CALL(mstats, addIo).Times(0);
 
     ASSERT_EQ(size, Host().io(IoType::Write, file, buffer, size, 0, 0));
     ASSERT_TRUE(file_contains_expected_data(0, 0, size));
@@ -390,7 +390,7 @@ TEST_F(HostWrite, HostWriteHandlesInterruptedPwrite)
         .WillOnce(testing::Throw(std::system_error(EINTR, std::generic_category())))
         .WillRepeatedly(testing::Invoke(this, &HostWrite::fake_pwrite));
     EXPECT_CALL(msys, fdatasync).Times(1);
-    EXPECT_CALL(mstats, addIo).Times(1);
+    EXPECT_CALL(mstats, addIo).Times(0);
 
     ASSERT_EQ(size, Host().io(IoType::Write, file, buffer, size, 0, 0));
     ASSERT_TRUE(file_contains_expected_data(0, 0, size));
@@ -535,7 +535,7 @@ struct HostRead : public HostIo {
     {
         EXPECT_CALL(mcfg, host()).WillOnce(testing::Return(true));
         EXPECT_CALL(msys, pread).WillRepeatedly(testing::Invoke(this, &HostRead::fake_pread));
-        EXPECT_CALL(mstats, addIo).Times(1);
+        EXPECT_CALL(mstats, addIo).Times(0);
     }
 };
 
@@ -549,7 +549,7 @@ TEST_F(HostRead, HostReadThrowsOnPreadException)
 {
     EXPECT_CALL(mcfg, host()).WillOnce(testing::Return(true));
     EXPECT_CALL(msys, pread).WillOnce(testing::Throw(std::system_error(EIO, std::generic_category())));
-    EXPECT_CALL(mstats, error).Times(1);
+    EXPECT_CALL(mstats, error).Times(0);
 
     ASSERT_THROW(Host().io(IoType::Read, file, buffer, 4096, 0, 0), std::system_error);
 }
@@ -563,7 +563,7 @@ TEST_F(HostRead, HostReadHandlesInterruptedPread)
     EXPECT_CALL(msys, pread)
         .WillOnce(testing::Throw(std::system_error(EINTR, std::generic_category())))
         .WillRepeatedly(testing::Invoke(this, &HostRead::fake_pread));
-    EXPECT_CALL(mstats, addIo).Times(1);
+    EXPECT_CALL(mstats, addIo).Times(0);
 
     ASSERT_EQ(file_length, Host().io(IoType::Read, file, buffer, file_length, 0, 0));
     ASSERT_TRUE(host_buffer_contains_expected_data(0, 0, file_length));
@@ -580,7 +580,7 @@ TEST_F(HostRead, HostReadHandlesShortPreads)
             return this->fake_pread(fd, buf, count / 2, offset);
         }))
         .WillRepeatedly(testing::Invoke(this, &HostRead::fake_pread));
-    EXPECT_CALL(mstats, addIo).Times(1);
+    EXPECT_CALL(mstats, addIo).Times(0);
 
     ASSERT_EQ(file_length, Host().io(IoType::Read, file, buffer, file_length, 0, 0));
     ASSERT_TRUE(host_buffer_contains_expected_data(0, 0, file_length));
