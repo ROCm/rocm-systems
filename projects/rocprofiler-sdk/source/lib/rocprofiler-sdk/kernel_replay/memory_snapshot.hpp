@@ -79,13 +79,20 @@ struct block_t
     explicit operator bool() const { return data != nullptr; }
 };
 
-// RAII handle for one materialized HSA arena. GPU-local blocks return to the replay backing cache;
-// pinned-host blocks return directly to their HSA pool.
+// What happens to a snapshot's backing once the replay that captured it finishes.
+enum class retain_mode : uint8_t
+{
+    per_replay,      // freed back to its pool
+    across_replays,  // kept as its pool's high-water arena for later replays
+};
+
+// RAII handle for one materialized HSA arena. Releasing it frees the arena or keeps it for later
+// replays, according to its retain mode.
 class owned_block_t
 {
 public:
     owned_block_t() = default;
-    owned_block_t(block_t, storage_kind, hsa_amd_memory_pool_t, bool cacheable);
+    owned_block_t(block_t, storage_kind, hsa_amd_memory_pool_t, retain_mode);
     ~owned_block_t();
 
     owned_block_t(const owned_block_t&) = delete;
@@ -103,7 +110,7 @@ private:
     block_t               m_block{};
     storage_kind          m_kind = storage_kind::none;
     hsa_amd_memory_pool_t m_pool{.handle = 0};
-    bool                  m_cacheable = false;
+    retain_mode           m_retain = retain_mode::per_replay;
 };
 
 struct snapshot_region_t
@@ -115,8 +122,8 @@ struct snapshot_region_t
 
 struct storage_segment_t
 {
-    size_t        size          = 0;
-    size_t        storage_index = 0;
+    size_t        size = 0;
+    size_t        tier = 0;
     owned_block_t backing{};
 };
 
@@ -124,7 +131,9 @@ struct snapshot_extent_t
 {
     size_t size = 0;
 
-    size_t region_index   = 0;
+    size_t region_index  = 0;
+    size_t region_offset = 0;
+
     size_t segment_index  = 0;
     size_t segment_offset = 0;
 };
