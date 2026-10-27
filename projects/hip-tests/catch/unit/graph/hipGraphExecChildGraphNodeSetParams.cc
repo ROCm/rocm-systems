@@ -29,9 +29,11 @@
   2. Update an embedded memcpy node using hipGraphExecMemcpyNodeSetParams1D
   3. Update an embedded kernel node using hipGraphExecKernelNodeSetParams
   4. Update an embedded memset node using the generic hipGraphExecNodeSetParams
+  5. Update a node nested two child graphs deep, and both nesting levels together
 
   Negative Scenarios:
   1. Pass the caller's own child graph nodes instead of the embedded ones
+  2. Pass an embedded child graph node belonging to an unrelated parent graph
  **/
 
 #include <vector>
@@ -495,4 +497,264 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes) {
   HIP_CHECK(hipFree(C_d));
   HIP_CHECK(hipFree(D_d));
   HIP_CHECK(hipFree(S_d));
+}
+
+/*
+   Update a node two levels deep through the parent's executable graph.
+
+   parent:      memcpyH2D_A (A_h->A_d) -> outerChildNode -> memcpyD2H (C_d->result_h)
+   outerChild:  memset (B_d=val) -> innerChildNode
+   innerChild:  kernel vectorADD(A_d, B_d, C_d)
+
+   A one-level child only recurses into ResolveClonedNode once before hitting the
+   graphExec's own node map, so it does not cover the multi-level walk or the chained
+   per-child lookups. Here the innermost kernel is reached by calling
+   hipGraphChildGraphNodeGetGraph twice, and the packet rewrite has to land on the
+   innermost child graph node rather than the outer one.
+ */
+HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_UpdateNestedChildGraphNodes) {
+  constexpr size_t N = 1024;
+  constexpr size_t Nbytes = N * sizeof(int);
+  constexpr auto blocksPerCU = 6;
+  constexpr auto threadsPerBlock = 256;
+  constexpr int kMemsetVal0 = 7;
+  constexpr int kMemsetVal1 = 19;
+  size_t NElem{N};
+  unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
+
+  int *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
+  HIP_CHECK(hipMalloc(&A_d, Nbytes));
+  HIP_CHECK(hipMalloc(&B_d, Nbytes));
+  HIP_CHECK(hipMalloc(&C_d, Nbytes));
+
+  std::vector<int> A_h(N), result_h(N), expected(N);
+  for (size_t i = 0; i < N; ++i) A_h[i] = static_cast<int>(i) + 1;
+
+  hipStream_t streamForGraph;
+  HIP_CHECK(hipStreamCreate(&streamForGraph));
+
+  // Innermost graph: one kernel, C_d = A_d + B_d.
+  hipGraph_t innerGraph;
+  HIP_CHECK(hipGraphCreate(&innerGraph, 0));
+
+  void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
+  hipKernelNodeParams kernelNodeParams{};
+  kernelNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
+  kernelNodeParams.gridDim = dim3(blocks);
+  kernelNodeParams.blockDim = dim3(threadsPerBlock);
+  kernelNodeParams.sharedMemBytes = 0;
+  kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
+  kernelNodeParams.extra = nullptr;
+
+  hipGraphNode_t innerKernel;
+  HIP_CHECK(hipGraphAddKernelNode(&innerKernel, innerGraph, nullptr, 0, &kernelNodeParams));
+
+  // Outer child graph: memset feeding the nested child graph node.
+  hipGraph_t outerGraph;
+  HIP_CHECK(hipGraphCreate(&outerGraph, 0));
+
+  hipMemsetParams memsetParams{};
+  memsetParams.dst = B_d;
+  memsetParams.elementSize = sizeof(int);
+  memsetParams.width = N;
+  memsetParams.height = 1;
+  memsetParams.pitch = 0;
+  memsetParams.value = kMemsetVal0;
+
+  hipGraphNode_t outerMemset, innerChildNode;
+  HIP_CHECK(hipGraphAddMemsetNode(&outerMemset, outerGraph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddChildGraphNode(&innerChildNode, outerGraph, &outerMemset, 1, innerGraph));
+
+  // Parent graph.
+  hipGraph_t graph;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
+  hipGraphNode_t memcpyH2D_A, outerChildNode, memcpyD2H;
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h.data(), Nbytes,
+                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddChildGraphNode(&outerChildNode, graph, &memcpyH2D_A, 1, outerGraph));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H, graph, &outerChildNode, 1, result_h.data(), C_d,
+                                    Nbytes, hipMemcpyDeviceToHost));
+
+  hipGraphExec_t graphExec;
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
+  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  for (size_t i = 0; i < N; ++i) expected[i] = A_h[i] + kMemsetVal0;
+  HipTest::checkTest(expected.data(), result_h.data(), N);
+
+  // Walk down two levels of embedded graphs.
+  hipGraph_t embeddedOuter = nullptr;
+  HIP_CHECK(hipGraphChildGraphNodeGetGraph(outerChildNode, &embeddedOuter));
+  REQUIRE(embeddedOuter != outerGraph);
+
+  hipGraphNode_t embeddedInnerChildNode =
+      GraphGetUniqueNodeOfType(embeddedOuter, hipGraphNodeTypeGraph);
+  hipGraph_t embeddedInner = nullptr;
+  HIP_CHECK(hipGraphChildGraphNodeGetGraph(embeddedInnerChildNode, &embeddedInner));
+  REQUIRE(embeddedInner != innerGraph);
+
+  SECTION("Update kernel node at nesting depth two") {
+    hipGraphNode_t embeddedKernel = GraphGetUniqueNodeOfType(embeddedInner, hipGraphNodeTypeKernel);
+    // Both inputs become B_d, so C_d = 2 * kMemsetVal0 and no longer depends on A_d.
+    void* kernelArgsUpdated[] = {&B_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
+    kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgsUpdated);
+    HIP_CHECK(hipGraphExecKernelNodeSetParams(graphExec, embeddedKernel, &kernelNodeParams));
+
+    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
+    HIP_CHECK(hipStreamSynchronize(streamForGraph));
+    for (size_t i = 0; i < N; ++i) expected[i] = kMemsetVal0 + kMemsetVal0;
+    HipTest::checkTest(expected.data(), result_h.data(), N);
+  }
+
+  SECTION("Update memset node at nesting depth one of the same graph") {
+    hipGraphNode_t embeddedMemset = GraphGetUniqueNodeOfType(embeddedOuter, hipGraphNodeTypeMemset);
+    memsetParams.value = kMemsetVal1;
+    HIP_CHECK(hipGraphExecMemsetNodeSetParams(graphExec, embeddedMemset, &memsetParams));
+
+    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
+    HIP_CHECK(hipStreamSynchronize(streamForGraph));
+    for (size_t i = 0; i < N; ++i) expected[i] = A_h[i] + kMemsetVal1;
+    HipTest::checkTest(expected.data(), result_h.data(), N);
+  }
+
+  SECTION("Update both nesting levels") {
+    hipGraphNode_t embeddedKernel = GraphGetUniqueNodeOfType(embeddedInner, hipGraphNodeTypeKernel);
+    hipGraphNode_t embeddedMemset = GraphGetUniqueNodeOfType(embeddedOuter, hipGraphNodeTypeMemset);
+
+    memsetParams.value = kMemsetVal1;
+    HIP_CHECK(hipGraphExecMemsetNodeSetParams(graphExec, embeddedMemset, &memsetParams));
+    void* kernelArgsUpdated[] = {&B_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
+    kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgsUpdated);
+    HIP_CHECK(hipGraphExecKernelNodeSetParams(graphExec, embeddedKernel, &kernelNodeParams));
+
+    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
+    HIP_CHECK(hipStreamSynchronize(streamForGraph));
+    for (size_t i = 0; i < N; ++i) expected[i] = kMemsetVal1 + kMemsetVal1;
+    HipTest::checkTest(expected.data(), result_h.data(), N);
+  }
+
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(outerGraph));
+  HIP_CHECK(hipGraphDestroy(innerGraph));
+  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(C_d));
+}
+
+/*
+   An embedded child graph node handle belonging to a different parent graph must not
+   resolve against this graphExec.
+
+   This is a different rejection path from passing the caller's own child graph nodes.
+   Those belong to a plain graph, so the lookup fails immediately when it cannot treat
+   their parent as a child graph node. A foreign embedded node does have a child graph
+   node as its parent, so the lookup recurses, misses, and has to terminate cleanly
+   instead of resolving to the wrong node.
+ */
+HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_NodeFromUnrelatedGraphRejected) {
+  constexpr size_t N = 1024;
+  constexpr size_t Nbytes = N * sizeof(int);
+  constexpr auto blocksPerCU = 6;
+  constexpr auto threadsPerBlock = 256;
+  constexpr int kMemsetVal = 3;
+  size_t NElem{N};
+  unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
+
+  int *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
+  HIP_CHECK(hipMalloc(&A_d, Nbytes));
+  HIP_CHECK(hipMalloc(&B_d, Nbytes));
+  HIP_CHECK(hipMalloc(&C_d, Nbytes));
+
+  std::vector<int> A_h(N), result_h(N), expected(N);
+  for (size_t i = 0; i < N; ++i) A_h[i] = static_cast<int>(i) + 1;
+
+  hipStream_t streamForGraph;
+  HIP_CHECK(hipStreamCreate(&streamForGraph));
+
+  hipMemsetParams memsetParams{};
+  memsetParams.dst = B_d;
+  memsetParams.elementSize = sizeof(int);
+  memsetParams.width = N;
+  memsetParams.height = 1;
+  memsetParams.pitch = 0;
+  memsetParams.value = kMemsetVal;
+
+  void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
+  hipKernelNodeParams kernelNodeParams{};
+  kernelNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
+  kernelNodeParams.gridDim = dim3(blocks);
+  kernelNodeParams.blockDim = dim3(threadsPerBlock);
+  kernelNodeParams.sharedMemBytes = 0;
+  kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
+  kernelNodeParams.extra = nullptr;
+
+  // Builds parent -> child(memset -> kernel) -> D2H and instantiates it.
+  auto buildPipeline = [&](hipGraph_t* childGraph, hipGraph_t* parentGraph,
+                           hipGraphNode_t* childNode, hipGraphExec_t* exec, int* resultHost) {
+    HIP_CHECK(hipGraphCreate(childGraph, 0));
+    hipGraphNode_t cMemset, cKernel;
+    HIP_CHECK(hipGraphAddMemsetNode(&cMemset, *childGraph, nullptr, 0, &memsetParams));
+    HIP_CHECK(hipGraphAddKernelNode(&cKernel, *childGraph, &cMemset, 1, &kernelNodeParams));
+
+    HIP_CHECK(hipGraphCreate(parentGraph, 0));
+    hipGraphNode_t h2d, d2h;
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&h2d, *parentGraph, nullptr, 0, A_d, A_h.data(), Nbytes,
+                                      hipMemcpyHostToDevice));
+    HIP_CHECK(hipGraphAddChildGraphNode(childNode, *parentGraph, &h2d, 1, *childGraph));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&d2h, *parentGraph, childNode, 1, resultHost, C_d, Nbytes,
+                                      hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphInstantiate(exec, *parentGraph, nullptr, nullptr, 0));
+  };
+
+  hipGraph_t childGraphA, graphA, childGraphB, graphB;
+  hipGraphNode_t childNodeA, childNodeB;
+  hipGraphExec_t graphExecA, graphExecB;
+  std::vector<int> resultB(N);
+
+  buildPipeline(&childGraphA, &graphA, &childNodeA, &graphExecA, result_h.data());
+  buildPipeline(&childGraphB, &graphB, &childNodeB, &graphExecB, resultB.data());
+
+  HIP_CHECK(hipGraphLaunch(graphExecA, streamForGraph));
+  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  for (size_t i = 0; i < N; ++i) expected[i] = A_h[i] + kMemsetVal;
+  HipTest::checkTest(expected.data(), result_h.data(), N);
+
+  // Nodes of graphB's embedded child graph: valid nodes, wrong graphExec.
+  hipGraph_t embeddedB = nullptr;
+  HIP_CHECK(hipGraphChildGraphNodeGetGraph(childNodeB, &embeddedB));
+  hipGraphNode_t foreignMemset = GraphGetUniqueNodeOfType(embeddedB, hipGraphNodeTypeMemset);
+  hipGraphNode_t foreignKernel = GraphGetUniqueNodeOfType(embeddedB, hipGraphNodeTypeKernel);
+
+  HIP_CHECK_ERROR(hipGraphExecMemsetNodeSetParams(graphExecA, foreignMemset, &memsetParams),
+                  hipErrorInvalidValue);
+  HIP_CHECK_ERROR(hipGraphExecKernelNodeSetParams(graphExecA, foreignKernel, &kernelNodeParams),
+                  hipErrorInvalidValue);
+
+  // graphB's own top level child graph node is equally foreign to graphExecA.
+  HIP_CHECK_ERROR(hipGraphExecChildGraphNodeSetParams(graphExecA, childNodeB, childGraphA),
+                  hipErrorInvalidValue);
+
+  // The rejected updates must not have disturbed either graph.
+  HIP_CHECK(hipGraphLaunch(graphExecA, streamForGraph));
+  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HipTest::checkTest(expected.data(), result_h.data(), N);
+
+  HIP_CHECK(hipGraphLaunch(graphExecB, streamForGraph));
+  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HipTest::checkTest(expected.data(), resultB.data(), N);
+
+  HIP_CHECK(hipGraphExecDestroy(graphExecA));
+  HIP_CHECK(hipGraphExecDestroy(graphExecB));
+  HIP_CHECK(hipGraphDestroy(graphA));
+  HIP_CHECK(hipGraphDestroy(graphB));
+  HIP_CHECK(hipGraphDestroy(childGraphA));
+  HIP_CHECK(hipGraphDestroy(childGraphB));
+  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(C_d));
 }

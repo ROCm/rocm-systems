@@ -1990,3 +1990,9 @@ graph:
   Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphExecChildGraphNodeSetParams_UpdateNestedChildGraphNodes:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExecChildGraphNodeSetParams_NodeFromUnrelatedGraphRejected:
+    <<: *level_default
+    tags: [node]
