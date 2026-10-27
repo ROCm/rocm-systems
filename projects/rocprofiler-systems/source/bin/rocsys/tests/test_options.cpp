@@ -173,43 +173,63 @@ TEST(options_test, suggest_choice_picks_one_close_name)
     EXPECT_FALSE(suggest_choice("hip", choices).has_value());
 }
 
-TEST(options_test, shipped_table_recognizes_dry_run_and_the_avail_traces_query)
+TEST(options_test, shipped_table_recognizes_dry_run_and_both_traces_rows)
 {
     const auto table = option_table();
-    ASSERT_EQ(table.size(), 2U);
+    ASSERT_EQ(table.size(), 3U);
     EXPECT_EQ(table[0].name, "dry-run");
     EXPECT_EQ(table[0].kind, value_kind::flag);
     EXPECT_EQ(table[0].required_caps, 0U);
     EXPECT_EQ(table[1].name, "traces");
-    EXPECT_EQ(table[1].kind, value_kind::flag);
+    EXPECT_EQ(table[1].kind, value_kind::token_list);
     EXPECT_EQ(table[1].required_caps,
+              static_cast<capability_set>(capability::honours_rocm_tracing));
+    EXPECT_EQ(table[1].min_values, 1U);
+    EXPECT_EQ(table[2].name, "traces");
+    EXPECT_EQ(table[2].kind, value_kind::flag);
+    EXPECT_EQ(table[2].required_caps,
               static_cast<capability_set>(capability::query_only));
 
     const auto* profile = find_verb("profile");
     const auto* avail   = find_verb("avail");
+    const auto* causal  = find_verb("causal");
     ASSERT_NE(profile, nullptr);
     ASSERT_NE(avail, nullptr);
+    ASSERT_NE(causal, nullptr);
     const context ctx{};
     const auto    argv =
-        std::vector<std::string>{ "rocsys",   "profile", "--dry-run", "--preset=quick",
-                                  "--traces", "hip",     "--",        "./app" };
+        std::vector<std::string>{ "rocsys", "profile", "--dry-run", "--traces",
+                                  "hip",    "--",      "./app" };
     auto parsed = parse(make_request(*profile, true, argv, table, ctx));
     ASSERT_TRUE(parsed);
     ASSERT_EQ(parsed.value().options.size(), 2U);
     EXPECT_EQ(parsed.value().options[0].spec->name, "dry-run");
-    EXPECT_EQ(parsed.value().options[1].spec->name, "traces");
-    EXPECT_EQ(parsed.value().passthrough,
-              (std::vector<std::string>{ "--preset=quick", "hip" }));
-    auto checked = validate(std::move(parsed.value()));
-    ASSERT_FALSE(checked);
-    EXPECT_NE(checked.error().error.find("not available for 'profile'"),
-              std::string::npos);
+    EXPECT_EQ(parsed.value().options[1].spec->kind, value_kind::token_list);
+    EXPECT_EQ(parsed.value().options[1].values, (std::vector<std::string>{ "hip" }));
+    EXPECT_TRUE(parsed.value().passthrough.empty());
+    EXPECT_TRUE(validate(parsed.value()));
 
     const auto avail_argv   = std::vector<std::string>{ "rocsys", "avail", "--traces" };
     auto       avail_parsed = parse(make_request(*avail, true, avail_argv, table, ctx));
     ASSERT_TRUE(avail_parsed);
     EXPECT_TRUE(avail_parsed.value().passthrough.empty());
+    EXPECT_EQ(avail_parsed.value().options[0].spec->kind, value_kind::flag);
     EXPECT_TRUE(validate(std::move(avail_parsed.value())));
+
+    const auto valued = std::vector<std::string>{ "rocsys", "avail", "--traces", "hip" };
+    const auto valued_parsed = parse(make_request(*avail, true, valued, table, ctx));
+    ASSERT_FALSE(valued_parsed);
+    EXPECT_NE(valued_parsed.error().error.find("does not take a value"),
+              std::string::npos);
+
+    const auto causal_argv =
+        std::vector<std::string>{ "rocsys", "causal", "--traces", "hip", "--", "./app" };
+    auto causal_parsed = parse(make_request(*causal, true, causal_argv, table, ctx));
+    ASSERT_TRUE(causal_parsed);
+    auto causal_checked = validate(std::move(causal_parsed.value()));
+    ASSERT_FALSE(causal_checked);
+    EXPECT_NE(causal_checked.error().error.find("not available for 'causal'"),
+              std::string::npos);
 }
 
 TEST(options_test, dry_run_after_the_separator_stays_with_the_application)

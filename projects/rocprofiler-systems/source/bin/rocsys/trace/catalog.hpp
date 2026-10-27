@@ -48,9 +48,18 @@ public:
     explicit trace_catalog(options::domain_query query);
 
     /// @brief Expand names into ROCm domains and runtime env keys.
-    ///        An unknown or unavailable name is an error.
+    ///        An unknown or unavailable name is an error. Case, '-' and '_' do not
+    ///        matter.
     [[nodiscard]] result<trace_selection> expand(
         std::span<const std::string> names) const;
+
+    /// @brief True when @p name is a friendly name, a Phase 2 runtime, or an SDK domain.
+    ///        This does not check whether the name is available.
+    [[nodiscard]] bool recognizes(std::string_view name) const;
+
+    /// @brief Names passed to suggestions: friendly names, runtime names, and SDK
+    ///        domains that are not already one of those.
+    [[nodiscard]] std::vector<std::string> names() const;
 
     /// @brief Friendly names, then host runtimes, then the remaining SDK domains.
     [[nodiscard]] std::vector<catalog_entry> entries() const;

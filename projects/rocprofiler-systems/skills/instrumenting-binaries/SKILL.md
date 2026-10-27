@@ -29,6 +29,10 @@ full, current flag list run `rocprof-sys-instrument --help` (use
 | Runs the app | yes, immediately, with `args` | no; run `rocprof-sys-run -- ./app.inst args` later |
 | Arguments after the target | passed to the app | ignored (give them when you run the result) |
 
+- `rocsys instrument --traces kernel -- ./app` and
+  `rocsys rewrite --traces kernel -- ./app` pass the same trace selection.
+  Rewrite stores it in the binary (`--env ROCPROFSYS_ROCM_DOMAINS=...`). Profile
+  the rewritten binary with `rocsys -- ./app.inst`.
 - Pick **runtime** when the performance of the libraries the app loads matters.
 - Pick **binary rewrite** for the lowest overhead, for repeated runs, and for MPI
   applications (upstream guidance).

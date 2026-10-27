@@ -20,6 +20,7 @@ add_library(
     help/renderer.cpp
     options/avail_traces.cpp
     options/parser.cpp
+    options/traces.cpp
     trace/catalog.cpp
     options/table.cpp
     options/validator.cpp

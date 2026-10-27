@@ -106,6 +106,43 @@ Pass ``-o``, ``--output``, or ``-o=`` to choose the path yourself:
 
    rocsys rewrite -o app.inst -- ./app
 
+Selecting what to trace
+======================
+
+``--traces`` chooses the ROCm APIs and host runtimes to trace. It is the same
+flag on ``profile``, ``instrument``, ``rewrite``, ``python`` and ``attach``.
+The names you list are turned on. Every other name ``--traces`` knows is turned
+off, including MPI, which is on by default. rocsys prints a note when that
+happens.
+
+.. code-block:: shell
+
+   rocsys --traces hip kernel -- ./app
+   rocsys instrument --traces kernel -- ./app
+   rocsys rewrite --traces mpi -- ./app
+   rocsys python --traces hip -- script.py
+   rocsys attach --traces kernel -p <pid> -d 5
+
+Names can be separated by spaces or commas, and ``--traces`` can be repeated.
+``hip`` traces the HIP runtime and compiler API. ``memory`` traces both memory
+copies and memory allocations. Host runtimes are ``mpi``, ``openmp``, ``rccl``,
+``ucx`` and ``openshmem``. ``kokkos`` is not a ``--traces`` name.
+
+``rocsys avail --traces`` lists every name, what it expands to, and whether
+this install can use it. It does not run ``rocprof-sys-avail``.
+
+``rocsys rewrite --traces`` stores the settings in the rewritten binary. Profile
+that binary with ``rocsys -- ./app.inst``. A later shell setting or
+``rocprof-sys-run`` flag overrides the built-in value.
+
+``--traces`` cannot be combined with ``--preset``, a preset shortcut such as
+``--balanced``, or ``--export-config``. Use ``--dry-run`` to see the settings
+rocsys would apply. ``causal`` does not accept ``--traces``.
+
+If ``ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING`` is enabled, the library also
+traces KFD page-fault and page-migrate domains. That setting is separate from
+``--traces``.
+
 Call-stack sampling
 ===================
 

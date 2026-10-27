@@ -5,6 +5,7 @@
 
 #include "options/avail_traces.hpp"
 #include "options/dry_run.hpp"
+#include "options/traces.hpp"
 
 #include <array>
 
@@ -14,8 +15,8 @@ namespace rocprofsys::rocsys::options
 std::span<const option_spec>
 option_table() noexcept
 {
-    static constexpr auto k_options =
-        std::to_array<option_spec>({ k_dry_run, k_avail_traces });
+    static const auto k_options =
+        std::to_array<option_spec>({ k_dry_run, k_traces, k_avail_traces });
     return k_options;
 }
 

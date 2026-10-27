@@ -23,6 +23,7 @@ A working `rocprof-sys-avail` binary, built/installed alongside
 | What settings/env vars exist, with descriptions? | `rocprof-sys-avail -S -bd` | `-b` suppresses the current-value/availability column, `-d` adds the description column |
 | What hardware counters are available on my system? | `rocprof-sys-avail -H -bd -A` | `-A`/`--available` restricts to counters this machine can actually use; add `-c CPU` or `-c GPU` to split by device |
 | What ROCm APIs can be traced? | `rocprof-sys-avail -bd -r ROCM_DOMAINS` | Regex-filters settings to the `ROCPROFSYS_ROCM_DOMAINS` row, listing every valid domain (`hip_runtime_api`, `hsa_api`, `kernel_dispatch`, `rccl_api`, `kfd_events`, ...) |
+| Which names does `rocsys --traces` accept, and can this install use them? | `rocsys avail --traces` | Friendly names (`hip`, `hsa`, `kernel`, `memory`, `marker`, `roctx`, `scratch`, `kfd`, `rocshmem`, `rocdecode`, `rocjpeg`, `hipfile`), host runtimes (`mpi`, `openmp`, `rccl`, `ucx`, `openshmem`), and the raw SDK domains. `memory` is copies and allocations. Kokkos is not listed |
 | What operations/API calls exist within one ROCm domain? | `rocprof-sys-avail --list-domains` then `rocprof-sys-avail --list-operations <domain>` | e.g. `--list-operations hip_runtime_api` lists individual HIP calls. Only domains printed by `--list-domains` are accepted: composites must be expanded (`hip_api` → `hip_runtime_api`, `hip_compiler_api`; `hsa_api` → `hsa_core_api`, `hsa_amd_ext_api`, `hsa_image_ext_api`, `hsa_finalize_ext_api`; `kfd_events` → the `kfd_*` domains; `roctx` → `marker_api`), and `kernel_dispatch` has no operation list |
 | What Timemory components can I collect? | `rocprof-sys-avail -C -bd` | add `-A` to restrict to components usable on this build |
 | What settings exist for one topic (tracing, sampling, output, ...)? | `rocprof-sys-avail --list-categories` then `rocprof-sys-avail -S -bd -c settings::<category>` | category names don't always match plain English — it's `settings::trace`, not `settings::tracing` — so always check `--list-categories` first |
@@ -115,8 +116,12 @@ Names found with the commands above are applied through these settings:
   - By default, `busy,temp,power,mem_usage` are enabled.
   - The value `all` collects everything.
   - `ROCPROFSYS_USE_AMD_SMI=OFF` disables this backend entirely.
-- **ROCm API tracing**: set `ROCPROFSYS_ROCM_DOMAINS` to a comma-separated list,
-  e.g. `hip_runtime_api,kernel_dispatch,memory_copy`.
+- **ROCm API tracing**: `rocsys --traces hip kernel -- ./app` selects those APIs
+  and turns the other `--traces` names off. `rocsys avail --traces` lists the
+  names. The same flag works on `profile`, `instrument`, `rewrite`, `python`
+  and `attach`. It cannot be combined with `--preset` or `--export-config`.
+  The underlying setting is still `ROCPROFSYS_ROCM_DOMAINS`, a comma-separated
+  list, e.g. `hip_runtime_api,kernel_dispatch,memory_copy`.
   - Copy names exactly from `rocprof-sys-avail -bd -r ROCM_DOMAINS`: one unknown
     name will fail produce a failure
   - `kfd_events` also needs `HSA_XNACK=1` and an XNACK-capable GPU; check with

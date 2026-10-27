@@ -43,7 +43,8 @@ struct parse_request
 
 /// @brief Pull rocsys options out of the tokens before `--`.
 ///        Unknown long options and short options stay in passthrough, in order.
-///        Repeated options become one @ref parsed_option.
+///        Repeated options become one @ref parsed_option. When two rows share a
+///        name, the row whose required capabilities the verb has is selected.
 [[nodiscard]] result<parsed_command>
 parse(const parse_request& request);
 
