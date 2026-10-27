@@ -110,6 +110,17 @@ public:
   }
 };
 
+class CommandProcessorCacheTestAccess {
+public:
+  static void flush(CommandProcessor &cp, bool completion) {
+    std::lock_guard lock(cp.hw_queue_mutex_);
+    if (completion)
+      cp.completion_->flush_caches();
+    else
+      cp.flush_gpu_caches();
+  }
+};
+
 } // namespace rocjitsu::amdgpu
 
 namespace {
@@ -10022,6 +10033,32 @@ protected:
     }
   }
 };
+
+TEST(CommandProcessorTest, CacheMaintenanceSerializesWithRuntimeWaveStateFlush) {
+  for (bool completion : {false, true}) {
+    SCOPED_TRACE(completion ? "completion" : "queue maintenance");
+    VmFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize());
+    (void)fixture.engine->step();
+    auto *cu = fixture.cu();
+    const uint64_t initial_epoch = cu->instruction_cache().epoch();
+    constexpr uint32_t kFlushCount = 1000;
+    std::barrier start(2);
+    std::thread cp_thread([&] {
+      start.arrive_and_wait();
+      for (uint32_t iteration = 0; iteration < kFlushCount; ++iteration)
+        amdgpu::CommandProcessorCacheTestAccess::flush(*fixture.cp(), completion);
+    });
+    std::thread runtime_thread([&] {
+      start.arrive_and_wait();
+      for (uint32_t iteration = 0; iteration < kFlushCount; ++iteration)
+        cu->with_wave_state_locked([&] { cu->flush_l1(); });
+    });
+    cp_thread.join();
+    runtime_thread.join();
+    EXPECT_EQ(cu->instruction_cache().epoch(), initial_epoch + 2 * kFlushCount);
+  }
+}
 
 TEST_P(AqlQueueFailureConcurrencyTest, DefersCacheFlushUntilWorkersJoin) { check_failure(true); }
 
