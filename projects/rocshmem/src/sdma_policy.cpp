@@ -24,6 +24,8 @@
 
 #include "sdma_policy.hpp"
 
+#include <climits>
+#include <cstdlib>
 #include <vector>
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
@@ -40,6 +42,20 @@ namespace rocshmem {
 
 #if defined(USE_SDMA)
 
+namespace {
+
+// Debug-only hook to exercise the fallback. Read with getenv rather than envvar so it stays out of
+// the documented variables, the help output and rocshmem_info.
+int forcedConnectFailureLocalRank() {
+  const char* value = std::getenv("ROCSHMEM_SDMA_FAIL_CONNECT_LOCAL_RANK");
+  if (value == nullptr || *value == '\0') return -1;
+  char* end = nullptr;
+  const long rank = std::strtol(value, &end, 10);
+  return (*end == '\0' && rank >= 0 && rank <= INT_MAX) ? static_cast<int>(rank) : -1;
+}
+
+}  // namespace
+
 __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
                                      const LocalAllGather& allGather) {
   my_pe = pe;
@@ -53,8 +69,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
   if (numChannels < 1 || numChannels > 8) {
     LOG_ERROR_ABORT("ROCSHMEM_SDMA_NUM_CHANNELS=%d is out of range [1, 8]", numChannels);
   }
-  const bool forceFail =
-      static_cast<int>(envvar::sdma::fail_connect_local_rank) == local_rank;
+  const bool forceFail = forcedConnectFailureLocalRank() == local_rank;
 
   // Get current device
   int deviceId;
