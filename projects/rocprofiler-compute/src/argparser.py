@@ -93,7 +93,7 @@ class DebugAction(argparse.Action):
 
     def __init__(
         self,
-        option_strings: List[str],
+        option_strings: list[str],
         help: str,
         base_action: str,
         debug_enabled: bool = False,
