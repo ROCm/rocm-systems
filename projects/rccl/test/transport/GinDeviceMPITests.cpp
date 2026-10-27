@@ -23,6 +23,7 @@
 #include "nccl_device.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 #ifdef ENABLE_ROCSHMEM_GIN
+#include "gin/gin_anvil_sdma_factory.h"
 #include "gin/gin_host_anvil_sdma.h"
 #endif
 
@@ -137,10 +138,16 @@ std::string anvilSingleNodeReason() {
 
 // AICOMRCCL-3417. The rest of this file requires NCCL_GIN_TYPE. This case is
 // the opposite: unset, so Anvil SDMA and PROXY are both eligible and SDMA
-// would otherwise sort ahead of PROXY on a multi-node communicator.
+// would otherwise sort ahead of PROXY on a multi-host communicator.
 std::string mixedBackendTwoNodeSkipReason() {
   std::string local = ginEnvDisabledReason();
   if (local.empty()) local = cuMemReason();
+#ifndef ENABLE_ROCSHMEM_GIN
+  if (local.empty()) local = "AICOMRCCL-3417 requires ENABLE_ROCSHMEM_GIN";
+#else
+  if (local.empty() && gin_anvil_sdma_probe() <= 0)
+    local = "AICOMRCCL-3417 requires Anvil SDMA (gin_anvil_sdma_probe)";
+#endif
   if (local.empty()) {
     const char* ginType = std::getenv("NCCL_GIN_TYPE");
     if (ginType && ginType[0])
@@ -7886,28 +7893,28 @@ TEST_F(GinProxyNthreadsSplitTests, SplitShare_SecondDevCommPut) {
   runPutWaitRoundTrip(child, getActiveStream());
 }
 
-// Two ranks, two nodes, NCCL_GIN_TYPE unset (AICOMRCCL-3417). Anvil SDMA must
-// not stay active: its factory addresses peers by local device id. PROXY is
+// Two ranks, two physical hosts, NCCL_GIN_TYPE unset (AICOMRCCL-3417). Anvil
+// SDMA must not stay active: its factory addresses peers by local device id,
+// including across hosts in one MNNVL pod where nNodes folds to 1. PROXY is
 // the default, a symmetric window registers, a default DevComm and an explicit
-// PROXY DevComm each complete a cross-node put/signal, and an explicit Anvil
-// DevComm is rejected. Two gfx1250 hosts in one MNNVL (UALoE) pod are one
-// node (comm->nNodes == 1); SDMA stays valid there, so the case skips.
+// PROXY DevComm each complete a cross-host put/signal, and an explicit Anvil
+// DevComm is rejected.
 TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodeUnsetType) {
   if (auto reason = mixedBackendTwoNodeSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
   if (auto reason = mpiCoordinatedSkipReason(
           !validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2,
                                      /*require_power_of_two=*/false, /*min_nodes=*/2, /*max_nodes=*/2),
-          "Requires exactly 2 ranks on 2 nodes");
+          "Requires exactly 2 ranks on 2 hosts");
       !reason.empty())
     GTEST_SKIP() << reason;
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
-  if (auto reason = mpiCoordinatedSkipReason(comm->nNodes < 2, "Both hosts are in one MNNVL (UALoE) pod");
+  if (auto reason = mpiCoordinatedSkipReason(comm->topo->nHosts < 2, "Requires topo->nHosts >= 2");
       !reason.empty())
     GTEST_SKIP() << reason;
-  ASSERT_MPI_EQ(2, comm->nNodes);
+  ASSERT_MPI_EQ(true, comm->topo->nHosts >= 2);
 
   ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
   ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));

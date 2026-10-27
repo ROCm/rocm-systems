@@ -2863,10 +2863,15 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
   if (ginGateAllows(globalGinTypeBitMask, comm)) {
     NCCLCHECKGOTO(ncclGinSetDefaultBackend(comm, globalGinTypeBitMask), ret, fail);
-    if (globalCrossNicSupport) {
-      comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
-    } else if (comm->contiguousRanksPerHost != INT_MAX) {
-      comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+    // SetDefaultBackend may drop every active backend (e.g. Anvil-only on a
+    // multi-host communicator). Keep globalGinSupport NONE so query/connect
+    // do not report a stale FULL/RAIL type with no backends.
+    if (comm->sharedRes->ginState.supported) {
+      if (globalCrossNicSupport) {
+        comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+      } else if (comm->contiguousRanksPerHost != INT_MAX) {
+        comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+      }
     }
   }
   comm->globalRmaProxySupport = globalRmaPluginSupport && globalCrossNicSupport && comm->cuMemGdrSupport;

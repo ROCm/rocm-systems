@@ -446,24 +446,22 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
   if (ginState->finalized) return ncclSuccess;
   std::lock_guard<std::mutex> lock(pluginMutex);
 
-  // Close ALL non-global backends and compact the array.
-  // Anvil SDMA peers are local GPU device ids (gin_anvil_sdma_create). On more
-  // than one node the same id is a different GPU, so leave SDMA out before
-  // connect instead of letting it become backends[0] or fail the whole GIN
-  // bring-up (AICOMRCCL-3417). Single-node ordering is unchanged. A node is
-  // SDMA's reach: one host on MI300X, one MNNVL (UALoE) pod on gfx1250.
+  // Close ALL non-global backends and compact the array. Anvil SDMA addresses
+  // peers by local device id, so it is dropped when more than one physical host
+  // is in the communicator (including multi-host MNNVL where nNodes folds to 1).
   for (int i = 0; i < initialNumActiveBackends; i++) {
     struct ncclGinBackendState* backend = &ginState->backends[i];
 #ifdef ENABLE_ROCSHMEM_GIN
-    const bool anvilMultiNode = comm->nNodes > 1 && backend->ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
+    const bool anvilMultiHost =
+        comm->topo->nHosts > 1 && backend->ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
 #else
-    const bool anvilMultiNode = false;
+    const bool anvilMultiHost = false;
 #endif
-    if (anvilMultiNode || !(BIT(backend->ginType) & globalBitMask)) {
-      if (anvilMultiNode) {
+    if (anvilMultiHost || !(BIT(backend->ginType) & globalBitMask)) {
+      if (anvilMultiHost) {
         INFO(NCCL_INIT | NCCL_NET,
-             "GIN backend ANVIL_SDMA is single-node only; removing it from active backends (nNodes=%d)",
-             comm->nNodes);
+             "GIN backend ANVIL_SDMA is single-host only; removing it from active backends (nHosts=%d)",
+             comm->topo->nHosts);
       } else {
         WARN("GIN backend type %d not supported on all ranks, removing from active backends", backend->ginType);
       }
