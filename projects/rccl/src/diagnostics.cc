@@ -109,12 +109,11 @@ static ncclResult_t ncclDiagDetectTransportMask(struct ncclComm* comm, unsigned 
 
   // The all-gather below is collective: every peer blocks in it. A rank that cannot allocate the
   // per-rank buffer cannot join, and retrying the same allocator would fail the same way, so there
-  // is no way to keep this rank in step. Rather than returning early and leaving its peers to hang
-  // in the all-gather, request a communicator abort (the net ring all-gather polls comm->abortFlag)
-  // and surface the error. This only fires under genuine memory exhaustion, where aborting is right.
+  // is no way to keep this rank in step. Surface the error instead; ncclRunDiagnostics propagates it
+  // and init fails, which tears the job down rather than running the rest of diagnostics out of step.
+  // This only fires under genuine memory exhaustion, where failing is the right outcome.
   if (ncclCalloc(&allPathMasks, comm->nRanks) != ncclSuccess) {
-    WARN("Diagnostics: failed to allocate %d-rank transport-mask buffer; aborting communicator", comm->nRanks);
-    if (comm->abortFlag) __atomic_store_n(comm->abortFlag, 1u, __ATOMIC_RELEASE);
+    WARN("Diagnostics: failed to allocate %d-rank transport-mask buffer", comm->nRanks);
     ret = ncclSystemError;
     goto fail;
   }
@@ -140,7 +139,13 @@ ncclResult_t ncclRunDiagnostics(struct ncclComm* comm) {
   ncclResult_t r;
   unsigned int transportMask = 0;
   r = ncclDiagDetectTransportMask(comm, &transportMask);
-  if (comm->rank == 0 && r != ncclSuccess) DIAG_PRINT("NCCL DIAG [INFO] transport detect returned %d", r);
+  if (r != ncclSuccess) {
+    // Detection is collective, so a failure here (e.g. buffer allocation) means the ranks are no
+    // longer in step. Stop and propagate the error: the caller fails init and the job aborts, rather
+    // than running the checks below out of step.
+    if (comm->rank == 0) DIAG_PRINT("NCCL DIAG [INFO] transport detect returned %d; aborting diagnostics", r);
+    return r;
+  }
 
   // Only exercise ib_write_bw when the communicator uses the network transport across at least two
   // hosts (nNodes counts hosts not connected via MNNVL). The union mask is allgathered and nNodes is

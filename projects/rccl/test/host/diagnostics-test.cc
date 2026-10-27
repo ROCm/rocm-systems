@@ -209,8 +209,6 @@ class DiagnosticsMicrotest : public ::testing::Test {
     comm_->nRanks = nRanks;
     comm_->nNodes = nNodes;
     comm_->bootstrap = reinterpret_cast<void*>(kBootstrapBits);
-    abortFlag_ = 0;
-    comm_->abortFlag = &abortFlag_;
     peerMasks_.assign(nRanks, 0);
   }
 
@@ -265,7 +263,6 @@ class DiagnosticsMicrotest : public ::testing::Test {
   std::vector<std::vector<ncclTopoLinkList>> links_;
   std::vector<unsigned int> peerMasks_;
   unsigned int myMask_ = 0;
-  uint32_t abortFlag_ = 0;
   int gathers_ = 0;
   ncclResult_t gatherResult_ = ncclSuccess;
   std::vector<std::string> checks_;
@@ -492,20 +489,29 @@ TEST_F(DiagnosticsMicrotest, DetectTransportMask_AllGatherFailureLeavesMaskZero)
 }
 
 // A rank that cannot allocate the gather buffer cannot join the collective, and retrying the same
-// allocator would fail the same way. Rather than returning early and leaving peers to hang in the
-// all-gather, diagnostics requests a communicator abort and surfaces the error; it never enters the
-// all-gather. This only fires under genuine memory exhaustion.
-TEST_F(DiagnosticsMicrotest, DetectTransportMask_CallocFailureAbortsCommWithoutJoiningAllGather) {
+// allocator would fail the same way. It surfaces the error without entering the all-gather; the
+// caller propagates it and fails init. This only fires under genuine memory exhaustion.
+TEST_F(DiagnosticsMicrotest, DetectTransportMask_CallocFailureReturnsErrorWithoutJoiningAllGather) {
   BuildComm(2, 0, 2);
   peerMasks_ = {0, Bit(PATH_NET)};
   g_diagnosticsCallocFailAt = 1;
   ncclResult_t ret;
   EXPECT_EQ(Detect(&ret), 0u);
   EXPECT_EQ(ret, ncclSystemError);
-  // The rank never joined the all-gather...
+  // The rank never joined the all-gather.
   EXPECT_EQ(gathers_, 0);
-  // ...and it raised the communicator abort flag so peers are released instead of hanging.
-  EXPECT_EQ(abortFlag_, 1u);
+}
+
+// ncclRunDiagnostics must surface the detection failure and run none of the checks, so init fails
+// and the job aborts instead of the surviving ranks proceeding through the checks out of step.
+TEST_F(DiagnosticsMicrotest, Run_CallocFailureReturnsErrorAndRunsNoChecks) {
+  BuildComm(2, 0, 2);
+  peerMasks_ = {0, Bit(PATH_NET)};
+  g_diagnosticsCallocFailAt = 1;
+  ncclResult_t ret;
+  Run(&ret);
+  EXPECT_EQ(ret, ncclSystemError);
+  EXPECT_TRUE(checks_.empty());
 }
 
 TEST_F(DiagnosticsMicrotest, Run_SingleHostSkipsNetBwAndRunsP2p) {
@@ -551,34 +557,32 @@ TEST_F(DiagnosticsMicrotest, Run_NetBwNeedsBothANetPathAndTwoHosts) {
 
 TEST_F(DiagnosticsMicrotest, Run_NonZeroRankPrintsNothingEvenOnFailures) {
   BuildComm(2, 1, 1);
-  gatherResult_ = ncclRemoteError;
   p2pResult_ = ncclSystemError;
   ncclResult_t ret;
   EXPECT_EQ(Run(&ret), "");
   EXPECT_EQ(ret, ncclSuccess);
   EXPECT_EQ(checks_, (std::vector<std::string>{"p2p"}));
   BuildComm(2, 1, 2);
-  gatherResult_ = ncclSuccess;
   peerMasks_[0] = Bit(PATH_NET);
   EXPECT_EQ(Run(&ret), "");
   EXPECT_EQ(checks_, (std::vector<std::string>{"ib", "p2p"}));
 }
 
-TEST_F(DiagnosticsMicrotest, Run_ReportsDetectAndP2pFailuresButSucceeds) {
+// A failed transport-mask all-gather desyncs the ranks, so diagnostics must abort and run no checks;
+// ncclRunDiagnostics propagates the error so init fails rather than probing out of step.
+TEST_F(DiagnosticsMicrotest, Run_DetectFailureAbortsAndRunsNoChecks) {
   BuildComm(2, 0, 2);
   peerMasks_[1] = Bit(PATH_NET);
   gatherResult_ = ncclRemoteError;
   p2pResult_ = ncclSystemError;
   ncclResult_t ret;
   const std::string out = Run(&ret);
-  EXPECT_EQ(ret, ncclSuccess);
-  EXPECT_EQ(checks_, (std::vector<std::string>{"p2p"}));
+  EXPECT_EQ(ret, ncclRemoteError);
+  EXPECT_TRUE(checks_.empty());
   const std::string expected = kBanner +
                                DiagLine("NCCL DIAG [INFO] transport detect returned " +
-                                        std::to_string(ncclRemoteError)) +
-                               kNetSkipped +
-                               DiagLine("NCCL DIAG [INFO] p2p: check returned " + std::to_string(ncclSystemError));
-  EXPECT_EQ(out.substr(0, expected.size()), expected);
+                                        std::to_string(ncclRemoteError) + "; aborting diagnostics");
+  EXPECT_EQ(out, expected);
 }
 
 TEST_F(DiagnosticsMicrotest, Run_ReportsElapsedMillisecondsAcrossRanks) {
