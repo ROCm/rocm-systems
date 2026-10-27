@@ -196,7 +196,7 @@ release(bool, DEBUG_HIP_MEM_POOL_VMHEAP, true,                                \
         "Enables virtual memory for memory pools")                            \
 release(bool, PAL_HIP_IPC_FLAG, true,                                         \
         "Enable interprocess flag for device allocation in PAL HIP")          \
-release(bool, HIP_OMNICACHE_ENABLE, true,                                     \
+release(bool, OMNICACHE_ENABLE, true,                                         \
         "Opt the process into OmniCache VRAM<->DRAM tiering.")                \
 release(uint, PAL_FORCE_ASIC_REVISION, 0,                                     \
         "Force a specific asic revision for all devices")                     \
