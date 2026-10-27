@@ -11,6 +11,12 @@
 
 namespace rocjitsu::test {
 
+inline constexpr char kUnimplementedInstructionDiagnostic[] =
+    "CU .*could not execute s_rfe_restore_b64.*pc=.*pid=.*qid=.*dispatch=.*unimplemented "
+    "instruction";
+inline constexpr char kDecodeFailureDiagnostic[] =
+    "CU .*could not decode.*pc=.*pid=.*qid=.*dispatch=.*0xbfff0000";
+
 inline bool has_sanitizer_diagnostic(std::string_view output) {
   constexpr std::array markers = {
       "AddressSanitizer",           "LeakSanitizer", "ThreadSanitizer", "MemorySanitizer",

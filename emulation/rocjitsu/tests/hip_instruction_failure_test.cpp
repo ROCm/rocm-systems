@@ -98,15 +98,13 @@ TEST(HipInstructionFailureTest, UnsupportedInstructionExitsWithFailure) {
   EXPECT_EXIT(
       wait_for_instruction_failure(FailureKind::Unsupported), native_instruction_failure,
       rocjitsu::test::ExpectedFailureDiagnostic(
-          "CU .*could not execute s_rfe_restore_b64.*pc=.*pid=.*qid=.*dispatch=.*unimplemented "
-          "instruction"));
+          rocjitsu::test::kUnimplementedInstructionDiagnostic));
 }
 
 TEST(HipInstructionFailureTest, DecodeFailureExitsWithFailure) {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
   EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Decode), native_instruction_failure,
-              rocjitsu::test::ExpectedFailureDiagnostic(
-                  "CU .*could not decode.*pc=.*pid=.*qid=.*dispatch=.*0xbfff0000"));
+              rocjitsu::test::ExpectedFailureDiagnostic(rocjitsu::test::kDecodeFailureDiagnostic));
 }
 
 namespace {
