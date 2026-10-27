@@ -214,11 +214,6 @@ Example usage:
     add_required_args(query_reporter)
     add_required_args(generate_summary)
 
-    # ISA decode options apply to the subcommands that open/decode a database
-    add_decode_args(converter)
-    add_decode_args(query_reporter)
-    add_decode_args(generate_summary)
-
     # converter: add args from any sub-modules
     process_converter_args = []
     process_converter_args.append(output_config.add_args(converter))
@@ -247,6 +242,11 @@ Example usage:
     process_generate_summary_args.append(output_config.add_args(generate_summary))
     process_generate_summary_args.append(summary.add_args(generate_summary))
     process_generate_summary_args.append(time_window.add_args(generate_summary))
+
+    # ISA decode options apply to the subcommands that open/decode a database
+    add_decode_args(converter)
+    add_decode_args(query_reporter, query_profile=True)
+    add_decode_args(generate_summary)
 
     # parse the command line arguments
     args = parser.parse_args(argv)

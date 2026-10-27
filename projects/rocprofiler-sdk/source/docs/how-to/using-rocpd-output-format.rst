@@ -1945,6 +1945,50 @@ One row per collected PC sample. Key columns:
 does not provide unsigned storage. Metadata IDs consistently use ``INTEGER``;
 timestamps and code-object offsets retain the existing ``BIGINT`` declaration.
 
+Execution-mask operations
++++++++++++++++++++++++++
+
+TEXT storage preserves every mask bit, but does not make integer operations
+automatic. SQLite's bitwise operators and ``CAST(... AS INTEGER)`` convert
+decimal text to a signed 64-bit integer. Masks above 2^63 - 1 are clamped, not
+reinterpreted as an unsigned bit pattern. For example, casting the full
+64-lane mask before counting bits gives 63 active lanes instead of 64.
+
+Standard SQLite has no built-in ``popcount``. A client-provided function must
+parse the decimal text without losing the high bit. Python integers can
+represent the full mask; this example registers a connection-local function
+and works with Python 3.6 and later:
+
+.. code-block:: python
+
+   import sqlite3
+
+   def mask_popcount(mask):
+     if mask is None:
+       return None
+     return bin(int(mask)).count("1")
+
+   with sqlite3.connect("results.db") as connection:
+     connection.create_function("mask_popcount", 1, mask_popcount)
+     rows = connection.execute(
+       "SELECT mask_popcount(exec_mask) AS active_lanes, COUNT(*) AS samples "
+       "FROM rocpd_gpu_pc_sample GROUP BY active_lanes"
+     ).fetchall()
+
+On Python 3.10 and later, ``int(mask).bit_count()`` can replace
+``bin(int(mask)).count("1")``. The function above is registered only on that
+connection; it is not a built-in ``rocpd query`` function. For bitwise analysis,
+likewise parse the original decimal text in an unsigned-capable client rather
+than casting it to SQLite INTEGER first.
+
+Compared with INTEGER storage, decimal TEXT uses more bytes and requires
+decimal-to-integer conversion for each evaluated mask. A Python SQL function
+also incurs SQLite-to-Python call overhead. Thus equal results do not imply
+equal performance; measure the intended query and workload. Grouping identical
+``exec_mask`` strings before computing their population counts can reduce
+conversions when many samples share a mask. These costs are separate from
+unpacking architecture-specific blob fields or decoding ISA instructions.
+
 rocpd_blob_event, rocpd_info_blob_schema, rocpd_info_blob_field
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
@@ -1985,6 +2029,40 @@ tracing, from the sample's code-object agent. If neither identifies an agent,
 the writer uses the architecture only when all enumerated GPUs agree. An
 ambiguous architecture uses an ``_unknown_arch`` layout containing only shared
 fields; it is not silently classified as GFX9.
+
+Code-object agent attribution
++++++++++++++++++++++++++++++
+
+For a known code object captured by ``rocprofv3``, its load callback records
+both ``code_object_id`` and the SDK agent ID. ``get_code_object_agent()`` looks
+up that recorded ID, and ``get_agent()`` supplies the GPU target version and
+ROCpd node ID. This does not require ``--kernel-trace``. The load metadata is
+retained when the object unloads; the unload callback flushes pending data
+rather than deleting the mapping. FILE and MEMORY storage types use the same
+mapping path. A ``memory://`` URI can prevent later ISA decoding, but does not
+by itself prevent agent attribution.
+
+The mapping is not unconditional for every sample:
+
+- ``code_object_id = 0`` is ``ROCPROFILER_CODE_OBJECT_ID_NONE``, not a loaded
+  object. A PC outside the parser's registered address ranges has no object
+  mapping. If dispatch correlation also fails, the parser reports
+  ``PCSAMPLE_STATUS_PARSER_ERROR`` and leaves both the object and dispatch IDs
+  unset. An unmapped PC whose dispatch correlation succeeds is instead marked
+  invalid by the parser. Neither case establishes a missing mapping for a
+  successfully identified code object.
+- A nonzero sample ID with no captured load record, or a recorded agent ID
+  absent from the agent metadata, indicates incomplete or inconsistent
+  attribution data. This is a defensive case, not an expected consequence of
+  disabling kernel tracing, unloading a known object, or using MEMORY storage.
+
+ROCpd does not invent a code-object or agent mapping for such records. If no
+parent-dispatch or code-object agent is available, ``agent_id`` remains NULL.
+For stochastic samples, a single shared architecture among enumerated GPUs can
+still select the blob layout without selecting a particular agent. Otherwise
+the unknown-architecture layout preserves only shared fields. An unsupported
+GPU target can also select that layout despite having a valid agent mapping;
+unsupported architecture and missing attribution are distinct conditions.
 
 Joined view
 +++++++++++
