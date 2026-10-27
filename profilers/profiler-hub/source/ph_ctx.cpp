@@ -1,4 +1,5 @@
 #include "ph_ctx.hpp"
+#include "trace_trim.hpp"
 #include "debug.hpp"
 #include "file_probe_failure.hpp"
 #include "ph_future.hpp"
@@ -370,7 +371,8 @@ ph_ctx::accept_trace(std::string_view trace_path)
     return accepted_trace_t{ std::string{ trace_path },
                              ph_schema_version_t{ .major = probe.schema_version.major,
                                                   .minor = probe.schema_version.minor,
-                                                  .patch = probe.schema_version.patch } };
+                                                  .patch = probe.schema_version.patch },
+                             probe.trace_schema };
 }
 
 ph_ctx::ph_ctx(std::string_view trace_path)
@@ -380,6 +382,7 @@ ph_ctx::ph_ctx(std::string_view trace_path)
 ph_ctx::ph_ctx(accepted_trace_t accepted)
 : m_file_path{ std::move(accepted.path) }
 , m_schema_version{ accepted.version }
+, m_trace_schema{ accepted.schema }
 , m_catalog{ std::make_shared<profiler_hub::reader_catalog_t>() }
 {}
 
@@ -547,6 +550,22 @@ ph_schema_version_t
 ph_ctx::get_schema_version()
 {
     return m_schema_version;
+}
+
+ph_result_t
+ph_ctx::trim_trace(uint64_t    start_ts,
+                   uint64_t    end_ts,
+                   const char* output_path,
+                   ph_future*  future)
+{
+    if(output_path == nullptr || output_path[0] == '\0') return PH_RESULT_INVALID_ARGUMENT;
+    if(const ph_result_t ready = wait_until_ready(); ready != PH_RESULT_SUCCESS) return ready;
+
+    const profiler_hub::version_t version{ m_schema_version.major,
+                                           m_schema_version.minor,
+                                           m_schema_version.patch };
+    return profiler_hub::trim_trace_file(
+        m_file_path, output_path, m_trace_schema, version, start_ts, end_ts, future);
 }
 
 ph_track_list_t

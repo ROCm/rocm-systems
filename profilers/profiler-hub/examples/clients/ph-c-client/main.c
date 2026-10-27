@@ -493,7 +493,6 @@ probe_result_name(ph_result_t result)
         case PH_RESULT_SUCCESS: return "success";
         case PH_RESULT_UNSUPPORTED_FILE: return "unsupported_file";
         case PH_RESULT_INVALID_FILE: return "invalid_file";
-        case PH_RESULT_UNSUPPORTED_SCHEMA_VERSION: return "unsupported_schema_version";
         case PH_RESULT_INVALID_ARGUMENT: return "invalid_argument";
         case PH_RESULT_INTERNAL_ERROR: return "internal_error";
         default: return "error";

@@ -842,3 +842,23 @@ ph_lookup_text(ph_ctx_t ctx, uint64_t id, uint32_t kind, const char** text)
         return PH_RESULT_SUCCESS;
     });
 }
+
+ph_result_t
+ph_trim_trace(ph_ctx_t    ctx,
+              uint64_t    start_ts,
+              uint64_t    end_ts,
+              const char* output_path,
+              ph_future_t future)
+{
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(output_path == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+    return run_operation(ctx, future, [=]() -> ph_result_t {
+        return ctx->trim_trace(start_ts, end_ts, output_path, future);
+    });
+}

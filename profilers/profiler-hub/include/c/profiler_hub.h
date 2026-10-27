@@ -27,8 +27,7 @@ extern "C"
      * @return PH_RESULT_SUCCESS when the file is a supported trace,
      *         PH_RESULT_UNSUPPORTED_FILE when it is not a supported format,
      *         PH_RESULT_INVALID_FILE when it is missing, unreadable, or not a
-     *         usable trace, PH_RESULT_UNSUPPORTED_SCHEMA_VERSION when the schema
-     *         version is recognized but not supported, PH_RESULT_INVALID_ARGUMENT
+     *         usable trace, PH_RESULT_INVALID_ARGUMENT
      *         if an argument is null, PH_RESULT_INTERNAL_ERROR on an unexpected
      *         failure.
      * @note The file is opened read-only and is not created or modified.
@@ -48,8 +47,7 @@ extern "C"
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p file_path is null
      *         or @p future already serves an operation,
-     *         PH_RESULT_UNSUPPORTED_FILE, PH_RESULT_INVALID_FILE, or
-     *         PH_RESULT_UNSUPPORTED_SCHEMA_VERSION
+     *         PH_RESULT_UNSUPPORTED_FILE or PH_RESULT_INVALID_FILE
      *         when the file is not a supported trace,
      *         PH_RESULT_CONTEXT_ALLOCATION_FAILED if the context could not be
      *         created or, without a future, the trace could not be read.
@@ -544,6 +542,31 @@ extern "C"
                                uint64_t     id,
                                uint32_t     kind,
                                const char** text);
+
+    /**
+     * @brief Writes a trimmed copy of the trace opened in @p ctx.
+     * @param start_ts Inclusive overlap start, in absolute trace nanoseconds.
+     *        The caller adds the trace origin before calling.
+     * @param end_ts Exclusive overlap end, in absolute trace nanoseconds.
+     * @param output_path File to create. An existing file at this path is
+     *        replaced. It must not be the source trace.
+     * @param future Null to trim before returning. Otherwise a future from
+     *        ph_future_create() that was not passed to an operation yet.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null or the trace failed to load,
+     *         PH_RESULT_INVALID_ARGUMENT if @p output_path is null or names
+     *         the source file, PH_RESULT_INVALID_FILE if the output cannot be
+     *         replaced, PH_RESULT_UNSUPPORTED_FILE if this schema has no trim
+     *         rules, PH_RESULT_CANCELLED if @p future is cancelled.
+     * @note The copy keeps the source schema. Duration rows that overlap the
+     *       window are kept, and rows that belong to those events are kept
+     *       with them. Tables the schema does not describe are copied whole.
+     */
+    ph_result_t ph_trim_trace(ph_ctx_t    ctx,
+                              uint64_t    start_ts,
+                              uint64_t    end_ts,
+                              const char* output_path,
+                              ph_future_t future);
 
 #ifdef __cplusplus
 }

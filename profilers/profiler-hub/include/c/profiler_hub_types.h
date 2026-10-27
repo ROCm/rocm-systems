@@ -33,8 +33,6 @@ extern "C"
                                                      can read. */
         PH_RESULT_INVALID_FILE,              /**< The file is missing, unreadable, or not
                                                      a usable trace. */
-        PH_RESULT_UNSUPPORTED_SCHEMA_VERSION, /**< The trace schema version is recognized
-                                                  but not supported. */
     } ph_result_t;
 
     struct ph_ctx;
