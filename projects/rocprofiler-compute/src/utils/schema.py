@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
-    from utils.metrics.pass_provenance import PassLayout
+    from utils.metrics.pass_layout import PassLayout
 
 import pandas as pd
 
