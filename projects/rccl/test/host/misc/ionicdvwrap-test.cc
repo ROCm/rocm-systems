@@ -22,6 +22,7 @@
 namespace {
 
 // The wrappers only forward these, so they are never dereferenced.
+ibv_context* const kCtx = reinterpret_cast<ibv_context*>(0xB0);
 ibv_qp* const kQp = reinterpret_cast<ibv_qp*>(0xC0);
 ibv_pd* const kPd = reinterpret_cast<ibv_pd*>(0xD0);
 ionic_dv_puec_route* const kRoute = reinterpret_cast<ionic_dv_puec_route*>(0xE0);
@@ -95,6 +96,36 @@ TEST_P(IonicdvwrapMicrotest, SymbolNotLoaded_ReturnsSystemErrorWithEopnotsupp) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Ionicdvwrap, IonicdvwrapMicrotest, ::testing::ValuesIn(kCases), CaseName<WrapCase>);
+
+// UDMA queries report a sentinel instead of failing when libionic lacks them.
+class IonicdvwrapUdmaMicrotest : public ::testing::Test {
+ private:
+  ScopedZeroedTable<ncclIonicdvSymbols> table_{ionicdvSymbols};
+};
+
+TEST_F(IonicdvwrapUdmaMicrotest, CtxGetUdmaCount_SymbolLoaded_ReturnsVerbResult) {
+  ionicdvSymbols.ionicdv_internal_ctx_get_udma_count = [](ibv_context* ctx) -> uint8_t {
+    EXPECT_EQ(ctx, kCtx);
+    return 4;
+  };
+  EXPECT_EQ(wrap_ionicdv_ctx_get_udma_count(kCtx), 4);
+}
+
+TEST_F(IonicdvwrapUdmaMicrotest, CtxGetUdmaCount_SymbolNotLoaded_ReturnsZero) {
+  EXPECT_EQ(wrap_ionicdv_ctx_get_udma_count(kCtx), 0);
+}
+
+TEST_F(IonicdvwrapUdmaMicrotest, QpGetUdmaIdx_SymbolLoaded_ReturnsVerbResult) {
+  ionicdvSymbols.ionicdv_internal_qp_get_udma_idx = [](ibv_qp* qp) -> uint8_t {
+    EXPECT_EQ(qp, kQp);
+    return 2;
+  };
+  EXPECT_EQ(wrap_ionicdv_qp_get_udma_idx(kQp), 2);
+}
+
+TEST_F(IonicdvwrapUdmaMicrotest, QpGetUdmaIdx_SymbolNotLoaded_ReturnsFF) {
+  EXPECT_EQ(wrap_ionicdv_qp_get_udma_idx(kQp), 0xFF);
+}
 
 TEST(IonicdvwrapSymbolsMicrotest, NoAinic_SucceedsWithoutLoadingLibionic) {
   ScopedHook noAinic(g_useAinic, [] { return false; });

@@ -51,7 +51,10 @@ struct IonicProvider {
 #define IONIC_SYM(field) \
   DlSym { "ionic_dv_" #field, "IONIC_1.0", offsetof(ncclIonicdvSymbols, ionicdv_internal_##field) }
   static DlSym Required() { return IONIC_SYM(pd_set_udma_mask); }
-  static std::vector<DlSym> Optional() { return {IONIC_SYM(qp_set_gda), IONIC_SYM(qp_set_puec_plane_route)}; }
+  static std::vector<DlSym> Optional() {
+    return {IONIC_SYM(qp_set_gda), IONIC_SYM(qp_set_puec_plane_route), IONIC_SYM(ctx_get_udma_count),
+            IONIC_SYM(qp_get_udma_idx)};
+  }
 #undef IONIC_SYM
 };
 
