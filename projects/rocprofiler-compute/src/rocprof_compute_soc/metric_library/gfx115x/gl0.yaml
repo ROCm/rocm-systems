@@ -1,5 +1,5 @@
 gl0.ai:
-  name: AI GL0
+  name: GL0 Arithmetic Intensity
   formula: SUM($wave_size * SQ_INSTS_VALU_sum) / (64 * SUM(TCP_REQ_sum))
   unit: FLOPs/Byte
   description: >-
@@ -15,7 +15,7 @@ gl0.busy:
     Each Workgroup Processor has its own GL0/TCP instance. Low utilization may indicate
     compute-bound workloads with minimal memory traffic or idle shader engines.
 gl0.bw:
-  name: GL0 Cache BW (TCP Cache)
+  name: GL0 Cache Bandwidth (TCP Cache)
   formula: 64 * SUM(TCP_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
@@ -25,7 +25,7 @@ gl0.bw:
   peak: $cu_per_gpu * 128 * $max_sclk / 1000
   peak_empirical: $L0Bw_empirical_peak
 gl0.data_fifo_stall:
-  name: Data FIFO Stall
+  name: GL0 Data FIFO Stall
   formula: SUM(TCP_DATA_FIFO_STALL_sum) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
@@ -101,7 +101,7 @@ gl0.rd_req:
   unit: (Requests + $normUnit)
   description: ''
 gl0.ta_req_stall:
-  name: TA Req Stall
+  name: TA Requests Stall
   formula: SUM(TCP_TCP_TA_REQ_STALL_sum) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-

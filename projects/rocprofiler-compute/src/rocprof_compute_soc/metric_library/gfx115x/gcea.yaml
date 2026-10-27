@@ -31,7 +31,7 @@ gcea.dram_rd_req:
     memory. High read request counts indicate memory-intensive workloads that may
     be bandwidth limited.
 gcea.dram_rd_size_32b_increments:
-  name: DRAM Read Size (32B increments)
+  name: DRAM Read Size (32B Increments)
   formula: SUM(GCEA_RDRAM_SIZE_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
@@ -70,14 +70,14 @@ gcea.dram_wr_req:
     write-intensive workloads. Combined with read requests, this shows total memory
     traffic.
 gcea.dram_wr_size_32b_increments:
-  name: DRAM Write Size (32B increments)
+  name: DRAM Write Size (32B Increments)
   formula: SUM(GCEA_WDRAM_SIZE_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
     Total volume of write data transferred to system memory. This quantifies memory
     write bandwidth consumption. High values indicate write-intensive workloads.
 gcea.probe_req:
-  name: Probe Requests
+  name: GCEA Probe Requests
   formula: SUM(GCEA_PRB_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
@@ -85,7 +85,7 @@ gcea.probe_req:
     system components require cache synchronization. High counts may indicate coherency
     traffic impacting performance.
 gcea.rd_returns:
-  name: Read Returns
+  name: GCEA Read Returns
   formula: SUM(GCEA_RRET_VLD_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
@@ -145,7 +145,7 @@ gcea.sysarb_util:
     The arbiter handles traffic between the GPU caches and system memory interface.
     High utilization indicates significant off-chip memory activity.
 gcea.wr_returns:
-  name: Write Returns
+  name: GCEA Write Returns
   formula: SUM(GCEA_WRET_VLD_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-

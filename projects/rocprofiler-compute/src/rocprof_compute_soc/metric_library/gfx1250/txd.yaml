@@ -19,14 +19,14 @@ txd.output_stalled_by_spi_wr_to_shader:
     Percentage of VMW-busy cycles the TXD is stalled because SPI is writing to the
     same shader VGPR bank.
 txd.shader_bus_util_gl0_return:
-  name: TXD-Shader Bus Util - GL0 Return
+  name: TXD-Shader Bus Utilization - GL0 Return
   formula: 100 * SUM(TX_VCD_VC_VGPRS_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
     Percentage of VMW-busy cycles the TXD-to-shader bus is carrying GL0 cache results
     to VGPRs.
 txd.shader_bus_util_lds_return:
-  name: TXD-Shader Bus Util - LDS Return
+  name: TXD-Shader Bus Utilization - LDS Return
   formula: 100 * SUM(TX_VCD_LDS_VGPRS_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-

@@ -176,7 +176,7 @@ gl1.gl1c_req_atomic_with_return:
   unit: (Requests + $normUnit)
   description: Number of returning GL1 atomic requests.
 gl1.gl1c_req_atomic_without_return:
-  name: GL1C Requests - Atomic without Return
+  name: GL1C Requests - Atomic Without Return
   formula: SUM(GL1C_REQ_ATOMIC_WITHOUT_RET_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: Number of non-returning GL1 atomic requests.

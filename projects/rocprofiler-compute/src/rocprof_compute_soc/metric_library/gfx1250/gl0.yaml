@@ -1,5 +1,5 @@
 gl0.ai:
-  name: AI GL0
+  name: GL0 Arithmetic Intensity
   formula: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum)
   unit: FLOPs/Byte
   description: Arithmetic intensity relative to GL0 data bandwidth.
@@ -9,7 +9,7 @@ gl0.atomic_req:
   unit: (Requests + $normUnit)
   description: Number of GL0 atomic requests.
 gl0.capacity_stall_rate:
-  name: Cache Capacity Stall Rate
+  name: GL0 Cache Capacity Stall Rate
   formula: 100 * SUM(TX_VMW_ALLOC_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
@@ -104,7 +104,7 @@ gl0.hit_rate:
   description: GL0 cache hit rate.
   peak: 100
 gl0.lat_fifo_stall_rate:
-  name: Latency FIFO Stall Rate
+  name: GL0 Latency FIFO Stall Rate
   formula: 100 * SUM(TX_VMW_LFIFO_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
@@ -115,13 +115,13 @@ gl0.lookup_hit_rate:
   unit: Percent
   description: GL0 cache lookup hit rate.
 gl0.ram_bank_conflict_stall_rate_rd:
-  name: Cache RAM Bank Conflict Stall Rate - Read
+  name: GL0 Cache RAM Bank Conflict Stall Rate - Read
   formula: 100 * SUM(TX_VMW_READ_DATACONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
     Percentage of VMW-busy cycles a GL0 SRAM read is stalled due to a bank conflict.
 gl0.ram_bank_conflict_stall_rate_wr:
-  name: Cache RAM Bank Conflict Stall Rate - Write
+  name: GL0 Cache RAM Bank Conflict Stall Rate - Write
   formula: 100 * SUM(TX_VMW_WRITE_DATACONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
@@ -143,13 +143,13 @@ gl0.req_lat:
   unit: Cycles
   description: Average GL0 cache request latency.
 gl0.req_stall_rate:
-  name: Request Stall Rate
+  name: GL0 Request Stall Rate
   formula: 100 * SUM(TX_VMW_VMW_VCA_REQ_STALL_sum) / SUM(TX_VMW_GATE_EN1_sum)
   unit: Percent
   description: >-
     Percentage of VMW-busy cycles the GL0 cache cannot accept a new request.
 gl0.return_queue_pending_stall_rate:
-  name: Return Queue Pending Stall Rate
+  name: GL0 Return Queue Pending Stall Rate
   formula: 100 * SUM(TX_VMW_GL1_PENDING_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
@@ -160,62 +160,62 @@ gl0.sector_lookup_hit_rate:
   unit: Percent
   description: GL0 cache sector-level lookup hit rate.
 gl0.segment_conflict_stall_rate_cache:
-  name: Segment Conflict Stall Rate - Cache
+  name: GL0 Segment Conflict Stall Rate - Cache
   formula: 100 * SUM(TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_VC_STALLED_CYCLES_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
     Percentage of VMW-busy cycles the GL0 cache is stalled due to a cross-port segment
     conflict.
 gl0.set_conflict_stall_rate_atomics:
-  name: Set Conflict Stall Rate - Atomics
+  name: GL0 Set Conflict Stall Rate - Atomics
   formula: 100 * SUM(TX_VMW_ATOMIC_SETCONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
     Percentage of VMW-busy cycles a GL0 atomic is stalled due to a cache set conflict.
 gl0.set_conflict_stall_rate_cache_rd:
-  name: Set Conflict Stall Rate - Cache Read
+  name: GL0 Set Conflict Stall Rate - Cache Read
   formula: 100 * SUM(TX_VMW_READ_SETCONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
     Percentage of VMW-busy cycles a GL0 read is stalled due to a cache set conflict.
 gl0.set_conflict_stall_rate_cache_wr:
-  name: Set Conflict Stall Rate - Cache Write
+  name: GL0 Set Conflict Stall Rate - Cache Write
   formula: 100 * SUM(TX_VMW_WRITE_SETCONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
     Percentage of VMW-busy cycles a GL0 write is stalled due to a cache set conflict.
 gl0.set_conflict_stall_same_port:
-  name: Set Conflict Stall - Same Port
+  name: GL0 Set Conflict Stall - Same Port
   formula: 100 * SUM(TX_VMW_SET_CONFLICT_STALL_SAME_PORT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
     Percentage of VMW-busy cycles stalled due to a same-port GL0 set conflict.
 gl0.slot_hit_rate:
-  name: Slot Hit Rate
+  name: GL0 Slot Hit Rate
   formula: 100 * SUM(TX_VMW_SLOT_HIT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
     Percentage of VMW-busy cycles a GL0 cache access hits a valid slot.
 gl0.slot_replacement_rate:
-  name: Slot Replacement Rate
+  name: GL0 Slot Replacement Rate
   formula: 100 * SUM(TX_VMW_SLOT_REPLACEMENT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
     Percentage of VMW-busy cycles a GL0 cache slot is being replaced.
 gl0.slot_replacement_stall_cross_port:
-  name: Slot Replacement Stall - Cross Port
+  name: GL0 Slot Replacement Stall - Cross Port
   formula: 100 * SUM(TX_VMW_SLOT_STALL_CROSS_PORT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
     Percentage of VMW-busy cycles stalled due to a cross-port slot replacement.
 gl0.slot_replacement_stall_same_port:
-  name: Slot Replacement Stall - Same Port
+  name: GL0 Slot Replacement Stall - Same Port
   formula: 100 * SUM(TX_VMW_SLOT_STALL_SAME_PORT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
     Percentage of VMW-busy cycles stalled due to a same-port slot replacement.
 gl0.total_conflict_stall_rate:
-  name: Cache Total Conflict Stall Rate
+  name: GL0 Cache Total Conflict Stall Rate
   formula: 100 * SUM(TX_VMW_TOTAL_CONFLICT_STALLS_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-
@@ -352,7 +352,7 @@ gl0.wr_sectors:
   unit: (Count + $normUnit)
   description: Number of GL0 cache sectors written.
 gl0.wr_stall_rate_gl1_rd_return:
-  name: Cache Write Stall Rate - GL1 Read Return
+  name: GL0 Cache Write Stall Rate - GL1 Read Return
   formula: 100 * SUM(TX_VMW_GL1_VMW_RDRET_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: >-

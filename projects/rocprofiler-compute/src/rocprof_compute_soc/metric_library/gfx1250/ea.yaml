@@ -56,60 +56,60 @@ ea.io_bw_wr:
   description: >-
     Total write bandwidth to host CPU memory (pinned or mapped) through the EA.
 ea.outstanding_req:
-  name: Outstanding Requests
+  name: EA Outstanding Requests
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_ALL_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: Average number of in-flight requests from EA to SDP.
 ea.outstanding_req_dram_rd:
-  name: Outstanding Requests - DRAM Read
+  name: EA Outstanding Requests - DRAM Read
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: Average in-flight HBM read requests from EA to SDP.
 ea.outstanding_req_dram_wr:
-  name: Outstanding Requests - DRAM Write
+  name: EA Outstanding Requests - DRAM Write
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: Average in-flight HBM write requests from EA to SDP.
 ea.outstanding_req_gmi_rd:
-  name: Outstanding Requests - GMI Read
+  name: EA Outstanding Requests - GMI Read
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_GMI_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: Average in-flight GMI read requests from EA to SDP.
 ea.outstanding_req_gmi_wr:
-  name: Outstanding Requests - GMI Write
+  name: EA Outstanding Requests - GMI Write
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_GMI_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: Average in-flight GMI write requests from EA to SDP.
 ea.outstanding_req_hdm_rd:
-  name: Outstanding Requests - HDM Read
+  name: EA Outstanding Requests - HDM Read
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_HDM_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: Average in-flight HDM read requests from EA to SDP.
 ea.outstanding_req_hdm_wr:
-  name: Outstanding Requests - HDM Write
+  name: EA Outstanding Requests - HDM Write
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_HDM_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: Average in-flight HDM write requests from EA to SDP.
 ea.outstanding_req_io_rd:
-  name: Outstanding Requests - IO Read
+  name: EA Outstanding Requests - IO Read
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_IO_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
     Average in-flight PCI-E and other IO read requests from EA to SDP.
 ea.outstanding_req_io_wr:
-  name: Outstanding Requests - IO Write
+  name: EA Outstanding Requests - IO Write
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_IO_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
     Average in-flight PCI-E and other IO write requests from EA to SDP.
 ea.outstanding_req_probe_req:
-  name: Outstanding Requests - Probe Request
+  name: EA Outstanding Requests - Probe Request
   formula: SUM(GC_EA_SE_PROBE_OUTSTANDING_REQ_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
     Time-averaged number of in-flight cache coherence probe requests from EA.
 ea.outstanding_req_probe_response:
-  name: Outstanding Requests - Probe Response
+  name: EA Outstanding Requests - Probe Response
   formula: SUM(GC_EA_SE_PROBE_OUTSTANDING_RESP_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: Average in-flight cache coherence probe responses from EA.

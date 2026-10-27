@@ -70,7 +70,7 @@ glarb.glarbc_req_atomic_with_return:
   unit: (Requests + $normUnit)
   description: Number of returning Graphics Level Arbiter atomic requests.
 glarb.glarbc_req_atomic_without_return:
-  name: GLARBC Requests - Atomic without Return
+  name: GLARBC Requests - Atomic Without Return
   formula: SUM(GLARBC_REQ_ATOMIC_WITHOUT_RET_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-

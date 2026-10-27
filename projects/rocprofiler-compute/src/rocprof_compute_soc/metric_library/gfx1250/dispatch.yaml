@@ -51,7 +51,7 @@ dispatch.workgroup_size:
   unit: Work-items
   description: Number of work-items per workgroup.
 dispatch.workgroups_per_wgp:
-  name: Workgroups
+  name: Workgroups per WGP
   formula: AVG(Grid_Size / Workgroup_Size) / $cu_per_gpu
   unit: Workgroups per WGP
   description: >-

@@ -23,7 +23,7 @@ gl2.ea_wr_req_dram:
     Efficiency Arbiter). These include evictions and writebacks going toward system
     memory. High counts indicate write-intensive workloads consuming memory bandwidth.
 gl2.fabric_rd_bw:
-  name: GL2-Fabric Read BW
+  name: GL2-Fabric Read Bandwidth
   formula: SUM(GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_RDREQ_128B_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
@@ -33,7 +33,7 @@ gl2.fabric_rd_bw:
     populated in sysinfo (max MEM clock from amd-smi).
   peak: $max_mclk * 4 * $num_memory_channels * 4 / 1000
 gl2.fabric_wr_bw:
-  name: GL2-Fabric Write BW
+  name: GL2-Fabric Write Bandwidth
   formula: SUM(GL2C_EA_WRREQ_64B_sum * 64 + NOISE_CLAMP(GL2C_MC_WRREQ_sum - GL2C_EA_WRREQ_64B_sum, GL2C_MC_WRREQ_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
@@ -88,7 +88,7 @@ gl2.util:
   unit: Percent
   description: ''
 gl2.wr_bw:
-  name: GL2 Cache Write BW
+  name: GL2 Cache Write Bandwidth
   formula: 64 * SUM(GL2C_WRITE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-

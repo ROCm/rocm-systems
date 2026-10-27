@@ -68,7 +68,7 @@ gl1.hit_rate:
     traffic to the L2 cache and improve performance.
   peak: 100
 gl1.lfifo_full_stall:
-  name: LFIFO Full Stall
+  name: GL1 LFIFO Full Stall
   formula: SUM(GL1C_STALL_LFIFO_FULL_sum) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-

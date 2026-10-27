@@ -47,7 +47,7 @@ sl1d.hits_per_req:
   unit: Percent
   description: Scalar Data Cache hit rate.
 sl1d.interface_stall_rate:
-  name: Interface Stall Rate
+  name: Dcache Interface Stall Rate
   formula: 100 * SUM(SQC_TC_STALL_sum) / SUM(SQ_BUSY_CYCLES_sum)
   unit: Percent
   description: Percentage of cycles the SQC-GL1 interface is stalled.
