@@ -15,6 +15,7 @@
 #include "graph.h"
 #include "utils.h"
 #include "param.h"
+#include "ib_gid_utils.h"
 #include "profiler/net_ib.h"
 
 #include <pthread.h>
@@ -796,15 +797,12 @@ static inline void printIbWcStatusHint(int status) {
   }
 }
 
-// GID Format
-// global:  |              64b  - subnet-prefix                |                 64b - EUI                          |
-// raw   :  | 10b fixed | 22b 0 | 16b FLID | 16b subnet-prefix |                 64b - EUI                          |
 static uint16_t ncclIbExtractLocalSubnetPrefix(uint64_t subnet_prefix) {
-  return (be64toh(subnet_prefix) & 0xffff);
+  return ncclIbGidSubnetPrefix16(subnet_prefix);
 }
 
 static int ncclIbExtractFlid(union ibv_gid* gid) {
-  return ntohs(*((uint16_t*)((uintptr_t)(gid->raw) + 4)));
+  return ncclIbGidFlid(gid->raw);
 }
 
 #endif

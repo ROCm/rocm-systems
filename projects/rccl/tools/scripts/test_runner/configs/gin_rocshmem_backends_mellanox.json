@@ -263,7 +263,7 @@
       "num_gpus": 1,
       "timeout": 120,
       "tests": [
-        { "name": "Gin_Mtu_Negotiation", "description": "ibv_mtu<->int conversion and per-peer path-MTU negotiation", "test_filter": "GinMtuNegotiation.*" }
+        { "name": "Gin_Mtu_Negotiation", "description": "ibv_mtu<->int conversion, per-peer path-MTU negotiation and IB GID selection", "test_filter": "GinMtuNegotiation.*:GinGidSelection.*" }
       ]
     }
   },

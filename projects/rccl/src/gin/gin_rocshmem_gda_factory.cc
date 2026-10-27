@@ -40,6 +40,8 @@
 
 #include "gin/gin_rocshmem_gda_factory.h"
 #include "dv_dlopen.h"
+#include "ib_gid_utils.h"
+#include "param.h"
 #include "gin_rocshmem_gda_inspect.h"
 #include <gda/queue_pair_provider.hpp>
 #include <gda/ibv_wrapper.hpp>
@@ -64,8 +66,6 @@
 #include <string>
 #include <dlfcn.h>
 #include <cassert>
-#include <endian.h>
-#include <arpa/inet.h>
 
 // Provider headers for types and structures
 #if defined(GDA_IONIC)
@@ -262,6 +262,15 @@ static GDAProvider gin_detect_provider(struct ibv_device_attr* attr) {
   return GDAProvider::UNSET;
 }
 
+NCCL_PARAM(GinRocshmemRoutableFlidGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
+
+// Mirrors ncclIbGetGidIndex()'s IB branch: prefer the routable-FLID GID when it has a nonzero FLID,
+// otherwise keep first_ib_idx.
+static int gin_select_ib_gid_index(const struct ibv_gid_entry* entries, int n, int first_ib_idx, int routable_idx) {
+  if (routable_idx >= 0 && routable_idx < n && ncclIbGidFlid(entries[routable_idx].gid.raw) != 0) return routable_idx;
+  return first_ib_idx;
+}
+
 static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
   struct ibv_device** dev_list = nullptr;
   int ndev = 0;
@@ -350,12 +359,12 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
         union ibv_gid* g = &gid_entries[i].gid;
         uint32_t gtype = gid_entries[i].gid_type;
 
-        // IB mode: use immediately
+        // IB mode: use immediately, preferring the routable-FLID GID so cross-subnet peers are reachable
         if (gtype == IBV_GID_TYPE_IB) {
-          selected_idx = i;
-          selected_type = gtype;
-          set->nic.gid = *g;
-          set->nic.gid_index = i;
+          selected_idx = gin_select_ib_gid_index(gid_entries, n, i, (int)ncclParamGinRocshmemRoutableFlidGidIndex());
+          selected_type = gid_entries[selected_idx].gid_type;
+          set->nic.gid = gid_entries[selected_idx].gid;
+          set->nic.gid_index = selected_idx;
           break;
         }
 
@@ -850,18 +859,7 @@ static int gin_modify_qps_rst_to_init(rocshmem_gin_qp_set* set) {
   return 0;
 }
 
-// GID Format
-// global:  |              64b  - subnet-prefix                |                 64b - EUI                          |
-// raw   :  | 10b fixed | 22b 0 | 16b FLID | 16b subnet-prefix |                 64b - EUI                          |
-static uint16_t ginExtractLocalSubnetPrefix(uint64_t subnet_prefix) {
-  return (be64toh(subnet_prefix) & 0xffff);
-}
-
-static int ginExtractFlid(union ibv_gid* gid) {
-  return ntohs(*((uint16_t*)((uintptr_t)(gid->raw) + 4)));
-}
-
-static int ginIbvMtuToInt(enum ibv_mtu mtu) {
+static int gin_ibv_mtu_to_int(enum ibv_mtu mtu) {
   switch (mtu) {
   case IBV_MTU_256: return 256;
   case IBV_MTU_512: return 512;
@@ -876,8 +874,8 @@ static int ginIbvMtuToInt(enum ibv_mtu mtu) {
 
 // Mirrors connect.cc's std::min(remDevInfo->mtu, ibDev->portAttr.active_mtu). Caller must have
 // already validated local_mtu.
-static int ginNegotiatePathMtu(enum ibv_mtu local_mtu, enum ibv_mtu remote_mtu, enum ibv_mtu* out) {
-  if (ginIbvMtuToInt(remote_mtu) == 0) return -1;
+static int gin_negotiate_path_mtu(enum ibv_mtu local_mtu, enum ibv_mtu remote_mtu, enum ibv_mtu* out) {
+  if (gin_ibv_mtu_to_int(remote_mtu) == 0) return -1;
   *out = (local_mtu < remote_mtu) ? local_mtu : remote_mtu;
   return 0;
 }
@@ -885,16 +883,26 @@ static int ginNegotiatePathMtu(enum ibv_mtu local_mtu, enum ibv_mtu remote_mtu, 
 // Test-only wrappers declared in gin_rocshmem_gda_inspect.h; no extra build guard needed since
 // this TU only compiles under ENABLE_ROCSHMEM_GIN already.
 extern "C" int ginTestIbvMtuToInt(int mtu) {
-  return ginIbvMtuToInt(static_cast<enum ibv_mtu>(mtu));
+  return gin_ibv_mtu_to_int(static_cast<enum ibv_mtu>(mtu));
 }
 
 extern "C" int ginTestNegotiatePathMtu(int local_mtu, int remote_mtu, int* out_mtu) {
-  if (ginIbvMtuToInt(static_cast<enum ibv_mtu>(local_mtu)) == 0) return -1;
+  if (gin_ibv_mtu_to_int(static_cast<enum ibv_mtu>(local_mtu)) == 0) return -1;
   enum ibv_mtu out;
-  int rc = ginNegotiatePathMtu(static_cast<enum ibv_mtu>(local_mtu), static_cast<enum ibv_mtu>(remote_mtu), &out);
+  int rc = gin_negotiate_path_mtu(static_cast<enum ibv_mtu>(local_mtu), static_cast<enum ibv_mtu>(remote_mtu), &out);
   if (rc != 0) return rc;
-  *out_mtu = ginIbvMtuToInt(out);
+  *out_mtu = gin_ibv_mtu_to_int(out);
   return 0;
+}
+
+extern "C" int ginTestSelectIbGidIndex(const unsigned char (*gid_raw)[16], int n, int first_ib_idx, int routable_idx) {
+  std::vector<struct ibv_gid_entry> entries(n);
+  for (int i = 0; i < n; i++) {
+    memset(&entries[i], 0, sizeof(entries[i]));
+    memcpy(entries[i].gid.raw, gid_raw[i], 16);
+    entries[i].gid_type = IBV_GID_TYPE_IB;
+  }
+  return gin_select_ib_gid_index(entries.data(), n, first_ib_idx, routable_idx);
 }
 
 static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_info* remote_info) {
@@ -914,14 +922,15 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
              IBV_QP_MIN_RNR_TIMER;
 
   enum ibv_mtu local_mtu = set->nic.portinfo.active_mtu;
-  if (ginIbvMtuToInt(local_mtu) == 0) {
+  if (gin_ibv_mtu_to_int(local_mtu) == 0) {
     return -1;
   }
 
   set->negotiated_mtu.resize(set->nRanks);
+  bool warned_zero_flid = false;
 
   for (int i = 0; i < set->nRanks; i++) {
-    if (ginNegotiatePathMtu(local_mtu, remote_info[i].active_mtu, &attr.path_mtu) != 0) {
+    if (gin_negotiate_path_mtu(local_mtu, remote_info[i].active_mtu, &attr.path_mtu) != 0) {
       return -1;
     }
     set->negotiated_mtu[i] = attr.path_mtu;
@@ -934,22 +943,22 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
       attr.ah_attr.grh.traffic_class = set->traffic_class;
       memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
     } else {
-      // Mirrors transport/net_ib/connect.cc::ncclIbQpRtr(), but doesn't prefer a routable-FLID
-      // sgid_index like ncclIbGetGidIndex() does.
-      bool sameSubnet = (ginExtractLocalSubnetPrefix(set->nic.gid.global.subnet_prefix) ==
-                         ginExtractLocalSubnetPrefix(remote_info[i].gid.global.subnet_prefix));
+      // Mirrors transport/net_ib/connect.cc::ncclIbQpRtr().
+      bool sameSubnet = (ncclIbGidSubnetPrefix16(set->nic.gid.global.subnet_prefix) ==
+                         ncclIbGidSubnetPrefix16(remote_info[i].gid.global.subnet_prefix));
       bool needGlobal = !sameSubnet || (set->nic.portinfo.flags & IBV_QPF_GRH_REQUIRED);
       attr.ah_attr.is_global = 0;
       memset(&attr.ah_attr.grh, 0, sizeof(attr.ah_attr.grh));
       attr.ah_attr.dlid = remote_info[i].lid;
       if (needGlobal) {
         if (!sameSubnet) {
-          uint16_t flid = ginExtractFlid(&remote_info[i].gid);
+          uint16_t flid = ncclIbGidFlid(remote_info[i].gid.raw);
           if (flid != 0) {
             attr.ah_attr.dlid = flid;
-          } else {
+          } else if (!warned_zero_flid) {
+            warned_zero_flid = true;
             LOG_WARN("GIN QP factory: remote FLID is zero even though endpoints are on different "
-                     "subnets, using dlid as fallback");
+                     "subnets, using dlid as fallback (further occurrences suppressed)");
           }
         }
         attr.ah_attr.is_global = 1;
@@ -1106,7 +1115,7 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
       uint32_t msn_tbl_sz  = bnxt_qps[idx].msn_tbl_sz;
       uint32_t psn_sz_log2 = bit_log2(bnxt_qps[idx].mem_info.sq_psn_sz);
       // Negotiated (not local-only) MTU: feeds fill_psns_for_msntbl's packet-count math.
-      uint32_t mtu         = ginIbvMtuToInt(negotiated_mtu[idx]);
+      uint32_t mtu         = gin_ibv_mtu_to_int(negotiated_mtu[idx]);
 
       void*    cq_buf   = bnxt_scqs[idx].buf;
       uint32_t cq_depth = bnxt_scqs[idx].depth;

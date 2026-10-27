@@ -19,6 +19,9 @@ int ginTestIbvMtuToInt(int mtu);
 /* Returns -1 without touching *out_mtu if remote_mtu is invalid. */
 int ginTestNegotiatePathMtu(int local_mtu, int remote_mtu, int* out_mtu);
 
+/* gid_raw holds n 16-byte GIDs; returns the index gin_select_ib_gid_index() would pick. */
+int ginTestSelectIbGidIndex(const unsigned char (*gid_raw)[16], int n, int first_ib_idx, int routable_idx);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

@@ -228,6 +228,7 @@ set(SRC_FILES
   include/graph.h
   include/group.h
   include/hip_rocm_version_info.h
+  include/ib_gid_utils.h
   include/ibvcore.h
   include/ibvsymbols.h
   include/ibvwrap.h

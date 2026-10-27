@@ -8,7 +8,10 @@
 
 #if defined(ENABLE_ROCSHMEM_GIN)
 
+#include <cstring>
+
 #include "ibvcore.h"
+#include "ib_gid_utils.h"
 #include "gin_rocshmem_gda_inspect.h"
 
 namespace {
@@ -54,6 +57,31 @@ TEST(GinMtuNegotiation, NegotiateRejectsInvalidLocalMtu) {
   int out = -1;
   EXPECT_EQ(ginTestNegotiatePathMtu(0, IBV_MTU_4096, &out), -1);
   EXPECT_EQ(out, -1);  // untouched on failure
+}
+
+// GID raw layout: bytes 4-5 hold the FLID (network order), bytes 6-7 the subnet prefix.
+TEST(GinGidSelection, GidFlidAndSubnetExtraction) {
+  uint8_t raw[16] = {0xfe, 0x80, 0, 0, 0x12, 0x34, 0xab, 0xcd};
+  EXPECT_EQ(ncclIbGidFlid(raw), 0x1234);
+  uint64_t prefix;
+  memcpy(&prefix, raw, sizeof(prefix));
+  EXPECT_EQ(ncclIbGidSubnetPrefix16(prefix), 0xabcd);
+}
+
+TEST(GinGidSelection, PrefersRoutableGidWithFlid) {
+  unsigned char gids[2][16] = {{0xfe, 0x80}, {0xfe, 0x80, 0, 0, 0x00, 0x2a}};
+  EXPECT_EQ(ginTestSelectIbGidIndex(gids, 2, 0, 1), 1);
+}
+
+TEST(GinGidSelection, FallsBackWhenRoutableFlidIsZero) {
+  unsigned char gids[2][16] = {{0xfe, 0x80}, {0xfe, 0x80}};
+  EXPECT_EQ(ginTestSelectIbGidIndex(gids, 2, 0, 1), 0);
+}
+
+TEST(GinGidSelection, FallsBackWhenRoutableIndexOutOfRange) {
+  unsigned char gids[1][16] = {{0xfe, 0x80}};
+  EXPECT_EQ(ginTestSelectIbGidIndex(gids, 1, 0, 1), 0);
+  EXPECT_EQ(ginTestSelectIbGidIndex(gids, 1, 0, -1), 0);
 }
 
 }  // namespace
