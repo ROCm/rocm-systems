@@ -70,6 +70,9 @@ enum backend_tag : int
     operation_settings_marker_core_api_skip     = 107,
     buffered_domains_kfd_below_boundary_version = 108,
     buffered_domains_kfd_at_boundary_version    = 109,
+    supported_domain_names                      = 110,
+    supported_domain_names_pre_1_0              = 111,
+    supported_domain_names_rocshmem_hipfile     = 112,
 };
 
 // tracing_config no longer caches get_version()/get_callback_tracing_names()/
@@ -156,6 +159,23 @@ struct tagged_backend<buffered_domains_kfd_at_boundary_version>
 template <>
 struct tagged_backend<callback_domains_rocshmem_hipfile_supported>
 : cached_backend_methods<callback_domains_rocshmem_hipfile_supported, mock_backend>
+{
+    static constexpr std::uint32_t compile_time_version = 10305U;
+};
+
+// 500 is rocprofiler-sdk 0.5.0: before RCCL, OMPT, memory allocation, and KFD,
+// and still on the legacy page_migration domain.
+template <>
+struct tagged_backend<supported_domain_names_pre_1_0>
+: cached_backend_methods<supported_domain_names_pre_1_0, mock_backend>
+{
+    static constexpr std::uint32_t compile_time_version = 500U;
+};
+
+// 10305 is rocprofiler-sdk 1.3.5: ROCSHMEM (>= 1.3.4) and HIPFILE (>= 1.3.5).
+template <>
+struct tagged_backend<supported_domain_names_rocshmem_hipfile>
+: cached_backend_methods<supported_domain_names_rocshmem_hipfile, mock_backend>
 {
     static constexpr std::uint32_t compile_time_version = 10305U;
 };
@@ -1239,6 +1259,83 @@ TEST_F(tracing_config_domains_test,
     EXPECT_THAT(sut::get_backtrace_operations(backend_t::BUFFER_TRACING_MEMORY_COPY),
                 gtest::UnorderedElementsAre(k_memory_copy_host_to_device,
                                             k_memory_copy_device_to_host));
+}
+
+// ─── get_supported_domain_names ───────────────────────────────────────────────
+//
+// The names are the keys of the compiled callback and buffered domain maps.
+// The mock's default compile_time_version is 1.3.1 (10301): KFD and memory
+// allocation are in, page_migration is out, and ROCSHMEM / HIPFILE are not yet.
+
+TEST_F(tracing_config_test, get_supported_domain_names_returns_compiled_header_map_keys)
+{
+    using sut =
+        tracing_config<tagged_backend<supported_domain_names>, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
+    EXPECT_THAT(sut::get_supported_domain_names(),
+                gtest::ElementsAre(
+                    "code_object", "hip_api", "hip_compiler_api", "hip_runtime_api",
+                    "hsa_amd_ext_api", "hsa_api", "hsa_core_api", "hsa_finalize_ext_api",
+                    "hsa_image_ext_api", "kernel_dispatch", "kfd_event_dropped_events",
+                    "kfd_event_page_fault", "kfd_event_page_migrate", "kfd_event_queue",
+                    "kfd_event_unmap_from_gpu", "kfd_events", "kfd_page_fault",
+                    "kfd_page_migrate", "kfd_queue", "marker_api", "marker_core_api",
+                    "memory_allocation", "memory_copy", "ompt", "rccl_api", "roctx",
+                    "scratch_memory"));
+}
+
+TEST_F(tracing_config_test, get_supported_domain_names_pre_1_0_keeps_page_migration)
+{
+    using sut = tracing_config<tagged_backend<supported_domain_names_pre_1_0>,
+                               mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
+    EXPECT_THAT(sut::get_supported_domain_names(),
+                gtest::ElementsAre("code_object", "hip_api", "hip_compiler_api",
+                                   "hip_runtime_api", "hsa_amd_ext_api", "hsa_api",
+                                   "hsa_core_api", "hsa_finalize_ext_api",
+                                   "hsa_image_ext_api", "kernel_dispatch", "marker_api",
+                                   "marker_core_api", "memory_copy", "page_migration",
+                                   "roctx", "scratch_memory"));
+}
+
+TEST_F(tracing_config_test,
+       get_supported_domain_names_1_3_5_includes_rocshmem_and_hipfile)
+{
+    using sut = tracing_config<tagged_backend<supported_domain_names_rocshmem_hipfile>,
+                               mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
+    EXPECT_THAT(sut::get_supported_domain_names(),
+                gtest::ElementsAre(
+                    "code_object", "hip_api", "hip_compiler_api", "hip_runtime_api",
+                    "hipfile_api", "hsa_amd_ext_api", "hsa_api", "hsa_core_api",
+                    "hsa_finalize_ext_api", "hsa_image_ext_api", "kernel_dispatch",
+                    "kfd_event_dropped_events", "kfd_event_page_fault",
+                    "kfd_event_page_migrate", "kfd_event_queue",
+                    "kfd_event_unmap_from_gpu", "kfd_events", "kfd_page_fault",
+                    "kfd_page_migrate", "kfd_queue", "marker_api", "marker_core_api",
+                    "memory_allocation", "memory_copy", "ompt", "rccl_api",
+                    "rocshmem_api", "roctx", "scratch_memory"));
 }
 
 }  // namespace rocprofsys::rocprofiler_sdk::testing
