@@ -678,6 +678,12 @@ executable_iterate_agent_symbols_unload_callback(hsa_executable_t        executa
     return HSA_STATUS_SUCCESS;
 }
 
+struct code_object_load_callback_data
+{
+    code_object_array_t* code_object_array       = nullptr;
+    bool                 populate_hip_symbol_map = true;
+};
+
 hsa_status_t
 code_object_load_callback(hsa_executable_t         executable,
                           hsa_loaded_code_object_t loaded_code_object,
@@ -704,7 +710,8 @@ code_object_load_callback(hsa_executable_t         executable,
     code_obj_v.hsa_executable  = executable;
     code_obj_v.hsa_code_object = loaded_code_object;
 
-    auto* code_obj_vec = static_cast<code_object_array_t*>(cb_data);
+    auto*  cb_data_v    = static_cast<code_object_load_callback_data*>(cb_data);
+    auto*& code_obj_vec = cb_data_v->code_object_array;
     auto exists = std::any_of(code_obj_vec->begin(), code_obj_vec->end(), [&code_obj_v](auto& itr) {
         return (itr && code_obj_v == *itr);
     });
@@ -820,7 +827,8 @@ code_object_load_callback(hsa_executable_t         executable,
     // generate a unique code object id
     data.code_object_id = ++get_code_object_id();
 
-    populate_hip_symbol_map_from_loaded_code_object(data);
+    if(cb_data_v && cb_data_v->populate_hip_symbol_map)
+        populate_hip_symbol_map_from_loaded_code_object(data);
 
     auto _status = ::rocprofiler::hsa::get_core_table()->hsa_executable_iterate_agent_symbols_fn(
         executable, data.hsa_agent, executable_iterate_agent_symbols_load_callback, &code_obj_v);
@@ -974,7 +982,7 @@ initialize_hip_binary_data()
 // Can be called repeatedly for already frozen code objects to notify newly active contexts.
 // Used for attachment to capture code objects created before attachment time
 hsa_status_t
-executable_freeze_internal(hsa_executable_t executable)
+executable_freeze_internal(hsa_executable_t executable, bool populate_hip_symbol_map = true)
 {
     ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
     (void) initialize_hip_binary_data();
@@ -984,10 +992,15 @@ executable_freeze_internal(hsa_executable_t executable)
     });
 
     auto* code_obj_vec = get_code_objects();
-    CHECK_NOTNULL(code_obj_vec)->wlock([executable](code_object_array_t& _vec) {
-        get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
-            executable, code_object_load_callback, &_vec);
-    });
+    CHECK_NOTNULL(code_obj_vec)
+        ->wlock(
+            [executable](code_object_array_t& _vec, bool _populate_hip) {
+                auto _cb_data = code_object_load_callback_data{
+                    .code_object_array = &_vec, .populate_hip_symbol_map = _populate_hip};
+                get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
+                    executable, code_object_load_callback, &_cb_data);
+            },
+            populate_hip_symbol_map);
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
     constexpr auto CODE_OBJECT_LOAD = ROCPROFILER_CODE_OBJECT_LOAD;
@@ -1589,7 +1602,18 @@ report_code_object_data()
             exe, HSA_EXECUTABLE_INFO_STATE, &_state);
         if(_status == HSA_STATUS_SUCCESS && _state == HSA_EXECUTABLE_STATE_FROZEN)
         {
-            auto _ret = executable_freeze_internal(exe);
+            constexpr auto populate_hip_symbol_map = false;
+            // For an executable first discovered during late configuration, being live and frozen
+            // does not guarantee its original ELF buffer is still valid. HSA only requires that
+            // buffer to outlive its code-object reader, so the application may already have
+            // destroyed the reader and freed the buffer. Without an attach-owned snapshot, this
+            // call reaches populate_hip_symbol_map_from_loaded_code_object(), which passes the
+            // loader's original memory_base to amd_comgr_set_data(), potentially reading freed
+            // memory and crashing. Replay must use retained ELF storage or avoid parsing the
+            // original buffer when its lifetime cannot be guaranteed. We elect to avoid parsing the
+            // original buffer -- thus, clients/tools must rely on code object / kernel symbol for
+            // kernel information and cannot use the HIP information.
+            auto _ret = executable_freeze_internal(exe, populate_hip_symbol_map);
             ROCP_WARNING_IF(_ret != HSA_STATUS_SUCCESS) << fmt::format(
                 "Failed to parse code object info for hsa_executable_t{{.handle={}}}: "
                 "ec={} :: {}",
