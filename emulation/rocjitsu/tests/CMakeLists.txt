@@ -412,6 +412,8 @@ add_executable(
     sparse_memory_test.cpp
     cpu_dispatch_pool_test.cpp
     simdojo_sim_test.cpp
+    simdojo_pipe_latch_test.cpp
+    simdojo_issue_queue_test.cpp
     partitioning_test.cpp
     simulated_kfd_test.cpp
     kfd_events_test.cpp
