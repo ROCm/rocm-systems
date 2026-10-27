@@ -11,6 +11,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from typing import (
+    Callable,
     Dict,
     FrozenSet,
     List,
@@ -294,6 +295,9 @@ _SAME_PASS_COUNTERS = frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"})
 _UNSET_EXPRESSION = "None"
 
 _ALREADY_BOUND_BUILTIN_RE = re.compile(rf"{re.escape(PASS_VAR_SEP)}\d+$")
+_BOUND_BUILTIN_SUFFIX_RE = re.compile(
+    rf"(ammolite__[A-Za-z0-9_]+?){re.escape(PASS_VAR_SEP)}\d+"
+)
 
 
 def bind_expression(
@@ -351,6 +355,46 @@ def ordered_scoped_builtin_bindings(
         )
         for variable_key in per_xcd + dependents
     ]
+
+
+def strip_bound_builtin_suffixes(expressions: List[str]) -> List[str]:
+    """Turn ``ammolite__var__passN`` back into ``ammolite__var``."""
+    return [_BOUND_BUILTIN_SUFFIX_RE.sub(r"\1", expr) for expr in expressions]
+
+
+def evaluate_pass_scoped_builtins(
+    layout: PassLayout,
+    used_passes: Set[str],
+    gpu_series: str,
+    expressions: List[str],
+    evaluate: Callable[[str, str, Dict[str, object]], object],
+    key_prefix: str,
+) -> Dict[str, object]:
+    """Evaluate each referenced pass-scoped built-in once per used pass.
+
+    Passes run in natural order and PER_XCD built-ins run before their
+    dependents. evaluate receives the built-in name, its pass-bound eval
+    string and the values already computed for that pass. Result keys are
+    key_prefix + name + "__passN".
+    """
+    if not used_passes or not layout.has_duplicates:
+        return {}
+    scoped = pass_scoped_builtins(layout, gpu_series)
+    build_in_vars = _referenced_builtins(scoped, gpu_series, expressions)
+    if not build_in_vars:
+        return {}
+    results: Dict[str, object] = {}
+    for pass_key in sorted(used_passes, key=layout.ordinal):
+        ordinal = layout.ordinal(pass_key)
+        pass_locals: Dict[str, object] = {}
+        for variable_key, eval_string in ordered_scoped_builtin_bindings(
+            build_in_vars, pass_key, layout, scoped
+        ):
+            pass_locals[f"{key_prefix}{variable_key}{PASS_VAR_SEP}{ordinal}"] = (
+                evaluate(variable_key, eval_string, pass_locals)
+            )
+        results.update(pass_locals)
+    return results
 
 
 def bind_metric_tables_to_passes(
@@ -519,6 +563,27 @@ def _choose_metric_pass(
             f"not in {chosen}; binding formula counters to that pass",
         )
     return chosen, False
+
+
+def _referenced_builtins(
+    scoped_builtins: FrozenSet[str],
+    gpu_series: str,
+    expressions: List[str],
+) -> Dict[str, str]:
+    """Scoped built-in formulas that the expressions reach.
+
+    Expressions may already be pass-bound. Built-ins resolve transitively,
+    so a dependent such as GRBM_GUI_ACTIVE_PER_XCD is kept when only
+    numActiveCUs is named.
+    """
+    _, builtin_names = extract_counters_and_variables(
+        "\n".join(strip_bound_builtin_suffixes(expressions)), gpu_series
+    )
+    return {
+        name: formula
+        for name, formula in get_build_in_vars(gpu_series).items()
+        if name in builtin_names and name in scoped_builtins
+    }
 
 
 class _MetricBinding(NamedTuple):
