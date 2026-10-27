@@ -146,8 +146,8 @@ build_v_mov_b32_src(uint16_t vdst, uint16_t src0, rj_code_arch_t arch,
                ? (error->emit() << "v_mov_b32 from a literal needs build_v_mov_b32_imm")
                : util::Result::failure();
   }
-  // Selector 254 is src_lds_direct on older CDNA targets, but a two-word
-  // literal on CDNA5. Neither literal form fits this single-word result.
+  // Selector 254 selects a trailing 64-bit literal on CDNA5. Neither literal
+  // form fits this single-word result.
   if (arch == ROCJITSU_CODE_ARCH_CDNA5 && src0 == cdna5::OPR_SRC_SRC_LITERAL64) {
     return error != nullptr
                ? (error->emit() << "v_mov_b32 from a 64-bit literal needs trailing literal words")

@@ -166,7 +166,8 @@ constexpr uint16_t kInlineZero = scalar_positive_inline_u32(0);
 
 // Copies the dword at kSource to kSource + kDestinationDelta, addressing both
 // through s[2:3] and a zero per-lane offset in v0. Without @p with_store the
-// store is replaced by s_nops of the same length.
+// store is replaced by s_nops of the same length. Replaces @p code with the
+// kernel words.
 void make_copy_kernel(rj_code_arch_t arch, bool with_store, std::vector<uint32_t> &code) {
   const auto zero = build_v_mov_b32_src(0, kInlineZero, arch);
   ASSERT_TRUE(zero.succeeded());

@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/builders/vector_builders.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
@@ -92,13 +93,11 @@ TEST(VectorBuilder, BuildVMovB32SrcRejectsLiteralSource) {
       build_v_mov_b32_src(0, cdna5::OPR_SRC_SRC_LITERAL64, ROCJITSU_CODE_ARCH_CDNA5).failed());
 }
 
-TEST(VectorBuilder, BuildVMovB32SrcAllowsOlderCdnaLdsDirectSource) {
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                    ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    const util::FailureOr<uint32_t> word = build_v_mov_b32_src(0, 254, arch);
-    ASSERT_TRUE(word.succeeded());
-    EXPECT_EQ(word.value(), 0x7E0002FEu) << "arch " << static_cast<int>(arch);
-  }
+TEST(VectorBuilder, BuildVMovB32SrcAllowsCdna1LdsDirectSource) {
+  const util::FailureOr<uint32_t> word =
+      build_v_mov_b32_src(0, cdna1::OPR_SRC_SRC_LDS_DIRECT, ROCJITSU_CODE_ARCH_CDNA1);
+  ASSERT_TRUE(word.succeeded());
+  EXPECT_EQ(word.value(), 0x7E0002FEu);
 }
 
 TEST(VectorBuilder, BuildVMovB32SrcRejectsNonAmdGpuArch) {
@@ -117,6 +116,9 @@ TEST(VectorBuilder, EmitsOnlyRequestedFailureDiagnostics) {
   const util::DiagnosticEmitter error(callback);
   EXPECT_TRUE(build_v_mov_b32_imm(0, 0, ROCJITSU_CODE_ARCH_CDNA4, &error).succeeded());
   EXPECT_TRUE(build_v_mov_b32_src(0, 0, ROCJITSU_CODE_ARCH_CDNA4, &error).succeeded());
+  EXPECT_TRUE(
+      build_v_mov_b32_src(0, cdna1::OPR_SRC_SRC_LDS_DIRECT, ROCJITSU_CODE_ARCH_CDNA1, &error)
+          .succeeded());
   EXPECT_EQ(messages, 0u);
   EXPECT_TRUE(build_v_mov_b32_imm(0, 0, ROCJITSU_CODE_ARCH_INVALID, &error).failed());
   EXPECT_EQ(messages, 1u);
@@ -127,6 +129,10 @@ TEST(VectorBuilder, EmitsOnlyRequestedFailureDiagnostics) {
   EXPECT_TRUE(build_v_mov_b32_src(0, kVectorSrcLiteral, ROCJITSU_CODE_ARCH_CDNA4, &error).failed());
   EXPECT_EQ(messages, 3u);
   EXPECT_EQ(message, "v_mov_b32 from a literal needs build_v_mov_b32_imm");
+  EXPECT_TRUE(build_v_mov_b32_src(0, cdna5::OPR_SRC_SRC_LITERAL64, ROCJITSU_CODE_ARCH_CDNA5, &error)
+                  .failed());
+  EXPECT_EQ(messages, 4u);
+  EXPECT_EQ(message, "v_mov_b32 from a 64-bit literal needs trailing literal words");
 }
 
 // kVectorSrcLiteral is declared once from cdna1's table; this pins that every
