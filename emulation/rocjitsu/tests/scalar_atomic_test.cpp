@@ -19,7 +19,9 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -116,9 +118,10 @@ protected:
         backing = std::make_shared<CachedScalarAtomicBacking>(memory);
       else
         backing = std::make_shared<ScalarAtomicBacking>(memory);
-      const auto space =
-          vm.register_address_space(7, std::make_shared<IdentityAddressSpaceTranslator>(), backing,
-                                    {}, memory_mode() == MemoryMode::CachedVm);
+      const auto space = vm.register_address_space(
+          7, std::make_shared<IdentityAddressSpaceTranslator>(), backing,
+          [this](uint64_t address, VmAccessKind kind) { vm_faults.emplace_back(address, kind); },
+          memory_mode() == MemoryMode::CachedVm);
       ASSERT_TRUE(space);
       l2.set_gpu_vm(&vm);
       cu->set_gpu_vm(&vm);
@@ -140,15 +143,35 @@ protected:
     cu->write_sgpr(wf->sgpr_alloc().base + reg, value);
   }
   uint32_t read_sgpr(unsigned reg) { return cu->read_sgpr(wf->sgpr_alloc().base + reg); }
+  void write_sgprs(unsigned reg, uint32_t dwords, uint64_t value) {
+    for (uint32_t i = 0; i < dwords; ++i)
+      write_sgpr(reg + i, static_cast<uint32_t>(value >> (32 * i)));
+  }
+  uint64_t read_sgprs(unsigned reg, uint32_t dwords) {
+    uint64_t value = 0;
+    for (uint32_t i = 0; i < dwords; ++i)
+      value |= uint64_t{read_sgpr(reg + i)} << (32 * i);
+    return value;
+  }
+  void write_memory(uint64_t address, uint32_t dwords, uint64_t value) {
+    if (dwords == 1)
+      memory.write32(address, static_cast<uint32_t>(value));
+    else
+      memory.write64(address, value);
+  }
+  uint64_t read_memory(uint64_t address, uint32_t dwords) {
+    return dwords == 1 ? memory.read32(address) : memory.read64(address);
+  }
 
-  std::unique_ptr<Instruction> prepare(cdna3::SmemBuilderFields fields = {
-                                           .sdata = 4, .glc = 1, .imm = 1}) {
-    const auto words = cdna3::build_smem(cdna3::kSAtomicDecSmem, fields);
+  std::unique_ptr<Instruction>
+  prepare(cdna3::SmemBuilderFields fields = {.sdata = 4, .glc = 1, .imm = 1},
+          uint16_t opcode = cdna3::kSAtomicDecSmem) {
+    const auto words = cdna3::build_smem(opcode, fields);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     if (!inst)
       return nullptr;
     if (cu->execute_instruction(inst.get(), *wf).failed()) {
-      ADD_FAILURE() << "s_atomic_dec execution failed";
+      ADD_FAILURE() << inst->mnemonic() << " execution failed";
       return nullptr;
     }
     EXPECT_TRUE(inst->is_memory_op());
@@ -156,6 +179,7 @@ protected:
   }
 
   GpuMemory memory{"scalar_atomic_memory"};
+  std::vector<std::pair<uint64_t, VmAccessKind>> vm_faults;
   GpuVm vm;
   L2Cache l2{"scalar_atomic_l2"};
   std::shared_ptr<ScalarAtomicBacking> backing;
@@ -172,38 +196,144 @@ INSTANTIATE_TEST_SUITE_P(
                        ::testing::Values(MemoryMode::Direct, MemoryMode::CachedVm,
                                          MemoryMode::TranslatedVm)));
 
-TEST_P(ScalarAtomicTest, DecrementWrapAndOptionalReturn) {
-  // MI300 ISA, S_ATOMIC_DEC: zero and values above DATA wrap to DATA.
-  constexpr std::array<std::array<uint32_t, 3>, 10> cases{{{0, 0, 0},
-                                                           {1, 0, 0},
-                                                           {0xffffffff, 0, 0},
-                                                           {0, 7, 7},
-                                                           {1, 7, 0},
-                                                           {7, 7, 6},
-                                                           {8, 7, 7},
-                                                           {0xffffffff, 7, 7},
-                                                           {0, 0xffffffff, 0xffffffff},
-                                                           {0xffffffff, 0xffffffff, 0xfffffffe}}};
-  for (const auto &[old, limit, expected] : cases) {
+struct ReadModifyWriteCase {
+  uint16_t opcode;
+  uint32_t dwords;
+  uint64_t old;
+  uint64_t data;
+  uint64_t expected;
+};
+
+TEST_P(ScalarAtomicTest, ReadModifyWriteAndOptionalReturn) {
+  constexpr auto cases = std::to_array<ReadModifyWriteCase>({
+      {cdna3::kSAtomicSwapSmem, 1, 0x11111111, 0x22222222, 0x22222222},
+      {cdna3::kSAtomicAddSmem, 1, 5, 7, 12},
+      {cdna3::kSAtomicAddSmem, 1, 0xffffffff, 1, 0},
+      {cdna3::kSAtomicSubSmem, 1, 5, 7, 0xfffffffe},
+      // Signed and unsigned min/max share operands so the two orders disagree.
+      {cdna3::kSAtomicSminSmem, 1, 0xffffffff, 1, 0xffffffff},
+      {cdna3::kSAtomicUminSmem, 1, 0xffffffff, 1, 1},
+      {cdna3::kSAtomicSmaxSmem, 1, 0xffffffff, 1, 1},
+      {cdna3::kSAtomicUmaxSmem, 1, 0xffffffff, 1, 0xffffffff},
+      {cdna3::kSAtomicAndSmem, 1, 0xff00ff00, 0x0ff00ff0, 0x0f000f00},
+      {cdna3::kSAtomicOrSmem, 1, 0xff00ff00, 0x0ff00ff0, 0xfff0fff0},
+      {cdna3::kSAtomicXorSmem, 1, 0xff00ff00, 0x0ff00ff0, 0xf0f0f0f0},
+      // S_ATOMIC_INC wraps to zero once memory is >= DATA (unsigned).
+      {cdna3::kSAtomicIncSmem, 1, 6, 7, 7},
+      {cdna3::kSAtomicIncSmem, 1, 7, 7, 0},
+      {cdna3::kSAtomicIncSmem, 1, 0x8000'0000, 7, 0},
+      // X2 forms carry across dwords and take the sign from bit 63.
+      {cdna3::kSAtomicSwapX2Smem, 2, 0x1111'1111'2222'2222, 0x3333'3333'4444'4444,
+       0x3333'3333'4444'4444},
+      {cdna3::kSAtomicAddX2Smem, 2, 0xffff'ffff, 1, 0x1'0000'0000},
+      {cdna3::kSAtomicSubX2Smem, 2, 0x1'0000'0000, 1, 0xffff'ffff},
+      {cdna3::kSAtomicSminX2Smem, 2, 0x8000'0000, 1, 1},
+      {cdna3::kSAtomicSminX2Smem, 2, ~uint64_t{0}, 1, ~uint64_t{0}},
+      {cdna3::kSAtomicUminX2Smem, 2, ~uint64_t{0}, 1, 1},
+      {cdna3::kSAtomicSmaxX2Smem, 2, 0x8000'0000, 1, 0x8000'0000},
+      {cdna3::kSAtomicSmaxX2Smem, 2, ~uint64_t{0}, 1, 1},
+      {cdna3::kSAtomicUmaxX2Smem, 2, ~uint64_t{0}, 1, ~uint64_t{0}},
+      {cdna3::kSAtomicAndX2Smem, 2, 0xff00ff00'00ff00ff, 0x0ff00ff0'f00ff00f, 0x0f000f00'000f000f},
+      {cdna3::kSAtomicOrX2Smem, 2, 0xff00ff00'00ff00ff, 0x0ff00ff0'f00ff00f, 0xfff0fff0'f0fff0ff},
+      {cdna3::kSAtomicXorX2Smem, 2, 0xff00ff00'00ff00ff, 0x0ff00ff0'f00ff00f, 0xf0f0f0f0'f0f0f0f0},
+      {cdna3::kSAtomicIncX2Smem, 2, 7, 0x1'0000'0005, 8},
+      {cdna3::kSAtomicIncX2Smem, 2, 0x1'0000'0005, 0x1'0000'0005, 0},
+      {cdna3::kSAtomicIncX2Smem, 2, 0x8000'0000'0000'0000, 7, 0},
+      // MI300 ISA, S_ATOMIC_DEC: zero and values above DATA wrap to DATA.
+      {cdna3::kSAtomicDecSmem, 1, 0, 0, 0},
+      {cdna3::kSAtomicDecSmem, 1, 1, 0, 0},
+      {cdna3::kSAtomicDecSmem, 1, 0xffffffff, 0, 0},
+      {cdna3::kSAtomicDecSmem, 1, 0, 7, 7},
+      {cdna3::kSAtomicDecSmem, 1, 1, 7, 0},
+      {cdna3::kSAtomicDecSmem, 1, 7, 7, 6},
+      {cdna3::kSAtomicDecSmem, 1, 8, 7, 7},
+      {cdna3::kSAtomicDecSmem, 1, 0xffffffff, 7, 7},
+      {cdna3::kSAtomicDecSmem, 1, 0, 0xffffffff, 0xffffffff},
+      {cdna3::kSAtomicDecSmem, 1, 0xffffffff, 0xffffffff, 0xfffffffe},
+      // S_ATOMIC_DEC_X2 borrows across dwords and compares all 64 bits.
+      {cdna3::kSAtomicDecX2Smem, 2, 0x1'0000'0000, ~uint64_t{0}, 0xffff'ffff},
+      {cdna3::kSAtomicDecX2Smem, 2, 0x1'0000'0000, 0x1'0000'0000, 0xffff'ffff},
+      {cdna3::kSAtomicDecX2Smem, 2, 0x2'0000'0001, 0x1'0000'0005, 0x1'0000'0005},
+      {cdna3::kSAtomicDecX2Smem, 2, 0, 0x1'2345'6789, 0x1'2345'6789},
+      {cdna3::kSAtomicDecX2Smem, 2, ~uint64_t{0}, ~uint64_t{0}, ~uint64_t{1}},
+  });
+  for (const auto &[opcode, dwords, old, data, expected] : cases) {
     for (uint8_t glc : {0, 1}) {
-      SCOPED_TRACE(testing::Message() << "old=" << old << " limit=" << limit << " glc=" << +glc);
-      memory.write32(kAddress, old);
-      memory.write32(kAddress + 4, 0xdeadbeef);
-      write_sgpr(4, limit);
-      write_sgpr(5, 0x12345678);
+      SCOPED_TRACE(testing::Message()
+                   << "opcode=" << opcode << " old=" << old << " data=" << data << " glc=" << +glc);
+      const uint64_t guard_address = kAddress + dwords * 4;
+      const unsigned guard_sgpr = 4 + dwords;
+      write_memory(kAddress, dwords, old);
+      memory.write32(guard_address, 0xdeadbeef);
+      write_sgprs(4, dwords, data);
+      write_sgpr(guard_sgpr, 0x12345678);
       wf->write_scc(1);
-      auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1});
+      auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1}, opcode);
       ASSERT_NE(inst, nullptr);
-      EXPECT_EQ(memory.read32(kAddress), old);
-      EXPECT_EQ(read_sgpr(4), limit);
+      EXPECT_EQ(read_memory(kAddress, dwords), old);
+      EXPECT_EQ(read_sgprs(4, dwords), data);
       ASSERT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Complete);
-      EXPECT_EQ(memory.read32(kAddress), expected);
-      EXPECT_EQ(read_sgpr(4), glc ? old : limit);
-      EXPECT_EQ(memory.read32(kAddress + 4), 0xdeadbeef);
-      EXPECT_EQ(read_sgpr(5), 0x12345678);
+      EXPECT_EQ(read_memory(kAddress, dwords), expected);
+      EXPECT_EQ(read_sgprs(4, dwords), glc ? old : data);
+      EXPECT_EQ(memory.read32(guard_address), 0xdeadbeef);
+      EXPECT_EQ(read_sgpr(guard_sgpr), 0x12345678);
       EXPECT_EQ(wf->read_scc(), 1u);
       EXPECT_EQ(wf->exec(), 0u);
       EXPECT_TRUE(wf->wait_counters().empty());
+    }
+  }
+}
+
+struct CompareSwapCase {
+  uint16_t opcode;
+  uint32_t dwords;
+  uint64_t old;
+  uint64_t source;
+  uint64_t compare;
+  uint64_t expected;
+};
+
+TEST_P(ScalarAtomicTest, CompareSwapReturnsOldAndPreservesCompare) {
+  constexpr auto cases = std::to_array<CompareSwapCase>({
+      {cdna3::kSAtomicCmpswapSmem, 1, 5, 9, 5, 9},
+      {cdna3::kSAtomicCmpswapSmem, 1, 5, 9, 6, 5},
+      // X2 compares all 64 bits, and its compare value starts at SDATA[2].
+      {cdna3::kSAtomicCmpswapX2Smem, 2, 0x1'0000'0005, 0x2'0000'0009, 0x1'0000'0005, 0x2'0000'0009},
+      {cdna3::kSAtomicCmpswapX2Smem, 2, 0x1'0000'0005, 0x2'0000'0009, 0x3'0000'0005, 0x1'0000'0005},
+      {cdna3::kSAtomicCmpswapX2Smem, 2, 0x1'0000'0005, 0x2'0000'0009, 0x1'0000'0006, 0x1'0000'0005},
+  });
+  for (const auto &[opcode, dwords, old, source, compare, expected] : cases) {
+    for (uint8_t glc : {0, 1}) {
+      SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " old=" << old
+                                      << " compare=" << compare << " glc=" << +glc);
+      const uint64_t guard_address = kAddress + dwords * 4;
+      const unsigned compare_sgpr = 4 + dwords;
+      const unsigned guard_sgpr = 4 + 2 * dwords;
+      write_memory(kAddress, dwords, old);
+      memory.write32(guard_address, 0xdeadbeef);
+      write_sgprs(4, dwords, source);
+      write_sgprs(compare_sgpr, dwords, compare);
+      write_sgpr(guard_sgpr, 0x12345678);
+      if (backing) {
+        backing->update_attempts = 0;
+        backing->mutations = 0;
+      }
+      auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1}, opcode);
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Complete);
+      EXPECT_EQ(read_memory(kAddress, dwords), expected);
+      EXPECT_EQ(read_sgprs(4, dwords), glc ? old : source);
+      EXPECT_EQ(read_sgprs(compare_sgpr, dwords), compare);
+      EXPECT_EQ(memory.read32(guard_address), 0xdeadbeef);
+      EXPECT_EQ(read_sgpr(guard_sgpr), 0x12345678);
+      EXPECT_TRUE(wf->wait_counters().empty());
+      if (backing) {
+        // A translated mismatch skips the compare/exchange, as for vector
+        // atomics. L2 always writes the line back.
+        const unsigned writes = old == compare || memory_mode() == MemoryMode::CachedVm ? 1u : 0u;
+        EXPECT_EQ(backing->update_attempts, writes);
+        EXPECT_EQ(backing->mutations, writes);
+      }
     }
   }
 }
@@ -298,208 +428,326 @@ TEST_P(ScalarAtomicTest, AtomicPublishesCachedWritesAndInvalidatesScalarCopies) 
   EXPECT_EQ(cached, 3u);
 }
 
+struct DecrementForm {
+  uint16_t opcode;
+  uint32_t dwords;
+};
+
+constexpr auto kDecrementForms = std::to_array<DecrementForm>({
+    {cdna3::kSAtomicDecSmem, 1},
+    {cdna3::kSAtomicDecX2Smem, 2},
+});
+
 TEST_P(ScalarAtomicTest, UnavailableAtomicRetainsCounterAndUpdatesExactlyOnce) {
   if (!backing)
     GTEST_SKIP() << "Retry injection requires a VM backing";
-  for (uint8_t glc : {0, 1}) {
-    memory.write32(kAddress, 4);
-    write_sgpr(4, 9);
-    backing->load_attempts = 0;
-    backing->update_attempts = 0;
-    backing->mutations = 0;
-    backing->outcome = VmAccessOutcome::Unavailable;
-    auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1});
-    ASSERT_NE(inst, nullptr);
-    ASSERT_EQ(pipeline->issue_deferred(inst.release(), *wf), VmAccessOutcome::Complete);
-    EXPECT_EQ(wf->wait_counters().lgkmcnt, 1u);
-    EXPECT_EQ(wf->wait_counters().vmcnt, 0u);
-    EXPECT_EQ(read_sgpr(4), 9u);
-    EXPECT_EQ(memory.read32(kAddress), 4u);
-    pipeline->tick();
-    EXPECT_EQ(wf->wait_counters().lgkmcnt, 1u);
-    EXPECT_EQ(backing->mutations, 0u);
-    backing->outcome = VmAccessOutcome::Complete;
-    pipeline->tick();
-    EXPECT_TRUE(wf->wait_counters().empty());
-    if (memory_mode() == MemoryMode::TranslatedVm) {
-      EXPECT_EQ(backing->load_attempts, 3u);
-      EXPECT_EQ(backing->update_attempts, 1u);
-    } else {
-      EXPECT_EQ(backing->update_attempts, 3u);
+  for (const auto &[opcode, dwords] : kDecrementForms) {
+    for (uint8_t glc : {0, 1}) {
+      SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " glc=" << +glc);
+      write_memory(kAddress, dwords, 4);
+      write_sgprs(4, dwords, 9);
+      backing->load_attempts = 0;
+      backing->update_attempts = 0;
+      backing->mutations = 0;
+      backing->outcome = VmAccessOutcome::Unavailable;
+      auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1}, opcode);
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(pipeline->issue_deferred(inst.release(), *wf), VmAccessOutcome::Complete);
+      // Two-dword scalar atomics hold two LGKM tokens, like two-dword scalar loads.
+      EXPECT_EQ(wf->wait_counters().lgkmcnt, dwords);
+      EXPECT_EQ(wf->wait_counters().vmcnt, 0u);
+      EXPECT_EQ(read_sgprs(4, dwords), 9u);
+      EXPECT_EQ(read_memory(kAddress, dwords), 4u);
+      pipeline->tick();
+      EXPECT_EQ(wf->wait_counters().lgkmcnt, dwords);
+      EXPECT_EQ(backing->mutations, 0u);
+      backing->outcome = VmAccessOutcome::Complete;
+      pipeline->tick();
+      EXPECT_TRUE(wf->wait_counters().empty());
+      if (memory_mode() == MemoryMode::TranslatedVm) {
+        EXPECT_EQ(backing->load_attempts, 3u);
+        EXPECT_EQ(backing->update_attempts, 1u);
+      } else {
+        EXPECT_EQ(backing->update_attempts, 3u);
+      }
+      EXPECT_EQ(backing->mutations, 1u);
+      EXPECT_EQ(read_sgprs(4, dwords), glc ? 4u : 9u);
+      EXPECT_EQ(read_memory(kAddress, dwords), 3u);
     }
-    EXPECT_EQ(backing->mutations, 1u);
-    EXPECT_EQ(read_sgpr(4), glc ? 4u : 9u);
-    EXPECT_EQ(memory.read32(kAddress), 3u);
+  }
+}
+
+TEST_P(ScalarAtomicTest, MisalignedTwoDwordAtomicFaultsWithoutUpdate) {
+  // On gfx90a, S_ATOMIC_*_X2 at an address that is 4 mod 8 raises a memory
+  // violation and leaves both neighboring qwords unchanged.
+  memory.write64(kAddress, 0x5'0000'0005);
+  memory.write64(kAddress + 8, 0x5'0000'0005);
+  write_sgprs(4, 2, 9);
+  auto inst = prepare({.sdata = 4, .glc = 1, .imm = 1, .offset = 4}, cdna3::kSAtomicDecX2Smem);
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Malformed);
+  EXPECT_TRUE(wf->wait_counters().empty());
+  EXPECT_EQ(memory.read64(kAddress), 0x5'0000'0005u);
+  EXPECT_EQ(memory.read64(kAddress + 8), 0x5'0000'0005u);
+  EXPECT_EQ(read_sgprs(4, 2), 9u);
+  if (backing) {
+    EXPECT_EQ(backing->load_attempts, 0u);
+    EXPECT_EQ(backing->update_attempts, 0u);
+    // GpuVmAccess reports the violation to the runtime.
+    EXPECT_EQ(vm_faults, (std::vector<std::pair<uint64_t, VmAccessKind>>{
+                             {kAddress + 4, VmAccessKind::Atomic}}));
+  } else {
+    // Physical memory has no fault reporter.
+    EXPECT_TRUE(vm_faults.empty());
   }
 }
 
 TEST_P(ScalarAtomicTest, FailedAtomicDoesNotWriteBackOrLeakCounter) {
   if (!backing)
     GTEST_SKIP() << "Fault injection requires a VM backing";
-  memory.write32(kAddress, 4);
-  write_sgpr(4, 9);
   backing->outcome = VmAccessOutcome::Faulted;
-  auto inst = prepare();
-  ASSERT_NE(inst, nullptr);
-  EXPECT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Faulted);
-  EXPECT_TRUE(wf->wait_counters().empty());
-  EXPECT_EQ(backing->mutations, 0u);
-  EXPECT_EQ(read_sgpr(4), 9u);
-  EXPECT_EQ(memory.read32(kAddress), 4u);
+  for (const auto &[opcode, dwords] : kDecrementForms) {
+    SCOPED_TRACE(testing::Message() << "opcode=" << opcode);
+    const uint64_t old = dwords == 1 ? 4 : 0x4'0000'0004;
+    const uint64_t data = dwords == 1 ? 9 : 0x9'0000'0009;
+    write_memory(kAddress, dwords, old);
+    write_sgprs(4, dwords, data);
+    auto inst = prepare({.sdata = 4, .glc = 1, .imm = 1}, opcode);
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Faulted);
+    EXPECT_TRUE(wf->wait_counters().empty());
+    EXPECT_EQ(backing->mutations, 0u);
+    EXPECT_EQ(read_sgprs(4, dwords), data);
+    EXPECT_EQ(read_memory(kAddress, dwords), old);
+  }
 }
 
 TEST_P(ScalarAtomicTest, UnavailableCompareExchangeRetriesWithCurrentMemoryValue) {
   if (memory_mode() != MemoryMode::TranslatedVm)
     GTEST_SKIP() << "Compare/exchange retries require a translated backing";
-  for (uint8_t glc : {0, 1}) {
-    memory.write32(kAddress, 4);
-    write_sgpr(4, 9);
-    backing->load_attempts = 0;
-    backing->update_attempts = 0;
+  for (const auto &[opcode, dwords] : kDecrementForms) {
+    for (uint8_t glc : {0, 1}) {
+      SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " glc=" << +glc);
+      write_memory(kAddress, dwords, 4);
+      write_sgprs(4, dwords, 9);
+      backing->load_attempts = 0;
+      backing->update_attempts = 0;
+      backing->mutations = 0;
+      backing->exchange_outcome = VmAccessOutcome::Unavailable;
+      auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1}, opcode);
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(pipeline->issue_deferred(inst.release(), *wf), VmAccessOutcome::Complete);
+      pipeline->tick();
+      EXPECT_EQ(wf->wait_counters().lgkmcnt, dwords);
+      EXPECT_EQ(backing->load_attempts, 1u);
+      EXPECT_EQ(backing->mutations, 0u);
+      EXPECT_EQ(read_sgprs(4, dwords), 9u);
+      EXPECT_EQ(read_memory(kAddress, dwords), 4u);
+
+      // Another writer changes memory after our load. The resumed CAS must retry
+      // with its observed value: zero wraps to nine, and GLC must return zero.
+      write_memory(kAddress, dwords, 0);
+      backing->exchange_outcome = VmAccessOutcome::Complete;
+      pipeline->tick();
+      EXPECT_TRUE(wf->wait_counters().empty());
+      EXPECT_EQ(backing->load_attempts, 1u);
+      EXPECT_EQ(backing->update_attempts, 4u);
+      EXPECT_EQ(backing->mutations, 1u);
+      EXPECT_EQ(read_sgprs(4, dwords), glc ? 0u : 9u);
+      EXPECT_EQ(read_memory(kAddress, dwords), 9u);
+
+      pipeline->tick();
+      EXPECT_EQ(backing->mutations, 1u);
+      EXPECT_EQ(read_memory(kAddress, dwords), 9u);
+    }
+  }
+}
+
+TEST_P(ScalarAtomicTest, CompareSwapMismatchAfterLostExchangeDoesNotWrite) {
+  if (memory_mode() != MemoryMode::TranslatedVm)
+    GTEST_SKIP() << "Compare/exchange retries require a translated backing";
+  constexpr std::array<std::pair<uint16_t, uint32_t>, 2> kCompareSwapForms{
+      {{cdna3::kSAtomicCmpswapSmem, 1}, {cdna3::kSAtomicCmpswapX2Smem, 2}}};
+  for (const auto &[opcode, dwords] : kCompareSwapForms) {
+    SCOPED_TRACE(testing::Message() << "opcode=" << opcode);
+    write_memory(kAddress, dwords, 4);
+    write_sgprs(4, dwords, 9);
+    write_sgprs(4 + dwords, dwords, 4);
     backing->mutations = 0;
     backing->exchange_outcome = VmAccessOutcome::Unavailable;
-    auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1});
+    auto inst = prepare({.sdata = 4, .glc = 1, .imm = 1}, opcode);
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(pipeline->issue_deferred(inst.release(), *wf), VmAccessOutcome::Complete);
     pipeline->tick();
-    EXPECT_EQ(wf->wait_counters().lgkmcnt, 1u);
-    EXPECT_EQ(backing->load_attempts, 1u);
     EXPECT_EQ(backing->mutations, 0u);
-    EXPECT_EQ(read_sgpr(4), 9u);
-    EXPECT_EQ(memory.read32(kAddress), 4u);
 
-    // Another writer changes memory after our load. The resumed CAS must retry
-    // with its observed value: zero wraps to nine, and GLC must return zero.
-    memory.write32(kAddress, 0);
+    // Another writer changes memory after our matching load. The resumed
+    // exchange observes a mismatch and must return it without writing.
+    write_memory(kAddress, dwords, 7);
     backing->exchange_outcome = VmAccessOutcome::Complete;
     pipeline->tick();
     EXPECT_TRUE(wf->wait_counters().empty());
-    EXPECT_EQ(backing->load_attempts, 1u);
-    EXPECT_EQ(backing->update_attempts, 4u);
-    EXPECT_EQ(backing->mutations, 1u);
-    EXPECT_EQ(read_sgpr(4), glc ? 0u : 9u);
-    EXPECT_EQ(memory.read32(kAddress), 9u);
-
-    pipeline->tick();
-    EXPECT_EQ(backing->mutations, 1u);
-    EXPECT_EQ(memory.read32(kAddress), 9u);
+    EXPECT_EQ(backing->mutations, 0u);
+    EXPECT_EQ(read_memory(kAddress, dwords), 7u);
+    EXPECT_EQ(read_sgprs(4, dwords), 7u);
   }
 }
 
 TEST_P(ScalarAtomicTest, FailedCompareExchangeDoesNotWriteBackOrLeakCounter) {
   if (memory_mode() != MemoryMode::TranslatedVm)
     GTEST_SKIP() << "Compare/exchange faults require a translated backing";
-  for (uint8_t glc : {0, 1}) {
-    memory.write32(kAddress, 4);
-    write_sgpr(4, 9);
-    backing->load_attempts = 0;
-    backing->update_attempts = 0;
-    backing->exchange_outcome = VmAccessOutcome::Faulted;
-    auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1});
-    ASSERT_NE(inst, nullptr);
-    EXPECT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Faulted);
-    EXPECT_TRUE(wf->wait_counters().empty());
-    EXPECT_EQ(backing->load_attempts, 1u);
-    EXPECT_EQ(backing->update_attempts, 1u);
-    EXPECT_EQ(backing->mutations, 0u);
-    EXPECT_EQ(read_sgpr(4), 9u);
-    EXPECT_EQ(memory.read32(kAddress), 4u);
+  for (const auto &[opcode, dwords] : kDecrementForms) {
+    for (uint8_t glc : {0, 1}) {
+      SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " glc=" << +glc);
+      const uint64_t old = dwords == 1 ? 4 : 0x4'0000'0004;
+      const uint64_t data = dwords == 1 ? 9 : 0x9'0000'0009;
+      write_memory(kAddress, dwords, old);
+      write_sgprs(4, dwords, data);
+      backing->load_attempts = 0;
+      backing->update_attempts = 0;
+      backing->exchange_outcome = VmAccessOutcome::Faulted;
+      auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1}, opcode);
+      ASSERT_NE(inst, nullptr);
+      EXPECT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Faulted);
+      EXPECT_TRUE(wf->wait_counters().empty());
+      EXPECT_EQ(backing->load_attempts, 1u);
+      EXPECT_EQ(backing->update_attempts, 1u);
+      EXPECT_EQ(backing->mutations, 0u);
+      EXPECT_EQ(read_sgprs(4, dwords), data);
+      EXPECT_EQ(read_memory(kAddress, dwords), old);
+    }
   }
 }
 
 TEST_P(ScalarAtomicTest, DecodedDependenciesFollowReturnBit) {
-  for (uint8_t glc : {0, 1}) {
-    SCOPED_TRACE(glc);
-    const auto words =
-        cdna3::build_smem(cdna3::kSAtomicDecSmem, {.sdata = 4, .glc = glc, .imm = 1});
-    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-    ASSERT_NE(inst, nullptr);
-    const InstDefUse def_use(*inst);
-    EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 4, 1}));
-    EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 0, 2}));
-    EXPECT_EQ(def_use.defs.contains({RegClass::SGPR, 4, 1}), glc != 0);
-    EXPECT_EQ(inst->num_dst_operands(), glc ? 1 : 0);
+  for (const auto &[opcode, dwords] : kDecrementForms) {
+    for (uint8_t glc : {0, 1}) {
+      SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " glc=" << +glc);
+      const auto words = cdna3::build_smem(opcode, {.sdata = 4, .glc = glc, .imm = 1});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      const InstDefUse def_use(*inst);
+      const RegisterRef sdata{RegClass::SGPR, 4, static_cast<uint8_t>(dwords)};
+      EXPECT_TRUE(def_use.uses.contains(sdata));
+      EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 0, 2}));
+      EXPECT_EQ(def_use.defs.contains(sdata), glc != 0);
+      EXPECT_EQ(inst->num_dst_operands(), glc ? 1 : 0);
 
-    EXPECT_TRUE(inst->is_memory_wait_producer());
-    const auto *issue = inst->amdgpu_memory_issue_info();
-    ASSERT_NE(issue, nullptr);
-    EXPECT_FALSE(issue->exec_masked);
-    const auto obligations = issue->counter_obligations();
-    ASSERT_EQ(obligations.size(), 1u);
-    EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::LGKMCNT);
-    EXPECT_EQ(obligations[0].completion_class(), MemoryCompletionClass::UNORDERED);
-    EXPECT_EQ(obligations[0].counter_increment(), 1u);
+      EXPECT_TRUE(inst->is_memory_wait_producer());
+      const auto *issue = inst->amdgpu_memory_issue_info();
+      ASSERT_NE(issue, nullptr);
+      EXPECT_FALSE(issue->exec_masked);
+      const auto obligations = issue->counter_obligations();
+      ASSERT_EQ(obligations.size(), 1u);
+      EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::LGKMCNT);
+      EXPECT_EQ(obligations[0].completion_class(), MemoryCompletionClass::UNORDERED);
+      // The access width sets the token count, independent of GLC.
+      EXPECT_EQ(obligations[0].counter_increment(), dwords);
+    }
   }
 }
 
 TEST_P(ScalarAtomicTest, ReturnedRegisterRequiresLgkmWait) {
-  for (bool waited : {false, true}) {
-    for (uint8_t glc : {0, 1}) {
-      const uint64_t program = kProgram + (waited * 2 + glc) * 0x100;
-      wf->pc = program;
-      wf->ensure_memory_wait_scoreboard().clear();
-      const uint64_t before = cu->memory_wait_diagnostic_count();
-      write_sgpr(4, 9);
-      memory.write32(kAddress, 4);
-      const auto atomic =
-          cdna3::build_smem(cdna3::kSAtomicDecSmem, {.sdata = 4, .glc = glc, .imm = 1});
-      std::vector<uint32_t> words(atomic.begin(), atomic.end());
-      // lgkmcnt(0), leaving vmcnt/expcnt unconstrained.
-      const uint32_t wait = cdna3::build_sopp(cdna3::kSWaitcntSopp, {.simm16 = 0x007f})[0];
-      words.push_back(waited ? wait : kNop);
-      words.push_back(cdna3::build_sop1(cdna3::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 5})[0]);
-      words.insert(words.end(), 4, kNop);
-      for (size_t i = 0; i < words.size(); ++i)
-        memory.write32(program + i * 4, words[i]);
-      for (unsigned i = 0; i < 3; ++i)
-        (void)cu->step();
-      ASSERT_FALSE(wf->is_halted());
-      EXPECT_EQ(wf->pc, program + 16);
-      EXPECT_EQ(read_sgpr(5), glc ? 4u : 9u);
-      EXPECT_EQ(cu->memory_wait_diagnostic_count() - before, glc && !waited ? 1u : 0u);
+  for (const auto &[opcode, dwords] : kDecrementForms) {
+    for (bool waited : {false, true}) {
+      for (uint8_t glc : {0, 1}) {
+        SCOPED_TRACE(testing::Message()
+                     << "opcode=" << opcode << " waited=" << waited << " glc=" << +glc);
+        const uint64_t program = kProgram + ((dwords - 1) * 4 + waited * 2 + glc) * 0x100;
+        wf->pc = program;
+        wf->ensure_memory_wait_scoreboard().clear();
+        const uint64_t before = cu->memory_wait_diagnostic_count();
+        write_sgprs(4, dwords, 0x9'0000'0009);
+        write_memory(kAddress, dwords, 0x7'0000'0004);
+        const auto atomic = cdna3::build_smem(opcode, {.sdata = 4, .glc = glc, .imm = 1});
+        std::vector<uint32_t> words(atomic.begin(), atomic.end());
+        // lgkmcnt(0), leaving vmcnt/expcnt unconstrained.
+        const uint32_t wait = cdna3::build_sopp(cdna3::kSWaitcntSopp, {.simm16 = 0x007f})[0];
+        words.push_back(waited ? wait : kNop);
+        // s_mov_b32 from the last returned dword, so X2 checks its high dword.
+        const uint32_t last = 4 + dwords - 1;
+        words.push_back(
+            cdna3::build_sop1(cdna3::kSMovB32Sop1, {.ssrc0 = static_cast<uint8_t>(last),
+                                                    .sdst = static_cast<uint8_t>(last + 1)})[0]);
+        words.insert(words.end(), 4, kNop);
+        for (size_t i = 0; i < words.size(); ++i)
+          memory.write32(program + i * 4, words[i]);
+        for (unsigned i = 0; i < 3; ++i)
+          (void)cu->step();
+        ASSERT_FALSE(wf->is_halted());
+        EXPECT_EQ(wf->pc, program + 16);
+        EXPECT_EQ(read_sgpr(last + 1), glc ? (dwords == 1 ? 4u : 7u) : 9u);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count() - before, glc && !waited ? 1u : 0u);
+      }
     }
   }
 }
 
 TEST_P(ScalarAtomicTest, ReportsScalarReadModifyWriteToPlugins) {
+  struct ObservedAccess {
+    std::string_view mnemonic;
+    uint32_t element_size_bytes;
+    uint32_t elements_per_lane;
+    bool returns_value;
+    bool operator==(const ObservedAccess &) const = default;
+  };
   class Observer final : public ExecutionPlugin {
   public:
     Observer() : ExecutionPlugin("scalar_atomic_observer") {}
     bool observes_memory_routing() const override { return true; }
     void onAmdgpuMemoryAccessRouted(const MemoryAccessObservation &access) override {
-      EXPECT_EQ(access.mnemonic, "s_atomic_dec");
       EXPECT_EQ(access.route, MemoryRoute::SCALAR);
       EXPECT_EQ(access.atomic_op, AtomicOp::DEC);
       EXPECT_EQ(access.wait_counter, WaitCounterType::LGKMCNT);
-      EXPECT_EQ(access.element_size_bytes, 4u);
-      EXPECT_EQ(access.elements_per_lane, 1u);
       EXPECT_EQ(access.request_lane_mask, 1u);
       ASSERT_EQ(access.addresses.size(), 1u);
       EXPECT_EQ(access.addresses[0], kAddress);
-      returns.push_back(access.is_load);
+      observed.push_back({.mnemonic = access.mnemonic,
+                          .element_size_bytes = access.element_size_bytes,
+                          .elements_per_lane = access.elements_per_lane,
+                          .returns_value = access.is_load});
     }
-    std::vector<bool> returns;
+    std::vector<ObservedAccess> observed;
   };
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto observer = std::make_unique<Observer>();
   auto *record = observer.get();
   ASSERT_TRUE(group->add(std::move(observer)));
   cu->set_plugin_group(group);
-  for (uint8_t glc : {0, 1}) {
-    write_sgpr(4, 9);
-    memory.write32(kAddress, 4);
-    const uint64_t program = kProgram + glc * 0x100;
-    wf->pc = program;
-    const auto words =
-        cdna3::build_smem(cdna3::kSAtomicDecSmem, {.sdata = 4, .glc = glc, .imm = 1});
-    memory.write32(program, words[0]);
-    memory.write32(program + 4, words[1]);
-    memory.write32(program + 8, kNop);
-    memory.write32(program + 12, kNop);
-    (void)cu->step();
-    ASSERT_FALSE(wf->is_halted());
-    EXPECT_EQ(wf->pc, program + 8);
+  for (const auto &[opcode, dwords] : kDecrementForms) {
+    for (uint8_t glc : {0, 1}) {
+      write_sgprs(4, dwords, 9);
+      write_memory(kAddress, dwords, 4);
+      const uint64_t program = kProgram + ((dwords - 1) * 2 + glc) * 0x100;
+      wf->pc = program;
+      const auto words = cdna3::build_smem(opcode, {.sdata = 4, .glc = glc, .imm = 1});
+      memory.write32(program, words[0]);
+      memory.write32(program + 4, words[1]);
+      memory.write32(program + 8, kNop);
+      memory.write32(program + 12, kNop);
+      (void)cu->step();
+      ASSERT_FALSE(wf->is_halted());
+      EXPECT_EQ(wf->pc, program + 8);
+    }
   }
-  EXPECT_EQ(record->returns, (std::vector<bool>{false, true}));
+  // Each atomic is one element of its access width, as for vector atomics.
+  EXPECT_EQ(record->observed, (std::vector<ObservedAccess>{
+                                  {.mnemonic = "s_atomic_dec",
+                                   .element_size_bytes = 4,
+                                   .elements_per_lane = 1,
+                                   .returns_value = false},
+                                  {.mnemonic = "s_atomic_dec",
+                                   .element_size_bytes = 4,
+                                   .elements_per_lane = 1,
+                                   .returns_value = true},
+                                  {.mnemonic = "s_atomic_dec_x2",
+                                   .element_size_bytes = 8,
+                                   .elements_per_lane = 1,
+                                   .returns_value = false},
+                                  {.mnemonic = "s_atomic_dec_x2",
+                                   .element_size_bytes = 8,
+                                   .elements_per_lane = 1,
+                                   .returns_value = true},
+                              }));
 }
 } // namespace

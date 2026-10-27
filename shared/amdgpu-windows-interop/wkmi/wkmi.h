@@ -335,7 +335,7 @@ void FillinHwQueuePrivData(void* priv_data,              ///< Pointer to HW queu
                            uint64_t wptr = 0,            ///< Initial write pointer value (for AQL queues)
                            uint64_t rptr = 0,            ///< Initial read pointer value (for AQL queues)
                            D3DKMT_HANDLE aql_queue_desc = 0, ///< Handle to AQL queue descriptor (for AQL queues)
-                           uint32_t** doorbell_ptr = nullptr, ///< [out] Pointer to receive doorbell offset address (for AQL/SDMA queues)
+                           uint32_t** doorbell_ptr = nullptr, ///< [out] Pointer to receive doorbell offset address (for AQL queues)
                            D3DKMT_HANDLE cwsr_mem_handle = 0); ///< Allocation handle of CWSR region (UMDKMDIF_CREATEHWQUEUE_PRIVATE_DATA::CwsrMemHandle)
 
 // ============================================================================
@@ -415,7 +415,8 @@ int GetUnregisterEventPrivDataSize();
 
 /// @brief Unregister a previously registered user-mode event
 void FillinUnregisterEventPrivData(void* priv_data,  ///< Pointer to event unregistration private data structure
-                                   uint64_t handle); ///< Event handle to unregister
+                                   uint64_t handle,
+                                   uint32_t event_id = 0); ///< Event handle to unregister
 
 // ============================================================================
 // Interop Interfaces (Windows only)

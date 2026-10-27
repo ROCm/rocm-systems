@@ -798,6 +798,10 @@ void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKi
 }
 
 bool Instrumentor::ensure_blocks_built(std::string *error_out) {
+  if (!obj_.is_valid()) {
+    report(error_out, "cannot instrument an invalid code object");
+    return false;
+  }
   if (blocks_built_)
     return true;
   if (arch_ == ROCJITSU_CODE_ARCH_RV32I || arch_ == ROCJITSU_CODE_ARCH_RV64I) {
@@ -1306,11 +1310,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Set the probe's offset
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);
       plan.probe_target_offset = probe.output_text_offset;
-      // Preserve special state the probe clobbers by saving it to a dead SGPR
-      // around the call. EXEC/VCC are saved unconditionally as a conservative
-      // policy: the summary detects the special-state writes the decoder exposes as
-      // operands, but always saving keeps correctness independent of per-opcode
-      // implicit-def coverage. M0 stays clobber-gated.
+      // Orchestrator policy: save EXEC/VCC unconditionally so correctness does
+      // not depend on complete per-opcode implicit-def coverage. The summary
+      // sees decoder-exposed operands; M0 follows touches_m0, which includes
+      // exposed reads as well as writes.
       plan.preserve_exec = true;
       plan.preserve_vcc = true;
       plan.preserve_m0 = summary->touches_m0;

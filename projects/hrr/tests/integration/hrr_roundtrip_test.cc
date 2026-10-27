@@ -652,6 +652,149 @@ HRR_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
 /**
  * Test Description
  * ----------------
+ *   - CPU-only check of hrr_d2h_mismatch_exit, the rule under which a Windows
+ *     roundtrip accepts a non-zero hrr-playback exit: D2H mismatches explain
+ *     it, nothing else does.  A fatal HIP error aborts before the summary
+ *     line, so its exit 1 must not pass, or a replay handler that stopped
+ *     working would go unnoticed on Windows while Linux catches it.
+ */
+HRR_TEST_CASE(Unit_HRR_D2HMismatchExit) {
+  const std::string mismatch =
+      "[HRR]   D2H checks     : 3 pass (3 exact, 0 within tol), 1 fail, 0 skipped\n";
+  const std::string clean =
+      "[HRR]   D2H checks     : 4 pass (4 exact, 0 within tol), 0 fail, 0 skipped\n";
+
+  CHECK(hrr_d2h_mismatch_exit(1, mismatch));
+  CHECK(hrr_d2h_mismatch_exit(2, ""));  // divergence guard, no summary
+
+  CHECK_FALSE(hrr_d2h_mismatch_exit(1, ""));     // fatal HIP error
+  CHECK_FALSE(hrr_d2h_mismatch_exit(1, clean));  // failed for another reason
+  CHECK_FALSE(hrr_d2h_mismatch_exit(0, clean));
+  CHECK_FALSE(hrr_d2h_mismatch_exit(134, mismatch));  // crash
+}
+
+// The expected blobs of the hipMemcpy readbacks in `cap`. Playback reads blobs
+// by name without re-hashing them, so replay compares against an edited one.
+static std::vector<fs::path> hrr_memcpy_d2h_blobs(const fs::path& cap) {
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.string(), arc));
+  std::vector<fs::path> blobs;
+  for (const auto& e : arc.events) {
+    if (e.header().event_type != static_cast<uint16_t>(HRR_API_HIPMEMCPY)) continue;
+    REQUIRE(e.raw_payload.size() >= sizeof(hrr_args_hipMemcpy));
+    const auto* a = reinterpret_cast<const hrr_args_hipMemcpy*>(e.raw_payload.data());
+    if (a->kind != hipMemcpyDeviceToHost || (!a->blob_hash_lo && !a->blob_hash_hi)) continue;
+    const auto it = arc.blobs.find(hrr::hash_hex(a->blob_hash_lo, a->blob_hash_hi));
+    REQUIRE(it != arc.blobs.end());
+    blobs.push_back(it->second);
+  }
+  return blobs;
+}
+
+// Every count of the "D2H checks" summary line.
+struct HrrD2HCounts { int pass = 0, exact = 0, tol = 0, fail = 0, skipped = 0; };
+static bool hrr_parse_d2h_counts(const std::string& out, HrrD2HCounts& c) {
+  const size_t pos = out.find("D2H checks");
+  if (pos == std::string::npos) return false;
+  const size_t colon = out.find(':', pos);
+  if (colon == std::string::npos) return false;
+  return std::sscanf(out.c_str() + colon + 1,
+                     " %d pass (%d exact, %d within tol), %d fail, %d skipped",
+                     &c.pass, &c.exact, &c.tol, &c.fail, &c.skipped) == 5;
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_ZeroInitRead_Direct, whose one hipMemcpy readback is a
+ *     zeroed buffer, and rewrite its expected blob as the int32 sentinels
+ *     1, 2, 3, ...: the recording of a handler that wrote small integers, played
+ *     back by one that wrote nothing.  Replay with HIP_HRR_REPLAY_ZERO_INIT=1.
+ *   - Default: the check fails.  Read as f32 every sentinel is below 1e-44, so
+ *     a float-tolerance retry would accept the zeros.
+ *   - HIP_HRR_D2H_TOL=f32:1e-3:1e-3: the same buffer passes, and the summary
+ *     counts it within tolerance, not exact.
+ *   - HIP_HRR_D2H_TOL naming no float type: refused before the replay starts.
+ */
+HRR_TEST_CASE(Unit_HRR_D2HExactByDefaultRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_d2h_exact"};
+  hrr_capture_direct("Unit_HRR_ZeroInitRead_Direct", cap.path);
+  const auto blobs = hrr_memcpy_d2h_blobs(cap.path);
+  REQUIRE(blobs.size() == 1);
+  const auto words = static_cast<size_t>(fs::file_size(blobs[0]) / sizeof(int32_t));
+  REQUIRE(words > 0);
+  {
+    std::vector<int32_t> sentinels(words);
+    for (size_t i = 0; i < words; ++i) sentinels[i] = static_cast<int32_t>(i + 1);
+    std::ofstream f(blobs[0], std::ios::binary | std::ios::trunc);
+    f.write(reinterpret_cast<const char*>(sentinels.data()),
+            static_cast<std::streamsize>(words * sizeof(int32_t)));
+    REQUIRE(f.good());
+  }
+
+  SECTION("byte-exact by default") {
+    auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_REPLAY_ZERO_INIT", "1"},
+                                                  {"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0"}});
+    INFO("Playback stdout:\n" << out);
+    HrrD2HCounts c;
+    REQUIRE(hrr_parse_d2h_counts(out, c));
+    CHECK(c.pass == 0);
+    CHECK(c.fail == 1);
+    REQUIRE(ret == 1);
+  }
+
+  SECTION("tolerance as an f32 opt-in") {
+    auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_REPLAY_ZERO_INIT", "1"},
+                                                  {"HIP_HRR_D2H_TOL", "f32:1e-3:1e-3"}});
+    INFO("Playback stdout:\n" << out);
+    HrrD2HCounts c;
+    REQUIRE(hrr_parse_d2h_counts(out, c));
+    CHECK(c.pass == 1);
+    CHECK(c.exact == 0);
+    CHECK(c.tol == 1);
+    REQUIRE(ret == 0);
+  }
+
+  SECTION("an opt-in without a float type is refused") {
+    auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_REPLAY_ZERO_INIT", "1"},
+                                                  {"HIP_HRR_D2H_TOL", "i32:1e-3:1e-3"}});
+    INFO("Playback stdout:\n" << out);
+    CHECK(out.find("D2H checks") == std::string::npos);
+    REQUIRE(ret == 1);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_ZeroInitRead_Direct and cut its one hipMemcpy readback
+ *     blob to half the copy.  Comparing the copy's first half would pass on a
+ *     truncated archive and say nothing about the rest.
+ *   - Replay: the check is skipped, not passed, and with every check skipped
+ *     the replay fails.
+ */
+HRR_TEST_CASE(Unit_HRR_D2HShortBlobRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_d2h_short"};
+  hrr_capture_direct("Unit_HRR_ZeroInitRead_Direct", cap.path);
+  const auto blobs = hrr_memcpy_d2h_blobs(cap.path);
+  REQUIRE(blobs.size() == 1);
+  const auto size = fs::file_size(blobs[0]);
+  REQUIRE(size >= 2);
+  fs::resize_file(blobs[0], size / 2);
+
+  auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_REPLAY_ZERO_INIT", "1"}});
+  INFO("Playback stdout:\n" << out);
+  HrrD2HCounts c;
+  REQUIRE(hrr_parse_d2h_counts(out, c));
+  CHECK(c.pass == 0);
+  CHECK(c.fail == 0);
+  CHECK(c.skipped == 1);
+  REQUIRE(ret == 1);
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - Capture Unit_HRR_UncapturedHostWrite_Direct: a mapped host flag is set by
  *     an uncaptured CPU store, then kDivergeIters kernels each write the flag
  *     value out and read it back.  Every replay D2H diverges (fresh zero flag).
@@ -682,7 +825,6 @@ HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
     auto [ret, out] = hrr_playback_env(
         cap.path,
         {{"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0.25"},
-         {"HIP_HRR_D2H_EXACT", "1"},
          {"HIP_HRR_REPLAY_DIVERGENCE_MIN_SAMPLES", "16"}});
     INFO("Playback stdout:\n" << out);
     INFO("Playback exit code: " << ret);
@@ -698,8 +840,7 @@ HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
   SECTION("guard OFF -> not exit 2") {
     auto [ret, out] = hrr_playback_env(
         cap.path,
-        {{"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0"},
-         {"HIP_HRR_D2H_EXACT", "1"}});
+        {{"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0"}});
     INFO("Playback stdout:\n" << out);
     INFO("Playback exit code: " << ret);
     // With the guard disabled the replay does not stop early: it either
@@ -747,12 +888,11 @@ TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
  *     hipStreamWriteValue64, including one hipExtStreamWriteValueIncrement
  *     write when the headers define it) and replay it.  Replay must
  *     reproduce every written value.
- *   - Replay with HIP_HRR_D2H_EXACT=1.  This is deliberate, not decoration:
- *     with the default tolerant validator a lost 32-bit write is accepted as
- *     "f64 within tolerance" on any blob whose length is a multiple of 8, and
- *     the increment slot differs from its no-increment value by far less than
- *     atol=rtol=1e-3 of the recorded magnitude.  Exact mode makes the playback
- *     exit code (the real gate) a byte-for-byte verdict.
+ *   - Replay with the default byte-exact D2H validation.  No float tolerance
+ *     fits these values: a lost 32-bit write would be accepted as "f64 within
+ *     tolerance" on any blob whose length is a multiple of 8, and the increment
+ *     slot differs from its no-increment value by far less than atol=rtol=1e-3
+ *     of the recorded magnitude.
  *   - Gated on hipDeviceAttributeCanUseStreamWaitValue: on a target without
  *     support the workload skips, which would leave too few events / no D2H
  *     blob for the archive assertions, so skip the roundtrip as well.
@@ -768,7 +908,7 @@ HRR_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamwritevalue"};
   hrr_capture_direct("Unit_HRR_StreamWriteValue_Direct", cap.path);
 
-  auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_D2H_EXACT", "1"}});
+  auto [ret, out] = hrr_playback_env(cap.path, {});
   INFO("Playback stdout:\n" << out);
   INFO("Playback exit code: " << ret);
 #ifdef _WIN32
@@ -796,13 +936,10 @@ HRR_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
 // ---------------------------------------------------------------------------
 // Helper: capture a workload and replay it with byte-exact D2H validation.
 //
-// Used by memset-D2D and driver-memcpy roundtrips.  hrr_run_roundtrip() cannot
-// be used because it offers no way to pass playback environment variables.
-// These workloads are bit-deterministic (pure fills/copies, no FP arithmetic),
-// so the numeric-tolerance fallback in the D2H validator can only weaken the
-// oracle: at the default atol=rtol=1e-3 it accepts any small float
-// interpretation, including an all-zero buffer against a small-magnitude
-// expectation.  HIP_HRR_D2H_EXACT=1 makes any byte difference a failure.
+// Used by memset-D2D and driver-memcpy roundtrips.  These workloads are
+// bit-deterministic (pure fills/copies, no FP arithmetic), so they never opt
+// into a HIP_HRR_D2H_TOL float tolerance: at atol=rtol=1e-3 it would accept an
+// all-zero buffer against a small-magnitude expectation.
 //
 // expect_apis, when given, names the API ids the capture must contain.  The
 // per-thread-default-stream roundtrips pass it because their workloads no longer
@@ -814,7 +951,7 @@ static void hrr_run_exact_roundtrip(const std::string& direct_case,
   hrr_capture_direct(direct_case, cap_path);
   hrr_require_recorded_apis(cap_path, expect_apis);
 
-  auto [ret, out] = hrr_playback_env(cap_path, {{"HIP_HRR_D2H_EXACT", "1"}});
+  auto [ret, out] = hrr_playback_env(cap_path, {});
   INFO("Playback stdout:\n" << out);
   INFO("Playback exit code: " << ret);
 
@@ -869,14 +1006,81 @@ HRR_TEST_CASE(Unit_HRR_MemsetD2DRoundtrip) {
  *     hipMemsetD2D* variants at a hipMemAllocPitch destination.  That API is a
  *     playback no-op, so the recorded destination has no alloc_map entry at
  *     replay.
- *   - Replay must warn and skip those calls, not hand a null destination to the
- *     real API: a non-success handler return is fatal and would abort the whole
- *     replay.  The archive's other (translatable) D2H blob is only reached and
- *     validated if the replay survived, which is what this asserts.
+ *   - Under the default unmapped-pointer policy (playback/hip_playback.h)
+ *     replay skips those calls rather than abort the whole replay.  The
+ *     archive's other (translatable) D2H blob is only reached and validated if
+ *     the replay survived, which is what this asserts.
  */
 HRR_TEST_CASE(Unit_HRR_MemsetD2DPitchAllocRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetd2dpitchalloc"};
   hrr_run_exact_roundtrip("Unit_HRR_MemsetD2DPitchAlloc_Direct", cap.path);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_MemsetD2DPitchAlloc_Direct again: its six hipMemsetD2D*
+ *     events write to a destination replay never maps.
+ *   - By default each is reported with its event index, API and recorded
+ *     pointer, the summary counts them on its Unmapped line, and the replay
+ *     still reaches and passes the D2H check after them.
+ *   - --strict-unmapped reports the first one the same way and ends the replay
+ *     there, before the summary, also from the warm-up pass --kernel-filter
+ *     runs without its usual log.
+ */
+HRR_TEST_CASE(Unit_HRR_UnmappedPointerPolicy) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_unmapped_policy"};
+  hrr_capture_direct("Unit_HRR_MemsetD2DPitchAlloc_Direct", cap.path);
+
+  // The first hipMemsetD2D8 is the first unmapped event; the diagnostic must
+  // name its index in the archive and its recorded destination.
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  size_t idx = 0;
+  uint64_t dst = 0;
+  for (size_t i = 0; i < arc.events.size() && dst == 0; ++i) {
+    const auto& ev = arc.events[i];
+    if (ev.header().event_type != HRR_API_HIPMEMSETD2D8) continue;
+    REQUIRE(ev.raw_payload.size() >= sizeof(hrr_args_hipMemsetD2D8));
+    dst = reinterpret_cast<const hrr_args_hipMemsetD2D8*>(ev.raw_payload.data())->dst;
+    idx = i;
+  }
+  REQUIRE(dst != 0);
+  char diag[128];
+  snprintf(diag, sizeof(diag), "Event %zu (hipMemsetD2D8): recorded pointer 0x%llx ",
+           idx, static_cast<unsigned long long>(dst));
+
+  SECTION("by default the events are reported, counted and skipped") {
+    auto [ret, out] = hrr_playback_merged(cap.path, "", {{"HIP_HRR_D2H_EXACT", "1"}});
+    INFO("Playback output:\n" << out);
+    CHECK(out.find(diag) != std::string::npos);
+    CHECK(out.find("Unmapped       : 6 event(s) not replayed as recorded") !=
+          std::string::npos);
+    CHECK(out.find("D2H checks") != std::string::npos);
+#ifndef _WIN32
+    CHECK(ret == 0);
+#endif
+  }
+
+  SECTION("--strict-unmapped aborts at the first one") {
+    auto [ret, out] = hrr_playback_merged(cap.path, "--strict-unmapped",
+                                          {{"HIP_HRR_D2H_EXACT", "1"}});
+    INFO("Playback output:\n" << out);
+    CHECK(ret != 0);
+    CHECK(out.find(diag) != std::string::npos);
+    CHECK(out.find("aborting replay (--strict-unmapped)") != std::string::npos);
+    CHECK(out.find("D2H checks") == std::string::npos);
+  }
+
+  SECTION("--strict-unmapped names the event in the silent warm-up pass too") {
+    auto [ret, out] = hrr_playback_merged(
+        cap.path, "--kernel-filter hrr_no_such_kernel --strict-unmapped",
+        {{"HIP_HRR_D2H_EXACT", "1"}});
+    INFO("Playback output:\n" << out);
+    CHECK(ret != 0);
+    CHECK(out.find("Fatal error in warm-up pass") != std::string::npos);
+    CHECK(out.find(diag) != std::string::npos);
+  }
 }
 
 /**
@@ -889,12 +1093,11 @@ HRR_TEST_CASE(Unit_HRR_MemsetD2DPitchAllocRoundtrip) {
  *     -fgpu-default-stream=per-thread, so the archive is what proves the _spt
  *     entry points were the ones reached; assert the recorded API ids before
  *     replaying.
- *   - Replay with HIP_HRR_D2H_EXACT=1 and REQUIRE exit 0.  Exact mode matters:
- *     the default oracle falls back to float tolerance (atol=rtol=1e-3) and
- *     accepts a zero-initialised replay buffer whenever the captured pattern
- *     decodes to a small magnitude, which would let a NOOP _spt memset handler
- *     pass.  The workload also picks patterns that are out of tolerance in every
- *     candidate encoding, so exact mode is belt and braces, not the only guard.
+ *   - Replay with the default byte-exact D2H validation and REQUIRE exit 0.  A
+ *     float tolerance (atol=rtol=1e-3) would accept a zero-initialised replay
+ *     buffer whenever the captured pattern decodes to a small magnitude, which
+ *     would let a NOOP _spt memset handler pass.  The workload also picks
+ *     patterns that are out of tolerance in every candidate encoding.
  *   - REQUIRE at least 4 validated D2H buffers, one per API under test: a NOOP
  *     playback handler for any single _spt memset fails its own buffer and turns
  *     the playback exit code into 1.
@@ -921,7 +1124,7 @@ HRR_TEST_CASE(Unit_HRR_MemsetSptRoundtrip) {
     REQUIRE(recorded(HRR_API_HIPMEMCPY));
   }
 
-  auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_D2H_EXACT", "1"}});
+  auto [ret, out] = hrr_playback_env(cap.path, {});
   INFO("Playback stdout:\n" << out);
   INFO("Playback exit code: " << ret);
 #ifdef _WIN32
@@ -929,7 +1132,7 @@ HRR_TEST_CASE(Unit_HRR_MemsetSptRoundtrip) {
   // as hrr_run_playback), so only a crash fails the test there.
   REQUIRE(ret < 128);
 #else
-  REQUIRE(ret == 0);  // any byte mismatch in exact mode exits 1
+  REQUIRE(ret == 0);  // any byte mismatch exits 1
 
   size_t pos = out.find("D2H checks");
   REQUIRE(pos != std::string::npos);
@@ -1338,6 +1541,44 @@ HRR_TEST_CASE(Unit_HRR_TextureRoundtrip) {
 HRR_TEST_CASE(Unit_HRR_GraphExplicitRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_graphexplicit"};
   hrr_run_roundtrip("Unit_HRR_GraphExplicit_Direct", cap.path);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_FailedEndCapture_Direct: a stream capture forked onto a
+ *     second stream and never joined, so hipStreamEndCapture fails with
+ *     hipErrorStreamCaptureUnjoined, then a direct H2D restore, kernel and D2H
+ *     on the stream that was capturing.
+ *   - The archive must hold the failed hipStreamEndCapture: it ended the
+ *     capture, so replay needs it to end its own.
+ *   - Replay with byte-exact D2H must match: the restore and launch run
+ *     directly instead of into a capture replay forgot to close.
+ */
+HRR_TEST_CASE(Unit_HRR_FailedEndCaptureRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_failedendcapture"};
+  hrr_run_exact_roundtrip("Unit_HRR_FailedEndCapture_Direct", cap.path,
+                          {HRR_API_HIPSTREAMBEGINCAPTURE,
+                           HRR_API_HIPSTREAMENDCAPTURE,
+                           HRR_API_HIPMEMCPYASYNC});
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_FailedEndCaptureInvalidated_Direct: a hipMalloc during a
+ *     global-mode capture invalidates it, so hipStreamEndCapture fails with
+ *     hipErrorStreamCaptureInvalidated, then the same direct work as above.
+ *   - The failed hipMalloc is not recorded, so replay's capture is valid and
+ *     its EndCapture returns a graph, which replay must destroy.
+ *   - Replay with byte-exact D2H must match.
+ */
+HRR_TEST_CASE(Unit_HRR_FailedEndCaptureInvalidatedRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_failedendcaptureinval"};
+  hrr_run_exact_roundtrip("Unit_HRR_FailedEndCaptureInvalidated_Direct", cap.path,
+                          {HRR_API_HIPSTREAMBEGINCAPTURE,
+                           HRR_API_HIPSTREAMENDCAPTURE,
+                           HRR_API_HIPMEMCPYASYNC});
 }
 
 HRR_TEST_CASE(Unit_HRR_HostRegLaunchRoundtrip) {

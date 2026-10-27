@@ -227,6 +227,22 @@ inline bool hrr_parse_d2h_summary(const std::string& out, int& d2h_pass, int& d2
 }
 
 // ---------------------------------------------------------------------------
+// hrr_d2h_mismatch_exit: whether a non-zero hrr-playback exit is explained by
+// D2H mismatches alone, the one failure Windows tolerates (see
+// hrr_run_playback):
+//   - exit 2: the divergence guard stopped the replay after too many D2H
+//     mismatches (it prints no summary);
+//   - exit 1 with a summary line that counts at least one failed D2H check.
+// A fatal HIP error aborts the replay before the summary is printed, so its
+// exit 1 is never taken for a mismatch.
+// ---------------------------------------------------------------------------
+inline bool hrr_d2h_mismatch_exit(int ret, const std::string& out) {
+  if (ret == 2) return true;
+  int d2h_pass = 0, d2h_fail = 0;
+  return ret == 1 && hrr_parse_d2h_summary(out, d2h_pass, d2h_fail) && d2h_fail > 0;
+}
+
+// ---------------------------------------------------------------------------
 // hrr_run_playback — spawn hrr-playback, capture stdout, assert:
 //   1. Exit code == 0.
 //   2. The "D2H checks" summary line is present and shows >= 1 pass, 0 fail.
@@ -247,10 +263,16 @@ inline void hrr_run_playback(const fs::path& cap_path,
   // On Windows (gfx1151 consumer iGPU CI target) replay is not guaranteed to
   // reproduce device output bit-for-bit — kernel output buffers can read back
   // as zero even though capture and playback both launch successfully. Treat
-  // D2H fidelity as best-effort there (same policy as the Linux fat-binary
-  // limitation below); a crash still fails the test via the ret < 128 check.
+  // D2H fidelity as best-effort there: a non-zero exit passes when D2H
+  // mismatches alone explain it, and only then. A crash or a fatal HIP error
+  // (which aborts before the summary) fails as it does on Linux, and a clean
+  // exit gets every check below.
 #ifdef _WIN32
-  require_d2h = false;
+  if (require_d2h && ret != 0) {
+    REQUIRE(hrr_d2h_mismatch_exit(ret, out));
+    WARN("D2H mismatch accepted: D2H fidelity is best-effort on Windows");
+    return;
+  }
 #endif
   // When require_d2h is false (e.g. no D2H in workload, or Linux fat-binary
   // limitation) we only assert that hrr-playback did not crash (signal).
