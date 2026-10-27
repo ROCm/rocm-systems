@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include "TestBed.hpp"
+#include "common/ProcessIsolatedTestRunner.hpp"
 
 #include <glob.h>
 #include <unistd.h>
@@ -80,6 +81,36 @@ namespace RcclUnitTesting
         while (std::getline(f, line))
         {
           if (line.find(needle) != std::string::npos) { found = true; break; }
+        }
+      }
+    }
+    globfree(&g);
+    return found;
+  }
+
+  // True if any P2P protocol line for this byte count reports protocol.
+  // "LL " does not match "LL128". A self-copy in the same alltoall stays SIMPLE, so a
+  // size can legitimately log both protocols; callers decide which combination they need.
+  static bool DebugLogsHaveProtocolForBytes(const std::string& globPattern, const char* protocol, long bytes)
+  {
+    const std::string needle = std::string("RCCL P2P SendRecv protocol=") + protocol +
+                               " dir=";
+    const std::string bytesNeedle = "bytes=" + std::to_string(bytes) + " ";
+    glob_t g{};
+    bool found = false;
+    if (glob(globPattern.c_str(), 0, nullptr, &g) == 0)
+    {
+      for (size_t i = 0; i < g.gl_pathc && !found; ++i)
+      {
+        std::ifstream f(g.gl_pathv[i]);
+        std::string line;
+        while (std::getline(f, line))
+        {
+          if (line.find(needle) != std::string::npos && line.find(bytesNeedle) != std::string::npos)
+          {
+            found = true;
+            break;
+          }
         }
       }
     }
@@ -1107,5 +1138,138 @@ namespace RcclUnitTesting
       int const recvBytes[4] = {8192, 2048, 8192, 2048};
       EXPECT_TRUE(RunGfx1250FourRankRing(testBed, sendBytes, recvBytes));
     }
+  }
+
+  // Per-peer alltoall sizes whose P2P protocol the single-node gfx94/gfx95 LL cap must produce.
+  // A self-copy logs SIMPLE at every size, so "LL" means the cross-peer op selected LL, and
+  // "Simple" means no cross-peer op selected LL.
+  struct P2pLlCrossoverExpect {
+    long bytes;
+    bool expectLL;
+  };
+
+  // Two-rank alltoall on the legacy-LL path. The SIMPLE channel estimate is 1 at and below
+  // 64 KiB/peer, which is what made NCCL 2.29's per-channel threshold skip LL. Each case runs
+  // in its own process (see the tests below) because the eligibility check latches
+  // NCCL_P2P_LL_THRESHOLD on first use.
+  static void RunSingleNodeGfx94LlCrossover(P2pLlCrossoverExpect const* expect, int nExpect)
+  {
+    std::string arch = DeviceGcnArchName();
+    if (arch.find("gfx94") == std::string::npos && arch.find("gfx95") == std::string::npos) {
+      GTEST_SKIP() << "Skipping... single-node gfx942/gfx950 LL crossover is gfx94/gfx95 only (detected "
+                   << arch << ").";
+    }
+    // Inherited pins change the SIMPLE estimate or the 64 KiB cap.
+    unsetenv("NCCL_P2P_NVL_CHUNKSIZE");
+    unsetenv("NCCL_MAX_P2P_NCHANNELS");
+    unsetenv("NCCL_MIN_P2P_NCHANNELS");
+    unsetenv("NCCL_PROTO");
+
+    std::string const debugGlob = "/tmp/rccl_p2p_ll_crossover_" + std::to_string(getpid()) + ".*";
+    RemoveGlobbedFiles(debugGlob);
+    setenv("NCCL_DEBUG", "INFO", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
+    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_p2p_ll_crossover_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    {
+      TestBed testBed;
+      if (testBed.ev.maxGpus < 2) {
+        testBed.Finalize();
+        RemoveGlobbedFiles(debugGlob);
+        unsetenv("NCCL_DEBUG_FILE");
+        unsetenv("NCCL_DEBUG_SUBSYS");
+        unsetenv("NCCL_DEBUG");
+        GTEST_SKIP() << "Skipping... P2P LL crossover needs at least 2 GPUs (detected "
+                     << testBed.ev.maxGpus << ").";
+      }
+      std::vector<ncclDataType_t> dataTypes;
+      testBed.GetSupportedDataTypes(dataTypes, {ncclInt8});
+      if (dataTypes.empty()) {
+        testBed.Finalize();
+        RemoveGlobbedFiles(debugGlob);
+        unsetenv("NCCL_DEBUG_FILE");
+        unsetenv("NCCL_DEBUG_SUBSYS");
+        unsetenv("NCCL_DEBUG");
+        GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
+      }
+
+      // Two ranks: the SIMPLE estimate is already 1 at these sizes, and gfx94 DDA alltoall
+      // requires 8 ranks, so this stays on the P2P planner the fix changes.
+      int const nRanks = 2;
+      testBed.InitComms(nRanks);
+      if (::testing::Test::HasFatalFailure()) {
+        testBed.Finalize();
+        return;
+      }
+      bool isCorrect = true;
+      for (int i = 0; i < nExpect && isCorrect && !::testing::Test::HasFailure(); ++i) {
+        size_t const total = static_cast<size_t>(expect[i].bytes) * static_cast<size_t>(nRanks);
+        testBed.SetCollectiveArgs(ncclCollAlltoAll, ncclInt8, total, total);
+        testBed.AllocateMem(false, false);
+        testBed.PrepareData();
+        testBed.ExecuteCollectives();
+        testBed.ValidateResults(isCorrect);
+        testBed.DeallocateMem();
+      }
+      testBed.DestroyComms();
+      testBed.Finalize();
+      EXPECT_TRUE(isCorrect);
+    }
+    if (::testing::Test::HasFailure()) {
+      RemoveGlobbedFiles(debugGlob);
+      unsetenv("NCCL_DEBUG_FILE");
+      unsetenv("NCCL_DEBUG_SUBSYS");
+      unsetenv("NCCL_DEBUG");
+      return;
+    }
+    for (int i = 0; i < nExpect; ++i) {
+      bool const sawLL = DebugLogsHaveProtocolForBytes(debugGlob, "LL", expect[i].bytes);
+      bool const sawSimple = DebugLogsHaveProtocolForBytes(debugGlob, "Simple", expect[i].bytes);
+      if (expect[i].expectLL) {
+        EXPECT_TRUE(sawLL) << "per-peer bytes " << expect[i].bytes
+                           << " expected LL; the SIMPLE channel estimate must not hide it";
+      } else {
+        EXPECT_TRUE(sawSimple) << "per-peer bytes " << expect[i].bytes << " expected SIMPLE";
+        EXPECT_FALSE(sawLL) << "per-peer bytes " << expect[i].bytes
+                            << " must stay SIMPLE (the 64 KiB/peer cap)";
+      }
+    }
+    RemoveGlobbedFiles(debugGlob);
+    unsetenv("NCCL_DEBUG_FILE");
+    unsetenv("NCCL_DEBUG_SUBSYS");
+    unsetenv("NCCL_DEBUG");
+  }
+
+  // Default threshold. 16/32/64 KiB per peer must be LL; 64 KiB+1 and 128 KiB-512 KiB must stay
+  // SIMPLE. Isolated so a prior test's NCCL_P2P_LL_THRESHOLD cannot latch the check.
+  TEST(SendRecv, SingleNodeGfx94LlCrossover)
+  {
+    RUN_ISOLATED_TEST_WITH_ENV(
+      "SingleNodeGfx94LlCrossover",
+      []() {
+        unsetenv("NCCL_P2P_LL_THRESHOLD");
+        P2pLlCrossoverExpect const expect[] = {
+          {16384, true}, {32768, true}, {65536, true},
+          {65537, false}, {131072, false}, {262144, false}, {524288, false},
+        };
+        RunSingleNodeGfx94LlCrossover(expect, sizeof(expect) / sizeof(expect[0]));
+      },
+      {{"NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0"},
+       {"NCCL_P2P_LL128_ENABLE", "0"},
+       {"RCCL_DDA_ENABLE", "0"}});
+  }
+
+  // An explicit NCCL_P2P_LL_THRESHOLD keeps the stock per-channel rule, so 16 KiB/peer stays SIMPLE.
+  TEST(SendRecv, SingleNodeGfx94LlCrossoverHonorsUserThreshold)
+  {
+    RUN_ISOLATED_TEST_WITH_ENV(
+      "SingleNodeGfx94LlCrossoverHonorsUserThreshold",
+      []() {
+        P2pLlCrossoverExpect const expect[] = {{16384, false}};
+        RunSingleNodeGfx94LlCrossover(expect, 1);
+      },
+      {{"NCCL_P2P_LL_THRESHOLD", "4096"},
+       {"NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0"},
+       {"NCCL_P2P_LL128_ENABLE", "0"},
+       {"RCCL_DDA_ENABLE", "0"}});
   }
 }
