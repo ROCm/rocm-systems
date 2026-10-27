@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
@@ -518,11 +519,10 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="ML API trace",
         help=(
-            "\t\t\tTrace ML APIs [frameworks]... User-defined regions are\n"
-            "\t\t\tincluded. user is not a value.\n"
-            "\t\t\tWith no arguments, traces all supported ML frameworks\n"
-            "\t\t\tand user-defined regions.\n"
-            "\t\t\tValues: all supported ML frameworks."
+            "\t\t\tTrace ML APIs. User-defined regions are included.\n"
+            "\t\t\tuser is not a value.\n"
+            "\t\t\tWith no arguments, traces every listed value.\n"
+            f"\t\t\tValues: {', '.join(KNOWN_ML_API_BACKENDS)}."
         ),
     )
     profile_group.add_argument(
@@ -665,10 +665,10 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="List operators",
         help=(
-            "\t\tList collected operators as a unified call tree [frameworks]...\n"
-            "\t\tWith no arguments, lists every collected ML API and user region.\n"
+            "\t\tList collected operators as a unified call tree.\n"
+            "\t\tWith no arguments, lists every collected operator.\n"
             "\t\tRequires --output-format stdout. Ignores --operator.\n"
-            "\t\tValues: all supported ML frameworks and user-defined regions."
+            f"\t\tValues: {', '.join((*KNOWN_ML_API_BACKENDS, 'user'))}."
         ),
     )
     analyze_group.add_argument(
@@ -683,14 +683,13 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="Operator filter",
         help=(
-            "\t\tFilter operators with glob patterns [selectors]...\n"
-            "\t\tForm: [FW:]PATTERN[,[FW:]PATTERN]. FW is optional.\n"
-            "\t\tA comma piece with its own FW starts that selector.\n"
-            "\t\tExample: --operator torch:*conv*,triton:*matmul*\n"
+            "\t\tFilter operators with glob patterns.\n"
+            "\t\tA pattern with no framework stays on the preceding one.\n"
+            "\t\tSpaces or commas separate patterns.\n"
+            "\t\tExample: --operator torch:*conv* *relu* triton:*matmul*\n"
             "\t\tWith no arguments, matches the collected stack.\n"
             "\t\tRequires --output-format stdout.\n"
             "\t\tIgnored when --list-operators is set.\n"
-            "\t\tValues: all supported ML frameworks and user-defined regions.\n"
             "\t\t(Default: **)"
         ),
     )
