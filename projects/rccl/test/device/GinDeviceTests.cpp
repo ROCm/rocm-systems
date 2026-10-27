@@ -18,8 +18,10 @@
 #include "nccl_device/gin/gin_device_common.h"
 #include "nccl_device/gin/proxy/gin_proxy.h"
 #include "nccl_device/gin/proxy/gin_proxy_device_host_common.h"
+#include "nccl_device/impl/barrier__funcs.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <iomanip>
 #include <vector>
@@ -1876,6 +1878,118 @@ TEST_F(GinDeviceTest, ProxyFlush_NoTimeoutOverloadWaitsForAbortPoll) {
     << "a no-timeout flush returned before the first abort poll (or testAbort's poll interval shrank); ready="
     << cycles[0] << " pending=" << cycles[1];
   queues.ExpectUnchanged();
+}
+
+// ---------------------------------------------------------------------------
+// WorldBarrierPutFence_*: when the proxy context reports that any signal flushes all earlier puts (NCCL 2.32), a
+//   Put-fenced world barrier flushes this rank's own puts and syncs LSA + rail instead of running the dense GIN barrier.
+// ---------------------------------------------------------------------------
+
+constexpr char kRocshmemGinSkip[] = "rocSHMEM GIN on: ncclGin would instantiate its test stubs, linked only -fgpu-rdc";
+
+struct WorldBarrierPutFenceResult {
+  ncclResult_t ret;
+  uint32_t peerPi;     // GFDs posted to LSA peer 1's proxy queue, counting the one already outstanding
+  uint32_t peerInbox;  // what this rank stored in LSA peer 1's barrier inbox
+  uint32_t selfSignal; // signal id of the GFD this rank posted to itself
+};
+
+#if !NCCL_GIN_ROCSHMEM_GDA_ENABLE && !NCCL_GIN_ANVIL_SDMA_ENABLE
+__global__ void kernelWorldBarrierPutFence(ncclDevComm comm, uint64_t timeoutCycles, ncclResult_t* ret) {
+  ncclGin gin{comm, /*contextIndex=*/0};
+  ncclBarrierSession<ncclCoopCta> bar(ncclCoopCta(), ncclTeamTagWorld(), gin, /*index=*/0);
+  *ret = bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Put, timeoutCycles);
+}
+#endif
+
+// Rank 0 of 2 ranks in one LSA domain, both GIN-connected (ginContextStride 1 < rail stride 2): the case where a Put
+// fence picks between dense GIN and LSA + rail. Both LSA peers alias one resource buffer (stride4G 0) and every barrier
+// signal has already arrived, so only one put to peer 1, which no proxy thread ever consumes, is left outstanding.
+static bool runWorldBarrierPutFence(bool flushesAllPutsOnAnySignal, WorldBarrierPutFenceResult* res) {
+#if NCCL_GIN_ROCSHMEM_GDA_ENABLE || NCCL_GIN_ANVIL_SDMA_ENABLE
+  return false;
+#else
+  // Proxy GPU context v3 appends `bool flushesAllPutsOnAnySignal` right after lastVisibleGet. It is set by offset in a
+  // larger buffer so the test also builds against the v2 context, whose barrier never reads it.
+  constexpr size_t kFlushesAllPutsOffset = offsetof(ncclGinProxyGpuCtx_t, lastVisibleGet) + sizeof(uint32_t*);
+  constexpr size_t kProxyCtxWords = 16;
+  static_assert(sizeof(ncclGinProxyGpuCtx_t) <= kProxyCtxWords * sizeof(uint64_t), "proxy ctx outgrew the buffer");
+  constexpr int kNranks = 2;
+  constexpr uint32_t kQueueSize = 16;
+  constexpr int kNSignals = 3; // dense barrier: signals 0 and 1, rail barrier: signal 2
+  DeviceBuffer<ncclGinProxyGfd_t> d_queues(kNranks * kQueueSize);
+  DeviceBuffer<uint32_t> d_pis(kNranks), d_cis(kNranks), d_gets(kNranks), d_lsa(32);
+  DeviceBuffer<uint64_t> d_signals(kNSignals), d_signalOffsets(kNSignals), d_shadows(kNSignals);
+  DeviceBuffer<uint64_t> d_proxyCtx(kProxyCtxWords);
+  DeviceBuffer<ncclResult_t> d_ret(1);
+  d_queues.zero();
+  d_cis.zero();
+  d_gets.zero();
+  d_signalOffsets.zero();
+  d_shadows.zero();
+  d_pis.copyFrom(std::vector<uint32_t>{0u, 1u});
+  d_signals.copyFrom(std::vector<uint64_t>(kNSignals, 1u));
+  std::vector<uint32_t> lsa(d_lsa.count, 0u);
+  lsa[4] = 1u; // LSA barrier 0 keeps its epoch at [1] and rank r's arrival at [3 + r]: peer 1 has arrived
+  d_lsa.copyFrom(lsa);
+  d_ret.upload(ncclInProgress);
+
+  ncclGinProxyGpuCtx_t proxyCtx{};
+  proxyCtx.nranks = kNranks;
+  proxyCtx.queueSize = kQueueSize;
+  proxyCtx.queues = d_queues.ptr;
+  proxyCtx.pis = d_pis.ptr;
+  proxyCtx.cis = d_cis.ptr;
+  proxyCtx.signals = d_signals.ptr;
+  proxyCtx.signalOffsets = d_signalOffsets.ptr;
+  proxyCtx.lastIssuedGet = d_gets.ptr;
+  proxyCtx.lastVisibleGet = d_gets.ptr;
+  std::vector<uint64_t> ctxWords(kProxyCtxWords, 0u);
+  std::memcpy(ctxWords.data(), &proxyCtx, sizeof(proxyCtx));
+  reinterpret_cast<uint8_t*>(ctxWords.data())[kFlushesAllPutsOffset] = flushesAllPutsOnAnySignal;
+  d_proxyCtx.copyFrom(ctxWords);
+
+  ncclDevComm comm{};
+  comm.nRanks = comm.lsaSize = kNranks;
+  comm.nRanks_rcp32 = comm.lsaSize_rcp32 = nccl::utility::idivRcp32(kNranks);
+  comm.resourceWindow_inlined.lsaFlatBase = reinterpret_cast<char*>(d_lsa.ptr);
+  comm.hybridLsaBarrier.nBarriers = 1;
+  comm.hybridRailGinBarrier.signal0 = 2;
+  comm.ginConnectionCount = 1;
+  comm.ginNetDeviceTypes[0] = NCCL_NET_DEVICE_GIN_PROXY;
+  comm.ginHandles[0] = d_proxyCtx.ptr;
+  comm.ginSignalCount = kNSignals;
+  comm.ginSignalShadows = d_shadows.ptr;
+  comm.ginContextCount = 1;
+  comm.ginConnectionStride = comm.ginContextStride = 1;
+
+  kernelWorldBarrierPutFence<<<1, 1>>>(comm, kProxyShortTimeoutCycles, d_ret.ptr);
+  EXPECT_EQ(hipGetLastError(), hipSuccess);
+  EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+  res->ret = d_ret.download();
+  res->peerPi = d_pis.copyTo()[1];
+  res->peerInbox = d_lsa.copyTo()[3];
+  res->selfSignal = static_cast<uint32_t>(d_queues.copyTo()[0].qword[ncclGinProxyGfdCompletion].completion.signalId);
+  return true;
+#endif
+}
+
+TEST_F(GinDeviceTest, WorldBarrierPutFence_AutoFlushUsesLsaAndRailBarriers) {
+  WorldBarrierPutFenceResult res{};
+  if (!runWorldBarrierPutFence(/*flushesAllPutsOnAnySignal=*/true, &res)) GTEST_SKIP() << kRocshmemGinSkip;
+  EXPECT_EQ(res.ret, ncclTimeout) << "the producer flush must wait on the outstanding put to peer 1 and report it";
+  EXPECT_EQ(res.peerPi, 1u) << "the dense GIN barrier signalled LSA peer 1; LSA + rail must replace it";
+  EXPECT_EQ(res.peerInbox, 1u) << "the LSA barrier never arrived at peer 1";
+  EXPECT_EQ(res.selfSignal, 2u) << "the self signal must be the rail barrier's (2), not the dense barrier's (0)";
+}
+
+TEST_F(GinDeviceTest, WorldBarrierPutFence_NoAutoFlushUsesDenseGinBarrier) {
+  WorldBarrierPutFenceResult res{};
+  if (!runWorldBarrierPutFence(/*flushesAllPutsOnAnySignal=*/false, &res)) GTEST_SKIP() << kRocshmemGinSkip;
+  EXPECT_EQ(res.ret, ncclSuccess) << "no flush runs and every dense barrier signal has arrived";
+  EXPECT_EQ(res.peerPi, 2u) << "the dense GIN barrier must signal peer 1";
+  EXPECT_EQ(res.peerInbox, 0u) << "no LSA barrier runs when every rank is GIN-connected";
+  EXPECT_EQ(res.selfSignal, 0u) << "the self signal must be the dense barrier's (0)";
 }
 
 } // namespace RcclUnitTesting
