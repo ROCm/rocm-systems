@@ -195,14 +195,14 @@
       },
       "tests": [
         {
-          "name": "UBR_MultiSegment_Generic",
-          "description": "Out-of-place AllReduce on a buffer spanning multiple VMM segments (multi-segment registration branch on Ring AllReduce)",
-          "test_filter": "UBR_MultiSegment.Generic"
-        },
-        {
           "name": "UBR_MultiSegment_Generic_Reuse",
           "description": "Register once, AllReduce twice - exercises the multi-segment registration reuse fast path (IPC or NET reuse)",
           "test_filter": "UBR_MultiSegment.Generic_Reuse"
+        },
+        {
+          "name": "UBR_MultiSegment_NetSegmentCountOddSizedHipMalloc",
+          "description": "NET segment count of an odd-sized hipMalloc registration must not walk past the allocation into the page-rounded tail",
+          "test_filter": "UBR_MultiSegment.NetSegmentCountOddSizedHipMalloc"
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa",
@@ -238,6 +238,36 @@
         "RCCL_MPI_LOG_ALL_RANKS": "1"
       },
       "tests": [
+        {
+          "name": "UBR_MultiSegment_Generic",
+          "description": "Out-of-place AllReduce on an 8-segment VMM buffer; asserts the NET cache rcclNet.nSegments",
+          "test_filter": "UBR_MultiSegment.Generic"
+        },
+        {
+          "name": "UBR_MultiSegment_GenericGraph",
+          "description": "Graph-captured AllReduce reusing a wider 8-segment graph record; asserts the NET cache counts the whole record",
+          "test_filter": "UBR_MultiSegment.GenericGraph",
+          "env_variables": {
+            "NCCL_GRAPH_REGISTER": "1"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_MultiSegmentRegisterOff_SliceSkipsNet",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: a one-segment slice of an 8-segment registration skips NET and the AllReduce is correct",
+          "test_filter": "UBR_MultiSegment.MultiSegmentRegisterOff_SliceSkipsNet",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_MultiSegmentRegisterOff_GraphSliceSkipsNet",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: graph registration of a one-segment slice reusing an 8-segment record skips NET and drops its reference",
+          "test_filter": "UBR_MultiSegment.MultiSegmentRegisterOff_GraphSliceSkipsNet",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0",
+            "NCCL_GRAPH_REGISTER": "1"
+          }
+        },
         {
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
           "description": "Cross-node ReduceScatter over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
@@ -300,6 +330,60 @@
           "name": "GdrFlush_RepeatedFlushBurst",
           "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
           "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_base": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 1200,
+      "description": "Shared env for remote GDR flush flag suites. Carries no tests: extends merges test lists, so children would inherit them.",
+      "env_variables": {
+        "RCCL_IB_GDR_FLUSH_FLAG": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "0"
+      }
+    },
+    "net_ib_gdr_flush_flag": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "tests": [
+        {
+          "name": "GdrFlushFlag_DefaultQps",
+          "description": "Remote GDR flush flag with default QPs. GdrFlushFlagTest needs 2 ranks; GdrFlushFlagProtoSwitchMPITest needs 2 nodes.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        },
+        {
+          "name": "GdrFlushFlag_FusedNic",
+          "description": "Fused (two-NIC) device keeps the RDMA read flush. Its own process: the vNIC it makes stays in the device list, and later comms in the process would use it and run without the flag.",
+          "test_filter": "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4Qps",
+          "description": "Remote GDR flush flag over 4 QPs per connection: requests rotate over the QPs and each flag tracks its own QP.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps_split": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4QpsSplit",
+          "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1: every request spans all 4 QPs, and the GPU waits on all 4 flags.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
         }
       ]
     },
@@ -1030,6 +1114,7 @@
         {"name": "HostApi_PutSignalNullWindow", "description": "Host API: put signal null window", "test_filter": "HostApiTest.PutSignalNullWindow"},
         {"name": "HostApi_PutSignalOffsetOutOfBounds", "description": "Host API: put signal offset out of bounds", "test_filter": "HostApiTest.PutSignalOffsetOutOfBounds"},
         {"name": "HostApi_PutSignalInvalidSigIdx", "description": "Host API: put signal invalid sig idx", "test_filter": "HostApiTest.PutSignalInvalidSigIdx"},
+        {"name": "HostApi_PutSignalMultiSigIdx", "description": "Host API: two independent signal indexes on numRmaSig=2", "test_filter": "HostApiMultiSigTest.PutSignalMultiSigIdx"},
         {"name": "HostApi_SignalCumulativeFence", "description": "Host API: signal cumulative fence", "test_filter": "HostApiTest.SignalCumulativeFence"},
         {"name": "HostApi_MultipleSendersOneReceiver", "description": "Host API: multiple senders one receiver", "test_filter": "HostApiTest.MultipleSendersOneReceiver"},
         {"name": "HostApi_WaitSignalMultipleDescriptors", "description": "Host API: wait signal multiple descriptors", "test_filter": "HostApiTest.WaitSignalMultipleDescriptors"},
@@ -1038,6 +1123,7 @@
         {"name": "HostApi_DenseAllToAllPutSignal", "description": "Host API: dense all-to-all put/signal, uniform and uneven sizes", "test_filter": "HostApiTest.DenseAllToAllPutSignal"},
         {"name": "HostApi_SignalImpliesPriorPutsDelivered", "description": "Host API: signal implies prior puts delivered", "test_filter": "HostApiTest.SignalImpliesPriorPutsDelivered"},
         {"name": "HostApi_PutSignalInvalidCtx", "description": "Host API: put signal invalid ctx", "test_filter": "HostApiTest.PutSignalInvalidCtx"},
+        {"name": "HostApi_PutSignalMultiCtx", "description": "Host API: striped puts across ctx 0 and 1 on numRmaCtx=2", "test_filter": "HostApiMultiCtxTest.PutSignalMultiCtx"},
         {"name": "HostApi_WaitSignalNullDescs", "description": "Host API: wait signal null descs", "test_filter": "HostApiTest.WaitSignalNullDescs"},
         {"name": "HostApi_WaitSignalZeroDesc", "description": "Host API: wait signal zero desc", "test_filter": "HostApiTest.WaitSignalZeroDesc"},
         {"name": "HostApi_TwoCommunicatorsIndependentWindows", "description": "Host API: two communicators independent windows", "test_filter": "HostApiTest.TwoCommunicatorsIndependentWindows"},
@@ -5168,6 +5254,11 @@
           "name": "Symk_AllGatherStoreData",
           "description": "Forced AllGather_ST with position-dependent data across its byte, 4-byte and 16-byte tiers and in-place",
           "test_filter": "SymmetricKernelCorruptionTest.AllGatherST_PositionDependentData"
+        },
+        {
+          "name": "Symk_GroupedAllGatherVaryingSizes",
+          "description": "Four AllGathers of different sizes fused in one group, exercising the work-range split; skips without cuMem",
+          "test_filter": "SymmetricKernelCorruptionTest.GroupedAllGather_VaryingSizes"
         }
       ]
     }
@@ -5225,6 +5316,24 @@
       "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank)",
       "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst",
       "config": "net_ib_gdr_flush",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush Flag - Default QPs (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1) over 2 ranks on 2 nodes",
+      "config": "net_ib_gdr_flush_flag",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush Flag - 4 QPs (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag over 4 QPs per connection",
+      "config": "net_ib_gdr_flush_flag_4qps",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush Flag - 4 QPs split (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1",
+      "config": "net_ib_gdr_flush_flag_4qps_split",
       "enabled": true
     },
     {
@@ -5453,6 +5562,18 @@
       "name": "UBR Concurrent Registration Hang Tests",
       "description": "Tests demonstrating UBR concurrent registration hang with separate buffers and fix with contiguous buffers. Includes one test expected to hang (run with timeout).",
       "config": "ubr_concurrent_reg_hang",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Registration and LSA",
+      "description": "Single-node UBR multi-segment registration tests",
+      "config": "ubr_multisegment_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - LSA plus GIN (Multi-Node)",
+      "description": "Two-node UBR multi-segment tests including Generic rcclNet.nSegments",
+      "config": "ubr_multisegment_lsagin_multinode",
       "enabled": true
     },
     {

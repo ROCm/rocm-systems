@@ -27,6 +27,7 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <array>
 #include <cerrno>
@@ -176,15 +177,12 @@ std::string proxyNthreadsSkipReason() {
   return "";
 }
 
-// rocSHMEM-GDA and SDMA implement only INDEXED signals; VA signals are
-// unsupported (Put/PutValue address the signal via indexedSignal.signalId).
+// rocSHMEM-GDA implements only INDEXED signals; VA signals are unsupported
+// (Put/PutValue address the signal via indexedSignal.signalId).
 std::string vaSignalTestSkipReason() {
   if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
     return "VA signals not supported by rocSHMEM-GDA (NCCL_GIN_TYPE=" +
            std::to_string(NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) + ")";
-  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
-    return "VA signals not supported by SDMA (NCCL_GIN_TYPE=" +
-           std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA) + ")";
   return "";
 }
 
@@ -205,19 +203,28 @@ std::string getBackendSkipReason() {
   return "";
 }
 
+// Missing, empty, signed, whitespace-prefixed, or overflowing values fall back
+// to the compiled default. strtoull skips leading whitespace before it sees a
+// sign, so " -1" would otherwise become ULLONG_MAX, and an unchecked overflow
+// does the same. Either value silently skips the SDMA-path tests.
+size_t anvilSdmaThresholdFromEnv() {
+  const char* e = std::getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD");
+  if (!e || !e[0] || std::isspace(static_cast<unsigned char>(e[0])) || *e == '-')
+    return NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
+  errno = 0;
+  char* end = nullptr;
+  unsigned long long v = std::strtoull(e, &end, 10);
+  if (end == e || *end != '\0' || errno == ERANGE) return NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
+  return static_cast<size_t>(v);
+}
+
 // The GIN-SDMA alltoall exists only on the SDMA backend.
 // BarrierFence uses kBytes=4096 to exercise the SDMA queue; a raised
 // NCCL_GIN_ANVIL_SDMA_THRESHOLD sends the traffic down the IPC fallback instead.
 std::string sdmaBarrierFenceEnvSkipReason() {
   if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return "";
   constexpr size_t kBarrierFenceBytes = 4096;
-  size_t threshold = NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
-  if (const char* e = std::getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD"); e && e[0] && *e != '-') {
-    char* end = nullptr;
-    unsigned long long v = std::strtoull(e, &end, 10);
-    if (end != e && *end == '\0') threshold = static_cast<size_t>(v);
-  }
-  if (threshold >= kBarrierFenceBytes)
+  if (anvilSdmaThresholdFromEnv() >= kBarrierFenceBytes)
     return "BarrierFence tests assume NCCL_GIN_ANVIL_SDMA_THRESHOLD is below 4096 bytes";
   return "";
 }
@@ -227,14 +234,20 @@ std::string sdmaBarrierFenceEnvSkipReason() {
 std::string sdmaIpcSignalIncEnvSkipReason() {
   if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return "";
   constexpr size_t kIpcBytes = 64;
-  size_t threshold = NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
-  if (const char* e = std::getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD"); e && e[0] && *e != '-') {
-    char* end = nullptr;
-    unsigned long long v = std::strtoull(e, &end, 10);
-    if (end != e && *end == '\0') threshold = static_cast<size_t>(v);
-  }
-  if (threshold < kIpcBytes)
+  if (anvilSdmaThresholdFromEnv() < kIpcBytes)
     return "BarrierFence IPC SignalInc needs NCCL_GIN_ANVIL_SDMA_THRESHOLD >= 64";
+  return "";
+}
+
+// AnvilStrongSignal_* needs the payload on the SDMA queue, so it runs only on
+// Anvil SDMA and only while its put stays at or above the SDMA threshold.
+constexpr size_t kAnvilStrongSignalBytes = 4u << 20;
+std::string anvilStrongSignalSkipReason() {
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    return "AnvilStrongSignal tests target the Anvil SDMA backend (NCCL_GIN_TYPE=" +
+           std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA) + ")";
+  if (anvilSdmaThresholdFromEnv() >= kAnvilStrongSignalBytes)
+    return "AnvilStrongSignal tests assume NCCL_GIN_ANVIL_SDMA_THRESHOLD is below 4 MiB";
   return "";
 }
 
@@ -2027,29 +2040,31 @@ TEST_F(GinMPIDeviceTests, WaitCounterAndSignal_MultiContext) {
   runWaitCounterAndSignal(n);
 }
 
+// Fill and check byte for BarrierFence visibility: 0x20 + rank + (i & 0x3f).
+__host__ __device__ inline uint8_t barrierFencePattern(int rank, size_t i) {
+  return static_cast<uint8_t>(0x20 + rank + (i & 0x3f));
+}
+
+template <typename Coop, typename GinOrAllContexts>
+__device__ void syncFenceVisibilityBarrierWith(Coop coop, GinOrAllContexts ginOrAllContexts,
+                                               BarrierFenceOperation operation, bool defaultFence) {
+  ncclGinBarrierSession<Coop> bar{coop, ginOrAllContexts, ncclTeamTagWorld{}, /*barrierIndex=*/0};
+  if (defaultFence) {
+    bar.sync(coop, cuda::memory_order_acq_rel);
+  } else {
+    ncclGinFenceLevel fence =
+      operation == BarrierFenceOperation::Get ? ncclGinFenceLevel::Get : ncclGinFenceLevel::Put;
+    bar.sync(coop, cuda::memory_order_acq_rel, fence);
+  }
+}
+
 template <typename GinOrAllContexts>
 __device__ void syncFenceVisibilityBarrier(GinOrAllContexts ginOrAllContexts, BarrierFenceOperation operation,
                                            bool defaultFence, bool coopAny) {
   if (coopAny) {
-    ncclCoopAny coop{ncclCoopCta()};
-    ncclGinBarrierSession<ncclCoopAny> bar{coop, ginOrAllContexts, ncclTeamTagWorld{}, /*barrierIndex=*/0};
-    if (defaultFence) {
-      bar.sync(coop, cuda::memory_order_acq_rel);
-    } else {
-      ncclGinFenceLevel fence =
-        operation == BarrierFenceOperation::Get ? ncclGinFenceLevel::Get : ncclGinFenceLevel::Put;
-      bar.sync(coop, cuda::memory_order_acq_rel, fence);
-    }
+    syncFenceVisibilityBarrierWith(ncclCoopAny{ncclCoopCta()}, ginOrAllContexts, operation, defaultFence);
   } else {
-    ncclGinBarrierSession<ncclCoopCta> bar{
-      ncclCoopCta(), ginOrAllContexts, ncclTeamTagWorld{}, /*barrierIndex=*/0};
-    if (defaultFence) {
-      bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
-    } else {
-      ncclGinFenceLevel fence =
-        operation == BarrierFenceOperation::Get ? ncclGinFenceLevel::Get : ncclGinFenceLevel::Put;
-      bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel, fence);
-    }
+    syncFenceVisibilityBarrierWith(ncclCoopCta(), ginOrAllContexts, operation, defaultFence);
   }
 }
 
@@ -2080,8 +2095,7 @@ __global__ void barrierFenceVisibilityKernel(
 
   int sourceRank = operation == BarrierFenceOperation::Put ? (rank + devComm.nRanks - 1) % devComm.nRanks : peer;
   for (size_t i = threadIdx.x; i < bytes; i += blockDim.x) {
-    uint8_t expected = static_cast<uint8_t>(0x20 + sourceRank + (i & 0x3f));
-    if (dst[i] != expected) atomicCAS(error, 0, static_cast<int>(i + 1));
+    if (dst[i] != barrierFencePattern(sourceRank, i)) atomicCAS(error, 0, static_cast<int>(i + 1));
   }
 }
 
@@ -2104,10 +2118,79 @@ __global__ void barrierFenceIpcSignalIncKernel(
   }
   gin.waitSignal(ncclCoopCta(), kSigIdx, /*least=*/1);
   for (size_t i = threadIdx.x; i < bytes; i += blockDim.x) {
-    uint8_t expected = static_cast<uint8_t>(0x20 + /*sourceRank=*/0 + (i & 0x3f));
-    if (dst[i] != expected) atomicCAS(error, 0, static_cast<int>(i + 1));
+    if (dst[i] != barrierFencePattern(/*sourceRank=*/0, i)) atomicCAS(error, 0, static_cast<int>(i + 1));
   }
 }
+
+// Shared alloc, window register, and devComm setup for the single-node GIN
+// visibility tests. Destruction runs on every exit, including a failing assert.
+struct GinSymmetricSetupStatus {
+  const char* step = "";
+  ncclResult_t nccl = ncclSuccess;
+  hipError_t hip = hipSuccess;
+};
+
+struct GinSymmetricBuffers {
+  ncclComm_t comm = nullptr;
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  int* dError = nullptr;
+  ncclWindow_t srcWin = nullptr;
+  ncclWindow_t dstWin = nullptr;
+  ncclDevComm devComm{};
+  bool devCommCreated = false;
+
+  GinSymmetricBuffers() = default;
+  GinSymmetricBuffers(const GinSymmetricBuffers&) = delete;
+  GinSymmetricBuffers& operator=(const GinSymmetricBuffers&) = delete;
+
+  ~GinSymmetricBuffers() {
+    if (devCommCreated && comm) (void)ncclDevCommDestroy(comm, &devComm);
+    if (srcWin && comm) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin && comm) (void)ncclCommWindowDeregister(comm, dstWin);
+    if (dError) (void)hipFree(dError);
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+  }
+};
+
+GinSymmetricSetupStatus prepareGinSymmetricBuffers(GinSymmetricBuffers* b, ncclComm_t comm, size_t bytes,
+                                                   const uint8_t* hostSrc, const ncclDevCommRequirements& reqs) {
+  b->comm = comm;
+  GinSymmetricSetupStatus st;
+  st.nccl = ncclMemAlloc(&b->dSrc, bytes);
+  if (st.nccl != ncclSuccess) { st.step = "ncclMemAlloc src"; return st; }
+  st.nccl = ncclMemAlloc(&b->dDst, bytes);
+  if (st.nccl != ncclSuccess) { st.step = "ncclMemAlloc dst"; return st; }
+  st.hip = hipMalloc(&b->dError, sizeof(int));
+  if (st.hip != hipSuccess) { st.step = "hipMalloc error"; return st; }
+  st.nccl = ncclCommWindowRegister(comm, b->dSrc, bytes, &b->srcWin, NCCL_WIN_COLL_SYMMETRIC);
+  if (st.nccl != ncclSuccess) { st.step = "ncclCommWindowRegister src"; return st; }
+  st.nccl = ncclCommWindowRegister(comm, b->dDst, bytes, &b->dstWin, NCCL_WIN_COLL_SYMMETRIC);
+  if (st.nccl != ncclSuccess) { st.step = "ncclCommWindowRegister dst"; return st; }
+  st.hip = hipMemcpy(b->dSrc, hostSrc, bytes, hipMemcpyHostToDevice);
+  if (st.hip != hipSuccess) { st.step = "hipMemcpy src"; return st; }
+  st.hip = hipMemset(b->dDst, 0, bytes);
+  if (st.hip != hipSuccess) { st.step = "hipMemset dst"; return st; }
+  st.hip = hipMemset(b->dError, 0, sizeof(int));
+  if (st.hip != hipSuccess) { st.step = "hipMemset error"; return st; }
+  st.hip = hipStreamSynchronize(nullptr);
+  if (st.hip != hipSuccess) { st.step = "hipStreamSynchronize"; return st; }
+  st.nccl = ncclDevCommCreate(comm, &reqs, &b->devComm);
+  if (st.nccl != ncclSuccess) { st.step = "ncclDevCommCreate"; return st; }
+  b->devCommCreated = true;
+  return st;
+}
+
+// ASSERT_MPI_EQ runs in the caller, so a peer-skip GTEST_SKIP returns from the
+// test body. Checking IsSkipped() after a helper that asserted internally would
+// miss ranks that already have an EXPECT failure (IsSkipped() is then false).
+#define ASSERT_GIN_SYMMETRIC_SETUP(st)     \
+  do {                                     \
+    SCOPED_TRACE((st).step);               \
+    ASSERT_MPI_EQ(ncclSuccess, (st).nccl); \
+    ASSERT_MPI_EQ(hipSuccess, (st).hip);   \
+  } while (0)
 
 void GinMPIDeviceTests::runBarrierFenceVisibility(
     BarrierFenceOperation operation, bool allContexts, bool defaultFence, bool coopAny) {
@@ -2123,6 +2206,7 @@ void GinMPIDeviceTests::runBarrierFenceVisibility(
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -2132,63 +2216,29 @@ void GinMPIDeviceTests::runBarrierFenceVisibility(
   // Larger than the default SDMA threshold so Anvil SDMA (NCCL_GIN_TYPE=7)
   // exercises a real SDMA copy rather than the small-transfer IPC fallback.
   constexpr size_t kBytes = 4096;
-  void* dSrc = nullptr;
-  void* dDst = nullptr;
-  int* dError = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBytes));
-  auto srcCleanup = makeScopeGuard([&]() {
-    if (dSrc) (void)ncclMemFree(dSrc);
-  });
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBytes));
-  auto dstCleanup = makeScopeGuard([&]() {
-    if (dDst) (void)ncclMemFree(dDst);
-  });
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dError, sizeof(int)));
-  auto errorCleanup = makeScopeGuard([&]() {
-    if (dError) (void)hipFree(dError);
-  });
-
-  ncclWindow_t srcWin = nullptr;
-  ncclWindow_t dstWin = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess,
-                ncclCommWindowRegister(comm, dSrc, kBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
-  auto srcWinCleanup = makeScopeGuard([&]() {
-    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
-  });
-  ASSERT_MPI_EQ(ncclSuccess,
-                ncclCommWindowRegister(comm, dDst, kBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
-  auto dstWinCleanup = makeScopeGuard([&]() {
-    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
-  });
-
   std::vector<uint8_t> hostSrc(kBytes);
-  for (size_t i = 0; i < kBytes; ++i)
-    hostSrc[i] = static_cast<uint8_t>(0x20 + rank + (i & 0x3f));
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBytes, hipMemcpyHostToDevice));
-  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, kBytes));
-  ASSERT_MPI_EQ(hipSuccess, hipMemset(dError, 0, sizeof(int)));
-  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(nullptr));
+  for (size_t i = 0; i < kBytes; ++i) {
+    hostSrc[i] = barrierFencePattern(rank, i);
+  }
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.worldGinBarrierCount = 1;
   reqs.ginContextCount = allContexts ? 2 : 1;
-  ncclDevComm devComm{};
-  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
-  auto devCommCleanup = makeScopeGuard([&]() {
-    (void)ncclDevCommDestroy(comm, &devComm);
-  });
-  if (allContexts && devComm.ginContextCount < 2)
-    GTEST_SKIP() << "Backend granted only " << static_cast<int>(devComm.ginContextCount)
+  GinSymmetricBuffers buf;
+  auto setup = prepareGinSymmetricBuffers(&buf, comm, kBytes, hostSrc.data(), reqs);
+  ASSERT_GIN_SYMMETRIC_SETUP(setup);
+  if (allContexts && buf.devComm.ginContextCount < 2)
+    GTEST_SKIP() << "Backend granted only " << static_cast<int>(buf.devComm.ginContextCount)
                  << " GIN context(s); AllContexts test requires 2";
 
   MPI_Barrier(MPI_COMM_WORLD);
   barrierFenceVisibilityKernel<<<1, kGinKernelThreads, 0, stream>>>(
-    srcWin, dstWin, static_cast<uint8_t*>(dDst), kBytes, operation, allContexts, defaultFence, coopAny, dError,
-    devComm);
+    buf.srcWin, buf.dstWin, static_cast<uint8_t*>(buf.dDst), kBytes, operation, allContexts, defaultFence, coopAny,
+    buf.dError, buf.devComm);
   ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, /*seconds=*/30));
 
   int error = 0;
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&error, dError, sizeof(error), hipMemcpyDeviceToHost));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&error, buf.dError, sizeof(error), hipMemcpyDeviceToHost));
   EXPECT_EQ(0, error) << "Fence visibility mismatch at byte " << (error == 0 ? 0 : error - 1);
   MPI_Barrier(MPI_COMM_WORLD);
 }
@@ -2246,64 +2296,31 @@ TEST_F(GinMPIDeviceTests, BarrierFence_IpcSignalIncMakesPutVisible_SingleNode) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
   constexpr size_t kBytes = 64;
-  void* dSrc = nullptr;
-  void* dDst = nullptr;
-  int* dError = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBytes));
-  auto srcCleanup = makeScopeGuard([&]() {
-    if (dSrc) (void)ncclMemFree(dSrc);
-  });
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBytes));
-  auto dstCleanup = makeScopeGuard([&]() {
-    if (dDst) (void)ncclMemFree(dDst);
-  });
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dError, sizeof(int)));
-  auto errorCleanup = makeScopeGuard([&]() {
-    if (dError) (void)hipFree(dError);
-  });
-
-  ncclWindow_t srcWin = nullptr;
-  ncclWindow_t dstWin = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess,
-                ncclCommWindowRegister(comm, dSrc, kBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
-  auto srcWinCleanup = makeScopeGuard([&]() {
-    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
-  });
-  ASSERT_MPI_EQ(ncclSuccess,
-                ncclCommWindowRegister(comm, dDst, kBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
-  auto dstWinCleanup = makeScopeGuard([&]() {
-    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
-  });
-
   std::vector<uint8_t> hostSrc(kBytes);
-  for (size_t i = 0; i < kBytes; ++i)
-    hostSrc[i] = static_cast<uint8_t>(0x20 + /*rank0 pattern*/0 + (i & 0x3f));
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBytes, hipMemcpyHostToDevice));
-  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, kBytes));
-  ASSERT_MPI_EQ(hipSuccess, hipMemset(dError, 0, sizeof(int)));
-  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(nullptr));
+  for (size_t i = 0; i < kBytes; ++i) {
+    hostSrc[i] = barrierFencePattern(/*rank0 pattern*/ 0, i);
+  }
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.worldGinBarrierCount = 1;
   reqs.ginSignalCount = 1;
-  ncclDevComm devComm{};
-  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
-  auto devCommCleanup = makeScopeGuard([&]() {
-    (void)ncclDevCommDestroy(comm, &devComm);
-  });
+  GinSymmetricBuffers buf;
+  auto setup = prepareGinSymmetricBuffers(&buf, comm, kBytes, hostSrc.data(), reqs);
+  ASSERT_GIN_SYMMETRIC_SETUP(setup);
 
   MPI_Barrier(MPI_COMM_WORLD);
   barrierFenceIpcSignalIncKernel<<<1, kGinKernelThreads, 0, stream>>>(
-    srcWin, dstWin, static_cast<uint8_t*>(dDst), kBytes, dError, devComm);
+    buf.srcWin, buf.dstWin, static_cast<uint8_t*>(buf.dDst), kBytes, buf.dError, buf.devComm);
   ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, /*seconds=*/30));
   MPI_Barrier(MPI_COMM_WORLD);
 
   int err = 0;
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&err, dError, sizeof(int), hipMemcpyDeviceToHost));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&err, buf.dError, sizeof(int), hipMemcpyDeviceToHost));
   ASSERT_EQ(err, 0) << "payload byte mismatch at index " << (err - 1);
 }
 
@@ -2530,6 +2547,70 @@ TEST_F(GinMPIDeviceTests, GetFlush_ConcurrentBlocks) {
   runGetVisibility(GetCompletion::Flush, /*nBlocks=*/8, /*nChunks=*/8, {64 * 1024});
 }
 
+
+
+// Rank 0: an SDMA put with no signal, then a separate strong signal, no Flush.
+// Rank 1: waitSignal then read the window. A strong signal must not be seen
+// before an earlier put to the same peer has landed, so this fails if the
+// signal path skips draining the peer's SDMA queue (weak semantics).
+__global__ void anvilStrongSignalAfterSdmaPutKernel(
+    ncclWindow_t srcWin, ncclWindow_t dstWin, uint8_t* dst, size_t bytes, int* error,
+    struct ncclDevComm devComm) {
+  constexpr ncclGinSignal_t kSigIdx = 0;
+  int rank = devComm.rank;
+  int peer = (rank + 1) % devComm.nRanks;
+  ncclGin gin{devComm, /*ginContext=*/0};
+  if (rank == 0) {
+    if (threadIdx.x == 0) {
+      gin.put(ncclTeamWorld(devComm), peer, dstWin, /*dstOffset=*/0, srcWin, /*srcOffset=*/0, bytes);
+      gin.signal(ncclTeamWorld(devComm), peer, ncclGin_StrongSignalInc{kSigIdx});
+    }
+    return;
+  }
+  gin.waitSignal(ncclCoopCta(), kSigIdx, /*least=*/1);
+  for (size_t i = threadIdx.x; i < bytes; i += blockDim.x) {
+    uint8_t expected = static_cast<uint8_t>(0x20 + (i & 0x3f));
+    if (dst[i] != expected) atomicCAS(error, 0, static_cast<int>(i + 1));
+  }
+}
+
+TEST_F(GinMPIDeviceTests, AnvilStrongSignal_OrdersEarlierSdmaPut_SingleNode) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = anvilStrongSignalSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = singleNodeReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  constexpr size_t kBytes = kAnvilStrongSignalBytes;
+  std::vector<uint8_t> hostSrc(kBytes);
+  for (size_t i = 0; i < kBytes; ++i)
+    hostSrc[i] = static_cast<uint8_t>(0x20 + (i & 0x3f));
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.ginSignalCount = 1;
+  GinSymmetricBuffers buf;
+  auto setup = prepareGinSymmetricBuffers(&buf, comm, kBytes, hostSrc.data(), reqs);
+  ASSERT_GIN_SYMMETRIC_SETUP(setup);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  anvilStrongSignalAfterSdmaPutKernel<<<1, kGinKernelThreads, 0, stream>>>(
+    buf.srcWin, buf.dstWin, static_cast<uint8_t*>(buf.dDst), kBytes, buf.dError, buf.devComm);
+  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, /*seconds=*/30));
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  int err = 0;
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&err, buf.dError, sizeof(int), hipMemcpyDeviceToHost));
+  ASSERT_EQ(err, 0) << "strong signal observed before the earlier SDMA put landed; first bad byte "
+                    << (err - 1);
+}
 
 // Collective kernel: every rank runs the same code. The barrier composes
 // signal + waitSignal over a per-peer signal window (gin_barrier__funcs.h):
