@@ -109,6 +109,9 @@ typedef struct rj_vm_gpu_info_t {
   uint32_t max_slots_scratch_cu;
 
   uint64_t local_mem_size;
+  uint64_t visible_vram_size;
+  uint32_t control_stack_size;
+  uint32_t context_save_size;
   uint32_t vram_type;
   uint32_t lds_size_kb;
   uint32_t mem_width;
