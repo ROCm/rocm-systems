@@ -303,7 +303,8 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipGetSymbolAddress",
     "hipGetSymbolSize",
     # Pinned host allocation — charged to the host budget (--max-host-bytes), a
-    # replaced entry is freed first, and hipFreeHost gives the allocation back
+    # replaced entry is freed first, and hipFreeHost / hipHostFree give the
+    # allocation back
     "hipHostMalloc",
     "hipMallocHost",
     "hipFreeHost",

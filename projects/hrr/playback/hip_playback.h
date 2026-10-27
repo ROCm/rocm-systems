@@ -200,9 +200,10 @@ struct PlaybackContext {
     // Protected by map_mutex: shared_lock for reads, unique_lock for writes.
     mutable std::shared_mutex map_mutex;
     // Orders a pinned-host snapshot copy against the free of its destination.
-    // Shared while destinations are resolved and the copy is queued; exclusive
-    // across map removal and the HIP free. Take this before map_mutex, never
-    // the other way round.
+    // A kernel launch holds it shared from before it hands on the turn until
+    // its launch call returns (hrr_launch_hold); every host free holds it
+    // exclusive across map removal and the HIP free. Take this before
+    // map_mutex, never the other way round.
     std::shared_mutex host_free_mu;
     std::unordered_map<uint64_t, hipStream_t>    stream_map;
     std::unordered_map<uint64_t, hipEvent_t>     event_map;
@@ -1081,6 +1082,17 @@ hipCtx_t hrr_live_ctx(uint64_t recorded);
 // Kernel-launch handlers read this to wait for their submission turn at the
 // exact point of the HIP call, allowing preparation work to run in parallel.
 extern thread_local uint64_t hrr_dispatch_seq;
+
+// Kernel-launch handoff, for dispatch_event. A launch gives up the global turn
+// before its handler runs, so it holds host_free_mu shared from before that
+// (hrr_launch_hold) until the launch call returns: the handler calls
+// hrr_launch_release then, and dispatch_event again on the way out. A free of
+// pinned host memory takes the lock exclusive, so it cannot drop a destination
+// a snapshot is about to be queued for. Both are per thread.
+void hrr_launch_hold(PlaybackContext& ctx);
+void hrr_launch_release();
+// True for the handlers that replay a kernel launch.
+bool hrr_is_launch_handler(hipError_t (*fn)(PlaybackContext&, const uint8_t*));
 
 // Device synchronize with an optional watchdog. When ctx.sync_watchdog_ms == 0
 // this is a plain hipDeviceSynchronize(). Otherwise the (potentially blocking)

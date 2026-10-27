@@ -486,14 +486,27 @@ static void host_snapshot_copy(void* data) {
     delete copies;
 }
 
+// A kernel launch's hold on host_free_mu, taken before the launch hands the
+// turn on and kept until its launch call returns. Per thread, as the launch is.
+static thread_local std::shared_lock<std::shared_mutex> t_launch_hold;
+
+void hrr_launch_hold(PlaybackContext& ctx) {
+    t_launch_hold = std::shared_lock<std::shared_mutex>(ctx.host_free_mu);
+}
+
+void hrr_launch_release() {
+    if (t_launch_hold.owns_lock()) t_launch_hold.unlock();
+}
+
 // Write a launch's pinned host snapshots back when its stream reaches it, by a
 // host function queued ahead of the kernel. The replay thread does not wait
-// for the stream, which may wait on work it has yet to submit. Kernel launches
-// give up the global turn before this runs, so a free on another thread can
-// otherwise release the destination first. host_free_mu is held shared from
-// the lookup through the queue; every host free takes it exclusive before it
-// drops the map entry. Nothing is restored when the stream captures into a
-// graph, where the kernel runs only when the graph is launched.
+// for the stream, which may wait on work it has yet to submit. A kernel launch
+// gives up the global turn before its handler runs, so a free on another
+// thread could release the destination first. The caller holds host_free_mu
+// shared (hrr_launch_hold) from before the turn is handed on until the launch
+// returns; every host free takes it exclusive before it drops the map entry.
+// Nothing is restored when the stream captures into a graph, where the kernel
+// runs only when the graph is launched.
 static hipError_t restore_host_snapshots(PlaybackContext& ctx, const uint8_t* rec,
                                          uint16_t n, hipStream_t stream,
                                          const std::string& kernel_name) {
@@ -502,7 +515,6 @@ static hipError_t restore_host_snapshots(PlaybackContext& ctx, const uint8_t* re
         ctx.host_snapshots_skipped += n;
         return hipSuccess;
     }
-    std::shared_lock host_free(ctx.host_free_mu);
     auto copies = std::make_unique<HostSnapCopies>();
     for (uint16_t i = 0; i < n; i++, rec += kHostSnapRecordSize) {
         uint64_t hash[2];
@@ -1443,6 +1455,10 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         }
     }
 
+    // The kernel and its snapshot copies are queued: a host free may go ahead.
+    // Not held across the syncs below, which can wait on events yet to replay.
+    hrr_launch_release();
+
     if (timing_ok)
         timing_ok = (HRR_HIP_CHECK(hipEventRecord(tl_stop, stream)) == hipSuccess);
 
@@ -1583,6 +1599,19 @@ hipError_t playback_hipModuleLaunchCooperativeKernel(PlaybackContext& ctx,
     // barrier replayed through the ordinary launch hangs instead of failing.
     return replay_kernel_launch(ctx, payload, /*ext_global_worksize=*/false,
                                 /*launch_ex=*/false, /*cooperative=*/true);
+}
+
+bool hrr_is_launch_handler(hipError_t (*fn)(PlaybackContext&, const uint8_t*)) {
+    return fn == playback_hipModuleLaunchKernel ||
+           fn == playback_hipExtModuleLaunchKernel ||
+           fn == playback_hipLaunchKernel ||
+           fn == playback_hipLaunchByPtr ||
+           fn == playback_hipLaunchKernel_spt ||
+           fn == playback_hipLaunchCooperativeKernel ||
+           fn == playback_hipLaunchCooperativeKernel_spt ||
+           fn == playback_hipDrvLaunchKernelEx ||
+           fn == playback_hipLaunchKernelExC ||
+           fn == playback_hipModuleLaunchCooperativeKernel;
 }
 
 // ---------------------------------------------------------------------------
@@ -3223,28 +3252,31 @@ hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
     return r;
 }
 
-hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* pl) {
+// hipHostFree and hipFreeHost differ only in the runtime call. The exclusive
+// lock keeps a launch that is queuing a pinned host snapshot for this buffer
+// from racing the free (see hrr_launch_hold).
+static hipError_t free_host_memory(PlaybackContext& ctx, uint64_t rec_ptr, int32_t recorded_ret,
+                                   hipError_t (*free_fn)(void*), const char* api) {
     std::unique_lock host_free(ctx.host_free_mu);
-    const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(pl);
-    void* live = ctx.lookup_ptr(a->ptr);
+    void* live = ctx.lookup_ptr(rec_ptr);
     if (!live) return hipSuccess;
-    hipError_t r = hipHostFree(live);
-    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
-        hrr_note_recorded_error(ctx, "hipHostFree", a->ret);
+    hipError_t r = free_fn(live);
+    if (r != hipSuccess && recorded_ret != 0 && static_cast<int32_t>(r) == recorded_ret) {
+        hrr_note_recorded_error(ctx, api, recorded_ret);
         return hipSuccess;
     }
-    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
+    if (r == hipSuccess) ctx.remove_alloc(rec_ptr);
     return r;
 }
 
+hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(pl);
+    return free_host_memory(ctx, a->ptr, a->ret, hipHostFree, "hipHostFree");
+}
+
 hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
-    std::unique_lock host_free(ctx.host_free_mu);
     const auto* a = reinterpret_cast<const hrr_args_hipFreeHost*>(pl);
-    void* live = ctx.lookup_ptr(a->ptr);
-    if (!live) return hipSuccess;
-    hipError_t r = hipFreeHost(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
-    return r;
+    return free_host_memory(ctx, a->ptr, a->ret, hipFreeHost, "hipFreeHost");
 }
 
 // ---------------------------------------------------------------------------
@@ -3318,29 +3350,34 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
     std::unique_lock host_free(ctx.host_free_mu);
     const auto* a = reinterpret_cast<const hrr_args_hipHostUnregister*>(pl);
 
-    // Retrieve the backing buffer regardless of whether lookup_ptr succeeds —
-    // we must free it even if the alloc_map entry was already removed.
+    // Leave the maps and the backing buffer alone until the runtime call
+    // succeeds. A failed unregister did not release the registration, so
+    // freeing the buffer would leave alloc_map aimed at freed heap.
     void* buf = nullptr;
     {
-        std::unique_lock lk(ctx.map_mutex);
+        std::shared_lock lk(ctx.map_mutex);
         auto it = ctx.host_reg_bufs.find(a->hostPtr);
-        if (it != ctx.host_reg_bufs.end()) {
-            buf = it->second;
-            ctx.host_reg_bufs.erase(it);
-        }
+        if (it != ctx.host_reg_bufs.end()) buf = it->second;
     }
 
     void* live = buf ? buf : ctx.lookup_ptr(a->hostPtr);
     if (!live) return hipSuccess;
 
     hipError_t r = hipHostUnregister(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->hostPtr);
+    if (r != hipSuccess) return r;
 
+    {
+        std::unique_lock lk(ctx.map_mutex);
+        ctx.host_reg_bufs.erase(a->hostPtr);
+    }
+    ctx.remove_alloc(a->hostPtr);
+    if (buf) {
 #ifdef _WIN32
-    _aligned_free(buf);
+        _aligned_free(buf);
 #else
-    free(buf);
+        free(buf);
 #endif
+    }
     return r;
 }
 

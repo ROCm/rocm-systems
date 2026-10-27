@@ -2279,7 +2279,6 @@ static hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* pay
 
 extern hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* payload);
 
-
 extern hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipHostGetFlags(PlaybackContext& ctx, const uint8_t* payload) {
