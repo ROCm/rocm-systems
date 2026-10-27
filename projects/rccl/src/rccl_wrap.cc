@@ -114,9 +114,6 @@ RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
 // isolating arch-table effects without rebuilding.
 RCCL_PARAM(IgnoreArchTable, "IGNORE_ARCH_TABLE", 0);
-// Returns true when the user has restricted the algorithm set via NCCL_ALGO.
-// When true, CE / DDA / Symmetric dispatch is skipped so getAlgoInfo() reaches
-// Ring/Tree exactly as the user requested.  Cached to avoid repeated getenv().
 rcclBackendMask_t rcclAllReducePreferredBackends(const ncclComm* comm) {
   if (rcclParamForceSymmetric()) return RCCL_BACKEND_SYMMETRIC;
   if (rcclParamForceDda())       return RCCL_BACKEND_DDA;
@@ -133,6 +130,9 @@ static inline ncclResult_t rcclSelectDone(const char* coll, bool query,
   return ncclSuccess;
 }
 
+// Returns true when the user has restricted the algorithm set via NCCL_ALGO.
+// When true, CE / DDA / Symmetric dispatch is skipped so getAlgoInfo() reaches
+// Ring/Tree exactly as the user requested.  Cached to avoid repeated getenv().
 bool rcclNcclAlgoEnvIsSet() {
   static int cached = -1;
   if (cached == -1) cached = (ncclGetEnv("NCCL_ALGO") != nullptr) ? 1 : 0;

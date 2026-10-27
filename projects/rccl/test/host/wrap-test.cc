@@ -5230,6 +5230,53 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLLChosenOnGfx1250) {
       });
 }
 
+
+// Under CTA_POLICY_ZERO the preferred mask is RCCL_BACKEND_CE only. When both
+// DDA (gfx1250 fabric LL) and CE 2-shot are simultaneously eligible, CE 2-shot
+// records as bestPreferred while DDA records as bestFallback, so CE wins.
+// This pins the precedence the PR exists to introduce; a regression where the
+// preferred mask stops being consulted would let DDA return first instead.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyCeTwoShotBeatsEligibleDdaOnGfx1250) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ZeroPolicyCeTwoShotBeatsEligibleDdaOnGfx1250",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)       return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 1;
+          return deft;
+        };
+        g_ceImplemented = true;
+        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+        ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                                [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                   size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks           = 8;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // Inject a table so extAlgoArchTable returns non-null for twoShotWindow.
+        // ceNonRegMax[AR] = 256 MiB opens the 2-shot window for an 8-float message.
+        rcclArchThresholds archTab{};
+        archTab.ceNonRegMax[ncclFuncAllReduce] = 256ULL * 1024 * 1024;
+        comm->archThresholds = &archTab;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        // CE 2-shot wins over DDA: preferred mask is RCCL_BACKEND_CE under ZERO.
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // (e) Env-override min: RCCL_CE_AR_2SHOT_MIN_BYTES=1024. Message is below min.
 //     252 floats * sizeof(float) = 1008 bytes < 1024 -- must not pick CE 2-shot.
 //     (rcclUseCeAr2Shot has no min-bound check; the bound lives in twoShotWindow
