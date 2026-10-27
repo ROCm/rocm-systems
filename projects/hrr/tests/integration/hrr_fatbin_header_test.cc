@@ -52,6 +52,8 @@
 // Exported by libamdhip64 and called by the module constructor clang emits for
 // every HIP translation unit; no header declares it.
 extern "C" void** __hipRegisterFatBinary(const void* data);
+// These two take names as char* but only read them, so the calls below
+// const_cast string literals to match the C signature.
 extern "C" void __hipRegisterFunction(void** modules, const void* hostFunction,
                                       char* deviceFunction, const char* deviceName,
                                       unsigned int threadLimit, uint3* tid, uint3* bid,
