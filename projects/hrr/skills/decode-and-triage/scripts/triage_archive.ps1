@@ -409,12 +409,16 @@ Then re-run with --replay docker (or set HRR_DOCKER_IMAGE and use --replay auto)
     Write-Triage "archive (WSL2)=$wslArchive"
     Write-Triage "log=$Log"
 
-    # Build the bash command that WSL2 will run
-    $mountClr = if ($env:HRR_DOCKER_MOUNT_CLR -eq "1") { "HRR_DOCKER_MOUNT_CLR=1 " } else { "" }
-    $wslCmd = "HRR_DOCKER_IMAGE='$($env:HRR_DOCKER_IMAGE)' ${mountClr}bash '$wslScript' --archive '$wslArchive' --log '$wslLog'"
+    # Pass every value as its own argument. The archive path is the capture
+    # author's to name, so it must never be spliced into a command string that
+    # bash parses: a folder called  x';touch PWNED;'  would run. `env` sets the
+    # variables, and --exec starts it without a shell on the WSL side.
+    $wslEnv = @("HRR_DOCKER_IMAGE=$($env:HRR_DOCKER_IMAGE)")
+    if ($env:HRR_DOCKER_MOUNT_CLR -eq "1") { $wslEnv += "HRR_DOCKER_MOUNT_CLR=1" }
+    $wslArgs = @($wslEnv) + @("bash", $wslScript, "--archive", $wslArchive, "--log", $wslLog)
 
-    Write-Triage "wsl bash: $wslCmd"
-    wsl -- bash -c $wslCmd
+    Write-Triage "wsl exec: env $($wslEnv -join ' ') bash $wslScript --archive $wslArchive --log $wslLog"
+    wsl --exec env @wslArgs
     $rc = $LASTEXITCODE
     Write-Triage "docker replay exit=$rc"
 

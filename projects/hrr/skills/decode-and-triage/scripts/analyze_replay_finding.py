@@ -548,14 +548,14 @@ def render_markdown(f: Finding) -> str:
         lines += [
             "## Fault details",
             f"- **Fault address**: `{sanitize(f.fault_address or 'n/a')}`",
-            f"- **Fault reason**: {sanitize(f.fault_reason or 'n/a')}",
+            f"- **Fault reason**: `{sanitize(f.fault_reason or 'n/a')}`",
             # Both are zero-based, so 0 is the first event, not a missing one.
             f"- **Failing event seq**: {'n/a' if f.failing_event_seq is None else f.failing_event_seq}",
             f"- **Failing call index**: {'n/a' if f.failing_call_index is None else f.failing_call_index}",
-            f"- **Failing API**: {sanitize(f.failing_api or 'n/a')}",
+            f"- **Failing API**: `{sanitize(f.failing_api or 'n/a')}`",
             f"- **Kernarg address**: `{sanitize(f.kernarg_address or 'n/a')}`",
-            f"- **GPU node**: {sanitize(f.gpu_node or 'n/a')}",
-            f"- **Grid / workgroup**: {sanitize(f.grid or 'n/a')} / {sanitize(f.workgroup or 'n/a')}",
+            f"- **GPU node**: `{sanitize(f.gpu_node or 'n/a')}`",
+            f"- **Grid / workgroup**: `{sanitize(f.grid or 'n/a')}` / `{sanitize(f.workgroup or 'n/a')}`",
             "",
             "## Replay progress at fault",
             f"- **Kernels launched**: {kernels}",
@@ -568,8 +568,8 @@ def render_markdown(f: Finding) -> str:
         "## Archive / capture",
         f"- **Events**: {f.archive_events or 'n/a'}",
         f"- **Kernels (archive)**: {f.archive_kernels or 'n/a'}",
-        f"- **Kernel names (archive)**: {', '.join(sanitize(n) for n in f.archive_kernel_names) or 'n/a'}",
-        f"- **Complete**: {sanitize(f.archive_complete or 'n/a')}",
+        f"- **Kernel names (archive)**: {', '.join(f'`{sanitize(n)}`' for n in f.archive_kernel_names) or 'n/a'}",
+        f"- **Complete**: `{sanitize(f.archive_complete or 'n/a')}`",
         f"- **Archive / reader format**: "
         f"{f.archive_format_version if f.archive_format_version is not None else 'n/a'}"
         f" / {f.reader_format_version if f.reader_format_version is not None else 'n/a'}",

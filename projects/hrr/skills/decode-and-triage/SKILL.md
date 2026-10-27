@@ -144,7 +144,7 @@ Print or paste it directly in the chat reply using the same template in Step 6 b
 
 #### Copying scripts to a remote machine (no Cursor installed)
 
-When the HIP app runs on a Remote Desktop machine without Cursor, copy the four
+When the HIP app runs on a Remote Desktop machine without Cursor, copy the five
 standalone script files and run them directly:
 
 ```
@@ -153,6 +153,7 @@ projects\hrr\skills\decode-and-triage\scripts\
   ensure_playback.ps1
   analyze_replay_finding.py
   check_replay_compat.py
+  archive_text.py
 ```
 
 Requirements on the remote: PowerShell 5+, Python 3.8+, and `hrr-playback.exe`
@@ -328,7 +329,7 @@ Classify each finding using these labels:
 - `--events`: full event log with `--info` (includes Kernel Call Counts).
 - `--timing`: kernel + graph GPU time.
 - `--verbose`: per-event trace. It prints the API name per event and not the kernel, so it cannot tell you which kernel faulted.
-- `--trace-kernels`: prints `[HRR launch] ... name="..."` before each launch. When a fault names no kernel, rerun by hand with `hrr-playback <pid-dir> --sync-after-launch --trace-kernels`: the last launch line before the fault is the one that faulted.
+- `--trace-kernels`: prints `[HRR launch] ... name="..."` before each launch. When a fault names no kernel, rerun by hand with `hrr-playback <pid-dir> --sync-after-launch --trace-kernels 2>&1 | python3 <skill>/scripts/archive_text.py` (the filter marks and escapes the kernel names the archive's author chose): the last launch line before the fault is the one that faulted.
 - `--sync-after-launch`: surface GPU errors per kernel.
 - `--kernel-filter STR`: replay one kernel only.
 - `--multi-thread`: one thread per captured thread.
