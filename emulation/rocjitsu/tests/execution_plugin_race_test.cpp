@@ -1649,6 +1649,9 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
             auto *wf = cu->dispatch_wf(0, 0x100, sgprs, 256, wave_size);
             ASSERT_NE(wf, nullptr);
             wf->set_exec(exec);
+            const uint32_t lds_size = wave_size * 16;
+            wf->set_lds_base(cu->allocate_lds(lds_size));
+            wf->set_lds_size(lds_size);
             wf->set_scratch_base(kScratch);
             wf->set_scratch_lane_size(256);
             std::array<amdgpu::Wavefront *, 1> waves{wf};
