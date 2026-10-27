@@ -23,6 +23,7 @@
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/amdgpu/trap_handler_config.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/wf_scheduler.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
@@ -375,13 +376,12 @@ public:
   /// @brief Register the CP wakeup used when a pool-driven CU becomes runnable.
   void set_on_pool_ready(std::function<void()> cb) { on_pool_ready_ = std::move(cb); }
 
-  struct TrapHandlerConfig {
-    uint64_t tba = 0;
-    uint64_t tma = 0;
-    bool debug_enabled = false;
-  };
+  using TrapHandlerConfig = amdgpu::TrapHandlerConfig;
 
-  /// @brief Resolve the KFD trap handler for a wave's process and GPU.
+  /// @brief Resolve trap configuration using the wave's frontend-owned identity.
+  /// @details SimulatedKfd resolves local/daemon process and GPU state; MES resolves
+  /// the process, queue, and address-space generation. The active frontend owns
+  /// this resolver and the sendmsg hook; a CP must not mix KFD and MES ownership.
   using TrapHandlerResolver = std::function<std::optional<TrapHandlerConfig>(const Wavefront &wf)>;
   void set_trap_handler_resolver(TrapHandlerResolver cb) { trap_handler_resolver_ = std::move(cb); }
   [[nodiscard]] std::optional<TrapHandlerConfig> resolve_trap_config(const Wavefront &wf) const {

@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -32,6 +33,9 @@
 #include <vector>
 
 namespace rocjitsu {
+namespace amdgpu {
+class Wavefront;
+}
 namespace kmd {
 
 /// @brief Context-save record layouts implemented by this codec.
@@ -290,6 +294,7 @@ struct CwsrWaveState {
   uint32_t trap_ctrl = 0;
   uint32_t xnack_state_priv = 0;
   uint32_t xnack_mask = 0;
+  std::array<uint32_t, 16> ttmps{}; ///< Raw TTMPs; debugger bookkeeping fields are synthesized.
 
   uint64_t wave_id = 0; ///< Stable, unique wave id (TTMP4:5) dbgapi reads as its own.
   /// Workgroup coordinates: gfx9.4 TTMP8/9/10; gfx12.5 X in TTMP9 and Y/Z in TTMP7.
@@ -336,6 +341,33 @@ struct CwsrWaveState {
   /// Workgroup LDS bytes. Present only on the first wave in each workgroup.
   std::vector<uint8_t> lds;
 };
+
+/// @brief Capture architectural wave state for KFD and MES context saves.
+/// @param runtime_save When false, use the current PC and debugger stop state.
+/// When true, also mark pending fatal exceptions as stopped and publish the
+/// interrupted PC if still inside the fatal trap handler.
+CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wave, rj_code_arch_t arch,
+                                    bool runtime_save = false);
+
+/// @brief Prepare wave records for queue CWSR serialization.
+/// @details Sorts by dispatch, workgroup, and wave index. Keeps LDS only on the
+/// first wave of each workgroup, clearing duplicate LDS payloads from the others.
+void prepare_cwsr_wave_states(std::vector<CwsrWaveState> &waves);
+
+/// @brief Match every saved record to a distinct live wave without modifying it.
+/// @details Prefer nonzero wave IDs. Dispatch/workgroup identity is a fallback
+/// only for live waves without a debugger wave ID. Returns live-wave indices in
+/// record order, or nullopt unless every record and live wave is matched once.
+[[nodiscard]] std::optional<std::vector<size_t>>
+match_cwsr_wave_states(std::span<const CwsrWaveState> states,
+                       std::span<amdgpu::Wavefront *const> waves);
+
+/// @brief Restore architectural state from a decoded CWSR record.
+/// @details Leaves debug_suspended set. KFD and MES callers must finish restoring
+/// the entire queue before clearing suspension and allowing waves to run.
+/// A nonempty LDS payload must cover wave.lds_size(); only that live allocation
+/// is written, excluding any padding in the saved record.
+void apply_cwsr_to_wave(amdgpu::Wavefront &wave, const CwsrWaveState &state, rj_code_arch_t arch);
 
 /// @brief The runtime-owned displaced-stepping region in a CWSR header.
 struct CwsrDebugRegion {

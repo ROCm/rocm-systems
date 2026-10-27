@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
+#include "rocjitsu/vm/amdgpu/trap_handler_config.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -26,13 +27,6 @@
 
 namespace rocjitsu::amdgpu {
 class SdmaQueueBindingFactory;
-
-/// @brief Trap configuration resolved for one MES-managed compute queue.
-struct MesTrapConfig {
-  uint64_t tba = 0;
-  uint64_t tma = 0;
-  bool debug_enabled = false;
-};
 
 /// @brief Processor binding and topology policy selected for one compute queue.
 struct ComputeQueueBindingPlan {
@@ -187,7 +181,7 @@ public:
   process_address_space_for_test(uint32_t process_id) const;
 
   /// @brief Resolve trap state for a live MES compute queue and address-space generation.
-  [[nodiscard]] std::optional<MesTrapConfig>
+  [[nodiscard]] std::optional<TrapHandlerConfig>
   resolve_trap_config(const QueueIdentity &identity) const;
 
 private:

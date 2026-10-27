@@ -382,7 +382,7 @@ TEST_F(MesEngineStateTest, ShaderDebuggerConfigurationSelectsTheProcessTrapHandl
 
   ASSERT_EQ(bindings_.aql->requests.size(), 1u);
   const rocjitsu::amdgpu::QueueIdentity identity = bindings_.aql->requests[0].identity;
-  const std::optional<rocjitsu::amdgpu::MesTrapConfig> config =
+  const std::optional<rocjitsu::amdgpu::TrapHandlerConfig> config =
       engine_.resolve_trap_config(identity);
   ASSERT_TRUE(config.has_value());
   EXPECT_EQ(config->tba, kTrapHandler);

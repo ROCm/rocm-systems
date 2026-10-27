@@ -176,13 +176,13 @@ std::optional<uint32_t> status_dword(uint32_t opcode) {
 
 } // namespace
 
-std::optional<MesTrapConfig> MesEngine::resolve_trap_config(const QueueIdentity &identity) const {
+std::optional<TrapHandlerConfig> MesEngine::resolve_trap_config(const QueueIdentity &identity) const {
   for (const Queue &queue : mapped_queues_) {
     if (queue.kind != QueueKind::Compute || queue.process_id != identity.process_id ||
         queue.queue_id != identity.queue_id || queue.address_space != identity.address_space ||
         !queue.trap_enabled || queue.trap_handler_address == 0)
       continue;
-    return MesTrapConfig{.tba = queue.trap_handler_address,
+    return TrapHandlerConfig{.tba = queue.trap_handler_address,
                          .tma = queue.trap_memory_address,
                          .debug_enabled =
                              debug_enabled_contexts_.contains(queue.process_context_address)};
