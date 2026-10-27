@@ -23,6 +23,11 @@
 // only fills ncclNet.finalize once ncclNet_v10->init() has succeeded, so the call
 // went through a null function pointer. The guard must suppress finalize() after a
 // failed init() while still running it when init() succeeded and devices() failed.
+//
+// NetPluginRailPlane — NCCL 2.32.3 "topo: add default rail and plane IDs" (AICOMRCCL-2519):
+// when the plugin reports no rail or plane, ncclTopoPopulateNics() assigns its own, one rail per
+// NIC GUID and the plane from the port, marked with bit 16 (NCCL_TOPO_UNDEF_BIT), for rail-aware
+// NIC selection and ring search to use. NCCL_TOPO_DUMP_FILE shows them on the <net> nodes.
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
@@ -92,6 +97,41 @@ void initAndDestroyComm() {
   ncclComm_t comm = nullptr;
   ASSERT_EQ(ncclCommInitRank(&comm, 1, id, 0), ncclSuccess);
   ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
+}
+
+// The rail_plane devices of plugin/net_reload_plugin.cpp: two ports of one NIC, then a second NIC.
+constexpr int kNumRailPlaneNets = 3;
+const char* const kRailPlaneGuids[kNumRailPlaneNets] = {"0x1111", "0x1111", "0x2222"};
+const int kRailPlanePorts[kNumRailPlaneNets] = {1, 2, 1};
+
+// Value of attribute `key` in a dumped XML element, or "" when it has none.
+std::string xmlAttr(const std::string& element, const std::string& key) {
+  const std::string needle = " " + key + "=\"";
+  size_t start = element.find(needle);
+  if (start == std::string::npos) return "";
+  start += needle.size();
+  return element.substr(start, element.find('"', start) - start);
+}
+
+// Inits and destroys a single-rank comm on the rail_plane devices with NCCL_TOPO_DUMP_FILE set,
+// and returns the <net> element dumped for each device ("" for one missing from the dump).
+void dumpRailPlaneNets(std::string nets[kNumRailPlaneNets]) {
+  ScopedTempFile dumpFile("/tmp/rccl_topo_dump_XXXXXX");
+  ASSERT_TRUE(dumpFile.valid()) << "failed to create topology dump file";
+  ASSERT_EQ(setenv("RCCL_NET_TEST_PLUGIN_MODE", "rail_plane", 1), 0);
+  ASSERT_EQ(setenv("NCCL_NET_PLUGIN", "STATIC_PLUGIN", 1), 0);
+  // Keep the two ports of the dual-port NIC separate devices: NIC fusion would merge them.
+  ASSERT_EQ(setenv("NCCL_NET_MERGE_LEVEL", "LOC", 1), 0);
+  ASSERT_EQ(setenv("NCCL_TOPO_DUMP_FILE", dumpFile.path().c_str(), 1), 0);
+  ASSERT_NO_FATAL_FAILURE(initAndDestroyComm());
+
+  std::ifstream f(dumpFile.path());
+  std::string line;
+  while (std::getline(f, line)) {
+    if (line.find("<net ") == std::string::npos) continue;
+    for (int d = 0; d < kNumRailPlaneNets; ++d)
+      if (xmlAttr(line, "name") == "RailPlane" + std::to_string(d)) nets[d] = line;
+  }
 }
 
 } // namespace
@@ -282,6 +322,44 @@ TEST(NetPluginInitFail, FinalizesWhenDevicesFailsAfterInit) {
         << "external plugin init must run before devices() is probed";
     EXPECT_EQ(countLines(finalizeFile.path()), 1)
         << "finalize() must release the context when devices() fails after a good init()";
+  });
+}
+
+TEST(NetPluginRailPlane, DumpListsEveryPluginNet) {
+  RUN_ISOLATED_TEST("NetPluginRailPlane.DumpListsEveryPluginNet", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    std::string nets[kNumRailPlaneNets];
+    ASSERT_NO_FATAL_FAILURE(dumpRailPlaneNets(nets));
+    for (int d = 0; d < kNumRailPlaneNets; ++d) {
+      ASSERT_FALSE(nets[d].empty()) << "RailPlane" << d << " is missing from the topology dump";
+      EXPECT_EQ(xmlAttr(nets[d], "guid"), kRailPlaneGuids[d]) << nets[d];
+      EXPECT_EQ(xmlAttr(nets[d], "port"), std::to_string(kRailPlanePorts[d])) << nets[d];
+    }
+  });
+}
+
+TEST(NetPluginRailPlane, DefaultRailFollowsGuidAndPlaneFollowsPort) {
+  RUN_ISOLATED_TEST("NetPluginRailPlane.DefaultRailFollowsGuidAndPlaneFollowsPort", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    std::string nets[kNumRailPlaneNets];
+    ASSERT_NO_FATAL_FAILURE(dumpRailPlaneNets(nets));
+    // NCCL_TOPO_UNDEF_BIT (src/graph/topo.h): set on a rail or plane RCCL generated itself.
+    constexpr int kGeneratedBit = 1 << 16;
+    int rails[kNumRailPlaneNets];
+    for (int d = 0; d < kNumRailPlaneNets; ++d) {
+      const std::string rail = xmlAttr(nets[d], "rail"), plane = xmlAttr(nets[d], "plane");
+      ASSERT_FALSE(rail.empty() || plane.empty())
+          << "no rail/plane assigned to a net whose plugin reports none: " << nets[d];
+      rails[d] = std::stoi(rail);
+      EXPECT_NE(rails[d] & kGeneratedBit, 0) << nets[d];
+      EXPECT_EQ(std::stoi(plane), kGeneratedBit | kRailPlanePorts[d]) << "plane must come from the port: " << nets[d];
+    }
+    EXPECT_EQ(rails[0], rails[1]) << "the two ports of one NIC (one GUID) must share a rail";
+    EXPECT_NE(rails[0], rails[2]) << "NICs with different GUIDs must be on different rails";
   });
 }
 
