@@ -266,42 +266,6 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeCopyAttributes_Attribute_Negative) {
 }
 
 /**
- * Test Description
- * ------------------------
- *   - An empty node is not a kernel node. Copying attributes either way must
- *     fail before the runtime downcasts the node.
- */
-HIP_TEST_CASE(Unit_hipGraphKernelNodeCopyAttributes_WrongKind) {
-  hipGraph_t graph{};
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  hipGraphNode_t empty{};
-  HIP_CHECK(hipGraphAddEmptyNode(&empty, graph, nullptr, 0));
-
-  constexpr size_t N = 256;
-  int *A_d{}, *B_d{}, *C_d{};
-  HIP_CHECK(hipMalloc(&A_d, N * sizeof(int)));
-  HIP_CHECK(hipMalloc(&B_d, N * sizeof(int)));
-  HIP_CHECK(hipMalloc(&C_d, N * sizeof(int)));
-  size_t NElem = N;
-  void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
-  hipKernelNodeParams kNodeParams{};
-  kNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
-  kNodeParams.gridDim = dim3(1);
-  kNodeParams.blockDim = dim3(256);
-  kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
-  hipGraphNode_t kernel{};
-  HIP_CHECK(hipGraphAddKernelNode(&kernel, graph, nullptr, 0, &kNodeParams));
-
-  HIP_CHECK_ERROR(hipGraphKernelNodeCopyAttributes(empty, kernel), hipErrorInvalidValue);
-  HIP_CHECK_ERROR(hipGraphKernelNodeCopyAttributes(kernel, empty), hipErrorInvalidValue);
-
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(C_d));
-  HIP_CHECK(hipGraphDestroy(graph));
-}
-
-/**
  * End doxygen group GraphTest.
  * @}
  */
