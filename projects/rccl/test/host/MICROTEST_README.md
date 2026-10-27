@@ -106,6 +106,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     channel/warp-selection, and tuning-ID helpers without a GPU. This TU
     defines `ncclParamNthreads` and `ncclParamLl128Nthreads`; do not duplicate
     them in `fakes/tuning_fakes.cc`.
+  - `tuning/cost_model.cc`, `ring.cc`, `tree.cc` (`TUNING_COST_MODEL_CC_PATH`
+    and siblings, from `tuning-cost-model-test.cc`); suite
+    `TuningCostModelMicrotest.*`. Covers the per-GPU-row LL bandwidth cap; the
+    other models are stubbed and the `tuning_general.cc` helpers resolve from
+    `tuning-general-test.cc`. This TU defines `ncclParamLl128C2c` and
+    `ncclParamNetOverhead`; do not fake them.
   - `tuning/tuning.cc` (`TUNING_CC_PATH`, from `tuning-test.cc`); suite
     `TuningMicrotest.*`. Covers tuning lifecycle, candidate selection, tuner
     overrides, NVLS efficiency policy, and symmetric-kernel fallback. Its
