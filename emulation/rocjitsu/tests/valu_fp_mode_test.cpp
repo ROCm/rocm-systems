@@ -6579,8 +6579,8 @@ void check_float_compare_swap_policy(std::initializer_list<FloatCompareSwapCase>
           static_cast<Bits>(test.source), static_cast<Bits>(test.compare), denorm_mode,
           /*legacy_minmax=*/true);
     };
-    EXPECT_EQ(run(3), static_cast<Bits>(test.preserved));
-    EXPECT_EQ(run(0), static_cast<Bits>(test.flushed));
+    EXPECT_EQ(run(/*denorm_mode=*/3), static_cast<Bits>(test.preserved));
+    EXPECT_EQ(run(/*denorm_mode=*/0), static_cast<Bits>(test.flushed));
   }
 }
 
