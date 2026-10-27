@@ -358,8 +358,6 @@ class TestCliBase(unittest.TestCase):
         self.memory_partition_modes = ["NPS1", "NPS2", "NPS4", "NPS8"]
         self.power_types = ["ppt0", "ppt1"]
         self.ptl_formats = ["I8", "F16", "BF16", "F32", "F64", "F8", "VECTOR"]
-        self.clk_limits = ["SCLK", "MCLK", "FCLK"]
-        self.limit_types = ["MAX", "MIN"]
         self.clk_levels = ["SCLK", "MCLK", "FCLK", "SOCCLK", "PCIE"]
 
         # When parsing, ignore these entries as they are abnormal

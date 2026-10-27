@@ -93,6 +93,11 @@ partition. Test NPS transitions only in a separate, controlled driver-reload
 workflow; the generic sweep neither reloads the driver nor clears changes
 queued before the test.
 
+Clock cleanup uses `reset --clocks` rather than replaying captured limits that
+can conflict with the sweep's current bounds. It resets clocks to defaults,
+then reapplies each GPU's saved performance level; custom clock limits are
+not preserved.
+
 ### Invocation
 
 From an installed package (recommended — avoids a shadowing `site-packages` copy):

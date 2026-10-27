@@ -150,7 +150,7 @@ class TestCliSetSweep(unittest.TestCase):
             [command for command, _ in commands],
         )
 
-    def test_cleanup_does_not_claim_to_restore_memory_partitions(self) -> None:
+    def _prepare_cleanup(self) -> None:
         self.sweep.metric_data = {
             "gpu_data": [
                 {"fan": {"max": "N/A", "speed": "N/A"}, "clock": {}, "perf_level": "N/A"}
@@ -173,8 +173,62 @@ class TestCliSetSweep(unittest.TestCase):
         self.sweep.partition_data = {
             "current_partition": [{"memory": "NPS1", "accelerator_type": "N/A"} for _ in range(2)]
         }
+
+    def test_cleanup_does_not_claim_to_restore_memory_partitions(self) -> None:
+        self._prepare_cleanup()
         self.sweep.RunCmds = Mock()
         test_set.TestSet._restore_starting_values(self.sweep)
         commands = self.sweep.RunCmds.call_args[0][0]
         self.assertTrue(commands)
         self.assertFalse(any("--memory-partition" in command for command, _ in commands))
+
+    def test_cleanup_resets_clocks_instead_of_replaying_stale_limits(self) -> None:
+        self._prepare_cleanup()
+        self.sweep.metric_data["gpu_data"][0]["clock"] = {
+            "gfx_0": {"min_clk": {"value": 500}, "max_clk": {"value": 500}}
+        }
+        self.sweep.static_data["gpu_data"][0]["clock"]["sys"] = {
+            "frequency_levels": {"Level 0": {"value": 500}, "Level 1": {"value": 1700}}
+        }
+        for gpu, level in enumerate(("AUTO", "HIGH")):
+            self.sweep.metric_data["gpu_data"][gpu]["perf_level"] = f"AMDSMI_DEV_PERF_LEVEL_{level}"
+        self.sweep.util = types.SimpleNamespace(
+            RunCmdSync=Mock(
+                side_effect=lambda cmd, **kwargs: (
+                    198 if cmd == "amd-smi set --clk-limit SCLK MAX 500 --gpu 0" else 0,
+                    "",
+                    "",
+                )
+            )
+        )
+
+        test_set.TestSet._restore_starting_values(self.sweep)
+
+        commands = [call[0][0] for call in self.sweep.util.RunCmdSync.call_args_list]
+        self.assertFalse(any("--clk-limit" in command for command in commands))
+        for gpu, level in enumerate(("AUTO", "HIGH")):
+            self.assertLess(
+                commands.index(f"amd-smi reset --clocks --gpu {gpu}"),
+                commands.index(f"amd-smi set --perf-level {level} --gpu {gpu}"),
+            )
+
+    def test_cleanup_keeps_strict_reset_statuses_and_attempts_every_gpu(self) -> None:
+        for code in (0, 2, 12, 198, 204):
+            with self.subTest(code=code):
+                self._prepare_cleanup()
+                self.sweep.util = types.SimpleNamespace(
+                    RunCmdSync=Mock(
+                        side_effect=lambda cmd, **kwargs: (
+                            code if cmd == "amd-smi reset --clocks --gpu 0" else 0,
+                            "",
+                            "",
+                        )
+                    )
+                )
+                if code in (0, 2):
+                    test_set.TestSet._restore_starting_values(self.sweep)
+                else:
+                    with self.assertRaisesRegex(AssertionError, f"rc={code}"):
+                        test_set.TestSet._restore_starting_values(self.sweep)
+                commands = [call[0][0] for call in self.sweep.util.RunCmdSync.call_args_list]
+                self.assertIn("amd-smi reset --clocks --gpu 1", commands)
