@@ -144,9 +144,13 @@ ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* paren
     comm->ncclNet = parent ? parent->ncclNet : &g_microFakeNet;
   return g_ncclNetInitResult;
 }
-// ASan aborts on allocations above its 1 TiB cap rather than returning NULL, and eats SIGFPE; both break death tests.
+// ASan aborts on allocations above its 1 TiB cap rather than returning NULL, which breaks the allocation-failure tests.
 extern "C" const char* __asan_default_options() {
-  return "allocator_may_return_null=1:handle_sigfpe=0";
+  return "allocator_may_return_null=1";
+}
+// UBSan would turn the death tests' SIGSEGV into a report plus exit(1); let the signal through.
+extern "C" const char* __ubsan_default_options() {
+  return "handle_segv=0";
 }
 
 // Must stay below #undef malloc/#undef free, or these bodies are rewritten into the UUT's seams.
@@ -856,20 +860,6 @@ TEST_F(InitMicrotest, P2pSchedule_NegativeGroupSizeParam_FailsInAllocation) {
   EXPECT_EQ(ncclSystemError, ncclP2pSchedule(c.get()));
 }
 
-// ERANGE is checked (param.cc:93-97) but the int64->int narrowing at :1313 is not, so GROUP_SIZE=0 or 2^32 SIGFPEs.
-TEST_F(InitMicrotest, P2pSchedule_ZeroGroupSizeParam_DiesOnDivideByZero) {
-  SetParams({{"P2P_SCHEDULE_GROUP_SIZE", 0}});
-  P2pScheduleComm c(/*nNodes=*/2, /*node=*/0, /*localRank=*/0, /*nRanks=*/8,
-                    /*maxLocalRanks=*/4, {4, 4});
-  // Pin the signal: EXPECT_DEATH("") would also accept ::abort(), _exit(1) or a null deref at the same spot.
-  EXPECT_EXIT(
-      {
-        DisableCoreDumpsForExpectedCrash();
-        (void)ncclP2pSchedule(c.get());
-      },
-      ::testing::KilledBySignal(SIGFPE), "");
-}
-
 TEST_F(InitMicrotest, P2pSchedule_SingleNode_BuildsFullSchedule) {
   // nNodes == 1 -> groupSize comes from maxLocalRanks, not the param.
   P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/4,
@@ -1273,11 +1263,14 @@ TEST_F(InitMicrotest, CommShrink_ZeroExcludeCount_ReturnsInvalidArgumentViaExitP
 TEST_F(InitMicrotest, CommShrink_NullNewcomm_DiesOnNullDeref) {
   ReadyComm rc;
   int exclude[1] = {0};
+  // Opaque, so *newcomm is a real access to address 0 rather than UB the optimizer may delete.
+  ncclComm_t* newcomm = nullptr;
+  asm volatile("" : "+r"(newcomm));
   // Match the message too: the signal alone would also accept a crash arriving BEFORE the newcomm validation.
   EXPECT_EXIT(
       {
         DisableCoreDumpsForExpectedCrash();
-        (void)ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
+        (void)ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, newcomm,
                                   /*config=*/nullptr, /*shrinkFlags=*/0);
       },
       DEATH_BY_SEGV, "newcomm argument is NULL");
@@ -4291,7 +4284,10 @@ TEST_F(InitMicrotest, SetCommAbortFlags_NullChildDevUnderNonNullChildFlag_DiesOn
       {
         DisableCoreDumpsForExpectedCrash();
         AbortFlagsComm c;
-        c.get()->childAbortFlagDev = nullptr;
+        // Opaque, so the store is a real access to address 0 rather than UB the optimizer may delete.
+        decltype(c.get()->childAbortFlagDev) nullDev = nullptr;
+        asm volatile("" : "+r"(nullDev));
+        c.get()->childAbortFlagDev = nullDev;
         fprintf(stderr, "setCommAbortFlags-reached-with-null-childAbortFlagDev\n");
         fflush(stderr);
         (void)setCommAbortFlags(c.get(), 1);

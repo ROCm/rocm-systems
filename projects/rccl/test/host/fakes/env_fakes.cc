@@ -65,7 +65,10 @@ const char* micro_getenv(const char* name) {
 // Link-level override rather than a scoped macro: production has bare std::getenv call sites, which a macro
 // cannot catch. It is process-wide, so gtest/libstdc++ reads must still see the real environment -- unlike
 // micro_getenv it falls back.
-extern "C" char* getenv(const char* name) {
+extern "C" char* getenv(const char* arg) {
+  // glibc declares the argument nonnull, so the compiler may drop a null check on it; check an opaque copy.
+  const char* name = arg;
+  asm volatile("" : "+r"(name));
   if (name != nullptr) {
     auto& m = microEnvMap();
     auto it = m.find(name);

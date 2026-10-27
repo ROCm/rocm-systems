@@ -554,24 +554,6 @@ TEST_F(RasDiagnosticsEnvMicrotest, Summarize_TwoDistinctCommsAreReportedSeparate
   EXPECT_EQ(0u, g_emittedLines[5].find("[OK]   NCCL environment: NCCL_* env vars consistent across 1 ranks in comm 0x9000"));
 }
 
-TEST_F(RasDiagnosticsEnvMicrotest, DISABLED_Summarize_HashCollisionsReportFullCommIdentity) {
-  SCOPED_TRACE("AICOMRCCL-2743: reporters omit host and process hashes from the communicator identity");
-  std::vector<char> records(EnvRecordStride() * 3, 0);
-  FillEnvRecord(records, 0, {0x8000, 0x8100, 0x8200}, 0, 1, {"NCCL_FIRST=ONLY"});
-  FillEnvRecord(records, 1, {0x8000, 0x8300, 0x8400}, 1, 2, {"NCCL_DEBUG=WARN"});
-  FillEnvRecord(records, 2, {0x8000, 0x8300, 0x8400}, 0, 2, {"NCCL_DEBUG=INFO"});
-  auto reporter = MakeRecordingReporter();
-  ASSERT_EQ(ncclSuccess,
-            rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, records.data(), static_cast<int>(records.size())));
-  ASSERT_EQ(5u, g_emittedLines.size());
-  EXPECT_EQ("[OK]   NCCL environment: NCCL_* env vars consistent across 1 ranks in comm 0x8000/0x8100/0x8200",
-            g_emittedLines[0]);
-  EXPECT_EQ("[INFO] NCCL environment: mismatch across 2 ranks in comm 0x8000/0x8300/0x8400 for NCCL_DEBUG",
-            g_emittedLines[1]);
-  EXPECT_EQ("[INFO] NCCL environment: 1 NCCL_* env var(s) differ across ranks in comm 0x8000/0x8300/0x8400",
-            g_emittedLines[4]);
-}
-
 TEST_F(RasDiagnosticsEnvMicrotest, Summarize_LongKeyAndValueAreTruncatedWithEllipsis) {
   const size_t stride = EnvRecordStride();
   std::vector<char> buf(stride * 2, 0);

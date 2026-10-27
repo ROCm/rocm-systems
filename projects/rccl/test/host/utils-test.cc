@@ -595,7 +595,10 @@ TEST_F(UtilsMicrotest, BitsToString_JoinsSetBitsOrPrintsTheWildcard) {
 TEST_F(UtilsMicrotest, BitsToString_KnownBug_TruncationWritesPastBufLen) {
   char buf[64];
   std::memset(buf, '#', sizeof(buf));
-  ASSERT_EQ(ncclSuccess, ncclBitsToString(0x3, 0xf, BitName, buf, 4, nullptr));
+  // Hidden from _FORTIFY_SOURCE, which would abort on the wrapped size; the writes themselves stay inside buf.
+  char* out = buf;
+  asm volatile("" : "+r"(out));
+  ASSERT_EQ(ncclSuccess, ncclBitsToString(0x3, 0xf, BitName, out, 4, nullptr));
   EXPECT_STREQ("INI", buf);
   EXPECT_EQ('#', buf[4]);
   EXPECT_EQ('C', buf[5]);  // how much of "COLL" lands is up to libc

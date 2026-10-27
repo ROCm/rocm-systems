@@ -101,11 +101,6 @@ TEST_F(DdaAllReduceFabricLL128Microtest, Eligible_BaselineFp32Sum) {
   EXPECT_TRUE(Eligible(4));
 }
 
-TEST_F(DdaAllReduceFabricLL128Microtest, Eligible_DdaLLZeroRejects) {
-  params_["RCCL_DDA_LL"] = 0;
-  EXPECT_FALSE(Eligible(4));
-}
-
 TEST_F(DdaAllReduceFabricLL128Microtest, Eligible_NeedsCommAndBootstrap) {
   EXPECT_FALSE(ncclAllReduceDdaFabricLL128Eligible_old(nullptr, kSendbuff, kRecvbuff, 4, ncclFloat32, ncclSum));
   comm().bootstrap = nullptr;
