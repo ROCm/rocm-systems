@@ -40,6 +40,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -59,6 +60,39 @@ using isa_names_t                    = std::vector<const std::string*>;
 using kernel_symbol_hip_device_map_t = std::unordered_map<std::string, std::string>;
 using comgr_code_object_vec_t        = std::vector<amd_comgr_code_object_info_t>;
 
+// Where the arguments a kernel declares itself end inside its kernarg segment. The compiler
+// appends its hidden argument block only to kernels that use it, so this boundary is a property of
+// each kernel and is not derivable from the segment size. `segment_size` is the size the same
+// metadata entry reports, kept so a reader can tell whether it describes the kernel it is asked
+// about.
+struct kernarg_layout_t
+{
+    size_t explicit_size{0};
+    size_t segment_size{0};
+
+    // A layout describes one kernel of one load, so it only answers for a request reporting the same
+    // segment size. Any other size means this is not the kernel the layout was read from -- another
+    // kernel sharing the name, or the same source rebuilt with a different argument list -- and the
+    // caller is told the boundary is unknown instead of being handed one it never measured.
+    std::optional<size_t>
+    explicit_size_for(size_t segment) const noexcept
+    {
+        if(segment != segment_size) return std::nullopt;
+        return explicit_size;
+    }
+};
+
+using kernel_symbol_kernarg_map_t = std::unordered_map<std::string, kernarg_layout_t>;
+
+// What one code object's amdhsa metadata says, read in a single pass over its kernel list. Kernels
+// are keyed by both their symbol name and their metadata name, which differ between code object
+// versions ("<symbol>.kd" versus the function name).
+struct code_object_metadata_t
+{
+    kernel_symbol_hip_device_map_t kernel_symbol_device_map = {};
+    kernel_symbol_kernarg_map_t    kernarg_layout_map       = {};
+};
+
 constexpr unsigned HIP_FAT_MAGIC      = 0x48495046;  // HIPF
 constexpr unsigned HIP_FAT_MAGIC_HIPK = 0x4B504948;  // HIPK
 
@@ -68,6 +102,9 @@ struct hip_register_data
     void**                         fat_binary_modules       = nullptr;
     hip_host_function_map_t        host_function_map        = {};
     kernel_symbol_hip_device_map_t kernel_symbol_device_map = {};
+    // Kernarg layouts by the id of the load they were read from, so that reloading a code object
+    // (or two loads that define kernels of the same name) cannot supply another load's boundary.
+    std::unordered_map<uint64_t, kernel_symbol_kernarg_map_t> kernel_kernarg_layout_map = {};
 };
 
 struct hip_fat_binary_wrapper
@@ -100,6 +137,12 @@ get_kernel_symbol_device_name_map(const amd_comgr_code_object_info_t& isa_offset
 
 kernel_symbol_hip_device_map_t
 get_kernel_symbol_device_name_map_from_executable(const void* executable, size_t executable_size);
+
+// Both metadata maps of an ELF code object image (a loaded .hsaco, not a fat binary). The image is
+// only read here: whatever is derived from it has to outlive the call, because the loader reports
+// the application's own buffer and the application may free it once the executable is frozen.
+code_object_metadata_t
+get_metadata_from_executable(const void* executable, size_t executable_size);
 
 }  // namespace hip
 }  // namespace code_object
