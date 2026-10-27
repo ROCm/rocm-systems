@@ -274,14 +274,15 @@ TEST(Gfx1250ExecutionTest, ArchitectureDecoderVectorScalarSourceFailureRejectsMe
     EXPECT_EQ(wave->instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnimplementedInstruction);
     ASSERT_NE(load->data(), nullptr);
-    const auto *state = static_cast<const amdgpu::VectorMemState *>(load->data());
+    const auto *state = load->data_as<amdgpu::VectorMemState>();
     EXPECT_EQ(state->lane_mask, 0u);
     wave->clear_instruction_execution_error();
     EXPECT_TRUE(cu->execute_instruction(load.get(), *wave).failed());
     EXPECT_EQ(wave->instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnimplementedInstruction);
     ASSERT_NE(load->data(), nullptr);
-    EXPECT_EQ(static_cast<const amdgpu::VectorMemState *>(load->data())->lane_mask, 0u);
+    state = load->data_as<amdgpu::VectorMemState>();
+    EXPECT_EQ(state->lane_mask, 0u);
   }
 }
 
