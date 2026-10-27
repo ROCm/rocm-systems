@@ -2017,3 +2017,6 @@ graph:
   Unit_hipGraphExecExternalSemaphoresNodeSetParams_Negative_InvalidArgs:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes:
+    <<: *level_default
+    tags: [node]
