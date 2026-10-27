@@ -146,6 +146,7 @@ set(PYTEST_TARGET_DEPENDENCIES
     rocprofiler-systems-run
     rocprofiler-systems-causal
     rocprofiler-systems-avail
+    rocprofiler-systems-exe
 )
 # Versioned python tests require a matching version of libpyrocprofsys
 if(TARGET libpyrocprofsys)
