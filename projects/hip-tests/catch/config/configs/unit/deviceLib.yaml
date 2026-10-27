@@ -291,6 +291,9 @@ deviceLib:
   Unit_bf162_floor_ceil:
     <<: *level_default
     tags: [types, P0]
+  Unit_bf16_integer_conversion_bits:
+    <<: *level_default
+    tags: [types, P0]
   Unit_AtomicsWithRandomActiveLanesInWavefront:
     <<: *level_default
     tags: [atomics]

@@ -1716,7 +1716,7 @@ template <typename VectorT>
 static void checkConversionBits(const std::vector<VectorT>& in,
                                 const std::vector<unsigned short>& res) {
   for (size_t i = 0; i < in.size(); i++) {
-    INFO("Input: " << static_cast<double>(in[i].val));
+    INFO("Input: " << in[i].val);
     REQUIRE(res[3 * i + 0] == in[i].bits);  // constructor
     REQUIRE(res[3 * i + 1] == in[i].bits);  // intrinsic
     REQUIRE(res[3 * i + 2] == in[i].bits);  // operator=
@@ -1770,12 +1770,12 @@ template <typename VectorT> static void runConversionBitsTest(const VectorT* tab
   } else {
     bf16_uint_conv_bits<<<1, size>>>(d_in, d_res, size);
   }
+  HIP_CHECK(hipGetLastError());
   HIP_CHECK(
       hipMemcpy(h_res.data(), d_res, sizeof(unsigned short) * out_size, hipMemcpyDeviceToHost));
-  checkConversionBits(std::vector<VectorT>(table, table + size), h_res);
-
   HIP_CHECK(hipFree(d_in));
   HIP_CHECK(hipFree(d_res));
+  checkConversionBits(std::vector<VectorT>(table, table + size), h_res);
 }
 
 HIP_TEST_CASE(Unit_bf16_integer_conversion_bits) {
@@ -1814,7 +1814,7 @@ HIP_TEST_CASE(Unit_bf16_integer_conversion_bits) {
       h_s[2 * i + 1] = __bfloat16_as_ushort(assigned);
     }
     for (size_t i = 0; i < s_n; i++) {
-      INFO("long Input: " << static_cast<double>(s_in[i]));
+      INFO("long Input: " << s_in[i]);
       REQUIRE(h_s[2 * i + 0] == s_exp[i]);
       REQUIRE(h_s[2 * i + 1] == s_exp[i]);
     }
@@ -1828,7 +1828,7 @@ HIP_TEST_CASE(Unit_bf16_integer_conversion_bits) {
       h_u[2 * i + 1] = __bfloat16_as_ushort(assigned);
     }
     for (size_t i = 0; i < u_n; i++) {
-      INFO("unsigned long Input: " << static_cast<double>(u_in[i]));
+      INFO("unsigned long Input: " << u_in[i]);
       REQUIRE(h_u[2 * i + 0] == u_exp[i]);
       REQUIRE(h_u[2 * i + 1] == u_exp[i]);
     }
@@ -1839,14 +1839,15 @@ HIP_TEST_CASE(Unit_bf16_integer_conversion_bits) {
     HIP_CHECK(hipMalloc(&d_rs, sizeof(unsigned short) * 2 * s_n));
     HIP_CHECK(hipMemcpy(d_s, s_in.data(), sizeof(long long) * s_n, hipMemcpyHostToDevice));
     bf16_long_conv_bits<<<1, s_n>>>(d_s, d_rs, s_n);
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(h_s.data(), d_rs, sizeof(unsigned short) * 2 * s_n, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_s));
+    HIP_CHECK(hipFree(d_rs));
     for (size_t i = 0; i < s_n; i++) {
-      INFO("long Input: " << static_cast<double>(s_in[i]));
+      INFO("long Input: " << s_in[i]);
       REQUIRE(h_s[2 * i + 0] == s_exp[i]);
       REQUIRE(h_s[2 * i + 1] == s_exp[i]);
     }
-    HIP_CHECK(hipFree(d_s));
-    HIP_CHECK(hipFree(d_rs));
 
     unsigned long long* d_u;
     unsigned short* d_ru;
@@ -1854,14 +1855,15 @@ HIP_TEST_CASE(Unit_bf16_integer_conversion_bits) {
     HIP_CHECK(hipMalloc(&d_ru, sizeof(unsigned short) * 2 * u_n));
     HIP_CHECK(hipMemcpy(d_u, u_in.data(), sizeof(unsigned long long) * u_n, hipMemcpyHostToDevice));
     bf16_ulong_conv_bits<<<1, u_n>>>(d_u, d_ru, u_n);
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(h_u.data(), d_ru, sizeof(unsigned short) * 2 * u_n, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_u));
+    HIP_CHECK(hipFree(d_ru));
     for (size_t i = 0; i < u_n; i++) {
-      INFO("unsigned long Input: " << static_cast<double>(u_in[i]));
+      INFO("unsigned long Input: " << u_in[i]);
       REQUIRE(h_u[2 * i + 0] == u_exp[i]);
       REQUIRE(h_u[2 * i + 1] == u_exp[i]);
     }
-    HIP_CHECK(hipFree(d_u));
-    HIP_CHECK(hipFree(d_ru));
   }
   SECTION("short") {
     runConversionBitsTest(kBF16ShortVectors,
