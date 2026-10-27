@@ -70,18 +70,36 @@ TEST(GinGidSelection, GidFlidAndSubnetExtraction) {
 
 TEST(GinGidSelection, PrefersRoutableGidWithFlid) {
   unsigned char gids[2][16] = {{0xfe, 0x80}, {0xfe, 0x80, 0, 0, 0x00, 0x2a}};
-  EXPECT_EQ(ginTestSelectIbGidIndex(gids, 2, 0, 1), 1);
+  unsigned idx[2] = {0, 1}, port[2] = {1, 1};
+  EXPECT_EQ(ginTestSelectIbGidIndex(gids, idx, port, 2, 1, 0, 1), 1);
 }
 
 TEST(GinGidSelection, FallsBackWhenRoutableFlidIsZero) {
   unsigned char gids[2][16] = {{0xfe, 0x80}, {0xfe, 0x80}};
-  EXPECT_EQ(ginTestSelectIbGidIndex(gids, 2, 0, 1), 0);
+  unsigned idx[2] = {0, 1}, port[2] = {1, 1};
+  EXPECT_EQ(ginTestSelectIbGidIndex(gids, idx, port, 2, 1, 0, 1), 0);
 }
 
-TEST(GinGidSelection, FallsBackWhenRoutableIndexOutOfRange) {
+TEST(GinGidSelection, FallsBackWhenRoutableIndexAbsent) {
   unsigned char gids[1][16] = {{0xfe, 0x80}};
-  EXPECT_EQ(ginTestSelectIbGidIndex(gids, 1, 0, 1), 0);
-  EXPECT_EQ(ginTestSelectIbGidIndex(gids, 1, 0, -1), 0);
+  unsigned idx[1] = {0}, port[1] = {1};
+  EXPECT_EQ(ginTestSelectIbGidIndex(gids, idx, port, 1, 1, 0, 1), 0);
+  EXPECT_EQ(ginTestSelectIbGidIndex(gids, idx, port, 1, 1, 0, -1), 0);
+}
+
+// Dual-port HCA: port 2's entries precede port 1's routable GID, so array position 1 is not
+// port 1 / gid_index 1.
+TEST(GinGidSelection, MatchesRoutableGidByPortAndIndexNotPosition) {
+  unsigned char gids[3][16] = {{0xfe, 0x80}, {0xfe, 0x80, 0, 0, 0x00, 0x77}, {0xfe, 0x80, 0, 0, 0x00, 0x2a}};
+  unsigned idx[3] = {0, 1, 1}, port[3] = {1, 2, 1};
+  EXPECT_EQ(ginTestSelectIbGidIndex(gids, idx, port, 3, 1, 0, 1), 1);
+}
+
+// Holes in the table: position 1 holds gid_index 2, so the routable gid_index 1 does not exist.
+TEST(GinGidSelection, TableHolesDoNotAliasRoutableIndex) {
+  unsigned char gids[2][16] = {{0xfe, 0x80}, {0xfe, 0x80, 0, 0, 0x00, 0x2a}};
+  unsigned idx[2] = {0, 2}, port[2] = {1, 1};
+  EXPECT_EQ(ginTestSelectIbGidIndex(gids, idx, port, 2, 1, 0, 1), 0);
 }
 
 }  // namespace
