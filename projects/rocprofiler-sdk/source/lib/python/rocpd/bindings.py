@@ -100,9 +100,7 @@ def _load_version_file_map(paths):
             for entry in data["rocprofiler-sdk-rocpd"]["rocpd_schemas"]:
                 version = str(entry["version"])
                 result[version] = {
-                    key: entry[key]
-                    for key in _SCHEMA_KIND_KEYS.values()
-                    if key in entry
+                    key: entry[key] for key in _SCHEMA_KIND_KEYS.values() if key in entry
                 }
             return result
     return {}
@@ -325,9 +323,7 @@ except ImportError:
                     else [databases]
                 )
                 self.schema_version = (
-                    schema_version
-                    if schema_version is not None
-                    else _sv_cls()
+                    schema_version if schema_version is not None else _sv_cls()
                 )
                 self.supported_features = list(supported_features)
 
@@ -381,6 +377,7 @@ except ImportError:
             r"\$(env|ENV)\{([A-Z0-9_]+)\}",
             r"%q\{([A-Z0-9_]+)\}",
         ]:
+
             def _env_repl(m):
                 var_name = m.group(m.lastindex)
                 return os.environ.get(var_name, "")
@@ -395,7 +392,7 @@ except ImportError:
         logical_node_type = 2
 
     class sql_engine(enum.IntEnum):
-        sqlite3 = 1            # ROCPD_SQL_ENGINE_SQLITE3
+        sqlite3 = 1  # ROCPD_SQL_ENGINE_SQLITE3
 
     class sql_schema(enum.IntEnum):
         rocpd_tables = 1
@@ -424,7 +421,7 @@ except ImportError:
             self.annotate_pmc = False
             self.agent_index_value = agent_indexing.logical_node
             self.perfetto_shmem_size_hint = 64
-            self.perfetto_buffer_size = (1 * 1024 * 1024)
+            self.perfetto_buffer_size = 1 * 1024 * 1024
             self.perfetto_backend = "inprocess"
             self.perfetto_buffer_fill_policy = "discard"
 
@@ -471,7 +468,6 @@ except ImportError:
     class Thread(RocpdNamespace):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-
 
     def write_perfetto(*args, **kwargs):
         raise RuntimeError(
