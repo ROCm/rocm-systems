@@ -5158,6 +5158,7 @@ TEST(CommandProcessorTest, RuntimeScratchStrideSurvivesLargeThenSmallPrivateSegm
   constexpr uint64_t kMainScratch = 0x00800000;
   constexpr uint64_t kAltScratch = 0x01000000;
   constexpr uint32_t kProcessId = 7, kQueueId = 19, kXcc = 2;
+  constexpr uint32_t kWaveSizeFieldShift = 12;
   for (const auto &arch : {"cdna1", "cdna2", "cdna3", "cdna4", "cdna5", "rdna1", "rdna2", "rdna3",
                            "rdna3_5", "rdna4"}) {
     for (bool alternate : {false, true}) {
@@ -5186,7 +5187,7 @@ TEST(CommandProcessorTest, RuntimeScratchStrideSurvivesLargeThenSmallPrivateSegm
       const uint32_t tmpring =
           2u |
           (static_cast<uint32_t>(main_wave_stride / properties.compute_tmpring_wavesize_granule)
-           << 12);
+           << kWaveSizeFieldShift);
       f.mem()->write64(kQueue + offsetof(amd_queue_t, read_dispatch_id), 1);
       f.mem()->write64(kQueue + offsetof(amd_queue_t, write_dispatch_id), 3);
       f.mem()->write64(kDoorbell, 3);
@@ -5205,7 +5206,7 @@ TEST(CommandProcessorTest, RuntimeScratchStrideSurvivesLargeThenSmallPrivateSegm
         const uint32_t alternate_tmpring =
             2u | (static_cast<uint32_t>(alternate_wave_stride /
                                         properties.compute_tmpring_wavesize_granule)
-                  << 12);
+                  << kWaveSizeFieldShift);
         f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_compute_tmpring_size),
                          alternate_tmpring);
         f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_scratch_wave64_lane_byte_size),
@@ -5424,6 +5425,9 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
     // Distinguish the allocations; this offset is not the target allocation granule.
     const uint64_t main_wave_stride = alternate_wave_stride + 1024;
 
+    // Synthetic CDNA5 alternate-scratch fixture: checked-in ROCr leaves
+    // alt_compute_tmpring_size zero on gfx12. This tests the explicit
+    // nonzero-tmpring model; runtime zero-field handling is separate.
     VmFixture fixture;
     ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna5", /*num_cus=*/1, /*num_wf_slots=*/2,
                                                /*lds_size_kb=*/64,
@@ -5473,7 +5477,7 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
                            1);
     fixture.mem()->write32(kQueueDescriptor +
                                offsetof(amd_queue_v2_t, alt_scratch_wave64_lane_byte_size),
-                           alternate_wave_stride / 64);
+                           kPrivateBytes * 32 / 64);
     fixture.mem()->write32(
         kQueueDescriptor + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_x), 64);
     fixture.mem()->write32(
