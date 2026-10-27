@@ -110,20 +110,32 @@ be resolved, rocjitsu reports `?` for the unresolved field. The fix is to add
 `__syncthreads()` between the write and the read.
 
 Each trace line shows an instruction's GPU virtual address, which varies
-between runs, and its disassembly. The trace lists the instructions
-that the reporting wave (here wave 0) executed, oldest first, ending at its
-racing access. `==>` marks the two instructions involved in the race, and the
-`<--` annotation names the wave and lane that performed each one. When the
+between runs, and its disassembly. The trace lists instructions that the
+reporting wave (here wave 0) executed, oldest first. `==>` marks entries matching
+the PC and captured encoding of either instruction involved in the race, and
+the `<--` annotation names the wave and lane that performed that access. When the
 conflicting instruction ran in another wave, as with wave 1's `ds_write_b32`
-above, the marker is placed where the reporting wave executed the same
-address.
+above, the marker is placed where the reporting wave executed the same bytes
+at the same address, if such an entry is present. Repeated executions of identical
+bytes at the same address are not distinguished; the displayed span ends at the
+first matching racing access after its first marker.
 
 The race detector retains the last 256 instructions of each wave. If the
-conflicting instruction is older than that, the report prints it first with a
-`(before trace window)` note. Traces longer than 32 instructions show only
-their first and last 16. Disassembly is produced from the instruction bytes
-that the wave executed, so it remains accurate if the kernel's code is later
-overwritten or unmapped.
+reporting wave has no entry matching the conflicting PC and encoding, the report
+prints the retained producer instruction first with a `(before trace window)`
+note. This can mean the instruction has left the trace, but it can also mean that
+another wave executed an instruction the reporting wave never executed. The note
+does not establish that the conflict is more than 256 instructions old.
+
+For example, if another wave's producer is at `0x1000` and the reporting wave's
+trace contains only its racing access at `0x3000`, the producer appears with
+`(before trace window)` and `0 instructions not recorded`. That count is the
+number of retained reporting-wave entries skipped before the first displayed
+marker, not the number of instructions since the producer ran.
+
+Traces longer than 32 instructions show only their first and last 16. Each trace
+row is disassembled from its own captured bytes, so it remains accurate if the
+kernel's code is later overwritten or unmapped.
 
 ### Running your own application
 
