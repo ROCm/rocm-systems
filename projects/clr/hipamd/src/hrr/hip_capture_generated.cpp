@@ -7838,6 +7838,20 @@ static hipError_t capture_hipKernelSetAttributeForDevice(hipKernel_t kernel, hip
 }
 
 // Generated shim
+static hipError_t capture_hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev) {
+  hipError_t r = g_real_table.hipKernelSetCacheConfig_fn(kernel, config, dev);
+  if (r == hipSuccess) {
+    hrr_args_hipKernelSetCacheConfig a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.kernel = reinterpret_cast<uint64_t>(kernel);
+    a.config = static_cast<decltype(a.config)>(config);
+    a.dev = static_cast<uint64_t>(static_cast<int>(dev));
+    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELSETCACHECONFIG, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8575,6 +8589,7 @@ void hip_capture_build_table() {
   g_cap_table.hipDeviceFlushGPUDirectRDMAWrites_fn = capture_hipDeviceFlushGPUDirectRDMAWrites;
   g_cap_table.hipLibraryGetModule_fn = capture_hipLibraryGetModule;
   g_cap_table.hipKernelSetAttributeForDevice_fn = capture_hipKernelSetAttributeForDevice;
+  g_cap_table.hipKernelSetCacheConfig_fn = capture_hipKernelSetCacheConfig;
 }
 
 void hip_capture_build_compiler_table() {
