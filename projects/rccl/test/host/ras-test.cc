@@ -1758,15 +1758,24 @@ TEST_F(RasMicrotest, MsgRecvRejectsCollRespClaimingMoreThanItCarries) {
 }
 
 TEST_F(RasMicrotest, MsgRecvAcceptsCollRespThatCarriesTheTailsItClaims) {
-  // The sender aligns the data to int64_t, so a check that ignored the padding would reject this.
-  size_t msgLen = rasMsgLength(RAS_MSG_COLLRESP) + 2 * sizeof(ncclSocketAddress);
+  // One peer, so that the peers array ends unaligned and the sender has to pad before the data: with a
+  // peer count that happens to land aligned the padding is zero and the rejecting case below becomes the
+  // accepting one, leaving the alignment itself unpinned.  The assertion keeps that from going unnoticed.
+  size_t msgLen = rasMsgLength(RAS_MSG_COLLRESP) + sizeof(ncclSocketAddress);
+  const int unpaddedLen = static_cast<int>(msgLen) + 16;
   ALIGN_SIZE(msgLen, alignof(int64_t));
   msgLen += 16;
-  EXPECT_EQ(ncclSuccess, MsgRecvWithBody(static_cast<int>(msgLen), [](rasMsg* msg) {
+  ASSERT_NE(static_cast<int>(msgLen), unpaddedLen);
+
+  auto fill = [](rasMsg* msg) {
     msg->type = RAS_MSG_COLLRESP;
-    msg->collResp.nPeers = 2;
+    msg->collResp.nPeers = 1;
     msg->collResp.nData = 16;
-  }));
+  };
+  // The sender aligns the data to int64_t, so a check that ignored the padding would reject this.
+  EXPECT_EQ(ncclSuccess, MsgRecvWithBody(static_cast<int>(msgLen), fill));
+  // And a message short by exactly that padding is not one the sender could have produced.
+  EXPECT_EQ(ncclRemoteError, MsgRecvWithBody(unpaddedLen, fill));
 }
 
 TEST_F(RasMicrotest, MsgRecvAcceptsExactMinimumLengthForItsMessageType) {
