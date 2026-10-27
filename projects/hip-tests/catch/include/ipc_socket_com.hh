@@ -39,7 +39,7 @@ class ipcSocketCom {
 
   int createSocket() {
 #if HT_WIN
-    handle.reset(new (std::nothrow) ipcHdl);
+    handle.reset(new (std::nothrow) ipcHdl());
     if (!handle) {
       perror("Socket failure: Handle memory allocation failed");
       return -1;
@@ -55,7 +55,7 @@ class ipcSocketCom {
 
     sprintf(name, "%u", getpid());
 
-    handle.reset(new (std::nothrow) ipcHdl);
+    handle.reset(new (std::nothrow) ipcHdl());
     if (!handle) {
       perror("Socket failure: Handle memory allocation failed");
       return -1;
@@ -95,7 +95,8 @@ class ipcSocketCom {
 
   int openSocket() {
 #if HT_WIN
-    handle = new (std::nothrow) ipcHdl;
+    handle.reset(new (std::nothrow) ipcHdl());
+
     if (!handle) {
       perror("Socket failure: Handle memory allocation failed");
       return -1;
@@ -118,7 +119,7 @@ class ipcSocketCom {
     int sock = 0;
     struct sockaddr_un cliaddr;
 
-    handle.reset(new (std::nothrow) ipcHdl);
+    handle.reset(new (std::nothrow) ipcHdl());
 
     if (!handle) {
       perror("Socket failure: Handle memory allocation failed");
