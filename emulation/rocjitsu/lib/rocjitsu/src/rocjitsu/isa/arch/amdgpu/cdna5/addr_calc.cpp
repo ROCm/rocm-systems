@@ -42,6 +42,8 @@ bool has_smem_offset(uint32_t soffset) { return soffset != OPR_SMEM_OFFSET_NULL;
 std::optional<uint32_t> read_sreg_m0_operand(amdgpu::Wavefront &wf, uint32_t operand) {
   if (operand <= amdgpu::kModernM0Selector)
     return amdgpu::try_read_scalar_selector(wf, operand);
+  // Preserve the category used by the CU's catch for the previous unsupported-
+  // operand exception. This describes simulator support, not hardware validity.
   wf.report_instruction_execution_error(
       amdgpu::InstructionExecutionError::UnimplementedInstruction);
   return std::nullopt;
