@@ -3,6 +3,7 @@
 This sample decodes multiple files using multiple threads, using the rocDecode library. The input is a directory of files and an input number of threads. The maximum number of threads is capped to 64.
 If the number of files is higher than the number of threads requested by the user, the files are distributed to the threads in a round robin fashion. 
 If the number of files is lesser than the number of threads requested by the user, the number of threads created will be equal to the number of files.
+Before decoding, the sample checks the decode capability of the GPU for each file and decodes only the files whose codec and bit depth the GPU supports. Unsupported files are skipped with an info message; if the GPU supports none of the files, the sample exits with code 77.
 
 ## Prerequisites:
 
