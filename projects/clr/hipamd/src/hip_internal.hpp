@@ -433,6 +433,15 @@ namespace hip {
     }
     /// Returns last captured graph node
     const std::vector<hip::GraphNode*>& GetLastCapturedNodes() const { return lastCapturedNodes_; }
+    /// Refreshes and returns edge data describing the last captured nodes. AMD graph edges carry
+    /// no per-edge metadata, so every entry is zero-initialized - which is what CUDA defines as a
+    /// full serialization of two nodes with memory visibility. Filled on demand rather than kept
+    /// in lockstep with lastCapturedNodes_, so the capture path is untouched; the returned storage
+    /// has the same lifetime as GetLastCapturedNodes(), i.e. until the next op on this stream.
+    const std::vector<hipGraphEdgeData>& RefreshCapturedEdgeData() {
+      capturedEdgeData_.assign(lastCapturedNodes_.size(), hipGraphEdgeData{});
+      return capturedEdgeData_;
+    }
     /// Set last captured graph node; copies stream priority onto kernel nodes.
     void SetLastCapturedNode(hip::GraphNode* graphNode);
     /// Returns dependencies removed during capture
@@ -544,6 +553,8 @@ namespace hip {
     hip::Stream* captureOwner_ = nullptr;                 //!< Origin owning this capture; the
                                                           //!< origin points at itself
     std::vector<hip::GraphNode*> lastCapturedNodes_;      //!< Last graph node(s) captured
+    std::vector<hipGraphEdgeData> capturedEdgeData_;      //!< Zero-filled edge data matching
+                                                          //!< lastCapturedNodes_, filled on demand
     std::vector<hip::GraphNode*> removedDependencies_;    //!< Deps removed via UpdateCaptureDeps
     std::unordered_set<hip::Stream*> captureStreams_;     //!< Streams enrolled in this capture,
                                                           //!< excluding the origin. Origin only.

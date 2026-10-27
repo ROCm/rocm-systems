@@ -2274,6 +2274,18 @@ HIP_PUBLIC_API hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, hipStre
       stream, captureStatus_out, id_out, graph_out, dependencies_out, numDependencies_out);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipStreamGetCaptureInfo_v3(hipStream_t stream,
+                                      hipStreamCaptureStatus* captureStatus_out,
+                                      unsigned long long* id_out, hipGraph_t* graph_out,
+                                      const hipGraphNode_t** dependencies_out,
+                                      const hipGraphEdgeData** edgeData_out,
+                                      size_t* numDependencies_out) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipStreamGetCaptureInfo_v3_fn(
+      stream, captureStatus_out, id_out, graph_out, dependencies_out, edgeData_out,
+      numDependencies_out);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device) {
   TRY;
   return hip::GetHipDispatchTable()->hipStreamGetDevice_fn(stream, device);

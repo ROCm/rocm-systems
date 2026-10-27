@@ -708,6 +708,7 @@ hip_7.18 {
 global:
     hipDeviceFlushGPUDirectRDMAWrites;
     hipKernelSetCacheConfig;
+    hipStreamGetCaptureInfo_v3;
 local:
     *;
 } hip_7.17;

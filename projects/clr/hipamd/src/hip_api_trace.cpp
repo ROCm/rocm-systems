@@ -618,6 +618,11 @@ hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, hipStreamCaptureStatus
                                       unsigned long long* id_out, hipGraph_t* graph_out,
                                       const hipGraphNode_t** dependencies_out,
                                       size_t* numDependencies_out);
+hipError_t hipStreamGetCaptureInfo_v3(hipStream_t stream, hipStreamCaptureStatus* captureStatus_out,
+                                      unsigned long long* id_out, hipGraph_t* graph_out,
+                                      const hipGraphNode_t** dependencies_out,
+                                      const hipGraphEdgeData** edgeData_out,
+                                      size_t* numDependencies_out);
 hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device);
 hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags);
 hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId);
@@ -1361,6 +1366,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipStreamEndCapture_fn = hip::hipStreamEndCapture;
   ptrDispatchTable->hipStreamGetCaptureInfo_fn = hip::hipStreamGetCaptureInfo;
   ptrDispatchTable->hipStreamGetCaptureInfo_v2_fn = hip::hipStreamGetCaptureInfo_v2;
+  ptrDispatchTable->hipStreamGetCaptureInfo_v3_fn = hip::hipStreamGetCaptureInfo_v3;
   ptrDispatchTable->hipStreamGetDevice_fn = hip::hipStreamGetDevice;
   ptrDispatchTable->hipStreamGetFlags_fn = hip::hipStreamGetFlags;
   ptrDispatchTable->hipStreamGetId_fn = hip::hipStreamGetId;
@@ -2291,6 +2297,8 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetModule_fn, 546);
 HIP_ENFORCE_ABI(HipDispatchTable, hipKernelSetAttributeForDevice_fn, 547);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 38
 HIP_ENFORCE_ABI(HipDispatchTable, hipKernelSetCacheConfig_fn, 548);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
+HIP_ENFORCE_ABI(HipDispatchTable, hipStreamGetCaptureInfo_v3_fn, 549);
 
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
@@ -2298,9 +2306,9 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipKernelSetCacheConfig_fn, 548);
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 549)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 550)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 38,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 39,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

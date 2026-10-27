@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 38
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 39
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -743,6 +743,10 @@ typedef hipError_t (*t_hipStreamGetCaptureInfo)(hipStream_t stream,
 typedef hipError_t (*t_hipStreamGetCaptureInfo_v2)(
     hipStream_t stream, hipStreamCaptureStatus* captureStatus_out, unsigned long long* id_out,
     hipGraph_t* graph_out, const hipGraphNode_t** dependencies_out, size_t* numDependencies_out);
+typedef hipError_t (*t_hipStreamGetCaptureInfo_v3)(
+    hipStream_t stream, hipStreamCaptureStatus* captureStatus_out, unsigned long long* id_out,
+    hipGraph_t* graph_out, const hipGraphNode_t** dependencies_out,
+    const hipGraphEdgeData** edgeData_out, size_t* numDependencies_out);
 typedef hipError_t (*t_hipStreamGetDevice)(hipStream_t stream, hipDevice_t* device);
 typedef hipError_t (*t_hipStreamGetFlags)(hipStream_t stream, unsigned int* flags);
 typedef hipError_t (*t_hipStreamGetId)(hipStream_t stream, unsigned long long* streamId);
@@ -1864,8 +1868,11 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 38
   t_hipKernelSetCacheConfig hipKernelSetCacheConfig_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
+  t_hipStreamGetCaptureInfo_v3 hipStreamGetCaptureInfo_v3_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 40
 
   // ******************************************************************************************* //
   //

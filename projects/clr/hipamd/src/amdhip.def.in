@@ -568,4 +568,5 @@ hipMemGetDefaultMemPool
 hipKernelNameRefByPtr
 hipModuleEnumerateFunctions
 hipDeviceFlushGPUDirectRDMAWrites
+hipStreamGetCaptureInfo_v3
 @HSA_EXPORTS@

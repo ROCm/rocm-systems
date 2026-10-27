@@ -2307,6 +2307,67 @@ hipError_t hipStreamGetCaptureInfo_v2_spt(hipStream_t stream,
                                                dependencies_out, numDependencies_out));
 }
 
+hipError_t hipStreamGetCaptureInfo_v3_common(hipStream_t stream,
+                                             hipStreamCaptureStatus* captureStatus_out,
+                                             unsigned long long* id_out, hipGraph_t* graph_out,
+                                             const hipGraphNode_t** dependencies_out,
+                                             const hipGraphEdgeData** edgeData_out,
+                                             size_t* numDependencies_out) {
+  if (captureStatus_out == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  // Edge data is only meaningful alongside the nodes it annotates.
+  if (edgeData_out != nullptr && dependencies_out == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  if (hip::Stream::StreamCaptureBlocking() == true &&
+      (stream == nullptr || stream == hipStreamLegacy)) {
+    return hipErrorStreamCaptureImplicit;
+  }
+  if (stream == nullptr || stream == hipStreamLegacy) {
+    *captureStatus_out = hipStreamCaptureStatusNone;
+    return hipSuccess;
+  }
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
+  hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+  *captureStatus_out = s->GetCaptureStatus();
+  if (*captureStatus_out == hipStreamCaptureStatusActive) {
+    if (id_out != nullptr) {
+      *id_out = s->GetCaptureID();
+    }
+    if (graph_out != nullptr) {
+      *graph_out = reinterpret_cast<hipGraph_t>(s->GetCaptureGraph());
+    }
+    if (dependencies_out != nullptr) {
+      *dependencies_out = reinterpret_cast<hipGraphNode_t const*>(s->GetLastCapturedNodes().data());
+    }
+    // Note: hipErrorLossyQuery is unreachable here. CUDA raises it when a caller asks for
+    // dependencies without edge data while some edge carries non-zero data; AMD has no per-edge
+    // metadata at all, so there is never anything to discard.
+    if (edgeData_out != nullptr) {
+      *edgeData_out = s->RefreshCapturedEdgeData().data();
+    }
+    if (numDependencies_out != nullptr) {
+      *numDependencies_out = s->GetLastCapturedNodes().size();
+    }
+  }
+  return hipSuccess;
+}
+
+hipError_t hipStreamGetCaptureInfo_v3(hipStream_t stream, hipStreamCaptureStatus* captureStatus_out,
+                                      unsigned long long* id_out, hipGraph_t* graph_out,
+                                      const hipGraphNode_t** dependencies_out,
+                                      const hipGraphEdgeData** edgeData_out,
+                                      size_t* numDependencies_out) {
+  HIP_INIT_API(hipStreamGetCaptureInfo_v3, stream, captureStatus_out, id_out, graph_out,
+               dependencies_out, edgeData_out, numDependencies_out);
+  HIP_RETURN(hipStreamGetCaptureInfo_v3_common(stream, captureStatus_out, id_out, graph_out,
+                                               dependencies_out, edgeData_out,
+                                               numDependencies_out));
+}
+
 hipError_t ihipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t* dependencies,
                                                size_t numDependencies, unsigned int flags) {
   HIP_INIT_API(hipStreamUpdateCaptureDependencies, stream, dependencies, numDependencies, flags);

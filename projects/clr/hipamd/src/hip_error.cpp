@@ -161,6 +161,8 @@ const char* ihipGetErrorName(hipError_t hip_error) {
       return "hipErrorRuntimeOther";
     case hipErrorCooperativeLaunchTooLarge:
       return "hipErrorCooperativeLaunchTooLarge";
+    case hipErrorLossyQuery:
+      return "hipErrorLossyQuery";
     case hipErrorStreamCaptureUnsupported:
       return "hipErrorStreamCaptureUnsupported";
     case hipErrorStreamCaptureInvalidated:
@@ -316,6 +318,8 @@ const char* ihipGetErrorString(hipError_t hip_error) {
       return "operation not permitted";
     case hipErrorNotSupported:
       return "operation not supported";
+    case hipErrorLossyQuery:
+      return "query was specified in a way that would discard information";
     case hipErrorStreamCaptureUnsupported:
       return "operation not permitted when stream is capturing";
     case hipErrorStreamCaptureInvalidated:

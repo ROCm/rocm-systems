@@ -164,6 +164,10 @@ typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
   // Deprecated
   hipErrorInvalidResourceHandle = 400,  ///< Resource handle (hipEvent_t or hipStream_t) invalid.
   hipErrorIllegalState = 401,  ///< Resource required is not in a valid state to perform operation.
+  hipErrorLossyQuery = 402,    ///< This indicates that the queried object is not in a state where
+                               ///< the requested information can be returned without loss. On AMD
+                               ///< this is never produced: graph edges carry no edge data, so a
+                               ///< query can never discard any.
   hipErrorNotFound = 500,      ///< Not found
   hipErrorNotReady = 600,      ///< Indicates that asynchronous operations enqueued earlier are not
                            ///< ready.  This is not actually an error, but is used to distinguish
@@ -9003,6 +9007,54 @@ hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, hipStreamCaptureStatus
                                       unsigned long long* id_out __dparm(0),
                                       hipGraph_t* graph_out __dparm(0),
                                       const hipGraphNode_t** dependencies_out __dparm(0),
+                                      size_t* numDependencies_out __dparm(0));
+
+/**
+ * @brief Get stream's capture state, including dependency edge data
+ *
+ * @param [in] stream - Stream of which to get capture status from.
+ * @param [out] captureStatus_out - Returns current capture status.
+ * @param [out] id_out - Unique capture ID.
+ * @param [out] graph_out - Returns the graph being captured into.
+ * @param [out] dependencies_out - Pointer to an array of nodes representing the graphs
+ * dependencies.
+ * @param [out] edgeData_out - Pointer to an array of edge data, one entry per node returned in
+ * dependencies_out. Requires dependencies_out to be non-null. On AMD every entry is
+ * zero-initialized, which denotes a full-completion dependency with memory visibility.
+ * @param [out] numDependencies_out - Returns size of the arrays returned in dependencies_out and
+ * edgeData_out.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorStreamCaptureImplicit
+ *
+ */
+hipError_t hipStreamGetCaptureInfo_v3(hipStream_t stream, hipStreamCaptureStatus* captureStatus_out,
+                                      unsigned long long* id_out __dparm(0),
+                                      hipGraph_t* graph_out __dparm(0),
+                                      const hipGraphNode_t** dependencies_out __dparm(0),
+                                      const hipGraphEdgeData** edgeData_out __dparm(0),
+                                      size_t* numDependencies_out __dparm(0));
+
+/**
+ * @brief Get stream's capture state
+ *
+ * @param [in] stream - Stream of which to get capture status from.
+ * @param [out] captureStatus_out - Returns current capture status.
+ * @param [out] id_out - Unique capture ID.
+ * @param [out] graph_out - Returns the graph being captured into.
+ * @param [out] dependencies_out - Pointer to an array of nodes representing the graphs
+ * dependencies.
+ * @param [out] edgeData_out - Pointer to an array of edges representing ---
+ * @param [out] numDependencies_out - Returns size of the array returned in dependencies_out.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorStreamCaptureImplicit
+ *
+ */
+hipError_t hipStreamGetCaptureInfo_v3(hipStream_t stream,
+                                      hipStreamCaptureStatus* captureStatus_out,
+                                      unsigned long long* id_out __dparm(0),
+                                      hipGraph_t* graph_out __dparm(0),
+                                      const hipGraphNode_t** dependencies_out __dparm(0),
+                                      const hipGraphEdgeData** edgeData_out __dparm(0),
                                       size_t* numDependencies_out __dparm(0));
 
 /**
