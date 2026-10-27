@@ -8,6 +8,7 @@ import importlib
 import pandas as pd
 import pytest
 
+from utils import utils_analysis
 from utils.file_io import load_df_pmc
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.pass_provenance import (
@@ -31,6 +32,22 @@ ROCPD_COUNTER_HEADER = (
     "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
 )
 ROCPD_COUNTER_ROW_PREFIX = "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,"
+
+DISPATCH_FIELDS = {
+    "GPU_ID": 0,
+    "Dispatch_ID": 0,
+    "Grid_Size": 256,
+    "Workgroup_Size": 64,
+    "LDS_Per_Workgroup": 0,
+    "Scratch_Per_Workitem": 0,
+    "Arch_VGPR": 8,
+    "Accum_VGPR": 0,
+    "SGPR": 16,
+    "Kernel_Name": "k",
+    "Start_Timestamp": 10,
+    "End_Timestamp": 20,
+    "Kernel_ID": 0,
+}
 
 # TA_BUSY and TD_BUSY are collected once each, in different passes.
 SPLIT_LAYOUT = PassLayout(
@@ -737,3 +754,43 @@ def test_cli_and_db_builtins_share_one_evaluation(
 
     assert call_evaluator(module, SPLIT_LAYOUT) == {"marker": 1}
     assert seen == [({"pmc_perf_0"}, "MI300", ["x"])]
+
+
+def test_provenance_merge_pivots_each_dispatch_once(monkeypatch) -> None:
+    rows = [
+        ("pmc_perf_10", "GRBM_GUI_ACTIVE", 300),
+        ("pmc_perf_2", "GRBM_GUI_ACTIVE", 200),
+        ("pmc_perf_2", "TA_BUSY", 50),
+        ("pmc_perf_1", "SQ_WAVES", 4),
+        ("pmc_perf_1", "GRBM_GUI_ACTIVE", 100),
+    ]
+    long_df = pd.DataFrame([
+        {**DISPATCH_FIELDS, "Pass_Key": key, "Counter_Name": name, "Counter_Value": v}
+        for key, name, v in rows
+    ])
+    layout = build_pass_layout(long_df)
+    pivots = []
+    real_pivot = utils_analysis._pivot_counters_by_pass
+
+    def count_pivot(group_df):
+        pivots.append(len(group_df))
+        return real_pivot(group_df)
+
+    monkeypatch.setattr(utils_analysis, "_pivot_counters_by_pass", count_pivot)
+    partial_dispatch = long_df[long_df["Pass_Key"] != "pmc_perf_10"].assign(
+        Dispatch_ID=1
+    )
+
+    result, _slot_to_id = process_rocpd_csv(
+        pd.concat([long_df, partial_dispatch], ignore_index=True),
+        pass_layout=layout,
+    )
+
+    assert pivots == [5, 4]
+    assert result["GRBM_GUI_ACTIVE"].tolist() == [100, 100]
+    assert result["GRBM_GUI_ACTIVE@pass:pmc_perf_1"].tolist() == [100, 100]
+    assert result["GRBM_GUI_ACTIVE@pass:pmc_perf_2"].tolist() == [200, 200]
+    assert result.at[0, "GRBM_GUI_ACTIVE@pass:pmc_perf_10"] == 300
+    assert pd.isna(result.at[1, "GRBM_GUI_ACTIVE@pass:pmc_perf_10"])
+    assert result["TA_BUSY"].tolist() == [50, 50]
+    assert "TA_BUSY@pass:pmc_perf_2" not in result.columns
