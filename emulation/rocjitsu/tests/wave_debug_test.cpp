@@ -69,7 +69,7 @@ struct WaveDebugFixture {
   }
 };
 
-TEST(WaveDebugTest, DebuggerReadsPreserveValuesAtNonzeroOffsets) {
+TEST(WaveDebugTest, DebuggerReadsPreservePhysicalStorageBoundsAtNonzeroOffsets) {
   const auto check = []<GpuIsa Isa>(rj_code_arch_t arch) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch, 2);
@@ -91,12 +91,12 @@ TEST(WaveDebugTest, DebuggerReadsPreserveValuesAtNonzeroOffsets) {
     EXPECT_EQ(wave->debug_read_sgpr(last_sgpr), 42u);
     EXPECT_EQ(wave->debug_read_vgpr(last_vgpr, last_lane), 43u);
 
-    EXPECT_EQ(first_wave->debug_read_sgpr(wave->sgpr_alloc().base - first_wave->sgpr_alloc().base +
-                                          last_sgpr),
-              42u);
-    EXPECT_EQ(first_wave->debug_read_vgpr(
-                  wave->vgpr_alloc().base - first_wave->vgpr_alloc().base + last_vgpr, last_lane),
-              43u);
+    const auto second_wave_sgpr =
+        wave->sgpr_alloc().base - first_wave->sgpr_alloc().base + last_sgpr;
+    const auto second_wave_vgpr =
+        wave->vgpr_alloc().base - first_wave->vgpr_alloc().base + last_vgpr;
+    EXPECT_EQ(first_wave->debug_read_sgpr(second_wave_sgpr), 42u);
+    EXPECT_EQ(first_wave->debug_read_vgpr(second_wave_vgpr, last_lane), 43u);
 
     const auto sgpr_end = fx.cu->sgpr_file().total_regs() - wave->sgpr_alloc().base;
     const auto vgpr_end = cu->vgpr_file().total_regs() - wave->vgpr_alloc().base;
