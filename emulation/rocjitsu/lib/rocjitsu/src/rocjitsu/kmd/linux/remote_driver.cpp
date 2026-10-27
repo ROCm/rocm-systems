@@ -7,6 +7,7 @@
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "util/log.h"
 #include "util/unique_handle.h"
@@ -1499,6 +1500,8 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
     auto *mapped = safe_mmap(addr, length, PROT_READ | PROT_WRITE, mflags, mapping_memfd, 0);
     if (mapped != MAP_FAILED)
       syscall(SYS_madvise, mapped, length, MADV_POPULATE_WRITE);
+    if (mapped != MAP_FAILED && rocjitsu::kmd::is_device_memory_backing(mapping_memfd))
+      syscall(SYS_madvise, mapped, length, MADV_DONTDUMP);
 
     if (memfd >= 0 && memfd != mapping_memfd)
       syscall(SYS_close, memfd);

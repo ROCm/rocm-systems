@@ -79,6 +79,121 @@ struct MemoryWaitScoreboardTest : ::testing::Test {
   }
 };
 
+TEST_F(MemoryWaitScoreboardTest, CancellingTheLatestIssuePreservesOlderCounterPositions) {
+  load(5);
+  const auto sequence = state.issue(WaitCounterKind::Load, false, 0, 2);
+  state.add({sequence, 0x104, ~uint64_t{0}, {RegClass::VGPR, 6, 1}, WaitCounterKind::Load, 0xf});
+  const std::array counters{WaitCounterType::VMCNT, WaitCounterType::VMCNT};
+  ASSERT_TRUE(state.cancel_last_issue(0x104, counters, ROCJITSU_CODE_ARCH_CDNA4, false));
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+  read(6);
+  EXPECT_TRUE(hazards.empty());
+  load(6);
+  state.wait(WaitCounterKind::Load, 1);
+  read(5);
+  EXPECT_TRUE(hazards.empty());
+  read(6);
+  ASSERT_EQ(hazards.size(), 1u);
+  EXPECT_EQ(hazards[0].reg.index, 6u);
+}
+
+TEST_F(MemoryWaitScoreboardTest, CancellationRestoresACoalescedProducerAtTheSamePc) {
+  load(5);
+  const auto older = state.events().front();
+  load(5);
+  ASSERT_EQ(state.events().size(), 1u);
+  const std::array counters{WaitCounterType::VMCNT};
+  ASSERT_TRUE(state.cancel_last_issue(0x100, counters, ROCJITSU_CODE_ARCH_CDNA4, false));
+  ASSERT_EQ(state.events().size(), 1u);
+  EXPECT_EQ(state.events()[0].sequence, older.sequence);
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+  read(5);
+  ASSERT_EQ(hazards.size(), 1u);
+  EXPECT_EQ(hazards[0].producer.sequence, older.sequence);
+}
+
+TEST_F(MemoryWaitScoreboardTest, RejectedCancellationPreservesTheOutstandingIssue) {
+  load(5);
+  const auto producer = state.events().front();
+  const std::array too_many{WaitCounterType::VMCNT, WaitCounterType::VMCNT};
+  EXPECT_FALSE(state.cancel_last_issue(0x100, too_many, ROCJITSU_CODE_ARCH_CDNA4, false));
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+  ASSERT_EQ(state.events().size(), 1u);
+  EXPECT_EQ(state.events().front().sequence, producer.sequence);
+  read(5);
+  ASSERT_EQ(hazards.size(), 1u);
+  EXPECT_EQ(hazards.front().producer.sequence, producer.sequence);
+
+  const std::array matching{WaitCounterType::VMCNT};
+  ASSERT_TRUE(state.cancel_last_issue(0x100, matching, ROCJITSU_CODE_ARCH_CDNA4, false));
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 0u);
+  EXPECT_TRUE(state.empty());
+  hazards.clear();
+  read(5);
+  EXPECT_TRUE(hazards.empty());
+}
+
+TEST_F(MemoryWaitScoreboardTest, CancellationPreservesOlderScalarReplaySources) {
+  state.xcnt_group(true);
+  for (uint32_t i = 0; i < 2; ++i) {
+    const uint64_t pc = 0x100 + 4 * i;
+    const auto completion = state.issue(WaitCounterKind::Km, true);
+    state.add({completion,
+               pc,
+               ~uint64_t{0},
+               {RegClass::SGPR, static_cast<uint16_t>(i), 1},
+               WaitCounterKind::Km,
+               0xf});
+    const auto translation = state.issue_xcnt(WaitCounterKind::Km, true);
+    state.add({translation, pc, ~uint64_t{0}, {RegClass::SGPR, 2, 1}, WaitCounterKind::X, 0xf});
+  }
+  const std::array counters{WaitCounterType::KMCNT};
+  ASSERT_TRUE(state.cancel_last_issue(0x104, counters, ROCJITSU_CODE_ARCH_CDNA5, true));
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Km), 1u);
+  EXPECT_EQ(state.outstanding(WaitCounterKind::X), 1u);
+  state.access({RegClass::SGPR, 1, 1}, ~uint64_t{0}, 0xf, false);
+  EXPECT_TRUE(hazards.empty());
+  state.access({RegClass::SGPR, 2, 1}, ~uint64_t{0}, 0xf, true);
+  ASSERT_EQ(hazards.size(), 1u);
+  EXPECT_EQ(hazards[0].producer.pc, 0x100u);
+  EXPECT_EQ(hazards[0].producer.counter, WaitCounterKind::X);
+}
+
+TEST_F(MemoryWaitScoreboardTest, IssueSnapshotPreservesOlderCompletionAndReplayPositions) {
+  load(5);
+  const auto older_x = state.issue_xcnt(WaitCounterKind::Load, false);
+  state.add({older_x, 0x100, 1, {RegClass::VGPR, 7, 1}, WaitCounterKind::X, 0xf});
+  const auto before = state.issue_snapshot();
+  const auto completion = state.issue(WaitCounterKind::Ds);
+  state.add({completion, 0x104, 1, {RegClass::VGPR, 6, 1}, WaitCounterKind::Ds, 0xf});
+  const auto replay = state.issue_xcnt(WaitCounterKind::Ds, false);
+  state.add({replay, 0x104, 1, {RegClass::VGPR, 8, 1}, WaitCounterKind::X, 0xf});
+  ASSERT_TRUE(state.cancel_last_issue(0x104, before));
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 0u);
+  EXPECT_EQ(state.outstanding(WaitCounterKind::X), 1u);
+  read(6);
+  state.access({RegClass::VGPR, 8, 1}, 1, 0xf, true);
+  EXPECT_TRUE(hazards.empty());
+  read(5);
+  state.access({RegClass::VGPR, 7, 1}, 1, 0xf, true);
+  ASSERT_EQ(hazards.size(), 2u);
+  EXPECT_EQ(hazards[0].producer.pc, 0x100u);
+  EXPECT_EQ(hazards[1].producer.pc, 0x100u);
+  EXPECT_EQ(hazards[1].producer.counter, WaitCounterKind::X);
+}
+
+TEST_F(MemoryWaitScoreboardTest, IssueSnapshotCannotCancelRetiredPositions) {
+  const auto before = state.issue_snapshot();
+  load(5);
+  state.wait(WaitCounterKind::Load, 0);
+  EXPECT_FALSE(state.cancel_last_issue(0x100, before));
+  EXPECT_TRUE(state.empty());
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 0u);
+  read(5);
+  EXPECT_TRUE(hazards.empty());
+}
+
 TEST_F(MemoryWaitScoreboardTest, MissingWaitIdentifiesProducerAndConsumer) {
   load(5);
   read(6);

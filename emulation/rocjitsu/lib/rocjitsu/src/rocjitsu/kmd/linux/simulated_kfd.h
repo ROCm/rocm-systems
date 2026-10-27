@@ -257,6 +257,11 @@ public:
     debug_notification_deferred_reap_for_testing_ = defer;
   }
 
+  /// @brief Pause GET_QUEUE_WAVE_STATE after its ownership snapshot, before materialization.
+  void set_queue_wave_state_hook_for_testing(std::function<void()> hook) {
+    queue_wave_state_hook_for_testing_ = std::move(hook);
+  }
+
   /// @brief Pause after ROCr decides queue-exception delivery and before ownership resolves.
   void set_runtime_exception_result_hook_for_testing(std::function<void(bool)> hook) {
     runtime_exception_result_hook_for_testing_ = std::move(hook);
@@ -583,6 +588,8 @@ private:
   int unmap_memory_ioctl(KfdProcess &proc, void *arg);
   int create_queue_ioctl(KfdProcess &proc, void *arg);
   int update_queue_ioctl(KfdProcess &proc, void *arg);
+  /// @brief Materialize stopped queue context and return XCC0 used sizes.
+  int get_queue_wave_state_ioctl(KfdProcess &proc, void *arg);
   /// @brief Whether KFD allows GWS with debugging, assuming capable firmware.
   bool debugger_supports_gws(uint32_t gpu_id) const;
   int alloc_queue_gws_ioctl(KfdProcess &proc, void *arg);
@@ -642,6 +649,11 @@ private:
                                         uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
                                         bool retain_on_rejection = true,
                                         bool reserve_runtime_on_rejection = false);
+  /// @brief Transfer a wave exception to the runtime after releasing its CU lock.
+  /// @details An unusable debugger image upgrades WaitForAcknowledgment to
+  /// PublishOrFail: ROCr acknowledges only its first fatal report per queue,
+  /// and a later failed delivery cannot leave an unpublished debugger stop.
+  /// Explicit PublishAndCancel remains unchanged for dispatch cancellation.
   bool defer_wave_exception_to_runtime(
       amdgpu::Wavefront &wf, uint64_t exception_mask, bool suspend_while_pending,
       bool clear_debug_stop_on_success = false, bool runtime_already_reserved = false,
@@ -695,13 +707,12 @@ private:
   bool on_wave_execution_failure(amdgpu::Wavefront &wf, bool retain_wave);
   bool on_wave_alu_exception(amdgpu::Wavefront &wf);
 
-  /// @brief Memory-violation handler installed on every compute unit.
-  /// @details Runs on the engine thread for a global-memory access to an
-  /// unmapped address. If the wave's process is being debugged, sets
-  /// TRAPSTS.xnack_error, stops the wave, and reports an
-  /// EC_QUEUE_WAVE_MEMORY_VIOLATION exception (rocm-dbgapi
-  /// WAVE_STOP_REASON_MEMORY_VIOLATION); returns true, else false.
-  bool on_wave_memory_violation(amdgpu::Wavefront &wf, uint64_t addr, bool is_write);
+  /// @brief Retain and report a memory fault to its debugger or runtime owner.
+  /// @details Sets TRAPSTS.xnack_error and uses the issuing PC for XNACK mode.
+  /// Returns true when an owner claims the wave; otherwise CU cancellation applies.
+  /// @param issue_pc Address of the memory instruction that caused the fault.
+  bool on_wave_memory_violation(amdgpu::Wavefront &wf, uint64_t addr, bool is_write,
+                                uint64_t issue_pc);
 
   /// @brief Toggle per-access debugger checks on every compute unit.
   void set_debug_active_on_all_cus(bool active);
@@ -736,9 +747,10 @@ private:
   /// @brief Duplicate the authorized target-memory fd for lock-free I/O.
   UniqueDriverFd duplicate_debug_target_mem(pid_t target_pid) const;
 
-  /// @brief Serialize all debug-halted waves of a queue into its CWSR area.
+  /// @brief Save a queue's stopped waves into its per-XCC CWSR areas.
+  /// @param runtime_save Include runtime-suspended waves and flush their memory for a core.
   bool serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
-                                   uint64_t ctx_base, uint32_t ctx_size);
+                                   uint64_t ctx_base, uint32_t ctx_size, bool runtime_save = false);
 
   /// @brief Stop the target's running waves and refresh their CWSR areas
   /// (KFD_IOC_DBG_TRAP_SUSPEND_QUEUES).
@@ -755,8 +767,9 @@ private:
   /// @ref kApertureStride. Shared by
   /// AMDKFD_IOC_GET_PROCESS_APERTURES_NEW and the debug device snapshot.
   kfd_process_device_apertures gpu_apertures(uint32_t ordinal) const;
-  int set_xnack_mode_ioctl(void *arg);
+  int set_xnack_mode_ioctl(KfdProcess &proc, void *arg);
   int get_tile_config_ioctl(void *arg);
+  /// @brief Back scratch for test-registered queues without the KFD queue ABI.
   bool allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size);
 
   /// @brief Lazily create the pollable KFD event descriptor across racing opens.
@@ -788,6 +801,8 @@ private:
   /// held simultaneously (allocate_scratch_backing and close() both release
   /// process_mutex_ before taking alloc_mutex_):
   ///   op_mutex_ < process_mutex_
+  ///   op_mutex_ (caller) < queue_context_mutex_ (target) < alloc_mutex_
+  ///   queue_context_mutex_ < hw_queue_mutex_ < wave_state_mutex_ (context ioctls)
   ///   op_mutex_ < alloc_mutex_ < {ipc_mutex_, page_table_request_mutex_, owned_fds_mutex_}
   ///   page_table_request_mutex_ < page_table_mutex_
   ///   page_table_request_mutex_ < vmid_mutex_       (GpuMemory binding validation)
@@ -795,7 +810,7 @@ private:
   ///   op_mutex_ < debug_sessions_mutex_ < runtime_mutex_ (debug_trap_ioctl)
   ///   process_mutex_ < interrupt_mutex_                (open()/open_process())
   ///   hw_queue_mutex_ (CP) < scratch_backing_mutex_ (KfdProcess) < alloc_mutex_
-  ///                                                    (allocate_scratch_backing)
+  ///                                (allocate_scratch_backing; test-registered queues)
   /// The op_mutex_ in the debug rule is always the CALLER's, while runtime_mutex_
   /// may belong to a DIFFERENT process (the debug target resolved by client pid).
   /// debug_trap_ioctl holds only the caller's op_mutex_ and never acquires the
@@ -883,6 +898,7 @@ private:
   bool debug_notification_deferred_reap_for_testing_ = false;
   amdgpu::InterruptSubscription interrupt_override_for_testing_;
   std::function<void(bool)> runtime_exception_result_hook_for_testing_;
+  std::function<void()> queue_wave_state_hook_for_testing_;
   std::optional<int> debug_notifier_dup_error_for_testing_;
   std::unordered_map<uint32_t, EventState *> event_dispatch_;
 
