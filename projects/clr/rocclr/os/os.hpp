@@ -271,13 +271,9 @@ class Os : AllStatic {
   //! POSIX: SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE
   //! Windows: ACCESS_VIOLATION, STACK_OVERFLOW, ILLEGAL_INSTRUCTION, INT_DIVIDE_BY_ZERO
   //! Callback is invoked before re-raising for default handling (core dump)
-  //! POSIX: each caller's callback is kept and all of them run, then the handler
-  //! installed before CLR's; the handler stays installed after a signal
-  //! A callback runs inside a signal handler, so it must be async-signal-safe.
-  //! It must also be reentrant and thread-safe: it runs again after a fault the
-  //! earlier handler recovers from, and threads that fault together run it at
-  //! the same time. It runs on the alternate signal stack when the earlier
-  //! handler asked for one, so it must use little stack.
+  //! POSIX: runs up to four callbacks (returns false when all are taken), then the earlier
+  //! handler. A callback can run again after a recovered fault, on several threads at once and
+  //! on the alternate stack: keep it reentrant, use little stack, avoid locks and allocation.
   //! Windows: one callback, which a later call replaces
   static bool installExceptionHandlers(CrashCallback callback = nullptr);
 

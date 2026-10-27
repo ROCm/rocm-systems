@@ -213,15 +213,9 @@ class AsyncLogger {
     flushPending();
   }
 
-  // The logger thread, a flush in the calling thread and crash callbacks all
-  // consume the queue. Each entry is written by the one consumer that moves
-  // claimIndex_ from k to k + 1 while readIndex_ is k; readIndex_ follows once
-  // it is written. A crash flush may have interrupted the claim holder, a
-  // producer or a thread holding the stream, so it never waits on them for
-  // long. It writes what was logged before it started, takes turns with a
-  // consumer that keeps moving readIndex_, and stops at an entry a producer has
-  // not finished and where readIndex_ or the stream stays held for
-  // kCrashWaitYields yields.
+  // Whoever moves claimIndex_ from readIndex_ to readIndex_ + 1 writes that entry, then moves
+  // readIndex_. A crash flush may have interrupted a holder or a producer: it stops at its starting
+  // writeIndex_, an unfinished entry, or a claim or the stream held for kCrashWaitYields yields.
   void flushPending(bool crash = false) {
     if (!crash) {
       TruncateLogFileFlushPath();
@@ -284,8 +278,9 @@ class AsyncLogger {
     }
   }
 
-  // A crash flush takes the stream only when it is free: the thread holding it
-  // may be waiting for the one that faulted. Windows has no such call.
+  // Gives up after kCrashWaitYields yields on a stream another thread holds, which may be waiting
+  // for the faulting one. FILE locks are recursive, so a fault inside this thread's own stdio call
+  // still gets the lock. Windows has no ftrylockfile.
   static bool tryLockOutFile() {
 #ifndef _WIN32
     for (size_t i = 0; ftrylockfile(outFile) != 0; ++i) {
