@@ -36,7 +36,7 @@ Multiple debug flags can be combined:
 * ``--debug-table-view``: Print plain tables instead of the views specified by ``cli_style``.
 * ``--debug-ignore-amd-smi``: Skip AMD-SMI queries when probing local hardware.
 * ``--debug-single-metric``: Show metric evaluation and memory chart diagnostics.
-   This replaces the removed ``-g`` flag. Combine it with ``--block`` to
+   Combine it with ``--block`` to
    isolate a metric, for example ``--block 2.1.0 --debug --debug-single-metric``.
 * ``--debug-verify-deps``: Check analyze-mode Python dependencies, then exit without
      analyzing a workload. The standalone ``--verify-deps`` spelling also works.
