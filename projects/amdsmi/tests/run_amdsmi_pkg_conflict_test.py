@@ -20,7 +20,7 @@ based solely on whether libamd_smi_python.so sits next to the wrapper
 file, with no path-walking, no env-var ladders, and no .pth tricks.
 
 Run it from inside a freshly-built tree where both artifacts exist:
-    $ROCM_PATH/lib/libamd_smi.so.<MAJOR>          (system rpm/deb; /opt/rocm default)
+    <build>/.../libamd_smi.so.<MAJOR>             (system rpm/deb; else $ROCM_PATH/lib)
     <build>/.../libamd_smi_python.so.<MAJOR>      (wheel)
 """
 
@@ -86,23 +86,21 @@ def _rocm_lib_dir() -> Path:
 
 
 def find_system_lib(build_root: Path) -> Path:
-    # Prefer the installed system library (rpm/deb layout). When it is absent
-    # -- e.g. the manylinux wheel job builds both libraries but installs no
-    # system package -- fall back to the build tree, which holds the same
-    # libamd_smi.so.<MAJOR> the package would ship.
-    lib_dir = _rocm_lib_dir()
+    # Prefer the build tree, which holds the libamd_smi.so.<MAJOR> the rpm/deb
+    # ships; an installed ROCm under /opt/rocm may be another build entirely.
+    # Fall back to the installed library when the build tree has none.
     candidates = sorted(
-        (c for c in lib_dir.glob("libamd_smi.so.*") if not c.is_symlink()), key=_version_key
+        (c for c in build_root.glob("**/libamd_smi.so.*") if not c.is_symlink()), key=_version_key
     )
+    lib_dir = _rocm_lib_dir()
     if not candidates:
         candidates = sorted(
-            (c for c in build_root.glob("**/libamd_smi.so.*") if not c.is_symlink()),
-            key=_version_key,
+            (c for c in lib_dir.glob("libamd_smi.so.*") if not c.is_symlink()), key=_version_key
         )
     if not candidates:
         sys.exit(
-            f"System libamd_smi.so not found under {lib_dir} or the build tree "
-            f"({build_root}); install the rpm/deb or build first."
+            f"System libamd_smi.so not found in the build tree ({build_root}) or under "
+            f"{lib_dir}; build first or install the rpm/deb."
         )
     return candidates[-1]
 
