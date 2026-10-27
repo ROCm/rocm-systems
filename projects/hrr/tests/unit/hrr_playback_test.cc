@@ -99,17 +99,21 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementHeldRanges) {
   CHECK(h.r.begin()->second == 0x20000);
 }
 
-// A range whose end is not above its start is never held, and asking for one
-// leaves the held ranges as they were (AIRUNTIME-3069).
-HRR_TEST_CASE(Unit_HRR_Playback_PlacementHeldRangesRejectInverted) {
+// hrr_place_range leaves the ceiling and address 0 to the held ranges: the plan
+// holds neither, so take refuses a range that reaches them (AIRUNTIME-3069).
+HRR_TEST_CASE(Unit_HRR_Playback_PlacementHeldRangesBounded) {
+  const uint64_t G = 1ull << 21, top = 1ull << 47;
   HrrHeldRanges h;
-  h.add(0x10000, 0x20000);
-  CHECK_FALSE(h.take(0x18000, 0x18000));  // empty
-  CHECK_FALSE(h.take(0x18000, 0x14000));  // inverted
-  CHECK_FALSE(h.take(~0ull - 0xfff, 0x1000));  // end wrapped past 2^64
+  for (const auto& r : hrr_place_plan({{0, 64}, {top - G, top}, {top, top + G}}, {}))
+    h.add(r.base, r.end);
   REQUIRE(h.r.size() == 1);
-  CHECK(h.r.begin()->first == 0x10000);
-  CHECK(h.r.begin()->second == 0x20000);
+  uint64_t b = 0, e = 0;
+  REQUIRE(hrr_place_range(0, 64, G, &b, &e));
+  CHECK_FALSE(h.take(b, e));
+  REQUIRE(hrr_place_range(top - 64, 65, G, &b, &e));  // one byte over
+  CHECK_FALSE(h.take(b, e));
+  REQUIRE(hrr_place_range(top - 64, 64, G, &b, &e));
+  CHECK(h.take(b, e));
 }
 
 // The range placement maps for an allocation is checked: a size that wraps
@@ -130,16 +134,12 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementRangeChecked) {
   CHECK_FALSE(hrr_place_range(B, ~0ull, G, &b, &e));
   // Without the rec + size check this is accepted as [B, B + G).
   CHECK_FALSE(hrr_place_range(B + 5, ~0ull, G, &b, &e));
-  // rec + size ends just below 2^64: no wrap, but far above the ceiling.
+  // rec + size ends just below 2^64: no wrap, but rounding up to a granule does.
   CHECK_FALSE(hrr_place_range(B, (0 - B) - 1, G, &b, &e));
-  // Ends just below 2^64 but rounding up to a granule wraps.
+  // The same from a different start.
   CHECK_FALSE(hrr_place_range(1ull << 63, (1ull << 63) - 1, G, &b, &e));
-  // Not above its start, or not an address.
+  // Nothing to place.
   CHECK_FALSE(hrr_place_range(B, 0, G, &b, &e));
-  CHECK_FALSE(hrr_place_range(0, 64, G, &b, &e));
-  // The ceiling hrr_place_plan applies: the last byte at 2^47 - 1 is fine.
-  CHECK(hrr_place_range((1ull << 47) - 64, 64, G, &b, &e));
-  CHECK_FALSE(hrr_place_range((1ull << 47) - 64, 65, G, &b, &e));
 }
 
 /**

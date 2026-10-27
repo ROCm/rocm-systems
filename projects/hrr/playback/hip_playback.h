@@ -105,22 +105,20 @@ inline std::vector<HrrVaRange> hrr_place_plan(std::vector<HrrVaRange> allocs,
 }
 
 // The granule-aligned range [base, end) that placing `size` bytes at the
-// recorded address `rec` would map, checked: false if `rec + size` or the
-// rounding wraps, if the range is empty, or if it passes the placement ceiling
-// (the one hrr_place_plan applies). `rec` and `size` come from the archive.
+// recorded address `rec` would map, checked: false if `size` is 0 or if
+// `rec + size` or the rounding wraps. `gran` is not 0; `rec` and `size` come
+// from the archive. The range is never empty. Whether it lies in held address
+// space is HrrHeldRanges::take's to say: the held ranges stop at the placement
+// ceiling and do not include 0.
 inline bool hrr_place_range(uint64_t rec, uint64_t size, uint64_t gran,
                             uint64_t* base, uint64_t* end) {
-    constexpr uint64_t kCeiling = 1ull << 47;
-    if (gran == 0 || rec == 0 || size == 0) return false;
+    if (size == 0) return false;
     uint64_t last;  // one past the last byte
     if (__builtin_add_overflow(rec, size, &last)) return false;
-    const uint64_t b = rec - rec % gran;
     uint64_t up;
     if (__builtin_add_overflow(last, gran - 1, &up)) return false;
-    const uint64_t e = up / gran * gran;
-    if (e <= b || e > kCeiling) return false;
-    *base = b;
-    *end = e;
+    *base = rec - rec % gran;
+    *end  = up / gran * gran;
     return true;
 }
 
@@ -141,10 +139,8 @@ struct HrrHeldRanges {
         }
         r[b] = e;
     }
-    // Drop [b, e) if one held range covers all of it. An empty or inverted
-    // range is never held: a wrapped end would otherwise split a real range.
+    // Drop [b, e), e > b, if one held range covers all of it.
     bool take(uint64_t b, uint64_t e) {
-        if (e <= b) return false;
         auto it = r.upper_bound(b);
         if (it == r.begin()) return false;
         --it;
