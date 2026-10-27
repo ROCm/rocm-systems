@@ -10794,6 +10794,54 @@ TEST(AqlDispatchTest, ForcedCloseCancelsWavesAndReclaimsLdsWithoutCompletion) {
   }
 }
 
+TEST(ClusterDispatchTest, RollbackCancellationWaitsForRuntimeWaveStateSnapshot) {
+  using namespace std::chrono_literals;
+  class SnapshotCancellationPlugin final : public CancellationLifecyclePlugin {
+  public:
+    std::promise<void> cancellation_entered;
+    void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wave) override {
+      CancellationLifecyclePlugin::onAmdgpuWavefrontCancelled(wave);
+      cancellation_entered.set_value();
+    }
+  };
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
+  auto plugin = std::make_unique<SnapshotCancellationPlugin>();
+  auto *observed = plugin.get();
+  auto cancelled = observed->cancellation_entered.get_future();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fixture.soc_ptr->set_plugin_group(group);
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  const uint64_t kernel = fixture.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(fixture.mem(), fixture.cp());
+  queue.dispatch(kernel, 32, 32);
+  ASSERT_TRUE(fixture.engine->step());
+  auto *wave = fixture.cu()->wf(0);
+  ASSERT_NE(wave, nullptr);
+  const uint32_t dispatch_id = wave->dispatch_id();
+  const uint32_t workgroup_id = wave->wg_id();
+  std::promise<void> rollback_started;
+  auto started = rollback_started.get_future();
+  std::thread rollback;
+  fixture.cu()->with_wave_state_locked([&] {
+    rollback = std::thread([&] {
+      rollback_started.set_value();
+      fixture.cu()->abort_workgroup(dispatch_id, workgroup_id);
+    });
+    started.wait();
+    // Cancellation observers read live wave state, so they must wait for a
+    // runtime snapshot to release the same mutex before the wave is retired.
+    EXPECT_EQ(cancelled.wait_for(50ms), std::future_status::timeout);
+  });
+  rollback.join();
+  EXPECT_EQ(cancelled.wait_for(0s), std::future_status::ready);
+  EXPECT_EQ(observed->cancellations, 1u);
+  EXPECT_EQ(observed->halts, 0u);
+  EXPECT_EQ(observed->completed_workgroups, 0u);
+  EXPECT_TRUE(wave->is_halted());
+}
+
 TEST(ClusterDispatchTest, LaterPeerSetupRollbackCancelsOnlyThatWaveIncarnation) {
   using namespace rocjitsu::amdhsa;
   for (uint32_t dispatch_threads : {1u, 2u}) {

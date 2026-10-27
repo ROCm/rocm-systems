@@ -863,6 +863,7 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
 }
 
 void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
+  std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   // Roll back a workgroup that was committed via begin_workgroup() but whose peers
   // in the same clustered dispatch failed to fully dispatch. Unlike release_wf(),
   // this fires cancellation hooks but no CP completion notify. Free any

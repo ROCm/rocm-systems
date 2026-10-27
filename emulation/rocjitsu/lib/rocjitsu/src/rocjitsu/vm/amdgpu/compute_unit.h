@@ -619,7 +619,8 @@ public:
   /// the same clustered dispatch fails. Frees the WG's resident waves and drops its
   /// refcount WITHOUT firing the completion hook or CP notify (the WG never executed),
   /// then reclaims LDS if the CU is now idle and unpinned. The caller is responsible
-  /// for unpinning any CP-side cluster LDS pin.
+  /// for unpinning any CP-side cluster LDS pin. Cancellation callbacks and resource
+  /// reclamation hold the CU mutex to exclude execution and runtime snapshots.
   void abort_workgroup(uint32_t dispatch_id, uint32_t wg_id);
 
   /// @brief Cancel every resident wave and pending completion for one dispatch.
