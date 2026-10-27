@@ -39,11 +39,13 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocprofiler
@@ -76,8 +78,9 @@ struct kernel_state_t
     hsa_executable_t         executable{};
     kernel_info_t            kernel{};
     hsa_signal_t             completion{};
-    void*                    kernarg          = nullptr;
-    size_t                   kernarg_capacity = 0;
+    void*                    kernarg           = nullptr;
+    size_t                   kernarg_capacity  = 0;
+    bool                     kernarg_on_device = false;
     std::vector<void*>       retired_kernargs{};
     std::atomic<bool>        resource_in_use{false};
 };
@@ -206,6 +209,70 @@ get_state(const hsa::AgentCache& agent)
         slot = candidate.release();
         return slot;
     });
+}
+
+// Small device allocations are carved out of larger blocks, so hostBaseAddress is set even when
+// the CPU cannot map the block. The block's host-access flag is what decides it.
+bool
+host_writable(void* ptr)
+{
+#if HSA_AMD_INTERFACE_VERSION_MAJOR > 1 ||                                                         \
+    (HSA_AMD_INTERFACE_VERSION_MAJOR == 1 && HSA_AMD_INTERFACE_VERSION_MINOR >= 18)
+    auto* ext = hsa::get_amd_ext_table();
+    if(!ext || !ext->hsa_amd_pointer_info_fn) return false;
+    auto info = hsa_amd_pointer_info_t{};
+    info.size = sizeof(info);
+    if(ext->hsa_amd_pointer_info_fn(ptr, &info, nullptr, nullptr, nullptr) != HSA_STATUS_SUCCESS)
+        return false;
+    return (info.alloc_flags & HSA_AMD_POINTER_INFO_ALLOC_FLAG_HOST_ACCESS) != 0;
+#else
+    (void) ptr;
+    return false;
+#endif
+}
+
+// Every wave reads the blit's arguments and copy descriptors, and reading them from host memory
+// makes each restore depend on PCIe read latency. Keep them in device memory the CPU can write,
+// and fall back to the host kernarg pool when it cannot. Returns the buffer and whether it is in
+// device memory.
+std::pair<void*, bool>
+allocate_kernarg(const hsa::AgentCache& agent, size_t size)
+{
+    auto* ext = hsa::get_amd_ext_table();
+    void* ptr = nullptr;
+    if(ext->hsa_amd_memory_pool_allocate_fn(
+           agent.gpu_pool(), size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &ptr) == HSA_STATUS_SUCCESS)
+    {
+        if(host_writable(ptr)) return {ptr, true};
+        ext->hsa_amd_memory_pool_free_fn(ptr);
+    }
+
+    ptr = nullptr;
+    if(ext->hsa_amd_memory_pool_allocate_fn(agent.kernarg_pool(), size, 0, &ptr) !=
+       HSA_STATUS_SUCCESS)
+        return {nullptr, false};
+    const auto hsa_agent = agent.get_hsa_agent();
+    if(ext->hsa_amd_agents_allow_access_fn(1, &hsa_agent, nullptr, ptr) != HSA_STATUS_SUCCESS)
+    {
+        ext->hsa_amd_memory_pool_free_fn(ptr);
+        return {nullptr, false};
+    }
+    return {ptr, false};
+}
+
+// Writes to device memory cross PCIe and may still be in flight when the packet is published, so
+// fence them and read the last byte back before the doorbell.
+void
+write_kernarg(void* dest, const std::vector<std::byte>& image, bool on_device)
+{
+    std::memcpy(dest, image.data(), image.size());
+    if(!on_device || image.empty()) return;
+
+    auto* last = static_cast<volatile std::byte*>(dest) + image.size() - 1;
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+    *last = image.back();
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+    [[maybe_unused]] const auto landed = *last;
 }
 }  // namespace
 
@@ -373,38 +440,43 @@ create(const hsa::Queue& queue, const std::vector<copy_region_t>& regions)
             new_capacity *= 2;
         }
 
-        void* new_kernarg = nullptr;
-        auto  status      = ext->hsa_amd_memory_pool_allocate_fn(
-            agent.kernarg_pool(), new_capacity, 0, &new_kernarg);
-        if(status != HSA_STATUS_SUCCESS) return std::nullopt;
-
-        const auto hsa_agent = agent.get_hsa_agent();
-        status = ext->hsa_amd_agents_allow_access_fn(1, &hsa_agent, nullptr, new_kernarg);
-        if(status != HSA_STATUS_SUCCESS)
-        {
-            ext->hsa_amd_memory_pool_free_fn(new_kernarg);
-            return std::nullopt;
-        }
+        const auto [new_kernarg, on_device] = allocate_kernarg(agent, new_capacity);
+        if(!new_kernarg) return std::nullopt;
+        ROCP_INFO << fmt::format("kernel replay blit: {}B argument buffer in {} memory for agent "
+                                 "'{}'",
+                                 new_capacity,
+                                 on_device ? "device" : "host",
+                                 agent.name());
 
         if(state->kernarg) state->retired_kernargs.emplace_back(state->kernarg);
-        state->kernarg          = new_kernarg;
-        state->kernarg_capacity = new_capacity;
+        state->kernarg           = new_kernarg;
+        state->kernarg_capacity  = new_capacity;
+        state->kernarg_on_device = on_device;
     }
     impl->kernarg = state->kernarg;
 
-    core->hsa_signal_store_screlease_fn(impl->completion, 1);
-
-    std::memset(impl->kernarg, 0, allocation_size);
-    auto* descriptor_memory = static_cast<std::byte*>(impl->kernarg) + descriptor_offset;
-    std::memcpy(descriptor_memory,
-                descriptor_data.data(),
-                descriptor_data.size() * sizeof(descriptor_data[0]));
+    auto image = std::vector<std::byte>{};
+    try
+    {
+        image.resize(allocation_size);
+    } catch(const std::bad_alloc&)
+    {
+        return std::nullopt;
+    }
+    const auto descriptor_address =
+        reinterpret_cast<uint64_t>(static_cast<std::byte*>(impl->kernarg) + descriptor_offset);
     const auto kernel_args = kernel_args_t{
-        reinterpret_cast<uint64_t>(descriptor_memory),
+        descriptor_address,
         static_cast<uint64_t>(descriptor_data.size()),
         launched_items,
     };
-    std::memcpy(impl->kernarg, &kernel_args, sizeof(kernel_args));
+    std::memcpy(image.data(), &kernel_args, sizeof(kernel_args));
+    std::memcpy(image.data() + descriptor_offset,
+                descriptor_data.data(),
+                descriptor_data.size() * sizeof(descriptor_data[0]));
+
+    core->hsa_signal_store_screlease_fn(impl->completion, 1);
+    write_kernarg(impl->kernarg, image, state->kernarg_on_device);
 
     const auto grid_size_x = static_cast<uint32_t>(launched_items);
 
