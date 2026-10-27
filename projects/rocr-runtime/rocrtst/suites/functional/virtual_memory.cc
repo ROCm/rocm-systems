@@ -2918,6 +2918,17 @@ static bool FabricHandlesSupported() {
   return supported;
 }
 
+// Reports whether the runtime resolves an owning agent for an imported handle in
+// hsa_amd_pointer_info. HSA_ENABLE_VMEM_IMPORT_OWNER=0 restores the legacy behaviour of
+// reporting no owner, so the expectation has to follow the flag. The runtime latches this at
+// the first hsa_init and these tests never change it afterwards, so reading the environment
+// here sees the value core::Flag did. Mirrors its parsing: any value but "0", including
+// unset, leaves the feature on.
+[[nodiscard]] static bool VmemImportOwnerEnabled() {
+  const char* var = getenv("HSA_ENABLE_VMEM_IMPORT_OWNER");
+  return var == nullptr || strcmp(var, "0") != 0;
+}
+
 // Queries hsa_amd_pointer_info() on a mapped VMM address. Both variants are exercised:
 // without an accessible-agent list, and with one, which is what rocprofiler-sdk's copy
 // interceptor uses when it attributes a hipMemcpyAsync.
@@ -3035,13 +3046,20 @@ void VirtMemoryTestBasic::DmaBufImportedHandlePointerInfo(hsa_agent_t gpu_agent,
     std::cout << "    Pointer info on dmabuf-imported VA " << addr << std::endl;
   }
   hsa_agent_t resolved_agent = {};
-  if (VmemImportResolvedAgent(imported_handle, &resolved_agent)) {
+  const bool placement_known = VmemImportResolvedAgent(imported_handle, &resolved_agent);
+  if (placement_known) {
     EXPECT_EQ(resolved_agent.handle, gpu_agent.handle)
         << "imported handle resolved to a device other than the exporter";
+  } else if (verbosity() > 0) {
+    std::cout << "    Import placement not recoverable on this system - owner not checked."
+              << std::endl;
+  }
+
+  if (placement_known && VmemImportOwnerEnabled()) {
     QueryVmemPointerInfo(addr, gpu_agent);
   } else {
-    if (verbosity() > 0) {
-      std::cout << "    Import placement not recoverable on this system - owner not checked."
+    if (placement_known && verbosity() > 0) {
+      std::cout << "    HSA_ENABLE_VMEM_IMPORT_OWNER=0 - expecting the legacy unset owner."
                 << std::endl;
     }
     QueryVmemPointerInfo(addr, hsa_agent_t{0});
@@ -3271,17 +3289,18 @@ void VirtMemoryTestBasic::ImportedBlitWithPeerAccessOnly(hsa_agent_t owner_gpu,
   hsa_amd_pointer_info_t info = {};
   info.size = sizeof(info);
   ASSERT_SUCCESS(hsa_amd_pointer_info(addr, &info, nullptr, nullptr, nullptr));
-  if (info.agentOwner.handle != owner_gpu.handle) {
-    /* Placement was not recoverable, so the owner is unset and the fallback is not exercised. */
-    if (verbosity() > 0) {
-      std::cout << "    Import placement not recoverable - Skipping." << std::endl;
-    }
-    return;
+  const bool owner_reported = (info.agentOwner.handle == owner_gpu.handle);
+  if (!owner_reported) {
+    EXPECT_EQ(info.agentOwner.handle, 0u)
+        << "imported VA owned by an agent that is neither the exporter nor unset";
   }
 
   if (verbosity() > 0) {
     std::cout << "    Blit on peer-mapped imported VA " << addr << " owned by agent "
-              << owner_gpu.handle << std::endl;
+              << info.agentOwner.handle
+              << (owner_reported ? " - unmapped-owner fallback exercised"
+                                 : " - owner unset, fallback not exercised")
+              << std::endl;
   }
 
   const size_t words = alloc_size / sizeof(uint32_t);
