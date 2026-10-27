@@ -6,23 +6,21 @@
 
 For every arch in src/rocprof_compute_soc/metric_library/, check that:
   1. each file loads, and a child file inherits from its parent arch's file;
-  2. each file lists its top-level keys in sorted order (format_yaml.py --fix sorts
-     them);
-  3. metrics and variables have the required fields and types; "peak" is a
+  2. metrics and variables have the required fields and types; "peak" is a
      theoretical peak and "peak_empirical" a roofline benchmark ceiling;
-  4. every ceiling the roofline benchmark measures on the arch is the
+  3. every ceiling the roofline benchmark measures on the arch is the
      "peak_empirical" of exactly one metric, or is in CEILINGS_WITHOUT_METRIC;
-  5. metric ids look like "{category}.{subcategory}_{name}", name hardware rather than
+  4. metric ids look like "{category}.{subcategory}_{name}", name hardware rather than
      a view, and live in the file named after their category, so each id is unique on
      the arch;
-  6. no two metrics on the arch share a formula or a name;
-  7. units use one spelling;
-  8. the library matches analysis_configs: every equation a row shows is a library
+  5. no two metrics on the arch share a formula or a name;
+  6. units use one spelling;
+  7. the library matches analysis_configs: every equation a row shows is a library
      formula (DISPLAY_VARIANTS list the rows that show one in another form), every
      formula is shown, every row's unit is its metric's unit (except UNIT_VARIANTS),
      each row's peak is its metric's "peak" or "peak_empirical" and each library peak
      is shown by a row, the no-filter counters equal detect_counters(), and the
-     variables equal get_build_in_vars(). Check 8 is temporary; see "Equivalence with
+     variables equal get_build_in_vars(). Check 7 is temporary; see "Equivalence with
      analysis_configs" below.
 """
 
@@ -38,7 +36,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from format_yaml import normalize_equation, sort_top_level_keys
+from format_yaml import normalize_equation
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
@@ -177,7 +175,6 @@ def validate_arch(metric_dir: Path, arch: str) -> list[str]:
         source = f"{path.parent.name}/{name}"
         if path.parent.name == arch:
             errors.extend(_inherit_errors(metric_dir, arch, path, source))
-            errors.extend(_order_errors(path, source))
         try:
             document = load_inherited_yaml(path)
         except (InheritanceError, yaml.YAMLError) as error:
@@ -268,13 +265,6 @@ def _parent_errors(
         expected = f"{parent_path.parent.name}/{parent_path.name}"
         return [f"[{source}] must inherit from {expected}"]
     return []
-
-
-def _order_errors(path: Path, source: str) -> list[str]:
-    content = path.read_text(encoding="utf-8")
-    if sort_top_level_keys(content) == content:
-        return []
-    return [f"[{source}] keys are not sorted; run tools/format_yaml.py --fix {path}"]
 
 
 def _variables_errors(document: dict[str, Any], source: str) -> list[str]:

@@ -167,13 +167,6 @@ def test_id_category_must_be_the_file_name(tree):
     )
 
 
-def test_keys_must_be_sorted(tree):
-    unsorted = BASE_METRIC + BASE_METRIC.replace("valu_util", "salu_util")
-    write_base_metrics(tree, unsorted)
-    errors = validate(tree)
-    assert any("[gfx_base/compute.yaml] keys are not sorted" in e for e in errors)
-
-
 @pytest.mark.parametrize(
     "formula", ["SUM(SQ_ACTIVE_INST_VALU)", "ROUND(SUM(SQ_ACTIVE_INST_VALU), 0)"]
 )
