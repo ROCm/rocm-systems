@@ -3332,6 +3332,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       liveness_options.live_before_instructions = std::span<const Instruction *const>(
           live_before_instructions.data(), live_before_instructions.size());
     }
+    // Model rules that query liveness without declaring that requirement.
+    if (force_unavailable_liveness_)
+      scope_requires_liveness = false;
     LivenessAnalysis liveness = LivenessAnalysis::unavailable();
     std::vector<ScopedCfgEdge> scope_analysis_edges;
     if (scope_requires_liveness) {
@@ -3953,6 +3956,28 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         const bool target_is_relocated_by_construction =
             (object_produces_code_addresses && code_addresses_fully_accounted) ||
             kernarg_supplied_targets().contains(offset);
+        // A join keeps its fallthrough edge, but its SGPR-held resume edge to the waiting side
+        // is unknown. G_FORK also has an unknown SGPR-held target. Liveness can miss registers
+        // needed on those paths, allowing scratch allocation to clobber them.
+        // Refuse before the relocated-by-construction permission can admit the join verbatim.
+        if ((inst.flags() & BRANCH_STACK) != 0) {
+          auto failure = make_kernel_failure(
+              DiagnosticKind::Legalization,
+              "conditional branch stack (fork/join) is not supported for relocated kernel text",
+              offset, std::string(inst.mnemonic()));
+          if (continue_after_failure && !skip_failed_kernels) {
+            append_error(result.diagnostics, failure.kind, failure.message, failure.guest_offset,
+                         failure.mnemonic, failure.required_work);
+            if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces)) {
+              continue;
+            }
+          }
+          if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
+            skip_scope = true;
+            break;
+          }
+          return leave_unchanged();
+        }
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
             !has_recovered_indirect_call && !has_relocation_table_call &&
             !recovered_indirect_return && !direct_branch_delta &&
@@ -4097,6 +4122,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           auto expansion =
               semantic_translator_->try_lower_expand(inst, offset, text, liveness, kernel_context);
           if (expansion.status == ExpandStatus::Failed) {
+            if (expansion.internal_error) {
+              append_error(result.diagnostics, DiagnosticKind::InternalError, expansion.message,
+                           offset, std::string(inst.mnemonic()));
+              return leave_unchanged();
+            }
             auto failure = make_kernel_failure(
                 DiagnosticKind::ExpandFailed,
                 expansion.message.empty()
@@ -4168,6 +4198,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           auto registered_expansion = semantic_translator_->try_lower_instruction_rewrite(
               inst, offset, text, liveness, kernel_context);
           if (registered_expansion.status == ExpandStatus::Failed) {
+            if (registered_expansion.internal_error) {
+              append_error(result.diagnostics, DiagnosticKind::InternalError,
+                           registered_expansion.message, offset, std::string(inst.mnemonic()));
+              return leave_unchanged();
+            }
             auto failure = make_kernel_failure(
                 DiagnosticKind::ExpandFailed, registered_expansion.message, offset,
                 std::string(inst.mnemonic()), std::move(registered_expansion.required_work));

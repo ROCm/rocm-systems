@@ -886,8 +886,12 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
                 .intercept_queues
                 .get(&(queue as usize))
                 .cloned()
+                .map(|owner| runtime.inflight.enter().map(|token| (owner, token)))
         };
         if let Some(intercept) = intercept {
+            let Some((intercept, _in_flight)) = intercept else {
+                return INVALID_RUNTIME_STATE;
+            };
             return crate::queue_intercept::destroy(&intercept);
         }
         let key = queue as usize;
