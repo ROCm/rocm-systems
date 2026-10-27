@@ -43,6 +43,23 @@
 namespace rocjitsu {
 namespace {
 
+// Check the dispatch's actual wave size, including when kernarg properties
+// are supplied: lane readback length alone cannot establish this.
+TEST(DbiSim, ExecutesRequestedWaveSize) {
+  for (uint32_t wave_size : {32u, 64u}) {
+    SCOPED_TRACE(wave_size);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize("rdna4", wave_size));
+    sim.set_kernarg({1, 2, 3, 4});
+    const std::vector<uint32_t> code{build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
+    sim.run_and_read_vgpr(code, 0, 0);
+    const test::WavefrontSnapshot *snapshot = sim.halted_wavefront();
+    ASSERT_NE(snapshot, nullptr);
+    EXPECT_EQ(snapshot->wf_size, wave_size);
+    EXPECT_EQ(snapshot->sgpr64(0), test::DbiSim::KERNARG_ADDR);
+  }
+}
+
 using test::kMovV1V0;
 using test::kMovV3V0;
 
@@ -77,11 +94,7 @@ struct MaskSimArch {
   rj_code_arch_t arch;
   uint32_t e_flags;
   uint32_t wave_size;
-  // The descriptor's wave32 bit drives the patch-time gates, which is all this
-  // selects. It does not reach execution: DbiSim synthesizes its own descriptor
-  // without the bit, so every target dispatches Wave64 and wave_size only says
-  // how many lanes to read back (see dbi_sim.h). Only RDNA has a bit to set;
-  // CDNA is Wave64 by construction.
+  // Keep the patched ELF and DbiSim dispatch descriptor on the same wave size.
   bool wave32;
 };
 

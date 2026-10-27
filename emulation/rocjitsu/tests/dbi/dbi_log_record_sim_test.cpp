@@ -18,10 +18,8 @@
 /// EXEC-masked.
 ///
 /// Not established here: store ordering and the probe's waits (the simulator
-/// completes every memory operation inside the instruction that issues it), and
-/// Wave32 execution. DbiSim dispatches RDNA4 as Wave64; the RDNA4 cases are
-/// Wave32 at patch time only, which is what makes the probe's high mask dword
-/// the immediate zero.
+/// completes every memory operation inside the instruction that issues it).
+/// DbiSim verifies actual Wave32 execution on RDNA4 from the halt snapshot.
 
 #include "../dbi_test_util.h"
 #include "../log_buffer_test_access.h"
@@ -222,9 +220,8 @@ protected:
   }
   static constexpr uint64_t kMaskedAnchor = 16;
 
-  // The anchor mask the probe records for one full wave at the patch-time wave
-  // size. RDNA4 is Wave32 there, so only exec_lo reaches the record even though
-  // DbiSim runs it as Wave64.
+  // The anchor mask the probe records for one full wave. RDNA4 executes
+  // Wave32, so only exec_lo reaches its record.
   uint64_t launch_mask() const { return t_.wave_size == 64 ? ~uint64_t{0} : 0xFFFFFFFFull; }
 
   uint64_t partial_mask() const { return t_.wave32 ? kWave32PartialMask : kWave64PartialMask; }
