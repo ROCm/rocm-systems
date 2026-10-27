@@ -84,6 +84,17 @@ pub enum NodeKind {
     Other,
 }
 
+/// CPU cores reported on a native topology node.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CpuNodeInfo {
+    /// Number of logical CPU cores reported by this source.
+    pub core_count: u32,
+    /// Lowest reported logical processor ID, when available.
+    pub core_id_base: Option<u32>,
+    /// Maximum CPU engine clock in MHz, when reported.
+    pub maximum_clock_mhz: Option<u32>,
+}
+
 /// One source-qualified topology node.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TopologyNode {
@@ -95,6 +106,8 @@ pub struct TopologyNode {
     pub native_id: NativeNodeId,
     /// Source node classification.
     pub kind: NodeKind,
+    /// CPU presence on this node, independent of whether it also has a GPU.
+    pub cpu: Option<CpuNodeInfo>,
 }
 
 /// An endpoint can attach to multiple nodes; several endpoints may attach to
@@ -160,6 +173,49 @@ pub struct MemoryLocation {
     pub host_visible_bytes: Option<u64>,
 }
 
+/// Native memory heap classification retained without implying allocatability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MemoryBankKind {
+    /// System memory.
+    System,
+    /// Device framebuffer memory reported as host visible.
+    FrameBufferPublic,
+    /// Device framebuffer memory reported as private.
+    FrameBufferPrivate,
+    /// Device global data share.
+    Gds,
+    /// Device local data share.
+    Lds,
+    /// Device scratch memory.
+    Scratch,
+    /// Device mapped system memory.
+    DeviceSvm,
+    /// Remapped device MMIO.
+    Mmio,
+    /// Heap class not recognized by this runtime.
+    Other(u32),
+}
+
+/// One source-qualified native memory bank. Its ordinal identifies a report,
+/// not an allocation target; native allocation APIs may merge banks.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MemoryBank {
+    /// Node that reported this bank.
+    pub node: NodeId,
+    /// Source-native bank ordinal within the node.
+    pub native_ordinal: u32,
+    /// Native heap classification.
+    pub kind: MemoryBankKind,
+    /// Reported bank capacity in bytes.
+    pub capacity_bytes: u64,
+    /// Opaque flags reported by the native source.
+    pub native_flags: u32,
+    /// Reported bus width in bits, when present.
+    pub width_bits: Option<u32>,
+    /// Reported maximum memory clock in MHz, when present.
+    pub maximum_clock_mhz: Option<u32>,
+}
+
 /// One source-qualified view of independent passive topology observations.
 /// A session publishes it only after driver contributions validate.
 /// Host facts can be incomplete; their per-source `complete` flag records that.
@@ -182,6 +238,8 @@ pub struct TopologySnapshot {
     pub caches: Vec<TopologyCache>,
     /// Memory locations attached to source-qualified nodes.
     pub memory_locations: Vec<MemoryLocation>,
+    /// Source-qualified native memory bank reports.
+    pub memory_banks: Vec<MemoryBank>,
 }
 
 impl TopologySnapshot {
@@ -195,6 +253,7 @@ impl TopologySnapshot {
             routes: Vec::new(),
             caches: Vec::new(),
             memory_locations: Vec::new(),
+            memory_banks: Vec::new(),
         };
         let complete = result.host.domains_complete
             && result.host.caches.complete
@@ -232,6 +291,7 @@ impl TopologySnapshot {
                 source,
                 native_id: NativeNodeId::LinuxNuma(domain.numa_node),
                 kind: NodeKind::HostNuma,
+                cpu: None,
             })?;
             for cache in &domain.caches.records {
                 result.caches.try_push(TopologyCache {
@@ -307,6 +367,7 @@ impl TopologySnapshot {
             source,
             native_id,
             kind,
+            cpu: None,
         })?;
         Ok(id)
     }
@@ -422,6 +483,65 @@ impl TopologySnapshot {
         Ok(())
     }
 
+    /// Associates CPU facts with an already-validated KFD node.
+    pub(crate) fn set_cpu_node(&mut self, node: NodeId, cpu: CpuNodeInfo) -> Result<(), Error> {
+        let Some(record) = self.nodes.get_mut(node.0) else {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidData,
+                detail: "CPU facts have no topology node",
+            });
+        };
+        if self.sources[record.source.0].kind != SourceKind::LinuxKfd
+            || cpu.core_count == 0
+            || record.cpu.is_some()
+        {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidData,
+                detail: "CPU facts are inconsistent with their source node",
+            });
+        }
+        record.cpu = Some(cpu);
+        Ok(())
+    }
+
+    /// Adds one native memory bank after checking its node and ordinal.
+    pub(crate) fn add_memory_bank(&mut self, bank: MemoryBank) -> Result<(), Error> {
+        if self.nodes.get(bank.node.0).is_none()
+            || self.memory_banks.iter().any(|record| {
+                record.node == bank.node && record.native_ordinal == bank.native_ordinal
+            })
+        {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidData,
+                detail: "native memory bank has no node or a duplicate ordinal",
+            });
+        }
+        self.memory_banks.try_push(bank)?;
+        Ok(())
+    }
+
+    /// Native memory banks attached to one source-qualified node.
+    pub fn banks_for_node(&self, node: NodeId) -> impl Iterator<Item = &MemoryBank> {
+        self.memory_banks
+            .iter()
+            .filter(move |bank| bank.node == node)
+    }
+
+    /// Reported directed route between exact source-qualified nodes.
+    #[must_use]
+    pub fn route_between_nodes(&self, from: NodeId, to: NodeId) -> Option<MemoryLinkInfo> {
+        if from == to {
+            return None;
+        }
+        let source = self.nodes.get(from.0)?.source;
+        (self.nodes.get(to.0)?.source == source).then_some(())?;
+        self.routes
+            .iter()
+            .rev()
+            .find(|route| route.source == from && route.target == to)
+            .map(|route| route.info)
+    }
+
     /// Nodes to which the endpoint is attached in this snapshot.
     pub fn nodes_for_endpoint(&self, endpoint: &Endpoint) -> impl Iterator<Item = &TopologyNode> {
         let owned = self.endpoints.iter().any(|candidate| {
@@ -521,6 +641,7 @@ mod tests {
         HostTopologySnapshot {
             memory_bytes: None,
             cpu: None,
+            cpu_apic_ids: Vec::new(),
             online_cpus: None,
             caches: HostCaches {
                 records: Vec::new(),

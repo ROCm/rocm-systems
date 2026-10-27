@@ -75,6 +75,13 @@ if(BUILD_TESTS)
     # explicitly before _exit() so child-process coverage data is flushed.
     add_compile_definitions(RCCL_TEST_CODE_COVERAGE=1)
   endif()
+  # -fgpu-rdc TUs skip host coverage: clang 24 rejects -fgpu-rdc plus
+  # -fprofile-instr-generate on TUs with dynamic initializers.
+  set(RCCL_TEST_GPU_RDC_COMPILE_OPTIONS -fgpu-rdc)
+  if (ENABLE_CODE_COVERAGE)
+    # Revert once the coverage nightly moves to ROCm 10.3, which has the clang fix.
+    list(APPEND RCCL_TEST_GPU_RDC_COMPILE_OPTIONS -fno-profile-instr-generate -fno-coverage-mapping)
+  endif()
 
   # add_rocshmem_targets() exports these with PARENT_SCOPE from src/, so re-derive them here.
   if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
@@ -405,6 +412,7 @@ if(BUILD_TESTS)
       device/DdaVecElementAddTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
+      device/TestTdmReduceCopy.cpp
       device/TestAsyncCopy.cpp
       device/TestLdsTransfer.cpp
       device/GinDeviceTests.cpp
@@ -472,6 +480,11 @@ if(BUILD_TESTS)
     # include/ header names are generic enough to shadow src/ for other TUs.
     set_source_files_properties(device/RcclEpTests.cpp PROPERTIES
       INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../src/algorithms/rccl_ep)
+
+    # device/TestTdmReduceCopy.cpp drives reduceCopy through common_kernel.h, whose common.h
+    # includes the generated device_table.h.
+    set_source_files_properties(device/TestTdmReduceCopy.cpp PROPERTIES
+      INCLUDE_DIRECTORIES ${PROJECT_BINARY_DIR}/hipify/gensrc)
 
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)
@@ -647,9 +660,17 @@ if(BUILD_TESTS)
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsDevRuntime)
 
+    set(DEV_RUNTIME_SEGMENTS_CC
+      ${PROJECT_BINARY_DIR}/hipify/src/dev_runtime_segments.cc
+      ${PROJECT_BINARY_DIR}/hipify/src/rccl_dev_runtime.cc)
+    set_source_files_properties(${DEV_RUNTIME_SEGMENTS_CC} PROPERTIES
+      GENERATED TRUE
+      LANGUAGE CXX)
+
     add_executable(rccl-UnitTestsDevRuntime
       gin_teardown_test.cpp
       DevRuntimeTestsStubs.cc
+      ${DEV_RUNTIME_SEGMENTS_CC}
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
@@ -1278,7 +1299,7 @@ if(BUILD_TESTS)
       set_source_files_properties(transport/GinDeviceMPITests.cpp PROPERTIES
           COMPILE_OPTIONS "-UNCCL_GIN_ANVIL_SDMA_ENABLE;-DNCCL_GIN_ANVIL_SDMA_ENABLE=1"
           INCLUDE_DIRECTORIES "${_ANVIL_SDMA_INCLUDES}")
-      target_compile_options(${test_executable} PRIVATE -fgpu-rdc)
+      target_compile_options(${test_executable} PRIVATE ${RCCL_TEST_GPU_RDC_COMPILE_OPTIONS})
       if(TARGET rocshmem_static)
         add_dependencies(${test_executable} rocshmem_static)
       endif()
@@ -1337,7 +1358,7 @@ if(BUILD_TESTS)
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilIpcDevice_test.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilSdmaTemplate_test.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/device/sdma/anvil_stub_quiet_count.cpp
-      PROPERTIES COMPILE_OPTIONS "-fgpu-rdc")
+      PROPERTIES COMPILE_OPTIONS "${RCCL_TEST_GPU_RDC_COMPILE_OPTIONS}")
     # install.sh --rocshmem-gin -t (GIN CI) sets ENABLE_ROCSHMEM_GIN without
     # GIN_ANVIL_UNIT_TESTS, so the gate at line 372 keeps Suite H out of that
     # build and only the IPC test and the counter TU compile relocatable there.
