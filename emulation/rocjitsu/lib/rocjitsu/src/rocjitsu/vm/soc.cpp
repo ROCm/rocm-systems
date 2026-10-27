@@ -250,6 +250,13 @@ void SoC::configure_mes_trap_handlers(amdgpu::CommandProcessor &owner) {
       return amdgpu::ComputeUnitCore::TrapHandlerConfig{
           .tba = config->tba, .tma = config->tma, .debug_enabled = config->debug_enabled};
     });
+    cu->set_sendmsg_handler([this](amdgpu::Wavefront &wave, uint32_t message) {
+      constexpr uint32_t kMessageIdMask = 0xf;
+      constexpr uint32_t kMessageInterrupt = 1;
+      if (!wave.in_trap_handler() || (message & kMessageIdMask) != kMessageInterrupt)
+        return false;
+      return mes_engine_.deliver_trap_interrupt(wave.process_id(), wave.m0());
+    });
   }
 }
 

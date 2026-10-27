@@ -156,10 +156,13 @@ public:
   [[nodiscard]] bool
   attach_frontend(std::string diagnostic_name,
                   std::shared_ptr<SdmaQueueBindingFactory> sdma_queue_binding_factory,
-                  InterruptSink interrupt_sink, MesFrontendCallbacks callbacks);
+                  InterruptSink interrupt_sink, MesFrontendCallbacks callbacks,
+                  InterruptSink trap_interrupt_sink = {});
   /// @brief Detach frontend callbacks while retaining any core-owned orphan bindings.
   /// @returns false while a queue or retry journal still requires the frontend.
   [[nodiscard]] bool detach_frontend();
+  /// @brief Forward a privileged shader message through the attached frontend.
+  [[nodiscard]] bool deliver_trap_interrupt(uint32_t process_id, uint32_t data) const;
   /// @brief Destroy every MES-created queue and address-space binding that can be released.
   /// @returns true only when all frontend-created state was released.
   [[nodiscard]] bool teardown_queues();
@@ -297,6 +300,7 @@ private:
   std::unordered_map<uint64_t, PendingMesFrame> pending_mes_frames_;
   std::shared_ptr<SdmaQueueBindingFactory> sdma_queue_binding_factory_;
   InterruptSink interrupt_sink_;
+  InterruptSink trap_interrupt_sink_;
   MesFrontendCallbacks callbacks_;
   std::string diagnostic_name_ = "MES";
   uint32_t next_queue_ordinal_ = 0;
