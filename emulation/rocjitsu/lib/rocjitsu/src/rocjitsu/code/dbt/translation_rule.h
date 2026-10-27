@@ -308,6 +308,11 @@ struct ExpandResult {
     return result;
   }
 
+  /// @brief Reject a lowering that queried analysis declared unavailable by its rule.
+  [[nodiscard]] static ExpandResult liveness_unavailable() {
+    return internal_failure("liveness query from a rule marked liveness-free");
+  }
+
   [[nodiscard]] static ExpandResult internal_failure(std::string message) {
     auto result = failed(std::move(message));
     result.internal_error = true;

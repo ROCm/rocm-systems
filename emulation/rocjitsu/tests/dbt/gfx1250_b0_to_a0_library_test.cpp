@@ -56,6 +56,24 @@ uint64_t source_identity(const std::vector<uint8_t> &bytes) {
 }
 #endif
 
+TEST(Gfx1250B0ToA0Library, InternalErrorsTakePrecedenceOverInputRejection) {
+  rocjitsu::TranslationDiagnostic internal;
+  internal.severity = rocjitsu::DiagnosticSeverity::Error;
+  internal.kind = rocjitsu::DiagnosticKind::InternalError;
+  rocjitsu::TranslationDiagnostic skipped;
+  skipped.kind = rocjitsu::DiagnosticKind::KernelSkipped;
+  rocjitsu::TranslationDiagnostic rejected;
+  rejected.severity = rocjitsu::DiagnosticSeverity::Error;
+  rejected.kind = rocjitsu::DiagnosticKind::ExpandFailed;
+  for (const std::vector<rocjitsu::TranslationDiagnostic> &diagnostics :
+       {std::vector{internal}, std::vector{internal, skipped}, std::vector{skipped, internal}}) {
+    EXPECT_EQ(rocjitsu::gfx1250_b0_to_a0_translation_status(diagnostics, true, false),
+              ROCJITSU_STATUS_ERROR);
+  }
+  EXPECT_EQ(rocjitsu::gfx1250_b0_to_a0_translation_status({rejected}, true, false),
+            ROCJITSU_STATUS_INVALID_CODE_OBJECT);
+}
+
 TEST(Gfx1250B0ToA0Library, RejectsInvalidArgumentsAndClearsOutputs) {
   auto *output = reinterpret_cast<uint8_t *>(0x1);
   size_t output_size = 1;

@@ -437,14 +437,14 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
   if (layout->vector) {
     auto maybe_free_pair = liveness.find_free_sgpr_pair(&inst);
     if (maybe_free_pair.failed())
-      return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+      return ExpandResult::liveness_unavailable();
     const auto free_pair = maybe_free_pair.value();
     borrowed_pair =
         (free_pair.has_value() && *free_pair + 1 <= kMaxOrdinarySgpr) ? free_pair : std::nullopt;
     if (!borrowed_pair) {
       auto maybe_staged_pair = reusable_destination_pair(inst, *layout, *words, liveness);
       if (maybe_staged_pair.failed())
-        return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+        return ExpandResult::liveness_unavailable();
       staged_vgpr_pair = maybe_staged_pair.value();
       if (!staged_vgpr_pair) {
         return ExpandResult::failed(

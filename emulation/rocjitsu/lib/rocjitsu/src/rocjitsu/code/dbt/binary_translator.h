@@ -38,6 +38,10 @@
 
 namespace rocjitsu {
 
+namespace internal {
+struct BinaryTranslatorTestAccess;
+}
+
 class AmdGpuCodeObject;
 class SemanticTranslator;
 class Instruction;
@@ -202,6 +206,9 @@ public:
   [[nodiscard]] TranslatedCodeObject translate(const AmdGpuCodeObject &obj);
 
 private:
+  friend struct internal::BinaryTranslatorTestAccess;
+  bool force_unavailable_liveness_ = false; ///< Test seam for analysis-contract failures.
+
   /// @brief Translate without final-output validation.
   /// @details Keeping the translation body in a separate call ensures its
   /// analysis state is destroyed before translate() audits the resulting ELF.

@@ -279,6 +279,9 @@ public:
 
   /// @brief Whether statically decoded operands cover every VGPR access in the scope.
   ///
+  /// @returns Failure when analysis is unavailable; successful false when
+  /// decoded VGPR usage is incomplete. Callers must reject both before relying
+  /// on physical VGPR ranges.
   /// @details False when relative addressing or runtime GPR indexing can redirect
   /// an encoded VGPR operand. Transformations that compare or reuse physical
   /// VGPR ranges must fail closed when this query returns false.

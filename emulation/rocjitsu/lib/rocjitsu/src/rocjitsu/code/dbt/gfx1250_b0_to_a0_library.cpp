@@ -177,20 +177,14 @@ rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size, uint8_
     // see, and it never reaches the caller if reporting is conditional on the
     // object being undispatchable.
     rocjitsu::emit_gfx1250_b0_to_a0_diagnostics(diagnostic_callback, user_data, result.diagnostics);
-    // Preserve the status used when a liveness contract failure was thrown.
-    if (rocjitsu::has_diagnostic_kind(result.diagnostics, rocjitsu::DiagnosticKind::InternalError))
-      return ROCJITSU_STATUS_ERROR;
-    // A translation that ran to completion and produced nothing dispatchable is a
-    // statement about the input, not about this run: repeating it reaches the same
-    // conclusion. Reporting it as such is what lets a caller distinguish it from
-    // the environmental failures below and cache the verdict rather than
-    // rediscovering it. Internal translator errors and exceptions carry no such
-    // promise and retain ROCJITSU_STATUS_ERROR.
-    if (result.elf_bytes.empty() || !result.dispatchable()) {
+    // Internal failures describe this translation attempt; rejected input can be cached.
+    const auto status = rocjitsu::gfx1250_b0_to_a0_translation_status(
+        result.diagnostics, !result.elf_bytes.empty(), result.dispatchable());
+    if (status != ROCJITSU_STATUS_SUCCESS) {
       if (result.diagnostics.empty())
         emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindResultNotDispatchable,
                         "translation produced no dispatchable code object");
-      return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+      return status;
     }
 
     auto *output = static_cast<uint8_t *>(std::malloc(result.elf_bytes.size()));

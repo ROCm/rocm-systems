@@ -155,6 +155,8 @@ TEST(SemanticScratchAllocator, UnavailableLivenessDoesNotFallBackToSpill) {
   EXPECT_EQ(result.failure, SemanticScratchFailure::LivenessUnavailable);
   EXPECT_EQ(context.num_vgprs, 8u);
   EXPECT_EQ(context.num_sgprs, 8u);
+  EXPECT_EQ(context.required_vgpr_count, 0u);
+  EXPECT_EQ(context.required_sgpr_count, 0u);
   EXPECT_EQ(context.required_private_segment_fixed_size, 32u);
   EXPECT_EQ(context.semantic_spill_persistent_end, 32u);
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
@@ -188,6 +190,8 @@ TEST(SemanticExpansion, UnavailableLivenessReturnsInternalFailureWithoutOutput) 
   EXPECT_EQ(result.message, "liveness query from a rule marked liveness-free");
   EXPECT_EQ(context.num_vgprs, 8u);
   EXPECT_EQ(context.num_sgprs, 8u);
+  EXPECT_EQ(context.required_vgpr_count, 0u);
+  EXPECT_EQ(context.required_sgpr_count, 0u);
   EXPECT_EQ(context.required_private_segment_fixed_size, 32u);
 }
 

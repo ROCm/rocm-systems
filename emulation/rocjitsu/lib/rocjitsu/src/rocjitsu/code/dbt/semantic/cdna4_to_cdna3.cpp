@@ -569,7 +569,7 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
       auto maybe_scratch_term = choose_vgpr_window_or_spill(
           inst, liveness, context, 1, 1, {forbidden[0], forbidden[1], forbidden[2], forbidden[3]});
       if (maybe_scratch_term.failed())
-        return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+        return ExpandResult::liveness_unavailable();
       scratch_term = maybe_scratch_term.value();
       if (!scratch_term)
         return failed_existing_expand_rule(
@@ -623,7 +623,7 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
         choose_vgpr_window_or_spill(inst, liveness, context, scratch_count, 1,
                                     {forbidden[0], forbidden[1], forbidden[2], forbidden[3]});
     if (maybe_scratch_lease.failed())
-      return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+      return ExpandResult::liveness_unavailable();
     scratch_lease = maybe_scratch_lease.value();
     if (!scratch_lease)
       return failed_existing_expand_rule(
@@ -747,7 +747,7 @@ ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
   auto maybe_scratch =
       choose_vgpr_window_or_spill(inst, liveness, context, 3, 1, {{vdst, 1}, {vsrc, 1}});
   if (maybe_scratch.failed())
-    return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+    return ExpandResult::liveness_unavailable();
   const auto scratch = maybe_scratch.value();
   if (!scratch)
     return failed_existing_expand_rule(
@@ -765,7 +765,7 @@ ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
   // pair that liveness proves dead at this replacement point.
   auto maybe_saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
   if (maybe_saved_exec.failed())
-    return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+    return ExpandResult::liveness_unavailable();
   const auto saved_exec = maybe_saved_exec.value();
   if (!saved_exec)
     return failed_existing_expand_rule(
@@ -881,7 +881,7 @@ ExpandResult lower_cvt_pk_f16_f32_cdna4_to_cdna3(const Instruction &inst,
       vdst_is_src1 ? src0_vgpr : (src1_vgpr ? src1_vgpr : src0_vgpr);
   auto maybe_temp = choose_one_vgpr_temp_or_spill(inst, liveness, context, vdst, preferred_temp);
   if (maybe_temp.failed())
-    return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+    return ExpandResult::liveness_unavailable();
   const auto temp = maybe_temp.value();
   if (!temp) {
     return failed_existing_expand_rule(
@@ -950,7 +950,7 @@ ExpandResult lower_cvt_pk_bf16_f32_cdna4_to_cdna3(const Instruction &inst,
       {{vdst, 1},
        {static_cast<uint16_t>(src1_vgpr.value_or(0)), static_cast<uint16_t>(src1_vgpr ? 1 : 0)}});
   if (maybe_scratch.failed())
-    return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+    return ExpandResult::liveness_unavailable();
   const auto scratch = maybe_scratch.value();
   if (!scratch)
     return failed_existing_expand_rule(
@@ -1108,7 +1108,7 @@ ExpandResult lower_dot2_f32_bf16_cdna4_to_cdna3(const Instruction &inst,
                                   {forbidden[0], forbidden[1], forbidden[2],
                                    forbidden.size() > 3 ? forbidden[3] : VgprForbiddenRange{}});
   if (maybe_scratch.failed())
-    return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+    return ExpandResult::liveness_unavailable();
   const auto scratch = maybe_scratch.value();
   if (!scratch) {
     return failed_existing_expand_rule(
@@ -1306,7 +1306,7 @@ ExpandResult lower_wide_k_mfma_cdna4_to_cdna3(const Instruction &inst,
     scratch_request.allow_spill = false;
     const SemanticScratchResult scratch = scratch_allocator.acquire_vgprs(scratch_request);
     if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
-      return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+      return ExpandResult::liveness_unavailable();
     // NYI: if no dead VGPR run exists, the general solution is to spill a live
     // VGPR range and use it for the partial accumulator. That waits on spill
     // manager integration, so reject for now rather than clobbering live inputs.
@@ -1410,7 +1410,7 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
                                                          {{static_cast<uint16_t>(vdst), 2},
                                                           {static_cast<uint16_t>(addr), 1}});
   if (maybe_scratch.failed())
-    return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+    return ExpandResult::liveness_unavailable();
   const auto scratch = maybe_scratch.value();
   if (!scratch)
     return failed_existing_expand_rule(
@@ -1441,7 +1441,7 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // this window back to the kernel translation context.
   auto maybe_saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
   if (maybe_saved_exec.failed())
-    return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+    return ExpandResult::liveness_unavailable();
   const auto saved_exec = maybe_saved_exec.value();
   if (!saved_exec)
     return failed_existing_expand_rule(
@@ -1661,7 +1661,7 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
       choose_vgpr_window_or_spill(inst, liveness, context, scratch_count, scratch_alignment,
                                   {{static_cast<uint16_t>(src.vaddr), vaddr_count}});
   if (maybe_scratch.failed())
-    return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+    return ExpandResult::liveness_unavailable();
   const auto scratch = maybe_scratch.value();
   if (!scratch) {
     return failed_existing_expand_rule(
@@ -1691,7 +1691,7 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // dead pair instead of blindly borrowing a high guest SGPR.
   auto maybe_saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
   if (maybe_saved_exec.failed())
-    return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+    return ExpandResult::liveness_unavailable();
   const auto saved_exec = maybe_saved_exec.value();
   if (!saved_exec)
     return failed_existing_expand_rule(
