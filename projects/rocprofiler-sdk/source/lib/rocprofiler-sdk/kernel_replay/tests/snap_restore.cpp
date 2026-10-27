@@ -323,6 +323,47 @@ TEST(kernel_replay_snapshot, forced_gpu_arena_restores_device_memory)
     ASSERT_EQ(hipFree(buffer), hipSuccess);
 }
 
+TEST(kernel_replay_snapshot, forced_gpu_arena_captures_through_batch_copy)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int n      = 4096;
+    float*        buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, n * sizeof(float)), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    const auto agent = allocation.agent;
+    ASSERT_NE(agent.handle, 0U);
+    const auto ctx = capture_context(agent, msnp::capture_mode::force_gpu);
+    ASSERT_TRUE(ctx.has_value());
+    record_for_snapshot_test(buffer, n * sizeof(float), agent);
+    launch_fill(buffer, 7.0f, n);
+
+    bool batch_called = false;
+    auto snapshot     = msnp::snap(*ctx, [&](const auto& gpu_regions) {
+        batch_called = true;
+        EXPECT_FALSE(gpu_regions.empty());
+        for(const auto& copy : gpu_regions)
+        {
+            const auto status = hsa_memory_copy(copy.dest, copy.source, copy.size);
+            if(status != HSA_STATUS_SUCCESS) return status;
+        }
+        return HSA_STATUS_SUCCESS;
+    });
+    ASSERT_TRUE(snapshot.complete());
+    ASSERT_EQ(snapshot.storage(), msnp::storage_kind::gpu_local);
+    EXPECT_TRUE(batch_called);
+
+    launch_fill(buffer, 19.0f, n);
+    ASSERT_TRUE(msnp::restore(snapshot));
+    const auto restored = read_device(buffer, n);
+    for(const auto value : restored)
+        EXPECT_FLOAT_EQ(value, 7.0f);
+
+    unrecord_for_snapshot_test(buffer);
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
 TEST(kernel_replay_snapshot, unavailable_gpu_backend_falls_back_to_one_pinned_arena)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";

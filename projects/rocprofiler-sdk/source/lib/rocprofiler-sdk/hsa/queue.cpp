@@ -1183,6 +1183,15 @@ WriteInterceptor(const void* packets,
                 ROCP_WARNING << "kernel replay: internal blit kernel unavailable; trying "
                                 "pinned-host snapshot backing";
 
+            // snap() holds the inventory read lock while this runs, so the blit must complete
+            // before it returns.
+            const auto capture_copy = [&](const auto& regions) {
+                auto pending = std::vector<kernel_replay::blit::packet_info>{};
+                auto status  = kernel_replay::blit::copy(queue, writer, regions, pending);
+                if(status != HSA_STATUS_SUCCESS || pending.empty()) return status;
+                return pending.back().wait();
+            };
+
             // Save this agent's tracked device allocations so every pass runs against identical
             // inputs. Plan whole-region placement against GPU then pinned-host budgets and
             // materialize at most one arena per tier before capture starts.
@@ -1194,7 +1203,8 @@ WriteInterceptor(const void* packets,
                     queue.get_agent().cpu_pool(),
                     kernel_replay::memory_snapshot::capture_mode::automatic,
                     gpu_backend_available,
-                });
+                },
+                capture_copy);
 
             // Snapshot incomplete: restoring a partial snapshot between passes would corrupt
             // application data, so decline replay. Close the CONFIG sequence, free our drain
