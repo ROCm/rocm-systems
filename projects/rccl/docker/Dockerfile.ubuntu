@@ -80,7 +80,7 @@ RUN wget https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar
     && cd ucx \
     && mkdir build \
     && cd build \
-    && ../configure --prefix=${UCX_INSTALL_PREFIX} --with-rocm=${ROCM_PATH} \
+    && ../configure --prefix=${UCX_INSTALL_PREFIX} --without-rocm \
     && make -j16 install \
     && cd ../.. \
     && rm -rf ucx ucx-1.16.0.tar.gz
