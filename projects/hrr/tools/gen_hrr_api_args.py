@@ -247,12 +247,6 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipLaunchKernel",
     "hipLaunchByPtr",
     "hipLaunchKernel_spt",
-    # Pushes an archive-chosen offset into the runtime's argument vector; the
-    # handler refuses a range that wraps or exceeds the legacy argument buffer.
-    "hipSetupArgument",
-    # Records on this replay thread that the runtime holds an execution frame,
-    # which hipSetupArgument writes into and requires.
-    "hipConfigureCall",
     # Cooperative launches by host stub — the cooperative entry point, for the
     # same reason hipModuleLaunchCooperativeKernel needs it.
     "hipLaunchCooperativeKernel",
@@ -919,6 +913,14 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     # SDKs. A null location can return hipErrorInvalidValue and abort replay;
     # leave this query as a harmless no-op instead.
     "hipMemGetDefaultMemPool",
+    # The pre-chevron launch ABI. Replay never reads the runtime's execution
+    # frames: hipLaunchByPtr is recorded as an ordinary hipModuleLaunchKernel
+    # and replays from its recorded arguments, as __hipPushCallConfiguration
+    # does. Forwarding hipSetupArgument would hand the runtime an archive-chosen
+    # offset (offset + size wraps in size_t) and write into a frame stack that
+    # may be empty, for a buffer nothing consumes.
+    "hipConfigureCall",
+    "hipSetupArgument",
 }
 
 # APIs that pass an opaque handle playback does not translate, but that

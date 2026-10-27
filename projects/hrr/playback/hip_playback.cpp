@@ -1540,65 +1540,6 @@ hipError_t playback_hipLaunchByPtr(PlaybackContext& ctx,
     return replay_kernel_launch(ctx, payload);
 }
 
-// True once hipConfigureCall has succeeded on this replay thread. The runtime
-// keeps its execution frames per thread, and replay pops none of them:
-// hipLaunchByPtr goes through hipModuleLaunchKernel and
-// __hipPopCallConfiguration is a no-op, so one successful configure leaves a
-// frame for every later hipSetupArgument on the thread.
-static thread_local bool hrr_legacy_call_configured = false;
-
-hipError_t playback_hipConfigureCall(PlaybackContext& ctx, const uint8_t* payload) {
-    const auto* a = reinterpret_cast<const hrr_args_hipConfigureCall*>(payload);
-    dim3 grid(a->gridDim_x, a->gridDim_y, a->gridDim_z);
-    dim3 block(a->blockDim_x, a->blockDim_y, a->blockDim_z);
-    hipError_t r = hipConfigureCall(grid, block, static_cast<size_t>(a->sharedMem),
-                                    ctx.translate_stream(a->stream));
-    if (r == hipSuccess) hrr_legacy_call_configured = true;
-    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
-        hrr_note_recorded_error(ctx, "hipConfigureCall", a->ret);
-        return hipSuccess;
-    }
-    return r;
-}
-
-hipError_t playback_hipSetupArgument(PlaybackContext& ctx, const uint8_t* payload) {
-    const auto* a = reinterpret_cast<const hrr_args_hipSetupArgument*>(payload);
-    // The runtime copies `size` bytes to arguments[offset] after growing the
-    // vector to offset + size, and that sum wraps in size_t for an offset the
-    // archive chose. Refuse a range outside the legacy argument buffer before
-    // the call, so neither the wrap nor an offset that asks for terabytes
-    // reaches the runtime.
-    const uint32_t n = a->arg_n > sizeof(a->arg_bytes)
-                           ? static_cast<uint32_t>(sizeof(a->arg_bytes))
-                           : a->arg_n;
-    if (!hrr::setup_argument_range_ok(a->offset, n)) {
-        fprintf(stderr,
-                "[HRR] hipSetupArgument: event with sequence number %llu pushes %u bytes at offset "
-                "%llu, which does not fit a %llu-byte legacy argument buffer (or wraps); "
-                "refusing the call\n",
-                (unsigned long long)hrr_dispatch_seq, n, (unsigned long long)a->offset,
-                (unsigned long long)hrr::kMaxLegacyArgBytes);
-        return hipErrorInvalidValue;
-    }
-    // The runtime writes into the top of its execution-frame stack without
-    // checking it, so an argument with no frame under it is undefined behaviour.
-    if (!hrr_legacy_call_configured) {
-        fprintf(stderr,
-                "[HRR] hipSetupArgument: event with sequence number %llu pushes an argument on a "
-                "thread with no hipConfigureCall replayed before it; refusing the call\n",
-                (unsigned long long)hrr_dispatch_seq);
-        return hipErrorInvalidValue;
-    }
-    unsigned char arg[sizeof(a->arg_bytes)]{};
-    if (a->arg_present) std::memcpy(arg, a->arg_bytes, n);
-    hipError_t r = hipSetupArgument(n ? arg : nullptr, n, static_cast<size_t>(a->offset));
-    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
-        hrr_note_recorded_error(ctx, "hipSetupArgument", a->ret);
-        return hipSuccess;
-    }
-    return r;
-}
-
 hipError_t playback_hipLaunchKernel_spt(PlaybackContext& ctx,
                                         const uint8_t* payload) {
     // Which stream the launch goes on is recorded in the payload, so the

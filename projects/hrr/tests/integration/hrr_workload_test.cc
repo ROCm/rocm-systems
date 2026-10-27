@@ -2032,16 +2032,15 @@ TEST_CASE("Unit_HRR_Logging_Direct", "[.][hrr-direct]") {
 // ===========================================================================
 // Workload: hipConfigureCall (legacy execution-stack launch config)
 //
-// hipConfigureCall has a real (non-noop) generated playback handler that
-// rebuilds the grid/block dim3s and the shared-mem size and translates the
-// stream handle before re-issuing the call - it drops no buffer and
-// dereferences no stale pointer.  It has no prior HRR coverage.  The legacy
+// hipConfigureCall is a NOOP at replay: nothing in replay reads the runtime's
+// execution frames, because hipLaunchByPtr is recorded as an ordinary
+// hipModuleLaunchKernel.  It has no prior HRR coverage.  The legacy
 // hipConfigureCall / hipSetupArgument / hipLaunchByPtr execution-stack launch
 // path is separate from the <<<>>> (__hipPushCallConfiguration) path HRR records
 // for kernel launches, so the API is exercised on its own: it only pushes a
 // call configuration onto the thread-local execution stack and returns
 // hipSuccess (no matching hipLaunchByPtr consumes it).  A memset-based D2H canary
-// then confirms the replay stream - including the replayed hipConfigureCall -
+// then confirms the replay stream, with the configure skipped,
 // stays intact end to end.
 // Final blob: h[i] == 88.
 // ===========================================================================

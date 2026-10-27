@@ -138,7 +138,15 @@ static hipError_t playback_hipChooseDeviceR0000(PlaybackContext& ctx, const uint
   return _r;
 }
 
-extern hipError_t playback_hipConfigureCall(PlaybackContext& ctx, const uint8_t* payload);
+static hipError_t playback_hipConfigureCall(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipConfigureCall — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
 
 static hipError_t playback_hipCreateSurfaceObject(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
@@ -3282,7 +3290,15 @@ static hipError_t playback_hipSetDeviceFlags(PlaybackContext& ctx, const uint8_t
   return _r;
 }
 
-extern hipError_t playback_hipSetupArgument(PlaybackContext& ctx, const uint8_t* payload);
+static hipError_t playback_hipSetupArgument(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipSetupArgument — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
 
 static hipError_t playback_hipSignalExternalSemaphoresAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;

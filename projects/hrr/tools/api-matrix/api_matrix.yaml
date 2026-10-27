@@ -1064,8 +1064,11 @@ overrides:
       The third crashing out-pointer, and the clearest of them: HRR recorded
       `const void* arg` as a bare address with none of the `size` bytes behind
       it, and the handler replayed it verbatim, so the runtime memcpy'd from a
-      capture-time host address. The argument bytes are now carried in the
-      event and replay pushes those, which is the whole content of the call.
+      capture-time host address. The argument bytes are carried in the event
+      now, but replay no longer pushes them: nothing in replay reads the
+      runtime's execution frames (the launch arrives as hipModuleLaunchKernel),
+      and the archive-chosen offset is a heap write that wraps in size_t. So
+      hipSetupArgument and hipConfigureCall are NOOP.
       Kept in its own workload because it sat at event 31 of the legacy-surface
       archive and hid the many APIs recorded after it.
   hipGetProcAddress_spt:
