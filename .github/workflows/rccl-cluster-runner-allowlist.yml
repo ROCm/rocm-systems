@@ -5,26 +5,12 @@ name: RCCL cluster runner allowlist
 
 # Cluster scale runners may only appear in workflows listed in
 # .github/scripts/allowlist/rccl-cluster-runners.allowlist.
-#
-# The check itself still scans every file in .github/workflows (see
-# rccl_check_cluster_runner_allowlist.py), but the triggers below are scoped to
-# RCCL-owned paths so unrelated workflow edits do not run this job. Trade-off: a
-# cluster runner added to a non-RCCL or brand-new workflow is not caught on its
-# own PR. It is still caught by the next run that any path below triggers, and
-# by workflow_dispatch.
 
 on:
   pull_request:
     paths:
-      # Workflows that are permitted to reference cluster scale runners.
-      - '.github/workflows/rccl-*.yml'
-      - '.github/workflows/rccl_*.yml'
-      - '.github/workflows/therock-rccl-*.yml'
-      # The allowlist, the scripts holding runner labels, and their tests.
-      - '.github/scripts/allowlist/rccl-cluster-runners.allowlist'
-      - '.github/scripts/rccl_*.py'
-      - '.github/scripts/tests/*rccl*_test.py'
-      - '.github/scripts/tests/conftest.py'
+      - '.github/workflows/**'
+      - '.github/scripts/**'
   workflow_dispatch:
 
 permissions:
