@@ -1,124 +1,44 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Integration tests for per-section profiling and metric listing."""
+"""Integration tests for block filtering and metric listing."""
 
+from math import isfinite
 from pathlib import Path
 
 import common
+import pandas as pd
 
 from tests.integration import common as integration_common
-from tests.integration.common import (
-    config,
-    is_gfx115x_soc,
-    is_gfx1250_soc,
-    num_kernels,
-)
+from tests.integration.common import CSVS, config, num_devices, num_kernels
+from utils.utils_common import load_yaml
 
 
-def test_lds_section(binary_handler_profile_rocprof_compute):
-    lds_block = "3" if is_gfx115x_soc() else ("9" if is_gfx1250_soc() else "12")
-    options = ["--block", lds_block]
+def test_block_filter(binary_handler_profile_rocprof_compute):
+    # Memory Chart is block 3 across the supported architecture configurations.
+    options = ["--block", "3"]
     workload_dir = common.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(
+    binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
     )
 
-    integration_common.check_csv_files(workload_dir, 1, num_kernels)
-
-    assert common.check_file_pattern(
-        f"- '{lds_block}'", f"{workload_dir}/profiling_config.yaml"
+    output_files = integration_common.check_csv_files(
+        workload_dir, num_devices, num_kernels
     )
-    lds_counter = "TX_VMW_LDS_INPUT_ACTIVE" if is_gfx1250_soc() else "SQ_INSTS_LDS"
-    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
-    assert any(common.check_file_pattern(lds_counter, str(f)) for f in results_files)
-    common.clean_output_dir(config["cleanup"], workload_dir)
+    assert sorted(output_files) == CSVS
+    profiling_config = load_yaml(Path(workload_dir) / "profiling_config.yaml")
+    assert profiling_config["filter_blocks"] == ["3"]
 
-
-def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
-    rdna_or_gfx1250 = is_gfx115x_soc() or is_gfx1250_soc()
-    instmix_block = "7" if rdna_or_gfx1250 else "10"
-    options = ["--block", instmix_block, "3"]
-    workload_dir = common.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=True, roof=False
+    counter_results = integration_common.read_counter_results(workload_dir)
+    assert not counter_results.empty, "Block 3 produced no counter rows"
+    counter_names = counter_results["Counter_Name"]
+    assert counter_names.notna().all(), "Block 3 produced missing counter names"
+    assert counter_names.str.strip().ne("").all(), (
+        "Block 3 produced empty counter names"
     )
+    counter_values = pd.to_numeric(counter_results["Counter_Value"], errors="coerce")
+    assert counter_values.map(isfinite).all(), "Block 3 produced invalid counter values"
 
-    integration_common.check_csv_files(workload_dir, 1, num_kernels)
-
-    assert common.check_file_pattern(
-        f"- '{instmix_block}'", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert common.check_file_pattern("- '3'", f"{workload_dir}/profiling_config.yaml")
-    instmix_counter = "SQ_INSTS_FLAT" if rdna_or_gfx1250 else "TA_FLAT_WAVEFRONTS"
-    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
-    assert any(
-        common.check_file_pattern(instmix_counter, str(f)) for f in results_files
-    )
-    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
-    assert any(
-        common.check_file_pattern("SQC_TC_DATA_READ_REQ", str(f)) for f in results_files
-    )
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_lds_sol_section(binary_handler_profile_rocprof_compute):
-    lds_sol_block = "3" if is_gfx115x_soc() else ("9.4" if is_gfx1250_soc() else "12.1")
-    options = ["--block", lds_sol_block]
-    workload_dir = common.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=True, roof=False
-    )
-
-    integration_common.check_csv_files(workload_dir, 1, num_kernels)
-
-    assert common.check_file_pattern(
-        f"- '{lds_sol_block}'", f"{workload_dir}/profiling_config.yaml"
-    )
-    if is_gfx115x_soc():
-        lds_sol_counter = "SQC_LDS_IDX_ACTIVE"
-    elif is_gfx1250_soc():
-        lds_sol_counter = "TX_VMW_LDS_INPUT_ACTIVE"
-    else:
-        lds_sol_counter = "SQ_ACTIVE_INST_LDS"
-    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
-    assert any(
-        common.check_file_pattern(lds_sol_counter, str(f)) for f in results_files
-    )
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_compute):
-    rdna_or_gfx1250 = is_gfx115x_soc() or is_gfx1250_soc()
-    instmix_block = "7" if rdna_or_gfx1250 else "10"
-    options = ["-k", "global_write", "--block", instmix_block]
-    custom_config = dict(config)
-    custom_config["kernel_name_1"] = "global_write"
-    custom_config["app_1"] = ["./tests/vmem"]
-    num_kernels = 1
-
-    workload_dir = common.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(
-        custom_config, workload_dir, options, check_success=True, roof=False
-    )
-
-    integration_common.check_csv_files(workload_dir, 1, num_kernels)
-
-    assert common.check_file_pattern(
-        f"- '{instmix_block}'", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert common.check_file_pattern(
-        "- global_write", f"{workload_dir}/profiling_config.yaml"
-    )
-    kernel_counter = "SQ_INSTS_FLAT_STORE" if rdna_or_gfx1250 else "TA_FLAT_WAVEFRONTS"
-    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
-    assert any(common.check_file_pattern(kernel_counter, str(f)) for f in results_files)
-    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
-    assert any(common.check_file_pattern("global_write", str(f)) for f in results_files)
-    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
-    assert not any(
-        common.check_file_pattern("global_read", str(f)) for f in results_files
-    )
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 

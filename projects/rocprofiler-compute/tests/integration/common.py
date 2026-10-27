@@ -11,6 +11,7 @@ star-imported, so the two helper sets stay distinguishable at the call site.
 
 import importlib.util
 import inspect
+import math
 import os
 import re
 import shutil
@@ -57,6 +58,21 @@ ROOF_ONLY_FILES = sorted([
     "roofline.csv",
     "sysinfo.csv",
 ])
+
+# These panels keep the same purpose across the supported GPU architectures.
+DETERMINISTIC_ACCURACY_BLOCKS = ("2", "4", "6")
+STOCHASTIC_ACCURACY_BLOCKS = ("3", "4")
+DETERMINISTIC_COUNTER_PATTERNS = (
+    r"SQ_INSTS_.*",
+    r"SPI_CS(?:N|\d)_(?:NUM_THREADGROUPS|WAVE)(?:_sum)?$",
+    r"SQ_WAVES(?:_sum)?$",
+)
+STOCHASTIC_COUNTER_PATTERNS = (
+    r".*REQ_sum$",
+    r".*REQ_.*_sum$",
+    r".*READ_sum$",
+    r".*WRITE_sum$",
+)
 
 
 # Shared constants for output directory tests.
@@ -351,6 +367,9 @@ def are_stochastic_counters_similar(test_dfs, baseline_df):
     if the stochastic counter values are similar. Returns True if all test dataframes
     have similar counter values to the baseline, otherwise returns False.
     """
+    if baseline_df.empty or not test_dfs or any(df.empty for df in test_dfs):
+        return False
+
     group_labels = [
         "Kernel_Name",
         "Grid_Size",
@@ -358,6 +377,9 @@ def are_stochastic_counters_similar(test_dfs, baseline_df):
         "LDS_Per_Workgroup",
         "Counter_Name",
     ]
+
+    if any(df[group_labels].isna().any().any() for df in [baseline_df, *test_dfs]):
+        return False
 
     baseline_grouped = baseline_df.groupby(group_labels)
     tests_grouped = [df.groupby(group_labels) for df in test_dfs]
@@ -367,70 +389,73 @@ def are_stochastic_counters_similar(test_dfs, baseline_df):
 
     # Check if all test dataframes have the same group keys as the baseline
     if not all(baseline_group_keys == keys for keys in tests_group_keys):
+        print("Stochastic comparison failed: counter/launch group keys do not match")
         return False
 
-    stochastic_counter_patterns = list(
-        map(
-            re.compile,
-            [
-                ".*REQ_sum$",
-                ".*REQ_.*_sum$",
-                ".*READ_sum$",
-                ".*WRITE_sum$",
-            ],
-        )
-    )
-
+    compared_groups = 0
     for group_key, baseline_group in baseline_grouped:
+        counter_name = group_key[4]
+        if not any(
+            re.match(pattern, counter_name) for pattern in STOCHASTIC_COUNTER_PATTERNS
+        ):
+            continue
+
         test_groups = [
             test_grouped.get_group(group_key) for test_grouped in tests_grouped
         ]
 
-        baseline_counters = baseline_group["Counter_Value"]
-        test_counters_list = [test_group["Counter_Value"] for test_group in test_groups]
-
-        counter_name = group_key[4]
+        baseline_counters = pd.to_numeric(
+            baseline_group["Counter_Value"], errors="coerce"
+        )
+        test_counters_list = [
+            pd.to_numeric(test_group["Counter_Value"], errors="coerce")
+            for test_group in test_groups
+        ]
+        if len(baseline_counters) < 2 or any(
+            not samples.map(math.isfinite).all()
+            for samples in [baseline_counters, *test_counters_list]
+        ):
+            return False
 
         # Warmup values aren't ignored as they do not significantly impact
         # the analysis for stochastic counters and leaves too few data points
         # for baseline.
-        if any(
-            re.match(pattern, counter_name) for pattern in stochastic_counter_patterns
-        ):
-            # Remove outliers using Z-score method
-            z_score_threshold = 2.0
+        baseline_mean = baseline_counters.mean()
+        baseline_std = baseline_counters.std()
+        upper_bound = baseline_mean + 3 * baseline_std
+        lower_bound = baseline_mean - 3 * baseline_std
 
-            test_z_scores_list = [
-                (
-                    (test_counters - test_counters.mean()) / test_counters.std(ddof=0)
+        for test_counters in test_counters_list:
+            if len(test_counters) < 2:
+                return False
+            # Constant samples have no Z-score; compare their values directly.
+            test_std = test_counters.std(ddof=0)
+            if test_std != 0:
+                test_z_scores = (
+                    (test_counters - test_counters.mean()) / test_std
                 ).abs()
-                for test_counters in test_counters_list
-            ]
-            test_counters_list_trimmed = [
-                test_counters[test_z_scores < z_score_threshold]
-                for test_counters, test_z_scores in zip(
-                    test_counters_list, test_z_scores_list
-                )
-            ]
+                test_counters = test_counters[test_z_scores < 2.0]
+            if (
+                test_counters.empty
+                or not test_counters.between(lower_bound, upper_bound).all()
+            ):
+                print(f"Stochastic counter comparison failed: {counter_name}")
+                return False
+        compared_groups += 1
 
-            baseline_mean = baseline_counters.mean()
-            baseline_std = baseline_counters.std()
-            upper_bound = baseline_mean + 3 * baseline_std
-            lower_bound = baseline_mean - 3 * baseline_std
-
-            for test_counters in test_counters_list_trimmed:
-                if test_counters.between(lower_bound, upper_bound).all() is False:
-                    return False
-
-    return True
+    print(f"Compared {compared_groups} stochastic counter groups")
+    return compared_groups > 0
 
 
 def are_deterministic_counters_equal(test_dfs, baseline_df):
     """
     Compares multiple test dataframes against a baseline dataframe to check
-    if the deterministic counter values are equal. Returns True if all test dataframes
-    have equal counter values to the baseline, otherwise returns False.
+    if the deterministic counter values are equal. Returns (success, reason),
+    requiring at least one relevant group with finite samples in every run.
     """
+    if baseline_df.empty or not test_dfs or any(df.empty for df in test_dfs):
+        return False, "Counter comparison requires nonempty baseline and test runs"
+
     group_labels = [
         "Kernel_Name",
         "Grid_Size",
@@ -438,6 +463,9 @@ def are_deterministic_counters_equal(test_dfs, baseline_df):
         "LDS_Per_Workgroup",
         "Counter_Name",
     ]
+
+    if any(df[group_labels].isna().any().any() for df in [baseline_df, *test_dfs]):
+        return False, "Counter comparison contains missing group labels"
 
     baseline_grouped = baseline_df.groupby(group_labels)
     tests_grouped = [df.groupby(group_labels) for df in test_dfs]
@@ -449,53 +477,45 @@ def are_deterministic_counters_equal(test_dfs, baseline_df):
     if not all(baseline_group_keys == keys for keys in tests_group_keys):
         return False, "Group keys do not match between baseline and test dataframes"
 
-    # series prior to MI350 use CSN, MI350 uses CS{0,1,2,3}
-    deterministic_counter_patterns = list(
-        map(
-            re.compile,
-            [
-                "SQ_INSTS_.*",
-                "SPI_CS\\d_NUM_THREADGROUPS",
-                "SPI_CSN_NUM_THREADGROUPS",
-                "SPI_CS\\d_WAVE",
-                "SPI_CSN_WAVE",
-                "SQ_WAVES",
-            ],
-        )
-    )
-
+    compared_groups = 0
     for group_key, baseline_group in baseline_grouped:
+        counter_name = group_key[4]
+        if not any(
+            re.match(pattern, counter_name)
+            for pattern in DETERMINISTIC_COUNTER_PATTERNS
+        ):
+            continue
+
         test_groups = [
             test_grouped.get_group(group_key) for test_grouped in tests_grouped
         ]
 
-        baseline_counters = baseline_group["Counter_Value"]
-        test_counters_list = [test_group["Counter_Value"] for test_group in test_groups]
-
-        counter_name = group_key[4]
+        baseline_counters = pd.to_numeric(
+            baseline_group["Counter_Value"], errors="coerce"
+        )
+        test_counters_list = [
+            pd.to_numeric(test_group["Counter_Value"], errors="coerce")
+            for test_group in test_groups
+        ]
         if any(
-            re.match(pattern, counter_name)
-            for pattern in deterministic_counter_patterns
+            not samples.map(math.isfinite).all()
+            for samples in [baseline_counters, *test_counters_list]
         ):
-            if (
-                all([
-                    test_counters.unique().size == 1
-                    for test_counters in test_counters_list
-                ])
-                and baseline_counters.unique().size == 1
-                and all([
-                    test_counters.values[0] == baseline_counters.values[0]
-                    for test_counters in test_counters_list
-                ])
-            ):
-                continue
+            return False, f"{counter_name} contains invalid counter samples"
 
+        if baseline_counters.unique().size != 1 or any(
+            samples.unique().size != 1 or samples.iloc[0] != baseline_counters.iloc[0]
+            for samples in test_counters_list
+        ):
             return (
                 False,
                 f"{counter_name} is not equal between baseline and test dataframes",
             )
+        compared_groups += 1
 
-    return True, "All deterministic counters are equal"
+    if not compared_groups:
+        return False, "No deterministic counter groups were compared"
+    return True, f"Compared {compared_groups} deterministic counter groups"
 
 
 # --
