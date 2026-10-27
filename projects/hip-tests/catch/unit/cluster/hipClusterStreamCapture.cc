@@ -7,8 +7,10 @@
 // Cluster dimensions of kernel launches captured into a graph by stream capture.
 
 #include <hip_test_common.hh>
+#include <resource_guards.hh>
 #include <hip/hip_cooperative_groups.h>
 
+#include <memory>
 #include <vector>
 
 #include "ClusterHelper.hpp"
@@ -28,6 +30,37 @@ __global__ void RecordClusterDims(dim3* out) {
 __global__ void CLUSTER_DIMS(2, 1, 1) RecordClusterDimsCD(dim3* out) {
   if (threadIdx.x == 0) out[blockIdx.x] = cg::this_cluster().dim_blocks();
 }
+
+// Global-mode stream capture that is ended, and its graph destroyed, on every exit path.
+class CaptureGuard {
+ public:
+  explicit CaptureGuard(hipStream_t stream) : stream_(stream) {
+    HIP_CHECK(hipStreamBeginCapture(stream_, hipStreamCaptureModeGlobal));
+    capturing_ = true;
+  }
+  CaptureGuard(const CaptureGuard&) = delete;
+  CaptureGuard& operator=(const CaptureGuard&) = delete;
+  ~CaptureGuard() {
+    if (capturing_) {
+      hipGraph_t partial = nullptr;
+      if (hipStreamEndCapture(stream_, &partial) == hipSuccess && partial != nullptr) {
+        static_cast<void>(hipGraphDestroy(partial));
+      }
+    }
+    if (graph_ != nullptr) static_cast<void>(hipGraphDestroy(graph_));
+  }
+
+  hipGraph_t End() {
+    capturing_ = false;
+    HIP_CHECK(hipStreamEndCapture(stream_, &graph_));
+    return graph_;
+  }
+
+ private:
+  hipStream_t stream_;
+  bool capturing_ = false;
+  hipGraph_t graph_ = nullptr;
+};
 
 // The cluster dimensions stored on the graph's only kernel node.
 dim3 KernelNodeClusterDims(hipGraph_t graph) {
@@ -57,6 +90,8 @@ void ReplayAndCheck(hipGraph_t graph, hipStream_t stream, dim3* d_out, dim3 expe
   HIP_CHECK(hipDeviceSynchronize());
   hipGraphExec_t exec = nullptr;
   HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  std::unique_ptr<hipGraphExec, decltype(&hipGraphExecDestroy)> exec_guard(exec,
+                                                                           hipGraphExecDestroy);
   HIP_CHECK(hipGraphLaunch(exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   std::vector<dim3> out(kBlocks);
@@ -67,7 +102,6 @@ void ReplayAndCheck(hipGraph_t graph, hipStream_t stream, dim3* d_out, dim3 expe
     REQUIRE(out[b].y == expected.y);
     REQUIRE(out[b].z == expected.z);
   }
-  HIP_CHECK(hipGraphExecDestroy(exec));
 }
 
 }  // namespace
@@ -99,10 +133,10 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_StreamCapture_LaunchAttribute) {
     HIP_SKIP_TEST("Cluster launch is not supported on this device");
     return;
   }
-  dim3* d_out = nullptr;
-  HIP_CHECK(hipMalloc(&d_out, kBlocks * sizeof(dim3)));
-  hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  LinearAllocGuard<dim3> out_guard(LinearAllocs::hipMalloc, kBlocks * sizeof(dim3));
+  dim3* d_out = out_guard.ptr();
+  StreamGuard stream_guard(Streams::withFlags, hipStreamNonBlocking);
+  hipStream_t stream = stream_guard.stream();
 
   hipLaunchAttribute attr{};
   attr.id = hipLaunchAttributeClusterDimension;
@@ -119,20 +153,15 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_StreamCapture_LaunchAttribute) {
   config.numAttrs = with_attribute ? 1 : 0;
   const dim3 expected = with_attribute ? dim3(2, 1, 1) : dim3(1, 1, 1);
 
-  hipGraph_t graph = nullptr;
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  CaptureGuard capture(stream);
   HIP_CHECK(hipLaunchKernelEx(&config, RecordClusterDims, d_out));
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  hipGraph_t graph = capture.End();
 
   const dim3 node_dims = KernelNodeClusterDims(graph);
   REQUIRE(node_dims.x == expected.x);
   REQUIRE(node_dims.y == expected.y);
   REQUIRE(node_dims.z == expected.z);
   ReplayAndCheck(graph, stream, d_out, expected);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(d_out));
 }
 
 /**
@@ -157,10 +186,10 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_StreamCapture_CompilerDirective) {
     HIP_SKIP_TEST("Cluster launch is not supported on this device");
     return;
   }
-  dim3* d_out = nullptr;
-  HIP_CHECK(hipMalloc(&d_out, kBlocks * sizeof(dim3)));
-  hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  LinearAllocGuard<dim3> out_guard(LinearAllocs::hipMalloc, kBlocks * sizeof(dim3));
+  dim3* d_out = out_guard.ptr();
+  StreamGuard stream_guard(Streams::withFlags, hipStreamNonBlocking);
+  hipStream_t stream = stream_guard.stream();
 
   hipLaunchAttribute attr{};
   attr.id = hipLaunchAttributeClusterDimension;
@@ -172,8 +201,7 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_StreamCapture_CompilerDirective) {
   config.blockDim = dim3(kThreads);
   config.stream = stream;
 
-  hipGraph_t graph = nullptr;
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  CaptureGuard capture(stream);
   SECTION("hipLaunchKernelGGL") {
     hipLaunchKernelGGL(RecordClusterDimsCD, dim3(kBlocks), dim3(kThreads), 0, stream, d_out);
     HIP_CHECK(hipGetLastError());
@@ -186,17 +214,13 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_StreamCapture_CompilerDirective) {
     config.numAttrs = 1;
     HIP_CHECK(hipLaunchKernelEx(&config, RecordClusterDimsCD, d_out));
   }
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  hipGraph_t graph = capture.End();
 
   const dim3 node_dims = KernelNodeClusterDims(graph);
   REQUIRE(node_dims.x == 2);
   REQUIRE(node_dims.y == 1);
   REQUIRE(node_dims.z == 1);
   ReplayAndCheck(graph, stream, d_out, dim3(2, 1, 1));
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(d_out));
 }
 
 /**
