@@ -4185,13 +4185,23 @@ void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   uint32_t vb = wf.vgpr_alloc().base;
-  const auto dst_off =
+  auto dst_off =
       Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  const auto src0_off =
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  auto src0_off =
       Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-  const auto src1_off =
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  auto src1_off =
       Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
-  if (!dst_off || !src0_off || !src1_off) {
+  if (!src1_off) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;

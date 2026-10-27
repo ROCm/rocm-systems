@@ -251,6 +251,19 @@ TEST(AsyncMmaPolicyTest, ScaledWmmaOffloadsVectorAndInlineScalesButKeepsScalarSc
       window.drain();
     }
   }
+  for (unsigned source : {0u, 1u}) {
+    SCOPED_TRACE(source);
+    const auto words = mma_test::make_cdna5_wmma_scale_words(4, 4, 128, 128);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    // Bypass decoding to check admission's defensive rejection of A/B constants.
+    auto *operand = const_cast<Operand *>(inst->src_operand(source));
+    operand->encoding_value_ = 128;
+    ASSERT_TRUE(operand->const_value());
+    ASSERT_TRUE(policy::footprint(*inst, wave->num_vgprs()));
+    amdgpu::AsyncInstructionWindow window(*cu, *wave);
+    EXPECT_FALSE(window.submit_mma(inst));
+    EXPECT_NE(inst, nullptr);
+  }
 }
 
 TEST(AsyncMmaPolicyTest, UnsupportedAsyncWmmaHaltsWithoutHostException) {

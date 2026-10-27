@@ -25,6 +25,7 @@ import cgen
 
 from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.conversion import share_stages
+from amdisa.codegen.execute.required_vgpr import append_required_vgpr_offset
 from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_OPS,
     FLUSH_NEAREST_F32_OPS,
@@ -6125,6 +6126,16 @@ class CodeGenerator:
             .replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
         )
 
+        required_vgpr_guards: list[str] = []
+        for name, operand in (
+            ('dst_off', 'vdst'),
+            ('src0_off', 'src0'),
+            ('src1_off', 'src1'),
+        ):
+            append_required_vgpr_offset(
+                required_vgpr_guards, name, operand, uses_vgpr_msb_indexing=True
+            )
+
         execution = (
             (
                 'namespace {\n'
@@ -6145,17 +6156,7 @@ class CodeGenerator:
                 return;
               }
               uint32_t vb = wf.vgpr_alloc().base;
-              const auto dst_off = Isa::resolved_vgpr_offset(
-                  wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-              const auto src0_off = Isa::resolved_vgpr_offset(
-                  wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
-              const auto src1_off = Isa::resolved_vgpr_offset(
-                  wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
-              if (!dst_off || !src0_off || !src1_off) {
-                wf.report_instruction_execution_error(
-                    amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-                return;
-              }
+            @REQUIRED_VGPR_GUARDS@
               uint32_t dst = vb + *dst_off;
               uint32_t src0_base = vb + *src0_off;
               uint32_t src1_base = vb + *src1_off;
@@ -6230,7 +6231,9 @@ class CodeGenerator:
                 return;
               }
             }
-            ''').replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
+            ''')
+            .replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
+            .replace('@REQUIRED_VGPR_GUARDS@', '\n'.join(required_vgpr_guards))
         )
         return _ImplOutputs(model=[model], execution=[execution])
 

@@ -192,7 +192,7 @@ public:
         continue;
       // Inline accumulator/scale constants are immutable. SGPRs and special
       // registers are not covered by the vector-register scoreboard.
-      if (i == sources || !operand->const_value())
+      if (i < 2 || i == sources || !operand->const_value())
         return false;
     }
     if (!pool_.available()) {
