@@ -7,6 +7,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added support for RDNA4M (gfx1170 and gfx1171) APUs, including counter collection, analysis, the memory chart, and roofline benchmarking.
+
 * Added the `LDS Utilization` metric to the gfx115x Memory Chart.
 
 * Added two wave utilization metrics to PC sampling analysis.

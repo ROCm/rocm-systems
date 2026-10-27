@@ -17,7 +17,7 @@ from utils.mem_chart_common import format_mem_chart_heading
 from utils.mem_chart_gfx9 import plot_mem_chart as plot_mem_chart_gfx9
 from utils.mem_chart_gfx11 import plot_mem_chart as plot_mem_chart_gfx11
 from utils.mem_chart_gfx1250 import plot_mem_chart as plot_mem_chart_gfx1250
-from utils.utils_common import is_gfx9, is_gfx115x, is_gfx1250
+from utils.utils_common import is_gfx9, is_gfx1250, uses_gfx11_mem_chart
 
 # Constants
 MIN_PLOT_WIDTH = 20
@@ -42,7 +42,7 @@ def _render_memory_chart(metric_dict: dict[str, Any], gpu_arch: str) -> str:
             chart_title=heading,
             gpu_arch=gpu_arch,
         )
-    if is_gfx115x(gpu_arch):
+    if uses_gfx11_mem_chart(gpu_arch):
         return plot_mem_chart_gfx11(metric_dict, chart_title=heading)
     if is_gfx1250(gpu_arch):
         return plot_mem_chart_gfx1250(metric_dict, chart_title=heading)

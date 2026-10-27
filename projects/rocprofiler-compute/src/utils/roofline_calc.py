@@ -85,9 +85,9 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
         "I32": OpsSupport.VALU,
         "I64": OpsSupport.VALU,
     },
-    # For gfx115x series, we are turning off WMMA benchmarking for all arithmetic
-    # precisions since we do not receive the respective counters from underlying tools
-    # for analysis.
+    # For gfx115x and gfx117x series, we are turning off WMMA benchmarking for all
+    # arithmetic precisions since we do not receive the respective counters from
+    # underlying tools for analysis.
     "gfx1150": {
         "FP16": OpsSupport.VALU,
         "BF16": OpsSupport.VALU,
@@ -116,6 +116,24 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
         "I64": OpsSupport.VALU,
     },  # Unsupported: F4, F6, F8
     "gfx1153": {
+        "FP16": OpsSupport.VALU,
+        "BF16": OpsSupport.VALU,
+        "FP32": OpsSupport.VALU,
+        "FP64": OpsSupport.VALU,
+        "I8": OpsSupport.VALU,
+        "I32": OpsSupport.VALU,
+        "I64": OpsSupport.VALU,
+    },  # Unsupported: F4, F6, F8
+    "gfx1170": {
+        "FP16": OpsSupport.VALU,
+        "BF16": OpsSupport.VALU,
+        "FP32": OpsSupport.VALU,
+        "FP64": OpsSupport.VALU,
+        "I8": OpsSupport.VALU,
+        "I32": OpsSupport.VALU,
+        "I64": OpsSupport.VALU,
+    },  # Unsupported: F4, F6, F8
+    "gfx1171": {
         "FP16": OpsSupport.VALU,
         "BF16": OpsSupport.VALU,
         "FP32": OpsSupport.VALU,

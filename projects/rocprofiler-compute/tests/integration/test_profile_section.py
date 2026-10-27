@@ -11,15 +11,15 @@ import common
 from tests.integration import common as integration_common
 from tests.integration.common import (
     config,
-    is_gfx115x_soc,
     is_gfx1250_soc,
+    is_rdna_apu_soc,
     num_kernels,
     validate,
 )
 
 
 def test_lds_section(binary_handler_profile_rocprof_compute):
-    lds_block = "3" if is_gfx115x_soc() else ("9" if is_gfx1250_soc() else "12")
+    lds_block = "3" if is_rdna_apu_soc() else ("9" if is_gfx1250_soc() else "12")
     options = ["--block", lds_block]
     workload_dir = common.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
@@ -43,7 +43,7 @@ def test_lds_section(binary_handler_profile_rocprof_compute):
 
 
 def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
-    rdna_or_gfx1250 = is_gfx115x_soc() or is_gfx1250_soc()
+    rdna_or_gfx1250 = is_rdna_apu_soc() or is_gfx1250_soc()
     instmix_block = "7" if rdna_or_gfx1250 else "10"
     options = ["--block", instmix_block, "3"]
     workload_dir = common.get_output_dir()
@@ -75,7 +75,9 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
 
 
 def test_lds_sol_section(binary_handler_profile_rocprof_compute):
-    lds_sol_block = "3" if is_gfx115x_soc() else ("9.4" if is_gfx1250_soc() else "12.1")
+    lds_sol_block = (
+        "3" if is_rdna_apu_soc() else ("9.4" if is_gfx1250_soc() else "12.1")
+    )
     options = ["--block", lds_sol_block]
     workload_dir = common.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
@@ -92,7 +94,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
     assert common.check_file_pattern(
         f"- '{lds_sol_block}'", f"{workload_dir}/profiling_config.yaml"
     )
-    if is_gfx115x_soc():
+    if is_rdna_apu_soc():
         lds_sol_counter = "SQC_LDS_IDX_ACTIVE"
     elif is_gfx1250_soc():
         lds_sol_counter = "TX_VMW_LDS_INPUT_ACTIVE"
@@ -106,7 +108,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
 
 
 def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_compute):
-    rdna_or_gfx1250 = is_gfx115x_soc() or is_gfx1250_soc()
+    rdna_or_gfx1250 = is_rdna_apu_soc() or is_gfx1250_soc()
     instmix_block = "7" if rdna_or_gfx1250 else "10"
     options = ["-k", "global_write", "--block", instmix_block]
     custom_config = dict(config)

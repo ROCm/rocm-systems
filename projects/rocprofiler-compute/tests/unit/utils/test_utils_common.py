@@ -1514,6 +1514,29 @@ def test_canonical_config_arch_maps_gfx115_variants_to_shared_dir():
 
 
 @pytest.mark.misc
+def test_canonical_config_arch_maps_gfx117_variants_to_own_dir():
+    assert canonical_config_arch("gfx1170") == "gfx117x"
+    assert canonical_config_arch("gfx1171") == "gfx117x"
+    assert canonical_config_arch("gfx942") == "gfx942"
+
+
+@pytest.mark.misc
+def test_is_gfx117x_matches_only_gfx117x():
+    assert utils_common.is_gfx117x("gfx1170")
+    assert utils_common.is_gfx117x("gfx1171")
+    for arch in ("gfx1151", "gfx1100", "gfx1201", "gfx1250", "gfx942", None, ""):
+        assert not utils_common.is_gfx117x(arch)
+
+
+@pytest.mark.misc
+def test_uses_gfx11_mem_chart_covers_gfx115x_and_gfx117x_only():
+    for arch in ("gfx1150", "gfx1153", "gfx1170", "gfx1171"):
+        assert utils_common.uses_gfx11_mem_chart(arch)
+    for arch in ("gfx1100", "gfx1201", "gfx1250", "gfx942", None, ""):
+        assert not utils_common.uses_gfx11_mem_chart(arch)
+
+
+@pytest.mark.misc
 def test_is_gfx1250_matches_only_the_supported_architecture():
     assert utils_common.is_gfx1250("gfx1250")
     assert not utils_common.is_gfx1250("gfx12500")

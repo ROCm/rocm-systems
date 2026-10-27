@@ -423,3 +423,18 @@ def test_is_single_panel_config_accepts_shared_gfx115x_dir(tmp_path):
     }
 
     assert is_single_panel_config(str(tmp_path), supported_archs) is False
+
+
+@pytest.mark.misc
+def test_is_single_panel_config_requires_separate_gfx117x_dir(tmp_path):
+    (tmp_path / "gfx115x").mkdir()
+    supported_archs = {
+        "gfx1151": "rdna35_halo",
+        "gfx1170": "gfx1170",
+        "gfx1171": "gfx1171",
+    }
+
+    assert is_single_panel_config(str(tmp_path), supported_archs) is None
+
+    (tmp_path / "gfx117x").mkdir()
+    assert is_single_panel_config(str(tmp_path), supported_archs) is False
