@@ -727,6 +727,34 @@ TEST(GpuVmTranslation, Gfx12ProfilesRejectAddressesOutsideTheirVirtualAddressWid
   EXPECT_EQ(gfx121_physical->read_calls, 0u);
 }
 
+TEST(GpuVmTranslation, Gfx12CanonicalPointersResolveTheSameMappedMemory) {
+  for (const auto config : {Gfx12VmConfig::gfx12_0(), Gfx12VmConfig::gfx12_1()}) {
+    const auto width = static_cast<uint32_t>(config.virtual_address_width);
+    SCOPED_TRACE(width);
+    auto physical = std::make_shared<TestPhysicalMemory>();
+    constexpr uint64_t root = 0x1000;
+    constexpr uint64_t page = 0x9000;
+    const uint64_t mask = (uint64_t{1} << width) - 1;
+    const uint64_t address = mask - 0x3fff;
+    if (width == 48)
+      map_gfx120_4k(*physical, root, address, page, kValid | kSystem | kReadable);
+    else
+      map_4k(*physical, root, address, page, kValid | kSystem | kReadable);
+    Gfx12PageTableTranslator translator(physical, root, config);
+
+    const auto unsigned_form = translator.translate(address + 0x10, 4, VmAccessKind::Read);
+    const auto canonical_form =
+        translator.translate((address | ~mask) + 0x10, 4, VmAccessKind::Read);
+    ASSERT_TRUE(unsigned_form);
+    ASSERT_TRUE(canonical_form);
+    EXPECT_EQ(canonical_form.translation.address, unsigned_form.translation.address);
+    EXPECT_EQ(canonical_form.translation.address, page + 0x10);
+    EXPECT_EQ(canonical_form.translation.domain, unsigned_form.translation.domain);
+    EXPECT_EQ(translator.translate(address | (uint64_t{1} << 63), 4, VmAccessKind::Read).outcome,
+              VmAccessOutcome::Malformed);
+  }
+}
+
 TEST(GpuVmTranslation, Gfx12WalkSeparatesTranslationFromPhysicalAccess) {
   auto physical = std::make_shared<TestPhysicalMemory>();
   constexpr uint64_t root = 0x1000;

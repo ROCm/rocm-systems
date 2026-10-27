@@ -801,7 +801,15 @@ VmTranslationResult Gfx12PageTableTranslator::translate(uint64_t address, std::s
     return {.outcome = VmAccessOutcome::Malformed, .translation = {}};
 
   const uint64_t virtual_address_mask = gfx12_virtual_address_mask(config_);
-  if (address > virtual_address_mask || size - 1 > virtual_address_mask - address)
+  if (address > virtual_address_mask) {
+    // Trap handlers sign-extend GPU pointers; accept that canonical form as
+    // well as the unsigned address used by driver mappings.
+    const uint64_t sign_bit = (virtual_address_mask >> 1) + 1;
+    if ((address & ~virtual_address_mask) != ~virtual_address_mask || (address & sign_bit) == 0)
+      return {.outcome = VmAccessOutcome::Malformed, .translation = {}};
+    address &= virtual_address_mask;
+  }
+  if (size - 1 > virtual_address_mask - address)
     return {.outcome = VmAccessOutcome::Malformed, .translation = {}};
 
   const uint64_t pte_address_mask = gfx12_pte_address_mask(config_);
