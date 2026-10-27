@@ -2971,10 +2971,10 @@ void install_runtime_shims_once() {
     hrr_cap::writer::install_fork_handlers();
     pinned_install_atfork();
     t_installing = true;
+    MAKE_SCOPE_GUARD(installing, [] { t_installing = false; });
     hip_capture_build_table();
     pinned_wrap_table();
     hip_capture_install();
-    t_installing = false;
   });
 }
 }  // namespace

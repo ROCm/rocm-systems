@@ -61,7 +61,7 @@ void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims);
 
 // Called from hip::GetHipDispatchTable() until g_capture_bootstrapped is set —
 // installs the shims before the first HIP API reads its slot when
-// HIP_HRR_CAPTURE_OUTPUT is set, so the call that runs hip::init() is recorded
+// HIP_HRR_CAPTURE_OUTPUT is set, so the call that runs hip::init() is recorded.
 extern std::atomic<bool> g_capture_bootstrapped;
 void hip_capture_bootstrap();
 

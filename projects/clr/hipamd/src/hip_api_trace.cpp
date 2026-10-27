@@ -9,7 +9,9 @@
 
 #include "hip_internal.hpp"
 #include "platform/activity.hpp"
+#if defined(HIP_HRR_CAPTURE_ENABLED)
 #include "hrr/hip_capture.h"
+#endif
 
 #include <atomic>
 #include <cstdint>
