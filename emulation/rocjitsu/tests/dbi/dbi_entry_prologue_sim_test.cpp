@@ -106,6 +106,7 @@
 /// nothing here exercises a non-NULL value. Both need hardware.
 
 #include "../dbi_test_util.h"
+#include "../instrumentor_test_access.h"
 #include "dbi_sim.h"
 #include "scalar_builders.h"
 
@@ -308,6 +309,8 @@ protected:
     pt.probe_symbol = "rj_test_log_probe";
     pt.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}, {ProbeArgSource::LogBufferPtrHi, 0}};
     instr.add_point(pt);
+    // The harness hands the CP the kernarg wrapper itself.
+    InstrumentorTestAccess::skip_patch_gates(instr);
 
     auto result = instr.patch_with_debug_summaries();
     ASSERT_TRUE(result.errors.empty())

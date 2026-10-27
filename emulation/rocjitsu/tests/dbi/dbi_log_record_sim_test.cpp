@@ -24,6 +24,7 @@
 /// the immediate zero.
 
 #include "../dbi_test_util.h"
+#include "../instrumentor_test_access.h"
 #include "../log_buffer_test_access.h"
 #include "dbi_sim.h"
 #include "log_record_probe.h"
@@ -162,6 +163,8 @@ protected:
       pt.force_full_exec = force_full_exec;
       instr.add_point(pt);
     }
+    // The harness hands the CP the kernarg wrapper itself.
+    InstrumentorTestAccess::skip_patch_gates(instr);
 
     const auto result = instr.patch_with_debug_summaries();
     ASSERT_TRUE(result.errors.empty()) << result.errors.front();
