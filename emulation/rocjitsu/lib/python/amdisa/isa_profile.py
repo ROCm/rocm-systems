@@ -577,7 +577,11 @@ class IsaProfile(ABC):
 
     @property
     def has_gfx11_image_address_extension(self) -> bool:
-        """Whether MIMG NSA appends one DWORD of address-register selectors."""
+        """Whether MIMG uses the GFX11 image-address encoding contract.
+
+        This selects DIM-based VADDR sizing, x4 SRSRC/SSAMP tuple scaling, and
+        the optional NSA DWORD containing additional address-register selectors.
+        """
         return False
 
     @property
