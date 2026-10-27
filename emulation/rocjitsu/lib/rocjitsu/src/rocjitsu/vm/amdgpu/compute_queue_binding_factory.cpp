@@ -34,20 +34,18 @@ public:
   QueueReconfigureStatus reconfigure(const QueueReconfigureRequest &request) override {
     if (format_ == QueuePacketFormat::Pm4)
       return command_processor_.update_pm4_queue_registration(registration_id_, request);
-    const bool disabled = !request.scheduling_percentage;
-    const uint64_t ring_base = disabled ? ring_base_ : request.ring_base_address;
-    const uint32_t ring_size = disabled ? ring_size_ : request.ring_size_bytes;
-    if (request.scheduling_percentage > 100 || !valid_aql_packet_ring(ring_base, ring_size))
-      return QueueReconfigureStatus::Invalid;
-    if (!registration_id_ ||
-        !command_processor_.update_queue_registration(registration_id_, ring_base, ring_size,
-                                                      disabled ? 0 : request.scheduling_percentage))
-      return QueueReconfigureStatus::Stale;
-    if (!disabled) {
-      ring_base_ = ring_base;
-      ring_size_ = ring_size;
+    QueueReconfigureRequest effective = request;
+    if (!request.scheduling_percentage) {
+      effective.ring_base_address = ring_base_;
+      effective.ring_size_bytes = ring_size_;
     }
-    return disabled ? QueueReconfigureStatus::Disabled : QueueReconfigureStatus::Applied;
+    const QueueReconfigureStatus status =
+        command_processor_.reconfigure_queue_registration(registration_id_, effective);
+    if (status == QueueReconfigureStatus::Applied) {
+      ring_base_ = effective.ring_base_address;
+      ring_size_ = effective.ring_size_bytes;
+    }
+    return status;
   }
 
   QueueSubmissionStatus submit_producer(uint64_t producer_cursor) override {
