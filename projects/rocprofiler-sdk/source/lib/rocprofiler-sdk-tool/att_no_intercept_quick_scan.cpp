@@ -34,6 +34,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <memory>
@@ -342,6 +343,13 @@ backend_create(agent_state_t& state)
     }
 
     status = rocprof_trace_decoder_quick_scan(state.decoder, 0, nullptr, 0, nullptr, nullptr);
+    if(status == ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED)
+    {
+        ROCP_ERROR << "--att-no-intercept requires a host CPU with AVX-512 support (AVX512F, "
+                      "AVX512BW and AVX512VBMI), which this system does not have. Use --att "
+                      "instead.";
+        std::exit(EXIT_FAILURE);
+    }
     if(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
     {
         auto msg = fmt::format("ATT no-intercept quick-scan support is unavailable for "

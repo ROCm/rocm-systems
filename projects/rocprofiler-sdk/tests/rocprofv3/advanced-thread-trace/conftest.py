@@ -171,6 +171,12 @@ def att_no_intercept_out_dir_path(request):
     output_dir_path = request.config.getoption("--att-no-intercept-out-dir")
     if not output_dir_path:
         pytest.skip("--att-no-intercept-out-dir not provided")
+    if not os.path.isdir(output_dir_path):
+        # rocprofv3 exits before writing any output when it rejects --att-no-intercept,
+        # e.g. on a host CPU without AVX-512
+        pytest.skip(
+            f"ATT no-intercept output unavailable: {output_dir_path} does not exist"
+        )
     return output_dir_path
 
 
