@@ -55,9 +55,9 @@ namespace kfd
 // One batch of records copied out of the ring in a single drain.
 struct record_batch
 {
-    std::vector<copied_record> records = {};
-    uint64_t                   now_ns  = 0;  // host clock sampled once for the batch
-    uint64_t                   drain_epoch = 0;
+    std::vector<copied_record> records     = {};
+    uint64_t                   now_ns      = 0;  // host clock sampled once for the batch
+    uint64_t                   drain_epoch = 0;  // reader drain pass that copied it
     // Which GPU's ring these came from. Pairing and correlation are keyed by it,
     // so records from different GPUs can never be matched to each other.
     uint32_t gpu_id = 0;
@@ -65,9 +65,9 @@ struct record_batch
     void clear()
     {
         records.clear();  // keeps capacity: steady state does not allocate
-        now_ns = 0;
+        now_ns      = 0;
         drain_epoch = 0;
-        gpu_id = 0;
+        gpu_id      = 0;
     }
 };
 
@@ -125,6 +125,13 @@ public:
         return m_tail.load(std::memory_order_acquire) - m_head.load(std::memory_order_acquire);
     }
 
+    // Monotonic counts of batches ever published / ever popped. Any thread may
+    // read them; a consumed count >= a published count sampled earlier proves
+    // every batch published by then has been fully processed, however much newer
+    // traffic has arrived since.
+    size_t published_count() const { return m_tail.load(std::memory_order_acquire); }
+    size_t consumed_count() const { return m_head.load(std::memory_order_acquire); }
+
     static constexpr size_t capacity() { return Capacity; }
 
 private:
@@ -134,15 +141,33 @@ private:
     std::atomic<size_t> m_tail = {0};
 };
 
+// Has the processor finished every batch up to `published_target` (a
+// published_count() sampled by the caller) AND released every record it held
+// back for lookahead from drain passes <= `through_epoch`? Newer traffic cannot
+// prolong the wait: it is neither below the target nor at an epoch <= through.
+// Read the consumed count before the held epoch: the processor stores that epoch
+// before it pops the batch that produced it.
+template <size_t Capacity>
+bool
+processor_drained_through(const record_pipe<Capacity>& pipe,
+                          const std::atomic<uint64_t>& deferred_epoch,
+                          uint64_t                     through_epoch,
+                          size_t                       published_target)
+{
+    if(pipe.consumed_count() < published_target) return false;
+    const auto pending = deferred_epoch.load(std::memory_order_acquire);
+    return pending == UINT64_MAX || pending > through_epoch;
+}
+
+// As above, targeting everything published at the moment of the call.
 template <size_t Capacity>
 bool
 processor_drained_through(const record_pipe<Capacity>& pipe,
                           const std::atomic<uint64_t>& deferred_epoch,
                           uint64_t                     through_epoch)
 {
-    if(!pipe.empty()) return false;
-    const auto pending = deferred_epoch.load(std::memory_order_acquire);
-    return pending == UINT64_MAX || pending > through_epoch;
+    return processor_drained_through(
+        pipe, deferred_epoch, through_epoch, pipe.published_count());
 }
 
 // PRODUCER-side helper: move as many FIFO batches from `overflow` into `pipe` as
@@ -151,20 +176,29 @@ processor_drained_through(const record_pipe<Capacity>& pipe,
 // out lets the shutdown path pump the remaining overflow to the processor before
 // declaring the reader finished, so a batch already taken from the ring is never
 // dropped when the pipe was full at stop.
+//
+// The batch is SWAPPED into the slot, so the slot's previous buffer (already
+// cleared by acquire()) comes back out instead of being freed; when `spare` is
+// given it keeps up to Capacity such buffers for the producer's next overflow
+// batch, so a sustained processor backlog does not turn every ring read into a
+// fresh allocation.
 template <size_t Capacity>
 bool
-spill_overflow_to_pipe(record_pipe<Capacity>&    pipe,
-                       std::deque<record_batch>& overflow,
-                       std::atomic<uint64_t>*    inflight = nullptr)
+spill_overflow_to_pipe(record_pipe<Capacity>&     pipe,
+                       std::deque<record_batch>&  overflow,
+                       std::atomic<uint64_t>*     inflight = nullptr,
+                       std::vector<record_batch>* spare    = nullptr)
 {
     while(!overflow.empty())
     {
         auto* _slot = pipe.acquire();
         if(_slot == nullptr) return false;
-        // Count captured BEFORE the move: std::move empties the source vector, so
-        // reading its size after would read 0 and under-discharge the reservation.
+        // Count captured BEFORE the swap: the swap empties the source, so reading
+        // its size after would read 0 and under-discharge the reservation.
         const auto _count = overflow.front().records.size();
-        *_slot            = std::move(overflow.front());
+        std::swap(*_slot, overflow.front());
+        if(spare != nullptr && spare->size() < Capacity)
+            spare->emplace_back(std::move(overflow.front()));
         overflow.pop_front();
         pipe.publish();
         // Discharge after publish; release pairs with the GC gate's acquire load.

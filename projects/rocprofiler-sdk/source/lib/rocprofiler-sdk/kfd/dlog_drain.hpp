@@ -39,11 +39,15 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <set>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocprofiler
@@ -67,9 +71,16 @@ constexpr uint32_t kMaxRegions = 8;
 // largest lattice value <= 16 MiB is 80 KiB << 7 == 10 MiB. Requests are snapped DOWN
 // onto this lattice so a reasonable-looking value can never become an EINVAL that
 // disables the feature.
+//
+// The default is the largest legal ring. ABI v4 cannot detect a producer lap, so
+// region capacity IS the loss margin: the reader must revisit every region before
+// the firmware writes region_record_count records into it. At ~1.8M records/s (a
+// dense graph burst) a 2.5 MiB ring with 4 regions laps a region in tens of
+// milliseconds -- within reach of an ordinary scheduling or page-fault stall.
+// 10 MiB quadruples that margin for 7.5 MiB more GTT per GPU.
 constexpr uint64_t kDlogMinRingBytes     = 80ull << 10;           // 80 KiB floor
-constexpr uint64_t kDlogDefaultRingBytes = 80ull << 15;           // 2.5 MiB (on the 80*2^k lattice)
 constexpr uint64_t kDlogMaxRingBytes     = 80ull << 17;           // 10 MiB (largest <= 16 MiB cap)
+constexpr uint64_t kDlogDefaultRingBytes = kDlogMaxRingBytes;     // 10 MiB (on the 80*2^k lattice)
 constexpr uint64_t kDlogMaxRingKb        = 0xFFFFFFFFull / 1024;  // parse domain (uint32 field)
 
 // Snap `want` down onto the 80 * 2^k lattice, clamped to
@@ -159,7 +170,27 @@ struct ring_cursors
 {
     uint32_t rptr[kMaxRegions] = {};     // consumer read slot index per region
     bool     rptr_init         = false;  // prime rptr[i]=wptr[i] on first drain
+    // High-water of records found unread in one region at one visit. A lap is
+    // undetectable, but its approach is not: this nearing region_record_count
+    // means the reader came close to losing a lap of records.
+    uint32_t max_unread = 0;
 };
+
+namespace detail
+{
+// Whether copy_pipes' output can be sized up front (std::vector can; a test sink
+// that only offers emplace_back cannot).
+template <typename OutT, typename = void>
+struct can_reserve : std::false_type
+{};
+
+template <typename OutT>
+struct can_reserve<
+    OutT,
+    std::void_t<decltype(std::declval<OutT&>().reserve(std::declval<OutT&>().size()))>>
+: std::true_type
+{};
+}  // namespace detail
 
 // Processor-side state: start/eop pairing. Touched ONLY by the processor thread,
 // so it needs no lock either. Deliberately separate from ring_cursors: the whole
@@ -181,9 +212,12 @@ struct pair_state
         size_t   index;
     };
 
+    // Records held for one more snapshot (see pair_records), kept in pairing order.
+    // The work buffers are reused across batches so steady state does not allocate.
     std::vector<pending_record> deferred_records      = {};
     std::vector<pending_record> next_deferred_records = {};
     std::vector<work_item>      pairing_work          = {};
+    std::vector<work_item>      pairing_merge         = {};
     uint64_t                    deferred_epoch        = UINT64_MAX;
 
     struct pending_start
@@ -201,14 +235,14 @@ struct pair_state
 
     // Pairing census: starts_seen far below eops_seen means the firmware is not
     // emitting STARTs, which is a different bug from a pairing mismatch.
-    uint64_t starts_seen        = 0;
-    uint64_t eops_seen          = 0;
-    uint64_t starts_overwritten = 0;  // a second START arrived on a retained key
-    uint64_t starts_out_of_order = 0;
-    uint64_t equal_tick_drops   = 0;  // EOP tick == retained START tick (fail-closed)
-    uint64_t stale_eop_drops    = 0;  // EOP tick < retained START tick (belongs earlier)
-    uint64_t starts_evicted     = 0;  // retained STARTs aged out by the watermark
-    uint64_t starts_cap_evicted = 0;  // retained STARTs dropped by the hard size cap
+    uint64_t starts_seen         = 0;
+    uint64_t eops_seen           = 0;
+    uint64_t starts_overwritten  = 0;  // a newer START replaced a retained key's START
+    uint64_t starts_out_of_order = 0;  // a START no newer than the retained one: ignored
+    uint64_t equal_tick_drops    = 0;  // EOP tick == retained START tick (fail-closed)
+    uint64_t stale_eop_drops     = 0;  // EOP tick < retained START tick (belongs earlier)
+    uint64_t starts_evicted      = 0;  // retained STARTs aged out by the watermark
+    uint64_t starts_cap_evicted  = 0;  // retained STARTs dropped by the hard size cap
 
     // Hard bound on pending_starts, mirroring the per-GPU hub cap (this map is
     // per-GPU too, and a START is of the same order in size). evict_stale is only
@@ -225,25 +259,32 @@ struct pair_state
         pending_starts.erase(start);
     }
 
+    // A second START on a live key is the same dispatch processed again: CP
+    // replays a dispatch it discarded on a queue switch, so the newest START (by
+    // tick) is the one that reached the shader engines. A START no newer than the
+    // retained one is a late copy of an earlier event and is ignored.
+    //
+    // The size cap is NOT enforced here but by enforce_start_cap() after each
+    // pairing pass, so it can never evict a START whose EOP sorts later in the
+    // same batch.
     void record_start(uint64_t key, uint64_t ticks, uint64_t copied_at)
     {
         ++starts_seen;
         auto start = pending_starts.find(key);
         if(start != pending_starts.end())
         {
-            ++starts_overwritten;
             if(ticks <= start->second.start_ticks)
             {
                 ++starts_out_of_order;
                 return;
             }
+            ++starts_overwritten;
             start_ages.emplace(copied_at, key);
             if(copied_at != start->second.seen_at_ns)
                 start_ages.erase({start->second.seen_at_ns, key});
             start->second = pending_start{ticks, copied_at};
             return;
         }
-        if(pending_starts.size() >= max_pending_starts) evict_oldest_start();
         auto inserted = pending_starts.emplace(key, pending_start{ticks, copied_at}).first;
         try
         {
@@ -262,6 +303,14 @@ struct pair_state
         auto oldest = pending_starts.find(start_ages.begin()->second);
         ++starts_cap_evicted;
         erase_start(oldest);
+    }
+
+    // Hard bound on pending_starts, applied once a pass has paired everything it
+    // can. Overshoot within a pass is bounded by one batch.
+    void enforce_start_cap()
+    {
+        while(pending_starts.size() > max_pending_starts && !start_ages.empty())
+            evict_oldest_start();
     }
 
     // Stream-driven eviction watermark: the copy timestamp of the last batch that
@@ -304,7 +353,7 @@ copy_pipes(const uint8_t*       records_base,
            const volatile void* wptr_base,
            ring_cursors&        cursors,
            OutT&                out,
-           // Reserved per region before the first memcpy so a record is counted
+           // Reserved before the first memcpy so a record is counted
            // from the instant it leaves the ring into `out`. nullptr in tests.
            std::atomic<uint64_t>* inflight = nullptr)
 {
@@ -323,25 +372,39 @@ copy_pipes(const uint8_t*       records_base,
         cursors.rptr_init = true;
     }
 
-    uint64_t copied = 0;
+    // Snapshot every region's producer index first, then copy. Sizing the output
+    // once from the snapshot means the copy loop never reallocates (a growing
+    // vector here was the reader's dominant cost under load, and every extra
+    // microsecond in this loop is lap exposure). Records the firmware writes after
+    // the snapshot are simply left for the next pass, exactly as records written
+    // into an already-visited region always were.
+    uint32_t wptr[kMaxRegions]   = {};
+    uint32_t unread[kMaxRegions] = {};
+    uint64_t total               = 0;
     for(uint32_t p = 0; p < num_regions; ++p)
     {
-        const uint32_t w = load_wptr_low32(wptr_base, p);
-        const uint32_t r = cursors.rptr[p];
-        if(w == r) continue;
-
+        wptr[p] = load_wptr_low32(wptr_base, p);
         // Unread count in the [0,N-1] wrapping domain. Wraps (w < r numerically)
         // and the N-1 -> 0 boundary are handled by the mask; exactly-full aliases
         // to empty and is indistinguishable, per the ABI's documented limits.
-        const uint32_t unread = (w - r) & mask;
+        unread[p] = (wptr[p] - cursors.rptr[p]) & mask;
+        total += unread[p];
+        cursors.max_unread = std::max(cursors.max_unread, unread[p]);
+    }
+    if(total == 0) return 0;
 
-        // Reserve BEFORE the first memcpy: from that instant these records live in
-        // `out` and will be processed while the pipe still reads empty. This is
-        // exactly what the batch's publish fetch_sub removes. Release pairs with
-        // the GC gate's acquire load.
-        if(inflight != nullptr) inflight->fetch_add(unread, std::memory_order_release);
+    if constexpr(detail::can_reserve<OutT>::value) out.reserve(out.size() + total);
 
-        for(uint32_t k = 0; k < unread; ++k)
+    // Reserve BEFORE the first memcpy: from that instant these records live in
+    // `out` and will be processed while the pipe still reads empty. This is
+    // exactly what the batch's publish fetch_sub removes. Release pairs with
+    // the GC gate's acquire load.
+    if(inflight != nullptr) inflight->fetch_add(total, std::memory_order_release);
+
+    for(uint32_t p = 0; p < num_regions; ++p)
+    {
+        const uint32_t r = cursors.rptr[p];
+        for(uint32_t k = 0; k < unread[p]; ++k)
         {
             const uint32_t idx  = (r + k) & mask;
             const uint64_t slot = static_cast<uint64_t>(p) * region_slots + idx;
@@ -349,12 +412,10 @@ copy_pipes(const uint8_t*       records_base,
             std::memcpy(&_out.rec, records_base + slot * kFwRecBytes, sizeof(_out.rec));
             _out.region = p;
             out.emplace_back(_out);
-            ++copied;
         }
-
-        cursors.rptr[p] = w;
+        cursors.rptr[p] = wptr[p];
     }
-    return copied;
+    return total;
 }
 
 // STAGE 2 (processor thread): pair start/eop out of an already-copied batch.
@@ -382,6 +443,7 @@ pair_records(const copied_record* records,
     auto& work = state.pairing_work;
     work.clear();
     work.reserve(deferred_count + count);
+    size_t held_items = 0;
     for(size_t index = 0; index < deferred_count + count; ++index)
     {
         const auto& rec = record_at(index).rec;
@@ -393,18 +455,35 @@ pair_records(const copied_record* records,
         const uint64_t key = (static_cast<uint64_t>(rec.doorbell_off) << 32) | rec.dispatch_id;
         work.push_back(
             pair_state::work_item{key, ts, rec.record_type == kRecStart ? 1u : 0u, index});
+        if(index < deferred_count) ++held_items;
     }
 
     // EOP-before-START at equal ticks (the `kind` term) is what makes ties
     // order-independent AND keeps ordinary doorbell reuse intact: {E_A(t),S_B(t)}
     // pairs E_A with the outstanding S_A, then installs S_B cleanly. The index
     // only completes the strict weak ordering; it never decides a pairing.
-    std::sort(work.begin(), work.end(), [](const auto& left, const auto& right) {
+    const auto pairing_order = [](const pair_state::work_item& left,
+                                  const pair_state::work_item& right) {
         if(left.key != right.key) return left.key < right.key;
         if(left.tick != right.tick) return left.tick < right.tick;
         if(left.kind != right.kind) return left.kind < right.kind;
         return left.index < right.index;
-    });
+    };
+
+    // Held records were stored in exactly this order last pass and are re-indexed
+    // in storage order, so their run is already sorted: sort only this batch's
+    // records, then merge the two runs. Each record is sorted once, not twice.
+    const auto held_end = work.begin() + static_cast<std::ptrdiff_t>(held_items);
+    std::sort(held_end, work.end(), pairing_order);
+    if(held_items != 0 && held_end != work.end())
+    {
+        auto& merged = state.pairing_merge;
+        merged.clear();
+        merged.reserve(work.size());
+        std::merge(
+            work.begin(), held_end, held_end, work.end(), std::back_inserter(merged), pairing_order);
+        work.swap(merged);
+    }
 
     state.next_deferred_records.clear();
     state.deferred_epoch  = UINT64_MAX;
@@ -481,6 +560,7 @@ pair_records(const copied_record* records,
     state.deferred_records.swap(state.next_deferred_records);
     state.next_deferred_records.clear();
     work.clear();
+    state.enforce_start_cap();
     return seen;
 }
 }  // namespace kfd

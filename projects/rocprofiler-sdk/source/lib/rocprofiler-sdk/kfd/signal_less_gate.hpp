@@ -81,7 +81,8 @@ enum class signal_less_counter
     finalizer_emitted,     // RESULT_READY: record emitted with KFD timestamps
     finalizer_no_timing,   // COMPLETED_NO_TIMING: retired, no record
     register_refused,      // hub refused a batch eligibility had accepted; id retired here
-    cap_evicted,           // closed-window entry evicted under the per-GPU hub cap (D9)
+    cap_evicted,           // always 0: admission no longer evicts; kept so the summary
+                           // line keeps the field tools already parse
     kCount
 };
 

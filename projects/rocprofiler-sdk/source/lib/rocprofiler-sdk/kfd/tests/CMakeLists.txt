@@ -164,8 +164,8 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
             GTest::gtest_main)
 
-# Pins the per-GPU hub cap to 1 for the whole binary so register_batch admit/refuse and
-# eligible-only eviction are exercised (the accessor caches its env read once).
+# Pins the per-GPU hub cap to 1 for the whole binary so register_batch admit/refuse at
+# saturation (which never evicts) is exercised (the accessor caches its env read once).
 rocprofiler_add_unit_test(
     TARGET kfd-dlog-hub-cap
     SOURCES ${ROCPROFILER_LIB_KFD_DLOG_HUB_CAP_TEST_SOURCES}
