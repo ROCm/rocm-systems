@@ -323,6 +323,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `getRequirements_gin`'s large tuning/GIN dependency surface is never called
   by these tests, so `-ffunction-sections`/`--gc-sections` drop it before any
   fake would be needed.
+- **`rccl-UnitTestsMicroNvls`** — the REAL `src/transport/nvls.cc` (via
+  `NVLS_CC_PATH`, from `nvls-test.cc`); suite `NvlsHipStubTest.*`. RCCL always
+  compiles the NVLS stub branch (the multicast code needs `CUDART_VERSION >= 12010`),
+  and the suite checks that the stubs leave NVLS off and never read
+  `NCCL_NVLS_ENABLE`, so no value can turn it on. Its own binary, not shared with
+  `rccl-UnitTestsMicro`: `fakes/transport_stubs.cc` and
+  `fakes/collective_stubs.cc` fake the `ncclNvls*` symbols the real file defines.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
   `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`, `ScopedHookMicrotest.*`.
@@ -553,7 +560,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `fabric/fabric_mem_handler.cc` (`FABRIC_MEM_HANDLER_CC_PATH`, from
     `fabric-mem-handler-test.cc`); suites `FabricMemHandler*`.
   - `fabric/fabric_gpu_barrier.cu` (`FABRIC_GPU_BARRIER_CC_PATH`, from
-    `fabric-gpu-barrier-test.cc`); suites `FabricGpuBarrier*`.
+    `fabric-gpu-barrier-test.cc`); suites `FabricGpuBarrier*`, `HipVmmLedger*`.
+  - `fabric/fabric_init.cu` (`FABRIC_INIT_CC_PATH`, from `fabric-init-test.cc`);
+    suites `FabricInit*`, `HostAllocLedger*`.
 
 - **`rccl-UnitTestsMicroNetIbCastDataPath`** — the net_ib_cast data path in
   `src/transport/net_ib_cast/`: `p2p.cc` (`NET_IB_CAST_P2P_CC_PATH`, suites
@@ -715,7 +724,7 @@ symbol.
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
 | `src/debug.cc` (`ncclDebugLog`, `ncclDebugLevelMask`, `ncclSetThreadName`, ...) | `fakes/nccl_fakes.cc` |
 | `src/enqueue/enqueue.cc`'s own symbols (targets that do not compile the real file) | `fakes/enqueue_fakes.cc` |
-| `src/init.cc` comm lifecycle + CTA/channel params | `fakes/comm_fakes.cc` |
+| `src/init.cc` comm lifecycle, CTA/channel params, `allocTracker` | `fakes/comm_fakes.cc`; `rccl-UnitTestsMicroRmaProxy` keeps a local `allocTracker` because that isolated target does not link the broader comm fake |
 | `src/init_nvtx.cc` | `fakes/init_nvtx_fakes.cc` |
 | `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc`; `ncclMemTrack*` / `ncclMemUntrack*` in `fakes/nccl_fakes.cc` |
 | `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
@@ -821,13 +830,6 @@ These do NOT follow the TU-per-file rule, deliberately:
   comm->nRanks` comparison every `devcomm-test.cc` filter makes, and the trap
   comment warning about that is what keeps those tests honest. Moving the hook
   without moving the readers that depend on the warning is how it would get lost.
-- `IsArchMatch` and the `allocTracker` data symbol stay in `p2p-test.cc`
-  itself rather than a fakes file, because neither has an owning production
-  TU to name a fakes file after: `IsArchMatch` is declared in the
-  header-only `archinfo.h`, and `allocTracker` is an `alloc.h` data symbol
-  that only `p2p.cc` references in this target. (The busId helpers alongside
-  them *do* have an owner — `src/misc/utils.cc` — so they live in
-  `fakes/utils_fakes.cc`, not here.)
 
 An aggregation header includes the per-TU headers a unit's tests use and
 declares the reset that chains their per-TU resets, and defines no seams itself.
@@ -1006,9 +1008,9 @@ When the link fails with `undefined symbol: foo`, find `foo` and
 triage it into the right bucket:
 
 - **It's a global variable (`extern int foo;`)** → add a definition
-  to its owning TU's fakes file. If it has no owning TU, or that file
-  cannot be linked (e.g. `allocTracker`, above), define it in the test.
-  Use a sensible default (usually zero).
+  to its owning TU's fakes file (e.g. `allocTracker`, from `src/init.cc`, is in
+  `fakes/comm_fakes.cc`). If it has no owning TU, define it in the test. Use a
+  sensible default (usually zero).
 - **It's a plain function the module references but doesn't define**
   → add a definition returning a sensible default to its owning TU's
   fakes file (e.g. `busIdToInt64` / `getBusId` go in
@@ -1144,7 +1146,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDda`,
-`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep`,
+`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep`, `rccl-UnitTestsMicroNvls`,
 `rccl-UnitTestsMicroNetIbCastDataPath`, `rccl-UnitTestsMicroRmaProxy` and `rccl-UnitTestsMicroNetIbCastInit` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -1199,6 +1201,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroGinHostProxy       # src/gin/gin_host_proxy.cc + proxy_gpucontext/
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/rccl-UnitTestsMicroNvls               # transport/nvls.cc (HIP stubs) tests
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc + src/diagnostics/ tests
 ./build/rccl-UnitTestsMicroGraph              # src/graph/{xml,topo,paths,search,rome_models}.cc tests
