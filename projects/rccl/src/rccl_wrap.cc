@@ -1861,6 +1861,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // is kept as a fallback (bestFallback).  If no preferred candidate exists,
     // RCCL warns and uses bestFallback — it never errors out on a policy mismatch.
     rcclCandSearch cs = { rcclAllReducePreferredBackends(comm), decision, *decision, false /*bestFallbackFound */, false /*bestPreferredFound */ };
+    if (!query) INFO(NCCL_TUNING, "AR candidate search: msgBytes=%zu preferred=0x%x CTAPolicy=%d", msgBytes, (unsigned)cs.preferred, (int)comm->config.CTAPolicy);
 
     // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
     // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
@@ -1872,6 +1873,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
       cand.algo = RCCL_CE_2SHOT;
       cand.nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
       rcclCandSearchRecord(cs, RCCL_BACKEND_CE, cand, twoShotWindow);
+      if (!query) INFO(NCCL_TUNING, "AR cand CE-2shot: inWindow=%d preferred=%d fallback=%d", (int)twoShotWindow, (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
     }
 
     // (4) DDA fast paths. Both DDA and CE 2-shot are candidates in the search;
@@ -1911,6 +1913,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
           cand.algo = RCCL_DDA_FABRIC_VMM;
           cand.nMaxChannels = ncclAllReduceDdaFabricBlocks(comm, count, datatype);
           rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand);
+          if (!query) INFO(NCCL_TUNING, "AR cand DDA-VMM(fabric-first): inWindow=1 preferred=%d fallback=%d", (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
         }
         // Small-message fast lane: LL protocol (no GPU barrier).
         if (arDdaLLMax > 0 && ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
@@ -1918,6 +1921,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
           cand.algo = RCCL_DDA_FABRIC_LL; cand.protocol = NCCL_PROTO_LL;
           cand.nMaxChannels = ncclAllReduceDdaFabricLLBlocks(comm, count, datatype);
           rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand, msgBytes <= arDdaLLMax);
+          if (!query) INFO(NCCL_TUNING, "AR cand DDA-LL: inWindow=%d preferred=%d fallback=%d", (int)(msgBytes <= arDdaLLMax), (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
         }
         // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
         if (!cs.bestPreferredFound && arDdaLL128Max > 0 &&
@@ -1926,6 +1930,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
           cand.algo = RCCL_DDA_FABRIC_LL128; cand.protocol = NCCL_PROTO_LL128;
           cand.nMaxChannels = ncclAllReduceDdaFabricLL128Blocks(comm, count, datatype);
           rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand, msgBytes <= arDdaLL128Max);
+          if (!query) INFO(NCCL_TUNING, "AR cand DDA-LL128: inWindow=%d preferred=%d fallback=%d", (int)(msgBytes <= arDdaLL128Max), (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
         }
         // The entry gate now admits the widest tier, so VMM re-checks its own cap.
         if (!cs.bestPreferredFound && arDdaVmmMax != 0 &&
@@ -1934,6 +1939,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
           cand.algo = RCCL_DDA_FABRIC_VMM;
           cand.nMaxChannels = ncclAllReduceDdaFabricBlocks(comm, count, datatype);
           rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand, msgBytes <= arDdaVmmMax);
+          if (!query) INFO(NCCL_TUNING, "AR cand DDA-VMM(fabric): inWindow=%d preferred=%d fallback=%d", (int)(msgBytes <= arDdaVmmMax), (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
         }
       } else {
         if (arDdaVmmMax != 0 &&
@@ -1942,6 +1948,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
           cand.algo = RCCL_DDA_IPC;
           cand.nMaxChannels = ncclAllReduceDdaIpcBlocks(comm, count, datatype);
           rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand, msgBytes <= arDdaVmmMax);
+          if (!query) INFO(NCCL_TUNING, "AR cand DDA-IPC: inWindow=%d preferred=%d fallback=%d", (int)(msgBytes <= arDdaVmmMax), (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
         }
       }
     }
@@ -1989,6 +1996,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     cand.algo = RCCL_CE_REGISTERED;
     cand.nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     rcclCandSearchRecord(cs, RCCL_BACKEND_CE, cand, ceRegBeatsSymk);
+    if (!query) INFO(NCCL_TUNING, "AR cand CE-registered: inWindow=%d(ceRegBeatsSymk) preferred=%d fallback=%d", (int)ceRegBeatsSymk, (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
   }
   if (!query && !cs.bestPreferredFound && ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || !symEligible)) INFO(NCCL_TUNING,
        "AR CE-registered disqualified: ceAvailable=%d(graphAllowed=%d bufOk=%d opOk=%d countDiv=%d archEnabled=%d)"
@@ -2014,6 +2022,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     }
     if (symkRecordable)
       rcclCandSearchRecord(cs, RCCL_BACKEND_SYMMETRIC, cand, symInWindow);
+    if (!query && symkRecordable) INFO(NCCL_TUNING, "AR cand symk: inWindow=%d preferred=%d fallback=%d", (int)symInWindow, (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
     // symk query failed — fall through to next candidate
   }
 
