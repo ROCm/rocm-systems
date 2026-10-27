@@ -128,6 +128,15 @@ option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx
 if(ENABLE_TDM_SIMPLE)
   add_compile_definitions(ENABLE_TDM_SIMPLE=1)
 endif()
+# Experimental: bytes of flag per LL128 line. Host (net proxy) and device code must agree, so it is a build setting.
+set(RCCL_LL128_FLAG_BYTES "8" CACHE STRING "Bytes of flag per LL128 line: 8 (default), 4, 2 or 1")
+set_property(CACHE RCCL_LL128_FLAG_BYTES PROPERTY STRINGS 8 4 2 1)
+if(NOT RCCL_LL128_FLAG_BYTES MATCHES "^[8421]$")
+  message(FATAL_ERROR "RCCL_LL128_FLAG_BYTES must be 8, 4, 2 or 1, got '${RCCL_LL128_FLAG_BYTES}'")
+endif()
+if(NOT RCCL_LL128_FLAG_BYTES STREQUAL "8")
+  add_compile_definitions(RCCL_LL128_FLAG_BYTES=${RCCL_LL128_FLAG_BYTES})
+endif()
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):
 #   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
