@@ -173,7 +173,11 @@ std::vector<uint32_t> make_copy_kernel(rj_code_arch_t arch, bool with_store) {
                              build_v_mov_b32_src(0, kInlineZero, arch)};
   const std::vector<uint32_t> load = build_global_load_dword(1, 0, 2, 0, arch);
   code.insert(code.end(), load.begin(), load.end());
-  code.push_back(build_wait_loads_complete(arch));
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(arch);
+  if (maybe_wait_loads_complete.failed()) {
+    return {};
+  }
+  code.push_back(maybe_wait_loads_complete.value());
   const std::vector<uint32_t> store = build_global_store_dword(1, 0, 2, kDestinationDelta, arch);
   if (with_store)
     code.insert(code.end(), store.begin(), store.end());
@@ -193,9 +197,11 @@ std::optional<uint32_t> run_copy(const SimArch &target, bool with_store) {
   std::array<uint8_t, sizeof(kSeed)> seed{};
   std::memcpy(seed.data(), &kSeed, sizeof(kSeed));
   sim.write_memory(kSource, seed);
-  const std::optional<std::vector<uint8_t>> bytes =
-      sim.run_and_read_memory(make_copy_kernel(target.arch, with_store), /*private_bytes=*/0,
-                              kSource + kDestinationDelta, sizeof(uint32_t));
+  const std::vector<uint32_t> kernel = make_copy_kernel(target.arch, with_store);
+  if (kernel.empty())
+    return std::nullopt;
+  const std::optional<std::vector<uint8_t>> bytes = sim.run_and_read_memory(
+      kernel, /*private_bytes=*/0, kSource + kDestinationDelta, sizeof(uint32_t));
   if (!bytes)
     return std::nullopt;
   uint32_t value = 0;

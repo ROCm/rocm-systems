@@ -144,9 +144,9 @@ protected:
         /*granulated_sgpr_count=*/kKernelSgprs / 8 - 1, /*entry_text_offset=*/0,
         /*granulated_vgpr_count=*/kKernelVgprs / 8 - 1,
         /*accum_offset=*/t_.wave32 ? 0 : kKernelVgprs / 4 - 1);
-    const auto probe = test::make_amdgpu_probe_elf(
-        kProbeSymbol, test::build_log_record_probe_body(t_.arch, kRecordType, kSlotCount),
-        t_.e_flags);
+    const auto body = test::build_log_record_probe_body(t_.arch, kRecordType, kSlotCount);
+    ASSERT_FALSE(body.empty());
+    const auto probe = test::make_amdgpu_probe_elf(kProbeSymbol, body, t_.e_flags);
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
     ASSERT_TRUE(obj.is_valid());

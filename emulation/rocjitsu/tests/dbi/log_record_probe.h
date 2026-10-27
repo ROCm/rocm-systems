@@ -179,7 +179,11 @@ build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_type, uint32_t 
 
   // Claim the slot at write_ptr.
   detail::append(words, build_global_load_dwordx2(kLoaded, kZero, kBase, kWritePtrOffset, arch));
-  words.push_back(build_wait_loads_complete(arch));
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(arch);
+  if (maybe_wait_loads_complete.failed()) {
+    return {};
+  }
+  words.push_back(maybe_wait_loads_complete.value());
   words.push_back(build_v_readfirstlane_b32(kWritePtr, kLoaded, arch));
   words.push_back(build_v_readfirstlane_b32(kWritePtr + 1, kLoaded + 1, arch));
   // On RDNA4 each SALU write below is waited on before its SGPR is next read,
