@@ -144,17 +144,74 @@ namespace RcclUnitTesting
     p[j] = MakeVal<T>(vi, PatternValueF(vi));
   }
 
+  // Block size MismatchReduceKernel must be launched with; it sizes the block reduction.
+  constexpr int kMismatchBlockSize = 256;
+
   template <typename T>
-  __global__ void MismatchReduceKernel(const T* a, const T* b, size_t n,
-                                       unsigned long long* mismatches,
-                                       unsigned long long* firstIdx)
+  __device__ inline void CountMismatch(T a, T b, size_t idx, unsigned long long& count, unsigned long long& first)
   {
-    size_t j = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (j >= n) return;
-    if (!Matches<T>(a[j], b[j]))
+    if (!Matches<T>(a, b))
     {
-      atomicAdd(mismatches, 1ULL);
-      atomicMin(firstIdx, (unsigned long long)j);   // remember earliest divergent index
+      ++count;
+      first = idx < first ? idx : first;
+    }
+  }
+
+  // Counts j with !Matches(a[j], b[j]) into *mismatches and lowers *firstIdx to the
+  // earliest such j (*firstIdx must start >= n). Grid-stride, so any grid size covers n.
+  // vectorized (both buffers 16-byte aligned) reads 16 bytes per load. Counts are reduced
+  // per block before one atomic pair, so a fully mismatched buffer does not serialize on
+  // the atomics.
+  template <typename T>
+  __global__ __launch_bounds__(kMismatchBlockSize)
+  void MismatchReduceKernel(const T* a, const T* b, size_t n, bool vectorized,
+                            unsigned long long* mismatches,
+                            unsigned long long* firstIdx)
+  {
+    static_assert(16 % sizeof(T) == 0, "element size must divide the 16-byte load");
+    constexpr size_t kVec = 16 / sizeof(T);
+    struct alignas(16) Vec { T v[kVec]; };
+
+    unsigned long long count = 0, first = ~0ULL;
+    size_t const tid    = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    size_t const stride = (size_t)gridDim.x * blockDim.x;
+    size_t const nVec   = vectorized ? n / kVec : 0;
+    Vec const* aVec = reinterpret_cast<Vec const*>(a);
+    Vec const* bVec = reinterpret_cast<Vec const*>(b);
+    for (size_t i = tid; i < nVec; i += stride)
+    {
+      Vec const x = aVec[i];
+      Vec const y = bVec[i];
+#pragma unroll
+      for (size_t k = 0; k < kVec; ++k) CountMismatch<T>(x.v[k], y.v[k], i * kVec + k, count, first);
+    }
+    for (size_t j = nVec * kVec + tid; j < n; j += stride) CountMismatch<T>(a[j], b[j], j, count, first);
+
+    for (int offset = warpSize / 2; offset > 0; offset /= 2)
+    {
+      count += __shfl_down(count, offset);
+      unsigned long long const other = __shfl_down(first, offset);
+      first = other < first ? other : first;
+    }
+    __shared__ unsigned long long waveCount[kMismatchBlockSize / 32];  // 32 = smallest wave size
+    __shared__ unsigned long long waveFirst[kMismatchBlockSize / 32];
+    int const wave = threadIdx.x / warpSize;
+    if (threadIdx.x % warpSize == 0)
+    {
+      waveCount[wave] = count;
+      waveFirst[wave] = first;
+    }
+    __syncthreads();
+    if (threadIdx.x != 0) return;
+    for (int w = 1; w < (int)(blockDim.x / warpSize); ++w)
+    {
+      count += waveCount[w];
+      first = waveFirst[w] < first ? waveFirst[w] : first;
+    }
+    if (count != 0)
+    {
+      atomicAdd(mismatches, count);
+      atomicMin(firstIdx, first);
     }
   }
 
