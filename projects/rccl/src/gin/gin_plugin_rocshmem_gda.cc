@@ -22,7 +22,9 @@
 #include "graph/topo.h"  // NCCL_TOPO_MAX_NODES
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h"
 #include "gin/gin_rocshmem_gda_factory.h"
+#include "common_cast.h"  // IbCastInitDevices/IbCastDevs/IbCastGetPhysProperties
 #include <hip/hip_runtime.h>
+#include <string.h>
 
 // RCCL env-var parameters for traffic class (defined in transport/net_ib/)
 extern int64_t ncclParamGinIbTc();
@@ -73,10 +75,49 @@ static int ginGdaBootstrapAllgather(void* ctx, void* buf, size_t perRankSize) {
 // Vtable implementations
 ///////////////////////////////////////////////////////////////////////////////
 
+// GIN-capable NIC table, built once at init. Each entry maps a logical GIN
+// device index (what the topology enumerates via devices()/getProperties()) to
+// the physical IB-CAST device index, so getProperties() can report that NIC's
+// real name + pciPath. Without this the backend advertised a single generic
+// device and the topology collapsed every local GPU onto it.
+#define GIN_GDA_MAX_DEVS MAX_IB_DEVS
+static int ginGdaPhysDevIndex[GIN_GDA_MAX_DEVS];
+static int ginGdaNDevs = 0;
+
+// Build ginGdaPhysDevIndex[] by intersecting the factory's GIN-capable NIC set
+// (recognized vendor + active port, resolved by ibverbs device name) with the
+// IB-CAST device table (which owns the per-NIC name + pciPath + topology ids).
+static void ginRocshmemGdaBuildDevTable() {
+  ginGdaNDevs = 0;
+
+  char ginNames[GIN_GDA_MAX_DEVS][MAXNAMESIZE];
+  int nGin = rocshmem_gin_list_devices(&ginNames[0][0], GIN_GDA_MAX_DEVS, MAXNAMESIZE);
+  if (nGin <= 0) return;
+  if (nGin > GIN_GDA_MAX_DEVS) nGin = GIN_GDA_MAX_DEVS;
+
+  // Match each GIN-capable NIC name to its physical IB-CAST device index.
+  for (int g = 0; g < nGin && ginGdaNDevs < GIN_GDA_MAX_DEVS; g++) {
+    for (int d = 0; d < IbCastNDevs; d++) {
+      if (strncmp(ginNames[g], IbCastDevs[d].devName, MAXNAMESIZE) == 0) {
+        ginGdaPhysDevIndex[ginGdaNDevs++] = d;
+        break;
+      }
+    }
+  }
+}
+
 static ncclResult_t ginRocshmemGdaInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
   const char* gin_type = getenv("NCCL_GIN_TYPE");
   if (!gin_type || atoi(gin_type) != NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) return ncclInternalError;
   if (rocshmem_gin_probe_devices() <= 0) return ncclInternalError;
+  // Populate the IB-CAST device table (name + pciPath + topology ids) and build
+  // the GIN-capable subset so devices()/getProperties() expose one entry per NIC.
+  if (IbCastInitDevices(logFunction, nullptr) != ncclSuccess) return ncclInternalError;
+  ginRocshmemGdaBuildDevTable();
+  if (ginGdaNDevs <= 0) {
+    IbCastFinalizeDevices();  // balance the ref before bailing
+    return ncclInternalError;
+  }
   // Allocate init context; bootstrap filled by ncclGinRocshmemSetInitContext
   struct ginRocshmemInitCtx* ictx = new ginRocshmemInitCtx{};
   *ctx = ictx;
@@ -84,7 +125,7 @@ static ncclResult_t ginRocshmemGdaInit(void** ctx, uint64_t commId, ncclDebugLog
 }
 
 static ncclResult_t ginRocshmemGdaDevices(int* ndev) {
-  *ndev = 1;
+  *ndev = ginGdaNDevs;
   return ncclSuccess;
 }
 
@@ -98,15 +139,21 @@ static ncclResult_t ginRocshmemGdaGetGinProperties(ncclGinProperties_t* ginProps
 }
 
 static ncclResult_t ginRocshmemGdaGetProperties(int dev, ncclNetProperties_v12_t* props) {
-  memset(props, 0, sizeof(*props));
-  props->name = const_cast<char*>("rocshmem-gda");
-  props->pciPath = nullptr;
-  props->guid = 0;
+  if (dev < 0 || dev >= ginGdaNDevs) {
+    WARN("GIN rocshmem-gda: requested properties for NIC %d, only %d GIN NICs enumerated", dev, ginGdaNDevs);
+    return ncclInvalidUsage;
+  }
+  // Report the real per-NIC name + pciPath (+ topology rail/plane ids) from the
+  // IB-CAST device table so the topology places one GIN node per NIC near its
+  // GPU. ncclTopoGetLocalGinDevs then hands each GPU a distinct local NIC.
+  NCCLCHECK(IbCastGetPhysProperties(ginGdaPhysDevIndex[dev], props));
   props->ptrSupport = NCCL_PTR_CUDA;
   props->netDeviceType = NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA;
   props->netDeviceVersion = NCCL_GIN_ROCSHMEM_VERSION;
   props->maxP2pBytes = 1ULL << 30;
   props->maxCollBytes = 1ULL << 30;
+  props->vProps.ndevs = 1;
+  props->vProps.devs[0] = dev;
   return ncclSuccess;
 }
 
@@ -145,10 +192,10 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
   // hands adjacent GPUs distinct NICs. This replaces the earlier NET-node query
   // (ncclTopoGetLocalNet / ncclTopoGetLocal(GPU, NET)), which on some topologies
   // collapsed every local GPU onto a single NIC (observed: all 8 GPUs landing on
-  // one bnxt device). A GIN topo node's net.dev is the IB-net plugin device
-  // index, so the real ibverbs name is resolved through comm->ncclNet->
-  // getProperties, the same dev space. Best-effort: on failure the factory
-  // selects the first usable active device.
+  // one bnxt device). The GIN node's net.dev is THIS backend's device index
+  // (devices()/getProperties() above), so the name is resolved through our own
+  // getProperties — not comm->ncclNet, whose dev space is the separate NET/RMA
+  // plugin. Best-effort: on failure the factory selects the first usable device.
   const char* preferredNic = nullptr;
   char preferredNicName[128] = {0};
   {
@@ -157,7 +204,7 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
     if (ncclTopoGetLocalGinDevs(cctx->comm, localGinDevs, &nLocalGinDevs) == ncclSuccess && nLocalGinDevs > 0) {
       int ginDev = localGinDevs[0];
       ncclNetProperties_t props;
-      if (ginDev >= 0 && cctx->comm->ncclNet->getProperties(ginDev, &props) == ncclSuccess && props.name != nullptr) {
+      if (ginDev >= 0 && ginRocshmemGdaGetProperties(ginDev, &props) == ncclSuccess && props.name != nullptr) {
         snprintf(preferredNicName, sizeof(preferredNicName), "%s", props.name);
         preferredNic = preferredNicName;
         INFO(NCCL_INIT, "GIN rocshmem-gda: comm rank %d GIN-local NIC: %s (ginDev %d, %d local gin devs)",
@@ -196,6 +243,9 @@ static ncclResult_t ginRocshmemGdaCloseColl(void* collComm) {
 
 static ncclResult_t ginRocshmemGdaFinalize(void* ctx) {
   delete (ginRocshmemInitCtx*)ctx;
+  // Balance the IbCastInitDevices ref taken in init (refcounted; the shared IB-CAST
+  // device table survives while the transport still holds a ref).
+  IbCastFinalizeDevices();
   return ncclSuccess;
 }
 

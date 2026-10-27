@@ -1486,7 +1486,10 @@ static bool gin_validate_device(GDAProvider provider, struct ibv_device_attr* de
   return true;
 }
 
-int rocshmem_gin_probe_devices(void) {
+// Shared walk behind rocshmem_gin_probe_devices and rocshmem_gin_list_devices:
+// count GIN-capable NICs (recognized vendor, validated, with an active port),
+// optionally recording each one's ibverbs device name into the caller's buffer.
+static int gin_enumerate_devices(char* names, int max_count, int name_stride) {
   if (!gin_ibv_available()) return 0;
 
   int ndev = 0;
@@ -1513,6 +1516,11 @@ int rocshmem_gin_probe_devices(void) {
     for (int port = 1; port <= dev_attr.phys_port_cnt; port++) {
       struct ibv_port_attr port_attr;
       if (gin_ibv_query_port(ctx, port, &port_attr) == 0 && port_attr.state == IBV_PORT_ACTIVE) {
+        if (names && count < max_count) {
+          const char* devName = gin_ibv_get_device_name(dev_list[d]);
+          char* slot = names + (size_t)count * name_stride;
+          snprintf(slot, name_stride, "%s", devName ? devName : "");
+        }
         count++;
         break;
       }
@@ -1522,4 +1530,12 @@ int rocshmem_gin_probe_devices(void) {
 
   gin_ibv_free_device_list(dev_list);
   return count;
+}
+
+int rocshmem_gin_probe_devices(void) {
+  return gin_enumerate_devices(nullptr, 0, 0);
+}
+
+int rocshmem_gin_list_devices(char* names, int max_count, int name_stride) {
+  return gin_enumerate_devices(names, max_count, name_stride);
 }

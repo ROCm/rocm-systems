@@ -143,6 +143,23 @@ GIN_QP_API int rocshmem_gin_get_provider(rocshmem_gin_qp_set_t qp_set);
  */
 GIN_QP_API int rocshmem_gin_probe_devices(void);
 
+/**
+ * @brief Enumerate the ibverbs device names of GIN-capable NICs.
+ *
+ * Same selection as rocshmem_gin_probe_devices (recognized BNXT/IONIC/MLX5
+ * vendor, validated, with an active port), but also returns each NIC's ibverbs
+ * device name so the caller can build a per-NIC GIN device list for topology
+ * placement. Names are written NUL-terminated into the caller's buffer.
+ *
+ * @param[out] names     Caller array of char[max_count][name_stride] receiving
+ *                       device names; may be NULL to only count.
+ * @param[in]  max_count Capacity of the names array (entries).
+ * @param[in]  name_stride Bytes per name entry (e.g. sizeof(name[0])).
+ * @return Number of GIN-capable NICs found (may exceed max_count; only the
+ *         first max_count names are written).
+ */
+GIN_QP_API int rocshmem_gin_list_devices(char* names, int max_count, int name_stride);
+
 #ifdef __cplusplus
 }
 #endif
