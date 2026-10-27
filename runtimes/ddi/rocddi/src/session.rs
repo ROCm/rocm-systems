@@ -63,6 +63,40 @@ struct DriverRegistry {
     closing: bool,
 }
 
+/// Retains an unfinished session when its native shutdown must be retried.
+///
+/// Frontends that cannot keep a public session handle after shutdown can move
+/// the session here. Dropping an unfinished retirement conservatively retains
+/// its driver owners through process exit instead of releasing native state
+/// whose cleanup has not been proved.
+#[must_use = "retry native shutdown until it succeeds or retain this owner"]
+pub struct SessionRetirement {
+    session: Option<Session>,
+}
+
+impl SessionRetirement {
+    /// Retries only the drivers that remain after earlier shutdown attempts.
+    ///
+    /// # Errors
+    /// Preserves the unfinished session for another attempt.
+    pub fn try_destroy(&mut self) -> Result<(), Error> {
+        let Some(session) = self.session.as_mut() else {
+            return Ok(());
+        };
+        session.destroy()?;
+        self.session = None;
+        Ok(())
+    }
+}
+
+impl Drop for SessionRetirement {
+    fn drop(&mut self) {
+        if let Some(session) = self.session.take() {
+            std::mem::forget(session);
+        }
+    }
+}
+
 impl Clone for Session {
     /// Shares this session's driver set, identities, and lifetime policy.
     /// A separate call to [`Session::new`] creates an independent session.
@@ -74,6 +108,13 @@ impl Clone for Session {
 }
 
 impl Session {
+    /// Moves a session into an owner that retains failed native cleanup.
+    pub fn into_retirement(self) -> SessionRetirement {
+        SessionRetirement {
+            session: Some(self),
+        }
+    }
+
     /// Populates optional information on an endpoint from its owning driver.
     /// The query reopens the endpoint without activating it and rejects a
     /// snapshot whose discovered metadata has changed. A failed query leaves
@@ -520,6 +561,20 @@ mod tests {
         assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Busy);
         drop(clone);
         session.destroy().unwrap();
+    }
+
+    #[test]
+    fn retirement_keeps_a_busy_session_for_a_later_shutdown_attempt() {
+        let session = Session::new(DriverContextLifetime::Session).unwrap();
+        let clone = session.clone();
+        let mut retirement = session.into_retirement();
+        assert_eq!(
+            retirement.try_destroy().unwrap_err().kind(),
+            ErrorKind::Busy
+        );
+        drop(clone);
+        retirement.try_destroy().unwrap();
+        retirement.try_destroy().unwrap();
     }
 
     #[test]

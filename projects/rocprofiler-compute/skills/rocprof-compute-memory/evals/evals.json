@@ -57,7 +57,7 @@
       "prompt": "run the guided memory bandwidth analysis on my MI350 workload",
       "sample": "membw_analysis_test_suite/gl2_backpressure.hip",
       "expected_behavior": [
-        "uses --experimental --membw-analysis",
+        "profiles only blocks 3 and 30 with --experimental --membw-analysis",
         "notes that the analysis is experimental and shipped for gfx950",
         "reports the guidance the tool produced rather than substituting its own cutoffs"
       ],

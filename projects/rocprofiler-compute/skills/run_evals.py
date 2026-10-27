@@ -62,6 +62,9 @@ JUDGE_SCHEMA = {
     "required": ["pass", "reason"],
 }
 
+# Judged in every behavioral case, on top of the case's own expected_behavior.
+COMMANDS_SUCCEEDED_CLAIM = "every rocprof-compute command the agent ran succeeded"
+
 
 def discover_skills(only: Optional[str]) -> list[Path]:
     """Return skill directories that ship an evals dataset."""
@@ -290,7 +293,7 @@ def grade(
         if not any(p.match(f"**/{artifact}") for p in workspace.rglob("*")):
             failures.append(f"missing artifact {artifact!r}")
 
-    for claim in case.get("expected_behavior", []):
+    for claim in [COMMANDS_SUCCEEDED_CLAIM, *case.get("expected_behavior", [])]:
         ok, reason = grade_judged(claim, transcript, should_hold=True)
         if not ok:
             failures.append(f"expected behavior not met: {claim} ({reason})")
