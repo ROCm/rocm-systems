@@ -68,6 +68,9 @@ struct ncclIbConnectionMetadata {
   int sl;
   int isP2p;
 };
+// RCCL: the cap rides in devName, so this struct stays the upstream size.
+static_assert(sizeof(struct ncclIbConnectionMetadata) == offsetof(struct ncclIbConnectionMetadata, isP2p) + 8,
+              "connection metadata must not add trailing wire fields");
 
 ncclResult_t ncclIbQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
 ncclResult_t ncclIbQpInit(struct ncclIbQp* qp);
