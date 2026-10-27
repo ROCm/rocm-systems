@@ -64,10 +64,15 @@ inline Registers uniform_input(std::array<uint32_t, 5> words) {
   return input;
 }
 
-// Reproduce the finite FP8/BF8 matrix inputs used by the selected captures.
-inline Registers f8_input(uint32_t width, bool bf8) {
+// Reproduce finite matrix capture inputs, including legal sparse index pairs.
+// gfx12=false replicates factor lanes for the GFX11 (RDNA3) operand layout.
+inline Registers float_input(uint32_t width, uint32_t bits, bool bfloat, bool gfx12) {
   Registers input{};
   uint32_t rng = 0x12056f10u;
+  constexpr uint32_t pairs[] = {4, 8, 12, 9, 13, 14};
+  const uint32_t sign = 1u << (bits - 1);
+  // Exclude non-finite magnitudes: BF8 starts at 0x7c; FP8 reserves only 0x7f.
+  const uint32_t limit = bits == 16 ? (bfloat ? 0x7f80 : 0x7c00) : (bfloat ? 0x7c : 0x7f);
   constexpr uint32_t c[] = {0,           1,           0x80000000u, 0x3f800001u,
                             0xbf800001u, 0x43800001u, 0xc3800001u, 0x80000001u};
   for (uint32_t reg = 0; reg < 33; ++reg) {
@@ -78,13 +83,19 @@ inline Registers f8_input(uint32_t width, bool bf8) {
       uint32_t value = c[(rng >> 24) & 7];
       if (reg < 16) {
         value = 0;
-        for (uint32_t shift = 0; shift < 32; shift += 8) {
-          // BF8 0x7c starts infinity/NaNs; FP8 0x7f is its sole NaN magnitude.
-          const uint32_t byte = (rng >> shift) & 255;
-          value |= ((byte & 128) | ((byte & 127) % (bf8 ? 0x7c : 0x7f))) << shift;
+        for (uint32_t shift = 0; shift < 32; shift += bits) {
+          const uint32_t part = (rng >> shift) & ((1u << bits) - 1);
+          value |= ((part & sign) | ((part & (sign - 1)) % limit)) << shift;
         }
       }
-      input[reg][lane] = value;
+      if (reg == 32) {
+        value = 0;
+        for (uint32_t i = 0; i < 8; ++i) {
+          value |= pairs[((rng >> (4 * i)) & 15) % 6] << (4 * i);
+        }
+      }
+      // RDNA3 repeats factor fragments; still advance the RNG for every lane.
+      input[reg][lane] = !gfx12 && reg < 16 && lane >= 16 ? input[reg][lane % 16] : value;
     }
   }
   return input;

@@ -214,6 +214,7 @@ echo "==> [3/6] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaF
   make -j"${build_jobs}" \
     rccl-UnitTestsFixtures \
     rccl-UnitTestsGinAnvilPlugin \
+    rccl-UnitTestsGinRocshmemGdaPlugin \
     rccl-UnitTestsGinAnvilConnCheckDevice \
     rccl-UnitTestsGinSdmaBroadcastPolicy \
     rccl-UnitTestsGinAnvilSdmaFactory \
@@ -283,6 +284,11 @@ if [[ ! -x "${rccl_tests_build}/alltoall_perf" ]]; then
 fi
 if [[ ! -x "${rccl_tests_build}/broadcast_perf" ]]; then
   echo "ERROR: broadcast_perf not built under ${rccl_tests_build}" >&2
+  ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
+  exit 1
+fi
+if [[ ! -x "${rccl_tests_build}/all_gather_perf" ]]; then
+  echo "ERROR: all_gather_perf not built under ${rccl_tests_build}" >&2
   ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
   exit 1
 fi

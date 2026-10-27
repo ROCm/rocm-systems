@@ -71,6 +71,7 @@ set_target_properties(
 add_library(
     rocjitsu_waitcheck_internal
     STATIC
+    $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
     $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
     $<TARGET_OBJECTS:rocjitsu_waitcheck_state>
     $<TARGET_OBJECTS:rocjitsu_waitcheck_stream>
@@ -90,6 +91,7 @@ set_target_properties(
 set(ROCJITSU_DBT_BASE_OBJECT_LIBS
     ${ROCJITSU_ANALYSIS_OBJECT_LIBS}
     rocjitsu_code
+    rocjitsu_executable
 )
 add_library(rocjitsu_dbt_internal STATIC)
 foreach(_object_lib IN LISTS ROCJITSU_DBT_BASE_OBJECT_LIBS)

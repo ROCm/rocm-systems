@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from amdisa.codegen.execute.fp8_formats import FNUZ_FP8_ARCHES, fp8_helper_name
+from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_fnuz_fp8
 from amdisa.isa_profile import MatrixLayout, SwmmacLayout
 
 if TYPE_CHECKING:
@@ -306,20 +306,35 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     uses_runtime_wave_swmmac_layout = swmmac_layout is SwmmacLayout.RUNTIME_WAVE
     uses_rdna_swmmac_arithmetic = (
         uses_runtime_wave_swmmac_layout
-        and result_type == 'I32'
         and (M, N) == (16, 16)
-        and (input_type, K) in {('IU8', 32), ('IU4', 32), ('IU4', 64)}
+        and (
+            (
+                result_type == 'I32'
+                and (input_type, K) in {('IU8', 32), ('IU4', 32), ('IU4', 64)}
+            )
+            or (
+                K == 32
+                and (
+                    (result_type, input_type)
+                    in {
+                        ('F32', 'F16'),
+                        ('F32', 'BF16'),
+                        ('F16', 'F16'),
+                        ('BF16', 'BF16'),
+                    }
+                    or (result_type == 'F32' and input_type in _F8_FIXED)
+                )
+            )
+        )
     )
-    # Floating-point RDNA4 forms still use the generic 16-bit index reader here.
-    # The floating-point SWMMAC slice supplies the matching mask and set width;
-    # changing only this mask would leave wave64 FP8/BF8 index selection incorrect.
+    if uses_runtime_wave_swmmac_layout and not uses_rdna_swmmac_arithmetic:
+        # Reject unsupported sparse shapes before resolving operands or index keys.
+        L = ['  throw util::UnimplementedInst(mnemonic());']
+        return '\n'.join(L)
     # Fixed-wave OPSEL bits are matrix-reuse hints, not sparse index selectors.
-    if uses_fixed_wave_swmmac_layout:
-        swmmac_index_key_expr = '0u'
-    elif uses_rdna_swmmac_arithmetic:
-        swmmac_index_key_expr = 'inst_.opsel & 0x3u'
-    else:
-        swmmac_index_key_expr = 'inst_.opsel & 0x1u'
+    swmmac_index_key_expr = (
+        '0u' if uses_fixed_wave_swmmac_layout else 'inst_.opsel & 0x3u'
+    )
     uses_fixed_wave32_split_k_dense_layout = (
         matrix_layout is MatrixLayout.WMMA_SPLIT_K
         and ctx.profile.wave_size == 32
@@ -385,7 +400,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         src0_base_expr = 'src0_base'
         src1_base_expr = 'src1_base'
         if uses_supported_swmmac_layout:
-            if not uses_rdna_swmmac_arithmetic:
+            if uses_fixed_wave_swmmac_layout:
                 L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
                 L.append(f'  uint32_t s2 = dst;')
             L.append(
@@ -435,7 +450,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         src0_base_expr = 'src0_base'
         src1_base_expr = 'src1_base'
         if uses_supported_swmmac_layout:
-            if not uses_rdna_swmmac_arithmetic:
+            if uses_fixed_wave_swmmac_layout:
                 L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
                 L.append(f'  uint32_t s2 = dst;')
             L.append(
@@ -548,11 +563,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' {src0_base_expr}, {src1_base_expr}, s2, extract_a, extract_b,'
                 f' inst_.clamp, const_acc);'
             )
-        elif (
-            uses_runtime_wave_swmmac_layout
-            or uses_gfx11_wmma_layout
-            or uses_gfx12_wmma_layout
-        ):
+        elif uses_gfx11_wmma_layout or uses_gfx12_wmma_layout:
             # Do not apply an existing accumulation policy to an unsupported shape.
             L.append('  throw util::UnimplementedInst(mnemonic());')
         else:
@@ -584,8 +595,8 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 L.append(f'                     s2, const_acc,')
                 L.append(f'                     inst_.cbsz, inst_.abid, inst_.blgp);')
     else:
-        # F32, F16, and BF16 matrix results accumulate in f32. Fixed Wave32 WMMA
-        # uses a Wave32 layout; CDNA MFMA uses the GFX9 MFMA layout helpers.
+        # Floating-point matrix results use the format-specific executors below.
+        # Fixed Wave32 WMMA uses a Wave32 layout; CDNA uses the GFX9 MFMA helpers.
         if uses_fixed_wave32_split_k_dense_layout and input_type in (
             'F8_F6_F4',
             'F8F6F4',
@@ -614,6 +625,23 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append(f'      }});')
             L.append(f'  if (!dispatched)')
             L.append(f'    throw util::UnimplementedInst(mnemonic());')
+            return '\n'.join(L)
+
+        if uses_rdna_swmmac_arithmetic:
+            if input_type in _F8_FIXED:
+                a_fp8, b_fp8 = _f8_bools(input_type)
+                L.append(
+                    f'  amdgpu::exec_gfx12_swmmac_dot8<{a_fp8}, {b_fp8}>(cu, wf.wf_size(), dst,'
+                    f' {src0_base_expr}, {src1_base_expr}, {index_base_expr}, {index_key_expr});'
+                )
+                return '\n'.join(L)
+            bf16 = str(input_type == 'BF16').lower()
+            packed_arg = ', true' if result_type != 'F32' else ''
+            L.append(
+                f'  amdgpu::exec_gfx12_swmmac_dot4<{bf16}{packed_arg}>(cu, wf.wf_size(), dst,'
+                f' {src0_base_expr}, {src1_base_expr}, {index_base_expr}, {index_key_expr},'
+                f" inst_.neg, inst_.neg_hi{', wf.fp16_ovfl()' if packed_arg else ''});"
+            )
             return '\n'.join(L)
 
         ea = fp8_helper_name(arch, _EXTRACT_A.get(input_type, 'amdgpu::extract_f32'))
@@ -681,19 +709,6 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                         f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
                         f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc);'
                     )
-        elif uses_runtime_wave_swmmac_layout:
-            if result_type == 'F16':
-                exec_fn = 'exec_swmmac_f16'
-            elif result_type == 'BF16':
-                exec_fn = 'exec_swmmac_bf16'
-            else:
-                exec_fn = 'exec_swmmac_f32'
-            L.append(
-                f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst, {src0_base_expr},'
-                f' {src1_base_expr}, s2, {index_base_expr}, {swmmac_index_entries},'
-                f' {index_key_expr},'
-                f' {ea}, {eb}, const_acc, wf.wf_size());'
-            )
         elif (
             uses_gfx11_wmma_layout
             and result_type in ('F32', 'F16', 'BF16')
@@ -830,7 +845,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             s1b = src1_base_expr
             if N % 16 == 0 and input_type in _F8_FIXED and has_blgp:
                 a_fp8, b_fp8 = _f8_bools(input_type)
-                fnuz = ', true' if arch in FNUZ_FP8_ARCHES else ''
+                fnuz = ', true' if uses_fnuz_fp8(arch) else ''
                 L.append(
                     f'  amdgpu::exec_f32_mfma_f8_spec<{M}, {N}, {K}, {a_fp8}, {b_fp8}{fnuz}>('
                     f'cu, dst, {s0b}, {s1b}, s2, const_acc, {cbsz}, {abid}, {blgp});'

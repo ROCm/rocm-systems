@@ -46,7 +46,16 @@ jobs:
       dashboard_ready: ${{ steps.upload_dashboard.outcome == 'success' }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
-      options: --user 0:0
+      options: >-
+        --user 0:0
+        --cgroup-parent=benchmark.slice
+        --cgroupns=host
+        --cpuset-cpus=0-63
+        --security-opt seccomp=unconfined
+        --volume /sys/fs/cgroup:/sys/fs/cgroup:ro
+        --volume /sys/kernel/sched_ext:/sys/kernel/sched_ext:ro
+        --volume /sys/devices/system/cpu:/sys/devices/system/cpu:ro
+        --mount type=bind,source=/usr/local/libexec/rocjitsu-benchmark-runner,target=/usr/local/libexec/rocjitsu-benchmark-runner,readonly
       env:
         DEBIAN_FRONTEND: noninteractive
 
@@ -77,6 +86,7 @@ jobs:
             libzstd-dev \
             ninja-build \
             python3-dev \
+            util-linux \
             zlib1g-dev
 
       - name: Checkout rocm-systems
@@ -129,6 +139,7 @@ jobs:
           repository: ROCm/rocm-libraries
           ref: ${{ env.TENSILE_SHA }}
           path: tensile-source
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python
@@ -223,14 +234,14 @@ jobs:
         run: |
           # Capture only this invocation; keep console output visible.
           set +e
-          "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
+          taskset -c 0-15 "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
             --rocjitsu-source-dir "${ROCJITSU_SOURCE_DIR}" \
             --build-dir "${ROCJITSU_BUILD_DIR}" \
             --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json" \
             --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json" \
-            --run-wrapper "\"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
+            --run-wrapper "/usr/bin/python3 -E -s /usr/local/libexec/rocjitsu-benchmark-runner/benchmark_run.py -- \"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
             --manifest benchmarks/suites/performance-v1.toml \
-            --output "${ROCJITSU_RESULT_DIR}" | tee "${BENCHMARK_DIR}/runner-output.txt"
+            --output "${ROCJITSU_RESULT_DIR}" | taskset -c 0-15 tee "${BENCHMARK_DIR}/runner-output.txt"
           RUNNER_PIPE_STATUS=("${PIPESTATUS[@]}")
           set -e
           RUNNER_EXIT="${RUNNER_PIPE_STATUS[0]}"

@@ -47,7 +47,8 @@ option(PROFILE "Enable statistics and timing support" OFF)
 option(USE_RO "Enable RO conduit" OFF)
 option(USE_IPC "Enable IPC support (using HIP)" ON)
 option(USE_GDA "Enable GDA conduit" OFF)
-option(USE_SDMA "Enable SDMA transport (MI300X+)." OFF)
+option(USE_SDMA "Enable SDMA transport (MI300X+)" OFF)
+option(USE_TDM "Enable TDM (Tensor Data Mover) LDS-staged IPC transfers (MI4xx / gfx1250+)" OFF)
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
 option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
 option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
@@ -120,7 +121,7 @@ set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 
 ## Setup VERSION
-set(VERSION_STRING 3.8.0)
+set(VERSION_STRING 3.9.0)
 message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)

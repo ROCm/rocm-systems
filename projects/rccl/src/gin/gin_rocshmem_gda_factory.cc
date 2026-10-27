@@ -467,7 +467,7 @@ static int gin_load_dv_library(rocshmem_gin_qp_set* set) {
       DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, pd_set_sqcmb);
       DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, pd_set_rqcmb);
       DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, pd_set_udma_mask);
-      DLSYM_OPT_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, create_cq_ex);
+      DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, create_cq_ex);
       return 0;
     }
 #endif
@@ -588,16 +588,16 @@ static int gin_create_cqs(rocshmem_gin_qp_set* set) {
       cq_attr.comp_mask = IBV_CQ_INIT_ATTR_MASK_PD;
 
       memset(&ionic_cq_attr, 0, sizeof(ionic_cq_attr));
-      if (set->ionic_dv.create_cq_ex) {
-        ionic_cq_attr.comp_mask = IONIC_CQ_INIT_ATTR_MASK_FLAGS;
-        ionic_cq_attr.flags = IONIC_CQ_INIT_ATTR_CCQE;
-      }
+      ionic_cq_attr.comp_mask = IONIC_CQ_INIT_ATTR_MASK_FLAGS;
+      ionic_cq_attr.flags = IONIC_CQ_INIT_ATTR_CCQE;
 
       for (int i = 0; i < n; i++) {
         cq_attr.parent_domain = set->nic.pd_uxdma[i & 1];
-        struct ibv_cq_ex* cq_ex = nullptr;
-        if (set->ionic_dv.create_cq_ex) cq_ex = set->ionic_dv.create_cq_ex(set->nic.context, &cq_attr, &ionic_cq_attr);
-        if (!cq_ex) cq_ex = gin_ibv_create_cq_ex(set->nic.context, &cq_attr);
+        // CCQE (collapsed single-entry CQ) is required: the rocSHMEM GDA device
+        // path only consumes collapsed CQs, so create_cq_ex is a mandatory ionic
+        // DV symbol (dlsym'd above, not optional) and there is no plain-CQ
+        // fallback — a missing/failed collapsed CQ is a hard init failure.
+        struct ibv_cq_ex* cq_ex = set->ionic_dv.create_cq_ex(set->nic.context, &cq_attr, &ionic_cq_attr);
         if (!cq_ex) return -1;
         set->ibv_cqs[i] = gin_ibv_cq_ex_to_cq(cq_ex);
         if (!set->ibv_cqs[i]) return -1;

@@ -4,7 +4,7 @@
 # libhsa
 
 libhsa implements the HSA C ABI over [rocddi](../rocddi/README.md). It reports
-HSA runtime version 1.21 and AMD extension version 1.33. This early frontend
+HSA runtime version 1.21 and AMD extension version 1.36. This early frontend
 does not yet provide complete ROCr compatibility. The
 [HSA headers](../../api-headers/include/hsa/) define the public ABI; an
 exported entry point does not imply that every request is supported.
@@ -19,7 +19,15 @@ mechanisms, while
 executable state. Final shutdown waits for outstanding native calls and stops
 runtime workers. On Linux KFD, a primary process context may remain after
 shutdown; later runtime generations use an instance-owned context when KFD
-supports it.
+supports it. If final native session shutdown fails after HSA objects retire,
+another `hsa_shut_down` retries that cleanup. `hsa_init` cannot publish a new
+generation until it succeeds.
+
+The single HSA CPU agent is frontend policy built from rocddi's passive host
+topology snapshot. It does not activate a CPU device. HSA prefers CPU cache
+records from OS NUMA node zero and uses the system scan when that node is
+absent. Cache handles, names, callback order, and agent attributes belong to
+libhsa.
 
 The CMake build stages `libhsa-runtime64.so.1` with `ROCR_1` symbol versions.
 Its `libamdf.so` alias exports AMDF from the same image. The two ABIs have

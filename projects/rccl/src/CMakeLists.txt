@@ -63,6 +63,7 @@ set(SRC_FILES
   device/hierarchical_shuffle.h
   device/network/unpack/unpack.h
   device/network/unpack/unpack_defs.h
+  device/ll128Layout.h
   device/onerank.cu
   device/op128.h
   device/primitives.h
@@ -87,8 +88,10 @@ set(SRC_FILES
   device/symmetric/reduce_scatter_gin.cuh
   device/tdm/asyncCopy.h
   device/tdm/cachePolicy.h
+  device/tdm/ll128Tdm.h
   device/tdm/syncPolicy.h
   device/tdm/tdmCopy.h
+  device/tdm/tdmReduce.h
   algorithms/dda/device/device_buffer.cc
   diagnostics.cc
   diagnostics.h
@@ -540,6 +543,7 @@ set(SRC_FILES
   ras/ras_param.h
   ras/rasnet.cc
   rccl_arch_thresholds.cc
+  rccl_dev_runtime.cc
   rccl_wrap.cc
   register/coll_reg.cc
   register/register.cc
@@ -1435,6 +1439,10 @@ endif()
 if(CUMEM_DMABUF_EXPORT_ENABLED)
   target_compile_definitions(rccl PRIVATE RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
   message(STATUS "RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED compile definition enabled")
+endif()
+if(HIP_MEM_LOCATION_TYPE_HOST)
+  target_compile_definitions(rccl PRIVATE RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED)
+  message(STATUS "RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED compile definition enabled")
 endif()
 
 ## Set RCCL compile options
