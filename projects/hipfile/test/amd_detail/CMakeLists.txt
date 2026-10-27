@@ -96,3 +96,12 @@ add_test(
     COMMAND gdb --batch --quiet -ex run -ex "thread apply all bt full" --return-child-result --args $<TARGET_FILE:batch_mt>
 )
 set_tests_properties(batch_mt_test PROPERTIES LABELS "stress;internal")
+
+hipfile_add_test_executable(
+    NAME hipfileread-cpu-visibility
+    DEPS hipfile
+    SRCS "hipfileread-cpu-visibility.cpp"
+    SYSINCLS ${HIPFILE_AMD_SOURCE_PATH} ${HIPFILE_INCLUDE_PATH} ${HIPFILE_TEST_COMMON_PATH} ${HIPFILE_THIRD_PARTY_PATH}
+)
+
+target_link_libraries(hipfileread-cpu-visibility PRIVATE Threads::Threads)
