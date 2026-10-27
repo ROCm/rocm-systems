@@ -25,6 +25,7 @@ from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSy
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
 from rocprof_compute_analyze.analysis_db import (
     SourceFrameCollector,
+    _roofline_point_values,
     db_analysis,
     filter_dispatch_frame,
     report_evaluation_diagnostics,
@@ -829,6 +830,51 @@ def test_calc_dataframe_expressions_same_pass_bind_uses_shadow_denominator():
 
     assert unbound.iloc[0] == 50.0  # cross-pass base GRBM=100
     assert bound.iloc[0] == 25.0  # same-pass GRBM=200
+
+
+def test_roofline_points_read_each_metric_from_one_pass():
+    """Roofline expressions use the selected counter copy, not the base column."""
+    from utils.metrics.pass_provenance import PassLayout
+
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TD_BUSY", "GRBM_GUI_ACTIVE"}),
+            "pmc_perf_1": frozenset({"TA_BUSY", "GRBM_GUI_ACTIVE"}),
+        },
+        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
+    )
+    pmc_df = pd.DataFrame({
+        "TA_BUSY": [50.0],
+        "TD_BUSY": [30.0],
+        "GRBM_GUI_ACTIVE": [100.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [100.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
+    })
+    expressions = {
+        "l1_cache_data": (
+            "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['GRBM_GUI_ACTIVE'])"
+        ),
+        "l2_cache_data": "COLLECT_RATIO(_collect.a, _collect.b)",
+        "lds_cache_data": "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])",
+    }
+
+    with patch(
+        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+        return_value="MI300",
+    ), patch(
+        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
+    ), patch("utils.metrics.pass_provenance.get_build_in_vars", return_value={}):
+        points = _roofline_point_values(
+            expressions,
+            pmc_df,
+            {"gpu_arch": "gfx942", "num_xcd": 1},
+            layout,
+        )
+
+    assert points["l1_cache_data"] == pytest.approx(50.0 / 200.0)
+    assert "l2_cache_data" not in points
+    assert pd.isna(points["lds_cache_data"])
 
 
 def test_calc_dataframe_expressions_computes_pass_scoped_builtins():
@@ -3715,8 +3761,11 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
     analyzer = make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df)
     evaluated_row_counts = []
 
-    def evaluate_roofline_metric(name, value, kernel_pmc_df, sys_info):
-        evaluated_row_counts.append(len(kernel_pmc_df))
+    def evaluate_roofline_metric(
+        name, value, kernel_pmc_df, sys_info, parse=False, **_kwargs
+    ):
+        if not parse:
+            evaluated_row_counts.append(len(kernel_pmc_df))
         return 42.0
 
     monkeypatch.setattr(

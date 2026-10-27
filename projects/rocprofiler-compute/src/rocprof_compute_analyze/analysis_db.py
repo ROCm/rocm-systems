@@ -6,7 +6,7 @@ import json
 import re
 import warnings
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, Dict, NamedTuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -176,6 +176,54 @@ def filter_dispatch_frame(
             ])
         ]
     return dispatch_frame
+
+
+def _is_composite_roofline_expression(expression: object) -> bool:
+    """Return whether expression must be filled by composite evaluation."""
+    if not isinstance(expression, str):
+        return False
+    return expression.lstrip().startswith((
+        "COLLECT_SUM(",
+        "COLLECT_RATIO(",
+        "WEIGHTED_AVG(",
+    ))
+
+
+def _roofline_point_values(
+    expressions: Dict[str, str],
+    pmc_df: pd.DataFrame,
+    sys_info: Dict[str, Any],
+    pass_layout: Optional[PassLayout],
+) -> Dict[str, Any]:
+    """Evaluate ordinary roofline points with one-pass expression binding."""
+    expression_rows = [
+        (metric_name, expression)
+        for metric_name, expression in expressions.items()
+        if expression and not _is_composite_roofline_expression(expression)
+    ]
+    if not expression_rows:
+        return {}
+
+    expression_df = pd.DataFrame({
+        "metric_id": [metric_name for metric_name, _expression in expression_rows],
+        "value_name": ["Value"] * len(expression_rows),
+        "value": [expression for _metric_name, expression in expression_rows],
+    })
+    used_passes = set()
+    if pass_layout is not None and pass_layout.has_duplicates:
+        used_passes = bind_expression_dataframe(
+            expression_df,
+            pass_layout,
+            mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"]),
+        )
+    values = db_analysis.calc_dataframe_expressions(
+        pmc_df,
+        sys_info.copy(),
+        expression_df,
+        pass_layout=pass_layout,
+        used_passes=used_passes,
+    )
+    return dict(zip(expression_df["metric_id"], values))
 
 
 class MetricInfoRow(NamedTuple):
@@ -1587,6 +1635,9 @@ class db_analysis(OmniAnalyze_Base):
                 "hbm_cache_data": roofline_data_expressions.get("AI HBM", ""),
                 "lds_cache_data": roofline_data_expressions.get("AI LDS", ""),
             }
+            pass_layout = getattr(self, "_pass_layout_per_workload", {}).get(
+                workload_path
+            )
 
             # Calculate kernel-level roofline data
             top_kernels = (
@@ -1600,16 +1651,12 @@ class db_analysis(OmniAnalyze_Base):
             roofline_df = pd.DataFrame([
                 {
                     "kernel_name": kernel_name,
-                    **{
-                        metric_name: db_analysis.evaluate(
-                            metric_name,
-                            roofline_data_expressions[metric_name],
-                            pmc_df[pmc_df["Kernel_Name"] == kernel_name],
-                            sys_info,
-                        )
-                        for metric_name in roofline_data_expressions
-                        if roofline_data_expressions[metric_name]
-                    },
+                    **_roofline_point_values(
+                        roofline_data_expressions,
+                        pmc_df[pmc_df["Kernel_Name"] == kernel_name],
+                        sys_info,
+                        pass_layout,
+                    ),
                 }
                 for kernel_name in top_kernels
             ])
