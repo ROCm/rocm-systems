@@ -7,14 +7,10 @@
 #ifndef DEVICE_BUFFER_HELPERS_HPP
 #define DEVICE_BUFFER_HELPERS_HPP
 
-#include <hip/hip_fp16.h>
-#include <hip/hip_runtime.h>
-
-#include <cmath>
-#include <type_traits>
-#include <vector>
-
 #include "nccl.h"
+#include <cmath>
+#include <hip/hip_runtime.h>
+#include <hip/hip_fp16.h>
 
 // hip_bfloat16 type handling based on ROCm version
 // Note: Do NOT define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BFLOAT16_H_ or _HIP_BFLOAT16_H_ guards here
@@ -29,6 +25,9 @@
 #else
   #include <hip/hip_bfloat16.h>
 #endif
+
+#include <type_traits>
+#include <vector>
 
 /**
  * @file DeviceBufferHelpers.hpp

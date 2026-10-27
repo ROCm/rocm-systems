@@ -4,9 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Loads the recorder profiler plugin (plugin/profiler_kernelch_recorder) for an
-// MPI test and points NCCL_PROFILER_PLUGIN at it. RCCL settles its profiler on
-// the first communicator in a process, so call Load() before creating one.
+// Loads the recorder profiler plugin for an MPI test; call Load() before the first communicator.
 
 #ifndef RCCL_TEST_PROFILER_RECORDER_HELPERS_HPP_
 #define RCCL_TEST_PROFILER_RECORDER_HELPERS_HPP_
@@ -17,6 +15,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -36,14 +35,12 @@ class ProfilerRecorder {
     Unload();
   }
 
-  // Agreed by all ranks: a missing recorder build is a skip, a recorder that
-  // will not load is a broken build or install and a failure.
+  // All ranks agree: a recorder not built is a skip, one that will not load is a failure.
   void Load() {
     std::string skip;
     std::string fail;
 #ifdef RCCL_TEST_KCH_RECORDER_NAME
-    // Built and installed beside the test binary, so it resolves the same way
-    // from a build tree and from an install.
+    // Installed beside the test binary in both build and install trees.
     std::error_code ec;
     std::filesystem::path exe =
         std::filesystem::read_symlink("/proc/self/exe", ec);
@@ -70,27 +67,14 @@ class ProfilerRecorder {
     if (!skipReason_.empty()) {
       return;
     }
-    const char* prev = getenv("NCCL_PROFILER_PLUGIN");
-    hadPrevPlugin_ = prev != nullptr;
-    if (prev != nullptr) {
-      prevPlugin_ = prev;
-    }
-    setenv("NCCL_PROFILER_PLUGIN", path_.c_str(), 1);
-    envSet_ = true;
+    pluginEnv_ = std::make_unique<MPIHelpers::MpiEnvGuard>(
+        "NCCL_PROFILER_PLUGIN", path_.c_str());
     reset_();
   }
 
-  // Restores NCCL_PROFILER_PLUGIN and closes the plugin. Call it after every
-  // communicator is destroyed: RCCL holds handles into the plugin.
+  // Call after every communicator is destroyed: RCCL holds handles into the plugin.
   void Unload() {
-    if (envSet_) {
-      if (hadPrevPlugin_) {
-        setenv("NCCL_PROFILER_PLUGIN", prevPlugin_.c_str(), 1);
-      } else {
-        unsetenv("NCCL_PROFILER_PLUGIN");
-      }
-      envSet_ = false;
-    }
+    pluginEnv_.reset();
     if (handle_ != nullptr) {
       dlclose(handle_);
       handle_ = nullptr;
@@ -146,7 +130,6 @@ class ProfilerRecorder {
 
   static constexpr size_t kPluginPathLimit = 255;
 
-  // Resolves one query symbol of the plugin.
   template <typename Fn>
   Fn Symbol(const char* name) {
     return reinterpret_cast<Fn>(dlsym(handle_, name));
@@ -183,13 +166,10 @@ class ProfilerRecorder {
   ThreadsFn proxyThreads_ = nullptr;
   std::string path_;
   void* handle_ = nullptr;
-  bool envSet_ = false;
-  bool hadPrevPlugin_ = false;
-  std::string prevPlugin_;
+  std::unique_ptr<MPIHelpers::MpiEnvGuard> pluginEnv_;
 };
 
-// Opens a test that uses `recorder`: fails when it will not load, skips when it
-// was not built.
+// Fails the test when the recorder will not load and skips it when it was not built.
 #define RECORDER_REQUIRE(recorder)             \
   do {                                         \
     if (!(recorder).failReason().empty()) {    \
