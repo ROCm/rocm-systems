@@ -1717,7 +1717,13 @@ template <typename AqlPacket>
 bool VirtualGPU::dispatchAqlPacket(AqlPacket* packet, uint16_t header,
                                    uint16_t rest, bool blocking, bool attach_signal) {
   if (command_ != nullptr && command_->getPktCapturingState()) {
+    // The packet runs later from the graph's launch queue, not from this one, so forming its
+    // header must not change this queue's fence tracking.
+    const bool fence_dirty = isFenceDirty();
+    const int fence_state = fence_state_;
     adjustHeader(header);
+    setFenceDirty(fence_dirty);
+    fence_state_ = fence_state;
     packet->header = header;
     if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
       // For ext dispatch packets the first 32 bits are {header(16), amd_format(8), setup(8)}.
