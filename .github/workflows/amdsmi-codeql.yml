@@ -124,13 +124,29 @@ jobs:
         run: |
           python3 - <<'PY'
           import json
+          import os
           import sys
           from pathlib import Path
+          from urllib.parse import urlencode
 
           report = json.loads(Path("sarif-results/cpp-filtered.sarif").read_text())
           findings = sum(len(run.get("results", [])) for run in report["runs"])
           if findings:
-              print(f"::error::CodeQL detected {findings} finding(s); see the uploaded SARIF report")
+              ref = os.environ["GITHUB_REF"]
+              scope = f"pr:{ref.split('/')[2]}" if ref.startswith("refs/pull/") else f"branch:{ref}"
+              query = urlencode({"query": f"tool:CodeQL {scope}"})
+              alerts_url = (
+                f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+                f"/security/code-scanning?{query}"
+              )
+              print(f"::error::CodeQL detected {findings} finding(s). View code scanning alerts: {alerts_url}")
+              with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+                summary.write(
+                  f"## CodeQL Findings\n\n"
+                  f"CodeQL detected **{findings} finding(s)**.\n\n"
+                  f"[View code scanning alerts]({alerts_url})\n\n"
+                  "The `amdsmi-codeql-report` artifact also contains the SARIF report.\n"
+                )
               sys.exit(1)
           print("CodeQL detected no findings")
           PY
