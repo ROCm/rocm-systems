@@ -10,9 +10,9 @@
 
 #include "nccl.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM defaults this stands in for
-#include "comm.h"      // also pulls recorder.h (no include guard)
+#include "alloc.h"
+#include "comm.h"
 #include "utils.h"
-#include "roctx.h"
 #include "profiler.h"
 
 #include "fakes/comm_fakes.h"
@@ -72,6 +72,9 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t
 std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t)> g_profilerStopCeCollEvent =
     DefaultProfilerCeCollEvent;
 
+// alloc.h per-device allocation counters, defined in src/init.cc.
+struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
+
 void ResetCommFakes() {
   g_commSetAsyncError = DefaultCommSetAsyncError;
   g_commCount = DefaultCommCount;
@@ -104,8 +107,7 @@ int64_t ncclParamCGAClusterSize() { return g_loadParam("CGA_CLUSTER_SIZE", NCCL_
 // init_fakes.cc and in enqueue_test_deps.cc, differing only in which record()
 // overloads each target referenced.
 
-roctx_scoped_range_in::roctx_scoped_range_in(const char*) noexcept {}
-roctx_scoped_range_in::~roctx_scoped_range_in() {}
+// roctx_scoped_range_in lives in roctx_fakes.cc.
 
 thread_local ncclProfilerApiState_t ncclProfilerApiState = {};
 ncclResult_t ncclProfilerStartGroupApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }

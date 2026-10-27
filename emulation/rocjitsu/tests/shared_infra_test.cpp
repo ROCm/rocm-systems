@@ -113,6 +113,7 @@
 #include "util/bit.h"
 #include "util/data_types.h"
 #include "util/except.h"
+#include "util/host_target.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -8440,7 +8441,7 @@ TEST(AluExceptionTest, MultiplyExactProductCoversF32RangeAndRounding) {
   }
 }
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 TEST(AluExceptionTest, HostDazPreservesExactSubnormalOutputClassification) {
   const amdgpu::fp_mode::ScopedEnvironment environment(0);
   _mm_setcsr(_mm_getcsr() | (1u << 6));
