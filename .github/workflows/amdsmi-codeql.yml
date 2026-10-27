@@ -120,6 +120,21 @@ jobs:
           checkout_path: ${{ env.PROJECT_DIR }}
           category: '/workflow:amdsmi-codeql/language:cpp'
 
+      - name: Fail on CodeQL findings
+        run: |
+          python3 - <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path("sarif-results/cpp-filtered.sarif").read_text())
+          findings = sum(len(run.get("results", [])) for run in report["runs"])
+          if findings:
+              print(f"::error::CodeQL detected {findings} finding(s); see the uploaded SARIF report")
+              sys.exit(1)
+          print("CodeQL detected no findings")
+          PY
+
       - name: Publish CodeQL report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
