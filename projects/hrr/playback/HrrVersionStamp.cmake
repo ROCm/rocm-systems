@@ -24,9 +24,6 @@ set(HRR_BUILD_BRANCH "unknown")
 # source tree, and git would run that repository's commands as the builder.
 # A checkout the builder already trusts belongs in their own git config.
 
-get_filename_component(_out_dir "${OUT_FILE}" DIRECTORY)
-file(MAKE_DIRECTORY "${_out_dir}")
-
 find_package(Git QUIET)
 if(GIT_FOUND)
   execute_process(
