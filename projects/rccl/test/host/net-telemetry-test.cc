@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <climits>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -1087,9 +1088,17 @@ TEST_F(NetTelemetryChannelMicrotest, AlignedCalloc_AllocFails_ReturnsNull) {
 using NetTelemetryHooksMicrotest = NetTelemetryMicrotest;
 
 TEST_F(NetTelemetryHooksMicrotest, GetNs_ReadsMonotonicClockInNanoseconds) {
-  g_nowNs = 12345678901234;
+  static clockid_t seenClock;
+  seenClock = CLOCK_REALTIME;
+  ScopedHook clockHook(g_clockGettime, [](clockid_t id, struct timespec* ts) {
+    seenClock = id;
+    ts->tv_sec = 12345;
+    ts->tv_nsec = 678901234;
+    return 0;
+  });
 
   EXPECT_EQ(rcclTelemetryGetNs(), 12345678901234);
+  EXPECT_EQ(seenClock, CLOCK_MONOTONIC);
 }
 
 TEST_F(NetTelemetryHooksMicrotest, BlockIndex_MapsIndexToDoublingBlocks) {
@@ -1231,10 +1240,17 @@ TEST_F(NetTelemetryQpHooksMicrotest, QpWqeComplete_SampledCompletions_TrackHisto
 TEST_F(NetTelemetryQpHooksMicrotest, QpWqeComplete_BucketPastHistogram_IsNotCounted) {
   rcclTelemetryCfg.histogram_max_buckets = RCCL_TELEMETRY_HISTOGRAM_SIZE + 4;
 
-  rcclTelemetryQpWqeComplete(qp_, g_nowNs - int64_t{30000} * (RCCL_TELEMETRY_HISTOGRAM_SIZE + 1));
+  rcclTelemetryQpWqeComplete(qp_, g_nowNs - int64_t{30000} * RCCL_TELEMETRY_HISTOGRAM_SIZE);
 
   EXPECT_EQ(rcclTelemetryQpSampledCount(qp_), 0u);
-  EXPECT_EQ(qp_->wqe_completion_ns_max, int64_t{30000} * (RCCL_TELEMETRY_HISTOGRAM_SIZE + 1));
+  EXPECT_EQ(qp_->wqe_completion_ns_max, int64_t{30000} * RCCL_TELEMETRY_HISTOGRAM_SIZE);
+  // The slot's zeroed alignment padding follows the histogram, so a write one past the end lands there.
+  static_assert(sizeof(RcclQpStats) >= sizeof(uint64_t) * (RCCL_TELEMETRY_HISTOGRAM_SIZE + 1) +
+                                           offsetof(RcclQpStats, wqe_completion_histogram));
+  uint64_t pastEnd;
+  std::memcpy(&pastEnd, reinterpret_cast<char*>(qp_) + offsetof(RcclQpStats, wqe_completion_histogram) +
+                            sizeof(qp_->wqe_completion_histogram), sizeof(pastEnd));
+  EXPECT_EQ(pastEnd, 0u);
 }
 
 TEST_F(NetTelemetryQpHooksMicrotest, QpWqeComplete_LastHistogramBucket_IsCounted) {
@@ -1513,7 +1529,7 @@ TEST_F(NetTelemetryCaptureMicrotest, SwCapture_MinComesFromAnyQpWithSamples) {
   ASSERT_EQ(rcclTelemetryRegisterDevice(0, "rdma0", "IB"), 0);
   RcclQpStats* a = SetupQps(0, 0, 3);
   rcclTelemetryQpWqeComplete(a, g_nowNs - 300);
-  rcclTelemetryQpWqeComplete(rcclTelemetryResolveQp(0, 0, 2), g_nowNs - 200);
+  rcclTelemetryQpWqeComplete(rcclTelemetryResolveQp(0, 0, 1), g_nowNs - 200);
   RcclTelemetrySwSnapshot snap[1];
 
   ASSERT_EQ(rcclTelemetrySwCapture(snap, 1), 1);
@@ -2123,6 +2139,8 @@ TEST_F(NetTelemetrySamplerMicrotest, SampledTableIdx_ResolvesNameThenAlternate) 
   EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigAinic, 7), CounterIndex(&rcclHwConfigAinic, "to_retransmits"));
   EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigMlx5, 7),
             CounterIndex(&rcclHwConfigMlx5, "local_ack_timeout_err"));
+  EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigThor2, 7),
+            CounterIndex(&rcclHwConfigThor2, "local_ack_timeout_err"));
   EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigThor2, 3), -1);
 }
 
