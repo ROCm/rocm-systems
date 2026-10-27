@@ -8,6 +8,7 @@ set(ROCPROFILER_LIB_KERNEL_REPLAY_HEADERS
     memory_tracker.hpp
     replay_callbacks.hpp
     snapshot-plan.hpp
+    snapshot-storage.hpp
     utils.hpp)
 set(ROCPROFILER_LIB_KERNEL_REPLAY_SOURCES
     blit-copy.cpp kernel_replay.cpp local_context.cpp memory_snapshot.cpp
