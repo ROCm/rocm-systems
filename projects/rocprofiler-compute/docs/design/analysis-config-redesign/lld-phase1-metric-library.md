@@ -719,6 +719,8 @@ panel that shows it:
 - A per-channel metric ends with `per Channel`.
 - It is in title case; short words (`and`, `by`, `of`, `on`, `over`, `per`, `to`,
   `under`, `vs`) stay lowercase.
+- An RDNA metric starts with RDNA's block word (`GL0`, `GL1`, `GL2`, `GCEA`, `CHC`, `EA`,
+  `TXA`, `WGP`, `Dcache`, `ICache`); an id both families share keeps its CDNA name.
 - A metric that shows one raw counter is named after the counter (`TCC_BUSY`).
 - A metric shown only by panel 3000 (memory bandwidth analysis) keeps that model's block
   words (`EA` for the L2-Fabric interface, `L1 Cache` and `TCP` for the vL1D, `TD -`,
