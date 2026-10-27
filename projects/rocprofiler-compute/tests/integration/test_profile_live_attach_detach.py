@@ -20,12 +20,7 @@ from tests.integration.common import (
 def test_live_attach_detach_block(
     binary_handler_profile_rocprof_compute,
 ):
-    options = [
-        "--block",
-        "3.1.1",
-        "4.1.1",
-        "5.1.1",
-    ]
+    options = ["--block", "3"]
     workload_dir = common.get_output_dir()
 
     # TODO: temp fix for sdk defautly disable attach/detach,

@@ -554,7 +554,8 @@ add_test(
     NAME test_common
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_common.xml ${COV_OPTION}
-        tests/unit/test_common.py ${WORKING_DIR_OPTION}
+        tests/unit/test_common.py tests/unit/integration/test_common.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
