@@ -36,9 +36,10 @@ EXPECT_CALL(*m_db, save(Field(&record::id, Eq(k_id)))).Times(1).WillOnce(Return(
   fake policy type. Never add a virtual interface, constructor overload, accessor, or hook
   to production code for a test.
 - **Static wrapper policies.** Either a state fake (`inline static` canned data plus a
-  `call_count`, model: `backends/hipfile/tests/mock_wrapper.hpp`), or static functions
-  forwarding to a `MockFunction<...>*` when exact arguments matter. Either way, reset all
-  static state in `SetUp()` and null the pointer in `TearDown()`; state is process-global.
+  `call_count`, model: `backends/hipfile/tests/mock_wrapper.hpp`), or, when exact
+  arguments matter, a global `std::unique_ptr<StrictMock<gmock_x>>` plus a forwarding
+  struct whose static functions call into it. Either way, reset all static state and
+  create the mock in `SetUp()`, reset the global in `TearDown()`; state is process-global.
 - **Virtual interfaces** end in `_interface`; mocks are `mock_<name>` with
   `MOCK_METHOD(..., (override))`.
 - **Library-mirroring names** in mocks go inside `NOLINTBEGIN(readability-identifier-naming)`
