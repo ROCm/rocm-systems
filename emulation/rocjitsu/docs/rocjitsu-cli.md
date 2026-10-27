@@ -42,10 +42,11 @@ In native KFD/AQL execution, an instruction that the simulator cannot decode or
 execute terminates the simulation engine with a failure result. The affected
 queue cancels its outstanding dispatches without publishing successful kernel
 or barrier completion. When available, the queue owner also receives an
-illegal-instruction exception for a decode failure or a queue-abort exception for an execution
-support failure. Runtime acceptance of that notification does not recover the
-simulator. A debugger-owned illegal-instruction stop is different: the debugger
-may repair the instruction and resume the wave without terminating the engine.
+illegal-instruction exception for a decode failure, or a queue-abort exception
+for a decoded instruction the simulator cannot execute. Runtime acceptance of
+that notification does not recover the simulator. A debugger-owned
+illegal-instruction stop is different: the debugger may repair the instruction
+and resume the wave without terminating the engine.
 
 The daemon hosts one shared simulation engine, not an isolated engine per
 client. A fatal instruction therefore shuts down the daemon and disconnects

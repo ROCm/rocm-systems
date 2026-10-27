@@ -434,7 +434,7 @@ TEST_F(DaemonTest, HipFatalDecodeDisconnectsValidClient) {
   const pid_t valid_client = fork();
   ASSERT_GE(valid_client, 0);
   if (valid_client == 0) {
-    // Kill the death-test child along with its launcher if the regression hangs.
+    // Kill the death-test child along with its launcher if the test hangs.
     if (setpgid(0, 0) != 0)
       _exit(127);
     redirect_output_or_exit(output_path);
