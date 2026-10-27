@@ -1660,6 +1660,7 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::SPM::spm_device_counting_service_hsa_registration();
 
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
+        rocprofiler::hsa::dispatch_time_init(hsa_api_table, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->core_, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->amd_ext_, lib_instance);
         rocprofiler::kernel_replay::memory_tracker_init(hsa_api_table->core_, lib_instance);
@@ -1740,8 +1741,6 @@ rocprofiler_set_api_table(const char* name,
             if(enable_queue_interposition)
                 rocprofiler::hsa::queue_interposition::interposition_init(
                     hsa_api_table->core_, enable_queue_interposition);
-            else if(!registered_contexts.empty())
-                rocprofiler::hsa::dispatch_time_init(hsa_api_table, lib_instance);
         }
 
         // Replay device thread trace contexts started before hsa_init(). Must run
