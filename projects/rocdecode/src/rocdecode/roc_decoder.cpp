@@ -147,9 +147,18 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
     }
 
 #ifndef _WIN32
-    // The interop is normally set up for all surfaces at decoder creation/reconfiguration
+    // The interop is set up for all surfaces at decoder creation and reconfiguration. A surface is
+    // only unmapped here if that setup failed (for example, the caller ignored a failed reconfigure),
+    // so import it now, on the decoder's device.
     if (hip_interop_[pic_idx].hip_mapped_device_mem == nullptr) {
+        int prev_device_id;
+        rocdec_status = SetDecoderDevice(prev_device_id);
+        if (rocdec_status != ROCDEC_SUCCESS) {
+            FunctionExitLog(g_rocdec_logger);
+            return rocdec_status;
+        }
         rocdec_status = ImportSurface(pic_idx);
+        CHECK_HIP(hipSetDevice(prev_device_id));
         if (rocdec_status != ROCDEC_SUCCESS) {
             FunctionExitLog(g_rocdec_logger);
             return rocdec_status;
