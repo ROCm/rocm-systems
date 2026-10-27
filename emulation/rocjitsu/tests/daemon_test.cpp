@@ -282,8 +282,8 @@ protected:
       daemon_pid_ = -1;
     }
     const std::string output = read_file(tmp_dir_ + "/daemon.log");
-    EXPECT_FALSE(rocjitsu::test::has_sanitizer_diagnostic(output))
-        << "daemon output contains a sanitizer diagnostic";
+    EXPECT_FALSE(rocjitsu::test::has_unexpected_failure_diagnostic(output))
+        << "daemon output contains a sanitizer or assertion diagnostic";
     if (expected_daemon_diagnostic_) {
       const ::testing::Matcher<const std::string &> diagnostic =
           ::testing::ContainsRegex(expected_daemon_diagnostic_);

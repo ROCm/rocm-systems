@@ -45,18 +45,19 @@ public:
       pattern = kind_ == FailureKind::Decode ? "Queue error: HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION:"
                                              : "Queue error: HSA_STATUS_ERROR_EXCEPTION:";
     const ::testing::Matcher<const std::string &> diagnostic =
-        rocjitsu::test::SanitizerFreeDiagnostic(pattern);
+        rocjitsu::test::ExpectedFailureDiagnostic(pattern);
     return diagnostic.MatchAndExplain(output, listener);
   }
 
   void DescribeTo(std::ostream *stream) const {
     *stream << "contains the daemon disconnect or HIP queue-error diagnostic matching its exit "
-               "without sanitizer diagnostics";
+               "without sanitizer or assertion diagnostics";
   }
 
   void DescribeNegationTo(std::ostream *stream) const {
-    *stream << "contains sanitizer diagnostics or does not contain the daemon diagnostic "
-               "matching its exit";
+    *stream
+        << "contains sanitizer or assertion diagnostics or does not contain the daemon diagnostic "
+           "matching its exit";
   }
 
 private:
@@ -96,7 +97,7 @@ TEST(HipInstructionFailureTest, UnsupportedInstructionExitsWithFailure) {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
   EXPECT_EXIT(
       wait_for_instruction_failure(FailureKind::Unsupported), native_instruction_failure,
-      rocjitsu::test::SanitizerFreeDiagnostic(
+      rocjitsu::test::ExpectedFailureDiagnostic(
           "CU .*could not execute s_rfe_restore_b64.*pc=.*pid=.*qid=.*dispatch=.*unimplemented "
           "instruction"));
 }
@@ -104,7 +105,7 @@ TEST(HipInstructionFailureTest, UnsupportedInstructionExitsWithFailure) {
 TEST(HipInstructionFailureTest, DecodeFailureExitsWithFailure) {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
   EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Decode), native_instruction_failure,
-              rocjitsu::test::SanitizerFreeDiagnostic(
+              rocjitsu::test::ExpectedFailureDiagnostic(
                   "CU .*could not decode.*pc=.*pid=.*qid=.*dispatch=.*0xbfff0000"));
 }
 
@@ -161,7 +162,7 @@ TEST(HipDaemonInstructionFailureTest, ValidClientExitsWhenAnotherClientFails) {
     }
   };
   EXPECT_EXIT(run_valid_client(), ::testing::ExitedWithCode(EXIT_FAILURE),
-              rocjitsu::test::SanitizerFreeDiagnostic("rocjitsu: daemon connection lost"));
+              rocjitsu::test::ExpectedFailureDiagnostic("rocjitsu: daemon connection lost"));
 }
 
 int main(int argc, char **argv) {
