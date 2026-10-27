@@ -30,6 +30,32 @@ ROCPD_COUNTER_HEADER = (
 ROCPD_COUNTER_ROW_PREFIX = "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,"
 
 
+def _counter_row(
+    dispatch_id: int,
+    counter_name: str,
+    counter_value: float,
+    pass_key: str,
+) -> dict:
+    return {
+        "GPU_ID": 0,
+        "Dispatch_ID": dispatch_id,
+        "Grid_Size": 256,
+        "Workgroup_Size": 64,
+        "LDS_Per_Workgroup": 0,
+        "Scratch_Per_Workitem": 0,
+        "Arch_VGPR": 8,
+        "Accum_VGPR": 0,
+        "SGPR": 16,
+        "Kernel_Name": "k",
+        "Start_Timestamp": 10,
+        "End_Timestamp": 20,
+        "Kernel_ID": 0,
+        "Counter_Name": counter_name,
+        "Counter_Value": counter_value,
+        "Pass_Key": pass_key,
+    }
+
+
 def _write_gzip_csv(path, text: str) -> None:
     import gzip
 
@@ -509,3 +535,70 @@ def test_eval_metric_uses_same_pass_for_duplicated_denominator() -> None:
     # Same-pass: 100 * 50 / 200 = 25. Cross-pass base would be 100 * 50 / 100 = 50.
     assert float(dfs[1].at["9.9.9", "Avg"]) == 25.0
     assert dfs[1].attrs.get("metric_row_pass", {}).get("9.9.9") == "pmc_perf_1"
+
+
+def test_missing_denominator_keeps_pooled_ratio() -> None:
+    """One dispatch lacks the denominator; the pooled ratio stays 50.
+
+    Dispatch 1 is 50/100. Dispatch 2 has numerator 50 and no denominator,
+    because that pass did not run. Two complete 50/100 dispatches pool to
+    100/200 = 50. The numerator-only sum still includes both dispatches.
+    """
+    long_df = pd.DataFrame([
+        _counter_row(0, "NUMERATOR", 50, "pmc_perf_0"),
+        _counter_row(0, "DENOMINATOR", 100, "pmc_perf_0"),
+        _counter_row(1, "NUMERATOR", 50, "pmc_perf_0"),
+    ])
+    layout = build_pass_layout(long_df)
+    raw_pmc_df, _slot_to_id = process_rocpd_csv(long_df, pass_layout=layout)
+    assert raw_pmc_df["DENOMINATOR"].isna().sum() == 1
+    assert raw_pmc_df["NUMERATOR"].sum() == 100
+
+    metric_df = pd.DataFrame({
+        "Metric_ID": ["9.9.9", "9.9.8"],
+        "Metric": ["Ratio", "Numerator"],
+        "Avg": [
+            (
+                "100 * to_sum(raw_pmc_df['NUMERATOR'])"
+                " / to_sum(raw_pmc_df['DENOMINATOR'])"
+            ),
+            "to_sum(raw_pmc_df['NUMERATOR'])",
+        ],
+    }).set_index("Metric_ID")
+    dfs = {1: metric_df}
+    dfs_type = {1: "metric_table"}
+    dfs_expressions = {1: metric_df["Avg"].tolist()}
+    sys_info = pd.Series({
+        "ip_blocks": "standard",
+        "gpu_arch": "gfx942",
+        "se_per_gpu": 4,
+        "sa_per_se": 1,
+        "pipes_per_gpu": 4,
+        "cu_per_gpu": 38,
+        "simd_per_cu": 4,
+        "sqc_per_gpu": 16,
+        "lds_banks_per_cu": 32,
+        "cur_sclk": 1800.0,
+        "cur_mclk": 1200.0,
+        "max_sclk": 2100.0,
+        "max_mclk": 1600.0,
+        "max_waves_per_cu": 32,
+        "num_memory_channels": 4,
+        "total_l2_chan": 16,
+        "num_xcd": 1,
+        "wave_size": 64,
+    })
+
+    eval_metric(
+        dfs,
+        dfs_type,
+        dfs_expressions,
+        sys_info,
+        pd.DataFrame(),
+        raw_pmc_df,
+        debug=False,
+        pass_layout=layout,
+    )
+
+    assert float(dfs[1].at["9.9.9", "Avg"]) == 50.0
+    assert float(dfs[1].at["9.9.8", "Avg"]) == 100.0
