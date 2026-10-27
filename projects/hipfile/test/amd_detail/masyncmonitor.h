@@ -18,7 +18,6 @@ struct MAsyncMonitor : IAsyncMonitor {
     {
     }
     MOCK_METHOD(void, submitIo, (std::shared_ptr<AsyncOp> op), (override));
-    MOCK_METHOD(void, submitIoAndWait, (std::shared_ptr<AsyncOp> op), (override));
 };
 
 }

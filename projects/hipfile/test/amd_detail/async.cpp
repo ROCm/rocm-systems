@@ -266,17 +266,19 @@ TEST_F(AsyncTest, GpuMismatchThrows)
     EXPECT_THROW(enqueue(), std::invalid_argument);
 }
 
-TEST_F(AsyncTest, DispatchBlockingOpSubmitsAndWaits)
+TEST_F(AsyncTest, DispatchBlockingOpWaitsForIo)
 {
-    MAsyncMonitor monitor;
-    auto          op = makeOp(async_run_io);
-    op->block        = true;
-    op->self         = op;
-    EXPECT_CALL(monitor, submitIoAndWait);
-    EXPECT_CALL(monitor, submitIo).Times(0);
+    // A real one-worker pool runs the op on another thread, so returning early would leave it unfinished.
+    AsyncMonitor                   monitor{std::make_unique<ThreadPool>(1)};
+    ContextOverride<IAsyncMonitor> co{&monitor};
+    auto                           op = makeOp(async_run_io);
+    op->block                         = true;
+    op->self                          = op;
+    EXPECT_CALL(*backend, io).WillOnce(Return(512));
 
     async_dispatch(op.get());
-    EXPECT_EQ(op->self, nullptr);
+    EXPECT_EQ(op->state.load(), AsyncOpState::Done);
+    EXPECT_EQ(bytes, 512);
 }
 
 TEST_F(AsyncTest, DispatchNonBlockingOpSubmits)
@@ -285,7 +287,6 @@ TEST_F(AsyncTest, DispatchNonBlockingOpSubmits)
     auto          op = makeOp(async_run_io);
     op->self         = op;
     EXPECT_CALL(monitor, submitIo);
-    EXPECT_CALL(monitor, submitIoAndWait).Times(0);
 
     async_dispatch(op.get());
     EXPECT_EQ(op->self, nullptr);
@@ -293,8 +294,10 @@ TEST_F(AsyncTest, DispatchNonBlockingOpSubmits)
 
 TEST_F(AsyncTest, DispatchSubmitFailureFinishesOpWithError)
 {
+    // A blocking op, so a failed submission must still finish the op or the host function would hang.
     MAsyncMonitor monitor;
     auto          op = makeOp(async_run_io);
+    op->block        = true;
     op->self         = op;
     EXPECT_CALL(monitor, submitIo).WillOnce(Throw(std::runtime_error("no workers")));
     EXPECT_CALL(*stream, finishOutstanding);
@@ -315,17 +318,6 @@ TEST_F(AsyncTest, MonitorSubmitIoRunsOpAndSignals)
     monitor.submitIo(op);
     EXPECT_TRUE(ran);
     EXPECT_EQ(slot, 1u);
-    EXPECT_EQ(op->state.load(), AsyncOpState::Done);
-}
-
-TEST_F(AsyncTest, MonitorSubmitIoAndWaitRunsOp)
-{
-    AsyncMonitor monitor{std::make_unique<InlinePool>()};
-    bool         ran{false};
-    auto         op = makeOp([&ran](AsyncOp *) { ran = true; });
-
-    monitor.submitIoAndWait(op);
-    EXPECT_TRUE(ran);
     EXPECT_EQ(op->state.load(), AsyncOpState::Done);
 }
 

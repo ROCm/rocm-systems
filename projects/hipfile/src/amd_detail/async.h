@@ -68,11 +68,8 @@ class IAsyncMonitor {
 public:
     virtual ~IAsyncMonitor() = default;
 
-    /// @brief Run an op on the pool without waiting (completion is observed via the stream signal).
+    /// @brief Run an op on the pool without waiting. Its state reaches Done when it finishes.
     virtual void submitIo(std::shared_ptr<AsyncOp> op) = 0;
-
-    /// @brief Run an op on the pool and block the caller until it finishes.
-    virtual void submitIoAndWait(std::shared_ptr<AsyncOp> op) = 0;
 };
 
 class AsyncMonitor : public IAsyncMonitor {
@@ -81,7 +78,6 @@ public:
     ~AsyncMonitor() override;
 
     void submitIo(std::shared_ptr<AsyncOp> op) override;
-    void submitIoAndWait(std::shared_ptr<AsyncOp> op) override;
 
 private:
     std::unique_ptr<IThreadPool> pool;       // Dedicated async pool; never the batch Context<IThreadPool>.

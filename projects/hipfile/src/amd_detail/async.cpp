@@ -17,7 +17,6 @@
 #include <atomic>
 #include <cstdint>
 #include <exception>
-#include <future>
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <stdexcept>
@@ -57,6 +56,16 @@ runOp(AsyncOp *op, bool run_io)
     op->state.notify_all();
 }
 
+// Only for ops that can't be abandoned: those the pool has already started, or that never arm a wait.
+static void
+waitUntilDone(AsyncOp *op)
+{
+    for (auto state = op->state.load(std::memory_order_acquire); state != AsyncOpState::Done;
+         state      = op->state.load(std::memory_order_acquire)) {
+        op->state.wait(state, std::memory_order_acquire);
+    }
+}
+
 AsyncOp::AsyncOp(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<IBuffer> _buffer,
                  std::shared_ptr<IStream> _stream, size_t *_size, hoff_t *_file_offset,
                  hoff_t *_buffer_offset, ssize_t *_bytes_transferred, std::function<void(AsyncOp *)> _io_fn,
@@ -86,18 +95,6 @@ void
 AsyncMonitor::submitIo(std::shared_ptr<AsyncOp> op)
 {
     task_group->run([task_op = std::move(op)]() { runOp(task_op.get(), true); });
-}
-
-void
-AsyncMonitor::submitIoAndWait(std::shared_ptr<AsyncOp> op)
-{
-    std::promise<void> done;
-    std::future<void>  ready{done.get_future()};
-    task_group->run([&op, &done]() {
-        runOp(op.get(), true);
-        done.set_value();
-    });
-    ready.wait();
 }
 
 void
@@ -197,7 +194,7 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType io_type, std::shared_ptr<I
     if (op->state.compare_exchange_strong(expected, AsyncOpState::Abandoned, std::memory_order_acq_rel)) {
         std::rethrow_exception(arm_error);
     }
-    op->state.wait(AsyncOpState::Started, std::memory_order_acquire);
+    waitUntilDone(op.get());
 }
 
 }
@@ -209,15 +206,13 @@ async_dispatch(void *userargs)
     using namespace hipFile;
     std::shared_ptr<AsyncOp> op = std::move(static_cast<AsyncOp *>(userargs)->self);
     try {
-        if (op->block) {
-            Context<IAsyncMonitor>::get()->submitIoAndWait(op);
-        }
-        else {
-            Context<IAsyncMonitor>::get()->submitIo(op);
-        }
+        Context<IAsyncMonitor>::get()->submitIo(op);
     }
     catch (...) {
         runOp(op.get(), false);
+    }
+    if (op->block) {
+        waitUntilDone(op.get());
     }
 }
 }
