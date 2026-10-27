@@ -82,6 +82,15 @@ __launch_bounds__(512)
   const size_t slot = kDdaLLRsSlotStridePkts;
   const size_t chunkWords = nPk * 2; // uint32 words per shard chunk
 
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+  // Prefetch the send chunks into L2 before the epoch barrier, one 128B line per 16 lanes; th 1 walks page tables.
+  if ((threadIdx.x & 15) == 0 && (size_t)blockIdx.x * blockDim.x + threadIdx.x < nPk) {
+    const char* base = reinterpret_cast<const char*>(sendbuff) + ((size_t)blockIdx.x * blockDim.x + threadIdx.x) * 8;
+    for (int r = 0; r < nRanks; ++r) {
+      __builtin_amdgcn_global_prefetch((const __attribute__((address_space(1))) void*)(base + (size_t)r * bytes), 0x11);
+    }
+  }
+#endif
   const uint32_t flag = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const size_t bankOffsetPkts = ddaLLRsBankOffsetPkts(flag, bankSize);
 
@@ -120,7 +129,7 @@ __launch_bounds__(512)
   // Phase 2: seed with my self-chunk, poll my slots for the others, reduce.
   // The first read of each peer group is issued before any flag is tested, so
   // those remote reads stay in flight together. A line whose flags already
-  // match is kept; only a stale line is read again.
+  // match is kept; every stale line of the batch is read again in one pass.
   const uint32_t* inSelf = in + (size_t)selfRank * chunkWords;
   LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
   for (size_t pk = gtid; pk < nPk; pk += stride) {
@@ -166,21 +175,61 @@ __launch_bounds__(512)
         }
       }
 #endif
+      // Re-read the batch until every line is fresh; the abort flag is checked once per pass.
+      int spins = 0;
+      while (true) {
+        uint32_t stale = 0;
+#pragma unroll
+        for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
+          if (base + i < nRanks && (f0[i] != flag || f1[i] != flag)) {
+            stale |= 1u << i;
+          }
+        }
+        if (stale == 0) {
+          break;
+        }
+        if (params.abortSpinTick(spins)) {
+          ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
+          return;
+        }
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+        // Branch-free re-read of every line shares one wait; a fresh line cannot change before this call ends.
+        asm volatile("" ::: "memory");
+        v4u again[kDdaLLRsRecvBatch];
+#pragma unroll
+        for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
+          if (base + i < nRanks) {
+            const int peer = (selfRank + base + i) % nRanks;
+            const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
+            again[i] = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+          }
+        }
+        asm volatile("" ::: "memory");
+#pragma unroll
+        for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
+          if (base + i < nRanks) {
+            union { v4u v; uint32_t w[4]; } u;
+            u.v = again[i];
+            d0[i] = u.w[0];
+            f0[i] = u.w[1];
+            d1[i] = u.w[2];
+            f1[i] = u.w[3];
+          }
+        }
+#else
+#pragma unroll
+        for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
+          if ((stale >> i) & 1u) {
+            const int peer = (selfRank + base + i) % nRanks;
+            const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
+            ddaLLLoadLineB128(src, d0[i], f0[i], d1[i], f1[i]);
+          }
+        }
+#endif
+      }
 #pragma unroll
       for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
-        const int r = base + i;
-        if (r < nRanks) {
-          const int peer = (selfRank + r) % nRanks;
-          const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
-          // A matching first load is kept. A miss polls through the shared
-          // helper so a revoked communicator can leave the spin.
-          if (f0[i] != flag || f1[i] != flag) {
-            if (!ddaLLWaitLineFlags(reinterpret_cast<const volatile LLPacket16*>(src), flag, params, d0[i], f0[i],
-                                    d1[i], f1[i])) {
-              ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
-              return;
-            }
-          }
+        if (base + i < nRanks) {
           ddaLLAddPayload<T>(acc0, acc1, d0[i], d1[i]);
         }
       }
