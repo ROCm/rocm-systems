@@ -277,24 +277,31 @@ instruction_words(const Instruction &inst, uint64_t offset, std::span<const uint
 /// The staging moves are EXEC-masked VALU operations. They are safe here because
 /// the instruction they precede is also an EXEC-masked VALU operation; an
 /// encoding with different lane-mask semantics must not use this fallback.
-[[nodiscard]] std::optional<uint16_t> reusable_destination_pair(const Instruction &inst,
-                                                                const EncodingSourceFields &layout,
-                                                                std::span<const uint32_t> words,
-                                                                const LivenessAnalysis &liveness) {
-  if (!layout.destination_stageable || inst.num_dst_operands() != 1 ||
-      !liveness.global_vgpr_usage_is_complete())
-    return std::nullopt;
+FailureOr<std::optional<uint16_t>> reusable_destination_pair(const Instruction &inst,
+                                                             const EncodingSourceFields &layout,
+                                                             std::span<const uint32_t> words,
+                                                             const LivenessAnalysis &liveness) {
+  if (!layout.destination_stageable || inst.num_dst_operands() != 1)
+    return std::optional<uint16_t>{};
+  auto maybe_complete = liveness.global_vgpr_usage_is_complete();
+  if (maybe_complete.failed())
+    return Result::failure();
+  if (!maybe_complete.value())
+    return std::optional<uint16_t>{};
 
   const Operand *dst = inst.dst_operand(0);
   if (dst == nullptr)
-    return std::nullopt;
+    return std::optional<uint16_t>{};
   const auto dst_ref = dst->to_register_ref();
   if (!dst_ref || dst_ref->cls != RegClass::VGPR || dst_ref->width != 2 ||
       static_cast<uint32_t>(dst_ref->index) + dst_ref->width > 256u)
-    return std::nullopt;
-  const auto dst_bank = liveness.vgpr_msb_bank_before(inst, dst->vgpr_msb_role());
+    return std::optional<uint16_t>{};
+  auto maybe_dst_bank = liveness.vgpr_msb_bank_before(inst, dst->vgpr_msb_role());
+  if (maybe_dst_bank.failed())
+    return Result::failure();
+  const auto dst_bank = maybe_dst_bank.value();
   if (!dst_bank)
-    return std::nullopt;
+    return std::optional<uint16_t>{};
   const uint16_t dst_phys =
       static_cast<uint16_t>(dst_ref->index + static_cast<uint16_t>(*dst_bank) * 256u);
 
@@ -307,9 +314,12 @@ instruction_words(const Instruction &inst, uint64_t offset, std::span<const uint
                             is_flat_scratch_base_64bit_source(inst, index, layout, words);
     if (rewritable) {
       found_rewritable_source = true;
-      const auto src_bank = liveness.vgpr_msb_bank_before(inst, src->vgpr_msb_role());
+      auto maybe_src_bank = liveness.vgpr_msb_bank_before(inst, src->vgpr_msb_role());
+      if (maybe_src_bank.failed())
+        return Result::failure();
+      const auto src_bank = maybe_src_bank.value();
       if (!src_bank || *src_bank != *dst_bank)
-        return std::nullopt;
+        return std::optional<uint16_t>{};
       continue;
     }
 
@@ -317,17 +327,20 @@ instruction_words(const Instruction &inst, uint64_t offset, std::span<const uint
     if (!src_ref || src_ref->cls != RegClass::VGPR)
       continue;
     if (static_cast<uint32_t>(src_ref->index) + src_ref->width > 256u)
-      return std::nullopt;
-    const auto src_bank = liveness.vgpr_msb_bank_before(inst, src->vgpr_msb_role());
+      return std::optional<uint16_t>{};
+    auto maybe_src_bank = liveness.vgpr_msb_bank_before(inst, src->vgpr_msb_role());
+    if (maybe_src_bank.failed())
+      return Result::failure();
+    const auto src_bank = maybe_src_bank.value();
     if (!src_bank) {
       if (register_ranges_overlap(dst_ref->index, dst_ref->width, src_ref->index, src_ref->width))
-        return std::nullopt;
+        return std::optional<uint16_t>{};
       continue;
     }
     const uint16_t src_phys =
         static_cast<uint16_t>(src_ref->index + static_cast<uint16_t>(*src_bank) * 256u);
     if (register_ranges_overlap(dst_phys, dst_ref->width, src_phys, src_ref->width))
-      return std::nullopt;
+      return std::optional<uint16_t>{};
   }
 
   RegisterSet implicit_uses;
@@ -340,7 +353,7 @@ instruction_words(const Instruction &inst, uint64_t offset, std::span<const uint
       implicit_alias = true;
   });
   if (implicit_alias || !found_rewritable_source)
-    return std::nullopt;
+    return std::optional<uint16_t>{};
   return dst_ref->index;
 }
 
@@ -422,11 +435,17 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
   std::optional<uint16_t> borrowed_pair;
   std::optional<uint16_t> staged_vgpr_pair;
   if (layout->vector) {
-    const std::optional<uint16_t> free_pair = liveness.find_free_sgpr_pair(&inst);
+    auto maybe_free_pair = liveness.find_free_sgpr_pair(&inst);
+    if (maybe_free_pair.failed())
+      return ExpandResult::liveness_unavailable();
+    const auto free_pair = maybe_free_pair.value();
     borrowed_pair =
         (free_pair.has_value() && *free_pair + 1 <= kMaxOrdinarySgpr) ? free_pair : std::nullopt;
     if (!borrowed_pair) {
-      staged_vgpr_pair = reusable_destination_pair(inst, *layout, *words, liveness);
+      auto maybe_staged_pair = reusable_destination_pair(inst, *layout, *words, liveness);
+      if (maybe_staged_pair.failed())
+        return ExpandResult::liveness_unavailable();
+      staged_vgpr_pair = maybe_staged_pair.value();
       if (!staged_vgpr_pair) {
         return ExpandResult::failed(
             "gfx1250 flat-scratch-base rewrite could not allocate safe temporary storage",
