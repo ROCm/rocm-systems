@@ -286,6 +286,14 @@ TEST(GfxCodeObjectTargets, LoadsGfx1251FromMachineFlags) {
   expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1251, ROCJITSU_CODE_TARGET_GFX1251);
 }
 
+TEST(GfxCodeObjectTargets, LoadsGfx1100FromMachineFlags) {
+  expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1100, ROCJITSU_CODE_TARGET_GFX1100);
+  const std::vector<uint8_t> image = make_minimal_amdgpu_elf(EF_AMDGPU_MACH_AMDGCN_GFX1100);
+  const AmdGpuCodeObject object(image.data(), image.size(), "hip", "gfx1100");
+  ASSERT_TRUE(object.is_valid());
+  EXPECT_EQ(object.target_id(), ROCJITSU_CODE_TARGET_GFX1100);
+}
+
 TEST(GfxCodeObjectTargets, FatbinMetadataRequiresMatchingConcreteTargetIdentity) {
   const auto gfx1250 = make_minimal_amdgpu_elf(EF_AMDGPU_MACH_AMDGCN_GFX1250);
   const auto gfx1251 = make_minimal_amdgpu_elf(EF_AMDGPU_MACH_AMDGCN_GFX1251);

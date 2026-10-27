@@ -473,6 +473,7 @@ add_executable(
     patch/kernarg_extension_test.cpp
     patch/sidecar_metadata_test.cpp
     patch/trampoline_builder_test.cpp
+    patch/checked_text_edits_test.cpp
     patch/instrumentor_test.cpp
     code/amdhsa_metadata_test.cpp
     patch/probe_symbol_test.cpp
