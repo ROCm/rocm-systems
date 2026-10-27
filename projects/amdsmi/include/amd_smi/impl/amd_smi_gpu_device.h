@@ -132,6 +132,7 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   const std::string& get_gpu_path() const;
   amdsmi_bdf_t get_bdf();
   bool check_if_drm_is_supported() { return drm_.check_if_drm_is_supported(); }
+  bool has_libdrm() const { return drm_.has_libdrm(); }
   uint32_t get_vendor_id();
   const GPUComputeProcessList_t& amdgpu_get_compute_process_list(
       ComputeProcessListType_t list_type = ComputeProcessListType_t::kAllProcessesOnDevice);

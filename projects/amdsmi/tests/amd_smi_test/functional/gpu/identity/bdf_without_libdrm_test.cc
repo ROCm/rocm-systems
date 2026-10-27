@@ -50,6 +50,7 @@ TEST(GpuFunctionalReadOnly, DrmInitWithoutLibdrmKeepsBdfAndRenderNode) {
 
   amd::smi::AMDSmiDrm drm;
   EXPECT_EQ(drm.init({"libdrm_amdgpu_absent_for_test.so.1"}), AMDSMI_STATUS_FAIL_LOAD_MODULE);
+  EXPECT_FALSE(drm.has_libdrm());
   std::vector<uint64_t> actual;
   for (const auto& bdf : drm.get_bdfs()) {
     EXPECT_NE(bdf.as_uint, 0U);
