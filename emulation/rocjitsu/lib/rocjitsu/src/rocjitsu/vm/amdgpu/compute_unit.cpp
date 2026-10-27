@@ -152,6 +152,12 @@ template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::C
   }
 }
 
+std::unique_ptr<Decoder> ComputeUnitCore::create_decoder(const Config &config) {
+  return config.target == ROCJITSU_CODE_TARGET_INVALID
+             ? Decoder::create(config.arch)
+             : Decoder::create(default_isa_target_registry(), config.target);
+}
+
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size, uint32_t vgpr_storage_lane_count,
                                  uint32_t vgpr_allocation_block_size)
@@ -1805,7 +1811,7 @@ constinit thread_local ComputeUnitCore::InstructionVmSnapshot
     *ComputeUnitCore::instruction_vm_snapshot_ = nullptr;
 
 template <bool EnableAsync>
-[[gnu::always_inline]] inline void ComputeUnitCore::issue_instruction_impl(
+[[gnu::always_inline]] inline bool ComputeUnitCore::issue_instruction_impl(
     Wavefront *active,
     std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window,
     std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage) {
@@ -1830,7 +1836,7 @@ template <bool EnableAsync>
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(MissingGpuVm) pc=0x",
                        std::hex, active->pc, std::dec, " vmid=", vmid);
       handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
-      return;
+      return false;
     }
     if (vm_access == nullptr) {
       const AddressSpaceHandle address_space = active->address_space();
@@ -1859,7 +1865,7 @@ template <bool EnableAsync>
                        " HALT(StaleAddressSpace) pc=0x", std::hex, active->pc, std::dec,
                        " vmid=", vmid);
       handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
-      return;
+      return false;
     }
   }
   const bool vm_address_space = vm_access != nullptr;
@@ -1899,21 +1905,21 @@ template <bool EnableAsync>
       if (using_retained_vm_access)
         active->set_vm_access({});
       request_functional_yield();
-      return;
+      return false;
     }
     if (fetch_outcome == VmAccessOutcome::Unavailable) {
       request_functional_yield();
-      return;
+      return false;
     }
     if (fetch_outcome == VmAccessOutcome::Faulted && memory_violation_handler_ &&
         memory_violation_handler_(*active, active->pc, false, active->pc)) {
-      return;
+      return false;
     }
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
                      " HALT(InstructionVmAccess) pc=0x", std::hex, active->pc, std::dec,
                      " vmid=", vmid, " outcome=", static_cast<unsigned>(fetch_outcome));
     handle_terminal_vm_fault(*active, fetch_outcome);
-    return;
+    return false;
   }
 
   active->trace_inst_count_++;
@@ -1931,9 +1937,9 @@ template <bool EnableAsync>
     // Let the queue owner observe the illegal instruction before retiring the
     // wave. A debugger may claim the exception before the runtime sees it.
     if (!active->fail_pm4_submission() && illegal_inst_handler_ && illegal_inst_handler_(*active))
-      return;
+      return false;
     active->halt();
-    return;
+    return false;
   }
   Instruction *inst = decoded.value().get();
   DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
@@ -1959,7 +1965,7 @@ template <bool EnableAsync>
   // counter changes, or async matrix submission. Scalar instructions still run.
   if ((active->mode_raw() & Wavefront::VSKIP_BIT) && inst->is_vskip_affected()) {
     active->pc += inst_size;
-    return;
+    return false;
   }
   auto *wait_state =
       config_.memory_wait_checks_enabled() ? active->memory_wait_scoreboard() : nullptr;
@@ -2013,7 +2019,7 @@ template <bool EnableAsync>
           plugin_group_->onAmdgpuAsyncInstructionIssued(active->pc, *inst, *active);
         active->pc += inst_size;
         record_gws_instruction_progress(active->process_id());
-        return;
+        return true;
       }
     }
   }
@@ -2141,14 +2147,14 @@ template <bool EnableAsync>
         if (uses_split_wave_state)
           active->set_status_raw(saved_status | kPrivilegedStatusBit);
         active->pc = config->tba;
-        return;
+        return true;
       }
     }
 
     // With no configured TBA, or for a parked s_trap executed by TBA code,
     // retire the instruction without inventing a host-side trap handler.
     active->pc += inst_size;
-    return;
+    return true;
   }
 
   if (inst->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) {
@@ -2160,11 +2166,11 @@ template <bool EnableAsync>
       uint64_t target = RegisterAccess(*active).read_scalar64(*target_operand);
       if (active->instruction_execution_failed()) [[unlikely]] {
         fail_current_instruction();
-        return;
+        return true;
       }
       if (target == 0) {
         active->halt();
-        return;
+        return true;
       }
     }
   }
@@ -2179,7 +2185,7 @@ template <bool EnableAsync>
 
   if (execution_result.failed()) [[unlikely]] {
     fail_current_instruction();
-    return;
+    return true;
   }
 
   record_gws_instruction_progress(executing_process);
@@ -2197,7 +2203,7 @@ template <bool EnableAsync>
   // authoritative terminal hook and fires in both cases — consumers should observe
   // termination there, not via the after-execute hook.
   if (active->is_halted()) {
-    return;
+    return true;
   }
 
   if (observes_after_execute_instruction_)
@@ -2224,7 +2230,7 @@ template <bool EnableAsync>
     if (tensor_outcome == VmAccessOutcome::Unavailable) {
       tensor_dma_pipeline_.defer_unavailable(decoded.value().release(), *active);
       active->pc += inst_size;
-      return;
+      return true;
     }
     if (tensor_outcome != VmAccessOutcome::Complete) {
       drain_async_window();
@@ -2234,10 +2240,10 @@ template <bool EnableAsync>
       const uint64_t issue_pc = active->pc;
       active->pc += inst_size;
       handle_memory_access_failure(*active, tensor_outcome, issue_pc);
-      return;
+      return true;
     }
     active->pc += inst_size;
-    return;
+    return true;
   }
 
   // Capture debugger probe info before the pipeline consumes the instruction.
@@ -2348,7 +2354,7 @@ template <bool EnableAsync>
           probe_wait_issue->pc, probe_wait_issue->before);
       assert(cancelled && "Claimed memory probe has no matching wait-check issue");
     }
-    return;
+    return true;
   }
   if (inst->is_memory_op()) {
     if (!inst->data()) {
@@ -2366,7 +2372,7 @@ template <bool EnableAsync>
       if (memory_outcome != VmAccessOutcome::Complete) {
         if (memory_outcome == VmAccessOutcome::Unavailable) {
           request_functional_yield();
-          return;
+          return true;
         }
         // Ordinary memory instructions may overlap independent matrix work.
         // Join that work before a terminal fault releases the wave's registers.
@@ -2376,7 +2382,7 @@ template <bool EnableAsync>
                          " outcome=", static_cast<unsigned>(memory_outcome));
         active->pc += inst_size;
         handle_memory_access_failure(*active, memory_outcome, issue_pc);
-        return;
+        return true;
       }
     }
   }
@@ -2399,7 +2405,7 @@ template <bool EnableAsync>
     const uint32_t enabled_alu_causes = alu_exception_trap_enables(*active);
     if ((new_alu_causes & enabled_alu_causes) != 0 && alu_exception_handler_ &&
         alu_exception_handler_(*active))
-      return;
+      return true;
   }
 
   // s_rfe follows the same target-minus-size convention as other control-flow
@@ -2418,12 +2424,13 @@ template <bool EnableAsync>
       if (watchpoint_handler_(*active, addr, dbg_bytes, dbg_is_write, dbg_is_atomic))
         break;
   }
+  return true;
 }
 
 // Keep ordinary issue and step as concrete entry points. Async execution
 // uses a separate entry selected when constructing the CU.
-void ComputeUnitCore::issue_instruction(Wavefront *active) {
-  issue_instruction_impl<false>(active);
+bool ComputeUnitCore::issue_instruction(Wavefront *active) {
+  return issue_instruction_impl<false>(active);
 }
 
 template <bool EnableAsync>
@@ -2461,11 +2468,9 @@ ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_siz
           if (admission)
             admission->flush();
         }
-      } else {
-        issue_instruction(wf.get());
-      }
-      if (issued)
+      } else if (issue_instruction(wf.get()) && issued) {
         *issued |= slot_bit;
+      }
       if (single_step && !wf->in_trap_handler() && !wf->debug_halted() && single_step_handler_)
         single_step_handler_(*wf);
     }
@@ -2501,12 +2506,6 @@ ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_siz
 }
 
 bool ComputeUnitCore::step() { return step_impl<false>(); }
-
-std::unique_ptr<Decoder> ComputeUnitCore::create_decoder(const Config &config) {
-  return config.target == ROCJITSU_CODE_TARGET_INVALID
-             ? Decoder::create(config.arch)
-             : Decoder::create(default_isa_target_registry(), config.target);
-}
 
 uint64_t ComputeUnitCore::run_issue_cycle(uint64_t selected_slots) {
   assert(wfs_.size() <= 64 && "issue-cycle slot masks cover at most 64 wave slots");
