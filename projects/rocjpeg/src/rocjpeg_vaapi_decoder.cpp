@@ -199,7 +199,9 @@ bool RocJpegVaapiMemoryPool::DeleteIdleEntry() {
  * idle entry exists, every entry is still in flight and the pool is allowed to grow past the target:
  * on a GPU with a single JPEG core the batched decoder submits one image per call, so each image in
  * the batch holds its own busy entry and a batch larger than the target legitimately needs more live
- * entries than the target allows. Failing here would reject valid work.
+ * entries than the target allows. Failing here would reject valid work. An entry also stays busy
+ * until every one of its surfaces is released, so a caller that syncs only some images of a batched
+ * decode before submitting again can likewise grow the pool past the target until the rest are released.
  *
  * @param surface_format The surface format for which the pool entry is being added.
  * @param pool_entry The pool entry to be added.
