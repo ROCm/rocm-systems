@@ -9,7 +9,10 @@ import pytest
 from amdisa.codegen import CodeGenerator
 from amdisa.gpuisa import Instruction
 from amdisa.isa_profile import (
+    Cdna1Profile,
+    Cdna2Profile,
     Cdna4Profile,
+    Cdna5Profile,
     CdnaProfile,
     Rdna1Profile,
     Rdna2Profile,
@@ -169,3 +172,39 @@ def test_subdecoder_keeps_opcodes_across_primary_prefixes(
     for index in set(enc.primary_dt_ptrs) - {-1}:
         entry = spec.primary_decode_table[index]
         assert entry.sub_decode_funcs[inst.opcode] == f'decode{inst.fmt_name}'
+
+
+@pytest.mark.parametrize(
+    'arch,profile',
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
+        ('cdna5', Cdna5Profile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+    ],
+)
+def test_dpp8_admission_keeps_staged_sources_within_one_dword(arch, profile):
+    spec = Parser(str(_mrisa_dir() / f'amdgpu_isa_{arch}.xml'), profile).parse()
+    generator = CodeGenerator(spec, '')
+    for enc in spec.encoding_map.values():
+        if profile.is_alt_encoding(enc.enc_name):
+            continue
+        _, dpp8_struct = generator._vop_dpp_struct_names(enc.enc_name)
+        if dpp8_struct is None:
+            continue
+        for inst in enc.insts:
+            if not generator._instruction_supports_dpp8(inst, enc.enc_name):
+                continue
+            sources = [
+                op
+                for op in inst.operands
+                if op.is_input and not op.is_output and not op.fieldless
+            ]
+            if sources:
+                assert sources[0].size <= 32, (arch, enc.enc_name, inst.name)

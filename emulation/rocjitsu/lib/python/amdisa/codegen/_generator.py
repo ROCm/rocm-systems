@@ -1675,7 +1675,7 @@ class CodeGenerator:
         )
 
     def _instruction_supports_dpp8(self, inst: Instruction, enc_name: str) -> bool:
-        return self._dpp_opcode_rule(
+        supported = self._dpp_opcode_rule(
             inst, enc_name
         ) is DppOpcodeRule.ALLOW and self.isa_spec.profile.supports_dpp_opcode(
             enc_name,
@@ -1684,6 +1684,20 @@ class CodeGenerator:
                 inst, enc_name, 'dpp8'
             ),
         )
+        if supported:
+            src0 = next(
+                (
+                    op
+                    for op in inst.operands
+                    if op.is_input and not op.is_output and not op.fieldless
+                ),
+                None,
+            )
+            # Both ordinary and MOVREL staging use this decoded source width.
+            assert (
+                src0 is None or src0.size <= 32
+            ), f'{inst.name}: DPP8 requires a source no wider than 32 bits'
+        return supported
 
     def _instruction_supports_sdwa(self, inst: Instruction, enc_name: str) -> bool:
         has_modifier_encoding = self._instruction_supports_modifier_encoding(
