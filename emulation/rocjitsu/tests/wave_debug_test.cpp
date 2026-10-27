@@ -1934,6 +1934,156 @@ TEST(WaveDebugTest, CwsrDeserializeRecoversSerializedWaveState) {
   }
 }
 
+TEST(WaveDebugTest, CwsrDeserializeDerivesWaveLayoutsFromTheControlStack) {
+  constexpr uint64_t kBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000;
+  constexpr uint32_t kControlCapacity = 4096;
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    const bool gfx1250 = arch == ROCJITSU_CODE_ARCH_CDNA5;
+    const uint32_t granule = kmd::cwsr_abi_properties(arch).lds_granule_bytes;
+    std::vector<uint32_t> control = {0, 0, (1u << 30) | (1u << 31)};
+    std::array<kmd::CwsrWaveState, 2> input;
+    std::array<std::vector<uint8_t>, 2> payloads;
+    uint32_t wave_bytes = 0;
+    for (uint32_t i = 0; i < input.size(); ++i) {
+      auto &wave = input[i];
+      wave = make_wave(0xBB01 + i, 0x3000 + i * 0x80);
+      wave.num_sgprs = gfx1250 ? 128 : 112;
+      wave.sgprs.resize(wave.num_sgprs, 0x12345678);
+      wave.num_vgprs = 16 * (i + 1);
+      wave.vgprs.resize(wave.num_vgprs * 64, 0x87654321);
+      wave.lds.assign(granule * (i + 1), 0x31 * (i + 1));
+      wave.scratch_scoreboard_id = 11 + i;
+      wave.shader_engine_id = i + 1;
+      wave.group_ids[0] += i;
+      wave.spi_ttmps_setup = true;
+      std::vector<uint8_t> single(kAreaSize);
+      const auto layout = kmd::serialize_queue_cwsr_bulk(
+          kBase, kAreaSize, {wave},
+          [&](uint64_t address, std::span<const uint8_t> bytes) {
+            std::memcpy(single.data() + address - kBase, bytes.data(), bytes.size());
+          },
+          arch);
+      ASSERT_TRUE(layout.ok);
+      payloads[i].assign(single.begin() + layout.wave_state_offset - layout.wave_state_size,
+                         single.begin() + layout.wave_state_offset);
+      wave_bytes += layout.wave_state_size;
+      // Explicit ABI words, including a state change between the two workgroups.
+      if (gfx1250) {
+        control.push_back((1u << 31) | (1u << 24) | ((i + 1) << 10) | ((wave.num_vgprs / 16) - 1));
+        control.push_back(0); // COMPUTE_RELAUNCH2
+        control.push_back((11 + i) | (1u << 12) | (1u << 13) | ((i + 1) << 24));
+      } else {
+        control.push_back((1u << 31) | (((wave.num_vgprs / 4) - 1) << 24) | ((i + 1) << 9) |
+                          (7u << 6) | ((wave.num_vgprs / 8) - 1));
+        control.push_back((11 + i) | ((i + 1) << 9) | (1u << 16) | (1u << 17));
+      }
+      control.push_back(1u << 30); // event, not a wave
+    }
+    std::vector<uint8_t> image(kAreaSize);
+    const std::array<uint32_t, 4> header = {
+        kControlCapacity - static_cast<uint32_t>(control.size() * 4),
+        static_cast<uint32_t>(control.size() * 4), kControlCapacity + wave_bytes, wave_bytes};
+    std::memcpy(image.data(), header.data(), sizeof(header));
+    std::memcpy(image.data() + header[0], control.data(), header[1]);
+    uint32_t end = header[2];
+    for (const auto &payload : payloads) {
+      end -= payload.size();
+      std::memcpy(image.data() + end, payload.data(), payload.size());
+    }
+    for (bool bulk : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << "arch=" << arch << " bulk=" << bulk);
+      std::vector<kmd::CwsrWaveState> output;
+      auto read32 = [&](uint64_t address) {
+        uint32_t value;
+        std::memcpy(&value, image.data() + address - kBase, sizeof(value));
+        return value;
+      };
+      auto read_block = [&](uint64_t address, std::span<uint8_t> bytes) {
+        std::memcpy(bytes.data(), image.data() + address - kBase, bytes.size());
+      };
+      ASSERT_TRUE(bulk ? kmd::deserialize_queue_cwsr_bulk(kBase, kAreaSize, output, read_block,
+                                                          arch, kControlCapacity)
+                       : kmd::deserialize_queue_cwsr(kBase, kAreaSize, output, read32, arch,
+                                                     kControlCapacity));
+      ASSERT_EQ(output.size(), input.size());
+      for (size_t i = 0; i < input.size(); ++i) {
+        const auto &wave = output[i];
+        EXPECT_EQ(wave.num_sgprs, input[i].num_sgprs);
+        EXPECT_EQ(wave.num_vgprs, input[i].num_vgprs);
+        EXPECT_EQ(wave.pc, input[i].pc);
+        EXPECT_EQ(wave.wave_id, input[i].wave_id);
+        EXPECT_EQ(wave.group_ids, input[i].group_ids);
+        EXPECT_EQ(wave.scratch_scoreboard_id, input[i].scratch_scoreboard_id);
+        EXPECT_EQ(wave.shader_engine_id, input[i].shader_engine_id);
+        EXPECT_TRUE(wave.is_first_in_group);
+        EXPECT_TRUE(wave.is_last_in_group);
+        EXPECT_EQ(wave.lds, input[i].lds);
+        for (uint32_t s = 0; s < wave.num_sgprs; ++s)
+          if (!kmd::cwsr_sgpr_slot_is_aliased(s, arch))
+            EXPECT_EQ(wave.sgprs[s], input[i].sgprs[s]);
+        for (uint32_t r = 0; r < wave.num_vgprs; ++r)
+          for (uint32_t lane = 0; lane < (gfx1250 ? 32u : 64u); ++lane)
+            EXPECT_EQ(wave.vgprs[r * 64 + lane], input[i].vgprs[r * 64 + lane]);
+      }
+    }
+  }
+}
+
+TEST(WaveDebugTest, CwsrDeserializeRejectsInvalidControlStacksWithoutChangingOutput) {
+  constexpr uint64_t kBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000;
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    std::vector<uint8_t> image(kAreaSize);
+    const std::vector<kmd::CwsrWaveState> input = {make_wave(0xBB01, 0x3000),
+                                                   make_wave(0xBB02, 0x3080)};
+    const auto layout = kmd::serialize_queue_cwsr_bulk(
+        kBase, kAreaSize, input,
+        [&](uint64_t address, std::span<const uint8_t> bytes) {
+          std::memcpy(image.data() + address - kBase, bytes.data(), bytes.size());
+        },
+        arch);
+    ASSERT_TRUE(layout.ok);
+    for (bool bulk : {false, true}) {
+      for (bool missing_state : {false, true}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "arch=" << arch << " bulk=" << bulk << " missing_state=" << missing_state);
+        auto corrupt = image;
+        // Either a wave precedes any state, or the final wave is replaced by
+        // a state without its following wave (and, on gfx1250, its second word).
+        const uint32_t offset = missing_state
+                                    ? layout.control_stack_offset + 8
+                                    : layout.control_stack_offset + layout.control_stack_size - 4;
+        uint32_t word = 0;
+        if (!missing_state)
+          std::memcpy(&word, image.data() + layout.control_stack_offset + 8, sizeof(word));
+        std::memcpy(corrupt.data() + offset, &word, sizeof(word));
+        auto read32 = [&](uint64_t address) {
+          uint32_t value;
+          std::memcpy(&value, corrupt.data() + address - kBase, sizeof(value));
+          return value;
+        };
+        auto read_block = [&](uint64_t address, std::span<uint8_t> bytes) {
+          std::memcpy(bytes.data(), corrupt.data() + address - kBase, bytes.size());
+        };
+        auto expected = input;
+        expected[0].pc = 0xDEAD;
+        expected[0].sgprs[0] = 0xBAD;
+        auto output = expected;
+        EXPECT_FALSE(
+            bulk ? kmd::deserialize_queue_cwsr_bulk(kBase, kAreaSize, output, read_block, arch)
+                 : kmd::deserialize_queue_cwsr(kBase, kAreaSize, output, read32, arch));
+        ASSERT_EQ(output.size(), expected.size());
+        for (size_t i = 0; i < expected.size(); ++i) {
+          EXPECT_EQ(output[i].pc, expected[i].pc);
+          EXPECT_EQ(output[i].sgprs, expected[i].sgprs);
+          EXPECT_EQ(output[i].vgprs, expected[i].vgprs);
+        }
+      }
+    }
+  }
+}
+
 TEST(WaveDebugTest, CwsrBulkCodecMatchesDwordCodecAndPublishesHeaderLast) {
   constexpr uint64_t kCtxBase = 0x400000000ULL;
   constexpr uint32_t kAreaSize = 0x40000;
@@ -2027,7 +2177,10 @@ TEST(WaveDebugTest, CwsrPublicationPreservesRuntimeFieldsAndDebuggerMemory) {
           },
           arch));
       EXPECT_EQ(restored[0].pc, wave.pc);
-      EXPECT_EQ(restored[0].vgprs, wave.vgprs);
+      // gfx1250's upper 32 lanes are padding in CwsrWaveState's 64-lane stride.
+      for (uint32_t r = 0; r < wave.num_vgprs; ++r)
+        for (uint32_t lane = 0; lane < (arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32u : 64u); ++lane)
+          EXPECT_EQ(restored[0].vgprs[r * 64 + lane], wave.vgprs[r * 64 + lane]);
       bool wrote = false;
       EXPECT_FALSE(kmd::serialize_queue_cwsr_bulk(
                        kBase, kAreaSize, {wave},
@@ -2119,6 +2272,66 @@ TEST(WaveDebugTest, CwsrBulkCodecUsesConstantBlockOperationsAtFullScale) {
   EXPECT_EQ(bytes_written,
             layout.wave_state_offset - layout.control_stack_offset + 10 * sizeof(uint32_t));
   EXPECT_GT(layout.wave_state_size, 64u * 1024u * 1024u);
+}
+
+TEST(WaveDebugTest, CwsrPrivateContextDoesNotConsumeControlStackOrDebuggerStorage) {
+  constexpr uint64_t base = 0x400000000ULL;
+  constexpr uint32_t area_size = 65536, control_stack = 256, debug_offset = 48000;
+  const std::vector<uint8_t> context(8195, 0x7b);
+  for (const bool has_wave : {false, true}) {
+    SCOPED_TRACE(has_wave);
+    std::vector<kmd::CwsrWaveState> waves(has_wave ? 1 : 0);
+    if (has_wave) {
+      waves[0].pc = 0x1234;
+      waves[0].num_sgprs = 16;
+      waves[0].num_vgprs = 16;
+    }
+    std::vector<uint8_t> image(area_size, 0xa5);
+    auto write = [&](uint64_t address, uint32_t word) {
+      std::memcpy(image.data() + address - base, &word, sizeof(word));
+    };
+    auto read = [&](uint64_t address) {
+      uint32_t word;
+      std::memcpy(&word, image.data() + address - base, sizeof(word));
+      return word;
+    };
+    write(base + 16, debug_offset);
+    write(base + 20, 64);
+    const auto layout =
+        kmd::serialize_queue_cwsr(base, area_size, waves, write, ROCJITSU_CODE_ARCH_CDNA5,
+                                  control_stack, kmd::CwsrDebugRegion{debug_offset, 64}, context);
+    ASSERT_TRUE(layout.ok);
+    EXPECT_EQ(layout.control_stack_size, (has_wave ? 5u : 2u) * sizeof(uint32_t));
+    std::vector<uint8_t> restored;
+    uint32_t read_calls = 0;
+    auto read_block = [&](uint64_t address, std::span<uint8_t> bytes) {
+      ++read_calls;
+      ASSERT_GE(address, base);
+      ASSERT_LE(address - base + bytes.size(), debug_offset);
+      std::memcpy(bytes.data(), image.data() + address - base, bytes.size());
+    };
+    ASSERT_TRUE(
+        kmd::deserialize_queue_cwsr_context(base, area_size, restored, read_block, control_stack));
+    EXPECT_EQ(restored, context);
+    EXPECT_LE(read_calls, 4u);
+    std::vector<kmd::CwsrWaveState> decoded;
+    ASSERT_TRUE(kmd::deserialize_queue_cwsr(base, area_size, decoded, read,
+                                            ROCJITSU_CODE_ARCH_CDNA5, control_stack));
+    ASSERT_EQ(decoded.size(), waves.size());
+    if (has_wave)
+      EXPECT_EQ(decoded[0].pc, waves[0].pc);
+    EXPECT_EQ(read(base + 16), debug_offset);
+    EXPECT_EQ(read(base + 20), 64u);
+    EXPECT_TRUE(std::ranges::all_of(std::span(image).subspan(debug_offset, 64),
+                                    [](uint8_t byte) { return byte == 0xa5; }));
+    for (uint32_t invalid_size : {0u, UINT32_MAX, debug_offset - layout.wave_state_offset}) {
+      write(base + layout.wave_state_offset + 4, invalid_size);
+      restored = {0x12, 0x34};
+      EXPECT_FALSE(kmd::deserialize_queue_cwsr_context(base, area_size, restored, read_block,
+                                                       control_stack));
+      EXPECT_EQ(restored, (std::vector<uint8_t>{0x12, 0x34}));
+    }
+  }
 }
 
 } // namespace

@@ -315,8 +315,8 @@ struct CwsrWaveState {
   /// by the per-wave scratch size to locate the wave's private memory, so it
   /// must match the wave's scratch base.
   uint32_t scratch_scoreboard_id = 0;
-  /// Physical shader engine containing the wave. gfx12.5 records this in the
-  /// COMPUTE_RELAUNCH wave word so scratch slots are interpreted per SE.
+  /// Shader-engine index used by the saved scratch mapping. A restored wave
+  /// may execute on a different CU while retaining this scratch bank.
   uint32_t shader_engine_id = 0;
   /// Trap id from s_trap: gfx9.4 TTMP6[25:28]; gfx12.5 TTMP11[28:31].
   uint32_t trap_id = 0;
@@ -416,13 +416,18 @@ struct CwsrLayout {
 ///        supplied, only the first four wave-state header words are published;
 ///        DebugOffset, DebugSize and the runtime error channel are left untouched.
 ///        Without it, the serializer initializes a standalone synthetic test header.
+/// @param queue_context Optional rocjitsu-private CP progress and resource data. Stored
+///        after the public wave image, before the runtime debugger region.
+///        This placement and encoding are not an AMD firmware ABI.
+///        It permits a save with zero resident waves but outstanding CP work.
 /// @returns The chosen layout; @ref CwsrLayout::ok is false if the waves do not
 ///          fit, in which case nothing is written.
 CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                                 const std::vector<CwsrWaveState> &waves,
                                 const std::function<void(uint64_t, uint32_t)> &write32,
                                 rj_code_arch_t arch, uint32_t control_stack_capacity = 0,
-                                std::optional<CwsrDebugRegion> runtime_debug_region = {});
+                                std::optional<CwsrDebugRegion> runtime_debug_region = {},
+                                std::span<const uint8_t> queue_context = {});
 
 /// @brief Serialize a queue using two block writes: payload first, then header.
 ///
@@ -443,7 +448,17 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 CwsrLayout serialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, const std::vector<CwsrWaveState> &waves,
     const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block, rj_code_arch_t arch,
-    uint32_t control_stack_capacity = 0, std::optional<CwsrDebugRegion> runtime_debug_region = {});
+    uint32_t control_stack_capacity = 0, std::optional<CwsrDebugRegion> runtime_debug_region = {},
+    std::span<const uint8_t> queue_context = {});
+
+/// @brief Read rocjitsu's private context after the public wave image in blocks.
+/// @details This is a simulator-owned encoding, not an AMD firmware format.
+/// The wave/register layout is unchanged; the runtime debugger area is excluded.
+/// An invalid or missing record leaves the output unchanged.
+bool deserialize_queue_cwsr_context(
+    uint64_t ctx_base, uint32_t area_size, std::vector<uint8_t> &context,
+    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block,
+    uint32_t control_stack_capacity);
 
 /// @brief Read wave register state back from a serialized CWSR area.
 ///
@@ -455,18 +470,19 @@ CwsrLayout serialize_queue_cwsr_bulk(
 ///
 /// @param ctx_base Context-save-restore GPU virtual address (from the queue).
 /// @param area_size Context-save-restore area size in bytes (from the queue).
-/// @param waves In: each element supplies the wave geometry (@ref
-///        CwsrWaveState::num_sgprs / @ref CwsrWaveState::num_vgprs), each
-///        leader's live @ref CwsrWaveState::lds length, @ref
-///        CwsrWaveState::is_first_in_group, and ordering used to reproduce the
-///        exact layout; Out: filled with the values currently stored in the
-///        area. The count and geometry must match the @ref serialize_queue_cwsr
-///        call that produced the area. LDS record padding is skipped, not
-///        returned as live data.
+/// @param waves Output in control-stack order. An empty input decodes every
+///        saved register slot. A nonempty input requests a per-record register
+///        subset through num_sgprs/num_vgprs, and each leader's live LDS byte
+///        count through lds.size(); it must match the saved wave count.
+///        Record addresses, allocation sizes, and workgroup boundaries always
+///        come from the control stack, independently of these requested counts.
+///        The codec models fixed SGPR blocks, no separate ACC payloads, and no
+///        gfx12.5 cluster records.
 /// @param read32 Callback that reads one dword from a GPU virtual address.
-/// @param control_stack_capacity Runtime control-stack boundary; zero selects compact layout.
-/// @returns True on success; false if the waves do not fit the area (in which
-///          case @p waves is left unchanged).
+/// @param control_stack_capacity Expected runtime control-stack boundary; zero
+///        accepts the boundary described by the saved header.
+/// @returns True on success; false for an invalid or unsupported saved layout
+///          or register subset, leaving @p waves unchanged.
 bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                             std::vector<CwsrWaveState> &waves,
                             const std::function<uint32_t(uint64_t)> &read32, rj_code_arch_t arch,
@@ -474,11 +490,12 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 
 /// @brief Read and deserialize a queue CWSR image using block transfers.
 ///
-/// @details Validates the ABI header against the geometry implied by @p waves,
-/// reads the contiguous control-stack/wave payload once, then applies the same
-/// decoder as @ref deserialize_queue_cwsr. The queue must remain suspended for
-/// the complete operation.
-/// @param control_stack_capacity Runtime control-stack boundary; zero selects compact layout.
+/// @details Validates the ABI header, reads the contiguous control-stack/wave
+/// payload once, then applies the same decoder and output contract as
+/// @ref deserialize_queue_cwsr. The queue must remain suspended for the complete
+/// operation.
+/// @param control_stack_capacity Expected runtime control-stack boundary; zero
+///        accepts the boundary described by the saved header.
 bool deserialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, std::vector<CwsrWaveState> &waves,
     const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, rj_code_arch_t arch,
