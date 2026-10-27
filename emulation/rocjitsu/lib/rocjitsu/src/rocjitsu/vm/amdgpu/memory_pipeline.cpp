@@ -1262,8 +1262,9 @@ bool rejects_flat_dds(const Instruction &inst, const Wavefront &wf, uint64_t req
 // halves a wave stride apart. Among atomics, only FLAT translation marks
 // private-backed lanes; BUFFER swizzling does not. Older architectures sharing
 // this layout are rejected as unsupported, without claiming their hardware returns MEMVIOL.
-bool rejects_flat_private_atomic64(const VectorMemState &d, const Wavefront &wf,
+bool rejects_flat_private_atomic64(const Instruction &inst, const Wavefront &wf,
                                    uint64_t request_lanes) {
+  const auto &d = *inst.data_as<VectorMemState>();
   if (d.atomic_op == AtomicOp::NONE || d.elem_size != sizeof(uint64_t) ||
       !d.requires_scratch_backing || !(d.scratch_lane_mask & request_lanes))
     return false;
@@ -1274,8 +1275,10 @@ bool rejects_flat_private_atomic64(const VectorMemState &d, const Wavefront &wf,
   case ROCJITSU_CODE_ARCH_CDNA5:
     return true;
   default:
-    util::Logger::warn("unsupported 64-bit private FLAT atomic: dword-interleaved scratch ",
-                       "is not supported by the contiguous atomic handlers");
+    util::Logger::warn(
+        "unsupported 64-bit private FLAT atomic: ", inst.mnemonic(),
+        " pc=", std::format("{:#x}", wf.pc),
+        ": dword-interleaved scratch is not supported by the contiguous atomic handlers");
     return true;
   }
 }
@@ -1291,7 +1294,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   // DDS address into another workgroup's LDS allocation.
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
   if (rejects_flat_dds(inst, wf, request_lanes) ||
-      rejects_flat_private_atomic64(d, wf, request_lanes))
+      rejects_flat_private_atomic64(inst, wf, request_lanes))
     return VmAccessOutcome::Faulted;
   const uint64_t shared_lanes = d.flat_local_lane_mask & request_lanes;
   const VmAccessOutcome outcome = initiate_global_access(d, wf, request_lanes & ~shared_lanes);
