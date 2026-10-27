@@ -107,16 +107,7 @@ static ncclResult_t ncclDiagDetectTransportMask(struct ncclComm* comm, unsigned 
     localPathMask |= 1u << t;
   }
 
-  // The all-gather below is collective: every peer blocks in it. A rank that cannot allocate the
-  // per-rank buffer cannot join, and retrying the same allocator would fail the same way, so there
-  // is no way to keep this rank in step. Surface the error instead; ncclRunDiagnostics propagates it
-  // and init fails, which tears the job down rather than running the rest of diagnostics out of step.
-  // This only fires under genuine memory exhaustion, where failing is the right outcome.
-  if (ncclCalloc(&allPathMasks, comm->nRanks) != ncclSuccess) {
-    WARN("Diagnostics: failed to allocate %d-rank transport-mask buffer", comm->nRanks);
-    ret = ncclSystemError;
-    goto fail;
-  }
+  NCCLCHECK(ncclCalloc(&allPathMasks, comm->nRanks));
   allPathMasks[comm->rank] = localPathMask;
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allPathMasks, sizeof(unsigned int)), ret, fail);
 
