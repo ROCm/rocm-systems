@@ -5500,6 +5500,76 @@ static hipError_t playback_hipKernelSetCacheConfig(PlaybackContext& ctx, const u
   return hipSuccess;
 }
 
+static hipError_t playback_hipExtMemcpyBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipExtMemcpyBatchAsync*>(payload);
+  void* _d_dsts[16]{};
+  uint32_t _d_dsts_n = a->dsts_n > 16u ? 16u : a->dsts_n;
+  (void)_d_dsts_n;
+  if (a->dsts_present)
+    std::memcpy(_d_dsts, a->dsts_bytes, static_cast<size_t>(_d_dsts_n) * sizeof(void*));
+  for (uint32_t _i = 0; _i < _d_dsts_n; ++_i)
+    _d_dsts[_i] = ctx.translate_ptr(reinterpret_cast<uint64_t>(_d_dsts[_i]));
+  void* _d_srcs[16]{};
+  uint32_t _d_srcs_n = a->srcs_n > 16u ? 16u : a->srcs_n;
+  (void)_d_srcs_n;
+  if (a->srcs_present)
+    std::memcpy(_d_srcs, a->srcs_bytes, static_cast<size_t>(_d_srcs_n) * sizeof(void*));
+  for (uint32_t _i = 0; _i < _d_srcs_n; ++_i)
+    _d_srcs[_i] = ctx.translate_ptr(reinterpret_cast<uint64_t>(_d_srcs[_i]));
+  size_t _d_sizes[16]{};
+  uint32_t _d_sizes_n = a->sizes_n > 16u ? 16u : a->sizes_n;
+  (void)_d_sizes_n;
+  if (a->sizes_present)
+    std::memcpy(_d_sizes, a->sizes_bytes, static_cast<size_t>(_d_sizes_n) * sizeof(size_t));
+  size_t _d_sizesDst[16]{};
+  uint32_t _d_sizesDst_n = a->sizesDst_n > 16u ? 16u : a->sizesDst_n;
+  (void)_d_sizesDst_n;
+  if (a->sizesDst_present)
+    std::memcpy(_d_sizesDst, a->sizesDst_bytes, static_cast<size_t>(_d_sizesDst_n) * sizeof(size_t));
+  hipExtMemcpyWait _d_waits[16]{};
+  uint32_t _d_waits_n = a->waits_n > 16u ? 16u : a->waits_n;
+  (void)_d_waits_n;
+  if (a->waits_present)
+    std::memcpy(_d_waits, a->waits_bytes, static_cast<size_t>(_d_waits_n) * sizeof(hipExtMemcpyWait));
+  for (uint32_t _i = 0; _i < _d_waits_n; ++_i)
+    _d_waits[_i].addr = ctx.translate_ptr(reinterpret_cast<uint64_t>(_d_waits[_i].addr));
+  hipExtMemcpySignal _d_signals[16]{};
+  uint32_t _d_signals_n = a->signals_n > 16u ? 16u : a->signals_n;
+  (void)_d_signals_n;
+  if (a->signals_present)
+    std::memcpy(_d_signals, a->signals_bytes, static_cast<size_t>(_d_signals_n) * sizeof(hipExtMemcpySignal));
+  for (uint32_t _i = 0; _i < _d_signals_n; ++_i)
+    _d_signals[_i].addr = ctx.translate_ptr(reinterpret_cast<uint64_t>(_d_signals[_i].addr));
+  hipExtMemcpyAttributes _d_attrs[16]{};
+  uint32_t _d_attrs_n = a->attrs_n > 16u ? 16u : a->attrs_n;
+  (void)_d_attrs_n;
+  if (a->attrs_present)
+    std::memcpy(_d_attrs, a->attrs_bytes, static_cast<size_t>(_d_attrs_n) * sizeof(hipExtMemcpyAttributes));
+  size_t _d_attrsIdxs[16]{};
+  uint32_t _d_attrsIdxs_n = a->attrsIdxs_n > 16u ? 16u : a->attrsIdxs_n;
+  (void)_d_attrsIdxs_n;
+  if (a->attrsIdxs_present)
+    std::memcpy(_d_attrsIdxs, a->attrsIdxs_bytes, static_cast<size_t>(_d_attrsIdxs_n) * sizeof(size_t));
+  static const auto _fn = reinterpret_cast<decltype(&hipExtMemcpyBatchAsync)>(
+      hrr_runtime_symbol("hipExtMemcpyBatchAsync"));
+  if (_fn == nullptr) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      fprintf(stderr, "[HRR] hipExtMemcpyBatchAsync is not exported by this "
+              "HIP runtime; skipping it during replay, results may "
+              "differ from capture.\n");
+    }
+    return hipSuccess;
+  }
+  hipError_t _r = (hipError_t)_fn((void**)(_d_dsts_n ? _d_dsts : nullptr), (void**)(_d_srcs_n ? _d_srcs : nullptr), (size_t*)(_d_sizes_n ? _d_sizes : nullptr), (size_t*)(_d_sizesDst_n ? _d_sizesDst : nullptr), (hipExtMemcpyWait*)(_d_waits_n ? _d_waits : nullptr), (hipExtMemcpySignal*)(_d_signals_n ? _d_signals : nullptr), (size_t)_d_dsts_n, (hipExtMemcpyAttributes*)(_d_attrs_n ? _d_attrs : nullptr), (size_t*)(_d_attrsIdxs_n ? _d_attrsIdxs : nullptr), (size_t)_d_attrs_n, (hipStream_t)ctx.translate_stream(a->stream));
+  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
+    hrr_note_recorded_error(ctx, "hipExtMemcpyBatchAsync", a->ret);
+    return hipSuccess;
+  }
+  return _r;
+}
+
 static hipError_t playback___hipPopCallConfiguration(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   return hipSuccess;
@@ -6095,15 +6165,16 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipLibraryGetModule)),  // [546] HRR_API_HIPLIBRARYGETMODULE
     static_cast<uint32_t>(sizeof(hrr_args_hipKernelSetAttributeForDevice)),  // [547] HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE
     static_cast<uint32_t>(sizeof(hrr_args_hipKernelSetCacheConfig)),  // [548] HRR_API_HIPKERNELSETCACHECONFIG
-    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [549] HRR_API_HIPPOPCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [550] HRR_API_HIPPUSHCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [551] HRR_API_HIPREGISTERFATBINARY
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [552] HRR_API_HIPREGISTERFUNCTION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [553] HRR_API_HIPREGISTERMANAGEDVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [554] HRR_API_HIPREGISTERSURFACE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [555] HRR_API_HIPREGISTERTEXTURE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [556] HRR_API_HIPREGISTERVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [557] HRR_API_HIPUNREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args_hipExtMemcpyBatchAsync)),  // [549] HRR_API_HIPEXTMEMCPYBATCHASYNC
+    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [550] HRR_API_HIPPOPCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [551] HRR_API_HIPPUSHCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [552] HRR_API_HIPREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [553] HRR_API_HIPREGISTERFUNCTION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [554] HRR_API_HIPREGISTERMANAGEDVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [555] HRR_API_HIPREGISTERSURFACE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [556] HRR_API_HIPREGISTERTEXTURE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [557] HRR_API_HIPREGISTERVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [558] HRR_API_HIPUNREGISTERFATBINARY
 };
 
 // ============================================================
@@ -6659,13 +6730,14 @@ hrr_playback_fn_t hrr_playback_dispatch[HRR_API_COUNT] = {
     playback_hipLibraryGetModule,  // [546] HRR_API_HIPLIBRARYGETMODULE
     playback_hipKernelSetAttributeForDevice,  // [547] HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE
     playback_hipKernelSetCacheConfig,  // [548] HRR_API_HIPKERNELSETCACHECONFIG
-    playback___hipPopCallConfiguration,  // [549] HRR_API_HIPPOPCALLCONFIGURATION
-    playback___hipPushCallConfiguration,  // [550] HRR_API_HIPPUSHCALLCONFIGURATION
-    playback___hipRegisterFatBinary,  // [551] HRR_API_HIPREGISTERFATBINARY
-    playback___hipRegisterFunction,  // [552] HRR_API_HIPREGISTERFUNCTION
-    playback___hipRegisterManagedVar,  // [553] HRR_API_HIPREGISTERMANAGEDVAR
-    playback___hipRegisterSurface,  // [554] HRR_API_HIPREGISTERSURFACE
-    playback___hipRegisterTexture,  // [555] HRR_API_HIPREGISTERTEXTURE
-    playback___hipRegisterVar,  // [556] HRR_API_HIPREGISTERVAR
-    playback___hipUnregisterFatBinary,  // [557] HRR_API_HIPUNREGISTERFATBINARY
+    playback_hipExtMemcpyBatchAsync,  // [549] HRR_API_HIPEXTMEMCPYBATCHASYNC
+    playback___hipPopCallConfiguration,  // [550] HRR_API_HIPPOPCALLCONFIGURATION
+    playback___hipPushCallConfiguration,  // [551] HRR_API_HIPPUSHCALLCONFIGURATION
+    playback___hipRegisterFatBinary,  // [552] HRR_API_HIPREGISTERFATBINARY
+    playback___hipRegisterFunction,  // [553] HRR_API_HIPREGISTERFUNCTION
+    playback___hipRegisterManagedVar,  // [554] HRR_API_HIPREGISTERMANAGEDVAR
+    playback___hipRegisterSurface,  // [555] HRR_API_HIPREGISTERSURFACE
+    playback___hipRegisterTexture,  // [556] HRR_API_HIPREGISTERTEXTURE
+    playback___hipRegisterVar,  // [557] HRR_API_HIPREGISTERVAR
+    playback___hipUnregisterFatBinary,  // [558] HRR_API_HIPUNREGISTERFATBINARY
 };
