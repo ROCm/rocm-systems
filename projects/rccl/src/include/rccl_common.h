@@ -158,12 +158,18 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct 
 // Arch-table channel cap for Ring Simple ReduceScatter
 // (rcclArchThresholds::rsRingSimpleCapped*). NCCL_MIN/MAX_NCHANNELS turn it off.
 void rcclUpdateCollectiveChannels(struct ncclComm* comm, size_t nBytes, const struct ncclTaskColl* info, int& nc);
+// gfx950 multi-node all_reduce/reduce_scatter choices measured with RCCL_IB_GDR_FLUSH_FLAG=1; a no-op
+// unless every rank of the comm uses the flag (comm->ibGdrFlushFlag). Call after
+// rcclUpdateCollectiveProtocol, whose choice it overrides.
+int rcclUpdateRemoteFlushAlgoProto(struct ncclComm* comm, size_t nBytes, struct ncclTaskColl* info,
+                                   float (*table)[NCCL_NUM_PROTOCOLS]);
 void rcclUpdateThreadThreshold(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info,
                                int& threadThreshold);
 void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info);
 void rcclGetMaxNthreads(struct ncclComm* comm, int maxNthreads[]);
 void rcclOptThreadBlockSize(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes, int& nThreads);
 void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]);
+void rcclScaleCollLl128BuffSize(struct ncclComm* comm);
 NCCL_API(ncclResult_t, rcclGetAlgoInfo, struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
          int collNetSupport, int nvlsSupport, int numPipeOps, int* algo, int* protocol, int* maxChannels);
 // Buffer/op-aware implementation query. Unlike rcclGetAlgoInfo(), this reports
