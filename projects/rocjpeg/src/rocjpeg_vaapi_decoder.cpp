@@ -371,7 +371,12 @@ bool RocJpegVaapiMemoryPool::SetSurfaceAsIdle(VASurfaceID surface_id) {
         for (auto& entry : pair.second) {
             auto it = std::find(entry.va_surface_ids.begin(), entry.va_surface_ids.end(), surface_id);
             if (it != entry.va_surface_ids.end()) {
-                entry.surface_status[std::distance(entry.va_surface_ids.begin(), it)] = kIdle;
+                size_t idx = std::distance(entry.va_surface_ids.begin(), it);
+                if (idx >= entry.surface_status.size()) {
+                    ErrorLog(g_rocjpeg_logger, "The surface_status of the pool entry for surface_id: " + ROCJPEG_TOSTR(surface_id) + " does not match its surfaces!");
+                    return false;
+                }
+                entry.surface_status[idx] = kIdle;
                 if (std::all_of(entry.surface_status.begin(), entry.surface_status.end(), [](MemPoolEntryStatus status) { return status == kIdle; })) {
                     entry.entry_status = kIdle;
                 }
