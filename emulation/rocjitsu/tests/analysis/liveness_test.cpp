@@ -7430,6 +7430,31 @@ TEST(GeneratedInstDefUse, Gfx1250Vop3CompareDefinesOneSgpr) {
   EXPECT_FALSE(idu.defs.contains({RegClass::SGPR, 54, 1}));
 }
 
+TEST(GeneratedInstDefUse, Gfx1250VopdCndmaskMaskIsOneSgprInWave32) {
+  // v_dual_cndmask_b32 in either VOPD3 slot, its mask in s8, paired with
+  // v_dual_fmac_f32. VOPD3 decodes the mask as an SGPR pair, so only Wave32
+  // narrows it.
+  for (const bool x_slot : {true, false}) {
+    SCOPED_TRACE(x_slot ? "X slot" : "Y slot");
+    const uint32_t opx = x_slot ? 9u : 0u;
+    const uint32_t opy = x_slot ? 0u : 9u;
+    auto inst =
+        decode_gfx1250_compound({0xcf000000u | (opx << 18) | (opy << 12) | 256u,
+                                 258u | (4u << 16) | ((x_slot ? 8u : 12u) << 24),
+                                 16u | (6u << 8) | ((x_slot ? 14u : 8u) << 16) | (18u << 24), 0u});
+    ASSERT_NE(inst, nullptr);
+    ASSERT_NE(inst->mnemonic().find("v_dual_cndmask_b32"), std::string_view::npos)
+        << inst->mnemonic();
+
+    const InstDefUse wave32(*inst, 32);
+    EXPECT_TRUE(wave32.uses.contains({RegClass::SGPR, 8, 1}));
+    EXPECT_FALSE(wave32.uses.contains({RegClass::SGPR, 9, 1}));
+
+    const InstDefUse wave64(*inst, 64);
+    EXPECT_TRUE(wave64.uses.contains({RegClass::SGPR, 8, 2}));
+  }
+}
+
 TEST(GeneratedInstDefUse, Gfx1250Scale16ScalarSourcesUseSingleSgprs) {
   auto inst = decode_gfx1250_compound(gfx1250_scale16_words(0, 2));
   ASSERT_NE(inst, nullptr);

@@ -239,7 +239,7 @@ Kernel-scoped backward register liveness over the CFG embedded in `BasicBlock`. 
 
 Ordinary SGPRs, VGPRs, and AccVGPRs via `RegisterSet`. `InstDefUse` records explicit operand defs and uses plus instruction-level implicit hooks; the only implicit hook today is the FLAT `saddr` SGPR-pair use that does not appear as an explicit operand.
 
-A wave-mask SGPR operand (a compare or carry-out result, a conditional-move selector, a carry-in) is one SGPR in Wave32 and a pair in Wave64, but RDNA decoders name the pair; the decoder marks it with `Operand::is_wave_mask()`, generated from the ISA's `FMT_NUM_M64` data format. `InstDefUse` and `LivenessAnalysis` therefore take the wave size the code executes at as a required argument and narrow these operands to the low SGPR at 32. Every caller passes 64, so a Wave32 kernel's wave-mask destinations are over-killed; passing the kernel's wave size is deferred.
+A wave-mask SGPR operand (a compare or carry-out result, a conditional-move selector, a carry-in) is one SGPR in Wave32 and a pair in Wave64, but RDNA decoders name the pair; the decoder marks it with `Operand::is_wave_mask()`, generated from the ISA's `FMT_NUM_M64` data format. `InstDefUse` and `LivenessAnalysis` therefore take the wave size the code executes at as a required argument and narrow these operands to the low SGPR at 32. DBT passes the guest kernel's wave size. The DBI instrumentor and the probe-body analyses (`probe_clobber`, `probe_live_in`) pass 64, so a Wave32 kernel's wave-mask destinations are over-killed; using the kernel's wave size is deferred.
 
 #### What it does NOT track
 

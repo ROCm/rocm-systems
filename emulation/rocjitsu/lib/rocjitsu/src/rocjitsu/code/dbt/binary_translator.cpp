@@ -162,6 +162,21 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   return true;
 }
 
+/// @brief The guest wave size every kernel in @p translations shares.
+///
+/// @details An object-wide analysis cannot apply each kernel's own wave size, so kernels that
+/// disagree get 64: wave-mask operands keep the pair width they decode with.
+[[nodiscard]] uint8_t common_guest_wavefront_size(std::span<const KdTranslation> translations) {
+  if (translations.empty())
+    return 64;
+  const uint8_t wave_size = translations.front().guest_wavefront_size;
+  for (const KdTranslation &translation : translations) {
+    if (translation.guest_wavefront_size != wave_size)
+      return 64;
+  }
+  return wave_size;
+}
+
 /// @brief Indirect transfers in one scope whose target pair was loaded from the kernarg segment.
 ///
 /// @details A target this object never computed and never stored still has a provenance when it
@@ -228,7 +243,7 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
   const auto kill_defs = [&](const Instruction &inst, PairState &state) {
     if (state.pointer.empty() && state.loaded.empty())
       return;
-    const InstDefUse def_use(inst, /*wave_size=*/64);
+    const InstDefUse def_use(inst, kd.guest_wavefront_size);
     // Only the pairs actually being tracked can be killed, and there are a handful at most.
     // Sweeping the whole SGPR file instead cost two RegisterSet::contains() calls per register per
     // instruction per sweep, which profiled as half of all translation time.
@@ -2516,7 +2531,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   const uint64_t text_vaddr = obj.text_sections().front()->vaddr();
   const auto relocation_pair_analysis =
-      analyze_relocation_pairs(blocks, relocation_function_tables, text_vaddr, /*wave_size=*/64);
+      analyze_relocation_pairs(blocks, relocation_function_tables, text_vaddr,
+                               common_guest_wavefront_size(descriptor_translations));
   const auto &relocation_table_dispatches = relocation_pair_analysis.dispatches;
   const auto relocation_table_calls = attach_relocation_table_call_edges(
       block_index, relocation_function_tables, relocation_table_dispatches);
@@ -3349,8 +3365,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       // entry at +256, which hardware enters with unknown EXEC) and pass it to
       // LivenessAnalysis so EXEC-masked vector defs can be promoted to kills where
       // EXEC is provably full, freeing more scratch registers. Reference issue #9733.
-      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), /*wave_size=*/64,
-                                  /*exec=*/nullptr, liveness_options, scope_analysis_edges);
+      liveness =
+          LivenessAnalysis(KernelBlockScope(scope.blocks), scope.translation->guest_wavefront_size,
+                           /*exec=*/nullptr, liveness_options, scope_analysis_edges);
     }
 
     std::unique_ptr<Gfx1250VgprMsbAnalysis> wmma_completion_wait_vgpr_msb;
