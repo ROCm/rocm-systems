@@ -638,6 +638,29 @@ TEST(Instrumentor, RejectsAlignedOffsetPastLastInstruction) {
       << "error was: " << result.errors.front();
 }
 
+TEST(Instrumentor, RejectsCodeObjectsUsingTheBranchStack) {
+  // The anchor itself is an ordinary s_nop; the join elsewhere in .text is what
+  // makes liveness unreliable for every site.
+  auto image = make_gfx950_elf_with_text_words({
+      0xBF800000u, // s_nop 0
+      0xBE802E22u, // s_cbranch_join s34
+      0xBF810000u, // s_endpgm
+  });
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instrumentor.add_point_by_offset(/*anchor_offset=*/0);
+
+  auto result = instrumentor.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(
+      result.errors.front().find("conditional branch stack (s_cbranch_join at .text offset 4)"),
+      std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
 TEST(Instrumentor, RejectsOffsetInteriorToMultiWordInstruction) {
   // .text: [s_mov_b32 s0, 0xDEADBEEF (8 bytes)][s_nop 0]. Offset 4 lands in the
   // *interior* of the 8-byte instruction at offset 0, so no decoded instruction

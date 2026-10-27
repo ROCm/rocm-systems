@@ -6,7 +6,15 @@ import socket
 import sys
 import tempfile
 import unittest.mock
-from subprocess import CalledProcessError, PIPE, Popen, TimeoutExpired, run
+# The nosec markers below are safe only while these calls run fixed commands
+# (./rocm-debug-agent-test, readelf) without a shell or outside input.
+from subprocess import (
+    CalledProcessError,
+    PIPE,
+    Popen,
+    TimeoutExpired,
+    run,
+)  # nosec B404
 import time
 import hashlib
 import logging
@@ -78,7 +86,7 @@ def run_and_communicate(
             else {}
         ),
     ):
-        p = Popen(cmd, stdout=PIPE, stderr=PIPE)
+        p = Popen(cmd, stdout=PIPE, stderr=PIPE)  # nosec B603
 
         def handle_failure(reason):
             logger().info("Test %s FAIL: %s", test_name, reason)
@@ -237,7 +245,9 @@ def _file_checksum(path: str, algo: str = "sha256") -> str:
 def _has_symbol_with_readelf(path: str, symbol: str) -> bool:
     # Use readelf -s (symbol table). Return True if symbol name appears.
     try:
-        res = run(["readelf", "-sW", path], stdout=PIPE, stderr=PIPE, check=True)
+        res = run(
+            ["readelf", "-sW", path], stdout=PIPE, stderr=PIPE, check=True
+        )  # nosec B603 B607
         out = res.stdout.decode(errors="ignore")
         return symbol in out
     except (CalledProcessError):
@@ -453,7 +463,7 @@ def test_sigquit(*, args, patterns=(), **_):
 
     LOOP_TIMEOUT = DEFAULT_TIMEOUT  # seconds
 
-    p = Popen(["./rocm-debug-agent-test", args], stdout=PIPE, stderr=PIPE)
+    p = Popen(["./rocm-debug-agent-test", args], stdout=PIPE, stderr=PIPE)  # nosec B603
 
     kernel_started = False
     wave_seen = False
@@ -700,7 +710,9 @@ def test_sigquit_resumes(*, name, args, patterns=(), **_):
     expect the program to finish: the agent resumes the waves it stopped."""
     check_list = [re.compile(s) for s in patterns]
     _log = logger()
-    p = Popen(["./rocm-debug-agent-test", args], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    p = Popen(
+        ["./rocm-debug-agent-test", args], stdin=PIPE, stdout=PIPE, stderr=PIPE
+    )  # nosec B603
 
     lock = threading.Lock()
     collected = {"out": b"", "err": b""}
