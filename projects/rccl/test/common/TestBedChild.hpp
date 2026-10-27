@@ -102,6 +102,7 @@ namespace RcclUnitTesting
     std::vector<std::vector<std::vector<hipGraphExec_t>>> graphExecs; // GraphExecs for executing collectives per group call
     std::vector<std::vector<std::vector<bool>>> graphEnabled;
     MemAllocType memAllocType = MEM_ALLOC_HIP;                        // Current memory allocation mode
+    bool commsFailed = false;                                         // A command failed since comms were created: abort, not finalize
 
     // Constructor
     TestBedChild(int const childId, bool const verbose, int const printValues, bool const useRankThreading);
@@ -149,7 +150,11 @@ namespace RcclUnitTesting
     // Release allocated memory
     ErrCode DeallocateMem();
 
-    // Destroys RCCL communicators
+    // Reads the parent's abort request, then calls DestroyComms()
+    ErrCode DestroyCommsCommand();
+
+    // Destroys RCCL communicators. Aborts them instead of finalizing when
+    // commsFailed is set, so a broken peer cannot block the teardown barrier.
     ErrCode DestroyComms();
 
     // Destroys graphs

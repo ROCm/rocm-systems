@@ -38,6 +38,7 @@ namespace RcclUnitTesting
     bool                       poolMode;              // reuse workers across configs (UT_COMM_POOL != 0)
     std::vector<TestBedChild*> poolChildren;          // persistent pool, index == pinned device id
     bool                       configUsedPool;        // last InitComms served from the pool (skip Finalize in DestroyComms)
+    bool                       childFailed = false;   // a child reported failure since the last DestroyComms (abort, not finalize)
 
     // Constructor - Creates one child process per detected GPU device that waits for further commands
     TestBed();
@@ -207,15 +208,24 @@ namespace RcclUnitTesting
     // runtime state from the test parent.
     bool SpawnChildProcess(TestBedChild* child, MemAllocType memAllocType);
 
+    // WaitForChild result when childId sent nothing within ChildReplyTimeoutSec().
+    static constexpr int kChildWaitTimedOut = -2;
+
+    // Seconds the parent waits for any single child reply (0 = no limit). Never
+    // shorter than the child's own collective timeout, and off under UT_DEBUG_PAUSE.
+    int ChildReplyTimeoutSec() const;
+
     // Blocks until childList[childId] has data (or EOF) to read. Returns the id
-    // of another active child whose pipe closed first, or -1.
+    // of another active child whose pipe closed first, kChildWaitTimedOut, or -1.
     int WaitForChild(int childId);
 
-    // Called when a child stops answering (it crashed or broke the protocol).
-    // Reports how it ended, kills and reaps every worker this TestBed owns or
-    // borrows, and resets it to no active children; the next InitComms starts
-    // fresh workers. Returns the report for the test failure message.
-    std::string AbandonChildren(int lostChildId);
+    // Called when a child stops answering (it crashed, hung, or broke the
+    // protocol). Reports how it ended, kills and reaps every worker this TestBed
+    // owns or borrows, and resets it to no active children; the next InitComms
+    // starts fresh workers. waitForExit gives a dying child time to report its
+    // exit status; a hung child is killed immediately. Returns the report for
+    // the test failure message.
+    std::string AbandonChildren(int lostChildId, bool waitForExit = true);
 
     // Reads one acknowledgement from each listed child (a child may appear once
     // per command it was sent), then fails if any reported failure.

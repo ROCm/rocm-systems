@@ -362,6 +362,7 @@ namespace RcclUnitTesting
     showTiming     = GetEnvVar("UT_SHOW_TIMING",  1);
     useInteractive = GetEnvVar("UT_INTERACTIVE",  0);
     timeoutUs      = GetEnvVar("UT_TIMEOUT_US" ,  5000000);
+    childTimeoutSec = GetEnvVar("UT_CHILD_TIMEOUT_S", 900);
     useMultithreading = GetEnvVar("UT_MULTITHREAD", false);
     commPool          = GetEnvVar("UT_COMM_POOL", true);
 
@@ -511,6 +512,7 @@ namespace RcclUnitTesting
         std::make_tuple("UT_SHOW_TIMING"      , showTiming    , "Show timing table"),
         std::make_tuple("UT_INTERACTIVE"      , useInteractive, "Run in interactive mode"),
         std::make_tuple("UT_TIMEOUT_US"       , timeoutUs     , "Timeout limit for collective calls in us"),
+        std::make_tuple("UT_CHILD_TIMEOUT_S"  , childTimeoutSec, "Parent wait limit per child reply in s (0=off)"),
         std::make_tuple("UT_MULTITHREAD"      , useMultithreading, "Multi-thread single-process ranks"),
         std::make_tuple("UT_COMM_POOL"        , commPool      , "Reuse child processes across configs"),
         std::make_tuple("UT_DEVICE_DATA"      , -1            , "Build/validate test data on GPU (0=host path; default on)"),

@@ -4,8 +4,10 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include "TestBed.hpp"
+#include <gtest/gtest-spi.h>
 #include <hip/hip_runtime.h>
 #include <cerrno>
+#include <chrono>
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -162,6 +164,117 @@ namespace RcclUnitTesting
       EXPECT_EQ(fcntl(fd, F_GETFD), -1) << "parent pipe fd " << fd << " left open";
       EXPECT_EQ(errno, EBADF);
     }
+  }
+
+  namespace
+  {
+    // Forks a worker that keeps its pipes open but never answers, as a worker
+    // wedged in a collective would, and makes it testBed's only child. The
+    // parent waits are limited to 1 s so the test runs quickly.
+    TestBedChild* InstallHungChild(TestBed& testBed)
+    {
+      testBed.poolMode = false;
+      testBed.configUsedPool = false;
+      testBed.ev.debugPause = false;
+      testBed.ev.timeoutUs = 0;
+      testBed.ev.childTimeoutSec = 1;
+
+      TestBedChild* child = new TestBedChild(0, false, 0, false);
+      if (child->InitPipes() != TEST_SUCCESS)
+      {
+        child->ClosePipes();
+        delete child;
+        return nullptr;
+      }
+      child->pid = fork();
+      if (child->pid == 0)
+      {
+        close(child->parentWriteFd);
+        close(child->parentReadFd);
+        while (true) pause();
+      }
+      if (child->pid < 0)
+      {
+        child->ClosePipes();
+        delete child;
+        return nullptr;
+      }
+      close(child->childWriteFd);
+      close(child->childReadFd);
+      child->childWriteFd = -1;
+      child->childReadFd = -1;
+      testBed.childList = {child};
+      testBed.numActiveChildren = 1;
+      testBed.numActiveRanks = 1;
+      return child;
+    }
+
+    bool AnyFailureMentions(::testing::TestPartResultArray const& failures, char const* text)
+    {
+      for (int i = 0; i < failures.size(); ++i)
+      {
+        if (std::string(failures.GetTestPartResult(i).message()).find(text) != std::string::npos) return true;
+      }
+      return false;
+    }
+  }
+
+  // A worker that never replies must fail the current test once
+  // UT_CHILD_TIMEOUT_S expires, and be killed and reaped, instead of hanging
+  // the whole binary.
+  TEST(Teardown, SilentChildFailsAfterReplyTimeout)
+  {
+    TestBed testBed;
+    TestBedChild* const child = InstallHungChild(testBed);
+    ASSERT_NE(child, nullptr);
+    pid_t const childPid = child->pid;
+
+    ::testing::TestPartResultArray failures;
+    auto const start = std::chrono::steady_clock::now();
+    {
+      ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+      testBed.DestroyComms();
+    }
+    auto const elapsed = std::chrono::steady_clock::now() - start;
+
+    EXPECT_EQ(failures.size(), 1);
+    EXPECT_TRUE(AnyFailureMentions(failures, "stopped responding"));
+    EXPECT_LT(elapsed, std::chrono::seconds(30));
+    EXPECT_TRUE(testBed.childList.empty());
+    EXPECT_EQ(testBed.numActiveChildren, 0);
+    EXPECT_FALSE(testBed.childFailed);
+    errno = 0;
+    EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
+    EXPECT_EQ(errno, ECHILD);
+  }
+
+  // A worker that ignores CHILD_STOP (e.g. stuck in comm teardown) must be
+  // killed at the teardown deadline rather than waited on forever.
+  TEST(Teardown, HungChildKilledAtTeardownDeadline)
+  {
+    TestBed testBed;
+    TestBedChild* const child = InstallHungChild(testBed);
+    ASSERT_NE(child, nullptr);
+    pid_t const childPid = child->pid;
+
+    ::testing::TestPartResultArray failures;
+    auto const start = std::chrono::steady_clock::now();
+    {
+      ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+      testBed.TeardownOwnedChildList();
+    }
+    auto const elapsed = std::chrono::steady_clock::now() - start;
+
+    EXPECT_EQ(failures.size(), 1);
+    EXPECT_TRUE(AnyFailureMentions(failures, "teardown deadline"));
+    EXPECT_LT(elapsed, std::chrono::seconds(30));
+    EXPECT_TRUE(testBed.childList.empty());
+    EXPECT_EQ(testBed.numActiveChildren, 0);
+    errno = 0;
+    EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
+    EXPECT_EQ(errno, ECHILD);
   }
 
   // Pool workers must start from a fresh process image even when an earlier

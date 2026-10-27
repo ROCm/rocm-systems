@@ -30,6 +30,7 @@ namespace RcclUnitTesting
     bool showTiming;     // Show timing per case at end            [UT_SHOW_TIMING]
     bool useInteractive; // Run in interactive mode                [UT_INTERACTIVE]
     int  timeoutUs;      // Set timeout for child in microseconds  [UT_TIMEOUT_US]
+    int  childTimeoutSec; // Parent wait per child reply in s (0=off) [UT_CHILD_TIMEOUT_S]
     bool useMultithreading; // Multi-thread single-process ranks   [UT_MULTITHREAD]
     bool commPool;       // Reuse child processes across configs    [UT_COMM_POOL]
 

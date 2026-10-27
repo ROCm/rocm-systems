@@ -169,7 +169,7 @@ namespace RcclUnitTesting
       case CHILD_VALIDATE_RESULTS: status = ValidateResults();      break;
       case CHILD_LAUNCH_GRAPHS   : status = LaunchGraphs();         break;
       case CHILD_DEALLOCATE_MEM  : status = DeallocateMem();        break;
-      case CHILD_DESTROY_COMMS   : status = DestroyComms();         break;
+      case CHILD_DESTROY_COMMS   : status = DestroyCommsCommand();  break;
       case CHILD_DESTROY_GRAPHS  : status = DestroyGraphs();        break;
       case CHILD_QUERY_SYMMETRIC : status = QuerySymmetricSupport(retValBuf); break;
       case CHILD_STOP            : goto stop;
@@ -183,6 +183,8 @@ namespace RcclUnitTesting
       // Send back acknowledgement to parent
       if (status == TEST_FAIL)
         TEST_ERROR("Child %d failed on command [%s]:", this->childId, ChildCommandNames[command]);
+      if (status != TEST_SUCCESS && !this->comms.empty())
+        this->commsFailed = true;
       if (RcclUnitTesting::safe_pipe_write(childWriteFd, &status, sizeof(status)) < 0) {
         TEST_ERROR("Child %d write to parent failed: %s", this->childId, strerror(errno));
         break;
@@ -1037,20 +1039,36 @@ namespace RcclUnitTesting
     using Clock = std::chrono::high_resolution_clock;
     if (this->verbose) TEST_INFO("Starting sychronization and timing");
     const auto start = Clock::now();
-    while (!streamsToComplete.empty() && usElapsed < timeoutUs)
+    hipError_t streamError = hipSuccess;
+    while (!streamsToComplete.empty() && usElapsed < timeoutUs && streamError == hipSuccess)
     {
       for (int i = 0; i < streamsToComplete.size(); i++)
       {
-        if (hipStreamQuery(streamsToComplete[i]) == hipSuccess)
+        hipError_t const queryResult = hipStreamQuery(streamsToComplete[i]);
+        if (queryResult == hipSuccess)
         {
           streamsToComplete.erase(streamsToComplete.begin() + i);
           i--;
         }
+        else if (queryResult != hipErrorNotReady)
+        {
+          streamError = queryResult;
+          break;
+        }
       }
       usElapsed = duration_cast<microseconds>(Clock::now() - start).count();
-      if (!streamsToComplete.empty()) {
+      if (!streamsToComplete.empty() && streamError == hipSuccess) {
         std::this_thread::sleep_for(std::chrono::microseconds(10));
       }
+    }
+
+    // A faulted stream never completes; fail now instead of waiting out the timeout.
+    if (streamError != hipSuccess)
+    {
+      TEST_ERROR("Child %d collective stream failed with HIP error %s; aborting communicators",
+                 this->childId, hipGetErrorString(streamError));
+      this->AbortComms();
+      return TEST_FAIL;
     }
 
     // timed out
@@ -1425,9 +1443,26 @@ namespace RcclUnitTesting
     return this->DeallocateMemInternal(groupId, collId, localRank);
   }
 
+  ErrCode TestBedChild::DestroyCommsCommand()
+  {
+    int abortComms = 0;
+    PIPE_READ(abortComms);
+    if (abortComms) this->commsFailed = true;
+    return DestroyComms();
+  }
+
   ErrCode TestBedChild::DestroyComms()
   {
     if (this->verbose) TEST_INFO("Child %d begins DestroyComms", this->childId);
+
+    // After a failure, abort before anything synchronizes the device: a kernel
+    // still waiting on a broken peer only exits once its comm is aborted.
+    if (this->commsFailed &&
+        std::any_of(this->comms.begin(), this->comms.end(), [](ncclComm_t c) { return c != nullptr; }))
+    {
+      TEST_WARN("Child %d aborting communicators after an earlier failure", this->childId);
+      this->AbortComms();
+    }
 
     // Graphs are captured on this config's streams; free any that DestroyGraphs
     // did not, before the streams go. A pooled worker would otherwise keep them
@@ -1546,6 +1581,7 @@ namespace RcclUnitTesting
 
     this->comms.clear();
     this->streams.clear();
+    this->commsFailed = false;
     if (this->verbose) TEST_INFO("Child %d finishes DestroyComms", this->childId);
     return status;
   }

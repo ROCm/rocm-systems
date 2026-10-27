@@ -6,8 +6,10 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/wait.h>
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <climits>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
@@ -44,6 +46,12 @@
   {                                                                                     \
     if (ev.verbose) TEST_INFO("Calling PIPE_READ to Child %d", childId); \
     int const lostChildId = WaitForChild(childId);                                      \
+    if (lostChildId == kChildWaitTimedOut)                                              \
+    {                                                                                   \
+      TEST_ERROR("Child %d did not reply within %d s (UT_CHILD_TIMEOUT_S)", childId,    \
+                 ChildReplyTimeoutSec());                                               \
+      FAIL() << AbandonChildren(childId, /*waitForExit=*/false);                        \
+    }                                                                                   \
     if (lostChildId >= 0)                                                               \
     {                                                                                   \
       TEST_ERROR("Child %d pipe closed while waiting for child %d", lostChildId, childId); \
@@ -69,6 +77,7 @@
     if (response != TEST_SUCCESS)                   \
     {                                               \
       TEST_ERROR("Child %d reports failure", childId); \
+      this->childFailed = true;                     \
       ASSERT_EQ(response, TEST_SUCCESS);            \
       FAIL();                                       \
     }                                               \
@@ -81,6 +90,34 @@ namespace RcclUnitTesting
     // Matched by suite, not by test: one sweep's sample, so exact test names leave siblings exposed.
     char const* const kGfx95NoPoolSuites[] = {"AlltoAll", "ReduceScatter", "AllGather",
                                               "P2pChannelScaling", "Broadcast", "GroupCall"};
+
+    // Reaps pid. A worker still alive at deadline (e.g. stuck in a collective
+    // teardown) is SIGKILLed and the current test fails. With noDeadline the
+    // wait is unbounded.
+    pid_t ReapChild(pid_t const pid, int* status, bool const noDeadline,
+                    std::chrono::steady_clock::time_point const deadline)
+    {
+      pid_t waitResult = -1;
+      if (!noDeadline)
+      {
+        while (true)
+        {
+          waitResult = waitpid(pid, status, WNOHANG);
+          if (waitResult == -1 && errno == EINTR) continue;
+          if (waitResult != 0) return waitResult;
+          if (std::chrono::steady_clock::now() >= deadline) break;
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        TEST_ERROR("Child pid %d did not exit before the teardown deadline (UT_CHILD_TIMEOUT_S); killing it", pid);
+        ADD_FAILURE() << "Child pid " << pid << " did not exit before the teardown deadline (UT_CHILD_TIMEOUT_S)";
+        kill(pid, SIGKILL);
+      }
+      do
+      {
+        waitResult = waitpid(pid, status, 0);
+      } while (waitResult == -1 && errno == EINTR);
+      return waitResult;
+    }
   }
 
   TestBed::TestBed() :
@@ -194,10 +231,22 @@ namespace RcclUnitTesting
     return true;
   }
 
+  int TestBed::ChildReplyTimeoutSec() const
+  {
+    if (ev.debugPause || ev.childTimeoutSec <= 0) return 0;
+    // ExecuteCollectives replies only after its own UT_TIMEOUT_US expires and
+    // the timed-out comms are aborted.
+    long long const collectiveTimeoutSec = 2 * ((static_cast<long long>(ev.timeoutUs) + 999999) / 1000000);
+    return static_cast<int>(std::min<long long>(std::max<long long>(ev.childTimeoutSec, collectiveTimeoutSec), INT_MAX));
+  }
+
   int TestBed::WaitForChild(int const childId)
   {
     // A peer that dies can leave childId blocked in a collective forever, so
-    // watch every active child's pipe, not only the one being read.
+    // watch every active child's pipe, not only the one being read. A child
+    // that hangs without dying is caught by the reply timeout.
+    int const timeoutSec = ChildReplyTimeoutSec();
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSec);
     std::vector<pollfd> fds;
     std::vector<int> fdChildIds;
     for (int c = 0; c < static_cast<int>(childList.size()); ++c)
@@ -211,11 +260,20 @@ namespace RcclUnitTesting
 
     while (true)
     {
-      if (poll(fds.data(), fds.size(), -1) < 0)
+      int pollTimeoutMs = -1;
+      if (timeoutSec > 0)
+      {
+        auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+          deadline - std::chrono::steady_clock::now());
+        pollTimeoutMs = static_cast<int>(std::clamp<long long>(remaining.count(), 0, INT_MAX));
+      }
+      int const pollResult = poll(fds.data(), fds.size(), pollTimeoutMs);
+      if (pollResult < 0)
       {
         if (errno == EINTR) continue;
         return -1;  // the read that follows reports the error
       }
+      if (pollResult == 0) return kChildWaitTimedOut;
       for (size_t i = 0; i < fds.size(); ++i)
       {
         if (fds[i].revents == 0) continue;
@@ -228,7 +286,7 @@ namespace RcclUnitTesting
     }
   }
 
-  std::string TestBed::AbandonChildren(int const lostChildId)
+  std::string TestBed::AbandonChildren(int const lostChildId, bool const waitForExit)
   {
     std::string reason = "Child " + std::to_string(lostChildId) + " stopped responding";
     TestBedChild* const lost = (lostChildId >= 0 && lostChildId < static_cast<int>(childList.size()))
@@ -239,7 +297,7 @@ namespace RcclUnitTesting
       // while), so give it time to finish dying and report the real cause.
       int status = 0;
       pid_t waitResult = 0;
-      auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+      auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(waitForExit ? 30 : 0);
       while ((waitResult = waitpid(lost->pid, &status, WNOHANG)) == 0 &&
              std::chrono::steady_clock::now() < deadline)
       {
@@ -282,6 +340,7 @@ namespace RcclUnitTesting
     this->poolChildren.clear();
     this->childList.clear();
     this->configUsedPool = false;
+    this->childFailed = false;
     this->numActiveChildren = 0;
     this->numActiveRanks = 0;
     this->rankToChildMap.clear();
@@ -598,6 +657,7 @@ namespace RcclUnitTesting
     }
     if (numFailed > 0)
     {
+      this->childFailed = true;
       FAIL() << numFailed << " of " << childIds.size() << " child acknowledgements reported failure";
     }
     if (allSucceeded) *allSucceeded = true;
@@ -842,6 +902,7 @@ namespace RcclUnitTesting
         int response = 0;
         PIPE_READ(childId, response);
         isCorrect &= (response == TEST_SUCCESS);
+        if (response != TEST_SUCCESS) this->childFailed = true;
       }
     }
 
@@ -963,6 +1024,12 @@ namespace RcclUnitTesting
     InteractiveWait("Starting DestroyComms");
 
     int const cmd = TestBedChild::CHILD_DESTROY_COMMS;
+    // After any child failure, healthy ranks must abort too: finalizing would
+    // block them in the intranode barrier waiting for the failed rank.
+    int const abortComms = this->childFailed ? 1 : 0;
+    if (abortComms && this->numActiveChildren > 0)
+      TEST_WARN("DestroyComms: aborting communicators on all %d children after a child failure",
+                this->numActiveChildren);
 
     // Send DestroyComms command to all active child processes first so they can
     // work in parallel, then collect acknowledgements in a second pass. Run the
@@ -980,6 +1047,7 @@ namespace RcclUnitTesting
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
       {
         PIPE_WRITE(childId, cmd);
+        PIPE_WRITE(childId, abortComms);
       }
       if (ev.verbose) waitStart = Clock::now();
       std::vector<int> ackChildIds;
@@ -1012,6 +1080,7 @@ namespace RcclUnitTesting
       // Classic / fork-fresh: reap the per-config children this call owns.
       TeardownOwnedChildList();
     }
+    this->childFailed = false;
 
     InteractiveWait("Finishing DestroyComms");
   }
@@ -1077,7 +1146,9 @@ namespace RcclUnitTesting
       }
     }
 
-    // Wait for processes to stop
+    // Wait for processes to stop. Children tear down in parallel, so they share one deadline.
+    int const timeoutSec = ChildReplyTimeoutSec();
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSec);
     for (int childId = 0; childId < this->numActiveChildren; ++childId)
     {
       TestBedChild* child = childList[childId];
@@ -1087,10 +1158,7 @@ namespace RcclUnitTesting
       pid_t waitResult = -1;
       if (child->pid > 0)
       {
-        do
-        {
-          waitResult = waitpid(child->pid, &returnVal, 0);
-        } while (waitResult == -1 && errno == EINTR);
+        waitResult = ReapChild(child->pid, &returnVal, timeoutSec == 0, deadline);
       }
       if (waitResult > 0 && WIFSIGNALED(returnVal))
       {
@@ -1134,6 +1202,8 @@ namespace RcclUnitTesting
         (void)RcclUnitTesting::safe_pipe_write(c->parentWriteFd, &cmd, sizeof(cmd));
       c->ClosePipes();
     }
+    int const timeoutSec = ChildReplyTimeoutSec();
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSec);
     for (TestBedChild* c : this->poolChildren)
     {
       if (!c)
@@ -1144,11 +1214,7 @@ namespace RcclUnitTesting
       if (c->pid > 0)
       {
         int returnVal = 0;
-        pid_t waitResult = -1;
-        do
-        {
-          waitResult = waitpid(c->pid, &returnVal, 0);
-        } while (waitResult == -1 && errno == EINTR);
+        pid_t const waitResult = ReapChild(c->pid, &returnVal, timeoutSec == 0, deadline);
         if (waitResult > 0 && WIFSIGNALED(returnVal))
         {
           TEST_ERROR("Pool worker %d killed by signal %d", c->childId, WTERMSIG(returnVal));
