@@ -776,6 +776,9 @@ graph:
   Unit_hipStreamBeginCapture_Negative_WaitDoesNotJoinInvalidatedCapture:
     <<: *level_default
     tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_LegacyStreamWaitIsRejected:
+    <<: *level_default
+    tags: [capture]
   Unit_hipStreamBeginCapture_Negative_StreamOffenceInvalidatesWholeCapture:
     <<: *level_default
     tags: [capture]
