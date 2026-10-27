@@ -399,6 +399,20 @@ def test_changed_scaled_display_variant(gfx90a_copy):
     assert any("3.1.26 L2-Fabric Read BW: not the listed form" in e for e in errors)
 
 
+def test_scaled_display_variant_unit(gfx908_copy):
+    """A row that shows a GB/s metric in seconds must say Bytes/s."""
+    library, configs = gfx908_copy
+    replace_in(
+        configs / "gfx908" / "0300_memory_chart.yaml",
+        "/ 1e9)\n          unit: Bytes/s",
+        "/ 1e9)\n          unit: GB/s",
+    )
+    errors = validate(library, configs)
+    assert any(
+        "3.1.16 VL1_L2 Read BW: unit 'GB/s' is not 'Bytes/s'" in e for e in errors
+    )
+
+
 def test_renamed_display_variant(gfx908_copy):
     library, configs = gfx908_copy
     path = configs / "gfx908" / "0300_memory_chart.yaml"

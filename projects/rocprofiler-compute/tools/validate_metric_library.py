@@ -71,10 +71,9 @@ from vendored import yaml
 # Categories named after panels rather than hardware.
 VIEW_CATEGORIES = ("system", "memchart", "roofline", "wavefront")
 
-# Alias -> canonical unit. A display scale such as Bytes/s vs GB/s is not stored here.
+# Alias -> canonical unit. A display scale such as Bytes/s vs GB/s is not an alias.
 UNIT_ALIASES = {
     "Gbps": "GB/s",
-    "Bytes/s": "GB/s",
     "GFLOPs": "GFLOP/s",
     "GIOPs": "GIOP/s",
     "(Req + $normUnit)": "(Requests + $normUnit)",
@@ -103,6 +102,8 @@ ROUND_RE = re.compile(r"^\s*ROUND\((.*),\s*\d+\s*\)\s*$", re.DOTALL)
 # Time in seconds (Bytes/s rows) and in nanoseconds (GB/s).
 SECONDS_SCALE = "/(SUM(End_Timestamp-Start_Timestamp)/1e9)"
 NANOSECONDS = "/SUM(End_Timestamp-Start_Timestamp)"
+# Metric unit -> the unit of a row that shows the metric in seconds.
+SECONDS_SCALE_UNITS = {"GB/s": "Bytes/s"}
 # TODO(AIPROFCOMP-820): remove with the row equation check when the old panel files are
 # deleted (see "Equivalence with analysis_configs" below).
 # Rows showing a metric in another display form (positional id -> label, metric id,
@@ -508,6 +509,7 @@ def _unit_errors(
     library: MetricLibrary,
 ) -> list[str]:
     unit_variants = UNIT_VARIANTS.get(arch, {})
+    display_variants = DISPLAY_VARIANTS.get(arch, {})
     errors = []
     for row, metric_id in zip(rows, metric_ids):
         if row.unit is None or metric_id is None:
@@ -515,6 +517,9 @@ def _unit_errors(
         label, unit = unit_variants.get(
             row.legacy_id, (row.label, library.metrics[metric_id]["unit"])
         )
+        variant = display_variants.get(row.legacy_id)
+        if variant is not None and variant[2] is None:
+            unit = SECONDS_SCALE_UNITS.get(unit, unit)
         if row.label != label:
             errors.append(
                 f"[{arch}] {row.legacy_id} is now {row.label!r}; update unit variants"
