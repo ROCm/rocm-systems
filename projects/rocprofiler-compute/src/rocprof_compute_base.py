@@ -307,8 +307,10 @@ class RocProfCompute:
             )
 
         try:
-            resolve_list_selectors(getattr(args, "list_operators", None))
-            resolve_operator_patterns(getattr(args, "operator", None))
+            args.list_operators = resolve_list_selectors(
+                getattr(args, "list_operators", None)
+            )
+            args.operator = resolve_operator_patterns(getattr(args, "operator", None))
         except ValueError as error:
             console_error("ml api trace", str(error))
 

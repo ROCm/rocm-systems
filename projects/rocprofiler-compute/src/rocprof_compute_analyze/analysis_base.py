@@ -23,10 +23,6 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.expression import build_metric_value_string
-from utils.ml_api_selectors import (
-    resolve_list_selectors,
-    resolve_operator_patterns,
-)
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     validate_workload,
@@ -74,11 +70,8 @@ def _authorize_ml_api_operator_flags(
     saved_selectors = [str(name) for name in saved_raw] if saved_raw else []
     saved_set = set(saved_selectors)
 
-    try:
-        list_selectors = resolve_list_selectors(getattr(args, "list_operators", None))
-        operator_patterns = resolve_operator_patterns(getattr(args, "operator", None))
-    except ValueError as error:
-        console_error("ml api trace", str(error))
+    list_selectors = getattr(args, "list_operators", None)
+    operator_patterns = getattr(args, "operator", None)
 
     if list_selectors is None and operator_patterns is None:
         return

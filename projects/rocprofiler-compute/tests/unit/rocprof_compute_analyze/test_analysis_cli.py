@@ -15,6 +15,7 @@ from rocprof_compute_analyze.analysis_cli import (
     cli_analysis,
 )
 from utils import schema
+from utils.ml_api_selectors import resolve_operator_patterns
 from utils.utils_analysis import CallTreeNode, KernelStats, iter_call_tree_paths
 
 ADDMM_PMC_GROUP_KEY = (1, "addmm_kernel", 0, 0, 0)
@@ -64,7 +65,7 @@ def workload_with_operator_forest():
 
 
 def apply_torch_operator_glob(pattern):
-    args = argparse.Namespace(operator=[pattern])
+    args = argparse.Namespace(operator=resolve_operator_patterns([pattern]))
     cli = cli_analysis(args, {})
     workload = workload_with_operator_forest()
     pmc_group_keys = cli.apply_operator_filter(args, workload, "/workload", ["torch"])
@@ -207,7 +208,7 @@ def test_list_operators_joint_backend_heading(capsys):
 
 
 def test_handle_operator_prints_matched_subtree(capsys):
-    args = argparse.Namespace(operator=["*addmm*"])
+    args = argparse.Namespace(operator=resolve_operator_patterns(["*addmm*"]))
     cli = cli_analysis(args, {})
     workload = workload_with_operator_forest()
     cli.apply_operator_filter(args, workload, "/workload", ["torch"])
@@ -228,7 +229,7 @@ def test_apply_operator_filter_missed_glob_errors(monkeypatch):
         "rocprof_compute_analyze.analysis_cli.console_error",
         record_error,
     )
-    args = argparse.Namespace(operator=["nomatch"])
+    args = argparse.Namespace(operator=resolve_operator_patterns(["nomatch"]))
     cli = cli_analysis(args, {})
     workload = workload_with_operator_forest()
     with pytest.raises(SystemExit) as excinfo:
@@ -257,7 +258,7 @@ def test_dispatch_filter_outside_operator_dispatches_errors(monkeypatch):
 
 
 def test_apply_operator_filter_keeps_nodes_from_requested_backend():
-    args = argparse.Namespace(operator=["torch:*"])
+    args = argparse.Namespace(operator=resolve_operator_patterns(["torch:*"]))
     cli = cli_analysis(args, {})
     workload = schema.Workload()
     workload.ml_api_call_trees = torch_parent_triton_child_forest()
@@ -327,7 +328,7 @@ def test_pre_processing_lists_operators_for_every_path(monkeypatch):
 def test_run_analysis_prints_matched_tree_for_every_path(monkeypatch):
     args = argparse.Namespace(
         path=[["/w1"], ["/w2"]],
-        operator=["*addmm*"],
+        operator=resolve_operator_patterns(["*addmm*"]),
         list_stats=False,
     )
     inst = cli_with_two_operator_workloads(args)

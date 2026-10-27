@@ -14,10 +14,6 @@ from utils import file_io, parser, schema, tty
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.ml_api_selectors import (
-    resolve_list_selectors,
-    resolve_operator_patterns,
-)
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
     CallTreeNode,
@@ -213,8 +209,8 @@ class cli_analysis(OmniAnalyze_Base):
         super().pre_processing()
         args = self.get_args()
 
-        list_selectors = resolve_list_selectors(getattr(args, "list_operators", None))
-        operator_patterns = resolve_operator_patterns(getattr(args, "operator", None))
+        list_selectors = getattr(args, "list_operators", None)
+        operator_patterns = getattr(args, "operator", None)
         listing_requested = list_selectors is not None
         filter_requested = operator_patterns is not None and not listing_requested
         list_backends = list_selectors if listing_requested else []
@@ -344,8 +340,8 @@ class cli_analysis(OmniAnalyze_Base):
         gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
         arch_config = self._arch_configs[gpu_arch]
 
-        list_selectors = resolve_list_selectors(getattr(args, "list_operators", None))
-        operator_patterns = resolve_operator_patterns(getattr(args, "operator", None))
+        list_selectors = getattr(args, "list_operators", None)
+        operator_patterns = getattr(args, "operator", None)
         if operator_patterns is not None and list_selectors is None:
             filter_backends = _operator_display_backends(operator_patterns)
             for path_info in args.path:
@@ -458,7 +454,7 @@ class cli_analysis(OmniAnalyze_Base):
         backends: list[str],
     ) -> list[tuple]:
         """Glob-filter the operator forest and return pmc group keys on the subtree."""
-        resolved = resolve_operator_patterns(getattr(args, "operator", None))
+        resolved = getattr(args, "operator", None)
         if resolved is None:
             return []
         framewise_patterns = _framewise_from_resolved(resolved)
@@ -499,7 +495,7 @@ class cli_analysis(OmniAnalyze_Base):
         """Display the matched operator call tree."""
         if not workload.ml_api_call_trees:
             return
-        resolved = resolve_operator_patterns(getattr(args, "operator", None))
+        resolved = getattr(args, "operator", None)
         if resolved is None:
             return
         framewise_patterns = _framewise_from_resolved(resolved)

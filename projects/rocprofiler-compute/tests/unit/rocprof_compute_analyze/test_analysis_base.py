@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from utils.ml_api_selectors import resolve_list_selectors, resolve_operator_patterns
 
 MODULE = "rocprof_compute_analyze.analysis_base"
 
@@ -200,8 +201,8 @@ def test_sanitize_authorizes_trace_ml_api_selectors(tmp_path, monkeypatch) -> No
             argparse.Namespace(
                 tui=False,
                 path=[[str(workload)]],
-                list_operators=list_operators,
-                operator=operator,
+                list_operators=resolve_list_selectors(list_operators),
+                operator=resolve_operator_patterns(operator),
                 output_name=None,
             ),
             {},
