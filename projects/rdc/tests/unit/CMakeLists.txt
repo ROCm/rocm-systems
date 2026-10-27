@@ -289,3 +289,36 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )
+
+# rdc_poll_latency_tests: the poll latency check of rdci diag. The check runs
+# with a fake GPU read and a fake clock, and inside RdcSmiLib with a fake metric
+# fetcher. It compiles those sources instead of linking librdc, so it needs no
+# GPU; amd_smi provides the calls the tests never make, librdc_bootstrap the
+# logger and the entity index helpers.
+add_executable(
+    rdc_poll_latency_tests
+    ${SRC_DIR}/test_poll_latency.cc
+    ${SRC_DIR}/test_smi_lib_poll_latency.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcPollLatencyTest.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcSmiDiagnosticImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcSmiLib.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/SmiUtils.cc
+)
+target_include_directories(
+    rdc_poll_latency_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(
+    rdc_poll_latency_tests
+    PRIVATE rdc_bootstrap amd_smi GTest::gtest_main pthread
+)
+set_target_properties(
+    rdc_poll_latency_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:${AMD_SMI_LIB_DIR}"
+)
+add_test(NAME rdc_poll_latency_tests COMMAND rdc_poll_latency_tests)
+install(
+    TARGETS rdc_poll_latency_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)

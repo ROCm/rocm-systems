@@ -21,11 +21,19 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcSmiLib.h"
 
+#include <amd_smi/amdsmi.h>
 #include <stdlib.h>
 #include <strings.h>
 
+#include <array>
+#include <chrono>
+#include <string>
+#include <vector>
+
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
+#include "rdc_lib/impl/RdcPollLatencyTest.h"
+#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
@@ -49,6 +57,12 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
                                                        uint32_t fields_count,
                                                        rdc_field_value_f callback,
                                                        void* user_data) {
+  std::lock_guard<std::mutex> guard(fetch_mutex_);
+  return read_fields_locked(fields, fields_count, callback, user_data);
+}
+
+rdc_status_t RdcSmiLib::read_fields_locked(rdc_gpu_field_t* fields, uint32_t fields_count,
+                                           rdc_field_value_f callback, void* user_data) {
   if (fields == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -92,10 +106,18 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
       }
       bulk_count = 0;
     }
-    values[bulk_count].gpu_index = fields[i].gpu_index;
-    metric_fetcher_->fetch_smi_field(fields[i].gpu_index,
-                                     static_cast<rdc_field_t>(fields[i].field_id),
-                                     &(values[bulk_count].field_value));
+    rdc_gpu_field_value_t& slot = values[bulk_count];
+    slot = {};
+    slot.gpu_index = fields[i].gpu_index;
+    const rdc_status_t fetch_status = metric_fetcher_->fetch_smi_field(
+        fields[i].gpu_index, static_cast<rdc_field_t>(fields[i].field_id), &slot.field_value);
+    if (slot.field_value.ts == 0) {
+      // fetch_smi_field() returned before it filled in the value.
+      slot.field_value.field_id = static_cast<rdc_field_t>(fields[i].field_id);
+      slot.field_value.status = (fetch_status == RDC_ST_NOT_SUPPORTED)
+                                    ? static_cast<int>(AMDSMI_STATUS_NOT_SUPPORTED)
+                                    : static_cast<int>(AMDSMI_STATUS_UNKNOWN_ERROR);
+    }
     bulk_count++;
   }
   if (bulk_count != 0) {
@@ -238,7 +260,7 @@ rdc_status_t RdcSmiLib::rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cas
   }
 
   const std::vector<rdc_diag_test_cases_t> tests{RDC_DIAG_COMPUTE_PROCESS, RDC_DIAG_NODE_TOPOLOGY,
-                                                 RDC_DIAG_GPU_PARAMETERS};
+                                                 RDC_DIAG_GPU_PARAMETERS, RDC_DIAG_POLL_LATENCY};
   std::copy(tests.begin(), tests.end(), test_cases);
   *test_case_count = tests.size();
   return RDC_ST_OK;
@@ -247,8 +269,8 @@ rdc_status_t RdcSmiLib::rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cas
 // Run a specific test case
 rdc_status_t RdcSmiLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
                                           uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-                                          uint32_t gpu_count, const char* /*config*/,
-                                          size_t /*config_size*/, rdc_diag_test_result_t* result,
+                                          uint32_t gpu_count, const char* config,
+                                          size_t config_size, rdc_diag_test_result_t* result,
                                           rdc_diag_callback_t* callback) {
   if (result == nullptr) {
     return RDC_ST_BAD_PARAMETER;
@@ -260,9 +282,81 @@ rdc_status_t RdcSmiLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
       return smi_diag_->check_smi_topo_info(gpu_index, gpu_count, result);
     case RDC_DIAG_GPU_PARAMETERS:
       return smi_diag_->check_smi_param_info(gpu_index, gpu_count, result);
+    case RDC_DIAG_POLL_LATENCY:
+      return run_poll_latency(gpu_index, gpu_count, config, config_size, result);
     default:
       return RDC_ST_NOT_SUPPORTED;
   }
+}
+
+namespace {
+
+// The fields the poll latency check reads: the clock, temperatures, power,
+// utilization, VRAM usage and ECC error counts that GPU monitoring polls.
+constexpr std::array<rdc_field_t, 9> kPollLatencyFields = {
+    RDC_FI_GPU_CLOCK,         RDC_FI_MEMORY_TEMP,       RDC_FI_GPU_TEMP,
+    RDC_FI_GPU_JUNCTION_TEMP, RDC_FI_POWER_USAGE,       RDC_FI_GPU_UTIL,
+    RDC_FI_GPU_MEMORY_USAGE,  RDC_FI_ECC_CORRECT_TOTAL, RDC_FI_ECC_UNCORRECT_TOTAL};
+
+rdc_status_t count_poll_values(rdc_gpu_field_value_t* values, uint32_t num_values,
+                               void* user_data) {
+  auto* counts = static_cast<PollValueCounts*>(user_data);
+  for (uint32_t i = 0; i < num_values; i++) {
+    const int status = values[i].field_value.status;
+    if (status == AMDSMI_STATUS_SUCCESS) {
+      counts->ok++;
+    } else if (status == AMDSMI_STATUS_NOT_SUPPORTED ||
+               status == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {
+      counts->not_supported++;
+    } else {
+      counts->failed++;
+    }
+  }
+  return RDC_ST_OK;
+}
+
+}  // namespace
+
+rdc_status_t RdcSmiLib::run_poll_latency(uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
+                                         uint32_t gpu_count, const char* config, size_t config_size,
+                                         rdc_diag_test_result_t* result) {
+  PollLatencyConfig cfg;
+  std::string error;
+  if (parse_poll_latency_config(config, config_size, &cfg, &error) != RDC_ST_OK) {
+    result->status = RDC_DIAG_RESULT_FAIL;
+    result->test_case = RDC_DIAG_POLL_LATENCY;
+    result->per_gpu_result_count = 0;
+    result->details.code = 0;
+    result->details.msg[0] = '\0';
+    strncpy_with_null(result->info, error.c_str(), MAX_DIAG_MSG_LENGTH);
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  // The check reads GPU fields, so it skips the CPUs in the group.
+  std::vector<uint32_t> gpus;
+  for (uint32_t i = 0; i < gpu_count && i < RDC_MAX_NUM_DEVICES; i++) {
+    if (rdc_get_info_from_entity_index(gpu_index[i]).device_type == RDC_DEVICE_TYPE_GPU) {
+      gpus.push_back(gpu_index[i]);
+    }
+  }
+
+  auto read = [this](uint32_t gpu, uint64_t* elapsed_us, PollValueCounts* counts) {
+    std::array<rdc_gpu_field_t, kPollLatencyFields.size()> fields;
+    for (size_t i = 0; i < fields.size(); i++) {
+      fields[i] = {gpu, kPollLatencyFields[i]};
+    }
+    std::lock_guard<std::mutex> guard(fetch_mutex_);
+    const auto start = std::chrono::steady_clock::now();
+    const rdc_status_t status = read_fields_locked(
+        fields.data(), static_cast<uint32_t>(fields.size()), count_poll_values, counts);
+    *elapsed_us = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                            std::chrono::steady_clock::now() - start)
+                                            .count());
+    return status;
+  };
+  return run_poll_latency_check(gpus.data(), static_cast<uint32_t>(gpus.size()),
+                                static_cast<uint32_t>(kPollLatencyFields.size()), cfg, read,
+                                real_poll_clock(), result);
 }
 
 rdc_status_t RdcSmiLib::rdc_diagnostic_run(const rdc_group_info_t&, rdc_diag_level_t, const char*,

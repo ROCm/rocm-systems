@@ -719,6 +719,7 @@ typedef enum {
   RDC_DIAG_RVS_H2DD2H_LONG_TEST,  //!< RVS Host<->Device transfer speed test
   RDC_DIAG_RVS_IET_LONG_TEST,     //!< RVS IET test
   RDC_DIAG_RVS_CUSTOM,            //!< RVS custom test
+  RDC_DIAG_POLL_LATENCY,          //!< Time to read telemetry from the GPUs
   RDC_DIAG_TEST_LAST,
 } rdc_diag_test_cases_t;
 
@@ -773,6 +774,9 @@ typedef struct {
 
 /**
  * @brief The diagnostic responses for test cases
+ *
+ * The structure is about 8 MB: keep it off the stack, for example by
+ * allocating it on the heap.
  */
 typedef struct {
   uint32_t results_count;

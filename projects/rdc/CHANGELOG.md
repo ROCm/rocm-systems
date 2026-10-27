@@ -4,6 +4,11 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ## RDC 1.4.0 for ROCm 10.2.0
 
+### Added
+
+- **`rdci diag` checks how long RDC takes to read telemetry from the GPUs**.
+  - The new Poll latency check reports how long a poll of the GPUs takes, warns when a poll takes longer than 100 ms or a value cannot be read, and fails when no value can be read. The diagnostic response (`rdc_diag_response_t`) is now about 8 MB, so keep it off the stack.
+
 ### Changed
 
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
