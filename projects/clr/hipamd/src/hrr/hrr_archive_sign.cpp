@@ -203,6 +203,25 @@ bool hash_tree_at(int dir, const std::string& prefix, std::map<std::string, std:
   return ok;
 }
 
+// `name` below the directory `dir`, whole, at most `max` bytes. A link is refused.
+bool read_all_at(int dir, const char* name, uintmax_t max, std::string* out) {
+  const int fd = openat(dir, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+  if (fd < 0) return false;
+  struct stat st;
+  bool ok = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) &&
+            static_cast<uintmax_t>(st.st_size) <= max;
+  if (ok) {
+    out->resize(static_cast<size_t>(st.st_size));
+    for (size_t off = 0; ok && off < out->size();) {
+      const ssize_t n = read(fd, out->data() + off, out->size() - off);
+      if (n > 0) off += static_cast<size_t>(n);
+      else ok = n < 0 && errno == EINTR;
+    }
+  }
+  close(fd);
+  return ok;
+}
+
 bool write_at(int dir, const char* name, const std::string& data, std::string* err) {
   unlinkat(dir, name, 0);
   const int fd = openat(dir, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
@@ -254,7 +273,7 @@ bool hash_tree(const std::string& dir, [[maybe_unused]] int fd,
 }  // namespace
 
 bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::string* err,
-                  int dir_fd, uintmax_t max_manifest_bytes) {
+                  int dir_fd, uintmax_t max_manifest_bytes, const ExpectedTree* expected) {
   [[maybe_unused]] const fs::path d(dir);
   std::map<std::string, std::string> hashes;  // sorted by path, as the manifest is
 #if !defined(_WIN32)
@@ -269,6 +288,28 @@ bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::st
   const int fd = -1;
 #endif
   if (!hash_tree(dir, fd, &hashes, err)) return false;
+  if (expected) {
+    // Only what the caller rewrote may differ from what it verified: any other
+    // file changed, added or removed since is refused rather than signed.
+    for (const auto& kv : hashes) {
+      if (expected->rewritten.count(kv.first)) continue;
+      const auto it = expected->digests.find(kv.first);
+      if (it == expected->digests.end()) {
+        *err = kv.first + ": not in the archive as it was verified";
+        return false;
+      }
+      if (it->second != kv.second) {
+        *err = kv.first + ": changed after the archive was verified";
+        return false;
+      }
+    }
+    for (const auto& kv : expected->digests) {
+      if (!expected->rewritten.count(kv.first) && !hashes.count(kv.first)) {
+        *err = kv.first + ": removed after the archive was verified";
+        return false;
+      }
+    }
+  }
   std::string manifest;
   for (const auto& kv : hashes) {
     // A name with a newline would split into lines that never verify.
@@ -310,19 +351,42 @@ bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::st
 
 VerifyResult verify_archive(const std::string& dir, const uint8_t public_key[kPublicKeySize],
                             std::string* err, std::map<std::string, std::string>* verified,
-                            uintmax_t max_manifest_bytes) {
-  const fs::path d(dir);
+                            uintmax_t max_manifest_bytes, int dir_fd) {
+  [[maybe_unused]] const fs::path d(dir);
+#if !defined(_WIN32)
+  // One directory for the signature, the manifest and the tree walk.
+  const DirFd dfd(dir, dir_fd);
+  if (dfd.fd < 0) {
+    *err = dir + ": cannot open";
+    return VerifyResult::kRefused;
+  }
+  const int fd = dfd.fd;
+  struct stat sst;
+  if (fstatat(fd, kSignatureName, &sst, AT_SYMLINK_NOFOLLOW) != 0 && errno == ENOENT) {
+    *err = dir + ": no " + kSignatureName;
+    return VerifyResult::kUnsigned;
+  }
+  auto read_member = [&](const char* name, uintmax_t max, std::string* out) {
+    return read_all_at(fd, name, max, out);
+  };
+#else
+  (void)dir_fd;
+  const int fd = -1;
   std::error_code ec;
   if (!fs::exists(fs::symlink_status(d / kSignatureName, ec))) {
     *err = dir + ": no " + kSignatureName;
     return VerifyResult::kUnsigned;
   }
+  auto read_member = [&](const char* name, uintmax_t max, std::string* out) {
+    return read_all(d / name, max, out);
+  };
+#endif
   std::string sig, manifest;
-  if (!read_all(d / kSignatureName, 64, &sig) || sig.size() != 64) {
+  if (!read_member(kSignatureName, 64, &sig) || sig.size() != 64) {
     *err = std::string(kSignatureName) + ": not a 64-byte Ed25519 signature";
     return VerifyResult::kRefused;
   }
-  if (!read_all(d / kManifestName, max_manifest_bytes, &manifest)) {
+  if (!read_member(kManifestName, max_manifest_bytes, &manifest)) {
     *err = std::string(kManifestName) + ": missing or unreadable";
     return VerifyResult::kRefused;
   }
@@ -348,16 +412,6 @@ VerifyResult verify_archive(const std::string& dir, const uint8_t public_key[kPu
     expected[line.substr(66)] = line.substr(0, 64);
   }
 
-#if !defined(_WIN32)
-  const DirFd dfd(dir, -1);
-  if (dfd.fd < 0) {
-    *err = dir + ": cannot open";
-    return VerifyResult::kRefused;
-  }
-  const int fd = dfd.fd;
-#else
-  const int fd = -1;
-#endif
   std::map<std::string, std::string> actual;
   if (!hash_tree(dir, fd, &actual, err)) return VerifyResult::kRefused;
   for (const auto& kv : actual) {

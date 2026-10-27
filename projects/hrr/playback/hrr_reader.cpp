@@ -876,7 +876,12 @@ bool read_archive_file(const std::string& dir, const std::string& rel,
     if (error) *error = "refusing " + path + ": not in the signed manifest";
     return false;
   }
-  if (!read_file_capped(path, data, error, refused)) return false;
+  if (!read_file_capped(path, data, error, refused)) {
+    // A listed file that cannot be read now was changed or removed since the
+    // check: that is a refusal, not an absent file.
+    if (verified && refused) *refused = true;
+    return false;
+  }
   if (verified) {
     StreamHash h;
     h.update(data.data(), data.size());

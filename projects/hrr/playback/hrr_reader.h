@@ -329,7 +329,8 @@ bool read_file_capped(const std::string& path, std::vector<uint8_t>& data,
 // Read the archive file `rel` (a path below `dir`) whole, as read_file_capped
 // does. With `verified` the file must be listed in it and its bytes must hash to
 // the listed digest, else the read is refused: false is returned, *refused is
-// set and *error says which. Null `verified`: no check.
+// set and *error says which. A listed file that is gone or unreadable is refused
+// too. Null `verified`: no check.
 bool read_archive_file(const std::string& dir, const std::string& rel,
                        const VerifiedFiles* verified, std::vector<uint8_t>& data,
                        std::string* error = nullptr, bool* refused = nullptr);

@@ -55,6 +55,7 @@ cases:
   Unit_HRR_Sign_KeyFiles: {}
   Unit_HRR_Sign_ManifestLimitAppliesToSigningToo: {}
   Unit_HRR_Sign_SigningFollowsTheDirectoryDescriptor: {}
+  Unit_HRR_Sign_SigningHoldsFilesToTheVerifiedTree: {}
   Unit_HRR_Sign_KeyOptionsAreNotIgnored: {}
   Unit_HRR_Sign_PlaybackRefusesTamperedArchive: {}
   Unit_HRR_Sign_RepairRefusesToSignAnAlteredSignedArchive: {}

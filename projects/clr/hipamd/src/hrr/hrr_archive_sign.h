@@ -22,6 +22,7 @@
 
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 
 namespace hrr_sign {
@@ -45,8 +46,19 @@ constexpr uintmax_t kMaxManifestBytes = 256u << 20;
 // else one opened from `dir`; a directory renamed or replaced on the path
 // afterwards cannot redirect the signing to other files. `dir` is then only used
 // in messages. Refuses when the manifest would exceed `max_manifest_bytes`.
+//
+// `expected` (when given) is an archive as an earlier verify_archive saw it. Signing
+// then refuses any file whose SHA-256 differs from it, that is not listed in it or
+// that is gone, except the paths in `rewritten`, which the caller changed itself
+// (repair rewrites events.bin and manifest.json). Without it the directory is
+// signed as found.
+struct ExpectedTree {
+  std::map<std::string, std::string> digests;  // path -> SHA-256 hex, as verified
+  std::set<std::string> rewritten;             // paths allowed to differ
+};
 bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::string* err,
-                  int dir_fd = -1, uintmax_t max_manifest_bytes = kMaxManifestBytes);
+                  int dir_fd = -1, uintmax_t max_manifest_bytes = kMaxManifestBytes,
+                  const ExpectedTree* expected = nullptr);
 
 enum class VerifyResult {
   kOk,        // signature is valid under the key and every file matches
@@ -58,10 +70,12 @@ enum class VerifyResult {
 // archive must be listed and match, and every listed file must exist. `err` names
 // the first offending file, in path order. On kOk `*verified` (when given) holds
 // the SHA-256 (lowercase hex) of each file as checked, by path below `dir`, for a
-// reader that opens the files again later and must compare what it reads.
+// reader that opens the files again later and must compare what it reads. On
+// POSIX the signature, the manifest and the files are read relative to one
+// directory descriptor, `dir_fd` when it is >= 0, else one opened from `dir`.
 VerifyResult verify_archive(const std::string& dir, const uint8_t public_key[kPublicKeySize],
                             std::string* err, std::map<std::string, std::string>* verified = nullptr,
-                            uintmax_t max_manifest_bytes = kMaxManifestBytes);
+                            uintmax_t max_manifest_bytes = kMaxManifestBytes, int dir_fd = -1);
 
 // The public key for a seed (what a replaying site is given). The seed is not
 // modified. Always true; the bool leaves room to refuse a key that is not valid.

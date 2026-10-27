@@ -67,6 +67,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #ifdef _WIN32
 #  include <fcntl.h>
@@ -1230,7 +1231,13 @@ static bool check_signature(const std::string& dir, hrr::VerifiedFiles* files,
 // present must therefore verify under the seed's own public key before anything
 // is rewritten. An archive with no signature (a crash, or captured unsigned) is
 // the case --signing-key is for, and passes.
-static bool check_existing_signature(const fs::path& dir) {
+//
+// The check and the signing that follows share one directory descriptor `dir_fd`
+// (-1 on Windows), and `*held` keeps the digests the check saw so that signing
+// refuses any file changed since; see resign_repaired. Without a signature there
+// is nothing to hold the content to, and `*held` stays unset.
+static bool check_existing_signature(const fs::path& dir, int dir_fd,
+                                     std::optional<hrr_sign::ExpectedTree>* held) {
   std::string err;
   uint8_t seed[hrr_sign::kSeedSize], pub[hrr_sign::kPublicKeySize];
   const bool have_pub = hrr_sign::read_key_file(g_signing_key_path, true, seed, &err) &&
@@ -1240,7 +1247,15 @@ static bool check_existing_signature(const fs::path& dir) {
     fprintf(stderr, "[HRR] repair: not signed: %s\n", err.c_str());
     return false;
   }
-  if (hrr_sign::verify_archive(dir.string(), pub, &err) == hrr_sign::VerifyResult::kRefused) {
+  std::map<std::string, std::string> seen;
+  const hrr_sign::VerifyResult vr = hrr_sign::verify_archive(
+      dir.string(), pub, &err, &seen, hrr_sign::kMaxManifestBytes, dir_fd);
+  if (vr == hrr_sign::VerifyResult::kOk) held->emplace().digests = std::move(seen);
+  if (vr == hrr_sign::VerifyResult::kUnsigned) {
+    fprintf(stderr, "[HRR] repair: %s has no signature; its content is signed as found, "
+                    "not verified\n", dir.string().c_str());
+  }
+  if (vr == hrr_sign::VerifyResult::kRefused) {
     fprintf(stderr, "[HRR] repair: refusing to sign %s: it holds a signature that does not "
                     "verify under this key (%s); it may have been altered. To sign it anyway, "
                     "delete %s and %s first\n",
@@ -1253,22 +1268,19 @@ static bool check_existing_signature(const fs::path& dir) {
 
 // After --repair rewrote events.bin and manifest.json the old signature, if any,
 // is stale. Sign the result with --signing-key, or drop the stale pair and say so.
-static bool resign_repaired(const fs::path& dir) {
+//
+// `dir_fd` is the descriptor check_existing_signature verified through and `held`
+// what it saw, so a file other than the ones repair rewrote that changed between
+// the check and now is refused, not signed.
+static bool resign_repaired(const fs::path& dir, int dir_fd,
+                            const std::optional<hrr_sign::ExpectedTree>& held) {
   std::string err;
   if (!g_signing_key_path.empty()) {
     uint8_t seed[hrr_sign::kSeedSize];
-    // Through the descriptor of the directory just rewritten, as capture does, so
-    // a directory renamed or swapped on the path cannot redirect the signing.
-    int dir_fd = -1;
-#ifndef _WIN32
-    hrr::safefs::Fd d = hrr::safefs::open_dir_nofollow_leaf(dir.string(), &err);
-    if (d.valid()) dir_fd = d.get();
-    const bool dir_ok = d.valid();
-#else
-    const bool dir_ok = true;
-#endif
-    const bool signed_ok = dir_ok && hrr_sign::read_key_file(g_signing_key_path, true, seed, &err) &&
-                           hrr_sign::sign_archive(dir.string(), seed, &err, dir_fd);
+    const bool signed_ok =
+        hrr_sign::read_key_file(g_signing_key_path, true, seed, &err) &&
+        hrr_sign::sign_archive(dir.string(), seed, &err, dir_fd, hrr_sign::kMaxManifestBytes,
+                               held ? &*held : nullptr);
     rocm::sha2::secure_zero(seed, sizeof(seed));  // on failure too
     if (!signed_ok) {
       fprintf(stderr, "[HRR] repair: not signed: %s\n", err.c_str());
@@ -1289,7 +1301,23 @@ static bool resign_repaired(const fs::path& dir) {
 static int repair_archive(const hrr::Archive& archive) {
   const fs::path archive_dir(archive.path);
 #ifdef HRR_HAVE_ARCHIVE_SIGN
-  if (!g_signing_key_path.empty() && !check_existing_signature(archive_dir)) return 1;
+  // One descriptor for the directory serves the signature check and the signing
+  // after it, so the directory cannot be swapped on the path between the two.
+  int dir_fd = -1;
+  std::optional<hrr_sign::ExpectedTree> held;
+  [[maybe_unused]] hrr::safefs::Fd dir_holder;
+  if (!g_signing_key_path.empty()) {
+#ifndef _WIN32
+    std::string open_err;
+    dir_holder = hrr::safefs::open_dir_nofollow_leaf(archive_dir.string(), &open_err);
+    if (!dir_holder.valid()) {
+      fprintf(stderr, "[HRR] repair: not signed: %s\n", open_err.c_str());
+      return 1;
+    }
+    dir_fd = dir_holder.get();
+#endif
+    if (!check_existing_signature(archive_dir, dir_fd, &held)) return 1;
+  }
 #endif
 
   if (archive.complete) {
@@ -1298,7 +1326,8 @@ static int repair_archive(const hrr::Archive& archive) {
 #ifdef HRR_HAVE_ARCHIVE_SIGN
     // The way to sign a complete archive that was captured unsigned, or changed
     // since (a region sidecar added): --repair --signing-key.
-    if (!g_signing_key_path.empty() && !resign_repaired(archive_dir)) return 1;
+    // Nothing was rewritten, so every file must still be as it was verified.
+    if (!g_signing_key_path.empty() && !resign_repaired(archive_dir, dir_fd, held)) return 1;
 #endif
     return 0;
   }
@@ -1367,7 +1396,9 @@ static int repair_archive(const hrr::Archive& archive) {
   printf("[HRR] Repaired archive: %zu events kept, clean trailer + manifest written\n",
          archive.events.size());
 #ifdef HRR_HAVE_ARCHIVE_SIGN
-  if (!resign_repaired(archive_dir)) return 1;
+  // Repair rewrote events.bin and manifest.json; any other file must be as verified.
+  if (held) held->rewritten = {"events.bin", "manifest.json"};
+  if (!resign_repaired(archive_dir, dir_fd, held)) return 1;
 #endif
   return 0;
 }

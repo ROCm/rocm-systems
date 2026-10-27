@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -515,6 +516,7 @@ HRR_TEST_CASE(Unit_HRR_Sign_RepairRefusesToSignAnAlteredSignedArchive) {
     INFO(out);
     CHECK(ret == 0);
     CHECK(a.verify(&err) == VerifyResult::kOk);
+    CHECK(out.find("not verified") != std::string::npos);  // said, since nothing was checked
   }
 }
 
@@ -687,10 +689,92 @@ HRR_TEST_CASE(Unit_HRR_Sign_FilesAreHeldToTheVerifiedDigestsWhenRead) {
       CHECK(data.empty());
       CHECK(err.find(rel) != std::string::npos);
     }
+    // A listed file that is gone is a refusal too, not an absent blob.
+    fs::remove(a.dir / "code_objects/0123.hsaco");
+    std::vector<uint8_t> gone;
+    std::string gone_err;
+    bool gone_refused = false;
+    CHECK_FALSE(hrr::read_archive_file(a.dir.string(), "code_objects/0123.hsaco", &loaded.verified,
+                                       gone, &gone_err, &gone_refused));
+    CHECK(gone_refused);
     // Without the digests the same swapped file is read: the check is what refuses it.
     std::vector<uint8_t> data;
-    CHECK(hrr::read_archive_file(a.dir.string(), "code_objects/0123.hsaco", nullptr, data));
+    CHECK(hrr::read_archive_file(a.dir.string(), "blobs/ab/abcdef.blob", nullptr, data));
+    // Without the digests a missing file is only missing: not a refusal.
+    bool missing_refused = true;
+    std::string missing_err;
+    CHECK_FALSE(hrr::read_archive_file(a.dir.string(), "code_objects/0123.hsaco", nullptr, data,
+                                       &missing_err, &missing_refused));
+    CHECK_FALSE(missing_refused);
   }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   --repair --signing-key verifies the old signature, then signs; between the two
+ *   the files must not change:
+ *   - negative control: an untouched archive signs again against the digests the
+ *     verify saw, and so does one whose events.bin and manifest.json were
+ *     rewritten (the two files repair rewrites, named in `rewritten`);
+ *   - a blob or code object altered, added or removed after the verify: sign_archive
+ *     refuses, naming the file, and leaves hrr.sig and hrr.manifest as they were;
+ *   - events.bin altered when it was not declared rewritten (a complete archive,
+ *     where repair writes nothing): refused;
+ *   - verify_archive given a directory descriptor reads that directory, not
+ *     whatever now stands at the path.
+ */
+HRR_TEST_CASE(Unit_HRR_Sign_SigningHoldsFilesToTheVerifiedTree) {
+  std::string err;
+  auto held_for = [&](const Archive& a, std::set<std::string> rewritten) {
+    hrr_sign::ExpectedTree t;
+    REQUIRE(hrr_sign::verify_archive(a.dir.string(), a.pub, &err, &t.digests) == VerifyResult::kOk);
+    t.rewritten = std::move(rewritten);
+    return t;
+  };
+  {
+    Archive a("hold_ok");
+    hrr_sign::ExpectedTree t = held_for(a, {});
+    CHECK(hrr_sign::sign_archive(a.dir.string(), a.seed, &err, -1, hrr_sign::kMaxManifestBytes, &t));
+    hrr_sign::ExpectedTree r = held_for(a, {"events.bin", "manifest.json"});
+    write_bytes(a.dir / "manifest.json", "{ \"pid\": 4242, \"complete\": true }\n");
+    write_bytes(a.dir / "events.bin", read_text_file(a.dir / "events.bin") + "x");
+    CHECK(hrr_sign::sign_archive(a.dir.string(), a.seed, &err, -1, hrr_sign::kMaxManifestBytes, &r));
+    CHECK(a.verify(&err) == VerifyResult::kOk);
+  }
+  for (const char* what : {"altered", "added", "removed", "events"}) {
+    Archive a(std::string("hold_") + what);
+    hrr_sign::ExpectedTree t = held_for(a, {});
+    const std::string sig_before = read_text_file(a.dir / "hrr.sig");
+    const std::string manifest_before = read_text_file(a.dir / "hrr.manifest");
+    std::string file;
+    if (!strcmp(what, "altered")) { file = "blobs/ab/abcdef.blob"; flip_first_byte(a.dir / file); }
+    else if (!strcmp(what, "added")) { file = "code_objects/evil.hsaco"; write_bytes(a.dir / file, "x"); }
+    else if (!strcmp(what, "removed")) { file = "code_objects/0123.hsaco"; fs::remove(a.dir / file); }
+    else { file = "events.bin"; write_bytes(a.dir / file, read_text_file(a.dir / file) + "x"); }
+    INFO(what);
+    CHECK_FALSE(hrr_sign::sign_archive(a.dir.string(), a.seed, &err, -1, hrr_sign::kMaxManifestBytes, &t));
+    CHECK(err.find(file) != std::string::npos);
+    CHECK(read_text_file(a.dir / "hrr.sig") == sig_before);
+    CHECK(read_text_file(a.dir / "hrr.manifest") == manifest_before);
+    // Negative control: without the digests the same directory is signed as found.
+    if (strcmp(what, "removed"))
+      CHECK(hrr_sign::sign_archive(a.dir.string(), a.seed, &err));
+  }
+#ifndef _WIN32
+  {
+    Archive a("hold_fd");
+    const int fd = ::open(a.dir.c_str(), O_RDONLY | O_DIRECTORY);
+    REQUIRE(fd >= 0);
+    const fs::path moved = a.root / "pid-moved";
+    fs::rename(a.dir, moved);
+    fs::create_directories(a.dir);  // another, empty directory now stands at the path
+    CHECK(hrr_sign::verify_archive(a.dir.string(), a.pub, &err, nullptr,
+                                   hrr_sign::kMaxManifestBytes, fd) == VerifyResult::kOk);
+    CHECK(hrr_sign::verify_archive(a.dir.string(), a.pub, &err) == VerifyResult::kUnsigned);
+    ::close(fd);
+  }
+#endif
 }
 
 #else
@@ -711,6 +795,7 @@ HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_RepairRefusesToSignAnAlteredSignedArchive)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_TrustedKeyVariableDoesNotBlockRepair)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_ManifestLimitAppliesToSigningToo)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_FilesAreHeldToTheVerifiedDigestsWhenRead)
+HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_SigningHoldsFilesToTheVerifiedTree)
 #endif
 
 /**
