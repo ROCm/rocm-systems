@@ -273,6 +273,7 @@ private:
   /// @brief Share the SoC-owned device-global GWS store across every XCD's CUs.
   void wire_gws_to_xcds();
   [[nodiscard]] bool install_internal_address_space(amdgpu::GpuMemory *memory);
+  void configure_mes_trap_handlers(amdgpu::CommandProcessor &owner);
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
   make_aql(uint32_t queue_ordinal) override;
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>

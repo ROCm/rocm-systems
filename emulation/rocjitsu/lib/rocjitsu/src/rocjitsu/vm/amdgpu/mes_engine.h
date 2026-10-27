@@ -20,11 +20,19 @@
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
 class SdmaQueueBindingFactory;
+
+/// @brief Trap configuration resolved for one MES-managed compute queue.
+struct MesTrapConfig {
+  uint64_t tba = 0;
+  uint64_t tma = 0;
+  bool debug_enabled = false;
+};
 
 /// @brief Processor binding and topology policy selected for one compute queue.
 struct ComputeQueueBindingPlan {
@@ -175,6 +183,10 @@ public:
   [[nodiscard]] std::optional<AddressSpaceHandle>
   process_address_space_for_test(uint32_t process_id) const;
 
+  /// @brief Resolve trap state for a live MES compute queue and address-space generation.
+  [[nodiscard]] std::optional<MesTrapConfig>
+  resolve_trap_config(const QueueIdentity &identity) const;
+
 private:
   enum class QueueKind : uint8_t { Mes, Compute, Sdma };
   enum class MesFramePhase : uint8_t { Semantic, Completion, ReadPointer, Terminal };
@@ -187,6 +199,8 @@ private:
     uint64_t initial_read_pointer = 0;
     uint64_t page_table_base = 0;
     uint64_t process_context_address = 0;
+    uint64_t trap_handler_address = 0;
+    uint64_t trap_memory_address = 0;
     uint64_t ring_dwords = 0;
     uint64_t doorbell_offset = 0;
     uint32_t process_id = 0;
@@ -194,6 +208,7 @@ private:
     uint32_t engine_id = 0;
     bool active = false;
     bool aql = false;
+    bool trap_enabled = false;
     AddressSpaceHandle address_space;
     QueueHandle queue_handle;
     QueueKind kind = QueueKind::Mes;
@@ -276,6 +291,8 @@ private:
   ComputeQueueBindingProvider &compute_bindings_;
   std::vector<Queue> mapped_queues_;
   std::unordered_map<uint32_t, AddressSpace> address_spaces_;
+  // SET_SHADER_DEBUGGER may enable a context before its first queue is created.
+  std::unordered_set<uint64_t> debug_enabled_contexts_;
   std::vector<AddressSpaceHandle> orphaned_address_spaces_;
   std::unordered_map<uint64_t, PendingMesFrame> pending_mes_frames_;
   std::shared_ptr<SdmaQueueBindingFactory> sdma_queue_binding_factory_;

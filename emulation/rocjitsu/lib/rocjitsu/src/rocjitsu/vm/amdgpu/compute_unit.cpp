@@ -2073,8 +2073,8 @@ template <bool EnableAsync>
     // instruction slot that ends the gfx1250 setreg/VGPR-MSB hazard window.
     active->clear_setreg_vgpr_msb_hazard();
     uint32_t trap_id = words[0] & 0xFFu;
-    if (!active->in_trap_handler() && trap_handler_resolver_) {
-      auto config = trap_handler_resolver_(*active);
+    if (!active->in_trap_handler()) {
+      const auto config = resolve_trap_config(*active);
       if (config && config->tba != 0) {
         const uint64_t saved_pc = active->pc;
         const uint32_t saved_status = active->status_raw();
