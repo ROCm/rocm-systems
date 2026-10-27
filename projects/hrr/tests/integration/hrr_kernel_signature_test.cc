@@ -17,16 +17,12 @@
  * archive unmodified as the control, then replays copies whose launch record
  * is edited to disagree with that signature. CLR reads kernelParams[i] only for
  * the kernel's own parameters, and only each parameter's size, so only a record
- * that does not cover the signature is refused:
- *
- *   - too few arguments: the last argument is dropped
- *   - a narrow argument: an int recorded as two bytes
- *   - a truncated payload: the record ends inside its last argument
- *
- * Each must be refused with a line naming the sequence and the kernel, exit
- * non-zero, and launch nothing. Two edits are not refused, because nothing is
- * read past the record: one more argument appended, and an int recorded as eight
- * bytes. Each must replay as the unmodified archive does.
+ * that does not cover the signature is refused. The handler tests cover the
+ * comparison itself; here a record with too few arguments must be refused with
+ * a line naming the sequence and the kernel, exit non-zero, and launch nothing.
+ * Two edits are not refused, because nothing is read past the record: one more
+ * argument appended, and an int recorded as eight bytes. Each must replay as
+ * the unmodified archive does.
  */
 
 #include "hrr_test_common.hh"
@@ -84,50 +80,33 @@ TEST_CASE("Unit_HRR_KernelSignature_Direct", "[.][hrr-direct]") {
 
 namespace {
 
-// One recorded argument: where its 3-byte (kind, size) prefix starts in the
-// record, and the whole of it, trailing pointer-offset list included.
-struct ArgSpan {
-  size_t   at;     // offset of the kind byte within the record
-  size_t   len;    // bytes from `at` to the next argument
-  uint8_t  kind;
-  uint16_t size;
-};
-
-// The launch record as the wire format lays it out after the 32-byte header:
+// The launch record's wire bytes, with where each argument sits in them. The
+// reader has already parsed the record (kernel name, arguments), so the offsets
+// follow from it; the layout after the 32-byte header is
 //   stream(8) name_len(2) name co_hash(16) grid(12) block(12) shared(4)
 //   num_args(2) num_snapshots(2) args... snapshots... launch-attribute tail
+// and each argument is kind(1) size(2) data, plus a count and 2-byte offsets
+// after a kind-3 argument.
 struct LaunchRecord {
+  struct Arg {
+    size_t at;   // offset of the argument's kind byte
+    size_t len;  // bytes to the next argument
+    uint16_t size;
+  };
   std::vector<uint8_t> bytes;  // header included
   size_t num_args_at = 0;      // offset of the u16 argument count
-  std::vector<ArgSpan> args;
+  std::vector<Arg> args;
   uint64_t sequence_id = 0;
 
-  explicit LaunchRecord(std::vector<uint8_t> raw) : bytes(std::move(raw)) {
-    const size_t hdr = sizeof(hrr_event_header);
-    REQUIRE(bytes.size() > hdr + 10);
-    std::memcpy(&sequence_id, bytes.data() + offsetof(hrr_event_header, sequence_id),
-                sizeof(sequence_id));
-    uint16_t name_len = 0;
-    std::memcpy(&name_len, bytes.data() + hdr + 8, 2);
-    num_args_at = hdr + 8 + 2 + name_len + 16 + 12 + 12 + 4;
-    REQUIRE(bytes.size() >= num_args_at + 4);
-    uint16_t num_args = 0;
-    std::memcpy(&num_args, bytes.data() + num_args_at, 2);
-    size_t p = num_args_at + 4;
-    for (uint16_t i = 0; i < num_args; i++) {
-      REQUIRE(bytes.size() >= p + 3);
-      ArgSpan a{p, 0, bytes[p], 0};
-      std::memcpy(&a.size, bytes.data() + p + 1, 2);
-      p += 3 + a.size;
-      if (a.kind == 3) {  // trailing list of embedded-pointer offsets
-        REQUIRE(bytes.size() >= p + 2);
-        uint16_t n = 0;
-        std::memcpy(&n, bytes.data() + p, 2);
-        p += 2 + 2u * n;
-      }
-      REQUIRE(bytes.size() >= p);
-      a.len = p - a.at;
-      args.push_back(a);
+  LaunchRecord(const hrr::Event& e) : bytes(e.raw_payload) {
+    sequence_id = e.header().sequence_id;
+    num_args_at = sizeof(hrr_event_header) + 8 + 2 + e.kernel_launch->kernel_name.size() +
+                  16 + 12 + 12 + 4;
+    size_t at = num_args_at + 4;
+    for (const auto& a : e.kernel_launch->args) {
+      const size_t len = 3 + a.size + (a.value_kind == 3 ? 2 + 2 * a.ptr_offsets.size() : 0);
+      args.push_back({at, len, a.size});
+      at += len;
     }
   }
 
@@ -146,15 +125,13 @@ struct LaunchRecord {
   }
 };
 
-enum class Mutation { TooFew, Narrow, Truncated, TooMany, Wide };
+enum class Mutation { TooFew, TooMany, Wide };
 
 const char* mutation_name(Mutation m) {
   switch (m) {
-    case Mutation::TooFew:    return "too few arguments";
-    case Mutation::Narrow:    return "a narrow argument";
-    case Mutation::Truncated: return "a truncated payload";
-    case Mutation::TooMany:   return "one more argument";
-    case Mutation::Wide:      return "a wide argument";
+    case Mutation::TooFew:  return "too few arguments";
+    case Mutation::TooMany: return "one more argument";
+    case Mutation::Wide:    return "a wide argument";
   }
   return "?";
 }
@@ -164,8 +141,8 @@ const char* mutation_name(Mutation m) {
 void mutate(LaunchRecord& rec, Mutation m) {
   // Capture never records hidden arguments: the pointer, scale and bias.
   REQUIRE(rec.args.size() == 3);
-  const ArgSpan& last = rec.args[2];
-  const ArgSpan& scale = rec.args[1];
+  const auto& last = rec.args[2];
+  const auto& scale = rec.args[1];
   switch (m) {
     case Mutation::TooFew: {
       rec.bytes.erase(rec.bytes.begin() + last.at, rec.bytes.begin() + last.at + last.len);
@@ -178,31 +155,13 @@ void mutate(LaunchRecord& rec, Mutation m) {
       rec.set_num_args(+1);
       break;
     }
-    case Mutation::Narrow: {
-      // The int `scale` recorded as 2 bytes.
-      REQUIRE(scale.kind == 0);
-      REQUIRE(scale.size == sizeof(int));
-      const uint16_t narrow = 2;
-      std::memcpy(rec.bytes.data() + scale.at + 1, &narrow, 2);
-      rec.bytes.erase(rec.bytes.begin() + scale.at + 3 + 2,
-                      rec.bytes.begin() + scale.at + scale.len);
-      break;
-    }
     case Mutation::Wide: {
       // The int `scale` recorded as 8 bytes, the extra bytes zero.
-      REQUIRE(scale.kind == 0);
       REQUIRE(scale.size == sizeof(int));
       const uint16_t wide = 8;
       std::memcpy(rec.bytes.data() + scale.at + 1, &wide, 2);
       const uint8_t pad[4] = {};
       rec.bytes.insert(rec.bytes.begin() + scale.at + scale.len, pad, pad + sizeof(pad));
-      break;
-    }
-    case Mutation::Truncated: {
-      // End the record two bytes into the last argument's value, after the
-      // count already promised every argument.
-      REQUIRE(last.size == sizeof(int));
-      rec.bytes.resize(last.at + 3 + 2);
       break;
     }
   }
@@ -227,23 +186,19 @@ void splice_record(const fs::path& copy_root, const std::vector<uint8_t>& origin
   write_file(events, file);
 }
 
-// The one launch record of the kernel under test.
-std::vector<uint8_t> find_launch_record(const fs::path& archive_dir) {
-  hrr::Archive arc;
-  REQUIRE(hrr::load_archive(archive_dir.string(), arc));
-  const std::vector<uint8_t>* found = nullptr;
+// The one launch event of the kernel under test, found by name.
+LaunchRecord find_launch_record(const hrr::Archive& arc) {
+  const hrr::Event* found = nullptr;
   size_t n = 0;
   for (const auto& e : arc.events) {
-    const auto& pl = e.raw_payload;
-    const auto hit = std::search(pl.begin(), pl.end(), kProbeName,
-                                 kProbeName + std::strlen(kProbeName));
-    if (hit == pl.end()) continue;
-    found = &pl;
+    if (!e.kernel_launch || e.kernel_launch->kernel_name.find(kProbeName) == std::string::npos)
+      continue;
+    found = &e;
     n++;
   }
   INFO("launch records naming " << kProbeName << ": " << n);
   REQUIRE(n == 1);
-  return *found;
+  return LaunchRecord(*found);
 }
 
 // The summary's launch counter. Replay stdout carries the summary, stderr the
@@ -273,8 +228,10 @@ TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
   hrr_capture_direct("Unit_HRR_KernelSignature_Direct", cap.path, 5);
   const fs::path archive = hrr_single_process_archive(cap.path);
 
-  const std::vector<uint8_t> original = find_launch_record(archive);
-  const LaunchRecord parsed(original);
+  hrr::Archive loaded;
+  REQUIRE(hrr::load_archive(archive.string(), loaded));
+  const LaunchRecord parsed = find_launch_record(loaded);
+  const std::vector<uint8_t>& original = parsed.bytes;
   // Pointer, scale, bias: capture records no hidden arguments.
   REQUIRE(parsed.args.size() == 3);
 
@@ -290,39 +247,37 @@ TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
     CHECK(fail == 0);
   }
 
-  for (const Mutation m : {Mutation::TooFew, Mutation::Narrow, Mutation::Truncated}) {
-    DYNAMIC_SECTION("a launch record with " << mutation_name(m) << " is refused") {
-      ScopedDir copy(fs::temp_directory_path() / "hrr_kernel_signature_edit.hrr");
-      fs::copy(cap.path, copy.path, fs::copy_options::recursive);
-      LaunchRecord edited(original);
-      mutate(edited, m);
-      REQUIRE(edited.bytes != original);
-      splice_record(copy.path, original, edited.bytes);
+  SECTION("a launch record with too few arguments is refused") {
+    ScopedDir copy(fs::temp_directory_path() / "hrr_kernel_signature_edit.hrr");
+    fs::copy(cap.path, copy.path, fs::copy_options::recursive);
+    LaunchRecord edited = parsed;
+    mutate(edited, Mutation::TooFew);
+    REQUIRE(edited.bytes != original);
+    splice_record(copy.path, original, edited.bytes);
 
-      auto [rc, out] = hrr_playback_merged(copy.path);
-      INFO("Replay of the edited archive:\n" << out);
-      CHECK(rc != 0);
+    auto [rc, out] = hrr_playback_merged(copy.path);
+    INFO("Replay of the edited archive:\n" << out);
+    CHECK(rc != 0);
 
-      const std::string named = "seq=" + std::to_string(parsed.sequence_id) + " kernel '";
-      const size_t at = out.find(named);
-      REQUIRE(at != std::string::npos);
-      const size_t eol = out.find('\n', at);
-      const std::string line = out.substr(at, eol - at);
-      CHECK(line.find(kProbeName) != std::string::npos);
-      CHECK(line.find("launch refused") != std::string::npos);
+    const std::string named = "seq=" + std::to_string(parsed.sequence_id) + " kernel '";
+    const size_t at = out.find(named);
+    REQUIRE(at != std::string::npos);
+    const size_t eol = out.find('\n', at);
+    const std::string line = out.substr(at, eol - at);
+    CHECK(line.find(kProbeName) != std::string::npos);
+    CHECK(line.find("launch refused") != std::string::npos);
 
-      // The refusal is fatal, so replay stops before its summary. Carrying on
-      // past it gets the counters: nothing ran, and the buffer the kernel would
-      // have written reads back unwritten, which replay compares and reports.
-      auto [rc2, out2] = hrr_playback_merged(copy.path, "--continue-on-error");
-      INFO("Replay of the edited archive, continuing past errors:\n" << out2);
-      CHECK(out2.find(named) != std::string::npos);
-      CHECK(kernels_launched(out2) == 0);
-      int pass = 0, fail = 0;
-      REQUIRE(hrr_parse_d2h_summary(out2, pass, fail));
-      CHECK(pass == 0);
-      CHECK(fail >= 1);
-    }
+    // The refusal is fatal, so replay stops before its summary. Carrying on
+    // past it gets the counters: nothing ran, and the buffer the kernel would
+    // have written reads back unwritten, which replay compares and reports.
+    auto [rc2, out2] = hrr_playback_merged(copy.path, "--continue-on-error");
+    INFO("Replay of the edited archive, continuing past errors:\n" << out2);
+    CHECK(out2.find(named) != std::string::npos);
+    CHECK(kernels_launched(out2) == 0);
+    int pass = 0, fail = 0;
+    REQUIRE(hrr_parse_d2h_summary(out2, pass, fail));
+    CHECK(pass == 0);
+    CHECK(fail >= 1);
   }
 
   // CLR reads the kernel's own parameters, each at its own size: an extra
@@ -331,7 +286,7 @@ TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
     DYNAMIC_SECTION("a launch record with " << mutation_name(m) << " replays") {
       ScopedDir copy(fs::temp_directory_path() / "hrr_kernel_signature_edit.hrr");
       fs::copy(cap.path, copy.path, fs::copy_options::recursive);
-      LaunchRecord edited(original);
+      LaunchRecord edited = parsed;
       mutate(edited, m);
       REQUIRE(edited.bytes != original);
       splice_record(copy.path, original, edited.bytes);

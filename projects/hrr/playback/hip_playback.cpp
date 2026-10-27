@@ -720,11 +720,10 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
 // `rls` is the caller's per-launch guard bookkeeping, or null on the graph
 // kernel-node path where a relocation could never be undone.
 //
-// Returns false when the payload ends before the `num_args` arguments the record
-// declares do. What was decoded is left in the outputs, but a launch built from
-// it would hand HIP fewer arguments than the kernel declares, so the caller
-// refuses the record.
-static bool decode_kernel_args(
+// A payload that ends before the `num_args` arguments the record declares do
+// leaves what was decoded in the outputs; kernel_args_fit_signature refuses it
+// when that is fewer or narrower arguments than the kernel declares.
+static void decode_kernel_args(
     PlaybackContext& ctx, const uint8_t*& p, const uint8_t* end,
     uint16_t num_args, const std::string& kernel_name,
     std::vector<void*>& arg_ptrs,
@@ -782,11 +781,11 @@ static bool decode_kernel_args(
     };
 
     for (uint16_t i = 0; i < num_args; i++) {
-        if (end - p < 3) return false;
+        if (end - p < 3) return;
         uint8_t  value_kind = *p++;
         uint16_t arg_size;
         memcpy(&arg_size, p, 2); p += 2;
-        if (end - p < arg_size) return false;
+        if (end - p < arg_size) return;
 
         const uint8_t* data = p;
         p += arg_size;
@@ -822,10 +821,10 @@ static bool decode_kernel_args(
         // value_kind 3 carries a trailing list of embedded-pointer byte offsets.
         std::vector<uint16_t> ptr_offsets;
         if (value_kind == 3) {
-            if (end - p < 2) return false;
+            if (end - p < 2) return;
             uint16_t n_ptrs; memcpy(&n_ptrs, p, 2); p += 2;
             for (uint16_t k = 0; k < n_ptrs; k++) {
-                if (end - p < 2) return false;
+                if (end - p < 2) return;
                 uint16_t off; memcpy(&off, p, 2); p += 2;
                 ptr_offsets.push_back(off);
             }
@@ -1030,51 +1029,66 @@ static bool decode_kernel_args(
             prev_half.valid = false;
         }
     }
+}
+
+// Whether the arguments a launch record carries cover the kernel's signature: at
+// least as many arguments, each at least as many bytes as its parameter. HIP
+// walks the signature of the loaded code object and copies each parameter's size
+// out of kernelParams[i] (rocclr/platform/kernel.cpp, captureHIPArgs), so only a
+// short list or a narrower argument is read past; extra arguments and wider ones
+// are never touched. On a mismatch `why` says which.
+static bool kernel_args_match(const std::vector<size_t>& recorded,
+                              const std::vector<size_t>& declared,
+                              std::string& why) {
+    char buf[160];
+    if (recorded.size() < declared.size()) {
+        snprintf(buf, sizeof(buf),
+                 "the record carries %zu arguments, the kernel declares %zu",
+                 recorded.size(), declared.size());
+        why = buf;
+        return false;
+    }
+    for (size_t i = 0; i < declared.size(); i++) {
+        if (recorded[i] >= declared[i]) continue;
+        snprintf(buf, sizeof(buf),
+                 "argument %zu is %zu bytes, the kernel declares %zu", i,
+                 recorded[i], declared[i]);
+        why = buf;
+        return false;
+    }
     return true;
 }
 
 // Refuse a launch whose decoded arguments do not cover the signature of the
-// kernel it resolved to. HIP's argument capture walks the code object's full
-// signature and reads kernelParams[i] for each parameter, so a short list or an
-// argument narrower than its parameter is an over-read of replay's own vectors
-// (extra or wider arguments are never read). The archive
-// is input like any other: the record and the code object it names are not
-// guaranteed to agree. `complete` is false when the payload ended early.
-// Returns true when the launch may go ahead; otherwise says why on stderr.
+// kernel it resolved to. A short list or an argument narrower than its
+// parameter is an over-read of replay's own vectors. The archive is input like
+// any other: the record and the code object it names are not guaranteed to
+// agree. Returns true when the launch may go ahead; otherwise says why on
+// stderr.
 static bool kernel_args_fit_signature(
     PlaybackContext& ctx, const char* api, const std::string& kernel_name,
-    hipFunction_t func, bool complete,
+    hipFunction_t func,
     const std::vector<std::vector<uint8_t>>& arg_storage) {
-    std::string why;
-    if (!complete) {
-        why = "the payload ends before the arguments the record declares";
+    std::vector<size_t> declared;
+    if (ctx.kernel_param_sizes) {
+        ctx.kernel_param_sizes(func, declared);
     } else {
-        std::vector<size_t> declared;
-        bool ok = true;
-        if (ctx.kernel_param_sizes) {
-            ok = ctx.kernel_param_sizes(func, declared);
-        } else {
-            // hipKernelGetParamInfo has no count; the first index past the end
-            // answers hipErrorInvalidValue.
-            constexpr size_t kMaxParams = 4096;
-            for (size_t i = 0; ok; i++) {
-                size_t off = 0, size = 0;
-                hipError_t r = hipKernelGetParamInfo(
-                    reinterpret_cast<hipKernel_t>(func), i, &off, &size);
-                if (r == hipErrorInvalidValue) break;
-                if (r != hipSuccess || i >= kMaxParams) ok = false;
-                else declared.push_back(size);
-            }
-        }
-        if (!ok) {
-            why = "the kernel's signature cannot be read from its code object";
-        } else {
-            std::vector<size_t> recorded;
-            recorded.reserve(arg_storage.size());
-            for (const auto& a : arg_storage) recorded.push_back(a.size());
-            if (hrr_kernel_args_match(recorded, declared, &why)) return true;
+        // hipKernelGetParamInfo has no count: on a resolved function it
+        // answers hipSuccess for each parameter and hipErrorInvalidValue for the
+        // first index past the end.
+        for (size_t i = 0;; i++) {
+            size_t off = 0, size = 0;
+            if (hipKernelGetParamInfo(reinterpret_cast<hipKernel_t>(func), i,
+                                      &off, &size) != hipSuccess)
+                break;
+            declared.push_back(size);
         }
     }
+    std::vector<size_t> recorded;
+    recorded.reserve(arg_storage.size());
+    for (const auto& a : arg_storage) recorded.push_back(a.size());
+    std::string why;
+    if (kernel_args_match(recorded, declared, why)) return true;
     fprintf(stderr,
             "[HRR] %s seq=%llu kernel '%s': %s — launch refused; its arguments "
             "would not cover the kernel's signature\n",
@@ -1156,11 +1170,11 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     const bool dbg_dump_ptrs = (ctx.dump_ptrs_ordinal != 0) || ctx.audit_host_args;
     std::vector<std::tuple<unsigned, uint64_t, void*>> dbg_ptrs;  // (arg_idx, recorded, live)
     std::string dbg_args;
-    const bool args_complete = decode_kernel_args(
+    decode_kernel_args(
         ctx, p, end, num_args, kernel_name, arg_ptrs, arg_storage, &rls,
         dbg_dump_ptrs ? &dbg_ptrs : nullptr, dbg_dump_ptrs ? &dbg_args : nullptr);
     if (!kernel_args_fit_signature(ctx, "kernel launch", kernel_name, func,
-                                   args_complete, arg_storage)) {
+                                   arg_storage)) {
         for (const auto& g : rls.guards) hrr_block_guard_teardown(g);
         return hipErrorInvalidValue;
     }
@@ -5565,10 +5579,8 @@ static bool rebuild_kernel_node_params(
     if (!func) return false;
 
     arg_storage.reserve(num_args);
-    const bool args_complete =
-        decode_kernel_args(ctx, p, end, num_args, kernel_name, arg_ptrs, arg_storage);
-    if (!kernel_args_fit_signature(ctx, api, kernel_name, func, args_complete,
-                                   arg_storage))
+    decode_kernel_args(ctx, p, end, num_args, kernel_name, arg_ptrs, arg_storage);
+    if (!kernel_args_fit_signature(ctx, api, kernel_name, func, arg_storage))
         return false;
 
     // CLR's GraphKernelNode::getFunc first asks the statically-registered

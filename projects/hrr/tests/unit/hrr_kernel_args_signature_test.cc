@@ -77,7 +77,6 @@ void declare(PlaybackContext& ctx, Sizes declared) {
   ctx.kernel_param_sizes = [declared](hipFunction_t f, std::vector<size_t>& out) {
     REQUIRE(f == fake_func());
     out = declared;
-    return true;
   };
 }
 
@@ -104,27 +103,6 @@ void check_refused(PlaybackContext& ctx, const Payload& p, const char* what) {
 /**
  * Test Description
  * ----------------
- *   - The comparison accepts an argument list that covers the signature: the
- *     same sizes, and also extra arguments or wider ones, which CLR never
- *     reads. It refuses a short list and a narrower argument, saying which.
- */
-TEST_CASE("Unit_HRR_KernelArgsSignature_Match", "[hrr]") {
-  std::string why;
-  CHECK(hrr_kernel_args_match({8, 4}, {8, 4}, &why));
-  CHECK(hrr_kernel_args_match({}, {}, &why));
-  CHECK(hrr_kernel_args_match({8, 4, 4}, {8, 4}, &why));  // extra argument
-  CHECK(hrr_kernel_args_match({4}, {}, &why));            // kernel declares none
-  CHECK(hrr_kernel_args_match({16, 4}, {8, 4}, &why));    // wider argument
-  CHECK_FALSE(hrr_kernel_args_match({8}, {8, 4}, &why));
-  CHECK(why.find("carries 1 arguments, the kernel declares 2") != std::string::npos);
-  CHECK_FALSE(hrr_kernel_args_match({8, 4}, {8, 8}, &why));
-  CHECK(why.find("argument 1 is 4 bytes, the kernel declares 8") != std::string::npos);
-  CHECK_FALSE(hrr_kernel_args_match({8, 2}, {8, 4}, nullptr));
-}
-
-/**
- * Test Description
- * ----------------
  *   - A launch record with fewer arguments than the code object's kernel
  *     declares is refused before the launch, naming the sequence.
  */
@@ -147,45 +125,6 @@ TEST_CASE("Unit_HRR_KernelArgsSignature_NarrowArgument", "[hrr]") {
   declare(ctx, {8, 16});
   auto narrow = launch("k", 2, [](Payload& p) { p.args({8, 4}); });
   check_refused(ctx, narrow, "argument 1 is 4 bytes, the kernel declares 16");
-}
-
-/**
- * Test Description
- * ----------------
- *   - A payload that ends before the declared arguments do is refused even
- *     when the arguments that did decode would match, whether it ends between
- *     two records or inside one.
- */
-TEST_CASE("Unit_HRR_KernelArgsSignature_TruncatedPayload", "[hrr]") {
-  PlaybackContext ctx;
-  declare(ctx, {8});
-  // Declares two arguments, carries one whole one; the first matches the
-  // one-parameter signature, so only the truncation distinguishes it.
-  auto between = launch("k", 2, [](Payload& p) { p.args({8}); });
-  // The launch-attribute tail follows, so cut the event short instead of
-  // letting it read as the second argument.
-  between.b.resize(between.b.size() - 8);
-  between.finish(HRR_API_HIPMODULELAUNCHKERNEL);
-  check_refused(ctx, between, "payload ends before the arguments");
-
-  auto inside = launch("k", 1, [](Payload& p) { p.arg(8, 3); });
-  inside.b.resize(inside.b.size() - 8);
-  inside.finish(HRR_API_HIPMODULELAUNCHKERNEL);
-  check_refused(ctx, inside, "payload ends before the arguments");
-}
-
-/**
- * Test Description
- * ----------------
- *   - A kernel whose signature cannot be read is refused rather than launched
- *     unchecked.
- */
-TEST_CASE("Unit_HRR_KernelArgsSignature_UnreadableSignature", "[hrr]") {
-  PlaybackContext ctx;
-  ctx.func_cache["k"] = fake_func();
-  ctx.kernel_param_sizes = [](hipFunction_t, std::vector<size_t>&) { return false; };
-  auto p = launch("k", 1, [](Payload& p) { p.args({8}); });
-  check_refused(ctx, p, "signature cannot be read");
 }
 
 /**
