@@ -25,6 +25,7 @@ class ProfileModeImportGuard:
         "rocprof_compute_analyze",
         "rocprof_compute_soc",
         "pc_sampling",
+        "ml_api_tracing",
         "utils",
         "vendored",
         "roofline",

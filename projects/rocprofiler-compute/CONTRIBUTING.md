@@ -326,7 +326,8 @@ non-stdlib packages are imported.
 - `json`, `csv`, `sqlite3`, `subprocess`, `pathlib`, `logging`, `sys`, `os`, etc.
 
 **Project modules**:
-- `rocprof_compute`, `utils`, `vendored.*`, `roofline`, `config`, `argparser`
+- `rocprof_compute`, `utils`, `ml_api_tracing`, `vendored.*`, `roofline`, `config`, `argparser`
+- The complete allowlist is in `ProfileModeImportGuard` in [`tests/conftest.py`](tests/conftest.py).
 
 **ROCm system libraries** (bundled with ROCm, not pip packages):
 - `amdsmi` - AMD System Management Interface
