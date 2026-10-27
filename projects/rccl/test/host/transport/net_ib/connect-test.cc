@@ -684,10 +684,20 @@ TEST_F(NetIbConnectMicrotest, SenderQps_EceEnabledQueriesAndAppliesReducedEce) {
     EXPECT_EQ(*supported, 1);
     return ncclSuccess;
   });
+  std::vector<ibv_qp_attr> rtrs;
+  ScopedHook modify(g_ibvModifyQp, [&rtrs](ibv_qp*, ibv_qp_attr* attr, int) {
+    if (attr->qp_state == IBV_QPS_RTR) rtrs.push_back(*attr);
+    return ncclSuccess;
+  });
 
   EXPECT_EQ(ncclIbSenderQpsToRts(&comm, &remote), ncclSuccess);
   EXPECT_EQ(set.calls, 1);
   EXPECT_EQ(comm.base.qps[0].ece.vendor_id, 0x4321u);
+  ASSERT_EQ(rtrs.size(), 1u);
+  EXPECT_EQ(rtrs[0].dest_qp_num, 200u);
+  EXPECT_EQ(std::memcmp(&rtrs[0].ah_attr.grh.dgid, &remote.devs[0].gid, sizeof(remote.devs[0].gid)), 0);
+  EXPECT_EQ(rtrs[0].ah_attr.sl, 2);
+  EXPECT_EQ(rtrs[0].ah_attr.grh.traffic_class, 3);
 }
 
 TEST_F(NetIbConnectMicrotest, QpRtr_RcRoceUsesGlobalRouteAndRcOnlyAttributes) {
@@ -701,13 +711,16 @@ TEST_F(NetIbConnectMicrotest, QpRtr_RcRoceUsesGlobalRouteAndRcOnlyAttributes) {
   qp.rtrAttr.sl = 2;
   qp.rtrAttr.remoteQpNum = 77;
   qp.rtrAttr.remoteLid = 9;
-  qp.rtrAttr.remoteGid = Ipv6Gid("2001:db8::2");
+  const auto remoteGid = Ipv6Gid("2001:db8::2");
+  qp.rtrAttr.remoteGid = remoteGid;
   qp.rtrAttr.localGidIndex = 3;
   qp.rtrAttr.localIbPort = 2;
-  ScopedHook modify(g_ibvModifyQp, [](ibv_qp*, ibv_qp_attr* attr, int mask) {
+  ScopedHook modify(g_ibvModifyQp, [&remoteGid](ibv_qp*, ibv_qp_attr* attr, int mask) {
     EXPECT_EQ(attr->qp_state, IBV_QPS_RTR);
     EXPECT_EQ(attr->dest_qp_num, 77u);
     EXPECT_EQ(attr->ah_attr.is_global, 1);
+    EXPECT_EQ(std::memcmp(&attr->ah_attr.grh.dgid, &remoteGid, sizeof(remoteGid)), 0);
+    EXPECT_EQ(attr->ah_attr.sl, 2);
     EXPECT_EQ(attr->ah_attr.grh.sgid_index, 3);
     EXPECT_EQ(attr->ah_attr.grh.traffic_class, 31);
     EXPECT_EQ(attr->ah_attr.port_num, 2);
@@ -1021,6 +1034,12 @@ TEST_F(NetIbConnectMicrotest, ConnectWrapper_UnexpectedStageIsRejected) {
 TEST_F(NetIbConnectMicrotest, Accept_CompletedHandshakePublishesRecvCommAndClearsStage) {
   ConfigureSingleDevice();
   InstallSingleDeviceResourceFakes();
+  const auto remoteGid = Ipv6Gid("2001:db8::2");
+  std::vector<ibv_qp_attr> rtrs;
+  ScopedHook modify(g_ibvModifyQp, [&rtrs](ibv_qp*, ibv_qp_attr* attr, int) {
+    if (attr->qp_state == IBV_QPS_RTR) rtrs.push_back(*attr);
+    return ncclSuccess;
+  });
   ncclIbListenComm listenComm{};
   listenComm.dev = 0;
   g_ncclSocketInit = [](ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType,
@@ -1066,7 +1085,7 @@ TEST_F(NetIbConnectMicrotest, Accept_CompletedHandshakePublishesRecvCommAndClear
       remote.devs[0].mtu = IBV_MTU_4096;
       remote.devs[0].lid = 9;
       remote.devs[0].link_layer = IBV_LINK_LAYER_ETHERNET;
-      remote.devs[0].gid = Ipv6Gid("2001:db8::2");
+      remote.devs[0].gid = remoteGid;
       remote.devs[0].rkey = 0xa1;
       remote.devs[0].currSpeed = 100000;
       remote.qpInfo[0].qpn = 300;
@@ -1096,6 +1115,11 @@ TEST_F(NetIbConnectMicrotest, Accept_CompletedHandshakePublishesRecvCommAndClear
   EXPECT_GE(recvCalls, 3);
   EXPECT_EQ(partialStates.size(), 5u);
   EXPECT_EQ(sentIsP2p, 1);
+  ASSERT_EQ(rtrs.size(), 1u);
+  EXPECT_EQ(rtrs[0].dest_qp_num, 300u);
+  EXPECT_EQ(std::memcmp(&rtrs[0].ah_attr.grh.dgid, &remoteGid, sizeof(remoteGid)), 0);
+  EXPECT_EQ(rtrs[0].ah_attr.sl, 2);
+  EXPECT_EQ(rtrs[0].ah_attr.grh.traffic_class, 19);
 
   EXPECT_EQ(NetIbConnectCloseRecv(comm), ncclSuccess);
 }
