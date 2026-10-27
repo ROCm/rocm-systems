@@ -2107,12 +2107,28 @@ typedef struct hipMemcpyNodeParams {
   hipMemcpy3DParms copyParams;  ///< Params set for the memory copy.
 } hipMemcpyNodeParams;
 
+/** 
+ * Child graph node ownership
+ */
+typedef enum hipGraphChildGraphNodeOwnership {
+  hipGraphChildGraphOwnershipClone = 0,     ///< Default. The child graph is cloned into
+                                            ///< the node.
+  hipGraphChildGraphOwnershipMove = 1,      ///< The child graph is moved into the parent.
+                                            ///< The handle is owned by the parent and is
+                                            ///< destroyed with it. A moved graph cannot be
+                                            ///< independently instantiated or destroyed,
+                                            ///< added to a second parent, or passed to
+                                            ///< hipGraphExecUpdate.
+  hipGraphChildGraphOwnershipInvalid = -1   ///< Reserved; not accepted on creation.
+} hipGraphChildGraphNodeOwnership;
 /**
  * Child graph node params
  */
 typedef struct hipChildGraphNodeParams {
   hipGraph_t graph;  ///< Either the child graph to clone into the node, or
                      ///< a handle to the graph possesed by the node used during query
+  hipGraphChildGraphNodeOwnership ownership;  ///< Clone (default) or move the child graph
+                                              ///< into the parent.
 } hipChildGraphNodeParams;
 
 /**
