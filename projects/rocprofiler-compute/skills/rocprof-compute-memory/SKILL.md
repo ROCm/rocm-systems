@@ -25,7 +25,7 @@ Always analyze one kernel at a time with `-k`.
 
 For diagnostic output, `--debug --debug-table-view` forces plain tables, and
 `--debug --debug-single-metric` enables metric evaluation and memory chart diagnostics.
-Use these only when troubleshooting; normal memory analysis needs neither.
+Use these only when troubleshooting; normal analysis needs neither.
 See [Debug options](../../docs/how-to/analyze/cli.rst#debug-options).
 
 ## 2. Open the level the chart points at
