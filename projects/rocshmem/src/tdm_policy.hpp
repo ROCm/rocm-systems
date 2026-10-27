@@ -47,9 +47,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
       ? tdm::make_cache_policy(tdm::StoreTemporalHint::NonTemporal, tdm::Scope::System)
       : tdm::make_cache_policy(tdm::StoreTemporalHint::Default, tdm::Scope::Wgp);
 
-  // Below threshold, TDM doesn't pay off (like the SDMA threshold); size
-  // is small enough here that Unroll=4 is plenty.
-  if (size < constmem.tdm_threshold) {
+  if (size < (is_put(Kind) ? constmem.tdm_put_threshold : constmem.tdm_get_threshold)) {
     memcpy_wg<Kind, 4>(dst, src, size);
     return;
   }
@@ -64,8 +62,8 @@ template <MemcpyKind Kind = MemcpyKind::Put>
     tile_bytes -= tile_bytes % element_bytes;
     if (tile_bytes > 0) {
       if (is_thread_zero_in_block()) {
-        tdm::copy_region_pipelined<TdmLoadPolicy, TdmStorePolicy>(dst, src, size, reg.ptr,
-                                                                   tile_bytes);
+        tdm::copy_pipelined_deep<TdmLoadPolicy, TdmStorePolicy>(dst, src, size, reg.ptr,
+                                                                tile_bytes);
       }
       const size_t covered = tdm::covered_bytes(size, tile_bytes);
       if (covered < size) {
@@ -97,7 +95,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
       ? tdm::make_cache_policy(tdm::StoreTemporalHint::NonTemporal, tdm::Scope::System)
       : tdm::make_cache_policy(tdm::StoreTemporalHint::Default, tdm::Scope::Wgp);
 
-  if (size < constmem.tdm_threshold) {
+  if (size < (is_put(Kind) ? constmem.tdm_put_threshold : constmem.tdm_get_threshold)) {
     memcpy_wave<Kind>(dst, src, size);
     return;
   }
@@ -123,8 +121,13 @@ template <MemcpyKind Kind = MemcpyKind::Put>
       void* wave_lds = static_cast<uint8_t*>(reg.ptr) +
                         static_cast<size_t>(wave_id) * slot_bytes;
       if (is_thread_zero_in_wave()) {
-        tdm::copy_region_pipelined<TdmLoadPolicy, TdmStorePolicy>(dst, src, size, wave_lds,
-                                                                   tile_bytes);
+        if constexpr (is_put(Kind)) {
+          tdm::copy_pipelined_shallow<TdmLoadPolicy, TdmStorePolicy>(dst, src, size, wave_lds,
+                                                                     tile_bytes, /*double_buffered=*/true);
+        } else {
+          tdm::copy_pipelined_deep<TdmLoadPolicy, TdmStorePolicy>(dst, src, size, wave_lds,
+                                                                  tile_bytes);
+        }
       }
       const size_t covered = tdm::covered_bytes(size, tile_bytes);
       if (covered < size) {
