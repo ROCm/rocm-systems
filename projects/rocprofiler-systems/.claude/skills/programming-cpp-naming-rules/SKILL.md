@@ -47,8 +47,10 @@ class driver
 
 ## In this repository
 
-- The folder under `source/lib/` maps to the namespace below `rocprofsys`:
+- New code: the folder under `source/lib/` maps to the namespace below `rocprofsys`:
   `source/lib/backends/hipfile/backend.hpp` declares
-  `rocprofsys::backends::hipfile::backend`. Tests add a `testing` namespace.
+  `rocprofsys::backends::hipfile::backend`. `core/`, `common/`, and `rocprof-sys/`
+  predate this; do not rename their namespaces to match. Tests add a `testing`
+  namespace.
 - Use nested namespace syntax (`namespace a::b`) and `#pragma once`.
 - Headers use `.hpp`.
