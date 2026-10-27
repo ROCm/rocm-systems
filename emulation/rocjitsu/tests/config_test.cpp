@@ -764,7 +764,10 @@ TEST(SystemGraphTest, ProjectsOnlySelectedNodeBeforeThreadAllocation) {
 
   const auto settings = load_execution_thread_settings_from_string_for_node_or_throw(
       json, rocjitsu::kEmbeddedSchema, "tray7");
-  EXPECT_EQ(settings.resolve(8).dispatch, (std::vector<uint32_t>{2, 2}));
+  util::FailureOr<config::ExecutionThreadAllocation> allocation =
+      settings.resolve(8, util::DiagnosticEmitter{});
+  ASSERT_TRUE(allocation.succeeded());
+  EXPECT_EQ(allocation.value().dispatch, (std::vector<uint32_t>{2, 2}));
   EXPECT_THROW(
       load_config_from_string_for_node_or_throw(json, rocjitsu::kEmbeddedSchema, "missing", 8),
       std::invalid_argument);
@@ -4887,8 +4890,10 @@ TEST(ConfigTestUtilTest, FileAndStringHelpersPreserveHostWidthSelection) {
   for (const auto width :
        {std::optional<uint32_t>{}, std::optional<uint32_t>{0}, std::optional<uint32_t>{4}}) {
     SCOPED_TRACE(width ? std::to_string(*width) : "automatic");
-    const auto expected =
-        settings.value().resolve(width.value_or(amdgpu::available_host_threads()));
+    util::FailureOr<config::ExecutionThreadAllocation> maybe_expected = settings.value().resolve(
+        width.value_or(amdgpu::available_host_threads()), util::DiagnosticEmitter{});
+    ASSERT_TRUE(maybe_expected.succeeded());
+    const auto expected = std::move(maybe_expected).value();
     config::LoadedConfig from_file;
     config::LoadedConfig from_string;
     ASSERT_TRUE(test::load_valid_config(file.path(), from_file, width));

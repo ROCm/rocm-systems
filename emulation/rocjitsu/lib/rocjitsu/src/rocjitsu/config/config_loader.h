@@ -75,13 +75,14 @@ struct ExecutionThreadAllocation {
 /// Pure table selector. Choose the largest effective allocation fitting the budget,
 /// after topology clamps and explicit overrides; later entries break ties.
 /// Explicit knobs may exceed the budget. With no fitting entry, unspecified knobs use
-/// serial defaults. Clocked mode only allocates engine partitions.
-ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest &request,
-                                                    uint32_t host_threads, uint32_t xcds,
-                                                    std::span<const uint32_t> dispatch_capacities,
-                                                    bool async_supported,
-                                                    std::span<const ExecutionThreadChoice> choices,
-                                                    bool clocked = false);
+/// serial defaults. Clocked mode only allocates engine partitions. Invalid helper
+/// requests or functional allocation entries emit a diagnostic and return failure.
+/// Allocation exceptions propagate.
+util::FailureOr<ExecutionThreadAllocation>
+resolve_execution_threads(const ExecutionThreadRequest &request, uint32_t host_threads,
+                          uint32_t xcds, std::span<const uint32_t> dispatch_capacities,
+                          bool async_supported, std::span<const ExecutionThreadChoice> choices,
+                          util::DiagnosticEmitter emit_error, bool clocked = false);
 
 /// Metadata needed to evaluate the pure allocation rule without building a VM.
 struct ExecutionThreadSettings {
@@ -93,9 +94,10 @@ struct ExecutionThreadSettings {
   bool clocked = false;
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
 
-  ExecutionThreadAllocation resolve(uint32_t host_threads) const {
+  util::FailureOr<ExecutionThreadAllocation> resolve(uint32_t host_threads,
+                                                     util::DiagnosticEmitter emit_error) const {
     return resolve_execution_threads(request, host_threads, xcds, dispatch_capacities,
-                                     async_supported, choices, clocked);
+                                     async_supported, choices, emit_error, clocked);
   }
 };
 
@@ -312,15 +314,15 @@ simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
 /// @param schema_text FlatBuffers schema text.
 /// @param emit_error Destination for failure diagnostics.
 /// @returns Success, or failure with a diagnostic for file-reading, parsing,
-/// KFD/DBT device conversion, component-range, or link-expression errors. Other
-/// validation and allocation exceptions propagate.
+/// KFD/DBT device conversion, component-range, link-expression, or execution-thread
+/// allocation errors. Other validation and allocation exceptions propagate.
 util::Result validate_config(const std::string &json_path, const std::string &schema_text,
                              util::DiagnosticEmitter emit_error);
 
 /// @brief Load simulation config from a JSON file.
-/// @details File-reading, parsing, KFD/DBT device conversion, component-range, and
-/// link-expression failures emit a diagnostic and return failure. Other validation
-/// and allocation exceptions propagate.
+/// @details File-reading, parsing, KFD/DBT device conversion, component-range,
+/// link-expression, and execution-thread allocation failures emit a diagnostic and
+/// return failure. Other validation and allocation exceptions propagate.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
@@ -346,9 +348,9 @@ util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
                                           uint32_t host_threads);
 
 /// @brief Load simulation config from a JSON string.
-/// @details Parsing, KFD/DBT device conversion, component-range, and link-expression
-/// failures emit a diagnostic and return failure. Other validation and allocation
-/// exceptions propagate.
+/// @details Parsing, KFD/DBT device conversion, component-range, link-expression,
+/// and execution-thread allocation failures emit a diagnostic and return failure.
+/// Other validation and allocation exceptions propagate.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.

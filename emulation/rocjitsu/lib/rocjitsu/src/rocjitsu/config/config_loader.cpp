@@ -48,21 +48,20 @@
 namespace rocjitsu {
 namespace config {
 
-ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest &request,
-                                                    uint32_t host_threads, uint32_t xcds,
-                                                    std::span<const uint32_t> dispatch_capacities,
-                                                    bool async_supported,
-                                                    std::span<const ExecutionThreadChoice> choices,
-                                                    bool clocked) {
+util::FailureOr<ExecutionThreadAllocation>
+resolve_execution_threads(const ExecutionThreadRequest &request, uint32_t host_threads,
+                          uint32_t xcds, std::span<const uint32_t> dispatch_capacities,
+                          bool async_supported, std::span<const ExecutionThreadChoice> choices,
+                          util::DiagnosticEmitter emit_error, bool clocked) {
   if (request.helpers < -1 || request.helpers > 128)
-    throw std::invalid_argument("async_helper_threads must be -1 or between 0 and 128");
+    return emit_error.emit() << "async_helper_threads must be -1 or between 0 and 128";
   const uint32_t budget = request.budget ? request.budget : std::max(host_threads, 1u);
   xcds = std::max(xcds, 1u);
   if (clocked) {
     const uint32_t cpu_budget =
         request.budget ? request.budget : std::min(budget, kDefaultExecutionThreadCap);
-    return {std::min(request.engines ? request.engines : cpu_budget, xcds),
-            std::vector<uint32_t>(dispatch_capacities.size(), 1), 0};
+    return ExecutionThreadAllocation{std::min(request.engines ? request.engines : cpu_budget, xcds),
+                                     std::vector<uint32_t>(dispatch_capacities.size(), 1), 0};
   }
   auto effective = [&](ExecutionThreadChoice choice) {
     ExecutionThreadAllocation result;
@@ -79,8 +78,8 @@ ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest
   uint64_t best_cost = 0;
   for (auto choice : choices) {
     if (!choice.engines || !choice.dispatch || choice.helpers > 128)
-      throw std::invalid_argument("thread_allocations require num_threads >= 1, "
-                                  "cpu_dispatch_threads >= 1 and async_helper_threads <= 128");
+      return emit_error.emit() << "thread_allocations require num_threads >= 1, "
+                                  "cpu_dispatch_threads >= 1 and async_helper_threads <= 128";
     auto candidate = effective(choice);
     uint64_t cpu_cost = candidate.engines;
     for (uint32_t width : candidate.dispatch)
@@ -1257,7 +1256,11 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
     return util::Result::failure();
   const auto &thread_settings = maybe_thread_settings.value();
   result.thread_allocations = thread_settings.choices;
-  result.execution_threads = thread_settings.resolve(host_threads);
+  util::FailureOr<ExecutionThreadAllocation> allocation =
+      thread_settings.resolve(host_threads, emit_error);
+  if (allocation.failed())
+    return util::Result::failure();
+  result.execution_threads = std::move(allocation).value();
   if (!result.engine_config.num_threads)
     result.engine_config.num_threads = result.execution_threads.engines;
   if (async_resources_override) {
