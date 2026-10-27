@@ -235,22 +235,26 @@ static int ncclIbRelaxedOrderingCapable(void) {
 
 static bool ncclMlx5dvDmaBufCapable(ibv_context* context) {
   ncclResult_t res;
-  int dev_fail = 0;
+  int ibvErrno = 0;
+  int mlxErrno = 0;
 
   struct ibv_pd* pd;
   NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, context), res, failure);
-  // Sample errno after each dummy call. The second call overwrites errno, and
-  // clearing it here would not change ncclIbDmaBufSupport(): that probe calls
-  // wrap_direct_ibv_reg_dmabuf_mr again and reads the errno that call sets.
+  // Sample each probe before the next call overwrites errno. A missing
+  // mlx5dv_reg_dmabuf_mr is ENOSYS, not the kernel's EOPNOTSUPP. Leaving that
+  // EOPNOTSUPP here is what made ncclIbDmaBufSupport() fail and sent GPU
+  // registration down ibv_reg_mr_iova2 (fd == -1).
   (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);
-  // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
-  dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
+  ibvErrno = errno;
   (void)wrap_direct_mlx5dv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/,
                                          0 /* mlx5 flags*/);
-  // mlx5dv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
-  dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
+  mlxErrno = errno;
   NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
-  if (dev_fail) goto failure;
+  errno = ibvErrno;
+  if (ibvErrno == EOPNOTSUPP || ibvErrno == EPROTONOSUPPORT) return false;
+  // Symbol absent: not a data-direct device. Kernel DMA-BUF support is ibvErrno.
+  if (mlxErrno == ENOSYS) return false;
+  if (mlxErrno == EOPNOTSUPP || mlxErrno == EPROTONOSUPPORT) return false;
   return true;
 failure:
   return false;

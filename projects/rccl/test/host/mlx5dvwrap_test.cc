@@ -69,6 +69,13 @@ TEST_F(Mlx5dvRegDmabufTest, DataDirectOffUsesIbv) {
   EXPECT_EQ(0, g_mlx5Calls);
 }
 
+TEST_F(Mlx5dvRegDmabufTest, MissingMlx5SymbolIsNotKernelEopnotsupp) {
+  errno = 0;
+  struct ibv_mr* mr = wrap_direct_mlx5dv_reg_dmabuf_mr(&pd_, 0, 0, 0, -1, 0, 0);
+  EXPECT_EQ(mr, nullptr);
+  EXPECT_EQ(errno, ENOSYS);
+}
+
 TEST_F(Mlx5dvRegDmabufTest, MissingMlx5SymbolFallsBackToIbv) {
   struct ibv_mr* mr = nullptr;
   EXPECT_EQ(ncclSuccess, Reg(true, &mr));

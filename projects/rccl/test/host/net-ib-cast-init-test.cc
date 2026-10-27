@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cerrno>
 #include <fcntl.h>
 #include <limits.h>
 #include <unistd.h>
@@ -356,8 +357,32 @@ INSTANTIATE_TEST_SUITE_P(
                       DmaBufProbe{"KernelProtocolUnsupported", false, EPROTONOSUPPORT, EBADF, false, false},
                       DmaBufProbe{"Mlx5LacksDmaBuf", false, EBADF, EPROTONOSUPPORT, false, false},
                       DmaBufProbe{"Mlx5OpUnsupported", false, EBADF, EOPNOTSUPP, false, false},
+                      DmaBufProbe{"Mlx5SymbolMissing", false, EBADF, ENOSYS, false, false},
                       DmaBufProbe{"PdDeallocFails", false, EBADF, EBADF, true, false}),
     [](const ::testing::TestParamInfo<DmaBufProbe>& info) { return info.param.name; });
+
+TEST_F(NetIbCastInitMicrotest, Mlx5SymbolMissing_RestoresTheIbvErrno) {
+  struct ibv_context ctx {};
+  struct ibv_pd pd {};
+  errno = EOPNOTSUPP;
+  ScopedHook alloc(g_ibvAllocPd, [&](struct ibv_pd** ret, struct ibv_context*) {
+    *ret = &pd;
+    return ncclSuccess;
+  });
+  ScopedHook ibvReg(g_ibvDirectRegDmabufMr, [](struct ibv_pd*, uint64_t, size_t, uint64_t, int, int) {
+    errno = EBADF;
+    return (struct ibv_mr*)nullptr;
+  });
+  ScopedHook mlx5Reg(g_mlx5dvDirectRegDmabufMr, [](struct ibv_pd*, uint64_t, size_t, uint64_t, int, int, int) {
+    errno = ENOSYS;
+    return (struct ibv_mr*)nullptr;
+  });
+  ScopedHook dealloc(g_ibvDeallocPd, [](struct ibv_pd*) { return ncclSuccess; });
+  EXPECT_FALSE(ncclMlx5dvDmaBufCapable(&ctx));
+  // The kernel accepted the DMA-BUF ioctl (EBADF on fd=-1). A missing mlx5
+  // symbol must not leave EOPNOTSUPP for IbCastDmaBufSupport().
+  EXPECT_EQ(errno, EBADF);
+}
 
 TEST_F(NetIbCastInitMicrotest, OooRqSize_ReportsTheDevicesOooReceiveDepthOnlyWhenEnabled) {
   struct ibv_context ctx {};
