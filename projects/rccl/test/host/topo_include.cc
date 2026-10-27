@@ -4,10 +4,11 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// src/graph/topo.cc for binaries that need it real but do not test it. It is
-// #included rather than linked because TopoSetNetDevsPolicy can only be defined
-// inside topo.cc's TU, where the NETDEVS policy statics live. topo-test.cc
-// includes that TU itself, so rccl-UnitTestsMicroTopo does not link this file.
+// src/graph/topo.cc for every binary that needs it, whether or not it is the
+// code under test. It is #included rather than linked because
+// TopoSetNetDevsPolicy can only be defined inside topo.cc's TU, where the
+// NETDEVS policy statics live. topo-test.cc #includes this file for the same
+// reason, so the definition exists exactly once.
 
 #include "fakes/graph_fakes.h"
 #include "fakes/param_redirect.h"
