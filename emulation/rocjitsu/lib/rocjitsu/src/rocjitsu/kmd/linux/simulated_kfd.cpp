@@ -5816,9 +5816,8 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
   }
   wave.set_debug_wave_id(state.wave_id);
   wave.set_queue_packet_id(state.queue_packet_id);
-  // Small SGPR allocations do not include the call-stack registers.
-  const uint32_t stack_pointer = wave.num_sgprs() > 32 ? wave.debug_read_sgpr(32) : 0;
-  const uint32_t stack_frame = wave.num_sgprs() > 33 ? wave.debug_read_sgpr(33) : 0;
+  const uint32_t stack_pointer = wave.debug_read_sgpr(32);
+  const uint32_t stack_frame = wave.debug_read_sgpr(33);
   // rocm-dbgapi may submit a lightweight control-state update with no register
   // payload after displaced stepping. Preserve the SGPR/VGPR values produced
   // by the displaced instruction in that case rather than restoring zeros.
@@ -5844,10 +5843,8 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
   // around the loop, which the loop cannot reach anyway (scratch_base_ is a
   // standalone member), so the only effect was discarding the debugger's edit.
   wave.set_scratch_base(state.flat_scratch);
-  if (wave.num_sgprs() > 32)
-    wave.debug_write_sgpr(32, stack_pointer);
-  if (wave.num_sgprs() > 33)
-    wave.debug_write_sgpr(33, stack_frame);
+  wave.debug_write_sgpr(32, stack_pointer);
+  wave.debug_write_sgpr(33, stack_frame);
   const bool single_step = !state.wave_stopped && (gfx12_5 ? (state.trap_ctrl & (1u << 9)) != 0
                                                            : (state.mode & kModeDebugEnMask) != 0);
   wave.set_debug_single_step(single_step);
