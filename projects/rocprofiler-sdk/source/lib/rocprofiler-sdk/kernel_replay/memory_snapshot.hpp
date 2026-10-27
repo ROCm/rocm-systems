@@ -167,13 +167,20 @@ struct snapshot_t
     storage_kind storage() const;
 };
 
+using batch_copy_fn_t = std::function<hsa_status_t(const std::vector<blit::copy_region_t>&)>;
+
 // Plan whole-region placement against queried GPU and host budgets, materialize at most one arena
 // per tier, and capture only after every required arena exists.
 snapshot_t
 snap(const capture_context_t&);
 
+// GPU-local storage is captured through one batch blit callback, which must finish the copy before
+// it returns. Pinned-host storage is captured synchronously.
 snapshot_t
-snap(const capture_context_t&, storage_budgets_t);
+snap(const capture_context_t&, const batch_copy_fn_t& batch_copy);
+
+snapshot_t
+snap(const capture_context_t&, storage_budgets_t, const batch_copy_fn_t& batch_copy = {});
 
 // Direct-test convenience: force the nearest CPU agent's pinned HSA pool.
 snapshot_t
@@ -183,8 +190,6 @@ snap(hsa_agent_t agent);
 // A failed copy returns false immediately because the snapshot is then only partially applied.
 bool
 restore(const snapshot_t& snapshot);
-
-using batch_copy_fn_t = std::function<hsa_status_t(const std::vector<blit::copy_region_t>&)>;
 
 // GPU-local storage restores through one batch blit callback. Pinned-host storage restores
 // synchronously and invokes the callback with no copy regions so the caller submits the target.

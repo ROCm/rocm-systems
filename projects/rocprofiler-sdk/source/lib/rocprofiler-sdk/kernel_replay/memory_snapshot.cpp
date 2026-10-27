@@ -69,23 +69,6 @@ dma_copy(void* dst, const void* src, size_t n)
     return core->hsa_memory_copy_fn(dst, src, n);
 }
 
-/// @brief Run @p copy under the tracker read lock, but only while [@p gpu_addr, +@p size) is still
-/// a live tracked allocation of >= @p size bytes, so a concurrent free (write lock) can't retire it
-/// mid-copy. Direction is caller-supplied: snap reads device->host, restore writes host->device.
-/// @return @p copy's status, or @c std::nullopt if the region was freed/shrunk since it was
-/// recorded.
-template <typename CopyFn>
-std::optional<hsa_status_t>
-with_inventory_check(void* gpu_addr, size_t size, CopyFn&& copy)
-{
-    return memory_tracker::inventory().rlock(
-        [&](const memory_tracker::tracked_map_t& map) -> std::optional<hsa_status_t> {
-            auto itr = map.find(gpu_addr);
-            if(itr == map.end() || itr->second.size < size) return std::nullopt;
-            return copy();
-        });
-}
-
 // A module-scope variable (__device__ / __constant__ global) discovered in a loaded executable.
 struct module_variable_t
 {
@@ -614,7 +597,13 @@ snap(const capture_context_t& ctx)
 }
 
 snapshot_t
-snap(const capture_context_t& ctx, storage_budgets_t budgets)
+snap(const capture_context_t& ctx, const batch_copy_fn_t& batch_copy)
+{
+    return snap(ctx, storage_budgets_t{gpu_plan_budget(ctx), host_plan_budget(ctx)}, batch_copy);
+}
+
+snapshot_t
+snap(const capture_context_t& ctx, storage_budgets_t budgets, const batch_copy_fn_t& batch_copy)
 {
     auto out = snapshot_t{};
 
@@ -752,45 +741,62 @@ snap(const capture_context_t& ctx, storage_budgets_t budgets)
         return out;
     }
 
-    size_t captured_regions = 0;
-    for(size_t region_index = 0; region_index < out.regions.size(); ++region_index)
+    auto gpu_copies = std::vector<copy_region_t>{};
+    try
     {
-        auto&      region         = out.regions[region_index];
-        const auto capture_region = [&] {
+        gpu_copies.reserve(out.extents.size());
+    } catch(const std::bad_alloc&)
+    {
+        out.regions.clear();
+        out.segments.clear();
+        out.extents.clear();
+        out.status = capture_status::unavailable;
+        return out;
+    }
+
+    // One inventory read lock covers every copy, including the batch, so no tracked region can be
+    // freed while it is being read.
+    size_t     captured_regions = 0;
+    const auto status           = memory_tracker::inventory().rlock([&](const auto& map) {
+        for(size_t region_index = 0; region_index < out.regions.size(); ++region_index)
+        {
+            auto& region = out.regions[region_index];
+            if(!region_is_live(region, map))
+            {
+                ROCP_INFO << fmt::format("kernel-replay snapshot: region {} ({}B) was retired "
+                                         "before capture, dropping from snapshot",
+                                         region.live_address,
+                                         region.size);
+                region.liveness = liveness_kind::retired;
+                continue;
+            }
             for(const auto& extent : out.extents)
             {
                 if(extent.region_index != region_index) continue;
-                const auto copy   = capture_copy(out, extent);
-                const auto status = dma_copy(copy.dest, copy.source, copy.size);
-                if(status != HSA_STATUS_SUCCESS) return status;
+                const auto copy = capture_copy(out, extent);
+                const auto kind = out.segments.at(extent.segment_index).backing.kind();
+                if(batch_copy && kind == storage_kind::gpu_local)
+                {
+                    gpu_copies.emplace_back(copy);
+                    continue;
+                }
+                const auto copy_status = dma_copy(copy.dest, copy.source, copy.size);
+                if(copy_status != HSA_STATUS_SUCCESS) return copy_status;
             }
-            return HSA_STATUS_SUCCESS;
-        };
-        const auto st = region.liveness == liveness_kind::tracked_allocation
-                            ? with_inventory_check(region.live_address, region.size, capture_region)
-                            : std::optional<hsa_status_t>{capture_region()};
+            ++captured_regions;
+        }
+        return gpu_copies.empty() ? HSA_STATUS_SUCCESS : batch_copy(gpu_copies);
+    });
 
-        if(!st)
-        {
-            ROCP_INFO << fmt::format("kernel-replay snapshot: region {} ({}B) was retired before "
-                                     "capture, dropping from snapshot",
-                                     region.live_address,
-                                     region.size);
-            region.liveness = liveness_kind::retired;
-            continue;
-        }
-        if(*st != HSA_STATUS_SUCCESS)
-        {
-            ROCP_WARNING << fmt::format("kernel-replay snapshot: copy failed for region {} ({}B)",
-                                        region.live_address,
-                                        region.size);
-            out.regions.clear();
-            out.extents.clear();
-            out.segments.clear();
-            out.status = capture_status::copy_failed;
-            return out;
-        }
-        ++captured_regions;
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << fmt::format("kernel-replay snapshot: capture copy failed for agent {}",
+                                    ctx.agent.handle);
+        out.regions.clear();
+        out.extents.clear();
+        out.segments.clear();
+        out.status = capture_status::copy_failed;
+        return out;
     }
 
     out.status = capture_status::complete;
