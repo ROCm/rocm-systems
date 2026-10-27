@@ -57,6 +57,7 @@ struct record_batch
 {
     std::vector<copied_record> records = {};
     uint64_t                   now_ns  = 0;  // host clock sampled once for the batch
+    uint64_t                   drain_epoch = 0;
     // Which GPU's ring these came from. Pairing and correlation are keyed by it,
     // so records from different GPUs can never be matched to each other.
     uint32_t gpu_id = 0;
@@ -65,6 +66,7 @@ struct record_batch
     {
         records.clear();  // keeps capacity: steady state does not allocate
         now_ns = 0;
+        drain_epoch = 0;
         gpu_id = 0;
     }
 };
@@ -131,6 +133,17 @@ private:
     std::atomic<size_t> m_head = {0};
     std::atomic<size_t> m_tail = {0};
 };
+
+template <size_t Capacity>
+bool
+processor_drained_through(const record_pipe<Capacity>& pipe,
+                          const std::atomic<uint64_t>& deferred_epoch,
+                          uint64_t                     through_epoch)
+{
+    if(!pipe.empty()) return false;
+    const auto pending = deferred_epoch.load(std::memory_order_acquire);
+    return pending == UINT64_MAX || pending > through_epoch;
+}
 
 // PRODUCER-side helper: move as many FIFO batches from `overflow` into `pipe` as
 // there are free slots, publishing each. Returns true once `overflow` is empty.

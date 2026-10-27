@@ -807,8 +807,9 @@ complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
     }
 }
 
+template <typename CompletionT>
 bool
-submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
+submit_to_task_group(CompletionT& proven)
 {
     if(registration::get_fini_status() != 0) return false;
 
@@ -820,7 +821,7 @@ submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
 
     // task_group_t::async takes a std::function, which must be copy-constructible;
     // the payload is move-only, so it travels in a shared_ptr.
-    auto _held = std::make_shared<kfd::signal_less_hub_t::proven>(std::move(proven));
+    auto _held = std::make_shared<CompletionT>(std::move(proven));
 
     // Counted before the submit, not inside the task: `inflight` is what every drain polls, so
     // work that is queued but not yet counted is work a drain reports as absent.
@@ -829,7 +830,10 @@ submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
         // Armed first: a throwing tool callback must not strand the counter every drain polls.
         auto _dtor = common::scope_destructor{
             [&mon]() { mon.inflight.fetch_sub(1, std::memory_order_release); }};
-        complete_signal_less_dispatch(std::move(*_held));
+        if constexpr(std::is_same_v<CompletionT, kfd::signal_less_hub_t::proven>)
+            complete_signal_less_dispatch(std::move(*_held));
+        else
+            kfd::run_complete_signal_less_batch(*_held, complete_signal_less_dispatch);
     });
     return true;
 }
@@ -854,9 +858,10 @@ is_dispatch_packet(const rocprofiler_packet& pkt)
 // keys" is answered here. If ANY packet fails, the WHOLE batch keeps the signal
 // path.
 //
-// keys_out is indexed BY PACKET INDEX, so registration uses the exact keys the
-// hub validated here rather than re-deriving them from a second doorbell lookup
-// that could observe a different generation.
+// keys_out is indexed BY PACKET INDEX, so registration uses this ownership
+// snapshot instead of re-deriving keys from a second doorbell lookup. Eligibility
+// checks capacity; registration validates keys atomically before publication and
+// replays signal instrumentation on refusal.
 bool
 signal_less_batch_eligible(Queue*                                            queue,
                            const rocprofiler_packet*                         packets,
@@ -883,16 +888,16 @@ signal_less_batch_eligible(Queue*                                            que
     const uint32_t _slot = (*_w)->slot;
 
     keys_out->assign(num_packets, std::nullopt);
-    auto _flat = std::vector<kfd::correlation_key>{};
+    size_t dispatch_count = 0;
     for(uint64_t i = 0; i < num_packets; ++i)
     {
         if(!is_dispatch_packet(packets[i])) continue;
         auto _key = kfd::correlation_key{
             _slot, static_cast<uint32_t>((base_pkt_index + i) & 0xFFFFFFFFULL), _gpu};
         (*keys_out)[i] = _key;
-        _flat.emplace_back(_key);
+        ++dispatch_count;
     }
-    if(_flat.empty())
+    if(dispatch_count == 0)
     {
         keys_out->clear();
         return false;
@@ -903,7 +908,7 @@ signal_less_batch_eligible(Queue*                                            que
     // doorbell_tls handoff process_doorbell_impl set before calling the interceptor.
     auto*      _st       = get_doorbell_tls().state;
     const bool _eligible = kfd::owner_registry().slot_uniquely_owned(_gpu, _slot) &&
-                           kfd::signal_less_hub().can_register_batch(_flat) &&
+                           kfd::signal_less_hub().can_register_batch(_gpu, dispatch_count) &&
                            !(_st != nullptr && _st->admission_closed);
 
     if(_eligible)
@@ -1159,7 +1164,7 @@ write_interceptor(Queue*                                queue,
         return;
     }
 
-    ROCP_INFO << fmt::format("write_interceptor called with pkt_count={}", pkt_count);
+    ROCP_TRACE << fmt::format("write_interceptor called with pkt_count={}", pkt_count);
 
     auto _contexts = context::get_active_contexts(context_filter);
 
@@ -1582,7 +1587,7 @@ write_interceptor(Queue*                                queue,
             current_signal_value =
                 get_core_table()->hsa_signal_load_scacquire_fn(last_completion_signal);
 
-            ROCP_INFO << fmt::format(
+            ROCP_TRACE << fmt::format(
                 "  Enqueued batch with completion signal {{.handle={}}} with value {}",
                 last_completion_signal.handle,
                 current_signal_value);
@@ -1759,11 +1764,11 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     const uint64_t pkt_count = drained;
     const uint64_t scan_end  = scan_pos + drained;
 
-    ROCP_INFO << fmt::format("{} :: pkt_count={} (scan_pos={}, scan_end={})",
-                             __FUNCTION__,
-                             pkt_count,
-                             scan_pos,
-                             scan_end);
+    ROCP_TRACE << fmt::format("{} :: pkt_count={} (scan_pos={}, scan_end={})",
+                              __FUNCTION__,
+                              pkt_count,
+                              scan_pos,
+                              scan_end);
 
     // A tool's enqueue callback runs inside write_interceptor below and may dispatch again, re-
     // entering this function on the same thread. Save the outer frame's handoff record and put it
@@ -2319,6 +2324,13 @@ bool
 submit_complete_signal_less_dispatch(signal_less_hub_t::proven& p)
 {
     return hsa::queue_interposition::submit_to_task_group(p);
+}
+
+bool
+submit_complete_signal_less_dispatch(signal_less_batch_t& batch)
+{
+    if(batch.empty()) return true;
+    return hsa::queue_interposition::submit_to_task_group(batch);
 }
 
 void

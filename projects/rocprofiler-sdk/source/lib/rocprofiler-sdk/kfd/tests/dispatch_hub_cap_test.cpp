@@ -26,7 +26,7 @@
 // ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_PER_GPU=1 so every test here runs at
 // cap 1. The cap ARITHMETIC (all values, no wrap) is covered deterministically by
 // HubCapArithmetic in dispatch_hub_test.cpp; this file proves the register_batch
-// wiring: admit/refuse, eligible-only eviction, and map-unmutated-on-refusal.
+// wiring: admit/refuse, completion preservation, and map-unmutated-on-refusal.
 // Spec 1227-1238.
 
 #include "lib/rocprofiler-sdk/kfd/dispatch_hub.hpp"
@@ -34,8 +34,10 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdint>
 #include <optional>
+#include <thread>
 #include <vector>
 
 namespace
@@ -123,9 +125,9 @@ TEST(HubCap, batch_larger_than_cap_refuses)
     EXPECT_EQ(hub.pending_count(), 0u);
 }
 
-// live == cap with a closed-window (eligible) entry: a new one-entry batch takes
-// the shortfall path and evicts the oldest eligible victim.
-TEST(HubCap, live_equals_cap_evicts_eligible_victim)
+// An expired closed window can still have an EOP in the reader backlog.
+// Saturated admission must preserve it for completion instead of evicting it.
+TEST(HubCap, live_equals_cap_preserves_closed_window_completion)
 {
     reset_disable();
     auto hub = hub_t{};
@@ -141,12 +143,19 @@ TEST(HubCap, live_equals_cap_evicts_eligible_victim)
     auto next = std::vector<hub_t::registration>{};
     next.emplace_back(reg_of(key_of(5, 1), mk_window(5, 700), /*corr_id=*/51));
     auto ev1 = std::vector<hub_t::leaked>{};
-    EXPECT_TRUE(hub.register_batch(std::move(next), ev1))
-        << "eligible victim evicted, batch admitted";
-    ASSERT_EQ(ev1.size(), 1u);
-    EXPECT_EQ(ev1[0].correlation_id, 41u) << "the closed pre-existing entry was evicted";
+    EXPECT_FALSE(hub.register_batch(std::move(next), ev1));
+    EXPECT_TRUE(ev1.empty());
     EXPECT_EQ(hub.pending_count(), 1u);
-    EXPECT_TRUE(hub.is_ledgered(41u)) << "evicted entry ledgered";
+    EXPECT_FALSE(hub.is_ledgered(41u));
+    ASSERT_EQ(next.size(), 1u);
+    EXPECT_EQ(next.front().correlation_id, 51u);
+
+    auto completion = hub.record_kernel_end(key_of(4, 1), uint64_t{150}, 250);
+    ASSERT_TRUE(completion.has_value());
+    EXPECT_EQ(completion->correlation_id, 41u);
+    EXPECT_EQ(hub.pending_count(), 0u);
+    EXPECT_TRUE(hub.register_batch(std::move(next), ev1));
+    EXPECT_EQ(hub.pending_count(), 1u);
 }
 
 // insufficient victim: live == cap but the only entry is OPEN-window (not eligible),
@@ -168,4 +177,136 @@ TEST(HubCap, insufficient_victim_refuses_and_leaves_map_unmutated)
     EXPECT_TRUE(ev1.empty());
     EXPECT_EQ(hub.pending_count(), 1u) << "map unmutated across the refusal";
     EXPECT_FALSE(hub.is_ledgered(61u)) << "the open-window entry was NOT evicted or ledgered";
+}
+
+TEST(HubCap, advisory_check_observes_retired_capacity)
+{
+    reset_disable();
+    auto hub    = hub_t{};
+    auto window = mk_window(8, 100);
+    auto batch  = std::vector<hub_t::registration>{};
+    auto leaked = std::vector<hub_t::leaked>{};
+    batch.emplace_back(reg_of(key_of(8, 1), window, 81));
+    ASSERT_TRUE(hub.register_batch(std::move(batch), leaked));
+
+    EXPECT_FALSE(hub.can_register_batch({key_of(8, 2)}));
+    EXPECT_FALSE(hub.can_register_batch(0, 1));
+    EXPECT_TRUE(hub.can_register_batch({key_of(8, 2, 1)}));
+    EXPECT_TRUE(hub.can_register_batch(1, 1));
+    EXPECT_FALSE(hub.can_register_batch(1, 2));
+    ASSERT_TRUE(hub.record_kernel_end(key_of(8, 1), uint64_t{150}, 200).has_value());
+    EXPECT_TRUE(hub.can_register_batch({key_of(8, 2)}));
+    EXPECT_TRUE(hub.can_register_batch(0, 1));
+}
+
+TEST(HubCap, capacity_hint_does_not_bypass_authoritative_key_validation)
+{
+    reset_disable();
+    auto hub = hub_t{};
+    hub.quarantine_slot(0, 12);
+    EXPECT_TRUE(hub.can_register_batch(0, 1));
+    EXPECT_FALSE(hub.can_register_batch({key_of(12, 1)}));
+    auto batch = std::vector<hub_t::registration>{};
+    batch.emplace_back(reg_of(key_of(12, 1), mk_window(12, 100), 121));
+    auto leaked = std::vector<hub_t::leaked>{};
+    EXPECT_FALSE(hub.register_batch(std::move(batch), leaked));
+    EXPECT_TRUE(leaked.empty());
+    EXPECT_EQ(hub.pending_count(), 0u);
+    ASSERT_EQ(batch.size(), 1u);
+    EXPECT_EQ(batch.front().correlation_id, 121u);
+}
+
+TEST(HubCap, capacity_hint_observes_lifecycle_gates)
+{
+    reset_disable();
+    auto hub = hub_t{};
+    EXPECT_TRUE(hub.can_register_batch(0, 1));
+    hub.set_mode(session_mode::stopping);
+    EXPECT_FALSE(hub.can_register_batch(0, 1));
+    hub.set_mode(session_mode::running);
+    signal_less_disable_latch().store(true);
+    EXPECT_FALSE(hub.can_register_batch(0, 1));
+    reset_disable();
+    hub.abandon_in_child();
+    EXPECT_FALSE(hub.can_register_batch(0, 1));
+}
+
+TEST(HubCap, capacity_hint_refreshes_after_gc_and_quarantine)
+{
+    reset_disable();
+    auto hub    = hub_t{};
+    auto batch  = std::vector<hub_t::registration>{};
+    auto leaked = std::vector<hub_t::leaked>{};
+    batch.emplace_back(reg_of(key_of(13, 1), mk_window(13, 100, 200), 131));
+    ASSERT_TRUE(hub.register_batch(std::move(batch), leaked));
+    EXPECT_FALSE(hub.can_register_batch(0, 1));
+    EXPECT_TRUE(hub.can_register_batch(1, 1));
+    EXPECT_EQ(hub.gc_closed_windows(UINT64_MAX).second.dispatches, 1u);
+    EXPECT_TRUE(hub.can_register_batch(0, 1));
+    batch.clear();
+    batch.emplace_back(reg_of(key_of(14, 1), mk_window(14, 300), 141));
+    ASSERT_TRUE(hub.register_batch(std::move(batch), leaked));
+    EXPECT_FALSE(hub.can_register_batch(0, 1));
+    EXPECT_EQ(hub.quarantine_slot(0, 14).size(), 1u);
+    EXPECT_TRUE(hub.can_register_batch(0, 1));
+}
+
+TEST(HubCap, saturated_gpu_refuses_multi_gpu_batch_without_mutation)
+{
+    reset_disable();
+    auto hub    = hub_t{};
+    auto batch  = std::vector<hub_t::registration>{};
+    auto leaked = std::vector<hub_t::leaked>{};
+    batch.emplace_back(reg_of(key_of(9, 1, 1), mk_window(9, 100, 200), 91));
+    ASSERT_TRUE(hub.register_batch(std::move(batch), leaked));
+
+    auto mixed = std::vector<hub_t::registration>{};
+    mixed.emplace_back(reg_of(key_of(10, 1, 0), mk_window(10, 100), 101));
+    mixed.emplace_back(reg_of(key_of(10, 1, 1), mk_window(10, 100), 102));
+    EXPECT_FALSE(hub.can_register_batch({key_of(10, 1, 0), key_of(10, 1, 1)}));
+    EXPECT_FALSE(hub.register_batch(std::move(mixed), leaked));
+    EXPECT_TRUE(leaked.empty());
+    EXPECT_EQ(hub.pending_count(), 1u);
+    EXPECT_FALSE(hub.is_ledgered(91));
+    ASSERT_EQ(mixed.size(), 2u);
+    EXPECT_EQ(mixed.front().correlation_id, 101u);
+    EXPECT_TRUE(hub.can_register_batch({key_of(10, 1, 0)}));
+    ASSERT_TRUE(hub.record_kernel_end(key_of(9, 1, 1), uint64_t{150}, 250).has_value());
+    EXPECT_TRUE(hub.register_batch(std::move(mixed), leaked));
+    EXPECT_EQ(hub.pending_count(), 2u);
+}
+
+TEST(HubCap, concurrent_batches_cannot_consume_the_same_capacity)
+{
+    reset_disable();
+    auto             hub          = hub_t{};
+    auto             ready        = std::atomic<size_t>{0};
+    auto             admitted     = std::atomic<size_t>{0};
+    auto             winner       = std::atomic<uint32_t>{0};
+    auto             workers      = std::vector<std::thread>{};
+    auto             window       = mk_window(11, 100);
+    constexpr size_t worker_count = 16;
+
+    for(uint32_t dispatch = 1; dispatch <= worker_count; ++dispatch)
+        workers.emplace_back([&, dispatch]() {
+            auto batch  = std::vector<hub_t::registration>{};
+            auto leaked = std::vector<hub_t::leaked>{};
+            batch.emplace_back(reg_of(key_of(11, dispatch), window, dispatch));
+            ready.fetch_add(1, std::memory_order_release);
+            while(ready.load(std::memory_order_acquire) != worker_count)
+                std::this_thread::yield();
+            hub.can_register_batch(0, 1);
+            if(hub.register_batch(std::move(batch), leaked))
+            {
+                admitted.fetch_add(1, std::memory_order_relaxed);
+                winner.store(dispatch, std::memory_order_relaxed);
+            }
+        });
+    for(auto& worker : workers)
+        worker.join();
+
+    EXPECT_EQ(admitted.load(), 1u);
+    EXPECT_EQ(hub.pending_count(), 1u);
+    EXPECT_TRUE(hub.record_kernel_end(key_of(11, winner.load()), uint64_t{150}, 200).has_value());
+    EXPECT_EQ(hub.pending_count(), 0u);
 }
