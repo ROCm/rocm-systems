@@ -271,11 +271,13 @@ class VirtualGPU : public device::VirtualDevice {
     size_t maxMemObjectsInQueue_;     //!< Maximum number of mem objects in the queue
   };
 
-  class HwQueueTracker : public amd::EmbeddedObject {
+  //! Hands out the completion signals of the operations on the queue. Subclasses decide how a
+  //! signal is proven free before its reuse.
+  class HwQueueTracker {
    public:
     HwQueueTracker(const VirtualGPU& gpu) : gpu_(gpu) {}
 
-    ~HwQueueTracker();
+    virtual ~HwQueueTracker();
 
     //! Creates a pool of signals for tracking of HW operations on the queue
     bool Create();
@@ -287,6 +289,9 @@ class VirtualGPU : public device::VirtualDevice {
     //! Wait for the curent active signal. Can idle the queue
     bool WaitCurrent();
 
+    //! Process the timing of the completed signal before its reuse. Requires the execution() lock
+    void ProcessSignalTiming(ProfilingSignal* signal);
+
     //! Update current active engine
     void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) { engine_ = engine; }
     HwQueueEngine GetActiveEngine() const { return engine_; }
@@ -295,7 +300,7 @@ class VirtualGPU : public device::VirtualDevice {
     std::vector<hsa_signal_t>& WaitingSignal(HwQueueEngine engine = HwQueueEngine::Compute);
 
     //! Resets current signal back to the previous one. It's necessary in a case of ROCr failure.
-    void ResetCurrentSignal();
+    virtual void ResetCurrentSignal() = 0;
 
     //! Adds an external signal(submission in another queue) for dependency tracking
     void AddExternalSignal(ProfilingSignal* signal) { external_signals_.push_back(signal); }
@@ -312,15 +317,25 @@ class VirtualGPU : public device::VirtualDevice {
     //! Adds a raw signal for dependency tracking
     void AddDynamicQueueWait(hsa_signal_t signal) { dynamic_queue_waits_.push_back(signal); }
 
-   private:
+   protected:
     //! Creates HSA signal with the specified scope
     bool CreateSignal(ProfilingSignal* signal, bool interrupt = false) const;
 
-    //! Wait for the next active signal
-    void WaitNext();
-
     //! Wait for the provided signal
     bool CpuWaitForSignal(ProfilingSignal* signal);
+
+    //! Moves current_id_ to the slot of the next use and makes its signal reusable
+    virtual void AcquireSlot() = 0;
+
+    //! Starts a use of the current slot's signal at init_val
+    virtual void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val) = 0;
+
+    //! Registers the async handler that processes ts once the signal drops below init_value
+    virtual hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
+                                         hsa_signal_value_t init_value) = 0;
+
+    //! True if the GPU may still be working on the last use of the signal
+    virtual bool IsBusy(const ProfilingSignal* signal) const = 0;
 
     HwQueueEngine engine_ = HwQueueEngine::Unknown;  //!< Engine used in the current operations
     std::stack<ProfilingSignal*> signal_pool_irq_;   //!< The pool of free signals with interrupts
@@ -331,6 +346,24 @@ class VirtualGPU : public device::VirtualDevice {
     std::vector<ProfilingSignal*> external_signals_;  //!< External signals for a wait in this queue
     std::vector<hsa_signal_t> dynamic_queue_waits_;   //!< Extra raw signals for a wait in this queue
     std::vector<hsa_signal_t> waiting_signals_;       //!< Current waiting signals in this queue
+  };
+
+  //! Reads and resets each signal when it is handed out
+  class LegacySignalTracker final : public HwQueueTracker {
+   public:
+    LegacySignalTracker(const VirtualGPU& gpu) : HwQueueTracker(gpu) {}
+
+    void ResetCurrentSignal() override;
+
+   private:
+    void AcquireSlot() override;
+    void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val) override;
+    hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
+                                 hsa_signal_value_t init_value) override;
+    bool IsBusy(const ProfilingSignal* signal) const override;
+
+    //! Wait for the next active signal
+    void WaitNext();
   };
 
   class MetaDataPreloader : public amd::EmbeddedObject {
@@ -362,25 +395,20 @@ class VirtualGPU : public device::VirtualDevice {
       template <class AqlPacket>
       inline void SetMetadata(AqlPacket* packet, uint16_t header,
                               uint64_t index, bool use_movdir64b,
-                              bool device_mem_ring_buf, uint32_t rest = 0,
-                              AqlPacket* aql_loc = nullptr) {
+                              bool device_mem_ring_buf, uint32_t rest,
+                              AqlPacket* aql_loc) {
         if (!HasMetadataQueue()) {
           return;
         }
         auto* dst = static_cast<uint8_t*>(queue_base_) + index * kMetadataPacketSize;
         FillMetadata(packet, header, dst, use_movdir64b, device_mem_ring_buf);
 
-        // For Format 4 (DISPATCH_LD), set the launch_descriptor pointer in the AQL packet
-        // to point to the launch_descriptor structure in the metadata packet
         if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
-          hsa_amd_packet_type8_t amd_format = static_cast<hsa_amd_packet_type8_t>(rest & 0xFF);
-          if (amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD) {
-            auto* metadata = GetMetadataPacket(index);
-            if (metadata != nullptr && aql_loc != nullptr) {
-              // Set the pointer in both the local packet copy and the queue location
-              auto* launch_desc = const_cast<amd_launch_descriptor_t*>(&metadata->launch_descriptor);
-              packet->launch_descriptor = launch_desc;
-              aql_loc->launch_descriptor = launch_desc;
+          if ((rest & 0xFF) == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD && aql_loc != nullptr) {
+            if (auto* meta = GetMutableMetadataPacket(index)) {
+              auto* ld = &meta->launch_descriptor;
+              packet->launch_descriptor = ld;
+              aql_loc->launch_descriptor = ld;
             }
           }
         }
@@ -435,6 +463,15 @@ class VirtualGPU : public device::VirtualDevice {
           return nullptr;
         }
         return reinterpret_cast<const hsa_amd_metadata_kernel_dispatch_packet_t*>(
+            static_cast<uint8_t*>(queue_base_) + index * kMetadataPacketSize);
+      }
+
+      //! Mutable accessor for patching the launch descriptor pointer.
+      hsa_amd_metadata_kernel_dispatch_packet_t* GetMutableMetadataPacket(uint64_t index) {
+        if (!IsAttached()) {
+          return nullptr;
+        }
+        return reinterpret_cast<hsa_amd_metadata_kernel_dispatch_packet_t*>(
             static_cast<uint8_t*>(queue_base_) + index * kMetadataPacketSize);
       }
 
@@ -555,6 +592,7 @@ class VirtualGPU : public device::VirtualDevice {
   void submitCopyMemory(amd::CopyMemoryCommand& cmd);
   void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd);
   void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd);
+  void SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd);
   void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd);
   void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd);
   void submitMapMemory(amd::MapMemoryCommand& cmd);
@@ -571,6 +609,7 @@ class VirtualGPU : public device::VirtualDevice {
       bool attach_signal = false);
   void submitNativeFn(amd::NativeFnCommand& cmd);
   void submitMarker(amd::Marker& cmd);
+  void CompleteCpuWait(amd::Command& cmd) override;
   void submitAccumulate(amd::AccumulateCommand& cmd);
   void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd);
   void submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& cmd);
@@ -672,7 +711,7 @@ class VirtualGPU : public device::VirtualDevice {
   }
   void SetCopyCommandType(cl_command_type type) { copy_command_type_ = type; }
 
-  HwQueueTracker& Barriers() { return barriers_; }
+  HwQueueTracker& Barriers() { return *barriers_; }
 
   Timestamp* timestamp() const { return timestamp_; }
   amd::Command* command() const { return command_; }
@@ -965,7 +1004,7 @@ class VirtualGPU : public device::VirtualDevice {
   std::once_flag scheduler_thread_init_;              //!< Ensures thread is initialized exactly once
   std::vector<hsa_signal_t> pendingSchedulerEvents_;  //!< Pending scheduler completion signals
 
-  HwQueueTracker barriers_;  //!< Tracks active barriers in ROCr
+  std::unique_ptr<HwQueueTracker> barriers_;  //!< Tracks active barriers in ROCr
 
   ManagedBuffer managed_buffer_;          //!< Memory manager for staging copies
   ManagedBuffer managed_kernarg_buffer_;  //!< Managed memory for kernel args

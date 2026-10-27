@@ -325,9 +325,9 @@ class GpuAgent : public GpuAgentInt {
                             std::vector<core::Signal*>& dep_signals) override;
 
   // @brief Override from core::Agent.
-  hsa_status_t DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
-                           const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
-                           const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
+  hsa_status_t DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
+                           const hsa_amd_memory_copy_rect_ptr_t* dsts, const hsa_dim3_t* ranges,
+                           uint16_t num_rects, hsa_amd_copy_direction_t dir,
                            std::vector<core::Signal*>& dep_signals, core::Signal& out_signal);
 
   // @brief Override from core::Agent.
@@ -465,6 +465,13 @@ class GpuAgent : public GpuAgentInt {
 
   /// @brief Override from AMD::GpuAgentInt.
   __forceinline bool is_xgmi_cpu_gpu() const { return xgmi_cpu_gpu_; }
+  /// @brief This GPU's memory is reached over PCIe, so stores to it pass through HDP and need
+  /// a flush.
+  __forceinline bool PcieStoresNeedFlush() const { return !xgmi_cpu_gpu_; }
+  /// @brief Host atomics on this GPU's memory are atomic with respect to the GPU.
+  __forceinline bool HostAtomicsSupported() const { return xgmi_cpu_gpu_; }
+  /// @brief The CP firmware consumes completion signal handle hints.
+  bool SignalHintsSupported() const;
   /// @brief Is large BAR support enabled for this GPU.
   __forceinline bool LargeBarEnabled() const { return large_bar_enabled_; }
 
@@ -704,6 +711,10 @@ class GpuAgent : public GpuAgentInt {
   };
 
   lazy_ptr<core::Queue> queues_[QueueCount];
+
+  // @brief Hint support is read from the utility queue's caps once, on first query.
+  mutable std::once_flag signal_hints_once_;
+  mutable bool signal_hints_supported_ = false;
 
   // @brief Mutex to protect the update to coherency type.
   std::mutex coherency_lock_;

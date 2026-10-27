@@ -145,6 +145,14 @@ NCCL_PARAM(P2pDisable, "P2P_DISABLE", 0);
 // Opt-in: enables GPU-resident NCCL progress counters when RAS is enabled. When disabled,
 // counter buffers remain null and profiler() skips progress-counter updates.
 NCCL_PARAM(ProgressCountersEnable, "PROGRESS_COUNTERS", 0);
+// A partition reaches the NIC and xGMI over the physical device's paths, so GIN is as available
+// to it as to the whole GPU — same reasoning as NCCL_NET_GDR_MLOPART for GDR. Tri-state because
+// only the single-node case has been validated:
+//   -1 (default) admit a partitioned communicator on one node; refuse across nodes.
+//    0 refuse every partitioned communicator (pre-parameter behaviour).
+//    1 admit on any node count (multi-node is opt-in: unvalidated, and it also reaches the
+//      hierarchical CE path gated by ncclHierCeAllowed).
+NCCL_PARAM(GinMloPart, "GIN_MLOPART", -1);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 extern int64_t ncclParamPatEnable();
@@ -153,6 +161,19 @@ extern int64_t ncclParamDiagnostics();
 extern int64_t ncclParamRasEnable();
 extern int64_t ncclParamP2pLL128Enable();
 extern int64_t ncclParamTreeCompact();
+
+// Whether this communicator may use GIN. MI300X CPX stamps mloPart on every partition, so without
+// NCCL_GIN_MLOPART every CPX rank would turn GIN off and fall back to a path that can't export its
+// buffers (AICOMRCCL-2387). Takes the whole comm, not the loose bools, so the call site can't
+// transpose cuMemGdrSupport and hasMloPart.
+static bool ginGateAllows(uint64_t ginTypeBitMask, const struct ncclComm* comm) {
+  if (ginTypeBitMask == 0 || !comm->cuMemGdrSupport) return false;
+  if (!comm->hasMloPart) return true;
+  int64_t mloPart = ncclParamGinMloPart();
+  if (mloPart == 0) return false;
+  if (mloPart > 0) return true;
+  return comm->nNodes <= 1;
+}
 
 static bool ctaPolicyIsValid(int ctaPolicy) {
   int availCtaPolicies[3] = {NCCL_CTA_POLICY_DEFAULT, NCCL_CTA_POLICY_EFFICIENCY, NCCL_CTA_POLICY_ZERO};
@@ -226,6 +247,13 @@ RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 #if ENABLE_TDM_SIMPLE
 // Off by default; the mover path is still under evaluation.
 RCCL_PARAM(TdmSimpleEnable, "TDM_SIMPLE_ENABLE", 0);
+// Independent of TDM_SIMPLE_ENABLE, which covers only copy-shaped slices.
+RCCL_PARAM(TdmSimpleReduceEnable, "TDM_SIMPLE_REDUCE_ENABLE", 0);
+#endif
+
+#if ENABLE_TDM_PRIM_LL128
+// Off by default; opt in with RCCL_TDM_LL128_ENABLE=1 on gfx1250.
+RCCL_PARAM(TdmLl128Enable, "TDM_LL128_ENABLE", 0);
 #endif
 
 /**
@@ -593,14 +621,20 @@ static ncclResult_t commFree(ncclComm_t comm) {
   if (comm->doneEvent != NULL) CUDACHECK(hipEventDestroy(comm->doneEvent));
 
   // GIN may use proxy. We need to finalize it before destroying the proxy.
-  NCCLCHECK(ncclGinHostFinalize(comm));
+  // closeColl and last-ref plugin-finalize errors are recorded here and returned
+  // after the sharedRes frees. The first of those two wins. ncclRmaProxyFinalize
+  // still returns immediately: a proxy failure aborts the rest of commFree.
+  ncclResult_t ginTeardownRet = ncclSuccess;
+  NCCLCHECKIGNORE(ncclGinHostFinalize(comm), ginTeardownRet);
   NCCLCHECK(ncclRmaProxyFinalize(comm));
 
   int sharedResRefCount = 0;
   if (comm->sharedRes) {
     sharedResRefCount = ncclAtomicRefCountDecrement(&comm->sharedRes->refCount);
     if (sharedResRefCount == 0) {
-      NCCLCHECK(ncclGinFinalize(comm));
+      // Last-ref plugin finalize. Keep ginTeardownRet when host finalize already
+      // failed; otherwise record this error. The sharedRes frees below still run.
+      NCCLCHECKIGNORE(ncclGinFinalize(comm), ginTeardownRet);
       for (int c = 0; c < MAXCHANNELS; c++) {
         if (comm->sharedRes->peers[c]) free(comm->sharedRes->peers[c]);
         if (comm->sharedRes->devPeers[c]) ncclCudaFree(comm->sharedRes->devPeers[c], comm->memManager);
@@ -678,7 +712,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
   }
   free(comm);
 
-  return ncclSuccess;
+  return ginTeardownRet;
 }
 
 ncclResult_t ncclUncapturedStreamPoolAcquire(struct ncclUncapturedStreamPool* pool, cudaStream_t* stream) {
@@ -757,7 +791,11 @@ ncclResult_t ncclCommEnsureReady(ncclComm_t comm) {
   /* comm must be ready, or error will be reported */
   ncclResult_t ret = ncclSuccess;
   if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire)) {
-    ncclGroupJobAbort(comm->groupJob);
+    // Claim the link so only one thread ever reaps it, and so the comm is left
+    // without a pointer to a job that abort may destroy.
+    struct ncclGroupJob* groupJob =
+      COMPILER_ATOMIC_EXCHANGE(&comm->groupJob, static_cast<struct ncclGroupJob*>(nullptr), std::memory_order_acq_rel);
+    ncclGroupJobAbort(groupJob);
   } else {
     NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
     if (ret == ncclInProgress) {
@@ -1068,6 +1106,10 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.cheapPostSendFenceOff = comm->cheapPostSendFenceOff;
 #if ENABLE_TDM_SIMPLE
   tmpCommAndChans.comm.tdmSimpleEnable = comm->tdmSimpleEnable;
+  tmpCommAndChans.comm.tdmSimpleReduceEnable = comm->tdmSimpleReduceEnable;
+#endif
+#if ENABLE_TDM_PRIM_LL128
+  tmpCommAndChans.comm.tdmLl128Enable = comm->tdmLl128Enable;
 #endif
   tmpCommAndChans.comm.patSharedQps = comm->patSharedQps ? 1 : 0;
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
@@ -1498,7 +1540,7 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   info->cuMemGdrSupport = true;
 #endif
   info->supportedGinTypeBitMask = 0;
-  for (int i = 0; i < comm->sharedRes->ginState.numActiveBackends; i++) {
+  for (int i = 0; !comm->sharedRes->ginState.finalized && i < comm->sharedRes->ginState.numActiveBackends; i++) {
     info->supportedGinTypeBitMask |= BIT(comm->sharedRes->ginState.backends[i].ginType);
   }
   info->rmaPluginAvailable = (comm->rmaState.rmaProxyState.ncclRma != nullptr);
@@ -1554,7 +1596,7 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
 #if ENABLE_TDM_SIMPLE
   // FIFO slot k sits at k*(buffSizes/NCCL_STEPS), so the step must be a RCCL_TDM_ALIGN
   // multiple for every slot to hit TDM's direct path. No-op at the 4MiB default.
-  if (comm->tdmSimpleEnable) {
+  if (comm->tdmSimpleEnable || comm->tdmSimpleReduceEnable) {
     int64_t simple = comm->buffSizes[NCCL_PROTO_SIMPLE];
     int64_t aligned = ROUNDUP(simple, (int64_t)(NCCL_STEPS * RCCL_TDM_ALIGN));
     if (simple > 0 && aligned != simple && aligned <= INT_MAX) {
@@ -2265,10 +2307,19 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->tdmSimpleEnable =
     rcclParamTdmSimpleEnable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
   if (comm->tdmSimpleEnable) INFO(NCCL_INIT, "TDM SIMPLE path enabled");
+  comm->tdmSimpleReduceEnable =
+    rcclParamTdmSimpleReduceEnable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
+  if (comm->tdmSimpleReduceEnable) INFO(NCCL_INIT, "TDM SIMPLE reduce path enabled");
+#endif
+#if ENABLE_TDM_PRIM_LL128
+  comm->tdmLl128Enable =
+    rcclParamTdmLl128Enable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
+  if (comm->tdmLl128Enable) INFO(NCCL_INIT, "TDM LL128 path enabled");
 #endif
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||
-      IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")) {
+      IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950") ||
+      IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250")) {
     comm->rcclUseOneSlice = nNodes == 1;
   }
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942")) {
@@ -2829,7 +2880,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   NCCLCHECKGOTO(ncclTopoPathAllDirectNVLink(comm->topo, &comm->isAllDirectNvlink), ret, fail);
   comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
-  if (globalGinTypeBitMask && comm->cuMemGdrSupport && !comm->hasMloPart) {
+  if (ginGateAllows(globalGinTypeBitMask, comm)) {
     NCCLCHECKGOTO(ncclGinSetDefaultBackend(comm, globalGinTypeBitMask), ret, fail);
     if (globalCrossNicSupport) {
       comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
@@ -2846,11 +2897,17 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // dedicated non-symmetric hostRma path for it. The numRmaCtx gate is upstream 2.31's.
   comm->hostRmaSupport = comm->config.numRmaCtx > 0 && (isOneLsaTeams || comm->globalRmaProxySupport);
   INFO(NCCL_INIT | NCCL_NET,
-       "GIN/RMA support: ginConnection %d hostRma %d symmetric %d (ginTypeMask 0x%lx mloPart %d nicFused %d "
-       "crossNic %d railable %d rmaPlugin %d cuMemGdr %d cuMemEnable %d oneLsaTeam %d numRmaCtx %d)",
+       "GIN/RMA support: ginConnection %d hostRma %d symmetric %d (ginTypeMask 0x%lx mloPart %d nNodes %d "
+       "nicFused %d crossNic %d railable %d rmaPlugin %d cuMemGdr %d cuMemEnable %d oneLsaTeam %d numRmaCtx %d)",
        comm->globalGinSupport, comm->hostRmaSupport, comm->symmetricSupport, (unsigned long)globalGinTypeBitMask,
-       comm->hasMloPart, globalNicFused, globalCrossNicSupport, comm->contiguousRanksPerHost != INT_MAX,
+       comm->hasMloPart, comm->nNodes, globalNicFused, globalCrossNicSupport, comm->contiguousRanksPerHost != INT_MAX,
        globalRmaPluginSupport, comm->cuMemGdrSupport, ncclCuMemEnable(), isOneLsaTeams, comm->config.numRmaCtx);
+  if (comm->hasMloPart && comm->nNodes > 1 && ncclParamGinMloPart() < 0) {
+    INFO(NCCL_INIT,
+         "NCCL_GIN_MLOPART admits a partitioned communicator on a single node only; set it to 1 to admit this "
+         "%d-node one, which no partitioned run has covered yet",
+         comm->nNodes);
+  }
 
   comm->ceColl.baseUCSymReadyPtr = NULL;
   comm->ceColl.baseUCSymComplPtr = NULL;
@@ -4895,6 +4952,8 @@ ncclResult_t ncclCommShrink_impl(ncclComm_t comm, int* excludeRanksList, int exc
   // Handle error mode by setting abort flags and waiting for kernels to complete and unset the flags
   // to avoid bootstrap issues
   if (shrinkFlags & NCCL_SHRINK_ABORT) {
+    // [RCCL] Disable DDA on the parent comm; see ncclComm::ddaDisabledAfterAbort.
+    comm->ddaDisabledAfterAbort = true;
     NCCLCHECKGOTO(setCommAbortFlags(comm, 1), res, exit);
     NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->deviceStream), res, exit);
     NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
@@ -5198,10 +5257,16 @@ ncclResult_t ncclCommGetAsyncError_impl(ncclComm_t comm, ncclResult_t* asyncErro
     }
   }
 
-  /* if there is linked group job, we should complete it. */
-  if (*asyncError == ncclSuccess && comm->groupJob) {
-    NCCLCHECK(ncclGroupJobComplete(comm->groupJob));
-    comm->groupJob = NULL;
+  /* if there is linked group job, we should complete it. Claiming the link
+   * atomically makes exactly one caller the owner of that reference: two
+   * threads polling the same comm must not both reach ncclGroupJobComplete,
+   * or one can destroy the job while the other is inside std::thread::join. */
+  if (*asyncError == ncclSuccess) {
+    struct ncclGroupJob* groupJob =
+      COMPILER_ATOMIC_EXCHANGE(&comm->groupJob, static_cast<struct ncclGroupJob*>(nullptr), std::memory_order_acq_rel);
+    if (groupJob) {
+      NCCLCHECK(ncclGroupJobComplete(groupJob));
+    }
   }
   return ncclSuccess;
 }

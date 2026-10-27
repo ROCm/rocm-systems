@@ -149,6 +149,7 @@ fn gfx1201_ais_vram_file_contract() -> Result<(), Box<dyn Error>> {
         MemoryKind::DeviceLocal {
             host_visible: false,
             coherent: false,
+            extended_coherent: false,
             uncached: false,
             contiguous: false,
         },
@@ -555,6 +556,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
         MemoryKind::DeviceLocal {
             host_visible: false,
             coherent: false,
+            extended_coherent: false,
             uncached: false,
             contiguous: false,
         },
@@ -568,6 +570,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
         MemoryKind::DeviceLocal {
             host_visible: false,
             coherent: true,
+            extended_coherent: false,
             uncached: true,
             contiguous: false,
         },
@@ -671,6 +674,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
         MemoryKind::DeviceLocal {
             host_visible: false,
             coherent: true,
+            extended_coherent: false,
             uncached: true,
             contiguous: false,
         },

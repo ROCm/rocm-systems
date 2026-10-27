@@ -79,23 +79,24 @@ static ncclResult_t ncclAllGatherDdaFabricLLTyped(
   INFO(NCCL_COLL, "DDA fabric AllGather LL: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%u)",
        nRanks, perRankBytes, grid.x, grid.y, block.x, blocksPerPeer);
 
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize);
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize);
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize);
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
     break;
   }
 
@@ -125,7 +126,7 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -154,7 +155,7 @@ uint32_t ncclAllGatherDdaFabricLLBlocks(ncclComm* comm, size_t sendcount, ncclDa
 
 ncclResult_t ncclAllGatherDdaFabricLL(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                       ncclComm* comm, cudaStream_t stream) {
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return ncclInvalidArgument;
   }
   // AllGather is a pure copy, so the payload moves as raw bytes: instantiate the

@@ -46,6 +46,7 @@
 #include "utils/debug.hpp"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -207,6 +208,11 @@ static hipError_t capture_hipChooseDevice(int* device, const hipDeviceProp_tR060
     a.prop = reinterpret_cast<uint64_t>(prop);
     if (prop) {
       std::memcpy(a.prop_bytes, prop, sizeof(hipDeviceProp_t));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, uuid), 0, sizeof(prop->uuid));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, luid), 0, sizeof(prop->luid));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, pciDomainID), 0, sizeof(prop->pciDomainID));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, pciBusID), 0, sizeof(prop->pciBusID));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, pciDeviceID), 0, sizeof(prop->pciDeviceID));
       a.prop_present = 1;
     }
     hrr_cap::writer::write_event_raw(HRR_API_HIPCHOOSEDEVICE, &a.hdr, sizeof(a));
@@ -224,6 +230,9 @@ static hipError_t capture_hipChooseDeviceR0000(int* device, const hipDeviceProp_
     a.properties = reinterpret_cast<uint64_t>(properties);
     if (properties) {
       std::memcpy(a.properties_bytes, properties, sizeof(hipDeviceProp_tR0000));
+      std::memset(a.properties_bytes + offsetof(hipDeviceProp_tR0000, pciDomainID), 0, sizeof(properties->pciDomainID));
+      std::memset(a.properties_bytes + offsetof(hipDeviceProp_tR0000, pciBusID), 0, sizeof(properties->pciBusID));
+      std::memset(a.properties_bytes + offsetof(hipDeviceProp_tR0000, pciDeviceID), 0, sizeof(properties->pciDeviceID));
       a.properties_present = 1;
     }
     hrr_cap::writer::write_event_raw(HRR_API_HIPCHOOSEDEVICER0000, &a.hdr, sizeof(a));
@@ -4552,10 +4561,11 @@ static hipError_t capture_hipStreamDestroy(hipStream_t stream) {
   return r;
 }
 
-// Generated shim
+// Generated shim (custom: also record the failures that end the capture)
 static hipError_t capture_hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
   hipError_t r = g_real_table.hipStreamEndCapture_fn(stream, pGraph);
-  if (r == hipSuccess) {
+  if (r == hipSuccess || r == hipErrorStreamCaptureInvalidated ||
+      r == hipErrorStreamCaptureUnjoined) {
     hrr_args_hipStreamEndCapture a{};
     a.ret         = static_cast<int32_t>(r);
     a.stream = reinterpret_cast<uint64_t>(stream);
@@ -7828,6 +7838,20 @@ static hipError_t capture_hipKernelSetAttributeForDevice(hipKernel_t kernel, hip
 }
 
 // Generated shim
+static hipError_t capture_hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev) {
+  hipError_t r = g_real_table.hipKernelSetCacheConfig_fn(kernel, config, dev);
+  if (r == hipSuccess) {
+    hrr_args_hipKernelSetCacheConfig a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.kernel = reinterpret_cast<uint64_t>(kernel);
+    a.config = static_cast<decltype(a.config)>(config);
+    a.dev = static_cast<uint64_t>(static_cast<int>(dev));
+    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELSETCACHECONFIG, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8565,6 +8589,7 @@ void hip_capture_build_table() {
   g_cap_table.hipDeviceFlushGPUDirectRDMAWrites_fn = capture_hipDeviceFlushGPUDirectRDMAWrites;
   g_cap_table.hipLibraryGetModule_fn = capture_hipLibraryGetModule;
   g_cap_table.hipKernelSetAttributeForDevice_fn = capture_hipKernelSetAttributeForDevice;
+  g_cap_table.hipKernelSetCacheConfig_fn = capture_hipKernelSetCacheConfig;
 }
 
 void hip_capture_build_compiler_table() {

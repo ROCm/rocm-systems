@@ -49,6 +49,7 @@
 #include "hsa_ext_image.h"
 #include "hsa_ven_amd_pc_sampling.h"
 #include "amd_launch_descriptor.h"
+#include "amd_hsa_signal.h"
 
 /**
  * - 1.0 - initial version
@@ -87,9 +88,15 @@
  * - 1.33 - hsa_amd_agent_set_attribute: GL2 persisting cache size control
  * - 1.34 - hsa_amd_vmem_get_vmem_info
  * - 1.35 - tools-only: hsa_amd_enable_high_precision_timestamps
+ * - 1.36 - hsa_amd_signal_batch_create, hsa_amd_signal_batch_destroy,
+ *          HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE,
+ *          HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH, HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED,
+ *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
+ *          hsa_amd_signal_set_hints, hsa_amd_signal_get_hints (inline)
+ * - 1.37 - hsa_amd_memory_async_batch_copy: HSA_AMD_MEMORY_COPY_OP_RECT
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 35
+#define HSA_AMD_INTERFACE_VERSION_MINOR 37
 
 #ifdef __cplusplus
 extern "C" {
@@ -140,7 +147,7 @@ typedef enum {
   HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH = 3,
 
   /**
-   * Extended kernel dispatch packet with spatial locality computing support.
+   * Extended kernel dispatch packet with launch descriptor support.
    * Supports clusters, launch descriptor for advanced scheduling, and L2 prefetch.
    */
   HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD = 4,
@@ -1026,8 +1033,34 @@ typedef enum hsa_amd_agent_info_s {
    * Returns the maximum supported persisting L2 cache size on this HW in bytes.
    * The type of this attribute is size_t.
    */
-  HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE = 0xA126
-
+  HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE = 0xA126,
+  /**
+   * Whether the agent's memory is reached over PCIe, so stores that arrive
+   * that way, from the host or from a peer, pass through HDP and are ordered
+   * with the agent's accesses only once flushed. Applies to anything written
+   * there: queues, kernel arguments, signals. The writer flushes by writing the
+   * HSA_AMD_AGENT_INFO_HDP_FLUSH register or by reading back its last store,
+   * before the agent can observe the data (for example before publishing a
+   * packet header or ringing a doorbell). One flush covers every earlier store.
+   * GPU agents only.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH = 0xA127,
+  /**
+   * Whether host atomic read-modify-write operations on the agent's memory are
+   * atomic with respect to the agent: true when the CPU and GPU are coherently
+   * connected over xGMI (A+A). When false, the host may only load and store
+   * there. GPU agents only.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED = 0xA128,
+  /**
+   * Whether the agent's CP firmware consumes completion signal handle hints
+   * (::hsa_amd_signal_set_hints). Hints may be put in the completion_signal
+   * of an AQL packet only on an agent that reports true. GPU agents only.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED = 0xA129,
 } hsa_amd_agent_info_t;
 
 /**
@@ -1981,6 +2014,12 @@ typedef enum {
    * The size of this attribute is size_t.
    */
   HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE = 18,
+  /**
+   * Whether ::hsa_amd_signal_batch_create accepts this pool: a fine-grained
+   * system memory pool, or a device pool where every queue's command processor
+   * sees a signal completion. The type of this attribute is bool.
+   */
+  HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE = 19,
 } hsa_amd_memory_pool_info_t;
 
 /**
@@ -2129,6 +2168,120 @@ hsa_status_t HSA_API
 hsa_status_t HSA_API hsa_amd_memory_pool_free(void* ptr);
 
 /**
+ * @brief Opaque handle to a batch of signals.
+ */
+typedef struct hsa_amd_signal_batch_s {
+  uint64_t handle;
+} hsa_amd_signal_batch_t;
+
+/**
+ * @brief Create @p count signals in one contiguous allocation from @p pool.
+ *
+ * Members are ordinary signals and may be used with every hsa_signal_* API.
+ * Each member must be destroyed with hsa_signal_destroy, and the batch with
+ * ::hsa_amd_signal_batch_destroy, in any order. The batch memory is released
+ * once all of them have been destroyed.
+ *
+ * Interrupt-capable members each consume a KFD event, of which a process has a
+ * limited number (about 4096). Members created after that limit busy-wait.
+ *
+ * @param[in] count Number of signals. Must be greater than 0.
+ *
+ * @param[in] initial_values Initial value of each signal, @p count entries.
+ *
+ * @param[in] num_consumers Size of @p consumers, as for ::hsa_amd_signal_create.
+ *
+ * @param[in] consumers Agents that might wait on the signals, as for
+ * ::hsa_amd_signal_create. Applies to every member.
+ *
+ * @param[in] attributes Signal attributes applied to every member.
+ * ::HSA_AMD_SIGNAL_IPC is not supported.
+ *
+ * @param[in] pool Memory pool providing the signal memory: one that reports
+ * ::HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE. That is a fine-grained system
+ * memory pool, or a pool of a GPU whose memory is host visible (large BAR):
+ * the extended-scope fine-grained (uncached) pool on gfx94x and gfx95x, or the
+ * coarse-grained pool on gfx125x. Device memory is made accessible to the host
+ * and to @p consumers, or to every GPU if @p num_consumers is 0. When the GPU
+ * reports ::HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH, the hsa_signal_* APIs
+ * flush every host store they make, and a caller writing a member's value
+ * directly must flush it before an agent reads it. Host read-modify-write
+ * operations (hsa_signal_add, subtract, and, or, xor, exchange and cas) are not
+ * supported on members in device memory unless the GPU reports
+ * ::HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED (A+A: CPU and GPU coherently
+ * connected over xGMI). Elsewhere they are not atomic, even between host
+ * threads.
+ *
+ * @param[out] batch Handle to the new batch.
+ *
+ * @param[out] signals Array of @p count entries receiving the signal handles.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to allocate
+ * the required resources.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_MEMORY_POOL @p pool is invalid or not a
+ * supported kind (see @p pool).
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p count is 0, @p initial_values,
+ * @p batch or @p signals is NULL, @p attributes requests ::HSA_AMD_SIGNAL_IPC, @p num_consumers is greater than
+ * 0 but @p consumers is NULL, or @p consumers contains duplicates.
+ */
+hsa_status_t HSA_API hsa_amd_signal_batch_create(uint32_t count,
+                                                 const hsa_signal_value_t* initial_values,
+                                                 uint32_t num_consumers,
+                                                 const hsa_agent_t* consumers,
+                                                 uint64_t attributes,
+                                                 hsa_amd_memory_pool_t pool,
+                                                 hsa_amd_signal_batch_t* batch,
+                                                 hsa_signal_t* signals);
+
+/**
+ * @brief Destroy a signal batch handle.
+ *
+ * Members not yet destroyed remain valid. Batch memory is released once every
+ * member has also been destroyed with hsa_signal_destroy.
+ *
+ * @param[in] batch Batch created by ::hsa_amd_signal_batch_create.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p batch is not a valid batch.
+ */
+hsa_status_t HSA_API hsa_amd_signal_batch_destroy(hsa_amd_signal_batch_t batch);
+
+/**
+ * @brief Return @p signal with its handle hints replaced by @p hints.
+ *
+ * @p hints combines ::amd_signal_hint_t values; 0 returns the plain handle.
+ * Use hints only on an agent that reports
+ * ::HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED: its CP firmware consumes every
+ * defined hint, while firmware without support takes the hinted handle as the
+ * signal address. Bits outside
+ * ::AMD_SIGNAL_HINT_MASK are dropped. A hinted handle is only for the
+ * completion_signal of an AQL packet; pass the plain handle to every runtime API.
+ */
+static inline hsa_signal_t hsa_amd_signal_set_hints(hsa_signal_t signal, uint64_t hints) {
+  const hsa_signal_t hinted_signal = {(signal.handle & ~AMD_SIGNAL_HINT_MASK) |
+                                      (hints & AMD_SIGNAL_HINT_MASK)};
+  return hinted_signal;
+}
+
+/**
+ * @brief Return the hints carried by the handle of @p signal; 0 for a plain handle.
+ */
+static inline uint64_t hsa_amd_signal_get_hints(hsa_signal_t signal) {
+  return signal.handle & AMD_SIGNAL_HINT_MASK;
+}
+
+/**
  * @brief Asynchronously copy a block of memory from the location pointed to by
  * @p src on the @p src_agent to the memory block pointed to by @p dst on the @p
  * dst_agent.
@@ -2238,6 +2391,7 @@ typedef enum {
   HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC     = 3,  /**< Source address resolved via indirection */
   HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST     = 4,  /**< Destination address resolved via indirection */
   HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST  = 5,  /**< Both src and dst resolved via indirection */
+  HSA_AMD_MEMORY_COPY_OP_RECT                    = 6,  /**< Rectangular copies of num_entries boxes */
 } hsa_amd_memory_copy_op_type_t;
 
 /**
@@ -2279,6 +2433,29 @@ typedef enum {
  * operations whose version it does not recognise.
  */
 #define HSA_AMD_MEMORY_COPY_OP_VERSION 1
+
+/*
+[Provisional API]
+Pitched memory descriptor.
+All elements must be 4 byte aligned.  Pitch and slice are in bytes.
+*/
+typedef struct hsa_pitched_ptr_s {
+  void* base;
+  size_t pitch;
+  size_t slice;
+} hsa_pitched_ptr_t;
+
+/**
+ * @brief Pitched memory and the origin of a rectangular region within it.
+ *
+ * @c pitched_ptr identifies the allocation. Its base, pitch, and slice must be
+ * 4-byte aligned, and pitch and slice are in bytes. @c offset is the origin of
+ * the region: x in bytes, y in rows, and z in layers.
+ */
+typedef struct hsa_amd_memory_copy_rect_ptr_s {
+  hsa_pitched_ptr_t pitched_ptr;
+  hsa_dim3_t offset;
+} hsa_amd_memory_copy_rect_ptr_t;
 
 /**
  * @brief Describes a single copy operation within a batch.
@@ -2374,6 +2551,15 @@ typedef enum {
  *   num_entries     -- >= 1 and <= 1024
  *   wait.scope      -- hsa_fence_scope_t for indirect address reads
  *
+ * RECT (one or more boxes, one signal for all boxes):
+ *   rect_src        -- caller-owned array of num_entries sources
+ *   rect_dst        -- caller-owned array of num_entries destinations
+ *   range_list      -- caller-owned array of num_entries ranges; x in bytes, y and z in rows and layers
+ *   src_agent       -- common source agent (GPU or CPU); if CPU, all dst_agent_list entries must be GPU
+ *   dst_agent_list  -- caller-owned array of num_entries destination agents
+ *   reserved0       -- must be 0
+ *   num_entries     -- number of boxes (>= 1); every range component must be >= 1
+ *
  * Future-proofing unions (reserved, must not be used):
  *   src_agent_list           -- reserved for future gather operations
  *   unused_size              -- must be 0 for non-SWAP types; for LINEAR multi, use size_list instead
@@ -2387,6 +2573,7 @@ typedef struct hsa_amd_memory_copy_op_s {
   union {
     void* src;                            /**< Source pointer (or void** for INDIRECT_SRC/SRCDST) */
     void** src_list;                      /**< LINEAR multi: caller-owned array of num_entries source pointers */
+    hsa_amd_memory_copy_rect_ptr_t* rect_src; /**< RECT: caller-owned array of num_entries sources */
   };
   union {
     hsa_agent_t src_agent;                /**< Source agent */
@@ -2399,6 +2586,7 @@ typedef struct hsa_amd_memory_copy_op_s {
   union {
     void* dst;                            /**< Destination pointer (or void** for INDIRECT_DST/SRCDST) */
     void** dst_list;                      /**< LINEAR multi / BROADCAST: caller-owned array of num_entries destination pointers */
+    hsa_amd_memory_copy_rect_ptr_t* rect_dst; /**< RECT: caller-owned array of num_entries destinations */
   };
   union {
     struct {
@@ -2411,8 +2599,9 @@ typedef struct hsa_amd_memory_copy_op_s {
     };
     struct {
       size_t* size_list;                  /**< LINEAR multi: caller-owned array of num_entries copy sizes */
-      size_t reserved0;                   /**< Must be 0 for LINEAR multi */
+      size_t reserved0;                   /**< Must be 0 for LINEAR multi and RECT */
     };
+    hsa_dim3_t* range_list;               /**< RECT: caller-owned array of num_entries ranges */
   };
   /** Wait-before-copy. Set to {0} to disable. */
   struct {
@@ -2447,7 +2636,9 @@ typedef struct hsa_amd_memory_copy_op_s {
  * is a single op that copies one source to multiple destinations via @c dst_list
  * and @c num_entries. A SWAP operation exchanges two buffers using @c src_size and
  * @c dst_size. SWAP operations require addresses to be 64-byte aligned for gfx94x/gfx95x
- * and 32-byte aligned for gfx1250.
+ * and 32-byte aligned for gfx1250. A RECT operation copies the boxes described
+ * by @c rect_src, @c rect_dst, and @c range_list, each under the requirements of
+ * hsa_amd_memory_async_copy_rect, and requires SDMA.
  *
  * @param[in] copy_ops Array of copy operation descriptors.
  *
@@ -2503,17 +2694,6 @@ hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
 hsa_status_t HSA_API
 hsa_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent, hsa_agent_t src_agent,
                                          uint32_t* recommended_ids_mask);
-
-/*
-[Provisional API]
-Pitched memory descriptor.
-All elements must be 4 byte aligned.  Pitch and slice are in bytes.
-*/
-typedef struct hsa_pitched_ptr_s {
-  void* base;
-  size_t pitch;
-  size_t slice;
-} hsa_pitched_ptr_t;
 
 /*
 [Provisional API]

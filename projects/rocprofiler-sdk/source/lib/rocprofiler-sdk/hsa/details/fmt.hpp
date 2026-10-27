@@ -222,7 +222,8 @@ struct formatter<rocprofiler::hsa::rocprofiler_packet>
             case 0:
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
                 // Vendor specific packet - check AMD format
-                if(pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+                if(pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
+                   pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD)
                     return fmt::format_to(ctx.out(), "{}", pkt.ext_kernel_dispatch);
 #endif
                 return fmt::format_to(ctx.out(), "{}", pkt.ext_amd_aql_pm4);
@@ -284,6 +285,10 @@ struct formatter<hsa_amd_memory_copy_op_type_t>
                 return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST");
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
                 return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST");
+#    if HSA_AMD_INTERFACE_VERSION >= ROCPROFILER_COMPUTE_VERSION(1, 37, 0)
+            case HSA_AMD_MEMORY_COPY_OP_RECT:
+                return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_RECT");
+#    endif
         }
 
         auto value = static_cast<std::underlying_type_t<hsa_amd_memory_copy_op_type_t>>(op);
@@ -450,6 +455,31 @@ struct formatter<hsa_amd_memory_copy_op_t>
                     wait,
                     signal,
                     reserved);
+#    if HSA_AMD_INTERFACE_VERSION >= ROCPROFILER_COMPUTE_VERSION(1, 37, 0)
+            case HSA_AMD_MEMORY_COPY_OP_RECT:
+                if(op.reserved0 != 0)
+                {
+                    reserved += fmt::format(", reserved0={}", op.reserved0);
+                }
+                return fmt::format_to(
+                    ctx.out(),
+                    "[MEMORY_COPY_OP type={}, version={}, num_entries={}, traffic_class={}, "
+                    "completion_signal={}, rect_src={}, src_agent={}, rect_dst={}, "
+                    "dst_agent_list={}, range_list={}{}{}{}]",
+                    type,
+                    op.version,
+                    op.num_entries,
+                    op.traffic_class,
+                    op.completion_signal.handle,
+                    fmt::ptr(op.rect_src),
+                    op.src_agent.handle,
+                    fmt::ptr(op.rect_dst),
+                    fmt::ptr(op.dst_agent_list),
+                    fmt::ptr(op.range_list),
+                    wait,
+                    signal,
+                    reserved);
+#    endif
         }
 
         auto value = static_cast<std::underlying_type_t<hsa_amd_memory_copy_op_type_t>>(op.type);

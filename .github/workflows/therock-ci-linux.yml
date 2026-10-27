@@ -1,3 +1,13 @@
+# DEPRECATED: retained solely for media-libs-ci.yml.
+#
+# This was a shared build workflow for TheRock single-arch CI, which was
+# removed in b7ae4f90d3a. media-libs-ci.yml is now its only consumer, and it
+# calls this in build-only mode: the test job and the projects_to_test,
+# test_type and test_runs_on inputs were dropped in that same commit.
+#
+# Do not add new callers. Slated for removal once media libs CI moves to
+# TheRock's multi-arch pipeline (therock-multi-arch-ci.yml).
+
 name: TheRock CI Linux
 
 on:
@@ -5,20 +15,12 @@ on:
     inputs:
       cmake_options:
         type: string
-      projects_to_test:
-        type: string
-      test_type:
-        type: string
-        default: "standard"
       package_version:
         type: string
         required: true
       amdgpu_families:
         type: string
         default: "gfx94X-dcgpu"
-      test_runs_on:
-        type: string
-        default: "linux-gfx942-1gpu-core42-ossci-rocm"
       build_runs_on:
         type: string
         default: "azure-linux-scale-rocm"
@@ -50,7 +52,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
 
       - name: Install python deps
         run: |
@@ -130,17 +132,3 @@ jobs:
             --artifact-group ${{ env.AMDGPU_FAMILIES }} \
             --build-dir TheRock/build \
             --upload
-
-  therock-test-linux:
-    name: "Test"
-    needs: [therock-build-linux]
-    # Skip tests if test_runs_on is empty (build-only mode) or gfx950-dcgpu (capacity)
-    # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
-    uses: ./.github/workflows/therock-test-packages.yml
-    with:
-      projects_to_test: ${{ inputs.projects_to_test }}
-      test_type: ${{ inputs.test_type }}
-      amdgpu_families: ${{ inputs.amdgpu_families }}
-      test_runs_on: ${{ inputs.test_runs_on }}
-      platform: "linux"

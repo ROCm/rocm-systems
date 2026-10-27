@@ -6,7 +6,7 @@
 ///
 /// Each test starts a daemon process, runs the HIP test binary with
 /// LD_PRELOAD as a subprocess, verifies the result, and tears down the
-/// daemon. Paths are injected via CMake compile definitions.
+/// daemon. CMake's rj_add_test_path stores paths in a generated data object.
 
 #include <gtest/gtest.h>
 
@@ -628,5 +628,6 @@ TEST_F(RcclDaemonTest, Broadcast) { run_collective("RcclTest.Broadcast"); }
 TEST_F(RcclDaemonTest, AllGather) { run_collective("RcclTest.AllGather"); }
 TEST_F(RcclDaemonTest, ReduceScatter) { run_collective("RcclTest.ReduceScatter"); }
 TEST_F(RcclDaemonTest, SendRecv) { run_collective("RcclTest.SendRecv"); }
+TEST_F(RcclDaemonTest, AllCasesInOneSession) { run_collective(nullptr); }
 
 } // namespace

@@ -47,6 +47,7 @@ test_categories:
       - "GinAllReduceEligibilityTest.*"
       - "NetSocketTests.*"
       - "NetBootstrapInterfaceTest.*"
+      - "BcmLinksTest.*"
       - "SocketPollTimeout.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
@@ -54,10 +55,13 @@ test_categories:
       - "P2pPxnLevel1NetId.*"
       - "SymmetricMemP2pLevelTests.*"
       - "TopoTest.*"
+      - "Mi350pPcieTopo.*"
       - "TopoGpuDev.*"
       - "TopoNicFusionTests.*"
       - "P2pMaxNchannels.*"
       - "ChannelDefaults.*"
+      - "Search*.*"
+      - "NetIbCastUdma.*"
     exclude_windows:
       - "*"
     labels:

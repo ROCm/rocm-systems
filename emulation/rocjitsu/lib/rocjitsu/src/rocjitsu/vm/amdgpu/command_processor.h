@@ -21,6 +21,7 @@
 /// href="https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/command-processor.html">ROCm
 /// CP documentation</a>
 
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_processor.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
@@ -36,6 +37,7 @@
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
 #include "simdojo/sim/component.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
@@ -61,7 +63,6 @@
 #endif
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
 
@@ -179,6 +180,12 @@ public:
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
 
+  /// @brief Return the physical XCC rank, or nullopt before topology assignment.
+  /// @details This is the rank from set_xcd_topology(), independent of scratch overrides.
+  std::optional<uint32_t> xcc_id() const {
+    return xcd_peers_.empty() ? std::nullopt : std::optional<uint32_t>(xcd_rank_);
+  }
+
   [[nodiscard]] uint64_t register_pm4_queue(Pm4QueueConfig config);
   [[nodiscard]] QueuePrepareCloseStatus
   prepare_unregister_pm4_queue_registration(uint64_t registration_id) noexcept;
@@ -216,7 +223,7 @@ public:
   /// @brief Cancel DRM work before its frontend revokes the process VM binding.
   void unregister_drm_queues(uint32_t process_id);
   void unregister_drm_queue(uint32_t queue_id, uint32_t process_id);
-  /// @brief Enqueue a DRM submission; return false if the queue has faulted.
+  /// @brief Enqueue a DRM submission; return false if its queue is missing, non-DRM, or faulted.
   [[nodiscard]] bool submit_pm4(uint32_t queue_id, uint32_t process_id, Pm4Submission submission);
   /// @brief Remove the queue currently identified by the legacy routing tuple.
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
@@ -237,7 +244,14 @@ public:
   void accept_fanout_shard(DispatchEntry shard);
   [[nodiscard]] bool update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
                                   uint32_t ring_size, uint32_t queue_percentage);
-  /// @brief Reconfigure only the queue incarnation identified by @p registration_id.
+  /// @brief Reconfigure a queue incarnation and propagate its state to fanout replicas.
+  /// @details A fanout owner must be called without any CP queue mutex already held:
+  /// peer propagation acquires peer locks after releasing the owner's mutation lock.
+  /// Busy reflects entries/publications on the ring owner; replicas never access
+  /// packet slots or publish its consumer pointer.
+  [[nodiscard]] QueueReconfigureStatus
+  reconfigure_queue_registration(uint64_t registration_id, const QueueReconfigureRequest &request);
+  /// @brief Compatibility update returning true for Applied or Disabled.
   [[nodiscard]] bool update_queue_registration(uint64_t registration_id, uint64_t ring_base_va,
                                                uint32_t ring_size, uint32_t queue_percentage);
   void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended,
@@ -448,6 +462,8 @@ public:
   const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
 
   /// @brief Return LDS targets selected by a cluster multicast mask.
+  /// @details Resolve targets only after all cluster peers have been admitted.
+  /// Dispatch plugin callbacks may run before cluster admission is complete.
   std::vector<ClusterLdsTarget> cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id,
                                                     uint32_t mcast_mask);
 
@@ -559,7 +575,7 @@ private:
 
   struct KernelDescriptorReadResult {
     VmAccessOutcome outcome;
-    rocr::llvm::amdhsa::kernel_descriptor_t descriptor{};
+    rocjitsu::amdhsa::kernel_descriptor_t descriptor{};
   };
 
   class ClusterWorkgroupPlacement;
@@ -619,6 +635,9 @@ private:
                                                          uint64_t packet_index,
                                                          bool alternate) const;
 
+  /// @brief Invalidate the admitted AQL slot before publishing its consumer cursor.
+  [[nodiscard]] VmAccessOutcome retire_aql_packet(ComputeQueueRecord &queue,
+                                                  const DispatchEntry &entry);
   /// @brief Hold retirement until ROCr acknowledges a use-once scratch reclaim.
   [[nodiscard]] VmAccessOutcome gate_dispatch_retirement(ComputeQueueRecord &queue,
                                                          const DispatchEntry &entry);
@@ -648,8 +667,9 @@ private:
                                      simdojo::Tick now);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
   void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
-  void dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
-                    const std::array<uint32_t, 4> &dimensions);
+  util::Result dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
+                            const std::array<uint32_t, 4> &dimensions,
+                            util::DiagnosticEmitter emit_error);
   void service_command_streams(simdojo::Tick now);
   void service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick now);
 
