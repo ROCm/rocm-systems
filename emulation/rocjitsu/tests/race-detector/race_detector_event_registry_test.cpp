@@ -63,6 +63,29 @@ constexpr InstructionSnapshot kInstruction{.pc = 0x1234, .words = {0xbf800007}, 
 constexpr std::array kObligations{
     MemoryCounterObligation{WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED}};
 
+TEST(InstructionSnapshotTest, EncodingRejectsEmptySnapshot) {
+  EXPECT_THROW(InstructionSnapshot{}.encoding(), std::logic_error);
+}
+
+TEST(InstructionSnapshotTest, EncodingRejectsOversizedSnapshot) {
+  for (const uint32_t count :
+       {uint32_t{InstructionSnapshot::kMaxWords + 1}, std::numeric_limits<uint32_t>::max()}) {
+    auto instruction = kInstruction;
+    instruction.word_count = count;
+    EXPECT_THROW(instruction.encoding(), std::logic_error);
+  }
+}
+
+TEST(InstructionSnapshotTest, EncodingViewsOnlyCapturedWords) {
+  auto instruction = kInstruction;
+  for (uint32_t count = 1; count <= InstructionSnapshot::kMaxWords; ++count) {
+    instruction.word_count = count;
+    const auto encoding = instruction.encoding();
+    EXPECT_EQ(encoding.data(), instruction.words.data());
+    EXPECT_EQ(encoding.size(), count);
+  }
+}
+
 class RaceEventRegistrationTest : public ::testing::Test {
 protected:
   RaceDetector detector{1,

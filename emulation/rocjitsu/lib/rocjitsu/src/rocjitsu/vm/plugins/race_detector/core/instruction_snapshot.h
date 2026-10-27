@@ -24,7 +24,10 @@ struct InstructionSnapshot {
       throw std::logic_error("race detector instruction snapshot has an invalid word count");
   }
 
-  std::span<const uint32_t> encoding() const { return std::span(words).first(word_count); }
+  std::span<const uint32_t> encoding() const {
+    validateEncoding();
+    return std::span(words).first(word_count);
+  }
 };
 
 } // namespace rocjitsu::plugins::race_detector
