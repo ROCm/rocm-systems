@@ -4,10 +4,8 @@ name: "rocjitsu-formatting"
 on:
   pull_request:
     # NOTE: Only files under these paths trigger CI formatting checks.
-    # Shared files (e.g. .github/scripts/) are not covered — run
-    # `pre-commit run --all-files` locally to catch issues outside this
-    # scope. We should incrementally add more paths here as projects
-    # adopt pre-commit.
+    # We should incrementally add more paths here as projects adopt
+    # pre-commit.
     # This job is named `pre-commit`, which is the one entry in
     # `checks.required_check_runs` in tools/systems_pr_bot/policy.yml, so a
     # path that is missing here leaves therock-pr-bot waiting out its timeout
@@ -15,6 +13,12 @@ on:
     paths:
       - "emulation/mirage/**"
       - "emulation/rocjitsu/**"
+      - ".github/scripts/collect_rocjitsu_afl_results.py"
+      - ".github/scripts/rocjitsu_fuzz_report.js"
+      - ".github/scripts/run_rocjitsu_afl_campaign.py"
+      - ".github/scripts/tests/test_collect_rocjitsu_afl_results.py"
+      - ".github/scripts/tests/test_rocjitsu_fuzz_report.js"
+      - ".github/scripts/tests/test_run_rocjitsu_afl_campaign.py"
       - ".github/workflows/rocjitsu-*.yml"
       - ".pre-commit-config.yaml"
 
