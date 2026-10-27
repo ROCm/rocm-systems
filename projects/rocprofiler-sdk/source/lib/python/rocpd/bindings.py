@@ -1,7 +1,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,10 @@ __all__ = [
     "RocpdImportData",
     "connect",
     "supported",
+    "load_schema",
+    "query_supported_schema_versions",
+    "schema_version",
+    "output_config",
     "read_agents",
     "read_nodes",
     "read_processes",
@@ -35,6 +39,139 @@ __all__ = [
 
 import os
 import sqlite3
+
+# ---------------------------------------------------------------------------
+# Pure-python schema loading (mirrors rocpd_sql_load_schema and
+# rocpd_query_supported_schema_versions in librocprofiler-sdk-rocpd). These are
+# defined at module scope so they can be compared against libpyrocpd in tests.
+# ---------------------------------------------------------------------------
+
+# values of sql_schema enum -> key in versions.yml
+_SCHEMA_KIND_KEYS = {
+    1: "rocpd_tables",
+    2: "rocpd_indexes",
+    3: "rocpd_views",
+    4: "rocpd_data_views",
+    5: "rocpd_summary_views",
+    6: "rocpd_metadata",
+}
+
+_SQLITE3_PRAGMA_FOREIGN_KEYS = 0x02
+
+
+def _version_tuple(version):
+    """Convert str / schema_version-like / (major, minor, patch) into a tuple of ints."""
+    if isinstance(version, str):
+        parts = [int(x) for x in version.split(".") if x != ""][:3]
+        return tuple(parts + [0] * (3 - len(parts)))
+    if hasattr(version, "major"):
+        return (int(version.major), int(version.minor), int(version.patch))
+    return tuple(int(x) for x in version)
+
+
+def _find_share_path():
+    """Locate <prefix>/share/rocprofiler-sdk-rocpd relative to this file."""
+    from pathlib import Path
+
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "share" / "rocprofiler-sdk-rocpd"
+        if (candidate / "versions.yml").exists():
+            return str(candidate)
+    return ""
+
+
+def _schema_search_paths(hints=None):
+    paths = [str(x) for x in (hints or [])]
+    paths += os.environ.get("ROCPD_SCHEMA_PATH", "").split(":")
+    paths += [_find_share_path()]
+    return [p for p in paths if p]
+
+
+def _load_version_file_map(paths):
+    """Returns {version_str: {kind_key: relative_file}} from the first versions.yml found."""
+    import yaml
+
+    for itr in paths:
+        fpath = os.path.join(itr, "versions.yml")
+        if os.path.exists(fpath):
+            with open(fpath, "r") as f:
+                data = yaml.safe_load(f)
+            result = {}
+            for entry in data["rocprofiler-sdk-rocpd"]["rocpd_schemas"]:
+                version = str(entry["version"])
+                result[version] = {
+                    key: entry[key]
+                    for key in _SCHEMA_KIND_KEYS.values()
+                    if key in entry
+                }
+            return result
+    return {}
+
+
+def _py_query_supported_schema_versions(engine=1, schema_path_hints=None):
+    """Returns sorted list of (major, minor, patch) tuples."""
+    if int(engine) != 1:
+        raise RuntimeError("unsupported rocpd SQL engine")
+    vmap = _load_version_file_map(_schema_search_paths(schema_path_hints))
+    return sorted(_version_tuple(v) for v in vmap)
+
+
+def _py_load_schema(engine, kind, options, version, variables):
+    """Pure-python equivalent of libpyrocpd.load_schema."""
+    if int(engine) != 1:
+        raise RuntimeError("unsupported rocpd SQL engine")
+
+    paths = _schema_search_paths()
+    vmap = _load_version_file_map(paths)
+    if not vmap:
+        raise RuntimeError("rocpd schema versions.yml not found")
+
+    vtuple = _version_tuple(version)
+    if vtuple == (0, 0, 0):
+        vtuple = max(_version_tuple(v) for v in vmap)
+    vkey = ".".join(str(x) for x in vtuple)
+    if vkey not in vmap:
+        raise RuntimeError(f"rocpd schema version {vkey} is not supported")
+
+    kind_key = _SCHEMA_KIND_KEYS.get(int(kind))
+    if kind_key is None or kind_key not in vmap[vkey]:
+        raise RuntimeError(f"rocpd schema kind {kind} not available for version {vkey}")
+
+    contents = None
+    for itr in paths:
+        fpath = os.path.join(itr, vmap[vkey][kind_key])
+        if os.path.exists(fpath):
+            with open(fpath, "r") as f:
+                contents = f.read()
+            break
+    if not contents:
+        raise RuntimeError(f"rocpd schema file for {kind_key} {vkey} not found or empty")
+
+    if int(options) & _SQLITE3_PRAGMA_FOREIGN_KEYS:
+        contents = "PRAGMA foreign_keys = ON;\n\n" + contents
+
+    uuid = getattr(variables, "uuid", None)
+    if uuid is not None:
+        uuid = str(uuid)
+        if uuid and not uuid.startswith("_"):
+            uuid = "_" + uuid
+        uuid = uuid.replace("-", "_")
+        contents = contents.replace("{{uuid}}", uuid)
+
+    guid = getattr(variables, "guid", None)
+    substitutions = {
+        "{{guid}}": None if guid is None else str(guid),
+        "{{schema_version}}": vkey,
+        "{{schema_version_major}}": str(vtuple[0]),
+        "{{schema_version_minor}}": str(vtuple[1]),
+        "{{schema_version_patch}}": str(vtuple[2]),
+    }
+    for key, value in substitutions.items():
+        if value is not None:
+            contents = contents.replace(key, value)
+
+    return contents
+
 
 try:
     # support disabling the python bindings via environment variable
@@ -56,7 +193,7 @@ try:
         """Check if the rocpd python bindings are available."""
         return True
 
-    # class defined by the bindings
+    # classes defined by the bindings
     RocpdImportData = libpyrocpd.RocpdImportData
     output_config = libpyrocpd.output_config
     schema_jinja_variables = libpyrocpd.schema_jinja_variables
@@ -82,6 +219,7 @@ try:
     read_threads = libpyrocpd.read_threads
     write_perfetto = libpyrocpd.write_perfetto
     load_schema = libpyrocpd.load_schema
+    query_supported_schema_versions = libpyrocpd.query_supported_schema_versions
 
 except ImportError:
     from typing import Iterator, Any, Mapping, Sequence, Type
@@ -284,11 +422,16 @@ except ImportError:
             self.annotate_args = False
             self.annotate_kfd = False
             self.annotate_pmc = False
-            self.agent_index_value = None
+            self.agent_index_value = agent_indexing.logical_node
             self.perfetto_shmem_size_hint = 64
             self.perfetto_buffer_size = (1 * 1024 * 1024)
             self.perfetto_backend = "inprocess"
             self.perfetto_buffer_fill_policy = "discard"
+
+    class schema_jinja_variables:
+        def __init__(self):
+            self.uuid = None
+            self.guid = None
 
     class RocpdNamespace:
         def __init__(self, data: dict, allowed_data: dict | None = None):
@@ -329,7 +472,24 @@ except ImportError:
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
 
-    write_perfetto = _unsupported_function
+
+    def write_perfetto(*args, **kwargs):
+        raise RuntimeError(
+            "pftrace output requires the rocpd Python bindings (libpyrocpd); "
+            "rebuild with the bindings"
+        )
+
+    def query_supported_schema_versions(engine=sql_engine.sqlite3, schema_path_hints=[]):
+        """Return supported rocpd SQL schema versions as a list of schema_version."""
+        return [
+            schema_version(*itr)
+            for itr in _py_query_supported_schema_versions(engine, schema_path_hints)
+        ]
+
+    def load_schema(engine, kind, options, version, variables):
+        """Return the rocpd SQL schema text for the given kind and version."""
+        return _py_load_schema(engine, kind, options, version, variables)
+
     agent = Agent
     node = Node
     process = Process
