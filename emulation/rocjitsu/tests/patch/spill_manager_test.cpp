@@ -8,7 +8,6 @@
 #include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -295,24 +294,14 @@ TEST(SpillManager, AccVgprIs4Bytes) {
   EXPECT_EQ(m.total_private_bytes() - before, 4u);
 }
 
-// Spill slots are logical per-lane byte offsets. Execution maps them to
-// dword-interleaved backing addresses; increasing the private reservation
-// must not turn it into a physical per-lane address stride. This checks the
-// allocator-to-address-mapping contract, not the trampoline's instruction encoding.
-TEST(SpillManager, SlotOffsetsMapToInterleavedScratchBacking) {
-  SpillManager m(/*orig=*/0, /*limit=*/16384);
+// Spill slots are logical per-lane byte offsets used as SCRATCH immediates.
+// ScratchAddrCalcTest covers their mapping to physical scratch backing addresses.
+TEST(SpillManager, SlotOffsetsAreLogicalPrivateByteOffsets) {
+  SpillManager m(/*orig=*/0, /*limit=*/kBigLimit);
   ASSERT_TRUE(m.allocate_slot(sgpr(0)).has_value());
   auto slot1 = m.allocate_slot(sgpr(1));
   ASSERT_TRUE(slot1.has_value());
   EXPECT_EQ(*slot1, 4u);
-
-  constexpr uint64_t kScratchBase = 0x1000;
-  for (uint32_t wave_size : {32u, 64u}) {
-    SCOPED_TRACE(wave_size);
-    const uint64_t expected_lane0 = wave_size == 32 ? 0x1080 : 0x1100;
-    EXPECT_EQ(amdgpu::scratch_lane_address(kScratchBase, *slot1, 0, wave_size), expected_lane0);
-    EXPECT_EQ(amdgpu::scratch_lane_address(kScratchBase, *slot1, 1, wave_size), expected_lane0 + 4);
-  }
 }
 
 TEST(SpillManager, ReserveSet_AddsAllRegisters) {
