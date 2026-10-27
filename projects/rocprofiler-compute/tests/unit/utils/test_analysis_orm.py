@@ -1142,7 +1142,7 @@ def test_per_source_line_rows_read_each_lines_state_and_instructions(db_session)
     rows = [
         (
             *row[:-1],
-            sorted(code_object_ids[uuid] for uuid in json.loads(row[-1])),
+            sorted(code_object_ids[int(uuid)] for uuid in row[-1].split(",") if uuid),
         )
         for row in Database.stream_per_source_line_rows(
             workload.workload_id, ["NONE", "WAITCNT"]

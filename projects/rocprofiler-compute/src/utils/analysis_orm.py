@@ -957,11 +957,11 @@ class Database:
                 PCSampleState.active_thread_percent,
                 *Database._stall_reason_columns(stall_reasons),
                 # DISTINCT removes the repeats that the stall-reason join adds.
-                # FILTER skips the null of a source line without instructions.
-                func
-                .json_group_array(distinct(InstructionSourceLine.instruction_uuid))
-                .filter(InstructionSourceLine.instruction_uuid.is_not(None))
-                .label("instruction_uuids"),
+                # A source line without instructions gets an empty string.
+                func.coalesce(
+                    func.group_concat(distinct(InstructionSourceLine.instruction_uuid)),
+                    "",
+                ).label("instruction_uuids"),
             )
             .select_from(SourceLine)
             .join(
@@ -994,8 +994,8 @@ class Database:
             # The stall-reason and instruction joins add rows, so group them
             # back into one row per source line.
             .group_by(SourceLine.source_line_uuid)
-            # The "?" row of a file has no source line number, so it sorts first.
-            .order_by(SourceFile.file_path, SourceLine.line_number.nulls_first())
+            # SQLite sorts NULL first, so the "?" row of a file comes first.
+            .order_by(SourceFile.file_path, SourceLine.line_number)
         )
 
     @staticmethod

@@ -11,7 +11,6 @@ in the per-kernel ISA files.
 """
 
 import itertools
-import json
 from collections.abc import Iterable, Iterator
 from functools import partial
 from pathlib import Path
@@ -130,11 +129,9 @@ def _format_source_line_rows(
         content,
         total_count,
         *other_cells,
-        instruction_uuids_json,
+        instruction_uuids,
     ) in file_rows:
-        isa_references = _format_isa_references(
-            instruction_uuids_json, isa_line_locations
-        )
+        isa_references = _format_isa_references(instruction_uuids, isa_line_locations)
         # The "?" row has no source line number. It keeps only its total count,
         # which is the samples lost to instructions without a source line number.
         if line_number is None:
@@ -150,18 +147,20 @@ def _format_source_line_rows(
 
 
 def _format_isa_references(
-    instruction_uuids_json: str,
+    instruction_uuids: str,
     isa_line_locations: Dict[int, IsaLineLocation],
 ) -> str:
     """Return the ISA references of one source line as text.
 
-    Each ISA file goes on its own line of text, written as
+    instruction_uuids holds the comma-separated uuids of the instructions of the
+    source line. Each ISA file goes on its own line of text, written as
     "<kernel folder>/<ISA file>:<instruction line numbers>". Consecutive
     instruction line numbers are written as one range.
     """
     locations = sorted(
-        isa_line_locations[instruction_uuid]
-        for instruction_uuid in json.loads(instruction_uuids_json)
+        isa_line_locations[int(instruction_uuid)]
+        for instruction_uuid in instruction_uuids.split(",")
+        if instruction_uuid
     )
     return ISA_REFERENCE_SEPARATOR.join(
         f"{isa_file.as_posix()}:"

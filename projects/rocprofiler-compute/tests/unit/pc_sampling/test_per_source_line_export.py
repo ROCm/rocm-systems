@@ -4,7 +4,6 @@
 """Unit tests for per_source_line_export.py."""
 
 import csv
-import json
 from pathlib import Path
 
 import pytest
@@ -58,7 +57,7 @@ def make_source_line_row(
         None,
         None,
         *stall_reason_counts,
-        json.dumps(list(instruction_uuids)),
+        ",".join(str(instruction_uuid) for instruction_uuid in instruction_uuids),
     )
 
 
@@ -97,9 +96,7 @@ def test_format_number_ranges(ascending_numbers, expected):
 
 def test_format_isa_references_lists_one_isa_file_per_line():
     """References are grouped by ISA file, in ISA file path order."""
-    instruction_uuids_json = json.dumps([105, 104, 103, 101, 102])
-
-    assert _format_isa_references(instruction_uuids_json, ISA_LINE_LOCATIONS) == (
+    assert _format_isa_references("105,104,103,101,102", ISA_LINE_LOCATIONS) == (
         "vecAdd_uuid_8/isa_code_object_id_5_pid_42.csv:3\n"
         "vecCopy_uuid_7/isa_code_object_id_5_pid_42.csv:2-4\n"
         "vecCopy_uuid_7/isa_code_object_id_5_pid_43.csv:2"
@@ -108,7 +105,7 @@ def test_format_isa_references_lists_one_isa_file_per_line():
 
 def test_format_isa_references_is_empty_for_a_line_without_instructions():
     """A source line without instructions has no ISA references."""
-    assert _format_isa_references("[]", ISA_LINE_LOCATIONS) == ""
+    assert _format_isa_references("", ISA_LINE_LOCATIONS) == ""
 
 
 def test_write_per_source_line_files_opens_one_file_per_source_file(tmp_path):
