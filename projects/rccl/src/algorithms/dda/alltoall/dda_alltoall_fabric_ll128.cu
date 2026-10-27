@@ -80,17 +80,6 @@ static inline std::pair<dim3, dim3> ddaAllToAllFabricLL128V2Geom(ncclComm* comm,
   return std::make_pair(dim3((unsigned)nPeers, (unsigned)bpp), dim3(threads));
 }
 
-template <int NR>
-static void ddaLL128A2AV2Launch(dim3 grid, dim3 block, cudaStream_t stream, hipEvent_t stopEvent, int8_t** peers,
-                                void* recvbuff, const void* sendbuff, size_t perChunkBytes, ncclComm* comm,
-                                size_t slices, size_t bankSize) {
-  const dda::common::DdaKernelParams params{comm->abortFlagDev};
-  hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128V2<int8_t, NR, 1>), grid, block, 0, stream,
-                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<int8_t*>(recvbuff),
-                        static_cast<const int8_t*>(sendbuff), perChunkBytes, comm->rank, comm->nRanks,
-                        comm->ddaLLEpochDev, comm->ddaLLEpochLen, slices, bankSize, params);
-}
-
 static ncclResult_t ncclAllToAllDdaFabricLL128V2(const void* sendbuff, void* recvbuff, size_t perChunkBytes,
                                                  ncclComm* comm, cudaStream_t stream) {
   const size_t slices = ddaLL128Slices(perChunkBytes);
@@ -100,20 +89,11 @@ static ncclResult_t ncclAllToAllDdaFabricLL128V2(const void* sendbuff, void* rec
        comm->nRanks, perChunkBytes, slices, gb.first.x, gb.first.y, gb.second.x);
   int8_t** peers = reinterpret_cast<int8_t**>(comm->ddaPeerPtrsDev);
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  switch (comm->nRanks) {
-  case 4:
-    ddaLL128A2AV2Launch<4>(gb.first, gb.second, stream, stopEvent, peers, recvbuff, sendbuff, perChunkBytes, comm,
-                           slices, bankSize);
-    break;
-  case 8:
-    ddaLL128A2AV2Launch<8>(gb.first, gb.second, stream, stopEvent, peers, recvbuff, sendbuff, perChunkBytes, comm,
-                           slices, bankSize);
-    break;
-  default:
-    ddaLL128A2AV2Launch<0>(gb.first, gb.second, stream, stopEvent, peers, recvbuff, sendbuff, perChunkBytes, comm,
-                           slices, bankSize);
-    break;
-  }
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
+  hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128V2<int8_t>), gb.first, gb.second, 0, stream,
+                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<int8_t*>(recvbuff),
+                        static_cast<const int8_t*>(sendbuff), perChunkBytes, comm->rank, comm->nRanks,
+                        comm->ddaLLEpochDev, comm->ddaLLEpochLen, slices, bankSize, params);
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
 }

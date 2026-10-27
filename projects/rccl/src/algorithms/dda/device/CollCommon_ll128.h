@@ -267,9 +267,10 @@ __device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t 
 
 // ddaLL128PollWire over N slices at once: every slice's loads are issued before any
 // flag is checked, so their reads are in flight together. A line whose flag matched
-// is not read again, which relies on cooperative loads reading each 128-byte line as
-// one unit; plain 16-byte loads can tear across a line's lanes. Returns false if the
-// comm abort flag is set so the kernel can leave the wait.
+// is not read again when cooperative loads read each 128-byte line as one unit;
+// plain 16-byte loads can tear across a line's lanes, so without the builtins every
+// line is read once more after its flag matched, as ddaLL128PollWire does. Returns
+// false if the comm abort flag is set so the kernel can leave the wait.
 template <int N>
 __device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[N],
                                                   uint64_t (&vr)[N][kDdaLL128WordsPerThread], uint64_t flag,
@@ -293,6 +294,14 @@ __device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[
         needReload |= flagLane && (vr[k][u + 1] != flag);
     }
   } while (__any(needReload));
+#if !RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+#pragma unroll
+  for (int k = 0; k < N; ++k) {
+#pragma unroll
+    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
+      ddaLL128LoadAtomic16B(wire[k] + u * kDdaLL128Warp, vr[k][u], vr[k][u + 1]);
+  }
+#endif
   return true;
 }
 
@@ -318,6 +327,39 @@ __device__ __forceinline__ void ddaLL128StoreRegs(
 // Slices needed to carry bytes of payload.
 constexpr size_t ddaLL128Slices(size_t bytes) {
   return (bytes + kDdaLL128DataBytesPerSlice - 1) / kDdaLL128DataBytesPerSlice;
+}
+
+// Payload bytes of slice s in a buffer of `bytes`: a full slice, or the remainder for the last.
+__device__ __forceinline__ int ddaLL128SliceBytes(size_t bytes, size_t s) {
+  const size_t rem = bytes - s * (size_t)kDdaLL128DataBytesPerSlice;
+  return rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+}
+
+// Packs one slice of `eltN` bytes at `src` and stores it to `wire` (the slice's wire
+// base plus 2 * lane). There is no branch between the loads and the stores, so all
+// four loads are in flight before the first store, partial slices included.
+__device__ __forceinline__ void ddaLL128SendSlice(const int8_t* src, int eltN, uint64_t* wire, uint64_t flag, int lane,
+                                                  bool flagLane) {
+  uint64_t regs[kDdaLL128WordsPerThread];
+  ddaLL128LoadRegsBegin(regs, src, eltN, lane, flagLane);
+#if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_sched_barrier)
+  // Without it the scheduler moves the flag-lane shuffle up between the loads, and
+  // the loads after the shuffle wait for the ones before it.
+  __builtin_amdgcn_sched_barrier(0);
+#endif
+  ddaLL128LoadRegsFinish(regs, flagLane);
+  ddaLL128StoreWire(wire, regs, flag, flagLane);
+}
+
+// Polls one slice at `wire` (the slice's wire base plus 2 * lane) and unpacks its
+// `eltN` bytes to `dst`. Returns false, for the whole warp, if the comm abort flag is set.
+__device__ __forceinline__ bool ddaLL128RecvSlice(const uint64_t* wire, int8_t* dst, int eltN, uint64_t flag, int lane,
+                                                  bool flagLane, DdaKernelParams params) {
+  const uint64_t* const lines[1] = {wire};
+  uint64_t vr[1][kDdaLL128WordsPerThread];
+  if (!ddaLL128PollWireN<1>(lines, vr, flag, lane, params)) return false;
+  ddaLL128StoreRegs(dst, vr[0], eltN, lane, flagLane);
+  return true;
 }
 
 } // namespace dda::common

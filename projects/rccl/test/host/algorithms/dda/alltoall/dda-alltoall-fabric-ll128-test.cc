@@ -39,9 +39,8 @@ constexpr size_t kSliceFloats = 480;
 // 256 threads = 8 warps per block.
 constexpr size_t kWarpsPerBlock = 8;
 
-template <int N>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaAllToAllFabricLL128V2<int8_t, N, 1>);
+  return KernelPtr(&dda::common::ddaAllToAllFabricLL128V2<int8_t>);
 }
 
 class DdaAlltoallFabricLL128Microtest : public ::testing::Test {
@@ -194,13 +193,12 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_UnsupportedDatatypeReturnsInvalid
   EXPECT_TRUE(g_ddaLaunches.empty());
 }
 
-TEST_F(DdaAlltoallFabricLL128Microtest, Launch_FourAndEightRanksUnrolledOthersRuntime) {
-  const std::pair<int, const void*> cases[] = {
-      {4, Kernel<4>()}, {8, Kernel<8>()}, {2, Kernel<0>()}, {3, Kernel<0>()}, {144, Kernel<0>()}};
-  for (const auto& [nRanks, kernel] : cases) {
+// One kernel for every rank count: the rank count only sizes the slots and rotates the peers.
+TEST_F(DdaAlltoallFabricLL128Microtest, Launch_OneKernelForEveryRankCount) {
+  for (int nRanks : {2, 3, 4, 8, 144}) {
     comm().nRanks = nRanks;
     const DdaLaunch& launch = RunOne(4);
-    EXPECT_EQ(launch.kernel, kernel) << "nRanks " << nRanks;
+    EXPECT_EQ(launch.kernel, Kernel()) << "nRanks " << nRanks;
     EXPECT_EQ(launch.grid.x, static_cast<unsigned>(nRanks - 1)) << "no self column";
     EXPECT_EQ(launch.Arg<int>(5), nRanks);
   }
@@ -210,7 +208,7 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_PassesBuffersSlicesBankAndAbortFl
   ASSERT_EQ(Run(8, ncclBfloat16), ncclSuccess);
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
   const DdaLaunch& launch = g_ddaLaunches[0];
-  EXPECT_EQ(launch.kernel, Kernel<4>());
+  EXPECT_EQ(launch.kernel, Kernel());
   EXPECT_EQ(launch.stream, kStream);
   EXPECT_EQ(launch.startEvent, nullptr);
   EXPECT_EQ(launch.stopEvent, kStopEvent);

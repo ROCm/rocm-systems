@@ -422,4 +422,13 @@ __device__ __forceinline__ void ddaSetLLEpoch(uint32_t* __restrict__ epochDev, i
   }
 }
 
+// Copies `bytes` (a multiple of 16) from src to dst in 16-byte vectors, thread `gtid` of
+// `gstride` threads taking every gstride-th vector, so the whole grid shares the copy.
+__device__ __forceinline__ void ddaGridCopy16B(const void* src, void* dst, size_t bytes, size_t gtid, size_t gstride) {
+  const v4u* s4 = reinterpret_cast<const v4u*>(src);
+  v4u* d4 = reinterpret_cast<v4u*>(dst);
+  const size_t nVec = bytes >> 4;
+  for (size_t i = gtid; i < nVec; i += gstride) d4[i] = s4[i];
+}
+
 } // namespace dda::common
