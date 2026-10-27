@@ -143,6 +143,19 @@ uint8_t ncclProfilerDeviceMode(int eActivationMask) {
   return mode;
 }
 bool ncclProfilerProxyDiagEnabled(void) { return false; }
+ncclResult_t ncclProfilerStartSendProxyStepEvent(int, struct ncclProxyArgs*, int) { return ncclSuccess; }
+ncclResult_t ncclProfilerStartRecvProxyStepEvent(int, struct ncclProxyArgs*, int) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopProxyStepEvent(int, struct ncclProxyArgs*, int) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopProxyOpEvent(int, struct ncclProxyArgs*) { return ncclSuccess; }
+ncclResult_t ncclProfilerRecordProxyOpEventState(int, struct ncclProxyArgs*, ncclProfilerEventState_t) {
+  return ncclSuccess;
+}
+ncclResult_t ncclProfilerRecordProxyStepEventState(int, struct ncclProxyArgs*, int, ncclProfilerEventState_t) {
+  return ncclSuccess;
+}
+ncclResult_t ncclProfilerRecordProxyDiagState(int, struct ncclProxyArgs*, uint8_t, int64_t, int64_t, uint16_t) {
+  return ncclSuccess;
+}
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunRasDiagnostics(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunDiagnostics(struct ncclComm* comm) { return ncclSuccess; }

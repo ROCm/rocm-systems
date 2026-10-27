@@ -10,10 +10,12 @@
 #define RCCL_TEST_HOST_PROXY_FAKES_H_
 
 #include <cstdint>
+#include <functional>
 
 #include "nccl.h"
 
 struct ncclComm;
+struct ncclProxyConnector;
 struct ncclProxyOp;
 
 // ncclProxySaveOp (proxy.cc:627) uses a "justInquire" protocol: the caller asks
@@ -37,6 +39,14 @@ extern uint64_t g_proxySaveOpLastOpCount;
 extern bool g_proxySaveOpSawNonNullJustInquire;
 
 extern ncclResult_t g_proxyStartResult;
+
+// ncclProxyCallAsync / ncclPollProxyResponse: transport connect paths post a request and poll for the response.
+// Default to fail-loud.
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, int /*type*/, void* /*reqBuff*/,
+                                  int /*reqSize*/, int /*respSize*/, void* /*opId*/)>
+    g_ncclProxyCallAsync;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, void* /*respBuff*/, void* /*opId*/)>
+    g_ncclPollProxyResponse;
 
 void ResetProxyFakes();
 
