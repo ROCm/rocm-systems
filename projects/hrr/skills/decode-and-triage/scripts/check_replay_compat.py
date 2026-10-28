@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from archive_text import sanitize
+
 _IS_WIN = sys.platform == "win32"
 
 # ---------------------------------------------------------------------------
@@ -713,8 +715,8 @@ def evaluate_compat(
         expected = capture_archs[min(gpu, len(capture_archs) - 1)]
         if expected and replay_arch and expected != replay_arch:
             msg = (
-                f"GPU architecture mismatch: capture GPU {gpu} is {expected}, "
-                f"replay GPU {gpu} looks like {replay_arch}"
+                f"GPU architecture mismatch: capture GPU {gpu} is {sanitize(expected)}, "
+                f"replay GPU {gpu} looks like {sanitize(replay_arch)}"
             )
             (report.blocks if strict_arch else report.warnings).append(msg)
 
@@ -722,7 +724,8 @@ def evaluate_compat(
         if capture.hip_runtime_version != replay.hip_runtime_version:
             msg = (
                 "HIP runtime version mismatch: capture "
-                f"{capture.hip_runtime_version} vs replay {replay.hip_runtime_version}"
+                f"{sanitize(capture.hip_runtime_version)} vs replay "
+                f"{sanitize(replay.hip_runtime_version)}"
             )
             (report.blocks if strict_version else report.prompts).append(msg)
 
@@ -730,7 +733,8 @@ def evaluate_compat(
         if capture.comgr_version != replay.comgr_version:
             msg = (
                 "comgr version mismatch: capture "
-                f"{capture.comgr_version} vs replay {replay.comgr_version}"
+                f"{sanitize(capture.comgr_version)} vs replay "
+                f"{sanitize(replay.comgr_version)}"
             )
             (report.blocks if strict_version else report.prompts).append(msg)
 
@@ -743,6 +747,9 @@ def evaluate_compat(
 # ---------------------------------------------------------------------------
 
 def render_report(report: CompatReport) -> str:
+    # The capture side is whatever the archive's author wrote, so every value
+    # printed passes the one sanitizer; the replay side is probed from the host
+    # or an image and gets the same treatment rather than a judgement call.
     lines = ["# HRR replay compatibility"]
     if report.capture:
         c = report.capture
@@ -751,27 +758,27 @@ def render_report(report: CompatReport) -> str:
             "",
             "## Capture metadata",
             f"- schema_version: {c.schema_version or 'n/a'}",
-            f"- hip_runtime_version: {c.hip_runtime_version or 'n/a'}",
-            f"- comgr_version: {c.comgr_version or 'n/a'}",
+            f"- hip_runtime_version: {sanitize(c.hip_runtime_version or 'n/a')}",
+            f"- comgr_version: {sanitize(c.comgr_version or 'n/a')}",
             f"- device_count: {c.device_count if c.device_count is not None else 'n/a'}",
             f"- captured_device_count: "
             f"{c.captured_device_count if c.captured_device_count is not None else 'n/a'}",
-            f"- gcn_arch_name: {arch_names[0] if arch_names else 'n/a'}",
+            f"- gcn_arch_name: {sanitize(arch_names[0]) if arch_names else 'n/a'}",
         ]
         if len(arch_names) > 1:
-            lines.append(f"- gcn_arch_names: {', '.join(arch_names)}")
+            lines.append(f"- gcn_arch_names: {', '.join(sanitize(a) for a in arch_names)}")
     if report.replay:
         r = report.replay
         lines += [
             "",
             "## Replay environment",
-            f"- source: {r.source}",
+            f"- source: {sanitize(r.source)}",
             f"- visible_gpus: {r.visible_gpus if r.visible_gpus is not None else 'unknown'}",
-            f"- hip_runtime_version: {r.hip_runtime_version or 'n/a'}",
-            f"- comgr_version: {r.comgr_version or 'n/a'}",
+            f"- hip_runtime_version: {sanitize(r.hip_runtime_version or 'n/a')}",
+            f"- comgr_version: {sanitize(r.comgr_version or 'n/a')}",
         ]
         if r.gpu_archs:
-            lines.append(f"- gpu_archs: {', '.join(a or 'n/a' for a in r.gpu_archs)}")
+            lines.append(f"- gpu_archs: {', '.join(sanitize(a or 'n/a') for a in r.gpu_archs)}")
     if report.blocks:
         lines += ["", "## Blocking issues"]
         lines += [f"- {b}" for b in report.blocks]

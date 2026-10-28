@@ -184,6 +184,7 @@ do_host_tests() {
     "rccl-UnitTestsMicroMnnvl:$SCRIPT_DIR/host_tests_micro_mnnvl.xml"
     "rccl-UnitTestsMicroAlloc:$SCRIPT_DIR/host_tests_micro_alloc.xml"
     "rccl-UnitTestsMicroTaskPrep:$SCRIPT_DIR/host_tests_micro_taskprep.xml"
+    "rccl-UnitTestsMicroNvls:$SCRIPT_DIR/host_tests_micro_nvls.xml"
     "rccl-UnitTestsMicroNcclDevice:$SCRIPT_DIR/host_tests_micro_nccl_device.xml"
     "rccl-UnitTestsMicroCore:$SCRIPT_DIR/host_tests_micro_core.xml"
     "rccl-UnitTestsMicroCftDevRuntime:$SCRIPT_DIR/host_tests_micro_cft_dev_runtime.xml"
@@ -210,6 +211,8 @@ do_host_tests() {
     "rccl-UnitTestsMicroDda:$SCRIPT_DIR/host_tests_micro_dda.xml"
     "rccl-UnitTestsMicroNetIbCastInit:$SCRIPT_DIR/host_tests_micro_net_ib_cast_init.xml"
     "rccl-UnitTestsMicroNetIbCastDataPath:$SCRIPT_DIR/host_tests_micro_net_ib_cast_data_path.xml"
+    "rccl-UnitTestsMicroNet:$SCRIPT_DIR/host_tests_micro_net.xml"
+    "rccl-UnitTestsMicroMisc:$SCRIPT_DIR/host_tests_micro_misc.xml"
   )
   # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs
   # GENERATE_SYM_KERNELS, off via install.sh --disable-sym-kernels); missing is a skip, not an error.
