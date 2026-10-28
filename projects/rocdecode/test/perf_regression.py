@@ -500,10 +500,12 @@ def main():
         summary_box(summary_rows, overall_ok, measure_only=measure_only)
         print(f"Results saved to: {out_dir}/")
         if measure_only:
+            print(f"NOTE: {measure_only_reason}")
             print("These measurements can serve as a future baseline for this GPU.")
     else:
         if measure_only:
             summary_box(summary_rows, overall_ok, measure_only=measure_only)
+            print(f"NOTE: {measure_only_reason}")
             print("ERROR: No streams were measured; no results CSV was saved.",
                   file=sys.stderr)
             return 1
