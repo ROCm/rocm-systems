@@ -12,10 +12,12 @@ thread_local! {
 /// Rejects recursive public lifecycle calls from tool callbacks while a
 /// transition runs on this thread.
 pub(crate) struct LifecycleCallScope {
+    /// Whether this scope set and must clear the thread-local entry flag.
     owns_flag: bool,
 }
 
 impl LifecycleCallScope {
+    /// Enters one public lifecycle call, rejecting same-thread recursion.
     pub(crate) fn enter() -> Result<Self, Status> {
         LIFECYCLE_ENTRY.with(|active| {
             if active.get() {
@@ -289,6 +291,7 @@ impl HsaLifecycle {
         }
     }
 
+    /// Reports a transition that another `hsa_init` caller must await.
     fn init_transition_in_progress(&self) -> bool {
         matches!(
             self.phase,

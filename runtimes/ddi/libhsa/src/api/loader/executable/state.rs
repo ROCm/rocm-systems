@@ -26,7 +26,7 @@ pub unsafe extern "C" fn hsa_executable_create(
     boundary(|| {
         let _mutation = match EXECUTABLE_TRAVERSAL.write() {
             Ok(guard) => guard,
-            Err(_) => return ERROR,
+            Err(()) => return ERROR,
         };
         if executable.is_null()
             || !matches!(profile, PROFILE_BASE | PROFILE_FULL)
@@ -75,7 +75,7 @@ pub unsafe extern "C" fn hsa_executable_create_alt(
     boundary(|| {
         let _mutation = match EXECUTABLE_TRAVERSAL.write() {
             Ok(guard) => guard,
-            Err(_) => return ERROR,
+            Err(()) => return ERROR,
         };
         if executable.is_null()
             || !matches!(profile, PROFILE_BASE | PROFILE_FULL)
@@ -296,7 +296,7 @@ pub unsafe extern "C" fn hsa_executable_destroy(executable: HsaExecutable) -> St
     boundary(|| {
         let _mutation = match EXECUTABLE_TRAVERSAL.write() {
             Ok(guard) => guard,
-            Err(_) => return ERROR,
+            Err(()) => return ERROR,
         };
         let mut guard = match lock() {
             Ok(guard) => guard,
