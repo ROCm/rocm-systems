@@ -115,6 +115,34 @@ init_gpu_pool(const AmdExtTable& api, rocprofiler::hsa::AgentCache& agent)
         << "HSA GPU Pool is not initialized";
 }
 
+// Finds the GPU pool that hsa_amd_signal_batch_create can place signals in (large-BAR device
+// memory). Completion signals there are written by the CP without crossing PCIe.
+void
+init_signal_pool(const AmdExtTable& api, rocprofiler::hsa::AgentCache& agent)
+{
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x17
+    static bool enabled = rocprofiler::common::get_env("ROCPROFILER_DEVICE_SIGNALS", true);
+    if(!enabled || api.version.step_id < 0x17 || !api.hsa_amd_signal_batch_create_fn) return;
+
+    auto find = [](hsa_amd_memory_pool_t pool, void* data) {
+        auto [api_ptr, pool_ptr] =
+            *static_cast<std::pair<const AmdExtTable*, hsa_amd_memory_pool_t*>*>(data);
+        bool capable = false;
+        if(api_ptr->hsa_amd_memory_pool_get_info_fn(
+               pool, HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE, &capable) != HSA_STATUS_SUCCESS ||
+           !capable)
+            return HSA_STATUS_SUCCESS;
+        *pool_ptr = pool;
+        return HSA_STATUS_INFO_BREAK;
+    };
+
+    auto params = std::make_pair(&api, &agent.signal_pool());
+    api.hsa_amd_agent_iterate_memory_pools_fn(agent.get_hsa_agent(), find, &params);
+#else
+    common::consume_args(api, agent);
+#endif
+}
+
 }  // namespace
 
 namespace rocprofiler
@@ -180,6 +208,7 @@ AgentCache::AgentCache(const rocprofiler_agent_t* rocp_agent,
     {
         init_cpu_pool(ext_table, *this);
         init_gpu_pool(ext_table, *this);
+        init_signal_pool(ext_table, *this);
         // When on-demand queue mode is enabled, defer queue creation to start_context
         if(!use_ondemand_queue()) init_device_counting_service_queue(api, ext_table);
     } catch(std::runtime_error& e)

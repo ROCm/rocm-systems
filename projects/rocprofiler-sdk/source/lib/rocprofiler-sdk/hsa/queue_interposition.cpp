@@ -45,6 +45,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
@@ -549,6 +550,20 @@ constexpr auto drain_warn_interval = std::chrono::seconds{30};
 // How often a wait re-tests the condition it is waiting on.
 constexpr auto poll_interval = std::chrono::milliseconds{1};
 
+// A buffer flush waits for in-flight dispatch records, re-testing at flush_poll_interval and giving
+// up once none has been delivered for flush_idle_timeout (a dispatch that is still running).
+constexpr auto flush_poll_interval = std::chrono::microseconds{20};
+constexpr auto flush_idle_timeout  = std::chrono::milliseconds{1};
+
+// Set on the record-emitter threads, which run nothing else. A wait for records there would wait
+// on the batch the calling tool callback belongs to.
+bool&
+on_record_emitter()
+{
+    static thread_local bool _v = false;
+    return _v;
+}
+
 class completion_monitor;
 
 void
@@ -587,6 +602,10 @@ public:
     // Registered but not yet retired (inbox + active). Lets other threads see whether
     // anything is outstanding without touching the monitor-private `active`.
     std::atomic<uint64_t> inflight = {0};
+
+    // Monotonic counts behind `inflight`, so a waiter can tell progress from new work.
+    std::atomic<uint64_t> registered = {0};
+    std::atomic<uint64_t> retired    = {0};
 
     // Runs emit_dispatch_records, which calls into tool code, so the monitor thread only does
     // bounded work between waits. One thread, because records are emitted in retirement order. Not
@@ -642,6 +661,7 @@ register_pending_completion(pending_completion&& pending)
         }
 
         mon.inflight.fetch_add(1, std::memory_order_relaxed);
+        mon.registered.fetch_add(1, std::memory_order_relaxed);
         inbox.emplace_back(std::move(pending));
         get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
     });
@@ -676,15 +696,26 @@ release_completion_signals(const std::shared_ptr<queue_info_session_t>& session,
 {
     auto batch = retired_batch{session, {}};
 
-    if(completed) batch.dispatch_times.reserve(session->packet_data.size());
+    if(completed)
+    {
+        batch.dispatch_times.reserve(session->packet_data.size());
+        kernel_dispatch::device_signal_read_fence();
+    }
 
     for(auto& packet : session->packet_data)
     {
+        auto* _device_signal = (packet.pooled_signal && packet.pooled_signal->get().device_memory)
+                                   ? &packet.pooled_signal->get()
+                                   : nullptr;
+
         if(completed)
-            batch.dispatch_times.emplace_back(kernel_dispatch::get_dispatch_time(*session, packet));
+            batch.dispatch_times.emplace_back(
+                _device_signal ? kernel_dispatch::get_device_signal_dispatch_time(*session, packet)
+                               : kernel_dispatch::get_dispatch_time(*session, packet));
 
         if(packet.pooled_signal)
         {
+            if(completed && _device_signal) --_device_signal->idle_value;
             // Back to the pool only once the GPU is done with it: Queue::create_signal re-acquires
             // the same handle a released slot held, so a signal a running kernel will still
             // decrement would hand that decrement to the next dispatch. Keeping the slot marked in
@@ -825,10 +856,14 @@ submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
     // Counted before the submit, not inside the task: `inflight` is what every drain polls, so
     // work that is queued but not yet counted is work a drain reports as absent.
     mon.inflight.fetch_add(1, std::memory_order_relaxed);
+    mon.registered.fetch_add(1, std::memory_order_relaxed);
     mon.record_emitter->async([&mon, _held]() {
+        on_record_emitter() = true;
         // Armed first: a throwing tool callback must not strand the counter every drain polls.
-        auto _dtor = common::scope_destructor{
-            [&mon]() { mon.inflight.fetch_sub(1, std::memory_order_release); }};
+        auto _dtor = common::scope_destructor{[&mon]() {
+            mon.retired.fetch_add(1, std::memory_order_release);
+            mon.inflight.fetch_sub(1, std::memory_order_release);
+        }};
         complete_signal_less_dispatch(std::move(*_held));
     });
     return true;
@@ -935,9 +970,12 @@ retire_completion_async(completion_monitor&                          mon,
     // object may be unloaded the moment a drain returns, and records naming its kernels must
     // already be out. Only this path decrements.
     mon.record_emitter->async([&mon, _batch = std::move(batch)]() mutable {
+        on_record_emitter() = true;
         // Armed first: a throwing tool callback must not strand the counter every drain polls.
-        auto _dtor = common::scope_destructor{
-            [&mon]() { mon.inflight.fetch_sub(1, std::memory_order_release); }};
+        auto _dtor = common::scope_destructor{[&mon]() {
+            mon.retired.fetch_add(1, std::memory_order_release);
+            mon.inflight.fetch_sub(1, std::memory_order_release);
+        }};
         emit_dispatch_records(std::move(_batch));
     });
 }
@@ -1290,10 +1328,12 @@ write_interceptor(Queue*                                queue,
         };
         auto _dispatch_pkt_index = std::vector<dispatch_pkt_ref>{};
 
-        auto create_signal = [](auto* signal) -> common::container::pool_object<signal_t>* {
-            if(auto* pool = get_signal_pool(); pool && signal->handle == 0)
+        auto create_signal = [queue](auto* signal) -> common::container::pool_object<signal_t>* {
+            if(auto* pool = get_signal_pool(queue->get_agent()); pool && signal->handle == 0)
             {
-                auto& _signal = pool->acquire(construct_hsa_signal, 0, 0, nullptr, 0);
+                auto& _signal = pool->acquire();
+                if(!_signal.get().device_memory)
+                    construct_hsa_signal(_signal.get(), 0, 0, nullptr, 0);
                 ROCP_FATAL_IF(!_signal.in_use()) << "Acquired signal from pool that is not in use";
                 ROCP_FATAL_IF(_signal.get().value == null_signal)
                     << "Acquired signal from pool that has invalid handle";
@@ -1316,7 +1356,8 @@ write_interceptor(Queue*                                queue,
             auto& _cs = pd.kernel_packet.kernel_dispatch.completion_signal;
 #endif
             if(_cs == null_signal) pd.pooled_signal = create_signal(&_cs);
-            get_core_table()->hsa_signal_add_scacq_screl_fn(_cs, 1);
+            if(!pd.pooled_signal || !pd.pooled_signal->get().device_memory)
+                get_core_table()->hsa_signal_add_scacq_screl_fn(_cs, 1);
             pd.completion_signal = _cs;
             return _cs;
         };
@@ -1579,8 +1620,11 @@ write_interceptor(Queue*                                queue,
             ROCP_FATAL_IF(last_completion_signal == null_signal)
                 << "invalid completion signal in the last packet of the batch";
 
+            const auto* _last_pooled = _info_session.packet_data.back().pooled_signal;
             current_signal_value =
-                get_core_table()->hsa_signal_load_scacquire_fn(last_completion_signal);
+                (_last_pooled && _last_pooled->get().device_memory)
+                    ? _last_pooled->get().idle_value
+                    : get_core_table()->hsa_signal_load_scacquire_fn(last_completion_signal);
 
             ROCP_INFO << fmt::format(
                 "  Enqueued batch with completion signal {{.handle={}}} with value {}",
@@ -2124,6 +2168,38 @@ void
 interposition_sync()
 {
     drain_completion_monitor();
+}
+
+void
+flush_sync()
+{
+    if(registration::get_fini_status() != 0 || internal_threading::fork_stale() ||
+       on_record_emitter())
+        return;
+
+    const auto* mon = common::static_object<completion_monitor>::get();
+    if(!mon) return;
+
+    // Batches registered after this point are not waited for, but their retirements still count
+    // as progress, so ongoing work cannot hold the flush.
+    const auto target        = mon->registered.load(std::memory_order_acquire);
+    auto       retired       = mon->retired.load(std::memory_order_acquire);
+    auto       last_progress = std::chrono::steady_clock::now();
+    while(retired < target)
+    {
+        std::this_thread::sleep_for(flush_poll_interval);
+        const auto now  = std::chrono::steady_clock::now();
+        const auto next = mon->retired.load(std::memory_order_acquire);
+        if(next != retired)
+        {
+            retired       = next;
+            last_progress = now;
+        }
+        else if(now - last_progress >= flush_idle_timeout)
+        {
+            break;
+        }
+    }
 }
 
 // Create the wake signal and launch the monitor thread. A second call while it is already

@@ -70,6 +70,17 @@ construct_hsa_signal(signal_t&          signal,
 common::container::pool<signal_t>*
 get_signal_pool();
 
+class AgentCache;
+
+/**
+ * @brief Get the signal pool for completion signals of kernel dispatches on @p agent.
+ *
+ * Signals are in the agent's signal-capable device memory when it has one, so the CP's completion
+ * write does not cross PCIe. Otherwise this is ::get_signal_pool().
+ */
+common::container::pool<signal_t>*
+get_signal_pool(const AgentCache& agent);
+
 /**
  * @brief Initialize the signal pool.
  *

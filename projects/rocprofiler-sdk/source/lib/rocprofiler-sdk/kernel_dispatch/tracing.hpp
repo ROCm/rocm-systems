@@ -52,6 +52,10 @@ using profiling_time         = tracing::profiling_time;
 profiling_time
 get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_data);
 
+// For a packet whose completion signal is an SDK-owned device-memory signal.
+profiling_time
+get_device_signal_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_data);
+
 void
 dispatch_complete(queue_info_session_t& session, packet_data_t& packet_data, profiling_time);
 

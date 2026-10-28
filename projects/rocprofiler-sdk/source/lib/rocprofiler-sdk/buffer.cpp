@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -330,6 +331,7 @@ rocprofiler_flush_buffer(rocprofiler_buffer_id_t buffer_id)
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;
 #endif
 
+    rocprofiler::hsa::queue_interposition::flush_sync();
     return rocprofiler::buffer::flush(buffer_id, true);
 }
 

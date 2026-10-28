@@ -46,5 +46,18 @@ get_dispatch_time(hsa_agent_t             agent,
                   hsa_signal_t            signal,
                   rocprofiler_kernel_id_t kernel_id,
                   std::optional<uint64_t> baseline = {});
+
+// Same result for an SDK-owned signal in device memory, reading the raw timestamps with a single
+// streaming host load instead of the several plain ones hsa_amd_profiling_get_dispatch_time makes.
+// Call device_signal_read_fence() once between observing a batch complete and these reads.
+profiling_time
+get_device_signal_dispatch_time(hsa_agent_t             agent,
+                                hsa_signal_t            signal,
+                                rocprofiler_kernel_id_t kernel_id,
+                                std::optional<uint64_t> baseline = {});
+
+// Streaming loads are weakly ordered, so they could run ahead of the load that saw the completion.
+void
+device_signal_read_fence();
 }  // namespace kernel_dispatch
 }  // namespace rocprofiler
