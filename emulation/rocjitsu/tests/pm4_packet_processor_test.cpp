@@ -521,8 +521,9 @@ TEST_P(Pm4AdmissionTest, FaultsWithoutRetirementOrSuccessCompletion) {
   const auto diagnostic = testing::internal::GetCapturedStderr();
   const auto reason_offset = diagnostic.find(packet.reason);
   EXPECT_NE(reason_offset, std::string::npos) << diagnostic;
-  if (reason_offset != std::string::npos)
+  if (reason_offset != std::string::npos) {
     EXPECT_EQ(diagnostic.find(packet.reason, reason_offset + 1), std::string::npos) << diagnostic;
+  }
   EXPECT_TRUE(queue.faulted);
   EXPECT_FALSE(completed);
   EXPECT_TRUE(dispatches.empty());
@@ -666,8 +667,9 @@ TEST_P(Pm4EffectFailureTest, StopsBeforeDependentEffectsAndRetirement) {
   const std::string reason = std::string("PM4 queue failed: ") + packet.reason;
   const auto reason_offset = diagnostic.find(reason);
   EXPECT_NE(reason_offset, std::string::npos) << diagnostic;
-  if (reason_offset != std::string::npos)
+  if (reason_offset != std::string::npos) {
     EXPECT_EQ(diagnostic.find(reason, reason_offset + 1), std::string::npos) << diagnostic;
+  }
   EXPECT_EQ(cancellations, 1u);
   EXPECT_FALSE(queue.command_retry_pending);
   EXPECT_FALSE(completed);
