@@ -246,7 +246,7 @@ public:
   uint64_t cmdbuf_aql_frame_write_index;
   uint32_t cmdbuf_aql_frame_size;
 
-  uint64_t  *signal_addr_;
+  std::vector<uint64_t*> pending_signals_;
   bool platform_atomic_support_;
   bool needs_barrier;
   bool ready_to_submit;

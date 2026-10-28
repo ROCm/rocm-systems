@@ -64,7 +64,7 @@ class PrivacyDocTest(unittest.TestCase):
 
     def test_inventory_lists_the_active_marker_capture_writes(self):
         writer = (CAPTURE_SRC / "hip_capture_writer.cpp").read_text(encoding="utf-8")
-        name = re.search(r'kActiveMarker = "/(\w+)"', writer).group(1)
+        name = re.search(r'kActiveMarker = "/?(\w+)"', writer).group(1)
         self.assertTrue(
             any(row.split("|")[2].strip() == f"`{name}`" for row in inventory_rows())
         )

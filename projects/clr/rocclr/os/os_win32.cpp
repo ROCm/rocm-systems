@@ -650,18 +650,22 @@ bool Os::MemoryMapFile(const char* fname, const void** mmap_ptr, size_t* mmap_si
   return true;
 }
 
-bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t mmap_size) {
+bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t mmap_size,
+                                ShmMode mode) {
   if (mmap_ptr == nullptr) {
     return false;
   }
 
-  HANDLE map_handle = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, fname);
-
+  HANDLE map_handle =
+      (mode == ShmMode::kOpenExisting)
+          ? OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, fname)
+          : CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, mmap_size, fname);
   if (map_handle == nullptr) {
-    map_handle = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, mmap_size, fname);
-    if (map_handle == nullptr) {
-      return false;
-    }
+    return false;
+  }
+  if (mode == ShmMode::kCreateNew && GetLastError() == ERROR_ALREADY_EXISTS) {
+    CloseHandle(map_handle);
+    return false;
   }
 
   *mmap_ptr = MapViewOfFile(map_handle, FILE_MAP_ALL_ACCESS, 0, 0, mmap_size);

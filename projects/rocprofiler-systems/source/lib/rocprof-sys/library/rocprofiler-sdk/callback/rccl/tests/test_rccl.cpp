@@ -173,12 +173,12 @@ TEST_F(rccl_callbacks_test, configure_registers_category_and_both_tracks)
     auto& registry = *test_support::g_metadata_registry_mock;
     EXPECT_CALL(registry, add_string(Eq(ext::comm_data_name))).Times(1);
     EXPECT_CALL(registry,
-                add_track(Eq(track_data_t{ std::string{ ext::rccl_send_track_name },
-                                           std::nullopt, "{}" })))
+                ensure_track(Eq(track_data_t{ std::string{ ext::rccl_send_track_name },
+                                              std::nullopt, "{}" })))
         .Times(1);
     EXPECT_CALL(registry,
-                add_track(Eq(track_data_t{ std::string{ ext::rccl_recv_track_name },
-                                           std::nullopt, "{}" })))
+                ensure_track(Eq(track_data_t{ std::string{ ext::rccl_recv_track_name },
+                                              std::nullopt, "{}" })))
         .Times(1);
 
     rccl::on_rccl_configure<sdk, ext>();
@@ -190,7 +190,7 @@ TEST_F(rccl_callbacks_test,
     ext::dlerror_result = "symbol lookup failed";
     EXPECT_CALL(*test_support::g_metadata_registry_mock,
                 add_string(Eq(ext::comm_data_name)));
-    EXPECT_CALL(*test_support::g_metadata_registry_mock, add_track(::testing::_))
+    EXPECT_CALL(*test_support::g_metadata_registry_mock, ensure_track(::testing::_))
         .Times(2);
 
     rccl::on_rccl_configure<sdk, ext>();
