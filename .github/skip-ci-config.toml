@@ -33,11 +33,25 @@ common = [
     ".github/skip-ci-config.toml",
 
     # Only `.github/workflows/therock-*.yml` participate in TheRock CI; every
-    # other workflow here runs on its own triggers and is never called by a
-    # TheRock run, so editing one cannot affect a TheRock build. fnmatch has no
-    # negation, so this is spelled as "does not start with t". New workflows
-    # whose names start with `t` simply don't skip CI, which fails safe.
+    # other workflow runs on its own triggers and is never called by a TheRock
+    # run, so editing one cannot affect a TheRock build.
+    #
+    # TheRock matches these with plain fnmatch and no negation operator, so
+    # "any name except therock-*" is spelled positionally: one pattern per
+    # character of "therock-", each matching names that diverge from the prefix
+    # at that character. A name must survive all eight to be treated as a CI
+    # workflow. Keep this block in sync if the therock- prefix ever changes.
+    #
+    # Names that are strict prefixes of "therock-" (e.g. therock.yml) match no
+    # pattern and therefore run CI, which is the fail-safe direction.
     ".github/workflows/[!t]*.yml",
+    ".github/workflows/t[!h]*.yml",
+    ".github/workflows/th[!e]*.yml",
+    ".github/workflows/the[!r]*.yml",
+    ".github/workflows/ther[!o]*.yml",
+    ".github/workflows/thero[!c]*.yml",
+    ".github/workflows/theroc[!k]*.yml",
+    ".github/workflows/therock[!-]*.yml",
 
     # `therock-rccl-*` is rooted at therock-rccl-ci.yml (schedule +
     # workflow_dispatch only), so it is likewise outside TheRock PR CI.
