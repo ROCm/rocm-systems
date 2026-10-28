@@ -680,7 +680,7 @@ private:
 
   /// @brief Whether a wave stop on @p gpu_id could be published to a debugger.
   /// @details Checked *before* a handler claims a stop. The CWSR codec models
-  /// the gfx9.4 record layout only (kmd/linux/cwsr.h), and serialization is the
+  /// the gfx9.4 and gfx12.5 record layouts (vm/amdgpu/cwsr.h). Serialization is the
   /// last step of reporting a stop -- by the time it can refuse, the wave is
   /// halted and the compute unit has been told the faulting access was handled.
   /// Asking first lets the handler decline the stop instead, which is a path

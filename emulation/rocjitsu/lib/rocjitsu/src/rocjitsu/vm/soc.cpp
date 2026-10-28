@@ -3,8 +3,8 @@
 
 #include "rocjitsu/vm/soc.h"
 
-#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
+#include "rocjitsu/vm/amdgpu/cwsr.h"
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
@@ -293,10 +293,10 @@ amdgpu::QueueContextSaveResult SoC::save_context(const amdgpu::QueueIdentity &id
                                                  uint32_t control_stack_size) {
   using amdgpu::VmAccessOutcome;
   const auto access = gpu_vm_.snapshot(identity.address_space);
-  if (!access || !kmd::cwsr_layout_modelled(arch_))
+  if (!access || !amdgpu::cwsr_layout_modelled(arch_))
     return {};
 
-  std::vector<kmd::CwsrWaveState> states;
+  std::vector<amdgpu::CwsrWaveState> states;
   std::unordered_set<amdgpu::L2Cache *> caches;
   const auto belongs_to_queue = [&](const amdgpu::Wavefront *wave) {
     return wave && !wave->is_halted() && wave->process_id() == identity.process_id &&
@@ -333,7 +333,7 @@ amdgpu::QueueContextSaveResult SoC::save_context(const amdgpu::QueueIdentity &id
             pending = true;
             continue;
           }
-          states.push_back(kmd::build_cwsr_wave_state(*wave, arch_));
+          states.push_back(amdgpu::build_cwsr_wave_state(*wave, arch_));
         }
       });
       if (cu->l2())
@@ -363,18 +363,19 @@ amdgpu::QueueContextSaveResult SoC::save_context(const amdgpu::QueueIdentity &id
   if (saved != VmAccessOutcome::Complete)
     return {.outcome = saved};
   std::array<uint32_t, 2> debug_region{};
-  const auto read = access->read(address + 16, std::as_writable_bytes(std::span(debug_region)));
+  const auto read = access->read(address + amdgpu::cwsr_debug_fields_offset(),
+                                 std::as_writable_bytes(std::span(debug_region)));
   if (read != VmAccessOutcome::Complete)
     return {.outcome = read};
-  kmd::prepare_cwsr_wave_states(states);
+  amdgpu::prepare_cwsr_wave_states(states);
   VmAccessOutcome status = VmAccessOutcome::Complete;
   auto write = [&](uint64_t target, std::span<const uint8_t> bytes) {
     if (status == VmAccessOutcome::Complete)
       status = access->write(target, std::as_bytes(bytes));
   };
-  const kmd::CwsrLayout layout = kmd::serialize_queue_cwsr_bulk(
+  const amdgpu::CwsrLayout layout = amdgpu::serialize_queue_cwsr_bulk(
       address, area_size, states, write, arch_, control_stack_size,
-      kmd::CwsrDebugRegion{debug_region[0], debug_region[1]}, queue_context);
+      amdgpu::CwsrDebugRegion{debug_region[0], debug_region[1]}, queue_context);
   if (!layout.ok)
     return {};
   return {.outcome = status,
@@ -392,7 +393,7 @@ amdgpu::VmAccessOutcome SoC::restore_context(const amdgpu::QueueIdentity &identi
                                              uint32_t control_stack_size) {
   using amdgpu::VmAccessOutcome;
   const auto access = gpu_vm_.snapshot(identity.address_space);
-  if (!access || !kmd::cwsr_layout_modelled(arch_))
+  if (!access || !amdgpu::cwsr_layout_modelled(arch_))
     return VmAccessOutcome::Faulted;
   if (!mes_queue_owner_)
     return VmAccessOutcome::Faulted;
@@ -402,11 +403,11 @@ amdgpu::VmAccessOutcome SoC::restore_context(const amdgpu::QueueIdentity &identi
       status = access->read(source, std::as_writable_bytes(bytes));
   };
   std::vector<uint8_t> queue_context;
-  std::vector<kmd::CwsrWaveState> states;
-  const bool decoded =
-      kmd::deserialize_queue_cwsr_context(address, area_size, queue_context, read,
-                                          control_stack_size) &&
-      kmd::deserialize_queue_cwsr_bulk(address, area_size, states, read, arch_, control_stack_size);
+  std::vector<amdgpu::CwsrWaveState> states;
+  const bool decoded = amdgpu::deserialize_queue_cwsr_context(address, area_size, queue_context,
+                                                              read, control_stack_size) &&
+                       amdgpu::deserialize_queue_cwsr_bulk(address, area_size, states, read, arch_,
+                                                           control_stack_size);
   if (status != VmAccessOutcome::Complete)
     return status;
   if (!decoded)
@@ -429,7 +430,7 @@ amdgpu::VmAccessOutcome SoC::restore_context(const amdgpu::QueueIdentity &identi
         }
       }
     });
-  const auto matches = kmd::match_cwsr_wave_states(states, waves);
+  const auto matches = amdgpu::match_cwsr_wave_states(states, waves);
   if (!matches) {
     release_context(identity);
     return VmAccessOutcome::Malformed;
@@ -451,17 +452,11 @@ amdgpu::VmAccessOutcome SoC::restore_context(const amdgpu::QueueIdentity &identi
     owners[wave_index]->with_wave_state_locked([&] {
       auto &wave = *waves[wave_index];
       const auto &state = states[index];
-      for (uint32_t t = 0; t < state.ttmps.size(); ++t)
-        wave.set_ttmp(t, state.ttmps[t]);
-      kmd::apply_cwsr_to_wave(wave, state, arch_);
+      amdgpu::apply_cwsr_to_wave(wave, state, arch_,
+                                 amdgpu::CwsrRestorePolicy::RestoreSavedRegisters);
       // Scratch remains in its original backing even when execution moves.
       wave.set_scratch_scoreboard_id(state.scratch_scoreboard_id);
       wave.set_shader_engine_id(state.shader_engine_id);
-      // The shared KFD helper preserves the live stack registers across a
-      // debugger edit. A newly allocated wave has no live stack to preserve.
-      for (uint32_t reg : {32u, 33u})
-        if (reg < state.num_sgprs)
-          wave.debug_write_sgpr(reg, state.sgprs[reg]);
       wave.set_trap_id(state.trap_id);
     });
   }

@@ -22,6 +22,7 @@
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/cwsr.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
@@ -214,12 +215,12 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
     // One high-VGPR wave sets the record stride for every resident wave.
     // Verify the advertised area with the serializer itself, rather than a
     // second size formula that could diverge from compute_geometry.
-    std::vector<kmd::CwsrWaveState> waves(resident_waves);
+    std::vector<amdgpu::CwsrWaveState> waves(resident_waves);
     for (auto &wave : waves)
       wave.num_vgprs = 8;
     waves.front().num_vgprs = max_vgprs;
     uint64_t writes = 0;
-    const auto layout = kmd::serialize_queue_cwsr(
+    const auto layout = amdgpu::serialize_queue_cwsr(
         0x100000, info.context_save_size, waves, [&](uint64_t, uint32_t) { ++writes; }, arch);
     EXPECT_TRUE(layout.ok);
     EXPECT_GT(writes, 0u);
@@ -232,7 +233,7 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
     for (uint64_t i = 0; i < cus.size(); ++i)
       waves[i].lds.resize(cus[i]->config().lds_size_kb * 1024);
     writes = 0;
-    const auto mixed = kmd::serialize_queue_cwsr(
+    const auto mixed = amdgpu::serialize_queue_cwsr(
         0x100000, info.context_save_size, waves, [&](uint64_t, uint32_t) { ++writes; }, arch);
     EXPECT_TRUE(mixed.ok);
     EXPECT_GT(writes, 0u);
@@ -243,14 +244,14 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
     if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
       // A large LDS group alongside many empty groups must fit while
       // preserving the independent record size of each group.
-      std::vector<kmd::CwsrWaveState> mixed_lds(512);
+      std::vector<amdgpu::CwsrWaveState> mixed_lds(512);
       for (auto &wave : mixed_lds) {
         wave.num_vgprs = 8;
         wave.is_first_in_group = true;
       }
       mixed_lds.front().lds.resize(cus.front()->config().lds_size_kb * 1024);
       writes = 0;
-      const auto padded = kmd::serialize_queue_cwsr(
+      const auto padded = amdgpu::serialize_queue_cwsr(
           0x100000, info.context_save_size, mixed_lds, [&](uint64_t, uint32_t) { ++writes; }, arch);
       EXPECT_TRUE(padded.ok);
       EXPECT_GT(writes, 0u);
@@ -265,10 +266,10 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
       gpu_info_from_config(unsupported.device, unsupported.soc()->num_xcds(), unsupported.pci);
   EXPECT_GE(info.control_stack_size, 40u);
   EXPECT_GT(info.context_save_size, info.control_stack_size);
-  std::vector<kmd::CwsrWaveState> wave(1);
+  std::vector<amdgpu::CwsrWaveState> wave(1);
   wave.front().num_vgprs = 8;
   uint32_t writes = 0;
-  EXPECT_FALSE(kmd::serialize_queue_cwsr(
+  EXPECT_FALSE(amdgpu::serialize_queue_cwsr(
                    0x100000, info.context_save_size, wave, [&](uint64_t, uint32_t) { ++writes; },
                    ROCJITSU_CODE_ARCH_RDNA3)
                    .ok);

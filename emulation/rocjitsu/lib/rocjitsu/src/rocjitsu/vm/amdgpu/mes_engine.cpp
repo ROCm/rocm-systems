@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/mes_engine.h"
 
+#include "rocjitsu/vm/amdgpu/cwsr.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_binding_factory.h"
 #include "util/log.h"
 
@@ -814,7 +815,7 @@ amdgpu::VmAccessOutcome MesEngine::execute_mes_semantic(std::span<const std::byt
       // MQD offsets are the guest-visible save indicator. A fresh MQD resets
       // them to the capacity (or zero), even if its backing memory is reused.
       const bool restoring = mapped.context_save_address != 0 && mapped.context_save_size != 0 &&
-                             mapped.control_stack_offset >= 40 &&
+                             mapped.control_stack_offset >= cwsr_header_size_bytes() &&
                              mapped.control_stack_offset < mapped.control_stack_size &&
                              mapped.wave_state_offset >= mapped.control_stack_size;
       const bool registered = mapped.aql ? register_aql_queue(mapped, restoring)

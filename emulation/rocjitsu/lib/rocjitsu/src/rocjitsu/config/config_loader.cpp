@@ -4,6 +4,7 @@
 #include "rocjitsu/config/config_loader.h"
 
 #include "rocjitsu/kmd/linux/cwsr.h"
+#include "rocjitsu/vm/amdgpu/cwsr.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
 
 #include "rocjitsu/config/config_common.h"
@@ -1137,13 +1138,13 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
   // The CWSR capacity uses device fields for LDS and wave slots, while wave
   // admission uses each CU's configured limits. Reject a producer that could
   // exceed its advertised save area (or the LDS field in the save record).
-  if (result.soc() && kmd::cwsr_layout_modelled(arch)) {
+  if (result.soc() && amdgpu::cwsr_layout_modelled(arch)) {
     auto validate_cwsr = [&](const KfdDeviceConfig &device) -> const char * {
       // Partial device identities do not publish a modelled CWSR area.
       if (!device.present || !kmd::cwsr_capacity_eligible_device(device, arch))
         return nullptr;
       const uint64_t advertised_lds = uint64_t{device.lds_size_kb} * 1024;
-      if (advertised_lds > kmd::cwsr_max_encoded_lds_bytes(arch))
+      if (advertised_lds > amdgpu::cwsr_max_encoded_lds_bytes(arch))
         return "CWSR advertised LDS capacity exceeds the save record field";
       const auto limits = kmd::cwsr_producer_limits_for_device(device, result.soc()->num_xcds());
       if (limits.cus_per_xcc == 0)

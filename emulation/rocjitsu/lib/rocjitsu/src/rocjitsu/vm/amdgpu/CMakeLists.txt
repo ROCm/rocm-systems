@@ -13,6 +13,7 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     compute_unit.cpp
     coalesced_lane_runs.cpp
     consumer_cursor_journal.cpp
+    cwsr.cpp
     device_cache_coherence.cpp
     gpu_memory_access.cpp
     gpu_queue_registry.cpp

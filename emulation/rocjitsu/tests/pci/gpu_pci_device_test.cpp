@@ -3,11 +3,11 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
-#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/cwsr.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/pci/bar_access_trace.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
@@ -1453,7 +1453,7 @@ TEST_F(GpuDeviceMes, RemoveSavesProgressAndReleasesQueuesWithoutResidentWaves) {
     EXPECT_EQ(transport_.dword_at(kContextPhysical + 8), kControlStack);
     EXPECT_EQ(transport_.dword_at(kContextPhysical + 12), 0u); // No resident wave payload.
     std::vector<uint8_t> queue_context;
-    ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr_context(
+    ASSERT_TRUE(rocjitsu::amdgpu::deserialize_queue_cwsr_context(
         kContext, 0x20000, queue_context,
         [&](uint64_t address, std::span<uint8_t> bytes) {
           EXPECT_TRUE(transport_.read(kContextPhysical + address - kContext,
@@ -1573,7 +1573,7 @@ TEST_F(GpuDeviceMes, RemoveAndReaddSaveAndRestoreAnUnfinishedWave) {
     EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
     EXPECT_FALSE(command_processor_.has_registered_queues());
 
-    std::vector<rocjitsu::kmd::CwsrWaveState> states(1);
+    std::vector<rocjitsu::amdgpu::CwsrWaveState> states(1);
     states[0].num_sgprs = 106;
     states[0].num_vgprs = 64;
     states[0].lds.resize(lds_bytes);
@@ -1583,8 +1583,8 @@ TEST_F(GpuDeviceMes, RemoveAndReaddSaveAndRestoreAnUnfinishedWave) {
     EXPECT_EQ(transport_.dword_at(kSchedulerMqdPhysical + 174 * sizeof(uint32_t)), read(kContext));
     EXPECT_EQ(transport_.dword_at(kSchedulerMqdPhysical + 176 * sizeof(uint32_t)),
               read(kContext + 2 * sizeof(uint32_t)));
-    ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(kContext, kContextSize, states, read,
-                                                      ROCJITSU_CODE_ARCH_CDNA5, kControlStack));
+    ASSERT_TRUE(rocjitsu::amdgpu::deserialize_queue_cwsr(kContext, kContextSize, states, read,
+                                                         ROCJITSU_CODE_ARCH_CDNA5, kControlStack));
     EXPECT_EQ(states[0].pc, kAfterLoad);
     EXPECT_EQ(states[0].exec, 1u);
     EXPECT_EQ(states[0].sgprs[0], 0x12345678u);
@@ -1592,7 +1592,7 @@ TEST_F(GpuDeviceMes, RemoveAndReaddSaveAndRestoreAnUnfinishedWave) {
     EXPECT_EQ(states[0].vgprs[0], 0xabcdef01u);
     EXPECT_EQ(states[0].trap_id, 2u);
     std::vector<uint8_t> queue_context;
-    ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr_context(
+    ASSERT_TRUE(rocjitsu::amdgpu::deserialize_queue_cwsr_context(
         kContext, kContextSize, queue_context,
         [&](uint64_t address, std::span<uint8_t> bytes) {
           EXPECT_TRUE(transport_.read(kContextPhysical + address - kContext,
@@ -1605,9 +1605,9 @@ TEST_F(GpuDeviceMes, RemoveAndReaddSaveAndRestoreAnUnfinishedWave) {
     auto write = [&](uint64_t address, uint32_t value) {
       store_dword(kContextPhysical + address - kContext, value);
     };
-    ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(kContext, kContextSize, states, write,
-                                                    ROCJITSU_CODE_ARCH_CDNA5, kControlStack,
-                                                    rocjitsu::kmd::CwsrDebugRegion{}, queue_context)
+    ASSERT_TRUE(rocjitsu::amdgpu::serialize_queue_cwsr(
+                    kContext, kContextSize, states, write, ROCJITSU_CODE_ARCH_CDNA5, kControlStack,
+                    rocjitsu::amdgpu::CwsrDebugRegion{}, queue_context)
                     .ok);
     compute_unit_->lds().zero_range(0, lds_bytes);
     for (uint64_t word = 0; word < 64; ++word)
@@ -1803,7 +1803,7 @@ TEST_F(GpuDeviceMes, ReaddRebuildsBarriersAndContinuesOnlyUnissuedWorkgroups) {
     const auto &lds = wave->lds();
     lds.read(wave->lds_base(), restored_lds.data(), restored_lds.size());
     EXPECT_EQ(restored_lds, expected_lds);
-    const auto state = rocjitsu::kmd::build_cwsr_wave_state(*wave, soc_.arch());
+    const auto state = rocjitsu::amdgpu::build_cwsr_wave_state(*wave, soc_.arch());
     EXPECT_EQ(state.shader_engine_id, 0u);
     EXPECT_EQ(state.scratch_scoreboard_id, slot);
   }
@@ -1842,7 +1842,7 @@ TEST_F(GpuDeviceMes, ReaddRebuildsBarriersAndContinuesOnlyUnissuedWorkgroups) {
     ASSERT_FALSE(wave->is_halted());
     EXPECT_GE(wave->scratch_base(), kScratch + 2 * kScratchStride);
     EXPECT_LT(wave->scratch_base(), kScratch + 4 * kScratchStride);
-    const auto state = rocjitsu::kmd::build_cwsr_wave_state(*wave, soc_.arch());
+    const auto state = rocjitsu::amdgpu::build_cwsr_wave_state(*wave, soc_.arch());
     EXPECT_EQ(state.shader_engine_id, 1u);
     EXPECT_EQ(state.scratch_scoreboard_id, slot);
     EXPECT_EQ(vram_dword_at(kScratchPhysical + slot * kScratchStride), 0x12345678u + slot);
@@ -1941,16 +1941,16 @@ TEST_F(GpuDeviceMes, RemoveAndReaddMatchesEveryWaveBeforeRestoringState) {
 
     ASSERT_FALSE(compute_unit_->has_active_wfs());
     EXPECT_FALSE(command_processor_.has_registered_queues());
-    std::vector<rocjitsu::kmd::CwsrWaveState> states;
+    std::vector<rocjitsu::amdgpu::CwsrWaveState> states;
     std::vector<uint8_t> queue_context;
-    ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr_context(
+    ASSERT_TRUE(rocjitsu::amdgpu::deserialize_queue_cwsr_context(
         kContext, kContextSize, queue_context,
         [&](uint64_t address, std::span<uint8_t> bytes) {
           EXPECT_TRUE(transport_.read(kContextPhysical + address - kContext,
                                       std::as_writable_bytes(bytes)));
         },
         kControlStack));
-    ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
+    ASSERT_TRUE(rocjitsu::amdgpu::deserialize_queue_cwsr(
         kContext, kContextSize, states,
         [&](uint64_t address) {
           return transport_.dword_at(kContextPhysical + address - kContext);
@@ -1969,12 +1969,12 @@ TEST_F(GpuDeviceMes, RemoveAndReaddMatchesEveryWaveBeforeRestoringState) {
     if (duplicate_identity)
       states[1] = states[0];
     std::ranges::reverse(states);
-    ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(
+    ASSERT_TRUE(rocjitsu::amdgpu::serialize_queue_cwsr(
                     kContext, kContextSize, states,
                     [&](uint64_t address, uint32_t value) {
                       store_dword(kContextPhysical + address - kContext, value);
                     },
-                    soc_.arch(), kControlStack, rocjitsu::kmd::CwsrDebugRegion{}, queue_context)
+                    soc_.arch(), kControlStack, rocjitsu::amdgpu::CwsrDebugRegion{}, queue_context)
                     .ok);
 
     for (uint64_t word = 0; word < 64; ++word)

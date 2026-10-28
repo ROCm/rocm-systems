@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 
 #include <algorithm>
 #include <limits>
@@ -14,25 +15,37 @@ namespace rocjitsu::amdgpu {
 // debugger-editable CWSR records; this image is the authority for allocations.
 struct CommandProcessor::QueueContext {
   struct Group {
-    uint32_t dispatch = 0, wg = 0, lds_bytes = 0;
+    uint32_t dispatch = 0;
+    uint32_t wg = 0;
+    uint32_t lds_bytes = 0;
     uint32_t remaining_waves = 0;
     bool has_barriers = false;
     ComputeUnitCore::WorkgroupBarriers barriers{};
   };
   struct Wave {
-    uint32_t group = 0, sgprs = 0, vgprs = 0, width = 0;
-    uint32_t packet = 0, wave_in_group = 0, scratch_lane_size = 0;
-    uint64_t debug_id = 0, code_bias = 0;
+    uint32_t group = 0;
+    uint32_t sgprs = 0;
+    uint32_t vgprs = 0;
+    uint32_t width = 0;
+    uint32_t packet = 0;
+    uint32_t wave_in_group = 0;
+    uint32_t scratch_lane_size = 0;
+    uint64_t debug_id = 0;
+    uint64_t code_bias = 0;
     std::array<uint32_t, 3> coordinates{};
     WfState state = WfState::RUNNING;
-    uint32_t sleep_cycles = 0, sched_mode = 0;
-    bool vgpr_msb_hazard = false, runtime_suspended = false;
+    uint32_t sleep_cycles = 0;
+    uint32_t sched_mode = 0;
+    bool vgpr_msb_hazard = false;
+    bool runtime_suspended = false;
     Wavefront::BarrierWaitState barrier;
     Wavefront::DebugStopState stop;
-    uint64_t queue_exceptions = 0, runtime_exceptions = 0;
+    uint64_t queue_exceptions = 0;
+    uint64_t runtime_exceptions = 0;
     uint32_t trap_saved_status = 0;
     uint64_t trap_saved_exec = 0;
-    bool interrupt_sent = false, self_halted = false;
+    bool interrupt_sent = false;
+    bool self_halted = false;
   };
   std::vector<Group> groups;
   std::vector<Wave> waves;
@@ -45,7 +58,7 @@ namespace {
 // NOT an AMD register layout: each scalar occupies one little-endian uint64.
 // The field visitors below are shared by writing and reading. Host pointers,
 // callbacks, and address-space leases never enter the saved image.
-constexpr uint64_t kQueueContextMagic = 0x3158544350434a52ULL; // "RJCPCTX1"
+constexpr uint64_t kQueueContextPayloadMagic = 0x3158544350434a52ULL; // "RJCPCTX1"
 constexpr uint64_t kQueueContextVersion = 2;
 
 class ContextWriter {
@@ -234,7 +247,7 @@ VmAccessOutcome CommandProcessor::save_queue_context(const QueueIdentity &identi
       return VmAccessOutcome::Malformed;
     reclaim_entry = std::distance(queue->entries.begin(), entry);
   }
-  writer(kQueueContextMagic, kQueueContextVersion);
+  writer(kQueueContextPayloadMagic, kQueueContextVersion);
   queue_fields(writer, *queue);
   writer(queue->read_pointer_journal.initialized(), queue->read_pointer_journal.cursor(),
          queue->entries.size(), reclaim_entry);
@@ -336,8 +349,8 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
   ComputeQueueRecord restored(static_cast<const ComputeQueueConfig &>(*queue));
   bool consumer_initialized;
   uint64_t consumer, count, reclaim_entry;
-  if (!reader(magic, version) || magic != kQueueContextMagic || version != kQueueContextVersion ||
-      !queue_fields(reader, restored) ||
+  if (!reader(magic, version) || magic != kQueueContextPayloadMagic ||
+      version != kQueueContextVersion || !queue_fields(reader, restored) ||
       !reader(consumer_initialized, consumer, count, reclaim_entry) ||
       count > reader.remaining() / sizeof(uint64_t) || restored.next_dispatch_idx > count ||
       (restored.scratch_reclaim.active() && reclaim_entry >= count) ||

@@ -4,8 +4,9 @@
 /// @file cwsr.cpp
 /// @brief CWSR (context-save-restore) area serialization for rocm-dbgapi.
 
-#include "rocjitsu/kmd/linux/cwsr.h"
+#include "rocjitsu/vm/amdgpu/cwsr.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+// Wavefront::lds() is defined inline in compute_unit.h.
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -14,12 +15,11 @@
 #include <cstring>
 #include <limits>
 
-namespace rocjitsu {
-namespace kmd {
+namespace rocjitsu::amdgpu {
 
 namespace {
 
-constexpr uint32_t kQueueContextMagic = 0x50434a52u; // "RJCP"
+constexpr uint32_t kCwsrPrivateContextMagic = 0x50434a52u; // "RJCP"
 
 // Layout constants matching the gfx9.4 and gfx12.5 cwsr_record_t definitions
 // in rocdbgapi.
@@ -32,14 +32,6 @@ constexpr uint32_t kDebuggerBytesPerWave = 32;
 constexpr uint32_t kDebuggerBytesAlign = 64;
 constexpr uint32_t kDebuggerReserveChunks = 8;
 constexpr uint32_t kTtmpCount = 16; // ttmps saved at the top of the hwreg block
-// The saved block holds kCwsrSavedSgprSlots scalars, so that is the ceiling a
-// wave can carry. It is deliberately not the architected count (102): s104 and
-// s105 are ordinary registers above the FLAT_SCRATCH alias, and CDNA3/CDNA4
-// default to 112 SGPRs per wave (config_loader default_sgprs_per_wf), so a
-// lower bound here would reject an ordinary dispatch and fail the queue's whole
-// CWSR publish. Slots that alias travel in their own fields either way.
-constexpr uint32_t kCwsrHeaderBytes = 10 * sizeof(uint32_t);
-constexpr uint32_t kWaveStateHeaderBytes = 4 * sizeof(uint32_t);
 constexpr uint32_t kControlStackOffset = 0x100u;
 
 // COMPUTE_RELAUNCH classification bits (control_stack_iterate): a word with bit
@@ -141,6 +133,12 @@ uint32_t encode_gfx1250_ttmp8(const CwsrWaveState &w) {
 struct CwsrGeometry {
   CwsrLayout layout{};
   uint32_t vgpr_count = 0;
+  // The saved block holds kCwsrSavedSgprSlots scalars, so that is the ceiling a
+  // wave can carry. It is deliberately not the architected count (102): s104 and
+  // s105 are ordinary registers above the FLAT_SCRATCH alias, and CDNA3/CDNA4
+  // default to 112 SGPRs per wave (config_loader default_sgprs_per_wf), so a
+  // lower bound here would reject an ordinary dispatch and fail the queue's whole
+  // CWSR publish. Slots that alias travel in their own fields either way.
   uint32_t sgpr_count = kCwsrSavedSgprSlots;
   uint32_t vcc_lo_slot = kCwsrVccLoSlot;
   uint32_t flat_scratch_lo_slot = kCwsrFlatScratchLoSlot;
@@ -220,7 +218,7 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
   const uint64_t control_stack_size =
       (2u + geometry.state_words * state_changes + num_waves) * sizeof(uint32_t);
   if (control_stack_capacity != 0 &&
-      (control_stack_capacity < kCwsrHeaderBytes + control_stack_size ||
+      (control_stack_capacity < cwsr_header_size_bytes() + control_stack_size ||
        (control_stack_capacity % sizeof(uint32_t)) != 0))
     return geometry;
   const uint64_t wave_area_begin = control_stack_capacity != 0
@@ -281,7 +279,7 @@ std::optional<CwsrLayout> decode_cwsr_header(const std::array<uint32_t, 4> &head
   const uint64_t control_end =
       static_cast<uint64_t>(layout.control_stack_offset) + layout.control_stack_size;
   if (((header[0] | header[1] | header[2] | header[3]) % sizeof(uint32_t)) != 0 ||
-      layout.control_stack_offset < kCwsrHeaderBytes ||
+      layout.control_stack_offset < cwsr_header_size_bytes() ||
       layout.control_stack_size < 2 * sizeof(uint32_t) || layout.wave_state_offset > area_size ||
       layout.wave_state_size > layout.wave_state_offset ||
       control_end != layout.wave_state_offset - layout.wave_state_size ||
@@ -293,11 +291,8 @@ std::optional<CwsrLayout> decode_cwsr_header(const std::array<uint32_t, 4> &head
 
 } // namespace
 
-CwsrCapacity cwsr_capacity_for_device(const config::KfdDeviceConfig &device, uint32_t num_xcc) {
-  const rj_code_arch_t arch =
-      cwsr_arch_for_gc_ip_version(gc_ip_version_for_gfx_target_version(device.gfx_target_version));
-  if (num_xcc == 0 || !cwsr_capacity_eligible_device(device, arch))
-    return {};
+CwsrCapacity cwsr_capacity_for_producer(rj_code_arch_t arch, CwsrProducerLimits producer,
+                                        uint32_t lds_size_kb) {
   if (!cwsr_layout_modelled(arch)) {
     // Queue consumers require nonzero storage even when this codec does not
     // implement the target's save record. Keep that compatibility reserve
@@ -308,7 +303,6 @@ CwsrCapacity cwsr_capacity_for_device(const config::KfdDeviceConfig &device, uin
   }
   const bool gfx12_5 = cwsr_layout_kind(arch) == CwsrLayoutKind::Gfx12_5;
   const auto properties = isa_properties(arch);
-  const auto producer = cwsr_producer_limits_for_device(device, num_xcc);
   if (producer.cus_per_xcc == 0)
     return {};
   const uint64_t active_cus = producer.cus_per_xcc;
@@ -335,15 +329,14 @@ CwsrCapacity cwsr_capacity_for_device(const config::KfdDeviceConfig &device, uin
     return {};
   const uint64_t control = (control_raw + kCwsrPageSize - 1) & ~(kCwsrPageSize - 1);
   const uint64_t record_total = waves * record_bytes;
-  if (control > kCwsrMaxAlignedBytes - record_total ||
-      device.lds_size_kb > kCwsrMaxAlignedBytes / 1024)
+  if (control > kCwsrMaxAlignedBytes - record_total || lds_size_kb > kCwsrMaxAlignedBytes / 1024)
     return {};
 
   // The CU allocator admits at most lds_size_kb of live workgroups per CU.
   // The codec saves each group's LDS separately, rounded to its record
   // granule. Allow one rounding remainder for every possible one-wave group.
   const uint64_t lds_granule = cwsr_lds_granule_bytes(arch);
-  const uint64_t lds_per_cu = uint64_t{device.lds_size_kb} * 1024;
+  const uint64_t lds_per_cu = uint64_t{lds_size_kb} * 1024;
   if (lds_per_cu > cwsr_max_encoded_lds_bytes(arch))
     return {};
   const uint64_t remaining = kCwsrMaxAlignedBytes - control - record_total;
@@ -542,7 +535,7 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   // This placement/encoding is rocjitsu-owned, not an AMD firmware format.
   if (!queue_context.empty()) {
     const uint64_t base = ctx_base + wave_state_offset;
-    write32(base, kQueueContextMagic);
+    write32(base, kCwsrPrivateContextMagic);
     write32(base + 4, static_cast<uint32_t>(queue_context.size()));
     for (size_t offset = 0; offset < queue_context.size(); offset += sizeof(uint32_t)) {
       uint32_t word = 0;
@@ -559,8 +552,8 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   write32(ctx_base + 8, layout.wave_state_offset);
   write32(ctx_base + 12, layout.wave_state_size);
   if (!runtime_debug_region) {
-    write32(ctx_base + 16, layout.debug_offset);
-    write32(ctx_base + 20, layout.debug_size);
+    write32(ctx_base + cwsr_debug_fields_offset(), layout.debug_offset);
+    write32(ctx_base + cwsr_debug_fields_offset() + sizeof(uint32_t), layout.debug_size);
     write32(ctx_base + 24, 0); // err_payload_addr lo
     write32(ctx_base + 28, 0); // err_payload_addr hi
     write32(ctx_base + 32, 0); // err_event_id
@@ -595,8 +588,8 @@ CwsrLayout serialize_queue_cwsr_bulk(
     image.resize(layout.wave_state_offset);
   const std::span<const uint8_t> bytes{image};
   write_block(ctx_base + layout.control_stack_offset, bytes.subspan(layout.control_stack_offset));
-  write_block(ctx_base,
-              bytes.first(runtime_debug_region ? kWaveStateHeaderBytes : kCwsrHeaderBytes));
+  write_block(ctx_base, bytes.first(runtime_debug_region ? cwsr_debug_fields_offset()
+                                                         : cwsr_header_size_bytes()));
   return layout;
 }
 
@@ -604,24 +597,25 @@ bool deserialize_queue_cwsr_context(
     uint64_t ctx_base, uint32_t area_size, std::vector<uint8_t> &context,
     const std::function<void(uint64_t, std::span<uint8_t>)> &read_block,
     uint32_t control_stack_capacity) {
-  if (!read_block || area_size < kCwsrHeaderBytes || (ctx_base & 3u) != 0 ||
+  if (!read_block || area_size < cwsr_header_size_bytes() || (ctx_base & 3u) != 0 ||
       ctx_base > UINT64_MAX - area_size)
     return false;
-  std::array<uint32_t, 6> header{};
+  constexpr size_t debug_fields_word = cwsr_debug_fields_offset() / sizeof(uint32_t);
+  std::array<uint32_t, debug_fields_word + 2> header{};
   read_block(ctx_base, {reinterpret_cast<uint8_t *>(header.data()), sizeof(header)});
   const auto layout = decode_cwsr_header({header[0], header[1], header[2], header[3]}, area_size,
                                          control_stack_capacity);
   if (!layout)
     return false;
-  const uint32_t debug_offset = header[4];
-  const uint32_t debug_size = header[5];
+  const uint32_t debug_offset = header[debug_fields_word];
+  const uint32_t debug_size = header[debug_fields_word + 1];
   const uint64_t limit = debug_size != 0 ? std::min(area_size, debug_offset) : area_size;
   const uint64_t offset = layout->wave_state_offset;
   if (offset + 8 > limit)
     return false;
   std::array<uint32_t, 2> prefix{};
   read_block(ctx_base + offset, {reinterpret_cast<uint8_t *>(prefix.data()), sizeof(prefix)});
-  if (prefix[0] != kQueueContextMagic)
+  if (prefix[0] != kCwsrPrivateContextMagic)
     return false;
   const uint64_t size = prefix[1];
   if (size == 0 || offset + 8 + ((size + 3) / 4) * 4 > limit)
@@ -636,7 +630,7 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                             std::vector<CwsrWaveState> &waves,
                             const std::function<uint32_t(uint64_t)> &read32, rj_code_arch_t arch,
                             uint32_t control_stack_capacity) {
-  if (!cwsr_layout_modelled(arch) || !read32 || area_size < kCwsrHeaderBytes ||
+  if (!cwsr_layout_modelled(arch) || !read32 || area_size < cwsr_header_size_bytes() ||
       (ctx_base & (alignof(uint32_t) - 1)) != 0 ||
       ctx_base > std::numeric_limits<uint64_t>::max() - area_size)
     return false;
@@ -821,7 +815,7 @@ bool deserialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, std::vector<CwsrWaveState> &waves,
     const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, rj_code_arch_t arch,
     uint32_t control_stack_capacity) {
-  if (!cwsr_layout_modelled(arch) || !read_block || area_size < kCwsrHeaderBytes ||
+  if (!cwsr_layout_modelled(arch) || !read_block || area_size < cwsr_header_size_bytes() ||
       (ctx_base & (alignof(uint32_t) - 1)) != 0 ||
       ctx_base > std::numeric_limits<uint64_t>::max() - area_size)
     return false;
@@ -854,21 +848,21 @@ uint32_t gfx1250_status(uint32_t status) {
 }
 
 uint32_t internal_status_from_gfx1250(const CwsrWaveState &state) {
-  uint32_t status = amdgpu::update_status_from_gfx12_state_priv(state.status, state.state_priv);
-  status &= ~amdgpu::Wavefront::kStatusHaltMask;
+  uint32_t status = update_status_from_gfx12_state_priv(state.status, state.state_priv);
+  status &= ~Wavefront::kStatusHaltMask;
   if (state.saved_status_halt)
-    status |= amdgpu::Wavefront::kStatusHaltMask;
+    status |= Wavefront::kStatusHaltMask;
   return status;
 }
 
 uint32_t internal_trapsts_from_gfx1250(const CwsrWaveState &state) {
-  uint32_t trapsts = amdgpu::update_trapsts_from_gfx12_excp_flag_priv(0, state.excp_flag_priv);
-  return amdgpu::update_trapsts_from_gfx12_excp_flag_user(trapsts, state.excp_flag_user);
+  uint32_t trapsts = update_trapsts_from_gfx12_excp_flag_priv(0, state.excp_flag_priv);
+  return update_trapsts_from_gfx12_excp_flag_user(trapsts, state.excp_flag_user);
 }
 
 } // namespace
 
-CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t arch, bool runtime_save) {
+CwsrWaveState build_cwsr_wave_state(Wavefront &wf, rj_code_arch_t arch, bool runtime_save) {
   CwsrWaveState state;
   const bool gfx12_5 = cwsr_layout_kind(arch) == CwsrLayoutKind::Gfx12_5;
   const uint32_t raw_status = wf.status_raw();
@@ -923,12 +917,12 @@ CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t arch, 
   if (gfx12_5) {
     uint32_t debug_status = application_status;
     if (state.wave_stopped)
-      debug_status |= amdgpu::Wavefront::kStatusHaltMask;
+      debug_status |= Wavefront::kStatusHaltMask;
     else
-      debug_status &= ~amdgpu::Wavefront::kStatusHaltMask;
-    state.state_priv = amdgpu::gfx12_state_priv_from_status(debug_status, state.flat_scratch != 0);
+      debug_status &= ~Wavefront::kStatusHaltMask;
+    state.state_priv = gfx12_state_priv_from_status(debug_status, state.flat_scratch != 0);
     state.status = gfx1250_status(application_status);
-    state.excp_flag_priv = amdgpu::gfx12_excp_flag_priv_from_trapsts(state.trapsts);
+    state.excp_flag_priv = gfx12_excp_flag_priv_from_trapsts(state.trapsts);
     state.excp_flag_user = (state.trapsts & 0x7Fu) | wf.gfx12_excp_flag_user_extra_raw();
     state.trap_ctrl = wf.gfx12_trap_ctrl_raw();
     state.xnack_state_priv = wf.gfx1250_xnack_state_priv_raw();
@@ -963,8 +957,8 @@ CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t arch, 
       state.vgprs[static_cast<size_t>(r) * 64 + lane] = wf.debug_read_vgpr(r, lane);
   state.lds.resize(wf.lds_size());
   if (!state.lds.empty())
-    static_cast<const amdgpu::Lds &>(wf.lds()).read(wf.lds_base(), state.lds.data(),
-                                                    static_cast<uint32_t>(state.lds.size()));
+    static_cast<const Lds &>(wf.lds()).read(wf.lds_base(), state.lds.data(),
+                                            static_cast<uint32_t>(state.lds.size()));
   return state;
 }
 
@@ -988,9 +982,8 @@ void prepare_cwsr_wave_states(std::vector<CwsrWaveState> &waves) {
   }
 }
 
-std::optional<std::vector<size_t>>
-match_cwsr_wave_states(std::span<const CwsrWaveState> states,
-                       std::span<amdgpu::Wavefront *const> waves) {
+std::optional<std::vector<size_t>> match_cwsr_wave_states(std::span<const CwsrWaveState> states,
+                                                          std::span<Wavefront *const> waves) {
   if (states.size() != waves.size())
     return std::nullopt;
   std::vector<size_t> matches;
@@ -1022,11 +1015,16 @@ match_cwsr_wave_states(std::span<const CwsrWaveState> states,
   return matches;
 }
 
-void apply_cwsr_to_wave(amdgpu::Wavefront &wave, const CwsrWaveState &state, rj_code_arch_t arch) {
+void apply_cwsr_to_wave(Wavefront &wave, const CwsrWaveState &state, rj_code_arch_t arch,
+                        CwsrRestorePolicy policy) {
+  const bool restore_saved_registers = policy == CwsrRestorePolicy::RestoreSavedRegisters;
+  if (restore_saved_registers)
+    for (uint32_t t = 0; t < state.ttmps.size(); ++t)
+      wave.set_ttmp(t, state.ttmps[t]);
   if (!state.lds.empty())
     wave.lds().write(wave.lds_base(), state.lds.data(), wave.lds_size());
   constexpr uint32_t kModeDebugEnMask = 1u << 11;
-  constexpr uint32_t kStatusHaltMask = amdgpu::Wavefront::kStatusHaltMask;
+  constexpr uint32_t kStatusHaltMask = Wavefront::kStatusHaltMask;
   const bool gfx12_5 = cwsr_layout_kind(arch) == CwsrLayoutKind::Gfx12_5;
   wave.pc = state.pc;
   // Mirror of the un-shadowing in build_cwsr_wave_state(): while a handler is
@@ -1076,8 +1074,6 @@ void apply_cwsr_to_wave(amdgpu::Wavefront &wave, const CwsrWaveState &state, rj_
   }
   wave.set_debug_wave_id(state.wave_id);
   wave.set_queue_packet_id(state.queue_packet_id);
-  const uint32_t stack_pointer = wave.debug_read_sgpr(32);
-  const uint32_t stack_frame = wave.debug_read_sgpr(33);
   // rocm-dbgapi may submit a lightweight control-state update with no register
   // payload after displaced stepping. Preserve the SGPR/VGPR values produced
   // by the displaced instruction in that case rather than restoring zeros.
@@ -1089,7 +1085,7 @@ void apply_cwsr_to_wave(amdgpu::Wavefront &wave, const CwsrWaveState &state, rj_
   // the round trip from disagreeing about which slots carry register state.
   if (!state.sgprs.empty())
     for (uint32_t s = 0; s < state.num_sgprs && s < state.sgprs.size(); ++s)
-      if (s != 32 && s != 33 && !cwsr_sgpr_slot_is_aliased(s, arch))
+      if (!cwsr_sgpr_slot_is_aliased(s, arch) && (restore_saved_registers || (s != 32 && s != 33)))
         wave.debug_write_sgpr(s, state.sgprs[s]);
   if (!state.vgprs.empty())
     for (uint32_t r = 0; r < state.num_vgprs; ++r)
@@ -1103,8 +1099,6 @@ void apply_cwsr_to_wave(amdgpu::Wavefront &wave, const CwsrWaveState &state, rj_
   // around the loop, which the loop cannot reach anyway (scratch_base_ is a
   // standalone member), so the only effect was discarding the debugger's edit.
   wave.set_scratch_base(state.flat_scratch);
-  wave.debug_write_sgpr(32, stack_pointer);
-  wave.debug_write_sgpr(33, stack_frame);
   const bool single_step = !state.wave_stopped && (gfx12_5 ? (state.trap_ctrl & (1u << 9)) != 0
                                                            : (state.mode & kModeDebugEnMask) != 0);
   wave.set_debug_single_step(single_step);
@@ -1114,5 +1108,4 @@ void apply_cwsr_to_wave(amdgpu::Wavefront &wave, const CwsrWaveState &state, rj_
   // is restored, so no wave runs against a partially restored queue.
 }
 
-} // namespace kmd
-} // namespace rocjitsu
+} // namespace rocjitsu::amdgpu

@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 
 rj_add_object_library(rocjitsu_kmd
-    cwsr.cpp
     events.cpp
     guest_kfd.cpp
     legacy_gpu_vm.cpp
