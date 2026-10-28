@@ -212,8 +212,9 @@ protected:
 } // namespace
 
 TEST_F(DdaReduceScatterFabricLL, LinesPublishedBeforeLaunchAreReduced) {
-  publishPeer((kSelf + 1) % kRanks);
-  publishPeer((kSelf + 2) % kRanks);
+  for (int r = 1; r < kRanks; ++r) {
+    publishPeer((kSelf + r) % kRanks);
+  }
   launch();
   ASSERT_TRUE(finishes()) << "kernel did not finish with every line already fresh";
   expectReduced();
