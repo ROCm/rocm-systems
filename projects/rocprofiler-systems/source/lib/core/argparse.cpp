@@ -846,33 +846,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.reg.processed_environs.emplace("cout_output");
     }
 
-    if(_data.reg.environ_filter("profile_diff", _data))
-    {
-        _parser
-            .add_argument(
-                { "--profile-diff" },
-                "Generate a diff output b/t the profile collected and an existing "
-                "profile from another run Accepts 1-2 parameters corresponding to "
-                "the input path and the input prefix")
-            .min_count(1)
-            .max_count(2)
-            .dtype("path [prefix]")
-            .action([&](parser_t& p) {
-                auto _v = p.get<strvec_t>("profile-diff");
-                update_env(_data, env_vars::DIFF_OUTPUT, true);
-                update_env(_data, env_vars::INPUT_PATH, _v.at(0));
-                if(_v.size() > 1)
-                {
-                    update_env(_data, env_vars::INPUT_PREFIX, _v.at(1));
-                }
-            });
-
-        _data.reg.processed_environs.emplace("profile_diff");
-        _data.reg.processed_environs.emplace("diff_output");
-        _data.reg.processed_environs.emplace("input_path");
-        _data.reg.processed_environs.emplace("input_prefix");
-    }
-
     _parser.start_group(
         "HOST/DEVICE (PROCESS SAMPLING) OPTIONS",
         "Process sampling is background measurements for resources available to the "
