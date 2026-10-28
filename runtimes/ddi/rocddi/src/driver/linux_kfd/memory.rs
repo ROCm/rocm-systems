@@ -564,6 +564,10 @@ impl DeviceVm {
         (self.base, self.limit)
     }
 
+    pub(super) fn endpoint_id(&self) -> [u8; 16] {
+        self.identity
+    }
+
     pub(super) fn next_sdma_engine_id(&self, count: u32) -> u32 {
         debug_assert!(count != 0);
         self.sdma_next_engine.fetch_add(1, Ordering::Relaxed) % count

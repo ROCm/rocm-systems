@@ -695,7 +695,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
             Some(VirtualMemoryPlacement::Device(id)) => runtime
                 .gpus
                 .iter()
-                .position(|gpu| gpu.info().native_gpu_id == id)
+                .position(|gpu| gpu.endpoint.id == id)
                 .map_or(HsaMemoryPool { handle: 0 }, |index| {
                     HsaState::gpu_pool(index, GpuPoolKind::Coarse)
                 }),
@@ -836,10 +836,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_vmem_info(
                 let agent = match memory.info().placement {
                     Some(VirtualMemoryPlacement::System) => HsaAgent { handle: CPU_AGENT },
                     Some(VirtualMemoryPlacement::Device(id)) => {
-                        let Some(index) = runtime
-                            .gpus
-                            .iter()
-                            .position(|gpu| gpu.info().native_gpu_id == id)
+                        let Some(index) = runtime.gpus.iter().position(|gpu| gpu.endpoint.id == id)
                         else {
                             return INVALID_ALLOCATION;
                         };
