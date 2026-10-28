@@ -710,10 +710,13 @@ pub(crate) unsafe extern "C" fn wait(
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 {
     crate::support::boundary(|| {
         unsafe {
-            let queue = exclusive(pointer.cast::<Queue>())?;
+            let queue = object(pointer.cast::<Queue>())?;
             if queue.mappings.load(Ordering::Acquire) != 0 {
                 return Err(BUSY);
             }
+            // Mapping children cannot borrow this queue after the preflight.
+            // The caller serializes direct queue calls with destruction.
+            let queue = exclusive(pointer.cast::<Queue>())?;
             let mut observation_error = None;
             if !queue.destroying.load(Ordering::Acquire) {
                 // A work-only BUSY rejection also leaves all public queue uses

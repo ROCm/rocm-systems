@@ -1787,10 +1787,13 @@ pub(crate) unsafe extern "C" fn destroy(
                 let instance = &*(*(*pointer).scope).instance;
                 unlink_host_backing(instance, pointer)?;
             }
-            let memory = exclusive(pointer)?;
+            let memory = object(pointer)?;
             if memory.children.load(Ordering::Acquire) != 0 {
                 return Err(BUSY);
             }
+            // Child mappings and scratch users have retired; direct access to
+            // this memory handle is serialized by the caller.
+            let memory = exclusive(pointer)?;
             memory.freeing = true;
             let release = match memory.release_native_for_destroy() {
                 Ok(release) => release,
