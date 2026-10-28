@@ -7,10 +7,14 @@
 //! destruction succeeds. Packet-format policy and public ABI behavior remain
 //! responsibilities of the frontend using rocddi.
 
+mod exception;
 mod layout;
 mod scratch;
 mod types;
 pub use super::kernel_queue::*;
+pub use exception::{
+    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, replace_scratch_owner,
+};
 pub(crate) use layout::{AqlControlLayout, AqlQueueHeader};
 pub use scratch::{MAX_PRIVATE_SEGMENT_BYTES, ScratchPlan, plan_scratch};
 pub use types::*;

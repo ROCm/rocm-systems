@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::api::queue::index::*;
+use rocddi::device::gpu::queue::replace_scratch_owner;
 use std::sync::atomic::AtomicUsize;
 
 /// Independent fixture positions for the public AMD queue control ABI.
@@ -54,10 +55,11 @@ fn failed_scratch_update_retains_both_old_and_candidate_owners() {
     let mut current = Some(DropCount(old_drops.clone()));
     let mut uncertain = Vec::new();
     assert!(matches!(
-        update_scratch_owner(
+        replace_scratch_owner(
             &mut current,
             &mut uncertain,
             DropCount(new_drops.clone()),
+            OUT_OF_RESOURCES,
             || Err(ERROR),
         ),
         Err(ERROR)
@@ -79,10 +81,11 @@ fn scratch_update_unwind_keeps_candidate_owned() {
     let mut current = None;
     let mut uncertain = Vec::new();
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = update_scratch_owner(
+        let _ = replace_scratch_owner(
             &mut current,
             &mut uncertain,
             DropCount(drops.clone()),
+            OUT_OF_RESOURCES,
             || -> Result<(), Status> { panic!("injected scratch update unwind") },
         );
     }));
