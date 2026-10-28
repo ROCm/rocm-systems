@@ -942,7 +942,8 @@ TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
     SCOPED_TRACE(name);
 
     config::LoadedConfig loaded;
-    if (name == "gfx1250_mi455x_kmd_2node_net.json") {
+    if (name == "gfx1250_mi455x_kmd_2node_net.json" ||
+        name == "gfx1250_mi455x_kmd_4node_2gpu_if.json") {
       ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), loaded, "node0"));
     } else {
       ASSERT_TRUE(test::load_valid_config(entry.path().string(), loaded));

@@ -85,6 +85,15 @@ public:
     for (auto *xcd : xcds_)
       xcd->set_apertures(shared_base, shared_limit, private_base, private_limit);
   }
+  void set_vmid_apertures(uint32_t vmid, uint64_t shared_base, uint64_t shared_limit,
+                          uint64_t private_base, uint64_t private_limit) {
+    for (auto *xcd : xcds_)
+      xcd->set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit);
+  }
+  void clear_vmid_apertures() {
+    for (auto *xcd : xcds_)
+      xcd->clear_vmid_apertures();
+  }
   /// @brief Install legacy backing during configuration.
   /// @details A non-null backing cannot be replaced with a different object.
   /// Reusing the same pointer is idempotent and repairs the internal binding
@@ -170,6 +179,14 @@ public:
     for (auto *xcd_ptr : xcds_)
       if (auto *cp = xcd_ptr->command_processor())
         fn(cp);
+  }
+
+  /// @brief Apply a function to every compute unit without exposing queue owners.
+  template <typename Fn> void for_each_cu(Fn &&fn) {
+    for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      for (auto *cu : cp->compute_units())
+        fn(cu);
+    });
   }
 
   /// @brief Update every queue owner that scans a process doorbell page.

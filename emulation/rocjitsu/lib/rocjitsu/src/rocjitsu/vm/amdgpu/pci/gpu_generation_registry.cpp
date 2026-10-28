@@ -12,9 +12,10 @@ namespace {
 /// @brief KFD target version gfx1250 reports.
 constexpr uint32_t kGfx1250TargetVersions[] = {120500};
 
-/// @details One row per generation this image can present. Adding a part is a
-/// row plus its profile, which is the whole point of the indirection: nothing
-/// here needs editing anywhere else to answer for a new target.
+/// @details A row and its profile register a generation for discovery and
+/// target-version answers. Full PCI/VFIO support also requires matching
+/// register behavior in GraphicsBlockModel, the memory-hub layout table, and
+/// the NBIF/HDP layout table for the new IP revisions.
 constexpr GpuGenerationDescriptor kGenerations[] = {
     {.id = "gfx1250",
      .gfx_target_versions = kGfx1250TargetVersions,
@@ -29,7 +30,8 @@ constexpr GpuGenerationDescriptor kGenerations[] = {
              .max_waves_per_simd = 16,
              .max_scratch_slots_per_cu = 32,
              .lds_size_kb = 320,
-         }},
+         },
+     .pcie = {.max_link_speed = 5, .max_link_width = 16}},
 };
 
 } // namespace

@@ -220,13 +220,27 @@ RJ_API_EXPORT void rj_vm_retain(rj_vm_t *vm);
 /// @param[in] vm VM handle (may be NULL, in which case this is a no-op).
 RJ_API_EXPORT void rj_vm_release(rj_vm_t *vm);
 
-/// @brief Mark a VM for destruction.
+/// @brief Close all processes and mark a VM for destruction only on success.
+///
+/// @details The host must first stop and join an asynchronous rj_vm_run call.
+/// If a final process writeback fails, the VM, plugins, and reference-count
+/// state remain intact. The caller retains the same handle and may retry.
+/// @param[in] vm VM to destroy (may be NULL).
+/// @retval ROCJITSU_STATUS_SUCCESS All process closes completed and the VM was
+/// marked for destruction.
+/// @retval ROCJITSU_STATUS_ERROR A process close failed; errno holds the driver
+/// error and the handle remains valid for retry.
+RJ_API_EXPORT rj_status_t rj_vm_destroy_checked(rj_vm_t *vm);
+
+/// @brief Compatibility wrapper for rj_vm_destroy_checked.
 ///
 /// @details If the reference count is already 0, frees immediately. Otherwise,
 /// the VM is freed when the last rj_vm_release drops the reference count to 0.
 /// No rj_vm_step or rj_vm_run call may be active. An asynchronous host must call
 /// rj_vm_request_exit and wait for rj_vm_run to return before destroying the VM;
-/// this ensures plugin shutdown cannot overlap simulation callbacks.
+/// this ensures plugin shutdown cannot overlap simulation callbacks. If final
+/// process close fails, this void wrapper retains the VM and logs a diagnostic;
+/// callers that need completion or retry must use rj_vm_destroy_checked.
 /// @param[in] vm VM to destroy (may be NULL).
 RJ_API_EXPORT void rj_vm_destroy(rj_vm_t *vm);
 
@@ -308,12 +322,19 @@ RJ_API_EXPORT rj_status_t rj_vm_device_open(rj_vm_t *vm, rj_client_pid_t client_
 /// @brief Close a specific KFD process by ID.
 /// @param[in] vm VM handle.
 /// @param[in] process_id The process ID to close (0 closes the local process).
+/// @return ROCJITSU_STATUS_SUCCESS on completion, or ROCJITSU_STATUS_ERROR with
+/// errno set to the driver's failure code. A failed final close remains retryable
+/// with the same process ID while the VM remains alive.
 RJ_API_EXPORT rj_status_t rj_vm_device_close(rj_vm_t *vm, uint32_t process_id);
 
 /// @brief Close every registered KFD process, waking any parked event waiters.
 /// @details Daemon-teardown helper: closes all live processes so client threads
-/// blocked in an infinite-timeout WAIT_EVENTS unblock and can be joined.
+/// blocked in an infinite-timeout WAIT_EVENTS unblock and can be joined. It also
+/// retries pending final closes and reports the first failure after visiting all
+/// processes.
 /// @param[in] vm VM handle.
+/// @return ROCJITSU_STATUS_SUCCESS when all closes complete, or
+/// ROCJITSU_STATUS_ERROR with errno set to the first driver's failure code.
 RJ_API_EXPORT rj_status_t rj_vm_close_all_devices(rj_vm_t *vm);
 
 /// @brief Map device memory (local mode).
@@ -327,9 +348,13 @@ RJ_API_EXPORT rj_status_t rj_vm_device_map_as(rj_vm_t *vm, uint32_t process_id, 
 /// @brief Unmap device memory (local mode).
 /// @param[in] vm VM handle.
 /// @param[in] unmap Unmapping descriptor.
+/// @return ROCJITSU_STATUS_SUCCESS on completion, or ROCJITSU_STATUS_ERROR with
+/// errno from the driver when unmapping fails.
 RJ_API_EXPORT rj_status_t rj_vm_device_unmap(rj_vm_t *vm, rj_vm_unmap_t *unmap);
 
 /// @brief Unmap device memory for a specific process (daemon mode).
+/// @return ROCJITSU_STATUS_SUCCESS on completion, or ROCJITSU_STATUS_ERROR with
+/// errno from the driver when unmapping fails.
 RJ_API_EXPORT rj_status_t rj_vm_device_unmap_as(rj_vm_t *vm, uint32_t process_id,
                                                 rj_vm_unmap_t *unmap);
 
@@ -366,6 +391,13 @@ RJ_API_EXPORT rj_status_t rj_vm_get_shared_mem(rj_vm_t *vm, int64_t offset, rj_h
 /// @brief Get the borrowed backing memory handle for a specific process (daemon mode).
 /// @details The VM retains ownership; the caller must not close the handle.
 RJ_API_EXPORT rj_status_t rj_vm_get_shared_mem_as(rj_vm_t *vm, uint32_t process_id, int64_t offset,
+                                                  rj_handle_t *handle);
+
+/// @brief Duplicate a process backing handle for transfer to another process.
+/// @details The caller owns and must close a nonnegative handle. Returns
+/// ROCJITSU_STATUS_SUCCESS with -1 in @p handle when no backing exists, or
+/// ROCJITSU_STATUS_ERROR with -1 when duplication fails.
+RJ_API_EXPORT rj_status_t rj_vm_dup_shared_mem_as(rj_vm_t *vm, uint32_t process_id, int64_t offset,
                                                   rj_handle_t *handle);
 
 /// @brief Request the simulation engine to stop.

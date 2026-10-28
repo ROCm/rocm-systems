@@ -48,6 +48,14 @@ public:
 
 class CommandProcessorCloseTestAccess {
 public:
+  static bool retain_pending_execution(CommandProcessor &command_processor) {
+    std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
+    if (command_processor.compute_queues_.size() != 1)
+      return false;
+    command_processor.compute_queues_.front().entries.emplace_back();
+    return true;
+  }
+
   static bool fetch_first_queue(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
     if (command_processor.compute_queues_.size() != 1)
@@ -847,6 +855,10 @@ TEST(GpuVmService, TwoQueuesRetainOneAddressSpace) {
   ASSERT_TRUE(second);
   EXPECT_EQ(command_processor.queue_address_space_for_test(1, 7), address_space);
   EXPECT_EQ(command_processor.queue_address_space_for_test(2, 7), address_space);
+  EXPECT_EQ(command_processor.queue_process_identity_kind_for_test(1, 7),
+            ProcessIdentityKind::Pasid);
+  EXPECT_EQ(command_processor.queue_process_identity_kind_for_test(2, 7),
+            ProcessIdentityKind::Pasid);
   ASSERT_TRUE(gpu_vm.lookup(address_space));
   EXPECT_EQ(gpu_vm.lookup(address_space)->queue_references, 2u);
   EXPECT_FALSE(gpu_vm.unregister_address_space(address_space));
@@ -2477,6 +2489,25 @@ TEST(GpuVmService, AqlReconfigureRejectsInvalidRingGeometry) {
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
 }
 
+TEST(GpuVmService, PreemptAqlCloseCancelsPendingExecution) {
+  GpuVm gpu_vm;
+  GpuQueueRegistry queues(gpu_vm);
+  CommandProcessor command_processor("cp");
+  const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
+  command_processor.set_gpu_vm(&gpu_vm);
+  const QueueHandle queue =
+      queues.register_queue(queue_request(address_space, command_processor, 1));
+  ASSERT_TRUE(queue);
+  ASSERT_TRUE(CommandProcessorCloseTestAccess::retain_pending_execution(command_processor));
+
+  EXPECT_EQ(queues.unregister_queue(queue).status, QueueCloseStatus::Busy);
+  EXPECT_EQ(command_processor.registered_queue_count_for_test(), 1u);
+  EXPECT_EQ(queues.unregister_queue(queue, QueueCloseMode::Preempt).status,
+            QueueCloseStatus::Closed);
+  EXPECT_EQ(command_processor.registered_queue_count_for_test(), 0u);
+  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
 TEST(GpuVmService, GracefulAqlCloseWaitsForRetiredCursorPublication) {
   GpuVm gpu_vm;
   CommandProcessor command_processor("cp");
@@ -2497,6 +2528,8 @@ TEST(GpuVmService, GracefulAqlCloseWaitsForRetiredCursorPublication) {
   EXPECT_EQ(blocked.status, QueueCloseStatus::Busy);
   EXPECT_TRUE(queues.contains(queue));
   EXPECT_EQ(command_processor.registered_queue_count_for_test(), 1u);
+  EXPECT_EQ(queues.unregister_queue(queue, QueueCloseMode::Preempt).status, QueueCloseStatus::Busy);
+  EXPECT_TRUE(queues.contains(queue));
 
   ASSERT_TRUE(CommandProcessorCloseTestAccess::retry_cursor_publication(command_processor));
   EXPECT_TRUE(queues.unregister_queue(queue));
@@ -2521,6 +2554,8 @@ TEST(GpuVmService, GracefulAqlCloseWaitsForCompletionPublicationRetry) {
   EXPECT_EQ(blocked.status, QueueCloseStatus::Busy);
   EXPECT_TRUE(queues.contains(queue));
   EXPECT_EQ(command_processor.registered_queue_count_for_test(), 1u);
+  EXPECT_EQ(queues.unregister_queue(queue, QueueCloseMode::Preempt).status, QueueCloseStatus::Busy);
+  EXPECT_TRUE(queues.contains(queue));
 
   ASSERT_TRUE(
       CommandProcessorCloseTestAccess::clear_idle_completion_publication(command_processor));
@@ -2545,6 +2580,9 @@ TEST(GpuVmService, TerminalAqlPublicationFailureRequiresForceCancel) {
   EXPECT_EQ(faulted.status, QueueCloseStatus::Faulted);
   EXPECT_TRUE(queues.contains(queue));
   EXPECT_EQ(command_processor.registered_queue_count_for_test(), 1u);
+  EXPECT_EQ(queues.unregister_queue(queue, QueueCloseMode::Preempt).status,
+            QueueCloseStatus::Faulted);
+  EXPECT_TRUE(queues.contains(queue));
 
   const QueueCloseResult canceled = queues.unregister_queue(queue, QueueCloseMode::ForceCancel);
   EXPECT_EQ(canceled.status, QueueCloseStatus::Closed);

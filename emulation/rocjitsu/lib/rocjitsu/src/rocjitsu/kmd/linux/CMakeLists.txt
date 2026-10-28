@@ -4,6 +4,7 @@
 rj_add_object_library(rocjitsu_kmd
     cwsr.cpp
     events.cpp
+    gpu_alias_ingress.cpp
     guest_kfd.cpp
     legacy_gpu_vm.cpp
     libc_passthrough.cpp

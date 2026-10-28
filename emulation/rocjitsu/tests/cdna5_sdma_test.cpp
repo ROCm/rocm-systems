@@ -520,12 +520,27 @@ private:
 
 class TranslatedSdmaQueueForTest {
 public:
-  explicit TranslatedSdmaQueueForTest(Gfx1250Sim &sim, amdgpu::InterruptSink interrupt_sink = {})
+  explicit TranslatedSdmaQueueForTest(Gfx1250Sim &sim, amdgpu::InterruptSink interrupt_sink = {},
+                                      bool enforce_dst_grant = false)
       : sim_(sim), legacy_vm_(sim.soc->gpu_vm(), sim.soc->memory()), process_(kProcessId),
         interrupt_sink_(std::move(interrupt_sink)) {
-    address_space_ = legacy_vm_.register_address_space(kProcessId, &process_.page_table_,
-                                                       &process_.page_table_mutex_,
-                                                       process_.page_table_generation());
+    std::function<amdgpu::VmAccessAdmission(uint64_t, std::size_t, amdgpu::VmAccessKind)> admission;
+    if (enforce_dst_grant) {
+      admission = [this](uint64_t address, std::size_t size, amdgpu::VmAccessKind) {
+        const auto grant = process_.gpu_access_grant(1250, address, size);
+        return amdgpu::VmAccessAdmission{.outcome = grant.allowed
+                                                        ? amdgpu::VmAccessOutcome::Complete
+                                                        : amdgpu::VmAccessOutcome::Faulted,
+                                         .generation = grant.generation,
+                                         .cacheable = grant.cacheable};
+      };
+    }
+    address_space_ = legacy_vm_.register_address_space(
+        kProcessId, {.page_table = &process_.page_table_,
+                     .page_table_mutex = &process_.page_table_mutex_,
+                     .page_table_generation = process_.page_table_generation(),
+                     .request_mutex = {},
+                     .access_admission = std::move(admission)});
     if (!address_space_)
       throw std::runtime_error("cannot register the translated SDMA test address space");
     process_.map_pages(kRingVa, ring_.data(), ring_.size() * sizeof(ring_[0]));
@@ -536,6 +551,16 @@ public:
     process_.map_pages(kDst2Va, dst2_.data(), dst2_.size());
     process_.map_pages(kSignalVa, signal_.data(), signal_.size() * sizeof(signal_[0]));
     process_.map_pages(kPollVa, poll_.data(), poll_.size() * sizeof(poll_[0]));
+
+    if (enforce_dst_grant) {
+      std::lock_guard lock(process_.alloc_mutex_);
+      KfdProcess::GpuAllocation allocation{};
+      allocation.gpu_va = kDstVa;
+      allocation.size = dst_.size();
+      allocation.handle = 1;
+      process_.allocations_.emplace(allocation.handle, std::move(allocation));
+      process_.publish_gpu_grants_locked();
+    }
 
     register_queue(kQueueStateVa);
   }
@@ -592,6 +617,19 @@ public:
   uint64_t dst2_va() const { return kDst2Va; }
   uint64_t signal_va() const { return kSignalVa; }
   uint64_t poll_va() const { return kPollVa; }
+
+  void set_dst_grant(bool granted) {
+    std::lock_guard lock(process_.alloc_mutex_);
+    auto &allocation = process_.allocations_.at(1);
+    if (granted) {
+      if (allocation.mapped_device_ids.insert(1250).second)
+        allocation.admission_generations[1250] = process_.next_gpu_admission_generation_locked();
+    } else {
+      allocation.mapped_device_ids.erase(1250);
+      allocation.admission_generations.erase(1250);
+    }
+    process_.publish_gpu_grants_locked();
+  }
 
   void set_passthrough(bool passthrough) {
     if (!legacy_vm_.set_passthrough(address_space_, passthrough))
@@ -1394,6 +1432,48 @@ TEST(Gfx1250SdmaTest, ConstFillClippedDestinationRejectsWithoutPartialTransfer) 
   EXPECT_EQ(queue.read_idx(), 0u);
   EXPECT_TRUE(std::ranges::all_of(queue.dst(), queue.dst() + kFillBytes,
                                   [](uint8_t value) { return value == kInitialByte; }));
+}
+
+TEST(Gfx1250SdmaTest, PinnedPacketHonorsLiveKfdDestinationGrant) {
+  class RecordingReporter : public amdgpu::MemoryFaultReporter {
+  public:
+    void report_memory_fault(uint32_t, uint64_t address, amdgpu::MemoryFaultCause cause) override {
+      addresses.push_back(address);
+      causes.push_back(cause);
+    }
+    std::vector<uint64_t> addresses;
+    std::vector<amdgpu::MemoryFaultCause> causes;
+  };
+
+  for (bool revoke_after_grant : {false, true}) {
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
+    TranslatedSdmaQueueForTest queue(sim, {}, /*enforce_dst_grant=*/true);
+    RecordingReporter reporter;
+    queue.set_fault_reporter(&reporter);
+    if (revoke_after_grant) {
+      queue.set_dst_grant(true);
+      queue.store<uint32_t>(queue.dst_va(), 0x11223344u);
+      queue.set_dst_grant(false);
+    }
+
+    auto *packet = queue.ring();
+    packet[0] = kSdmaOpConstFill | (0x2u << 30);
+    write_sdma_qword_va(packet, 1, 2, queue.dst_va());
+    packet[3] = 0x55667788u;
+    packet[4] = sizeof(uint32_t) - 1;
+    queue.submit(5);
+
+    EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Faulted);
+    EXPECT_EQ(queue.read_idx(), 0u);
+    uint32_t destination = 0;
+    std::memcpy(&destination, queue.dst(), sizeof(destination));
+    EXPECT_EQ(destination, revoke_after_grant ? 0x11223344u : 0u);
+    ASSERT_EQ(reporter.addresses.size(), 1u);
+    EXPECT_EQ(reporter.addresses.front(), queue.dst_va());
+    EXPECT_EQ(reporter.causes.front(), amdgpu::MemoryFaultCause::NotPresent);
+    queue.set_fault_reporter(nullptr);
+  }
 }
 
 // A byte count that runs past the end of the address space is a malformed

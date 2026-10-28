@@ -1,0 +1,20 @@
+diff --git a/lib/pci.c b/lib/pci.c
+--- a/lib/pci.c
++++ b/lib/pci.c
+@@ -57,7 +57,15 @@ get_bar_eff_size(vfu_ctx_t *vfu_ctx, uint16_t bar_index)
+     assert(vfu_ctx != NULL);
+     if (bar_index % 2 == 1) {
+         if (vfu_ctx->reg_info[bar_index - 1].flags & VFU_REGION_FLAG_64_BITS) {
+-            return vfu_ctx->reg_info[bar_index - 1].size >> 32;
++            uint64_t size = vfu_ctx->reg_info[bar_index - 1].size;
++            uint64_t upper_size = size >> 32;
++
++            /* A sub-4GiB 64-bit BAR still has a fully writable upper
++             * address register. Zero would mask every high address bit. */
++            if (size != 0 && upper_size == 0) {
++                return 1;
++            }
++            return upper_size;
+         }
+     }
+     return vfu_ctx->reg_info[bar_index].size;

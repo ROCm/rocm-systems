@@ -191,7 +191,15 @@ bool map_userptr(SimulatedKfd *driver, uint32_t pid, void *host, size_t size) {
   alloc.size = size;
   alloc.gpu_id = kGpuId;
   alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
-  return driver->ioctl(pid, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc) == 0;
+  if (driver->ioctl(pid, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc) != 0)
+    return false;
+
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  return driver->ioctl(pid, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map) == 0 && map.n_success == 1;
 }
 
 // A fanned-out dispatch of a kernel that spills to private memory, submitted
