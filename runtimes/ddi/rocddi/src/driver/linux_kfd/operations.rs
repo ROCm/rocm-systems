@@ -431,25 +431,33 @@ impl GpuInstrumentationOperations for LinuxKfdDriver {
         &self,
         device: &DeviceState,
         size: u32,
-        timeout: &mut u32,
-        bytes_copied: &mut u32,
+        timeout: u32,
         destination: Option<usize>,
-        data_loss: &mut bool,
-    ) -> Result<(), Error> {
+    ) -> Result<SpmDestinationReport, SpmDestinationFailure> {
         let mut args = uapi::Spm {
             destination: destination.map_or(0, |address| address as u64),
             size,
             operation: uapi::SPM_OP_SET_DESTINATION,
-            timeout: *timeout,
+            timeout,
             gpu_id: device.native.gpu_id,
             bytes_copied: 0,
             has_data_loss: 0,
         };
         let result = device.vm.kfd().spm(&mut args);
-        *timeout = args.timeout;
-        *bytes_copied = args.bytes_copied;
-        *data_loss = args.has_data_loss != 0;
-        result.map_err(|source| native_error("KFD SPM destination update", source))
+        let report = SpmDestinationReport {
+            timeout: args.timeout,
+            bytes_copied: args.bytes_copied,
+            data_loss: args.has_data_loss != 0,
+        };
+        result.map_or_else(
+            |source| {
+                Err(SpmDestinationFailure {
+                    error: native_error("KFD SPM destination update", source),
+                    report,
+                })
+            },
+            |()| Ok(report),
+        )
     }
 }
 pub(super) fn marketing_name(contents: &str, device_id: u32, revision: u32) -> Option<String> {
