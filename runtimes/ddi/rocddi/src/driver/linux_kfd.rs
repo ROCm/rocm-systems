@@ -763,7 +763,7 @@ mod tests {
             file,
             Arc::new(move |call| {
                 let sys::Call::RuntimeEnable(args) = call else {
-                    unreachable!("unexpected KFD call")
+                    return Err(std::io::Error::other("unexpected KFD call"));
                 };
                 assert_eq!(args.mode_mask, 0);
                 if observed.fetch_add(1, Ordering::Relaxed) == 0 {
