@@ -225,10 +225,10 @@ class Bench_base(ABC):
 
     def get_gfx_arch(self, device: int) -> str:
         """Retrieve the gfx architecture."""
-        arch_str = hip.hipGetDeviceProperties(device).gcnArchName
-
         # Parse out only gfx
-        return arch_str.split(":", 1)[0]
+        return (
+            hip.hipGetDeviceProperties(device).gcnArchName.split(":")[0].split("-")[0]
+        )
 
     def set_cache_kernel_selector(self) -> None:
         self.cache_kernel_selector = {}
