@@ -13,7 +13,6 @@
 #include "fakes/libc_seam_undef.h"
 
 #include <arpa/inet.h>
-#include <dlfcn.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/mman.h>
@@ -38,6 +37,7 @@ std::vector<MicroFwriteCall> g_fwriteCalls;
 std::vector<MicroPerrorCall> g_perrorCalls;
 std::vector<int> g_closedFds;
 std::vector<void*> g_freedPointers;
+std::vector<void (*)(void)> g_atexitFns;
 std::vector<FILE*> g_fprintfCalls;
 std::vector<int> g_writtenFds;
 std::vector<int> g_readFds;
@@ -286,6 +286,52 @@ static void DefaultFree(void* ptr) {
   std::free(ptr);
 }
 
+// Fails rather than forwarding: the default read and close are fakes, and real files would make results
+// host-dependent.
+static int DefaultOpen(const char*, int, mode_t) {
+  errno = ENOENT;
+  return -1;
+}
+
+// The filesystem and ioctl defaults below fail too, so a unit never sees the host.
+static FILE* DefaultFopen(const char*, const char*) {
+  errno = ENOENT;
+  return nullptr;
+}
+
+static DIR* DefaultOpendir(const char*) {
+  errno = ENOENT;
+  return nullptr;
+}
+
+// Only reached with a DIR* a test hook handed out, so forward to real libc.
+static struct dirent* DefaultReaddir(DIR* dir) { return ::readdir(dir); }
+static int DefaultClosedir(DIR* dir) { return ::closedir(dir); }
+
+static ssize_t DefaultReadlink(const char*, char*, size_t) {
+  errno = ENOENT;
+  return -1;
+}
+
+static int DefaultIoctl(int, unsigned long, void*) {
+  errno = ENOTTY;
+  return -1;
+}
+
+static int DefaultAtexit(void (*fn)(void)) {
+  g_atexitFns.push_back(fn);
+  return 0;
+}
+
+static int DefaultClockGettime(clockid_t clk, struct timespec* ts) { return ::clock_gettime(clk, ts); }
+static int DefaultPosixMemalign(void** ptr, size_t alignment, size_t size) {
+  return ::posix_memalign(ptr, alignment, size);
+}
+static int DefaultPthreadCreate(pthread_t* thread, const pthread_attr_t* attr, void* (*fn)(void*), void* arg) {
+  return ::pthread_create(thread, attr, fn, arg);
+}
+static int DefaultNanosleep(const struct timespec* req, struct timespec* rem) { return ::nanosleep(req, rem); }
+
 // ---------------------------------------------------------------------------
 
 std::function<ssize_t(int, const void*, size_t)> g_write = DefaultWrite;
@@ -312,9 +358,22 @@ std::function<void(const char*)> g_perror = DefaultPerror;
 std::function<void(int)> g_exit = DefaultExit;
 std::function<int(char*, size_t)> g_gethostname = DefaultGethostname;
 std::function<int(const char*, int)> g_access = DefaultAccess;
+std::function<int(const char*, int, mode_t)> g_open = DefaultOpen;
 std::function<void*(size_t)> g_malloc = DefaultMalloc;
 std::function<void*(size_t, size_t)> g_calloc = DefaultCalloc;
 std::function<void(void*)> g_free = DefaultFree;
+std::function<FILE*(const char*, const char*)> g_fopen = DefaultFopen;
+std::function<DIR*(const char*)> g_opendir = DefaultOpendir;
+std::function<struct dirent*(DIR*)> g_readdir = DefaultReaddir;
+std::function<int(DIR*)> g_closedir = DefaultClosedir;
+std::function<ssize_t(const char*, char*, size_t)> g_readlink = DefaultReadlink;
+std::function<int(int, unsigned long, void*)> g_ioctl = DefaultIoctl;
+std::function<int(void (*)(void))> g_atexit = DefaultAtexit;
+std::function<int(clockid_t, struct timespec*)> g_clockGettime = DefaultClockGettime;
+std::function<int(void**, size_t, size_t)> g_posixMemalign = DefaultPosixMemalign;
+std::function<int(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*)> g_pthreadCreate =
+    DefaultPthreadCreate;
+std::function<int(const struct timespec*, struct timespec*)> g_nanosleep = DefaultNanosleep;
 
 static int RealFcntl(int fd, int cmd, int arg) { return ::fcntl(fd, cmd, arg); }
 static void RealExit(int status) { ::exit(status); }
@@ -331,11 +390,7 @@ std::function<void(struct ifaddrs*)> g_freeifaddrs = ::freeifaddrs;
 std::function<int(int, struct rlimit*)> g_getrlimit = ::getrlimit;
 std::function<int(int, const struct rlimit*)> g_setrlimit = ::setrlimit;
 std::function<int(pid_t, size_t, cpu_set_t*)> g_schedGetaffinity = ::sched_getaffinity;
-std::function<void*(const char*, int)> g_dlopen = ::dlopen;
-std::function<char*()> g_dlerror = ::dlerror;
 std::function<char*(const char*, char*)> g_realpath = ::realpath;
-std::function<FILE*(const char*, const char*)> g_fopen = ::fopen;
-std::function<DIR*(const char*)> g_opendir = ::opendir;
 std::function<int(char*)> g_mkstemp = ::mkstemp;
 std::function<int(int, int, off_t, off_t)> g_fallocate = ::fallocate;
 std::function<void*(void*, size_t, int, int, int, off_t)> g_mmap = ::mmap;
@@ -358,8 +413,6 @@ ASSERT_HOOK_MATCHES_PROD(g_freeifaddrs, ::freeifaddrs);
 ASSERT_HOOK_MATCHES_PROD(g_getrlimit, ::getrlimit);
 ASSERT_HOOK_MATCHES_PROD(g_setrlimit, ::setrlimit);
 ASSERT_HOOK_MATCHES_PROD(g_schedGetaffinity, ::sched_getaffinity);
-ASSERT_HOOK_MATCHES_PROD(g_dlopen, ::dlopen);
-ASSERT_HOOK_MATCHES_PROD(g_dlerror, ::dlerror);
 ASSERT_HOOK_MATCHES_PROD(g_realpath, ::realpath);
 ASSERT_HOOK_MATCHES_PROD(g_fopen, ::fopen);
 ASSERT_HOOK_MATCHES_PROD(g_opendir, ::opendir);
@@ -413,9 +466,21 @@ void ResetLibcFakes() {
   g_exit = DefaultExit;
   g_gethostname = DefaultGethostname;
   g_access = DefaultAccess;
+  g_open = DefaultOpen;
   g_malloc = DefaultMalloc;
   g_calloc = DefaultCalloc;
   g_free = DefaultFree;
+  g_fopen = DefaultFopen;
+  g_opendir = DefaultOpendir;
+  g_readdir = DefaultReaddir;
+  g_closedir = DefaultClosedir;
+  g_readlink = DefaultReadlink;
+  g_ioctl = DefaultIoctl;
+  g_atexit = DefaultAtexit;
+  g_clockGettime = DefaultClockGettime;
+  g_posixMemalign = DefaultPosixMemalign;
+  g_pthreadCreate = DefaultPthreadCreate;
+  g_nanosleep = DefaultNanosleep;
   g_poll = ::poll;
   g_getsockopt = ::getsockopt;
   g_getsockname = ::getsockname;
@@ -428,11 +493,7 @@ void ResetLibcFakes() {
   g_getrlimit = ::getrlimit;
   g_setrlimit = ::setrlimit;
   g_schedGetaffinity = ::sched_getaffinity;
-  g_dlopen = ::dlopen;
-  g_dlerror = ::dlerror;
   g_realpath = ::realpath;
-  g_fopen = ::fopen;
-  g_opendir = ::opendir;
   g_mkstemp = ::mkstemp;
   g_fallocate = ::fallocate;
   g_mmap = ::mmap;
@@ -446,6 +507,7 @@ void ResetLibcFakes() {
   g_perrorCalls.clear();
   g_closedFds.clear();
   g_freedPointers.clear();
+  g_atexitFns.clear();
   g_fprintfCalls.clear();
   g_writtenFds.clear();
   g_readFds.clear();
@@ -507,6 +569,10 @@ void UseRealLibc() {
   g_perror = ::perror;
   g_exit = RealExit;
   g_free = ::free;
+  g_open = [](const char* path, int flags, mode_t mode) { return ::open(path, flags, mode); };
+  g_fopen = ::fopen;
+  g_opendir = ::opendir;
+  g_readlink = ::readlink;
 }
 
 // ---------------------------------------------------------------------------
@@ -555,9 +621,38 @@ int micro_fflush(FILE* stream) { return g_fflush(stream); }
 void micro_perror(const char* prefix) { g_perror(prefix); }
 int micro_gethostname(char* name, size_t len) { return g_gethostname(name, len); }
 int micro_access(const char* path, int mode) { return g_access(path, mode); }
+int micro_open(const char* path, int flags, ...) {
+  mode_t mode = 0;
+  if ((flags & O_CREAT) || (flags & O_TMPFILE) == O_TMPFILE) {
+    va_list args;
+    va_start(args, flags);
+    mode = va_arg(args, mode_t);
+    va_end(args);
+  }
+  return g_open(path, flags, mode);
+}
 void* micro_malloc(size_t size) { return g_malloc(size); }
 void* micro_calloc(size_t nmemb, size_t size) { return g_calloc(nmemb, size); }
 void micro_free(void* ptr) { g_free(ptr); }
+FILE* micro_fopen(const char* path, const char* mode) { return g_fopen(path, mode); }
+DIR* micro_opendir(const char* path) { return g_opendir(path); }
+struct dirent* micro_readdir(DIR* dir) { return g_readdir(dir); }
+int micro_closedir(DIR* dir) { return g_closedir(dir); }
+ssize_t micro_readlink(const char* path, char* buf, size_t len) { return g_readlink(path, buf, len); }
+int micro_ioctl(int fd, unsigned long request, ...) {
+  va_list args;
+  va_start(args, request);
+  void* arg = va_arg(args, void*);
+  va_end(args);
+  return g_ioctl(fd, request, arg);
+}
+int micro_atexit(void (*fn)(void)) { return g_atexit(fn); }
+int micro_clock_gettime(clockid_t clk, struct timespec* ts) { return g_clockGettime(clk, ts); }
+int micro_posix_memalign(void** ptr, size_t alignment, size_t size) { return g_posixMemalign(ptr, alignment, size); }
+int micro_pthread_create(pthread_t* thread, const pthread_attr_t* attr, void* (*fn)(void*), void* arg) {
+  return g_pthreadCreate(thread, attr, fn, arg);
+}
+int micro_nanosleep(const struct timespec* req, struct timespec* rem) { return g_nanosleep(req, rem); }
 int micro_poll(struct pollfd* fds, nfds_t nfds, int timeout) { return g_poll(fds, nfds, timeout); }
 int micro_getsockopt(int fd, int level, int optname, void* optval, socklen_t* optlen) {
   return g_getsockopt(fd, level, optname, optval, optlen);
@@ -572,11 +667,7 @@ void micro_freeifaddrs(struct ifaddrs* ifa) { g_freeifaddrs(ifa); }
 int micro_getrlimit(int resource, struct rlimit* lim) { return g_getrlimit(resource, lim); }
 int micro_setrlimit(int resource, const struct rlimit* lim) { return g_setrlimit(resource, lim); }
 int micro_sched_getaffinity(pid_t pid, size_t size, cpu_set_t* set) { return g_schedGetaffinity(pid, size, set); }
-void* micro_dlopen(const char* file, int mode) { return g_dlopen(file, mode); }
-char* micro_dlerror(void) { return g_dlerror(); }
 char* micro_realpath(const char* path, char* resolved) { return g_realpath(path, resolved); }
-FILE* micro_fopen(const char* path, const char* mode) { return g_fopen(path, mode); }
-DIR* micro_opendir(const char* path) { return g_opendir(path); }
 int micro_mkstemp(char* tmpl) { return g_mkstemp(tmpl); }
 int micro_fallocate(int fd, int mode, off_t offset, off_t len) { return g_fallocate(fd, mode, offset, len); }
 void* micro_mmap(void* addr, size_t len, int prot, int flags, int fd, off_t offset) {

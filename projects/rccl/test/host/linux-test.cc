@@ -58,7 +58,9 @@
 #include "linux-test-common.h"
 
 #include "fakes/libc_seam.h"
+#include "fakes/dl_seam.h"
 #include LINUX_CC_PATH
+#include "fakes/dl_seam_undef.h"
 #include "fakes/libc_seam_undef.h"
 
 namespace {

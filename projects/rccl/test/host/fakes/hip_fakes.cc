@@ -611,6 +611,7 @@ static hipError_t DefaultHipStreamBatchMemOp(hipStream_t, unsigned int,
 std::function<hipError_t(hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int)>
     g_hipStreamBatchMemOp = DefaultHipStreamBatchMemOp;
 
+
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 static hipError_t DefaultHipMemcpyBatchAsync(void**, void**, size_t*, size_t, hipMemcpyAttributes*, size_t*,
                                              size_t, size_t*, hipStream_t)
@@ -1027,6 +1028,7 @@ hipError_t hipStreamWriteValue32(hipStream_t, void*, std::uint32_t, unsigned int
 {
     FailLoudUnfaked("hip_fakes", "hipStreamWriteValue32");
 }
+
 
 // ce_coll.cc's batch path; in-RCCL builds inherit CE_BATCH_ASYNC_SUPPORTED, standalone ones compile the call out.
 #ifdef CE_BATCH_ASYNC_SUPPORTED

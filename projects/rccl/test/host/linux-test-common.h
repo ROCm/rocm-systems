@@ -26,6 +26,7 @@
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "fakes/env_fakes.h"
+#include "fakes/dl_fakes.h"
 #include "fakes/libc_fakes.h"
 #include "fakes/nccl_fakes.h"
 
@@ -101,12 +102,14 @@ class LinuxTestBase : public ::testing::Test {
  protected:
   LinuxTestBase() {
     UseRealLibc();
+    ResetDlFakes();
     ResetEnvFakes();
     params_.Set("SOCKET_RETRY_SLEEP_MSEC", 0);
   }
   ~LinuxTestBase() override {
     ResetEnvFakes();
     UseRealLibc();
+    ResetDlFakes();
   }
   LogRecord log_;
   ParamScript params_;

@@ -37,10 +37,12 @@
 // The headers that declare the names renamed below, so this file satisfies its own ordering rule and a unit following
 // the recipe above cannot get it wrong by forgetting one. Include guards make the includer's own copies free.
 #include <dirent.h>
-#include <dlfcn.h>
-#include <ifaddrs.h>
+#include <pthread.h>
+#include <time.h>
 #include <netdb.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
+#include <ifaddrs.h>
 #include <poll.h>
 #include <sched.h>
 #include <signal.h>
@@ -80,6 +82,18 @@ void micro_free(void*);
 int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)));
 int micro_gethostname(char*, size_t);
 int micro_access(const char*, int);
+int micro_open(const char*, int, ...);
+FILE* micro_fopen(const char*, const char*);
+DIR* micro_opendir(const char*);
+struct dirent* micro_readdir(DIR*);
+int micro_closedir(DIR*);
+ssize_t micro_readlink(const char*, char*, size_t);
+int micro_ioctl(int, unsigned long, ...);
+int micro_atexit(void (*)(void));
+int micro_clock_gettime(clockid_t, struct timespec*);
+int micro_posix_memalign(void**, size_t, size_t);
+int micro_pthread_create(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
+int micro_nanosleep(const struct timespec*, struct timespec*);
 int micro_poll(struct pollfd*, nfds_t, int);
 int micro_getsockopt(int, int, int, void*, socklen_t*);
 int micro_getsockname(int, struct sockaddr*, socklen_t*);
@@ -92,11 +106,7 @@ void micro_freeifaddrs(struct ifaddrs*);
 int micro_getrlimit(int, struct rlimit*);
 int micro_setrlimit(int, const struct rlimit*);
 int micro_sched_getaffinity(pid_t, size_t, cpu_set_t*);
-void* micro_dlopen(const char*, int);
-char* micro_dlerror(void);
 char* micro_realpath(const char*, char*);
-FILE* micro_fopen(const char*, const char*);
-DIR* micro_opendir(const char*);
 int micro_mkstemp(char*);
 int micro_fallocate(int, int, off_t, off_t);
 void* micro_mmap(void*, size_t, int, int, int, off_t);
@@ -131,6 +141,18 @@ sighandler_t micro_signal(int, sighandler_t);
 #define fprintf micro_fprintf
 #define gethostname micro_gethostname
 #define access micro_access
+#define open micro_open
+#define fopen micro_fopen
+#define opendir micro_opendir
+#define readdir micro_readdir
+#define closedir micro_closedir
+#define readlink micro_readlink
+#define ioctl micro_ioctl
+#define atexit micro_atexit
+#define clock_gettime micro_clock_gettime
+#define posix_memalign micro_posix_memalign
+#define pthread_create micro_pthread_create
+#define nanosleep micro_nanosleep
 #define poll micro_poll
 #define getsockopt micro_getsockopt
 #define getsockname micro_getsockname
@@ -143,11 +165,7 @@ sighandler_t micro_signal(int, sighandler_t);
 #define getrlimit micro_getrlimit
 #define setrlimit micro_setrlimit
 #define sched_getaffinity micro_sched_getaffinity
-#define dlopen micro_dlopen
-#define dlerror micro_dlerror
 #define realpath micro_realpath
-#define fopen micro_fopen
-#define opendir micro_opendir
 #define mkstemp micro_mkstemp
 #define fallocate micro_fallocate
 #define mmap micro_mmap
