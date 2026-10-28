@@ -18,8 +18,6 @@
 #include "gin/gin_host_rocshmem_gda.h"  // ginRocshmemInitCtx, SetInitContext
 #include "comm.h"
 #include "bootstrap.h"
-#include "graph.h"       // ncclTopoGetLocalGinDevs (GIN-local NIC selection)
-#include "graph/topo.h"  // NCCL_TOPO_MAX_NODES
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h"
 #include "gin/gin_rocshmem_gda_factory.h"
 #include "common_cast.h"  // IbCastInitDevices/IbCastDevs/IbCastGetPhysProperties
@@ -167,9 +165,8 @@ static ncclResult_t ginRocshmemGdaGetProperties(int dev, ncclNetProperties_v12_t
     WARN("GIN rocshmem-gda: requested properties for NIC %d, only %d GIN NICs enumerated", dev, ginGdaNDevs);
     return ncclInvalidUsage;
   }
-  // Report the real per-NIC name + pciPath (+ topology rail/plane ids) from the
-  // IB-CAST device table so the topology places one GIN node per NIC near its
-  // GPU. ncclTopoGetLocalGinDevs then hands each GPU a distinct local NIC.
+  // Report the real per-NIC name + pciPath + topology rail/plane ids from the
+  // IB-CAST table so the topology places one GIN node per NIC near its GPU.
   NCCLCHECK(IbCastGetPhysProperties(ginGdaPhysDevIndex[dev], props));
   props->ptrSupport = NCCL_PTR_CUDA;
   props->netDeviceType = NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA;
@@ -210,22 +207,20 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
     trafficClass = cctx->comm->config.trafficClass;
   }
 
-  // The GIN node's net.dev is this backend's own device index, so resolve the
-  // NIC name through our getProperties, not comm->ncclNet (a separate dev space).
+  // Use the device gin_host selected for THIS connection (listen's dev, one per
+  // ginComm so multiple local NICs each get their own QP set). The GIN node's
+  // net.dev is this backend's own device index, so resolve the NIC name through
+  // our getProperties, not comm->ncclNet (a separate dev space).
   const char* preferredNic = nullptr;
   char preferredNicName[128] = {0};
   {
-    int localGinDevs[NCCL_TOPO_MAX_NODES];
-    int nLocalGinDevs = 0;
-    if (ncclTopoGetLocalGinDevs(cctx->comm, localGinDevs, &nLocalGinDevs) == ncclSuccess && nLocalGinDevs > 0) {
-      int ginDev = localGinDevs[0];
-      ncclNetProperties_t props;
-      if (ginDev >= 0 && ginRocshmemGdaGetProperties(ginDev, &props) == ncclSuccess && props.name != nullptr) {
-        snprintf(preferredNicName, sizeof(preferredNicName), "%s", props.name);
-        preferredNic = preferredNicName;
-        INFO(NCCL_INIT, "GIN rocshmem-gda: comm rank %d GIN-local NIC: %s (ginDev %d, %d local gin devs)",
-             cctx->comm->rank, preferredNicName, ginDev, nLocalGinDevs);
-      }
+    int ginDev = listenComm ? ((ginRocshmemGdaListenCtx*)listenComm)->dev : -1;
+    ncclNetProperties_t props;
+    if (ginDev >= 0 && ginRocshmemGdaGetProperties(ginDev, &props) == ncclSuccess && props.name != nullptr) {
+      snprintf(preferredNicName, sizeof(preferredNicName), "%s", props.name);
+      preferredNic = preferredNicName;
+      INFO(NCCL_INIT, "GIN rocshmem-gda: comm rank %d GIN NIC: %s (ginDev %d)",
+           cctx->comm->rank, preferredNicName, ginDev);
     }
   }
 

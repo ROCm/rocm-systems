@@ -122,16 +122,6 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
   return ncclSuccess;
 }
 
-// Real definition lives in graph/topo.cc, which this target does not link. The
-// plugin uses this best-effort to pick a GIN-local NIC; report the first device
-// so connect() resolves a preferred NIC name (failure would just fall back to
-// the factory's first-usable-device selection).
-ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm*, int* localGinDevs, int* localGinCount) {
-  localGinDevs[0] = 0;
-  *localGinCount = IbCastNDevs > 0 ? 1 : 0;
-  return ncclSuccess;
-}
-
 extern "C" hipError_t hipMalloc(void** ptr, size_t size) {
   using Fn = hipError_t (*)(void**, size_t);
   static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "hipMalloc"));
