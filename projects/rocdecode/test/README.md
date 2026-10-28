@@ -105,7 +105,7 @@ is saved to CSV (which can serve as a future baseline), and the summary reports
 printed as a WARNING.
 
 ```shell
-test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--runs N] [--device ID] [--quick] [--check-rocm]
+test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--runs N] [--device ID] [--gpu NAME] [--quick] [--check-rocm]
 ```
 
 | Option | Description |
@@ -115,22 +115,26 @@ test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--
 | `--tolerance PCT` | Regression threshold, % Avg FPS drop (default: `$ROCDECODE_PERF_TOLERANCE` or 5). |
 | `--runs N` | Runs to average when confirming a flagged stream (default: 3). |
 | `--device ID` | GPU device id (default: 0). |
+| `--gpu NAME` | GPU name for baseline lookup (e.g. `Navi31`, `MI300X`). Overrides auto-detection. Also overridable via `ROCDECODE_PERF_GPU` env var; `--gpu` takes priority. |
 | `--quick` | Fast check: one baseline stream per leaf subfolder, capped at ≤4K (8K skipped). |
 | `--check-rocm` | Only verify the ROCm toolchain (`ROCM_PATH`) and exit. |
 
 ### GPU detection
 
-The local GPU is detected and mapped to the matching baseline column: `MI250X`, `MI300X`,
-`MI300A`, `MI350`, `MI355`, `Navi31`, `Navi48`, or `780M`. Detection tries, in order:
+The local GPU is detected and mapped to the matching baseline column. Detection tries,
+in order:
 
-1. `amd-smi` market name (disambiguates parts sharing the same gfx target),
-2. `rocm-smi` product name / GFX version,
-3. `hipInfo` Name / gcnArchName (works on both Linux and Windows),
-4. KFD `gfx_target_version` (Linux only; unambiguous targets only).
+1. `--gpu` flag or `ROCDECODE_PERF_GPU` env var (explicit override, skips auto-detection),
+2. `amd-smi` market name (disambiguates parts sharing the same gfx target; Linux only),
+3. `rocm-smi` product name / GFX version (Linux only),
+4. `hipInfo` Name / gcnArchName (works on both Linux and Windows),
+5. KFD `gfx_target_version` (Linux only; unambiguous targets only).
 
-Because MI300X/MI300A share `gfx942` and MI350/MI355 share `gfx950`, detection prefers the
-market name. On Windows, `amd-smi` and `rocm-smi` may not work; the `hipInfo` fallback
-(step 3) handles this case. Override with `ROCDECODE_PERF_GPU=<column>` if needed.
+Detection prefers market names because multiple GPUs can share a gfx target (MI300X/MI300A
+share `gfx942`, MI350/MI355 share `gfx950`, 780M/760M/740M share `gfx1103`). On Windows,
+`amd-smi` and `rocm-smi` are skipped; the `hipInfo` fallback (step 4) handles detection.
+Use `--gpu <name>` to override when auto-detection produces the wrong label or when no
+baseline column exists for the detected GPU.
 
 ### Perf stream + baseline location
 

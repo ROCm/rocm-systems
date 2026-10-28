@@ -85,12 +85,16 @@ MARKET_MAP = [
     (re.compile(r"MI350", re.I), "MI350"),
     (re.compile(r"7900\s*XTX|Navi\s*31", re.I), "Navi31"),
     (re.compile(r"9070|Navi\s*48", re.I), "Navi48"),
+    # Integrated GPUs — matched by hipInfo Name: field (e.g. "AMD Radeon(TM) 780M").
+    # These share gfx1103, so they must be identified by market name, not gfx target.
+    (re.compile(r"780M", re.I), "780M"),
+    (re.compile(r"760M", re.I), "760M"),
+    (re.compile(r"740M", re.I), "740M"),
 ]
-# gfx targets that map unambiguously to a single column (MI300X/MI300A share
-# gfx942 and MI350/MI355 share gfx950, so those are intentionally omitted).
-# gfx1103 is the 780M integrated GPU on the Windows dev machine.
-GFX_MAP = {"gfx90a": "MI250X", "gfx1100": "Navi31", "gfx1103": "780M",
-           "gfx1201": "Navi48"}
+# gfx targets that map unambiguously to a single baseline column (MI300X/MI300A
+# share gfx942, MI350/MI355 share gfx950, and 780M/760M/740M share gfx1103,
+# so those are intentionally omitted — use MARKET_MAP for disambiguation).
+GFX_MAP = {"gfx90a": "MI250X", "gfx1100": "Navi31", "gfx1201": "Navi48"}
 
 
 def find_tool(name):
@@ -160,8 +164,11 @@ def _extract_hipinfo_device_block(output, device):
     return output  # fallback: return everything (single-GPU or unexpected format)
 
 
-def detect_gpu(device=0):
+def detect_gpu(device=0, gpu_name=None):
     """Return (column_label, detail) or (None, reason)."""
+    # --gpu flag takes priority, then ROCDECODE_PERF_GPU env var.
+    if gpu_name:
+        return gpu_name, f"--gpu {gpu_name}"
     override = os.environ.get("ROCDECODE_PERF_GPU")
     if override:
         return override, f"ROCDECODE_PERF_GPU override = {override}"
@@ -319,6 +326,9 @@ def main():
     ap.add_argument("--runs", type=int, default=3,
         help="runs to average when confirming a flagged stream (default: 3)")
     ap.add_argument("--device", type=int, default=0, help="GPU device id (default: 0)")
+    ap.add_argument("--gpu", default=None,
+        help="GPU name for baseline lookup (e.g. Navi31, MI300X). "
+             "Overrides auto-detection; also overridable via ROCDECODE_PERF_GPU env var.")
     ap.add_argument("--check-rocm", action="store_true",
         help="only verify the ROCm toolchain (ROCM_PATH) and exit")
     ap.add_argument("--quick", action="store_true",
@@ -343,10 +353,10 @@ def main():
         print("       Build it first: cmake --build build (or test/build_samples.sh)", file=sys.stderr)
         return 1
 
-    label, detail = detect_gpu(args.device)
+    label, detail = detect_gpu(args.device, args.gpu)
     if label is None:
         print(f"ERROR: could not identify the GPU ({detail}).", file=sys.stderr)
-        print("       Set ROCDECODE_PERF_GPU to a baseline column (e.g. Navi31).", file=sys.stderr)
+        print("       Use --gpu <name> (e.g. --gpu Navi31) or set ROCDECODE_PERF_GPU.", file=sys.stderr)
         return 1
     baseline = {}
     col = None
