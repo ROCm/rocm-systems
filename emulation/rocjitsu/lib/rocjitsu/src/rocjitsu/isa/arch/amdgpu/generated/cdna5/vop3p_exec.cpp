@@ -4177,7 +4177,7 @@ bool isGfx1250WmmaScaleFormatPairLegal(uint32_t matrix_a_fmt, uint32_t matrix_b_
 void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   const uint32_t matrix_a_fmt = inst_.op == 0x88u ? 4u : inst_.opsel;
-  const uint32_t matrix_b_fmt = inst_.op == 0x88u ? 4u : (inst_.opsel_hi_2 << 2) | inst_.opsel_hi;
+  const uint32_t matrix_b_fmt = inst_.op == 0x88u ? 4u : (inst_.opsel_hi_2 << 2u) | inst_.opsel_hi;
   if (!isGfx1250WmmaScaleFormatPairLegal(matrix_a_fmt, matrix_b_fmt, scale_inst_.neg & 0x3u,
                                          scale_inst_.neg_hi & 0x3u)) {
     wf.report_instruction_execution_error(
