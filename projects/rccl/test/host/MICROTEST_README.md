@@ -185,16 +185,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `rasTimeoutFactorNs`, and `rasTimeoutFactorSec` symbols so it can link beside
     `fakes/ras_param_fakes.cc` and the `ras-test.cc` timeout fake in the shared
     microtest binary.
-  - `transport/net_socket.cc` and `transport/net_socket/common.cc`
-    (`NET_SOCKET_CC_PATH`, `NET_SOCKET_COMMON_CC_PATH`, from
-    `net-socket-test.cc`); suites `NetSocket*Microtest.*`. Three disabled tests
-    pin production bugs and are enabled with their fixes:
-    `NetSocketTransferMicrotest.DISABLED_Test_RecvInlinePayloadAfterSizeFrame_CompletesWithPayload`
-    ([AICOMRCCL-3104](https://amd-hub.atlassian.net/browse/AICOMRCCL-3104)),
-    `NetSocketAcceptMicrotest.DISABLED_Accept_AfterRejectedIndex_StartsNewHandshake`
-    ([AICOMRCCL-3105](https://amd-hub.atlassian.net/browse/AICOMRCCL-3105)), and
-    `NetSocketTaskMicrotest.DISABLED_Test_SplitFailed_LaterPollDoesNotUseControlSocket`
-    ([AICOMRCCL-3106](https://amd-hub.atlassian.net/browse/AICOMRCCL-3106)).
   - `tuning/tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from
     `tuning-general-test.cc`); suite `TuningGeneralMicrotest.*`. Covers the
     shared step-count, hardware-index, time-estimation, thread-threshold,
@@ -588,6 +578,18 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `net_ib/net_ib_gid_inspect.cc` (`NET_IB_GID_INSPECT_CC_PATH`, from
     `net_ib/net-ib-gid-inspect-test.cc`); suites
     `NetIbGidInspectMicrotest.*`.
+  - `net_socket.cc` and `net_socket/common.cc`
+    (`NET_SOCKET_CC_PATH`, `NET_SOCKET_COMMON_CC_PATH`, from
+    `net-socket-test.cc`); suites `NetSocket*Microtest.*`. The test renames the
+    four definitions that `fakes/transport_net_socket*_fakes.cc` also provide for
+    the `rma_socket` tests. Three disabled tests pin production bugs and are
+    enabled with their fixes:
+    `NetSocketTransferMicrotest.DISABLED_Test_RecvInlinePayloadAfterSizeFrame_CompletesWithPayload`
+    ([AICOMRCCL-3104](https://amd-hub.atlassian.net/browse/AICOMRCCL-3104)),
+    `NetSocketAcceptMicrotest.DISABLED_Accept_AfterRejectedIndex_StartsNewHandshake`
+    ([AICOMRCCL-3105](https://amd-hub.atlassian.net/browse/AICOMRCCL-3105)), and
+    `NetSocketTaskMicrotest.DISABLED_Test_SplitFailed_LaterPollDoesNotUseControlSocket`
+    ([AICOMRCCL-3106](https://amd-hub.atlassian.net/browse/AICOMRCCL-3106)).
   - `net_telemetry.cc` and `src/include/net_telemetry.h`
     (`NET_TELEMETRY_CC_PATH`, from `net-telemetry-test.cc`); suites
     `NetTelemetry*Microtest.*`.
@@ -833,8 +835,8 @@ symbol.
 | `src/transport/net_ib_cast/{connect,p2p,p2p_resiliency,p2p_resiliency_recovery,qp_sharing,scheduler}.cc` (targets that do not compile the real file) | `fakes/net_ib_cast_<file>_fakes.cc` |
 | `src/transport/net_ib_cast/init.cc` (targets that do not compile the real file) | `fakes/net_ib_cast_init_fakes.cc` |
 | `src/transport/net_ib_cast/net_ib_ops_fault.cc` | `fakes/net_ib_ops_fault_fakes.cc` |
-| `src/transport/net_socket.cc` (targets that do not compile the real file) | `fakes/transport_net_socket_fakes.{h,cc}` |
-| `src/transport/net_socket/common.cc` (targets that do not compile the real file) | `fakes/transport_net_socket_common_fakes.{h,cc}` |
+| `src/transport/net_socket.cc`'s `ncclNetSocket`, for the `rma_socket` tests (`net-socket-test.cc` renames the real one in `rccl-UnitTestsMicroTransport`) | `fakes/transport_net_socket_fakes.{h,cc}` |
+| `src/transport/net_socket/common.cc`'s `ncclNetIfs`, `ncclNetSocketCreateListener` and `ncclNetSocketInitDevices`, for the `rma_socket` tests (`net-socket-test.cc` renames the real ones in `rccl-UnitTestsMicroTransport`) | `fakes/transport_net_socket_common_fakes.{h,cc}` |
 | generated `sym_kernels_host.cc` (targets that do not compile it) | `fakes/sym_kernels_index_fakes.cc` |
 | rocSHMEM host API | `fakes/rocshmem_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroNet`) | `fakes/transport_p2p_fakes.cc` |
