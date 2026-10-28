@@ -22,6 +22,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <set>
+#include <sstream>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace rocprofsys
@@ -139,6 +142,27 @@ bool
 backtrace_metrics::operator()(Tp) const
 {
     return (*this)(type_list<Tp>{});
+}
+
+// Perfetto title for one sampled hardware counter. get_event_info() returns the
+// PAPI short description when the component map is filled, and an empty string
+// when it is not. The empty case keeps the configured symbol.
+inline std::string
+hardware_counter_track_name(const std::string& _label, std::int64_t _tid)
+{
+    std::string _desc = tim::papi::get_event_info(_label).short_descr;
+    if(_desc.empty())
+    {
+        _desc = _label;
+    }
+    if(_desc.empty())
+    {
+        throw std::runtime_error("Empty description for " + _label);
+    }
+
+    std::stringstream _track_name;
+    _track_name << "Thread " << _desc << " [" << _tid << "] (S)";
+    return _track_name.str();
 }
 }  // namespace component
 }  // namespace rocprofsys

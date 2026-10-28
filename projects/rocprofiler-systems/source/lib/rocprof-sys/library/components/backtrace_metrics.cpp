@@ -178,20 +178,7 @@ apply_for_all_thread_names(std::int64_t                            _tid,
         auto const _hw_cnt_labels = *get_papi_labels(_tid);
         for(auto const& itr : _hw_cnt_labels)
         {
-            std::string _desc = tim::papi::get_event_info(itr).short_descr;
-            if(_desc.empty())
-            {
-                _desc = itr;
-            }
-            if(_desc.empty())
-            {
-                throw std::runtime_error(
-                    fmt::format("Empty description for {}", itr.c_str()));
-            }
-
-            std::stringstream track_name_ss;
-            track_name_ss << "Thread " << _desc << " [" << _tid << "] (S)";
-            _apply(track_name_ss.str());
+            _apply(hardware_counter_track_name(itr, _tid));
         }
     }
     else
