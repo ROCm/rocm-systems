@@ -131,13 +131,13 @@ public:
     const uint64_t pc = 0x100 + reg * 4;
     const auto order = unordered ? MemoryOrderClass::UNORDERED : MemoryOrderClass::VMEM;
     const std::array obligations{MemoryCounterObligation{*domain.race, order}};
-    const InstructionSnapshot instruction{.pc = pc, .words = {kProbeWord}, .word_count = 1};
+    const InstructionSnapshot instruction{pc, std::array{kProbeWord}};
     state_->registerEvent(instruction, MemoryEventType::GLOBAL_TO_VGPR, {reg}, lanes, bytes,
                           obligations, order);
   }
   void counter_only(CounterDomain domain) {
     const std::array obligations{MemoryCounterObligation{*domain.race, MemoryOrderClass::VMEM}};
-    const InstructionSnapshot instruction{.pc = 0x800, .words = {kProbeWord}, .word_count = 1};
+    const InstructionSnapshot instruction{0x800, std::array{kProbeWord}};
     state_->registerEvent(instruction, MemoryEventType::VGPR_TO_GLOBAL, {}, 1, 0xf, obligations,
                           MemoryOrderClass::VMEM);
   }

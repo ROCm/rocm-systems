@@ -4,9 +4,10 @@
 #include "race_test_instruction.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
+#include <algorithm>
 #include <array>
 #include <gtest/gtest.h>
-#include <limits>
+#include <span>
 #include <vector>
 
 using namespace rocjitsu::plugins::race_detector;
@@ -59,31 +60,36 @@ using namespace rocjitsu;
 using amdgpu::MemoryCounterObligation;
 using amdgpu::WaitCounterType;
 
-constexpr InstructionSnapshot kInstruction{.pc = 0x1234, .words = {0xbf800007}, .word_count = 1};
+constexpr std::array<uint32_t, 1> kWords{0xbf800007};
+constexpr InstructionSnapshot kInstruction{0x1234, kWords};
 constexpr std::array kObligations{
     MemoryCounterObligation{WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED}};
 
-TEST(InstructionSnapshotTest, EncodingRejectsEmptySnapshot) {
-  EXPECT_THROW(InstructionSnapshot{}.encoding(), std::logic_error);
+TEST(InstructionSnapshotTest, RejectsEmptyAndOversizedEncodings) {
+  const std::array<uint32_t, InstructionSnapshot::kMaxWords + 1> words{};
+  EXPECT_THROW(InstructionSnapshot(0x10, std::span(words).first(0)), std::logic_error);
+  EXPECT_THROW(InstructionSnapshot(0x10, words), std::logic_error);
 }
 
-TEST(InstructionSnapshotTest, EncodingRejectsOversizedSnapshot) {
-  for (const uint32_t count :
-       {uint32_t{InstructionSnapshot::kMaxWords + 1}, std::numeric_limits<uint32_t>::max()}) {
-    auto instruction = kInstruction;
-    instruction.word_count = count;
-    EXPECT_THROW(instruction.encoding(), std::logic_error);
+TEST(InstructionSnapshotTest, CopiesEveryEncodingWidth) {
+  constexpr std::array<uint32_t, InstructionSnapshot::kMaxWords> expected{1, 2, 3, 4};
+  for (size_t count = 1; count <= InstructionSnapshot::kMaxWords; ++count) {
+    auto source = expected;
+    const InstructionSnapshot instruction(0x10, std::span(source).first(count));
+    source.fill(0);
+    EXPECT_EQ(instruction.pc(), 0x10u);
+    EXPECT_TRUE(std::ranges::equal(instruction.encoding(), std::span(expected).first(count)));
   }
 }
 
-TEST(InstructionSnapshotTest, EncodingViewsOnlyCapturedWords) {
-  auto instruction = kInstruction;
-  for (uint32_t count = 1; count <= InstructionSnapshot::kMaxWords; ++count) {
-    instruction.word_count = count;
-    const auto encoding = instruction.encoding();
-    EXPECT_EQ(encoding.data(), instruction.words.data());
-    EXPECT_EQ(encoding.size(), count);
-  }
+TEST(InstructionSnapshotTest, EqualityComparesPcAndEncoding) {
+  const std::array<uint32_t, 2> words{0xbf800000, 0};
+  const InstructionSnapshot one_word(0x10, std::span(words).first(1));
+  EXPECT_EQ(one_word, InstructionSnapshot(0x10, std::span(words).first(1)));
+  EXPECT_NE(one_word, InstructionSnapshot(0x14, std::span(words).first(1)));
+  EXPECT_NE(one_word, InstructionSnapshot(0x10, std::array{0xbf800007u}));
+  // A trailing zero word is part of the encoding, not unused storage.
+  EXPECT_NE(one_word, InstructionSnapshot(0x10, words));
 }
 
 class RaceEventRegistrationTest : public ::testing::Test {
@@ -98,98 +104,32 @@ protected:
   std::vector<RaceViolation> violations;
 };
 
-TEST(EventRegistry, RetainsCapturedPcAndOwnedEncoding) {
+TEST(EventRegistry, RetainsCapturedInstruction) {
   EventRegistry events;
-  auto instruction = kInstruction;
-  const auto id = events.add(WaveId{0}, instruction, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf,
+  const auto id = events.add(WaveId{0}, kInstruction, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf,
                              {}, kObligations, MemoryOrderClass::UNORDERED);
-  instruction.pc = 0x5678;
-  instruction.words[0] = 0;
-  instruction.word_count = 0;
-
-  EXPECT_EQ(events.pc(id), kInstruction.pc);
-  EXPECT_EQ(events.instruction(id).words, kInstruction.words);
-  EXPECT_EQ(events.instruction(id).word_count, kInstruction.word_count);
-}
-
-TEST_F(RaceEventRegistrationTest, InvalidSizesDoNotChangeEventState) {
-  EventRegistry events;
-  auto &wave = detector.getWaveRaceState(0);
-  IntervalSet intervals;
-  intervals.append(8, 16);
-  intervals.finalize();
-  for (const uint32_t count :
-       {0u, uint32_t{InstructionSnapshot::kMaxWords + 1}, std::numeric_limits<uint32_t>::max()}) {
-    auto invalid = kInstruction;
-    invalid.word_count = count;
-    EXPECT_THROW(events.add(WaveId{0}, invalid, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, {},
-                            kObligations, MemoryOrderClass::UNORDERED),
-                 std::logic_error);
-    EXPECT_THROW(detector.allocateEventId(WaveId{0}, invalid, MemoryEventType::VGPR_TO_LDS, {2}, 1,
-                                          0xf, intervals, kObligations,
-                                          MemoryOrderClass::UNORDERED),
-                 std::logic_error);
-    EXPECT_THROW(wave.registerEvent(invalid, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf,
-                                    kObligations, MemoryOrderClass::UNORDERED),
-                 std::logic_error);
-  }
-  EXPECT_EQ(events.totalAllocated(), 0);
-  EXPECT_EQ(detector.events().totalAllocated(), 0);
-  EXPECT_TRUE(wave.getWaveMemoryEvents().empty());
-  EXPECT_TRUE(wave.getVgprMemoryEvents(2).empty());
-  EXPECT_EQ(wave.getRegEventCount(MemoryEventType::GLOBAL_TO_VGPR, 2), 0);
-  EXPECT_TRUE(detector.getLdsWriteEvents().empty());
-  wave.checkVgprRead(2, 0, 0xf);
-  detector.validateRead(8, WaveId{0}, 0, 8);
-  EXPECT_TRUE(violations.empty());
-}
-
-TEST_F(RaceEventRegistrationTest, InvalidScalarLoadDoesNotCheckPendingDestination) {
-  auto &wave = detector.getWaveRaceState(0);
-  const RegisterRef destination{RegClass::SGPR, 2, 1};
-  wave.registerScalarLoad(kInstruction, destination, 1, kObligations, MemoryOrderClass::UNORDERED);
-  ASSERT_TRUE(violations.empty());
-  for (const uint32_t count : {0u, uint32_t{InstructionSnapshot::kMaxWords + 1}}) {
-    auto invalid = kInstruction;
-    invalid.word_count = count;
-    EXPECT_THROW(
-        wave.registerScalarLoad(invalid, destination, 1, kObligations, MemoryOrderClass::UNORDERED),
-        std::logic_error);
-  }
-  EXPECT_EQ(detector.events().totalAllocated(), 1);
-  EXPECT_EQ(wave.getWaveMemoryEvents().size(), 1u);
-  EXPECT_TRUE(violations.empty());
-  wave.registerScalarLoad(kInstruction, destination, 1, kObligations, MemoryOrderClass::UNORDERED);
-  EXPECT_EQ(violations.size(), 1u);
+  EXPECT_EQ(events.pc(id), kInstruction.pc());
+  EXPECT_EQ(events.instruction(id), kInstruction);
 }
 
 TEST_F(RaceEventRegistrationTest, WaveApisRetainCapturedPcAndEncoding) {
   auto &wave = detector.getWaveRaceState(0);
   const std::array<uint32_t, 1> addresses{8};
-  auto instruction = kInstruction;
-  wave.registerEvent(instruction, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, kObligations,
+  auto at = [](int offset) { return InstructionSnapshot(kInstruction.pc() + offset, kWords); };
+  wave.registerEvent(at(0), MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, kObligations,
                      MemoryOrderClass::UNORDERED);
-  ++instruction.pc;
-  wave.registerScalarLoad(instruction, RegisterRef{RegClass::SGPR, 2, 1}, 1, kObligations,
+  wave.registerScalarLoad(at(1), RegisterRef{RegClass::SGPR, 2, 1}, 1, kObligations,
                           MemoryOrderClass::UNORDERED);
-  ++instruction.pc;
-  wave.registerLdsEvent(instruction, MemoryEventType::LDS_TO_VGPR, {3}, 1, 1, addresses, 4, 0xf,
+  wave.registerLdsEvent(at(2), MemoryEventType::LDS_TO_VGPR, {3}, 1, 1, addresses, 4, 0xf,
                         kObligations, MemoryOrderClass::UNORDERED);
-  ++instruction.pc;
-  wave.registerLdsEvent(instruction, MemoryEventType::LDS_TO_VGPR, {4}, 1, 1, addresses, addresses,
-                        4, 0xf, kObligations, MemoryOrderClass::UNORDERED);
-  ++instruction.pc;
-  wave.registerDualOffsetLdsEvent(instruction, MemoryEventType::LDS_TO_VGPR, {5}, 1, 1, addresses,
-                                  1, 3, kObligations, MemoryOrderClass::UNORDERED);
-  instruction = {};
+  wave.registerLdsEvent(at(3), MemoryEventType::LDS_TO_VGPR, {4}, 1, 1, addresses, addresses, 4,
+                        0xf, kObligations, MemoryOrderClass::UNORDERED);
+  wave.registerDualOffsetLdsEvent(at(4), MemoryEventType::LDS_TO_VGPR, {5}, 1, 1, addresses, 1, 3,
+                                  kObligations, MemoryOrderClass::UNORDERED);
 
   ASSERT_EQ(detector.events().totalAllocated(), 5);
-  for (int i = 0; i < 5; ++i) {
-    const auto &stored = detector.events().instruction(EventId{i});
-    EXPECT_EQ(stored.pc, kInstruction.pc + i);
-    EXPECT_EQ(stored.words, kInstruction.words);
-    EXPECT_EQ(stored.word_count, kInstruction.word_count);
-  }
+  for (int i = 0; i < 5; ++i)
+    EXPECT_EQ(detector.events().instruction(EventId{i}), at(i));
   const auto &intervals = detector.events().ldsIntervals(EventId{4});
   EXPECT_TRUE(intervals.overlapsRange(16, 24));
   EXPECT_TRUE(intervals.overlapsRange(32, 40));

@@ -43,9 +43,7 @@ struct CounterCapacities {
 /// Every event registration method (registerEvent, registerScalarLoad,
 /// registerLdsEvent and registerDualOffsetLdsEvent) takes the producing
 /// instruction as an InstructionSnapshot; the event's PC comes from the
-/// snapshot. A snapshot that is not valid (see InstructionSnapshot) throws
-/// std::logic_error before any event state changes and before scalar-write
-/// checks run. The encoding is decoded only if a plugin report needs its
+/// snapshot. The encoding is decoded only if a plugin report needs its
 /// disassembly.
 class WaveRaceState {
 public:

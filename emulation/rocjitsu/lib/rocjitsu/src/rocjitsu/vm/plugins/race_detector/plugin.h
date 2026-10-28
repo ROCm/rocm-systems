@@ -8,7 +8,6 @@
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
-#include <array>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -19,6 +18,7 @@
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <vector>
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -28,21 +28,24 @@ struct MarkedInstruction {
   int lane; // -1 for scalar
 };
 
-template <typename T, size_t N> struct RingBuffer {
-  std::array<T, N> data{};
-  size_t head = 0;
-  size_t len = 0;
-
-  void push(T val) {
-    data[head] = val;
-    head = (head + 1) % N;
-    if (len < N)
-      ++len;
+/// Retains the last N pushed values. Elements are never default-constructed.
+template <typename T, size_t N> class RingBuffer {
+public:
+  void push(const T &val) {
+    if (data_.size() < N)
+      data_.push_back(val);
+    else
+      data_[head_] = val;
+    head_ = (head_ + 1) % N;
   }
 
   /// Element i in insertion order; 0 is the oldest retained element.
-  const T &operator[](size_t i) const { return data[(head - len + i) % N]; }
-  size_t size() const { return len; }
+  const T &operator[](size_t i) const { return data_[data_.size() < N ? i : (head_ + i) % N]; }
+  size_t size() const { return data_.size(); }
+
+private:
+  std::vector<T> data_;
+  size_t head_ = 0;
 };
 
 /// Return the memory instruction recorded as the exact conflict.
@@ -59,17 +62,15 @@ MarkedInstruction findConflict(const RaceViolation &, RaceDetector &);
 /// conflict's PC and encoding, prints the conflict first with a "(before trace window)"
 /// note. Each trace row prints its own captured bytes. Calls `disassemble` only
 /// for printed rows. Repeated executions of identical bytes at the same PC are
-/// not distinguished. Every snapshot in `trace`, `conflict` and `read` must be
-/// valid (see InstructionSnapshot); otherwise formatTrace throws
-/// std::logic_error. Exceptions from `disassemble` propagate to the caller.
+/// not distinguished. Exceptions from `disassemble` propagate to the caller.
 std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                         const std::function<std::string(const InstructionSnapshot &)> &disassemble,
                         std::optional<MarkedInstruction> conflict, MarkedInstruction read);
 
 struct RaceWavefrontState : WavefrontState {
   /// The wave's most recently issued instructions, oldest first. Each entry owns
-  /// a valid copy of its encoding, so reports can disassemble it after the code
-  /// is rewritten or unmapped.
+  /// a copy of its encoding, so reports can disassemble it after the code is
+  /// rewritten or unmapped.
   RingBuffer<InstructionSnapshot, 256> trace;
   WaveRaceState *race_state = nullptr;
 };

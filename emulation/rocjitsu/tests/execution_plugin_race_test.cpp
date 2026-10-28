@@ -244,12 +244,10 @@ TEST_F(FormattedLoadRaceTest, RecordingBytesDoesNotDisassemble) {
   for (uint64_t pc : {0x540024b100ULL, 0x100002a100ULL})
     fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(pc, instruction, *wave);
   ASSERT_EQ(plugin_state->trace.size(), 2u);
-  EXPECT_EQ(plugin_state->trace[0].pc, 0x540024b100ULL);
-  EXPECT_EQ(plugin_state->trace[0].word_count, 1u);
-  EXPECT_EQ(plugin_state->trace[0].words[0], S_NOP | 7);
+  EXPECT_EQ(plugin_state->trace[0], testInstruction(0x540024b100ULL, S_NOP | 7));
   instruction.word = S_NOP | 9;
-  EXPECT_EQ(plugin_state->trace[0].words[0], S_NOP | 7);
-  EXPECT_EQ(plugin_state->trace[1].pc, 0x100002a100ULL);
+  EXPECT_EQ(plugin_state->trace[0], testInstruction(0x540024b100ULL, S_NOP | 7));
+  EXPECT_EQ(plugin_state->trace[1].pc(), 0x100002a100ULL);
   EXPECT_FALSE(instruction.was_disassembled);
 }
 
@@ -2457,9 +2455,7 @@ TEST(FindConflictTest, UsesRecordedConflictingEvent) {
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), second};
   MarkedInstruction conflict = findConflict(violation, detector);
 
-  EXPECT_EQ(conflict.instruction.pc, 0x200u);
-  ASSERT_EQ(conflict.instruction.word_count, 1u);
-  EXPECT_EQ(conflict.instruction.words[0], S_NOP);
+  EXPECT_EQ(conflict.instruction, testInstruction(0x200));
 }
 
 TEST(FindConflictTest, RejectsUnavailableConflictingEvent) {
@@ -2501,6 +2497,20 @@ auto make_trace(std::initializer_list<uint64_t> pcs) {
   return rb;
 }
 
+TEST(RingBufferTest, KeepsInsertionOrderBeforeAndAfterWrapping) {
+  RingBuffer<int, 4> buffer;
+  for (int value : {1, 2, 3})
+    buffer.push(value);
+  ASSERT_EQ(buffer.size(), 3u);
+  EXPECT_EQ(buffer[0], 1);
+  EXPECT_EQ(buffer[2], 3);
+  for (int value : {4, 5, 6})
+    buffer.push(value);
+  ASSERT_EQ(buffer.size(), 4u);
+  for (size_t i = 0; i < buffer.size(); ++i)
+    EXPECT_EQ(buffer[i], static_cast<int>(i) + 3);
+}
+
 TEST(FormatTraceTest, WaveLaneAnnotations) {
   auto trace = make_trace({0x100, 0x108, 0x10c});
   std::unordered_map<uint64_t, std::string> disasm = {
@@ -2511,7 +2521,7 @@ TEST(FormatTraceTest, WaveLaneAnnotations) {
   MarkedInstruction conflict{testInstruction(0x100), 3, -1};
   MarkedInstruction read{trace[2], 0, 5};
   auto result = formatTrace(
-      trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc); },
+      trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc()); },
       conflict, read);
   EXPECT_NE(result.find("; <-- wave 3"), std::string::npos);
   EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
@@ -2533,7 +2543,7 @@ TEST(FormatTraceTest, NoLineBeforeFirstMarker) {
   MarkedInstruction conflict{trace[2], 1, -1};
   MarkedInstruction read{trace[4], 1, 3};
   auto result = formatTrace(
-      trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc); },
+      trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc()); },
       conflict, read);
   EXPECT_EQ(result.substr(0, 5), "  ==>");
   EXPECT_EQ(result.find("0x100"), std::string::npos);
@@ -2551,7 +2561,7 @@ TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
   MarkedInstruction conflict{testInstruction(0x100), 0, -1};
   MarkedInstruction read{trace[2], 0, 5};
   auto result = formatTrace(
-      trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc); },
+      trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc()); },
       conflict, read);
   EXPECT_NE(result.find("before trace window"), std::string::npos);
   EXPECT_NE(result.find("buffer_load_dwordx4"), std::string::npos);
@@ -2567,7 +2577,7 @@ TEST(FormatTraceTest, ResolvesOnlyPrintedInstructions) {
     trace.push(testInstruction(pc));
   std::vector<uint64_t> requested;
   auto resolve = [&](const InstructionSnapshot &instruction) {
-    requested.push_back(instruction.pc);
+    requested.push_back(instruction.pc());
     return "s_nop 0";
   };
   const auto report =
@@ -2589,7 +2599,7 @@ TEST(FormatTraceTest, IdenticalEncodingsKeepPcBasedSelection) {
 
 TEST(FormatTraceTest, RepeatedPcKeepsEachCapturedEncoding) {
   const auto words = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
-  const InstructionSnapshot load{.pc = 0x100, .words = {words[0], words[1]}, .word_count = 2};
+  const InstructionSnapshot load{0x100, std::span(words.data(), 2)};
   const auto rewritten = testInstruction(0x100);
   RingBuffer<InstructionSnapshot, 256> trace;
   for (const auto &instruction : {load, testInstruction(0x104), rewritten, testInstruction(0x108)})
@@ -2598,7 +2608,7 @@ TEST(FormatTraceTest, RepeatedPcKeepsEachCapturedEncoding) {
   const auto report =
       formatTrace(trace,
                   [&](const InstructionSnapshot &instruction) {
-                    auto decoded = decoder->decode_window(instruction.encoding(), instruction.pc);
+                    auto decoded = decoder->decode_window(instruction.encoding(), instruction.pc());
                     EXPECT_TRUE(decoded.succeeded());
                     return decoded.succeeded() ? decoded.value()->disassemble() : std::string{};
                   },
@@ -2610,62 +2620,36 @@ TEST(FormatTraceTest, RepeatedPcKeepsEachCapturedEncoding) {
 }
 
 TEST(FormatTraceTest, RewrittenReadPcDoesNotTrimAtAnEarlierEncoding) {
-  auto producer = testInstruction(0x100);
-  auto read = producer;
-  read.words[0] = S_NOP | 7;
+  const auto producer = testInstruction(0x100);
+  const auto read = testInstruction(0x100, S_NOP | 7);
   RingBuffer<InstructionSnapshot, 256> trace;
   for (const auto &instruction : {producer, testInstruction(0x104), read})
     trace.push(instruction);
-  const auto report = formatTrace(trace,
-                                  [](const InstructionSnapshot &instruction) {
-                                    return std::format("s_nop {}", instruction.words[0] & 0xffff);
-                                  },
-                                  MarkedInstruction{producer, 0, -1}, {read, 0, 0});
+  const auto report =
+      formatTrace(trace,
+                  [](const InstructionSnapshot &instruction) {
+                    return std::format("s_nop {}", instruction.encoding()[0] & 0xffff);
+                  },
+                  MarkedInstruction{producer, 0, -1}, {read, 0, 0});
   EXPECT_EQ(report, "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
                     "       0x104  s_nop 0\n"
                     "  ==>  0x100  s_nop 7  ; <-- wave 0 lane 0\n");
 }
 
 TEST(FormatTraceTest, DifferentEncodingAtConflictPcIsNotTheProducer) {
-  auto producer = testInstruction(0x100);
-  producer.words[0] = S_NOP | 7;
+  const auto producer = testInstruction(0x100, S_NOP | 7);
   RingBuffer<InstructionSnapshot, 256> trace;
   trace.push(testInstruction(0x100));
   trace.push(testInstruction(0x104));
-  const auto report = formatTrace(trace,
-                                  [](const InstructionSnapshot &instruction) {
-                                    return std::format("s_nop {}", instruction.words[0] & 0xffff);
-                                  },
-                                  MarkedInstruction{producer, 1, -1}, {trace[1], 0, 0});
+  const auto report =
+      formatTrace(trace,
+                  [](const InstructionSnapshot &instruction) {
+                    return std::format("s_nop {}", instruction.encoding()[0] & 0xffff);
+                  },
+                  MarkedInstruction{producer, 1, -1}, {trace[1], 0, 0});
   EXPECT_EQ(report, "  ==>  0x100  s_nop 7  (before trace window)  ; <-- wave 1\n"
                     "       ... 1 instructions not recorded ...\n"
                     "  ==>  0x104  s_nop 0  ; <-- wave 0 lane 0\n");
-}
-
-TEST(FormatTraceTest, MatchingIgnoresUnusedEncodingStorage) {
-  RingBuffer<InstructionSnapshot, 256> trace;
-  trace.push(testInstruction(0x100));
-  trace.push(testInstruction(0x104));
-  auto producer = trace[0];
-  producer.words[3] = 0xdeadbeef;
-  const auto report = formatTrace(trace,
-                                  [](const InstructionSnapshot &instruction) {
-                                    EXPECT_EQ(instruction.words[3], 0u);
-                                    return "s_nop 0";
-                                  },
-                                  MarkedInstruction{producer, 1, -1}, {trace[1], 0, 0});
-  EXPECT_EQ(report, "  ==>  0x100  s_nop 0  ; <-- wave 1\n"
-                    "  ==>  0x104  s_nop 0  ; <-- wave 0 lane 0\n");
-}
-
-TEST(FormatTraceTest, RejectsInvalidMarkedSnapshots) {
-  auto trace = make_trace({0x100, 0x104});
-  auto resolve = [](const InstructionSnapshot &) { return "s_nop 0"; };
-  const InstructionSnapshot invalid{.pc = 0x104};
-  EXPECT_THROW(formatTrace(trace, resolve, MarkedInstruction{trace[0], 1, -1}, {invalid, 0, 0}),
-               std::logic_error);
-  EXPECT_THROW(formatTrace(trace, resolve, MarkedInstruction{invalid, 1, -1}, {trace[1], 0, 0}),
-               std::logic_error);
 }
 
 TEST(FormatTraceTest, PropagatesDisassemblyFailures) {
@@ -2716,7 +2700,7 @@ TEST(RaceDisassemblyTest, SnapshotsOwnShortLiteralAndMaximumWidthEncodings) {
     }
     auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(plugin->slot_index()));
     ASSERT_EQ(state->trace.size(), 1u);
-    EXPECT_EQ(wave->disassemble_instruction(state->trace[0].encoding(), state->trace[0].pc),
+    EXPECT_EQ(wave->disassemble_instruction(state->trace[0].encoding(), state->trace[0].pc()),
               expected);
   }
 }

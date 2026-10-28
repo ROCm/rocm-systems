@@ -108,7 +108,6 @@ void WaveRaceState::registerScalarLoad(
     InstructionSnapshot instruction, RegisterRef destination, uint64_t execMask,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
     MemoryOrderClass memoryOrder) {
-  instruction.validateEncoding();
   const size_t limit = destination.cls == RegClass::SGPR   ? sgprMemoryEvents.size()
                        : destination.cls == RegClass::TTMP ? ttmpMemoryEvents.size()
                                                            : 0;
@@ -138,7 +137,6 @@ void WaveRaceState::registerEventWithIntervals(
     uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
     MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask) {
-  instruction.validateEncoding();
   ProfileScope ps(*profiler_, "registerEvent");
   bool toSgpr = isToSgpr(type);
   bool toTtmp = isToTtmp(type);

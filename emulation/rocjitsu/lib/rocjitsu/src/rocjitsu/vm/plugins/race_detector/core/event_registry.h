@@ -53,8 +53,6 @@ class EventRegistry {
 
 public:
   /// Allocate an event with its producing instruction and every counter obligation.
-  /// Throws std::logic_error before allocating if `instruction` is not a valid
-  /// InstructionSnapshot.
   EventId add(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
               std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
               IntervalSet ldsIntervals,
@@ -63,7 +61,6 @@ public:
     int id = base_offset_ + static_cast<int>(entries_.size());
     assert(!counterObligations.empty());
     assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
-    instruction.validateEncoding();
     EventInfo event{waveId,
                     instruction,
                     type,
@@ -149,7 +146,7 @@ public:
   MemoryOrderClass memoryOrder(EventId id) const { return entries_[index(id)].memoryOrder; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
   bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
-  uint64_t pc(EventId id) const { return instruction(id).pc; }
+  uint64_t pc(EventId id) const { return instruction(id).pc(); }
   const InstructionSnapshot &instruction(EventId id) const {
     return entries_[index(id)].instruction;
   }

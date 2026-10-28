@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cstring>
 #include <format>
 #include <mutex>
 #include <optional>
@@ -33,19 +32,16 @@ namespace rocjitsu::plugins::race_detector {
 namespace {
 
 InstructionSnapshot capture_instruction(uint64_t pc, const Instruction &inst) {
-  InstructionSnapshot snapshot{.pc = pc};
   static_assert(InstructionSnapshot::kMaxWords * sizeof(uint32_t) ==
                 amdgpu::InstructionCache::kFetchBytes);
   if (!inst.raw_encoding())
     throw std::logic_error(
         std::format("race detector instruction at PC {:#x} has no encoding", pc));
   if (inst.size() <= 0 || inst.size() % sizeof(uint32_t) != 0 ||
-      static_cast<size_t>(inst.size()) > sizeof(snapshot.words))
+      static_cast<size_t>(inst.size()) > InstructionSnapshot::kMaxWords * sizeof(uint32_t))
     throw std::logic_error(std::format(
         "race detector instruction at PC {:#x} has invalid encoding size {}", pc, inst.size()));
-  snapshot.word_count = static_cast<uint32_t>(inst.size()) / sizeof(uint32_t);
-  std::memcpy(snapshot.words.data(), inst.raw_encoding(), inst.size());
-  return snapshot;
+  return {pc, std::span(inst.raw_encoding(), inst.size() / sizeof(uint32_t))};
 }
 
 // onAmdgpuBeforeExecuteInstruction() records each instruction before it can
@@ -161,12 +157,8 @@ MarkedInstruction findConflict(const RaceViolation &v, RaceDetector &detector) {
 std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                         const std::function<std::string(const InstructionSnapshot &)> &disassemble,
                         std::optional<MarkedInstruction> conflict, MarkedInstruction read) {
-  auto matches = [](const InstructionSnapshot &a, const InstructionSnapshot &b) {
-    return a.pc == b.pc && std::ranges::equal(a.encoding(), b.encoding());
-  };
   auto isMarked = [&](const InstructionSnapshot &instruction) {
-    return matches(instruction, read.instruction) ||
-           (conflict && matches(instruction, conflict->instruction));
+    return instruction == read.instruction || (conflict && instruction == conflict->instruction);
   };
 
   size_t n = trace.size();
@@ -180,7 +172,7 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
   }
   if (conflict) {
     for (size_t i = 0; i < n; ++i)
-      if (matches(trace[i], conflict->instruction)) {
+      if (trace[i] == conflict->instruction) {
         conflict_found = true;
         break;
       }
@@ -189,7 +181,7 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
   std::ostringstream oss;
 
   if (conflict && !conflict_found) {
-    oss << "  ==>  0x" << std::hex << conflict->instruction.pc << std::dec << "  ";
+    oss << "  ==>  0x" << std::hex << conflict->instruction.pc() << std::dec << "  ";
     const auto d = disassemble(conflict->instruction);
     if (!d.empty())
       oss << d << "  ";
@@ -202,7 +194,7 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
 
   size_t last = n;
   for (size_t i = first; i < n; ++i) {
-    if (matches(trace[i], read.instruction)) {
+    if (trace[i] == read.instruction) {
       last = i + 1;
       break;
     }
@@ -213,10 +205,10 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
 
   auto emit = [&](size_t i) {
     const auto &instruction = trace[i];
-    bool is_conflict = conflict && matches(instruction, conflict->instruction);
-    bool is_read = matches(instruction, read.instruction);
+    bool is_conflict = conflict && instruction == conflict->instruction;
+    bool is_read = instruction == read.instruction;
     oss << ((is_conflict || is_read) ? "  ==>  " : "       ");
-    oss << "0x" << std::hex << instruction.pc << std::dec << "  " << disassemble(instruction);
+    oss << "0x" << std::hex << instruction.pc() << std::dec << "  " << disassemble(instruction);
     if (is_conflict) {
       oss << "  ; <-- wave " << conflict->wave;
       if (conflict->lane >= 0)
@@ -284,7 +276,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     auto *ws = get_state(wf);
     assert(ws && ws->race_state && "no wavefront state for race");
     const InstructionSnapshot current = current_instruction(*ws, *wf);
-    uint64_t pc = current.pc;
+    uint64_t pc = current.pc();
 
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
@@ -314,17 +306,17 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     oss << formatTrace(
         ws->trace,
         [wf](const InstructionSnapshot &instruction) {
-          return wf->disassemble_instruction(instruction.encoding(), instruction.pc);
+          return wf->disassemble_instruction(instruction.encoding(), instruction.pc());
         },
         conflict, access_mark);
 
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
       bool is_new = !observed_races_.count({dispatch_id, pc}) &&
-                    !observed_races_.count({dispatch_id, conflict.instruction.pc});
+                    !observed_races_.count({dispatch_id, conflict.instruction.pc()});
       observed_races_.emplace(dispatch_id, pc);
       if (is_new) {
-        observed_races_.emplace(dispatch_id, conflict.instruction.pc);
+        observed_races_.emplace(dispatch_id, conflict.instruction.pc());
         const char *space = v.space == RaceViolation::Space::VGPR   ? "VGPR"
                             : v.space == RaceViolation::Space::SGPR ? "SGPR"
                             : v.space == RaceViolation::Space::TTMP ? "TTMP"
