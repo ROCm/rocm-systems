@@ -16,6 +16,15 @@ from utils.ml_api_selectors import (
 )
 
 
+def assert_comma_name_hints_spaces(excinfo):
+    message = str(excinfo.value)
+    assert (
+        "To pass several values, list them after the flag, separated by spaces."
+        in message
+    )
+    assert "Values:" not in message
+
+
 def test_absent_profile_selection_is_empty():
     assert resolve_profile_selection(None) == []
 
@@ -55,8 +64,9 @@ def test_empty_operator_flag_is_unscoped_double_star():
 
 
 def test_operator_rejects_unknown_prefix():
-    with pytest.raises(ValueError, match="jax"):
+    with pytest.raises(ValueError, match="jax") as excinfo:
         resolve_operator_patterns(["jax:*foo*"])
+    assert "Values:" in str(excinfo.value)
     with pytest.raises(ValueError, match="all_supported_backends"):
         resolve_operator_patterns(["all_supported_backends:*relu*"])
     with pytest.raises(ValueError, match="toch"):
@@ -66,13 +76,21 @@ def test_operator_rejects_unknown_prefix():
 
 
 def test_comma_joined_profile_token_is_unknown():
-    with pytest.raises(ValueError, match="torch,triton"):
+    with pytest.raises(ValueError, match="torch,triton") as excinfo:
         resolve_profile_selection(["torch,triton"])
+    assert_comma_name_hints_spaces(excinfo)
 
 
 def test_comma_joined_list_token_is_unknown():
-    with pytest.raises(ValueError, match="torch,triton"):
+    with pytest.raises(ValueError, match="torch,triton") as excinfo:
         resolve_list_selectors(["torch,triton"])
+    assert_comma_name_hints_spaces(excinfo)
+
+
+def test_comma_joined_operator_prefix_is_unknown():
+    with pytest.raises(ValueError, match="torch,triton") as excinfo:
+        resolve_operator_patterns(["torch,triton:*relu*"])
+    assert_comma_name_hints_spaces(excinfo)
 
 
 def test_list_operators_rejects_backend_missing_from_workload():

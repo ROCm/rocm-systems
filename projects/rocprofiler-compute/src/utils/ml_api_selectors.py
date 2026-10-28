@@ -31,6 +31,18 @@ def _argv_tokens(raw: List[str]) -> List[str]:
     return [str(value).strip() for value in raw if str(value).strip()]
 
 
+def _unknown_ml_api_name_message(
+    label: str, token: str, values: Tuple[str, ...]
+) -> str:
+    """Error text for an unknown selector name or prefix."""
+    if "," in token:
+        return (
+            f"Unknown {label} {token!r}. "
+            "To pass several values, list them after the flag, separated by spaces."
+        )
+    return f"Unknown {label} {token!r}. Values: {', '.join(values)}."
+
+
 def resolve_profile_selection(raw: Optional[List[str]]) -> List[str]:
     """Resolve --trace-ml-api."""
     if raw is None:
@@ -47,8 +59,9 @@ def resolve_profile_selection(raw: Optional[List[str]]) -> List[str]:
             )
         if name not in KNOWN_ML_API_BACKENDS:
             raise ValueError(
-                f"Unknown --trace-ml-api value {name!r}. "
-                f"Values: {', '.join(KNOWN_ML_API_BACKENDS)}."
+                _unknown_ml_api_name_message(
+                    "--trace-ml-api value", name, KNOWN_ML_API_BACKENDS
+                )
             )
 
     return _unique_keep_order(tokens)
@@ -62,8 +75,9 @@ def resolve_list_selectors(raw: Optional[List[str]]) -> Optional[List[str]]:
     for name in tokens:
         if name not in OPERATOR_SELECTORS:
             raise ValueError(
-                f"Unknown --list-operators value {name!r}. "
-                f"Values: {', '.join(OPERATOR_SELECTORS)}."
+                _unknown_ml_api_name_message(
+                    "--list-operators value", name, OPERATOR_SELECTORS
+                )
             )
     return _unique_keep_order(tokens)
 
@@ -87,8 +101,9 @@ def _patterns_by_backend(tokens: List[str]) -> Dict[str, List[str]]:
             prefix, rest = selector_token.split(":", 1)
             if prefix not in OPERATOR_SELECTORS:
                 raise ValueError(
-                    f"Unknown --operator prefix {prefix!r}. "
-                    f"Values: {', '.join(OPERATOR_SELECTORS)}."
+                    _unknown_ml_api_name_message(
+                        "--operator prefix", prefix, OPERATOR_SELECTORS
+                    )
                 )
             _save(prefix, rest.strip() or "**")
             continue
