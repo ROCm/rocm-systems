@@ -70,7 +70,7 @@ static inline std::pair<dim3, dim3> ddaAllReduceFabricLLGeom(ncclComm* comm, siz
 
 // Two-shot covers one shard (the message divided by nRanks) with 1024-thread
 // blocks, and keeps the full fabric cap. That grid can be larger than the
-// halved one-shot cap, so the tuner must see both.
+// 64-block one-shot cap, so the tuner must see both.
 static inline std::pair<dim3, dim3> ddaAllReduceFabricLLTwoShotGeom(ncclComm* comm, size_t count, int typeSize) {
   const size_t nPk = (((size_t)count * (size_t)typeSize) >> 3) / (size_t)comm->nRanks;
   const unsigned threads = 1024;
@@ -641,7 +641,7 @@ uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataTy
   const auto oneShot = ddaAllReduceFabricLLGeom(comm, count, typeSize).first;
   const auto twoShot = ddaAllReduceFabricLLTwoShotGeom(comm, count, typeSize).first;
   // The two-shot tier keeps the full fabric cap, so a mid-size message can
-  // launch more blocks than the halved one-shot grid.
+  // launch more blocks than the 64-block one-shot grid.
   return std::max(oneShot.x * oneShot.y, twoShot.x * twoShot.y);
 }
 

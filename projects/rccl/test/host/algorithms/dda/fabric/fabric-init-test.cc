@@ -280,7 +280,7 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_HandsEveryResourceToComm
   EXPECT_NE(comm_->ddaFabricBarrierState->resources, nullptr);
   EXPECT_EQ(StateOf(comm_->ddaFabricBarrierState->barrierHost).nRanks, kNRanks);
   EXPECT_EQ(comm_->ddaFabricMaxBlocks, kCuCount);
-  EXPECT_EQ(comm_->ddaFabricLLOneShotMaxBlocks, kCuCount / 2);
+  EXPECT_EQ(comm_->ddaFabricLLOneShotMaxBlocks, kCuCount);
   EXPECT_NE(comm_->ddaLLEpochDev, nullptr);
   EXPECT_EQ(comm_->ddaLLEpochLen, kCuCount);
 }
@@ -522,6 +522,15 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_PublishesLocalCapForThePeers) {
   EXPECT_EQ(published, 7);
   EXPECT_EQ(comm_->ddaFabricMaxBlocks, 7);
   EXPECT_EQ(comm_->ddaFabricLLOneShotMaxBlocks, 7);
+}
+
+TEST_F(FabricInitCommInitMicrotest, CommInit_ManyCus_OneShotCapStopsAt64) {
+  comm_->cuCount = 128;
+
+  ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+
+  EXPECT_EQ(comm_->ddaFabricMaxBlocks, 128);
+  EXPECT_EQ(comm_->ddaFabricLLOneShotMaxBlocks, 64);
 }
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_CapOfOne_OneShotCapStaysOne) {

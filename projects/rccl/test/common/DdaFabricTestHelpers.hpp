@@ -36,7 +36,7 @@ struct DdaFabricMockComm
         comm.ddaScratchBytes    = std::numeric_limits<size_t>::max();
         comm.ddaFabricMaxBlocks = DDA_FABRIC_MAXBLOCKS;
         // One-shot LL reads this cap, not ddaFabricMaxBlocks. Match the full
-        // budget the tests assumed before the half-CU default.
+        // budget the tests assumed before the 64-block one-shot default.
         comm.ddaFabricLLOneShotMaxBlocks = DDA_FABRIC_MAXBLOCKS;
         comm.archName            = const_cast<char*>("gfx1250");
         // Non-null so launcher tests can tell the abort flag was forwarded.

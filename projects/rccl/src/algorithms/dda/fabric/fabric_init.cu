@@ -33,6 +33,8 @@ using nccl_dda_detail::DdaFabricMaxBlocksOverride;
 
 RCCL_PARAM(DdaFabricBufferSizeForScratch, "DDA_FABRIC_BUFFER_SIZE", -1);
 
+constexpr int kDdaFabricLLOneShotDefaultMaxBlocks = 64;
+
 bool ncclDdaUseFabricPath(ncclComm* comm) {
   if (comm == nullptr) {
     return false;
@@ -205,8 +207,11 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaPeerPtrsHost = peerHost;
   comm->ddaFabricBarrierState = barrierState;
   comm->ddaFabricMaxBlocks = nBlocksMax;
-  // Half the CUs: a full-CU one-shot grid starts slowly from idle. Explicit RCCL_DDA_FABRIC_MAXBLOCKS is kept as-is.
-  comm->ddaFabricLLOneShotMaxBlocks = parsedOverride.valid ? nBlocksMax : std::max(1, nBlocksMax / 2);
+  // 64 is the smallest grid that covers a 512 KB message (bs 64 x 4096 bf16) in two passes of 512-thread
+  // blocks; larger grids lose time when ranks arrive skewed, smaller ones add a pass. Explicit
+  // RCCL_DDA_FABRIC_MAXBLOCKS is kept as-is.
+  comm->ddaFabricLLOneShotMaxBlocks =
+      parsedOverride.valid ? nBlocksMax : std::min(nBlocksMax, kDdaFabricLLOneShotDefaultMaxBlocks);
   comm->ddaLLEpochDev = epochDev;
   comm->ddaLLEpochLen = (int)epochLen;
   INFO(NCCL_INIT,
