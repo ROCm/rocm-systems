@@ -19,6 +19,12 @@ rccl_assert_source_line("${_rccl_src_root}/misc/rocmwrap.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rocmwrap_fakes.cc"
   "int64_t rcclParamForceEnableDMABUF() { return g_loadParam(\"RCCL_FORCE_ENABLE_DMABUF\", 0); }"
   "the ForceEnableDMABUF fake default")
+rccl_assert_source_line("${_rccl_src_root}/transport/net.cc"
+  "NCCL_PARAM(GdrCopySyncEnable, \"GDRCOPY_SYNC_ENABLE\", 1);"
+  "fakes/transport_stubs.cc: ncclParamGdrCopySyncEnable()")
+rccl_assert_source_line("${_rccl_src_root}/transport/net.cc"
+  "NCCL_PARAM(GdrCopyFlushEnable, \"GDRCOPY_FLUSH_ENABLE\", 0);"
+  "fakes/transport_stubs.cc: ncclParamGdrCopyFlushEnable()")
 # src/enqueue/task_prep/*.cc declare these five but define none, and param_redirect.h only rewrites
 # NCCL_PARAM where it expands, so the hand-written bodies below are the only definitions on that link line.
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
@@ -94,8 +100,8 @@ set(_rccl_cast_pins
     "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI> }"
   "transport/net_ib_cast/p2p.cc" "RCCL_PARAM(IbCastGdrFlushGpuMemNoRelaxedOrdering, \"GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING\", 1)<SEMI>"
     "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING\", 1)<SEMI>"
-  "transport/net_ib_cast/p2p.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\"}<SEMI>"
-    "net_ib_cast_p2p_fakes.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\"}<SEMI>"
+  "transport/net_ib_cast/p2p.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\", \"IGet\", \"Failed\"}<SEMI>"
+    "net_ib_cast_p2p_fakes.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\", \"IGet\", \"Failed\"}<SEMI>"
   "transport/net_ib_cast/p2p_resiliency.cc" "NCCL_PARAM(IbCastResiliencyPortFailover, \"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
     "net_ib_cast_p2p_resiliency_fakes.cc" "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI> }"
   "transport/net_ib_cast/p2p_resiliency.cc" "NCCL_PARAM(IbCastResiliencyPortFailoverMaxAttempts, \"IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS\", 1)<SEMI>"
@@ -209,6 +215,7 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicro -- the broad-coverage micro binary.
   set(TEST_MICRO_SOURCE_FILES
     p2p-test.cc
+    coll-net-test.cc                     # src/transport/coll_net.cc
     rma-proxy-launch-test.cc            # RMA proxy queue + stream-memop coverage
     rma-proxy-progress-test.cc
     gin-plugin-init-test.cc
@@ -248,6 +255,7 @@ function(rccl_define_micro_source_lists)
     rccl-graph-gen-test.cc               # src/graph/rccl_graph_gen.cc ring construction + cut balancing
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    fakes/channel_fakes.cc
     fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
@@ -263,6 +271,8 @@ function(rccl_define_micro_source_lists)
     fakes/recorder_fakes.cc
     fakes/profiler_fakes.cc
     fakes/roctx_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/topo_stubs.cc
     fakes/utils_fakes.cc
     fakes/collective_stubs.cc
     fakes/devcomm_fakes.cc
@@ -304,6 +314,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes
@@ -381,6 +392,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
@@ -490,6 +502,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
@@ -562,6 +575,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/ce_reduce_fakes.cc             # src/device/ce_reduce.cc
@@ -572,7 +586,7 @@ function(rccl_define_micro_source_lists)
     fakes/env_fakes.cc
     fakes/os_fakes.cc
     fakes/profiler_fakes.cc
-    fakes/rccl_wrap_fakes.cc             # rcclParamCeAllReduce, rcclParamCeArStagingBytes
+    fakes/rccl_wrap_fakes.cc             # rcclParamCeAllReduce, rcclParamCeReduceScatter, rcclParamCeArStagingBytes
     fakes/recorder_fakes.cc
     fakes/rma_fakes.cc
     fakes/roctx_fakes.cc
@@ -632,6 +646,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
@@ -671,6 +686,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/collectives_fakes.cc
@@ -695,6 +711,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/collectives_fakes.cc
@@ -730,6 +747,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
@@ -902,6 +920,7 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc                  # core floor, incl. proxy profiler hooks
+    fakes/channel_fakes.cc
     fakes/net_ib_cast_common_fakes.cc    # netIbCast
     fakes/net_ib_cast_connect_fakes.cc   # rcclCastNetP2pPolicy
     fakes/os_fakes.cc
@@ -1564,6 +1583,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+    COLL_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/coll_net.cc"
+    RCCL_TRANSPORT_STUBS_OMIT_COLL_NET
+    RCCL_COLLECTIVE_STUBS_OMIT_COLL_NET
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
     # collectives_tmp.cc, not collectives.cc: src/CMakeLists.txt lists src/collectives.cc first,
