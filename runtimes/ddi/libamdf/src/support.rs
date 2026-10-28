@@ -60,7 +60,8 @@ pub(crate) unsafe fn object<'a, T>(p: *const T) -> Result<&'a T, u64> {
 
 pub(crate) unsafe fn exclusive<'a, T>(p: *mut T) -> Result<&'a mut T, u64> {
     output_pointer(p)?;
-    // SAFETY: Mutating operations require exclusive access in the C contract.
+    // SAFETY: Callers use this helper only for destruction, for which the C
+    // contract excludes concurrent use of the whole public handle.
     Ok(unsafe { &mut *p })
 }
 
