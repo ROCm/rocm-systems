@@ -210,7 +210,7 @@ int main(int argc, char **argv) {
   auto help =
       std::make_shared<BoolFlag>(FlagInfo{"--help", {"-h"}, "Show help", ValueMode::Switch});
   auto report = [](std::string_view message) { std::cerr << message << '\n'; };
-  DiagnosticEmitter diagnostic(report);
+  util::DiagnosticEmitter diagnostic(report);
   if (command
           .add_flags("Decoder fuzzing", {afl_flag, json_flag, input_flag, seeds_flag, target_flag},
                      diagnostic)

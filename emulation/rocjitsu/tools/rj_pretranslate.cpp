@@ -160,7 +160,7 @@ int main(int argc, char **argv) {
   auto report = [](std::string_view message) {
     std::fprintf(stderr, "%.*s\n", static_cast<int>(message.size()), message.data());
   };
-  DiagnosticEmitter diagnostic(report);
+  util::DiagnosticEmitter diagnostic(report);
   if (command
           .add_flags("Translation store", {root_flag, force_flag, portable, fail_flag}, diagnostic)
           .failed() ||

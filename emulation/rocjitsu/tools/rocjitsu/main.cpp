@@ -60,6 +60,7 @@
 
 using namespace rocjitsu;
 namespace ucli = rocjitsu::cli;
+namespace launcher = rocjitsu::launcher;
 
 namespace {
 
@@ -238,7 +239,7 @@ void reap_stale_runtime_dirs() {
   }
 }
 
-using KfdGpuOrdinal = rocjitsu::cli::VisibleGpu;
+using KfdGpuOrdinal = launcher::VisibleGpu;
 
 std::optional<uint32_t> read_u32_file(const std::filesystem::path &path) {
   std::ifstream in(path);
@@ -309,7 +310,7 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
   for (uint32_t ordinal = 0; ordinal < nodes.size(); ++ordinal)
     gpus.push_back({ordinal, nodes[ordinal].gpu_id, nodes[ordinal].gfx_target_version,
                     nodes[ordinal].unique_id});
-  return rocjitsu::cli::enumerate_kfd_gpus(gpus);
+  return launcher::enumerate_kfd_gpus(gpus);
 }
 
 std::optional<std::string_view> environment_value(const char *name) {
@@ -320,7 +321,7 @@ std::optional<std::string_view> environment_value(const char *name) {
 /// @brief Resolve automatic host selection once for every DBT runtime layer.
 bool resolve_host_gpu(rocjitsu::config::DbtGuestConfig *dbt_guest,
                       const std::vector<KfdGpuOrdinal> &topology) {
-  const std::vector<KfdGpuOrdinal> visible_gpus = rocjitsu::cli::effective_visible_gpus(
+  const std::vector<KfdGpuOrdinal> visible_gpus = launcher::effective_visible_gpus(
       topology, environment_value("ROCR_VISIBLE_DEVICES"), environment_value("HIP_VISIBLE_DEVICES"),
       environment_value("CUDA_VISIBLE_DEVICES"));
 
@@ -332,19 +333,19 @@ bool resolve_host_gpu(rocjitsu::config::DbtGuestConfig *dbt_guest,
     return false;
   }
 
-  const rocjitsu::cli::HostSelection selection =
-      rocjitsu::cli::select_host_gpu(visible_gpus, dbt_guest->host.gpu_id, *target_version);
-  if (selection.status == rocjitsu::cli::HostSelectionStatus::Selected) {
+  const launcher::HostSelection selection =
+      launcher::select_host_gpu(visible_gpus, dbt_guest->host.gpu_id, *target_version);
+  if (selection.status == launcher::HostSelectionStatus::Selected) {
     dbt_guest->host.gpu_id = selection.gpu_id;
     return true;
   }
-  if (selection.status == rocjitsu::cli::HostSelectionStatus::ExplicitGpuHidden) {
+  if (selection.status == launcher::HostSelectionStatus::ExplicitGpuHidden) {
     std::cerr << std::format(
         "rocjitsu: dbt_guest.host_gpu_id {} is hidden by ROCm device visibility settings\n",
         dbt_guest->host.gpu_id);
     return false;
   }
-  if (selection.status == rocjitsu::cli::HostSelectionStatus::ExplicitGpuIsaMismatch) {
+  if (selection.status == launcher::HostSelectionStatus::ExplicitGpuIsaMismatch) {
     std::cerr << std::format("rocjitsu: dbt_guest.host_gpu_id {} does not match host_isa '{}'\n",
                              dbt_guest->host.gpu_id, dbt_guest->host.isa);
     return false;
@@ -378,7 +379,7 @@ dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
     const auto &device = devices[ordinal];
     gpus.push_back({ordinal, device.gpu_id, device.gfx_target_version, device.unique_id});
   }
-  return rocjitsu::cli::enumerate_kfd_gpus(gpus);
+  return launcher::enumerate_kfd_gpus(gpus);
 }
 
 void print_usage(const ucli::Command &command) {
@@ -406,7 +407,7 @@ int main(int argc, char *argv[]) {
   std::signal(SIGPIPE, SIG_IGN);
 
   ucli::Command command{"rocjitsu", ucli::PositionalMode::AfterSeparator};
-  rocjitsu::cli::LaunchFlags flags;
+  launcher::LaunchFlags flags;
   auto report = [](std::string_view message) { std::cerr << message << '\n'; };
   util::DiagnosticEmitter diagnostic(report);
   if (flags.register_flags(command, diagnostic).failed())
@@ -783,18 +784,18 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  rocjitsu::cli::LaunchEnvironment launch_environment;
-  rocjitsu::cli::prepend_launch_preloads(launch_environment, lib_path);
+  launcher::LaunchEnvironment launch_environment;
+  launcher::prepend_launch_preloads(launch_environment, lib_path);
   if (dbt_guest_mode) {
     std::optional<std::string_view> child_rocr_visible = environment_value("ROCR_VISIBLE_DEVICES");
     std::optional<std::string> expanded_rocr_visible =
-        rocjitsu::cli::expanded_rocr_visible_devices(dbt_execution_gpus, child_rocr_visible);
+        launcher::expanded_rocr_visible_devices(dbt_execution_gpus, child_rocr_visible);
     if (expanded_rocr_visible) {
       launch_environment.set("ROCR_VISIBLE_DEVICES", *expanded_rocr_visible);
       child_rocr_visible = *expanded_rocr_visible;
     }
-    if (std::optional<rocjitsu::cli::VisibilityOverride> client_visible =
-            rocjitsu::cli::normalized_client_visible_devices(
+    if (std::optional<launcher::VisibilityOverride> client_visible =
+            launcher::normalized_client_visible_devices(
                 dbt_execution_gpus, child_rocr_visible, environment_value("HIP_VISIBLE_DEVICES"),
                 environment_value("CUDA_VISIBLE_DEVICES"), dbt_guest_config.host.gpu_id))
       launch_environment.set(client_visible->name, client_visible->value);
@@ -802,7 +803,7 @@ int main(int argc, char *argv[]) {
     // rocprofiler-register table-delivery path so it cannot validate an
     // unshadowed table before rocjitsu installs guest-agent wrappers. Also
     // exclude the overlapping automatic HotSwap hook across ROCr generations.
-    rocjitsu::cli::configure_dbt_guest_tool_environment(launch_environment, hooks_path);
+    launcher::configure_dbt_guest_tool_environment(launch_environment, hooks_path);
   }
   // Export the invocation runtime dir so every descendant (including grandchild
   // processes spawned through wrappers like ctest) inherits the exact directory
@@ -811,7 +812,7 @@ int main(int argc, char *argv[]) {
     launch_environment.set(rocjitsu::kRpcInvocationDirEnv, rpc_invocation_runtime_dir(my_pid));
   if (launched_daemon_pid)
     launch_environment.set(rocjitsu::kRpcDaemonPidEnv, std::to_string(*launched_daemon_pid));
-  rocjitsu::cli::execvp_with_environment(app_argv[0], app_argv, launch_environment);
+  launcher::execvp_with_environment(app_argv[0], app_argv, launch_environment);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));
   cleanup_runtime_files(my_pid);

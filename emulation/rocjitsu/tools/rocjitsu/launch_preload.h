@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace rocjitsu::cli {
+namespace rocjitsu::launcher {
 
 class LaunchEnvironment {
 public:
@@ -36,4 +36,4 @@ void configure_dbt_guest_tool_environment(LaunchEnvironment &environment,
 
 int execvp_with_environment(const char *file, char *const argv[], LaunchEnvironment &environment);
 
-} // namespace rocjitsu::cli
+} // namespace rocjitsu::launcher

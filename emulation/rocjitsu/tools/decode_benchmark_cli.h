@@ -15,12 +15,12 @@ class DecodeTargetFlag final : public cli::Flag {
 public:
   using Flag::Flag;
   std::optional<rj_code_target_id_t> value() const { return value_; }
-  cli::Result set_value(std::optional<rj_code_target_id_t> value,
-                        cli::DiagnosticEmitter diagnostic);
+  util::Result set_value(std::optional<rj_code_target_id_t> value,
+                         util::DiagnosticEmitter diagnostic);
   std::string format_value() const override;
 
 private:
-  cli::Result parse_value(std::string_view text, cli::DiagnosticEmitter diagnostic) override;
+  util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override;
   std::optional<rj_code_target_id_t> value_;
 };
 
@@ -30,11 +30,11 @@ public:
   DecodeCountFlag(cli::FlagInfo info, size_t initial, size_t minimum)
       : Flag(std::move(info)), value_(initial), minimum_(minimum) {}
   size_t value() const { return value_; }
-  cli::Result set_value(uint64_t value, cli::DiagnosticEmitter diagnostic);
+  util::Result set_value(uint64_t value, util::DiagnosticEmitter diagnostic);
   std::string format_value() const override;
 
 private:
-  cli::Result parse_value(std::string_view text, cli::DiagnosticEmitter diagnostic) override;
+  util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override;
   size_t value_;
   size_t minimum_;
 };
@@ -50,8 +50,8 @@ struct DecodeBenchmarkFlags {
       cli::FlagInfo{"--help", {"-h"}, "Show help", cli::ValueMode::Switch});
 };
 
-cli::Result register_decode_benchmark_flags(cli::Command &command,
-                                            const DecodeBenchmarkFlags &flags,
-                                            cli::DiagnosticEmitter diagnostic);
+util::Result register_decode_benchmark_flags(cli::Command &command,
+                                             const DecodeBenchmarkFlags &flags,
+                                             util::DiagnosticEmitter diagnostic);
 
 } // namespace rocjitsu::tools
