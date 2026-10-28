@@ -13,6 +13,7 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <string_view>
 #include <unistd.h>
 #include <unordered_map>
 
@@ -33,14 +34,8 @@ process_cpu_info_data()
     cpu_info    current_cpu;
     bool        has_processor_entry = false;
 
-    auto parse_long = [](const std::string& value) -> long {
-        try
-        {
-            return std::stol(value);
-        } catch(const std::exception&)
-        {
-            return -1;
-        }
+    auto parse_long = [](std::string_view value) -> long {
+        return utility::string::safe_stol(value).value_or(-1L);
     };
 
     static const std::unordered_map<std::string,
@@ -97,7 +92,8 @@ process_cpu_info_data()
 
         const std::string key =
             utility::string::to_lower(utility::string::trim(line.substr(0, colon_pos)));
-        const auto value = utility::string::trim(line.substr(colon_pos + 1));
+        const auto value =
+            utility::string::trim(std::string_view{ line }.substr(colon_pos + 1));
 
         auto const it = field_parsers.find(key);
         if(it != field_parsers.end())
