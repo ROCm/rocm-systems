@@ -14,11 +14,13 @@ from rocprof_compute_soc.soc_base import OmniSoC_Base
 from tests.integration.common import (
     DETERMINISTIC_ACCURACY_BLOCKS,
     DETERMINISTIC_COUNTER_PATTERNS,
+    LIVE_ATTACH_SET,
     STOCHASTIC_ACCURACY_BLOCKS,
     STOCHASTIC_COUNTER_PATTERNS,
     are_deterministic_counters_equal,
     are_stochastic_counters_similar,
 )
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
     build_metric_list,
     canonical_config_arch,
@@ -40,6 +42,34 @@ def counter_frame(counter_name, values):
         [("jacobi", 1024, 256, 1296, counter_name, value) for value in values],
         columns=COUNTER_COLUMNS,
     )
+
+
+@pytest.mark.parametrize("gpu_arch", sorted(mi_gpu_specs.get_gpu_series_dict()))
+def test_live_attach_set_fits_one_pass_on_each_architecture(gpu_arch):
+    args = Namespace(
+        config_dir=str(analysis_configs_dir),
+        filter_blocks=[],
+        set_selected=LIVE_ATTACH_SET,
+        roof_only=False,
+        membw_analysis=False,
+    )
+    machine_specs = SimpleNamespace(
+        gpu_arch=gpu_arch,
+        gpu_series=mi_gpu_specs.get_gpu_series(gpu_arch),
+        l2_banks=1,
+    )
+    soc = OmniSoC_Base(args, machine_specs)
+    soc.set_arch(gpu_arch)
+    soc.set_perfmon_config(mi_gpu_specs.get_perfmon_config(gpu_arch))
+    requested_counters, selected_blocks = soc.detect_counters()
+    assert selected_blocks
+    assert requested_counters
+
+    counter_files, _, accumulator_count = soc._allocate_perfmon_counter_files(
+        requested_counters
+    )
+    assert len(counter_files) == 1, f"{gpu_arch}: live attachment needs one pass"
+    assert accumulator_count == 0, f"{gpu_arch}: live attachment set uses accumulators"
 
 
 @pytest.mark.parametrize(
