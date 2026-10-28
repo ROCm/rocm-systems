@@ -572,7 +572,7 @@ function(rccl_define_micro_source_lists)
     fakes/env_fakes.cc
     fakes/os_fakes.cc
     fakes/profiler_fakes.cc
-    fakes/rccl_wrap_fakes.cc             # rcclParamCeAllReduce, rcclParamCeArStagingBytes
+    fakes/rccl_wrap_fakes.cc             # rcclParamCeAllReduce, rcclParamCeReduceScatter, rcclParamCeArStagingBytes
     fakes/recorder_fakes.cc
     fakes/rma_fakes.cc
     fakes/roctx_fakes.cc
