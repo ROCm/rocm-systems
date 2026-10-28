@@ -166,6 +166,8 @@ test_categories:
       - "Win*"
       # test/common/ProcessIsolatedTestRunner.cpp
       - "ProcessIsolatedRunnerMicrotest.*"
+      # register/*.cc
+      - "Register*"
     exclude_windows:
       - "*"
     labels:
