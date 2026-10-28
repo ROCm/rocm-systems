@@ -24,6 +24,7 @@
 #ifndef GIN_SDMA_DEVTIME_H_
 #define GIN_SDMA_DEVTIME_H_
 
+#include <climits>
 #include <vector>
 #include "common.h"
 #include "gin_sdma_devtime_host.h"
@@ -84,10 +85,20 @@ static inline testResult_t measure(struct threadArgs* args, int gridCtas, int lo
   // flight yet. Launch-all-then-sync avoids the -g N>1 device-barrier deadlock
   // (GPU 0 would spin waiting for GPUs never launched). Mirrors startColl()/
   // completeColl().
+  // Pre-fill the stamp buffers with reduction-inert sentinels (min(start) ignores
+  // LLONG_MAX, max(end) ignores LLONG_MIN). A collective whose timed kernel stamps
+  // only a subset of CTAs (e.g. GinAlltoAllTimedKernel, work confined to CTA 0)
+  // then leaves the unstamped slots out of the window without the host needing to
+  // know which CTAs were active. Collectives that stamp every CTA overwrite all
+  // slots, so the sentinels never survive and the reduction is unchanged.
+  const std::vector<long long> startInit((size_t)gridCtas, LLONG_MAX);
+  const std::vector<long long> endInit((size_t)gridCtas, LLONG_MIN);
   for (int i = 0; i < args->nGpus; i++) {
     CUDACHECK(hipSetDevice(args->gpus[i]));
     CUDACHECK(hipMalloc(&d_start[i], (size_t)gridCtas * sizeof(long long)));
     CUDACHECK(hipMalloc(&d_end[i], (size_t)gridCtas * sizeof(long long)));
+    CUDACHECK(hipMemcpy(d_start[i], startInit.data(), (size_t)gridCtas * sizeof(long long), hipMemcpyHostToDevice));
+    CUDACHECK(hipMemcpy(d_end[i], endInit.data(), (size_t)gridCtas * sizeof(long long), hipMemcpyHostToDevice));
   }
   for (int i = 0; i < args->nGpus; i++) {
     CUDACHECK(hipSetDevice(args->gpus[i]));

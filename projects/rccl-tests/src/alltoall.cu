@@ -418,15 +418,18 @@ __device__ inline void hybridTimedGridJoin(struct ncclDevComm devComm) {
 // no extra signal bookkeeping.
 template <typename T>
 __global__ void GinAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int loop, int skip, long long* start_time, long long* end_time) {
+  // ginAlltoAllBody confines all work to CTA 0; CTAs 1..N return immediately and
+  // would otherwise stamp start_time at launch (before CTA 0's skip warmups).
+  const bool timing = (blockIdx.x == 0);
   for (int i = 0; i < skip + loop; i++) {
     if (i == skip) {
       __syncthreads();
-      if (threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
+      if (timing && threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
     }
     ginAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
   }
   __syncthreads();
-  if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
+  if (timing && threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
 }
 
 template <typename T>
