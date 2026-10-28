@@ -16,9 +16,10 @@ PR edits trigger a fresh evaluation, including a change of target branch with
 an unchanged head commit. Each matrix row reports its own result; a failure
 does not cancel the other rows.
 
-Each row uses `.github/actions/scoped-formatting`, which calls the shared
-`.github/actions/changed-files` selector. The selector inspects the complete
-local Git diff between the event's merge base and head. It does not use
+Formatting steps live directly in the workflow. Each row calls the shared
+`.github/actions/changed-files` selector, also used by the unit-test workflow.
+The selector inspects the complete local Git diff between the event's merge
+base and head. It does not use
 GitHub's capped path filters or PR-files API. It includes deleted paths and
 both sides of renames, preserves unusual filename bytes, and fails if Git
 cannot establish an unambiguous comparison. The formatter uses the same
@@ -26,10 +27,11 @@ validated comparison commits.
 
 The matrix's include/exclude regular expressions decide whether a row needs
 formatting. An unaffected row succeeds without installing formatters or
-checking out source and submodules. Changes to either shared action or the
+checking out source and submodules. Changes to the shared selector or the
 formatting workflow activate all four scopes. The initial sparse, blobless
-checkout retrieves commit/tree history and the actions; source contents are
-fetched only when needed.
+checkout retrieves commit/tree history and the selector; source contents are
+fetched only when needed. Formatting jobs have a 15-minute timeout, with a
+10-minute timeout for runtimes.
 
 Pushes to `develop` that change CUID or rocprofiler-compute paths also trigger
 the workflow. Documentation exclusions apply only to pull requests. Project

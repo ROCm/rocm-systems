@@ -23,7 +23,7 @@ jobs:
   pre-commit:
     name: ${{ matrix.check-name }}
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ matrix.timeout-minutes || 360 }}
+    timeout-minutes: ${{ matrix.timeout-minutes || 15 }}
     strategy:
       # Every named check must report its own result, even if another fails.
       fail-fast: false
@@ -33,6 +33,7 @@ jobs:
             check-name: pre-commit / runtimes
             timeout-minutes: 10
             include: '^(runtimes/|\.pre-commit-config\.yaml\Z)'
+
           - scope: rocjitsu
             # The base-branch PR bot still requires this name during rollout.
             check-name: pre-commit
@@ -41,11 +42,13 @@ jobs:
               emulation/mirage
               emulation/rocjitsu
               .github
+
           - scope: cuid
             check-name: pre-commit / cuid
             include: '^projects/cuid/'
             exclude: '(\.(md|rst|rtf)\Z|(^|/)\.readthedocs\.yaml\Z|^projects/cuid/docs/)'
             config: projects/cuid/.pre-commit-config.yaml
+
           - scope: rocprofiler-compute
             check-name: pre-commit / rocprofiler-compute
             include: '^projects/rocprofiler-compute/'
@@ -60,16 +63,39 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           filter: blob:none
-          sparse-checkout: |
-            .github/actions/changed-files
-            .github/actions/scoped-formatting
+          sparse-checkout: .github/actions/changed-files
 
-      - name: Format changed files in this scope
-        uses: ./.github/actions/scoped-formatting
+      - name: Inspect the complete change scope
+        id: scope
+        uses: ./.github/actions/changed-files
         with:
           include: ${{ matrix.include }}
           # Documentation exclusions apply only to presubmit formatting.
           exclude: ${{ github.event_name == 'pull_request' && matrix.exclude || '' }}
-          config: ${{ matrix.config || '.pre-commit-config.yaml' }}
+          always-include: '^\.github/(actions/changed-files/|workflows/scoped-formatting\.yml\Z)'
+
+      - name: Checkout formatting inputs
+        if: steps.scope.outputs.affected == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
           sparse-checkout: ${{ matrix.sparse-checkout }}
           submodules: ${{ matrix.submodules || 'false' }}
+
+      - name: Set up Python
+        if: steps.scope.outputs.affected == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Run pre-commit on the complete change scope
+        if: steps.scope.outputs.affected == 'true'
+        uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+        with:
+          extra_args: >-
+            --show-diff-on-failure
+            --config ${{ matrix.config || '.pre-commit-config.yaml' }}
+            --from-ref ${{ steps.scope.outputs.base }}
+            --to-ref ${{ steps.scope.outputs.head }}

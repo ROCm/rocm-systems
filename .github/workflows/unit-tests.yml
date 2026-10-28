@@ -31,14 +31,14 @@ jobs:
               .github/workflows
             dependencies: pyyaml
             run: python -B -m unittest discover -s .github/actions/changed-files/tests -v
+
           - suite: formatting
-            include: '^\.github/(actions/scoped-formatting/|workflows/)'
+            include: '^\.github/workflows/'
             sparse-checkout: |
               .github/actions/changed-files
-              .github/actions/scoped-formatting
               .github/workflows
             dependencies: pyyaml
-            run: python -B -m unittest discover -s .github/actions/scoped-formatting/tests -v
+            run: python -B -m unittest discover -s .github/workflows/tests -v
     steps:
       - name: Checkout scope inspector
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

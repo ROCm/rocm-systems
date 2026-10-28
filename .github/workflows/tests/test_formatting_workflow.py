@@ -6,16 +6,16 @@ import unittest
 
 import yaml
 
-ACTION_DIRECTORY = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ACTION_DIRECTORY.parent / "changed-files"))
+WORKFLOWS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(WORKFLOWS.parent / "actions/changed-files"))
 
 from scope import matches_scope
 
-WORKFLOWS = ACTION_DIRECTORY.parents[1] / "workflows"
-ACTION = yaml.load(
-    (ACTION_DIRECTORY / "action.yml").read_text(), Loader=yaml.BaseLoader
+WORKFLOW = yaml.load(
+    (WORKFLOWS / "scoped-formatting.yml").read_text(), Loader=yaml.BaseLoader
 )
-ALWAYS_INCLUDE = ACTION["runs"]["steps"][0]["with"]["always-include"]
+STEPS = WORKFLOW["jobs"]["pre-commit"]["steps"]
+ALWAYS_INCLUDE = STEPS[1]["with"]["always-include"]
 
 
 def workflow_scope(name: str) -> dict[str, str]:
@@ -65,33 +65,41 @@ class WorkflowScopeTests(unittest.TestCase):
         for scope in scopes:
             self.assertNotIn("enabled", scope)
         for step in job["steps"]:
-            self.assertNotIn("if", step)
             self.assertNotIn("continue-on-error", step)
-        checkout, formatting = job["steps"]
+        checkout, inspector = job["steps"][:2]
+        self.assertNotIn("if", checkout)
+        self.assertNotIn("if", inspector)
         self.assertEqual(checkout["with"]["fetch-depth"], "0")
-        self.assertIn(
-            ".github/actions/changed-files",
-            checkout["with"]["sparse-checkout"].splitlines(),
-        )
-        self.assertEqual(formatting["uses"], "./.github/actions/scoped-formatting")
         self.assertEqual(
-            formatting["with"],
-            {
-                "include": "${{ matrix.include }}",
-                "exclude": "${{ github.event_name == 'pull_request' && matrix.exclude || '' }}",
-                "config": "${{ matrix.config || '.pre-commit-config.yaml' }}",
-                "sparse-checkout": "${{ matrix.sparse-checkout }}",
-                "submodules": "${{ matrix.submodules || 'false' }}",
-            },
+            checkout["with"]["sparse-checkout"], ".github/actions/changed-files"
+        )
+        self.assertEqual(inspector["id"], "scope")
+        self.assertEqual(inspector["uses"], "./.github/actions/changed-files")
+        self.assertEqual(inspector["with"]["include"], "${{ matrix.include }}")
+        self.assertEqual(
+            inspector["with"]["exclude"],
+            "${{ github.event_name == 'pull_request' && matrix.exclude || '' }}",
         )
 
     def test_formatter_uses_the_inspected_comparison(self) -> None:
-        scope, checkout, setup, formatting = ACTION["runs"]["steps"]
-        self.assertEqual(scope["uses"], "./.github/actions/changed-files")
-        self.assertEqual(scope["with"]["include"], "${{ inputs.include }}")
-        self.assertEqual(scope["with"]["exclude"], "${{ inputs.exclude }}")
+        _, _, checkout, setup, formatting = STEPS
         for step in (checkout, setup, formatting):
             self.assertEqual(step["if"], "steps.scope.outputs.affected == 'true'")
+        self.assertEqual(checkout["with"]["fetch-depth"], "0")
+        self.assertEqual(
+            checkout["with"]["sparse-checkout"], "${{ matrix.sparse-checkout }}"
+        )
+        self.assertEqual(
+            checkout["with"]["submodules"], "${{ matrix.submodules || 'false' }}"
+        )
+        self.assertEqual(
+            formatting["uses"],
+            "pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd",
+        )
+        self.assertIn(
+            "--config ${{ matrix.config || '.pre-commit-config.yaml' }}",
+            formatting["with"]["extra_args"],
+        )
         self.assertIn(
             "--from-ref ${{ steps.scope.outputs.base }}",
             formatting["with"]["extra_args"],
@@ -132,7 +140,6 @@ class WorkflowScopeTests(unittest.TestCase):
     def test_shared_infrastructure_changes_activate_every_scope(self) -> None:
         for name in ("runtimes", "rocjitsu", "cuid", "rocprofiler-compute"):
             for path in (
-                ".github/actions/scoped-formatting/action.yml",
                 ".github/actions/changed-files/scope.py",
                 ".github/workflows/scoped-formatting.yml",
             ):

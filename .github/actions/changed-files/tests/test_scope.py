@@ -120,17 +120,17 @@ class GitScopeTests(unittest.TestCase):
         self.assertEqual(result["head"], self.git("rev-parse", "feature"))
 
     def test_sparse_checkout_keeps_out_of_worktree_changes(self) -> None:
-        self.write(".github/actions/scoped-formatting/placeholder")
+        self.write(".github/actions/changed-files/placeholder")
         self.commit()
         self.git("branch", "-f", "base", "feature")
         self.write("runtimes/hidden.rs")
         self.commit()
-        self.git("sparse-checkout", "set", ".github/actions/scoped-formatting")
+        self.git("sparse-checkout", "set", ".github/actions/changed-files")
         self.assertFalse((self.repository / "runtimes/hidden.rs").exists())
         self.assertEqual(self.run_scope()["affected"], "true")
 
     def test_blobless_checkout_needs_no_source_blobs_or_network(self) -> None:
-        self.write(".github/actions/scoped-formatting/placeholder")
+        self.write(".github/actions/changed-files/placeholder")
         self.commit()
         self.git("branch", "-f", "base", "feature")
         self.write("runtimes/unfetched.rs", "source blob must stay on the server\n")
@@ -145,7 +145,7 @@ class GitScopeTests(unittest.TestCase):
             str(clone),
         )
         self.repository = clone
-        self.git("sparse-checkout", "set", ".github/actions/scoped-formatting")
+        self.git("sparse-checkout", "set", ".github/actions/changed-files")
         self.git("checkout", "feature")
         self.assertIn("?", self.git("rev-list", "--objects", "--missing=print", "HEAD"))
         self.git("remote", "set-url", "origin", (self.root / "unavailable").as_uri())
