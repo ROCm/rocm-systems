@@ -870,12 +870,14 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_PacketRefresh) {
 
     output = output_b.ptr();
     value = 22;
-    HIP_CHECK(hipGraphKernelNodeSetParams(write_node, &write_params));
+    const hipError_t set_params = hipGraphKernelNodeSetParams(write_node, &write_params);
     hipGraphNode_t error_node = nullptr;
     hipGraphExecUpdateResult result = hipGraphExecUpdateError;
-    HIP_CHECK(hipGraphExecUpdate(exec, graph, &error_node, &result));
+    const hipError_t update = hipGraphExecUpdate(exec, graph, &error_node, &result);
     const hipError_t query = hipStreamQuery(stream);
     *release = 1;  // release the spin before any throwing check so cleanup can never hang
+    HIP_CHECK(set_params);
+    HIP_CHECK(update);
     HIP_CHECK(hipGraphLaunch(exec, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
