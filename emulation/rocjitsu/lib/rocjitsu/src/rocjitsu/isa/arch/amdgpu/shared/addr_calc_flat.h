@@ -36,8 +36,9 @@ enum class ScratchAddressMode { VectorEnable, LegacyCdna, Rdna1, Rdna2 };
 /// @details Populates d.per_lane_addr, d.lane_mask, and d.exec_mask.
 /// Handles all three segments:
 /// - FLAT (seg==0): 64-bit VGPR pair + unsigned 12-bit offset.
-/// - SCRATCH (seg==1): scratch_base + 32-bit VGPR + saddr + signed 12-bit (RDNA) or 13-bit (CDNA)
-/// offset.
+/// - SCRATCH (seg==1): 32-bit VGPR + saddr + signed 12-bit (RDNA) or 13-bit
+///   (CDNA) immediate forms the private byte offset. scratch_lane_address()
+///   interleaves that offset across lanes and adds the wave's scratch_base.
 /// - GLOBAL (seg==2): 64-bit saddr + unsigned 32-bit VGPR offset + signed 13-bit offset,
 ///   or 64-bit VGPR pair when saddr==0x7F.
 ///
@@ -75,19 +76,9 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
   }
 
   if (inst.seg == 1) {
-    // SCRATCH: wave-private memory with a dword-interleaved backing layout.
-    // The hardware stores scratch in a dword-interleaved ("swizzled") layout:
-    // a lane's private byte offset `off` maps to
-    //   scratch_base + (off/4)*lane_count*4 + lane*4 + off%4
-    // so consecutive dwords of one lane are lane_count*4 bytes apart. We
-    // reproduce that exact layout (rather than lane-major) so it matches how
-    // rocm-dbgapi reads private_swizzled memory (rocdbgapi memory.cpp), letting
-    // ROCgdb resolve scratch-resident variables. The interleave granule is a
-    // dword (rocdbgapi architecture.cpp: private_lane interleave_size =
-    // sizeof(uint32_t)). FLAT_SCRATCH is a dedicated register held in the
+    // SCRATCH: wave-private memory in the dword-interleaved layout of
+    // scratch_lane_address(). FLAT_SCRATCH is a dedicated register held in the
     // wavefront's scratch_base_ member.
-    constexpr uint32_t kScratchInterleave = sizeof(uint32_t);
-    const uint32_t lane_count = wf.wf_size();
     uint64_t scratch_base = wf.scratch_base();
     int64_t saddr_val = 0;
     if (inst.saddr != 0x7F && (!rdna || inst.saddr != 0x7D)) {
@@ -121,10 +112,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
     if (has_vaddr)
       vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
-    d.scratch_swizzle = true;
-    d.requires_scratch_backing = true;
-    d.scratch_addr_stride = lane_count * kScratchInterleave;
-    d.scratch_lane_mask = exec;
+    add_private_scratch_lanes(d, wf.wf_size(), exec);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
@@ -132,9 +120,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
       if (has_vaddr)
         vaddr = vaddr_region->lane(0, lane);
       uint64_t priv_off = static_cast<uint64_t>(static_cast<int64_t>(vaddr) + saddr_val + offset);
-      d.per_lane_addr[lane] =
-          scratch_base + (priv_off / kScratchInterleave) * lane_count * kScratchInterleave +
-          static_cast<uint64_t>(lane) * kScratchInterleave + (priv_off % kScratchInterleave);
+      d.per_lane_addr[lane] = scratch_lane_address(scratch_base, priv_off, lane, wf.wf_size());
     }
   } else if (inst.seg == 2) {
     // GLOBAL: saddr (64-bit SGPR pair) + unsigned VGPR offset (32-bit) + offset,
@@ -170,8 +156,6 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     // unmapped aperture VA range, using the same dword-interleaved swizzle as
     // dedicated SCRATCH ops so the private layout is uniform (and readable by
     // rocm-dbgapi).
-    constexpr uint32_t kScratchInterleave = sizeof(uint32_t);
-    const uint32_t lane_count = wf.wf_size();
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     auto vaddr_region = regs.read_vgpr_region(vbase, 2, exec);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -183,10 +167,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
           translate_flat_address(wf, addr, lane, FlatPrivateLayout::Interleaved);
       if (translated.private_address) {
         addr = translated.value;
-        d.scratch_swizzle = true;
-        d.requires_scratch_backing = true;
-        d.scratch_addr_stride = lane_count * kScratchInterleave;
-        d.scratch_lane_mask |= 1ULL << lane;
+        add_private_scratch_lanes(d, wf.wf_size(), uint64_t{1} << lane);
       }
       d.per_lane_addr[lane] = addr;
     }

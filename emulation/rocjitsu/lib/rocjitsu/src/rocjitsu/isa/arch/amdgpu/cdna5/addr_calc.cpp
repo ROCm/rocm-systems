@@ -156,10 +156,7 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
           amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::EncodedLane);
       if (translated.private_address) {
         addr = translated.value;
-        d.scratch_swizzle = true;
-        d.requires_scratch_backing = true;
-        d.scratch_addr_stride = wf.wf_size() * sizeof(uint32_t);
-        d.scratch_lane_mask |= uint64_t{1} << lane;
+        amdgpu::add_private_scratch_lanes(d, wf.wf_size(), uint64_t{1} << lane);
       }
     } else {
       assert(!amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::EncodedLane)
@@ -250,8 +247,9 @@ uint32_t async_lds_lane_address(const VglobalMachineInst &inst, const amdgpu::Wa
 
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d) {
-  // Scratch SGPR/VGPR offsets are signed 32-bit values. Widen before combining
-  // them, including the optional payload scaling of the VGPR operand.
+  // CDNA5 section 10.2 defines both scratch register offsets as signed 32-bit
+  // values. Widen before combining them, including the optional payload
+  // scaling of the VGPR operand.
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
   uint64_t exec = d.exec_mask;
@@ -277,24 +275,15 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr_region;
   if (inst.sve)
     vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
-  constexpr uint32_t kScratchInterleave = sizeof(uint32_t);
-  const uint32_t lane_count = wf.wf_size();
-  d.scratch_swizzle = true;
-  d.requires_scratch_backing = true;
-  d.scratch_lane_mask = exec;
-  d.scratch_addr_stride = lane_count * kScratchInterleave;
+  amdgpu::add_private_scratch_lanes(d, wf.wf_size(), exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t vaddr = 0;
-    if (inst.sve) {
-      const int32_t voffset = static_cast<int32_t>(vaddr_region->lane(0, lane));
-      vaddr = amdgpu::flat_vector_offset(static_cast<uint32_t>(voffset), true, scale);
-    }
-    const uint64_t private_offset = vaddr + saddr_val + offset;
+    const uint64_t voffset =
+        inst.sve ? amdgpu::flat_vector_offset(vaddr_region->lane(0, lane), true, scale) : 0;
+    const uint64_t private_offset = voffset + static_cast<uint64_t>(saddr_val + offset);
     d.per_lane_addr[lane] =
-        scratch_base + (private_offset / kScratchInterleave) * lane_count * kScratchInterleave +
-        static_cast<uint64_t>(lane) * kScratchInterleave + (private_offset % kScratchInterleave);
+        amdgpu::scratch_lane_address(scratch_base, private_offset, lane, wf.wf_size());
   }
 }
 

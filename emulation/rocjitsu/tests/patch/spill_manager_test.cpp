@@ -294,33 +294,14 @@ TEST(SpillManager, AccVgprIs4Bytes) {
   EXPECT_EQ(m.total_private_bytes() - before, 4u);
 }
 
-// Pins the contract that allocate_slot returns a per-lane *byte offset* that
-// composes additively with the per-lane flat-scratch addressing formula
-//   flat_scratch_base_byte_addr[lane] = FLAT_SCRATCH_INIT
-//                                     + lane * private_segment_fixed_size
-// If this test ever needs editing, the trampoline emitter (Phase 6) is also
-// broken. We use a *non-zero* slot so the `+ slot_offset` term is exercised
-// (the lane=0/slot=0 case alone is a tautology).
-TEST(SpillManager, SlotAddressMatchesFlatScratchFormula) {
-  SpillManager m(/*orig=*/0, /*limit=*/16384);
+// Spill slots are logical per-lane byte offsets used as SCRATCH immediates.
+// ScratchAddrCalcTest covers their mapping to physical scratch backing addresses.
+TEST(SpillManager, SlotOffsetsAreLogicalPrivateByteOffsets) {
+  SpillManager m(/*orig=*/0, /*limit=*/kBigLimit);
   ASSERT_TRUE(m.allocate_slot(sgpr(0)).has_value());
   auto slot1 = m.allocate_slot(sgpr(1));
   ASSERT_TRUE(slot1.has_value());
   EXPECT_EQ(*slot1, 4u);
-
-  constexpr uint64_t kFlatScratchInit = 0xCAFEBA5Eull;
-  const uint32_t per_lane_bytes = m.total_private_bytes();
-
-  {
-    constexpr uint32_t lane = 0;
-    const uint64_t addr = kFlatScratchInit + lane * per_lane_bytes + *slot1;
-    EXPECT_EQ(addr, kFlatScratchInit + 4u);
-  }
-  {
-    constexpr uint32_t lane = 1;
-    const uint64_t addr = kFlatScratchInit + lane * per_lane_bytes + *slot1;
-    EXPECT_EQ(addr, kFlatScratchInit + per_lane_bytes + 4u);
-  }
 }
 
 TEST(SpillManager, ReserveSet_AddsAllRegisters) {

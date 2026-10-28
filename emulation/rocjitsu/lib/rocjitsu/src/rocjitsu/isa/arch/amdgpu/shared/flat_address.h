@@ -3,16 +3,46 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 namespace rocjitsu::amdgpu {
 
-enum class FlatPrivateLayout { None, Interleaved, Linear, EncodedLane };
+/// @brief Bytes of one lane's private memory stored contiguously in scratch.
+/// @details The ISA's SWIZZLE(offset, ThreadID) interleaves private memory by dword across the
+/// wave. rocm-dbgapi reads private memory with the same 4-byte interleave (rocdbgapi memory.cpp
+/// private_swizzled), so ROCgdb depends on execution and wait planning agreeing on it.
+inline constexpr uint32_t kScratchInterleaveBytes = sizeof(uint32_t);
+
+/// @brief Byte distance between consecutive interleave units of one lane.
+constexpr uint32_t scratch_unit_stride(uint32_t wave_size) {
+  return wave_size * kScratchInterleaveBytes;
+}
+
+/// @brief Map a lane's private byte offset to its interleaved scratch address.
+/// @details Callers decode operands and apply each architecture's signedness first.
+constexpr uint64_t scratch_lane_address(uint64_t scratch_base, uint64_t private_offset,
+                                        uint32_t lane, uint32_t wave_size) {
+  return scratch_base + private_offset / kScratchInterleaveBytes * scratch_unit_stride(wave_size) +
+         uint64_t{lane} * kScratchInterleaveBytes + private_offset % kScratchInterleaveBytes;
+}
+
+/// @brief Add private lanes whose transfers follow the dword-interleaved scratch layout.
+/// @details OR the mask so mixed FLAT requests retain every private lane. BUFFER
+/// descriptor swizzling has different address-space provenance and must not use this helper.
+inline void add_private_scratch_lanes(VectorMemState &state, uint32_t wave_size, uint64_t lanes) {
+  state.scratch_swizzle = true;
+  state.requires_scratch_backing = true;
+  state.scratch_addr_stride = scratch_unit_stride(wave_size);
+  state.scratch_swizzle_unit = kScratchInterleaveBytes;
+  state.scratch_lane_mask |= lanes;
+}
+
+enum class FlatPrivateLayout { None, Interleaved, EncodedLane };
 
 struct FlatAddress {
   uint64_t value;
   bool private_address = false;
-  bool swizzled = false;
 };
 
 /// Pure address translation shared by execution and pre-execution wait planning.
@@ -38,10 +68,7 @@ inline FlatAddress translate_flat_address(const Wavefront &wf, uint64_t address,
       return {address};
     offset = static_cast<uint32_t>(address);
   }
-  if (layout == FlatPrivateLayout::Linear)
-    return {wf.scratch_base() + uint64_t{lane} * wf.scratch_lane_size() + offset, true};
-  return {wf.scratch_base() + (offset / 4) * wf.wf_size() * 4 + uint64_t{lane} * 4 + offset % 4,
-          true, true};
+  return {scratch_lane_address(wf.scratch_base(), offset, lane, wf.wf_size()), true};
 }
 
 inline uint64_t flat_vector_offset(uint64_t value, bool signed_offset, unsigned scale = 1) {
