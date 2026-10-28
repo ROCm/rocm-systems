@@ -28,7 +28,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Fixed a host-blocking issue in `hipMemcpyBatchAsync` that could occur when the API was repeatedly issued on a stream containing a long-running kernel. The implementation now reserves only the total descriptor space required for each dispatch in the kernel argument pool, preventing pool exhaustion and eliminating unnecessary host waits for kernel completion.
 * Resolved a segmentation fault in `hipStreamEndCapture` during multi-stream capture caused by a bookkeeping cycle among capture participants. The fix tracks capture participants in a single origin-stream-owned set, eliminating recursive traversal of forked streams during capture finalization and improving stream capture stability.
 * Resolved a potential deadlock between `hipMallocAsync` and `hipEventSynchronize` during concurrent multi-threaded execution.
-* Fixed incorrect calculations when using the type `bool` for `cooperative_groups::exclusive_scan`. The identity value associated with the first active lane was incorrect for `bool`. Additionally the code allowed type promotion from `bool` to `int` causing integer compiler intrinsics to be utilized for the type `bool` producing wrong results.
+* Fixed incorrect calculations when using the type `bool` for `cooperative_groups::exclusive_scan`. The implementation now correctly handles the identity value for the first active lane and prevents unintended type conversions from `bool` to `int`.
 
 ### Optimized
 
