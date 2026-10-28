@@ -7980,6 +7980,41 @@ TEST_F(GinMPIDeviceTests, Recycle_NonGinThenProxyPut) {
   runPutWaitRoundTrip(comm, getActiveStream());
 }
 
+// GIN DevComm then GIN_CONNECTION_NONE DevComm: the second gets no GIN contexts (AICOMRCCL-3230).
+TEST_F(GinMPIDeviceTests, GinThenNonGin_NonGinGetsNoGinContexts) {
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  ncclDevComm gin{};
+  ncclResult_t ginSt = ncclDevCommCreate(comm, &reqs, &gin);
+  bool ginLive = (ginSt == ncclSuccess);
+  auto ginCleanup = makeScopeGuard([&]() {
+    if (ginLive) (void)ncclDevCommDestroy(comm, &gin);
+  });
+  ASSERT_MPI_EQ(ncclSuccess, ginSt);
+  ASSERT_MPI_GT((int)gin.ginContextCount, 0);
+
+  ncclDevCommRequirements none = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+  none.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+  ncclDevComm nonGin{};
+  ncclResult_t nonGinSt = ncclDevCommCreate(comm, &none, &nonGin);
+  bool nonGinLive = (nonGinSt == ncclSuccess);
+  auto nonGinCleanup = makeScopeGuard([&]() {
+    if (nonGinLive) (void)ncclDevCommDestroy(comm, &nonGin);
+  });
+  ASSERT_MPI_EQ(ncclSuccess, nonGinSt);
+  ASSERT_MPI_EQ(0, (int)nonGin.ginContextCount);
+
+  ncclResult_t nonGinDestroySt = ncclDevCommDestroy(comm, &nonGin);
+  nonGinLive = false;
+  ASSERT_MPI_EQ(ncclSuccess, nonGinDestroySt);
+  ncclResult_t ginDestroySt = ncclDevCommDestroy(comm, &gin);
+  ginLive = false;
+  ASSERT_MPI_EQ(ncclSuccess, ginDestroySt);
+}
+
 // Destroy a PROXY DevComm, create another: put/waitSignal still succeeds.
 TEST_F(GinMPIDeviceTests, Recycle_DestroyThenProxyPut) {
   if (auto reason = proxyNthreadsTwoRankSkipReason(); !reason.empty()) GTEST_SKIP() << reason;

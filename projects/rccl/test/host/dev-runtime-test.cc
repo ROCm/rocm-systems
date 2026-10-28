@@ -6895,6 +6895,19 @@ TEST_F(DevrCommCreateInternalTest, WorldGinBarrierOnRail_RejectedWithoutLatching
   EXPECT_FALSE(comm->devrState.ginEnabled);
 }
 
+// Branch: GIN already enabled on the comm by an earlier devComm. A devComm
+// that requests no GIN connection must not get GIN dev-comm setup (AICOMRCCL-3230).
+TEST_F(DevrCommCreateInternalTest, NoGinRequestedOnGinEnabledComm_SkipsGinDevCommSetup) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->devrState.ginEnabled = true;
+  ScopedHook setup(g_devrGinDevCommSetup,
+                   [](ncclComm*, ncclDevCommRequirements const*, ncclDevComm*, uint32_t) { return ncclSuccess; });
+
+  EXPECT_EQ(Create(), ncclSuccess);
+  EXPECT_EQ(setup.calls, 0);
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevCommCopyLsaData copies the LSA-shared span of a devcomm between two

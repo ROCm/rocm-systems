@@ -520,11 +520,17 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
 // this binary, so a fake would be a duplicate. Tests drive its terms instead of
 // its answer.
 
-// Reached only once GIN is activated, which the GIN gate rejects for every
-// comm this binary builds.
-ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
-                                 uint32_t) {
+// Seam: reached only for a devComm that requests a GIN connection.
+static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
+                                           struct ncclDevComm*, uint32_t) {
   return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
+    g_devrGinDevCommSetup = DefaultGinDevCommSetup;
+
+ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
+                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
+  return g_devrGinDevCommSetup(comm, reqs, devComm, deviceCodeVersion);
 }
 
 // The enqueue-rearch job path: collective_stubs.cc pins
@@ -559,6 +565,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapSend                           = DefaultBootstrapSend;
   g_devrBootstrapRecv                           = DefaultBootstrapRecv;
   g_devrGinConnectOnce                          = DefaultGinConnectOnce;
+  g_devrGinDevCommSetup                         = DefaultGinDevCommSetup;
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;
