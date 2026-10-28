@@ -781,8 +781,42 @@ mod tests {
         assert_eq!(second.poll().unwrap(), Some(event));
         assert_eq!(second.poll().unwrap(), None);
 
-        drop(first);
+        let mut late = subscribe(&device).unwrap();
+        assert_eq!(late.poll().unwrap(), Some(event));
+
+        let next = DeviceEvent::GpuHardwareException(GpuHardwareException {
+            endpoint_id: Some(id),
+            scope: GpuResetScope::WholeGpu,
+            memory_lost: true,
+            cause: GpuResetCause::Ecc,
+        });
+        std::thread::scope(|scope| {
+            let waiter = scope.spawn(move || first.wait(std::time::Duration::from_secs(2)));
+            assert!(
+                driver
+                    .wait_for_subscriber(std::time::Duration::from_secs(1))
+                    .unwrap()
+            );
+            driver.publish_event(next).unwrap();
+            assert_eq!(waiter.join().unwrap().unwrap(), Some(next));
+        });
+        assert_eq!(second.poll().unwrap(), Some(next));
+        assert_eq!(late.poll().unwrap(), Some(next));
+
+        drop(late);
         drop(second);
+        let older = DeviceEvent::GpuHardwareException(GpuHardwareException {
+            endpoint_id: Some(id),
+            scope: GpuResetScope::WholeGpu,
+            memory_lost: false,
+            cause: GpuResetCause::Other,
+        });
+        driver.publish_event(older).unwrap();
+        driver.publish_event(next).unwrap();
+        let mut late = subscribe(&device).unwrap();
+        assert_eq!(late.poll().unwrap(), Some(next));
+        assert_eq!(late.poll().unwrap(), None);
+        drop(late);
         drop(device);
         drop(driver);
         session.destroy().unwrap();
