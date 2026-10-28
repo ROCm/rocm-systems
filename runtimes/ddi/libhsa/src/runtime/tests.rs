@@ -643,7 +643,7 @@ fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
         },
         endpoints: Vec::new(),
         sources: Vec::new(),
-        nodes: [(2, NodeKind::KfdHost, 8), (7, NodeKind::KfdGpu, 4)]
+        nodes: [(2, NodeKind::Host, 8), (7, NodeKind::Gpu, 4)]
             .into_iter()
             .enumerate()
             .map(|(id, (native, kind, count))| TopologyNode {
