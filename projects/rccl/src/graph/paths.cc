@@ -17,8 +17,10 @@
 
 // Pre-compute GPU->NIC, GPU->GPU and NIC->GPU paths
 
+// RCCL: a BFS level can hold nodes of every type, e.g. all DEVs behind the shared UALoE fabric NVS
+// plus the base GPU's CPU and NIC. Entries are unique and each type has at most NCCL_TOPO_MAX_NODES.
 struct ncclTopoNodeList {
-  struct ncclTopoNode* list[NCCL_TOPO_MAX_NODES];
+  struct ncclTopoNode* list[NCCL_TOPO_MAX_NODES * NCCL_TOPO_NODE_TYPES];
   int count;
 };
 

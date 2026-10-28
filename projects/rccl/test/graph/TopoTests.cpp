@@ -118,12 +118,13 @@ protected:
   }
 
   // Rebuild the fixture XML tree. Needed when one TEST_F walks several CPU
-  // model-id cases and each case has to start from an empty <system>.
-  void resetXml() {
+  // model-id cases and each case has to start from an empty <system>, or when the tree outgrows
+  // kMaxXmlNodes.
+  void resetXml(int maxNodes = kMaxXmlNodes) {
     free(xml);
     xml = nullptr;
     root = nullptr;
-    ASSERT_EQ(xmlAlloc(&xml, kMaxXmlNodes), ncclSuccess);
+    ASSERT_EQ(xmlAlloc(&xml, maxNodes), ncclSuccess);
     ASSERT_EQ(xmlAddNode(xml, nullptr, "system", &root), ncclSuccess);
   }
 
@@ -304,6 +305,12 @@ protected:
   // report. amd-smi only sees the GPUs of its own host, so no entry names another host's GPU, and
   // every host reuses the same bus ids. With fabricSupported=0 the entries are 1-hop XGMI instead.
   static constexpr int kFabricGpusPerHost = 4;
+  // XML nodes addFabricHost() adds; keep in sync with it.
+  static constexpr int kFabricGpuXmlNodes = 3;  // PCIe switch, GPU <pci>, <gpu>
+  static constexpr int kFabricNicXmlNodes = 3;  // NIC <pci>, <nic>, <net>
+  static constexpr int kFabricPeerEntries = kFabricGpusPerHost - 1;
+  static constexpr int kFabricHostXmlNodes =
+      1 /* <cpu> */ + kFabricGpusPerHost * (kFabricGpuXmlNodes + kFabricPeerEntries + kFabricNicXmlNodes);
   static void fabricGpuBusId(int g, char* busId, size_t len) {
     snprintf(busId, len, "0000:%02x:00.0", 0x11 + g * 0x10);
   }
@@ -2254,6 +2261,31 @@ TEST_F(TopoTest, UaloeFabric_NonFabricHostStaysOffTheSwitch) {
       }
     }
   }
+
+  ncclTopoFree(built);
+}
+
+// A full clique puts every DEV on the shared NVS, so one BFS level from a GPU holds the other 143
+// DEVs plus the CPU and NIC behind its PCI switch, more than NCCL_TOPO_MAX_NODES entries.
+TEST_F(TopoTest, UaloeFabric_FullCliqueFitsPathFrontier) {
+  const int nHosts = NCCL_TOPO_MAX_NODES / kFabricGpusPerHost;
+  ASSERT_NO_FATAL_FAILURE(resetXml(1 /* <system> */ + nHosts * kFabricHostXmlNodes));
+  for (int h = 0; h < nHosts; h++) {
+    addFabricHost(0x12600 + h, /*baseRank=*/h * kFabricGpusPerHost, /*fabricSupported=*/1);
+  }
+  struct ncclTopoSystem* built = buildSystemWithPaths(0x12600);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nHosts, nHosts);
+  ASSERT_EQ(built->nodes[DEV].count, NCCL_TOPO_MAX_NODES);
+  ASSERT_EQ(built->nodes[NVS].count, 1);
+
+  int nonNvlPairs = 0;
+  for (int g = 0; g < built->nodes[GPU].count; g++) {
+    for (int p = 0; p < built->nodes[GPU].count; p++) {
+      if (p != g && built->nodes[GPU].nodes[g].paths[GPU][p].type != PATH_NVL) nonNvlPairs++;
+    }
+  }
+  EXPECT_EQ(nonNvlPairs, 0);
 
   ncclTopoFree(built);
 }
