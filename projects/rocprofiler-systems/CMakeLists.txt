@@ -253,6 +253,9 @@ rocprofiler_systems_add_option(
 )
 rocprofiler_systems_add_option(ROCPROFSYS_USE_OMPT "Enable OpenMP tools support" ON)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_PYTHON "Enable Python support" OFF)
+rocprofiler_systems_add_option(ROCPROFSYS_USE_CPU_SNAP
+    "Build the cpu-snap call-stack sampler (external/cpu-snap)" OFF
+)
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_DYNINST "Build dyninst from submodule"
     OFF
 )
