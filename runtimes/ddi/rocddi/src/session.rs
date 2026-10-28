@@ -11,6 +11,7 @@
 
 use crate::device::{Device, DeviceResources};
 use crate::driver::{self, DriverInstance};
+use crate::memory::Allocation;
 use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
 use crate::topology::{AttachmentKind, Endpoint, NativeNodeId, SourceId, TopologySnapshot};
@@ -275,21 +276,11 @@ impl Session {
     /// is returned, and only failed drivers remain for a destroy retry. The
     /// session may then be used only for another destroy attempt.
     pub fn destroy(&mut self) -> Result<(), Error> {
-        self.ensure_process()?;
+        self.preflight_destroy()?;
         let registry = Shared::get_mut(&mut self.registry).ok_or(Error::Operation {
             kind: ErrorKind::Busy,
             detail: "another owner still borrows this session",
         })?;
-        if registry
-            .drivers
-            .iter()
-            .any(DriverInstance::has_other_owners)
-        {
-            return Err(Error::Operation {
-                kind: ErrorKind::Busy,
-                detail: "a device or resource still borrows a session driver",
-            });
-        }
         registry.closing = true;
         let mut first_error = None;
         registry
@@ -306,6 +297,53 @@ impl Session {
         // Retain failed drivers for retry. Every driver gets an attempt even
         // when another fails, so shutdown progress is independent of order.
         first_error.map_or(Ok(()), Err)
+    }
+
+    /// Checks whether another owner would make `destroy` return `Busy` before
+    /// native cleanup starts. This leaves the session fully usable on failure.
+    /// The caller serializes this check with new resource creation before using
+    /// it as a frontend teardown preflight.
+    ///
+    /// # Errors
+    /// Reports `Busy` while any session or driver owner remains live.
+    pub fn preflight_destroy(&mut self) -> Result<(), Error> {
+        self.preflight_destroy_allowing(None)
+    }
+
+    /// Preflights while accounting for the exact allocation retained by a
+    /// frontend's signal-event service. Only that one driver reference is
+    /// exempt; callers must release the page before invoking `destroy`.
+    pub(crate) fn preflight_destroy_allowing(
+        &mut self,
+        page: Option<&Allocation>,
+    ) -> Result<(), Error> {
+        self.ensure_process()?;
+        let registry = Shared::get_mut(&mut self.registry).ok_or(Error::Operation {
+            kind: ErrorKind::Busy,
+            detail: "another owner still borrows this session",
+        })?;
+        if page.is_some_and(|page| {
+            !registry
+                .drivers
+                .iter()
+                .any(|driver| driver.owns_allocation(page))
+        }) {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "signal event page belongs to another session driver",
+            });
+        }
+        if registry
+            .drivers
+            .iter()
+            .any(|driver| driver.has_other_owners_except(page))
+        {
+            return Err(Error::Operation {
+                kind: ErrorKind::Busy,
+                detail: "a device or resource still borrows a session driver",
+            });
+        }
+        Ok(())
     }
 
     /// Visits passive endpoint records from every installed driver. Each
@@ -558,8 +596,76 @@ mod tests {
     fn cloned_session_blocks_driver_shutdown_until_released() {
         let mut session = Session::new(DriverContextLifetime::Session).unwrap();
         let clone = session.clone();
+        assert_eq!(
+            session.preflight_destroy().unwrap_err().kind(),
+            ErrorKind::Busy
+        );
+        assert!(session.ensure_open().is_ok());
         assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Busy);
         drop(clone);
+        session.preflight_destroy().unwrap();
+        session.destroy().unwrap();
+    }
+
+    #[test]
+    fn signal_page_preflight_exempts_only_its_own_driver_reference() {
+        let id = [0x71; 16];
+        let driver = Shared::new(
+            TestDriver::new(id, EndpointKind::Npu, DriverContextLifetime::Session)
+                .with_host_registration(),
+        )
+        .unwrap();
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(driver.clone())],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let device = session
+            .activate(&session.open_endpoint(id).unwrap())
+            .unwrap();
+        let page = crate::memory::host_page_size().unwrap();
+        let mut host = HostAllocation::allocate(page, page).unwrap();
+        let mut registration = device
+            .register_host_allocation(
+                &host,
+                &[],
+                crate::memory::HostMappingPolicy::Fine,
+                page,
+                DeviceAccess::READ,
+            )
+            .unwrap();
+        drop(device);
+
+        assert_eq!(
+            session.preflight_destroy().unwrap_err().kind(),
+            ErrorKind::Busy
+        );
+        // The extra driver clone still makes this preflight Busy even when
+        // the registered allocation is identified as the internal page.
+        assert_eq!(
+            session
+                .preflight_destroy_allowing(Some(&registration))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Busy
+        );
+        let mut foreign = Session::new(DriverContextLifetime::Session).unwrap();
+        assert_eq!(
+            foreign
+                .preflight_destroy_allowing(Some(&registration))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidArgument
+        );
+        foreign.destroy().unwrap();
+        drop(driver);
+        session
+            .preflight_destroy_allowing(Some(&registration))
+            .unwrap();
+        assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Busy);
+        registration.free().unwrap();
+        drop(registration);
+        host.free().unwrap();
         session.destroy().unwrap();
     }
 
