@@ -7,10 +7,10 @@
 
 namespace cooperative_groups {
 namespace details {
-#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and                           \
+#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) &&                           \
     __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
-using ::details::accelerated_memcpy_global_to_lds;
-using ::details::accelerated_memcpy_lds_to_global;
+using ::hip_impl::accelerated_memcpy_global_to_lds;
+using ::hip_impl::accelerated_memcpy_lds_to_global;
 #endif
 
 template <typename TyGroup> struct can_group_do_async_copy : public std::false_type {};
@@ -22,7 +22,7 @@ template <> struct can_group_do_async_copy<cooperative_groups::coalesced_group>
 template <> struct can_group_do_async_copy<cooperative_groups::thread_block>
     : public std::true_type {};
 
-#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and                           \
+#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) &&                           \
     __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
 template <class TyGroup, typename TyElem,
           typename std::enable_if<details::can_group_do_async_copy<TyGroup>{}, bool>::type = true>
@@ -97,7 +97,7 @@ template <class TyGroup, typename TyElem, typename TySize, size_t Hint = alignof
 __CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __restrict__ dst,
                                                 const TyElem* __restrict__ src,
                                                 const TySize& count) {
-#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and                           \
+#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) &&                           \
     __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
   // Use the async path only when the builtins are actually invocable on the target, otherwise the
   // accelerated loop would advance offsets without issuing any load/store and silently drop data.
