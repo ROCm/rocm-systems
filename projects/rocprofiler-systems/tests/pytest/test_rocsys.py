@@ -227,6 +227,28 @@ class TestRocsys(RocprofsysTest):
             ],
         )
 
+    @pytest.mark.timeout(60)
+    def test_avail_traces_lists_names_without_the_legacy_tool(self) -> None:
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["avail", "--traces"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"NAME\s+WHAT IT TRACES\s+EXPANDS TO\s+AVAILABLE",
+                r"\bhip\b",
+                r"hip_api",
+                r"\bmpi\b",
+                r"ROCPROFSYS_USE_MPIP",
+                r"ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING",
+                r"SDK domains for this install:",
+            ],
+            fail_regex=[r"rocprof-sys-avail", r"\bkokkos\b"],
+        )
+
     @pytest.mark.timeout(15)
     def test_unknown_subcommand(self) -> None:
         result = self.run_test(

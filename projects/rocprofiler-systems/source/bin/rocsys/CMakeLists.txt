@@ -18,7 +18,9 @@ add_library(
     default_system.cpp
     dry_run.cpp
     help/renderer.cpp
+    options/avail_traces.cpp
     options/parser.cpp
+    trace/catalog.cpp
     options/table.cpp
     options/validator.cpp
 )
@@ -47,7 +49,10 @@ add_executable(
 target_compile_definitions(rocprofiler-systems-exe PRIVATE TIMEMORY_CMAKE=1)
 target_include_directories(
     rocprofiler-systems-exe
-    PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/..
+    PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}
+        ${CMAKE_CURRENT_LIST_DIR}/..
+        ${PROJECT_SOURCE_DIR}/source/lib/core
 )
 target_link_libraries(
     rocprofiler-systems-exe
@@ -58,6 +63,7 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-bin-common
         rocprofiler-systems::rocprofiler-systems-rocsys-core
         rocprofiler-systems::rocprofiler-systems-core
+        rocprofiler-systems::rocprofiler-systems-rocm
         rocprofiler-systems::rocprofiler-systems-json
         rocprofiler-systems::rocprofiler-systems-sanitizer
 )

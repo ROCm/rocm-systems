@@ -8,10 +8,18 @@
 #include "dry_run.hpp"
 #include "help/renderer.hpp"
 #include "launcher.hpp"
+#include "options/avail_traces.hpp"
+#include "options/context.hpp"
 #include "options/dry_run.hpp"
 #include "options/parser.hpp"
 #include "options/table.hpp"
 #include "options/validator.hpp"
+#include "trace/catalog.hpp"
+
+#include "backends/rocprofiler_sdk/backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
+#include "sdk/tracing-config-deps.hpp"
+#include "sdk/tracing-config.hpp"
 
 #include <timemory/utility/argparse.hpp>
 
@@ -68,6 +76,7 @@ struct prepared_launch
     rocprofsys::rocsys::env_plan    env       = {};
     bool                            dry_run   = {};
     bool                            tool_help = {};
+    bool                            traces    = {};
 };
 
 [[nodiscard]] bool
@@ -82,6 +91,57 @@ command_has_option(const rocprofsys::rocsys::options::parsed_command& command,
         }
     }
     return false;
+}
+
+[[nodiscard]] std::vector<std::string>
+sdk_domain_choices()
+{
+    using tracing_config_t = rocprofsys::rocprofiler_sdk::tracing_config<
+        rocprofsys::backends::rocprofiler_sdk::backend<
+            rocprofsys::rocprofiler_sdk::wrapper>,
+        rocprofsys::rocprofiler_sdk::default_externals>;
+    return tracing_config_t::get_domain_choices();
+}
+
+[[nodiscard]] std::vector<std::string>
+sdk_supported_domains()
+{
+    using tracing_config_t = rocprofsys::rocprofiler_sdk::tracing_config<
+        rocprofsys::backends::rocprofiler_sdk::backend<
+            rocprofsys::rocprofiler_sdk::wrapper>,
+        rocprofsys::rocprofiler_sdk::default_externals>;
+    return tracing_config_t::get_supported_domain_names();
+}
+
+[[nodiscard]] bool
+runtime_compiled(std::string_view name)
+{
+    if(name == "mpi")
+    {
+#if(defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0) ||                            \
+    (defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0)
+        return true;
+#else
+        return false;
+#endif
+    }
+    if(name == "openmp")
+    {
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
+        return true;
+#else
+        return false;
+#endif
+    }
+    return name == "rccl" || name == "ucx" || name == "openshmem";
+}
+
+[[nodiscard]] rocprofsys::rocsys::options::domain_query
+production_domains()
+{
+    return { .choices          = sdk_domain_choices,
+             .supported        = sdk_supported_domains,
+             .runtime_compiled = runtime_compiled };
 }
 
 [[nodiscard]] rocprofsys::rocsys::result<prepared_launch>
@@ -131,6 +191,8 @@ prepare_launch(const rocprofsys::cli::dispatch_result& routed,
         .dry_run =
             command_has_option(command, rocprofsys::rocsys::options::k_dry_run.name),
         .tool_help = rocprofsys::rocsys::help::requests_tool_help(command.passthrough),
+        .traces =
+            command_has_option(command, rocprofsys::rocsys::options::k_avail_traces.name),
     };
 }
 
@@ -150,6 +212,13 @@ launch_command(const rocprofsys::cli::dispatch_result& routed,
         rocprofsys::rocsys::help::write_verb_options(
             std::cout, *routed.spec, rocprofsys::rocsys::options::option_table());
         std::cout.flush();
+    }
+    else if(ready.traces)
+    {
+        const auto catalog =
+            rocprofsys::rocsys::trace::trace_catalog{ production_domains() };
+        rocprofsys::rocsys::options::write_avail_traces(std::cout, catalog);
+        return EXIT_SUCCESS;
     }
     else if(ready.dry_run)
     {
