@@ -78,13 +78,13 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       reqs->lsaBarrierCount = deviceCtaCount;
       return testSuccess;
     #if defined(NCCL_OS_LINUX)
-    case 3: // GinAlltoAllKernel: all CTAs participate
+    case 3: // GinAlltoAllKernel: all GIN confined to CTA 0 (barrier/signal index 0)
       if (commProperties.ginType == NCCL_GIN_TYPE_NONE) {
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
-      reqs->barrierCount = deviceCtaCount;
-      reqs->ginSignalCount = deviceCtaCount;
+      reqs->barrierCount = 1;
+      reqs->ginSignalCount = 1;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
 #else
@@ -130,9 +130,9 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
       reqs->lsaBarrierCount = deviceCtaCount;
       return true;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
-    case 3: // GinAlltoAllKernel: all CTAs participate
-      reqs->barrierCount = deviceCtaCount;
-      reqs->ginSignalCount = deviceCtaCount;
+    case 3: // GinAlltoAllKernel: all GIN confined to CTA 0 (barrier/signal index 0)
+      reqs->barrierCount = 1;
+      reqs->ginSignalCount = 1;
       return true;
     case 4: // HybridAlltoAllKernel: CTA 0 = GIN, CTAs 1..N = LSA
       if (deviceCtaCount < 2) return false;
