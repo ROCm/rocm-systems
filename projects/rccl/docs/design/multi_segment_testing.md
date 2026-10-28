@@ -5,6 +5,7 @@ The tests put the correctness burden on pure boundary math that runs on the host
 ## Strategy
 
 ```mermaid
+%% caption: Test layers: host unit tests, MPI hardware tests, and runner jobs
 flowchart LR
  subgraph host["host unit tests, no NIC or GPU"]
  ut["NetIbMultiSegmentUnitTests, RmaSegmentMathTests, prefix-post fixtures"]
@@ -95,6 +96,7 @@ Shared VMM helpers are `test/common/MultiSegmentVmmHelpers.hpp` and `test/common
 A hybrid window is one VMM range with a private GPU segment followed by one 2 MiB-aligned host segment per local rank. CI runs 8 ranks on 2 nodes, 4 per node, so each window has five segments:
 
 ```mermaid
+%% caption: Hybrid DeepEP window: one private GPU segment, then one host segment per local rank
 flowchart LR
  g["GPU k, private"] --> c0["CPU 0"]
  c0 --> c1["CPU 1"]

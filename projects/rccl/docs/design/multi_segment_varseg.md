@@ -14,6 +14,7 @@ A buffer of 16 or fewer segments registers today; a buffer past 16 stages (see [
 Raising `NCCL_IB_MAX_SEGMENTS` does not work. `NCCL_IB_MAX_WRS_PER_SEND` is `8 * 2 * NCCL_IB_MAX_SEGMENTS`, so the sender QP depth, the embedded `sges` and `wrs` arrays, `flushWrs` and the side FIFO would all scale with the constant. Multiplying `max_send_wr` by the segment count exceeds the HCA `max_qp_wr`, and `ibv_create_qp` fails. Each of these products has to go.
 
 ```mermaid
+%% caption: Today's 16-segment limit on the P2P path
 flowchart TD
   walk["walk the VA"] --> n{"more than 16 segments?"}
   n -->|yes| stage["decline and stage"]
@@ -35,6 +36,7 @@ The same 16 sizes the RMA path. One put or get splits into at most `4 * 16 = 64`
 Storage follows the count the walk returns. No queue depth depends on the segment count. A post that does not cover the whole buffer stores its byte offset, and the next progress call continues from there.
 
 ```mermaid
+%% caption: Proposed design past 16 segments: counted records behind a capability bit
 flowchart TD
   walk["walk the VA"] --> n{"ranks disagree or allocation fails?"}
   n -->|yes| stage["decline and stage"]
@@ -43,11 +45,9 @@ flowchart TD
   bit -->|"no, at most 16"| old["today's 704-byte slot"]
   bit -->|"no, more than 16"| stage
   bit -->|yes| rec["fixed header plus counted records"]
-  rec --> post["one bounded post"]
+  rec --> post["post one bounded chunk, repeat while bytes remain"]
   old --> post
-  post --> left{"bytes remain?"}
-  left -->|yes| post
-  left -->|no| done["transfer complete"]
+  post --> done["transfer complete"]
   classDef netib fill:#e0f5f8,stroke:#008299,color:#1d1d1f
   classDef okpath fill:#e8f8ec,stroke:#34c759,color:#1d1d1f
   classDef stagepath fill:#fff9e0,stroke:#ffcc00,color:#1d1d1f
@@ -102,6 +102,7 @@ struct ncclIbMrHandle {
 One progress call posts one slice of each receive (at most `NCCL_NET_IB_MAX_RECVS` data WRs) plus the signaled tail. Each slice uses its own segment's rkey. A direct-GDR flush posts one read per receive and resumes for the remaining segments. The same-MR collapse in [flush read collapse](multi_segment_flush_read_collapse.md), if it lands, only drops reads inside one post.
 
 ```mermaid
+%% caption: Proposed P2P send of one receive with many segments on a bounded queue
 sequenceDiagram
   participant S as sender progress
   participant Q as send QP, depth 512

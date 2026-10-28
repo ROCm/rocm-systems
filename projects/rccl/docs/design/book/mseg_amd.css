@@ -1,0 +1,39 @@
+/* Multi-segment design book on rocm-docs-core: diagram surface and print layout. */
+figure.amd-diagram { margin: 1.4rem auto; text-align: center; }
+figure.amd-diagram img {
+  background: #f7f7f8; border: 1px solid #e6e6e9; border-radius: 10px; padding: 18px; box-sizing: content-box;
+  max-width: calc(100% - 36px); height: auto;
+}
+figure.amd-diagram figcaption { font-size: 0.9rem; color: var(--pst-color-text-muted); margin-top: 0.5rem; }
+figure.amd-diagram figcaption .caption-number { font-weight: 600; color: var(--pst-color-text-base); }
+
+@page { size: letter; }
+@page wide { size: letter landscape; }
+
+@media print {
+  .common-header .navbar-toggler, .common-header .header-all-versions, .common-header .klavika-font,
+  .common-header .vr, .common-header #navbarSupportedContent,
+  .bd-header, .bd-header-announcement, .bd-sidebar-primary, .bd-sidebar-secondary, .bd-footer,
+  .bd-footer-article, .bd-footer-content, .header-article, .prev-next-area, .search-button,
+  .theme-switch-button, .headerlink, #rocm-header, .bd-banner, .skip-link { display: none !important; }
+  html, body { background: #fff !important; }
+  .bd-page-width, .bd-main, .bd-content, .bd-article-container, .bd-article { max-width: none !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+  body { font-size: 10pt; }
+  h1 { break-before: page; font-size: 20pt; }
+  #jb-print-docs-body > h1 { break-before: avoid; font-size: 26pt; margin: 0.5in 0 0.3in; }
+  #jb-print-docs-body { break-after: page; }
+  h1, h2, h3, h4 { break-inside: avoid; }
+  h2 { font-size: 14pt; break-after: avoid; }
+  h3, h4 { break-after: avoid; }
+  figure.amd-diagram { break-inside: avoid; page-break-inside: avoid; }
+  figure.amd-diagram img { max-height: 8.5in; width: auto; padding: 9px; border-radius: 10px; max-width: calc(100% - 18px); }
+  figure.fig-landscape { page: wide; }
+  figure.fig-landscape img { max-height: 5.7in; }
+  pre { white-space: pre-wrap !important; word-break: break-word; font-size: 8pt; break-inside: auto; }
+  div.highlight { break-inside: auto; }
+  table { font-size: 8.5pt; break-inside: auto; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
+  a { color: #0051c6 !important; text-decoration: none; }
+  .admonition { break-inside: avoid; }
+}

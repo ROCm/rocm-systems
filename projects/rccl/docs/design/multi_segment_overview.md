@@ -17,6 +17,7 @@ This is the entry point to the multi-segment design docs. It explains why RCCL r
 A buffer goes through five stages. Allocation decides how many physical segments it has. Registration counts them, registers one MR per segment, and (for symmetric GIN windows) makes every rank agree on the layout. The data path splits each operation at segment boundaries. Deregistration frees every per-segment MR.
 
 ```mermaid
+%% caption: The five stages of a multi-segment buffer
 flowchart TD
  alloc["allocate VMM buffer of N physical segments"] --> sw{"switch on and N greater than 1?"}
  sw -->|no| legacy["existing single-MR path"]
@@ -43,6 +44,7 @@ flowchart TD
 The two transports differ in how the remote side learns the layout. GIN/RMA registers a symmetric window collectively, so every rank learns every peer's per-segment addresses and rkeys at registration time. NET/IB P2P registers each buffer locally, so the receiver sends its segment table with each clear-to-send (CTS) message.
 
 ```mermaid
+%% caption: How each transport learns the remote segment layout
 sequenceDiagram
  participant A as rank A
  participant B as rank B
@@ -57,6 +59,31 @@ sequenceDiagram
 ```
 
 The details are in [GIN/RMA](multi_segment_gin_rma.md), [classic NET/IB P2P](multi_segment_netib_wire.md), [IB-CAST P2P](multi_segment_netib_cast.md) and [IB-CAST GIN/RMA](multi_segment_netib_cast_gin.md). The rules every path must keep are in the [current contract](multi_segment_current.md).
+
+## Memory spaces and scopes
+
+Each rank's window is backed by up to 16 physical segments, each on the device or in host NUMA memory. Every segment gets its own DMA-BUF fd and one MR per NIC device. Who may touch the window sets the scope: the rank itself, the LSA team of same-node peers through loads and stores, every rank of the communicator through GIN/RMA, or one connection through NET/IB P2P.
+
+```mermaid
+%% caption: Memory spaces and access scopes of a multi-segment window
+flowchart TD
+ win["window on one rank"] --> segs["up to 16 physical segments, each device or host NUMA"]
+ segs --> mr["one DMA-BUF fd per segment, one MR per segment per NIC"]
+ win --> scope{"who accesses it?"}
+ scope -->|"same node"| lsa["LSA team: loads and stores"]
+ scope -->|"every rank"| gin["communicator: GIN/RMA"]
+ scope -->|"one peer"| p2p["connection: NET/IB P2P"]
+ gin -.->|"rkeys"| mr
+ p2p -.->|"rkeys"| mr
+ classDef devmem fill:#eeeefb,stroke:#5856d6,color:#1d1d1f
+ classDef gin fill:#e5f1ff,stroke:#007aff,color:#1d1d1f
+ classDef netib fill:#e0f5f8,stroke:#008299,color:#1d1d1f
+ classDef okpath fill:#e8f8ec,stroke:#34c759,color:#1d1d1f
+ class win,segs,lsa devmem
+ class fd,mr okpath
+ class gin gin
+ class p2p netib
+```
 
 ## Terms
 
@@ -130,6 +157,7 @@ A later follow-up removes the 16-segment cap; its design is in [registering past
 Every diagram and callout in the multi-segment docs uses this scheme. Component colors mark the transport or memory a node belongs to. Outcome colors mark how a decision ends, and they take precedence over component colors on outcome nodes. Sequence diagrams group participants in a box of the component color and shade outcome messages with a region of the outcome color. Uncolored nodes are steps shared by several components.
 
 ```mermaid
+%% caption: Color legend for every diagram in this book
 flowchart LR
  subgraph comp["Components"]
  direction TB
@@ -138,13 +166,13 @@ flowchart LR
  lnet["classic NET/IB P2P"]
  lcast["IB-CAST"]
  lhost["host memory"]
- ldev["device memory segment"]
+ ldev["device memory"]
  end
  subgraph outc["Outcomes"]
  direction TB
- lok["per-segment registration, success"]
- lstage["staging, fallback, skip"]
- lfail["failure, WARN, error return"]
+ lok["success"]
+ lstage["staging or fallback"]
+ lfail["failure or error"]
  end
  classDef gin fill:#e5f1ff,stroke:#007aff,color:#1d1d1f
  classDef rma fill:#f5ebfb,stroke:#af52de,color:#1d1d1f

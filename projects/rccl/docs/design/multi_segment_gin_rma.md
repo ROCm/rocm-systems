@@ -9,6 +9,7 @@ A GIN window is symmetric: one collective registers it on every rank, and each r
 The data path sends every operation through one builder that splits at local and remote boundaries. Each side uses its own rank's `segOff` row, so ranks may have different segment sizes as long as the counts match:
 
 ```mermaid
+%% caption: Two ranks with equal segment counts but different segment sizes
 sequenceDiagram
  box rgb(229,241,255) GIN
  participant R0 as rank 0, 4 MiB GPU then 2 MiB CPU
@@ -17,6 +18,36 @@ sequenceDiagram
  R0->>R1: allgather nSegments 2 and segOff
  Note over R0,R1: counts match, sizes differ
  R0->>R1: iput 6 MiB, split on rank 0's row locally and rank 1's row remotely
+```
+
+## Thread hierarchy mapping
+
+A GIN operation starts in a GPU thread group and ends as work requests on a QP. Only lane 0 of the cooperative group (`coop.thread_rank() == 0`) writes the 128-byte descriptor into the per-peer ring in host-pinned memory; the kernel chooses the context through the `ncclGin` context index (`ginContextCount` defaults to 4). The host proxy progress thread polls every context and peer and calls the RMA backend, which posts on that context's QP to the peer. Multi-segment support changes only the last step: the backend splits the operation into one WR per slice. Same-node peers use LSA loads and stores and never reach the proxy.
+
+```mermaid
+%% caption: Thread hierarchy mapping from a GPU thread group to a QP on the NIC
+flowchart TD
+ subgraph gpu["GPU kernel on the user stream"]
+  direction LR
+  grid["grid"] --> block["block"] --> coop["cooperative group"]
+ end
+ gpu --> lane["lane 0 of the group picks the context and writes a 128-byte descriptor"]
+ lane --> ring["per-peer ring in host-pinned memory"]
+ ring --> poll["host proxy thread polls every context and peer"]
+ poll --> rma["RMA backend: iput, iputSignal, iget, iflush"]
+ rma --> split["context QP to the peer: one WR per slice, per-segment keys"]
+ split --> done["NIC completion advances the counter and consumer index"]
+ gpu -.->|"same node"| lsa["LSA loads and stores, no proxy"]
+ classDef gin fill:#e5f1ff,stroke:#007aff,color:#1d1d1f
+ classDef rma fill:#f5ebfb,stroke:#af52de,color:#1d1d1f
+ classDef hostmem fill:#f2f2f7,stroke:#8e8e93,color:#1d1d1f
+ classDef devmem fill:#eeeefb,stroke:#5856d6,color:#1d1d1f
+ classDef okpath fill:#e8f8ec,stroke:#34c759,color:#1d1d1f
+ class grid,block,coop,lane gin
+ class poll,rma rma
+ class ring hostmem
+ class split,done okpath
+ class lsa devmem
 ```
 
 ## Code layout and dispatch
@@ -77,10 +108,11 @@ Each rank exchanges one fixed-size record, so a rank that failed halfway through
 The gather target `regConsensus` is per communicator, `nranks` records allocated with `ncclIbMalloc` (page-aligned, because the allgather registers whole pages) in the connect finish function, only with the switch on, and freed on close. Registration therefore has nothing to allocate before its first collective.
 
 ```mermaid
+%% caption: Consensus: every rank gathers the fixed-size record, then succeeds or fails together
 sequenceDiagram
  box rgb(245,235,251) RMA
  participant R as rank r
- participant C as regConsensus gather
+ participant C as regConsensus<br/>gather
  end
  R->>R: count segments, register one MR per segment, record any local failure
  R->>C: allgather the fixed-size record
@@ -132,7 +164,8 @@ while (rem > 0) {
 - **Zero-size operations** post no WR. Classic ties such an operation to its predecessor's sequence id; IB-CAST completes it on its first `Test()`.
 
 ```mermaid
-flowchart LR
+%% caption: Segmented WR builder: slice, bound check, and final-WR signaling
+flowchart TD
  t["transfer of size bytes"] --> b["ncclRmaBuildSegmentedWrs"]
  b --> s["slice: min of local bound, remote bound, UINT32_MAX"]
  s --> more{"more than 64 slices?"}
@@ -157,6 +190,7 @@ Classic (`rcclRmaWrCreditsReserve`) tracks posted and completed request sequence
 If `ibv_post_send` accepts only a prefix of a chain, the request is kept and the call returns success, so callers that `NCCLCHECK` it still reach `Test()` and drain the completion. If the accepted prefix stops before the signaled tail, no completion will come, so the request is marked FAILED and `Test()` reports the error. Only a post that accepted nothing frees the slot and returns the error; classic also returns the sequence id with `ncclRmaReleaseSeqId`. The rule is `ncclRmaCompletePostedRequest`, applied by classic in `ncclRmaFinishPostedRequest`.
 
 ```mermaid
+%% caption: Prefix post: which requests are kept, failed, or freed
 flowchart TD
  p["ibv_post_send"] --> q{"any WR accepted?"}
  q -->|no| f["free slot, return the error"]
@@ -182,6 +216,7 @@ flowchart TD
 - `rcclDevrGinRegistersMultiSegment` also requires every active GIN backend to be the proxy type. `symMemoryRegisterGin` fails a device-only multi-segment window with `ncclInvalidUsage` when it does not hold. A window that contains host segments keeps develop's per-segment GIN path and needs `NCCL_DMABUF_ENABLE=1`.
 
 ```mermaid
+%% caption: Window gates: which multi-segment windows reach the RMA backend
 flowchart TD
  w["multi-segment window"] --> sys{"contains host segments?"}
  sys -->|yes| dev["develop per-segment GIN path, needs DMA-BUF"]

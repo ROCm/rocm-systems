@@ -17,6 +17,7 @@ The side-table layout and the CTS rules are in [classic NET/IB P2P](multi_segmen
 - **Depths.** The sender data QP depth, the extra CTS WRs (`NET_IB_MAX_REQUESTS * (resiliency ? 1 : 2)`) and the flush QP depth are chosen in the same connect, from the advertise bit.
 
 ```mermaid
+%% caption: What connect does today: one MR over the CTS block and side table
 sequenceDiagram
   participant S as sender connect
   participant R as receiver accept
@@ -36,6 +37,7 @@ sequenceDiagram
 4. **The first irecv can be the first use.** The receiver fills the slot inside `irecv`, which can race the sender's first `isend`. The write target has to exist when connect completes.
 
 ```mermaid
+%% caption: Why deferring the side table to first registration still needs connect-time work
 flowchart TD
   reg["first multi-segment regMr"] --> q{"table already in the connect MR?"}
   q -->|yes| use["irecv writes the slot the peer has"]
@@ -63,6 +65,7 @@ flowchart TD
 - Mark the helper and both call sites with `// RCCL:` comments.
 
 ```mermaid
+%% caption: Option: allocate and exchange the side table on first multi-segment registration
 sequenceDiagram
   participant S as send comm
   participant R as recv comm

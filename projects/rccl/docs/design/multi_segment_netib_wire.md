@@ -7,13 +7,14 @@ Classic NET/IB P2P (`net_ib`, layer 06, [PR 10886](https://github.com/ROCm/rocm-
 The classic data plane was single-MR by construction. The receiver's CTS entry (`ncclIbSendFifo`) carries one remote address and one rkey per NIC device, and `ncclIbMultiSend` walks one contiguous region across QPs. A boundary-crossing write with segment 0's rkey is rejected by the responder, so the sender must learn every remote segment's address and rkey, and must cut its writes at both its own and the receiver's boundaries.
 
 ```mermaid
+%% caption: Classic NET/IB P2P: CTS, side table, and segmented send
 sequenceDiagram
  box rgb(224,245,248) classic NET/IB
  participant Rc as ncclIbIrecv
  participant Side as side table at the sender
  participant F as 64-byte CTS FIFO
  participant Sn as ncclIbIsend
- participant Sg as ncclIbMultiSendSegmented
+ participant Sg as ncclIbMultiSend<br/>Segmented
  participant Q as QP and NIC
  end
  Note over Rc,F: a slot with only single-segment receives writes the CTS only
@@ -25,7 +26,7 @@ sequenceDiagram
  loop per QP chunk
  Sg->>Q: one WR per slice, local lkey and remote rkey of that slice
  end
- Sg->>Q: final RDMA_WRITE_WITH_IMM, signaled
+ Sg->>Q: final WRITE_WITH_IMM, signaled
 ```
 
 ## Data structures
@@ -88,28 +89,40 @@ for (int s = 0; s < numSegments && remaining > 0; s++) {
 `ncclIbRegMrDmaBufMultiSeg` declines with `ncclInvalidUsage` on a receive comm whose peer lacks the capability (`ncclIbDeclineMultiSegRegistration`); a send comm registers regardless, because it only splits its own buffer onto the receiver's single rkey. It `calloc`s the handle, registers one MR per segment per device into `segMrs[s][i]`, aliases segment 0 into `mrs[]`, and unwinds exactly the MRs made on failure. `ncclIbDeregMr` forwards a multi-segment handle to `rcclIbDeregMrMultiSeg`, which frees only through `segMrs[][]`. Develop's single-MR registration now also `calloc`s its handle and unwinds a partial registration.
 
 ```mermaid
+%% caption: Classic NET/IB registration, part 1: eligibility
 flowchart TD
- reg["NET proxy registration"] --> n{"more than one segment?"}
+ reg["NET proxy registration"] --> n{"N > 1?"}
  n -->|no| single["develop single-MR registration"]
  n -->|yes| sw{"switch on?"}
- sw -->|no| stage["collective stages"]
- sw -->|yes| fd{"plugin handles fd = -1?"}
- fd -->|no| stage
- fd -->|yes| walk{"walk covers the range with the expected count?"}
- walk -->|no| inv["ncclInvalidUsage, no handle"]
- inv --> stage
- walk -->|yes| uni{"interior segments uniform?"}
- uni -->|no| stage
- uni -->|yes| cap{"receive comm and peer lacks the capability?"}
- cap -->|yes| stage
+ sw -->|no| st1["collective stages"]
+ sw -->|yes| fd{"fd = -1 supported?"}
+ fd -->|no| st2["collective stages"]
+ fd -->|yes| chk["layout checks, next figure"]
+ classDef netib fill:#e0f5f8,stroke:#008299,color:#1d1d1f
+ classDef stagepath fill:#fff9e0,stroke:#ffcc00,color:#1d1d1f
+ class reg,chk netib
+ class st1,st2 stagepath
+```
+
+An eligible buffer then goes through the layout checks in `rcclIbRegMrDmaBufFromRange` and `ncclIbRegMrDmaBufMultiSeg`:
+
+```mermaid
+%% caption: Classic NET/IB registration, part 2: layout checks
+flowchart TD
+ chk["eligible multi-segment buffer"] --> walk{"walk matches count?"}
+ walk -->|no| inv["ncclInvalidUsage, no handle, then stage"]
+ walk -->|yes| uni{"interior uniform?"}
+ uni -->|no| st3["collective stages"]
+ uni -->|yes| cap{"recv peer lacks cap?"}
+ cap -->|yes| st4["collective stages"]
  cap -->|no| mrs["one MR per segment per device"]
  classDef netib fill:#e0f5f8,stroke:#008299,color:#1d1d1f
  classDef okpath fill:#e8f8ec,stroke:#34c759,color:#1d1d1f
  classDef stagepath fill:#fff9e0,stroke:#ffcc00,color:#1d1d1f
  classDef failpath fill:#ffeceb,stroke:#ff3b30,color:#1d1d1f
- class reg netib
+ class chk netib
  class mrs okpath
- class stage stagepath
+ class st3,st4 stagepath
  class inv failpath
 ```
 
@@ -161,7 +174,8 @@ A zero-length chunk still posts one 0-byte write; its rkey comes from `ncclIbSeg
 The builder converts the request-relative send offset into two registration-relative cursors and lets `ncclIbSplitTransferAtOffsets` advance them independently:
 
 ```mermaid
-flowchart LR
+%% caption: Independent local and remote offsets select the lkey and rkey of each slice
+flowchart TD
  q["request-relative sendOff"] --> l["localReqOff + sendOff"]
  q --> r["remoteReqOff + sendOff"]
  l --> s["ncclIbSplitTransferAtOffsets"]
@@ -175,6 +189,28 @@ flowchart LR
 ```
 
 `NetIbSplit.IndependentLocalAndRemoteStartOffsets` locks this on the host; the MPI offset and boundary tests check it through real MRs.
+
+## Step pipeline and streams
+
+The kernels run on the user stream; a host proxy progress thread runs both `sendProxyProgress` and `recvProxyProgress`. Each step uses slot `step % NCCL_STEPS`, so up to 8 steps per connection are in flight, and each slot carries its own CTS, side-table entries and segmented chain. That is why the [queue sizing](#queue-sizing) reserves one worst-case chain per step.
+
+```mermaid
+%% caption: One P2P step through a NCCL_STEPS slot, kernels on the user stream and proxies on host threads
+sequenceDiagram
+ participant KS as sender kernel, user stream
+ participant SP as sender proxy thread
+ participant RP as receiver proxy thread
+ participant KR as receiver kernel, user stream
+ Note over KS,KR: step s uses slot s mod NCCL_STEPS, up to 8 steps in flight
+ KR->>RP: slot free
+ RP->>SP: irecv: side table if multi-segment, then CTS with idx last
+ KS->>SP: data ready in the slot
+ Note over SP: wait for the CTS and side idx
+ SP->>RP: one RDMA write per slice, signaled final write with immediate
+ Note over RP: test sees the immediate, then the GDR flush read
+ RP->>KR: tail advances, data visible
+ SP->>KS: test sees the completion, head frees the slot
+```
 
 ## Flush
 

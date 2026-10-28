@@ -69,6 +69,7 @@ The stack also changes RCCL-only files that already existed: `rccl_wrap.cc` (the
 The workaround exists because ROCm's DMA-BUF export for an address range describes only the first physical allocation. Removal needs `hipMemGetHandleForAddressRange` (through `cuMemGetHandleForAddressRange`) to return one DMA-BUF covering the whole range, so one `ibv_reg_dmabuf_mr` registers it. That must hold for the DeepEP layouts, which mix device and host segments in one window. If the driver fixes only device-only ranges, keep the workaround for windows with host segments.
 
 ```mermaid
+%% caption: Removal plan, gated on what the driver can export
 flowchart TD
  drv{"driver exports one DMA-BUF for several allocations?"}
  drv -->|no| keep["keep the workaround"]

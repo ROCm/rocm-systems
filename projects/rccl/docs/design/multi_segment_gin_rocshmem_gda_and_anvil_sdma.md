@@ -18,6 +18,7 @@ The proxy posts from a host thread, so per-segment MRs and a WR loop were a host
 | Layout agreement | host consensus gather | the same gather on the host |
 
 ```mermaid
+%% caption: Where each GIN backend splits a put at segment boundaries
 flowchart TB
  put["ncclGin put, iput, iget"] --> h["proxy: host ncclRmaBuildSegmentedWrs"]
  put --> d5["GDA: device put template"]
@@ -102,12 +103,12 @@ struct ncclGinRocshmemGdaMemHandle {
 ### Device put, put-value and flush
 
 ```mermaid
+%% caption: Proposed GDA device put loop over segment slices
 flowchart TD
  p["put srcOff, dstOff, bytes"] --> z{"bytes == 0?"}
  z -->|yes| sig["signal only, if requested"]
- z -->|no| l["find local segment of srcOff and remote segment of dstOff"]
- l --> c["chunk = min of remaining, both segment bounds, UINT32_MAX"]
- c --> w{"64 slices already posted?"}
+ z -->|no| l["find the local segment of srcOff and the remote segment of dstOff; chunk = min of remaining, both segment bounds, UINT32_MAX"]
+ l --> w{"64 slices posted?"}
  w -->|yes| r["do not post; set hasError"]
  w -->|no| n["put_nbi with that slice's keys, signaled only if last and no signal"]
  n --> a{"bytes left?"}
@@ -115,7 +116,7 @@ flowchart TD
  a -->|no| sig
  classDef gin fill:#e5f1ff,stroke:#007aff,color:#1d1d1f
  classDef failpath fill:#ffeceb,stroke:#ff3b30,color:#1d1d1f
- class p,sig,l,c,n gin
+ class p,sig,l,n gin
  class r failpath
 ```
 
@@ -154,6 +155,7 @@ A two-segment non-hybrid window needs one extra row for the CPU object, not 16. 
 ### Device put
 
 ```mermaid
+%% caption: Proposed Anvil SDMA put: segment cut, size cut, and copy kind
 flowchart TD
  p["Anvil put srcOff, dstOff, bytes"] --> phys["cut at local and remote segment bounds"]
  phys --> size["cut each slice at 128 MiB"]

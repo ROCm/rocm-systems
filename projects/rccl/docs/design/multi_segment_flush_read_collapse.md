@@ -12,6 +12,7 @@ A multi-segment direct-GDR flush posts one `RDMA_READ` per overlapped segment on
 With `RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0` (direct GDR), classic `rcclIbIflushMultiSeg` (`net_ib/p2p.cc`) builds `flushWrs[NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS]` (128 entries). For a multi-segment handle it calls `ncclIbSegmentsOverlappingRange` and posts `segMrs[seg][i]->rkey` at the first byte of each overlap. A single-segment handle posts one read through `ncclIbMrForRange`. Only the last read is signaled. CAST `IbCastIflush` (`net_ib_cast/p2p.cc`) builds the same chain, with `mhandle->mrs[i]` on the single-segment arm. The scratchpad path (`useGpuFlushMem`) posts one write and one read of the flush buffer and never walks segments. Eight 128-read chains are why the advertised P2P flush QP depth is 1024.
 
 ```mermaid
+%% caption: Reads one flush posts today, per NIC of the receive comm
 flowchart TD
   n["one NIC of the receive comm"] --> mode{"scratchpad flush?"}
   mode -->|yes| one["one write and one read of the flush buffer"]
@@ -31,6 +32,7 @@ GIN flush in `ncclRmaBuildSegmentedWrs` (`net_ib/gin.cc` and the CAST copy) emit
 Two reads on one flush QP become one only when they use the same `ibv_mr`, which means the same rkey on the same NIC index. That happens when two receives in one `iflush` overlap one segment, or when the same handle is passed twice. Keep the first read and its address. The last kept read stays the signaled one.
 
 ```mermaid
+%% caption: Proposed collapse of flush reads that share an MR
 flowchart TD
   reads["reads for this NIC"] --> key{"same ibv_mr as a kept read?"}
   key -->|yes| drop["drop this read"]

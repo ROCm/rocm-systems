@@ -56,6 +56,7 @@ The walk is the classic one, including whole-page export, the `segBase == 0` gua
 Every chain reserves send-queue credits before posting, through `IbCastRmaReservePostComplete`:
 
 ```mermaid
+%% caption: IB-CAST RMA credits: bounded wait for send-queue room
 flowchart TD
  r["operation needs nWr WRs"] --> c{"outstanding plus nWr fits the QP depth?"}
  c -->|no| p["poll the CQ, yield if nothing completed"]

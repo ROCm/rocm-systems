@@ -9,6 +9,7 @@ Line numbers are at the wire tip `6e4efc95f2b4` (`multi-segment-dmabuf-cast-gin`
 The registration entry points in the runtime decide whether a buffer takes the multi-segment path. Each transport then registers one MR per segment and splits its operations at segment boundaries.
 
 ```mermaid
+%% caption: How the registration and data-path layers connect, with the layer that owns each step
 flowchart TD
  win["window or buffer registration"] --> netreg["NET registration: count segments (03)"]
  win --> devr["symmetric window: dev runtime gates (05)"]

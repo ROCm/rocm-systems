@@ -36,6 +36,7 @@ The first three apply on both sides because the segmented send engine cannot ser
 The last applies on the receive side only, as on classic: the side table describes the receiver, and a sender splits locally onto the receiver's single rkey. This also covers a local switch-off, because `peerCaps` is then 0.
 
 ```mermaid
+%% caption: When IB-CAST declines multi-segment registration
 flowchart TD
  a["NET registration, N segments"] --> p{"plugin handles fd = -1?"}
  p -->|no| dec["decline, staging"]
@@ -86,12 +87,13 @@ The receiver allocates `remSegLayout` and registers `segLayoutFifoMr` per device
 - **Host coverage.** `test/transport/NetIbCast/NetIbCastMultiplaneTests.cpp` holds the prefix-post and side-table fixtures.
 
 ```mermaid
+%% caption: IB-CAST P2P send with the side slot, and failure handling
 sequenceDiagram
  box rgb(255,241,224) IB-CAST
  participant Rc as IbCastIrecv
  participant Side as side slot at the sender
  participant Sn as IbCastIsend
- participant Sg as IbCastMultiSendSegmented
+ participant Sg as IbCastMultiSend<br/>Segmented
  participant Q as QP and NIC
  end
  Rc->>Rc: validate every handle
