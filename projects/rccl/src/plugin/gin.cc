@@ -12,6 +12,7 @@
 #include "checks.h"
 #include "plugin.h"
 #include "nccl_gin.h"
+#include "graph/topo.h"
 #include "gin/gin_host_proxy.h"
 #ifdef ENABLE_ROCSHMEM_GIN
 #include "gin/gin_host_rocshmem_gda.h"

@@ -19,6 +19,7 @@
 #include "SymmetricMemPrereq.hpp"
 #include "TestChecks.hpp"
 #include "comm.h"
+#include "graph/topo.h"
 
 #include "nccl_device.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
