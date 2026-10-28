@@ -10,17 +10,21 @@ project(cpu_snap
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Symlink compile_commands.json into the source root so editor / clangd
-# at the project root sees the compile DB without manual setup.
-if(CMAKE_EXPORT_COMPILE_COMMANDS AND NOT CMAKE_BINARY_DIR STREQUAL CMAKE_SOURCE_DIR)
-    file(CREATE_LINK
-        "${CMAKE_BINARY_DIR}/compile_commands.json"
-        "${CMAKE_SOURCE_DIR}/compile_commands.json"
-        SYMBOLIC)
-endif()
+# Standalone-only settings: a parent project that adds cpu-snap with
+# add_subdirectory() owns its source root and build type.
+if(PROJECT_IS_TOP_LEVEL)
+    # Symlink compile_commands.json into the source root so editor / clangd
+    # at the project root sees the compile DB without manual setup.
+    if(CMAKE_EXPORT_COMPILE_COMMANDS AND NOT CMAKE_BINARY_DIR STREQUAL CMAKE_SOURCE_DIR)
+        file(CREATE_LINK
+            "${CMAKE_BINARY_DIR}/compile_commands.json"
+            "${CMAKE_SOURCE_DIR}/compile_commands.json"
+            SYMBOLIC)
+    endif()
 
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
+    if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+        set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -109,8 +113,9 @@ endif()
 find_package(Threads REQUIRED)
 
 # libdw (elfutils) for DWARF stack unwinding. Required only by
-# cpu_snap::sampling; cpu_snap core builds without it.
-if(CPU_SNAP_BUILD_SAMPLING)
+# cpu_snap::sampling; cpu_snap core builds without it. A parent project can
+# provide its own libdw as LibDw::LibDw; then this lookup is skipped.
+if(CPU_SNAP_BUILD_SAMPLING AND NOT TARGET LibDw::LibDw)
     find_path(LIBDW_INCLUDE_DIR elfutils/libdwfl.h
         PATHS /usr/include /usr/include/x86_64-linux-gnu)
     find_library(LIBDW_LIBRARY NAMES dw)
@@ -198,6 +203,13 @@ if(CPU_SNAP_INSTALL)
         ${CMAKE_CURRENT_BINARY_DIR}/cpu_snapConfig.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/cpu_snapConfigVersion.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cpu_snap)
+endif()
+
+# Everything below is for developing cpu-snap on its own. Skip it when a parent
+# project adds cpu-snap with add_subdirectory(): target names such as 'format'
+# would clash with the parent's.
+if(NOT PROJECT_IS_TOP_LEVEL)
+    return()
 endif()
 
 # ---------------------------------------------------------------------------

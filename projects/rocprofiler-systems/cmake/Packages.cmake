@@ -62,6 +62,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-fmt
 rocprofiler_systems_add_interface_library(rocprofiler-systems-spdlog
     "Provides spdlog library"
 )
+rocprofiler_systems_add_interface_library(rocprofiler-systems-cpu-snap
+    "Provides the cpu-snap call-stack sampler"
+)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-timemory
     "Provides timemory libraries"
 )
@@ -767,6 +770,16 @@ endif()
 
 if(ROCPROFSYS_USE_PAPI AND ROCPROFSYS_BUILD_PAPI)
     include(PAPI)
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# cpu-snap (local clone)
+#
+# ----------------------------------------------------------------------------------------#
+
+if(ROCPROFSYS_USE_CPU_SNAP)
+    include(CpuSnap)
 endif()
 
 # ----------------------------------------------------------------------------------------#
