@@ -93,6 +93,7 @@ if(HIP_PLATFORM MATCHES "amd")
       hipMemPtrGetInfo.cc
       hipPointerGetAttributes.cc
       hipExtMallocWithFlags.cc
+      hipExtMemcpyBatchAsync.cc
       hipMallocMngdMultiThread.cc
       hipMemVmm.cc
       hipArray.cc

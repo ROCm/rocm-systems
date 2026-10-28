@@ -5,6 +5,7 @@
 /// @brief Exact SIMD coverage for packed, true16, compare and dual-slot paths.
 
 #include "decode_test_util.h"
+#include "util/host_target.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
@@ -592,7 +593,7 @@ TEST_F(SimdCoverage, MixedFmaUsesProfileSemanticsAndCompilerGuard) {
     put(2, lane, 0xbf800000u);
     put(3, lane, sentinel);
   }
-#if defined(__FMA__)
+#if RJ_HOST_HAS_FMA
   ASSERT_FALSE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, false>(inst, *wf)));
   for (uint32_t lane = 0; lane < 32; ++lane)
     EXPECT_EQ(get(3, lane), sentinel);
