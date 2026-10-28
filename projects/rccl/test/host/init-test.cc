@@ -5217,6 +5217,32 @@ TEST_F(InitMicrotest, CommFree_LastAbortFlagReference_ReleasesFlagStorage) {
   EXPECT_EQ(1, std::count(released.begin(), released.end(), static_cast<void*>(abortRefCount)));
 }
 
+// NCCL 2.32.3 (19ac6e28): the profiler thread loads comm->abortFlag through pt->abortFlag, so the comm
+// that drops the last reference must stop and join the thread before it frees the flag.
+TEST_F(InitMicrotest, CommFree_LastAbortFlagReference_StopsProfilerThreadBeforeFreeingTheFlag) {
+  ncclComm* comm = nullptr;
+  auto* abortFlag = static_cast<uint32_t*>(::calloc(1, sizeof(uint32_t)));
+  auto* abortRefCount = static_cast<int*>(::malloc(sizeof(int)));
+  *abortRefCount = 1;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, abortFlag, abortRefCount));
+  comm->abortFlagDev = static_cast<uint32_t*>(::calloc(1, sizeof(uint32_t)));
+
+  std::vector<std::string> order;
+  ScopedHook microFree(g_microFree, [&](void* p) {
+    if (p == abortFlag) order.push_back("freeAbortFlag");
+    ::free(p);
+  });
+  ScopedHook threadDestroy(g_ncclProfilerThreadDestroy, [&](struct ncclComm*) {
+    order.push_back("profilerThreadDestroy");
+    return ncclSuccess;
+  });
+  EXPECT_EQ(ncclSuccess, commFree(comm));  // frees comm; do not touch it afterwards
+
+  ASSERT_EQ(1, threadDestroy.calls) << "commFree never stopped the profiler thread";
+  EXPECT_EQ((std::vector<std::string>{"profilerThreadDestroy", "freeAbortFlag"}), order)
+      << "commFree freed comm->abortFlag while the profiler thread could still load it through pt->abortFlag";
+}
+
 TEST_F(InitMicrotest, CommFree_AbortFlagSet_ReportsAbortCompletion) {
   ncclComm* comm = nullptr;
   uint32_t abortFlag = 1;
