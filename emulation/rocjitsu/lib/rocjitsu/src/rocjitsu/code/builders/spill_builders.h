@@ -155,11 +155,11 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
 [[nodiscard]] inline uint32_t build_wait_stores_complete(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0);
+    return build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0).value();
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0);
+    return build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0).value();
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return build_sopp_encoding(arch, rdna4::kSWaitStorecntSopp, 0);
+    return build_sopp_encoding(arch, rdna4::kSWaitStorecntSopp, 0).value();
   default:
     throw util::UnimplementedInst("store-completion wait for target architecture");
   }
@@ -169,11 +169,11 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
 [[nodiscard]] inline uint32_t build_wait_loads_complete(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0);
+    return build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0).value();
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0);
+    return build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0).value();
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return build_sopp_encoding(arch, rdna4::kSWaitLoadcntSopp, 0);
+    return build_sopp_encoding(arch, rdna4::kSWaitLoadcntSopp, 0).value();
   default:
     throw util::UnimplementedInst("load-completion wait for target architecture");
   }
@@ -201,16 +201,16 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
   // probe call still reaches emit_probe_call and needs the unconditional boundary
   // drain. Its monolithic s_waitcnt 0 drains vmcnt+lgkmcnt, same as CDNA3/4.
   case ROCJITSU_CODE_ARCH_CDNA2:
-    return {build_sopp_encoding(arch, cdna2::kSWaitcntSopp, 0)};
+    return {build_sopp_encoding(arch, cdna2::kSWaitcntSopp, 0).value()};
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return {build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0)};
+    return {build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0).value()};
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return {build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0)};
+    return {build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0).value()};
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return {build_sopp_encoding(arch, rdna4::kSWaitLoadcntDscntSopp, 0),
-            build_sopp_encoding(arch, rdna4::kSWaitSamplecntSopp, 0),
-            build_sopp_encoding(arch, rdna4::kSWaitBvhcntSopp, 0),
-            build_sopp_encoding(arch, rdna4::kSWaitKmcntSopp, 0)};
+    return {build_sopp_encoding(arch, rdna4::kSWaitLoadcntDscntSopp, 0).value(),
+            build_sopp_encoding(arch, rdna4::kSWaitSamplecntSopp, 0).value(),
+            build_sopp_encoding(arch, rdna4::kSWaitBvhcntSopp, 0).value(),
+            build_sopp_encoding(arch, rdna4::kSWaitKmcntSopp, 0).value()};
   default:
     throw util::UnimplementedInst("all-loads wait for target architecture");
   }

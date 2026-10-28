@@ -625,8 +625,11 @@ void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelT
   const std::string_view mnemonic = inst.mnemonic();
   const bool invert_to_next =
       mnemonic == "s_cbranch_scc0" || mnemonic == "s_cbranch_vccz" || mnemonic == "s_cbranch_execz";
-  return build_sopp_encoding(arch, invert_to_next ? op + 1u : op - 1u,
-                             static_cast<uint16_t>(*skip));
+  const util::FailureOr<uint32_t> word =
+      build_sopp_encoding(arch, invert_to_next ? op + 1u : op - 1u, static_cast<uint16_t>(*skip));
+  if (word.failed())
+    return std::nullopt;
+  return word.value();
 }
 
 [[nodiscard]] std::optional<uint16_t> direct_call_return_sgpr(const Instruction &inst,
