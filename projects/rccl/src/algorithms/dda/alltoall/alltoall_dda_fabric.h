@@ -159,18 +159,54 @@ __device__ __forceinline__ void ddaA2APeerCopy(T* dst, const T* src, size_t begi
 // k = b / blocksPerPeer, and drains the slot of rank (self - k) % nRanks (written by that rank's block b).
 // The share is cut into `pieces` runs of rows: step p pushes piece p, drains the source's piece p - 1, then posts p.
 // The flags are of FabricGpuBarrier: epoch flags by default, CAS flags with RCCL_DDA_A2A_PUSH_PEER_EPOCH=0
+// drain > 0: drain * (nRanks - 1) drain blocks follow the nRanks * blocksPerPeer push blocks, drain of them per source
+// offset r = 1 .. nRanks - 1; drain block d of offset r drains slices d, d + drain, ... of every piece of rank
+// (self - r) % nRanks, in piece order. The push blocks (k != 0) then only push and post.
 template <typename T>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaAllToAllFabricPushPeer(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                             const T* __restrict__ sendbuff, int selfRank, int nRanks,
-                                            int blocksPerPeer, unsigned pieces, FabricGpuBarrier barrier) {
+                                            int blocksPerPeer, unsigned pieces, unsigned drain,
+                                            FabricGpuBarrier barrier) {
   constexpr size_t countPerThread = sizeof(uint4) / sizeof(T);
   const size_t nLines = count / countPerThread;
+  const size_t stride = static_cast<size_t>(blocksPerPeer) * blockDim.x;
+  const unsigned pushBlocks = static_cast<unsigned>(nRanks * blocksPerPeer);
+
+  // Every thread has at most nRows rows; pieces are whole unroll groups of rows. All ranks derive the same piece
+  // count, since it depends only on count, blocksPerPeer and blockDim.
+  const size_t nRows = (nLines + stride - 1) / stride;
+  const size_t perPiece = ((nRows + pieces - 1) / pieces + kDdaA2APeerUnroll - 1) / kDdaA2APeerUnroll * kDdaA2APeerUnroll;
+  const size_t nPieces = (nRows + perPiece - 1) / perPiece;
+  // Line range [lo, hi) of piece p for the thread whose first line is `first`: rows [p * perPiece, (p + 1) * perPiece).
+  auto pieceOf = [&](size_t first, size_t p) -> std::pair<size_t, size_t> {
+    const size_t lo = first + p * perPiece * stride;
+    const size_t hi = first + (p + 1) * perPiece * stride;
+    return {lo, hi < nLines ? hi : nLines};
+  };
+
+  const uint32_t epoch = barrier.epochBegin();
+  if (blockIdx.x >= pushBlocks) {
+    // Drain block: waits for the push blocks it serves and copies their pieces out of this rank's scratch.
+    const unsigned idx = blockIdx.x - pushBlocks;
+    const int r = 1 + static_cast<int>(idx / drain);
+    const int from = (selfRank - r + nRanks) % nRanks;
+    const size_t fromSlot = static_cast<size_t>(from) * count;
+    for (size_t p = 0; p < nPieces; ++p) {
+      for (unsigned j = idx % drain; j < static_cast<unsigned>(blocksPerPeer); j += drain) {
+        barrier.waitPeer(from, epoch, static_cast<unsigned>(p), r * blocksPerPeer + static_cast<int>(j));
+        auto [lo, hi] = pieceOf(static_cast<size_t>(j) * blockDim.x + threadIdx.x, p);
+        ddaA2APeerCopy<true, false>(recvbuff + fromSlot, ipcbuffs[selfRank] + fromSlot, lo, hi, stride);
+      }
+    }
+    barrier.epochEnd(epoch, pieces);
+    return;
+  }
+
   const int k = blockIdx.x / blocksPerPeer;
   const size_t begin = (blockIdx.x % blocksPerPeer) * static_cast<size_t>(blockDim.x) + threadIdx.x;
-  const size_t stride = static_cast<size_t>(blocksPerPeer) * blockDim.x;
 
   const int peer = (selfRank + k) % nRanks;
   const int srcRank = (selfRank - k + nRanks) % nRanks;
@@ -180,28 +216,19 @@ __launch_bounds__(512)
   const size_t slot = static_cast<size_t>(srcRank) * count;
 
   // Entry handshake instead of a full barrier: only peer reads the slot this block writes, so wait for peer alone.
-  const uint32_t epoch = barrier.epochBegin();
   if (k != 0) barrier.signalWait(srcRank, peer, epoch);
 
   {
-    // Every thread has at most nRows rows; pieces are whole unroll groups of rows. All ranks derive the same piece
-    // count, since it depends only on count, blocksPerPeer and blockDim.
-    const size_t nRows = (nLines + stride - 1) / stride;
-    const size_t perPiece = ((nRows + pieces - 1) / pieces + kDdaA2APeerUnroll - 1) / kDdaA2APeerUnroll * kDdaA2APeerUnroll;
-    const size_t nPieces = (nRows + perPiece - 1) / perPiece;
-    // This thread's line range [lo, hi) of piece p: rows [p * perPiece, (p + 1) * perPiece).
-    auto piece = [&](size_t p) -> std::pair<size_t, size_t> {
-      const size_t lo = begin + p * perPiece * stride;
-      const size_t hi = begin + (p + 1) * perPiece * stride;
-      return {lo, hi < nLines ? hi : nLines};
-    };
-
+    auto piece = [&](size_t p) { return pieceOf(begin, p); };
+    // With drain blocks the push blocks (k != 0) only push and post. Group 0 pushes its own chunk into its own scratch
+    // and still drains it, since no drain block serves the own slot.
+    const bool drainHere = drain == 0 || k == 0;
     for (size_t p = 0; p <= nPieces; ++p) {
       if (p < nPieces) {
          auto [lo, hi] = piece(p);
          ddaA2APeerCopy<false, true>(dst, src, lo, hi, stride);
       }
-      if (p > 0) {
+      if (p > 0 && drainHere) {
         barrier.waitPeer(srcRank, epoch, static_cast<unsigned>(p - 1));
         auto [lo, hi] = piece(p - 1);
         ddaA2APeerCopy<true, false>(recvbuff + slot, ipcbuffs[selfRank] + slot, lo, hi, stride);
@@ -211,5 +238,4 @@ __launch_bounds__(512)
   }
   barrier.epochEnd(epoch, pieces);
 }
-
 } // namespace dda::common

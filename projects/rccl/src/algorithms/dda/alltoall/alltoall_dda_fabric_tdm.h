@@ -130,6 +130,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
 // recvbuff slots that other blocks of this rank may still be reading from sendbuff.
 // pieces >= 1 (the host never passes 0): a wave goes through nRounds rounds of UnrollPeers tiles, and a piece is a
 // run of those rounds. Step p pushes piece p, waits for the source's piece p - 1 and drains it, then posts piece p.
+// With drain > 0, drain * (nRanks - 1) extra blocks drain the scratch (see ddaAllToAllFabricPushPeer).
 // The flags are signalWait / postPeer / waitPeer of FabricGpuBarrier. With the default epoch flags a post never waits for the previous piece to be
 // consumed, and every wave polls the flag itself. The pieces land at their place in the chunk, so the scratch needed is
 // unchanged. One piece pushes the whole share, posts, waits and drains: no overlap.
@@ -137,7 +138,7 @@ template <int TileBytes, int UnrollPeers>
 __global__ void __launch_bounds__(kDdaA2ATdmMaxWarpsPerBlock* kDdaA2ATdmWave)
 ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* __restrict__ recvbuff,
                               const uint8_t* __restrict__ sendbuff, size_t bytesPerRank, int selfRank, int nRanks,
-                              int blocksPerPeer, unsigned pieces, FabricGpuBarrier barrier) {
+                              int blocksPerPeer, unsigned pieces, unsigned drain, FabricGpuBarrier barrier) {
   static_assert(TileBytes * UnrollPeers == kDdaA2ATdmWindowBytes, "tiles must fill one wave window");
   static_assert(TileBytes % kDdaA2ATdmAlign == 0, "tiles must be whole 256 B rows");
 #if TDM_SUPPORTED
@@ -147,18 +148,9 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
   const size_t warps = blockDim.x / warpSize;
   uint8_t* window = ddaA2ATdmSmem + static_cast<size_t>(warp) * kDdaA2ATdmWindowBytes;
 
-  const int k = static_cast<int>(blockIdx.x) / blocksPerPeer;
-  const size_t slice = static_cast<size_t>(blockIdx.x) % blocksPerPeer;
   const size_t nTiles = (bytesPerRank + TileBytes - 1) / TileBytes;
-  const size_t first = (slice * warps + warp) * UnrollPeers;
   const size_t stride = static_cast<size_t>(blocksPerPeer) * warps * UnrollPeers;
-
-  const int peer = (selfRank + k) % nRanks;
-  const int from = (selfRank - k + nRanks) % nRanks;
-
-  // Entry handshake instead of a full barrier: only peer reads the slot this block writes, so wait for peer alone.
-  const uint32_t epoch = barrier.epochBegin();
-  if (k != 0) barrier.signalWait(from, peer, epoch);
+  const unsigned pushBlocks = static_cast<unsigned>(nRanks * blocksPerPeer);
 
   // Rounds a wave goes through and the pieces they are cut into. Every wave of every rank derives the same piece
   // count, since it depends only on bytesPerRank, blocksPerPeer and blockDim.
@@ -167,8 +159,8 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
   const size_t nPieces = (nRounds + perPiece - 1) / perPiece;
 
   // Copies this wave's rounds [p * perPiece, (p + 1) * perPiece) of a bytesPerRank chunk from src to dst through its
-  // LDS window.
-  auto pass = [&](const uint8_t* src, uint8_t* dst, size_t p) {
+  // LDS window, starting at tile `first`.
+  auto passFrom = [&](size_t first, const uint8_t* src, uint8_t* dst, size_t p) {
     const size_t limit = first + (p + 1) * perPiece * stride;
     for (size_t base = first + p * perPiece * stride; base < nTiles && base < limit; base += stride) {
 #pragma unroll
@@ -196,17 +188,48 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
     }
   };
 
+  const uint32_t epoch = barrier.epochBegin();
+  if (blockIdx.x >= pushBlocks) {
+    // Drain block: waits for the push blocks it serves and copies their pieces out of this rank's scratch.
+    const unsigned idx = blockIdx.x - pushBlocks;
+    const int r = 1 + static_cast<int>(idx / drain);
+    const int fromRank = (selfRank - r + nRanks) % nRanks;
+    const size_t fromOff = static_cast<size_t>(fromRank) * bytesPerRank;
+    for (size_t p = 0; p < nPieces; ++p) {
+      for (unsigned j = idx % drain; j < static_cast<unsigned>(blocksPerPeer); j += drain) {
+        barrier.waitPeer(fromRank, epoch, static_cast<unsigned>(p), r * blocksPerPeer + static_cast<int>(j));
+        passFrom((static_cast<size_t>(j) * warps + warp) * UnrollPeers, peerScratch[selfRank] + fromOff,
+                 recvbuff + fromOff, p);
+      }
+    }
+    barrier.epochEnd(epoch, pieces);
+    return;
+  }
+
+  const int k = static_cast<int>(blockIdx.x) / blocksPerPeer;
+  const size_t slice = static_cast<size_t>(blockIdx.x) % blocksPerPeer;
+  const size_t first = (slice * warps + warp) * UnrollPeers;
+
+  const int peer = (selfRank + k) % nRanks;
+  const int from = (selfRank - k + nRanks) % nRanks;
+
+  // Entry handshake instead of a full barrier: only peer reads the slot this block writes, so wait for peer alone.
+  if (k != 0) barrier.signalWait(from, peer, epoch);
+
   uint8_t* const dst = peerScratch[peer] + static_cast<size_t>(selfRank) * bytesPerRank;
   const uint8_t* const src = sendbuff + static_cast<size_t>(peer) * bytesPerRank;
   const uint8_t* const slot = peerScratch[selfRank] + static_cast<size_t>(from) * bytesPerRank;
   uint8_t* const out = recvbuff + static_cast<size_t>(from) * bytesPerRank;
+  // With drain blocks the push blocks (k != 0) only push and post. Group 0 pushes its own chunk into its own scratch
+  // and still drains it, since no drain block serves the own slot.
+  const bool drainHere = drain == 0 || k == 0;
   // Every TDM store of a piece has drained (tdmWait) before epochPostPiece, which also waits for the wave's stores and
   // syncs the block before thread 0 posts. Every wave polls the source's flag itself.
   for (size_t p = 0; p <= nPieces; ++p) {
-    if (p < nPieces) pass(src, dst, p);
-    if (p > 0) {
+    if (p < nPieces) passFrom(first, src, dst, p);
+    if (p > 0 && drainHere) {
       barrier.waitPeer(from, epoch, static_cast<unsigned>(p - 1));
-      pass(slot, out, p - 1);
+      passFrom(first, slot, out, p - 1);
     }
     if (p < nPieces) barrier.postPeer(peer, epoch, static_cast<unsigned>(p));
   }
@@ -221,6 +244,7 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
   (void)nRanks;
   (void)blocksPerPeer;
   (void)pieces;
+  (void)drain;
   (void)barrier;
   __builtin_trap();
 #endif
