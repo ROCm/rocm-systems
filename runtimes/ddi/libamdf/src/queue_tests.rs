@@ -300,6 +300,7 @@ fn native_transport() -> queue::QueueTransport {
         ring_host_address: 0x1000,
         ring_device_address: 0x1000,
         ring_size_bytes: 4096,
+        aql_control: None,
         sdma_engine_id: None,
         read_index_host_address: 0x2000,
         read_index_device_address: 0x4000,
