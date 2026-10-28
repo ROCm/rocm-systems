@@ -342,13 +342,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `getRequirements_gin`'s large tuning/GIN dependency surface is never called
   by these tests, so `-ffunction-sections`/`--gc-sections` drop it before any
   fake would be needed.
-- **`rccl-UnitTestsMicroNvls`** — the REAL `src/transport/nvls.cc` (via
-  `NVLS_CC_PATH`, from `nvls-test.cc`); suite `NvlsHipStubTest.*`. RCCL always
-  compiles the NVLS stub branch (the multicast code needs `CUDART_VERSION >= 12010`),
-  and the suite checks that the stubs leave NVLS off and never read
-  `NCCL_NVLS_ENABLE`, so no value can turn it on. Its own binary, not shared with
-  `rccl-UnitTestsMicro`: `fakes/transport_stubs.cc` and
-  `fakes/collective_stubs.cc` fake the `ncclNvls*` symbols the real file defines.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
   `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`, `ScopedHookMicrotest.*`.
@@ -598,6 +591,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `net_ib/net_ib_gid_inspect.cc` (`NET_IB_GID_INSPECT_CC_PATH`, from
     `net_ib/net-ib-gid-inspect-test.cc`); suites
     `NetIbGidInspectMicrotest.*`.
+  - `nvls.cc` (`NVLS_CC_PATH`, from `nvls-test.cc`); suite `NvlsHipStubTest.*`.
+    RCCL always compiles the NVLS stub branch (the multicast code needs
+    `CUDART_VERSION >= 12010`), and the suite checks that the stubs leave NVLS off
+    and never read `NCCL_NVLS_ENABLE`, so no value can turn it on.
+    `fakes/transport_stubs.cc` and `fakes/collective_stubs.cc` fake the `ncclNvls*`
+    symbols the real file defines, so this binary links neither.
   - `rma_socket.cc` (`RMA_SOCKET_CC_PATH`, from `rma-socket-test.cc`);
     suites `RmaSocketMicrotest.*`.
   - `rma_socket_mem.cc` (`RMA_SOCKET_MEM_CC_PATH`, from
@@ -1181,7 +1180,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroNet`, `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDda`, `rccl-UnitTestsMicroMisc`,
 `rccl-UnitTestsMicroTransport`,
-`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep`, `rccl-UnitTestsMicroNvls`,
+`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep`,
 `rccl-UnitTestsMicroNetIbCastDataPath`, `rccl-UnitTestsMicroRmaProxy` and `rccl-UnitTestsMicroNetIbCastInit` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -1236,7 +1235,6 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroGinHostProxy       # src/gin/gin_host_proxy.cc + proxy_gpucontext/
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
-./build/rccl-UnitTestsMicroNvls               # transport/nvls.cc (HIP stubs) tests
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc + src/diagnostics/ tests
 ./build/rccl-UnitTestsMicroGraph              # src/graph/{xml,topo,paths,search,rome_models}.cc tests

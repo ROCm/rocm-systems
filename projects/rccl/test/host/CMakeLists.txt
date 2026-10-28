@@ -684,16 +684,6 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroNvls -- REAL src/transport/nvls.cc, which RCCL always compiles
-  # as its NVLS stubs (the multicast code needs CUDART_VERSION >= 12010). Its own
-  # binary: fakes/transport_stubs.cc and fakes/collective_stubs.cc fake the ncclNvls*
-  # entry points nvls.cc defines for real.
-  set(TEST_MICRO_NVLS_SOURCE_FILES
-    nvls-test.cc
-    fakes/nccl_fakes.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
   # rccl-UnitTestsMicroNcclDevice -- src/nccl_device/ requirement builders. Own binary:
   # fakes/dev_runtime_micro_fakes.cc fakes three of them in rccl-UnitTestsMicro.
   set(TEST_MICRO_NCCL_DEVICE_SOURCE_FILES
@@ -1047,6 +1037,7 @@ function(rccl_define_micro_source_lists)
     transport/net_ib/p2p-resiliency-recovery-test.cc
     transport/net_ib/reg-test.cc
     transport/net_ib/wqe-lat-mon-test.cc
+    transport/nvls-test.cc
     transport/rma-socket-test.cc
     transport/rma-socket-mem-test.cc
     transport/rma-socket-progress-recver-test.cc
@@ -2057,16 +2048,6 @@ if(_ENQ_BUILD_DEVLINKER)
 endif()
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroNvls
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroNvls
-  SOURCES ${TEST_MICRO_NVLS_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    NVLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/nvls.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
-
-# ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroNcclDevice
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroNcclDevice
@@ -2418,6 +2399,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTransport
     NET_IB_P2P_RESILIENCY_RECOVERY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/p2p_resiliency_recovery.cc"
     NET_IB_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/reg.cc"
     NET_IB_WQE_LAT_MON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/wqe_lat_mon.cc"
+    NVLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/nvls.cc"
     RMA_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket.cc"
     RMA_SOCKET_MEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_mem.cc"
     RMA_SOCKET_PROGRESS_RECVER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_progress_recver.cc"

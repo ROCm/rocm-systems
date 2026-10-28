@@ -3325,7 +3325,6 @@ class TestExecutor:
                        "rccl-UnitTestsMicroInit-faultinj",
                        "rccl-UnitTestsMicroEnqueue",
                        "rccl-UnitTestsMicroSymKernels",
-                       "rccl-UnitTestsMicroNvls",
                        "rccl-UnitTestsMicroGinHost",
                        "rccl-UnitTestsMicroRomeModels",
                        "rccl-UnitTestsMicroDda",
