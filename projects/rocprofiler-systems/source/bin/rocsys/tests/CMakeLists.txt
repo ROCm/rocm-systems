@@ -6,6 +6,7 @@ add_library(
     OBJECT
     test_catalog.cpp
     test_cli_dispatcher.cpp
+    test_traces.cpp
     test_delivery.cpp
     test_dry_run.cpp
     test_help.cpp
@@ -18,4 +19,9 @@ target_link_libraries(
     PUBLIC
         rocprofiler-systems::rocprofiler-systems-rocsys-core
         rocprofiler-systems-googletest-library
+)
+
+target_compile_definitions(
+    rocsys-tests
+    PRIVATE ROCPROFSYS_PRESET_DIR="${PROJECT_SOURCE_DIR}/source/bin/common/presets"
 )

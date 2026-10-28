@@ -79,17 +79,30 @@ match_long_option(std::string_view token)
     return long_option{ body.substr(0, equal), body.substr(equal + 1) };
 }
 
+// Two rows can share a name. The row whose required capabilities this verb has
+// wins. A verb that has none of them still gets the first row, so validate can
+// reject it instead of leaving the token for the legacy tool.
 [[nodiscard]] const option_spec*
-find_option(std::span<const option_spec> options, std::string_view name)
+find_option(std::span<const option_spec> options, std::string_view name,
+            capability_set caps)
 {
+    const option_spec* fallback = nullptr;
     for(const auto& spec : options)
     {
-        if(spec.name == name)
+        if(spec.name != name)
+        {
+            continue;
+        }
+        if((caps & spec.required_caps) == spec.required_caps)
         {
             return &spec;
         }
+        if(fallback == nullptr)
+        {
+            fallback = &spec;
+        }
     }
-    return nullptr;
+    return fallback;
 }
 
 [[nodiscard]] diagnostic
@@ -190,7 +203,8 @@ private:
             ++m_index;
             return std::nullopt;
         }
-        const auto* spec = find_option(m_request.options, matched->name);
+        const auto* spec =
+            find_option(m_request.options, matched->name, m_request.verb->caps);
         if(spec == nullptr)
         {
             m_command.passthrough.push_back(m_head[m_index]);
@@ -217,6 +231,12 @@ private:
                                                          const long_option& matched)
     {
         if(matched.inline_value.has_value())
+        {
+            return flag_does_not_take_a_value(spec);
+        }
+        // `avail --traces hip` is a value on the query flag, not a legacy argument.
+        if(has_capability(spec.required_caps, capability::query_only) &&
+           m_index < m_head.size() && !is_flag_token(m_head[m_index]))
         {
             return flag_does_not_take_a_value(spec);
         }
@@ -294,6 +314,12 @@ private:
     [[nodiscard]] std::optional<diagnostic> reject_unless_accepted(
         const option_spec& spec, std::string_view token)
     {
+        // A verb that cannot use the option fails in validate. Checking the name
+        // here would query the SDK for a command that never traces.
+        if((m_request.verb->caps & spec.required_caps) != spec.required_caps)
+        {
+            return std::nullopt;
+        }
         if(spec.accepts == nullptr || spec.accepts(token, *m_request.ctx))
         {
             return std::nullopt;

@@ -13,6 +13,7 @@
 #include "options/dry_run.hpp"
 #include "options/parser.hpp"
 #include "options/table.hpp"
+#include "options/traces.hpp"
 #include "options/validator.hpp"
 #include "trace/catalog.hpp"
 
@@ -93,6 +94,31 @@ command_has_option(const rocprofsys::rocsys::options::parsed_command& command,
     return false;
 }
 
+[[nodiscard]] bool
+is_avail_traces_query(const rocprofsys::rocsys::options::parsed_command& command)
+{
+    for(const auto& option : command.options)
+    {
+        if(option.spec != nullptr &&
+           option.spec->kind == rocprofsys::rocsys::options::value_kind::flag &&
+           option.spec->name == rocprofsys::rocsys::options::k_avail_traces.name)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void
+print_trace_notes(std::ostream& out, const rocprofsys::rocsys::env_plan& ops)
+{
+    for(const auto& note :
+        rocprofsys::rocsys::options::disabled_runtime_notes(ops, std::getenv))
+    {
+        out << "note: " << note << '\n';
+    }
+}
+
 [[nodiscard]] std::vector<std::string>
 sdk_domain_choices()
 {
@@ -152,8 +178,9 @@ prepare_launch(const rocprofsys::cli::dispatch_result& routed,
     {
         return rocprofsys::rocsys::diagnostic{ .error = "missing command arguments" };
     }
-    const rocprofsys::rocsys::options::context ctx{};
-    auto                                       parsed =
+    const auto ctx =
+        rocprofsys::rocsys::options::context{ .domains = production_domains() };
+    auto parsed =
         rocprofsys::rocsys::options::parse(rocprofsys::rocsys::options::parse_request{
             .verb             = routed.spec,
             .strip_subcommand = routed.strip_subcommand,
@@ -191,8 +218,7 @@ prepare_launch(const rocprofsys::cli::dispatch_result& routed,
         .dry_run =
             command_has_option(command, rocprofsys::rocsys::options::k_dry_run.name),
         .tool_help = rocprofsys::rocsys::help::requests_tool_help(command.passthrough),
-        .traces =
-            command_has_option(command, rocprofsys::rocsys::options::k_avail_traces.name),
+        .traces    = is_avail_traces_query(command),
     };
 }
 
@@ -222,10 +248,12 @@ launch_command(const rocprofsys::cli::dispatch_result& routed,
     }
     else if(ready.dry_run)
     {
+        print_trace_notes(std::cerr, ready.env);
         rocprofsys::rocsys::write_dry_run(std::cout, routed.spec->name, ready.plan.argv,
                                           ready.env);
         return EXIT_SUCCESS;
     }
+    print_trace_notes(std::cerr, ready.env);
     return rocprofsys::rocsys::launcher<>{}.launch(ready.plan, program);
 }
 }  // namespace

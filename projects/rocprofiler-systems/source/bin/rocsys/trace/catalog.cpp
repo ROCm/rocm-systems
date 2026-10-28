@@ -49,14 +49,40 @@ domain_reason(std::span<const std::string> choices,
 }
 
 [[nodiscard]] const runtime_table::row*
+matching_runtime(std::string_view token)
+{
+    for(const auto& spec : runtime_table::rows())
+    {
+        if(spec.name == k_kokkos)
+        {
+            continue;
+        }
+        if(options::same_choice(spec.name, token))
+        {
+            return &spec;
+        }
+        for(const auto alias : spec.aliases)
+        {
+            if(options::same_choice(alias, token))
+            {
+                return &spec;
+            }
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] const runtime_table::row*
 phase2_runtime(std::string_view token)
 {
-    const auto* spec = runtime_table::find_trace_name(token);
-    if(spec == nullptr || spec->name == k_kokkos)
+    for(const auto& item : runtime_table::trace_overrides())
     {
-        return nullptr;
+        if(options::same_choice(item.name, token))
+        {
+            return matching_runtime(item.canonical);
+        }
     }
-    return spec;
+    return matching_runtime(token);
 }
 
 [[nodiscard]] std::string
@@ -337,6 +363,40 @@ trace_catalog::expand(std::span<const std::string> names) const
     return selection;
 }
 
+bool
+trace_catalog::recognizes(std::string_view name) const
+{
+    load();
+    return phase2_runtime(name) != nullptr || friendly(name) != nullptr ||
+           listed(m_choices, name);
+}
+
+std::vector<std::string>
+trace_catalog::names() const
+{
+    load();
+    std::vector<std::string> choices;
+    for(const auto& alias : k_friendly_names)
+    {
+        choices.emplace_back(alias.name);
+    }
+    for(const auto& spec : runtime_table::rows())
+    {
+        if(spec.name != k_kokkos)
+        {
+            choices.emplace_back(spec.name);
+        }
+    }
+    for(const auto& choice : m_choices)
+    {
+        if(!claimed_by_alias(choice))
+        {
+            choices.push_back(choice);
+        }
+    }
+    return choices;
+}
+
 std::vector<catalog_entry>
 trace_catalog::entries() const
 {
@@ -389,27 +449,7 @@ trace_catalog::entries() const
 std::optional<std::string>
 trace_catalog::suggest(std::string_view name) const
 {
-    load();
-    std::vector<std::string> choices;
-    for(const auto& alias : k_friendly_names)
-    {
-        choices.emplace_back(alias.name);
-    }
-    for(const auto& spec : runtime_table::rows())
-    {
-        if(spec.name != k_kokkos)
-        {
-            choices.emplace_back(spec.name);
-        }
-    }
-    for(const auto& choice : m_choices)
-    {
-        if(!claimed_by_alias(choice))
-        {
-            choices.push_back(choice);
-        }
-    }
-    return options::suggest_choice(name, choices);
+    return options::suggest_choice(name, names());
 }
 
 std::span<const std::string>

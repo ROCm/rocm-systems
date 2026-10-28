@@ -32,6 +32,9 @@ and Kokkos (`ROCPROFSYS_USE_KOKKOSP`). ROCm API tracing is on in every built-in 
 by default for the HIP runtime API, ROCTx markers, kernel dispatches, memory copies and
 scratch memory. A preset may narrow or widen that set, and `--rocm=<domains>` overrides it.
 
+`rocsys --traces` cannot be combined with `--preset` or a shortcut such as
+`--balanced`. Use one or the other.
+
 API tracing is separate from output selection. A preset's `tracing.enabled: false` (or
 `ROCPROFSYS_TRACE=false`) turns Perfetto trace output off, not API tracing. The collected
 data goes to whichever outputs are on: Perfetto, rocPD or profile files. Never say a

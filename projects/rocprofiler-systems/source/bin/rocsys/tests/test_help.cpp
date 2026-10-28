@@ -19,6 +19,7 @@
 
 using rocprofsys::rocsys::capability;
 using rocprofsys::rocsys::capability_set;
+using rocprofsys::rocsys::has_capability;
 using rocprofsys::rocsys::k_verbs;
 using rocprofsys::rocsys::verb_spec;
 using rocprofsys::rocsys::help::requests_tool_help;
@@ -102,9 +103,14 @@ TEST(help_test, every_verb_lists_dry_run_and_rewrite_names_the_follow_up)
                   std::string::npos)
             << verb.name;
         const auto traces = text.find("--traces");
-        if(verb.name == "avail")
+        if(has_capability(verb.caps, capability::honours_rocm_tracing))
         {
-            EXPECT_NE(traces, std::string::npos);
+            EXPECT_NE(text.find("Select APIs to trace"), std::string::npos) << verb.name;
+            EXPECT_EQ(text.find("List trace names"), std::string::npos) << verb.name;
+        }
+        else if(verb.name == "avail")
+        {
+            EXPECT_NE(text.find("List trace names"), std::string::npos);
         }
         else
         {
