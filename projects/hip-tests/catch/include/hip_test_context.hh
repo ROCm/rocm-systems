@@ -145,6 +145,16 @@ class TestContext {
 
 static bool _log_enable = (!TestContext::getEnvVar("HT_LOG_ENABLE").empty() ? true : false);
 
+// Set when a HIP check macro runs, i.e. when this process has used (and thus
+// initialized) the HIP runtime. Process-wide and sticky. The last-error-reset
+// listener only resets when this is set, so it never initializes HIP in a
+// parent that never used it, e.g. a fork-based multiprocess parent.
+inline std::atomic<bool> g_hipRuntimeInitialized{false};
+
+// Set by the last-error-reset listener when strict mode saw an unconsumed error;
+// main() turns it into a non-zero exit after Catch and context cleanup finish.
+inline std::atomic<bool> g_hipStrictLastErrorFailed{false};
+
 // printing logs
 #define LogPrintf(format, ...)                                                                     \
   {                                                                                                \
