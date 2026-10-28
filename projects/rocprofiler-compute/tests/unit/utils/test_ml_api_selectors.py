@@ -57,6 +57,15 @@ def test_empty_operator_flag_is_unscoped_double_star():
     assert resolve_operator_patterns([]) == {UNSCOPED_OPERATOR_KEY: ["**"]}
 
 
+def test_operator_rejects_unknown_prefix():
+    with pytest.raises(ValueError, match="jax"):
+        resolve_operator_patterns(["jax:*foo*"])
+    with pytest.raises(ValueError, match="all_supported_backends"):
+        resolve_operator_patterns(["all_supported_backends:*relu*"])
+    with pytest.raises(ValueError, match="toch"):
+        resolve_operator_patterns(["toch:*relu* torch:*relu*"])
+
+
 def test_list_operators_rejects_backend_missing_from_workload():
     with pytest.raises(ValueError, match="triton"):
         check_list_operators_against_traced_frameworks(["triton"], ["torch"])

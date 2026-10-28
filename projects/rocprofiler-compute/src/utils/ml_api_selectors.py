@@ -96,6 +96,11 @@ def _patterns_by_backend(token: str) -> Dict[str, List[str]]:
             continue
         if ":" in selector_token:
             prefix, rest = selector_token.split(":", 1)
+            if prefix not in _OPERATOR_BACKENDS:
+                raise ValueError(
+                    f"Unknown --operator prefix {prefix!r}. "
+                    f"Values: {', '.join(_OPERATOR_BACKENDS)}."
+                )
             _save(prefix, rest.strip() or "**")
             continue
         _save(prefix, selector_token)
