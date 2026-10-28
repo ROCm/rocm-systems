@@ -89,8 +89,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Scoped the unset `RCCL_P2P_BATCH_THRESHOLD` to gfx950 at 16 or more nodes. The NCCL 2.31.2 sync applied the 64 KiB per-peer cutoff on every architecture, so with `RCCL_P2P_BATCH_ENABLE=1` several AllToAll peer rounds shared one channel and ran one after another above 64 KiB per peer. On MI300X (gfx942), 4 nodes and 32 ranks, in-place AllToAll from 4 MiB to 16 MiB was about 6–16% slower. The parameter now defaults to `-1`. A negative value, including an explicit `-1`, selects that architecture default: 64 KiB on gfx950 with 16 or more nodes, and no size cutoff elsewhere. A non-negative value is the cutoff on every architecture. The variable does not itself turn batching on.
 * Fixed `ncclCommShrink` accepting an exclusion list with negative, out-of-range or duplicate ranks and building a child communicator with an inconsistent rank count, which could hang or access memory out of bounds. Such a list now returns `ncclInvalidArgument`.
 * Fixed `ncclCommSplit` and `ncclCommShrink` crashing when `newcomm` is `NULL`. They now return `ncclInvalidArgument`.
-* Fixed communicator initialization skipping its error cleanup when a step after transport setup failed, for example an invalid `RCCL_UNROLL_FACTOR`. The error is now recorded in the communicator state and a split or shrink child communicator handle is still returned to the caller.
-* Fixed communicator initialization leaking the ring and tree scratch arrays when connecting rings or trees failed.
+* Fixed `ncclCommSplit` and `ncclCommShrink` leaking the child communicator when a late initialization step failed, for example with an invalid `RCCL_UNROLL_FACTOR`. The error is still returned, and the child handle is now returned too so it can be released with `ncclCommDestroy`.
+* Fixed communicator initialization leaking memory when connecting rings or trees failed.
 
 ### Known issues
 
