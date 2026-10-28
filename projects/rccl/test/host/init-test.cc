@@ -2533,6 +2533,7 @@ struct PeerSpec {
   int uuidTag = -1;     // -1 = its own UUID; equal values (>=1) make two peers the same GPU
   int compCap = -1;     // -1 = same as self
   ncclComm* comm = nullptr;  // only read for same-process peers (:1527, :1549)
+  const ncclPeerInfo* base = nullptr;  // non-null: start from this slot instead of zeros; the knobs above still apply
 };
 
 // Scripts g_bootstrapAllGather for the sizeof(ncclPeerInfo) site at :1466.
@@ -2562,7 +2563,7 @@ void InstallPeerInfoAllGather(TransportsRankComm& c, std::vector<PeerSpec> specs
     for (int i = 0; i < nranks; ++i) {
       if (i == selfRank) continue;  // assert-only above; never overwrite our own contribution
       const PeerSpec& s = specs[i];
-      info[i] = ncclPeerInfo{};
+      info[i] = s.base ? *s.base : ncclPeerInfo{};
       info[i].rank = i;
       info[i].version = s.version < 0 ? self.version : s.version;
       info[i].hostHash = self.hostHash + s.node;
@@ -2774,6 +2775,60 @@ TEST_F(InitMicrotest, InitTransportsRank_MultiRankNvml_LastPairCollision_IsTheOn
   InstallPeerInfoAllGather(c, specs);
   EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_TRUE(c.get()->hasMultiRankNvml);
+}
+
+// --- Mismatched git revisions (NCCL 2.32): rank 0 reports them after the peer-scan loop ---
+namespace {
+// What a rank whose library was built from gitHash contributes: the real fillInfo's slot under that
+// rcclGitHash, so the fingerprint it carries is the UUT's own, not one the test made up.
+ncclPeerInfo PeerInfoBuiltFrom(TransportsRankComm& c, const char* gitHash) {
+  ncclPeerInfo info{};
+  const char* const ours = rcclGitHash;
+  rcclGitHash = gitHash;
+  const ncclResult_t res = fillInfo(c.get(), &info, c.get()->commHash);
+  rcclGitHash = ours;
+  if (res != ncclSuccess) ADD_FAILURE() << "fillInfo for the peer returned " << res;
+  return info;
+}
+
+// A revision as the report prints it: the low 32 bits of getHash over the git hash string.
+std::string GitFingerprint(const char* gitHash) {
+  char hex[16];
+  snprintf(hex, sizeof(hex), "0x%08x", static_cast<uint32_t>(getHash(gitHash, strlen(gitHash))));
+  return hex;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, InitTransportsRank_PeerFromOtherGitRevision_Rank0ReportsFirstMismatchOnce) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  const char* const otherRevision = "develop:0badc0d";
+  const ncclPeerInfo same = PeerInfoBuiltFrom(c, rcclGitHash);
+  const ncclPeerInfo other = PeerInfoBuiltFrom(c, otherRevision);
+  std::vector<PeerSpec> specs(4);
+  specs[1].base = &same;   // matches, so the report must look past it
+  specs[2].base = &other;
+  specs[3].base = &other;  // a second mismatch, still one report
+  InstallPeerInfoAllGather(c, specs);
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));  // non-fatal: ran on to :1576
+  });
+  // Anchor on the VALUES: both fingerprints and the first rank that differs.
+  const std::string want = "rank 0 fingerprint " + GitFingerprint(rcclGitHash) + ", rank 2 fingerprint " +
+                           GitFingerprint(otherRevision);
+  EXPECT_TRUE(LogHas(log, want.c_str())) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "rank 3 fingerprint")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PeersFromSameGitRevision_ReportsNoFingerprint) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  const ncclPeerInfo same = PeerInfoBuiltFrom(c, rcclGitHash);
+  std::vector<PeerSpec> specs(4);
+  for (PeerSpec& s : specs) s.base = &same;  // InstallPeerInfoAllGather skips the self entry
+  InstallPeerInfoAllGather(c, specs);
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_FALSE(LogHas(log, "fingerprint")) << "actual log:\n" << log;
 }
 
 // --- The MNNVL scope test (init.cc:1500-1510) ---
