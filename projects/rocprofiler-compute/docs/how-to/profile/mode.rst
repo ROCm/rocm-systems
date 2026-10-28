@@ -1121,7 +1121,7 @@ for them. They appear under the ``torch.compile`` call in the operator tree.
    Triton trace is currently an experimental feature. You must pass
    ``--experimental`` to both **profile** and **analyze** commands when using the
    Triton trace related options (``--trace-ml-api triton`` for profile;
-   ``--list-operators triton`` and ``--operator`` for analyze).
+   ``--list-operators triton`` and ``--operator triton:PATTERN`` for analyze).
 
 Requirements
 ------------
@@ -1151,7 +1151,7 @@ analyze each framework separately. To enable all supported backends at once,
 use :ref:`--trace-ml-api <ml-api-trace>`.
 
 To analyze the captured Triton kernels, use ``--list-operators triton`` and
-``--operator`` in analyze mode (see :doc:`../analyze/cli`).
+``--operator triton:PATTERN`` in analyze mode (see :doc:`../analyze/cli`).
 
 .. _ml-api-trace:
 
