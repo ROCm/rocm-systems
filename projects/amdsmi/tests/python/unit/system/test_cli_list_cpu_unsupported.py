@@ -2,20 +2,16 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for ``amd-smi list --cpu``/``--core`` rejection.
+"""Unit tests for ``amd-smi list --cpu`` CPU identification and ``--core`` rejection.
 
 ``--cpu`` and ``--core`` are accepted by the shared device-argument group used
-by every subcommand (see ``AMDSMIParser._add_device_arguments``), but ``list``
-never implemented a CPU/core listing path. Passing either flag used to fall
-through to ``list_gpu``'s dead cpu guard, which ``print("N/A")``'d straight to
-stdout (bypassing ``AMDSMILogger`` entirely) and returned success, so
-``amd-smi list --cpu all --file out.log`` silently wrote an empty file and
-exited 0.
-
-``ListDevicesCommands.list_devices`` now rejects ``--cpu``/``--core`` up front
-with ``AmdSmiCommandNotSupportedException`` (``COMMAND_NOT_SUPPORTED`` exit
-code), which the CLI entry point turns into a non-zero exit and a printed error
-message instead of a silent empty success.
+by every subcommand (see ``AMDSMIParser._add_device_arguments``). ``list --cpu``
+reports the socket-level CPU identity (family/model/stepping, formatted as hex);
+family and model come from the amd-smi APIs
+(``amdsmi_get_cpu_family``/``amdsmi_get_cpu_model``) while stepping is read from
+``/proc/cpuinfo`` via ``AMDSMIHelpers``. ``list --core`` is still not serviced
+and is rejected up front with ``AmdSmiCommandNotSupportedException``
+(``COMMAND_NOT_SUPPORTED`` exit code).
 
 The CLI dir is resolved through ``common.find_cli_dir`` so the suite exercises
 the install or the checkout as ``cli_search_order`` dictates, and skips cleanly
@@ -66,8 +62,8 @@ if "_version" not in sys.modules:
     _stubs.update(generated_version_stub())
 _restore_stubs = stub_modules_at_import(_stubs) if _stubs else None
 
-cli_exc: Any = None
 _CLI_IMPORT_ERROR: Any = None
+cli_exc: Any = None
 if _CLI_DIR is None:
     _CLI_IMPORT_ERROR = "amd-smi CLI dir not found"
 else:
@@ -94,12 +90,50 @@ def tearDownModule():
         _restore_stubs()
 
 
+class _FakeHandle:
+    def __init__(self, value):
+        self.value = value
+
+
+class _FakeLogger:
+    def __init__(self):
+        self.stored = {}
+
+    def store_cpu_output(self, device_handle, argument, data):
+        self.stored[argument] = data
+
+    def store_multiple_device_output(self):
+        pass
+
+    def print_output(self, **kwargs):
+        pass
+
+
 class _FakeHelpers:
+    def __init__(self, family=26, model=17, stepping=2):
+        self._family = family
+        self._model = model
+        self._stepping = stepping
+
+    def check_required_groups(self):
+        pass
+
+    def handle_cpus(self, args, logger, subcommand):
+        if isinstance(args.cpu, list):
+            args.cpu = args.cpu[0]
+        return False, args.cpu
+
+    def get_cpu_id_from_device_handle(self, device_handle):
+        return 0
+
     def get_output_format(self):
         return "human"
 
+    def get_cpu_stepping(self):
+        return self._stepping
 
-class TestCliListCpuUnsupported(unittest.TestCase):
+
+class TestCliListCpuIdentification(unittest.TestCase):
     CommandNotSupported: Any = (
         cli_exc.AmdSmiCommandNotSupportedException if cli_exc is not None else None
     )
@@ -107,28 +141,52 @@ class TestCliListCpuUnsupported(unittest.TestCase):
         int(cli_exc.AmdSmiExitCode.COMMAND_NOT_SUPPORTED) if cli_exc is not None else None
     )
 
-    def _make_commands(self):
+    def _make_commands(self, family=26, model=17, stepping=2):
         module = load_cli_module("list_devices_under_test", _LIST_DEVICES_PATH, _SUBCOMMANDS_DIR)
+        # family/model come from the amd-smi interface; stub them on the module's
+        # bound interface so the test is hardware-independent.
+        module.amdsmi_interface.amdsmi_get_cpu_family = lambda: family
+        module.amdsmi_interface.amdsmi_get_cpu_model = lambda: model
         commands = module.ListDevicesCommands()
-        commands.helpers = _FakeHelpers()
+        commands.helpers = _FakeHelpers(family=family, model=model, stepping=stepping)
+        commands.logger = _FakeLogger()
+        commands.group_check_printed = False
+        commands.cpu_handles = [_FakeHandle(1)]
         return commands
 
-    def test_cpu_flag_raises_command_not_supported(self):
+    def test_cpu_flag_reports_family_model_stepping(self):
         commands = self._make_commands()
-        args = argparse.Namespace(gpu=None, cpu=["0"], core=None)
-        with self.assertRaises(self.CommandNotSupported) as ctx:
-            commands.list_devices(args)
-        self.assertEqual(ctx.exception.value, self.expected_exit_code)
-        self.assertIn("--cpu and --core are not supported", str(ctx.exception))
+        args = argparse.Namespace(gpu=None, cpu=[_FakeHandle(1)], core=None)
+        commands.list_devices(args)
+        self.assertEqual(commands.logger.stored["family"], "0x1A")
+        self.assertEqual(commands.logger.stored["model"], "0x11")
+        self.assertEqual(commands.logger.stored["stepping"], "0x2")
 
     def test_core_flag_raises_command_not_supported(self):
         commands = self._make_commands()
-        args = argparse.Namespace(gpu=None, cpu=None, core=["0"])
+        args = argparse.Namespace(gpu=None, cpu=None, core=[_FakeHandle(1)])
         with self.assertRaises(self.CommandNotSupported) as ctx:
             commands.list_devices(args)
         self.assertEqual(ctx.exception.value, self.expected_exit_code)
+        self.assertIn("--core is not supported", str(ctx.exception))
+        self.assertNotIn("family", commands.logger.stored)
 
-    def test_no_cpu_or_core_does_not_raise(self):
+    def test_family_model_fallback_to_na(self):
+        commands = self._make_commands()
+        module = load_cli_module("list_devices_under_test", _LIST_DEVICES_PATH, _SUBCOMMANDS_DIR)
+
+        def _raise():
+            raise module.amdsmi_exception.AmdSmiLibraryException(12)
+
+        module.amdsmi_interface.amdsmi_get_cpu_family = _raise
+        module.amdsmi_interface.amdsmi_get_cpu_model = _raise
+        args = argparse.Namespace(gpu=None, cpu=[_FakeHandle(1)], core=None)
+        commands.list_devices(args)
+        self.assertEqual(commands.logger.stored["family"], "N/A")
+        self.assertEqual(commands.logger.stored["model"], "N/A")
+        self.assertEqual(commands.logger.stored["stepping"], "0x2")
+
+    def test_no_cpu_or_core_does_not_list_cpu(self):
         # Namespace without cpu/core attrs at all (as e.g. a hypervisor-only
         # parser would produce) must not be mistaken for a cpu/core request.
         commands = self._make_commands()
@@ -140,6 +198,7 @@ class TestCliListCpuUnsupported(unittest.TestCase):
         except Exception:
             # Expected: the GPU listing path itself needs further attributes
             # (device_handles_gpus, etc.) that this minimal stub doesn't
-            # provide. Reaching that point proves the cpu/core guard didn't
+            # provide. Reaching that point proves the cpu/core path didn't
             # fire, which is all this test verifies.
             pass
+        self.assertNotIn("family", commands.logger.stored)

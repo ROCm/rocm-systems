@@ -109,7 +109,29 @@ class _FakeHelpers:
 
 
 class TestCliDeviceArgsCpuCoreHidden(unittest.TestCase):
-    def _build_parser(self, cpu_core_supported):
+    def test_list_registration_for_cpu_and_gpu_systems(self):
+        for gpu, cpu in ((False, True), (True, False), (True, True), (False, False)):
+            with self.subTest(gpu=gpu, cpu=cpu):
+                parser = argparse.ArgumentParser(prog="amd-smi")
+                subparsers = parser.add_subparsers()
+                fake = types.SimpleNamespace(
+                    helpers=types.SimpleNamespace(
+                        is_amdgpu_initialized=lambda: gpu,
+                        is_amd_hsmp_initialized=lambda: cpu,
+                    ),
+                    description="AMD SMI",
+                    _add_device_arguments=lambda *args, **kwargs: None,
+                    _add_command_modifiers=lambda *args: None,
+                )
+                AMDSMIParser._add_list_parser(fake, subparsers, lambda args: None)
+                self.assertEqual("list" in subparsers.choices, gpu or cpu)
+                if gpu or cpu:
+                    self.assertNotIn(
+                        "--cpu and --core are not supported",
+                        subparsers.choices["list"].format_help(),
+                    )
+
+    def _build_parser(self, cpu_core_supported, cpu_supported=None):
         """Invoke the real ``_add_device_arguments`` on a minimal fake ``self``
         and return the ``argparse.ArgumentParser`` it populated.
         """
@@ -140,7 +162,12 @@ class TestCliDeviceArgsCpuCoreHidden(unittest.TestCase):
         fake._add_device_arguments = types.MethodType(AMDSMIParser._add_device_arguments, fake)
 
         parser = argparse.ArgumentParser(prog="amd-smi list")
-        fake._add_device_arguments(parser, required=False, cpu_core_supported=cpu_core_supported)
+        fake._add_device_arguments(
+            parser,
+            required=False,
+            cpu_core_supported=cpu_core_supported,
+            cpu_supported=cpu_supported,
+        )
         return parser
 
     @staticmethod
@@ -176,6 +203,20 @@ class TestCliDeviceArgsCpuCoreHidden(unittest.TestCase):
         rendered = parser.format_help()
         self.assertIn("--cpu", rendered)
         self.assertIn("--core", rendered)
+
+    def test_cpu_shown_core_hidden_for_list(self):
+        # list services --cpu (advertised) but still rejects --core (suppressed).
+        parser = self._build_parser(cpu_core_supported=False, cpu_supported=True)
+
+        self.assertNotEqual(self._help_for(parser, "--cpu"), argparse.SUPPRESS)
+        self.assertEqual(self._help_for(parser, "--core"), argparse.SUPPRESS)
+
+        rendered = parser.format_help()
+        self.assertIn("--cpu", rendered)
+        self.assertNotIn("--core", rendered)
+
+        # --core still parses so the runtime guard (not argparse) rejects it.
+        self.assertEqual(parser.parse_args(["--core", "0"]).core, ["0"])
 
     def test_gpu_always_visible(self):
         for supported in (False, True):
