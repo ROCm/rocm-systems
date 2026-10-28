@@ -8745,6 +8745,112 @@ amd_dbgapi_get_architecture (uint32_t elf_amdgpu_machine,
   TRACE_END (make_ref (param_out (architecture_id)));
 }
 
+namespace
+{
+
+/* Architecture compatibility mapping table.  Maps agent architectures to
+   compatible code object architectures.  An agent can execute a code object
+   if the pair {agent_machine, code_object_machine} exists in this table.
+   This table implements the compatibility rules defined in the LLVM AMDGPU
+   documentation at
+   https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table to
+   ensure consistent compatibility rules between runtime code object loading
+   and debugger validation.  */
+struct arch_compat_entry_t
+{
+  elf_amdgpu_machine_t agent_machine;
+  elf_amdgpu_machine_t code_object_machine;
+
+  bool operator== (const arch_compat_entry_t &other) const
+  {
+    return agent_machine == other.agent_machine
+           && code_object_machine == other.code_object_machine;
+  }
+};
+
+static const std::vector<arch_compat_entry_t> arch_compat_table = {
+  /* gfx9 family can run gfx9-generic code objects.  */
+  { EF_AMDGPU_MACH_AMDGCN_GFX900, EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX902, EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX904, EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX906, EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC },
+
+  /* gfx9.4 family can run gfx9-4-generic code objects.  */
+  { EF_AMDGPU_MACH_AMDGCN_GFX942, EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX950, EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC },
+
+  /* gfx10.1 family can run gfx10-1-generic code objects.  */
+  { EF_AMDGPU_MACH_AMDGCN_GFX1010, EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX1011, EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX1012, EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC },
+
+  /* gfx10.3 family can run gfx10-3-generic code objects.  */
+  { EF_AMDGPU_MACH_AMDGCN_GFX1030, EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX1031, EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX1032, EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC },
+
+  /* gfx11 family can run gfx11-generic code objects.  */
+  { EF_AMDGPU_MACH_AMDGCN_GFX1100, EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX1101, EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX1102, EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX1103, EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX1150, EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX1151, EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX1152, EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX1153, EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC },
+
+  /* gfx11.7 family can run gfx11-7-generic code objects.  */
+  { EF_AMDGPU_MACH_AMDGCN_GFX1170, EF_AMDGPU_MACH_AMDGCN_GFX11_7_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX1171, EF_AMDGPU_MACH_AMDGCN_GFX11_7_GENERIC },
+  { EF_AMDGPU_MACH_AMDGCN_GFX1172, EF_AMDGPU_MACH_AMDGCN_GFX11_7_GENERIC }
+};
+
+} /* namespace  */
+
+amd_dbgapi_status_t AMD_DBGAPI
+amd_dbgapi_architecture_is_compatible (
+    amd_dbgapi_architecture_id_t code_object_architecture_id,
+    amd_dbgapi_architecture_id_t agent_architecture_id,
+    amd_dbgapi_architecture_compatibility_state_t *compatibility_state)
+{
+  TRACE_BEGIN (param_in (code_object_architecture_id),
+               param_in (agent_architecture_id),
+               param_in (compatibility_state));
+  TRY
+  {
+    if (!detail::is_initialized)
+      THROW (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+
+    if (compatibility_state == nullptr)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
+
+    const architecture_t *code_object_arch
+      = architecture_t::find (code_object_architecture_id);
+    const architecture_t *agent_arch
+      = architecture_t::find (agent_architecture_id);
+
+    if (code_object_arch == nullptr || agent_arch == nullptr)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARCHITECTURE_ID);
+
+    /* Check if the agent can execute the code object by searching for the
+       pair {agent_machine, code_object_machine} in the compatibility table.
+       Also check for exact architecture match.  */
+    *compatibility_state
+      = (agent_arch->elf_amdgpu_machine ()
+             == code_object_arch->elf_amdgpu_machine ()
+         || std::find (arch_compat_table.begin (), arch_compat_table.end (),
+                       arch_compat_entry_t{ agent_arch->elf_amdgpu_machine (),
+                                            code_object_arch->elf_amdgpu_machine () })
+              != arch_compat_table.end ())
+          ? AMD_DBGAPI_ARCHITECTURE_COMPATIBLE
+          : AMD_DBGAPI_ARCHITECTURE_INCOMPATIBLE;
+  }
+  CATCH (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_ARCHITECTURE_ID,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
+  TRACE_END (make_ref (param_out (compatibility_state)));
+}
+
 amd_dbgapi_status_t AMD_DBGAPI
 amd_dbgapi_architecture_get_info (amd_dbgapi_architecture_id_t architecture_id,
                                   amd_dbgapi_architecture_info_t query,
