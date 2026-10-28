@@ -220,7 +220,7 @@ try:
     query_supported_schema_versions = libpyrocpd.query_supported_schema_versions
 
 except ImportError:
-    from typing import Iterator, Any, Mapping, Sequence, Type
+    from typing import Any, Iterator, List, Mapping, Optional, Sequence, Type, Union
     import enum
 
     def supported():
@@ -431,7 +431,7 @@ except ImportError:
             self.guid = None
 
     class RocpdNamespace:
-        def __init__(self, data: dict, allowed_data: dict | None = None):
+        def __init__(self, data: dict, allowed_data: Optional[dict] = None):
             """Initialize the RocpdNamespace with data and optional allowed_data filter."""
             if not isinstance(data, dict):
                 raise TypeError("Expected a dict")
@@ -494,9 +494,9 @@ except ImportError:
     def _query_as_objects(
         conn,
         query: str,
-        params: Sequence[Any] | Mapping[str, Any] | None = None,
+        params: Optional[Union[Sequence[Any], Mapping[str, Any]]] = None,
         factory: Type[RocpdNamespace] = RocpdNamespace,
-        allowed_data: dict | None = None,
+        allowed_data: Optional[dict] = None,
     ) -> Iterator[RocpdNamespace]:
         """
         Execute `query` and yield one `factory(dict)` per row without altering `conn.row_factory`.
@@ -511,10 +511,10 @@ except ImportError:
     def _fetch_all_objects(
         conn,
         query: str,
-        params: Sequence[Any] | Mapping[str, Any] | None = None,
+        params: Optional[Union[Sequence[Any], Mapping[str, Any]]] = None,
         factory: Type[RocpdNamespace] = RocpdNamespace,
-        allowed_data: dict | None = None,
-    ) -> list[RocpdNamespace]:
+        allowed_data: Optional[dict] = None,
+    ) -> List[RocpdNamespace]:
         """Return a list instead of a generator."""
         return list(
             _query_as_objects(
