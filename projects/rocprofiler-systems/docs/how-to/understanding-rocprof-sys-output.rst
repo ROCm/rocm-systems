@@ -442,9 +442,10 @@ trace cache. The ``N`` field in ``|N>>>`` numbers the threads in the order of th
 IDs. Each thread created by the application starts its own tree with a ``start_thread`` row,
 and GPU kernels and memory copies are nested under the API call that launched them. With
 ``ROCPROFSYS_COLLAPSE_THREADS=ON`` all threads share one tree and the labels have no ``N``.
-The MPI rank is part of the file name, not of the label. ``ROCPROFSYS_TIMING_UNITS`` sets
-the unit of the values with the name of its ``std::chrono`` literal: ``ns``, ``us``,
-``ms``, ``s`` (the default), ``min`` or ``h``.
+The MPI rank is part of the file name, not of the label. ``ROCPROFSYS_TIMING_UNITS`` takes
+the same names as for the other Timemory components, and the report prints the unit with
+the name of its ``std::chrono`` literal: ``ns``, ``us``, ``ms``, ``cs``, ``ds``, ``s`` (the
+default), ``min`` or ``h``.
 
 For the other Timemory components, the ``N`` field is the thread ID. If MPI support is enabled,
 this becomes ``|M|N>>>`` where ``M`` is the rank.
