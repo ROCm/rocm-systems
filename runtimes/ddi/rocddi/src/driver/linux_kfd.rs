@@ -28,7 +28,7 @@ use crate::device::gpu::kernel_queue::{
 };
 use crate::device::gpu::profiling::{
     ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet, PcSamplingIntervalUnit,
-    PcSamplingMethod, PcSamplingRequest,
+    PcSamplingMethod, PcSamplingRequest, SpmDestinationFailure, SpmDestinationReport,
 };
 use crate::device::gpu::queue::{QueuePriority, QueueRequest, QueueScratch, QueueTransport};
 use crate::driver::{
