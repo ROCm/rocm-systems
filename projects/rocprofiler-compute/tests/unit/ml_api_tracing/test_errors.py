@@ -198,7 +198,7 @@ def test_error_constructors_preserve_attributes_messages_and_classification(
     assert isinstance(error, FATAL_ML_API_TRACE_ERRORS) is fatal
 
 
-def test_fatal_error_classes_keep_analysis_policy_order():
+def test_fatal_error_tuple_preserves_existing_class_sequence():
     assert FATAL_ML_API_TRACE_ERRORS == (
         KernelSequenceLengthMismatchError,
         MarkerNotNestedError,

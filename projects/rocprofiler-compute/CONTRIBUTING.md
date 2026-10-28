@@ -329,6 +329,12 @@ non-stdlib packages are imported.
 - `rocprof_compute`, `utils`, `ml_api_tracing`, `vendored.*`, `roofline`, `config`, `argparser`
 - The complete allowlist is in `ProfileModeImportGuard` in [`tests/conftest.py`](tests/conftest.py).
 
+`ml_api_tracing` has profiling-safe helpers and analysis-only modules. Profile
+code must use only its stdlib-only tier; modules that depend on pandas belong
+to the analysis tier. Keep the package initializer free of submodule imports.
+The [package docstring](src/ml_api_tracing/__init__.py) lists the modules in
+each tier.
+
 **ROCm system libraries** (bundled with ROCm, not pip packages):
 - `amdsmi` - AMD System Management Interface
 - `hip` - HIP runtime Python bindings

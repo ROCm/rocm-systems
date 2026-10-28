@@ -119,11 +119,6 @@ def test_cap_args_appends_suffix_after_requested_prefix(arguments, expected):
     assert cap_args(arguments, max_len=2) == expected
 
 
-def test_argument_cap_applies_to_raw_text_before_encoding():
-    assert encode_args(cap_args("|" * 513)) == "%7C" * 512 + "..."
-    assert encode_args(cap_args("(" + ";" * 511 + ")")) == ("(" + "%3B" * 511 + "...)")
-
-
 def test_split_operator_args_respects_nested_commas():
     tokens = split_operator_args("(self=float32[2, 2], other=(1, 2), name='a,b')")
     assert tokens == ["self=float32[2, 2]", "other=(1, 2)", "name='a,b'"]

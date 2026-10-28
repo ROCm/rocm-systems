@@ -1,6 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+"""Shared test hooks and the profile-mode import guard.
+
+Keep module-level imports stdlib-only: isolated import checks load
+ProfileModeImportGuard from this file with site-packages disabled via -S.
+"""
+
 import builtins
 import os
 import random
