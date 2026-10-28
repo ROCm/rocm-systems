@@ -685,8 +685,12 @@ def test_att_no_intercept_target_kernel(att_no_intercept_out_dir_path):
         f"Traced kernels: {traced_kernel_names}"
     )
 
-    # The trace is cut per kernel: each stats file covers one code object and labels only
-    # the kernel it was cut for.
+    # Fixture-specific expectation for this app's kernel schedule: the trace is cut at the
+    # next dispatch on the traced me/pipe, so a stats file covers exactly one code object
+    # and labels only the traced kernel. This holds when no other kernel's tokens interleave
+    # on the same shader engine inside the cut range (true for this fixture's layout); the
+    # quick scan does not filter tokens per wavefront, so tokens of kernels that run on the
+    # same engine between the two cuts are not excluded in general.
     for stats_file in sorted(out_dir.glob("stats_*.csv")):
         with open(stats_file, newline="") as f:
             rows = [row for row in csv.reader(f) if row and len(row) >= 3][1:]

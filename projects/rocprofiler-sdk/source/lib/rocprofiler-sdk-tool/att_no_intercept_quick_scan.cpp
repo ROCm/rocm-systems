@@ -67,12 +67,23 @@ wait_for_prior_chunks(agent_state_t& state, uint64_t chunk_index)
     }
 }
 
+struct dispatch_offset_t
+{
+    uint8_t  me_id       = 0;
+    uint8_t  pipe_id     = 0;
+    uint64_t byte_offset = 0;
+};
+
 struct scan_context_t
 {
     agent_state_t*                    state               = nullptr;
     const std::unordered_set<size_t>* kernel_filter_range = nullptr;
     trace_range_t                     trace               = {};
     std::vector<trace_range_t>*       completed           = {};
+
+    // Dispatches in token order, used to bound a continuation from the previous chunk
+    // at the next dispatch on its me/pipe.
+    std::vector<dispatch_offset_t> dispatch_offsets = {};
 
     uint64_t chunk_index          = 0;
     uint64_t first_valid_offset   = 0;
@@ -135,6 +146,10 @@ handle_dispatch(scan_context_t&                                    context,
 
     auto& state = *context.state;
 
+    // Record each dispatch so a continuation from the previous chunk can be bounded
+    // at the next dispatch on its me/pipe.
+    context.dispatch_offsets.push_back({dispatch.me_id, dispatch.pipe_id, dispatch.byte_offset});
+
     // Latch first valid dispatch, taking consecutive kernels into consideration
     if(--context.remaining_dispatches == 0) context.first_flush_count = 2;
 
@@ -151,6 +166,16 @@ handle_dispatch(scan_context_t&                                    context,
         if(is_targeted_iteration(*iteration_count, *context.kernel_filter_range))
         {
             auto& trace = context.trace;
+            if(trace.active && trace.remaining_dispatches == 0 && dispatch.me_id == trace.me_id &&
+               dispatch.pipe_id == trace.pipe_id)
+            {
+                // The previous range is complete; this dispatch begins a new one.
+                ROCP_INFO << "End cut trace at dispatch byte: " << dispatch.byte_offset;
+                trace.offset_end = dispatch.byte_offset;
+                context.completed->emplace_back(trace);
+                trace = {};
+            }
+
             if(!trace.active)
             {
                 trace              = trace_range_t{};
@@ -173,8 +198,8 @@ handle_dispatch(scan_context_t&                                    context,
     }
     else if(trace.active && dispatch.me_id == trace.me_id && dispatch.pipe_id == trace.pipe_id)
     {
-        // The SQ orders tokens per me/pipe and runs one dispatch at a time per me/pipe, so
-        // the next dispatch on this me/pipe is the end of the current trace range.
+        // Tokens are ordered per me/pipe, so the next dispatch on this me/pipe is
+        // the end of the current trace range.
         ROCP_INFO << "End cut trace at dispatch byte: " << dispatch.byte_offset;
         trace.offset_end = dispatch.byte_offset;
         context.completed->emplace_back(trace);
@@ -370,37 +395,47 @@ send_overlapping_requests(scan_context_t&             context,
     auto  chunk_index = context.chunk_index;
     auto& state       = *context.state;
 
-    // Signal next chunk to continue from an active trace
-    if(context.trace.active && !is_end)
-    {
-        state.pending_requests++;
-        {
-            auto lock = std::unique_lock{state.request_mutex};
-            state.chunk_requested.insert(chunk_index);
-        }
-        ROCP_INFO << "Requesting post-chunk: " << chunk_index;
-    }
-
     wait_for_prior_chunks(state, chunk_index);
 
-    state.chunk_completed.fetch_add(1);
-
-    if(state.pending_requests == 0 || chunk_index == 0) return 0;
-
     uint64_t offset    = 0;
+    bool     resolved  = false;
     bool     requested = false;
     {
         auto lock = std::unique_lock{state.request_mutex};
-        if(state.chunk_requested.find(chunk_index - 1) != state.chunk_requested.end())
+        if(chunk_index > 0 && state.chunk_requested.erase(chunk_index - 1) > 0)
         {
             requested = true;
-            state.chunk_requested.erase(chunk_index - 1);
+
+            // A trace left active by the previous chunk ends at the next dispatch on
+            // its me/pipe; bound the appended bytes there so tokens of the following
+            // kernel are not appended to the previous capture.
+            if(state.continuation_valid)
+            {
+                uint64_t consumed = state.continuation_remaining;
+                for(auto const& record : context.dispatch_offsets)
+                {
+                    if(record.me_id != state.continuation_me_id ||
+                       record.pipe_id != state.continuation_pipe_id)
+                        continue;
+                    if(consumed-- > 0) continue;
+                    offset   = record.byte_offset;
+                    resolved = true;
+                    break;
+                }
+                state.continuation_valid = false;
+            }
+        }
+        else
+        {
+            state.continuation_valid = false;
         }
     }
+
     if(requested)
     {
         state.pending_requests--;
-        offset = context.first_valid_offset != 0u ? context.first_valid_offset : scan_size;
+        if(!resolved)
+            offset = context.first_valid_offset != 0u ? context.first_valid_offset : scan_size;
         for(auto& range : ranges)
             if(range.offset_begin < offset) offset = std::max(offset, range.offset_end);
 
@@ -410,11 +445,33 @@ send_overlapping_requests(scan_context_t&             context,
 
         ROCP_INFO << "Request send: " << chunk_index << " with size " << ret_data.size();
 
-        auto lock                         = std::unique_lock{state.data_mutex};
-        state.chunk_data[chunk_index - 1] = std::move(ret_data);
+        {
+            auto lock                         = std::unique_lock{state.data_mutex};
+            state.chunk_data[chunk_index - 1] = std::move(ret_data);
+        }
+        state.data_cv.notify_all();
     }
-    state.data_cv.notify_all();
-    return offset;
+
+    // Signal next chunk to continue from an active trace. Published after the consume
+    // above so this chunk's own publish cannot overwrite the continuation before it is
+    // read, and before marking this chunk complete so the next chunk (which waits on
+    // chunk_completed) is guaranteed to observe it.
+    if(context.trace.active && !is_end)
+    {
+        state.pending_requests++;
+        {
+            auto lock = std::unique_lock{state.request_mutex};
+            state.chunk_requested.insert(chunk_index);
+            state.continuation_me_id     = context.trace.me_id;
+            state.continuation_pipe_id   = context.trace.pipe_id;
+            state.continuation_remaining = context.trace.remaining_dispatches;
+            state.continuation_valid     = true;
+        }
+        ROCP_INFO << "Requesting post-chunk: " << chunk_index;
+    }
+
+    state.chunk_completed.fetch_add(1);
+    return requested ? offset : 0;
 }
 
 std::vector<uint8_t>

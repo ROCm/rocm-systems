@@ -111,6 +111,14 @@ struct agent_state_t
     std::atomic<uint64_t> chunk_completed{0};
     std::atomic<uint64_t> pending_requests{0};
 
+    // Published by a chunk that ended with an active trace and consumed by the next
+    // chunk to bound its overlap at the next dispatch on the traced me/pipe. Guarded
+    // by request_mutex.
+    uint8_t  continuation_me_id     = 0;
+    uint8_t  continuation_pipe_id   = 0;
+    uint64_t continuation_remaining = 0;
+    bool     continuation_valid     = false;
+
     std::mutex                                         request_mutex{};
     std::unordered_set<uint64_t>                       chunk_requested{};
     std::mutex                                         data_mutex{};
