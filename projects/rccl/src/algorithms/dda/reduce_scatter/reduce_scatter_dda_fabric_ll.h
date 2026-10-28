@@ -127,9 +127,9 @@ __launch_bounds__(512)
   }
 
   // Phase 2: seed with my self-chunk, poll my slots for the others, reduce.
-  // The first read of each peer group is issued before any flag is tested, so
-  // those remote reads stay in flight together. A line whose flags already
-  // match is kept; every stale line of the batch is read again in one pass.
+  // Each pass issues every read of a peer group before any flag is tested, so
+  // those remote reads stay in flight together. The group is read again until
+  // every line is fresh.
   const uint32_t* inSelf = in + (size_t)selfRank * chunkWords;
   LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
   for (size_t pk = gtid; pk < nPk; pk += stride) {
@@ -138,78 +138,28 @@ __launch_bounds__(512)
     for (int base = 1; base < nRanks; base += kDdaLLRsRecvBatch) {
       uint32_t d0[kDdaLLRsRecvBatch], f0[kDdaLLRsRecvBatch];
       uint32_t d1[kDdaLLRsRecvBatch], f1[kDdaLLRsRecvBatch];
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-      v4u got[kDdaLLRsRecvBatch];
-#pragma unroll
-      for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
-        const int r = base + i;
-        if (r < nRanks) {
-          const int peer = (selfRank + r) % nRanks;
-          const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
-          got[i] = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
-        }
-      }
-      // Keep every peer load above this point so the flag tests cannot sink
-      // the later loads back between them.
-      asm volatile("" ::: "memory");
-#pragma unroll
-      for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
-        const int r = base + i;
-        if (r < nRanks) {
-          union { v4u v; uint32_t w[4]; } u;
-          u.v = got[i];
-          d0[i] = u.w[0];
-          f0[i] = u.w[1];
-          d1[i] = u.w[2];
-          f1[i] = u.w[3];
-        }
-      }
-#else
-#pragma unroll
-      for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
-        const int r = base + i;
-        if (r < nRanks) {
-          const int peer = (selfRank + r) % nRanks;
-          const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
-          ddaLLLoadLineB128(src, d0[i], f0[i], d1[i], f1[i]);
-        }
-      }
-#endif
-      // Re-read the batch until every line is fresh; each pass is one abort spin tick.
+      // Read the batch until every line is fresh; the first pass is the first read, each pass one abort spin tick.
       int spins = 0;
       while (true) {
-        uint32_t stale = 0;
-#pragma unroll
-        for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
-          if (base + i < nRanks && (f0[i] != flag || f1[i] != flag)) {
-            stale |= 1u << i;
-          }
-        }
-        if (stale == 0) {
-          break;
-        }
-        if (params.abortSpinTick(spins)) {
-          ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
-          return;
-        }
+        // Each pass reads every line, sharing one wait; a fresh line cannot change before this call ends.
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-        // Branch-free re-read of every line shares one wait; a fresh line cannot change before this call ends.
         asm volatile("" ::: "memory");
-        v4u again[kDdaLLRsRecvBatch];
+        v4u got[kDdaLLRsRecvBatch];
 #pragma unroll
         for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
           if (base + i < nRanks) {
             const int peer = (selfRank + base + i) % nRanks;
             const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
-            again[i] = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+            got[i] = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
           }
         }
+        // Keep every load above this point so the flag tests cannot sink one between them.
         asm volatile("" ::: "memory");
 #pragma unroll
         for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
           if (base + i < nRanks) {
             union { v4u v; uint32_t w[4]; } u;
-            u.v = again[i];
+            u.v = got[i];
             d0[i] = u.w[0];
             f0[i] = u.w[1];
             d1[i] = u.w[2];
@@ -219,13 +169,29 @@ __launch_bounds__(512)
 #else
 #pragma unroll
         for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
-          if ((stale >> i) & 1u) {
+          if (base + i < nRanks) {
             const int peer = (selfRank + base + i) % nRanks;
             const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
             ddaLLLoadLineB128(src, d0[i], f0[i], d1[i], f1[i]);
           }
         }
+        // Keep every load above this point so none sinks past the flag tests or out of the loop.
+        asm volatile("" ::: "memory");
 #endif
+        bool fresh = true;
+#pragma unroll
+        for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
+          if (base + i < nRanks && (f0[i] != flag || f1[i] != flag)) {
+            fresh = false;
+          }
+        }
+        if (fresh) {
+          break;
+        }
+        if (params.abortSpinTick(spins)) {
+          ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
+          return;
+        }
       }
 #pragma unroll
       for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
