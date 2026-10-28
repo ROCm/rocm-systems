@@ -47,7 +47,7 @@ class SmiNicSubsystemUALoE : public SmiNicSubsystem {
   static constexpr uint16_t VENDOR_ID = 0x1022;
   static constexpr uint16_t DEVICE_ID = 0x1747;
 
-  bool is_driver_loaded(const std::string& bdf, DriverType driver_type) const override;
+  bool driver_loaded(const std::string& bdf, DriverType driver_type) const override;
 
   std::string driver_sysfs_root_;
   std::vector<std::unique_ptr<SmiNic>> nics_;

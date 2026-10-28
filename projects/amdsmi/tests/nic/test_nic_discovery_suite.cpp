@@ -101,7 +101,7 @@ static void make_fake_pci_device(const fs::path& root, const std::string& bdf,
 
 // Builds the real Pensando shape: upstream bridge -> intermediate 0x1001 bridge
 // -> ionic port, with sys/bus/pci/devices/<bdf> symlinked into sys/devices the
-// way the kernel does it. is_downstream_port() proves ancestry off the resolved
+// way the kernel does it. downstream_port() proves ancestry off the resolved
 // path, so the nesting has to be genuine for the port to attach.
 static std::vector<std::string> g_log_lines;
 static void capture_log(const std::string& msg) { g_log_lines.push_back(msg); }
@@ -181,7 +181,7 @@ static void write_fake_vpd(const fs::path& dir, const std::string& product, cons
 }
 
 // A stand-in plugin reporting AMD, the vendor Pensando already reports. It
-// answers is_driver_loaded affirmatively only for the BDF it discovered, so a
+// answers driver_loaded affirmatively only for the BDF it discovered, so a
 // lookup that reaches the wrong plugin is observable as a false.
 class StubAmdSubsystem : public SmiNicSubsystem {
  public:
@@ -199,7 +199,7 @@ class StubAmdSubsystem : public SmiNicSubsystem {
   const std::vector<std::unique_ptr<SmiNic>>& get_nics() const override { return nics_; }
 
  private:
-  bool is_driver_loaded(const std::string& bdf, DriverType) const override { return bdf == bdf_; }
+  bool driver_loaded(const std::string& bdf, DriverType) const override { return bdf == bdf_; }
 
   std::string bdf_;
   std::vector<std::unique_ptr<SmiNic>> nics_;
@@ -306,13 +306,12 @@ int main() {
   SmiNicSubsystem& sub = pensando;
 
   // Main role must resolve against the ionic dir we populated.
-  check("pensando Main driver detected", sub.is_driver_loaded(bdf, DriverType::Main));
+  check("pensando Main driver detected", sub.driver_loaded(bdf, DriverType::Main));
   // A different BDF must not match.
   check("pensando Main driver absent for other bdf",
-        !sub.is_driver_loaded("0000:c1:00.1", DriverType::Main));
+        !sub.driver_loaded("0000:c1:00.1", DriverType::Main));
   // Rdma role hits a different (unpopulated) path -> proves the roles diverge.
-  check("pensando Rdma driver absent (dir not present)",
-        !sub.is_driver_loaded(bdf, DriverType::Rdma));
+  check("pensando Rdma driver absent (dir not present)", !sub.driver_loaded(bdf, DriverType::Rdma));
 
   // The BDF-less overload only asks whether the vendor's driver directory exists.
   check("pensando Main driver present without a bdf", sub.is_driver_present(DriverType::Main));
@@ -349,9 +348,9 @@ int main() {
   }
   check("aux dir lists the dangling entry before the valid one", is_good_listed_second);
   check("pensando Rdma driver found past a dangling entry",
-        sub.is_driver_loaded(aux_bdf, DriverType::Rdma));
+        sub.driver_loaded(aux_bdf, DriverType::Rdma));
 
-  // ---- Broadcom is_driver_loaded (mirrors the Pensando role->path checks) ----
+  // ---- Broadcom driver_loaded (mirrors the Pensando role->path checks) ----
   const std::string bnxt_bdf = "0000:e1:00.0";
   fs::path bnxt_dir = root / "sys/bus/pci/drivers/bnxt_en";
   fs::create_directories(bnxt_dir);
@@ -359,11 +358,11 @@ int main() {
 
   SmiNicSubsystemBroadcom broadcom(root.string());
   SmiNicSubsystem& bsub = broadcom;
-  check("broadcom Main driver detected", bsub.is_driver_loaded(bnxt_bdf, DriverType::Main));
+  check("broadcom Main driver detected", bsub.driver_loaded(bnxt_bdf, DriverType::Main));
   check("broadcom Main driver absent for other bdf",
-        !bsub.is_driver_loaded("0000:e1:00.1", DriverType::Main));
+        !bsub.driver_loaded("0000:e1:00.1", DriverType::Main));
   check("broadcom Rdma driver absent (dir not present)",
-        !bsub.is_driver_loaded(bnxt_bdf, DriverType::Rdma));
+        !bsub.driver_loaded(bnxt_bdf, DriverType::Rdma));
 
   // ---- Broadcom discover(): netdev-walk bound to bnxt_en, vendor 0x14e4 ----
   fs::path disc_root = make_tmp_root();
@@ -397,7 +396,7 @@ int main() {
   fs::create_directories(bng_dir);
   fs::create_symlink("../../../devices/pci/" + bng_bdf, bng_dir / bng_bdf);
   check("broadcom Main driver detected for a bng_en function",
-        bsub.is_driver_loaded(bng_bdf, DriverType::Main));
+        bsub.driver_loaded(bng_bdf, DriverType::Main));
   check("broadcom Main driver present without a bdf", bsub.is_driver_present(DriverType::Main));
   check("broadcom Rdma driver absent without a bdf (no aux dir)",
         !bsub.is_driver_present(DriverType::Rdma));
@@ -435,9 +434,9 @@ int main() {
   SmiNicSubsystemBroadcom broadcom_rdma(rdma_root.string());
   SmiNicSubsystem& rdma_sub = broadcom_rdma;
   check("broadcom Rdma driver detected (aux symlink through bdf)",
-        rdma_sub.is_driver_loaded(rdma_bdf, DriverType::Rdma));
+        rdma_sub.driver_loaded(rdma_bdf, DriverType::Rdma));
   check("broadcom Rdma driver absent for other bdf",
-        !rdma_sub.is_driver_loaded("0000:e1:00.1", DriverType::Rdma));
+        !rdma_sub.driver_loaded("0000:e1:00.1", DriverType::Rdma));
 
   // ---- Broadcom bng_en Rdma: aux driver bng_re.rdma binds bng_en.rdma.<n> ----
   fs::path bng_rdma_root = make_tmp_root();
@@ -451,9 +450,9 @@ int main() {
   SmiNicSubsystemBroadcom broadcom_bng_rdma(bng_rdma_root.string());
   SmiNicSubsystem& bng_rdma_sub = broadcom_bng_rdma;
   check("broadcom Rdma driver detected for bng_re.rdma",
-        bng_rdma_sub.is_driver_loaded(bng_rdma_bdf, DriverType::Rdma));
+        bng_rdma_sub.driver_loaded(bng_rdma_bdf, DriverType::Rdma));
   check("bng_re.rdma absent for other bdf",
-        !bng_rdma_sub.is_driver_loaded("0000:01:00.1", DriverType::Rdma));
+        !bng_rdma_sub.driver_loaded("0000:01:00.1", DriverType::Rdma));
   check("broadcom Rdma driver present without a bdf for bng_re.rdma",
         bng_rdma_sub.is_driver_present(DriverType::Rdma));
   check("broadcom Main driver absent without a bdf when only the aux driver exists",
@@ -751,7 +750,7 @@ int main() {
     check("fabric endpoint survives ainic_only", filter_sys.get_nics().size() == 1);
   }
 
-  // ---- UALoE is_driver_loaded maps Main to the ifoe PCI driver dir ----
+  // ---- UALoE driver_loaded maps Main to the ifoe PCI driver dir ----
   // There is no RDMA auxiliary driver for a fabric endpoint, so that role must
   // stay negative rather than aliasing onto the Main path.
   {
@@ -764,11 +763,11 @@ int main() {
 
     SmiNicSubsystemUALoE ualoe_drv(ualoe_drv_root.string());
     SmiNicSubsystem& ualoe_sub = ualoe_drv;
-    check("ualoe Main driver detected", ualoe_sub.is_driver_loaded(ualoe_bdf, DriverType::Main));
+    check("ualoe Main driver detected", ualoe_sub.driver_loaded(ualoe_bdf, DriverType::Main));
     check("ualoe Main driver absent for other bdf",
-          !ualoe_sub.is_driver_loaded("0001:01:00.0", DriverType::Main));
+          !ualoe_sub.driver_loaded("0001:01:00.0", DriverType::Main));
     check("ualoe Rdma driver absent (no rdma aux driver)",
-          !ualoe_sub.is_driver_loaded(ualoe_bdf, DriverType::Rdma));
+          !ualoe_sub.driver_loaded(ualoe_bdf, DriverType::Rdma));
   }
 
   // ---- hwmon resolves through the port, not the bridge ----
@@ -1003,7 +1002,7 @@ int main() {
     check("only the stub plugin contributes a NIC to the empty tree",
           own_sys.get_nics().size() == 1);
     check("driver query resolves through the plugin that owns the NIC",
-          own_sys.is_driver_loaded(stub_bdf, DriverType::Main));
+          own_sys.driver_loaded(stub_bdf, DriverType::Main));
   }
 
   // ---- BDF order weights the domain above the bus ----

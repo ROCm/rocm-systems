@@ -63,7 +63,7 @@ static SmiSysfsReader::SysfsStatus read_all_impl(const std::string& filepath,
     return SmiSysfsReader::SysfsStatus::FileNotFound;
   }
 
-  if (!SmiSysfsReader::is_readable(filepath)) {
+  if (!SmiSysfsReader::exists(filepath)) {
     return SmiSysfsReader::SysfsStatus::IOError;
   }
 
@@ -111,7 +111,7 @@ static SmiSysfsReader::SysfsStatus read_line_impl(const std::string& filepath,
     return SmiSysfsReader::SysfsStatus::FileNotFound;
   }
 
-  if (!SmiSysfsReader::is_readable(filepath)) {
+  if (!SmiSysfsReader::exists(filepath)) {
     return SmiSysfsReader::SysfsStatus::IOError;
   }
 
@@ -174,7 +174,7 @@ SmiSysfsReader::SysfsStatus SmiSysfsReader::readLine(const std::string& filepath
   return status;
 }
 
-bool SmiSysfsReader::is_readable(const std::string& filepath) {
+bool SmiSysfsReader::exists(const std::string& filepath) {
   std::ifstream file(filepath);
   return file.good();
 }

@@ -165,18 +165,18 @@ enumerate one vendor's hardware.
      virtual void discover(const std::string& pci_path, const std::string& net_path,
                            std::shared_ptr<amd::smi::nic::transport::NicTransport> transport) = 0;
      virtual NicVendor vendor() const = 0;  // descriptive only
-     virtual bool is_driver_loaded(const std::string& bdf, DriverType driver_type) const = 0;
+     virtual bool driver_loaded(const std::string& bdf, DriverType driver_type) const = 0;
      virtual const std::vector<std::unique_ptr<SmiNic>>& get_nics() const = 0;
 
     protected:
      std::pair<uint16_t, uint16_t> read_pci_ids(const std::string& sysfs_bus_path) const;
-     bool was_bdf_resolved(const std::string& symlink, std::string& bdf) const;
+     bool resolve_bdf(const std::string& symlink, std::string& bdf) const;
      bool is_driver_bound_to_bdf(const std::string& driver_dir, const std::string& bdf,
                                  bool is_canonical_match) const;
    };
    ```
 
-   The protected helpers ``read_pci_ids()``, ``was_bdf_resolved()`` and
+   The protected helpers ``read_pci_ids()``, ``resolve_bdf()`` and
    ``is_driver_bound_to_bdf()`` are shared by every plugin so vendors don't
    reimplement sysfs PCI parsing or driver-binding checks. ``DriverType`` names a
    role (``Main`` for the netdev/PCI driver, ``Rdma`` for the RDMA auxiliary
@@ -900,24 +900,24 @@ discovery through the vendor plugins:
 - ``discover_nics()`` iterates the registered plugins, calling
   ``discover("/sys/bus/pci/devices", "/sys/class/net", transport)`` on each and collecting
   their ``get_nics()`` into one BDF-sorted list.
-- ``is_driver_loaded()`` finds the plugin that owns the NIC (by object identity over
+- ``driver_loaded()`` finds the plugin that owns the NIC (by object identity over
   each plugin's ``get_nics()``, not by ``vendor()``) and asks it. The BDF passed in is a
   port BDF.
 
 The Pensando plugin (``src/vendors/pensando/``) is the reference implementation.
 It matches its PCI IDs during ``discover()``, walks ``/sys/class/net`` in
 ``discover_ports()`` to associate ports with the device, and implements
-``is_driver_loaded()`` for the ``ionic`` and ``ionic_rdma`` drivers.
+``driver_loaded()`` for the ``ionic`` and ``ionic_rdma`` drivers.
 
 ### Device discovery details (Pensando reference)
 
 | Step | Mechanism |
 |------|-----------|
 | Bridge match | Scan ``/sys/bus/pci/devices``; ``read_pci_ids()`` must equal ``VENDOR_ID`` and one of ``BRIDGE_DEVICE_IDS``. |
-| Port match | Walk ``/sys/class/net``; ``was_bdf_resolved()`` on each ``<iface>/device``; ``read_pci_ids()`` must equal ``VENDOR_ID``/``PORT_ID``. |
+| Port match | Walk ``/sys/class/net``; ``resolve_bdf()`` on each ``<iface>/device``; ``read_pci_ids()`` must equal ``VENDOR_ID``/``PORT_ID``. |
 | Downstream check | Confirm the resolved path of the port function contains ``/<bridge_bdf>/``. |
 | Management function | Find ``VENDOR_ID``/``MGMT_ID`` (``pds_core``) under the same bridge; it enables the ``FWCTL`` capability. |
-| Driver presence | ``is_driver_loaded(bdf, Main)`` checks ``/sys/bus/pci/drivers/ionic``; ``is_driver_loaded(bdf, Rdma)`` checks that a link under ``/sys/bus/auxiliary/drivers/ionic_rdma.rdma`` resolves through the port BDF. |
+| Driver presence | ``driver_loaded(bdf, Main)`` checks ``/sys/bus/pci/drivers/ionic``; ``driver_loaded(bdf, Rdma)`` checks that a link under ``/sys/bus/auxiliary/drivers/ionic_rdma.rdma`` resolves through the port BDF. |
 
 The vendor's kernel driver must be loaded for its ports to appear under
 ``/sys/class/net``; without it, no ports are discovered for that device.
@@ -1249,7 +1249,7 @@ projects/amdsmi/
 │       └── src/
 │           ├── smi_nic.cpp                   # SmiNic / SmiNicPort (owns the Auto transport)
 │           ├── smi_nic_system.cpp            # SmiNicSystem::discover_nics()
-│           ├── smi_nic_subsystem.cpp         # read_pci_ids() / was_bdf_resolved() / is_driver_bound_to_bdf() helpers
+│           ├── smi_nic_subsystem.cpp         # read_pci_ids() / resolve_bdf() / is_driver_bound_to_bdf() helpers
 │           ├── smi_nic_interface.cpp         # C interface implementation
 │           ├── smi_nic_transport_ioctl.cpp   # ioctl transport backend + create_transport() factory
 │           ├── smi_nic_transport_netlink.cpp # netlink transport backend and AutoBackend (built when HAVE_LIBNL3)
@@ -1521,9 +1521,9 @@ reported under ``AMDSMI_PROCESSOR_TYPE_AMD_NIC`` and queried through the existin
    ``src/nic/ai-nic/amdsmi_unified/src/vendors/<name>/``:
    - Add ``<name>_subsystem.{h,cpp}`` with a class that derives from
      ``SmiNicSubsystem`` (``inc/smi_nic_subsystem.h``) and implements ``discover()``,
-     ``vendor()``, ``is_driver_loaded()``, and ``get_nics()``.
+     ``vendor()``, ``driver_loaded()``, and ``get_nics()``.
    - Match your hardware by PCI vendor/device ID in ``discover()`` using the
-     inherited ``read_pci_ids()`` helper; use ``was_bdf_resolved()`` to map a network
+     inherited ``read_pci_ids()`` helper; use ``resolve_bdf()`` to map a network
      interface back to its PCI BDF. Follow ``vendors/pensando/`` as the model.
    - Build your NIC and port objects on ``SmiNic``/``SmiNicPort`` so you inherit the
      shared ethtool transport (FEC, pause, link settings, driver info,

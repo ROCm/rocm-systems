@@ -393,7 +393,7 @@ class FakeSubsystem : public SmiNicSubsystem {
   void discover(const std::string&, const std::string&,
                 std::shared_ptr<tp::NicTransport>) override {}
   NicVendor vendor() const override { return NicVendor::AMD; }
-  bool is_driver_loaded(const std::string& bdf, DriverType) const override {
+  bool driver_loaded(const std::string& bdf, DriverType) const override {
     return (m_unbound.count(bdf) == 0);
   }
   const std::vector<std::unique_ptr<SmiNic>>& get_nics() const override { return nics_; }
