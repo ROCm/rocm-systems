@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from archive_text import sanitize
+
 _IS_WIN = sys.platform == "win32"
 
 # ---------------------------------------------------------------------------
@@ -273,6 +275,16 @@ def _parse_rocm_smi(text: str) -> tuple[int, list[str], list[str]]:
     return len(gpu_ids), archs, names
 
 
+def _parse_amd_smi_static(text: str) -> tuple[int, list[str], list[str]]:
+    """Parse `amd-smi static --asic`: a `GPU: N` heading per device."""
+    count = len(re.findall(r"^GPU: \d+\s*$", text, re.M))
+    # amd-smi prints N/A when the ASIC query fails; "" keeps the index and skips the arch check.
+    archs = ["" if a == "N/A" else a.lower()
+             for a in re.findall(r"^\s*TARGET_GRAPHICS_VERSION: (\S+)", text, re.M)]
+    names = [n.strip() for n in re.findall(r"^\s*MARKET_NAME: (.+)$", text, re.M)]
+    return count, archs, names
+
+
 # ---------------------------------------------------------------------------
 # Windows: amd-smi / hipDeviceGetProperties based GPU enumeration
 # ---------------------------------------------------------------------------
@@ -310,26 +322,22 @@ if rc != 0:
 n = count.value
 print(f"gpu_count={n}")
 
-# hipDeviceGetAttribute for arch
-hipDeviceAttributeGcnArch = 57   # HIP attribute enum value
-for i in range(n):
-    val = ctypes.c_int(0)
-    rc = lib.hipDeviceGetAttribute(ctypes.byref(val), hipDeviceAttributeGcnArch, i)
-    if rc == 0:
-        print(f"gpu_{i}_gcn={val.value}")
-
-# hipGetDeviceProperties for name
-class hipDevicePropFields(ctypes.Structure):
+# The exported hipGetDeviceProperties fills hipDeviceProp_tR0000
+# (hip_deprecated.h), whose gcnArchName starts at offset 396 on x86_64.
+class hipDeviceProp_tR0000(ctypes.Structure):
     _fields_ = [
         ("name", ctypes.c_char * 256),
-        ("_pad", ctypes.c_uint8 * (4096 - 256)),
+        ("_pad", ctypes.c_uint8 * (396 - 256)),
+        ("gcnArchName", ctypes.c_char * 256),
+        ("_rest", ctypes.c_uint8 * 4096),
     ]
 
 for i in range(n):
-    props = hipDevicePropFields()
+    props = hipDeviceProp_tR0000()
     rc = lib.hipGetDeviceProperties(ctypes.byref(props), i)
     if rc == 0:
         print(f"gpu_{i}_name={props.name.decode(errors='replace')}")
+        print(f"gpu_{i}_arch={props.gcnArchName.decode(errors='replace')}")
 """
 
 _PROBE_HIP_VERSION_WIN_PY = r"""
@@ -356,9 +364,6 @@ for c in dll_candidates:
 if lib is None:
     sys.exit(1)
 
-major = ctypes.c_int(0)
-minor = ctypes.c_int(0)
-patch = ctypes.c_int(0)
 lib.hipRuntimeGetVersion.restype = ctypes.c_int
 lib.hipRuntimeGetVersion.argtypes = [ctypes.POINTER(ctypes.c_int)]
 flat = ctypes.c_int(0)
@@ -367,8 +372,8 @@ if rc == 0:
     v = flat.value
     maj = v // 10000000
     min_ = (v // 100000) % 100
-    pat = (v // 100) % 1000
-    print(f"{maj}.{min_}.{pat:05d}")
+    pat = v % 100000
+    print(f"{maj}.{min_}.{pat}")
     sys.exit(0)
 sys.exit(1)
 """
@@ -383,11 +388,9 @@ def _parse_win_gpu_probe(text: str) -> tuple[int, list[str], list[str]]:
         m = re.match(r"gpu_count=(\d+)", line)
         if m:
             count = int(m.group(1))
-        m = re.match(r"gpu_(\d+)_gcn=(\d+)", line)
+        m = re.match(r"gpu_(\d+)_arch=(.+)", line)
         if m:
-            gcn = int(m.group(2))
-            # Map integer GCN arch to string (e.g. 0x942 → gfx942)
-            archs.append(f"gfx{gcn:x}")
+            archs.append(_normalize_arch(m.group(2)))
         m = re.match(r"gpu_(\d+)_name=(.+)", line)
         if m:
             names.append(m.group(2).strip())
@@ -400,15 +403,17 @@ def _parse_win_gpu_probe(text: str) -> tuple[int, list[str], list[str]]:
 
 def probe_host_replay_env_linux() -> ReplayEnvironment:
     env = ReplayEnvironment(source="host:linux")
-    smi = shutil.which("rocm-smi") or shutil.which("amd-smi")
-    if smi:
-        proc = _run([smi, "--showid", "--showproductname"], timeout=30)
-        out = proc.stdout + proc.stderr
-        count, archs, names = _parse_rocm_smi(out)
-        if count > 0:
-            env.visible_gpus = count
-            env.gpu_archs = archs
-            env.gpu_names = names
+    count, archs, names = 0, [], []
+    if rocm_smi := shutil.which("rocm-smi"):
+        proc = _run([rocm_smi, "--showid", "--showproductname"], timeout=30)
+        count, archs, names = _parse_rocm_smi(proc.stdout + proc.stderr)
+    elif amd_smi := shutil.which("amd-smi"):
+        proc = _run([amd_smi, "static", "--asic"], timeout=30)
+        count, archs, names = _parse_amd_smi_static(proc.stdout)
+    if count > 0:
+        env.visible_gpus = count
+        env.gpu_archs = archs
+        env.gpu_names = names
 
     hip_config = shutil.which("hipconfig")
     if hip_config:
@@ -710,8 +715,8 @@ def evaluate_compat(
         expected = capture_archs[min(gpu, len(capture_archs) - 1)]
         if expected and replay_arch and expected != replay_arch:
             msg = (
-                f"GPU architecture mismatch: capture GPU {gpu} is {expected}, "
-                f"replay GPU {gpu} looks like {replay_arch}"
+                f"GPU architecture mismatch: capture GPU {gpu} is {sanitize(expected)}, "
+                f"replay GPU {gpu} looks like {sanitize(replay_arch)}"
             )
             (report.blocks if strict_arch else report.warnings).append(msg)
 
@@ -719,7 +724,8 @@ def evaluate_compat(
         if capture.hip_runtime_version != replay.hip_runtime_version:
             msg = (
                 "HIP runtime version mismatch: capture "
-                f"{capture.hip_runtime_version} vs replay {replay.hip_runtime_version}"
+                f"{sanitize(capture.hip_runtime_version)} vs replay "
+                f"{sanitize(replay.hip_runtime_version)}"
             )
             (report.blocks if strict_version else report.prompts).append(msg)
 
@@ -727,7 +733,8 @@ def evaluate_compat(
         if capture.comgr_version != replay.comgr_version:
             msg = (
                 "comgr version mismatch: capture "
-                f"{capture.comgr_version} vs replay {replay.comgr_version}"
+                f"{sanitize(capture.comgr_version)} vs replay "
+                f"{sanitize(replay.comgr_version)}"
             )
             (report.blocks if strict_version else report.prompts).append(msg)
 
@@ -740,6 +747,9 @@ def evaluate_compat(
 # ---------------------------------------------------------------------------
 
 def render_report(report: CompatReport) -> str:
+    # The capture side is whatever the archive's author wrote, so every value
+    # printed passes the one sanitizer; the replay side is probed from the host
+    # or an image and gets the same treatment rather than a judgement call.
     lines = ["# HRR replay compatibility"]
     if report.capture:
         c = report.capture
@@ -748,27 +758,27 @@ def render_report(report: CompatReport) -> str:
             "",
             "## Capture metadata",
             f"- schema_version: {c.schema_version or 'n/a'}",
-            f"- hip_runtime_version: {c.hip_runtime_version or 'n/a'}",
-            f"- comgr_version: {c.comgr_version or 'n/a'}",
+            f"- hip_runtime_version: {sanitize(c.hip_runtime_version or 'n/a')}",
+            f"- comgr_version: {sanitize(c.comgr_version or 'n/a')}",
             f"- device_count: {c.device_count if c.device_count is not None else 'n/a'}",
             f"- captured_device_count: "
             f"{c.captured_device_count if c.captured_device_count is not None else 'n/a'}",
-            f"- gcn_arch_name: {arch_names[0] if arch_names else 'n/a'}",
+            f"- gcn_arch_name: {sanitize(arch_names[0]) if arch_names else 'n/a'}",
         ]
         if len(arch_names) > 1:
-            lines.append(f"- gcn_arch_names: {', '.join(arch_names)}")
+            lines.append(f"- gcn_arch_names: {', '.join(sanitize(a) for a in arch_names)}")
     if report.replay:
         r = report.replay
         lines += [
             "",
             "## Replay environment",
-            f"- source: {r.source}",
+            f"- source: {sanitize(r.source)}",
             f"- visible_gpus: {r.visible_gpus if r.visible_gpus is not None else 'unknown'}",
-            f"- hip_runtime_version: {r.hip_runtime_version or 'n/a'}",
-            f"- comgr_version: {r.comgr_version or 'n/a'}",
+            f"- hip_runtime_version: {sanitize(r.hip_runtime_version or 'n/a')}",
+            f"- comgr_version: {sanitize(r.comgr_version or 'n/a')}",
         ]
         if r.gpu_archs:
-            lines.append(f"- gpu_archs: {', '.join(r.gpu_archs)}")
+            lines.append(f"- gpu_archs: {', '.join(sanitize(a or 'n/a') for a in r.gpu_archs)}")
     if report.blocks:
         lines += ["", "## Blocking issues"]
         lines += [f"- {b}" for b in report.blocks]

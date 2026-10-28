@@ -286,7 +286,7 @@ static ncclResult_t ginDevCommSetupWithBackend(struct ncclComm* comm, struct ncc
     // TODO: check if a shared devComm in the list could match our requirements.
   }
 
-  nContextsTotal = ROUNDUP(nContextsTotal, backend->ginCommCount);
+  nContextsTotal = ncclGinContextCount(nContextsTotal, backend->ginCommCount);
   devComm->ginContextCount = nContextsTotal;
   int nContextsPerComm = nContextsTotal / backend->ginCommCount;
   INFO(NCCL_INIT,
@@ -473,6 +473,10 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
     }
 
     if (ncclSuccess == ginDevCommSetupWithBackend(comm, reqs, devComm, deviceCodeVersion, candidate)) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      INFO(NCCL_INIT, "GIN: comm %p rank %d commId 0x%llx using backend %s type %d", comm, comm->rank,
+           (unsigned long long)comm->commHash, candidate->ncclGin->name, candidate->ginType);
+#endif
       return ncclSuccess;
     }
 

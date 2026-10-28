@@ -3194,6 +3194,95 @@ TEST_CASE("Unit_HRR_GraphExplicit_Direct", "[.][hrr][direct]") {
 }
 
 // ---------------------------------------------------------------------------
+// Workload — a capture that fails at hipStreamEndCapture, then direct work on
+// the same stream. A fork onto a second stream that never joins back makes
+// EndCapture return hipErrorStreamCaptureUnjoined, which still ends the
+// capture on both streams. The H2D restore, kernel and D2H that follow run
+// directly; a replay that still thinks the stream is capturing records them
+// into a graph nobody launches and the D2H never sees the kernel's output.
+// ---------------------------------------------------------------------------
+// The direct H2D restore, kernel and D2H that run on s after its capture
+// failed at hipStreamEndCapture.
+static void failed_endcapture_direct_work(hipStream_t s, float* d_in, float* d_out) {
+  std::vector<float> h_in(N), h_out(N, 0.0f);
+  for (int i = 0; i < N; ++i) h_in[i] = static_cast<float>(i + 1);
+  HRR_HIP_CHECK(hipMemcpyAsync(d_in, h_in.data(), SZ, hipMemcpyHostToDevice, s));
+  hipLaunchKernelGGL(hrr_vectorScale, dim3((N + 255) / 256), dim3(256), 0, s,
+                     d_in, d_out, 2.0f, N);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipMemcpyAsync(h_out.data(), d_out, SZ, hipMemcpyDeviceToHost, s));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h_out[i] == 2.0f * static_cast<float>(i + 1));
+}
+
+TEST_CASE("Unit_HRR_FailedEndCapture_Direct", "[.][hrr][direct]") {
+  // Warm-up first HIP call so the hipMalloc below is captured (see MiscAPIs).
+  HRR_HIP_CHECK(hipSetDevice(0));
+  float* d_in = nullptr;
+  float* d_out = nullptr;
+  float* d_side = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d_in, SZ));
+  HRR_HIP_CHECK(hipMalloc(&d_out, SZ));
+  HRR_HIP_CHECK(hipMalloc(&d_side, SZ));
+  hipStream_t s, side;
+  HRR_HIP_CHECK(hipStreamCreate(&s));
+  HRR_HIP_CHECK(hipStreamCreate(&side));
+  hipEvent_t fork;
+  HRR_HIP_CHECK(hipEventCreate(&fork));
+
+  hipGraph_t graph = nullptr;
+  HRR_HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeGlobal));
+  HRR_HIP_CHECK(hipEventRecord(fork, s));
+  HRR_HIP_CHECK(hipStreamWaitEvent(side, fork, 0));
+  HRR_HIP_CHECK(hipMemsetAsync(d_side, 0, SZ, side));
+  REQUIRE(hipStreamEndCapture(s, &graph) == hipErrorStreamCaptureUnjoined);
+  (void)hipGetLastError();
+  REQUIRE(graph == nullptr);
+
+  failed_endcapture_direct_work(s, d_in, d_out);
+
+  HRR_HIP_CHECK(hipEventDestroy(fork));
+  HRR_HIP_CHECK(hipStreamDestroy(side));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+  HRR_HIP_CHECK(hipFree(d_side));
+  HRR_HIP_CHECK(hipFree(d_out));
+  HRR_HIP_CHECK(hipFree(d_in));
+}
+
+// ---------------------------------------------------------------------------
+// Workload — the same direct work after a capture that a prohibited call
+// invalidated. hipMalloc during a global-mode capture fails and invalidates
+// it; the failed call is not recorded, so replay's own capture stays valid,
+// its EndCapture succeeds, and replay must discard that graph and go on
+// running the later work directly.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_FailedEndCaptureInvalidated_Direct", "[.][hrr][direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  float* d_in = nullptr;
+  float* d_out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d_in, SZ));
+  HRR_HIP_CHECK(hipMalloc(&d_out, SZ));
+  hipStream_t s;
+  HRR_HIP_CHECK(hipStreamCreate(&s));
+
+  hipGraph_t graph = nullptr;
+  void* prohibited = nullptr;
+  HRR_HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeGlobal));
+  HRR_HIP_CHECK(hipMemsetAsync(d_out, 0, SZ, s));
+  REQUIRE(hipMalloc(&prohibited, SZ) == hipErrorStreamCaptureUnsupported);
+  (void)hipGetLastError();
+  REQUIRE(hipStreamEndCapture(s, &graph) == hipErrorStreamCaptureInvalidated);
+  (void)hipGetLastError();
+  REQUIRE(graph == nullptr);
+
+  failed_endcapture_direct_work(s, d_in, d_out);
+
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+  HRR_HIP_CHECK(hipFree(d_out));
+  HRR_HIP_CHECK(hipFree(d_in));
+}
+
+// ---------------------------------------------------------------------------
 // Workload Y — hipHostRegister/Unregister + hipLaunchKernel
 // ---------------------------------------------------------------------------
 __global__ void hrr_fill(int* out, int val, int n) {
@@ -4727,4 +4816,79 @@ TEST_CASE("Unit_HRR_FailedShimCalls_Direct", "[.][hrr-direct]") {
 
   HRR_HIP_CHECK(hipStreamDestroy(stream));
   HRR_HIP_CHECK(hipMemPoolDestroy(pool));
+}
+
+// ---------------------------------------------------------------------------
+// hipExtMemcpyBatchAsync with offset pointers, per-entry sizes, a zeroed
+// sizesDst array and two attribute ranges; D2H of both destinations. A second
+// batch issues an asymmetric swap (sizesDst != sizes) where swap is supported;
+// D2H covers both operands.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_ExtMemcpyBatch_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  constexpr size_t kBytes = 4096;
+  unsigned char *src = nullptr, *dst0 = nullptr, *dst1 = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&src, kBytes));
+  HRR_HIP_CHECK(hipMalloc(&dst0, kBytes));
+  HRR_HIP_CHECK(hipMalloc(&dst1, kBytes));
+  std::vector<unsigned char> h(kBytes);
+  for (size_t i = 0; i < kBytes; ++i) h[i] = static_cast<unsigned char>(i * 7 + 1);
+  HRR_HIP_CHECK(hipMemcpy(src, h.data(), kBytes, hipMemcpyHostToDevice));
+  HRR_HIP_CHECK(hipMemset(dst0, 0, kBytes));
+  HRR_HIP_CHECK(hipMemset(dst1, 0, kBytes));
+  hipStream_t stream = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {dst0, dst1 + 128};
+  void* srcs[] = {src + 64, src};
+  size_t sizes[] = {1024, 2048};
+  size_t sizes_dst[] = {0, 0};
+  hipExtMemcpyAttributes attrs[2] = {};
+  attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attrs[1].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attrs[1].flags = hipMemcpyFlagExtPreferLinear;
+  size_t attr_idxs[] = {0, 1};
+  HRR_HIP_CHECK(hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizes_dst, nullptr, nullptr, 2,
+                                       attrs, attr_idxs, 2, stream));
+  HRR_HIP_CHECK(hipStreamSynchronize(stream));
+
+  std::vector<unsigned char> out0(kBytes), out1(kBytes);
+  HRR_HIP_CHECK(hipMemcpy(out0.data(), dst0, kBytes, hipMemcpyDeviceToHost));
+  HRR_HIP_CHECK(hipMemcpy(out1.data(), dst1, kBytes, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < kBytes; ++i) {
+    REQUIRE(out0[i] == (i < 1024 ? h[i + 64] : 0));
+    REQUIRE(out1[i] == (i >= 128 && i < 128 + 2048 ? h[i - 128] : 0));
+  }
+
+  // Asymmetric swap: dst0[0, 2048) <- src[0, 2048), src[0, 1024) <- dst0[0, 1024).
+  HRR_HIP_CHECK(hipMemcpy(dst0, out0.data(), kBytes, hipMemcpyHostToDevice));
+  void* swap_dsts[] = {dst0};
+  void* swap_srcs[] = {src};
+  size_t swap_sizes[] = {2048};
+  size_t swap_sizes_dst[] = {1024};
+  hipExtMemcpyAttributes swap_attr{};
+  swap_attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  swap_attr.flags = hipMemcpyFlagExtOpSwap;
+  size_t swap_attr_idx[] = {0};
+  const hipError_t swap_err = hipExtMemcpyBatchAsync(swap_dsts, swap_srcs, swap_sizes,
+                                                     swap_sizes_dst, nullptr, nullptr, 1,
+                                                     &swap_attr, swap_attr_idx, 1, stream);
+  if (swap_err == hipErrorNotSupported) {
+    (void)hipGetLastError();
+  } else {
+    HRR_HIP_CHECK(swap_err);
+    HRR_HIP_CHECK(hipStreamSynchronize(stream));
+    std::vector<unsigned char> swapped_dst(kBytes), swapped_src(kBytes);
+    HRR_HIP_CHECK(hipMemcpy(swapped_dst.data(), dst0, kBytes, hipMemcpyDeviceToHost));
+    HRR_HIP_CHECK(hipMemcpy(swapped_src.data(), src, kBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kBytes; ++i) {
+      REQUIRE(swapped_dst[i] == (i < 2048 ? h[i] : out0[i]));
+      REQUIRE(swapped_src[i] == (i < 1024 ? out0[i] : h[i]));
+    }
+  }
+
+  HRR_HIP_CHECK(hipStreamDestroy(stream));
+  HRR_HIP_CHECK(hipFree(src));
+  HRR_HIP_CHECK(hipFree(dst0));
+  HRR_HIP_CHECK(hipFree(dst1));
 }
