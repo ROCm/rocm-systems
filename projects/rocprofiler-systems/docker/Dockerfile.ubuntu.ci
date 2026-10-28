@@ -31,6 +31,14 @@ RUN apt-get update && \
         libucx-dev ucx-utils && \
     apt-get autoclean
 
+# Ubuntu 26.04 only: newer libstdc++ headers
+RUN OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
+    OS_ID=$(grep '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
+    if [ "${OS_ID}" == "ubuntu" ] && [ "${OS_VERSION}" == "26.04" ]; then \
+        apt-get install -y libstdc++-16-dev && \
+        apt-get autoclean; \
+    fi
+
 RUN OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
     OS_ID=$(grep '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
     if [ "${OS_ID}" == "ubuntu" ] && [ "${OS_VERSION}" == "22.04" ]; then \
