@@ -5159,6 +5159,7 @@ TEST(CommandProcessorTest, RuntimeScratchStrideSurvivesLargeThenSmallPrivateSegm
   constexpr uint64_t kAltScratch = 0x01000000;
   constexpr uint32_t kProcessId = 7, kQueueId = 19, kXcc = 2;
   constexpr uint32_t kWaveSizeFieldShift = 12;
+  constexpr uint32_t kLargePrivateBytes = 1024;
   for (const auto &arch : {"cdna1", "cdna2", "cdna3", "cdna4", "cdna5", "rdna1", "rdna2", "rdna3",
                            "rdna3_5", "rdna4"}) {
     for (bool alternate : {false, true}) {
@@ -5179,7 +5180,8 @@ TEST(CommandProcessorTest, RuntimeScratchStrideSurvivesLargeThenSmallPrivateSegm
       const uint32_t code[] = {build_s_endpgm(f.cu()->arch())};
       const uint64_t large = f.write_kernel(0x1000, code, sizeof(code));
       const uint64_t small = f.write_kernel(0x2000, code, sizeof(code));
-      f.mem()->write32(large + offsetof(kernel_descriptor_t, private_segment_fixed_size), 1024);
+      f.mem()->write32(large + offsetof(kernel_descriptor_t, private_segment_fixed_size),
+                       kLargePrivateBytes);
       f.mem()->write32(small + offsetof(kernel_descriptor_t, private_segment_fixed_size), 16);
       const uint64_t main_wave_stride = 64 * 1024;
       const uint64_t alternate_wave_stride = 128 * 1024;
@@ -5209,8 +5211,11 @@ TEST(CommandProcessorTest, RuntimeScratchStrideSurvivesLargeThenSmallPrivateSegm
                   << kWaveSizeFieldShift);
         f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_compute_tmpring_size),
                          alternate_tmpring);
+        // Capacity follows the larger kernel's private_segment_fixed_size.
+        // Keep it distinct from the tmpring stride so addressing through the
+        // lane-byte field makes the test fail.
         f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_scratch_wave64_lane_byte_size),
-                         alternate_wave_stride / 64);
+                         kLargePrivateBytes * width / 64);
         f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_x),
                          2 * width);
         f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_y), 1);
@@ -5475,6 +5480,9 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
                            kAlternateScratch);
     fixture.mem()->write64(kQueueDescriptor + offsetof(amd_queue_v2_t, alt_scratch_max_use_index),
                            1);
+    // In the 48-byte case, admission needs 1536 bytes/wave but the stride is 2560.
+    // Keeping these distinct makes the test fail if addresses use the lane-byte
+    // field instead of the tmpring stride.
     fixture.mem()->write32(kQueueDescriptor +
                                offsetof(amd_queue_v2_t, alt_scratch_wave64_lane_byte_size),
                            kPrivateBytes * 32 / 64);
