@@ -52,13 +52,13 @@ public:
 
   void DescribeTo(std::ostream *stream) const {
     *stream << "contains the daemon disconnect or HIP queue-error diagnostic matching its exit "
-               "without sanitizer or assertion diagnostics";
+               "without "
+            << rocjitsu::test::kUnexpectedFailureDiagnostics;
   }
 
   void DescribeNegationTo(std::ostream *stream) const {
-    *stream
-        << "contains sanitizer or assertion diagnostics or does not contain the daemon diagnostic "
-           "matching its exit";
+    *stream << "contains " << rocjitsu::test::kUnexpectedFailureDiagnostics
+            << " or does not contain the daemon diagnostic matching its exit";
   }
 
 private:

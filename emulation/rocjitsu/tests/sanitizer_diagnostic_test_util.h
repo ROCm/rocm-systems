@@ -37,12 +37,24 @@ inline bool has_assertion_diagnostic(std::string_view output) {
   return false;
 }
 
-inline bool has_unexpected_failure_diagnostic(std::string_view output) {
-  return has_sanitizer_diagnostic(output) || has_assertion_diagnostic(output);
+// libstdc++ and libc++ report std::terminate() before aborting.
+inline bool has_terminate_diagnostic(std::string_view output) {
+  return output.find("terminate called") != std::string_view::npos ||
+         output.find("libc++abi: terminating") != std::string_view::npos;
 }
 
-// Sanitizers and assertions can exit with status 1 or SIGABRT, like a fatal GPU failure.
-// Check captured stderr as well as the exit status to keep their reports visible.
+inline bool has_unexpected_failure_diagnostic(std::string_view output) {
+  return has_sanitizer_diagnostic(output) || has_assertion_diagnostic(output) ||
+         has_terminate_diagnostic(output);
+}
+
+// Names every report kind rejected by has_unexpected_failure_diagnostic().
+inline constexpr char kUnexpectedFailureDiagnostics[] =
+    "sanitizer, assertion or termination diagnostics";
+
+// Sanitizers, assertions and std::terminate() can exit with status 1 or SIGABRT, like a
+// fatal GPU failure. Check captured stderr as well as the exit status to keep their
+// reports visible.
 class ExpectedFailureDiagnostic {
 public:
   using is_gtest_matcher = void;
@@ -51,7 +63,7 @@ public:
 
   bool MatchAndExplain(const std::string &output, ::testing::MatchResultListener *listener) const {
     if (has_unexpected_failure_diagnostic(output)) {
-      *listener << "contains a sanitizer or assertion diagnostic";
+      *listener << "contains " << kUnexpectedFailureDiagnostics;
       return false;
     }
     return diagnostic_.MatchAndExplain(output, listener);
@@ -59,11 +71,11 @@ public:
 
   void DescribeTo(std::ostream *stream) const {
     diagnostic_.DescribeTo(stream);
-    *stream << " without sanitizer or assertion diagnostics";
+    *stream << " without " << kUnexpectedFailureDiagnostics;
   }
 
   void DescribeNegationTo(std::ostream *stream) const {
-    *stream << "contains sanitizer or assertion diagnostics or ";
+    *stream << "contains " << kUnexpectedFailureDiagnostics << " or ";
     diagnostic_.DescribeNegationTo(stream);
   }
 
