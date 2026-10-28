@@ -730,13 +730,16 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_instance_t) -> u64 {
         unsafe {
             // Destruction is externally serialized. Keep this owner alive
             // until native shutdown releases every resource it retains.
-            let instance = exclusive(pointer.cast::<Instance>())?;
+            let instance = object(pointer.cast::<Instance>())?;
             if instance.children.load(Ordering::Acquire) != 0 {
                 return Err(BUSY);
             }
             if *instance.host_backing_head.lock().map_err(|_| INTERNAL)? != 0 {
                 return Err(BUSY);
             }
+            // No child can now retain a shared borrow, and the caller
+            // serializes direct use of the instance during destruction.
+            let instance = exclusive(pointer.cast::<Instance>())?;
             instance
                 .event_service
                 .lock()
@@ -1050,7 +1053,7 @@ pub(crate) unsafe extern "C" fn device_info(
 
 pub(crate) unsafe extern "C" fn device_destroy(pointer: *mut amdf_device_t) -> u64 {
     crate::support::boundary(|| unsafe {
-        let device = exclusive(pointer.cast::<Device>())?;
+        let device = object(pointer.cast::<Device>())?;
         if device.queues.load(Ordering::Acquire) != 0 || device.events.load(Ordering::Acquire) != 0
         {
             return Err(BUSY);
