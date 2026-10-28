@@ -88,16 +88,19 @@ inline ImageAddressRegisters gfx12_image_address_registers(const VimageMachineIn
 /// dropped. A null resource drops every lane. The texel layout is the one
 /// addrlib gives a linear surface: rows of PITCH elements, one row per 1D slice
 /// and HEIGHT rows per 2D slice. DMASK picks the shader components after the
-/// descriptor's channel selects, packed into consecutive VGPRs; a store
-/// inverts those selects the way formatted buffer stores do. D16 consumes packed
-/// half registers. DA=0 accesses layer zero without a layer coordinate.
+/// descriptor's channel selects, packed into consecutive VGPRs. Loads and CDNA2
+/// stores compact those selectors into the enabled DMASK slots. RDNA stores
+/// instead scatter the packed inputs back into their shader-component slots,
+/// qualify the descriptor's full selector mapping, and invert it the way
+/// formatted buffer stores do. D16 consumes packed half registers. DA=0 accesses
+/// layer zero without a layer coordinate.
 /// @returns Failure after reporting an unsupported operand (empty DMASK,
 /// UNORM=0 store) or an unimplemented feature (R128, an architecture other than
 /// CDNA2/RDNA3/RDNA3.5/RDNA4, tiling, mips, cube, MSAA, RDNA linear
 /// 1D/2D-array and 3D resources whose decoded descriptors do not provide PITCH,
 /// decoded RDNA PITCH narrower than WIDTH, nonzero base array, incompatible
-/// RDNA DIM, format outside the buffer table, unmodeled store selector mappings,
-/// TFE, or LWE).
+/// RDNA DIM, format outside the buffer table, unqualified RDNA full-selector
+/// store mappings, TFE, or LWE).
 inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
                                          uint32_t resource_reg,
                                          const ImageAddressRegisters &address_registers,
@@ -198,6 +201,8 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
     return fail(InstructionExecutionError::UnimplementedInstruction);
   if (!format.value())
     return util::Result::success();
+  // CDNA2 preserves its legacy compacted-selector acceptance; only RDNA's
+  // full-selector/scatter path requires a qualified inverse mapping.
   if (!gfx9 && !state.is_load &&
       !image_store_selectors_supported(state.decoded_buffer_format, descriptor_selectors))
     return fail(InstructionExecutionError::UnimplementedInstruction);
