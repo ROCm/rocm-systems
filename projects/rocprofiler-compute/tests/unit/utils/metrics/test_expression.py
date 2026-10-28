@@ -12,7 +12,6 @@ from utils.metrics.expression import (
     CodeTransformer,
     InvalidExpressionError,
     build_eval_string,
-    gen_counter_list,
     update_denominator_string,
     update_normal_unit_string,
 )
@@ -51,35 +50,6 @@ class TestExpression:
         )
         result = transformer.visit_Call(supported_call)
         assert result.func.id == "to_min", f"Expected 'to_min', got: {result.func.id}"
-
-    def test_gen_counter_list_with_none_returns_empty(self):
-        """gen_counter_list returns (False, []) when given None."""
-        visited, counters = gen_counter_list(None)
-        assert not visited
-        assert counters == []
-
-    def test_gen_counter_list_with_non_string_returns_empty(self):
-        """gen_counter_list returns (False, []) when given a non-string input."""
-        visited, counters = gen_counter_list(123)
-        assert not visited
-        assert counters == []
-
-    def test_gen_counter_list_extracts_counters_from_aggregation(self):
-        """gen_counter_list extracts every counter referenced in an AVG expression."""
-        visited, counters = gen_counter_list("AVG(SQ_WAVES + TCC_HIT)")
-        assert visited
-        assert "SQ_WAVES" in counters
-        assert "TCC_HIT" in counters
-
-    def test_gen_counter_list_handles_timestamp_expression(self):
-        """gen_counter_list visits timestamp-only expressions successfully."""
-        visited, _ = gen_counter_list("Start_Timestamp + End_Timestamp")
-        assert visited
-
-    def test_gen_counter_list_with_invalid_syntax_returns_unvisited(self):
-        """gen_counter_list returns visited=False when the equation is unparseable."""
-        visited, _ = gen_counter_list("INVALID SYNTAX !!!")
-        assert not visited
 
     def test_update_denominator_string_substitutes_denom_for_per_wave(self):
         """update_denominator_string replaces $denom."""

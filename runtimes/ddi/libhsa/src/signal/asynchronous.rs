@@ -4,10 +4,11 @@
 //! Retained signal callbacks and their serialized dispatcher.
 
 use super::*;
+use crate::api::signal::atomic::hsa_signal_load_scacquire;
 
 /// Work accepted by the single asynchronous callback dispatcher.
 #[derive(Clone, Copy)]
-pub(super) enum AsyncRequest {
+pub(crate) enum AsyncRequest {
     /// Run an application callback without a signal condition.
     Function {
         /// One-shot application function scheduled on the dispatcher.
@@ -69,13 +70,27 @@ impl SignalState {
 
     /// Joins the callback worker after the shared stop request is published.
     pub(crate) fn join_worker(&mut self) {
-        if let Some(dispatcher) = self.async_dispatcher.take() {
-            let _ = dispatcher.worker.join();
+        if let Some(worker) = self.take_worker() {
+            let _ = worker.join();
         }
     }
 
+    /// Detaches the callback worker for joining outside the lifecycle lock.
+    pub(crate) fn take_worker(&mut self) -> Option<thread::JoinHandle<()>> {
+        self.async_dispatcher
+            .take()
+            .map(|dispatcher| dispatcher.worker)
+    }
+
     /// Starts the dispatcher if needed and enqueues a callback request.
-    fn enqueue_async(&mut self, request: AsyncRequest, stop_workers: &Arc<AtomicBool>) -> Status {
+    pub(crate) fn enqueue_async(
+        &mut self,
+        request: AsyncRequest,
+        stop_workers: &Arc<AtomicBool>,
+    ) -> Status {
+        if stop_workers.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         if self.async_dispatcher.is_none() {
             let (sender, receiver) = std::sync::mpsc::channel();
             let stop = stop_workers.clone();
@@ -92,38 +107,6 @@ impl SignalState {
             .as_ref()
             .map_or(ERROR, |dispatcher| dispatcher.send(request))
     }
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_amd_async_function")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-/// Queues a function to run on the asynchronous callback worker.
-pub unsafe extern "C" fn hsa_amd_async_function(
-    callback: AsyncFunction,
-    arg: *mut c_void,
-) -> Status {
-    boundary(|| {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        let Some(callback) = callback else {
-            return INVALID_ARGUMENT;
-        };
-        runtime.signal_state.enqueue_async(
-            AsyncRequest::Function {
-                callback,
-                arg: unsafe { CallbackArg::new(arg) },
-            },
-            &runtime.stop_workers,
-        )
-    })
 }
 
 /// Adds or removes a signal handler from the dispatcher state.
@@ -249,74 +232,4 @@ pub(super) fn run_async_dispatcher(
             }
         }
     }
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_amd_signal_async_handler")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-/// Registers a callback for a signal condition.
-pub unsafe extern "C" fn hsa_amd_signal_async_handler(
-    signal: HsaSignal,
-    condition: u32,
-    compare_value: SignalValue,
-    handler: SignalHandler,
-    arg: *mut c_void,
-) -> Status {
-    boundary(|| {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        let Some(handler) = handler else {
-            return INVALID_ARGUMENT;
-        };
-        if !matches!(
-            condition,
-            SIGNAL_CONDITION_EQ | SIGNAL_CONDITION_NE | SIGNAL_CONDITION_LT | SIGNAL_CONDITION_GTE
-        ) {
-            return INVALID_ARGUMENT;
-        }
-        if !runtime.signal_state.owns_signal(signal) {
-            return INVALID_SIGNAL;
-        }
-        let address = signal.handle as usize;
-        if !runtime
-            .signal_state
-            .interrupt_signals
-            .contains_key(&address)
-            && !runtime
-                .signal_state
-                .owned_ipc_signals
-                .contains_key(&address)
-            && !runtime
-                .signal_state
-                .imported_ipc_signals
-                .contains_key(&address)
-        {
-            return INVALID_SIGNAL;
-        }
-        if let Err(status) = runtime.signal_state.retain_async_signal(signal) {
-            return status;
-        }
-        let status = runtime.signal_state.enqueue_async(
-            AsyncRequest::Signal {
-                signal,
-                condition,
-                compare_value,
-                handler,
-                arg: unsafe { CallbackArg::new(arg) },
-            },
-            &runtime.stop_workers,
-        );
-        if status != SUCCESS {
-            runtime.signal_state.release_async_signal(signal);
-        }
-        status
-    })
 }

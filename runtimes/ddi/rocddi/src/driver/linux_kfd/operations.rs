@@ -511,12 +511,26 @@ impl AllocationOperations for LinuxKfdDriver {
                 "secondary KFD contexts cannot bind host-owned pages",
             ));
         }
+        if let MemoryKind::DeviceLocal {
+            coherent,
+            extended_coherent: true,
+            uncached,
+            ..
+        } = kind
+            && (!coherent || uncached)
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "extended local coherence requires a cached coherent mapping",
+            ));
+        }
         let native_kind = match kind {
             MemoryKind::System => memory::BufferKind::Gtt,
             MemoryKind::OwnedHost { policy } => memory::BufferKind::OwnedUserptr { cache: policy },
             MemoryKind::DeviceLocal {
                 host_visible,
                 coherent,
+                extended_coherent,
                 uncached,
                 contiguous,
             } => {
@@ -540,6 +554,7 @@ impl AllocationOperations for LinuxKfdDriver {
                 memory::BufferKind::Vram {
                     public: host_visible,
                     coherent,
+                    extended_coherent,
                     uncached,
                     contiguous,
                 }
@@ -695,6 +710,12 @@ impl VirtualMemoryOperations for LinuxKfdDriver {
         permissions: DeviceAccess,
     ) -> Result<Owned<KfdVirtualHostMapping>, Error> {
         KfdVirtualHostMapping::create(memory, reservation, address, offset, size, permissions)
+    }
+    fn set_virtual_host_mapping_permissions(
+        mapping: &mut KfdVirtualHostMapping,
+        permissions: DeviceAccess,
+    ) -> Result<(), Error> {
+        mapping.set_permissions(permissions)
     }
     fn free_virtual_host_mapping(mapping: &mut KfdVirtualHostMapping) -> Result<(), Error> {
         mapping.free()
