@@ -61,10 +61,13 @@ struct Scene {
     return handle;
   }
 
-  static ncclRmaSocketProxyMrHandle MakeGdrMappedMr(void* data, size_t size, void* barPtr, uint64_t id = 0) {
+  // `mh` is the GDRCopy handle the copy hooks should receive for this MR.
+  static ncclRmaSocketProxyMrHandle MakeGdrMappedMr(void* data, size_t size, void* barPtr, gdr_mh_t mh,
+                                                    uint64_t id = 0) {
     ncclRmaSocketProxyMrHandle handle = MakeMr(data, size, NCCL_PTR_CUDA, id);
     handle.gdr.mapped = 1;
     handle.gdr.barPtr = barPtr;
+    handle.gdr.mh = mh;
     return handle;
   }
 

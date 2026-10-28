@@ -2108,36 +2108,38 @@ mod tests {
         let (root, drm) = fixture.roots();
         let callbacks = crate::test_support::allocator::State::default();
         // SAFETY: Test state outlives the scoped metadata fault hook.
-        let _scope = unsafe { callbacks.allocator() }.scope();
-        let mut endpoint = None;
-        enumerate(&root, &drm, &mut |e| {
-            endpoint = Some(e);
-            Ok(())
-        })
-        .unwrap();
-        assert!(callbacks.allocations.load(Ordering::Relaxed) >= 1);
-        assert_eq!(
-            callbacks.allocations.load(Ordering::Relaxed),
-            callbacks.frees.load(Ordering::Relaxed)
-        );
-        let session =
-            crate::session::Session::new(crate::session::DriverContextLifetime::Session).unwrap();
-        assert_eq!(
-            session.activate(&endpoint.unwrap()).err().unwrap().kind(),
-            ErrorKind::InvalidArgument
-        );
-        callbacks.fail.store(true, Ordering::Relaxed);
-        let mut visited = false;
-        assert_eq!(
-            enumerate(&root, &drm, &mut |_| {
-                visited = true;
+        unsafe { callbacks.allocator() }.with_scope(|| {
+            let mut endpoint = None;
+            enumerate(&root, &drm, &mut |e| {
+                endpoint = Some(e);
                 Ok(())
             })
-            .unwrap_err()
-            .kind(),
-            ErrorKind::ResourceExhausted
-        );
-        assert!(!visited);
+            .unwrap();
+            assert!(callbacks.allocations.load(Ordering::Relaxed) >= 1);
+            assert_eq!(
+                callbacks.allocations.load(Ordering::Relaxed),
+                callbacks.frees.load(Ordering::Relaxed)
+            );
+            let session =
+                crate::session::Session::new(crate::session::DriverContextLifetime::Session)
+                    .unwrap();
+            assert_eq!(
+                session.activate(&endpoint.unwrap()).err().unwrap().kind(),
+                ErrorKind::InvalidArgument
+            );
+            callbacks.fail.store(true, Ordering::Relaxed);
+            let mut visited = false;
+            assert_eq!(
+                enumerate(&root, &drm, &mut |_| {
+                    visited = true;
+                    Ok(())
+                })
+                .unwrap_err()
+                .kind(),
+                ErrorKind::ResourceExhausted
+            );
+            assert!(!visited);
+        });
     }
 
     #[test]
