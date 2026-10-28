@@ -693,14 +693,33 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
 // ================================================================================================
 void StatCO::ResetManagedVarDevicePtr() {
   std::scoped_lock lock(sclock_);
+  bool released_any = false;
   for (auto& [_, managed_vars] : managedVars_) {
     for (auto& managed_var : managed_vars) {
-      if (auto** slot = static_cast<void**>(managed_var->GetManagedVarPtr())) {
-        *slot = nullptr;
+      // A cleared flag means the pointer is a plain host allocation that was
+      // never managed memory, so the purge cannot have freed it and
+      // FindDeferredManagedVar() still needs it.
+      if (!managed_var->GetAllocFlag()) {
+        continue;
       }
+      auto** slot = static_cast<void**>(managed_var->GetManagedVarPtr());
+      if (slot == nullptr || *slot == nullptr) {
+        continue;
+      }
+      // MemObjMap::Purge() only releases memory whose context owns a single
+      // device, so when more than one device is visible the allocation on
+      // hip::host_context outlives the reset and stays usable. Dropping it here
+      // would leak it and lose its contents.
+      if (amd::MemObjMap::FindMemObj(*slot) != nullptr) {
+        continue;
+      }
+      *slot = nullptr;
       managed_var->SetAllocFlag(false);
-      managed_var->ClearDeviceVars();
+      released_any = true;
     }
+  }
+  if (!released_any) {
+    return;
   }
   // Every device, not just the one being reset: a managed allocation lives on a
   // single-device context, so it is invalid process-wide once that device goes.
