@@ -44,9 +44,9 @@ pub(crate) use create::{create_hardware_queue, create_sdma_queue};
 pub(crate) mod index;
 #[cfg(test)]
 use crate::api::queue::core::*;
-use event::queue_event_worker;
 #[cfg(test)]
-use event::{queue_error_status, update_scratch_owner};
+use event::queue_error_status;
+use event::queue_event_worker;
 
 /// AQL packet size in bytes, checked against the public C header by ABI tests.
 pub(crate) const AQL_PACKET_BYTES: usize = std::mem::size_of::<HsaKernelDispatchPacket>();
