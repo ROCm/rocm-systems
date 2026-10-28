@@ -382,6 +382,23 @@ impl SignalEventService {
         }
     }
 
+    /// Checks whether a session has external driver owners before this
+    /// service releases its internally retained signal page. A Busy result
+    /// leaves the page and event creation state unchanged.
+    ///
+    /// # Errors
+    /// Reports a foreign process, a page from another session, or a live
+    /// external owner of the session or one of its drivers.
+    pub fn preflight_session_destroy(
+        &self,
+        session: &mut crate::session::Session,
+    ) -> Result<(), Error> {
+        self.ensure_process()?;
+        session.preflight_destroy_allowing(
+            self.page.as_ref().and_then(|page| page.allocation.as_ref()),
+        )
+    }
+
     fn ensure_process(&self) -> Result<(), Error> {
         if self.process_id == std::process::id() {
             Ok(())

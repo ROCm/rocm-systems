@@ -11,13 +11,15 @@
 #[cfg(test)]
 use super::test_driver;
 use super::{
-    AddressSpaceInfo, AllocationOperations, Driver, GpuDriver, GpuInstrumentationOperations,
-    GpuKernelQueueOperations, GpuUserQueueOperations, KfdDriver, KfdEventSubscription, linux_kfd,
+    AddressSpaceInfo, AllocationOperations, AllocationState, Driver, GpuDriver,
+    GpuInstrumentationOperations, GpuKernelQueueOperations, GpuUserQueueOperations, KfdDriver,
+    KfdEventSubscription, linux_kfd,
 };
 use crate::device::event::DeviceEvent;
 use crate::device::gpu::profiling::{
     ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet,
 };
+use crate::memory::Allocation;
 use crate::memory::storage::Shared;
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, TopologySnapshot};
@@ -68,11 +70,28 @@ impl DriverInstance {
         }
     }
 
-    pub(crate) fn has_other_owners(&self) -> bool {
-        match self {
-            Self::LinuxKfd(driver) => Shared::strong_count(driver) != 1,
+    /// Checks whether an allocation holds this exact installed driver.
+    pub(crate) fn owns_allocation(&self, allocation: &Allocation) -> bool {
+        match (self, &allocation.inner) {
+            (Self::LinuxKfd(driver), AllocationState::LinuxKfd(allocation)) => {
+                allocation.shares_driver_instance(driver)
+            }
             #[cfg(test)]
-            Self::Test(driver) => Shared::strong_count(driver) != 1,
+            (Self::Test(driver), AllocationState::Test(allocation)) => {
+                allocation.shares_driver_instance(driver)
+            }
+            #[cfg(test)]
+            _ => false,
+        }
+    }
+
+    /// Counts only the driver reference held by a recognized internal page.
+    pub(crate) fn has_other_owners_except(&self, page: Option<&Allocation>) -> bool {
+        let expected = 1 + usize::from(page.is_some_and(|page| self.owns_allocation(page)));
+        match self {
+            Self::LinuxKfd(driver) => Shared::strong_count(driver) != expected,
+            #[cfg(test)]
+            Self::Test(driver) => Shared::strong_count(driver) != expected,
         }
     }
 
