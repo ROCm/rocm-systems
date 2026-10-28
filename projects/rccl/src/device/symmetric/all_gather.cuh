@@ -167,7 +167,7 @@ static __device__ void bcastEnds(ncclSymkArgsHandler const& handler, int tn, int
 
 // Copy `input` into `output` on every rank of `team`, which must be a unit-stride sub-team of the
 // LSA team, or only on LSA slot `dstSlot` when one is given.
-template <typename T, bool EnableTma>
+template <typename T, bool EnableTma, bool Deep = false>
 static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, int nBlocks, bool waitNeeded,
                              ncclLsaBarrierSession<ncclCoopCta>& bar, ncclSymPtr<T> input, ncclSymPtr<T> output,
                              size_t nElts, ncclTeam team, int dstSlot = -1) {
@@ -227,7 +227,7 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
     // of falling to the 4-byte and per-byte paths. One pack per peer lets UnrollPeers batch them all.
     constexpr int UnrollPacks = 1, UnrollPeers = 8;
 #else
-    constexpr int UnrollPacks = ncclSymkUnrollPacks, UnrollPeers = 2;
+    constexpr int UnrollPacks = Deep ? 4 * ncclSymkUnrollPacks : ncclSymkUnrollPacks, UnrollPeers = 2;
 #endif
     constexpr int BytePerPack = ncclSymkBytePerPack;
     constexpr int BytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, UnrollPacks);
@@ -357,8 +357,8 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
     int groupBlock = unit < nRows ? unit / nGroups : nG0Blocks + (unit - nRows) / (nGroups - 1);
     if (group == 0) {
       int bt = flattenIx(lane, WARP_SIZE, groupBlock, nG0Blocks, warp, nBlockWarps);
-      bcast<char, /*EnableTma=*/false>(handler, nG0Blocks * blockDim.x, bt, /*nBlocks=*/1, /*waitNeeded=*/false, bar,
-                                       input, mySlot, nElts, scaleIn);
+      bcast<char, /*EnableTma=*/false, /*Deep=*/true>(handler, nG0Blocks * blockDim.x, bt, /*nBlocks=*/1,
+                                                      /*waitNeeded=*/false, bar, input, mySlot, nElts, scaleIn);
       continue;
     }
 
@@ -376,8 +376,8 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
       cuda::atomic_ref<uint64_t> flag(flags[flagRow + group]);
       for (int i = 0; i < nBlockChunks; i++) {
         size_t lo = (size_t(i) * nGroupBlocks + groupBlock) * chunkBytes;
-        bcast<char, false>(handler, tn, t, 1, false, bar, input + lo, mySlot + lo, min(chunkBytes, nElts - lo), scaleIn,
-                           toSlot);
+        bcast<char, false, /*Deep=*/true>(handler, tn, t, 1, false, bar, input + lo, mySlot + lo,
+                                          min(chunkBytes, nElts - lo), scaleIn, toSlot);
         // half.sync() orders every pusher warp's stores before this system-scope fence
         half.sync();
         if (t == 0) {
@@ -398,8 +398,8 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
         }
         half.sync();
         size_t lo = (size_t(i) * nGroupBlocks + groupBlock) * chunkBytes;
-        bcast<char, false>(handler, tn, t, 1, false, bar, fromSlot + lo, fromSlot + lo, min(chunkBytes, nElts - lo),
-                           scaleIn);
+        bcast<char, false, /*Deep=*/true>(handler, tn, t, 1, false, bar, fromSlot + lo, fromSlot + lo,
+                                          min(chunkBytes, nElts - lo), scaleIn);
       }
     }
     seq += nBlockChunks;
