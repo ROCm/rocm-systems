@@ -1291,27 +1291,22 @@ impl KfdAllocation {
         if size == 0 {
             return Err(error(ErrorKind::InvalidArgument, "allocation size is zero"));
         }
-        let native_size = match kind {
-            BufferKind::Userptr(pages) => {
-                let (_, cover) =
-                    crate::memory::device::registered_host_page_cover(pages.address, size, page)
-                        .ok_or_else(|| {
-                            error(ErrorKind::InvalidArgument, "invalid registered host extent")
-                        })?;
-                cover
-            }
-            _ => {
-                let cover = size
-                    .checked_add(page - 1)
-                    .map(|size| size & !(page - 1))
+        let native_size = if let BufferKind::Userptr(pages) = kind {
+            let (_, cover) =
+                crate::memory::device::registered_host_page_cover(pages.address, size, page)
                     .ok_or_else(|| {
-                        error(
-                            ErrorKind::ResourceExhausted,
-                            "native allocation size overflows",
-                        )
+                        error(ErrorKind::InvalidArgument, "invalid registered host extent")
                     })?;
-                cover
-            }
+            cover
+        } else {
+            size.checked_add(page - 1)
+                .map(|size| size & !(page - 1))
+                .ok_or_else(|| {
+                    error(
+                        ErrorKind::ResourceExhausted,
+                        "native allocation size overflows",
+                    )
+                })?
         };
         if !desc.alignment.is_power_of_two() {
             return Err(error(
@@ -2749,6 +2744,7 @@ pub(super) fn queue_fixture_with_range(
         sdma_next_engine: AtomicU32::new(0),
         scratch: Mutex::new(ScratchPool::new(sysfs::KfdQueueProperties {
             gfx_target: 120_001,
+            target_profile: crate::topology::GpuTargetProfile::Gfx1201,
             xcc_count: 1,
             ..sysfs::KfdQueueProperties::default()
         })),

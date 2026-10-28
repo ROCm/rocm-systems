@@ -15,8 +15,9 @@ use crate::memory::storage::TryPush;
 use crate::memory::{DeviceAccess, HostCacheability};
 use crate::topology::{
     CacheInfo, CacheKind, CpuNodeInfo, Endpoint, EndpointKind, GpuInfo, GpuQueueCapabilities,
-    MemoryBank, MemoryBankKind, MemoryLinkInfo, MemoryLinkType, MemoryLocation, MemoryLocationKind,
-    NativeNodeId, NodeKind, PciInfo, SourceKind, TopologyCache, TopologySnapshot,
+    GpuSdmaDialect, GpuTargetProfile, MemoryBank, MemoryBankKind, MemoryLinkInfo, MemoryLinkType,
+    MemoryLocation, MemoryLocationKind, NativeNodeId, NodeKind, PciInfo, SourceKind, TopologyCache,
+    TopologySnapshot,
 };
 use crate::{Error, ErrorKind};
 use std::fmt::{self, Write as _};
@@ -50,6 +51,8 @@ pub(crate) struct KfdNode {
 pub(crate) struct KfdQueueProperties {
     /// Encoded GFX target reported by KFD.
     pub gfx_target: u32,
+    /// Packet and scratch dialect resolved from the target at discovery.
+    pub target_profile: crate::topology::GpuTargetProfile,
     /// Enabled compute-unit count.
     pub compute_units: u32,
     /// Maximum resident waves per compute unit.
@@ -1044,9 +1047,18 @@ fn read_node(
     // ROCr's SDMA v4 packet path, so its IP version must match that dialect.
     // Commands remain target-specific and caller-owned; a discovered SDMA IP
     // does not change any frontend's advertised transport revision.
-    let gfx9_sdma = matches!(gfx, 90008 | 90010 | 90402 | 90500)
-        && sdma_ip.is_some_and(|(major, _, _)| major == 4);
-    let sdma_qualified = (gfx9_sdma || (100_100..=120_001).contains(&gfx) || gfx == 120_500)
+    let target_profile = GpuTargetProfile::from_kfd_target(gfx);
+    let gfx9_sdma =
+        target_profile == GpuTargetProfile::Gfx9 && sdma_ip.is_some_and(|(major, _, _)| major == 4);
+    let sdma_qualified = (gfx9_sdma
+        || matches!(
+            target_profile,
+            GpuTargetProfile::Gfx10
+                | GpuTargetProfile::Gfx11
+                | GpuTargetProfile::Gfx1200
+                | GpuTargetProfile::Gfx1201
+                | GpuTargetProfile::Gfx1250
+        ))
         && sdma.unwrap_or(0) != 0
         && sdma_queues.unwrap_or(0) != 0;
 
@@ -1066,6 +1078,7 @@ fn read_node(
     let public = if integrated { 0 } else { visible };
     let queues = KfdQueueProperties {
         gfx_target: gfx,
+        target_profile,
         compute_units: simds / per_cu,
         maximum_wave_count_per_compute_unit: waves,
         maximum_scratch_wave_count_per_compute_unit: scratch,
@@ -1137,6 +1150,7 @@ fn read_node(
                 gfx_major: gfx / 10000,
                 gfx_minor: (gfx / 100) % 100,
                 gfx_stepping: gfx % 100,
+                target_profile: queues.target_profile,
                 unique_id,
                 hive_id,
                 asic_family_id: family_id,
@@ -1174,7 +1188,7 @@ fn read_node(
                     // GFX12 shares the AQL system-scope cache protocol.
                     aql_system_cache_control: cfg!(target_arch = "x86_64")
                         && supports_aql
-                        && matches!(gfx, 120_000 | 120_001 | 120_500),
+                        && target_profile.supports_kernel_submission(),
                     pm4: supports_pm4,
                     kernel_pm4: supports_pm4,
                     // PM4 uses the GFX12 ACQUIRE_MEM GCR encoding.
@@ -1182,13 +1196,19 @@ fn read_node(
                     sdma: sdma_qualified,
                     kernel_sdma: cfg!(target_arch = "x86_64")
                         && sdma_qualified
-                        && ((matches!(gfx, 120_000 | 120_001) && sdma_ip == Some((7, 0, 1)))
-                            || (gfx == 120_500 && sdma_ip == Some((7, 1, 0)))),
+                        && matches!(
+                            (target_profile.sdma_dialect(), sdma_ip),
+                            (Some(GpuSdmaDialect::Gfx1200), Some((7, 0, 1)))
+                                | (Some(GpuSdmaDialect::Gfx1250), Some((7, 1, 0)))
+                        ),
                     // USER_GCR requires the matching target-specific SDMA packet format.
                     sdma_system_cache_control: cfg!(target_arch = "x86_64")
                         && sdma_qualified
-                        && ((matches!(gfx, 120_000 | 120_001) && sdma_ip == Some((7, 0, 1)))
-                            || (gfx == 120_500 && sdma_ip == Some((7, 1, 0)))),
+                        && matches!(
+                            (target_profile.sdma_dialect(), sdma_ip),
+                            (Some(GpuSdmaDialect::Gfx1200), Some((7, 0, 1)))
+                                | (Some(GpuSdmaDialect::Gfx1250), Some((7, 1, 0)))
+                        ),
                     sdma_engine_count: if sdma_qualified { sdma.unwrap_or(0) } else { 0 },
                 },
             },
@@ -1197,8 +1217,15 @@ fn read_node(
         host_visible_local_memory_bytes: public,
         host_local_cacheability: (cfg!(target_arch = "x86_64")
             && public != 0
-            && ((100_100..=120_001).contains(&gfx) || gfx == 120_500))
-            .then_some(HostCacheability::WriteCombined),
+            && matches!(
+                target_profile,
+                GpuTargetProfile::Gfx10
+                    | GpuTargetProfile::Gfx11
+                    | GpuTargetProfile::Gfx1200
+                    | GpuTargetProfile::Gfx1201
+                    | GpuTargetProfile::Gfx1250
+            ))
+        .then_some(HostCacheability::WriteCombined),
         allocation_granularity: 4096,
         address_bit_count: bits,
         minimum_address: 65536,

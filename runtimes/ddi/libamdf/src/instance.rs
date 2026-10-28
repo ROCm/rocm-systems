@@ -451,8 +451,7 @@ fn pm4_atomic_capabilities() -> amdf_atomic_capabilities_t {
 }
 
 pub(crate) fn sdma_format_features(
-    gfx_major: u32,
-    gfx_minor: u32,
+    target_profile: topology::GpuTargetProfile,
     supports_gcr: bool,
 ) -> amdf_queue_format_features_t {
     let mut features = if supports_gcr {
@@ -464,10 +463,10 @@ pub(crate) fn sdma_format_features(
     // additionally exposes COPY_LINEAR and FENCE memory-scope fields. These
     // are packet-layout facts, independent of the cache operations qualified
     // for a family.
-    if gfx_major >= 12 {
+    if target_profile.sdma_fence_system() {
         features |= AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM;
     }
-    if gfx_major == 12 && gfx_minor >= 5 {
+    if target_profile.sdma_memory_scope() {
         features |= AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE;
     }
     features
@@ -532,7 +531,7 @@ pub(crate) fn family(
             0
         } else if pm4 {
             AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR
-                | if (gpu.gfx_major == 11 || gpu.gfx_major == 12)
+                | if gpu.target_profile.supports_pm4_dispatch_scratch()
                     && gpu.xcc_count == 1
                     && gpu.shader_engine_count_per_xcc != 0
                     && gpu.maximum_scratch_wave_count_per_compute_unit != 0
@@ -542,11 +541,7 @@ pub(crate) fn family(
                     0
                 }
         } else {
-            sdma_format_features(
-                gpu.gfx_major,
-                gpu.gfx_minor,
-                queues.sdma_system_cache_control,
-            )
+            sdma_format_features(gpu.target_profile, queues.sdma_system_cache_control)
         },
         roles: if aql {
             AMDF_QUEUE_ROLE_COMPUTE
