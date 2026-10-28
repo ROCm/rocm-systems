@@ -249,7 +249,8 @@ def _check_library_version(lib, path):
 
 def _unload(lib):
     """Drop the reference ctypes.CDLL took on a library the version check
-    rejected, so a later RTLD_NOLOAD lookup cannot return it."""
+    rejected, so a later load by SONAME, or one PyTorch's hook redirects,
+    cannot return it."""
     import _ctypes
 
     handle = getattr(lib, "_handle", None)
@@ -267,11 +268,14 @@ def _rocm_sdk_core_dir():
     if getattr(module, "__file__", None):
         return Path(module.__file__).parent
     for entry in sys.path:
-        if not entry:
+        if not entry or not isinstance(entry, str):
             continue
         candidate = Path(entry) / "_rocm_sdk_core"
-        if (candidate / "__init__.py").is_file():
-            return candidate
+        try:
+            if (candidate / "__init__.py").is_file():
+                return candidate
+        except OSError:
+            continue
     return None
 
 
@@ -347,9 +351,11 @@ def _load_library():
                 return lib, str(path)
 
     if _AMDSMI_ROCM_SDK_CORE:
+        if sdk_core is None:
+            errors.append("_rocm_sdk_core not found on sys.path")
         raise OSError(
             "no usable %s from rocm-sdk-core: %s"
-            % (_AMDSMI_LIB_SONAME, "; ".join(errors) or "_rocm_sdk_core not found on sys.path")
+            % (_AMDSMI_LIB_SONAME, "; ".join(errors) or "no file at " + ", ".join(map(str, candidates)))
         )
     try:
         lib = ctypes.CDLL(_AMDSMI_LIB_SONAME, mode=mode)

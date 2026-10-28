@@ -18,6 +18,7 @@
 # and ctypes.CDLL is monkey-patched to a FakeCDLL that simulates the
 # library surface.
 
+import _ctypes
 import ast
 import builtins
 import ctypes
@@ -31,6 +32,7 @@ import sysconfig
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -516,8 +518,44 @@ class WheelLoaderContractTest(unittest.TestCase):
         self.assertEqual(attempted, [(str(sdk_lib), True)])
         self.assertEqual(mod._loaded_lib_path, str(sdk_lib))
 
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_rocm_sdk_core_copy_names_the_missing_library(self):
+        site, pkg, sdk_lib = self._sdk_core_site()
+        sdk_lib.unlink()
+        sys.path.insert(0, str(site))
+        try:
+            with _Patch(STABLE_SYMBOLS):
+                mod = _import_wrapper_from(str(pkg), self._modname)
+        finally:
+            sys.path.remove(str(site))
+        self.assertIsNone(mod._loaded_lib_path)
+        self.assertIn(str(sdk_lib), str(mod._libraries["libamd_smi.so"]._err))
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root ignores permissions")
+    def test_unusable_sys_path_entries_are_skipped(self):
+        # The import system skips non-str and unreadable sys.path entries, so
+        # the _rocm_sdk_core lookup must not fail on them either.
+        site, pkg, sdk_lib = self._sdk_core_site()
+        locked = self._tmp / "locked"
+        (locked / "inner").mkdir(parents=True)
+        locked.chmod(0)
+        entries = [b"/nonexistent", str(locked / "inner"), str(site)]
+        sys.path[:0] = entries
+        try:
+            with _Patch(STABLE_SYMBOLS):
+                mod = _import_wrapper_from(str(pkg), self._modname)
+        finally:
+            del sys.path[: len(entries)]
+            locked.chmod(0o700)
+        self.assertEqual(mod._loaded_lib_path, str(sdk_lib))
+
     def _versioned_cdll(self, versions, attempted):
         class _Versioned(FakeCDLL):
+            @property
+            def _handle(self):
+                return self._path
+
             def __getattr__(self, name):
                 if name != "amdsmi_get_lib_version":
                     return FakeCDLL.__getattr__(self, name)
@@ -542,9 +580,12 @@ class WheelLoaderContractTest(unittest.TestCase):
         site, pkg, sdk_lib = self._sdk_core_site()
         (pkg / "_version.py").write_text('__version__ = "27.1.0+abc"\n')
         attempted = []
-        mod = self._import_with(site, pkg, self._versioned_cdll({str(sdk_lib): (27, 2)}, attempted))
+        cdll = self._versioned_cdll({str(sdk_lib): (27, 2)}, attempted)
+        with mock.patch.object(_ctypes, "dlclose", create=True) as dlclose:
+            mod = self._import_with(site, pkg, cdll)
         self.assertIsNone(mod._loaded_lib_path)
         self.assertIn("27.2", str(mod._libraries["libamd_smi.so"]._err))
+        dlclose.assert_called_once_with(str(sdk_lib))
 
     @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
     def test_older_library_warns(self):
@@ -556,6 +597,19 @@ class WheelLoaderContractTest(unittest.TestCase):
                 site, pkg, self._versioned_cdll({str(sdk_lib): (27, 1)}, attempted)
             )
         self.assertEqual(mod._loaded_lib_path, str(sdk_lib))
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_newer_system_library_is_closed_before_the_fallback(self):
+        # Without TheRock's flag a newer library found by SONAME is refused and
+        # closed, and rocm-sdk-core's library is loaded instead.
+        site, pkg, sdk_lib = self._sdk_core_site(rocm_sdk_core=False)
+        (pkg / "_version.py").write_text('__version__ = "27.1.0"\n')
+        attempted = []
+        cdll = self._versioned_cdll({sdk_lib.name: (27, 2), str(sdk_lib): (27, 1)}, attempted)
+        with mock.patch.object(_ctypes, "dlclose", create=True) as dlclose:
+            mod = self._import_with(site, pkg, cdll)
+        self.assertEqual(mod._loaded_lib_path, str(sdk_lib))
+        dlclose.assert_called_once_with(sdk_lib.name)
 
 
 class DisableSystemFallbackToolTest(unittest.TestCase):
