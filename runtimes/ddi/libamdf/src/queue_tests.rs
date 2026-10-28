@@ -18,6 +18,7 @@ pub(super) struct Fixture {
     progress_calls: AtomicU64,
     destroy_calls: AtomicU64,
     fail_destroy_once: AtomicBool,
+    busy_destroy_once: AtomicBool,
     destroy_errno: AtomicU64,
     backing_live: AtomicBool,
     retire_on_call: AtomicU64,
@@ -51,6 +52,12 @@ impl Fixture {
 
     pub(super) fn destroy(&self) -> Result<(), Error> {
         self.destroy_calls.fetch_add(1, Ordering::Relaxed);
+        if self.busy_destroy_once.swap(false, Ordering::AcqRel) {
+            return Err(Error::Operation {
+                kind: ErrorKind::Busy,
+                detail: "native queue still has work",
+            });
+        }
         if self.consumed.load(Ordering::Acquire) < self.producer.load(Ordering::Acquire) {
             return Err(Error::Operation {
                 kind: ErrorKind::Busy,
@@ -98,6 +105,7 @@ fn fixture_queue(environment: &Environment) -> (Owned<Queue>, Arc<Fixture>) {
         progress_calls: AtomicU64::new(0),
         destroy_calls: AtomicU64::new(0),
         fail_destroy_once: AtomicBool::new(false),
+        busy_destroy_once: AtomicBool::new(false),
         destroy_errno: AtomicU64::new(0),
         backing_live: AtomicBool::new(true),
         retire_on_call: AtomicU64::new(u64::MAX),
@@ -654,6 +662,27 @@ fn unconsumed_queue_teardown_is_retryable_and_keeps_the_parent_borrow() {
     // SAFETY: All publication is now consumed and no mappings remain.
     unsafe { assert_eq!(destroy(pointer), 0) };
     assert_eq!(environment.queues.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn native_work_busy_keeps_the_queue_and_parent_borrow_for_retry() {
+    let environment = Environment::new();
+    let (queue, fixture) = fixture_queue(&environment);
+    fixture.busy_destroy_once.store(true, Ordering::Release);
+    let pointer = queue.into_raw().cast();
+    // SAFETY: Native BUSY is a preflight rejection and leaves the handle live.
+    unsafe { assert_eq!(destroy(pointer), BUSY) };
+    assert_eq!(environment.queues.load(Ordering::Relaxed), 1);
+    assert!(fixture.backing_live.load(Ordering::Acquire));
+    let mut mapping = ptr::null_mut();
+    // SAFETY: The rejected teardown keeps the public transport usable.
+    unsafe {
+        assert_eq!(map(pointer, ptr::null_mut(), &raw mut mapping), 0);
+        assert_eq!(unmap(mapping), 0);
+        assert_eq!(destroy(pointer), 0);
+    }
+    assert_eq!(environment.queues.load(Ordering::Relaxed), 0);
+    assert_eq!(fixture.destroy_calls.load(Ordering::Relaxed), 2);
 }
 
 #[test]
