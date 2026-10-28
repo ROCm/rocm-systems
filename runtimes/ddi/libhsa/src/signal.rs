@@ -13,7 +13,7 @@
 //! communicate through a channel so callbacks and worker joins occur without
 //! holding the process-global runtime lock.
 
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering, fence};
@@ -81,6 +81,44 @@ fn publish_wait_signal(address: usize) {
     handles
         .entry(address)
         .or_insert_with(|| NEXT_WAIT_SIGNAL_GENERATION.fetch_add(1, Ordering::Relaxed));
+}
+
+/// Locally owned IPC handles; the kind word in their shared storage is mutable
+/// by another process and cannot authorize host doorbell operations.
+static IPC_SIGNAL_HANDLES: LazyLock<RwLock<HashSet<usize>>> =
+    LazyLock::new(|| RwLock::new(HashSet::new()));
+
+/// Records a newly created or imported IPC signal before publishing its handle.
+pub(crate) fn register_ipc_signal(address: usize) -> Result<(), Status> {
+    let mut handles = IPC_SIGNAL_HANDLES
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    handles.try_reserve(1).map_err(|_| OUT_OF_RESOURCES)?;
+    if !handles.insert(address) {
+        return Err(OUT_OF_RESOURCES);
+    }
+    Ok(())
+}
+
+/// Clears local IPC metadata after the native mapping has been released.
+pub(crate) fn unregister_ipc_signal(address: usize) {
+    IPC_SIGNAL_HANDLES
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(&address);
+}
+
+/// Treats a peer-modified IPC kind as an ordinary signal for host stores.
+pub(crate) fn host_store_kind(address: usize, kind: i64) -> i64 {
+    if kind == AMD_SIGNAL_KIND_DOORBELL || kind == AMD_SIGNAL_KIND_LEGACY_DOORBELL {
+        let handles = IPC_SIGNAL_HANDLES
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if handles.contains(&address) {
+            return AMD_SIGNAL_KIND_USER;
+        }
+    }
+    kind
 }
 
 /// Locks the address ranges whose device writes require an HDP readback.
@@ -467,6 +505,12 @@ impl SignalState {
         wait_handles.clear();
         self.signal_groups.clear();
         self.async_signal_refs.clear();
+        for &address in self.imported_ipc_signals.keys() {
+            unregister_ipc_signal(address);
+        }
+        for &address in self.owned_ipc_signals.keys() {
+            unregister_ipc_signal(address);
+        }
         self.imported_ipc_signals.clear();
         self.owned_ipc_signals.clear();
         self.recycled_signals.clear();
@@ -906,7 +950,10 @@ impl SignalState {
     fn finish_signal_storage(&mut self, address: usize) -> Status {
         if let Some(mut imported) = self.imported_ipc_signals.remove(&address) {
             return match imported.allocation.free() {
-                Ok(()) => SUCCESS,
+                Ok(()) => {
+                    unregister_ipc_signal(address);
+                    SUCCESS
+                }
                 Err(error) => {
                     self.imported_ipc_signals.insert(address, imported);
                     map_error(error)
@@ -915,7 +962,10 @@ impl SignalState {
         }
         if let Some(mut owned) = self.owned_ipc_signals.remove(&address) {
             return match owned.allocation.free() {
-                Ok(()) => SUCCESS,
+                Ok(()) => {
+                    unregister_ipc_signal(address);
+                    SUCCESS
+                }
                 Err(error) => {
                     self.owned_ipc_signals.insert(address, owned);
                     map_error(error)
