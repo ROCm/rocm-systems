@@ -556,6 +556,16 @@ pub(crate) struct DriverVirtualHostMapping<D: VirtualMemoryOperations> {
 }
 
 impl<D: VirtualMemoryOperations> DriverVirtualHostMapping<D> {
+    pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
+        if self.host_intervals.is_none() {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "virtual host mapping is no longer live",
+            });
+        }
+        D::set_virtual_host_mapping_permissions(&mut self.inner, permissions)
+    }
+
     pub(crate) fn free(&mut self) -> Result<(), Error> {
         let mut ranges = self
             .host_intervals
@@ -601,6 +611,15 @@ pub struct VirtualHostMapping {
 }
 
 impl VirtualHostMapping {
+    /// Changes process-wide CPU page permissions on a live host map.
+    ///
+    /// # Errors
+    /// Reports invalid permissions or a native protection failure without
+    /// releasing the mapping.
+    pub fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
+        self.inner.set_permissions(permissions)
+    }
+
     /// Removes the host mapping while preserving the encompassing address
     /// reservation for reuse.
     ///

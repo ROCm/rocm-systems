@@ -304,6 +304,60 @@
         }
       ]
     },
+    "net_ib_gdr_flush_flag_base": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 1200,
+      "description": "Shared env for remote GDR flush flag suites. Carries no tests: extends merges test lists, so children would inherit them.",
+      "env_variables": {
+        "RCCL_IB_GDR_FLUSH_FLAG": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "0"
+      }
+    },
+    "net_ib_gdr_flush_flag": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "tests": [
+        {
+          "name": "GdrFlushFlag_DefaultQps",
+          "description": "Remote GDR flush flag with default QPs. GdrFlushFlagTest needs 2 ranks; GdrFlushFlagProtoSwitchMPITest needs 2 nodes.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        },
+        {
+          "name": "GdrFlushFlag_FusedNic",
+          "description": "Fused (two-NIC) device keeps the RDMA read flush. Its own process: the vNIC it makes stays in the device list, and later comms in the process would use it and run without the flag.",
+          "test_filter": "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4Qps",
+          "description": "Remote GDR flush flag over 4 QPs per connection: requests rotate over the QPs and each flag tracks its own QP.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps_split": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4QpsSplit",
+          "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1: every request spans all 4 QPs, and the GPU waits on all 4 flags.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
     "gdr_flush_cumem_multinode": {
       "extends": "default",
       "is_gtest": true,
@@ -6087,6 +6141,32 @@
           "name": "SymWin_WindowLifecycle_Repeated",
           "description": "Repeated register/deregister cycles",
           "test_filter": "SymWin_WindowLifecycle.RepeatedRegisterDeregister"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_SlicesShareBacking",
+          "description": "Many slices of one allocation share a backing registration",
+          "test_filter": "SymWin_WindowLifecycle.SlicesShareBackingRegistration"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_BackingReleasedAfterLast",
+          "description": "A slice stays mapped after its sibling window on the same allocation is deregistered",
+          "test_filter": "SymWin_WindowLifecycle.BackingReleasedAfterLastWindow"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_ReleasedBackingFreesVa",
+          "description": "The last window to drop a backing returns that symmetric VA for the next registration",
+          "test_filter": "SymWin_WindowLifecycle.ReleasedBackingFreesSymmetricVa"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_DuplicateExactRange",
+          "description": "Two live windows on the same range deregister independently",
+          "test_filter": "SymWin_WindowLifecycle.DuplicateExactRange"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_RankDivergentReregister",
+          "description": "Collective re-register when only one rank has dropped its backing cache",
+          "test_filter": "SymWin_WindowLifecycle.RankDivergentReregister",
+          "timeout": 120
         }
       ]
     },
@@ -6565,6 +6645,11 @@
           "test_filter": "DdaMPI_ReduceScatter.LLAndLL128Interleaved"
         },
         {
+          "name": "DDA_Fabric_ReduceScatter_InterleavedUnsynchronised",
+          "description": "DDA fabric ReduceScatter LL and LL128 alternated on one communicator with no stream drain and no MPI barrier at a tier switch, at RCCL_DDA_FABRIC_MAXBLOCKS=2. Both tiers double-buffer on the shared bank stride.",
+          "test_filter": "DdaMPI_ReduceScatter.LLAndLL128InterleavedUnsynchronised"
+        },
+        {
           "name": "DDA_Fabric_ReduceScatter_GridStride",
           "description": "DDA fabric ReduceScatter LL and LL128 with RCCL_DDA_FABRIC_MAXBLOCKS=2 so both kernels grid-stride; stream drain and global MPI barrier at each tier switch",
           "test_filter": "DdaMPI_ReduceScatter.GridStrideWithTwoBlocks"
@@ -6615,6 +6700,21 @@
           "name": "DDA_Fabric_AllReduce_LL128_TwoShot",
           "description": "DDA fabric AllReduce LL128 two-shot tier with the LL and LL128 one-shot thresholds zeroed; own process",
           "test_filter": "DdaMPI_AllReduce.LL128TwoShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_BitIdentical",
+          "description": "Float and bf16 AllReduce at 256 KiB to 4 MiB returns bit-identical output on every rank under the default selection",
+          "test_filter": "DdaMPI_AllReduce.BitIdenticalAcrossRanksDefaultSelection"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL_OneShot_BitIdentical",
+          "description": "DDA fabric AllReduce LL one-shot tier folds in rank order, so every rank gets the same bits back",
+          "test_filter": "DdaMPI_AllReduce.LLOneShotBitIdenticalAcrossRanks"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL128_OneShot_BitIdentical",
+          "description": "DDA fabric AllReduce LL128 one-shot tier folds in rank order, so every rank gets the same bits back; own process",
+          "test_filter": "DdaMPI_AllReduce.LL128OneShotBitIdenticalAcrossRanks"
         }
       ]
     },
@@ -6675,6 +6775,24 @@
       "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank)",
       "description": "Whitebox coverage of the NET/IB GDR flush fix: dma-buf and peermem RO=0 scratchpad reads, feature-disabled fallback, repeated-flush burst, and the fault-injection regression guard. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
       "config": "net_ib_gdr_flush",
+      "enabled": false
+    },
+    {
+      "name": "GDR Flush Flag - Default QPs (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1) over 2 ranks on 2 nodes. Disabled: gfx1250 cannot use the flag, so every case would skip.",
+      "config": "net_ib_gdr_flush_flag",
+      "enabled": false
+    },
+    {
+      "name": "GDR Flush Flag - 4 QPs (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag over 4 QPs per connection. Disabled: gfx1250 cannot use the flag, so every case would skip.",
+      "config": "net_ib_gdr_flush_flag_4qps",
+      "enabled": false
+    },
+    {
+      "name": "GDR Flush Flag - 4 QPs split (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1. Disabled: gfx1250 cannot use the flag, so every case would skip.",
+      "config": "net_ib_gdr_flush_flag_4qps_split",
       "enabled": false
     },
     {

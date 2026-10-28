@@ -793,7 +793,7 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
     case amd::CopyMetadata::kCopyOpSwap:
       hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
       hsaOp.src_size = op.size;
-      hsaOp.dst_size = op.size;
+      hsaOp.dst_size = (op.sizeB > 0) ? op.sizeB : op.size;
       break;
     case amd::CopyMetadata::kCopyOpIndirectSrc:
       hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC;
@@ -886,6 +886,7 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       std::vector<void*> dsts;
       std::vector<hsa_agent_t> dst_agents;
       std::vector<size_t> sizes;
+      std::vector<size_t> dst_sizes;
     };
 
     MultiArrays swapPending;
@@ -916,12 +917,12 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     for (const auto& op : ops) {
       if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
-        assert(op.src_size == op.dst_size && "Asymmetric swap not yet supported");
         if (swapPending.srcs.empty()) swapSrcAgent = op.src_agent;
         swapPending.srcs.push_back(op.src);
         swapPending.dsts.push_back(op.dst);
         swapPending.dst_agents.push_back(op.dst_agent);
         swapPending.sizes.push_back(op.src_size);
+        swapPending.dst_sizes.push_back(op.dst_size);
         continue;
       }
       const auto opType = static_cast<hsa_amd_memory_copy_op_type_t>(op.type);
@@ -963,19 +964,39 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     // --- Emit SWAP batch ---
     if (!swapPending.srcs.empty()) {
-      multiStore.push_back(std::move(swapPending));
-      auto& stored = multiStore.back();
+      const bool has_asymmetric = swapPending.sizes != swapPending.dst_sizes;
 
-      hsa_amd_memory_copy_op_t swap = {};
-      swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-      swap.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
-      swap.src_agent = swapSrcAgent;
-      swap.src_list = stored.srcs.data();
-      swap.dst_list = stored.dsts.data();
-      swap.dst_agent_list = stored.dst_agents.data();
-      swap.size_list = stored.sizes.data();
-      swap.num_entries = static_cast<uint16_t>(stored.srcs.size());
-      finalOps.push_back(swap);
+      if (has_asymmetric) {
+        // Asymmetric: one scalar op per entry.
+        for (size_t i = 0; i < swapPending.srcs.size(); ++i) {
+          hsa_amd_memory_copy_op_t swap = {};
+          swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+          swap.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
+          swap.src_agent = swapSrcAgent;
+          swap.src = swapPending.srcs[i];
+          swap.dst = swapPending.dsts[i];
+          swap.dst_agent = swapPending.dst_agents[i];
+          swap.src_size = swapPending.sizes[i];
+          swap.dst_size = swapPending.dst_sizes[i];
+          swap.num_entries = 0;
+          finalOps.push_back(swap);
+        }
+      } else {
+        // Symmetric: one multi-entry op.
+        multiStore.push_back(std::move(swapPending));
+        auto& stored = multiStore.back();
+
+        hsa_amd_memory_copy_op_t swap = {};
+        swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+        swap.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
+        swap.src_agent = swapSrcAgent;
+        swap.src_list = stored.srcs.data();
+        swap.dst_list = stored.dsts.data();
+        swap.dst_agent_list = stored.dst_agents.data();
+        swap.size_list = stored.sizes.data();
+        swap.num_entries = static_cast<uint16_t>(stored.srcs.size());
+        finalOps.push_back(swap);
+      }
     }
 
     // --- Emit LINEAR / BROADCAST batches ---
@@ -2905,9 +2926,14 @@ struct CopyBufferBatchDescriptor {
 bool KernelBlitManager::useShaderCopyBufferPath(const Memory& srcMemory, const Memory& dstMemory,
                                                 size_t size, amd::CopyMetadata copyMetadata,
                                                 bool* useLimitedP2pBlitWg) const {
-  bool isP2pOrIpc = (&srcMemory.dev() != &dstMemory.dev()) ||
-                    srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared() ||
-                    srcMemory.owner()->vmmImported() || dstMemory.owner()->vmmImported();
+  // Imported (VMM/IPC) memory can be reached through another device's view, and a local view can
+  // map a peer's pages, so compare the physical owners. Other memory keeps the view comparison:
+  // host-backed allocations are owned by the CPU agent, which would make every host copy P2P.
+  const bool imported = srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared() ||
+                        srcMemory.owner()->vmmImported() || dstMemory.owner()->vmmImported();
+  bool isP2pOrIpc = imported
+      ? srcMemory.getOwningAgent().handle != dstMemory.getOwningAgent().handle
+      : &srcMemory.dev() != &dstMemory.dev();
   const bool smallP2pOrIpc = isP2pOrIpc && size <= dev().settings().sdma_p2p_threshold_;
   if (useLimitedP2pBlitWg != nullptr) {
     *useLimitedP2pBlitWg = smallP2pOrIpc;
