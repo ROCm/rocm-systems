@@ -1,0 +1,150 @@
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./assets/fonts/ibm-plex-sans-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./assets/fonts/ibm-plex-sans-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./assets/fonts/ibm-plex-sans-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./assets/fonts/ibm-plex-mono-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./assets/fonts/ibm-plex-mono-500.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./assets/fonts/ibm-plex-mono-600.woff2') format('woff2');
+}
+
+/* Real bold face scoped to the approved Overview card headings. Its Plex
+   license is bundled through theme.fontLicenses.sans. */
+@font-face {
+  font-family: 'Overview Title';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./assets/fonts/ibm-plex-sans-bold.ttf') format('truetype');
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-width: 320px;
+}
+
+body {
+  margin: 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+code,
+pre {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+#root {
+  min-height: calc(100dvh / var(--dashboard-density, 1));
+}
+
+/* Keep chart tooltip text on the normal paint path, not a scaled GPU bitmap.
+   Important overrides ECharts' inline translate3d/left/top positioning. */
+.dashboard-chart-tooltip {
+  transform: none !important;
+  will-change: auto !important;
+  backdrop-filter: none !important;
+  left: var(--chart-tooltip-x, 0px) !important;
+  top: var(--chart-tooltip-y, 0px) !important;
+}
+
+/* One responsive desktop density layer; phones stay native size. */
+@supports (zoom: 0.8) {
+  @media (min-width: 900px) {
+    body {
+      --dashboard-density: var(--dashboard-scale, 0.7392);
+      zoom: var(--dashboard-density);
+    }
+    /* Popper/Popover receive viewport pixel anchors; cancel inherited zoom there
+       so those coordinates are not scaled a second time. Dialog flex centering
+       and in-chart tooltips stay in the shared density layer. */
+    .MuiPopover-root, .MuiPopper-root { zoom: calc(1 / var(--dashboard-density)); }
+    /* Only portal coordinates escape the density layer. Match the surrounding
+       body / caption text using the same scale without scaling geometry again. */
+    .MuiAutocomplete-popper .MuiAutocomplete-listbox .MuiAutocomplete-option,
+    .MuiAutocomplete-popper .MuiAutocomplete-option .MuiTypography-body1,
+    .MuiAutocomplete-popper .MuiAutocomplete-option .MuiTypography-body2,
+    .MuiAutocomplete-popper .MuiAutocomplete-groupLabel,
+    .MuiAutocomplete-popper .MuiAutocomplete-noOptions,
+    .MuiAutocomplete-popper .MuiAutocomplete-loading,
+    .MuiMenu-root .MuiMenu-list .MuiMenuItem-root {
+      font-size: calc(14px * var(--dashboard-density));
+      line-height: calc(20px * var(--dashboard-density));
+    }
+    .MuiAutocomplete-popper .MuiAutocomplete-option .MuiTypography-caption {
+      font-size: calc(12px * var(--dashboard-density));
+      line-height: calc(18px * var(--dashboard-density));
+    }
+    .MuiAutocomplete-popper .MuiAutocomplete-option .MuiSvgIcon-fontSizeSmall {
+      font-size: calc(20px * var(--dashboard-density));
+    }
+    .MuiAutocomplete-popper .MuiAutocomplete-groupLabel {
+      line-height: calc(48px * var(--dashboard-density));
+    }
+    .MuiAutocomplete-popper .MuiAutocomplete-option .MuiListItemText-root {
+      margin-block: calc(6px * var(--dashboard-density));
+    }
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgba(141, 141, 141, 0.55);
+  background-clip: padding-box;
+}

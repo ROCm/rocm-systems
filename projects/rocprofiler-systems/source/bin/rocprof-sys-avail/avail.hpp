@@ -65,7 +65,7 @@ public:
         setNextName(name);
         writeName();
 
-        auto base64string =
+        auto const base64string =
             base64::encode(reinterpret_cast<const unsigned char*>(data), size);
         saveValue(base64string);
     }
@@ -77,26 +77,26 @@ public:
     //! Sets the name for the next node created with startNode
     void setNextName(const char* name)
     {
-        if(exclude_stream.count(name) > 0)
+        if(exclude_stream.contains(name))
         {
             return;
         }
 
-        if((current_entry != nullptr) && value_keys.count(name) > 0)
+        if((current_entry != nullptr) && value_keys.contains(name))
         {
             current_entry->insert({ name, "" });
-            current_value = &((*current_entry)[name]);
+            current_value = &(*current_entry)[name];
             return;
         }
 
-        if(value_keys.count(name) > 0)
+        if(value_keys.contains(name))
         {
             return;
         }
 
         current_value = nullptr;
         output_stream->push_back(entry_type{});
-        current_entry = &(output_stream->back());
+        current_entry = &output_stream->back();
 
         current_entry->insert({ "identifier", name });
         std::string       func   = name;
@@ -138,10 +138,10 @@ public:
     void makeArray() {}
 
 private:
-    value_type* current_value  = nullptr;
-    entry_type* current_entry  = nullptr;
-    array_type* output_stream  = nullptr;
-    unique_set  exclude_stream = {};
+    value_type* current_value = nullptr;
+    entry_type* current_entry = nullptr;
+    array_type* output_stream = nullptr;
+    unique_set  exclude_stream;
     int_stack   name_counter;
     unique_set  value_keys = { "name",    "value",     "description", "count",
                                "environ", "max_count", "cmdline",     "data_type",

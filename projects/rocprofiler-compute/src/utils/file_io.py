@@ -1,17 +1,18 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import io
 import json
 import re
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, List, Optional, Sequence
 
 import pandas as pd
 import yaml
 
 import config
-from utils import csv_compression, schema, utils_analysis
+from utils import csv_compression, utils_analysis
 from utils.logger import (
     console_debug,
     console_error,
@@ -23,6 +24,12 @@ from utils.utils_common import (
     canonical_config_arch,
     normalize_filter_to_str_list,
 )
+
+KERNEL_SYMBOLS_CSV_GLOB = f"rocpd_kernel_symbols_*.csv{csv_compression.GZIP_SUFFIX}"
+
+_CSV_CHUNK_ROWS = 1_000_000
+# Aggregations that can run per chunk, mapped to how their chunk results combine.
+_CHUNK_COMBINERS = {"sum": "sum", "min": "min", "max": "max", "count": "sum"}
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -232,6 +239,63 @@ def load_pc_sampling_results(workload_path: str) -> list[dict[str, Any]]:
     return tool_records
 
 
+def load_kernel_short_names(
+    workload_path: str,
+    tool_data_records: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Map a workload's kernel names to the short names profiling captured."""
+    symbol_frames = _read_kernel_symbol_csvs(workload_path)
+
+    # A PC-sampling-only run has no rocpd database to write the CSV from, so
+    # read the same pair out of its results JSON instead.
+    if not symbol_frames:
+        return {
+            symbol["formatted_kernel_name"]: symbol["truncated_kernel_name"]
+            for tool_data in tool_data_records
+            for symbol in tool_data.get("kernel_symbols", [])
+        }
+
+    # A symbol is written once per process and once per run. The repeats all
+    # say the same thing, so keeping the last one is enough.
+    symbols = pd.concat(symbol_frames, ignore_index=True).dropna(
+        subset=["Kernel_Name", "Kernel_Short_Name"]
+    )
+    return dict(zip(symbols["Kernel_Name"], symbols["Kernel_Short_Name"]))
+
+
+def _read_kernel_symbol_csvs(workload_path: str) -> list[pd.DataFrame]:
+    """Return the workload's symbol CSVs that hold symbols to read.
+
+    Prefers the native tool's per-pid files; the rocpd conversion's file is
+    read only when there are none, as in attach mode. Columns are renamed to
+    one shape.
+
+    The conversion opens each file before it runs its query, so an extract that
+    failed leaves an empty file behind rather than no file.
+    """
+    symbol_frames = []
+    artifacts = utils_analysis.find_native_artifacts(Path(workload_path))
+    symbol_csv_paths = [artifact.kernel_symbols for artifact in artifacts] or sorted(
+        Path(workload_path).glob(KERNEL_SYMBOLS_CSV_GLOB)
+    )
+    for symbol_csv_path in symbol_csv_paths:
+        try:
+            symbols = pd.read_csv(symbol_csv_path)
+        except (pd.errors.EmptyDataError, pd.errors.ParserError):
+            continue
+        symbols = symbols.rename(
+            columns={
+                "kernel_name": "Kernel_Name",
+                "kernel_short_name": "Kernel_Short_Name",
+            }
+        )
+        if not symbols.empty and {"Kernel_Name", "Kernel_Short_Name"}.issubset(
+            symbols.columns
+        ):
+            symbol_frames.append(symbols)
+    return symbol_frames
+
+
 def process_pc_sampling_kernel_traces(
     tool_data_records: list[dict[str, Any]],
 ) -> pd.DataFrame:
@@ -307,70 +371,175 @@ def create_df_pmc(
     verbose: int,
 ) -> pd.DataFrame:
     """
-    Load all raw pmc counters and join into one df.
+    Read all raw pmc counters into one analysis df.
+
+    Counter data comes from the native tool's per-pid artifacts when there are
+    any, and from the rocpd result artifacts otherwise. Bad profiling output
+    stops the run instead of producing a partial frame.
     """
-    pmc_perf_path = csv_compression.compressed_name(
-        Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
-    )
-    if not pmc_perf_path.is_file():
-        return pd.DataFrame()
+    df, _slot_to_id = create_df_pmc_with_slot_ids(raw_data_dir, verbose)
+    return df
 
-    df = pd.read_csv(pmc_perf_path)
 
-    # The rocpd counter CSV is long: one row per counter per dispatch. Anything
-    # else was written by a removed backend and is no longer supported.
-    if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
-        console_error(
-            "analysis",
-            f"{pmc_perf_path} is not in the supported rocpd format. "
-            "Please re-profile this workload with a current release.",
-        )
-    df = utils_analysis.process_rocpd_csv(df)
+@demarcate
+def create_df_pmc_with_slot_ids(
+    raw_data_dir: str,
+    verbose: int,
+) -> tuple[pd.DataFrame, dict[tuple, int]]:
+    """Read pmc counters and the map from process_rocpd_csv group keys to 1..N ids."""
+    counter_rows = _read_counter_rows(Path(raw_data_dir))
+    if counter_rows.empty:
+        return pd.DataFrame(), {}
+
+    df, slot_to_id = utils_analysis.process_rocpd_csv(counter_rows)
 
     utils_analysis.add_unit_counter(df)
 
     if verbose >= 2:
-        console_debug(f"pmc_raw_data final_single_df {df.info}")
+        frame_info = io.StringIO()
+        df.info(buf=frame_info)
+        console_debug(f"pmc_raw_data final_single_df\n{frame_info.getvalue()}")
+    return df, slot_to_id
+
+
+def _read_counter_rows(workload_dir: Path) -> pd.DataFrame:
+    """Read the long counter rows of a workload, one row per counter per dispatch.
+
+    Older workloads and attach mode have no native artifacts, so they fall back
+    to the rocpd result artifacts.
+    """
+    artifacts = utils_analysis.find_native_artifacts(workload_dir)
+    if artifacts:
+        return _read_native_counter_rows(workload_dir, artifacts)
+
+    result_files = sorted(
+        workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
+    )
+    if not result_files:
+        return pd.DataFrame()
+    frames = [_read_counter_results(result_file) for result_file in result_files]
+    counter_rows = pd.concat(frames, ignore_index=True)
+    # rocpd lists no agents, so number the GPUs that ran dispatches from 0.
+    counter_rows["GPU_ID"] = counter_rows["GPU_ID"].rank(method="dense").astype(int) - 1
+    return counter_rows
+
+
+def _read_native_counter_rows(
+    workload_dir: Path,
+    artifacts: List[utils_analysis.NativeArtifacts],
+) -> pd.DataFrame:
+    """Join each process's native CSVs, numbering ids per counter set and GPUs
+    from the agents CSVs."""
+    counter_sets = []
+    for fbase in sorted({artifact.fbase for artifact in artifacts}):
+        processes = [
+            utils_analysis.join_native_counters(
+                _read_profiling_csv(
+                    artifact.counters,
+                    group_by=("dispatch_id", "counter_name"),
+                    agg={"counter_value": "sum"},
+                ),
+                _read_profiling_csv(artifact.dispatch),
+                _read_profiling_csv(artifact.kernel_symbols),
+                artifact.pid,
+            )
+            for artifact in artifacts
+            if artifact.fbase == fbase
+        ]
+        counter_sets.append(
+            utils_analysis.assign_native_ids(pd.concat(processes, ignore_index=True))
+        )
+
+    counter_rows = pd.concat(counter_sets, ignore_index=True)
+    gpu_ids = utils_analysis.number_gpus_by_node(
+        pd.concat(
+            [_read_profiling_csv(artifact.agents) for artifact in artifacts],
+            ignore_index=True,
+        )
+    )
+    counter_rows["GPU_ID"] = counter_rows["GPU_ID"].map(gpu_ids)
+    if counter_rows.empty:
+        console_error(
+            "profiling",
+            f"No counter data in the native profiling data under {workload_dir}.\n"
+            "Please re-run 'rocprof-compute profile'.",
+        )
+    return counter_rows
+
+
+def _read_counter_results(result_file: Path) -> pd.DataFrame:
+    """Read one rocpd result artifact and check it carries counter rows."""
+    df = _read_profiling_csv(result_file)
+
+    # The rocpd counter CSV is long: one row per counter per dispatch.
+    if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
+        console_error(
+            "analysis",
+            f"{result_file} is not in the supported rocpd format. "
+            "Please re-profile this workload with a current release.",
+        )
+
     return df
 
 
-def collect_wave_occu_per_cu(in_dir: str, out_dir: str, num_se: int) -> None:
+def _read_profiling_csv(
+    csv_path: Path,
+    group_by: Sequence[str] = (),
+    agg: Optional[dict[str, str]] = None,
+) -> pd.DataFrame:
+    """Read one profiling CSV, stopping the run if it is empty or corrupt.
+
+    With agg, reads only the group_by and agg columns, a chunk at a time, and
+    returns them aggregated per group_by.
     """
-    Collect wave occupancy info from in_dir csv files
-    and consolidate into out_dir/wave_occu_per_cu.csv.
-    It depends highly on wave_occu_se*.csv format.
-    """
-    in_path = Path(in_dir)
-    all_data = pd.DataFrame()
-
-    for i in range(num_se):
-        file_path = in_path / f"wave_occu_se{i}.csv"
-        if not file_path.exists():
-            continue
-
-        tmp_df = pd.read_csv(file_path)
-        if tmp_df.empty:
-            continue
-
-        se_idx = f"SE{tmp_df.loc[0, 'SE']}"
-        tmp_df.rename(
-            columns={
-                "Dispatch": "Dispatch",
-                "SE": "SE",
-                "CU": "CU",
-                "Occupancy": se_idx,
-            }
-        )
-
-        # TODO: join instead of concat!
-        if i == 0:
-            all_data = tmp_df[{"CU", se_idx}]
-            all_data.sort_index(axis=1, inplace=True)
+    try:
+        if agg is None:
+            df = pd.read_csv(csv_path)
         else:
-            all_data = pd.concat([all_data, tmp_df[se_idx]], axis=1, copy=False)
+            df = _aggregate_csv_in_chunks(csv_path, list(group_by), agg)
+    except pd.errors.EmptyDataError:
+        console_error(
+            "profiling",
+            f"No counter data in {csv_path}.\nPlease re-run 'rocprof-compute profile'.",
+        )
+        return pd.DataFrame()
+    except csv_compression.CORRUPT_CSV_ERRORS as error:
+        console_error(
+            "profiling",
+            f"{csv_path} is truncated or corrupt: {error}\n"
+            "A profile run killed mid-write leaves this behind; "
+            "re-run 'rocprof-compute profile' to regenerate the "
+            "workload.",
+        )
+        return pd.DataFrame()
 
-    if not all_data.empty:
-        all_data.to_csv(Path(out_dir) / "wave_occu_per_cu.csv", index=False)
+    if df.empty:
+        console_error(
+            "profiling",
+            f"No counter data in {csv_path}.\nPlease re-run 'rocprof-compute profile'.",
+        )
+    return df
+
+
+def _aggregate_csv_in_chunks(
+    csv_path: Path, group_by: List[str], agg: dict[str, str]
+) -> pd.DataFrame:
+    """Aggregate each chunk, then aggregate the per-chunk results."""
+    unsupported = set(agg.values()) - _CHUNK_COMBINERS.keys()
+    if unsupported:
+        raise ValueError(f"Cannot aggregate in chunks with {sorted(unsupported)}")
+
+    chunks = pd.read_csv(csv_path, usecols=[*group_by, *agg], chunksize=_CSV_CHUNK_ROWS)
+    partials = [
+        chunk.groupby(group_by, sort=False, as_index=False).agg(agg) for chunk in chunks
+    ]
+    combine = {column: _CHUNK_COMBINERS[func] for column, func in agg.items()}
+    return (
+        pd
+        .concat(partials, ignore_index=True)
+        .groupby(group_by, sort=False, as_index=False)
+        .agg(combine)
+    )
 
 
 def is_single_panel_config(

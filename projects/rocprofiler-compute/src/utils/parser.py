@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from pc_sampling.code_object_analysis import InstructionPipelines
 from pc_sampling.pc_sampling_analysis import (
     SOURCE_LINE_MISSING,
     aggregate_pc_sample_records,
@@ -19,10 +20,10 @@ from utils import schema
 from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
-from utils.metrics.expression import gen_counter_list
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
+    MEMBW_ANALYSIS_PANEL_ID,
     METRIC_ID_RE,
     SUPPORTED_FIELD,
     convert_filter_blocks_to_panel_ids,
@@ -30,6 +31,7 @@ from utils.utils_common import (
     expand_placeholder_ranges,
     normalize_filter_to_str_list,
 )
+from utils.utils_counter_defs import metric_expressions, metric_value_keys
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -45,8 +47,6 @@ from utils.utils_common import (
 PMC_KERNEL_TOP_TABLE_ID: int = 1
 # 002 is ID of pmc_dispatch_info.csv table
 PMC_DISPATCH_INFO_TABLE_ID: int = 2
-# Panel id of block 30, Memory Bandwidth Analysis
-MEMBW_ANALYSIS_PANEL_ID: int = 3000
 
 
 @demarcate
@@ -56,7 +56,6 @@ def build_dfs(
     sys_info: pd.Series,
     profiling_config: dict[str, Any],
     arch: Optional[str] = None,
-    membw_analysis: bool = False,
 ) -> None:
     """Build a dataframe template for each table in each panel. Analyze-mode
     filter_metrics overrides profile-mode filter_blocks; tables that fail the
@@ -75,7 +74,6 @@ def build_dfs(
     dfs: dict[int, pd.DataFrame] = {}
     dfs_type: dict[int, str] = {}
     dfs_expressions: dict[int, list[str]] = {}
-    metric_counters: dict[str, list[str]] = {}
 
     if filter_metrics:
         numeric_tokens = [t for t in filter_metrics if METRIC_ID_RE.match(str(t))]
@@ -89,10 +87,6 @@ def build_dfs(
         profile_panel_filter = convert_filter_blocks_to_panel_ids(
             profiling_config.get("filter_blocks", []), arch
         )
-
-    # --membw-analysis asks for block 30, so keep it even when -b narrows.
-    if membw_analysis and user_metric_filter:
-        user_metric_filter = [*user_metric_filter, "30"]
 
     arch_configs.panel_configs = expand_placeholder_ranges(
         arch_configs.panel_configs, sys_info
@@ -118,7 +112,6 @@ def build_dfs(
                         panel_id=panel_id,
                         user_metric_filter=user_metric_filter,
                         profile_panel_filter=profile_panel_filter,
-                        metric_counters=metric_counters,
                     )
                     # Filter excluded every metric in this panel; skip the empty table.
                     if data_config["metric"] and df.empty:
@@ -164,7 +157,6 @@ def build_dfs(
     arch_configs.dfs = dfs
     arch_configs.dfs_type = dfs_type
     arch_configs.dfs_expressions = dfs_expressions
-    arch_configs.metric_counters = metric_counters
 
 
 def _metric_passes_filter(
@@ -201,18 +193,16 @@ def _build_metric_table_df(
     panel_id: int,
     user_metric_filter: Optional[list[str]],
     profile_panel_filter: set[int],
-    metric_counters: dict[str, list[str]],
 ) -> tuple[pd.DataFrame, list[str]]:
     """Build the metric_table dataframe and its list of formula strings for
-    data_config, dropping rows the active filter excludes. Updates
-    metric_counters in place.
+    data_config, dropping rows the active filter excludes.
     """
     table_id = data_config["id"]
     table_data_source_idx = f"{table_id // 100}.{table_id % 100}"
     is_simple_box = data_config.get("cli_style") == "simple_box"
 
     headers: list[str] = ["Metric_ID", data_config["header"]["metric"]]
-    header_keys: set[str] = set(data_config["header"]) - {"metric", "expr"}
+    value_keys = metric_value_keys(data_config)
     if is_simple_box:
         headers.extend(simple_box)
         for key, tile in data_config["header"].items():
@@ -241,44 +231,19 @@ def _build_metric_table_df(
             continue
 
         values: list[Any] = [metric_idx, key]
-        eqn_content: list[Any] = []
-        if is_simple_box:
-            for k, v in entries.items():
-                if k == "expr":
-                    for bv in simple_box.values():
-                        values.append(bv[0] + v + bv[1])
-                    eqn_content.append(v)
-                elif k not in {"coll_level", "alias"} and k in header_keys:
-                    values.append(v)
-        else:
-            for k, v in entries.items():
-                if k not in {"coll_level", "alias"} and k in header_keys:
-                    values.append(v)
-                    eqn_content.append(v)
-        expressions.extend(
-            v for v in eqn_content if isinstance(v, str) and v and v != "None"
-        )
+        for k, v in entries.items():
+            if is_simple_box and k == "expr":
+                values.extend(
+                    prefix + v + suffix for prefix, suffix in simple_box.values()
+                )
+            elif k in value_keys:
+                values.append(v)
+        expressions.extend(metric_expressions(data_config, entries))
 
-        if "alias" in entries:
-            values.append(entries["alias"])
         if "metrics_description" in panel:
             values.append(panel["metrics_description"].get(key, ""))
 
         rows.append(values)
-
-        filtered_counters: dict[str, None] = {}
-        formula_visited = False
-        for formula in eqn_content:
-            if formula is None or formula == "None":
-                continue
-            visited, counters = gen_counter_list(formula)
-            if visited:
-                formula_visited = True
-            for counter in counters:
-                filtered_counters[counter] = None
-
-        if filtered_counters or formula_visited:
-            metric_counters[key] = list(filtered_counters)
 
     df = pd.DataFrame(rows, columns=headers)
     df.set_index("Metric_ID", inplace=True)
@@ -286,25 +251,12 @@ def _build_metric_table_df(
 
 
 @demarcate
-def apply_filters(
-    workload: schema.Workload, dir_path: str, is_gui: bool, debug: bool
-) -> pd.DataFrame:
+def apply_filters(workload: schema.Workload, debug: bool) -> pd.DataFrame:
     """
     Apply user's filters to the raw_pmc df.
     """
 
-    # TODO: error out properly if filters out of bound
-    filtered_df = workload.raw_pmc
-
-    # Apply GPU ID filter
-    if workload.filter_gpu_ids:
-        filtered_df = filtered_df.loc[
-            filtered_df["GPU_ID"]
-            .astype(str)
-            .isin(normalize_filter_to_str_list(workload.filter_gpu_ids))
-        ]
-        if filtered_df.empty:
-            console_error("analysis", f"{workload.filter_gpu_ids} is an invalid gpu-id")
+    filtered_df = _apply_gpu_filter(workload)
 
     # Apply kernel filter
     # NB:
@@ -328,54 +280,37 @@ def apply_filters(
 
 
 def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
-    """Apply kernel ID or name filters."""
-    if all(isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids):
-        # Handle integer kernel IDs
-        kernel_top_dataframe = workload.dfs.get(PMC_KERNEL_TOP_TABLE_ID)
-        if kernel_top_dataframe is None:
-            console_error(
-                "Kernel top stats table not loaded. "
-                "Ensure create_df_kernel_top_stats() "
-                "is called before applying kernel filters."
-            )
-
-        validate_kernel_filter_ids(
-            workload.filter_kernel_ids, len(kernel_top_dataframe["Kernel_Name"])
-        )
-
-        # Extract kernel names and mark selected kernels with "*"
-        # TODO: fix it for unaligned comparison
-        selected_kernels = []
-        kernel_top_dataframe["Selected"] = ""
-
-        for kernel_id in workload.filter_kernel_ids:
-            selected_kernels.append(kernel_top_dataframe.loc[kernel_id, "Kernel_Name"])
-            kernel_top_dataframe.loc[kernel_id, "Selected"] = "*"
-
-        if selected_kernels:
-            df = df.loc[df["Kernel_Name"].isin(selected_kernels)]
-
-    elif all(isinstance(kernel_id, str) for kernel_id in workload.filter_kernel_ids):
-        # Handle string kernel names
-        cleaned_dataframe = df["Kernel_Name"].apply(
-            lambda kernel_name: (
-                kernel_name.strip() if isinstance(kernel_name, str) else kernel_name
-            )
-        )
-        df = df.loc[cleaned_dataframe.isin(workload.filter_kernel_ids)]
-    else:
+    """Apply kernel ID filters, marking the selected rows in the top stats table."""
+    kernel_top_dataframe = workload.dfs.get(PMC_KERNEL_TOP_TABLE_ID)
+    if kernel_top_dataframe is None:
         console_error(
-            "analyze",
-            "Mixing kernel indices and string filters is not currently supported",
+            "Kernel top stats table not loaded. "
+            "Ensure create_df_kernel_top_stats() "
+            "is called before applying kernel filters."
         )
+
+    validate_kernel_filter_ids(
+        workload.filter_kernel_ids, len(kernel_top_dataframe["Kernel_Name"])
+    )
+
+    # Extract kernel names and mark selected kernels with "*"
+    # TODO: fix it for unaligned comparison
+    selected_kernels = []
+    kernel_top_dataframe["Selected"] = ""
+
+    for kernel_id in workload.filter_kernel_ids:
+        selected_kernels.append(kernel_top_dataframe.loc[kernel_id, "Kernel_Name"])
+        kernel_top_dataframe.loc[kernel_id, "Selected"] = "*"
+
+    if selected_kernels:
+        df = df.loc[df["Kernel_Name"].isin(selected_kernels)]
 
     return df
 
 
 def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
     """Apply dispatch ID filters."""
-    # NB: support ignoring the 1st n dispatched execution by '> n'
-    #     The better way may be parsing python slice string
+    # '> n' keeps the dispatches whose id is greater than n.
     available_dispatch_ids = set(df["Dispatch_ID"].astype(int))
     if available_dispatch_ids:
         available_ids_hint = (
@@ -387,10 +322,10 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
 
     for dispatch_id in workload.filter_dispatch_ids:
         if isinstance(dispatch_id, str) and ">" in dispatch_id:
-            # '> n' skips the first n dispatches, so n is a number of
-            # dispatches, not an id.
-            skipped = int(re.match(r"\>\s*(\d+)", dispatch_id).group(1))
-            valid = 0 <= skipped <= len(available_dispatch_ids)
+            threshold = int(re.match(r"\>\s*(\d+)", dispatch_id).group(1))
+            valid = bool(available_dispatch_ids) and threshold <= max(
+                available_dispatch_ids
+            )
         else:
             valid = int(dispatch_id) in available_dispatch_ids
         if not valid:
@@ -412,6 +347,23 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
         df = df[df["Dispatch_ID"].astype(int).isin(selected_dispatches)]
 
     return df
+
+
+def _apply_gpu_filter(workload: schema.Workload) -> pd.DataFrame:
+    """Apply the requested GPU IDs before other row filters."""
+    # TODO: error out properly if filters out of bound
+    filtered_df = workload.raw_pmc
+
+    if workload.filter_gpu_ids:
+        filtered_df = filtered_df.loc[
+            filtered_df["GPU_ID"]
+            .astype(str)
+            .isin(normalize_filter_to_str_list(workload.filter_gpu_ids))
+        ]
+        if filtered_df.empty:
+            console_error("analysis", f"{workload.filter_gpu_ids} is an invalid gpu-id")
+
+    return filtered_df
 
 
 def _build_pc_sampling_partial_frame(
@@ -473,11 +425,15 @@ def _format_pc_sampling_display_frame(
     method: str,
     sorting_type: str,
     num_rows: Optional[int] = None,
+    gpu_arch: Optional[str] = None,
 ) -> pd.DataFrame:
     """Return the sampling rows in their requested display layout."""
     # Project stall_reason as a descending list[(reason, count)].
     df["stall_reason"] = df["stall_reason"].apply(_stall_reason_dict_to_list)
     df["source_line"] = df["source_line"].apply(_trim_source_line)
+    df["instruction_type"] = df["instruction"].apply(
+        lambda instruction: InstructionPipelines.lookup(instruction, gpu_arch)
+    )
 
     # Sort on the numeric offset (lexicographic hex order is wrong), then
     # format offset as hex for display. Leading with pid keeps each process's
@@ -505,6 +461,7 @@ def _format_pc_sampling_display_frame(
         "pid",
         "source_line",
         "instruction",
+        "instruction_type",
         "code_object_id",
         "offset",
         "count",
@@ -513,8 +470,8 @@ def _format_pc_sampling_display_frame(
     # wave_occupancy_percent is stochastic-only: a host_trap record has no
     # wave count to derive it from.
     stochastic_only_columns = [
-        "count_issued",
-        "count_stalled",
+        "issue_count",
+        "stall_count",
         "wave_occupancy_percent",
         "stall_reason",
     ]
@@ -609,6 +566,7 @@ def load_pc_sampling_data(
         pc_sampling_method,
         sorting_type,
         num_rows=num_rows,
+        gpu_arch=sys_info.get("gpu_arch"),
     )
 
 
@@ -637,8 +595,8 @@ def nullify_unevaluated_metric_values(
     table cells still contain raw formula strings produced by
     ``build_metric_value_string``.  This helper walks every
     ``metric_table`` in *workload* and sets each ``SUPPORTED_FIELD``
-    column to ``"N/A"`` so that downstream display code (``tty``,
-    ``webui``, ``tui``) can safely format the values.
+    column to ``"N/A"`` so that downstream display code can safely
+    format the values.
     """
     for df_id, df_type in workload.dfs_type.items():
         if df_type != "metric_table":
@@ -714,10 +672,8 @@ def torch_operator_pattern_matches(pattern: str, operator_name: str) -> bool:
 def load_table_data(
     workload: schema.Workload,
     dir_path: str,
-    is_gui: bool,
     args: argparse.Namespace,
     dfs_expressions: dict[int, list[str]],
-    skip_kernel_top: bool = False,
     pc_sampling_tool_data: Optional[list[dict[str, Any]]] = None,
 ) -> None:
     """
@@ -725,8 +681,7 @@ def load_table_data(
     - Load data for "pc_sampling_table"
     - Calculate mertric value for all "metric_table"
     """
-    if not skip_kernel_top:
-        load_non_mertrics_table(workload, dir_path, args, pc_sampling_tool_data)
+    load_non_mertrics_table(workload, dir_path, args, pc_sampling_tool_data)
 
     eval_metric(
         workload.dfs,
@@ -734,7 +689,7 @@ def load_table_data(
         dfs_expressions,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
-        apply_filters(workload, dir_path, is_gui, args.debug),
+        apply_filters(workload, args.debug),
         args.debug,
     )
 

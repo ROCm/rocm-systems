@@ -14,6 +14,8 @@
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 
+#include <comm.h>
+
 #include <hip/hip_runtime.h>
 #include <cstdlib>
 #include <string>
@@ -48,6 +50,8 @@ inline bool isCeRuntimeDriverSupported()
 //   4. NCCL_LOCAL_REGISTER=0      (explicit buffer registration only).
 //   5. NCCL_CUMEM_ENABLE=1        (VMM-backed symmetric memory; default is 0).
 //      Without this, comm->symmetricSupport is false and CE is never dispatched.
+//      RCCL can still leave it false (no cuMem, e.g. kernel < 6.8), so once a
+//      communicator exists, gate on the overload that takes it.
 //
 // Use this single check wherever a test needs to decide between asserting the
 // CE path or the SM fallback path.
@@ -68,6 +72,12 @@ inline bool isCeDispatchConfigured()
            MPIHelpers::getEnvParam("NCCL_CUMEM_ENABLE",          kCuMemEnableDefault)       == kCuMemEnable;
 }
 
+// Same gate for a live communicator: ncclCeAvailable also requires its symmetric memory support.
+inline bool isCeDispatchConfigured(const ncclComm* comm)
+{
+    return isCeDispatchConfigured() && comm != nullptr && comm->symmetricSupport;
+}
+
 // Returns true when CE AlltoAll dispatch is expected (CE prerequisites + RCCL_DDA_ENABLE=0).
 inline bool isCeAlltoAllDispatchConfigured()
 {
@@ -84,6 +94,12 @@ inline bool isCeAllReduceDispatchConfigured()
     constexpr int kCeAllReduceEnabled = 1;
     return isCeDispatchConfigured() &&
            MPIHelpers::getEnvParam("RCCL_CE_ALLREDUCE", kCeAllReduceDefault) == kCeAllReduceEnabled;
+}
+
+// CE AllReduce gate for a live communicator; see isCeDispatchConfigured(const ncclComm*).
+inline bool isCeAllReduceDispatchConfigured(const ncclComm* comm)
+{
+    return isCeDispatchConfigured(comm) && isCeAllReduceDispatchConfigured();
 }
 
 // Batch path prediction helpers

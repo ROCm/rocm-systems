@@ -13,6 +13,7 @@
 
 #include "amdsmi_fakes.h"        // src/misc/amdsmi_wrap.cc
 #include "bootstrap_stubs.h"     // src/bootstrap.cc
+#include "enqueue_fakes.h"       // src/enqueue/enqueue.cc
 #include "env_fakes.h"           // src/misc/param.cc + getenv interposition
 #include "env_plugin_fakes.h"    // src/plugin/env.cc
 #include "gin_fakes.h"           // src/plugin/gin.cc + src/gin/gin_host.cc
@@ -23,12 +24,17 @@
 #include "nccl_fakes.h"
 #include "nccl_stubs.h"          // core/lifecycle stubs + data symbols
 #include "os_fakes.h"            // src/os/linux.cc
+#include "rccl_arch_thresholds_fakes.h"  // src/rccl_arch_thresholds.cc
 #include "rccl_wrap_fakes.h"     // src/rccl_wrap.cc
 #include "recorder_fakes.h"      // src/recorder.cc
 #include "rocmwrap_fakes.h"      // src/misc/rocmwrap.cc
+#ifdef ENABLE_ROCSHMEM
+#include "rocshmem_fakes.h"      // the rocSHMEM host API
+#endif
 #include "strongstream_stubs.h"  // src/misc/strongstream.cc
 #include "topo_stubs.h"          // src/graph/*.cc
 #include "transport_stubs.h"     // src/transport/*.cc + src/plugin/net.cc
+#include "transport_net_ib_fakes.h"  // src/transport/net_ib
 #include "tuning_fakes.h"        // src/graph/tuning.cc
 
 struct ncclComm;

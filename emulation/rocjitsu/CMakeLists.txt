@@ -3,23 +3,7 @@
 
 cmake_minimum_required(VERSION 3.22)
 
-set(_RJ_ROCM_PATH_EXPLICIT OFF)
-if(DEFINED ROCM_PATH AND NOT "${ROCM_PATH}" STREQUAL "")
-    set(_RJ_ROCM_PATH_EXPLICIT ON)
-elseif(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
-    set(_RJ_ROCM_PATH_EXPLICIT ON)
-    set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH "Path to the ROCm installation")
-elseif(IS_DIRECTORY "/opt/rocm")
-    set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to the ROCm installation")
-endif()
-
-if(_RJ_ROCM_PATH_EXPLICIT AND NOT IS_DIRECTORY "${ROCM_PATH}")
-    message(FATAL_ERROR "ROCM_PATH must be set to a valid directory")
-endif()
-unset(_RJ_ROCM_PATH_EXPLICIT)
-
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-include(rj_default_compiler)
 
 project(rocm_jit_suite VERSION 0.3.0)
 
@@ -28,11 +12,6 @@ include(rj_version)
 # Generate compile_commands.json for clangd, clang-tidy, and other tooling that
 # needs the exact compiler invocations from the configured build tree.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-# Default install prefix to /opt/rocm, matching other ROCm projects.
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_PATH)
-    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "" FORCE)
-endif()
 
 include(CTest)
 
@@ -61,10 +40,26 @@ if(
     endif()
 endif()
 
-# HSA/KFD headers (local copies from rocr-runtime).
-set(HSA_INCLUDE_DIR
-    "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers"
+# The monorepo provides the HSA and Linux UAPI headers as one CMake target.
+# Detached rocjitsu checkouts can point this at a matching api-headers tree.
+set(RJ_RUNTIME_API_HEADERS_SOURCE_DIR
+    "${PROJECT_SOURCE_DIR}/../../runtimes/api-headers"
+    CACHE PATH
+    "Source directory of runtimes/api-headers"
 )
+if(NOT TARGET rocm_runtime::runtime_headers)
+    if(NOT EXISTS "${RJ_RUNTIME_API_HEADERS_SOURCE_DIR}/CMakeLists.txt")
+        message(
+            FATAL_ERROR
+            "Runtime API headers not found at ${RJ_RUNTIME_API_HEADERS_SOURCE_DIR}; "
+            "set RJ_RUNTIME_API_HEADERS_SOURCE_DIR to runtimes/api-headers"
+        )
+    endif()
+    add_subdirectory(
+        "${RJ_RUNTIME_API_HEADERS_SOURCE_DIR}"
+        "${CMAKE_CURRENT_BINARY_DIR}/runtime-api-headers"
+    )
+endif()
 
 include(rj_log)
 
@@ -368,6 +363,17 @@ if(ROCJITSU_ENABLE_VFIO)
     include(rj_libvfio_user)
 endif()
 
+# Configure arithmetic before applying the parent host CPU flags.
+if(BUILD_TESTING)
+    include(rj_test_registration)
+endif()
+
+# Keep library and tests ahead of rj_host_cpu to avoid inheriting its -march policy.
+add_subdirectory(lib/arith)
+
+# Apply the host CPU policy to rocjitsu targets, after configuring dependencies.
+include(rj_host_cpu)
+
 # Libraries
 add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
@@ -387,6 +393,7 @@ target_link_libraries(
         rocjitsu_analysis
         rocjitsu_code
         rocjitsu_code_object
+        rocjitsu_executable
         rocjitsu_isa
         rocjitsu_isa_registry
         simdojo
@@ -401,7 +408,7 @@ target_link_libraries(
         rocjitsu_config
         rocjitsu_dbt_config
         rocjitsu_ip_discovery
-        rocjitsu_drm_headers
+        rocm_runtime::runtime_headers
         util
         flatbuffers
         Threads::Threads
@@ -410,7 +417,6 @@ target_include_directories(
     rocjitsu_shared
     PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
 )
-target_include_directories(rocjitsu_shared SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
 
 # Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -432,6 +438,9 @@ add_dependencies(rocjitsu_shared flatbuffers_schemas)
 add_subdirectory(tools)
 add_subdirectory(tools/rj-ip-discovery)
 add_subdirectory(fuzz/decode)
+add_subdirectory(fuzz/code_object)
+add_subdirectory(fuzz/execution)
+add_subdirectory(fuzz/multiplexer)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(tools/rocjitsu)

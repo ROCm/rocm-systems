@@ -40,7 +40,7 @@ using ::rocprofsys::pmc::device_type;
 [[nodiscard]] inline bool
 is_runtime_visible(const std::string& bdf, const std::set<std::string>& visible_bdfs)
 {
-    return !bdf.empty() && visible_bdfs.count(bdf) > 0;
+    return !bdf.empty() && visible_bdfs.contains(bdf);
 }
 
 /**
@@ -112,35 +112,6 @@ struct gpu_traits
     }
 
     /**
-     * @brief Initialize Perfetto storage for devices.
-     */
-    template <typename Perfetto, typename DeviceVector>
-    static void init_perfetto_storage(const DeviceVector& devices)
-    {
-        Perfetto::init_storage(devices);
-    }
-
-    /**
-     * @brief Setup Perfetto counter tracks for a device.
-     */
-    template <typename Perfetto>
-    static void setup_counter_tracks(const device_ptr_t&      device,
-                                     const enabled_metrics_t& enabled)
-    {
-        Perfetto::setup_counter_tracks(device->get_index(), enabled);
-    }
-
-    /**
-     * @brief Post-process Perfetto data.
-     */
-    template <typename Perfetto, typename DeviceEntries>
-    static void post_process_perfetto(const DeviceEntries& /*device_entries*/,
-                                      const enabled_metrics_t& enabled)
-    {
-        Perfetto::post_process(enabled);
-    }
-
-    /**
      * @brief Get metrics from a device.
      */
     [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&      device,
@@ -201,7 +172,7 @@ struct gpu_traits
 
         for(auto& device : devices)
         {
-            auto index = device->get_index();
+            auto const index = device->get_index();
 
             bool should_include = (filter.mode == device_selection_mode::all) ||
                                   (filter.mode == device_selection_mode::specific &&
@@ -224,7 +195,7 @@ struct gpu_traits
 
             if(should_include && device->is_supported())
             {
-                auto supported = device->get_supported_metrics();
+                auto const supported = device->get_supported_metrics();
                 entries.push_back(device_entry{ std::move(device), supported });
             }
         }

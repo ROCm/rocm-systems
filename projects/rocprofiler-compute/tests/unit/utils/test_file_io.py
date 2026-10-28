@@ -3,19 +3,76 @@
 
 """Unit tests for utils.file_io."""
 
+import gzip
 import tempfile
 
 import common
 import pandas as pd
 import pytest
 
+from utils import file_io
 from utils.file_io import (
     create_df_kernel_top_stats,
     create_df_pmc,
     is_single_panel_config,
+    load_kernel_short_names,
     rank_kernels_by_total_duration,
     validate_kernel_filter_ids,
 )
+
+KERNEL_SYMBOLS_COLUMNS = ["Kernel_Name", "Kernel_Short_Name"]
+
+ROCPD_COUNTER_HEADER = (
+    "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
+    "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
+    "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
+)
+ROCPD_COUNTER_ROW_PREFIX = "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,"
+
+NATIVE_COUNTERS_HEADER = "dispatch_id,counter_id,counter_name,counter_value\n"
+NATIVE_DISPATCH_HEADER = (
+    "dispatch_id,gpu_id,kernel_id,grid_size,workgroup_size,lds_per_workgroup,"
+    "scratch_per_workitem,start_timestamp,end_timestamp,correlation_id\n"
+)
+NATIVE_KERNEL_SYMBOLS_CSV = (
+    "kernel_id,kernel_name,kernel_short_name,arch_vgpr,accum_vgpr,sgpr\n"
+    "7,kernel_a,kernel_a,8,0,16\n"
+)
+NATIVE_AGENTS_HEADER = "node_id,name,product_name\n"
+
+
+def write_native_process(
+    workload_dir, fbase, pid, counters, dispatch_ids, gpu_id=0, agent_node_ids=None
+):
+    """Write one process's native CSVs; counters are (dispatch_id, name, value).
+
+    The agents CSV lists agent_node_ids, or just gpu_id when not given.
+    """
+    common.write_gzip_csv(
+        workload_dir / f"counters_{fbase}_{pid}.csv.gz",
+        NATIVE_COUNTERS_HEADER
+        + "".join(f"{d},5,{name},{value}\n" for d, name, value in counters),
+    )
+    common.write_gzip_csv(
+        workload_dir / f"dispatch_{fbase}_{pid}.csv.gz",
+        NATIVE_DISPATCH_HEADER
+        + "".join(
+            f"{d},{gpu_id},7,256,64,0,0,{d * 100},{d * 100 + 50},{d + 500}\n"
+            for d in dispatch_ids
+        ),
+    )
+    common.write_gzip_csv(
+        workload_dir / f"kernel_symbols_{fbase}_{pid}.csv.gz",
+        NATIVE_KERNEL_SYMBOLS_CSV,
+    )
+    common.write_gzip_csv(
+        workload_dir / f"agents_{fbase}_{pid}.csv.gz",
+        NATIVE_AGENTS_HEADER
+        + "".join(
+            f'{node_id},"gfx942","AMD Instinct MI300X"\n'
+            for node_id in (agent_node_ids or [gpu_id])
+        ),
+    )
 
 
 def _raw_pmc() -> pd.DataFrame:
@@ -218,7 +275,7 @@ def test_filters() -> None:
 
 
 # =============================================================================
-# create_df_pmc: long-form vs wide pmc_perf.csv.gz
+# create_df_pmc: long-form result artifacts
 # =============================================================================
 
 
@@ -227,13 +284,13 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
     shape of the data, so a workload with no profiling_config.yaml is still read
     correctly instead of being handed to the parser one counter at a time."""
     long_form_csv = (
-        "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
-        "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
-        "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
-        "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_WAVES,4\n"
-        "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_BUSY_CYCLES,100\n"
+        ROCPD_COUNTER_HEADER
+        + ROCPD_COUNTER_ROW_PREFIX
+        + "SQ_WAVES,4\n"
+        + ROCPD_COUNTER_ROW_PREFIX
+        + "SQ_BUSY_CYCLES,100\n"
     )
-    common.write_pmc_perf(tmp_path, long_form_csv)
+    common.write_gzip_csv(tmp_path / "results_pmc_perf_0.csv.gz", long_form_csv)
 
     df = create_df_pmc(str(tmp_path), verbose=0)
 
@@ -243,16 +300,50 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
     assert "Counter_Name" not in df.columns
 
 
-def test_create_df_pmc_rejects_wide_pmc_perf(tmp_path) -> None:
-    """A wide pmc_perf.csv.gz was written by a removed backend; analyze only
-    supports the rocpd long format, so it is rejected with a re-profile error."""
+def test_create_df_pmc_numbers_result_gpus_from_zero(tmp_path) -> None:
+    """rocpd GPU ids are node ids, numbered from 0 among the GPUs that ran."""
+    common.write_gzip_csv(
+        tmp_path / "results_pmc_perf_0.csv.gz",
+        ROCPD_COUNTER_HEADER
+        + "5"
+        + ROCPD_COUNTER_ROW_PREFIX.removeprefix("0")
+        + "SQ_WAVES,4\n",
+    )
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert df["GPU_ID"].tolist() == [0]
+
+
+def test_create_df_pmc_combines_result_files_of_one_workload(tmp_path) -> None:
+    """Counters split across passes land on the same dispatch row."""
+    common.write_gzip_csv(
+        tmp_path / "results_pmc_perf_0.csv.gz",
+        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_WAVES,4\n",
+    )
+    common.write_gzip_csv(
+        tmp_path / "results_pmc_perf_1.csv.gz",
+        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_BUSY_CYCLES,100\n",
+    )
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert len(df) == 1
+    assert df["SQ_WAVES"].iloc[0] == 4
+    assert df["SQ_BUSY_CYCLES"].iloc[0] == 100
+    assert df["Dispatch_Unit"].iloc[0] == 1
+
+
+def test_create_df_pmc_rejects_wide_result_file(tmp_path) -> None:
+    """Only the rocpd long format is supported, so a wide counter file errors
+    out with a re-profile message instead of being read as counter data."""
     wide_csv = (
         "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
         "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
         "Start_Timestamp,End_Timestamp,Kernel_ID,SQ_WAVES,SQ_BUSY_CYCLES\n"
         "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,4,100\n"
     )
-    common.write_pmc_perf(tmp_path, wide_csv)
+    common.write_gzip_csv(tmp_path / "results_pmc_perf_0.csv.gz", wide_csv)
 
     with pytest.raises(SystemExit):
         create_df_pmc(str(tmp_path), verbose=0)
@@ -260,6 +351,286 @@ def test_create_df_pmc_rejects_wide_pmc_perf(tmp_path) -> None:
 
 def test_create_df_pmc_missing_file_returns_empty(tmp_path) -> None:
     assert create_df_pmc(str(tmp_path), verbose=0).empty
+
+
+def test_create_df_pmc_errors_on_header_only_result_file(tmp_path) -> None:
+    """A pass that recorded no dispatch is bad profiling output, not empty data."""
+    common.write_gzip_csv(tmp_path / "results_pmc_perf_0.csv.gz", ROCPD_COUNTER_HEADER)
+
+    with pytest.raises(SystemExit):
+        create_df_pmc(str(tmp_path), verbose=0)
+
+
+def test_create_df_pmc_errors_on_empty_pass_beside_a_good_one(tmp_path) -> None:
+    """One unreadable pass fails the run rather than analyzing a partial set."""
+    common.write_gzip_csv(
+        tmp_path / "results_pmc_perf_0.csv.gz",
+        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_WAVES,4\n",
+    )
+    (tmp_path / "results_pmc_perf_1.csv.gz").write_bytes(b"")
+
+    with pytest.raises(SystemExit):
+        create_df_pmc(str(tmp_path), verbose=0)
+
+
+def test_create_df_pmc_errors_on_truncated_result_file(tmp_path) -> None:
+    """A profile run killed mid-write leaves a partial gzip behind."""
+    rows = "".join(f"{ROCPD_COUNTER_ROW_PREFIX}SQ_WAVES,{i}\n" for i in range(2000))
+    whole = gzip.compress((ROCPD_COUNTER_HEADER + rows).encode("utf-8"))
+    (tmp_path / "results_pmc_perf_0.csv.gz").write_bytes(whole[: len(whole) // 2])
+
+    with pytest.raises(SystemExit):
+        create_df_pmc(str(tmp_path), verbose=0)
+
+
+# =============================================================================
+# create_df_pmc: native tool artifacts
+# =============================================================================
+
+
+def test_create_df_pmc_prefers_native_artifacts_over_result_files(tmp_path) -> None:
+    """A native run writes both lanes; the rocpd results are not read."""
+    common.write_gzip_csv(
+        tmp_path / "results_pmc_perf_0.csv.gz",
+        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_WAVES,4\n",
+    )
+    write_native_process(tmp_path, "pmc_perf_0", 100, [(1, "SQ_WAVES", 42)], [1])
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert df["SQ_WAVES"].tolist() == [42]
+
+
+def test_create_df_pmc_lines_native_counter_sets_up_by_dispatch(tmp_path) -> None:
+    """Counters split across passes land on the same dispatch row."""
+    write_native_process(tmp_path, "pmc_perf_0", 100, [(1, "SQ_WAVES", 4)], [1])
+    write_native_process(tmp_path, "pmc_perf_1", 200, [(1, "SQ_BUSY_CYCLES", 100)], [1])
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert len(df) == 1
+    assert df["SQ_WAVES"].iloc[0] == 4
+    assert df["SQ_BUSY_CYCLES"].iloc[0] == 100
+
+
+def test_create_df_pmc_keeps_native_dispatch_order_past_nine(tmp_path) -> None:
+    """Ids are numbers, so dispatch 10 does not sort before dispatch 2."""
+    dispatch_ids = range(1, 13)
+    write_native_process(
+        tmp_path,
+        "pmc_perf_0",
+        100,
+        [(d, "SQ_WAVES", d) for d in dispatch_ids],
+        dispatch_ids,
+    )
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert df["SQ_WAVES"].tolist() == list(dispatch_ids)
+
+
+def test_create_df_pmc_sums_native_counter_instances_across_chunks(
+    tmp_path, monkeypatch
+) -> None:
+    """Instances split across chunks still add up to one total per dispatch."""
+    monkeypatch.setattr(file_io, "_CSV_CHUNK_ROWS", 2)
+    write_native_process(
+        tmp_path,
+        "pmc_perf_0",
+        100,
+        [(1, "SQ_WAVES", 10), (1, "SQ_BUSY", 5), (1, "SQ_WAVES", 32)],
+        [1],
+    )
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert df["SQ_WAVES"].tolist() == [42]
+    assert df["SQ_BUSY"].tolist() == [5]
+
+
+def test_create_df_pmc_errors_on_truncated_native_counters(tmp_path) -> None:
+    """A truncated gzip is caught while it is read in chunks."""
+    write_native_process(tmp_path, "pmc_perf_0", 100, [(1, "SQ_WAVES", 4)], [1])
+    rows = "".join(f"1,5,SQ_WAVES,{i}\n" for i in range(2000))
+    whole = gzip.compress((NATIVE_COUNTERS_HEADER + rows).encode("utf-8"))
+    counters = tmp_path / "counters_pmc_perf_0_100.csv.gz"
+    counters.write_bytes(whole[: len(whole) // 2])
+
+    with pytest.raises(SystemExit):
+        create_df_pmc(str(tmp_path), verbose=0)
+
+
+def test_read_profiling_csv_rejects_an_aggregation_that_cannot_chunk(tmp_path):
+    with pytest.raises(ValueError, match="mean"):
+        file_io._read_profiling_csv(
+            tmp_path / "unused.csv.gz", group_by=("a",), agg={"b": "mean"}
+        )
+
+
+def test_create_df_pmc_errors_when_no_native_counter_joins(tmp_path) -> None:
+    """Native artifacts whose counters match no dispatch are bad output."""
+    write_native_process(tmp_path, "pmc_perf_0", 100, [(2, "SQ_WAVES", 4)], [1])
+
+    with pytest.raises(SystemExit):
+        create_df_pmc(str(tmp_path), verbose=0)
+
+
+def test_create_df_pmc_gives_processes_on_one_gpu_one_gpu_id(tmp_path) -> None:
+    """The dispatch CSV carries the node id, which every process shares."""
+    write_native_process(
+        tmp_path, "pmc_perf_0", 100, [(1, "SQ_WAVES", 4)], [1], gpu_id=2
+    )
+    write_native_process(
+        tmp_path, "pmc_perf_0", 200, [(1, "SQ_WAVES", 8)], [1], gpu_id=2
+    )
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert df["GPU_ID"].tolist() == [0, 0]
+
+
+def test_create_df_pmc_numbers_gpus_in_node_order_across_processes(tmp_path) -> None:
+    """GPU ids follow node ids, not the order processes are read in."""
+    write_native_process(
+        tmp_path, "pmc_perf_0", 100, [(1, "SQ_WAVES", 4)], [1], gpu_id=3
+    )
+    write_native_process(
+        tmp_path, "pmc_perf_0", 200, [(1, "SQ_WAVES", 8)], [1], gpu_id=2
+    )
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert dict(zip(df["SQ_WAVES"], df["GPU_ID"])) == {4: 1, 8: 0}
+
+
+def test_create_df_pmc_counts_gpus_that_ran_no_dispatch(tmp_path) -> None:
+    """GPU ids number every agent, so an idle GPU still takes an id."""
+    write_native_process(
+        tmp_path,
+        "pmc_perf_0",
+        100,
+        [(1, "SQ_WAVES", 4)],
+        [1],
+        gpu_id=3,
+        agent_node_ids=[2, 3],
+    )
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert df["GPU_ID"].tolist() == [1]
+
+
+def test_load_kernel_short_names_dedupes_repeated_symbols(tmp_path):
+    """A symbol repeats per process and per run, and folds to one entry."""
+    pd.DataFrame(
+        [("vecCopy(double*)", "vecCopy"), ("vecCopy(double*)", "vecCopy")],
+        columns=KERNEL_SYMBOLS_COLUMNS,
+    ).to_csv(tmp_path / "rocpd_kernel_symbols_pmc_perf_0.csv.gz", index=False)
+    pd.DataFrame(
+        [("vecCopy(double*)", "vecCopy"), ("vecAdd()", "vecAdd")],
+        columns=KERNEL_SYMBOLS_COLUMNS,
+    ).to_csv(tmp_path / "rocpd_kernel_symbols_pmc_perf_1.csv.gz", index=False)
+
+    assert load_kernel_short_names(str(tmp_path), []) == {
+        "vecCopy(double*)": "vecCopy",
+        "vecAdd()": "vecAdd",
+    }
+
+
+def test_load_kernel_short_names_prefers_the_native_symbols(tmp_path):
+    """A native run writes both shapes; the rocpd one is not read."""
+    pd.DataFrame(
+        [("vecCopy(double*)", "stale")],
+        columns=KERNEL_SYMBOLS_COLUMNS,
+    ).to_csv(tmp_path / "rocpd_kernel_symbols_pmc_perf_0.csv.gz", index=False)
+    for prefix, columns in (
+        ("counters", ["dispatch_id"]),
+        ("dispatch", ["dispatch_id"]),
+        ("agents", ["node_id"]),
+    ):
+        pd.DataFrame([(1,)], columns=columns).to_csv(
+            tmp_path / f"{prefix}_run0_100.csv.gz", index=False
+        )
+    pd.DataFrame(
+        [(7, "vecCopy(double*)", "vecCopy")],
+        columns=["kernel_id", "kernel_name", "kernel_short_name"],
+    ).to_csv(tmp_path / "kernel_symbols_run0_100.csv.gz", index=False)
+
+    assert load_kernel_short_names(str(tmp_path), []) == {
+        "vecCopy(double*)": "vecCopy",
+    }
+
+
+def test_load_kernel_short_names_falls_back_to_the_sampling_results(tmp_path):
+    """A PC-sampling-only workload has no rocpd db, so its JSON carries them."""
+    tool_data_records = [
+        {
+            "kernel_symbols": [
+                {
+                    "formatted_kernel_name": "vecCopy(double*)",
+                    "truncated_kernel_name": "vecCopy",
+                }
+            ]
+        },
+        {
+            "kernel_symbols": [
+                {
+                    "formatted_kernel_name": "vecAdd()",
+                    "truncated_kernel_name": "vecAdd",
+                }
+            ]
+        },
+    ]
+
+    assert load_kernel_short_names(str(tmp_path), tool_data_records) == {
+        "vecCopy(double*)": "vecCopy",
+        "vecAdd()": "vecAdd",
+    }
+
+
+def test_load_kernel_short_names_prefers_the_profiled_csv(tmp_path):
+    """A counter run that also sampled takes the CSV, which covers every kernel."""
+    pd.DataFrame(
+        [("vecCopy(double*)", "vecCopy")], columns=KERNEL_SYMBOLS_COLUMNS
+    ).to_csv(tmp_path / "rocpd_kernel_symbols_pmc_perf_0.csv.gz", index=False)
+    tool_data_records = [
+        {
+            "kernel_symbols": [
+                {
+                    "formatted_kernel_name": "vecAdd()",
+                    "truncated_kernel_name": "vecAdd",
+                }
+            ]
+        }
+    ]
+
+    assert load_kernel_short_names(str(tmp_path), tool_data_records) == {
+        "vecCopy(double*)": "vecCopy"
+    }
+
+
+def test_load_kernel_short_names_falls_back_past_an_empty_csv(tmp_path):
+    """A failed extract leaves the file behind, which is a miss, not a mapping."""
+    gzip.open(tmp_path / "rocpd_kernel_symbols_pmc_perf_0.csv.gz", "wt").close()
+    tool_data_records = [
+        {
+            "kernel_symbols": [
+                {
+                    "formatted_kernel_name": "vecAdd()",
+                    "truncated_kernel_name": "vecAdd",
+                }
+            ]
+        }
+    ]
+
+    assert load_kernel_short_names(str(tmp_path), tool_data_records) == {
+        "vecAdd()": "vecAdd"
+    }
+
+
+def test_load_kernel_short_names_tolerates_a_record_without_symbols(tmp_path):
+    """The fallback runs when things went wrong, so a bare record is not fatal."""
+    assert load_kernel_short_names(str(tmp_path), [{"metadata": {"pid": 1}}]) == {}
 
 
 @pytest.mark.misc

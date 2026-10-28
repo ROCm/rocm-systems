@@ -14,6 +14,13 @@ Read and follow **[`.ai/rules/python-style.md`](.ai/rules/python-style.md)** bef
 generating or modifying any Python code. These rules cover function design, naming,
 nesting, code organization, and testing conventions.
 
+## C++ Code Style
+
+Read and follow **[`CPP_CODING_STYLE.md`](CPP_CODING_STYLE.md)** before generating
+or modifying any C++ or CMake code. It indexes one file per topic under
+`.ai/rules/cpp/`, covering the language version, performance, testability,
+callback boundaries, naming, comments, STL usage, and CMake.
+
 ## Ruff
 
 All code in `src/` must pass Ruff checks. Read **[`.ai/rules/ruff.md`](.ai/rules/ruff.md)**
@@ -45,8 +52,19 @@ for staging, commit message conventions, pre-commit hook handling, and branch sa
 When asked to create a pull request, follow **[`.ai/rules/pr-workflow.md`](.ai/rules/pr-workflow.md)**
 for PR template inference, JIRA handling, formatting, and repo identification.
 
-## Skills
+## Contributor Skills
 
 Reusable agent workflows live under **[`.ai/skills/`](.ai/skills/)** with
 tool-specific shims in `.claude/commands/`, `.github/prompts/`, and
 `.cursor/commands/`.
+
+## User-Facing Skills
+
+Agent Skills that drive `rocprof-compute` for end users live under
+**[`skills/`](skills/)**. Read **[`skills/README.md`](skills/README.md)** for
+the layout and how to run their evaluations.
+
+These skills have no CI coverage, so keeping them correct is each change's own
+responsibility. When a change alters CLI options, output layout, supported
+architectures, or whether a feature is experimental, update the matching skill
+in the same pull request, the same way you update docs and tests.

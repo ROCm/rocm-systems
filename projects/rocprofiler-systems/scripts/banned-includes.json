@@ -4,6 +4,10 @@
         "hint": "use the ROCPROFSYS_* macros in \"common/defines.h\""
     },
     {
+        "header": "timemory/components/timing/backends.hpp",
+        "hint": "use clocks::timeline for trace timestamps or clocks::thread_cpu for thread CPU time, both in \"common/clocks.hpp\", or call clock_gettime directly"
+    },
+    {
         "header": "timemory/defines.h",
         "hint": "don't use defines from Timemory"
     },
@@ -38,5 +42,9 @@
     {
         "header": "timemory/utility/macros.hpp",
         "hint": "use the ROCPROFSYS_* macros in \"common/defines.h\""
+    },
+    {
+        "header": "timemory/utility/popen.hpp",
+        "hint": "fork+execv directly; see bin/common to_c_argv()"
     }
 ]

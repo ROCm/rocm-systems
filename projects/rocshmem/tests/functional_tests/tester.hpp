@@ -203,8 +203,37 @@
   X(QpPingPong,                158)  \
   X(QpPutNbi,                  159)  \
   X(SdmaPingPong,              160)  \
-  X(SdmaPutNbi,                161)
-
+  X(SdmaPutNbi,                161)  \
+  X(BufferRegisterSymmetric,   162)  \
+  X(TilePutWaveRowMajor,       163)  \
+  X(TilePutWaveColumnMajor,    164)  \
+  X(TileGetWaveRowMajor,       165)  \
+  X(TileGetWaveColumnMajor,    166)  \
+  X(TilePutWGRowMajor,              167)  \
+  X(TilePutWGColumnMajor,           168)  \
+  X(TileGetWGRowMajor,              169)  \
+  X(TileGetWGColumnMajor,           170)  \
+  X(SignalAdd,                      171)  \
+  X(SignalSet,                      172)  \
+  X(SignalWaitUntil,                173)  \
+  X(TilePutRowMajorStartCoord,      177)  \
+  X(TileGetRowMajorStartCoord,      178)  \
+  X(TilePutWaveRowMajorStartCoord,  179)  \
+  X(TileGetWaveRowMajorStartCoord,  180)  \
+  X(TilePutWGRowMajorStartCoord,    181)  \
+  X(TileGetWGRowMajorStartCoord,    182)  \
+  X(TilePut3D,                      183)  \
+  X(TileGet3D,                      184)  \
+  X(TilePutWG3D,                    185)  \
+  X(TileGetWG3D,                    186)  \
+  X(TilePut4D,                      187)  \
+  X(TileGet4D,                      188)  \
+  X(TilePutWG4D,                    189)  \
+  X(TileGetWG4D,                    190)  \
+  X(TilePutWave3D,                  191)  \
+  X(TileGetWave3D,                  192)  \
+  X(TilePutWave4D,                  193)  \
+  X(TileGetWave4D,                  194)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {

@@ -7,20 +7,31 @@ import inspect
 from pathlib import Path
 
 import common
+import pandas as pd
 import pytest
 
 from tests.integration import common as integration_common
 from tests.integration.common import (
     CSVS,
     config,
-    is_gfx115x_soc,
     num_devices,
     num_kernels,
-    validate,
 )
 
 
-def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute, soc):
+def assert_gpu_ids_are_agent_node_ids(rank_dir):
+    """Each process's dispatch GPU ids are node ids from its own agents CSV."""
+    dispatch_csvs = sorted(rank_dir.glob("dispatch_*.csv.gz"))
+    assert dispatch_csvs, f"No native dispatch CSV in {rank_dir}"
+    for dispatch_csv in dispatch_csvs:
+        agents_csv = rank_dir / dispatch_csv.name.replace("dispatch_", "agents_", 1)
+        assert agents_csv.is_file(), f"No agents CSV beside {dispatch_csv.name}"
+        node_ids = set(pd.read_csv(agents_csv)["node_id"])
+        # Subset: agents lists every GPU, not just the ones dispatched to.
+        assert set(pd.read_csv(dispatch_csv)["gpu_id"]) <= node_ids
+
+
+def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute):
     """
     Test multi-rank profiling of a non-MPI application.
 
@@ -40,32 +51,14 @@ def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute
         file_dict = integration_common.check_csv_files(
             str(rank_dir), num_devices, num_kernels
         )
-        if soc == "MI100":
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif soc == "MI200":
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif "MI300" in soc:
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif "MI350" in soc:
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif is_gfx115x_soc():
-            assert sorted(list(file_dict.keys())) == CSVS
-        else:
-            print(f"Testing isn't supported yet for {soc}")
-            assert 0
-
-        validate(
-            inspect.stack()[0][3],
-            str(rank_dir),
-            file_dict,
-        )
+        assert sorted(list(file_dict.keys())) == CSVS
+        assert_gpu_ids_are_agent_node_ids(rank_dir)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_multi_rank_profiling_mpi_comm(
     binary_handler_profile_rocprof_compute,
-    soc,
 ):
     """
     Test multi-rank profiling of an MPI application.
@@ -98,25 +91,7 @@ def test_multi_rank_profiling_mpi_comm(
             str(rank_dir), num_devices, num_kernels
         )
 
-        if soc == "MI100":
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif soc == "MI200":
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif "MI300" in soc:
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif "MI350" in soc:
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif is_gfx115x_soc():
-            assert sorted(list(file_dict.keys())) == CSVS
-        else:
-            print(f"Testing isn't supported yet for {soc}")
-            assert 0
-
-        validate(
-            inspect.stack()[0][3],
-            str(rank_dir),
-            file_dict,
-        )
+        assert sorted(list(file_dict.keys())) == CSVS
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 

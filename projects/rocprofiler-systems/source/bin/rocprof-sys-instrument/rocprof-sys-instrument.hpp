@@ -70,7 +70,7 @@ struct rocprofsys_call_expr
     snippet_vec_t get_params()
     {
         snippet_vec_t _ret;
-        for(auto& itr : m_params)
+        for(auto const& itr : m_params)
         {
             _ret.push_back(itr.get());
         }
@@ -79,8 +79,7 @@ struct rocprofsys_call_expr
 
     call_expr_pointer_t get(procedure_t* func)
     {
-        return call_expr_pointer_t((func) ? new call_expr_t(*func, get_params())
-                                          : nullptr);
+        return call_expr_pointer_t(func ? new call_expr_t(*func, get_params()) : nullptr);
     }
 
 private:
@@ -97,8 +96,8 @@ struct rocprofsys_snippet_vec
     template <typename... Args>
     void generate(procedure_t* func, Args&&... args)
     {
-        auto _expr = rocprofsys_call_expr(std::forward<Args>(args)...);
-        auto _call = _expr.get(func);
+        auto       _expr = rocprofsys_call_expr(std::forward<Args>(args)...);
+        auto const _call = _expr.get(func);
         if(_call)
         {
             m_entries.push_back(_expr);
@@ -109,7 +108,7 @@ struct rocprofsys_snippet_vec
 
     void append(snippet_vec_t& _obj)
     {
-        for(auto& itr : m_data)
+        for(auto const& itr : m_data)
         {
             _obj.push_back(itr.get());
         }
@@ -151,7 +150,7 @@ rocprofsys_get_is_executable(const std::string& _cmd, bool _default_v)
 //======================================================================================//
 //
 static inline address_space_t*
-rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
+rocprofsys_get_address_space(patch_pointer_t const& _bpatch, int _cmdc, char** _cmdv,
                              const std::vector<std::string>& _cmdenv, bool _rewrite,
                              const std::string& _name = {})
 {
@@ -163,7 +162,7 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
         {
             errprintf(-127,
                       "'%s' is a text file. rocprof-sys only supports instrumenting "
-                      "binary files",
+                      "binary files\n",
                       _name.c_str());
         }
 
@@ -183,11 +182,11 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
     else
     {
         // override the current environment to start the process, revert environment
-        using strpair_t    = std::pair<std::string, std::string>;
-        auto _imported     = std::vector<strpair_t>{};
-        auto _exported     = std::vector<strpair_t>{};
-        auto _get_env_pair = [](const std::string& _full) {
-            auto _pos = _full.find('=');
+        using strpair_t          = std::pair<std::string, std::string>;
+        auto       _imported     = std::vector<strpair_t>{};
+        auto       _exported     = std::vector<strpair_t>{};
+        auto const _get_env_pair = [](const std::string& _full) {
+            auto const _pos = _full.find('=');
             if(_pos < _full.length())
             {
                 return std::make_pair(_full.substr(0, _pos), _full.substr(_pos + 1));
@@ -215,13 +214,12 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
             verbprintf(4, "[env] %s=%s\n", itr.first.c_str(), itr.second.c_str());
         }
 
-        if(_cmdc < 1) errprintf(-127, "No command provided");
-
+        // Empty _cmdc is rejected in main before this helper is called.
         if(is_text_file(_cmdv[0]))
         {
             errprintf(-1,
                       "'%s' is a text file. rocprof-sys only supports instrumenting "
-                      "binary files",
+                      "binary files\n",
                       _cmdv[0]);
         }
 
@@ -293,7 +291,7 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
         }
         return _v;
     }();
-    auto _names_str = fmt::format("[{}]", fmt::join(_names, ", "));
+    auto const _names_str = fmt::format("[{}]", fmt::join(_names, ", "));
 
     ROCPROFSYS_ADD_LOG_ENTRY("Inserting", _points.size(),
                              "instrumentation points into function(s)", _names_str);
@@ -318,7 +316,7 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
     size_t _n = 0;
     for(const auto& itr : _points)
     {
-        if(!itr || _traps.count(itr) > 0)
+        if(!itr || _traps.contains(itr))
         {
             continue;
         }
@@ -345,7 +343,7 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     {
         return false;
     }
-    module_t* module = funcToInstr->getModule();
+    module_t const* module = funcToInstr->getModule();
     if(!module || !traceFunc)
     {
         return false;
@@ -409,7 +407,7 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     size_t _n = 0;
     for(auto& itr : *_points)
     {
-        if(!itr || _traps.count(itr) > 0)
+        if(!itr || _traps.contains(itr))
         {
             continue;
         }

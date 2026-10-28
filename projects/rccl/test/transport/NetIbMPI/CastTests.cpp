@@ -6,7 +6,14 @@
 
 #include "NetIbMPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
+#include "multiplane.h"
 #include <initializer_list>
+#include <set>
+
+// ThreadedCastAgreedNqps returns this when the connection uses one queue pair: real,
+// but the scheduler then returns before split selection and token accounting, so the
+// threaded branches skip rather than assert.
+static constexpr int kThreadedNqpsSingleQp = 1;
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -35,7 +42,7 @@ TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSize = 1024;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -96,7 +103,7 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr int    kTotTokens = 100;
     constexpr size_t kMsgSz     = 64;
@@ -205,7 +212,7 @@ TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSize = 128;
     constexpr int    kNMsgs   = 10;
@@ -258,7 +265,7 @@ TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSize = 256;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -311,7 +318,7 @@ TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSize = 64;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -357,7 +364,7 @@ TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSize = 128;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -416,7 +423,7 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSz  = 32;
     constexpr size_t kBufSz  = (NCCL_IB_MAX_QPS + 1)  * kMsgSz;
@@ -490,7 +497,7 @@ TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr int    kNMsgs  = 100;
     constexpr size_t kMsgSz  = 32;
@@ -586,10 +593,69 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    // Parameterized by MPIEnvironment::nThreads. Scheduler state is per send
+    // communicator, so every worker arms and audits its own tokens while N
+    // schedulers run the boundary decision concurrently.
+    if (MPIEnvironment::nThreads > 1) {
+        // Token-delta assertions need the RTT-driven update suspended: with
+        // several workers the wall-clock gap between the before and after
+        // snapshots is wide enough for the timer to rewrite the ledger.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+        // The live count, agreed across ranks: on a merged device the plugin creates
+        // the requested QPs per member, so an environment-derived threshold is wrong.
+        int nqps = 0;
+        // The helper reports failures itself; both ranks exit together. One queue pair
+        // is not a failure but bypasses split selection and token accounting.
+        const int nqpsStatus = ThreadedCastAgreedNqps(/*dev=*/0, &nqps);
+        if (nqpsStatus == kThreadedNqpsSingleQp)
+            GTEST_SKIP() << "the connection uses a single queue pair, which bypasses WRR and "
+                            "split selection; CastSingleQPBypassesWrr covers that case";
+        if (nqpsStatus != 0) return;
+        const size_t splitDataMin = GetSplitDataMin();
+        if (splitDataMin == 0)
+            GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+        const size_t threshold = splitDataMin * static_cast<size_t>(nqps);
+        // WorkerCastPrepareTokens warms up with 64 bytes, which a small threshold would
+        // otherwise put past the allocation.
+        const size_t bufSize = std::max<size_t>(64, threshold);
+
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastSplitDataThresholdBoundary",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, bufSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
+                ThreadResult result;
+
+                bool outstanding = false;
+                const int seed = WorkerSeed(threadIdx, 1599);
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 1599, seed,
+                                                 /*totTokens=*/100, &outstanding);
+                if (!result.ok)
+                    return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+
+                // At the threshold the split path must leave WRR tokens alone.
+                result = WorkerCastTransferExpectTokens(rank, pair, buffer, threshold, 1600,
+                                                        mhandle, seed + 1, /*tokens=*/0,
+                                                        kLargeTransferTimeoutMs, &outstanding);
+                if (!result.ok)
+                    return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+
+                // One byte below it, WRR must consume exactly one token.
+                result = WorkerCastTransferExpectTokens(rank, pair, buffer, threshold - 1, 1601,
+                                                        mhandle, seed + 2, /*tokens=*/1,
+                                                        kLargeTransferTimeoutMs, &outstanding);
+                if (!result.ok && outstanding) return WorkerRetainHostBuffer(result, host);
+                return result;
+            });
+        return;
+    }
+
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     void* comm = (rank == 0) ? recvComm : sendComm;
 
@@ -684,7 +750,7 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr int    kPhase  = 10;
     constexpr size_t kMsgSz  = 64;
@@ -814,7 +880,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     void* comm = (rank == 0) ? recvComm : sendComm;
 
@@ -922,7 +988,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     // Must be strictly below splitDataMin so dataPerQp < splitDataMin for any nqps,
     // ensuring messages take the WRR path (not the split path).
@@ -1021,10 +1087,87 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    // Parameterized by MPIEnvironment::nThreads: N schedulers sweep both sides of
+    // the WRR/split boundary at once, each auditing its own token ledger.
+    if (MPIEnvironment::nThreads > 1) {
+        // Token-delta assertions need the RTT-driven update suspended: with
+        // several workers the wall-clock gap between the before and after
+        // snapshots is wide enough for the timer to rewrite the ledger.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+        // The live count, agreed across ranks, not the environment's request: on a
+        // merged device the plugin creates that many QPs per member, so a threshold
+        // derived from the environment sits on the wrong side of the split boundary.
+        int nqps = 0;
+        // The helper reports a failure itself; both ranks take this exit together. A
+        // single queue pair is not a failure but is not testable here either: the
+        // scheduler returns before split selection and token accounting, so the token
+        // deltas these branches expect never appear.
+        const int nqpsStatus = ThreadedCastAgreedNqps(/*dev=*/0, &nqps);
+        if (nqpsStatus == kThreadedNqpsSingleQp)
+            GTEST_SKIP() << "the connection uses a single queue pair, which bypasses WRR and "
+                            "split selection; CastSingleQPBypassesWrr covers that case";
+        if (nqpsStatus != 0) return;
+        const size_t splitDataMin = GetSplitDataMin();
+        if (splitDataMin == 0)
+            GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+        const size_t threshold = splitDataMin * static_cast<size_t>(nqps);
+        // Floored at the 64 bytes the token warm-up transfers, for the same reason.
+        const size_t bufSize = std::max<size_t>(64, threshold * 2);
+
+        std::vector<size_t> wrrSizes;
+        for (size_t size : std::initializer_list<size_t>{512, 4096, splitDataMin, threshold - 1})
+            if (size > 0 && size < threshold) wrrSizes.push_back(size);
+        // Sorted first: std::unique only collapses *adjacent* equals, and this list is
+        // built in a fixed order, not a sorted one. splitDataMin can equal 512 or 4096
+        // without being next to it, so the duplicate survived and that size ran twice.
+        std::sort(wrrSizes.begin(), wrrSizes.end());
+        wrrSizes.erase(std::unique(wrrSizes.begin(), wrrSizes.end()), wrrSizes.end());
+        const std::vector<size_t> splitSizes = {threshold, threshold * 2};
+
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastSendRecvMultipleSizes",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, bufSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
+                ThreadResult result;
+
+                bool outstanding = false;
+                const int seedBase = WorkerSeed(threadIdx, 1999);
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 1999,
+                                                 seedBase, /*totTokens=*/100, &outstanding);
+                if (!result.ok)
+                    return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+
+                int tag = 2000;
+                for (size_t size : wrrSizes) {
+                    const int stepTag = tag++;
+                    result = WorkerCastTransferExpectTokens(rank, pair, buffer, size, stepTag,
+                                                            mhandle, seedBase + stepTag,
+                                                            /*tokens=*/1, kLargeTransferTimeoutMs,
+                                                            &outstanding);
+                    if (!result.ok)
+                        return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+                }
+                for (size_t size : splitSizes) {
+                    const int stepTag = tag++;
+                    result = WorkerCastTransferExpectTokens(rank, pair, buffer, size, stepTag,
+                                                            mhandle, seedBase + stepTag,
+                                                            /*tokens=*/0, kLargeTransferTimeoutMs,
+                                                            &outstanding);
+                    if (!result.ok)
+                        return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+                }
+                return result;
+            });
+        return;
+    }
+
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kBufSz = 524288; // 512 KB — fits all test sizes
     std::vector<char> sendBuf(kBufSz);
@@ -1061,7 +1204,9 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
         if (sz > 0 && sz < kThreshold && sz <= kBufSz)
             kWrrSizes.push_back(sz);
     }
-    // Deduplicate (kSplitDataMin or 512 might equal kThreshold-1).
+    // Deduplicate (kSplitDataMin or 512 might equal kThreshold-1). Sorted first because
+    // std::unique only collapses adjacent equals and this list is built in a fixed order.
+    std::sort(kWrrSizes.begin(), kWrrSizes.end());
     kWrrSizes.erase(std::unique(kWrrSizes.begin(), kWrrSizes.end()), kWrrSizes.end());
     // Sizes at/above threshold → split path (0 tokens consumed).
     const std::vector<size_t> kSplitSizes = {kThreshold, kThreshold * 2};
@@ -1131,10 +1276,55 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    // Parameterized by MPIEnvironment::nThreads: concurrent 16 MB split-path
+    // transfers, each worker confirming its own scheduler stayed untouched.
+    if (MPIEnvironment::nThreads > 1) {
+        // Token-delta assertions need the RTT-driven update suspended: with
+        // several workers the wall-clock gap between the before and after
+        // snapshots is wide enough for the timer to rewrite the ledger.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+        // The live count, agreed across ranks, not the environment's request: on a
+        // merged device the plugin creates that many QPs per member, so a threshold
+        // derived from the environment sits on the wrong side of the split boundary.
+        int nqps = 0;
+        // The helper reports a failure itself; both ranks take this exit together. A
+        // single queue pair is not a failure but is not testable here either: the
+        // scheduler returns before split selection and token accounting, so the token
+        // deltas these branches expect never appear.
+        const int nqpsStatus = ThreadedCastAgreedNqps(/*dev=*/0, &nqps);
+        if (nqpsStatus == kThreadedNqpsSingleQp)
+            GTEST_SKIP() << "the connection uses a single queue pair, which bypasses WRR and "
+                            "split selection; CastSingleQPBypassesWrr covers that case";
+        if (nqpsStatus != 0) return;
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastLargeTransfer",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, kLargeBufferSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
+                ThreadResult result;
+
+                bool outstanding = false;
+                const int seed = WorkerSeed(threadIdx, 2099);
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 2099, seed,
+                                                 /*totTokens=*/100, &outstanding);
+                if (!result.ok)
+                    return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+
+                result = WorkerCastTransferExpectTokens(rank, pair, buffer, kLargeBufferSize,
+                                                        2100, mhandle, seed + 1, /*tokens=*/0,
+                                                        kLargeTransferTimeoutMs, &outstanding);
+                if (!result.ok && outstanding) return WorkerRetainHostBuffer(result, host);
+                return result;
+            });
+        return;
+    }
+
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSz = kLargeBufferSize; // 16 MB
     std::vector<char> sendBuf(kMsgSz);
@@ -1196,10 +1386,56 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    // Parameterized by MPIEnvironment::nThreads: a zero-byte send must still take
+    // the WRR path on every worker's own scheduler.
+    if (MPIEnvironment::nThreads > 1) {
+        // Token-delta assertions need the RTT-driven update suspended: with
+        // several workers the wall-clock gap between the before and after
+        // snapshots is wide enough for the timer to rewrite the ledger.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+        // The live count, agreed across ranks, not the environment's request: on a
+        // merged device the plugin creates that many QPs per member, so a threshold
+        // derived from the environment sits on the wrong side of the split boundary.
+        int nqps = 0;
+        // The helper reports a failure itself; both ranks take this exit together. A
+        // single queue pair is not a failure but is not testable here either: the
+        // scheduler returns before split selection and token accounting, so the token
+        // deltas these branches expect never appear.
+        const int nqpsStatus = ThreadedCastAgreedNqps(/*dev=*/0, &nqps);
+        if (nqpsStatus == kThreadedNqpsSingleQp)
+            GTEST_SKIP() << "the connection uses a single queue pair, which bypasses WRR and "
+                            "split selection; CastSingleQPBypassesWrr covers that case";
+        if (nqpsStatus != 0) return;
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastSendRecvZeroSize",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                const size_t regSize = 64;
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, regSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
+                ThreadResult result;
+
+                bool outstanding = false;
+                const int seed = WorkerSeed(threadIdx, 2199);
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 2199, seed,
+                                                 /*totTokens=*/100, &outstanding);
+                if (!result.ok)
+                    return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+
+                result = WorkerCastTransferExpectTokens(rank, pair, buffer, 0, 2200, mhandle,
+                                                        seed + 1, /*tokens=*/1,
+                                                        kLargeTransferTimeoutMs, &outstanding);
+                if (!result.ok && outstanding) return WorkerRetainHostBuffer(result, host);
+                return result;
+            });
+        return;
+    }
+
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kRegSz = 64;
     char buf[kRegSz];
@@ -1269,12 +1505,194 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    // Parameterized by MPIEnvironment::nThreads. The single-threaded body already
+    // drives many connections, but strictly one after another; here every worker
+    // owns a connection so the schedulers advance simultaneously. Each worker
+    // audits its own ledger: tokens are per send communicator.
+    if (MPIEnvironment::nThreads > 1) {
+        if (GetSplitDataMin() == 0)
+            GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+        // As the other four threaded branches do: a short update interval refills
+        // tokens mid-phase, and the audit below then reads a ledger the sends did
+        // not produce.
+        //
+        // The cost is that it suspends IbCastQpSchedUpdateTx outright, so the RTT
+        // assertions the serial body makes below -- initQpTokens no longer holding the
+        // seeded 70/30, i.e. "the RTT timer fired" -- have no counterpart here, and the
+        // scheduler weights stay 0 for the whole run. That path has no threaded coverage
+        // today; restoring it needs a separate short-interval threaded suite, which
+        // cannot reuse these token audits. See WorkerCastPrepareTokens for the full
+        // scope note.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+
+        // The live count, agreed across ranks, not the environment's request: on a
+        // merged device the plugin creates that many QPs per member, so a threshold
+        // derived from the environment sits on the wrong side of the split boundary.
+        int nqps = 0;
+        // The helper reports a failure itself; both ranks take this exit together. A
+        // single queue pair is not a failure but is not testable here either: the
+        // scheduler returns before split selection and token accounting, so the token
+        // deltas these branches expect never appear.
+        const int nqpsStatus = ThreadedCastAgreedNqps(/*dev=*/0, &nqps);
+        if (nqpsStatus == kThreadedNqpsSingleQp)
+            GTEST_SKIP() << "the connection uses a single queue pair, which bypasses WRR and "
+                            "split selection; CastSingleQPBypassesWrr covers that case";
+        if (nqpsStatus != 0) return;
+        const size_t splitDataMin = GetSplitDataMin();
+        // Split is taken when size / liveNqps >= splitDataMin, so the boundary scales
+        // with the live count; a ramp built from splitDataMin alone never crosses it.
+        const size_t threshold = splitDataMin * static_cast<size_t>(nqps);
+        if (threshold < 2)
+            GTEST_SKIP() << "live split threshold is " << threshold
+                         << " bytes: there is no WRR band below it to stress";
+        // One byte under the threshold and not floored: a 64-byte floor would push it
+        // past the threshold when the threshold is small. Only the buffer is floored.
+        const size_t msgSize = threshold - 1;
+        const std::vector<size_t> rampSizes = {threshold / 4, threshold / 2,
+                                               threshold, threshold * 2};
+        const size_t bufSize = std::max<size_t>(64, std::max(msgSize, threshold * 2));
+        static constexpr int kThreadedMsgs = 100;
+        static constexpr int kThreadedRampRounds = 5;
+
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastStressMultiRoundTwoConns",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, bufSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
+                ThreadResult result;
+
+                bool outstanding = false;
+                const int tagBase = 10000 + threadIdx * 200;
+                const int seedBase = WorkerSeed(threadIdx, 3999);
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, tagBase,
+                                                 seedBase, /*totTokens=*/kThreadedMsgs,
+                                                 &outstanding);
+                if (!result.ok)
+                    return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+
+                // Phase 1: small messages, all on the WRR path. One pattern for the
+                // whole phase rather than seedBase + i: makeBytePattern keeps the seed
+                // modulo 256, and the worker stride is 161 there, so a per-message seed
+                // collides across workers -- worker t at message 0 and worker t+1 at
+                // message 95 produce the same byte. Every worker sends the same msgSize,
+                // so the size check cannot separate the pair either, and a payload
+                // delivered on the wrong connection would verify clean. Freshness per
+                // message survives because the receiver is cleared before each transfer.
+                for (int i = 0; i < kThreadedMsgs; i++) {
+                    result = WorkerSendRecvPattern(rank, pair, buffer, msgSize, tagBase + 1 + i,
+                                                   mhandle, seedBase, kDefaultTimeoutMs,
+                                                   &outstanding);
+                    if (!result.ok)
+                        return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+                }
+
+                if (rank == 1) {
+                    struct ncclIbCastSchedState state = {};
+                    result = WorkerCastGetSchedState(pair.sendComm, &state);
+                    if (!result.ok) return result;
+                    if (!state.schedInit) {
+                        result.ok = false;
+                        result.msg = "scheduler never initialized after the WRR phase";
+                        return result;
+                    }
+                    int sum = 0;
+                    for (int qp = 0; qp < state.nqps; qp++) sum += state.activeQpTokens[qp];
+                    if (sum != state.activeTotTokens) {
+                        result.ok = false;
+                        result.msg = "per-QP tokens do not sum to activeTotTokens";
+                        return result;
+                    }
+                    if (state.activeTotTokens < 0
+                        || state.activeTotTokens > state.initTotTokens) {
+                        result.ok = false;
+                        result.msg = "activeTotTokens left the [0, initTotTokens] range";
+                        return result;
+                    }
+                    // Exact, because everything above holds whether or not WRR ran:
+                    // schedInit is set unconditionally, and the sum and the range hold
+                    // both at 0 and at an untouched full ledger. This phase arms
+                    // exactly kThreadedMsgs tokens against exactly that many
+                    // sub-threshold sends and the refill only fires on the next one, so
+                    // a WRR path that ran leaves none and one that did not leaves all.
+                    if (state.activeTotTokens != 0) {
+                        result.ok = false;
+                        result.msg = "the WRR phase left "
+                                     + std::to_string(state.activeTotTokens) + " of "
+                                     + std::to_string(state.initTotTokens)
+                                     + " tokens unspent, so the sends did not take the "
+                                       "WRR path";
+                        return result;
+                    }
+                }
+
+                // Phase 2: ramp across the WRR/split boundary.
+                int tag = tagBase + 1 + kThreadedMsgs;
+                for (int round = 0; round < kThreadedRampRounds; round++) {
+                    for (size_t size : rampSizes) {
+                        if (size == 0 || size > bufSize) continue;
+                        const int stepTag = tag++;
+                        result = WorkerSendRecvPattern(rank, pair, buffer, size, stepTag, mhandle,
+                                                       seedBase + stepTag,
+                                                       kLargeTransferTimeoutMs, &outstanding);
+                        if (!result.ok)
+                            return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+                    }
+                }
+                return result;
+            });
+        return;
+    }
+
     constexpr int kNConns = 100;
     std::vector<void*> listenComms(kNConns, nullptr);
     std::vector<void*> sendComms(kNConns, nullptr);
     std::vector<void*> recvComms(kNConns, nullptr);
-    for (int c = 0; c < kNConns; c++)
-        SetupCastConnection(/*dev=*/0, &listenComms[c], &sendComms[c], &recvComms[c]);
+    // Declared here rather than beside their registration loops so the guard below can
+    // release them: closing a communicator releases the plugin's own memory regions, not
+    // the ones a test registered, and the IB-CAST registration cache is per device -- so
+    // a wrapper left behind outlives this test, and its cache reference with it.
+    std::vector<void*> mhandles(kNConns, nullptr);
+    std::vector<void*> rampHandles(kNConns, nullptr);
+    // Declared before the guard, and sized once their sizes are known, because
+    // destruction runs in reverse: declared after it, their storage would be freed while
+    // the guard's registrations still described it, and the guard would then deregister
+    // memory that no longer exists.
+    std::vector<std::vector<char>> sendBufs, recvBufs, rampSend, rampRecv;
+
+    // Releases whatever is still held on any exit from here, the teardown's own failures
+    // included: otherwise a setup, registration or close failure returns from this body
+    // and leaves connections open and memory still registered for the rest of the
+    // process, which is the contamination the helper stopped creating inside itself.
+    // Registrations go before the communicator they belong to. A slot is nulled only
+    // after successful cleanup, so the guard can retry a failed teardown.
+    auto connsScope = makeScopeGuard([&]() {
+        for (int c = 0; c < kNConns; c++) {
+            void* comm = (rank == 0) ? recvComms[c] : sendComms[c];
+            if (comm && rampHandles[c]
+                && DeregisterMemory(comm, rampHandles[c]) == ncclSuccess)
+                rampHandles[c] = nullptr;
+            if (comm && mhandles[c] && DeregisterMemory(comm, mhandles[c]) == ncclSuccess)
+                mhandles[c] = nullptr;
+            if (rampHandles[c] || mhandles[c]) continue;
+            if (recvComms[c] && CloseRecvComm(recvComms[c]) == ncclSuccess)
+                recvComms[c] = nullptr;
+            if (sendComms[c] && CloseSendComm(sendComms[c]) == ncclSuccess)
+                sendComms[c] = nullptr;
+            if (!recvComms[c] && !sendComms[c] && listenComms[c]
+                && CloseListenComm(listenComms[c]) == ncclSuccess)
+                listenComms[c] = nullptr;
+        }
+    });
+
+    // Wrapped, because the helper ends in a fatal assertion: without this a failed setup
+    // returns from the helper and not from here, and the loop would work through the
+    // remaining connections at up to 30 s each instead of reporting what went wrong.
+    for (int c = 0; c < kNConns; c++) {
+        ASSERT_NO_FATAL_FAILURE(
+            SetupCastConnection(/*dev=*/0, &listenComms[c], &sendComms[c], &recvComms[c]));
+    }
 
     // Scale msgs per connection inversely with connection count so total work stays constant.
     constexpr int kNMsgsTotal = 10000;
@@ -1286,8 +1704,8 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     const size_t kBufSz = static_cast<size_t>(kNMsgs) * kMsgSz;
 
     // One send/recv buffer pair per connection.
-    std::vector<std::vector<char>> sendBufs(kNConns, std::vector<char>(kBufSz));
-    std::vector<std::vector<char>> recvBufs(kNConns, std::vector<char>(kBufSz));
+    sendBufs.assign(kNConns, std::vector<char>(kBufSz));
+    recvBufs.assign(kNConns, std::vector<char>(kBufSz));
     for (int c = 0; c < kNConns; c++) {
         for (size_t i = 0; i < kBufSz; i++) {
             sendBufs[c][i] = static_cast<char>(((i + c) * 3 + 7)  & 0xFF);
@@ -1295,7 +1713,6 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
         memset(recvBufs[c].data(), 0, kBufSz);
     }
 
-    std::vector<void*> mhandles(kNConns, nullptr);
     for (int c = 0; c < kNConns; c++) {
         void* comm   = (rank == 0) ? recvComms[c] : sendComms[c];
         char* regBuf = (rank == 0) ? recvBufs[c].data() : sendBufs[c].data();
@@ -1413,15 +1830,14 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     constexpr int kLargeRounds = 20;
     const size_t  kRampBufSz   = kRampSizes.back();   // one MR per conn, sized for largest
 
-    std::vector<std::vector<char>> rampSend(kNConns, std::vector<char>(kRampBufSz));
-    std::vector<std::vector<char>> rampRecv(kNConns, std::vector<char>(kRampBufSz));
+    rampSend.assign(kNConns, std::vector<char>(kRampBufSz));
+    rampRecv.assign(kNConns, std::vector<char>(kRampBufSz));
     for (int c = 0; c < kNConns; c++) {
         for (size_t i = 0; i < kRampBufSz; i++)
             rampSend[c][i] = static_cast<char>(((i + c) * 7 + 3) & 0xFF);
         memset(rampRecv[c].data(), 0, kRampBufSz);
     }
 
-    std::vector<void*> rampHandles(kNConns, nullptr);
     for (int c = 0; c < kNConns; c++) {
         void* comm   = (rank == 0) ? recvComms[c] : sendComms[c];
         char* regBuf = (rank == 0) ? rampRecv[c].data() : rampSend[c].data();
@@ -1454,17 +1870,44 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     // ── Teardown ─────────────────────────────────────────────────────────────
+    // Reported, not asserted, and for the barrier below: these checks are rank-local, so a
+    // fatal one would return from this rank while its peer waited in that collective --
+    // the hang ListenCloseListen was rewritten to remove. Each slot is also nulled as it
+    // is closed, so the guard can stay armed through the loop and close whatever a failure
+    // leaves behind.
+    bool teardownOk = true;
     for (int c = 0; c < kNConns; c++) {
         void* comm = (rank == 0) ? recvComms[c] : sendComms[c];
-        ASSERT_EQ(DeregisterMemory(comm, rampHandles[c]), ncclSuccess);
-        ASSERT_EQ(DeregisterMemory(comm, mhandles[c]), ncclSuccess);
+        const ncclResult_t deregRamp = DeregisterMemory(comm, rampHandles[c]);
+        if (deregRamp == ncclSuccess) rampHandles[c] = nullptr;
+        else teardownOk = false;
+        const ncclResult_t deregMsg = DeregisterMemory(comm, mhandles[c]);
+        if (deregMsg == ncclSuccess) mhandles[c] = nullptr;
+        else teardownOk = false;
+        EXPECT_EQ(deregRamp, ncclSuccess)
+            << "deregistering the ramp buffer failed on conn " << c;
+        EXPECT_EQ(deregMsg, ncclSuccess)
+            << "deregistering the phase-1 buffer failed on conn " << c;
+        if (rampHandles[c] || mhandles[c]) continue;
         if (rank == 0) {
-            ASSERT_EQ(CloseRecvComm(recvComms[c]), ncclSuccess);
-            ASSERT_EQ(CloseListenComm(listenComms[c]), ncclSuccess);
+            const ncclResult_t closedRecv = CloseRecvComm(recvComms[c]);
+            if (closedRecv == ncclSuccess) recvComms[c] = nullptr;
+            else teardownOk = false;
+            EXPECT_EQ(closedRecv, ncclSuccess) << "CloseRecvComm failed on conn " << c;
+            if (!recvComms[c]) {
+                const ncclResult_t closedListen = CloseListenComm(listenComms[c]);
+                if (closedListen == ncclSuccess) listenComms[c] = nullptr;
+                else teardownOk = false;
+                EXPECT_EQ(closedListen, ncclSuccess) << "CloseListenComm failed on conn " << c;
+            }
         } else {
-            ASSERT_EQ(CloseSendComm(sendComms[c]), ncclSuccess);
+            const ncclResult_t closedSend = CloseSendComm(sendComms[c]);
+            if (closedSend == ncclSuccess) sendComms[c] = nullptr;
+            else teardownOk = false;
+            EXPECT_EQ(closedSend, ncclSuccess) << "CloseSendComm failed on conn " << c;
         }
     }
+    if (teardownOk) connsScope.dismiss();
 
     MPI_Barrier(MPI_COMM_WORLD);
 }
@@ -1498,7 +1941,7 @@ TEST_F(NetIbMPITest, CastGrhSetOnRoceQp) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSize = 1024;
     char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
@@ -1581,7 +2024,7 @@ TEST_F(NetIbMPITest, CastSubnetAwareRoutingSameSubnet) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSize = 1024;
     char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
@@ -1595,6 +2038,549 @@ TEST_F(NetIbMPITest, CastSubnetAwareRoutingSameSubnet) {
     CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 901, mhandle);
     if (rank == 0)
         EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0) << "data mismatch";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: CastMultiplaneConnectionSmoke
+//
+// Smoke test for AINIC multiplane PUEC route programming.
+// When RCCL_MULTIPLANE_MAP_FILE is set, the QP RTR path in connect.cc
+// resolves each VIP to its PIP GIDs and programs per-plane PUEC routes
+// via ionic_dv_qp_set_puec_plane_route().
+//
+// This test establishes a CAST connection, performs a data-integrity
+// transfer, and verifies no crash or error occurs with multiplane
+// enabled.  The PUEC route programming is validated implicitly: if the
+// routes were wrong (e.g. source==destination for same-host peers),
+// the transfer would fail or time out.
+//
+// Requires: AINIC NIC + RCCL_MULTIPLANE_MAP_FILE pointing to a valid
+// VIP-to-PIP XML.  Skips cleanly when multiplane is not enabled.
+// =============================================================================
+TEST_F(NetIbMPITest, CastMultiplaneConnectionSmoke) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    // Two-step gate: multiplane must be configured AND the NIC must advertise
+    // PUEC support via sysfs puec_nports.  Use MPI_Allreduce so all ranks
+    // agree on skip/run — a unilateral GTEST_SKIP desynchronises TearDown's
+    // MPI_Barrier and causes a false FAIL.
+    bool multiplaneOn = false;
+    ASSERT_EQ(IbCastMultiplaneEnabled(&multiplaneOn), ncclSuccess);
+    int localSkip = (!multiplaneOn || !AnyDeviceHasPuecSupport()) ? 1 : 0;
+    int globalSkip = 0;
+    MPI_Allreduce(&localSkip, &globalSkip, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (globalSkip) {
+        GTEST_SKIP() << "Multiplane not available: "
+                        "requires RCCL_MULTIPLANE_MAP_FILE + NIC PUEC support "
+                        "(puec_nports > 0)";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+
+    // Data integrity: fill with a known pattern, verify after transfer.
+    constexpr size_t kMsgSize = 4096;
+    char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
+    for (size_t i = 0; i < kMsgSize; i++)
+        sendBuf[i] = static_cast<char>((i * 13 + 7) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 950, mhandle);
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0) << "multiplane data mismatch";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: CastMultiplaneMultiSizeTransfer
+//
+// Exercises the multiplane PUEC path with multiple message sizes (64B to 4MB)
+// to cover both small-message and large-message code paths.  Each size
+// performs a full send/recv cycle with data-integrity verification.
+//
+// Requires: multiplane enabled (AINIC + RCCL_MULTIPLANE_MAP_FILE).  Skips otherwise.
+// =============================================================================
+TEST_F(NetIbMPITest, CastMultiplaneMultiSizeTransfer) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    bool multiplaneOn = false;
+    ASSERT_EQ(IbCastMultiplaneEnabled(&multiplaneOn), ncclSuccess);
+    int localSkip = (!multiplaneOn || !AnyDeviceHasPuecSupport()) ? 1 : 0;
+    int globalSkip = 0;
+    MPI_Allreduce(&localSkip, &globalSkip, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (globalSkip) {
+        GTEST_SKIP() << "Multiplane not available: "
+                        "requires RCCL_MULTIPLANE_MAP_FILE + NIC PUEC support";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+
+    constexpr size_t kMaxSize = 4 * 1024 * 1024;  // 4 MB
+    std::vector<char> sendBuf(kMaxSize);
+    std::vector<char> recvBuf(kMaxSize);
+    for (size_t i = 0; i < kMaxSize; i++)
+        sendBuf[i] = static_cast<char>((i * 17 + 3) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? recvBuf.data() : sendBuf.data();
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMaxSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Test several sizes: 64B, 1KB, 64KB, 1MB, 4MB
+    const size_t sizes[] = {64, 1024, 64 * 1024, 1024 * 1024, kMaxSize};
+    int tag = 960;
+    for (size_t sz : sizes) {
+        memset(recvBuf.data(), 0, sz);
+        CastDoSendRecv(rank, sendComm, recvComm, buf, sz, tag++, mhandle);
+        if (rank == 0) {
+            EXPECT_EQ(memcmp(sendBuf.data(), recvBuf.data(), sz), 0)
+                << "multiplane data mismatch at size " << sz;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: CastMultiplaneDisabledNoRegression
+//
+// Verifies that when multiplane is not enabled, the connection setup and
+// data transfer work identically to the non-multiplane path.  This is a
+// backward-compatibility guard: the multiplane code in connect.cc must be
+// completely inert when multiplane is disabled.
+// =============================================================================
+TEST_F(NetIbMPITest, CastMultiplaneDisabledNoRegression) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    // This test validates the disabled (no-multiplane) path.  Use MPI_Allreduce
+    // so all ranks agree — a unilateral GTEST_SKIP desynchronises TearDown's
+    // MPI_Barrier and causes a false FAIL.
+    bool multiplaneOn = false;
+    ASSERT_EQ(IbCastMultiplaneEnabled(&multiplaneOn), ncclSuccess);
+    int localSkip = multiplaneOn ? 1 : 0;
+    int globalSkip = 0;
+    MPI_Allreduce(&localSkip, &globalSkip, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (globalSkip) {
+        GTEST_SKIP() << "Multiplane is enabled; this test validates "
+                        "the disabled (no-multiplane) path";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+
+    constexpr size_t kMsgSize = 2048;
+    char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
+    for (size_t i = 0; i < kMsgSize; i++)
+        sendBuf[i] = static_cast<char>((i * 23) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 970, mhandle);
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0)
+            << "data mismatch with multiplane disabled";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: CastRegistrationRejectsBadArguments
+//
+// Regression cover for the production guard this branch adds to net_ib_cast's
+// regMr/regMrDmaBuf/deregMr. On develop each of these dereferences the
+// communicator or the handle before looking at them, so the suite's reaction to a
+// failed connection setup was a SIGSEGV inside librccl rather than a readable
+// failure; the guard returns ncclInvalidArgument instead.
+//
+// The existing negative registration tests pass a null *buffer* with a valid
+// communicator, and the new setup wrappers return before registration when setup
+// fails, so nothing else in the suite reaches these arms.
+//
+// A null communicator needs no connection: the guard runs before the arguments reach
+// the device. deregMr is the exception -- it answers a null handle with success
+// before it looks at the communicator -- so the null-comm arm there has to carry a
+// handle, and the documented shortcut is checked on its own. The zero-size arm does
+// need a live communicator, since with a null one the null-comm check answers first.
+// Both ranks run the same checks and reach the barrier from the same place.
+// =============================================================================
+TEST_F(NetIbMPITest, CastRegistrationRejectsBadArguments) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
+
+    // No CAST_ENV_CHECK_OR_SKIP here, unlike the 16 tests above: the arms under test
+    // are argument checks that run before the scheduler, so the WRR env vars are not
+    // needed and the macro would only turn a pass into a skip.
+    net_ = &netIbCast;
+    // Not AssertInitAndGetDevices, and not that helper wrapped in
+    // ASSERT_NO_FATAL_FAILURE either. Its assertions are rank-local -- a node whose IB
+    // port is down reports ndev == 0 on that rank alone -- so making the failure fatal
+    // here, however it is propagated, returns from this body on the rank that failed
+    // while its peer walks into SetupCastConnection and blocks in the MPI_Allreduce
+    // there. Nothing downstream resynchronises them: cleanupTestCommunicator returns
+    // before its barriers when no test communicator was created. Wrapping a rank-local
+    // assertion trades an unset out-parameter for a hang, which is a worse failure than
+    // the one it fixes.
+    //
+    // So the checks are recorded non-fatally and reduced first, the way both setup
+    // helpers do it: every rank reaches the same collective and the same verdict.
+    // Both return codes go into the verdict, not just the device count. IbCastInit
+    // populates the merged-device list first (IbCastInitDevices) and can still fail
+    // afterwards -- starting the port-recovery thread, allocating the context -- while
+    // IbCastDevices goes on reporting the count that was already filled in. Reducing
+    // ndev alone would let both ranks agree they were ready and walk into setup on a
+    // plugin whose init had failed.
+    const ncclResult_t initRet = InitNetIb();
+    EXPECT_EQ(initRet, ncclSuccess) << "InitNetIb failed";
+    int ndev = 0;
+    const ncclResult_t devRet = GetDeviceCount(&ndev);
+    EXPECT_EQ(devRet, ncclSuccess) << "GetDeviceCount failed";
+    int ready = (initRet == ncclSuccess && devRet == ncclSuccess && ndev > 0) ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &ready, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+    ASSERT_EQ(ready, 1) << "init or device discovery failed on at least one rank";
+
+    // Fixed, not allocated: a rank-local allocation failure would end this rank
+    // before the barrier below while its peer waited there.
+    static char buffer[4096];
+    void* mhandle = nullptr;
+
+    // No connection required for these three.
+    EXPECT_EQ(RegisterMemory(nullptr, buffer, sizeof(buffer), NCCL_PTR_HOST, &mhandle),
+              ncclInvalidArgument)
+        << "regMr must reject a null communicator instead of dereferencing it";
+    EXPECT_EQ(RegisterDmaBufMemory(nullptr, buffer, sizeof(buffer), NCCL_PTR_HOST,
+                                   /*offset=*/0, /*fd=*/-1, &mhandle),
+              ncclInvalidArgument)
+        << "regMrDmaBuf must reject a null communicator";
+    // Not the mhandle above: it is still null, since the two calls above return before
+    // assigning it, and a null handle takes deregMr's early success. The guard rejects
+    // the communicator before the handle is read, so a value that points at nothing
+    // usable reaches the arm under test safely.
+    void* const unusedMhandle = reinterpret_cast<void*>(0x1);
+    EXPECT_EQ(DeregisterMemory(nullptr, unusedMhandle), ncclInvalidArgument)
+        << "deregMr must reject a null communicator";
+    EXPECT_EQ(DeregisterMemory(nullptr, nullptr), ncclSuccess)
+        << "deregMr must keep treating a null handle as a no-op, ahead of the comm check";
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+
+    const int rank = MPIEnvironment::world_rank;
+    void* comm = (rank == 0) ? recvComm : sendComm;
+    ASSERT_NE(comm, nullptr);
+
+    EXPECT_EQ(RegisterMemory(comm, buffer, /*size=*/0, NCCL_PTR_HOST, &mhandle),
+              ncclInvalidArgument)
+        << "regMr must reject a zero size";
+    EXPECT_EQ(RegisterMemory(comm, buffer, sizeof(buffer), NCCL_PTR_HOST, nullptr),
+              ncclInvalidArgument)
+        << "regMr must reject a null out-handle";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, nullptr);
+}
+
+// =============================================================================
+// Test: CastUdmaPinningVerify
+//
+// Functional HW test: establishes a CAST connection, reads back per-QP UDMA
+// indices via ionic_dv_qp_get_udma_idx, and verifies that every QP in this
+// single-channel connection reports the same in-range UDMA index.
+//
+// Also performs a data-integrity send/recv to confirm the QPs are functional.
+//
+// Requires: AINIC NIC with ionic driver supporting qp_get_udma_idx.
+// Skips cleanly on non-AINIC or older drivers (all queryOk false).
+// =============================================================================
+TEST_F(NetIbMPITest, CastUdmaPinningVerify) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    // Route check: skip if dev 0 has no routable GID.
+    ncclNetProperties_t props;
+    memset(&props, 0, sizeof(props));
+    ASSERT_EQ(GetDeviceProperties(0, &props), ncclSuccess);
+    int skipFlag = (props.name && !CanRouteCrossNode(props.name)) ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &skipFlag, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    if (skipFlag) {
+        GTEST_SKIP() << "dev 0 has no routable GID on at least one rank";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    // ── UDMA state readback (sender side only) ──
+    // Rank 1 is the sender; rank 0 reads from recvComm (which also works, but
+    // the plan specifies sender).  Use MPI_Allreduce to synchronize decisions.
+    //
+    // This test uses a single connection (channelId=0) so all QPs share the
+    // same UDMA engine.  Cross-channel round-robin (different channels →
+    // different engines) is verified by the host-only CrossChannelDistribution
+    // test which exercises the same ncclIbCastUdmaRoundRobinMask helper that
+    // the production QP-creation path calls.
+    void* myComm = (rank == 0) ? recvComm : sendComm;
+    int udmaFail = 0, udmaSkip = 0;
+    struct ncclIbCastUdmaState udma = {};
+
+    if (ncclIbCastGetUdmaState(myComm, &udma) != ncclSuccess) {
+        udmaFail = 1;
+    } else if (udma.nqps <= 0 || udma.udmaCount == 0) {
+        // When AINIC is active, udmaCount must be non-zero; a zero value
+        // means the discovery code in init.cc was broken or removed.
+        if (rcclUseAinic()) udmaFail = 1;
+        else                udmaSkip = 1;
+    } else {
+        // Check if any QP has a valid readback.
+        bool anyQueryOk = false;
+        for (int i = 0; i < udma.nqps; i++) {
+            if (udma.queryOk[i]) {
+                anyQueryOk = true;
+                break;
+            }
+        }
+        if (!anyQueryOk) {
+            // Older driver without ionic_dv_qp_get_udma_idx support.
+            udmaSkip = 1;
+        } else {
+            // Validate per-QP UDMA indices.
+            // Within a single connection (one channelId), all QPs share
+            // the same UDMA engine because the mask is set per-PD at the
+            // channel level.  Round-robin distribution happens across
+            // different channels/connections, not within one connection.
+            uint8_t firstIdx = 0xFF;
+            for (int i = 0; i < udma.nqps; i++) {
+                if (!udma.queryOk[i]) continue;
+
+                // UDMA index must be within range.
+                EXPECT_LT(udma.udmaIdx[i], udma.udmaCount)
+                    << "rank " << rank << " QP " << i
+                    << " udmaIdx=" << (int)udma.udmaIdx[i]
+                    << " exceeds udmaCount=" << (int)udma.udmaCount;
+
+                // All QPs in this single-channel connection share one engine.
+                if (firstIdx == 0xFF) {
+                    firstIdx = udma.udmaIdx[i];
+                } else {
+                    EXPECT_EQ(udma.udmaIdx[i], firstIdx)
+                        << "rank " << rank << " QP " << i
+                        << " expected same udmaIdx=" << (int)firstIdx
+                        << " as QP 0 (single channel), but got "
+                        << (int)udma.udmaIdx[i];
+                }
+            }
+
+            // Verify the shared round-robin helper agrees with what the
+            // driver reported for channel 0 (first engine in the sequence).
+            uint8_t hostMask = 0;
+            EXPECT_EQ(ncclIbCastTestUdmaRoundRobin(udma.udmaCount, 1, &hostMask),
+                      ncclSuccess);
+            if (firstIdx != 0xFF) {
+                EXPECT_EQ(1u << firstIdx, (unsigned)hostMask)
+                    << "rank " << rank
+                    << " driver reported engine " << (int)firstIdx
+                    << " but shared helper picked mask " << (int)hostMask;
+            }
+        }
+    }
+
+    MPI_Allreduce(MPI_IN_PLACE, &udmaFail, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, &udmaSkip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+
+    if (udmaFail || udmaSkip) {
+        // TeardownConnection accepts null mhandle — no need to register memory
+        // just to tear down.  Avoids a fatal ASSERT_EQ that could hang the peer.
+        TeardownConnection(recvComm, listenComm, sendComm, nullptr);
+        if (udmaFail)
+            FAIL() << "ncclIbCastGetUdmaState failed";
+        GTEST_SKIP() << "UDMA pinning readback unavailable "
+                        "(non-AINIC device or older ionic driver)";
+    }
+
+    // ── Data integrity: confirm QPs are functional ──
+    constexpr size_t kMsgSize = 1024;
+    char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 11) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 980, mhandle);
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0) << "UDMA pinning data mismatch";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: CastUdmaPinningSharingVerify
+//
+// Functional HW test: establishes a CAST connection with QP sharing enabled
+// (RCCL_IB_QP_SHARING_ENABLE=1, RCCL_IB_COMM_NGROUPS=1), reads back per-QP
+// UDMA indices via ionic_dv_qp_get_udma_idx, and verifies that the
+// sharing-path UDMA mask selection in ncclIbCreateQpIonic works correctly:
+//   - Each QP's UDMA index is within [0, udmaCount)
+//   - Data integrity via send/recv confirms functional QPs
+//
+// NGROUPS must be 1 so that connect.cc selects the per-QP qpIdx as the
+// udmaSelector (connect.cc:504).  With NGROUPS > 1 the selector is
+// qpSharingGroupIdx, which is constant across all QPs in a connection,
+// so every QP would land on one engine and the distinct-engine check
+// would be ineffective.
+//
+// Requires: AINIC NIC with ionic driver supporting qp_get_udma_idx,
+//           and RCCL_IB_QP_SHARING_ENABLE=1 + RCCL_IB_COMM_NGROUPS=1
+//           set via test runner config.
+// Skips cleanly on non-AINIC, older drivers, or if sharing is not enabled.
+// =============================================================================
+TEST_F(NetIbMPITest, CastUdmaPinningSharingVerify) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    // Route check: skip if dev 0 has no routable GID.
+    ncclNetProperties_t props;
+    memset(&props, 0, sizeof(props));
+    ASSERT_EQ(GetDeviceProperties(0, &props), ncclSuccess);
+    int skipFlag = (props.name && !CanRouteCrossNode(props.name)) ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &skipFlag, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    if (skipFlag) {
+        GTEST_SKIP() << "dev 0 has no routable GID on at least one rank";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    // ── UDMA state readback ──
+    void* myComm = (rank == 0) ? recvComm : sendComm;
+    int udmaFail = 0, udmaSkip = 0;
+    struct ncclIbCastUdmaState udma = {};
+
+    if (ncclIbCastGetUdmaState(myComm, &udma) != ncclSuccess) {
+        udmaFail = 1;
+    } else if (udma.nqps <= 0 || udma.udmaCount == 0) {
+        if (rcclUseAinic()) udmaFail = 1;
+        else         udmaSkip = 1;
+    } else {
+        bool anyQueryOk = false;
+        for (int i = 0; i < udma.nqps; i++) {
+            if (udma.queryOk[i]) {
+                anyQueryOk = true;
+                break;
+            }
+        }
+        if (!anyQueryOk) {
+            udmaSkip = 1;
+        } else {
+            // Validate per-QP UDMA indices: each must be in range.
+            // With NGROUPS=1 the sharing path uses qpIdx as the UDMA
+            // selector, so distinct QPs get distinct engines via the
+            // round-robin formula 1u << (qpIdx % udmaCount).
+            std::set<uint8_t> distinctEngines;
+            for (int i = 0; i < udma.nqps; i++) {
+                if (!udma.queryOk[i]) continue;
+                EXPECT_LT(udma.udmaIdx[i], udma.udmaCount)
+                    << "rank " << rank << " QP " << i
+                    << " udmaIdx=" << (int)udma.udmaIdx[i]
+                    << " exceeds udmaCount=" << (int)udma.udmaCount;
+                distinctEngines.insert(udma.udmaIdx[i]);
+            }
+
+            // When the NIC has more than 2 UDMA engines and the
+            // connection has enough QPs, verify that the sharing path
+            // actually spreads across more than 2 engines.  This
+            // catches a regression to the legacy "% 2" formula that
+            // would still pass the range check above.
+            if (udma.udmaCount > 2 && udma.nqps >= udma.udmaCount) {
+                EXPECT_GT(distinctEngines.size(), 2u)
+                    << "rank " << rank
+                    << " expected >2 distinct UDMA engines with udmaCount="
+                    << (int)udma.udmaCount << " and nqps=" << udma.nqps
+                    << ", but only saw " << distinctEngines.size();
+            }
+        }
+    }
+
+    MPI_Allreduce(MPI_IN_PLACE, &udmaFail, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, &udmaSkip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+
+    if (udmaFail || udmaSkip) {
+        TeardownConnection(recvComm, listenComm, sendComm, nullptr);
+        if (udmaFail)
+            FAIL() << "ncclIbCastGetUdmaState failed";
+        GTEST_SKIP() << "UDMA pinning readback unavailable "
+                        "(non-AINIC device or older ionic driver)";
+    }
+
+    // ── Data integrity: confirm QPs are functional with sharing enabled ──
+    constexpr size_t kMsgSize = 1024;
+    char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 13) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 981, mhandle);
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0) << "UDMA sharing data mismatch";
 
     MPI_Barrier(MPI_COMM_WORLD);
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);

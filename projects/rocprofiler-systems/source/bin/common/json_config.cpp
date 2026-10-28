@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/json_config.hpp"
+#include <algorithm>
 #include <cstdint>
 
 #include "common/env_vars.hpp"
@@ -47,7 +48,7 @@ collect_enabled_entry_names(const nlohmann::json&             metrics_obj,
     std::vector<std::string> result;
     for(const auto& [name, metric] : metrics_obj.items())
     {
-        if(exclude.count(name) > 0)
+        if(exclude.contains(name))
         {
             continue;
         }
@@ -98,19 +99,19 @@ json_value_to_string(const nlohmann::json& val)
     {
         return val.get<std::string>();
     }
-    else if(val.is_boolean())
+    if(val.is_boolean())
     {
         return val.get<bool>() ? "true" : "false";
     }
-    else if(val.is_number_integer())
+    if(val.is_number_integer())
     {
         return std::to_string(val.get<std::int64_t>());
     }
-    else if(val.is_number_float())
+    if(val.is_number_float())
     {
         return std::to_string(val.get<double>());
     }
-    else if(val.is_array())
+    if(val.is_array())
     {
         std::string result;
         for(const auto& item : val)
@@ -184,10 +185,6 @@ resolve_schema_config(const nlohmann::json& config)
     {
         const auto& tracing = config["tracing"];
         resolve_enabled(result, tracing, "enabled", env_vars::TRACE);
-        if(tracing.contains("legacy"))
-        {
-            resolve_enabled(result, tracing["legacy"], "enabled", env_vars::TRACE_LEGACY);
-        }
         resolve_value(result, tracing, "buffer_size_kb",
                       env_vars::PERFETTO_BUFFER_SIZE_KB);
         resolve_value(result, tracing, "fill_policy", env_vars::PERFETTO_FILL_POLICY);
@@ -230,10 +227,25 @@ resolve_schema_config(const nlohmann::json& config)
     {
         const auto& domains = config["domains"];
 
-        // GPU domain (AMD SMI metrics)
+        // GPU domain (AMD SMI and hipFile metrics)
         if(domains.contains("gpu"))
         {
             const auto& gpu = domains["gpu"];
+            // hipFile telemetry is independent of AMD SMI being enabled.
+            if(gpu.contains("hipfile"))
+            {
+                const auto& hipfile = gpu["hipfile"];
+                resolve_enabled(result, hipfile, "enabled", env_vars::USE_HIPFILE);
+                if(hipfile.contains("metrics"))
+                {
+                    auto enabled = collect_enabled_entry_names(hipfile["metrics"]);
+                    if(!enabled.empty())
+                    {
+                        result[std::string{ env_vars::HIPFILE_METRICS }] =
+                            join_with(enabled, ',');
+                    }
+                }
+            }
             if(gpu.contains("enabled") && gpu["enabled"].get<bool>())
             {
                 result[std::string{ env_vars::USE_AMD_SMI }]          = "true";
@@ -241,7 +253,7 @@ resolve_schema_config(const nlohmann::json& config)
 
                 if(gpu.contains("metrics"))
                 {
-                    auto enabled = collect_enabled_entry_names(gpu["metrics"]);
+                    auto const enabled = collect_enabled_entry_names(gpu["metrics"]);
                     if(!enabled.empty())
                     {
                         result[std::string{ env_vars::AMD_SMI_METRICS }] =
@@ -273,7 +285,7 @@ resolve_schema_config(const nlohmann::json& config)
             if(rocm.contains("enabled") && rocm["enabled"].get<bool>())
             {
                 // Top-level rocm.enabled ensures tracing is on and default domains set
-                if(result.find(std::string{ env_vars::TRACE }) == result.end())
+                if(!result.contains(std::string{ env_vars::TRACE }))
                 {
                     result[std::string{ env_vars::TRACE }] = "true";
                 }
@@ -332,7 +344,7 @@ resolve_schema_config(const nlohmann::json& config)
                         result[std::string{ env_vars::CPU_FREQ }] = "true";
                     }
 
-                    auto enabled = collect_enabled_entry_names(metrics, { "freq" });
+                    auto const enabled = collect_enabled_entry_names(metrics, { "freq" });
                     if(!enabled.empty())
                     {
                         result[std::string{ env_vars::CPU_METRICS }] =
@@ -503,7 +515,7 @@ load_and_resolve(const std::string& filepath)
 
     try
     {
-        auto config = nlohmann::json::parse(ifs);
+        auto const config = nlohmann::json::parse(ifs);
         return resolve_config(config);
     } catch(const nlohmann::json::exception& e)
     {
@@ -557,7 +569,7 @@ load_config_metadata(const std::string& filepath)
 
     try
     {
-        auto config = nlohmann::json::parse(ifs);
+        auto const config = nlohmann::json::parse(ifs);
         return get_config_metadata(config);
     } catch(const nlohmann::json::exception&)
     {
@@ -585,8 +597,8 @@ expand_rocm_domain_shorthand(const std::string& shorthand)
         { "hipfile", "hipfile_api" },
     } };
 
-    auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
-                           [&](const entry& e) { return e.first == shorthand; });
+    auto it = std::ranges::find_if(shortcuts,
+                                   [&](const entry& e) { return e.first == shorthand; });
     if(it != shortcuts.end())
     {
         return std::string{ it->second };
@@ -597,12 +609,12 @@ expand_rocm_domain_shorthand(const std::string& shorthand)
 std::string
 expand_rocm_domains(const std::string& domains_str)
 {
-    auto tokens = split_csv_lowercase(domains_str);
+    auto const tokens = split_csv_lowercase(domains_str);
 
     std::string result;
     for(const auto& t : tokens)
     {
-        auto expanded = expand_rocm_domain_shorthand(t);
+        auto const expanded = expand_rocm_domain_shorthand(t);
         if(!result.empty())
         {
             result += ',';
@@ -642,8 +654,8 @@ expand_parallel_runtimes(const std::string& runtimes_str)
 
     for(const auto& token : split_csv_lowercase(runtimes_str))
     {
-        auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
-                               [&](const entry& e) { return e.first == token; });
+        auto it = std::ranges::find_if(shortcuts,
+                                       [&](const entry& e) { return e.first == token; });
         if(it != shortcuts.end())
         {
             result[std::string{ it->second }] = "true";
@@ -671,8 +683,8 @@ expand_gpu_metrics(const std::string& metrics_str)
     std::string result;
     for(const auto& token : split_csv_lowercase(metrics_str))
     {
-        auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
-                               [&](const entry& e) { return e.first == token; });
+        auto it = std::ranges::find_if(shortcuts,
+                                       [&](const entry& e) { return e.first == token; });
         if(!result.empty())
         {
             result += ',';
@@ -767,7 +779,7 @@ is_truthy(const std::string& v)
     {
         return false;
     }
-    auto lower = utility::string::to_lower(v);
+    auto const lower = utility::string::to_lower(v);
     return lower == "true" || lower == "on" || lower == "yes";
 }
 
@@ -776,7 +788,7 @@ export_enabled(nlohmann::json& config, const std::map<std::string, std::string>&
                std::string_view env_var, const std::string& json_path_section,
                const std::string& json_path_key)
 {
-    auto it = env_map.find(std::string{ env_var });
+    auto const it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
     {
         config[json_path_section][json_path_key]["enabled"] = is_truthy(it->second);
@@ -788,7 +800,7 @@ export_section_enabled(nlohmann::json&                           config,
                        const std::map<std::string, std::string>& env_map,
                        std::string_view env_var, const std::string& json_path_section)
 {
-    auto it = env_map.find(std::string{ env_var });
+    auto const it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
     {
         config[json_path_section]["enabled"] = is_truthy(it->second);
@@ -801,7 +813,7 @@ export_string_value(nlohmann::json&                           config,
                     std::string_view env_var, const std::string& json_path_section,
                     const std::string& json_path_key)
 {
-    auto it = env_map.find(std::string{ env_var });
+    auto const it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
     {
         config[json_path_section][json_path_key]["value"] = it->second;
@@ -814,7 +826,7 @@ export_int_value(nlohmann::json&                           config,
                  std::string_view env_var, const std::string& json_path_section,
                  const std::string& json_path_key)
 {
-    auto it = env_map.find(std::string{ env_var });
+    auto const it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
     {
         set_json_int(config[json_path_section][json_path_key]["value"], it->second);
@@ -827,7 +839,7 @@ export_double_value(nlohmann::json&                           config,
                     std::string_view env_var, const std::string& json_path_section,
                     const std::string& json_path_key)
 {
-    auto it = env_map.find(std::string{ env_var });
+    auto const it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
     {
         set_json_double(config[json_path_section][json_path_key]["value"], it->second);
@@ -839,7 +851,7 @@ namespace
 std::optional<std::string>
 lookup(const std::map<std::string, std::string>& env_map, std::string_view key)
 {
-    auto it = env_map.find(std::string{ key });
+    auto const it = env_map.find(std::string{ key });
     if(it != env_map.end())
     {
         return it->second;
@@ -852,7 +864,6 @@ export_tracing_section(nlohmann::json&                           config,
                        const std::map<std::string, std::string>& env_map)
 {
     export_section_enabled(config, env_map, env_vars::TRACE, "tracing");
-    export_enabled(config, env_map, env_vars::TRACE_LEGACY, "tracing", "legacy");
     export_int_value(config, env_map, env_vars::PERFETTO_BUFFER_SIZE_KB, "tracing",
                      "buffer_size_kb");
     export_string_value(config, env_map, env_vars::PERFETTO_FILL_POLICY, "tracing",
@@ -892,6 +903,16 @@ export_domain_gpu(nlohmann::json&                           config,
     if(auto v = lookup(env_map, env_vars::USE_PROCESS_SAMPLING))
     {
         gpu["process_sampling"]["enabled"] = is_truthy(*v);
+    }
+
+    // hipFile infinty storage I/O telemetry is independent of AMD SMI.
+    if(auto hipfile_enabled = lookup(env_map, env_vars::USE_HIPFILE))
+    {
+        gpu["hipfile"]["enabled"] = is_truthy(*hipfile_enabled);
+    }
+    if(auto metrics = lookup(env_map, env_vars::HIPFILE_METRICS))
+    {
+        csv_to_json_enabled_flags(gpu["hipfile"]["metrics"], *metrics);
     }
 
     auto use_amd_smi = lookup(env_map, env_vars::USE_AMD_SMI);

@@ -51,8 +51,7 @@ struct cache_policy
             auto qname      = make_qualified_name(meta);
             auto track_name = format_track_name(gpu_id, qname);
 
-            registry.add_track(
-                { .track_name = track_name, .thread_id = std::nullopt, .extdata = "{}" });
+            registry.ensure_track(track_name, std::nullopt);
 
             registry.add_pmc_info({ .type             = agent_type::gpu,
                                     .agent_type_index = gpu_id,
@@ -74,8 +73,9 @@ struct cache_policy
                                     .is_derived       = meta.is_derived ? 1U : 0U,
                                     .extdata          = "{}" });
 
-            name_entries.push_back(
-                { meta.counter_id, std::move(qname), std::move(track_name) });
+            name_entries.push_back({ .counter_id    = meta.counter_id,
+                                     .pmc_info_name = std::move(qname),
+                                     .track_name    = std::move(track_name) });
         }
 
         registry.set_gpu_perf_counter_counter_names(static_cast<std::uint32_t>(gpu_id),

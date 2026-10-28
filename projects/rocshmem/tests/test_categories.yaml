@@ -83,6 +83,9 @@ test_categories:
       # Signal operations
       - "putsignal_.*"
       - "signalfetch_.*"
+      - "signaladd_.*"
+      - "signalset_.*"
+      - "signalwaituntil_.*"
 
       # Stream tests (basic)
       - "putmem_signal_on_stream_.*"
@@ -92,6 +95,7 @@ test_categories:
       # Specialized tests
       - "shmemptr_.*"
       - "library_info_.*"
+      - "buffer_register_symmetric_.*"
       - "hipmodule_init_.*"
 
     labels:

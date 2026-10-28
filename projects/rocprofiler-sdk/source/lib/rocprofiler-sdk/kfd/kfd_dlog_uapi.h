@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/* KFD dispatch-log stream UAPI (profiler ABI v6, stream ABI v3). Vendored subset
+/* KFD dispatch-log stream UAPI (profiler ABI v6, stream ABI v4). Vendored subset
  * of include/uapi/linux/kfd_ioctl.h needed by the SDK's dispatch-log reader; keep
  * byte-accurate with the kernel header. The backing is always KFD-owned GTT
  * consumed zero-copy via RAW_MMAP, so this carries only the OPEN_STREAM request
@@ -85,18 +85,27 @@ struct kfd_ioctl_profiler_args
 };
 
 /* Dispatch-log profiler stream (anon_inode fd; KFD-owned GTT BO, RAW mmap) */
-#define KFD_DLOG_STREAM_ABI_VERSION 3
+#define KFD_DLOG_STREAM_ABI_VERSION 4
 
 #define KFD_DLOG_STATUS_TARGET_EXITED (1ULL << 2)
 #define KFD_DLOG_STATUS_FATAL         (1ULL << 5)
 
 /*
  * RAW_MMAP layout in the mmap'd BO: an array of 20-byte firmware records,
- * followed by u64 wptr[num_regions] (firmware producer) then u64
- * rptr[num_regions] (consumer); byte offsets come from kfd_dlog_stream_info.
- * Firmware publishes payload before wptr[]; consumers read wptr[], issue a read
- * barrier, then read payload. The consumer barrier cannot repair missing
- * firmware ordering. Treat record_type==0 or doorbell_off==0 as
+ * followed by u64 wptr[num_regions] (firmware producer). The mapping is
+ * READ-ONLY (the kernel rejects PROT_WRITE); consumers must never write into it.
+ *
+ * The producer's wptr[i] semantics are ASIC-dependent: on gfx12 it is a WRAPPING
+ * 32-bit slot index in [0,N-1] (N == region_record_count, a power of two); on the
+ * gfx950 legacy path it is a FREE-RUNNING record count. Both are consumed the same
+ * way, because only the low 32 bits and the masked delta/slot are ever used: read
+ * the low 32 bits of wptr[i] with a 32-bit acquire load. The consumer keeps its
+ * read cursor rptr[i] in local memory (NOT in the BO): on attach it primes
+ * rptr[i]=wptr[i] (discarding backlog), readiness is wptr[i]!=rptr[i], and unread
+ * == (wptr[i]-rptr[i]) & (N-1). Documented limits: a full lap between reads is
+ * undetectable, exactly-full (N unread) looks empty, and firmware does not throttle
+ * on rptr. Firmware publishes payload before wptr[]; consumers read wptr[], issue a
+ * read barrier, then read payload. Treat record_type==0 or doorbell_off==0 as
  * padding/not-yet-written and skip it.
  */
 struct kfd_dlog_stream_info
@@ -110,7 +119,6 @@ struct kfd_dlog_stream_info
     __u64 mmap_size;
     __u64 records_offset;
     __u64 wptr_offset;
-    __u64 rptr_offset;
     __u32 gpu_id;
     __u32 target_pid;
     __u32 pasid;
@@ -122,6 +130,24 @@ struct kfd_dlog_stream_status
     __u64 status;
     __u64 target_exit_count;
 };
+
+/*
+ * Stream-fd poll/read contract. The stream fd is opened O_RDONLY (mmap stays
+ * PROT_READ, MAP_SHARED). The kernel keeps a per-stream u64 notify_count, bumped
+ * by each firmware notify IRQ (every 512 records per pipe) and by queue-destroy
+ * nudges; it tracks no reader position.
+ *
+ *   poll(): POLLIN|POLLRDNORM is LEVEL-triggered while notify_count != 0; ->poll
+ *           has no side effects. POLLHUP (target/stream exit) and POLLERR (GPU
+ *           reset) are unchanged.
+ *   read(fd, &u64, 8): returns 8 and the count, then zeroes it. Returns -1/EAGAIN
+ *           when the count is 0 (never blocks, regardless of O_NONBLOCK), and
+ *           -1/EINVAL if the buffer is < 8 bytes.
+ *
+ * A consumer MUST read() the count after each POLLIN wake (otherwise poll() stays
+ * ready forever and busy-spins), then drain every region to its wptr. Records
+ * below one notify interval are picked up by draining on the poll timeout.
+ */
 
 /* Sub-operation selector for the dispatch-log stream fd ioctl. */
 enum kfd_dlog_stream_op

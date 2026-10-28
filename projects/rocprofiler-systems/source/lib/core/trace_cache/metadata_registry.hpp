@@ -14,19 +14,19 @@
 #include <cstring>
 #include <fmt/format.h>
 #include <functional>
-#include <initializer_list>
 #include <map>
 #include <memory>
 #include <optional>
 #include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <set>
 #include <string.h>
 #include <string>
 #include <string_view>
 #include <sys/types.h>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::trace_cache
@@ -40,8 +40,8 @@ struct process
     std::string   command;
     std::string   environment;
     std::string   extdata;
-    std::uint32_t start;
-    std::uint32_t end;
+    std::uint64_t start;
+    std::uint64_t end;
 };
 
 struct pmc
@@ -90,8 +90,8 @@ struct thread
     std::int32_t  parent_process_id;
     std::int32_t  process_id;
     std::uint64_t thread_id;  // < Unique
-    std::uint32_t start;
-    std::uint32_t end;
+    std::uint64_t start;
+    std::uint64_t end;
     std::string   extdata;
     friend bool   operator<(const thread& lhs, const thread& rhs)
     {
@@ -160,6 +160,51 @@ struct track
     }
 };
 
+/// Transparent comparators: lookups need only the key, not a fully built struct.
+struct thread_less
+{
+    using is_transparent = void;
+    bool operator()(const thread& lhs, const thread& rhs) const
+    {
+        return lhs.thread_id < rhs.thread_id;
+    }
+    bool operator()(const thread& lhs, std::uint64_t rhs) const
+    {
+        return lhs.thread_id < rhs;
+    }
+    bool operator()(std::uint64_t lhs, const thread& rhs) const
+    {
+        return lhs < rhs.thread_id;
+    }
+};
+
+/// Transparent hash so string lookups accept a string_view without building a string.
+struct string_hash
+{
+    using is_transparent = void;
+    std::size_t operator()(std::string_view value) const noexcept
+    {
+        return std::hash<std::string_view>{}(value);
+    }
+};
+
+struct track_less
+{
+    using is_transparent = void;
+    bool operator()(const track& lhs, const track& rhs) const
+    {
+        return lhs.track_name < rhs.track_name;
+    }
+    bool operator()(const track& lhs, std::string_view rhs) const
+    {
+        return lhs.track_name < rhs;
+    }
+    bool operator()(std::string_view lhs, const track& rhs) const
+    {
+        return lhs < rhs.track_name;
+    }
+};
+
 struct code_object_less
 {
     bool operator()(const rocprofiler_callback_tracing_code_object_load_data_t& lhs,
@@ -195,9 +240,33 @@ struct gpu_perf_counter_name_entry
 
 }  // namespace info
 
+namespace detail
+{
+/// Shared-lock membership check first; the write lock is taken only for a new key, and
+/// @p make (-> element) runs only then.
+template <typename Synchronized, typename Key, typename MakeFn>
+void
+insert_if_absent(Synchronized& data, const Key& key, MakeFn&& make)
+{
+    data.ulock(
+        [&key](const auto& container) { return container.find(key) != container.end(); },
+        [&make](auto& container) {
+            container.emplace(make());
+            return true;
+        });
+}
+
+template <typename Synchronized, typename Key>
+void
+insert_if_absent(Synchronized& data, const Key& key)
+{
+    insert_if_absent(data, key, [&key]() -> const Key& { return key; });
+}
+}  // namespace detail
+
 struct metadata_registry
 {
-    metadata_registry();
+    metadata_registry()                                    = default;
     metadata_registry(const metadata_registry&)            = delete;
     metadata_registry& operator=(const metadata_registry&) = delete;
     metadata_registry(metadata_registry&&)                 = delete;
@@ -205,21 +274,38 @@ struct metadata_registry
 
     void set_process(const info::process& process);
     void add_pmc_info(const info::pmc& pmc_info);
-    void add_thread_info(const info::thread& thread_info);
-    void add_track(const info::track& track_info);
+
+    /// Registers the thread only if @p thread_id is unknown; @p make (-> info::thread)
+    /// is invoked under the write lock, so the known path builds nothing. @p make must be
+    /// lightweight and must not call back into the registry (the lock is already held).
+    template <typename MakeFn>
+        requires std::is_invocable_r_v<info::thread, MakeFn>
+    void ensure_thread(std::uint64_t thread_id, MakeFn&& make)
+    {
+        detail::insert_if_absent(m_threads, thread_id, [&] {
+            auto thread = std::invoke(std::forward<MakeFn>(make));
+            assert(thread.thread_id == thread_id &&
+                   "ensure_thread: key and thread.thread_id must match");
+            return thread;
+        });
+    }
+
+    /// Registers the track only if @p name is unknown; the track is built on insert only.
+    void ensure_track(std::string_view name, std::optional<size_t> thread_id,
+                      std::string_view extdata = "{}");
+
     void add_queue(const std::uint64_t& queue_handle);
     void add_stream(const std::uint64_t& stream_handle);
     void add_string(const std::string_view string_value);
 
-    info::process               get_process_info() const;
-    std::optional<info::pmc>    get_pmc_info(const std::string_view& unique_name) const;
-    std::optional<info::thread> get_thread_info(const std::uint32_t& thread_id) const;
-    std::optional<info::track>  get_track_info(const std::string_view& track_name) const;
-    std::vector<info::pmc>      get_pmc_info_list() const;
-    std::vector<info::thread>   get_thread_info_list() const;
-    std::vector<info::track>    get_track_info_list() const;
-    std::vector<std::uint64_t>  get_queue_list() const;
-    std::vector<std::uint64_t>  get_stream_list() const;
+    info::process              get_process_info() const;
+    std::optional<info::pmc>   get_pmc_info(const std::string_view& unique_name) const;
+    std::optional<info::track> get_track_info(const std::string_view& track_name) const;
+    std::vector<info::pmc>     get_pmc_info_list() const;
+    std::vector<info::thread>  get_thread_info_list() const;
+    std::vector<info::track>   get_track_info_list() const;
+    std::vector<std::uint64_t> get_queue_list() const;
+    std::vector<std::uint64_t> get_stream_list() const;
     std::vector<std::string_view> get_string_list() const;
 
     bool save_to_file(const std::string&                         filepath,
@@ -240,8 +326,6 @@ struct metadata_registry
         std::uint64_t code_object_id) const;
     std::optional<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
     get_kernel_symbol(std::uint64_t kernel_id) const;
-    rocprofiler::sdk::buffer_name_info_t<const char*>   get_buffer_name_info() const;
-    rocprofiler::sdk::callback_name_info_t<const char*> get_callback_tracing_info() const;
 
     void set_gpu_perf_counter_counter_names(
         std::uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries);
@@ -250,47 +334,36 @@ struct metadata_registry
     find_gpu_perf_counter_by_id(std::uint32_t device_id, std::uint64_t counter_id) const;
 
 private:
-    common::synchronized<info::process, state::thread> m_process{};
+    common::synchronized<info::process, state::thread> m_process;
     common::synchronized<
         std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>,
         state::thread>
-                                                                m_pmc_infos{};
-    common::synchronized<std::set<info::thread>, state::thread> m_threads{};
-    common::synchronized<std::set<info::track>, state::thread>  m_tracks{};
+        m_pmc_infos;
+    common::synchronized<std::set<info::thread, info::thread_less>, state::thread>
+        m_threads;
+    common::synchronized<std::set<info::track, info::track_less>, state::thread> m_tracks;
 
-    common::synchronized<std::set<std::uint64_t>, state::thread>         m_streams{};
-    common::synchronized<std::set<std::uint64_t>, state::thread>         m_queues{};
-    common::synchronized<std::unordered_set<std::string>, state::thread> m_strings{};
+    common::synchronized<std::set<std::uint64_t>, state::thread> m_streams;
+    common::synchronized<std::set<std::uint64_t>, state::thread> m_queues;
+    common::synchronized<
+        std::unordered_set<std::string, info::string_hash, std::equal_to<>>,
+        state::thread>
+        m_strings;
     common::synchronized<std::set<rocprofiler_callback_tracing_code_object_load_data_t,
                                   info::code_object_less>,
                          state::thread>
-        m_code_objects{};
+        m_code_objects;
     common::synchronized<
         std::set<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t,
                  info::kernel_symbol_less>,
         state::thread>
-                                                      m_kernel_symbols{};
-    rocprofiler::sdk::buffer_name_info_t<const char*> m_buffered_tracing_info{
-        rocprofiler::sdk::get_buffer_tracing_names<const char*>()
-    };
-    rocprofiler::sdk::callback_name_info_t<const char*> m_callback_tracing_info{
-        rocprofiler::sdk::get_callback_tracing_names<const char*>()
-    };
-
+        m_kernel_symbols{};
     // SDK PMC counter name ordering: device_id -> ordered name entries
     std::map<std::uint32_t, std::vector<info::gpu_perf_counter_name_entry>>
-        m_gpu_perf_counter_counter_names{};
+        m_gpu_perf_counter_counter_names;
     // O(1) lookup index: device_id -> counter_id -> index into the vector above
     std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>>
         m_gpu_perf_counter_index{};
-
-    using callback_rename_map_t =
-        std::map<rocprofiler_tracing_operation_t, std::string_view>;
-
-    void overwrite_callback_names(
-        std::initializer_list<
-            std::pair<rocprofiler_callback_tracing_kind_t, callback_rename_map_t>>
-            rename_table);
 };
 
 }  // namespace rocprofsys::trace_cache

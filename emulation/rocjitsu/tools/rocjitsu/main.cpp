@@ -10,7 +10,8 @@
 ///   rocjitsu --daemon --config foo.json           (daemon-only: run daemon server)
 ///
 /// Builds configured with ROCJITSU_ENABLE_VFIO additionally support
-///   rocjitsu --config foo.json --vfio-socket <path>  (serve a PCI device to a VMM)
+///   rocjitsu --config foo.json --vfio-socket <path> [--vfio-socket <path> ...]
+///                                                  (serve PCI devices to a VMM)
 
 #include "rocjitsu/daemon/rj_daemon.h"
 #if defined(RJ_ENABLE_VFIO_USER)
@@ -18,11 +19,14 @@
 #endif
 
 #include "rocjitsu/base/rj_version.h"
+#include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/config/effective_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
+#include "util/diagnostic.h"
 
 #include "embedded_schema.h"
 #include "launch_preload.h"
@@ -33,6 +37,7 @@
 #include <cerrno>
 #include <charconv>
 #include <csignal>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -43,6 +48,8 @@
 #include <iterator>
 #include <optional>
 #include <poll.h>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <sys/prctl.h>
 #include <sys/wait.h>
@@ -231,16 +238,6 @@ void reap_stale_runtime_dirs() {
 
 using KfdGpuOrdinal = rocjitsu::cli::VisibleGpu;
 
-std::optional<uint32_t> parse_u32(std::string_view text) {
-  uint32_t value = 0;
-  auto *begin = text.data();
-  auto *end = text.data() + text.size();
-  auto [ptr, err] = std::from_chars(begin, end, value);
-  if (err != std::errc{} || ptr != end)
-    return std::nullopt;
-  return value;
-}
-
 std::optional<uint32_t> read_u32_file(const std::filesystem::path &path) {
   std::ifstream in(path);
   uint32_t value = 0;
@@ -290,7 +287,7 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
       continue;
 
     std::string name = entry.path().filename().string();
-    auto node_id = parse_u32(name);
+    const std::optional<uint32_t> node_id = config::parse_uint32(name);
     if (!node_id)
       continue;
 
@@ -356,16 +353,20 @@ bool resolve_host_gpu(rocjitsu::config::DbtGuestConfig *dbt_guest,
   return false;
 }
 
-std::vector<KfdGpuOrdinal>
+util::FailureOr<std::vector<KfdGpuOrdinal>>
 dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
-                           const rocjitsu::config::DbtGuestConfig &dbt_guest) {
+                           const rocjitsu::config::DbtGuestConfig &dbt_guest,
+                           util::DiagnosticEmitter emit_error) {
   if (dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Hardware)
     return real_kfd_gpu_ordinals();
 
   const std::string host_config_path = rocjitsu::config::resolve_dbt_host_config_path(
       dbt_config_path, dbt_guest.host.simulator_config_path);
-  rocjitsu::config::LoadedConfig loaded =
-      rocjitsu::config::load_config(host_config_path, rocjitsu::kEmbeddedSchema);
+  auto maybe_loaded =
+      rocjitsu::config::load_config(host_config_path, rocjitsu::kEmbeddedSchema, emit_error);
+  if (maybe_loaded.failed())
+    return util::Result::failure();
+  const auto &loaded = maybe_loaded.value();
   std::vector<rocjitsu::config::KfdDeviceConfig> devices = loaded.devices;
   if (devices.empty() && loaded.device.present)
     devices.push_back(loaded.device);
@@ -387,16 +388,30 @@ void print_usage() {
          "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
          "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
          "  rocjitsu --attach --config foo.json -- ./app Attach to running daemon\n"
-         "  rocjitsu --config foo.json --vfio-socket <path>\n"
-         "                                               Serve a PCI device to a VMM\n"
+         "  rocjitsu --config foo.json --vfio-socket <path> [--vfio-socket <path> ...]\n"
+         "                                               Serve PCI devices to a VMM\n"
          "\n"
          "Options:\n"
          "  --config <path>   Simulation config JSON (required)\n"
+         "  --node <id>, --node=<id>\n"
+         "                    Select one local node from a system manifest. Required\n"
+         "                    for multi-node launches. Not available with --attach.\n"
+         "  --cpu-thread-budget <n>, --cpu-thread-budget=<n>\n"
+         "                    Replace cpu_thread_budget for this launch only; the\n"
+         "                    config file is left unchanged. Zero selects automatic\n"
+         "                    sizing. Not available with --attach.\n"
+         "  --wait-checking <mode>, --wait-checking=<mode>\n"
+         "                    Override every CU and GPU for this launch:\n"
+         "                    on = ordinary checks, off = no wait checks,\n"
+         "                    all = ordinary plus gfx1250 XCNT.\n"
+         "                    Omission keeps JSON settings and defaults. The source\n"
+         "                    config is unchanged. Not available with --attach.\n"
          "  --vfio-socket <path>\n"
-         "                    Serve the configured GPU as a PCI function to a VMM over\n"
-         "                    the vfio-user protocol on this AF_UNIX socket, instead of\n"
-         "                    launching an application. Requires a build with\n"
-         "                    ROCJITSU_ENABLE_VFIO.\n"
+         "                    Serve a local GPU as a PCI function to a VMM over\n"
+         "                    the vfio-user protocol on this AF_UNIX socket. Repeat\n"
+         "                    once per local GPU in ordinal order for a multi-GPU\n"
+         "                    config. Use --node for a multi-node manifest. Requires\n"
+         "                    ROCJITSU_ENABLE_VFIO at build time.\n"
          "                    The VMM must share guest RAM through an mmap-able\n"
          "                    descriptor or the device cannot reach it; with QEMU that\n"
          "                    means -object\n"
@@ -415,8 +430,10 @@ int main(int argc, char *argv[]) {
   std::signal(SIGPIPE, SIG_IGN);
 
   const char *config_path = nullptr;
-  const char *vfio_socket = nullptr;
+  std::vector<std::string> vfio_sockets;
   bool thread_budget_table = false;
+  config::LaunchOverrides overrides;
+  std::string local_node;
   int vfio_ready_fd = -1;
   bool daemon_mode = false;
   bool attach_mode = false;
@@ -430,8 +447,53 @@ int main(int argc, char *argv[]) {
     }
     if (arg == "--config" && i + 1 < argc) {
       config_path = argv[++i];
-    } else if (arg == "--vfio-socket" && i + 1 < argc) {
-      vfio_socket = argv[++i];
+    } else if (arg == "--node" || arg.starts_with("--node=")) {
+      const size_t equals = arg.find('=');
+      if (equals != std::string_view::npos) {
+        local_node = arg.substr(equals + 1);
+      } else if (i + 1 < argc) {
+        local_node = argv[++i];
+      }
+      if (local_node.empty()) {
+        std::cerr << "rocjitsu: --node requires a nonempty ID\n";
+        return 1;
+      }
+    } else if (arg == "--cpu-thread-budget" || arg.starts_with("--cpu-thread-budget=")) {
+      // Both spellings are accepted because wrappers that forward a single opaque
+      // token cannot pass a flag and its value as two arguments.
+      const size_t equals = arg.find('=');
+      std::string_view value;
+      if (equals != std::string_view::npos) {
+        value = arg.substr(equals + 1);
+      } else if (i + 1 < argc) {
+        value = argv[++i];
+      } else {
+        std::cerr << "rocjitsu: --cpu-thread-budget requires a value\n";
+        return 1;
+      }
+      overrides.cpu_thread_budget = config::parse_uint32(value);
+      if (!overrides.cpu_thread_budget) {
+        std::cerr << "rocjitsu: --cpu-thread-budget requires an unsigned integer\n";
+        return 1;
+      }
+    } else if (arg == "--wait-checking" || arg.starts_with("--wait-checking=")) {
+      const size_t equals = arg.find('=');
+      std::string_view value;
+      if (equals != std::string_view::npos)
+        value = arg.substr(equals + 1);
+      else if (i + 1 < argc)
+        value = argv[++i];
+      overrides.wait_checking = config::parse_wait_checking(value);
+      if (!overrides.wait_checking) {
+        std::cerr << "rocjitsu: --wait-checking requires on, off, or all\n";
+        return 1;
+      }
+    } else if (arg == "--vfio-socket") {
+      if (i + 1 >= argc) {
+        std::cerr << "rocjitsu: --vfio-socket requires a path\n";
+        return 1;
+      }
+      vfio_sockets.emplace_back(argv[++i]);
     } else if (arg == "--thread-budget-table") {
       thread_budget_table = true;
     } else if (arg == "--vfio-ready-fd" && i + 1 < argc) {
@@ -467,6 +529,8 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  overrides.local_node = local_node;
+
   if (!config_path) {
     std::cerr << "rocjitsu: --config is required\n";
     print_usage();
@@ -479,14 +543,56 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  // Attaching joins a daemon that already built its machine from its own config,
+  // so these overrides cannot change it.
+  if (overrides.cpu_thread_budget && attach_mode) {
+    std::cerr << "rocjitsu: --cpu-thread-budget cannot be combined with --attach\n";
+    return 1;
+  }
+  if (overrides.wait_checking && attach_mode) {
+    std::cerr << "rocjitsu: --wait-checking cannot be combined with --attach\n";
+    return 1;
+  }
+  if (!local_node.empty() && attach_mode) {
+    std::cerr << "rocjitsu: --node cannot be combined with --attach\n";
+    return 1;
+  }
+
+  // Applying overrides to a copy keeps them inside this launch: the
+  // config the user named is never rewritten, and simulations built from other
+  // configs in the same process tree keep their own settings.
+  util::StringDiagnostic launch_config_diagnostic;
+  auto config_json_for_this_launch = [&]() -> rocjitsu::FailureOr<std::string> {
+    auto json = rocjitsu::config::read_config_file(abs_config, launch_config_diagnostic.emitter());
+    if (json.failed())
+      return util::Result::failure();
+    if (overrides.empty())
+      return std::move(json.value());
+    return rocjitsu::config::json_with_launch_overrides(json.value(), overrides,
+                                                        launch_config_diagnostic.emitter());
+  };
+
   if (thread_budget_table) {
-    if (vfio_socket || vfio_ready_fd >= 0 || daemon_mode || attach_mode || separator_idx >= 0) {
+    if (!vfio_sockets.empty() || vfio_ready_fd >= 0 || daemon_mode || attach_mode ||
+        separator_idx >= 0) {
       std::cerr << "rocjitsu: --thread-budget-table cannot be combined with a launch mode\n";
       return 1;
     }
     try {
-      auto settings =
-          rocjitsu::config::load_execution_thread_settings(abs_config, rocjitsu::kEmbeddedSchema);
+      rocjitsu::FailureOr<std::string> json = config_json_for_this_launch();
+      if (json.failed()) {
+        std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
+      auto maybe_settings = rocjitsu::config::load_execution_thread_settings_from_string(
+          json.value(), rocjitsu::kEmbeddedSchema, launch_config_diagnostic.emitter());
+      if (maybe_settings.failed()) {
+        std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
+      auto &settings = maybe_settings.value();
       const uint32_t host = rocjitsu::amdgpu::available_host_threads();
       std::cout
           << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
@@ -515,20 +621,49 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  const pid_t my_pid = getpid();
+
+  // Reclaim per-PID runtime dirs orphaned by prior runs (execvp never returns, so
+  // those invocations could not clean up after themselves). Done for every launch
+  // mode, before this invocation creates its own directory.
+  reap_stale_runtime_dirs();
+
+  // The copy lives in this invocation's runtime directory, beside the config-path
+  // handoff an exec'd workload already reads, so the same cleanup reclaims it.
+  auto write_config_for_this_launch = [&]() {
+    if (overrides.empty())
+      return true;
+    util::StringDiagnostic diagnostic;
+    rocjitsu::FailureOr<std::string> written = rocjitsu::config::write_effective_config(
+        abs_config, overrides, my_pid, diagnostic.emitter());
+    if (written.failed()) {
+      std::cerr << std::format("rocjitsu: {}\n", diagnostic.message());
+      cleanup_runtime_files(my_pid);
+      return false;
+    }
+    abs_config = std::move(written.value());
+    return true;
+  };
+
   // Serving a VMM builds its own machine, with the PCI function inside it, so
   // this is dispatched before the parse that builds one here -- not because no
   // machine is needed, but because the one it needs is assembled differently.
-  if (vfio_socket != nullptr) {
+  if (!vfio_sockets.empty()) {
     if (daemon_mode || attach_mode || (separator_idx >= 0 && separator_idx + 1 < argc)) {
       std::cerr << "rocjitsu: --vfio-socket serves a VMM and cannot be combined with "
                    "--daemon, --attach, or an application\n";
       return 1;
     }
+    if (!write_config_for_this_launch())
+      return 1;
 #if defined(RJ_ENABLE_VFIO_USER)
-    return rocjitsu::run_vfio_server(abs_config, vfio_socket, vfio_ready_fd);
+    const int status = rocjitsu::run_vfio_server(abs_config, vfio_sockets, vfio_ready_fd);
+    cleanup_runtime_files(my_pid);
+    return status;
 #else
     std::cerr << "rocjitsu: this build has no vfio-user support; reconfigure with "
                  "-DROCJITSU_ENABLE_VFIO=ON\n";
+    cleanup_runtime_files(my_pid);
     return 1;
 #endif
   }
@@ -540,9 +675,14 @@ int main(int argc, char *argv[]) {
 
   rocjitsu::config::DbtGuestConfig dbt_guest_config;
   try {
-    dbt_guest_config = rocjitsu::config::load_dbt_guest_config_from_file(abs_config);
-    if (!dbt_guest_config.enabled)
-      (void)rocjitsu::config::load_config(abs_config, rocjitsu::kEmbeddedSchema);
+    auto maybe_dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(
+        abs_config, launch_config_diagnostic.emitter());
+    if (maybe_dbt_guest.failed()) {
+      std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
+                               launch_config_diagnostic.message());
+      return 1;
+    }
+    dbt_guest_config = std::move(maybe_dbt_guest.value());
   } catch (const std::exception &e) {
     std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
     return 1;
@@ -552,13 +692,62 @@ int main(int argc, char *argv[]) {
     std::cerr << "rocjitsu: dbt_guest mode currently supports local launch only\n";
     return 1;
   }
+  if (dbt_guest_mode && !local_node.empty()) {
+    std::cerr << "rocjitsu: --node cannot be combined with dbt_guest mode\n";
+    return 1;
+  }
+  // A dbt_guest simulator_config is resolved relative to the config naming it, and
+  // it, not this config, is what the host VM is built from. Moving overrides onto
+  // a copy would therefore both break that path and miss the config they must reach.
+  if (dbt_guest_mode && overrides.cpu_thread_budget &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
+    std::cerr << std::format("rocjitsu: --cpu-thread-budget cannot be combined with a dbt_guest "
+                             "simulator_config; set cpu_thread_budget in {} instead\n",
+                             dbt_guest_config.host.simulator_config_path);
+    return 1;
+  }
+  if (dbt_guest_mode && overrides.wait_checking &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
+    std::cerr << std::format("rocjitsu: --wait-checking cannot be combined with a dbt_guest "
+                             "simulator_config; set wait_checking in {} instead\n",
+                             dbt_guest_config.host.simulator_config_path);
+    return 1;
+  }
+
+  if (!write_config_for_this_launch())
+    return 1;
+
+  if (!dbt_guest_mode) {
+    try {
+      if (attach_mode) {
+        auto graph = rocjitsu::config::load_system_graph(abs_config, rocjitsu::kEmbeddedSchema,
+                                                         launch_config_diagnostic.emitter());
+        if (graph.failed()) {
+          std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
+                                   launch_config_diagnostic.message());
+          cleanup_runtime_files(my_pid);
+          return 1;
+        }
+        if (graph.value().explicit_manifest)
+          throw std::invalid_argument(
+              "system manifest attach requires daemon node identity checking");
+      }
+      auto validated = rocjitsu::config::validate_config(abs_config, rocjitsu::kEmbeddedSchema,
+                                                         launch_config_diagnostic.emitter());
+      if (validated.failed()) {
+        std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
+                                 launch_config_diagnostic.message());
+        cleanup_runtime_files(my_pid);
+        return 1;
+      }
+    } catch (const std::exception &e) {
+      std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
+      cleanup_runtime_files(my_pid);
+      return 1;
+    }
+  }
 
   bool has_app = (separator_idx >= 0 && separator_idx + 1 < argc);
-
-  // Reclaim per-PID runtime dirs orphaned by prior runs (execvp never returns, so
-  // those invocations could not clean up after themselves). Done for every mode,
-  // including daemon-only, before this invocation creates its own directory.
-  reap_stale_runtime_dirs();
 
   if (daemon_mode && !has_app)
     return run_daemon_server(abs_config.c_str());
@@ -585,7 +774,14 @@ int main(int argc, char *argv[]) {
       return 1;
     }
     try {
-      dbt_execution_gpus = dbt_execution_gpu_ordinals(abs_config, dbt_guest_config);
+      auto maybe_gpus = dbt_execution_gpu_ordinals(abs_config, dbt_guest_config,
+                                                   launch_config_diagnostic.emitter());
+      if (maybe_gpus.failed()) {
+        std::cerr << std::format("rocjitsu: failed to load DBT execution topology: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
+      dbt_execution_gpus = std::move(maybe_gpus.value());
     } catch (const std::exception &e) {
       std::cerr << std::format("rocjitsu: failed to load DBT execution topology: {}\n", e.what());
       return 1;
@@ -598,8 +794,6 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   }
-
-  pid_t my_pid = getpid();
 
   // Set only where this process forked the daemon itself. A client authorizes
   // that process to reach into its address space, so which PID it is has to

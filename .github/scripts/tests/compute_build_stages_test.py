@@ -34,6 +34,26 @@ class ParseProjectsTest(unittest.TestCase):
     def test_empty(self):
         self.assertEqual(cbs._parse_projects(""), [])
 
+    def test_cuid_uses_amdsmi_build_and_test_selection(self):
+        for projects in ("shared/cuid", "projects/amdsmi,shared/cuid"):
+            with self.subTest(projects=projects), patch.object(
+                cbs, "compute_windows_families", return_value="none"
+            ) as windows, patch.object(cbs, "set_github_output") as output:
+                self.assertEqual(cbs.main(["--changed-projects", projects]), 0)
+                windows.assert_called_once_with(
+                    changed_projects="projects/amdsmi",
+                    therock_path="_therock",
+                    run_all_tests=False,
+                )
+                output.assert_called_once_with([], "none", "projects/amdsmi")
+
+    def test_cuid_selection_preserves_other_projects(self):
+        with patch.object(
+            cbs, "compute_windows_families", return_value=""
+        ), patch.object(cbs, "set_github_output") as output:
+            cbs.main(["--changed-projects", "projects/rdc, shared/cuid"])
+            output.assert_called_once_with([], "", "projects/amdsmi,projects/rdc")
+
 
 class ComputeBuildStagesTest(unittest.TestCase):
     def test_run_all_tests_builds_everything(self):
@@ -60,10 +80,8 @@ class ComputeBuildStagesTest(unittest.TestCase):
         profiler_projects = [
             "aqlprofile",
             "rocprofiler",
-            "rocprofiler-compute",
             "rocprofiler-register",
             "rocprofiler-sdk",
-            "rocprofiler-systems",
             "roctracer",
         ]
 
@@ -80,16 +98,26 @@ class ComputeBuildStagesTest(unittest.TestCase):
             cbs.compute_build_stages("projects/rdc", "/no/such/therock"), []
         )
 
-    def _install_fake_topology(self, all_stages, required, known=None):
+    def _install_fake_topology(
+        self, all_stages=(), required=(), known=None, windows_disabled=()
+    ):
         """Install a fake _therock_utils.build_topology module on sys.path.
 
         known: set of resolvable project names. Any project not in `known`
         resolves to None (mirrors BuildTopology.resolve_alias_to_artifact).
+        windows_disabled: artifacts with "windows" in disable_platforms.
         """
         known = set(known) if known is not None else None
         mod = types.ModuleType("_therock_utils.build_topology")
 
+        class _Artifacts(dict):
+            def __missing__(self, name):
+                platforms = ["windows"] if name in windows_disabled else []
+                return types.SimpleNamespace(disable_platforms=platforms)
+
         class _Topo:
+            artifacts = _Artifacts()
+
             def get_all_stage_names(self):
                 return set(all_stages)
 
@@ -150,6 +178,52 @@ class ComputeBuildStagesTest(unittest.TestCase):
             known={"mystery"},
         )
         self.assertEqual(cbs.compute_build_stages("projects/mystery", "_therock"), [])
+
+    def test_windows_all_linux_only_skips_windows(self):
+        self._install_fake_topology(windows_disabled={"rocprofiler-compute", "rdc"})
+        self.assertEqual(
+            cbs.compute_windows_families(
+                "projects/rocprofiler-compute,projects/rdc", "_therock"
+            ),
+            "none",
+        )
+
+    def test_windows_any_windows_project_keeps_windows(self):
+        self._install_fake_topology(windows_disabled={"rocprofiler-compute"})
+        self.assertEqual(
+            cbs.compute_windows_families(
+                "projects/rocprofiler-compute,projects/clr", "_therock"
+            ),
+            "",
+        )
+
+    def test_windows_unknown_project_keeps_windows(self):
+        self._install_fake_topology(
+            known={"rocprofiler-compute"}, windows_disabled={"rocprofiler-compute"}
+        )
+        self.assertEqual(
+            cbs.compute_windows_families(
+                "projects/rocprofiler-compute,projects/unknown", "_therock"
+            ),
+            "",
+        )
+
+    def test_windows_run_all_tests_keeps_windows(self):
+        self._install_fake_topology(windows_disabled={"rocprofiler-compute"})
+        self.assertEqual(
+            cbs.compute_windows_families(
+                "projects/rocprofiler-compute", "_therock", run_all_tests=True
+            ),
+            "",
+        )
+
+    def test_windows_empty_changed_projects_keeps_windows(self):
+        self.assertEqual(cbs.compute_windows_families("", "_therock"), "")
+
+    def test_windows_topology_load_failure_keeps_windows(self):
+        self.assertEqual(
+            cbs.compute_windows_families("projects/rdc", "/no/such/therock"), ""
+        )
 
 
 if __name__ == "__main__":

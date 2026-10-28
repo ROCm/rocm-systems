@@ -13,15 +13,13 @@
 #include <string_view>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 struct inlined_symbol
 {
     unsigned int line = 0;
-    std::string  file = {};
-    std::string  func = {};
+    std::string  file;
+    std::string  func;
 
     template <typename ArchiveT>
     void serialize(ArchiveT&, const unsigned int);
@@ -69,11 +67,10 @@ struct symbol : private tim::unwind::bfd_file::symbol
     unsigned int                line         = 0;
     uintptr_t                   load_address = 0;
     address_range               address      = {};
-    std::string                 func         = {};
-    std::string                 file         = {};
-    std::vector<uintptr_t>      breakpoints  = {};
-    std::vector<inlined_symbol> inlines      = {};
-    std::vector<dwarf_entry>    dwarf_info   = {};
+    std::string                 func;
+    std::string                 file;
+    std::vector<uintptr_t>      breakpoints;
+    std::vector<inlined_symbol> inlines;
+    std::vector<dwarf_entry>    dwarf_info;
 };
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

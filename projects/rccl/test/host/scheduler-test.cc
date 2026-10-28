@@ -114,7 +114,7 @@ std::vector<ncclTaskBcast*> ScheduleBcastTasksToPlan_CollectBcastTaskQueue(struc
   return items;
 }
 
-// Minimal ncclComm scaffold for ncclMakeSymmetricTaskList; nRanks=1 skips the bootstrap-consensus block by default.
+// Minimal ncclComm scaffold for ncclMakeSymmetricTaskList.
 class MakeSymmetricTaskList_Scene {
  public:
   MakeSymmetricTaskList_Scene() : comm(new ncclComm{}) {
@@ -224,6 +224,16 @@ class SchedulerMicrotest : public ::testing::Test {
     ResetDevRuntimeFakes();      // covers g_devrFindWindow/g_devrInitOnce/g_devrWindowHasSysmemSegment
     ResetTuningFakes();          // g_tuningCompute's canonical reset (its default is ncclSystemError, not success)
   }
+
+  // symBatchAligned16B reads only comm->rank.
+  bool SymBatchAligned16B(struct ncclTaskColl* headTask, int rank = 0) {
+    if (alignComm_ == nullptr) alignComm_.reset(new ncclComm{});
+    alignComm_->rank = rank;
+    return symBatchAligned16B(alignComm_.get(), headTask);
+  }
+
+ private:
+  std::unique_ptr<ncclComm> alignComm_;
 };
 
 TEST_F(SchedulerMicrotest, AgvChannelCount_MultiplierAtMost1_ReturnsTunedChannelsUnchanged) {
@@ -360,68 +370,152 @@ TEST_F(SchedulerMicrotest, ConvertSymTaskDevOp_DefaultDatatype_LeavesScalarArgUn
   EXPECT_EQ(task.opDev.scalarArg, kPoison);
 }
 
-TEST_F(SchedulerMicrotest, SymBatchAligned16B_SingleTaskNoWindowsAligned_ReturnsTrue) {
+static ncclDevrWindow SymWindow(uintptr_t userAddr, int winFlags = NCCL_WIN_COLL_SYMMETRIC) {
+  ncclDevrWindow win{};
+  win.userPtr = reinterpret_cast<void*>(userAddr);
+  win.winFlags = winFlags;
+  return win;
+}
+
+// One task whose operands sit at sendOff and recvOff into their windows.
+static ncclTaskColl SymTask(ncclDevrWindow* sendWin, uintptr_t sendOff, ncclDevrWindow* recvWin, uintptr_t recvOff) {
+  ncclTaskColl t{};
+  t.sendWin = sendWin;
+  t.recvWin = recvWin;
+  t.sendbuff = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(sendWin->userPtr) + sendOff);
+  t.recvbuff = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(recvWin->userPtr) + recvOff);
+  t.isSymLast = 1;
+  return t;
+}
+
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_SingleTaskAligned_ReturnsTrue) {
+  ncclDevrWindow sendWin = SymWindow(0x1000), recvWin = SymWindow(0x2000);
+  ncclTaskColl t = SymTask(&sendWin, 0x30, &recvWin, 0x20);
+  EXPECT_TRUE(SymBatchAligned16B(&t));
+}
+
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_SingleTaskMisaligned_ReturnsFalse) {
+  ncclDevrWindow sendWin = SymWindow(0x1000), recvWin = SymWindow(0x2000);
+  ncclTaskColl t = SymTask(&sendWin, 0x28, &recvWin, 0x20);  // offset 8: a multiple of 8 but not of 16
+  EXPECT_FALSE(SymBatchAligned16B(&t));
+}
+
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_FirstAlignedSecondMisaligned_TraversesAndReturnsFalse) {
+  ncclDevrWindow sendWin = SymWindow(0x1000), recvWin = SymWindow(0x2000);
+  ncclTaskColl second = SymTask(&sendWin, 0x31, &recvWin, 0x20);
+  ncclTaskColl first = SymTask(&sendWin, 0x30, &recvWin, 0x20);
+  first.isSymLast = 0;
+  first.next = &second;
+  EXPECT_FALSE(SymBatchAligned16B(&first));
+}
+
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_FirstMisalignedNotLast_ReturnsFalseWithoutTraversing) {
+  ncclDevrWindow sendWin = SymWindow(0x1000), recvWin = SymWindow(0x2000);
+  ncclTaskColl first = SymTask(&sendWin, 0x31, &recvWin, 0x20);
+  first.isSymLast = 0;
+  first.next = reinterpret_cast<ncclTaskColl*>(0x1);  // must never be dereferenced
+  EXPECT_FALSE(SymBatchAligned16B(&first));
+}
+
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_WindowOffsetsAligned_RawBuffersMisaligned_ReturnsTrue) {
+  ncclDevrWindow sendWin = SymWindow(0x1003), recvWin = SymWindow(0x2007);
+  ncclTaskColl t = SymTask(&sendWin, 16, &recvWin, 0);  // raw 0x1013 and 0x2007
+  EXPECT_TRUE(SymBatchAligned16B(&t));
+}
+
+// Raw addresses differ by rank, so without both windows the answer could too.
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_NoWindows_ReturnsFalseEvenWhenRawPointersAlign) {
   ncclTaskColl t{};
   t.sendbuff = reinterpret_cast<void*>(0x1030);
   t.recvbuff = reinterpret_cast<void*>(0x1020);
   t.isSymLast = 1;
-  EXPECT_TRUE(symBatchAligned16B(&t));
+  EXPECT_FALSE(SymBatchAligned16B(&t));
 }
 
-TEST_F(SchedulerMicrotest, SymBatchAligned16B_SingleTaskNoWindowsMisaligned_ReturnsFalse) {
-  ncclTaskColl t{};
-  t.sendbuff = reinterpret_cast<void*>(0x1028);  // offset 8: a multiple of 8 but not of 16
-  t.recvbuff = reinterpret_cast<void*>(0x1020);
-  t.isSymLast = 1;
-  EXPECT_FALSE(symBatchAligned16B(&t));
-}
-
-TEST_F(SchedulerMicrotest, SymBatchAligned16B_FirstAlignedSecondMisaligned_TraversesAndReturnsFalse) {
-  ncclTaskColl second{};
-  second.sendbuff = reinterpret_cast<void*>(0x2031);
-  second.recvbuff = reinterpret_cast<void*>(0x2020);
-  second.isSymLast = 1;
-  ncclTaskColl first{};
-  first.sendbuff = reinterpret_cast<void*>(0x1030);
-  first.recvbuff = reinterpret_cast<void*>(0x1020);
-  first.isSymLast = 0;
-  first.next = &second;
-  EXPECT_FALSE(symBatchAligned16B(&first));
-}
-
-TEST_F(SchedulerMicrotest, SymBatchAligned16B_FirstMisalignedNotLast_ReturnsFalseWithoutTraversing) {
-  ncclTaskColl first{};
-  first.sendbuff = reinterpret_cast<void*>(0x1031);
-  first.recvbuff = reinterpret_cast<void*>(0x1020);
-  first.isSymLast = 0;
-  first.next = reinterpret_cast<ncclTaskColl*>(0x1);  // must never be dereferenced
-  EXPECT_FALSE(symBatchAligned16B(&first));
-}
-
-TEST_F(SchedulerMicrotest, SymBatchAligned16B_WindowOffsetsAligned_RawBuffersMisaligned_ReturnsTrue) {
-  ncclDevrWindow sendWin{};
-  sendWin.userPtr = reinterpret_cast<void*>(0x1003);
-  ncclDevrWindow recvWin{};
-  recvWin.userPtr = reinterpret_cast<void*>(0x2007);
-  ncclTaskColl t{};
-  t.sendWin = &sendWin;
-  t.recvWin = &recvWin;
-  t.sendbuff = reinterpret_cast<void*>(0x1013);  // inputOff (via window) = 16
-  t.recvbuff = reinterpret_cast<void*>(0x2007);  // outputOff (via window) = 0
-  t.isSymLast = 1;
-  EXPECT_TRUE(symBatchAligned16B(&t));
-}
-
-TEST_F(SchedulerMicrotest, SymBatchAligned16B_SendWindowOnly_UsesWindowOffsetForSend_ReturnsTrue) {
-  ncclDevrWindow sendWin{};
-  sendWin.userPtr = reinterpret_cast<void*>(0x1003);
-  ncclTaskColl t{};
-  t.sendWin = &sendWin;
+// ncclReduceScatterConfig reaches the symmetric path with only the send window registered.
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_SendWindowOnly_ReturnsFalse) {
+  ncclDevrWindow sendWin = SymWindow(0x1000), recvWin = SymWindow(0x2000);
+  ncclTaskColl t = SymTask(&sendWin, 0x10, &recvWin, 0);
   t.recvWin = nullptr;
-  t.sendbuff = reinterpret_cast<void*>(0x1013);  // inputOff (via window) = 16
-  t.recvbuff = reinterpret_cast<void*>(0x2000);  // outputOff (raw, no window) = 0x2000
+  EXPECT_FALSE(SymBatchAligned16B(&t));
+}
+
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_RecvWindowOnly_ReturnsFalse) {
+  ncclDevrWindow sendWin = SymWindow(0x1000), recvWin = SymWindow(0x2000);
+  ncclTaskColl t = SymTask(&sendWin, 0x10, &recvWin, 0);
+  t.sendWin = nullptr;
+  EXPECT_FALSE(SymBatchAligned16B(&t));
+}
+
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_EitherWindowNotSymmetric_ReturnsFalse) {
+  for (bool sendSymmetric : {false, true}) {
+    ncclDevrWindow sendWin = SymWindow(0x1000, sendSymmetric ? NCCL_WIN_COLL_SYMMETRIC : 0);
+    ncclDevrWindow recvWin = SymWindow(0x2000, sendSymmetric ? 0 : NCCL_WIN_COLL_SYMMETRIC);
+    ncclTaskColl t = SymTask(&sendWin, 0x10, &recvWin, 0);
+    EXPECT_FALSE(SymBatchAligned16B(&t)) << "sendSymmetric = " << sendSymmetric;
+  }
+}
+
+// In-place AllGather/ReduceScatter shift one side by rank * slice. With a 24 B slice the local
+// offset check passes on ranks 0 and 2 but fails on 1 and 3; every rank must agree, or ranks pick
+// different symmetric kernels and grids and hang at the LSA barrier.
+static ncclTaskColl InPlaceTask(ncclFunc_t func, int rank, size_t sliceBytes, ncclDataType_t datatype = ncclInt8) {
+  alignas(16) static char window[1024];
+  static ncclDevrWindow win = SymWindow(reinterpret_cast<uintptr_t>(window));
+  ncclTaskColl t{};
+  t.func = func;
+  t.datatype = datatype;
+  t.count = sliceBytes / ncclTypeSize(datatype);
+  t.sendWin = t.recvWin = &win;
+  char* slice = window + size_t(rank) * sliceBytes;
+  t.sendbuff = func == ncclFuncAllGather ? slice : window;
+  t.recvbuff = func == ncclFuncAllGather ? window : slice;
   t.isSymLast = 1;
-  EXPECT_TRUE(symBatchAligned16B(&t));
+  return t;
+}
+
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_InPlaceUnalignedSlice_FalseOnEveryRank) {
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncReduceScatter}) {
+    for (int rank = 0; rank < 4; rank++) {
+      ncclTaskColl t = InPlaceTask(func, rank, /*sliceBytes=*/24);
+      EXPECT_FALSE(SymBatchAligned16B(&t, rank)) << "func " << int(func) << " rank " << rank;
+    }
+  }
+}
+
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_InPlaceAlignedSlice_TrueOnEveryRank) {
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncReduceScatter}) {
+    for (int rank = 0; rank < 4; rank++) {
+      ncclTaskColl t = InPlaceTask(func, rank, /*sliceBytes=*/32);
+      EXPECT_TRUE(SymBatchAligned16B(&t, rank)) << "func " << int(func) << " rank " << rank;
+    }
+  }
+}
+
+// Slices of 6 and 8 float32: comparing element counts instead of bytes flips rank 2 and rank 0.
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_InPlaceFloat32Slice_UsesBytesNotElements) {
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncReduceScatter}) {
+    for (int rank = 0; rank < 4; rank++) {
+      const std::string where = "func " + std::to_string(int(func)) + " rank " + std::to_string(rank);
+      ncclTaskColl unaligned = InPlaceTask(func, rank, /*sliceBytes=*/24, ncclFloat32);
+      ncclTaskColl aligned = InPlaceTask(func, rank, /*sliceBytes=*/32, ncclFloat32);
+      EXPECT_FALSE(SymBatchAligned16B(&unaligned, rank)) << where;
+      EXPECT_TRUE(SymBatchAligned16B(&aligned, rank)) << where;
+    }
+  }
+}
+
+// Both operands in one window, 512 B apart rather than rank * 24 B: only the in-place comparison
+// separates this from the unaligned in-place case, since the window offsets alone align.
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_OutOfPlaceUnalignedSlice_StaysAligned) {
+  // recvbuff is rank 2's slice of sendbuff, so the task is in place only at rank 2.
+  ncclDevrWindow win = SymWindow(0x10000);
+  ncclTaskColl t = SymTask(&win, 0, &win, 2 * 24);
+  t.func = ncclFuncReduceScatter;
+  t.datatype = ncclInt8;
+  t.count = 24;
+  EXPECT_TRUE(SymBatchAligned16B(&t, /*rank=*/1));
+  EXPECT_FALSE(SymBatchAligned16B(&t, /*rank=*/2));
 }
 
 TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_NoBcastTasks_ReturnsSuccessWithoutTouchingPeers) {
@@ -654,7 +748,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_FourRingDepths_BuildsWorkIte
   std::vector<WorkBatchCall> workBatchCalls;
   ScopedHook workBatchHook(g_addWorkBatchToPlan,
                            [&](struct ncclComm*, struct ncclKernelPlan*, int channelId, enum ncclDevWorkType workType,
-                               int devFuncId, uint32_t workOffset, int, int, bool newBatch) {
+                               int devFuncId, int /*progressSlot*/, uint32_t workOffset, int, int, bool newBatch) {
                              workBatchCalls.push_back({channelId, workType, devFuncId, workOffset, newBatch});
                            });
   struct ncclProxyOp recordedProxyOp {};
@@ -727,7 +821,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_EmptySliceFromZeroCount_Skip
   auto algoInfoHook = ScheduleBcastTasksToPlan_StubAlgoInfoAndFuncId(NCCL_PROTO_SIMPLE);
   int workBatchCalls = 0;
   ScopedHook workBatchHook(g_addWorkBatchToPlan,
-                           [&](struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, uint32_t,
+                           [&](struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, int, uint32_t,
                                int, int, bool) { ++workBatchCalls; });
 
   EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
@@ -836,7 +930,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_ThreeChannels_SplitsBytesPer
   std::vector<int> workBatchChannelIds;
   ScopedHook workBatchHook(g_addWorkBatchToPlan,
                            [&](struct ncclComm*, struct ncclKernelPlan*, int channelId, enum ncclDevWorkType, int,
-                               uint32_t, int, int, bool) { workBatchChannelIds.push_back(channelId); });
+                               int, uint32_t, int, int, bool) { workBatchChannelIds.push_back(channelId); });
   std::vector<int> proxyOpChannelIds;
   ScopedHook proxyOpHook(g_addProxyOpIfNeeded, [&](struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp* op) {
     proxyOpChannelIds.push_back(op->channelId);
@@ -914,7 +1008,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_WarpSpeedMultiplierAbove1_Ha
   std::vector<int> workBatchChannelIds;
   ScopedHook workBatchHook(g_addWorkBatchToPlan,
                            [&](struct ncclComm*, struct ncclKernelPlan*, int channelId, enum ncclDevWorkType, int,
-                               uint32_t, int, int, bool) { workBatchChannelIds.push_back(channelId); });
+                               int, uint32_t, int, int, bool) { workBatchChannelIds.push_back(channelId); });
 
   RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_COLL);
   ncclResult_t result = ncclInternalError;
@@ -1109,16 +1203,19 @@ TEST_F(SchedulerMicrotest,
   EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
 }
 
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_WindowRejection_DefaultRegType_GoesToRemainder) {
-  MakeSymmetricTaskList_Scene scene;
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_UnregisteredRegType_StillEntersSymmetricBucket) {
+  MakeSymmetricTaskList_Scene scene;  // g_symRegType defaults to ncclSymSendNonregRecvNonreg
+  scene.comm->planner.nTasksColl = 5;
   ncclTaskColl task{};
   task.func = ncclFuncBroadcast;
-  // All defaults reach the window-rejection arm untouched: symAvailable/cfgAllowsSymk true, regType=reject.
   struct ncclTaskColl* remainTasksHead = nullptr;
 
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
-  EXPECT_EQ(remainTasksHead, &task);
+  // Unregistered buffers no longer divert to the remainder here. The symmetric fallback ladder in
+  // ncclTuningCompute owns that decision, so the task reaches the args-size guard instead.
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(remainTasksHead, nullptr);
   EXPECT_EQ(task.next, nullptr);
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_GetSymRegTypeFails_PropagatesError) {
@@ -1148,7 +1245,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_AllReduceNotForcedOutWhenSymKer
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_AllLocalChecksPass_NRanksOne_GoesToSymmetricBucket) {
-  MakeSymmetricTaskList_Scene scene;  // nRanks=1: bootstrap-consensus block skipped by construction
+  MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   ncclTaskColl task{};
   task.func = ncclFuncBroadcast;
@@ -1263,99 +1360,6 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TwoTasksSameOpAndDatatypeDiffer
   EXPECT_EQ(task1.next, nullptr);  // singleton in its own bucket
   EXPECT_EQ(task2.next, nullptr);  // singleton in its own (different) bucket, NOT chained to task1
   EXPECT_EQ(scene.comm->planner.nTasksColl, 3);
-}
-
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_NRanksTwoBootstrapNull_SkipsConsensusBlock) {
-  MakeSymmetricTaskList_Scene scene;
-  scene.comm->nRanks = 2;
-  scene.comm->bootstrap = nullptr;  // half of the guard: consensus block must not run without this
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  ScopedHook symkHook(g_symkAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; });
-  ScopedHook bootstrapHook(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
-  EXPECT_EQ(bootstrapHook.calls, 0);  // direct proof the consensus block's bootstrapAllGather never ran
-  EXPECT_EQ(remainTasksHead, &task);
-}
-
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_NRanksOneBootstrapNonNull_SkipsConsensusBlock) {
-  MakeSymmetricTaskList_Scene scene;  // nRanks=1: the other half of the guard
-  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  ScopedHook symkHook(g_symkAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; });
-  ScopedHook bootstrapHook(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
-  EXPECT_EQ(bootstrapHook.calls, 0);
-  EXPECT_EQ(remainTasksHead, &task);
-}
-
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusBootstrapAllGatherFails_PropagatesError) {
-  MakeSymmetricTaskList_Scene scene;
-  scene.comm->nRanks = 2;
-  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  ScopedHook bootstrapHook(g_bootstrapAllGather, [](void*, void*, int) { return ncclSystemError; });
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSystemError);
-  EXPECT_EQ(bootstrapHook.calls, 1);
-}
-
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusAllAgree_WantSymStaysTrue_GoesToSymmetricBucket) {
-  MakeSymmetricTaskList_Scene scene;
-  scene.comm->nRanks = 3;
-  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
-  scene.comm->planner.nTasksColl = 5;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-
-  uint8_t preGatherOwnFlag = 0xFF;
-  ScopedHook bootstrapHook(g_bootstrapAllGather, [&](void*, void* allData, int) {
-    uint8_t* buf = reinterpret_cast<uint8_t*>(allData);
-    preGatherOwnFlag = buf[0];  // this rank's own wantSym flag, written before the call
-    buf[0] = 1;
-    buf[1] = 1;
-    buf[2] = 1;  // every rank agrees
-    return ncclSuccess;
-  });
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
-  EXPECT_EQ(bootstrapHook.calls, 1);
-  EXPECT_EQ(preGatherOwnFlag, 1);  // proves flags[comm->rank] = wantSym?1:0 ran before bootstrapAllGather
-  EXPECT_EQ(remainTasksHead, nullptr);
-  EXPECT_EQ(task.next, nullptr);
-  EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
-}
-
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusOneDisagrees_WantSymFlipsFalse_GoesToRemainder) {
-  MakeSymmetricTaskList_Scene scene;
-  scene.comm->nRanks = 3;
-  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-
-  ScopedHook bootstrapHook(g_bootstrapAllGather, [&](void*, void* allData, int) {
-    uint8_t* buf = reinterpret_cast<uint8_t*>(allData);
-    buf[0] = 1;
-    buf[1] = 0;  // rank 1 disagrees
-    buf[2] = 1;
-    return ncclSuccess;
-  });
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
-  EXPECT_EQ(bootstrapHook.calls, 1);
-  EXPECT_EQ(remainTasksHead, &task);
-  EXPECT_EQ(task.next, nullptr);
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ArgsSizeGuard_TooSmall_ReturnsInternalErrorWithWarnLog) {
@@ -1736,11 +1740,22 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_GetRegBuffFails_PropagatesError
   EXPECT_EQ(tuningHook.calls, 0);  // NCCLCHECK returns immediately: tuning is never reached
 }
 
+// g_devrFindWindow stub: every buffer is in win.
+static std::function<ncclResult_t(struct ncclComm*, void const*, struct ncclDevrWindow**)> FindWindowAlways(
+    ncclDevrWindow* win) {
+  return [win](struct ncclComm*, void const*, struct ncclDevrWindow** window) {
+    *window = win;
+    return ncclSuccess;
+  };
+}
+
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_SymAligned16B_TrueWhenBuffersAlign) {
   MakeSymmetricTaskList_Scene scene;
   ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
-  task.sendbuff = reinterpret_cast<void*>(0x1030);  // matches SymBatchAligned16B_SingleTaskNoWindowsAligned
+  task.sendbuff = reinterpret_cast<void*>(0x1030);  // matches SymBatchAligned16B_SingleTaskAligned
   task.recvbuff = reinterpret_cast<void*>(0x1020);  // offset diff 0x10: divisible by 16
+  ncclDevrWindow win = SymWindow(0x1000);
+  ScopedHook findWindowHook(g_devrFindWindow, FindWindowAlways(&win));
 
   bool capturedAligned = false;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
@@ -1756,8 +1771,28 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_SymAligned16B_TrueW
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_SymAligned16B_FalseWhenBuffersMisalign) {
   MakeSymmetricTaskList_Scene scene;
   ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
-  task.sendbuff = reinterpret_cast<void*>(0x1028);  // matches SymBatchAligned16B_SingleTaskNoWindowsMisaligned
+  task.sendbuff = reinterpret_cast<void*>(0x1028);  // matches SymBatchAligned16B_SingleTaskMisaligned
   task.recvbuff = reinterpret_cast<void*>(0x1020);  // offset diff 8: not divisible by 16
+  ncclDevrWindow win = SymWindow(0x1000);
+  ScopedHook findWindowHook(g_devrFindWindow, FindWindowAlways(&win));
+
+  bool capturedAligned = true;
+  ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
+    capturedAligned = input->symAligned16B;
+    return ncclSuccess;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_FALSE(capturedAligned);
+}
+
+// Aligned raw pointers outside any window: the receive address differs by rank, so the batch must not offer Tma.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_SymAligned16B_FalseWithoutWindows) {
+  MakeSymmetricTaskList_Scene scene;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
+  task.sendbuff = reinterpret_cast<void*>(0x1030);
+  task.recvbuff = reinterpret_cast<void*>(0x1020);
 
   bool capturedAligned = true;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
@@ -1863,10 +1898,10 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_KernelIdCount
   EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
 }
 
-// task->winRegType is always ncclSymSendRegRecvReg here (the classification loop's wantSym gate is its only writer).
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_NeverCalled_BecauseWinRegTypeIsAlwaysRegRecvReg) {
+// Both winRegType arms of the LL-init gate (symmetric_sched.cc:257) are reachable now. Each test below pins one.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_NotCalledWhenBuffersRegistered) {
   MakeSymmetricTaskList_Scene scene;
-  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);  // sets g_symRegType = ncclSymSendRegRecvReg
   ScopedHook llMaskHook(g_symkLLKernelMask, []() { return ~0; });  // every bit set: isolates the regType operand
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
   ScopedHook initOnceHook(g_symkInitOnce, [](struct ncclComm*) { return ncclSuccess; });
@@ -1874,6 +1909,19 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_NeverCalled_Becaus
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
   EXPECT_EQ(initOnceHook.calls, 0);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_CalledWhenBuffersUnregistered) {
+  MakeSymmetricTaskList_Scene scene;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
+  g_symRegType = ncclSymSendNonregRecvNonreg;  // the arm the window gate used to make unreachable
+  ScopedHook llMaskHook(g_symkLLKernelMask, []() { return ~0; });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
+  ScopedHook initOnceHook(g_symkInitOnce, [](struct ncclComm*) { return ncclSuccess; });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(initOnceHook.calls, 1);
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_SingleTask_SetsFieldsAndEnqueues) {
@@ -2346,6 +2394,108 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_KernelDynSmem_FalseWhenBitNotS
   EXPECT_EQ(scene.plan->kernelDynSmem, 0);
 }
 
+// ---- Tma kernels: launch geometry and the tile-staging LDS bound ----
+//
+// These read ncclSymkWarpsPerBlock rather than restating 16, but they do not prove the tuner picks
+// it: nWarps arrives already decided and no test target compiles sym_model.cc. They cover what is
+// downstream of that choice. That the width fits the budget is a static_assert in sym_kernels.h.
+constexpr int kSymTmaWaveSize = 32;
+constexpr ncclSymkKernelId kSymTmaKernelId = ncclSymkKernelId_AllGather_TmaST;
+// Fixture value: ncclSymkTileSmemBudget is gfx1250-device-pass only and this is a host binary.
+constexpr int kSymTmaGrantBytes = 320 << 10;
+
+int SymTmaOnlyKernelMask() { return 1 << (int)kSymTmaKernelId; }
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TmaKernel_ShippingGeometry_ThreadsAndSmemParams) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.comm->WarpSize = kSymTmaWaveSize;
+  ncclSymkKernelMaxDynamicSmem[0] = kSymTmaGrantBytes;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.devFuncId = kSymTmaKernelId;
+  task.nWarps = ncclSymkWarpsPerBlock;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ScopedHook tmaMaskHook(g_symkTmaKernelMask, SymTmaOnlyKernelMask);
+  ScopedHook smemMaskHook(g_symkDynamicSmemKernelMask, SymTmaOnlyKernelMask);
+
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->threadPerBlock, ncclSymkWarpsPerBlock * kSymTmaWaveSize);  // 512
+  EXPECT_EQ(scene.plan->kernelDynSmem, kSymTmaGrantBytes);  // in the dyn-smem mask: reserves it all
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  EXPECT_EQ(argsBuf->maxDynamicSmem, kSymTmaGrantBytes);
+}
+
+// The tuned width's windows, one byte short: the plan has to fail rather than launch an overrun
+// that gets DMA'd to peers.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TmaKernel_GrantBelowWarpWindows_RejectsWithWarn) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.comm->WarpSize = kSymTmaWaveSize;
+  ncclSymkKernelMaxDynamicSmem[0] = ncclSymkWarpsPerBlock * ncclTmaShmemScratchWarpSize() - 1;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.devFuncId = kSymTmaKernelId;
+  task.nWarps = ncclSymkWarpsPerBlock;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ScopedHook tmaMaskHook(g_symkTmaKernelMask, SymTmaOnlyKernelMask);
+
+  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+  ncclResult_t result = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { result = ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()); });
+  EXPECT_EQ(result, ncclInternalError);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "tile staging LDS"));
+}
+
+// Exactly enough is enough: pins the comparison as >, not >=.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TmaKernel_GrantExactlyMeetsWarpWindows_Accepted) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.comm->WarpSize = kSymTmaWaveSize;
+  ncclSymkKernelMaxDynamicSmem[0] = ncclSymkWarpsPerBlock * ncclTmaShmemScratchWarpSize();
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.devFuncId = kSymTmaKernelId;
+  task.nWarps = ncclSymkWarpsPerBlock;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ScopedHook tmaMaskHook(g_symkTmaKernelMask, SymTmaOnlyKernelMask);
+
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->threadPerBlock, ncclSymkWarpsPerBlock * kSymTmaWaveSize);
+}
+
+// The width the launch actually got, not just the constant: sym_kernels.h's static_assert cannot see
+// a tuner that hands out something else, or a kernel that took the LL arm by mistake.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TmaKernel_WarpCountNotTheTunedWidth_RejectsWithWarn) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.comm->WarpSize = kSymTmaWaveSize;
+  ncclSymkKernelMaxDynamicSmem[0] = kSymTmaGrantBytes;  // ample: only the width can fail here
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.devFuncId = kSymTmaKernelId;
+  task.nWarps = ncclSymkWarpsPerBlock / 2;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ScopedHook tmaMaskHook(g_symkTmaKernelMask, SymTmaOnlyKernelMask);
+
+  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+  ncclResult_t result = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { result = ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()); });
+  EXPECT_EQ(result, ncclInternalError);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "expected the tuned"));
+}
+
+// Both Tma checks are scoped to the mask: a kernel that stages no tiles keeps its own width and is
+// unaffected by an undersized grant.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_NonTmaKernel_UndersizedGrantAndOtherWidth_NotRejected) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.comm->WarpSize = kSymTmaWaveSize;
+  constexpr int kWarps = 4;  // deliberately not ncclSymkWarpsPerBlock
+  ncclSymkKernelMaxDynamicSmem[0] = kWarps * ncclTmaShmemScratchWarpSize() - 1;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();  // AllGather_LL: not in the mask below
+  task.nWarps = kWarps;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ScopedHook tmaMaskHook(g_symkTmaKernelMask, SymTmaOnlyKernelMask);
+
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->threadPerBlock, kWarps * kSymTmaWaveSize);
+}
+
 // Head task's nMaxChannels(60) differs from the rest of the batch(kSymSchedBigBatchChannels=100): proves the
 // value comes from headTask specifically, not a std::max shared across the batch (both clear the 4096 floor).
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_NMaxChannels_DerivedFromHeadTask_FeedsArgsSize) {
@@ -2543,7 +2693,7 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsBufProfilerEnabled_SetOneW
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
   auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
   ASSERT_NE(argsBuf, nullptr);
-  EXPECT_EQ(argsBuf->profilerEnabled, 1);
+  EXPECT_EQ(argsBuf->profilerMode, ncclDevProfilerModeKernelCh);
 }
 
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsBufProfilerEnabled_SetZeroWhenFalse) {
@@ -2553,7 +2703,7 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsBufProfilerEnabled_SetZero
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
   auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
   ASSERT_NE(argsBuf, nullptr);
-  EXPECT_EQ(argsBuf->profilerEnabled, 0);
+  EXPECT_EQ(argsBuf->profilerMode, ncclDevProfilerModeNone);
 }
 
 // profilerEnabled=true catches ordering bugs; nMaxChannels=5 (not 3) avoids the alignUp(n*4,16)==16 bucket tie.

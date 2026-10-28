@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <ostream>
 #include <string>
@@ -32,6 +33,8 @@
 #undef __global__
 
 #include SYM_KERNELS_CC_PATH
+
+#include "SymTdmTestHelpers.h"
 
 namespace {
 
@@ -111,12 +114,7 @@ TEST_F(SymKernelMicrotest, MaxChunkElts_UnhandledCombination_ReturnsZeroRegardle
 // ---- ncclSymkMask: kmask assembly (2GB/64GB thresholds, Tma gating, Gin gating; hasLsaMultimem false throughout) ----
 
 // Factory lambdas (see ForceLegacyCudaRegister/ReuseSysmemHandlesOn): every other param keeps its default.
-std::function<int64_t(const char*, int64_t)> SymTmaEnable(int64_t value) {
-  return [value](const char* env, int64_t deftVal) -> int64_t {
-    return std::string(env) == "SYM_TMA_ENABLE" ? value : deftVal;
-  };
-}
-
+// SymTmaEnable is in SymTdmTestHelpers.h.
 std::function<int64_t(const char*, int64_t)> SymGinKernelsEnable(int64_t value) {
   return [value](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "SYM_GIN_KERNELS_ENABLE" ? value : deftVal;
@@ -127,8 +125,19 @@ class SymKernelMaskTest : public SymKernelMicrotest {
  protected:
   static constexpr ncclDataType_t kTy = ncclFloat32;
 
+  // NCCL 2.32's ncclSymkTmaAvailable also requires enough opt-in shared memory for 16 warps of TMA
+  // scratch. Report exactly that, so the TMA cases below are still gated only by compute capability,
+  // SYM_TMA_ENABLE and alignment.
+  void SetUp() override {
+    SymKernelMicrotest::SetUp();
+    comm_->maxSharedMemOptin = ncclTmaShmemScratchWarpSize() * 16;
+  }
+
   // AllReduce's nBusBytes multiplier is 1, so nElts*4 (f32) controls the byte count exactly, cell-aligned.
   static size_t NEltsForBytes(size_t bytes) { return bytes / ncclTypeSize(kTy); }
+
+  void MakeTmaCapableComm() { SetTdmCapableArch(comm_.get()); }
+  void MakeTmaIncapableComm() { SetSymkArch(comm_.get(), "gfx950", 95, /*warpSize=*/64); }
 };
 
 TEST_F(SymKernelMaskTest, JustBelow2GB_LLKernelSurvives) {
@@ -151,7 +160,8 @@ TEST_F(SymKernelMaskTest, JustBelow2GBUnaligned_AlignUpRoundsUpToLLKernelCleared
 }
 
 TEST_F(SymKernelMaskTest, JustBelow64GB_NonLLKernelSurvives) {
-  comm_->minCompCap = 100;
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
   size_t nElts = NEltsForBytes(32 * (size_t(2) << 30) - NCCL_SYM_KERNEL_CELL_SIZE);
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts, /*symAligned16B=*/true);
@@ -159,23 +169,24 @@ TEST_F(SymKernelMaskTest, JustBelow64GB_NonLLKernelSurvives) {
 }
 
 TEST_F(SymKernelMaskTest, At64GB_EntireMaskZeroed) {
-  comm_->minCompCap = 100;
+  MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
   size_t nElts = NEltsForBytes(32 * (size_t(2) << 30));
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts, /*symAligned16B=*/true);
   EXPECT_EQ(kmask, 0u);
 }
 
-TEST_F(SymKernelMaskTest, TmaAvailable_CompCapAtBoundaryAndAligned_TmaKernelSurvives) {
-  comm_->minCompCap = 100;
+TEST_F(SymKernelMaskTest, TmaAvailable_ArchCapableAndAligned_TmaKernelSurvives) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
   uint32_t kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
 }
 
-TEST_F(SymKernelMaskTest, CompCapJustBelowBoundary_TmaKernelCleared) {
-  comm_->minCompCap = 99;
+TEST_F(SymKernelMaskTest, ArchNotTmaCapable_TmaKernelCleared) {
+  MakeTmaIncapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
   uint32_t kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
@@ -183,7 +194,7 @@ TEST_F(SymKernelMaskTest, CompCapJustBelowBoundary_TmaKernelCleared) {
 }
 
 TEST_F(SymKernelMaskTest, TmaParamDisabled_TmaKernelCleared) {
-  comm_->minCompCap = 100;
+  MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(0));
   uint32_t kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
@@ -191,11 +202,124 @@ TEST_F(SymKernelMaskTest, TmaParamDisabled_TmaKernelCleared) {
 }
 
 TEST_F(SymKernelMaskTest, NotSymAligned16B_TmaKernelCleared) {
-  comm_->minCompCap = 100;
+  MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
   uint32_t kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/false);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+}
+
+// ---- NCCL_SYM_TMA_ENABLE left at its compile-time default (no loadParam hook): on, not forced ----
+
+TEST_F(SymKernelMaskTest, DefaultParam_ArchCapableAndAligned_TmaKernelOfferedAlongsideOthers) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  MakeTmaCapableComm();
+  uint32_t kmask =
+      ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
+  EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+  for (ncclSymkKernelId id : {ncclSymkKernelId_AllReduce_AGxLL_R, ncclSymkKernelId_AllReduce_RSxLD_AGxST}) {
+    EXPECT_TRUE(KernelBitSet(kmask, id)) << "the default must leave the tuner a choice: " << (int)id;
+  }
+}
+
+TEST_F(SymKernelMaskTest, DefaultParam_EachCollectiveOffersItsTmaKernel) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  MakeTmaCapableComm();
+  EXPECT_TRUE(KernelBitSet(
+      ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true),
+      ncclSymkKernelId_AllGather_TmaST));
+  EXPECT_TRUE(KernelBitSet(
+      ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true),
+      ncclSymkKernelId_ReduceScatter_TmaLD));
+  EXPECT_TRUE(KernelBitSet(
+      ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSumPostDiv, kTy, /*nElts=*/1024, /*symAligned16B=*/true),
+      ncclSymkKernelId_ReduceScatter_TmaLD));
+}
+
+// Pins the default itself. Unlike the mask cases above, this runs on builds whose SDK lacks the TDM header.
+TEST_F(SymKernelMaskTest, DefaultParam_OffersButDoesNotForce) {
+  EXPECT_EQ(ncclParamSymTmaEnable(), 1);
+  MakeTmaCapableComm();
+  EXPECT_FALSE(ncclSymkTmaForced(comm_.get()));
+}
+
+// ---- NCCL_SYM_TMA_ENABLE=2: force by leaving nothing else in the mask ----
+
+// What force has to remove: the non-Tma AllReduce kernels that survive this fixture
+// (hasLsaMultimem=false already clears the MC pair).
+constexpr ncclSymkKernelId kNonTmaAllReduceKernels[] = {
+    ncclSymkKernelId_AllReduce_AGxLL_R,
+    ncclSymkKernelId_AllReduce_RSxLD_AGxST,
+};
+
+TEST_F(SymKernelMaskTest, TmaForced_NonTmaKernelsCleared) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  MakeTmaCapableComm();
+  ScopedHook loadParam(g_loadParam, SymTmaEnable(2));
+  uint32_t kmask =
+      ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
+  EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+  for (ncclSymkKernelId id : kNonTmaAllReduceKernels) {
+    EXPECT_FALSE(KernelBitSet(kmask, id)) << "force left a non-Tma candidate for the tuner to pick: " << (int)id;
+  }
+}
+
+// Kills a mutant that made 1 behave like 2, or dropped the >= 2 test.
+TEST_F(SymKernelMaskTest, TmaEnabledNotForced_NonTmaKernelsStillOffered) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  MakeTmaCapableComm();
+  ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
+  uint32_t kmask =
+      ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
+  EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+  for (ncclSymkKernelId id : kNonTmaAllReduceKernels) {
+    EXPECT_TRUE(KernelBitSet(kmask, id)) << "enable=1 must leave the tuner a choice: " << (int)id;
+  }
+}
+
+// Force must not empty the mask when the arch already cleared the Tma bit.
+TEST_F(SymKernelMaskTest, TmaForced_ArchNotCapable_NonTmaKernelsSurvive) {
+  MakeTmaIncapableComm();
+  ScopedHook loadParam(g_loadParam, SymTmaEnable(2));
+  uint32_t kmask =
+      ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
+  EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+  for (ncclSymkKernelId id : kNonTmaAllReduceKernels) {
+    EXPECT_TRUE(KernelBitSet(kmask, id)) << "force with no Tma kernel available must not clear: " << (int)id;
+  }
+}
+
+// Same guard via the alignment gate: kmask non-empty but no Tma bit, which a bare
+// `kmask &= kernelMask_Tma` would zero.
+TEST_F(SymKernelMaskTest, TmaForced_NotSymAligned16B_NonTmaKernelsSurvive) {
+  MakeTmaCapableComm();
+  ScopedHook loadParam(g_loadParam, SymTmaEnable(2));
+  uint32_t kmask =
+      ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/false);
+  EXPECT_NE(kmask, 0u);
+  EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+  for (ncclSymkKernelId id : kNonTmaAllReduceKernels) {
+    EXPECT_TRUE(KernelBitSet(kmask, id)) << "force on a misaligned pair must not clear: " << (int)id;
+  }
+}
+
+// Force is per-collective: each keeps its own Tma kernel and loses the rest.
+TEST_F(SymKernelMaskTest, TmaForced_AppliesToEachCollectivesOwnTmaKernel) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  MakeTmaCapableComm();
+  ScopedHook loadParam(g_loadParam, SymTmaEnable(2));
+
+  uint32_t agMask =
+      ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
+  EXPECT_TRUE(KernelBitSet(agMask, ncclSymkKernelId_AllGather_TmaST));
+  EXPECT_FALSE(KernelBitSet(agMask, ncclSymkKernelId_AllGather_ST));
+  EXPECT_FALSE(KernelBitSet(agMask, ncclSymkKernelId_AllGather_LL));
+
+  uint32_t rsMask =
+      ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
+  EXPECT_TRUE(KernelBitSet(rsMask, ncclSymkKernelId_ReduceScatter_TmaLD));
+  EXPECT_FALSE(KernelBitSet(rsMask, ncclSymkKernelId_ReduceScatter_LD));
+  EXPECT_FALSE(KernelBitSet(rsMask, ncclSymkKernelId_ReduceScatter_LL));
 }
 
 TEST_F(SymKernelMaskTest, NeedGinFalse_HasGinTrue_GinKernelClearedNonGinKernelSurvives) {
@@ -357,6 +481,25 @@ TEST_F(SymKernelMaskTest, ReduceScatterNRanksMultiplier_AtPerRank2GB_LLKernelCle
   size_t nElts = NEltsForBytes((size_t(2) << 30) / comm_->nRanks);
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, nElts);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
+}
+
+// rcclSymkKernelIdIsTma drives the SymTDM label, rcclSymkKernelIdIsLL the LL protocol label; the names are the oracle.
+TEST_F(SymKernelMicrotest, KernelIdIsTma_OnlyTheTdmKernels) {
+  for (int id = 0; id < ncclSymkKernelId_Count; id++) {
+    const char* name = ncclSymkKernelIdToString(id);
+    EXPECT_EQ(std::strstr(name, "Tma") != nullptr, rcclSymkKernelIdIsTma(id)) << name;
+  }
+  EXPECT_FALSE(rcclSymkKernelIdIsTma(-1));
+  EXPECT_FALSE(rcclSymkKernelIdIsTma(ncclSymkKernelId_Count));
+}
+
+TEST_F(SymKernelMicrotest, KernelIdIsLL_OnlyTheLLKernels) {
+  for (int id = 0; id < ncclSymkKernelId_Count; id++) {
+    const char* name = ncclSymkKernelIdToString(id);
+    EXPECT_EQ(std::strstr(name, "LL") != nullptr, rcclSymkKernelIdIsLL(id)) << name;
+  }
+  EXPECT_FALSE(rcclSymkKernelIdIsLL(-1));
+  EXPECT_FALSE(rcclSymkKernelIdIsLL(ncclSymkKernelId_Count));
 }
 
 // ---- ncclSymkAvailable/ncclSymkImplemented: the (coll,red,ty) support set independent of the generated switch ----

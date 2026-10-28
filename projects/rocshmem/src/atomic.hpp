@@ -63,28 +63,69 @@ struct type_identity { using type = T; };
 template <typename T>
 using type_identity_t = typename type_identity<T>::type;
 
+// Older compiler versions restrict the non-arithmetic __scoped_atomic_*
+// builtins to integer or pointer operands and reject float/double/etc.
+// Fixed upstream in clang; see llvm/llvm-project#183843.
+#if defined(__clang_major__) && __clang_major__ >= 23
+#define ROCSHMEM_HAVE_FLOAT_SCOPED_ATOMIC_N
+#endif
+
+// atomic_storage_t<T> is the type actually handed to the builtin: T itself for
+// integers and pointers, or a same-size unsigned integer for float/double on
+// compilers that need the workaround.
+template <typename T> struct atomic_storage { using type = T; };
+
+#ifndef ROCSHMEM_HAVE_FLOAT_SCOPED_ATOMIC_N
+template <> struct atomic_storage<float>    { using type = uint32_t; };
+template <> struct atomic_storage<double>   { using type = uint64_t; };
+#endif
+
+template <typename T>
+using atomic_storage_t = typename atomic_storage<T>::type;
+
+template <typename To, typename From>
+__host__ __device__ __forceinline__ To atomic_bit_cast(const From& from) {
+  if constexpr (std::is_same_v<To, From>) {
+    return from;
+  } else {
+    static_assert(sizeof(To) == sizeof(From),
+                  "atomic_bit_cast requires source/destination of equal size");
+    return __builtin_bit_cast(To, from);
+  }
+}
+
 template <memory_scope scope = memory_scope::system,
           memory_order order = memory_order::seq_cst, typename T>
 __host__ __device__
 T load(const T* address) {
-  return __scoped_atomic_load_n(address, static_cast<int>(order),
-                                static_cast<int>(scope));
+  using U = atomic_storage_t<T>;
+  U bits = __scoped_atomic_load_n(reinterpret_cast<const U*>(address),
+                                  static_cast<int>(order),
+                                  static_cast<int>(scope));
+  return atomic_bit_cast<T>(bits);
 }
 
 template <memory_scope scope = memory_scope::system,
           memory_order order = memory_order::seq_cst, typename T>
 __host__ __device__
 void store(T* address, type_identity_t<T> value) {
-  return __scoped_atomic_store_n(address, value, static_cast<int>(order),
-                                 static_cast<int>(scope));
+  using U = atomic_storage_t<T>;
+  __scoped_atomic_store_n(reinterpret_cast<U*>(address),
+                          atomic_bit_cast<U>(value),
+                          static_cast<int>(order),
+                          static_cast<int>(scope));
 }
 
 template <memory_scope scope = memory_scope::system,
           memory_order order = memory_order::seq_cst, typename T>
 __host__ __device__
 T exchange(T* obj, type_identity_t<T> desired) {
-  return __scoped_atomic_exchange_n(obj, desired, static_cast<int>(order),
-                                    static_cast<int>(scope));
+  using U = atomic_storage_t<T>;
+  U old_bits = __scoped_atomic_exchange_n(reinterpret_cast<U*>(obj),
+                                          atomic_bit_cast<U>(desired),
+                                          static_cast<int>(order),
+                                          static_cast<int>(scope));
+  return atomic_bit_cast<T>(old_bits);
 }
 
 template <memory_scope scope   = memory_scope::system,
@@ -92,10 +133,16 @@ template <memory_scope scope   = memory_scope::system,
           memory_order failure = memory_order::seq_cst, typename T>
 __host__ __device__
 bool compare_exchange_weak(T* obj, T& expected, type_identity_t<T> desired) {
-  return __scoped_atomic_compare_exchange_n(obj, &expected, desired, true,
-                                            static_cast<int>(success),
-                                            static_cast<int>(failure),
-                                            static_cast<int>(scope));
+  using U = atomic_storage_t<T>;
+  U expected_bits = atomic_bit_cast<U>(expected);
+  bool result = __scoped_atomic_compare_exchange_n(reinterpret_cast<U*>(obj),
+                                                   &expected_bits,
+                                                   atomic_bit_cast<U>(desired), true,
+                                                   static_cast<int>(success),
+                                                   static_cast<int>(failure),
+                                                   static_cast<int>(scope));
+  expected = atomic_bit_cast<T>(expected_bits);
+  return result;
 }
 
 template <memory_scope scope   = memory_scope::system,
@@ -103,10 +150,16 @@ template <memory_scope scope   = memory_scope::system,
           memory_order failure = memory_order::seq_cst, typename T>
 __host__ __device__
 bool compare_exchange_strong(T* obj, T& expected, type_identity_t<T> desired) {
-  return __scoped_atomic_compare_exchange_n(obj, &expected, desired, false,
-                                            static_cast<int>(success),
-                                            static_cast<int>(failure),
-                                            static_cast<int>(scope));
+  using U = atomic_storage_t<T>;
+  U expected_bits = atomic_bit_cast<U>(expected);
+  bool result = __scoped_atomic_compare_exchange_n(reinterpret_cast<U*>(obj),
+                                                   &expected_bits,
+                                                   atomic_bit_cast<U>(desired), false,
+                                                   static_cast<int>(success),
+                                                   static_cast<int>(failure),
+                                                   static_cast<int>(scope));
+  expected = atomic_bit_cast<T>(expected_bits);
+  return result;
 }
 
 template <memory_scope scope = memory_scope::system,

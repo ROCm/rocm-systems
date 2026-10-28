@@ -142,10 +142,10 @@ struct __half {
   }
 #endif
 
-// MANIPULATORS - DEVICE ONLY
+// MANIPULATORS - INTEGRAL
 #if !defined(__HIP_NO_HALF_CONVERSIONS__)
   template <typename T, Enable_if_t<__hip_internal::is_integral<T>{}>* = nullptr>
-  __device__ __half& operator=(T x) {
+  __HOST_DEVICE__ __half& operator=(T x) {
     data = static_cast<_Float16>(x);
     return *this;
   }
@@ -756,30 +756,20 @@ inline __HOST_DEVICE__ bool __hisnan(__half x) {
   return (hr.x & 0x7FFFU) > 0x7C00u;
 }
 inline __HOST_DEVICE__ __half __hmax(const __half x, const __half y) {
-  if (__hisnan(x) && !__hisnan(y)) return y;
-  if (!__hisnan(x) && __hisnan(y)) return x;
-  if (__hisnan(x) && __hisnan(y)) return HIPRT_NAN_FP16;
-  if (static_cast<__half_raw>(x).data > static_cast<__half_raw>(y).data)
-    return __half_raw{static_cast<__half_raw>(x).data};
-  return __half_raw{static_cast<__half_raw>(y).data};
+  return __half_raw{__builtin_elementwise_maximumnum(static_cast<__half_raw>(x).data,
+                                                     static_cast<__half_raw>(y).data)};
 }
 inline __HOST_DEVICE__ __half __hmax_nan(const __half x, const __half y) {
-  if (__hisnan(x)) return x;
-  if (__hisnan(y)) return y;
-  return __hmax(x, y);
+  return __half_raw{__builtin_elementwise_maximum(static_cast<__half_raw>(x).data,
+                                                  static_cast<__half_raw>(y).data)};
 }
 inline __HOST_DEVICE__ __half __hmin(const __half x, const __half y) {
-  if (__hisnan(x) && !__hisnan(y)) return y;
-  if (!__hisnan(x) && __hisnan(y)) return x;
-  if (__hisnan(x) && __hisnan(y)) return HIPRT_NAN_FP16;
-  if (static_cast<__half_raw>(x).data > static_cast<__half_raw>(y).data)
-    return __half_raw{static_cast<__half_raw>(y).data};
-  return __half_raw{static_cast<__half_raw>(x).data};
+  return __half_raw{__builtin_elementwise_minimumnum(static_cast<__half_raw>(x).data,
+                                                     static_cast<__half_raw>(y).data)};
 }
 inline __HOST_DEVICE__ __half __hmin_nan(const __half x, const __half y) {
-  if (__hisnan(x)) return x;
-  if (__hisnan(y)) return y;
-  return __hmin(x, y);
+  return __half_raw{__builtin_elementwise_minimum(static_cast<__half_raw>(x).data,
+                                                  static_cast<__half_raw>(y).data)};
 }
 
 // Arithmetic
@@ -964,17 +954,18 @@ inline __device__ __half unsafeAtomicAdd(__half* address, __half value) {
 
 namespace __hip_internal {
 template <>
-struct NumericLimits<__half> {
-    static constexpr __half maximum() {
-      __half_raw raw { .x = 0x7C00U };
-      return __half(raw);
-    }
-    static constexpr __half minimum() {
-      __half_raw raw { .x = 0xFC00U };
-      return __half(raw);
-    }
+struct ExclusiveScanIdentity<__half> {
+  static constexpr __half maximum() {
+    __half_raw raw { .x = 0x7C00U };
+    return __half(raw);
+  }
+  static constexpr __half minimum() {
+    __half_raw raw { .x = 0xFC00U };
+    return __half(raw);
+  }
 };
 }  // namespace __hip_internal
+
 #endif  // defined(__clang__) && defined(__HIP__)
 
 // Math functions

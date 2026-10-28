@@ -7,6 +7,7 @@
 #include "nccl.h"
 #include "comm.h"        // NCCL_GIN_MAX_CONNECTIONS (via transitive gin headers)
 #include "rma/rma_ce.h"
+#include "rma/rma.h"
 #include "rma/rma_proxy.h"
 
 #include "rocmwrap.h"   // ncclCuStreamBatchMemOp
@@ -25,6 +26,9 @@ ASSERT_HOOK_MATCHES_PROD(g_rmaCePutLaunch,      ncclRmaCePutLaunch);
 ASSERT_HOOK_MATCHES_PROD(g_rmaProxyWaitLaunch,  ncclRmaProxyWaitLaunch);
 ASSERT_HOOK_MATCHES_PROD(g_rmaCeWaitLaunch,     ncclRmaCeWaitLaunch);
 ASSERT_HOOK_MATCHES_PROD(g_cuStreamBatchMemOp,  ncclCuStreamBatchMemOp);
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
+ASSERT_HOOK_MATCHES_PROD(g_rmaInitialized,      ncclRmaInitialized);
+#endif
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -70,6 +74,12 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, hipStream_t
 std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, hipStream_t)>
     g_rmaCeWaitLaunch = DefaultRmaLaunch;
 
+// ncclRmaInitialized (src/rma/rma.cc): false matches a comm whose RMA resources were never set up.
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
+static bool DefaultRmaInitialized(struct ncclComm*) { return false; }
+std::function<bool(struct ncclComm*)> g_rmaInitialized = DefaultRmaInitialized;
+#endif
+
 // ---------------------------------------------------------------------------
 // Externals the compiled TU links against
 // ---------------------------------------------------------------------------
@@ -102,6 +112,11 @@ ncclResult_t ncclRmaCePutLaunch(struct ncclComm* comm, struct ncclKernelPlan* pl
   return g_rmaCePutLaunch(comm, plan, stream);
 }
 
+// Omitted where the target compiles the real rma.cc as its unit under test and defines this itself.
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
+bool ncclRmaInitialized(struct ncclComm* comm) { return g_rmaInitialized(comm); }
+#endif
+
 // ---------------------------------------------------------------------------
 // Reset
 // ---------------------------------------------------------------------------
@@ -118,6 +133,40 @@ ncclResult_t ncclCuStreamBatchMemOp(hipStream_t stream, unsigned int numOps,
   return g_cuStreamBatchMemOp(stream, numOps, batchParams);
 }
 
+// Floors for the rest of rma_proxy_launch.cc, reached by ce_coll.cc; omitted where the target compiles the real file.
+#ifndef RCCL_RMA_FAKES_OMIT_PROXY_LAUNCH_FLOOR
+ncclResult_t ncclRmaProxyPutBuildOp(struct ncclComm*, struct ncclRmaProxyCtx*, int, bool, struct ncclDevrWindow*,
+                                    size_t, struct ncclDevrWindow*, size_t, size_t, int, int, ncclSignalMode_t,
+                                    struct ncclRmaPutSignalOp*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyPutBuildOp");
+}
+ncclResult_t ncclRmaProxyPutGroupBuildDesc(struct ncclComm*, struct ncclRmaProxyCtx*, struct ncclKernelPlan*, int,
+                                           struct ncclRmaPutSignalOp**, int, struct ncclRmaProxyDesc*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyPutGroupBuildDesc");
+}
+ncclResult_t ncclRmaProxyWaitBuildDesc(struct ncclComm*, struct ncclRmaProxyCtx*, struct ncclKernelPlan*, int, int**,
+                                       int**, int**, struct ncclRmaProxyDesc*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyWaitBuildDesc");
+}
+int ncclRmaProxyPutGroupStartNumOps(bool) { FailLoudUnfaked("rma_fakes", "ncclRmaProxyPutGroupStartNumOps"); }
+ncclResult_t ncclRmaProxyPutGroupStartParams(struct ncclRmaProxyDesc*, hipStreamBatchMemOpParams*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyPutGroupStartParams");
+}
+int ncclRmaProxyPutGroupDoneNumOps(bool) { FailLoudUnfaked("rma_fakes", "ncclRmaProxyPutGroupDoneNumOps"); }
+ncclResult_t ncclRmaProxyPutGroupDoneParams(struct ncclRmaProxyDesc*, hipStreamBatchMemOpParams*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyPutGroupDoneParams");
+}
+int ncclRmaProxyWaitNumStreamOps(const struct ncclRmaProxyDesc*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyWaitNumStreamOps");
+}
+ncclResult_t ncclRmaProxyWaitParams(struct ncclRmaProxyCtx*, struct ncclRmaProxyDesc*, hipStreamBatchMemOpParams*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyWaitParams");
+}
+ncclResult_t ncclRmaProxyEnqueueDesc(struct ncclRmaProxyCtx*, struct ncclRmaProxyDesc**) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyEnqueueDesc");
+}
+#endif
+
 void ResetRmaFakes() {
   g_rmaCircularBufEmpty = DefaultRmaCircularBufEmpty;
   g_rmaDestroyDesc      = DefaultRmaDestroyDesc;
@@ -126,4 +175,7 @@ void ResetRmaFakes() {
   g_rmaProxyWaitLaunch  = DefaultRmaLaunch;
   g_rmaCeWaitLaunch     = DefaultRmaLaunch;
   g_cuStreamBatchMemOp  = DefaultCuStreamBatchMemOp;
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
+  g_rmaInitialized      = DefaultRmaInitialized;
+#endif
 }

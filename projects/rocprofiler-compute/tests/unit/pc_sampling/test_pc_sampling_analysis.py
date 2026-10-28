@@ -59,6 +59,7 @@ HOST_TRAP_DISPLAY_COLUMNS = [
     "pid",
     "source_line",
     "instruction",
+    "instruction_type",
     "code_object_id",
     "offset",
     "count",
@@ -69,12 +70,13 @@ STOCHASTIC_DISPLAY_COLUMNS = [
     "pid",
     "source_line",
     "instruction",
+    "instruction_type",
     "code_object_id",
     "offset",
     "count",
     "active_thread_percent",
-    "count_issued",
-    "count_stalled",
+    "issue_count",
+    "stall_count",
     "wave_occupancy_percent",
     "stall_reason",
     "Kernel_Name",
@@ -482,7 +484,7 @@ def test_aggregate_empty_records_returns_columns() -> None:
         empty, group_by=["code_object_id", "code_object_offset"], sys_info={}
     )
     assert result.empty
-    for column in ("count", "count_issued", "count_stalled", "stall_reason"):
+    for column in ("count", "issue_count", "stall_count", "stall_reason"):
         assert column in result.columns
     # kernel_id / inst_index are carried since they are not group keys.
     assert "kernel_id" in result.columns
@@ -494,7 +496,14 @@ def test_aggregate_counts_issued_and_stalled() -> None:
     records = load_pc_sample_records(
         make_tool_data(
             stochastic=[
-                make_record(1, 0x10, 0, dispatch_id=0, wave_issued=True),
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    wave_issued=True,
+                    stall_reason=f"{PREFIX}OTHER_WAIT",
+                ),
                 make_record(
                     1,
                     0x10,
@@ -511,8 +520,8 @@ def test_aggregate_counts_issued_and_stalled() -> None:
     )
     row = result.iloc[0]
     assert row["count"] == 2
-    assert row["count_issued"] == 1
-    assert row["count_stalled"] == 1
+    assert row["issue_count"] == 1
+    assert row["stall_count"] == 1
     assert row["stall_reason"] == {"WAITCNT": 1}
 
 
@@ -526,8 +535,8 @@ def test_aggregate_host_trap_counts_are_none() -> None:
     )
     row = result.iloc[0]
     assert row["count"] == 1
-    assert row["count_issued"] is None
-    assert row["count_stalled"] is None
+    assert row["issue_count"] is None
+    assert row["stall_count"] is None
     assert row["stall_reason"] is None
 
 
@@ -1114,6 +1123,21 @@ def setup_pc_sampling_data(
     )
 
 
+def test_load_pc_sampling_data_carries_the_static_instruction_type() -> None:
+    """The CLI table types every row, whichever sampling method ran."""
+    df = load_pc_sampling_data(
+        make_pc_sampling_workload(),
+        "offset",
+        [setup_pc_sampling_data(method="host_trap")],
+    )
+
+    # The workload filters to one kernel, which owns the first two offsets.
+    assert dict(zip(df["instruction"], df["instruction_type"], strict=True)) == {
+        "v_mov_b32": "VALU",
+        "s_waitcnt": "INTERNAL",
+    }
+
+
 @pytest.mark.parametrize(
     "method, sorting_type",
     [
@@ -1338,8 +1362,8 @@ def test_load_pc_sampling_data_filtered_multi_dispatch_groupby() -> None:
     assert len(df) == 1
     row = df.iloc[0]
     assert row["count"] == 2
-    assert row["count_stalled"] == 2
-    assert row["count_issued"] == 0
+    assert row["stall_count"] == 2
+    assert row["issue_count"] == 0
     assert {reason for reason, _ in row["stall_reason"]} == {
         "WAITCNT",
         "ALU_DEPENDENCY",
@@ -1436,8 +1460,8 @@ def test_load_pc_sampling_data_separates_code_objects_within_one_record(
     assert list(df["count"]) == [2, 2]
     assert set(df["Kernel_Name"]) == {"sharedKernel"}
     if method == "stochastic":
-        assert list(df["count_issued"]) == [1, 0]
-        assert list(df["count_stalled"]) == [1, 2]
+        assert list(df["issue_count"]) == [1, 0]
+        assert list(df["stall_count"]) == [1, 2]
         assert list(df["stall_reason"]) == [
             [("WAITCNT", 1)],
             [("ALU_DEPENDENCY", 1), ("WAITCNT", 1)],
@@ -1598,8 +1622,8 @@ def test_load_pc_sampling_data_rejects_conflicting_methods() -> None:
 @pytest.mark.parametrize(
     "populated, expected_column_count",
     [
-        ("host_trap", 8),  # host_trap-only is detected
-        ("both", 12),  # stochastic wins when both arrays are populated
+        ("host_trap", 9),  # host_trap-only is detected
+        ("both", 13),  # stochastic wins when both arrays are populated
     ],
 )
 def test_load_pc_sampling_data_method_detection(
@@ -1803,8 +1827,8 @@ def test_load_pc_sampling_data_keeps_multi_process_rows_separate() -> None:
     assert list(shared_rows["offset"]) == ["0x10", "0x10"]
     assert list(shared_rows["code_object_id"]) == [7, 5]
     assert list(shared_rows["count"]) == [3, 2]
-    assert list(shared_rows["count_issued"]) == [1, 0]
-    assert list(shared_rows["count_stalled"]) == [2, 2]
+    assert list(shared_rows["issue_count"]) == [1, 0]
+    assert list(shared_rows["stall_count"]) == [2, 2]
     assert list(shared_rows["stall_reason"]) == [
         [("ALU_DEPENDENCY", 1), ("WAITCNT", 1)],
         [("WAITCNT", 2)],
@@ -2237,7 +2261,6 @@ def test_load_table_data_forwards_pc_sampling_tool_data() -> None:
                 load_table_data(
                     workload=workload,
                     dir_path="dir",
-                    is_gui=False,
                     args=args,
                     dfs_expressions={},
                     pc_sampling_tool_data=sentinel,

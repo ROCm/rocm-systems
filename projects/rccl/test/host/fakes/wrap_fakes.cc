@@ -54,7 +54,8 @@
 ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetFirmwareVersion, amd_smi_getFirmwareVersion);
 ASSERT_HOOK_MATCHES_PROD(g_isSymmetricKernelRequested, isSymmetricKernelRequested);
 ASSERT_HOOK_MATCHES_PROD(g_allReduceShouldTakeDdaPath, rcclAllReduceShouldTakeDdaPath);
-ASSERT_HOOK_MATCHES_PROD(g_commCount, ncclCommCount);
+ASSERT_HOOK_MATCHES_PROD(g_ensureHierarchicalComms, rcclEnsureHierarchicalComms);
+ASSERT_HOOK_MATCHES_PROD(g_reserveHierarchicalTempBuffer, rcclReserveHierarchicalTempBuffer);
 
 // getAlgoInfo, rcclKernelPackedChannels, and the four ReduceScatter *Blocks
 // hooks are link-closure symbols with no production header declaration, so
@@ -68,7 +69,7 @@ ASSERT_HOOK_MATCHES_PROD(g_commCount, ncclCommCount);
 // rcclGetProtocolName) call WARN on their invalid-input arms, and tests assert
 // on that text via gtest's stderr capture.
 //
-// ncclDebugLevel / ncclDebugMask / ncclDebugNoWarn / ncclDebugLog() itself
+// ncclDebugLevelMask / ncclDebugMask / ncclDebugNoWarn / ncclDebugLog() itself
 // are defined once, by fakes/nccl_fakes.cc, which this binary already links
 // for p2p.cc's tests -- defining them again here would be a duplicate-symbol
 // error. ncclDebugMask's default there (0) differs from what this file used
@@ -143,16 +144,15 @@ const bool ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS] = {true, true, true, tru
 // build intentionally models the unrestricted case for every generated entry.
 char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS] = {};
 
-// ncclCommCount: real behaviour by default (de-risks future tests),
-// but a controllable seam so rcclGetAlgoInfo's NCCLCHECK(ncclCommCount(...))
-// failure arm (never exercised -- every prior test let this succeed) can be
-// proven too.
-static ncclResult_t DefaultCommCount(const ncclComm_t comm, int* count) {
-  if (count) *count = comm ? comm->nRanks : 0;
-  return ncclSuccess;
-}
-std::function<ncclResult_t(const ncclComm_t, int*)> g_commCount = DefaultCommCount;
-ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) { return g_commCount(comm, count); }
+// ncclCommCount (g_commCount) is init.cc's, so it lives in comm_fakes.cc.
+
+static ncclResult_t DefaultEnsureHierarchicalComms(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ensureHierarchicalComms = DefaultEnsureHierarchicalComms;
+ncclResult_t rcclEnsureHierarchicalComms(struct ncclComm* comm) { return g_ensureHierarchicalComms(comm); }
+
+static ncclResult_t DefaultReserveHierarchicalTempBuffer(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_reserveHierarchicalTempBuffer = DefaultReserveHierarchicalTempBuffer;
+ncclResult_t rcclReserveHierarchicalTempBuffer(struct ncclComm* comm) { return g_reserveHierarchicalTempBuffer(comm); }
 
 // ---------------------------------------------------------------------------
 // Controllable seams for the top-level dispatchers (rcclSelectAllReduce/
@@ -168,9 +168,14 @@ ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) { return g_commCou
 // ---------------------------------------------------------------------------
 
 #ifdef ENABLE_ROCSHMEM_GIN
-// The real definitions live in gin_all_reduce_sdma.cu, which this host-only
-// binary intentionally does not compile. Keep GIN-SDMA out of the selector by
-// default so ENABLE_ROCSHMEM_GIN builds retain the non-GIN test behaviour.
+// The real definitions live in gin_alltoall_sdma.cu / gin_all_reduce_sdma.cu,
+// which this host-only binary intentionally does not compile. Keep GIN-SDMA
+// out of the selector by default so ENABLE_ROCSHMEM_GIN builds retain the
+// non-GIN test behaviour.
+bool ncclAllToAllGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+  return false;
+}
+
 bool ncclAllReduceGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
   return false;
 }

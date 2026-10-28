@@ -6,13 +6,156 @@
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
+#include <unistd.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <string>
 
 #include "TestBed.hpp"
 #include "StandaloneUtils.hpp"
+#include "VerifiableFp8.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 namespace RcclUnitTesting
 {
+  // HIP must stay out of the gtest parent (later tests fork without exec), so device checks
+  // run in an isolated child and the GPU count comes from EnvVars' out-of-process probe.
+  // Gate in the parent only: EnvVars reports 0 GPUs in a re-exec'd child, and a skipped
+  // child is scored as a pass.
+  static bool ShouldSkipForNoGpu(int minGpus = 1)
+  {
+    if (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr) return false;
+    return EnvVars().maxGpus < minGpus;
+  }
+
+  // Non-reduce FP8 collectives (e.g. AllToAll) compare against one reference, bit-exactly:
+  // values one FP8 step apart, inside the former absolute bound (< 9e-2), must not match.
+  TEST(Fp8Validation, HostCompareIsExact)
+  {
+    auto matches = [](ncclDataType_t const dataType, float const actualValue, float const expectedValue)
+    {
+      uint8_t actualStorage = 0;
+      uint8_t expectedStorage = 0;
+      PtrUnion actual;
+      PtrUnion expected;
+      EXPECT_EQ(actual.Attach(&actualStorage), TEST_SUCCESS);
+      EXPECT_EQ(expected.Attach(&expectedStorage), TEST_SUCCESS);
+      EXPECT_EQ(actual.Set(dataType, 0, 0, actualValue), TEST_SUCCESS);
+      EXPECT_EQ(expected.Set(dataType, 0, 0, expectedValue), TEST_SUCCESS);
+
+      bool isMatch = false;
+      EXPECT_EQ(actual.IsEqual(dataType, 1, expected, false, isMatch), TEST_SUCCESS);
+      return isMatch;
+    };
+    for (ncclDataType_t const dataType : {ncclFloat8e4m3, ncclFloat8e5m2})
+    {
+      EXPECT_TRUE(matches(dataType, 1.5f, 1.5f));
+      EXPECT_FALSE(matches(dataType, 1.75f, 1.5f));
+    }
+    EXPECT_FALSE(matches(ncclFloat8e4m3, 0.5f, 0.5625f));
+    EXPECT_FALSE(matches(ncclFloat8e5m2, 0.25f, 0.3125f));
+  }
+
+  TEST(Fp8Validation, DeviceCompareIsExact)
+  {
+    if (ShouldSkipForNoGpu())
+      GTEST_SKIP() << "Requires a GPU";
+
+    RUN_ISOLATED_TEST("Fp8Validation_DeviceCompareIsExact", []()
+    {
+      for (ncclDataType_t const dataType : {ncclFloat8e4m3, ncclFloat8e5m2})
+      {
+        PtrUnion actual;
+        PtrUnion expected;
+        ASSERT_EQ(actual.AllocateGpuMem(1), TEST_SUCCESS);
+        ASSERT_EQ(expected.AllocateGpuMem(1), TEST_SUCCESS);
+        ASSERT_EQ(actual.ClearGpuMem(1), TEST_SUCCESS);
+        ASSERT_EQ(expected.ClearGpuMem(1), TEST_SUCCESS);
+
+        size_t mismatches = 0;
+        ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, 1, actual.ptr, expected.ptr, mismatches, false),
+                  TEST_SUCCESS);
+        EXPECT_EQ(mismatches, 0);
+
+        ASSERT_EQ(hipMemset(expected.ptr, 0xFF, 1), hipSuccess);
+        ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, 1, actual.ptr, expected.ptr, mismatches, false),
+                  TEST_SUCCESS);
+        EXPECT_EQ(mismatches, 1);
+
+        EXPECT_EQ(actual.FreeGpuMem(), TEST_SUCCESS);
+        EXPECT_EQ(expected.FreeGpuMem(), TEST_SUCCESS);
+      }
+    });
+  }
+
+  // FP8 reductions validate against the verifiable generator's single reference. It must accept
+  // its own expected values, report each corrupted element, and give every rank distinct inputs
+  // so that a missing or duplicated rank changes the result (for Min/Max too).
+  TEST(Fp8Validation, VerifiableReferenceDetectsErrors)
+  {
+    if (ShouldSkipForNoGpu())
+      GTEST_SKIP() << "Requires a GPU";
+
+    RUN_ISOLATED_TEST("Fp8Validation_VerifiableReferenceDetectsErrors", []()
+    {
+      ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+      size_t const numElements = 4096;
+      int    const rankCounts[] = {3, 8};
+      uint64_t const seed = 0x5eed;
+      uint8_t* bufGpu = nullptr;
+      uint8_t* otherGpu = nullptr;
+      int64_t* badEltN = nullptr;
+      ASSERT_EQ(hipMalloc(&bufGpu, numElements), hipSuccess);
+      ASSERT_EQ(hipMalloc(&otherGpu, numElements), hipSuccess);
+      ASSERT_EQ(hipHostMalloc((void**)&badEltN, sizeof(int64_t)), hipSuccess);
+      std::vector<uint8_t> rank0(numElements), rank1(numElements);
+
+      for (ncclDataType_t const dataType : {ncclFloat8e4m3, ncclFloat8e5m2})
+      for (ncclRedOp_t const redOp : {ncclSum, ncclProd, ncclMax, ncclMin})
+      for (int const rankN : rankCounts)
+      {
+        SCOPED_TRACE(std::string(ncclDataTypeNames[dataType]) + " " + ncclRedOpNames[redOp] +
+                     " ranks=" + std::to_string(rankN));
+        auto verify = [&]() {
+          *badEltN = -1;
+          EXPECT_EQ(VerifiableFp8Verify(bufGpu, numElements, dataType, redOp, rankN,
+                                        seed, 0, badEltN, nullptr), hipSuccess);
+          EXPECT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+          return *badEltN;
+        };
+
+        ASSERT_EQ(VerifiableFp8PrepareExpected(bufGpu, numElements, dataType, redOp, rankN,
+                                               seed, 0, nullptr), hipSuccess);
+        EXPECT_EQ(verify(), 0);
+
+        // Flip an exponent bit: the value changes by far more than any tolerance
+        uint8_t byte = 0;
+        ASSERT_EQ(hipMemcpy(&byte, bufGpu + 17, 1, hipMemcpyDeviceToHost), hipSuccess);
+        byte ^= 0x08;
+        ASSERT_EQ(hipMemcpy(bufGpu + 17, &byte, 1, hipMemcpyHostToDevice), hipSuccess);
+        EXPECT_EQ(verify(), 1);
+
+        ASSERT_EQ(VerifiableFp8PrepareInput(bufGpu, numElements, dataType, redOp, rankN, 0,
+                                            seed, 0, nullptr), hipSuccess);
+        ASSERT_EQ(VerifiableFp8PrepareInput(otherGpu, numElements, dataType, redOp, rankN, 1,
+                                            seed, 0, nullptr), hipSuccess);
+        ASSERT_EQ(hipMemcpy(rank0.data(), bufGpu, numElements, hipMemcpyDeviceToHost), hipSuccess);
+        ASSERT_EQ(hipMemcpy(rank1.data(), otherGpu, numElements, hipMemcpyDeviceToHost), hipSuccess);
+        size_t differing = 0;
+        for (size_t i = 0; i < numElements; ++i) differing += (rank0[i] != rank1[i]);
+        EXPECT_GT(differing, numElements / 2);
+      }
+
+      EXPECT_EQ(hipFree(bufGpu), hipSuccess);
+      EXPECT_EQ(hipFree(otherGpu), hipSuccess);
+      EXPECT_EQ(hipHostFree(badEltN), hipSuccess);
+    });
+  }
+
   /**
    * \brief Verify that each device is assigned to the right rank using ncclCommSplit API.
    * ******************************************************************************************/
@@ -388,5 +531,115 @@ namespace RcclUnitTesting
       for (auto& comm : comms)
         NCCLCHECK(ncclCommDestroy(comm));
     });
+  }
+
+  static std::string nvlsLogPath;
+  static void RemoveNvlsLog()
+  {
+    if (!nvlsLogPath.empty())
+      std::remove(nvlsLogPath.c_str());
+  }
+  struct NvlsLogRemover
+  {
+    ~NvlsLogRemover() { RemoveNvlsLog(); }
+  };
+
+  // Init + AllReduce across all devices, then check the RCCL log (NCCL_DEBUG_FILE) for NVLS activity.
+  static void RunAllReduceAndCheckNoNvls()
+  {
+    // A unique file created here, before RCCL reads NCCL_DEBUG_FILE at first init, so another
+    // local user cannot pre-create the log and make the checks below read planted content.
+    char logTemplate[] = "/tmp/rccl_nvls_enable_XXXXXX";
+    int const logFd = mkstemp(logTemplate);
+    ASSERT_GE(logFd, 0) << "mkstemp failed";
+    close(logFd);
+    std::string const logPath = logTemplate;
+    nvlsLogPath = logPath;
+    // The guard covers ASSERT_* early returns; HIPCALL failures exit(-1), which skips local
+    // destructors but still runs atexit handlers.
+    std::atexit(RemoveNvlsLog);
+    NvlsLogRemover removeLog;
+    ASSERT_EQ(setenv("NCCL_DEBUG_FILE", logPath.c_str(), 1), 0);
+
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+
+    std::vector<ncclComm_t> comms(numDevices);
+    ASSERT_EQ(ncclSuccess, ncclCommInitAll(comms.data(), numDevices, nullptr));
+
+    constexpr int N = 1024;
+    std::vector<int*> gpuInput(numDevices);
+    std::vector<int*> gpuOutput(numDevices);
+    std::vector<hipStream_t> stream(numDevices);
+    for (int rank = 0; rank < numDevices; rank++) {
+      std::vector<int> cpuInput(N, rank + 1);
+      HIPCALL(hipSetDevice(rank));
+      HIPCALL(hipStreamCreate(&stream[rank]));
+      HIPCALL(hipMalloc((void**)&gpuInput[rank], N * sizeof(int)));
+      HIPCALL(hipMalloc((void**)&gpuOutput[rank], N * sizeof(int)));
+      HIPCALL(hipMemcpy(gpuInput[rank], cpuInput.data(), N * sizeof(int), hipMemcpyHostToDevice));
+      HIPCALL(hipMemset(gpuOutput[rank], 0, N * sizeof(int)));
+    }
+
+    ASSERT_EQ(ncclSuccess, ncclGroupStart());
+    for (int rank = 0; rank < numDevices; rank++) {
+      ASSERT_EQ(ncclSuccess,
+                ncclAllReduce(gpuInput[rank], gpuOutput[rank], N, ncclInt, ncclSum, comms[rank], stream[rank]));
+    }
+    ASSERT_EQ(ncclSuccess, ncclGroupEnd());
+
+    int const expected = numDevices * (numDevices + 1) / 2;
+    for (int rank = 0; rank < numDevices; rank++) {
+      HIPCALL(hipSetDevice(rank));
+      HIPCALL(hipStreamSynchronize(stream[rank]));
+      std::vector<int> cpuOutput(N);
+      HIPCALL(hipMemcpy(cpuOutput.data(), gpuOutput[rank], N * sizeof(int), hipMemcpyDeviceToHost));
+      for (int i = 0; i < N; i++)
+        ASSERT_EQ(cpuOutput[i], expected) << "rank " << rank << " element " << i;
+      ncclResult_t asyncErr;
+      ASSERT_EQ(ncclSuccess, ncclCommGetAsyncError(comms[rank], &asyncErr));
+      EXPECT_EQ(asyncErr, ncclSuccess);
+    }
+
+    for (int rank = 0; rank < numDevices; rank++) {
+      HIPCALL(hipSetDevice(rank));
+      HIPCALL(hipFree(gpuInput[rank]));
+      HIPCALL(hipFree(gpuOutput[rank]));
+      HIPCALL(hipStreamDestroy(stream[rank]));
+      ASSERT_EQ(ncclSuccess, ncclCommDestroy(comms[rank]));
+    }
+
+    std::ifstream logFile(logPath);
+    ASSERT_TRUE(logFile.is_open()) << "RCCL wrote no log to " << logPath;
+    std::stringstream log;
+    log << logFile.rdbuf();
+    EXPECT_NE(log.str().find("Init COMPLETE"), std::string::npos) << "log did not capture communicator init";
+    // Tripwires: both strings exist only in nvls.cc's `#if CUDART_VERSION >= 12010` branch, which
+    // RCCL does not compile today. They fail only if a future change enables that branch.
+    // NCCL's multicast bind failure, a WARN that fails initialization:
+    EXPECT_EQ(log.str().find("Failed to bind NVLink SHARP"), std::string::npos);
+    // Printed by NCCL's NVLS init whenever NCCL_NVLS_ENABLE is nonzero:
+    EXPECT_EQ(log.str().find("NVLS multicast support is"), std::string::npos);
+  }
+
+  /**
+   * \brief Verify NCCL_NVLS_ENABLE has no effect: RCCL does not implement NVLS, so no value
+   * attempts a multicast bind or fails communicator init the way NCCL 2.29+ can.
+   * ******************************************************************************************/
+  TEST(Standalone, NvlsEnable_NoEffect)
+  {
+    if (ShouldSkipForNoGpu(2)) {
+      GTEST_SKIP() << "This test requires at least 2 devices.";
+    }
+
+    using Config = ProcessIsolatedTestRunner::TestConfig;
+    auto nvlsEnableIs = [](const char* value) {
+      return Config(std::string("NvlsEnable_NoEffect_") + value, RunAllReduceAndCheckNoNvls)
+        .withEnvironment({{"NCCL_NVLS_ENABLE", value},
+                          {"NCCL_DEBUG", "INFO"},
+                          {"NCCL_DEBUG_SUBSYS", "INIT,NVLS,REG"}})
+        .withTimeout(std::chrono::seconds(60));
+    };
+    RUN_ISOLATED_TESTS(nvlsEnableIs("0"), nvlsEnableIs("1"), nvlsEnableIs("2"));
   }
 }

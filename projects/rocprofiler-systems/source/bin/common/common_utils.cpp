@@ -54,15 +54,15 @@ to_c_argv(std::vector<std::string>& src)
 void
 print_command(const std::vector<std::string>& argv, std::string_view prefix)
 {
-    auto cmd = std::accumulate(argv.begin(), argv.end(), std::string{},
-                               [](std::string acc, const std::string& arg) {
-                                   if(!acc.empty())
-                                   {
-                                       acc += ' ';
-                                   }
-                                   acc += arg;
-                                   return acc;
-                               });
+    auto const cmd = std::accumulate(argv.begin(), argv.end(), std::string{},
+                                     [](std::string acc, const std::string& arg) {
+                                         if(!acc.empty())
+                                         {
+                                             acc += ' ';
+                                         }
+                                         acc += arg;
+                                         return acc;
+                                     });
     if(cmd.empty())
     {
         return;
@@ -79,26 +79,26 @@ print_environment_impl(const std::vector<std::string>&              env,
 {
     std::vector<std::string_view> entries;
     entries.reserve(env.size());
-    std::copy(env.begin(), env.end(), std::back_inserter(entries));
-    std::sort(entries.begin(), entries.end());
-    entries.erase(std::unique(entries.begin(), entries.end()), entries.end());
+    std::ranges::copy(env, std::back_inserter(entries));
+    std::ranges::sort(entries);
+    entries.erase(std::ranges::unique(entries).begin(), entries.end());
 
     auto is_updated = [&](std::string_view entry) {
         return is_updated_key(env_key(entry));
     };
-    auto is_general = [&](std::string_view entry) {
+    auto const is_general = [&](std::string_view entry) {
         return !is_updated(entry) && entry.starts_with(rocprofsys_prefix);
     };
 
-    const bool has_updated = std::any_of(entries.begin(), entries.end(), is_updated);
+    const bool has_updated = std::ranges::any_of(entries, is_updated);
     const bool has_general =
-        include_general_vars && std::any_of(entries.begin(), entries.end(), is_general);
+        include_general_vars && std::ranges::any_of(entries, is_general);
     if(!has_updated && !has_general)
     {
         return;
     }
 
-    auto emit_matching = [&](auto pred) {
+    auto const emit_matching = [&](auto pred) {
         for(const auto& entry : entries)
         {
             if(pred(entry))
@@ -129,7 +129,7 @@ strip_flag_prefix(std::string_view name)
 }
 
 translated_args
-translate_arguments(int argc, char** argv, preset_registry& registry,
+translate_arguments(int argc, char* const* argv, preset_registry const& registry,
                     const std::unordered_map<std::string, std::string>& deprecated_flags)
 {
     translated_args result;
@@ -156,11 +156,11 @@ translate_arguments(int argc, char** argv, preset_registry& registry,
             // double-mapping
             if(!deprecated_flags.empty())
             {
-                auto        arg_sv = std::string_view{ argv[arg_idx] };
+                auto const  arg_sv = std::string_view{ argv[arg_idx] };
                 std::string flag_name;
                 std::string eq_suffix;
 
-                auto eq_pos = arg_sv.find('=');
+                auto const eq_pos = arg_sv.find('=');
                 if(eq_pos != std::string_view::npos)
                 {
                     flag_name = std::string{ arg_sv.substr(0, eq_pos) };
@@ -171,7 +171,7 @@ translate_arguments(int argc, char** argv, preset_registry& registry,
                     flag_name = std::string{ arg_sv };
                 }
 
-                auto match = deprecated_flags.find(flag_name);
+                auto const match = deprecated_flags.find(flag_name);
                 if(match != deprecated_flags.end())
                 {
                     std::cerr << "[rocprof-sys] WARNING: '" << flag_name
@@ -247,7 +247,7 @@ void
 print_pre_execution_info(std::string_view tool_name, std::string_view preset_mode,
                          preset_registry& registry)
 {
-    auto output_dir = get_output_directory();
+    auto const output_dir = get_output_directory();
 
     bool tracing_on   = false;
     bool profiling_on = false;
@@ -255,10 +255,10 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 
     if(!preset_mode.empty() && !tool_name.empty())
     {
-        auto normalized = strip_flag_prefix(preset_mode);
-        tracing_on      = registry.is_section_enabled(normalized, "tracing");
-        profiling_on    = registry.is_section_enabled(normalized, "profiling");
-        rocpd_on        = registry.is_rocpd_output_enabled(normalized);
+        auto const normalized = strip_flag_prefix(preset_mode);
+        tracing_on            = registry.is_section_enabled(normalized, "tracing");
+        profiling_on          = registry.is_section_enabled(normalized, "profiling");
+        rocpd_on              = registry.is_rocpd_output_enabled(normalized);
 
         constexpr size_t box_width       = 60;
         constexpr size_t box_inner_width = box_width - 2;
@@ -284,7 +284,7 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 
         std::cerr << "Preset:        " << preset_mode << "\n";
 
-        auto description = registry.describe(normalized);
+        auto const description = registry.describe(normalized);
         if(!description.empty())
         {
             std::cerr << "\n" << description << "\n";
@@ -336,7 +336,7 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 void
 warn_if_output_not_writable(std::string_view tool_name)
 {
-    auto output_dir = get_output_directory();
+    auto const output_dir = get_output_directory();
     if(!check_directory_writable(output_dir))
     {
         std::cerr << "[rocprof-sys][WARNING] Output directory '" << output_dir
@@ -364,7 +364,7 @@ validate_configuration()
 
     // Check ROCPROFSYS_TMPDIR writability
     const char* tmpdir     = std::getenv(env_vars::TMPDIR);
-    auto        tmpdir_str = std::string{ tmpdir ? tmpdir : "/tmp" };
+    auto const  tmpdir_str = std::string{ tmpdir ? tmpdir : "/tmp" };
     if(!check_directory_writable(tmpdir_str))
     {
         std::cerr << "[rocprof-sys][WARNING] Temp directory '" << tmpdir_str
@@ -427,7 +427,7 @@ collect_resolved_settings(const std::vector<std::string>&        current_env,
     std::unordered_map<std::string, std::string> initial_map;
     for(const auto& env_str : initial_envs)
     {
-        auto eq_pos = env_str.find('=');
+        auto const eq_pos = env_str.find('=');
         if(eq_pos != std::string::npos)
         {
             initial_map[env_str.substr(0, eq_pos)] = env_str.substr(eq_pos + 1);
@@ -437,7 +437,7 @@ collect_resolved_settings(const std::vector<std::string>&        current_env,
     for(const auto& env_entry : current_env)
     {
         const std::string_view entry{ env_entry };
-        auto                   eq_pos = entry.find('=');
+        auto const             eq_pos = entry.find('=');
         if(eq_pos == std::string_view::npos)
         {
             continue;
@@ -451,7 +451,7 @@ collect_resolved_settings(const std::vector<std::string>&        current_env,
             continue;
         }
 
-        auto match = initial_map.find(key);
+        auto const match = initial_map.find(key);
         if(match == initial_map.end() || match->second != val)
         {
             result[key] = val;
@@ -466,8 +466,8 @@ export_config(const std::vector<std::string>&        current_env,
               const std::string& preset_name, std::string_view tool_name,
               const std::string& output_file)
 {
-    auto settings = collect_resolved_settings(current_env, initial_envs);
-    auto json_str =
+    auto const settings = collect_resolved_settings(current_env, initial_envs);
+    auto const json_str =
         rocprofsys::json_config::export_config_as_json(settings, preset_name, tool_name);
 
     if(output_file.empty())
@@ -513,43 +513,17 @@ run_post_parse_validation(std::string_view tool_name, domain_flag_state& state,
 
 namespace
 {
-std::string
-strip_ansi(const std::string& text)
-{
-    std::string result;
-    result.reserve(text.size());
-    bool in_escape = false;
-    for(const char ch : text)
-    {
-        if(in_escape)
-        {
-            if(ch == 'm')
-            {
-                in_escape = false;
-            }
-            continue;
-        }
-        if(ch == '\033')
-        {
-            in_escape = true;
-            continue;
-        }
-        result += ch;
-    }
-    return result;
-}
-
 bool
 is_section_header(const std::string& line, std::string& bracket_name)
 {
-    auto ansi_stripped = strip_ansi(line);
-    auto stripped      = utility::string::ltrim(ansi_stripped);
+    auto const ansi_stripped = utility::string::strip_ansi(line);
+    auto const stripped      = utility::string::ltrim(ansi_stripped);
     if(stripped.empty() || stripped.front() != '[')
     {
         return false;
     }
     // Find the closing bracket -the bracket name ends at the first ']'
-    auto close = stripped.find(']');
+    auto const close = stripped.find(']');
     if(close == std::string::npos)
     {
         return false;
@@ -561,15 +535,15 @@ is_section_header(const std::string& line, std::string& bracket_name)
 bool
 line_contains_flag(const std::string& line, const std::string& flag)
 {
-    auto stripped = strip_ansi(line);
+    auto stripped = utility::string::strip_ansi(line);
     // Flag lines have leading whitespace then the flag name
-    auto pos = stripped.find(flag);
+    auto const pos = stripped.find(flag);
     if(pos == std::string::npos)
     {
         return false;
     }
     // Verify it's a word boundary (not a substring of a longer flag)
-    auto end = pos + flag.size();
+    auto const end = pos + flag.size();
     if(end < stripped.size())
     {
         const char next = stripped[end];
@@ -609,41 +583,51 @@ struct group_topic_desc
     const char*                   name;
     const char*                   blurb;
     help_group_names              sections;
-    std::vector<std::string_view> tools{};  // empty => shown for all tools
+    std::vector<std::string_view> tools;  // empty => shown for all tools
 };
 
 const std::vector<group_topic_desc>&
 group_topic_table()
 {
     static const std::vector<group_topic_desc> table = {
-        { "preset",
-          "Preset, domain, and export options",
-          { "[PRESET OPTIONS]", "[DOMAIN OPTIONS]", "[EXPORT OPTIONS]" } },
-        { "general",
-          "General options (output, trace, profile)",
-          { "[GENERAL OPTIONS]" } },
-        { "tracing", "Tracing-specific options", { "[TRACING OPTIONS]" } },
-        { "profiling", "Profile output format options", { "[PROFILE OPTIONS]" } },
-        { "output",
-          "Output format selection (pftrace/rocpd/json/text)",
-          { "[OUTPUT FORMAT OPTIONS]" } },
-        { "sampling",
-          "Sampling frequency and timer options",
-          { "[GENERAL SAMPLING OPTIONS]", "[SAMPLING TIMER OPTIONS]",
-            "[ADVANCED SAMPLING OPTIONS]" } },
-        { "process",
-          "Host/device process sampling options",
-          { "[HOST/DEVICE (PROCESS SAMPLING) OPTIONS]" } },
-        { "counters",
-          "Hardware counter options (CPU/GPU events)",
-          { "[HARDWARE COUNTER OPTIONS]" } },
-        { "backend", "Backend options (include/exclude)", { "[BACKEND OPTIONS]" } },
-        { "execution",
-          "Execution control options (e.g., --fork)",
-          { "[EXECUTION OPTIONS]" },
-          { "run" } },
-        { "debug", "Debug, logging, and verbosity options", { "[DEBUG OPTIONS]" } },
-        { "misc", "Miscellaneous options", { "[MISCELLANEOUS OPTIONS]" } },
+        { .name     = "preset",
+          .blurb    = "Preset, domain, and export options",
+          .sections = { "[PRESET OPTIONS]", "[DOMAIN OPTIONS]", "[EXPORT OPTIONS]" } },
+        { .name     = "general",
+          .blurb    = "General options (output, trace, profile)",
+          .sections = { "[GENERAL OPTIONS]" } },
+        { .name     = "tracing",
+          .blurb    = "Tracing-specific options",
+          .sections = { "[TRACING OPTIONS]" } },
+        { .name     = "profiling",
+          .blurb    = "Profile output format options",
+          .sections = { "[PROFILE OPTIONS]" } },
+        { .name     = "output",
+          .blurb    = "Output format selection (pftrace/rocpd/json/text)",
+          .sections = { "[OUTPUT FORMAT OPTIONS]" } },
+        { .name     = "sampling",
+          .blurb    = "Sampling frequency and timer options",
+          .sections = { "[GENERAL SAMPLING OPTIONS]", "[SAMPLING TIMER OPTIONS]",
+                        "[ADVANCED SAMPLING OPTIONS]" } },
+        { .name     = "process",
+          .blurb    = "Host/device process sampling options",
+          .sections = { "[HOST/DEVICE (PROCESS SAMPLING) OPTIONS]" } },
+        { .name     = "counters",
+          .blurb    = "Hardware counter options (CPU/GPU events)",
+          .sections = { "[HARDWARE COUNTER OPTIONS]" } },
+        { .name     = "backend",
+          .blurb    = "Backend options (include/exclude)",
+          .sections = { "[BACKEND OPTIONS]" } },
+        { .name     = "execution",
+          .blurb    = "Execution control options (e.g., --fork)",
+          .sections = { "[EXECUTION OPTIONS]" },
+          .tools    = { "run" } },
+        { .name     = "debug",
+          .blurb    = "Debug, logging, and verbosity options",
+          .sections = { "[DEBUG OPTIONS]" } },
+        { .name     = "misc",
+          .blurb    = "Miscellaneous options",
+          .sections = { "[MISCELLANEOUS OPTIONS]" } },
     };
     return table;
 }
@@ -658,24 +642,29 @@ const std::vector<domain_topic_desc>&
 domain_topic_table()
 {
     static const std::vector<domain_topic_desc> table = {
-        { "gpu",
-          { "GPU metrics, device sampling, GPU counters",
-            { "--gpu", "-D", "--device", "--gpus", "--process-freq", "--process-wait",
-              "--process-duration", "-G", "--gpu-events", "--ai-nics", "--use-amd-smi",
-              "--amd-smi-metrics" } } },
-        { "cpu",
-          { "CPU sampling, timers, CPU counters",
-            { "--cpu", "-H", "--host", "-S", "--sample", "--sampling-freq",
-              "--sampling-wait", "--sampling-duration", "-t", "--tids",
-              "--sample-cputime", "--sample-realtime", "--sample-overflow", "-C",
-              "--cpu-events" } } },
-        { "rocm",
-          { "ROCm API tracing options",
-            { "--rocm", "-T", "--trace", "--hsa-interrupt", "--selected-regions",
-              "--use-amd-smi", "--gpus", "--ai-nics" } } },
-        { "parallel",
-          { "MPI, OpenMP, Kokkos, RCCL options",
-            { "--parallel", "-I", "--include", "-E", "--exclude" } } },
+        { .name = "gpu",
+          .info = { .description   = "GPU metrics, device sampling, GPU counters",
+                    .flag_patterns = { "--gpu", "-D", "--device", "--gpus",
+                                       "--process-freq", "--process-wait",
+                                       "--process-duration", "-G", "--gpu-events",
+                                       "--ai-nics", "--use-amd-smi",
+                                       "--amd-smi-metrics" } } },
+        { .name = "cpu",
+          .info = { .description   = "CPU sampling, timers, CPU counters",
+                    .flag_patterns = { "--cpu", "-H", "--host", "-S", "--sample",
+                                       "--sampling-freq", "--sampling-wait",
+                                       "--sampling-duration", "-t", "--tids",
+                                       "--sample-cputime", "--sample-realtime",
+                                       "--sample-overflow", "-C", "--cpu-events" } } },
+        { .name = "rocm",
+          .info = { .description   = "ROCm API tracing options",
+                    .flag_patterns = { "--rocm", "-T", "--trace", "--hsa-interrupt",
+                                       "--selected-regions", "--use-amd-smi", "--gpus",
+                                       "--ai-nics" } } },
+        { .name = "parallel",
+          .info = { .description   = "MPI, OpenMP, Kokkos, RCCL options",
+                    .flag_patterns = { "--parallel", "-I", "--include", "-E",
+                                       "--exclude" } } },
     };
     return table;
 }
@@ -687,8 +676,7 @@ domain_topic_table()
 bool
 shown_for_tool(const std::vector<std::string_view>& tools, std::string_view tool_name)
 {
-    return tools.empty() ||
-           std::find(tools.begin(), tools.end(), tool_name) != tools.end();
+    return tools.empty() || std::ranges::find(tools, tool_name) != tools.end();
 }
 }  // namespace
 
@@ -749,7 +737,7 @@ void
 print_see_also(std::string_view topic, std::ostream& out)
 {
     const auto& relations = get_related_topics_map();
-    auto        it        = relations.find(topic);
+    auto const  it        = relations.find(topic);
     if(it == relations.end() || it->second.empty())
     {
         return;
@@ -849,7 +837,7 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
                      std::string_view tool_name, std::ostream& out)
 {
     const auto& topic_map = get_help_topic_map();
-    auto        match     = topic_map.find(std::string{ topic });
+    auto const  match     = topic_map.find(std::string{ topic });
     if(match == topic_map.end())
     {
         return false;
@@ -886,7 +874,8 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
             {
                 sections.back().end = line_idx;
             }
-            sections.push_back({ line_idx, lines.size(), bracket_name });
+            sections.push_back(
+                { .start = line_idx, .end = lines.size(), .header = bracket_name });
         }
     }
 
@@ -896,7 +885,7 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
     bool found = false;
     for(const auto& sec : sections)
     {
-        if(target_headers.count(sec.header) > 0)
+        if(target_headers.contains(sec.header))
         {
             found = true;
             for(size_t line_idx = sec.start; line_idx < sec.end; ++line_idx)
@@ -919,7 +908,7 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
                       std::string_view tool_name, std::ostream& out)
 {
     const auto& domain_map = get_domain_help_map();
-    auto        match      = domain_map.find(std::string{ domain });
+    auto const  match      = domain_map.find(std::string{ domain });
     if(match == domain_map.end())
     {
         return false;
@@ -944,7 +933,7 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
     size_t options_start = 0;
     for(size_t line_idx = 0; line_idx < lines.size(); ++line_idx)
     {
-        auto stripped = strip_ansi(lines[line_idx]);
+        auto const stripped = utility::string::strip_ansi(lines[line_idx]);
         if(utility::string::ltrim(stripped).starts_with("Options:"))
         {
             options_start = line_idx + 1;
@@ -960,8 +949,8 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
     for(size_t idx = options_start; idx < lines.size(); ++idx)
     {
         const auto& current_line = lines[idx];
-        auto        stripped     = strip_ansi(current_line);
-        auto        trimmed      = utility::string::ltrim(stripped);
+        auto const  stripped     = utility::string::strip_ansi(current_line);
+        auto const  trimmed      = utility::string::ltrim(stripped);
 
         // Skip separators and empty lines at the top
         if(trimmed.empty())

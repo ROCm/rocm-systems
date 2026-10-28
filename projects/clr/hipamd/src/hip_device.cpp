@@ -157,8 +157,9 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   amd::Command::EventWaitList eventWaitList(0);
   bool submitMarker = false;
   std::vector<amd::CommandQueue*> activeQueues;
+  void* wait_signal = nullptr;
 
-  auto waitForStream = [&submitMarker, &eventWaitList](hip::Stream* stream) {
+  auto waitForStream = [&](hip::Stream* stream) {
     if (amd::Command* command = stream->getLastQueuedCommand(true)) {
       amd::Event& event = command->event();
       // Check HW status of the ROCclr event.
@@ -167,9 +168,21 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
       if (!ready) {
         ready = (command->status() == CL_COMPLETE);
       }
+      // Cache maintenance, not ordering: never skipped by the blocking tracker.
       submitMarker |= stream->vdev()->isFenceDirty();
       if (!ready) {
         command->notifyCmdQueue();
+        if (wait_null_stream) {
+          // The HW signal the marker below would wait on (as in IsHwEventReady).
+          void* signal =
+              (event.NotifyEvent() != nullptr) ? event.NotifyEvent()->HwEvent() : event.HwEvent();
+          if (blocking_stream->IsBlockedOn(signal)) {
+            // This stream already waits on the same signal; skip the redundant marker.
+            command->release();
+            return;
+          }
+          wait_signal = signal;
+        }
         eventWaitList.push_back(command);
       } else {
         command->release();
@@ -203,6 +216,11 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
     auto* marker = new amd::Marker(*blocking_stream, kMarkerDisableFlush, eventWaitList);
     marker->enqueue();
     marker->release();
+  }
+
+  // Publish only once the marker is queued, so a racing launch can't skip ahead of it
+  if (wait_signal != nullptr) {
+    blocking_stream->SetBlockedOn(wait_signal);
   }
 
   // Release all active commands; safe after the marker was enqueued
@@ -767,7 +785,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   // Caching behavior
   deviceProps.globalL1CacheSupported = 1;
   deviceProps.localL1CacheSupported = 1;
-  deviceProps.persistingL2CacheMaxSize = info.l2CacheSize_;
+  deviceProps.persistingL2CacheMaxSize = info.persistingL2CacheMaxSize_;
   deviceProps.reservedSharedMemPerBlock = 0;
   deviceProps.sharedMemPerBlockOptin = info.localMemSizePerCU_;
 
@@ -805,9 +823,11 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options
-  deviceProps.gpuDirectRDMASupported = 0;
-  deviceProps.gpuDirectRDMAFlushWritesOptions = 0;
-  deviceProps.gpuDirectRDMAWritesOrdering = 0;
+  deviceProps.gpuDirectRDMASupported = (info.dmabufSupported_ && info.largeBar_) ? 1 : 0;
+  // Set option if we have a HDP register
+  deviceProps.gpuDirectRDMAFlushWritesOptions =
+      hip::ihipRdmaFlushWritesOptions(info.hdpMemFlushCntl);
+  deviceProps.gpuDirectRDMAWritesOrdering = hip::ihipRdmaWritesOrdering();
   // The LUID is a Windows/DXGI adapter concept; the backend reports a zero LUID
   // and zero node mask on platforms without a WDDM adapter.
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[0]) = info.luidLowPart_;
