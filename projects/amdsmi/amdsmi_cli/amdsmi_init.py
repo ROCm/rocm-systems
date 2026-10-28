@@ -192,9 +192,7 @@ def amdsmi_cli_init():
             amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
             amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
         ):
-            logging.error(
-                "Drivers not loaded (amdgpu, amd_hsmp, ionic, bnxt_en drivers not found in modules)"
-            )
+            logging.error("Drivers not loaded (amdgpu, amd_hsmp drivers not found in modules)")
             sys.exit(int(AmdSmiExitCode.DRIVERS_NOT_LOADED))
         else:
             raise e

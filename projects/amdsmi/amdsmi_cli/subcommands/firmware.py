@@ -7,6 +7,9 @@ import logging
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 
+# Each worker opens its own netlink socket, so cap them on hosts with many NICs.
+_MAX_FW_WORKERS = 8
+
 
 class FirmwareCommands:
     def _get_nic_fw_info(self, device_handle):
@@ -47,8 +50,9 @@ class FirmwareCommands:
             # Each firmware query is a live devlink round trip (~1s); fetch them
             # concurrently instead of once per recursive handle_ainics call below.
             if isinstance(args.nic, list) and len(args.nic) > 1 and args.fw_list:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=len(args.nic)) as pool:
-                    fw_infos = pool.map(self._get_nic_fw_info, args.nic)
+                max_workers = min(len(args.nic), _MAX_FW_WORKERS)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    fw_infos = list(pool.map(self._get_nic_fw_info, args.nic))
                 args._nic_fw_info_prefetch = dict(zip((h.value for h in args.nic), fw_infos))
 
             handled_multiple_nics, device_handle = self.helpers.handle_ainics(

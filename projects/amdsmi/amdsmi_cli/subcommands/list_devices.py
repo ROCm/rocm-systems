@@ -329,8 +329,11 @@ class ListDevicesCommands:
         self.logger.output = {}
         self.logger.clear_multiple_devices_output()
 
-        # JSON/CSV cannot carry a second document; NICs there need an explicit --nic.
-        if self.helpers.is_ainic_initialized() and self.logger.is_human_readable_format():
+        # JSON/CSV cannot carry a second document; NICs there need an explicit --nic
+        # unless no GPU was listed, when they are the only document.
+        if self.helpers.is_ainic_initialized() and (
+            gpuCount == 0 or self.logger.is_human_readable_format()
+        ):
             ainics = self._get_ainics_from_args(args)
             if len(ainics) > 0:
                 self.list_ainic(args, False, nic=ainics)

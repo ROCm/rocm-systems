@@ -99,7 +99,7 @@ class _AssumeDriverLoaded:
         "amdgpu": ("is_amdgpu_initialized",),
         "hsmp_acpi": ("is_amd_hsmp_initialized",),
         "ionic": ("is_ainic_initialized",),
-        "bnxt_en": ("is_ainic_initialized", "is_brcm_nic_initialized"),
+        "bnxt_en": ("is_ainic_initialized",),
     }
     _CHOICES = {
         "amdgpu": ("get_gpu_choices",),
@@ -119,6 +119,14 @@ class _AssumeDriverLoaded:
         if name in self._choices:
             return lambda: ({}, "")
         return getattr(self._helpers, name)
+
+
+def _nic_index(value):
+    """argparse type for a NIC port index; -1 selects every port."""
+    index = int(value)
+    if index < -1:
+        raise argparse.ArgumentTypeError(f"invalid index {value}: must be 0 or greater")
+    return index
 
 
 class AMDSMIParser(argparse.ArgumentParser):
@@ -1468,6 +1476,25 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         parser.parse_known_args = _intercept
 
+    @staticmethod
+    def _guard_nic_arguments_require_nic(parser):
+        """--port, --rdma and --sensors read a NIC; without --nic they would be ignored and a GPU
+        dump printed instead, so reject them at parse time."""
+        _original_parse_known_args = parser.parse_known_args
+
+        def _intercept(args=None, namespace=None):
+            namespace, extras = _original_parse_known_args(args, namespace)
+            is_nic_argument_given = (
+                (getattr(namespace, "port", None) is not None)
+                or (getattr(namespace, "rdma", None) is not None)
+                or getattr(namespace, "sensors", False)
+            )
+            if is_nic_argument_given and (getattr(namespace, "nic", None) is None):
+                parser.error("arguments --port/--rdma/--sensors: not allowed without --nic")
+            return namespace, extras
+
+        parser.parse_known_args = _intercept
+
     def _add_device_arguments(self, subcommand_parser: argparse.ArgumentParser, required=False):
         # Device arguments help text
         gpu_help = (
@@ -2395,7 +2422,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             nic_stats_group = metric_parser.add_argument_group("NIC Arguments")
             nic_stats_group.add_argument(
                 "--port",
-                type=int,
+                type=_nic_index,
                 nargs="?",
                 const=-1,
                 default=None,
@@ -2404,7 +2431,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
             nic_stats_group.add_argument(
                 "--rdma",
-                type=int,
+                type=_nic_index,
                 nargs="?",
                 const=-1,
                 default=None,
@@ -2418,6 +2445,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "--extended", action="store_true", required=False, help=extended_help
             )
             self._guard_extended_requires_port(metric_parser)
+            self._guard_nic_arguments_require_nic(metric_parser)
 
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(metric_parser)
