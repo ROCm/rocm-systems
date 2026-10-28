@@ -312,8 +312,11 @@ def test_deprecated_options_are_real_options():
         # Options of the workload belong to the workload
         (["profile", "-n", "x", "--", "./app", "--device", "1"], []),
         (["profile", "--roofline-device", "1"], []),
+        (["analyze", "--config-dir", "/tmp/cfg"], ["--config-dir"]),
+        (["profile", "--config-dir=/tmp/cfg", "-n", "x"], ["--config-dir"]),
     ],
-    ids=["old_name", "equals_form", "workload_options", "new_name"],
+    ids=["old_name", "equals_form", "workload_options", "new_name",
+         "config_dir", "config_dir_equals_form"],
 )  # fmt: skip
 def test_warn_deprecated_options(argv, warned, caplog):
     warn_deprecated_options(argv)
