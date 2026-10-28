@@ -1,0 +1,80 @@
+{
+    "version": 4,
+    "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "default",
+            "displayName": "Release (no sanitizer)",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CPU_SNAP_SANITIZER": "none"
+            }
+        },
+        {
+            "name": "debug",
+            "displayName": "Debug",
+            "binaryDir": "${sourceDir}/build-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CPU_SNAP_SANITIZER": "none"
+            }
+        },
+        {
+            "name": "asan",
+            "displayName": "AddressSanitizer + UBSan",
+            "binaryDir": "${sourceDir}/build-asan",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CPU_SNAP_SANITIZER": "asan+ubsan"
+            }
+        },
+        {
+            "name": "tsan",
+            "displayName": "ThreadSanitizer",
+            "binaryDir": "${sourceDir}/build-tsan",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CPU_SNAP_SANITIZER": "tsan"
+            }
+        },
+        {
+            "name": "ubsan",
+            "displayName": "UndefinedBehaviorSanitizer",
+            "binaryDir": "${sourceDir}/build-ubsan",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CPU_SNAP_SANITIZER": "ubsan"
+            }
+        },
+        {
+            "name": "coverage",
+            "displayName": "cpu_snap | coverage (gcc/clang)",
+            "description": "Coverage instrumentation; mutually exclusive with sanitizers. Build then run 'cmake --build --target coverage' for the report.",
+            "binaryDir": "${sourceDir}/build-coverage",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CPU_SNAP_COVERAGE": "ON",
+                "CPU_SNAP_SANITIZER": "none",
+                "CPU_SNAP_BUILD_EXAMPLES": "ON",
+                "CPU_SNAP_BUILD_BENCH": "OFF",
+                "CPU_SNAP_BUILD_TESTS": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        { "name": "default",  "configurePreset": "default" },
+        { "name": "debug",    "configurePreset": "debug" },
+        { "name": "asan",     "configurePreset": "asan" },
+        { "name": "tsan",     "configurePreset": "tsan" },
+        { "name": "ubsan",    "configurePreset": "ubsan" },
+        { "name": "coverage", "configurePreset": "coverage" }
+    ],
+    "testPresets": [
+        { "name": "default",  "configurePreset": "default",  "output": { "outputOnFailure": true } },
+        { "name": "asan",     "configurePreset": "asan",     "output": { "outputOnFailure": true } },
+        { "name": "tsan",     "configurePreset": "tsan",     "output": { "outputOnFailure": true } },
+        { "name": "ubsan",    "configurePreset": "ubsan",    "output": { "outputOnFailure": true } },
+        { "name": "coverage", "configurePreset": "coverage", "output": { "outputOnFailure": true } }
+    ]
+}
