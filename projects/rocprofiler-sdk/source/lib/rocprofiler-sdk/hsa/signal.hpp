@@ -34,7 +34,7 @@ struct signal_t
     hsa_signal_t value = {.handle = 0};
     // In device memory, where every host access crosses PCIe. The host never writes such a
     // signal: each dispatch it completes decrements it by one, and `idle_value` tracks the value
-    // it holds while no dispatch is using it.
+    // it holds while no dispatch is using it (see retire_device_signal).
     bool               device_memory = false;
     hsa_signal_value_t idle_value    = 0;
 };

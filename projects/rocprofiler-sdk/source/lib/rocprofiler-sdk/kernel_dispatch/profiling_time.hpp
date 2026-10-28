@@ -47,16 +47,34 @@ get_dispatch_time(hsa_agent_t             agent,
                   rocprofiler_kernel_id_t kernel_id,
                   std::optional<uint64_t> baseline = {});
 
-// Same result for an SDK-owned signal in device memory, reading the raw timestamps with a single
-// streaming host load instead of the several plain ones hsa_amd_profiling_get_dispatch_time makes.
-// Call device_signal_read_fence() once between observing a batch complete and these reads.
+// What the host reads back from an SDK-owned completion signal in device memory.
+struct device_signal_snapshot
+{
+    hsa_signal_value_t value      = 0;
+    uint64_t           start_tick = 0;
+    uint64_t           end_tick   = 0;
+};
+
+// Reads the value and raw timestamps of an SDK-owned device-memory signal with streaming loads of
+// its one cache line, instead of the several serialized plain loads hsa_signal_load and
+// hsa_amd_profiling_get_dispatch_time make. Call device_signal_read_fence() once between
+// observing a batch complete and these reads.
+device_signal_snapshot
+read_device_signal(hsa_signal_t signal);
+
+// get_dispatch_time for a signal read with read_device_signal. The first call cross-checks the
+// result against hsa_amd_profiling_get_dispatch_time; on a mismatch, this and every later call
+// return the latter.
 profiling_time
-get_device_signal_dispatch_time(hsa_agent_t             agent,
-                                hsa_signal_t            signal,
-                                rocprofiler_kernel_id_t kernel_id,
-                                std::optional<uint64_t> baseline = {});
+get_device_signal_dispatch_time(hsa_agent_t                   agent,
+                                hsa_signal_t                  signal,
+                                const device_signal_snapshot& snapshot,
+                                rocprofiler_kernel_id_t       kernel_id,
+                                std::optional<uint64_t>       baseline = {});
 
 // Streaming loads are weakly ordered, so they could run ahead of the load that saw the completion.
+// They are also not snooped: a line an earlier read of the same signal left behind would carry
+// that read's value, which is why callers check the snapshot's value before using its timestamps.
 void
 device_signal_read_fence();
 }  // namespace kernel_dispatch

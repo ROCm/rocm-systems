@@ -82,33 +82,94 @@ finish_dispatch_time(std::string_view                  _responsible,
     return _profile_time;
 }
 
-// Both raw timestamps in one streaming load. The host maps device memory write-combined, where a
-// plain load is a serialized ~1 us PCIe round trip but streaming loads overlap; on other memory
-// types a streaming load is an ordinary load. Weakly ordered: see device_signal_read_fence.
-#if defined(__x86_64__)
-__attribute__((target("sse4.1"))) void
-load_raw_timestamps(hsa_signal_t _signal, uint64_t& _start, uint64_t& _end)
-{
-    static_assert(offsetof(amd_signal_t, end_ts) == offsetof(amd_signal_t, start_ts) + 8);
-    static_assert(offsetof(amd_signal_t, start_ts) % 16 == 0);
+static_assert(offsetof(amd_signal_t, value) == 8);
+static_assert(offsetof(amd_signal_t, start_ts) == 32);
+static_assert(offsetof(amd_signal_t, end_ts) == 40);
+static_assert(alignof(amd_signal_t) == 64);
 
+// The value and both raw timestamps, with two streaming loads of the one cache line holding them.
+// On a write-combined mapping (how the host maps large-BAR device memory) a plain load is a
+// serialized ~1 us PCIe round trip, but streaming loads of a line are served by one fill; on other
+// memory types a streaming load is an ordinary load. Weakly ordered: see device_signal_read_fence.
+#if defined(__x86_64__)
+__attribute__((target("sse4.1"))) device_signal_snapshot
+load_device_signal(hsa_signal_t _signal)
+{
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    auto*      _ts = &reinterpret_cast<amd_signal_t*>(_signal.handle)->start_ts;
-    const auto _v  = _mm_stream_load_si128(reinterpret_cast<__m128i*>(_ts));
-    _start         = static_cast<uint64_t>(_mm_cvtsi128_si64(_v));
-    _end           = static_cast<uint64_t>(_mm_extract_epi64(_v, 1));
+    auto*      _line = reinterpret_cast<__m128i*>(_signal.handle);
+    const auto _head = _mm_stream_load_si128(_line);
+    const auto _ts   = _mm_stream_load_si128(_line + 2);
+    return device_signal_snapshot{static_cast<hsa_signal_value_t>(_mm_extract_epi64(_head, 1)),
+                                  static_cast<uint64_t>(_mm_cvtsi128_si64(_ts)),
+                                  static_cast<uint64_t>(_mm_extract_epi64(_ts, 1))};
 }
 #else
-void
-load_raw_timestamps(hsa_signal_t _signal, uint64_t& _start, uint64_t& _end)
+device_signal_snapshot
+load_device_signal(hsa_signal_t _signal)
 {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    const auto* _amd_signal = reinterpret_cast<const amd_signal_t*>(_signal.handle);
-    _start                  = _amd_signal->start_ts;
-    _end                    = _amd_signal->end_ts;
+    const volatile auto* _amd_signal =
+        reinterpret_cast<const volatile amd_signal_t*>(_signal.handle);
+    return device_signal_snapshot{_amd_signal->value, _amd_signal->start_ts, _amd_signal->end_ts};
 }
 #endif
+
+profiling_time
+convert_device_signal_time(hsa_agent_t                        _hsa_agent,
+                           const device_signal_snapshot&      _snapshot,
+                           hsa_amd_profiling_dispatch_time_t& _dispatch_time)
+{
+    _dispatch_time = hsa_amd_profiling_dispatch_time_t{};
+    // zero ticks are what hsa_amd_profiling_get_dispatch_time reports as 0..0
+    if(_snapshot.start_tick == 0 || _snapshot.end_tick == 0)
+        return profiling_time{HSA_STATUS_SUCCESS, 0, 0};
+
+    const auto* _ext = hsa::get_amd_ext_table();
+    if(!_ext || !_ext->hsa_amd_profiling_convert_tick_to_system_domain_fn)
+        return profiling_time{HSA_STATUS_ERROR_NOT_INITIALIZED, 0, 0};
+
+    // end first, as ROCr's GpuAgent::TranslateTime does, so clock-read jitter does not land in the
+    // duration
+    auto status = _ext->hsa_amd_profiling_convert_tick_to_system_domain_fn(
+        _hsa_agent, _snapshot.end_tick, &_dispatch_time.end);
+    if(status == HSA_STATUS_SUCCESS)
+        status = _ext->hsa_amd_profiling_convert_tick_to_system_domain_fn(
+            _hsa_agent, _snapshot.start_tick, &_dispatch_time.start);
+    return profiling_time{status, _dispatch_time.start, _dispatch_time.end};
+}
+
+// Whether raw reads agree with hsa_amd_profiling_get_dispatch_time. Checked on the first
+// completed device signal, so a change in ROCr's signal layout or time translation turns the raw
+// path off rather than producing wrong timestamps.
+enum class raw_read_state : int
+{
+    unchecked = 0,
+    agrees,
+    disagrees
+};
+
+std::atomic<raw_read_state>&
+get_raw_read_state()
+{
+    static auto _v = std::atomic<raw_read_state>{raw_read_state::unchecked};
+    return _v;
+}
+
+// ROCr re-syncs its clocks while translating, so translations of one tick can differ slightly
+constexpr uint64_t raw_read_tolerance_ns = 1000;
+
+bool
+within_tolerance(uint64_t _lhs, uint64_t _rhs)
+{
+    return ((_lhs > _rhs) ? _lhs - _rhs : _rhs - _lhs) <= raw_read_tolerance_ns;
+}
 }  // namespace
+
+device_signal_snapshot
+read_device_signal(hsa_signal_t signal)
+{
+    return load_device_signal(signal);
+}
 
 void
 device_signal_read_fence()
@@ -142,32 +203,46 @@ get_dispatch_time(hsa_agent_t             _hsa_agent,
 
 profiling_time
 get_device_signal_dispatch_time(
-    hsa_agent_t             _hsa_agent,
-    hsa_signal_t            _signal,
-    rocprofiler_kernel_id_t _kernel_id,
-    std::optional<uint64_t> _baseline)  // NOLINT(performance-unnecessary-value-param)
+    hsa_agent_t                   _hsa_agent,
+    hsa_signal_t                  _signal,
+    const device_signal_snapshot& _snapshot,
+    rocprofiler_kernel_id_t       _kernel_id,
+    std::optional<uint64_t>       _baseline)  // NOLINT(performance-unnecessary-value-param)
 {
-    auto ts         = common::timestamp_ns();
-    auto start_tick = uint64_t{0};
-    auto end_tick   = uint64_t{0};
-    load_raw_timestamps(_signal, start_tick, end_tick);
+    auto& _state = get_raw_read_state();
+    if(_state.load(std::memory_order_relaxed) == raw_read_state::disagrees)
+        return get_dispatch_time(_hsa_agent, _signal, _kernel_id, _baseline);
 
+    auto ts            = common::timestamp_ns();
     auto dispatch_time = hsa_amd_profiling_dispatch_time_t{};
-    auto status        = HSA_STATUS_SUCCESS;
-    // zero ticks are what hsa_amd_profiling_get_dispatch_time reports as 0..0
-    if(start_tick != 0 && end_tick != 0)
+    auto converted     = convert_device_signal_time(_hsa_agent, _snapshot, dispatch_time);
+
+    if(_state.load(std::memory_order_relaxed) == raw_read_state::unchecked &&
+       converted.status == HSA_STATUS_SUCCESS && dispatch_time.start != 0)
     {
-        const auto* _ext = hsa::get_amd_ext_table();
-        // end first, as ROCr does, so clock-read jitter does not land in the duration
-        status = _ext->hsa_amd_profiling_convert_tick_to_system_domain_fn(
-            _hsa_agent, end_tick, &dispatch_time.end);
-        if(status == HSA_STATUS_SUCCESS)
-            status = _ext->hsa_amd_profiling_convert_tick_to_system_domain_fn(
-                _hsa_agent, start_tick, &dispatch_time.start);
+        auto reference = hsa_amd_profiling_dispatch_time_t{};
+        auto status    = hsa::get_amd_ext_table()->hsa_amd_profiling_get_dispatch_time_fn(
+            _hsa_agent, _signal, &reference);
+        const bool agrees = status == HSA_STATUS_SUCCESS &&
+                            within_tolerance(dispatch_time.start, reference.start) &&
+                            within_tolerance(dispatch_time.end, reference.end);
+        _state.store(agrees ? raw_read_state::agrees : raw_read_state::disagrees,
+                     std::memory_order_relaxed);
+        if(!agrees)
+        {
+            ROCP_WARNING << fmt::format(
+                "device signal timestamps read directly ({}..{}) disagree with "
+                "hsa_amd_profiling_get_dispatch_time ({}..{}); using the latter from now on",
+                dispatch_time.start,
+                dispatch_time.end,
+                reference.start,
+                reference.end);
+            return get_dispatch_time(_hsa_agent, _signal, _kernel_id, _baseline);
+        }
     }
 
     return finish_dispatch_time("hsa_amd_profiling_convert_tick_to_system_domain",
-                                status,
+                                converted.status,
                                 dispatch_time,
                                 ts,
                                 _hsa_agent,

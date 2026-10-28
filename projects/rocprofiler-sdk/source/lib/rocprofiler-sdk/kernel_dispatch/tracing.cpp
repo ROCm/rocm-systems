@@ -55,7 +55,9 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
 }
 
 profiling_time
-get_device_signal_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_data)
+get_device_signal_dispatch_time(const queue_info_session_t&   session,
+                                packet_data_t&                packet_data,
+                                const device_signal_snapshot& snapshot)
 {
     const auto& callback_record = packet_data.callback_record;
     const auto* _rocp_agent     = agent::get_agent(callback_record.dispatch_info.agent_id);
@@ -63,9 +65,9 @@ get_device_signal_dispatch_time(const queue_info_session_t& session, packet_data
     auto        _signal         = packet_data.completion_signal;
     auto        _kern_id        = callback_record.dispatch_info.kernel_id;
 
-    return (_hsa_agent)
-               ? get_device_signal_dispatch_time(*_hsa_agent, _signal, _kern_id, session.enqueue_ts)
-               : profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
+    return (_hsa_agent) ? get_device_signal_dispatch_time(
+                              *_hsa_agent, _signal, snapshot, _kern_id, session.enqueue_ts)
+                        : profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
 }
 
 void

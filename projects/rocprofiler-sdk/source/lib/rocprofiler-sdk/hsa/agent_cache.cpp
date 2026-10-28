@@ -115,22 +115,32 @@ init_gpu_pool(const AmdExtTable& api, rocprofiler::hsa::AgentCache& agent)
         << "HSA GPU Pool is not initialized";
 }
 
-// Finds the GPU pool that hsa_amd_signal_batch_create can place signals in (large-BAR device
-// memory). Completion signals there are written by the CP without crossing PCIe.
+// Finds the pool of the GPU's own memory that hsa_amd_signal_batch_create can place signals in.
+// ROCr reports one only where the host can map it (large BAR): the extended-scope fine-grained pool
+// on gfx94x/gfx95x, the coarse-grained pool on gfx125x. Completion signals there are written by
+// the CP without crossing PCIe.
 void
 init_signal_pool(const AmdExtTable& api, rocprofiler::hsa::AgentCache& agent)
 {
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x17
+    // read once, for the first agent: all agents of a process behave the same
     static bool enabled = rocprofiler::common::get_env("ROCPROFILER_DEVICE_SIGNALS", true);
-    if(!enabled || api.version.step_id < 0x17 || !api.hsa_amd_signal_batch_create_fn) return;
+    if(!enabled || api.version.step_id < 0x17 || !api.hsa_amd_signal_batch_create_fn ||
+       !api.hsa_amd_memory_pool_get_info_fn ||
+       !api.hsa_amd_profiling_convert_tick_to_system_domain_fn)
+        return;
 
     auto find = [](hsa_amd_memory_pool_t pool, void* data) {
         auto [api_ptr, pool_ptr] =
             *static_cast<std::pair<const AmdExtTable*, hsa_amd_memory_pool_t*>*>(data);
-        bool capable = false;
+        bool capable  = false;
+        auto location = HSA_AMD_MEMORY_POOL_LOCATION_CPU;
         if(api_ptr->hsa_amd_memory_pool_get_info_fn(
                pool, HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE, &capable) != HSA_STATUS_SUCCESS ||
-           !capable)
+           !capable ||
+           api_ptr->hsa_amd_memory_pool_get_info_fn(
+               pool, HSA_AMD_MEMORY_POOL_INFO_LOCATION, &location) != HSA_STATUS_SUCCESS ||
+           location != HSA_AMD_MEMORY_POOL_LOCATION_GPU)
             return HSA_STATUS_SUCCESS;
         *pool_ptr = pool;
         return HSA_STATUS_INFO_BREAK;
@@ -138,6 +148,18 @@ init_signal_pool(const AmdExtTable& api, rocprofiler::hsa::AgentCache& agent)
 
     auto params = std::make_pair(&api, &agent.signal_pool());
     api.hsa_amd_agent_iterate_memory_pools_fn(agent.get_hsa_agent(), find, &params);
+
+    if(agent.signal_pool().handle != 0)
+    {
+        auto flags = uint32_t{0};
+        api.hsa_amd_memory_pool_get_info_fn(
+            agent.signal_pool(), HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flags);
+        ROCP_INFO << fmt::format("agent {}: kernel dispatch completion signals in device memory "
+                                 "pool {:#x} (global flags {:#x})",
+                                 agent.name(),
+                                 agent.signal_pool().handle,
+                                 flags);
+    }
 #else
     common::consume_args(api, agent);
 #endif
