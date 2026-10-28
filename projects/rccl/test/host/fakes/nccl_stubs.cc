@@ -52,13 +52,6 @@ struct ncclStrongStream;
 struct ncclTopoGraph;
 
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm) { ::abort(); }
-// This fake does NOT allocate ring->userRanks/rankToIndex like the real initChannel; callers must supply storage.
-ncclResult_t g_initChannelResult = ncclSuccess;
-int g_initChannelLastId = -1;
-ncclResult_t initChannel(struct ncclComm* comm, int channelid) {
-  g_initChannelLastId = channelid;
-  return g_initChannelResult;
-}
 
 // Controllable (was hardcoded success). This is commFree's FIRST NCCLCHECK, so it doubles as the
 // "commFree entered" marker for commCleanup's ordering oracle and as the only knob that fails commFree.
@@ -194,7 +187,6 @@ ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) {
 // rcclGetTuningIndexForArch (src/graph/tuning.cc): tuning_fakes.cc.
 // rcclUseAinic (src/transport/net.cc): transport_stubs.cc.
 
-ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }
 static ncclResult_t DefaultNcclAsyncLaunch(struct ncclAsyncJob* job, ncclResult_t (*func)(struct ncclAsyncJob*),
                                            void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*),
                                            struct ncclComm*) {
@@ -231,7 +223,6 @@ int64_t ncclParamGraphStreamOrdering() {
   return g_loadParam("GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
 }
 #endif
-int64_t rcclParamPxnOptQpUsage() { ::abort(); }  // src/channel.cc:14
 static ncclResult_t DefaultCollTraceDestroy(struct ncclComm*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclComm*)> g_collTraceDestroy = DefaultCollTraceDestroy;
 namespace latency_profiler {
@@ -300,8 +291,6 @@ void ResetNcclStubs() {
   g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
   g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
-  g_initChannelResult = ncclSuccess;
-  g_initChannelLastId = -1;
   g_cleanupCallOrder.clear();
   g_ncclCeFinalizeResult = ncclSuccess;
   g_ncclGinFinalizeResult = ncclSuccess;
