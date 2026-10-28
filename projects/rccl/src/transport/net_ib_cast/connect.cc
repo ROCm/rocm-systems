@@ -66,6 +66,45 @@ static inline bool IbCastIsCtsOffloadEnabled(int isP2p) {
   return IbCastOffloadEnabled && !(isP2p && rcclParamIbCastP2pDisableCts());
 }
 
+extern int64_t ncclParamIbCastReceiverSideMatchingScheme();
+extern int64_t ncclParamIbCastResiliencyPortFailover();
+
+// Order matters here:
+// BY_ORDER -> CTS offload (forced), else AINIC/user request after remaps
+// BY_ID    -> failover / OOO RQ (beats explicit or default BY_ORDER)
+// BY_INDEX -> default (non-AINIC) or user requested
+// Explicit SCHEME=BY_ORDER is not a hard force: same as AINIC default.
+// 7.14 has no QP-sharing path, so that develop remap is omitted.
+static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
+  if (useCtsOffload) {
+    return BY_ORDER;
+  }
+
+  if (ncclParamIbCastOooRq() || (ncclParamIbCastResiliencyPortFailover() == 1)) {
+    return BY_ID;
+  }
+
+  int64_t requested = ncclParamIbCastReceiverSideMatchingScheme();
+  if (requested == -2) {
+    return IbCastAinicRoce ? BY_ORDER : BY_INDEX;
+  }
+  return requested;
+}
+
+// Resolve live: IbCastOffloadEnabled is still mutated after the first call
+// (PORT_FAILOVER clears it in IbCastInitDevices). Caching BY_ORDER from the
+// pre-failover value would disable resiliency on comms that actually run BY_ID.
+bool IbCastByOrderRequested() {
+  return IbCastResolveRecvMatchingScheme(IbCastOffloadEnabled) == BY_ORDER;
+}
+
+void IbCastReportMatchingScheme() {
+  INFO(NCCL_NET, "NET/IB-CAST: collectives communicators: CTS Offload: %s   RecvMatchingScheme: %d",
+       IbCastIsCtsOffloadEnabled(0) ? "ON" : "OFF", IbCastResolveRecvMatchingScheme(IbCastIsCtsOffloadEnabled(0)));
+  INFO(NCCL_NET, "NET/IB-CAST: P2P communicators: CTS Offload: %s   RecvMatchingScheme: %d",
+       IbCastIsCtsOffloadEnabled(1) ? "ON" : "OFF", IbCastResolveRecvMatchingScheme(IbCastIsCtsOffloadEnabled(1)));
+}
+
 ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int cqSize) {
   base->ibDevN = ibDevN;
   ncclIbDev* ibDev = IbCastDevs + ibDevN;
@@ -828,9 +867,7 @@ ib_recv_dev_list:
   // Read isP2p from handle
   isP2p = handle->isP2p;
   comm->useCtsOffload = IbCastIsCtsOffloadEnabled(isP2p) && !handle->isRMA;
-  if (comm->useCtsOffload) {
-    comm->base.recvMatchingScheme = BY_ORDER;
-  }
+  comm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(comm->useCtsOffload);
 
   INFO(NCCL_NET, "NET/IB: IbCastConnect isP2p=%d isRMA=%d", isP2p, handle->isRMA);
   comm->base.nqps = IbCastCalculateNqps(isP2p, comm->base.vProps.ndevs, 
@@ -1389,9 +1426,7 @@ ib_recv:
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
 
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p);
-  if (rComm->useCtsOffload) {
-    rComm->base.recvMatchingScheme = BY_ORDER;
-  }
+  rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
   INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d useCtsOffload=%d (IbP2pDisableCts=%d)", remMeta.isP2p, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts());
   rComm->base.nqps = IbCastCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs,
                                          remMeta.ndevs, __func__);

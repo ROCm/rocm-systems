@@ -66,7 +66,7 @@ extern union ncclSocketAddress IbCastIfAddr;
 enum ncclIbRequestMatchingScheme {
   BY_INDEX=0,
   BY_ID=1,
-  BY_ORDER=2, // send requests are posted in the order they are received (CTS OFFLOAD)
+  BY_ORDER=2, // completions matched by posted WR identity (CTS offload, or software CTS with on-demand recvs)
 };
 
 struct ncclIbMr {
@@ -811,6 +811,9 @@ struct ncclIbQpSchedParmsCB {
   uint64_t prodEpoch;
   struct ncclIbQpSchedParms parms;
 };
+
+bool IbCastByOrderRequested();
+void IbCastReportMatchingScheme();
 
 bool rcclUseIbCastQpSched();
 ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms *parms);
