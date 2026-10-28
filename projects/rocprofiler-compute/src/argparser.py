@@ -521,7 +521,7 @@ Examples:
         help=(
             "\t\t\tTrace ML APIs. User-defined ROCTx regions are included.\n"
             "\t\t\tuser is not a value.\n"
-            "\t\t\tWith no arguments, traces every listed value.\n"
+            f"\t\t\tWith no arguments, traces {' and '.join(KNOWN_ML_API_BACKENDS)}.\n"
             f"\t\t\tValues: {', '.join(KNOWN_ML_API_BACKENDS)}."
         ),
     )
@@ -685,13 +685,15 @@ Examples:
         help=(
             "\t\tFilter operators with glob patterns.\n"
             "\t\tA pattern with no framework stays on the preceding one.\n"
+            "\t\tPrefix-less patterns are also legal.\n"
             "\t\tSpaces or commas separate patterns.\n"
             "\t\tExample: --operator torch:*conv* *relu* triton:*matmul*\n"
             "\t\tExample: --operator user:*UserDefined*\n"
-            "\t\tWith no arguments, matches the collected stack.\n"
+            "\t\tWith no arguments, matches every collected operator.\n"
+            "\t\tOmitting the flag does not filter.\n"
             "\t\tRequires --output-format stdout.\n"
             "\t\tIgnored when --list-operators is set.\n"
-            "\t\t(Default: **)"
+            f"\t\tValues: {', '.join((*KNOWN_ML_API_BACKENDS, 'user'))}."
         ),
     )
     analyze_group.add_argument(

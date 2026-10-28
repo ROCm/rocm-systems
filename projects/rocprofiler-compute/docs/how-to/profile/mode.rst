@@ -1161,6 +1161,7 @@ ML API trace
 ``--trace-ml-api`` with no selector traces all supported ML frameworks
 and user-defined ROCTx regions.
 User-defined ROCTx regions are included with every ``--trace-ml-api`` run.
+``--trace-ml-api user`` is not a valid value.
 
 .. warning::
 
