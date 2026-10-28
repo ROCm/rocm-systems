@@ -17,6 +17,21 @@
 #include <mutex>
 #include <sched.h>
 
+#include "fail_loud.h"
+#include "signature-drift.h"
+
+// Omitted when RCCL_OS_FAKES_OMIT_ncclSocketClose is defined: the target's own socket model closes sockets.
+#ifndef RCCL_OS_FAKES_OMIT_ncclSocketClose
+static ncclResult_t DefaultSocketClose(struct ncclSocket*, bool) {
+  FailLoudUnfaked("os_fakes", "ncclSocketClose");
+}
+std::function<ncclResult_t(struct ncclSocket*, bool)> g_ncclSocketClose = DefaultSocketClose;
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketClose, ncclSocketClose);
+#undef ASSERT_HOOK_MATCHES_PROD
+
+ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) { return g_ncclSocketClose(sock, wait); }
+#endif
+
 void* ncclOsAlignedAlloc(size_t alignment, size_t size) {
   void* p = nullptr;
   if (posix_memalign(&p, alignment, size) != 0) return nullptr;
@@ -80,6 +95,18 @@ std::function<ncclResult_t(const char*, const char*, char*, int)> g_ncclOsTopoGe
 ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, char* strValue, int maxLen) {
   ++g_ncclOsTopoGetStrFromSysCalls;
   return g_ncclOsTopoGetStrFromSys(path, fileName, strValue, maxLen);
+}
+
+std::function<ncclResult_t(const char*, const char*, char*, int)> SysfsAnswers(const char* bios,
+                                                                              const char* numaBalancing) {
+  return [=](const char*, const char* file, char* value, int maxLen) {
+    const char* answer = std::strcmp(file, "bios_version") == 0     ? bios
+                         : std::strcmp(file, "numa_balancing") == 0 ? numaBalancing
+                                                                     : nullptr;
+    if (answer == nullptr) return ncclSystemError;
+    std::snprintf(value, maxLen, "%s", answer);
+    return ncclSuccess;
+  };
 }
 
 // fillInfo MLOPart PCI-function fallback (init.cc ~1093). The default models what sysfs actually
@@ -155,7 +182,14 @@ ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int, char* affinityStr, size_t m
   return ncclSuccess;
 }
 
+static char* DefaultNcclOsRealpath(const char*, char*) { return nullptr; }
+std::function<char*(const char*, char*)> g_ncclOsRealpath = DefaultNcclOsRealpath;
+char* ncclOsRealpath(const char* path, char* resolvedPath) { return g_ncclOsRealpath(path, resolvedPath); }
+
 void ResetOsFakes() {
+#ifndef RCCL_OS_FAKES_OMIT_ncclSocketClose
+  g_ncclSocketClose = DefaultSocketClose;
+#endif
   g_ncclOsCpuCountValue = 0;
   g_ncclOsCpuCountCalls = 0;
   g_ncclOsCpuCountMasks.clear();
@@ -173,4 +207,5 @@ void ResetOsFakes() {
   g_pciComputePartition = kDefaultComputePartition;
   g_pciComputePartitionCalls = 0;
   g_lastPciComputePartitionBusId.clear();
+  g_ncclOsRealpath = DefaultNcclOsRealpath;
 }

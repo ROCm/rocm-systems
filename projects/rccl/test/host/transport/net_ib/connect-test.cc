@@ -28,6 +28,7 @@
 #include "fakes/mlx5dvwrap_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
+#include "fakes/os_fakes.h"
 #include "fakes/socket_fakes.h"
 #include "fakes/transport_net_ib_fakes.h"
 #include "fakes/transport_net_ib_resiliency_fakes.h"
@@ -196,6 +197,7 @@ class NetIbConnectMicrotest : public ::testing::Test {
     ResetTransportNetIbResiliencyFakes();
     ResetTransportNetIbFakes();
     ResetSocketFakes();
+    ResetOsFakes();
     ResetHipFakes();
     ResetIbvwrapFakes();
     ResetMlx5dvwrapFakes();

@@ -13,6 +13,7 @@
 #include "ScopedHook.h"
 #include "fakes/ibvwrap_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "transport/net_ib/NetIbGlobals.h"
 
 #include NET_IB_GID_INSPECT_CC_PATH
 
@@ -26,7 +27,7 @@ class NetIbGidInspectMicrotest : public ::testing::Test {
   }
 
   void TearDown() override {
-    ncclNIbDevs = -1;
+    NetIbResetGlobals();
     ResetIbvwrapFakes();
     ResetNcclFakes();
   }
@@ -72,6 +73,11 @@ TEST_F(NetIbGidInspectMicrotest, GetQpState_ClampsCountAndReportsUnmaterializedQ
   EXPECT_EQ(state.devIndex[0], 2);
   EXPECT_EQ(state.rtrGidIndex[0], 9);
   EXPECT_FALSE(state.queryOk[0]);
+
+  comm.base.nqps = -1;  // not connected yet
+  ASSERT_EQ(ncclIbGidGetQpState(&comm, &state), ncclSuccess);
+  EXPECT_EQ(state.nqps, 0);
+  EXPECT_EQ(state.devIndex[0], 0);
 }
 
 TEST_F(NetIbGidInspectMicrotest, GetAndSetComm_ValidDeviceRoundTripsStateAndIbDevice) {
@@ -149,17 +155,28 @@ TEST_F(NetIbGidInspectMicrotest, RecoveryAndProbingGidLookupsFindMatchingMateria
   ncclIbSendComm comm{};
   ncclIbResiliency resiliency{};
   comm.base.resiliency = &resiliency;
+  ibv_qp otherDeviceQp{};
   ibv_qp recoveryQp{};
   ibv_qp probingQp{};
-  resiliency.nPortRecoveryQps = 2;
-  resiliency.portRecoveryQps[0].devIndex = 3;  // matching device, but no materialized QP
+  // Each list puts a QP on another device, then an unmaterialized QP on device 3, ahead of the match.
+  resiliency.nPortRecoveryQps = 3;
+  resiliency.portRecoveryQps[0].devIndex = 4;
+  resiliency.portRecoveryQps[0].qp = &otherDeviceQp;
+  resiliency.portRecoveryQps[0].rtrAttr.localGidIndex = 5;
   resiliency.portRecoveryQps[1].devIndex = 3;
-  resiliency.portRecoveryQps[1].qp = &recoveryQp;
-  resiliency.portRecoveryQps[1].rtrAttr.localGidIndex = 7;
-  resiliency.nProbingQps = 1;
-  resiliency.probingQps[0].devIndex = 3;
-  resiliency.probingQps[0].qp = &probingQp;
-  resiliency.probingQps[0].rtrAttr.localGidIndex = 8;
+  resiliency.portRecoveryQps[1].rtrAttr.localGidIndex = 6;
+  resiliency.portRecoveryQps[2].devIndex = 3;
+  resiliency.portRecoveryQps[2].qp = &recoveryQp;
+  resiliency.portRecoveryQps[2].rtrAttr.localGidIndex = 7;
+  resiliency.nProbingQps = 3;
+  resiliency.probingQps[0].devIndex = 4;
+  resiliency.probingQps[0].qp = &otherDeviceQp;
+  resiliency.probingQps[0].rtrAttr.localGidIndex = 5;
+  resiliency.probingQps[1].devIndex = 3;
+  resiliency.probingQps[1].rtrAttr.localGidIndex = 6;
+  resiliency.probingQps[2].devIndex = 3;
+  resiliency.probingQps[2].qp = &probingQp;
+  resiliency.probingQps[2].rtrAttr.localGidIndex = 8;
   int gid = -1;
 
   EXPECT_EQ(ncclIbGidGetRecoveryGidIndex(&comm, 3, &gid), ncclSuccess);
@@ -167,6 +184,7 @@ TEST_F(NetIbGidInspectMicrotest, RecoveryAndProbingGidLookupsFindMatchingMateria
   EXPECT_EQ(ncclIbGidGetProbingGidIndex(&comm, 3, &gid), ncclSuccess);
   EXPECT_EQ(gid, 8);
   EXPECT_EQ(ncclIbGidGetRecoveryGidIndex(&comm, 9, &gid), ncclInvalidArgument);
+  EXPECT_EQ(ncclIbGidGetProbingGidIndex(&comm, 9, &gid), ncclInvalidArgument);
 }
 
 TEST_F(NetIbGidInspectMicrotest, DriveQpToError_ValidIndexRequestsErrorState) {

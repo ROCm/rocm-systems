@@ -29,8 +29,8 @@ class ScopedDmaBufProbe {
         probeErrno_(probeErrno),
         alloc(g_ibvAllocPd, [this](struct ibv_pd** out, struct ibv_context* context) {
           allocContext = context;
-          *out = pd_;
-          return ncclSuccess;
+          *out = allocFails ? nullptr : pd_;
+          return allocFails ? ncclSystemError : ncclSuccess;
         }),
         probe(g_ibvDirectRegDmabufMr,
               [this](struct ibv_pd* pd, uint64_t, size_t, uint64_t, int fd, int) -> struct ibv_mr* {
@@ -41,8 +41,12 @@ class ScopedDmaBufProbe {
               }),
         dealloc(g_ibvDeallocPd, [this](struct ibv_pd* pd) {
           deallocPd = pd;
-          return ncclSuccess;
+          return deallocFails ? ncclSystemError : ncclSuccess;
         }) {}
+
+  // Set before the probe runs to fail ibv_alloc_pd or ibv_dealloc_pd.
+  bool allocFails = false;
+  bool deallocFails = false;
 
   struct ibv_context* allocContext = nullptr;
   struct ibv_pd* probePd = nullptr;
