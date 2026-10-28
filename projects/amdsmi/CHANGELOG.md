@@ -30,7 +30,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - This is unrelated to the legacy `amdsmi_*_gpu_power_profile*` preset-mask API, which is unchanged.
 
 - **Added Power Stabilization support (HAWK dummy-compute insertion and Ramp Management)**.  
-  - Query and configure GPU power stabilization and ramp management settings via `amd-smi static --power-stabilization` and `amd-smi set --power-stabilization-configure KEY=VALUE [...]` (or `@<path>` to a JSON file), on supported bare-metal Linux platforms.
+  - Query and configure GPU power stabilization and ramp management settings via `amd-smi static --power-stabilization` and `amd-smi set --power-stabilization-configure KEY=VALUE [...]` (or `@<path>` to a JSON file), on supported bare-metal Linux platforms. When NPM (Node-level Power Management) coordination makes settings node-wide, a write against a non-primary GPU still applies but prints an informational/warning note naming the node's primary GPU.
 
 - **Added `AMDSMI_VRAM_TYPE_HBM4` to `amdsmi_vram_type_t`**.  
   - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.

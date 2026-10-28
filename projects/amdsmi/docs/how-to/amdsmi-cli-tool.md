@@ -2052,6 +2052,36 @@ for example `Applied 9/9 parameters from 'ps.json'`, so an automated caller
 can tell a partial restore from a complete one without counting the
 per-field lines itself.
 
+### NPM coordination
+
+When NPM (Node-level Power Management) coordination is active on a node,
+every Power Stabilization / Ramp Management parameter becomes node-wide
+rather than per-GPU. `amd-smi set --power-stabilization-configure` still
+takes a plain `--gpu N` -- writing against a non-primary GPU is not
+rejected, since the caller may want the value to take effect once NPM is no
+longer active for that GPU. Instead, the CLI prints a note alongside the
+normal per-field result: an informational note when `--gpu` already targets
+the node's primary GPU (OAM ID 0), or a warning naming the equivalent
+primary-GPU command otherwise.
+
+```shell-session
+~$ sudo amd-smi set --gpu 0 --power-stabilization-configure power_floor=25
+GPU: 0
+POWER_STABILIZATION_CONFIGURE: [INFO] NPM is enabled; this setting applies node-wide, not just to this GPU.
+POWER_STABILIZATION_CONFIGURE: power_floor=25: success
+```
+
+```shell-session
+~$ sudo amd-smi set --gpu 5 --power-stabilization-configure power_floor=25
+GPU: 5
+POWER_STABILIZATION_CONFIGURE: [WARNING] power_stabilization is node-wide while NPM is enabled; this write only reflects this GPU's own node state. To configure the node, use its primary GPU instead: 'amd-smi set --gpu 0 --power-stabilization-configure power_floor=25'
+POWER_STABILIZATION_CONFIGURE: power_floor=25: success
+```
+
+The primary GPU is resolved once at CLI startup from whichever device first
+yields a node handle, the same assumption `--node-power-limit`/
+`--node-balancing-mode` make.
+
 ### Prerequisites
 
 - Bare-metal Linux only; not available on multi-VF devices.

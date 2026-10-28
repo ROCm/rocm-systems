@@ -1336,7 +1336,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 for token in tokens:
                     try:
                         result = AMDSMIHelpers.parse_power_stabilization_token(
-                            token, ignore_host_control=False
+                            token, ignore_read_only=False
                         )
                     except ValueError as e:
                         raise argparse.ArgumentError(self, f"{e} for {option_string}")

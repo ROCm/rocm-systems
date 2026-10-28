@@ -11071,11 +11071,7 @@ typedef struct {
  *
  *  @details A read returns the current effective
  *  value of each parameter, which can differ from the last value written,
- *  regardless of host_control_enabled or enabled state. This is most
- *  notable for the ramp_* fields: when NPM coordination is active on a
- *  node, PMFW -- not amdsmi -- reconciles each GPU's requested ramp value
- *  into a node/socket-level effective value, so a read can return a value
- *  that differs from what was last written to this GPU's own node.
+ *  regardless of host_control_enabled or enabled state.
  *
  *  @param[in] processor_handle GPU device handle
  *  @param[out] info Pointer to receive the Power Stabilization info
@@ -11100,12 +11096,15 @@ amdsmi_status_t amdsmi_get_power_stabilization_info(amdsmi_processor_handle proc
  *  @platform{gpu_bm_linux}
  *
  *  @details Applies exactly one parameter per call; a batch of calls is not
- *  rolled back if a later call fails. RAMP_* parameters are written to the
- *  target processor_handle's own sysfs node. Any parameter dependency (for
- *  example, ramp-down configuration requiring Power Stabilization to already
- *  be enabled) is enforced by the driver via the sysfs write itself; this
- *  function performs no client-side dependency or range validation beyond
- *  checking that value->type matches the type documented for param_id.
+ *  rolled back if a later call fails. When NPM (Node-level Power Management)
+ *  coordination is active on a node, param_id may become node-wide
+ *  rather than per-GPU; amdsmi does not detect NPM state or reroute the
+ *  write on the caller's behalf, so the caller is responsible for
+ *  selecting the node's primary GPU handle (OAM ID 0) before calling this
+ *  function. Any parameter dependency is enforced by the
+ *  driver via the sysfs write itself; this function performs no
+ *  client-side dependency or range validation beyond checking that
+ *  value->type matches the type documented for param_id.
  *
  *  @param[in] processor_handle GPU device handle
  *  @param[in] param_id Parameter to set

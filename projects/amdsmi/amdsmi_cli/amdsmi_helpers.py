@@ -688,7 +688,7 @@ class AMDSMIHelpers:
 
     @staticmethod
     def parse_power_stabilization_token(
-        token: str, ignore_host_control: bool
+        token: str, ignore_read_only: bool
     ) -> Optional[Tuple["amdsmi_interface.AmdSmiPowerStabilizationParamId", Union[int, float]]]:
         """Parse a single 'KEY=VALUE' Power Stabilization token into
         (AmdSmiPowerStabilizationParamId, value).
@@ -697,10 +697,11 @@ class AMDSMIHelpers:
         argv parsing (amdsmi_parser.py) and its @<file> JSON restore path
         (set_value.py) so the two entry points can't drift apart.
 
-        Returns None for "host_control=..." when ignore_host_control is True
-        (HOST_CONTROL is read-only, silently skipped when replaying a full
-        `static --json` dump). Raises ValueError with a user-facing message
-        for any other malformed token, unknown key, or unparsable value.
+        Returns None for "host_control=..." when ignore_read_only is True
+        (HOST_CONTROL isn't a settable param_id at all, so it's silently
+        skipped when replaying a full `static --json` dump). Raises
+        ValueError with a user-facing message for any other malformed
+        token, unknown key, or unparsable value.
         """
         param_ids = amdsmi_interface.AmdSmiPowerStabilizationParamId
         allowed_keys = {name.lower(): member for name, member in param_ids.__members__.items()}
@@ -716,7 +717,7 @@ class AMDSMIHelpers:
         safe_value = AMDSMIHelpers._sanitize_for_error_message(raw_value)
 
         if key == "host_control":
-            if ignore_host_control:
+            if ignore_read_only:
                 return None
             raise ValueError("HOST_CONTROL is read-only and cannot be set")
 
@@ -3736,6 +3737,23 @@ class AMDSMIHelpers:
     # (amdsmi_interface.py's own string contract stays unchanged).
     NPM_BALANCING_MODE_TO_CLI = {"PB": "POWER_BALANCING", "FB": "FREQUENCY_BALANCING"}
     NPM_BALANCING_MODE_FROM_CLI = {"POWER_BALANCING": "PB", "FREQUENCY_BALANCING": "FB"}
+
+    def is_npm_enabled(self, node_handle) -> bool:
+        """Check whether NPM (Node Power Management) is enabled on a node.
+
+        No node handle counts as disabled for callers deciding between per-GPU
+        and node-wide behavior. A driver read failure (AmdSmiException) or a
+        malformed return missing "status" (KeyError) is NOT treated as
+        "disabled": that would fail open, silently letting a per-GPU write
+        through on a node where NPM might actually be enabled. Instead such
+        errors propagate to the caller, matching the established precedent in
+        validate_and_set_node_balancing_mode, which lets the same kind of
+        error propagate rather than masking it.
+        """
+        if node_handle is None:
+            return False
+        info = amdsmi_interface.amdsmi_get_npm_info(node_handle)
+        return info["status"] == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_ENABLED
 
     def validate_and_set_node_balancing_mode(self, node_handle, requested_mode, logger):
         """Validate and set the NPM balancing mode for a node.

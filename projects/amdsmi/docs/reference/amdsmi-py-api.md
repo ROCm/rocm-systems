@@ -6804,7 +6804,7 @@ finally:
 - Bare-metal Linux only. Not available on multi-VF devices; both cases
   return `AMDSMI_STATUS_NOT_SUPPORTED`.
 
-Description: Get Power Stabilization (HAWK dummy-compute insertion plus Ramp Management) info for a GPU. Reads `host_control_enabled`, `enabled`, and all configuration parameters directly from sysfs. A read returns the current effective value of each parameter, which can differ from the last value written, regardless of `host_control_enabled` or `enabled` state. This is most notable for the `ramp_*` fields: when NPM coordination is active on a node, PMFW -- not amdsmi -- reconciles each GPU's requested ramp value into a node/socket-level effective value, so a read can return a value that differs from what was last written to this GPU's own node.
+Description: Get Power Stabilization (HAWK dummy-compute insertion plus Ramp Management) info for a GPU. Reads `host_control_enabled`, `enabled`, and all configuration parameters directly from sysfs. A read returns the current effective value of each parameter, which can differ from the last value written, regardless of `host_control_enabled` or `enabled` state. When NPM (Node-level Power Management) coordination is active on a node, every field becomes node-wide rather than per-GPU; a read reflects the current effective node-wide value regardless of which GPU handle on that node is used.
 
 Input parameters:
 
@@ -6865,7 +6865,7 @@ finally:
   return `AMDSMI_STATUS_NOT_SUPPORTED`.
 - Writing requires root (or equivalent sysfs write permission).
 
-Description: Set a single Power Stabilization parameter. Applies exactly one parameter per call; a batch of calls is not rolled back if a later call fails. Any parameter dependency (for example, ramp-down configuration requiring Power Stabilization to already be enabled) is enforced by the driver via the sysfs write itself; this function performs no client-side dependency or range validation beyond checking the value's type.
+Description: Set a single Power Stabilization parameter. Applies exactly one parameter per call; a batch of calls is not rolled back if a later call fails. When NPM (Node-level Power Management) coordination is active on a node, every `param_id` becomes node-wide rather than per-GPU; amdsmi does not detect NPM state or reroute the write on the caller's behalf, so the caller is responsible for selecting the node's primary GPU handle (OAM ID 0) before calling this function. Any parameter dependency (for example, ramp-down configuration requiring Power Stabilization to already be enabled) is enforced by the driver via the sysfs write itself; this function performs no client-side dependency or range validation beyond checking the value's type.
 
 Input parameters:
 

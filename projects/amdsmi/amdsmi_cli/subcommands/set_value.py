@@ -1011,7 +1011,29 @@ class SetValueCommands:
         self.logger.print_output()
         self.logger.clear_multiple_devices_output()
 
-    def _apply_power_stabilization_params(self, args, parsed, source_file=None):
+    def _power_stabilization_npm_note(self, args, attempted):
+        """Returns a one-line note (as a list) about NPM's node-wide effect on
+        this write, or None if NPM isn't active. [INFO] when args.gpu is the
+        primary GPU (the write genuinely is node-wide); [WARNING] + the
+        equivalent primary-GPU command otherwise (the write only affects this
+        GPU's own node state, not the actual node-wide value)."""
+        if not self.helpers.is_npm_enabled(getattr(self, "node_handle", None)):
+            return None
+        if self.primary_gpu_handle is not None and args.gpu.value == self.primary_gpu_handle.value:
+            return ["[INFO] NPM is enabled; this setting applies node-wide, not just to this GPU."]
+        if self.primary_gpu_handle is None:
+            return None
+        primary_gpu_id = self.helpers.get_gpu_id_from_device_handle(self.primary_gpu_handle)
+        return [
+            "[WARNING] power_stabilization is node-wide while NPM is enabled; "
+            "this write only reflects this GPU's own node state. To configure "
+            f"the node, use its primary GPU instead: 'amd-smi set --gpu "
+            f"{primary_gpu_id} --power-stabilization-configure {attempted}'"
+        ]
+
+    def _apply_power_stabilization_params(
+        self, args, parsed, source_file=None, prefix_messages=None
+    ):
         # Apply one parameter per call, in order; the core API performs no
         # rollback, so stop at the first failure (matches its own semantics).
         # Accumulate into a single "power_stabilization_configure" document,
@@ -1024,7 +1046,7 @@ class SetValueCommands:
         # lines itself.
         total = len(parsed)
         applied = 0
-        results = []
+        results = list(prefix_messages) if prefix_messages else []
 
         for param_id, value in parsed:
             field_name = param_id.name.lower()
@@ -1065,6 +1087,7 @@ class SetValueCommands:
         self.logger.store_output(args.gpu, "power_stabilization_configure", results)
         self.logger.print_output()
         self.logger.clear_multiple_devices_output()
+        return results
 
     def _configure_power_stabilization_from_file(self, args, file_path, gpu_bdf, gpu_id):
         # Restores Power Stabilization settings for this GPU's entry from a
@@ -1073,6 +1096,7 @@ class SetValueCommands:
         # `{"gpu_data": [{"gpu": <int>, "power_stabilization": {...}}, ...]}`
         # (see AMDSMILogger.combine_arrays_to_json), so entries are matched by
         # the integer "gpu" index, not by BDF.
+
         ps_entry = self._load_gpu_section_from_json_file(
             file_path, gpu_id, gpu_bdf, "power_stabilization", "Power Stabilization"
         )
@@ -1098,9 +1122,7 @@ class SetValueCommands:
         parsed = []
         for token in tokens:
             try:
-                result = AMDSMIHelpers.parse_power_stabilization_token(
-                    token, ignore_host_control=True
-                )
+                result = AMDSMIHelpers.parse_power_stabilization_token(token, ignore_read_only=True)
             except ValueError as e:
                 raise AmdSmiInvalidFilePathException(
                     command, self.logger.format, f"'{file_path}': {e}"
@@ -1118,7 +1140,10 @@ class SetValueCommands:
             self.logger.clear_multiple_devices_output()
             return
 
-        self._apply_power_stabilization_params(args, parsed, source_file=file_path)
+        note = self._power_stabilization_npm_note(args, f"@{file_path}")
+        self._apply_power_stabilization_params(
+            args, parsed, source_file=file_path, prefix_messages=note
+        )
 
     def set_gpu(
         self,
@@ -2431,7 +2456,14 @@ class SetValueCommands:
                     args, args.power_stabilization_configure.file_path, gpu_bdf, gpu_id
                 )
                 return
-            self._apply_power_stabilization_params(args, args.power_stabilization_configure.tokens)
+            attempted = " ".join(
+                f"{param_id.name.lower()}={value}"
+                for param_id, value in args.power_stabilization_configure.tokens
+            )
+            note = self._power_stabilization_npm_note(args, attempted)
+            self._apply_power_stabilization_params(
+                args, args.power_stabilization_configure.tokens, prefix_messages=note
+            )
             return
 
     def set_value(

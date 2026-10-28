@@ -22,7 +22,6 @@
 #include <string>
 #include <type_traits>
 
-#include "amd_smi/impl/scoped_fd.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_common.h"  // Should go before rocm_smi.h
 #include "rocm_smi/rocm_smi_device.h"
@@ -41,6 +40,59 @@
 namespace {
 
 namespace fs = std::filesystem;
+
+// Local mirror of amd_smi::ScopedFD (include/amd_smi/impl/scoped_fd.h) --
+// rocm_smi must not include amd_smi's internal headers.
+class ScopedFD {
+ public:
+  ScopedFD(const std::string& path, int flags) : fd_(open(path.c_str(), flags)), path_(path) {
+    if (fd_ < 0) {
+      // Save errno before LOG_ERROR (mutex + file write) gets a chance to
+      // clobber it; callers must read open_errno() instead of the global
+      // errno after this constructor runs.
+      saved_errno_ = errno;
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | Failed to open file: " << path_
+         << " | Error: " << strerror(saved_errno_);
+      LOG_ERROR(ss);
+    }
+  }
+  ~ScopedFD() {
+    if (fd_ >= 0) {
+      close(fd_);
+    }
+  }
+
+  ScopedFD(const ScopedFD&) = delete;
+  ScopedFD& operator=(const ScopedFD&) = delete;
+
+  ScopedFD(ScopedFD&& other) noexcept : fd_(other.fd_), path_(std::move(other.path_)) {
+    other.fd_ = -1;
+  }
+  ScopedFD& operator=(ScopedFD&& other) noexcept {
+    if (this != &other) {
+      if (fd_ >= 0) close(fd_);
+      fd_ = other.fd_;
+      path_ = std::move(other.path_);
+      saved_errno_ = other.saved_errno_;
+      other.fd_ = -1;
+    }
+    return *this;
+  }
+
+  int get() const { return fd_; }
+  bool valid() const { return fd_ >= 0; }
+  operator int() const { return fd_; }
+  // errno captured at construction time if open() failed; see the
+  // constructor's comment for why this must be used instead of the global
+  // errno after construction returns.
+  int open_errno() const { return saved_errno_; }
+
+ private:
+  int fd_;
+  std::string path_;
+  int saved_errno_ = 0;
+};
 
 // Maps a Power Stabilization param id to its sysfs filename, relative to
 // the device's power_stabilization/ directory.
@@ -70,10 +122,12 @@ const char* power_stabilization_param_relpath(rsmi_power_stabilization_param_id_
 
 // Shared by both the read (ifstream open failure) and write (open()/write()
 // failure) paths, so a permission-restricted or driver-rejected node is
-// classified identically regardless of which helper hit it. Safe to read
-// errno here: both ifstream's open() and the raw open()/write() calls
-// surface the underlying failure's errno, and nothing else touches errno
-// between that call and this check.
+// classified identically regardless of which helper hit it. The read path
+// and write()'s post-write failure read the global errno immediately, with
+// nothing in between to clobber it. ScopedFD's open() failure is the
+// exception: its constructor's own LOG_ERROR call can clobber errno before
+// the caller gets to read it, so that path must use ScopedFD::open_errno()
+// (saved at construction time) instead.
 rsmi_status_t classify_power_stabilization_errno(int err) {
   if (err == EACCES || err == EPERM) {
     return RSMI_STATUS_PERMISSION;
@@ -211,7 +265,7 @@ template <typename T>
 rsmi_status_t write_sysfs_value(const std::string& path, T value) {
   ScopedFD fd(path, O_WRONLY | O_TRUNC | O_CLOEXEC | O_NOFOLLOW);
   if (!fd.valid()) {
-    return classify_power_stabilization_errno(errno);
+    return classify_power_stabilization_errno(fd.open_errno());
   }
 
   std::string text = format_power_stabilization_value(value);
@@ -279,9 +333,10 @@ rsmi_status_t rsmi_dev_power_stabilization_param_set(uint32_t dv_ind,
     return RSMI_STATUS_NOT_SUPPORTED;
   }
 
-  // RAMP_* params apply directly to dv_ind's own sysfs node. No NPM
-  // master-node routing: the existing NPM registry is keyed by board path
-  // for node-level power limits, not per-parameter last-write-wins routing.
+  // All params apply directly to dv_ind's own sysfs node. No NPM-aware
+  // routing here: when NPM coordination makes a param node-wide, selecting
+  // the node's primary GPU handle (OAM ID 0) is the caller's responsibility
+  // (enforced by the CLI), not this function's.
   bool is_ramp_rate = param_id == RSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE ||
                       param_id == RSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE;
 
