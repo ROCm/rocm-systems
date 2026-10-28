@@ -18,6 +18,7 @@ use crate::device::gpu::queue::{
     SdmaEngineSelection, ring_doorbell,
 };
 use crate::memory::{Allocation, DeviceAccess, MemoryKind};
+use crate::topology::{GpuSdmaDialect, GpuTargetProfile};
 use crate::{Error, ErrorKind};
 
 // GFX12.0 SDMA 7.0.1 uses the OSS5 COPY_LINEAR and GCR packet layouts. Keep the packet
@@ -696,7 +697,13 @@ struct TimingState {
 
 impl CopyResources {
     fn new(gpu: &GpuDevice<'_>, format: KernelQueueFormat) -> Result<Self, CopyFailure> {
-        let gfx9 = gpu.info().gfx_major == 9;
+        let dialect = gpu.info().target_profile.sdma_dialect().ok_or_else(|| {
+            CopyFailure::retired(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "no qualified SDMA packet dialect for this GPU",
+            })
+        })?;
+        let gfx9 = dialect == GpuSdmaDialect::Gfx9;
         let command = gpu
             .device()
             .allocate(
@@ -781,12 +788,10 @@ impl CopyResources {
             submitting: false,
             submitted_any: false,
             timing: None,
-            protocol: if gfx9 {
-                SdmaProtocol::Gfx9
-            } else if gpu.info().gfx_minor == 5 {
-                SdmaProtocol::Gfx12_5
-            } else {
-                SdmaProtocol::Gfx12_0
+            protocol: match dialect {
+                GpuSdmaDialect::Gfx9 => SdmaProtocol::Gfx9,
+                GpuSdmaDialect::Gfx1200 => SdmaProtocol::Gfx12_0,
+                GpuSdmaDialect::Gfx1250 => SdmaProtocol::Gfx12_5,
             },
         };
         Ok(resources)
@@ -1543,7 +1548,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
             // SAFETY: The caller supplied the same direct-range contract.
             return unsafe { self.copy_linear(destination, source, size) };
         }
-        if (self.gpu.info().gfx_major, self.gpu.info().gfx_minor) != (12, 5) {
+        if self.gpu.info().target_profile != GpuTargetProfile::Gfx1250 {
             return self.record(Err(CopyFailure::retired(Error::Operation {
                 kind: ErrorKind::Unsupported,
                 detail: "controlled SDMA copy is supported only on gfx1250",
@@ -1618,7 +1623,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
         options: GpuCopyOptions,
     ) -> Result<(), CopyFailure> {
         self.active()?;
-        if (self.gpu.info().gfx_major, self.gpu.info().gfx_minor) != (12, 5) {
+        if self.gpu.info().target_profile != GpuTargetProfile::Gfx1250 {
             return self.record(Err(CopyFailure::retired(Error::Operation {
                 kind: ErrorKind::Unsupported,
                 detail: "native SDMA swap is supported only on gfx1250",
@@ -1836,16 +1841,11 @@ impl<'device> GpuDevice<'device> {
     #[must_use]
     pub fn supports_linear_copy(&self) -> bool {
         let info = self.info();
-        let gfx12 = matches!(
-            (info.gfx_major, info.gfx_minor, info.gfx_stepping),
-            (12, 0, 0 | 1) | (12, 5, 0)
-        ) && info.queues.kernel_sdma;
-        let gfx9 = matches!(
-            (info.gfx_major, info.gfx_minor, info.gfx_stepping),
-            (9, 0, 8 | 10) | (9, 4, 2) | (9, 5, 0)
-        ) && cfg!(target_arch = "x86_64")
-            && info.queues.sdma;
-        gfx12 || gfx9
+        match info.target_profile.sdma_dialect() {
+            Some(GpuSdmaDialect::Gfx9) => cfg!(target_arch = "x86_64") && info.queues.sdma,
+            Some(GpuSdmaDialect::Gfx1200 | GpuSdmaDialect::Gfx1250) => info.queues.kernel_sdma,
+            None => false,
+        }
     }
 
     /// Copies a non-overlapping device-address range through the GFX12.0 SDMA

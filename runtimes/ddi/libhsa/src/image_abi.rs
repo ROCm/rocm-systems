@@ -755,10 +755,7 @@ pub(crate) unsafe fn create_sampler(
         return INVALID_AGENT;
     };
     let info = runtime.gpus[index].info();
-    if !matches!(
-        (info.gfx_major, info.gfx_minor, info.gfx_stepping),
-        (12, 0, 0 | 1)
-    ) {
+    if !info.target_profile.supports_image_sampler() {
         return NOT_SUPPORTED;
     }
     if runtime.image_state.samplers.try_reserve(1).is_err() {
