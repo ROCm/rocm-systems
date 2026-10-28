@@ -9,7 +9,7 @@
 // list lock, and progress-thread lifecycle, plus proxy-thread CPU affinity
 // (AICOMRCCL-1859): the comm->cpuAffinity stash in ginDevCommSetupWithBackend and
 // the pin applied by each progress thread. Also covers connecting a DevComm to GIN
-// at a custom rank stride (NCCL 2.31.2, AICOMRCCL-2000).
+// at a custom rank stride (NCCL 2.31.2).
 //
 // Own binary (rccl-UnitTestsMicroGinHost): gin-plugin-init-test.cc already defines
 // ncclParamGinEnable in rccl-UnitTestsMicro, and gin_fakes.cc supplies
@@ -811,10 +811,10 @@ ncclResult_t CaptureStrideCreateContext(void* /*collComm*/, ncclGinConfig_t* con
 
 ncclResult_t CaptureStrideDestroyContext(void* /*ginCtx*/) { return ncclSuccess; }
 
-// NCCL_GIN_CONNECTION_CUSTOM_STRIDE (AICOMRCCL-2000): the requested world-rank
-// stride must be positive, no larger than the rail team, and a multiple of the
-// stride the communicator actually connected. The plugin sees that stride in
-// NCCL_GIN_CONNECTION_CUSTOM_STRIDE (AICOMRCCL-2000): the plugin sees the stride in units of the connected group.
+// NCCL_GIN_CONNECTION_CUSTOM_STRIDE: the requested world-rank stride must be
+// positive, no larger than the rail team, and a multiple of the stride the
+// communicator actually connected. The plugin sees that stride in units of the
+// connected group.
 class GinHostCustomStrideMicrotest : public ::testing::Test {
 protected:
   std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
