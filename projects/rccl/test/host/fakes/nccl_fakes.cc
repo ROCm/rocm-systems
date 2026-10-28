@@ -39,6 +39,7 @@
 // Signature-drift watchdog: assert each hook still matches the production
 // symbol it shadows (templates + macro live in fakes/signature-drift.h).
 #include "signature-drift.h"
+#include "fail_loud.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_proxyConnect,              ncclProxyConnect);
 ASSERT_HOOK_MATCHES_PROD(g_proxyCallBlocking,         ncclProxyCallBlocking);
@@ -56,6 +57,8 @@ ASSERT_HOOK_MATCHES_PROD(g_memTrackImportFromPeer,    ncclMemTrackImportFromPeer
 ASSERT_HOOK_MATCHES_PROD(g_memTrack,                  ncclMemTrack);
 ASSERT_HOOK_MATCHES_PROD(g_memUntrackDynamic,         ncclMemUntrackDynamic);
 ASSERT_HOOK_MATCHES_PROD(g_dynMemMarkExportToPeer,    ncclDynMemMarkExportToPeer);
+ASSERT_HOOK_MATCHES_PROD(g_shmImportShareableBuffer,  ncclShmImportShareableBuffer);
+ASSERT_HOOK_MATCHES_PROD(g_shmIpcClose,               ncclShmIpcClose);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -240,19 +243,37 @@ ncclResult_t ncclRegLocalIsValid(struct ncclReg* reg, bool* isValid)
     return g_regLocalIsValid(reg, isValid);
 }
 
-ncclResult_t ncclShmImportShareableBuffer(struct ncclComm*  /*comm*/,
-                                          int               /*proxyRank*/,
-                                          ncclShmIpcDesc_t* /*desc*/,
-                                          void**            /*hptr*/,
-                                          void**            /*dptr*/,
-                                          ncclShmIpcDesc_t* /*descOut*/)
+static ncclResult_t DefaultShmImportShareableBuffer(struct ncclComm*, int, ncclShmIpcDesc_t*, void**, void**,
+                                                    ncclShmIpcDesc_t*)
 {
     return ncclSystemError;
 }
+std::function<ncclResult_t(struct ncclComm*, int, ncclShmIpcDesc_t*, void**, void**, ncclShmIpcDesc_t*)>
+    g_shmImportShareableBuffer = DefaultShmImportShareableBuffer;
+ncclResult_t ncclShmImportShareableBuffer(struct ncclComm*  comm,
+                                          int               proxyRank,
+                                          ncclShmIpcDesc_t* desc,
+                                          void**            hptr,
+                                          void**            dptr,
+                                          ncclShmIpcDesc_t* descOut)
+{
+    return g_shmImportShareableBuffer(comm, proxyRank, desc, hptr, dptr, descOut);
+}
 
-ncclResult_t ncclShmIpcClose(ncclShmIpcDesc_t* /*desc*/)
+static ncclResult_t DefaultShmIpcClose(ncclShmIpcDesc_t*)
 {
     return ncclSuccess;
+}
+std::function<ncclResult_t(ncclShmIpcDesc_t*)> g_shmIpcClose = DefaultShmIpcClose;
+ncclResult_t ncclShmIpcClose(ncclShmIpcDesc_t* desc)
+{
+    return g_shmIpcClose(desc);
+}
+
+// src/plugin/profiler.cc, which has no fakes file yet. plugin/net.cc only hands its address to a plugin's init.
+ncclResult_t ncclProfilerCallback(void**, int, void*, int64_t, void*)
+{
+    FailLoudUnfaked("nccl_fakes", "ncclProfilerCallback");
 }
 
 // ---------------------------------------------------------------------------
@@ -622,6 +643,8 @@ void ResetNcclFakes()
     g_ncclTopoCheckNet             = DefaultTopoCheckNet;
     g_regLocalIsValid              = DefaultRegLocalIsValid;
     g_shmAllocateShareableBuffer   = DefaultShmAllocateShareableBuffer;
+    g_shmImportShareableBuffer     = DefaultShmImportShareableBuffer;
+    g_shmIpcClose                  = DefaultShmIpcClose;
     g_commGraphRegister            = DefaultCommGraphRegister;
     g_commGraphDeregister          = DefaultCommGraphDeregister;
     g_ncclSetThreadName            = DefaultSetThreadName;

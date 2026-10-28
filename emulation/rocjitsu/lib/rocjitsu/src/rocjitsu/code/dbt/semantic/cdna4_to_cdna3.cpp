@@ -255,7 +255,7 @@ void emit_cdna3_scratch_restore(std::vector<uint32_t> &words, const SemanticScra
          encoded_src == kSrcDpp || encoded_src == kSrcLiteral64 || encoded_src == kSrcLiteral32;
 }
 
-[[nodiscard]] std::optional<SemanticScratchLease>
+FailureOr<std::optional<SemanticScratchLease>>
 choose_one_vgpr_temp_or_spill(const Instruction &inst, const LivenessAnalysis &liveness,
                               TranslationContext &context, uint8_t forbidden,
                               std::optional<uint8_t> preferred_victim) {
@@ -265,10 +265,13 @@ choose_one_vgpr_temp_or_spill(const Instruction &inst, const LivenessAnalysis &l
   request.forbidden.expand({RegClass::VGPR, forbidden, 1});
   SemanticScratchAllocator allocator(inst, liveness, context,
                                      Cdna3ScratchEmitter::allocation_policy());
-  return allocator.acquire_vgprs(request).lease;
+  const auto scratch = allocator.acquire_vgprs(request);
+  if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
+    return Result::failure();
+  return scratch.lease;
 }
 
-[[nodiscard]] std::optional<SemanticScratchLease>
+FailureOr<std::optional<SemanticScratchLease>>
 choose_vgpr_window_or_spill(const Instruction &inst, const LivenessAnalysis &liveness,
                             TranslationContext &context, uint16_t count, uint16_t alignment,
                             std::initializer_list<VgprForbiddenRange> forbidden_ranges) {
@@ -281,7 +284,10 @@ choose_vgpr_window_or_spill(const Instruction &inst, const LivenessAnalysis &liv
   }
   SemanticScratchAllocator allocator(inst, liveness, context,
                                      Cdna3ScratchEmitter::allocation_policy());
-  return allocator.acquire_vgprs(request).lease;
+  const auto scratch = allocator.acquire_vgprs(request);
+  if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
+    return Result::failure();
+  return scratch.lease;
 }
 
 /// @brief Reserve non-overlapping private slots for one borrowed virtual-LDS SGPR pair.
@@ -347,9 +353,9 @@ void emit_cdna3_exec_mask(std::vector<uint32_t> &words, uint64_t mask) {
   emit_s_mov_b32_lit(words, kExecLo + 1, static_cast<uint32_t>(mask >> 32));
 }
 
-[[nodiscard]] std::optional<uint8_t>
-choose_cdna3_exec_save_sgpr(const Instruction &inst, const LivenessAnalysis &liveness,
-                            const TranslationContext &context) {
+FailureOr<std::optional<uint8_t>> choose_cdna3_exec_save_sgpr(const Instruction &inst,
+                                                              const LivenessAnalysis &liveness,
+                                                              const TranslationContext &context) {
   const auto overlaps_virtual_lds_base = [&](uint32_t candidate) {
     if (!context.virtualize_lds)
       return false;
@@ -365,7 +371,7 @@ choose_cdna3_exec_save_sgpr(const Instruction &inst, const LivenessAnalysis &liv
     const uint32_t preferred = (context.num_sgprs + 1u) & ~1u;
     for (uint32_t candidate = preferred; candidate + 1u < kCdna3MaxOrdinarySgprs; candidate += 2u) {
       if (!overlaps_virtual_lds_base(candidate))
-        return static_cast<uint8_t>(candidate);
+        return std::optional<uint8_t>{static_cast<uint8_t>(candidate)};
     }
   }
 
@@ -374,12 +380,18 @@ choose_cdna3_exec_save_sgpr(const Instruction &inst, const LivenessAnalysis &liv
   // without dataflow proof; if the guest read that pair later, restoring EXEC
   // still left the guest scalar contents corrupted.
   uint16_t search_start = 0;
-  while (auto candidate = liveness.find_free_sgpr_pair(&inst, search_start)) {
+  while (true) {
+    auto maybe_candidate = liveness.find_free_sgpr_pair(&inst, search_start);
+    if (maybe_candidate.failed())
+      return Result::failure();
+    const auto candidate = maybe_candidate.value();
+    if (!candidate)
+      break;
     if (!overlaps_virtual_lds_base(*candidate))
-      return static_cast<uint8_t>(*candidate);
+      return std::optional<uint8_t>{static_cast<uint8_t>(*candidate)};
     search_start = static_cast<uint16_t>(*candidate + 2);
   }
-  return std::nullopt;
+  return std::optional<uint8_t>{};
 }
 
 void require_cdna3_exec_save_sgpr(TranslationContext &context, uint8_t saved_exec) {
@@ -554,8 +566,11 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
     std::optional<SemanticScratchLease> scratch_term;
     if (vdst_aliases_any_vgpr_source(vdst, src)) {
       const auto forbidden = bitop3_spill_forbidden_ranges(vdst, src);
-      scratch_term = choose_vgpr_window_or_spill(
+      auto maybe_scratch_term = choose_vgpr_window_or_spill(
           inst, liveness, context, 1, 1, {forbidden[0], forbidden[1], forbidden[2], forbidden[3]});
+      if (maybe_scratch_term.failed())
+        return ExpandResult::liveness_unavailable();
+      scratch_term = maybe_scratch_term.value();
       if (!scratch_term)
         return failed_existing_expand_rule(
             inst, "No VGPR or spill-backed scratch for compact bitop temporary",
@@ -604,9 +619,12 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
   std::optional<SemanticScratchLease> scratch_lease;
   if (scratch_count != 0) {
     const auto forbidden = bitop3_spill_forbidden_ranges(vdst, src);
-    scratch_lease =
+    auto maybe_scratch_lease =
         choose_vgpr_window_or_spill(inst, liveness, context, scratch_count, 1,
                                     {forbidden[0], forbidden[1], forbidden[2], forbidden[3]});
+    if (maybe_scratch_lease.failed())
+      return ExpandResult::liveness_unavailable();
+    scratch_lease = maybe_scratch_lease.value();
     if (!scratch_lease)
       return failed_existing_expand_rule(
           inst, "No VGPR or spill-backed scratch window for temporary bitop temporaries",
@@ -726,7 +744,11 @@ ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
   // their pre-write contents. Explicitly forbid only the architectural outputs:
   // those registers are intentionally written near the end of the lowering and
   // cannot be restored as scratch victims.
-  auto scratch = choose_vgpr_window_or_spill(inst, liveness, context, 3, 1, {{vdst, 1}, {vsrc, 1}});
+  auto maybe_scratch =
+      choose_vgpr_window_or_spill(inst, liveness, context, 3, 1, {{vdst, 1}, {vsrc, 1}});
+  if (maybe_scratch.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto scratch = maybe_scratch.value();
   if (!scratch)
     return failed_existing_expand_rule(
         inst, "No free VGPR scratch window for swap temporaries",
@@ -741,7 +763,10 @@ ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
   // Prefer a fresh descriptor-backed SGPR pair for EXEC save/restore. When the
   // descriptor cannot grow, choose_cdna3_exec_save_sgpr() falls back only to a
   // pair that liveness proves dead at this replacement point.
-  const std::optional<uint8_t> saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
+  auto maybe_saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
+  if (maybe_saved_exec.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto saved_exec = maybe_saved_exec.value();
   if (!saved_exec)
     return failed_existing_expand_rule(
         inst, "No free descriptor-backed SGPR pair for EXEC save/restore",
@@ -854,7 +879,10 @@ ExpandResult lower_cvt_pk_f16_f32_cdna4_to_cdna3(const Instruction &inst,
 
   const std::optional<uint8_t> preferred_temp =
       vdst_is_src1 ? src0_vgpr : (src1_vgpr ? src1_vgpr : src0_vgpr);
-  auto temp = choose_one_vgpr_temp_or_spill(inst, liveness, context, vdst, preferred_temp);
+  auto maybe_temp = choose_one_vgpr_temp_or_spill(inst, liveness, context, vdst, preferred_temp);
+  if (maybe_temp.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto temp = maybe_temp.value();
   if (!temp) {
     return failed_existing_expand_rule(
         inst, "No VGPR temporary or scratch spill slot for packed F16 conversion",
@@ -917,10 +945,13 @@ ExpandResult lower_cvt_pk_bf16_f32_cdna4_to_cdna3(const Instruction &inst,
   // The NaN-safe RNE lowering needs one result register per half plus three
   // shared scratch temporaries (the temps are reused across the two halves
   // because the low conversion completes before the high one begins).
-  auto scratch = choose_vgpr_window_or_spill(
+  auto maybe_scratch = choose_vgpr_window_or_spill(
       inst, liveness, context, 5, 1,
       {{vdst, 1},
        {static_cast<uint16_t>(src1_vgpr.value_or(0)), static_cast<uint16_t>(src1_vgpr ? 1 : 0)}});
+  if (maybe_scratch.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto scratch = maybe_scratch.value();
   if (!scratch)
     return failed_existing_expand_rule(
         inst, "No VGPR scratch window for packed BF16 conversion temporaries",
@@ -1072,10 +1103,13 @@ ExpandResult lower_dot2_f32_bf16_cdna4_to_cdna3(const Instruction &inst,
   }
 
   constexpr uint16_t kScratchCount = 4;
-  auto scratch =
+  auto maybe_scratch =
       choose_vgpr_window_or_spill(inst, liveness, context, kScratchCount, 1,
                                   {forbidden[0], forbidden[1], forbidden[2],
                                    forbidden.size() > 3 ? forbidden[3] : VgprForbiddenRange{}});
+  if (maybe_scratch.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto scratch = maybe_scratch.value();
   if (!scratch) {
     return failed_existing_expand_rule(
         inst, "No VGPR scratch window for BF16 dot2 temporaries",
@@ -1271,6 +1305,8 @@ ExpandResult lower_wide_k_mfma_cdna4_to_cdna3(const Instruction &inst,
     scratch_request.alignment = kMfmaTupleBaseAlignment;
     scratch_request.allow_spill = false;
     const SemanticScratchResult scratch = scratch_allocator.acquire_vgprs(scratch_request);
+    if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
+      return ExpandResult::liveness_unavailable();
     // NYI: if no dead VGPR run exists, the general solution is to spill a live
     // VGPR range and use it for the partial accumulator. That waits on spill
     // manager integration, so reject for now rather than clobbering live inputs.
@@ -1367,11 +1403,15 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // a spill restore would otherwise overwrite the translated result. ACC
   // destinations name the AccVGPR file, so the same numeric ordinary VGPRs can
   // still be used when ordinary VGPR liveness permits it.
-  auto scratch = dst_is_acc ? choose_vgpr_window_or_spill(inst, liveness, context, kScratchCount, 2,
-                                                          {{static_cast<uint16_t>(addr), 1}})
-                            : choose_vgpr_window_or_spill(inst, liveness, context, kScratchCount, 2,
-                                                          {{static_cast<uint16_t>(vdst), 2},
-                                                           {static_cast<uint16_t>(addr), 1}});
+  auto maybe_scratch = dst_is_acc
+                           ? choose_vgpr_window_or_spill(inst, liveness, context, kScratchCount, 2,
+                                                         {{static_cast<uint16_t>(addr), 1}})
+                           : choose_vgpr_window_or_spill(inst, liveness, context, kScratchCount, 2,
+                                                         {{static_cast<uint16_t>(vdst), 2},
+                                                          {static_cast<uint16_t>(addr), 1}});
+  if (maybe_scratch.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto scratch = maybe_scratch.value();
   if (!scratch)
     return failed_existing_expand_rule(
         inst, "No even-aligned VGPR window found for transpose scratch",
@@ -1399,7 +1439,10 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   }
   // SemanticScratchAllocator has already fed any descriptor growth required by
   // this window back to the kernel translation context.
-  const std::optional<uint8_t> saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
+  auto maybe_saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
+  if (maybe_saved_exec.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto saved_exec = maybe_saved_exec.value();
   if (!saved_exec)
     return failed_existing_expand_rule(
         inst, "No free descriptor-backed SGPR pair for EXEC save/restore",
@@ -1614,9 +1657,12 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // extra +1 scratch register holds the scalar LDS byte address; only the
   // payload tuple needs this alignment.
   const uint16_t scratch_alignment = virtual_lds || data_count >= 3 ? 2 : 1;
-  auto scratch =
+  auto maybe_scratch =
       choose_vgpr_window_or_spill(inst, liveness, context, scratch_count, scratch_alignment,
                                   {{static_cast<uint16_t>(src.vaddr), vaddr_count}});
+  if (maybe_scratch.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto scratch = maybe_scratch.value();
   if (!scratch) {
     return failed_existing_expand_rule(
         inst, "No scratch VGPR window found for temporary global-load destination and LDS address",
@@ -1643,7 +1689,10 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // Prefer a new descriptor-backed SGPR pair for EXEC save/restore. If the
   // descriptor is already full, the helper falls back only to a liveness-proven
   // dead pair instead of blindly borrowing a high guest SGPR.
-  const std::optional<uint8_t> saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
+  auto maybe_saved_exec = choose_cdna3_exec_save_sgpr(inst, liveness, context);
+  if (maybe_saved_exec.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto saved_exec = maybe_saved_exec.value();
   if (!saved_exec)
     return failed_existing_expand_rule(
         inst, "No free descriptor-backed SGPR pair for EXEC save/restore",
