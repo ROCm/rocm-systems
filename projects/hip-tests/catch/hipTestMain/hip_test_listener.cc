@@ -6,9 +6,11 @@
 
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
+#include <catch2/catch_test_case_info.hpp>
 #include <hip_test_params.hh>
 #include <hip_test_context.hh>
 #include <hip_test_level.hh>
+#include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -48,3 +50,55 @@ class HipTestParameterListener : public Catch::EventListenerBase {
 
 // Register the listener - it will be automatically activated
 CATCH_REGISTER_LISTENER(HipTestParameterListener)
+
+#if HT_AMD
+extern "C" hipError_t hipExtGetLastError(void);
+#endif
+
+/**
+ * @brief Clears the sticky thread-local HIP last error after each test case so
+ * an error left unconsumed by one test cannot fail the next. Clears both the
+ * standard (hipGetLastError) and, on AMD, the command (hipExtGetLastError)
+ * states. Skips tests that registered via HIP_SKIP_LAST_ERROR_RESET, so HIP is
+ * never initialized in fork-based multiprocess parents that require it clean.
+ * A leftover error is always reported on stderr; HIP_TEST_STRICT_LAST_ERROR
+ * additionally fails the run and names every culprit.
+ */
+class HipLastErrorResetListener : public Catch::EventListenerBase {
+ public:
+  using Catch::EventListenerBase::EventListenerBase;
+
+  void testCaseEnded(Catch::TestCaseStats const& stats) override {
+    if (hipSkipLastErrorResetTests().count(stats.testInfo->name) != 0) {
+      return;
+    }
+    hipError_t leftover = hipGetLastError();
+#if HT_AMD
+    static_cast<void>(hipExtGetLastError());
+#endif
+    if (leftover != hipSuccess) {
+      fprintf(stderr, "[HIP last-error] test '%s' left %d (%s)\n",
+              stats.testInfo->name.c_str(), static_cast<int>(leftover),
+              hipGetErrorString(leftover));
+      if (strict_) {
+        culprits_.push_back(stats.testInfo->name);
+      }
+    }
+  }
+
+  void testRunEnded(Catch::TestRunStats const&) override {
+    if (culprits_.empty()) {
+      return;
+    }
+    // A throw here would std::terminate; exit non-zero so strict mode fails cleanly.
+    fprintf(stderr, "[HIP last-error] strict mode: %zu test(s) left unconsumed errors\n",
+            culprits_.size());
+    std::exit(EXIT_FAILURE);
+  }
+
+ private:
+  bool strict_ = !TestContext::getEnvVar("HIP_TEST_STRICT_LAST_ERROR").empty();
+  std::vector<std::string> culprits_;
+};
+
+CATCH_REGISTER_LISTENER(HipLastErrorResetListener)

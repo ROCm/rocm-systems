@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <set>
 #include <vector>
 #include <iostream>
 #include <string>
@@ -144,6 +145,22 @@ class TestContext {
 };
 
 static bool _log_enable = (!TestContext::getEnvVar("HT_LOG_ENABLE").empty() ? true : false);
+
+// Tests whose parent process must not have HIP initialized (fork-based
+// device-visibility tests). The last-error-reset listener skips these so it
+// never initializes HIP in the parent. Declare with HIP_SKIP_LAST_ERROR_RESET
+// next to the test case.
+inline std::set<std::string>& hipSkipLastErrorResetTests() {
+  static std::set<std::string> s;
+  return s;
+}
+struct HipSkipLastErrorResetRegistrar {
+  explicit HipSkipLastErrorResetRegistrar(const char* name) {
+    hipSkipLastErrorResetTests().insert(name);
+  }
+};
+#define HIP_SKIP_LAST_ERROR_RESET(name)                                                            \
+  static ::HipSkipLastErrorResetRegistrar hipSkipReset_##name { #name }
 
 // printing logs
 #define LogPrintf(format, ...)                                                                     \

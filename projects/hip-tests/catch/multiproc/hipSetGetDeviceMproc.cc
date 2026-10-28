@@ -382,6 +382,7 @@ static void testMinRvdMaxHvd(int numDevices, int* deviceList, int count) {
 /**
  * Scenario sets Invalid visible device list and checks behavior.
  */
+HIP_SKIP_LAST_ERROR_RESET(Unit_hipSetDevice_InvalidVisibleDeviceList);
 HIP_TEST_CASE(Unit_hipSetDevice_InvalidVisibleDeviceList) {
   int numDevices = 0;
 
@@ -405,6 +406,7 @@ HIP_TEST_CASE(Unit_hipSetDevice_InvalidVisibleDeviceList) {
 /**
  * Scenario sets valid visible device list and checks behavior.
  */
+HIP_SKIP_LAST_ERROR_RESET(Unit_hipSetDevice_ValidVisibleDeviceList);
 HIP_TEST_CASE(Unit_hipSetDevice_ValidVisibleDeviceList) {
   int numDevices = 0;
   std::vector<int> deviceList;
@@ -430,6 +432,7 @@ HIP_TEST_CASE(Unit_hipSetDevice_ValidVisibleDeviceList) {
 /**
  * Scenario sets subset of available devices and checks behavior.
  */
+HIP_SKIP_LAST_ERROR_RESET(Unit_hipSetDevice_SubsetOfAvailableDevices);
 HIP_TEST_CASE(Unit_hipSetDevice_SubsetOfAvailableDevices) {
   int numDevices = 0;
   const int deviceListLength = 1;
@@ -456,6 +459,7 @@ HIP_TEST_CASE(Unit_hipSetDevice_SubsetOfAvailableDevices) {
  * Scenario tests getDevice behavior with Minimal Len of RVD
  * and Maximal Len of HVD
  */
+HIP_SKIP_LAST_ERROR_RESET(Unit_hipSetDevice_MinRvdMaxHvdDevicesList);
 HIP_TEST_CASE(Unit_hipSetDevice_MinRvdMaxHvdDevicesList) {
   int numDevices = 0;
   std::vector<int> deviceList;
@@ -484,6 +488,7 @@ HIP_TEST_CASE(Unit_hipSetDevice_MinRvdMaxHvdDevicesList) {
  * Scenario tests getDevice behavior with Maximal Len of RVD
  * and Minimal Len of HVD
  */
+HIP_SKIP_LAST_ERROR_RESET(Unit_hipSetDevice_MaxRvdMinHvdDevicesList);
 HIP_TEST_CASE(Unit_hipSetDevice_MaxRvdMinHvdDevicesList) {
   int numDevices = 0;
   std::vector<int> deviceList;
@@ -508,6 +513,7 @@ HIP_TEST_CASE(Unit_hipSetDevice_MaxRvdMinHvdDevicesList) {
 /**
  * Scenario tests getDevice behavior with combination of RVD and CVD
  */
+HIP_SKIP_LAST_ERROR_RESET(Unit_hipSetDevice_RvdCvdDevicesList);
 HIP_TEST_CASE(Unit_hipSetDevice_RvdCvdDevicesList) {
   int numDevices = 0;
   std::vector<int> deviceList;

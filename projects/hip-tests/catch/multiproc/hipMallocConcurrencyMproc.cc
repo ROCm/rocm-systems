@@ -144,6 +144,7 @@ static bool validateMemoryOnGPU(int gpu, bool concurOnOneGPU = false) {
 /**
  * Parallel execution of parent and child on gpu0
  */
+HIP_SKIP_LAST_ERROR_RESET(Unit_hipMalloc_ChildConcurrencyDefaultGpu);
 HIP_TEST_CASE(Unit_hipMalloc_ChildConcurrencyDefaultGpu) {
   int devCnt = 0, pid = 0;
   constexpr auto resSuccess = 1, resFailure = 2;
@@ -187,6 +188,7 @@ HIP_TEST_CASE(Unit_hipMalloc_ChildConcurrencyDefaultGpu) {
  * Parallel execution of api on multiple gpus from
  * different child processes.
  */
+HIP_SKIP_LAST_ERROR_RESET(Unit_hipMalloc_ChildConcurrencyMultiGpu);
 HIP_TEST_CASE(Unit_hipMalloc_ChildConcurrencyMultiGpu) {
   int devCnt = 0, pid = 0;
   constexpr auto resSuccess = 1, resFailure = 2;

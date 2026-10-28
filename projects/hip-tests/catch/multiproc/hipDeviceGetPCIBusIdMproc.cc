@@ -141,6 +141,7 @@ bool getPciBusId(int deviceCount, char** hipDeviceList) {
 /**
  * Scenario: Validate behavior of hipDeviceGetPCIBusId for masked devices.
  */
+HIP_SKIP_LAST_ERROR_RESET(Unit_hipDeviceGetPCIBusId_MaskedDevices);
 HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_MaskedDevices) {
   int count = -1;
   constexpr int ReqGPUs = 2;
