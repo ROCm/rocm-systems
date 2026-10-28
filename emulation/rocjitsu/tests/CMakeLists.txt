@@ -7,6 +7,7 @@ include(rj_find_rocm_library)
 
 if(RJ_ENABLE_UBSAN)
     add_executable(ubsan_vptr_probe ubsan_vptr_probe.cpp)
+    rj_configure_target(ubsan_vptr_probe WARNINGS)
     add_test(
         NAME cmake.ubsan_vptr
         COMMAND
