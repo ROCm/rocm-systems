@@ -922,33 +922,6 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroNet -- src/transport/net.cc. Own binary: transport_stubs.cc, which most
-  # targets link, defines rcclUseAinic and netTransport, and net.cc defines both.
-  set(TEST_MICRO_NET_SOURCE_FILES
-    net-test.cc
-    fakes/collectives_fakes.cc           # func/algo/proto name tables
-    fakes/env_fakes.cc
-    fakes/hip_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/nccl_stubs.cc                  # core floor, incl. proxy profiler hooks
-    fakes/channel_fakes.cc
-    fakes/net_ib_cast_common_fakes.cc    # netIbCast
-    fakes/net_ib_cast_connect_fakes.cc   # rcclCastNetP2pPolicy
-    fakes/os_fakes.cc
-    fakes/proxy_fakes.cc
-    fakes/rccl_wrap_fakes.cc             # NET registration segment count / commit
-    fakes/hsa_fakes.cc                   # hsa_status_string (net.cc's HSACHECK)
-    fakes/rocmwrap_fakes.cc
-    fakes/topo_stubs.cc
-    fakes/transport_net_ib_common_fakes.cc  # src/transport/net_ib/common.cc ncclNetIb
-    fakes/transport_net_ib_connect_net_fakes.cc  # rcclNetP2pPolicy, GDR flush-flag accessors
-    fakes/transport_net_ib_fakes.cc
-    fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real parseStringList/matchIfList for NCCL_IB_HCA
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
   # src/diagnostics/p2p.cc; fakes transport/p2p.cc, which rccl-UnitTestsMicro compiles.
   set(TEST_MICRO_DIAGNOSTICS_SOURCE_FILES
     diag-p2p-test.cc
@@ -1028,6 +1001,7 @@ function(rccl_define_micro_source_lists)
     transport/coll-net-test.cc
     transport/net-socket-test.cc
     transport/net-telemetry-test.cc
+    transport/net-test.cc
     transport/net_ib/common-test.cc
     transport/net_ib/connect-test.cc
     transport/net_ib/gdr-test.cc
@@ -1047,6 +1021,7 @@ function(rccl_define_micro_source_lists)
     transport/rma-socket-setup-test.cc
     fakes/bootstrap_stubs.cc
     fakes/channel_fakes.cc
+    fakes/collectives_fakes.cc           # func/algo/proto name tables
     fakes/comm_fakes.cc                  # allocTracker, ncclGdrCopy
     fakes/env_fakes.cc
     fakes/gdr_peermem_fakes.cc
@@ -1058,10 +1033,16 @@ function(rccl_define_micro_source_lists)
     fakes/libc_fakes.cc
     fakes/mlx5dvwrap_fakes.cc
     fakes/nccl_fakes.cc
+    fakes/nccl_stubs.cc
+    fakes/net_ib_cast_common_fakes.cc    # netIbCast
+    fakes/net_ib_cast_connect_fakes.cc   # rcclCastNetP2pPolicy
     fakes/os_fakes.cc
+    fakes/proxy_fakes.cc
+    fakes/rccl_wrap_fakes.cc             # NET registration segment count / commit
     fakes/rocmwrap_fakes.cc
     fakes/socket_fakes.cc
     fakes/topo_stubs.cc
+    fakes/transport_net_ib_connect_net_fakes.cc
     fakes/transport_net_ib_fakes.cc
     fakes/transport_net_ib_p2p_fakes.cc
     fakes/transport_net_ib_recovery_fakes.cc
@@ -1069,6 +1050,7 @@ function(rccl_define_micro_source_lists)
     fakes/transport_net_ib_wqe_lat_fakes.cc
     fakes/transport_net_socket_common_fakes.cc
     fakes/transport_net_socket_fakes.cc
+    fakes/transport_p2p_fakes.cc
     fakes/transport_stubs.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
@@ -2387,8 +2369,10 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTransport
   SOURCES ${TEST_MICRO_TRANSPORT_SOURCE_FILES}
   EXTRA_INCLUDES
     ${RCCL_HOST_HIPIFY_DIR}/src/transport
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # the net_ib_cast fakes' headers
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
+    ${_MICRO_DMABUF_EXPORT_DEF}  # standalone: the cuMem DMA-BUF arms in-build gets from rccl
     ENABLE_FAULT_INJECTION
     COLL_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/coll_net.cc"
     NET_IB_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/common.cc"
@@ -2408,13 +2392,18 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTransport
     # common_tmp.cc: src/CMakeLists.txt lists transport/net_ib/common.cc first.
     NET_SOCKET_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket/common_tmp.cc"
     NET_TELEMETRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc"
+    # net_tmp.cc, not net.cc: src/CMakeLists.txt lists plugin/net.cc first, so
+    # add_file_unique() renames this one. Re-check after any source-list reorder.
+    NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_tmp.cc"
     NVLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/nvls.cc"
     P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
     RMA_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket.cc"
     RMA_SOCKET_MEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_mem.cc"
     RMA_SOCKET_PROGRESS_RECVER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_progress_recver.cc"
     RMA_SOCKET_SETUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_setup.cc"
+    RCCL_TRANSPORT_P2P_FAKES_OMIT_SHAREABLE_BUFFERS
     RCCL_TRANSPORT_STUBS_OMIT_COLL_NET
+    RCCL_TRANSPORT_STUBS_OMIT_NET
     RCCL_TRANSPORT_STUBS_OMIT_NVLS
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_transport.yaml")
 
@@ -2471,22 +2460,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastInit
     NET_IB_CAST_MULTIPLANE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/multiplane.cc"
     NET_IB_CAST_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_cast_gid_inspect.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_init.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroNet
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroNet
-  SOURCES ${TEST_MICRO_NET_SOURCE_FILES}
-  EXTRA_INCLUDES
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # the net_ib_cast fakes' headers
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    ${_MICRO_DMABUF_EXPORT_DEF}  # standalone: the cuMem DMA-BUF arms in-build gets from rccl
-    # net_tmp.cc, not net.cc: src/CMakeLists.txt lists plugin/net.cc first, so
-    # add_file_unique() renames this one. Re-check after any source-list reorder.
-    NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_tmp.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroMisc

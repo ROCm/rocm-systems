@@ -12,6 +12,7 @@ test_categories:
       - "FreshRegistration*"
       - "GuardOperands/P2pAllocateSkipMarkExport.*"
       - "MappingStages/P2pImportMapStageFails.*"
+      - "Net*"  # net.cc; also matches the NetIb, NetSocket and NetTelemetry suites
       - "NetIb*"
       - "NetSocket*"
       - "NetTelemetry*"

@@ -517,11 +517,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   compiled as sources; suite `TopoGpuDevMicrotest.*` in `graph-dev-test.cc`. Its own binary:
   every other target links fakes for the graph symbols these files define. See
   `test_categories_micro_graph.yaml`.
-- **`rccl-UnitTestsMicroNet`**: `src/transport/net.cc` (via `NET_CC_PATH`, suites
-  `Net*Microtest.*`), driven through a fake `ncclNet_t`. Its own binary: `transport_stubs.cc`,
-  which most targets link, defines `rcclUseAinic` and `netTransport`, and `net.cc` defines
-  both. See `test_categories_micro_net.yaml`.
-
 - **`rccl-UnitTestsMicroGinHostFinalize`**: `src/gin/gin_host.cc` (via
   `GIN_HOST_CC_PATH`, suite `GinHostFinalizeTest.*`): host finalize, connect
   failure / retry, and the register, deregister and DevCommSetup walks over
@@ -555,7 +550,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     (`NET_IB_COMMON_CC_PATH`, from `net_ib/common-test.cc`); suites
     `NetIbCommonMicrotest.*`.
   - `net_ib/connect.cc` (`NET_IB_CONNECT_CC_PATH`, from
-    `net_ib/connect-test.cc`); suites `NetIbConnectMicrotest.*`.
+    `net_ib/connect-test.cc`); suites `NetIbConnectMicrotest.*` and
+    `NetIbConnectCuMemFlushMicrotest.*`.
   - `net_ib/p2p.cc` and host helpers in `net_ib/p2p.h`
     (`NET_IB_P2P_CC_PATH`, from `net_ib/net-ib-p2p-test.cc`); suites
     `NetIbP2pMicrotest.*`.
@@ -592,6 +588,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     ([AICOMRCCL-3105](https://amd-hub.atlassian.net/browse/AICOMRCCL-3105)), and
     `NetSocketTaskMicrotest.DISABLED_Test_SplitFailed_LaterPollDoesNotUseControlSocket`
     ([AICOMRCCL-3106](https://amd-hub.atlassian.net/browse/AICOMRCCL-3106)).
+  - `net.cc` (`NET_CC_PATH`, from `net-test.cc`); suites `Net*Microtest.*`, driven
+    through a fake `ncclNet_t`. Its calls into `net_ib/connect.cc` and `p2p.cc`, which this binary
+    also compiles for real, are renamed onto the `micro_*` fakes by
+    `fakes/transport_net_ib_connect_net_seam.h` and `fakes/transport_p2p_seam.h`, and
+    `RCCL_TRANSPORT_STUBS_OMIT_NET` drops the stub copies of the names `net.cc` defines.
   - `net_telemetry.cc` and `src/include/net_telemetry.h`
     (`NET_TELEMETRY_CC_PATH`, from `net-telemetry-test.cc`); suites
     `NetTelemetry*Microtest.*`.
@@ -607,6 +608,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `FreshRegistration*`, `ConnStepAcquireMicrotest.*`,
     `GuardOperands/P2pAllocateSkipMarkExport.*` and
     `MappingStages/P2pImportMapStageFails.*`.
+    `RCCL_TRANSPORT_P2P_FAKES_OMIT_SHAREABLE_BUFFERS` drops the fake copies of its
+    shareable-buffer entry points.
   - `rma_socket.cc` (`RMA_SOCKET_CC_PATH`, from `rma-socket-test.cc`);
     suites `RmaSocketMicrotest.*`.
   - `rma_socket_mem.cc` (`RMA_SOCKET_MEM_CC_PATH`, from
@@ -834,7 +837,7 @@ symbol.
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/net_ib/common.cc` (`ncclNetIb`, targets that do not compile the real file) | `fakes/transport_net_ib_common_fakes.cc` |
 | `src/transport/net_ib/connect.cc` (`ncclParamIbQpsPerConn`, `ncclIbGidInfoQuery`, GDR flush-flag support and enable; listen, connect, accept and close fail loudly) | `fakes/transport_net_ib_fakes.{h,cc}` |
-| `src/transport/net_ib/connect.cc`'s `rcclNetP2pPolicy` and GDR flush-flag accessors (targets that do not compile the real file) | `fakes/transport_net_ib_connect_net_fakes.cc` |
+| `src/transport/net_ib/connect.cc`'s `rcclNetP2pPolicy` and GDR flush-flag accessors, macro-renamed in `net.cc` via `fakes/transport_net_ib_connect_net_seam.h` | `fakes/transport_net_ib_connect_net_fakes.cc` |
 | `src/transport/net_ib/p2p.cc` | `fakes/transport_net_ib_p2p_fakes.{h,cc}` |
 | `src/transport/net_ib/p2p_resiliency.cc` | `fakes/transport_net_ib_resiliency_fakes.{h,cc}` |
 | `src/transport/net_ib/p2p_resiliency_recovery.cc` | `fakes/transport_net_ib_recovery_fakes.{h,cc}` |
@@ -847,7 +850,7 @@ symbol.
 | `src/transport/net_socket/common.cc`'s `ncclNetIfs`, `ncclNetSocketCreateListener` and `ncclNetSocketInitDevices`, for the `rma_socket` tests (`net-socket-test.cc` renames the real ones in `rccl-UnitTestsMicroTransport`) | `fakes/transport_net_socket_common_fakes.{h,cc}` |
 | generated `sym_kernels_host.cc` (targets that do not compile it) | `fakes/sym_kernels_index_fakes.cc` |
 | rocSHMEM host API | `fakes/rocshmem_fakes.cc` |
-| `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroNet`) | `fakes/transport_p2p_fakes.cc` |
+| `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`; macro-renamed in `net.cc` via `fakes/transport_p2p_seam.h` in `rccl-UnitTestsMicroTransport`, which compiles the real file) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/p2p.cc` registration entry points, macro-renamed in one unit via `fakes/transport_p2p_reg_seam.h` (`rccl-UnitTestsMicro`, which compiles the real file) | `fakes/transport_p2p_reg_fakes.cc` |
 | selected entry points from `src/{transport,proxy}.cc`, `src/transport/{generic,coll_net,net,nvls}.cc`, `src/{graph/paths,tuning/tuning,plugin/net}.cc` (targets that do not compile the real files) | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
@@ -1187,7 +1190,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
-`rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroNet`, `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDda`, `rccl-UnitTestsMicroMisc`,
+`rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDda`, `rccl-UnitTestsMicroMisc`,
 `rccl-UnitTestsMicroTransport`,
 `rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep`,
 `rccl-UnitTestsMicroNetIbCastDataPath`, `rccl-UnitTestsMicroRmaProxy` and `rccl-UnitTestsMicroNetIbCastInit` — **without configuring/building all of
@@ -1264,7 +1267,6 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests
 ./build/rccl-UnitTestsMicroTransport          # src/transport/ tests
 ./build/rccl-UnitTestsMicroNetIbCastDataPath  # net_ib_cast p2p/scheduler/ops-fault tests
-./build/rccl-UnitTestsMicroNet                # src/transport/net.cc tests
 ./build/rccl-UnitTestsMicroMisc               # src/misc/ IB verbs + dv loaders, gdr_peermem.cc
 ./build/rccl-HostUnitTests
 ./build/rccl-UnitTestsMicroRoctxNvml          # misc/roctx.cc + misc/nvmlwrap_stub.cc tests

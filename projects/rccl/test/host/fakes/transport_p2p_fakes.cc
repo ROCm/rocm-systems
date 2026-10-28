@@ -46,17 +46,31 @@ std::function<ncclResult_t(struct ncclComm*, int, size_t, ncclIpcDesc*, void**, 
 static ncclResult_t DefaultNcclP2pFreeShareableBuffer(ncclIpcDesc*) { return ncclSuccess; }
 std::function<ncclResult_t(ncclIpcDesc*)> g_ncclP2pFreeShareableBuffer = DefaultNcclP2pFreeShareableBuffer;
 
+ncclResult_t micro_ncclP2pAllocateShareableBuffer(size_t size, int directMap, ncclIpcDesc* ipcDesc, void** ptr,
+                                                  int peerRank, struct ncclMemManager* manager, ncclMemType_t memtype) {
+  return g_ncclP2pAllocateShareableBuffer(size, directMap, ipcDesc, ptr, peerRank, manager, memtype);
+}
+
+ncclResult_t micro_ncclP2pImportShareableBuffer(struct ncclComm* comm, int peer, size_t size, ncclIpcDesc* ipcDesc,
+                                                void** devMemPtr, void* ownerPtr, ncclMemType_t memType) {
+  return g_ncclP2pImportShareableBuffer(comm, peer, size, ipcDesc, devMemPtr, ownerPtr, memType);
+}
+
+ncclResult_t micro_ncclP2pFreeShareableBuffer(ncclIpcDesc* ipcDesc) { return g_ncclP2pFreeShareableBuffer(ipcDesc); }
+
+#ifndef RCCL_TRANSPORT_P2P_FAKES_OMIT_SHAREABLE_BUFFERS
 ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int directMap, ncclIpcDesc* ipcDesc, void** ptr,
                                             int peerRank, struct ncclMemManager* manager, ncclMemType_t memtype) {
-  return g_ncclP2pAllocateShareableBuffer(size, directMap, ipcDesc, ptr, peerRank, manager, memtype);
+  return micro_ncclP2pAllocateShareableBuffer(size, directMap, ipcDesc, ptr, peerRank, manager, memtype);
 }
 
 ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm* comm, int peer, size_t size, ncclIpcDesc* ipcDesc,
                                           void** devMemPtr, void* ownerPtr, ncclMemType_t memType) {
-  return g_ncclP2pImportShareableBuffer(comm, peer, size, ipcDesc, devMemPtr, ownerPtr, memType);
+  return micro_ncclP2pImportShareableBuffer(comm, peer, size, ipcDesc, devMemPtr, ownerPtr, memType);
 }
 
-ncclResult_t ncclP2pFreeShareableBuffer(ncclIpcDesc* ipcDesc) { return g_ncclP2pFreeShareableBuffer(ipcDesc); }
+ncclResult_t ncclP2pFreeShareableBuffer(ncclIpcDesc* ipcDesc) { return micro_ncclP2pFreeShareableBuffer(ipcDesc); }
+#endif
 
 void ResetTransportP2pFakes() {
   g_ncclP2pAllocateShareableBuffer = DefaultNcclP2pAllocateShareableBuffer;

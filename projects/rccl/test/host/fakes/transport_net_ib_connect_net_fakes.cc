@@ -4,8 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Implementation of transport_net_ib_connect_net_fakes.h. Targets that compile the real
-// net_ib/connect.cc must not link this file.
+// Implementation of transport_net_ib_connect_net_fakes.h.
 
 #include "transport_net_ib_connect_net_fakes.h"
 
@@ -17,23 +16,25 @@ static ncclResult_t DefaultNetP2pPolicy(void*, int) {
   FailLoudUnfaked("transport_net_ib_connect_net_fakes", "rcclNetP2pPolicy");
 }
 std::function<ncclResult_t(void*, int)> g_rcclNetP2pPolicy = DefaultNetP2pPolicy;
-ncclResult_t rcclNetP2pPolicy(void* handle, int isP2p) { return g_rcclNetP2pPolicy(handle, isP2p); }
+ncclResult_t micro_rcclNetP2pPolicy(void* handle, int isP2p) { return g_rcclNetP2pPolicy(handle, isP2p); }
 
 std::vector<std::pair<void*, int>> g_ibSetListenGdrFlushFlagCalls;
-void ncclIbSetListenGdrFlushFlag(void* listenComm, int enable) {
+void micro_ncclIbSetListenGdrFlushFlag(void* listenComm, int enable) {
   g_ibSetListenGdrFlushFlagCalls.emplace_back(listenComm, enable);
 }
 
 static uint64_t* DefaultIbGetGpuFlushFlag(void*) { return nullptr; }
 std::function<uint64_t*(void*)> g_ibGetGpuFlushFlag = DefaultIbGetGpuFlushFlag;
-uint64_t* ncclIbGetGpuFlushFlag(void* recvComm) { return g_ibGetGpuFlushFlag(recvComm); }
+uint64_t* micro_ncclIbGetGpuFlushFlag(void* recvComm) { return g_ibGetGpuFlushFlag(recvComm); }
 
 static uint64_t DefaultIbGetGpuFlushFlagSeq(void*) { return 0; }
 std::function<uint64_t(void*)> g_ibGetGpuFlushFlagSeq = DefaultIbGetGpuFlushFlagSeq;
-uint64_t ncclIbGetGpuFlushFlagSeq(void* recvComm) { return g_ibGetGpuFlushFlagSeq(recvComm); }
+uint64_t micro_ncclIbGetGpuFlushFlagSeq(void* recvComm) { return g_ibGetGpuFlushFlagSeq(recvComm); }
 
 std::vector<std::pair<void*, int>> g_ibSetGpuFlushFlagHintCalls;
-void ncclIbSetGpuFlushFlagHint(void* recvComm, int need) { g_ibSetGpuFlushFlagHintCalls.emplace_back(recvComm, need); }
+void micro_ncclIbSetGpuFlushFlagHint(void* recvComm, int need) {
+  g_ibSetGpuFlushFlagHintCalls.emplace_back(recvComm, need);
+}
 
 ASSERT_HOOK_MATCHES_PROD(g_rcclNetP2pPolicy, rcclNetP2pPolicy);
 ASSERT_HOOK_MATCHES_PROD(g_ibGetGpuFlushFlag, ncclIbGetGpuFlushFlag);

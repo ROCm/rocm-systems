@@ -1,0 +1,17 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Routes a unit's calls into the src/transport/p2p.cc shareable-buffer entry points to the micro_* trampolines
+// in transport_p2p_fakes.h, for a binary that also compiles the real p2p.cc. Include it before the
+// #include <UNIT>_CC_PATH and transport_p2p_seam_undef.h after it. No include guard on purpose.
+
+// The headers declaring the renamed names, so a rename never rewrites a declaration.
+#include "p2p.h"
+#include "transport_p2p_fakes.h"
+
+#define ncclP2pAllocateShareableBuffer micro_ncclP2pAllocateShareableBuffer
+#define ncclP2pImportShareableBuffer micro_ncclP2pImportShareableBuffer
+#define ncclP2pFreeShareableBuffer micro_ncclP2pFreeShareableBuffer
