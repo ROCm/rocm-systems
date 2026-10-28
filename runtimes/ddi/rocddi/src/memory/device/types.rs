@@ -13,6 +13,15 @@ pub struct AllocationDesc {
     pub alignment: u64,
 }
 
+/// Policy for detached physical backing created for virtual-memory mappings.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct VirtualMemoryOptions {
+    /// Prevent substitution of the native backing after creation.
+    pub pinned: bool,
+    /// Request an uncached backing where the selected placement supports it.
+    pub uncached: bool,
+}
+
 /// Returns the aligned base and page cover for `size` bytes starting at the
 /// exact registered host address. Both KFD and DRM registration use this rule.
 pub(crate) fn registered_host_page_cover(
