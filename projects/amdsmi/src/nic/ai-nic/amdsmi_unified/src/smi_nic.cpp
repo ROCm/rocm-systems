@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -25,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "amd_smi/impl/nic/amd_smi_nic_interface.h"
 #include "smi_ibverbs.h"
 #include "smi_nic_log.h"
 #include "smi_nic_testing.h"
@@ -243,28 +245,32 @@ std::optional<std::string> SmiNicPort::permanent_address() const {
 
 void SmiNicPort::discover_infiniband() {
   std::string infiniband_path = sysfs_bus_path_ + "/infiniband";
-  if (!std::filesystem::exists(infiniband_path) ||
-      !std::filesystem::is_directory(infiniband_path)) {
+  // Error codes throughout, as in collect_standard_statistics(): a throw here drops every NIC.
+  std::error_code ec;
+  if (!std::filesystem::exists(infiniband_path, ec) ||
+      !std::filesystem::is_directory(infiniband_path, ec)) {
     return;
   }
 
-  std::error_code ec;
   // Manual increment(ec): operator++ on directory_iterator throws on a
   // mid-scan read error; the non-throwing form only guards construction.
   for (auto it = std::filesystem::directory_iterator(infiniband_path, ec);
        (!ec && (it != std::filesystem::directory_iterator())); it.increment(ec)) {
-    if (it->is_directory()) {
+    std::error_code entry_ec;
+    if (it->is_directory(entry_ec)) {
       std::string name = it->path().filename().string();
       std::string sysfs_path = it->path().string();
       SmiInfiniBand ib(name, sysfs_path);
 
       std::string ports_path = sysfs_path + "/ports";
-      if (std::filesystem::exists(ports_path) && std::filesystem::is_directory(ports_path)) {
-        std::error_code port_ec;
+      std::error_code port_ec;
+      if (std::filesystem::exists(ports_path, port_ec) &&
+          std::filesystem::is_directory(ports_path, port_ec)) {
         for (auto port_it = std::filesystem::directory_iterator(ports_path, port_ec);
              (!port_ec && (port_it != std::filesystem::directory_iterator()));
              port_it.increment(port_ec)) {
-          if (port_it->is_directory()) {
+          std::error_code port_entry_ec;
+          if (port_it->is_directory(port_entry_ec)) {
             std::string port_name = port_it->path().filename().string();
             std::string port_sysfs_path = port_it->path().string();
             SmiInfiniBandPort port(iface_, port_name, port_sysfs_path);
@@ -386,7 +392,16 @@ auto& port_mtu_query() {
   return query;
 }
 
+auto& is_rdma_mtu_deferred() {
+  static auto is_deferred = std::atomic<bool>{false};
+  return is_deferred;
+}
+
 }  // namespace
+
+void smi_nic_defer_rdma_mtu(bool is_deferred) { is_rdma_mtu_deferred().store(is_deferred); }
+
+bool smi_nic_is_rdma_mtu_deferred() { return is_rdma_mtu_deferred().load(); }
 
 void smi_nic_set_port_mtu_query_for_testing(PortMtuQuery_t query) {
   port_mtu_query() = query ? std::move(query) : PortMtuQuery_t{smi_ibverbs::query_port_mtu};
@@ -395,6 +410,18 @@ void smi_nic_set_port_mtu_query_for_testing(PortMtuQuery_t query) {
 SmiInfiniBandPort::SmiInfiniBandPort(std::string& netdev, std::string& name,
                                      const std::string& sysfs_path)
     : netdev_(netdev), name_(name), sysfs_path_(sysfs_path) {
+  if (!is_rdma_mtu_deferred().load()) {
+    query_ibverbs_mtu_once();
+  }
+}
+
+// A fork per RDMA port. Discovery runs it unless smi_nic_defer_rdma_mtu() moved it to the first
+// read; either way a port is probed once, and a failed probe leaves its MTU unknown.
+void SmiInfiniBandPort::query_ibverbs_mtu_once() const {
+  if (m_was_ibverbs_mtu_queried) {
+    return;
+  }
+  m_was_ibverbs_mtu_queried = true;
   // The port directory is .../infiniband/<rdma_dev>/ports/<n>; libibverbs wants the device name.
   const auto rdma_dev = std::filesystem::path(sysfs_path_).parent_path().parent_path().filename();
   const auto port = port_num();
@@ -436,11 +463,13 @@ std::optional<std::string> SmiInfiniBandPort::state() const {
 }
 
 std::optional<uint16_t> SmiInfiniBandPort::max_mtu() const {
+  query_ibverbs_mtu_once();
   return m_ibverbs_max_mtu.has_value() ? m_ibverbs_max_mtu
                                        : get_sysfs_data<uint16_t>(sysfs_path_ + "/max_mtu");
 }
 
 std::optional<uint16_t> SmiInfiniBandPort::active_mtu() const {
+  query_ibverbs_mtu_once();
   return m_ibverbs_active_mtu.has_value() ? m_ibverbs_active_mtu
                                           : get_sysfs_data<uint16_t>(sysfs_path_ + "/active_mtu");
 }

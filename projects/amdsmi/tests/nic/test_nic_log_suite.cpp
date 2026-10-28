@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -29,6 +30,10 @@
 #ifdef HAVE_LIBNL3
 #include <linux/genetlink.h>
 #include <netlink/genl/ctrl.h>
+#include <netlink/socket.h>
+#include <sys/resource.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 
 #include "netlink_generic.h"
 #include "smi_devlink_netlink.h"
@@ -442,6 +447,92 @@ auto test_netlink_query_failure_logged() -> void {
   check("no SUCCESS", !has_substr(all, "SUCCESS"), all);
 }
 
+auto get_recv_timeout_sec(nl::GenericNetlinkClient& client) -> long {
+  auto timeout = timeval{};
+  auto len = static_cast<socklen_t>(sizeof(timeout));
+  const auto fd = nl_socket_get_fd(client.socket().get());
+  if (getsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, &len) < 0) {
+    return -1;
+  }
+  return static_cast<long>(timeout.tv_sec);
+}
+
+auto test_netlink_connect_bounds_the_receive() -> void {
+  std::cout << "\nNetlink socket: connect sets a receive timeout\n";
+  auto client = nl::GenericNetlinkClient{};
+  check("connect", (client.connect() == 0));
+  check("SO_RCVTIMEO is the named limit", (get_recv_timeout_sec(client) == nl::kNlRecvTimeoutSec),
+        std::to_string(get_recv_timeout_sec(client)));
+}
+
+// With auto-ack off, a request of type NLMSG_NOOP gets no reply from the kernel, which stands in
+// for a peer that never answers.
+auto test_netlink_silent_peer_times_out() -> void {
+  std::cout << "\nNetlink query: a silent peer times out instead of hanging\n";
+  constexpr auto kShortTimeoutSec = 1;
+  constexpr auto kSlackSec = 2;
+  auto client = nl::GenericNetlinkClient{};
+  check("connect", (client.connect() == 0));
+  check("shorten the limit", (client.socket().set_recv_timeout(kShortTimeoutSec) == 0));
+  const auto port_before = nl_socket_get_local_port(client.socket().get());
+
+  const auto begin = std::chrono::steady_clock::now();
+  const auto ret = client.query(NLMSG_NOOP, 1, 1, nullptr, ignore_msg, nullptr, NLM_F_REQUEST);
+  const auto waited = std::chrono::steady_clock::now() - begin;
+
+  check("query reports try again", (ret == -NLE_AGAIN), "ret=" + std::to_string(ret));
+  check("the error maps to EAGAIN", (nl::nle_to_errno(-ret) == EAGAIN));
+  check("the wait is bounded", (waited < std::chrono::seconds(kShortTimeoutSec + kSlackSec)));
+
+  const auto family = client.resolve_family_id("nlctrl");
+  check("nlctrl resolves after the timeout", family.has_value());
+  if (!family.has_value()) {
+    return;
+  }
+  const auto next = client.query(*family, CTRL_CMD_GETFAMILY, 1, nullptr, ignore_msg, nullptr,
+                                 (NLM_F_REQUEST | NLM_F_DUMP));
+  check("the next query succeeds", (next == 0), "ret=" + std::to_string(next));
+  check("the next query ran on a fresh socket, so a late reply cannot reach it",
+        (nl_socket_get_local_port(client.socket().get()) != port_before));
+  check("the replacement socket keeps the receive timeout",
+        (get_recv_timeout_sec(client) == nl::kNlRecvTimeoutSec));
+}
+
+// A reset that cannot open its socket (here: no free descriptors) must not leave the client
+// disabled: the next query after the condition clears has to reconnect.
+auto test_netlink_recovers_when_the_reset_cannot_reconnect() -> void {
+  std::cout << "\nNetlink query: a failed reconnect after a timeout is retried by later queries\n";
+  constexpr auto kShortTimeoutSec = 1;
+  auto client = nl::GenericNetlinkClient{};
+  check("connect", (client.connect() == 0));
+  check("shorten the limit", (client.socket().set_recv_timeout(kShortTimeoutSec) == 0));
+  const auto family = client.resolve_family_id("nlctrl");
+  check("nlctrl resolves", family.has_value());
+  if (!family.has_value()) {
+    return;
+  }
+
+  auto saved = rlimit{};
+  check("read the descriptor limit", (getrlimit(RLIMIT_NOFILE, &saved) == 0));
+  auto none_left = saved;
+  none_left.rlim_cur = 0;
+  check("exhaust descriptors", (setrlimit(RLIMIT_NOFILE, &none_left) == 0));
+  const auto timed_out =
+      client.query(NLMSG_NOOP, 1, 1, nullptr, ignore_msg, nullptr, NLM_F_REQUEST);
+  const auto blocked = client.query(*family, CTRL_CMD_GETFAMILY, 1, nullptr, ignore_msg, nullptr,
+                                    (NLM_F_REQUEST | NLM_F_DUMP));
+  check("descriptors restored", (setrlimit(RLIMIT_NOFILE, &saved) == 0));
+  const auto recovered = client.query(*family, CTRL_CMD_GETFAMILY, 1, nullptr, ignore_msg, nullptr,
+                                      (NLM_F_REQUEST | NLM_F_DUMP));
+
+  check("the silent query timed out", (timed_out == -NLE_AGAIN),
+        "ret=" + std::to_string(timed_out));
+  check("a query with no descriptor available fails", (blocked < 0),
+        "ret=" + std::to_string(blocked));
+  check("a query after the limit clears succeeds", (recovered == 0),
+        "ret=" + std::to_string(recovered));
+}
+
 auto test_devlink_describe_reporters() -> void {
   std::cout << "\nDevlink describe: reporters\n";
   auto fw = nl::DevlinkReporter{};
@@ -703,6 +794,9 @@ int main() {
   test_netlink_errors_map_to_errno();
   test_netlink_query_success_logged();
   test_netlink_query_failure_logged();
+  test_netlink_connect_bounds_the_receive();
+  test_netlink_silent_peer_times_out();
+  test_netlink_recovers_when_the_reset_cannot_reconnect();
   test_devlink_describe_reporters();
   test_devlink_describe_port_split_unknown();
   test_devlink_describe_device_info_masks_serials();

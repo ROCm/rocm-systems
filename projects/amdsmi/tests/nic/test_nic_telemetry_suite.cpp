@@ -16,23 +16,28 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #include "amd_smi/impl/nic/amd_smi_nic_interface.h"
 #include "nic_check.h"
 #include "smi_nic_hwmon.h"
 #include "smi_nic_interface.h"
+#include "smi_nic_subsystem.h"
+#include "smi_nic_system.h"
 #include "smi_nic_telemetry.h"
 #include "smi_nic_testing.h"
 
@@ -663,6 +668,153 @@ static void test_context_entry_points_reject_bad_input() {
   smi_nic_destroy_context(ctx);
 }
 
+// A devlink round trip can block on firmware, so smi_get_nic_telemetry() must not hold the context
+// mutex across it: every other per-NIC call on the context would queue behind one slow NIC.
+class BlockingDevlinkClient : public dl::IDevlinkClient {
+ public:
+  tp::Result<dl::DevlinkPortSplit> get_port_split(const std::string&) override {
+    return {false, {}, ENOTSUP};
+  }
+  tp::Result<std::vector<dl::DevlinkReporter>> get_health_reporters(const std::string&) override {
+    m_entered.set_value();
+    m_release.wait_for(kStuckLimit);
+    return {false, {}, ENOTSUP};
+  }
+  tp::Result<dl::DevlinkDeviceInfo> get_device_info(const std::string&) override {
+    return {false, {}, ENOTSUP};
+  }
+
+  static constexpr auto kStuckLimit = std::chrono::seconds(10);
+
+  std::promise<void> m_entered;
+  std::promise<void> m_release_signal;
+  std::shared_future<void> m_release = m_release_signal.get_future().share();
+};
+
+// Serves one NIC whose hwmon and devlink addresses are fixed by the test.
+class OneNicSubsystem : public SmiNicSubsystem {
+ public:
+  void discover(const std::string&, const std::string&,
+                std::shared_ptr<tp::NicTransport>) override {}
+  NicVendor vendor() const override { return NicVendor::AMD; }
+  bool driver_loaded(const std::string&, DriverType) const override { return true; }
+  const std::vector<std::unique_ptr<SmiNic>>& get_nics() const override { return m_nics; }
+  void add(std::unique_ptr<SmiNic> nic) { m_nics.push_back(std::move(nic)); }
+
+ private:
+  std::vector<std::unique_ptr<SmiNic>> m_nics;
+};
+
+// Reports one temperature file per sensor, so each snapshot field can be traced to its source.
+class FixedHwmonNic : public SmiNic {
+ public:
+  FixedHwmonNic(const std::string& bdf, std::map<NicTempSensor, std::string> paths)
+      : SmiNic("", bdf, NicType::Ethernet), m_paths(std::move(paths)) {}
+  std::optional<std::string> hwmon_temp_path(NicTempSensor sensor) const override {
+    const auto it = m_paths.find(sensor);
+    if (it == m_paths.end()) {
+      return std::nullopt;
+    }
+    return it->second;
+  }
+
+ private:
+  std::map<NicTempSensor, std::string> m_paths;
+};
+
+class DevlinkFactoryGuard_t {
+ public:
+  explicit DevlinkFactoryGuard_t(DevlinkFactory_t factory) {
+    smi_nic_set_devlink_factory_for_testing(std::move(factory));
+  }
+  ~DevlinkFactoryGuard_t() { smi_nic_set_devlink_factory_for_testing(nullptr); }
+  DevlinkFactoryGuard_t(const DevlinkFactoryGuard_t&) = delete;
+  DevlinkFactoryGuard_t& operator=(const DevlinkFactoryGuard_t&) = delete;
+};
+
+static auto make_context_with_nic(std::unique_ptr<SmiNic> nic) -> smi_nic_ctx_t {
+  auto subsystem = std::make_unique<OneNicSubsystem>();
+  subsystem->add(std::move(nic));
+  auto system = std::make_unique<SmiNicSystem>("/tmp", "/tmp");
+  system->register_subsystem(std::move(subsystem));
+  system->discover_nics();
+  auto ctx = smi_nic_ctx_t{nullptr};
+  smi_nic_create_context_for_testing(&ctx, std::move(system));
+  return ctx;
+}
+
+static void test_telemetry_does_not_hold_the_context_lock_across_devlink() {
+  std::cout << "\nTelemetry: a slow devlink call leaves the context free\n";
+  constexpr auto kProbeLimit = std::chrono::seconds(2);
+  constexpr auto kEnterLimit = std::chrono::seconds(5);
+  constexpr auto kNicBdf = uint64_t{0x300};
+
+  auto ctx = make_context_with_nic(std::make_unique<SmiNic>("", "0000:03:00.0", NicType::Ethernet));
+  auto blocking = std::make_shared<BlockingDevlinkClient>();
+  const auto factory_guard = DevlinkFactoryGuard_t{[blocking]() { return blocking; }};
+
+  auto entered = blocking->m_entered.get_future();
+  auto telemetry = smi_nic_telemetry_t{};
+  auto reader = std::async(std::launch::async,
+                           [&]() { return smi_get_nic_telemetry(ctx, kNicBdf, &telemetry); });
+  const auto is_reader_blocked = (entered.wait_for(kEnterLimit) == std::future_status::ready);
+  check("telemetry reaches the devlink call", is_reader_blocked);
+
+  auto driver = smi_nic_driver_info_t{};
+  auto probe = std::async(std::launch::async,
+                          [&]() { return smi_get_nic_driver_info(ctx, kNicBdf, &driver); });
+  const auto was_probe_served = (probe.wait_for(kProbeLimit) == std::future_status::ready);
+  check("another call on the context completes while devlink is blocked", was_probe_served);
+
+  blocking->m_release_signal.set_value();
+  check("telemetry still succeeds once devlink answers", reader.get() == SMI_NIC_STATUS_SUCCESS);
+  probe.wait();
+  smi_nic_destroy_context(ctx);
+}
+
+static void test_telemetry_carries_hwmon_and_devlink_addresses_through_the_context() {
+  std::cout << "\nTelemetry: context read keeps hwmon value and devlink addresses\n";
+  constexpr auto kNicBdf = uint64_t{0x300};
+  const auto write_temp = [](const std::string& name, int millidegrees) {
+    const auto path = g_tmpdir + "/" + name;
+    auto file = std::ofstream(path);
+    file << millidegrees << "\n";
+    return path;
+  };
+  const auto asic_path = write_temp("ctx_asic_input", 41000);
+  const auto transceiver_path = write_temp("ctx_transceiver_input", 52000);
+  const auto board_path = write_temp("ctx_board_input", 63000);
+
+  auto nic = std::make_unique<FixedHwmonNic>(
+      "0000:03:00.0",
+      std::map<NicTempSensor, std::string>{{NicTempSensor::Asic, asic_path},
+                                           {NicTempSensor::Transceiver, transceiver_path},
+                                           {NicTempSensor::Board, board_path}});
+  nic->set_mgmt_bdf("0000:09:00.0");
+  auto ctx = make_context_with_nic(std::move(nic));
+
+  auto fake = std::make_shared<FakeDevlinkClient>();
+  fake->reporters = {true, {make_reporter("fw", 1, 0)}, 0};
+  const auto factory_guard = DevlinkFactoryGuard_t{[fake]() { return fake; }};
+
+  auto telemetry = smi_nic_telemetry_t{};
+  const auto status = smi_get_nic_telemetry(ctx, kNicBdf, &telemetry);
+
+  check("telemetry succeeds", status == SMI_NIC_STATUS_SUCCESS);
+  check("asic temperature reaches the asic field", telemetry.temperature.asic_temp_c == 41,
+        std::to_string(telemetry.temperature.asic_temp_c));
+  check("transceiver temperature reaches the transceiver field",
+        telemetry.temperature.transceiver_temp_c == 52,
+        std::to_string(telemetry.temperature.transceiver_temp_c));
+  check("board temperature reaches the board field", telemetry.temperature.board_temp_c == 63,
+        std::to_string(telemetry.temperature.board_temp_c));
+  check("health is read from the management function", fake->reporters_dev == "0000:09:00.0",
+        "got " + fake->reporters_dev);
+  check("port split is read from the telemetry function", fake->port_split_dev == "0000:03:00.0",
+        "got " + fake->port_split_dev);
+  smi_nic_destroy_context(ctx);
+}
+
 // A multi-function card registers its devlink instance on the port function,
 // not on the bridge its handle names. Querying the bridge is what made port
 // split and firmware read unsupported on hardware. Health is addressed at the
@@ -981,6 +1133,8 @@ int main() {
   test_sensor_shim_struct_truncates_a_long_label_with_a_terminator();
   test_sensor_shim_struct_of_a_nic_without_hwmon_is_empty();
   test_context_entry_points_reject_bad_input();
+  test_telemetry_does_not_hold_the_context_lock_across_devlink();
+  test_telemetry_carries_hwmon_and_devlink_addresses_through_the_context();
   test_devlink_addresses_the_port_function();
   test_devlink_health_addresses_the_management_function();
   test_devlink_addresses_a_portless_nic_itself();

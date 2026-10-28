@@ -27,7 +27,9 @@ constexpr size_t kPort = 4;
 constexpr size_t kRdma = 5;
 constexpr size_t kKind = 6;
 constexpr size_t kCapability = 7;
-constexpr size_t kGetterCount = 8;
+constexpr size_t kRdmaMtu = 8;
+constexpr size_t kCreateContext = 9;
+constexpr size_t kGetterCount = 10;
 
 // inline (not anonymous-namespace): NicUnit's SetUp/Populate are defined in
 // this header and included by multiple .cc files, so the linker folds their
@@ -47,6 +49,11 @@ smi_nic_status_t Stub(smi_nic_ctx_t, uint64_t, Info* info) {
   return g_status[Index];
 }
 
+// The MTU fill leaves the RDMA info alone unless a test installs its own.
+inline smi_nic_status_t NoMtuStub(smi_nic_ctx_t, uint64_t, smi_nic_rdma_devices_info_t*) {
+  return g_status[kRdmaMtu];
+}
+
 // The RDMA stub fills like the rest rather than writing nothing: a non-zero fill
 // is what the real getter leaves behind when it takes its ports.empty() early
 // return without its own `*info = {}`, so the zeroing the tolerated path is
@@ -60,6 +67,8 @@ inline const amd::smi::nic_info_getters_t kStubGetters = {
     Stub<kRdma, smi_nic_rdma_devices_info_t>,
     Stub<kKind, uint8_t>,
     Stub<kCapability, uint32_t>,
+    NoMtuStub,
+    smi_nic_create_context,
 };
 
 class NicUnit : public ::testing::Test {

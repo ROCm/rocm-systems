@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -18,6 +19,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -304,6 +306,48 @@ static void test_standard_statistics_survive_sysfs_errors() {
         !is_collect_throwing([&] { mixed_port.collect_standard_statistics(); }));
   check("the counters beside a looping entry are still read",
         (mixed_port.get_standard_stats_map().count("rx_bytes") == 1));
+  fs::remove_all(root);
+}
+
+// A throw out of discovery reaches the context creation catch-all and drops every NIC. Symlink
+// loops stand in for unreadable dirs (same non-"absent" error, and chmod 000 does not block root).
+static void test_infiniband_discovery_survives_sysfs_errors() {
+  namespace fs = std::filesystem;
+  const fs::path root =
+      fs::temp_directory_path() / ("amdsmi-ib-errs-" + std::to_string(::getpid()));
+  fs::remove_all(root);
+
+  const fs::path looped_root = root / "looped";
+  fs::create_directories(looped_root);
+  fs::create_symlink("infiniband", looped_root / "infiniband");
+  SmiNicPort looped_port("faketh0", "0000:00:00.0", looped_root.string(), looped_root.string());
+  check("a looping infiniband dir does not throw",
+        !is_collect_throwing([&] { looped_port.discover_infiniband(); }));
+  check("a looping infiniband dir reads as no RDMA devices", looped_port.infiniband().empty());
+
+  const fs::path mixed_root = root / "mixed";
+  fs::create_directories(mixed_root / "infiniband" / "good" / "ports");
+  fs::create_symlink("bad", mixed_root / "infiniband" / "bad");
+  SmiNicPort mixed_port("faketh0", "0000:00:00.0", mixed_root.string(), mixed_root.string());
+  check("a looping RDMA device entry does not throw",
+        !is_collect_throwing([&] { mixed_port.discover_infiniband(); }));
+  check("the RDMA device beside a looping entry is still found",
+        (mixed_port.infiniband().size() == 1) && (mixed_port.infiniband()[0].rdma_dev() == "good"));
+
+  const fs::path ports_root = root / "ports";
+  fs::create_directories(ports_root / "infiniband" / "dev0");
+  fs::create_symlink("ports", ports_root / "infiniband" / "dev0" / "ports");
+  SmiNicPort ports_port("faketh0", "0000:00:00.0", ports_root.string(), ports_root.string());
+  check("a looping ports dir does not throw",
+        !is_collect_throwing([&] { ports_port.discover_infiniband(); }));
+
+  const fs::path port_entry_root = root / "port_entry";
+  fs::create_directories(port_entry_root / "infiniband" / "dev0" / "ports");
+  fs::create_symlink("bad", port_entry_root / "infiniband" / "dev0" / "ports" / "bad");
+  SmiNicPort entry_port("faketh0", "0000:00:00.0", port_entry_root.string(),
+                        port_entry_root.string());
+  check("a looping RDMA port entry does not throw",
+        !is_collect_throwing([&] { entry_port.discover_infiniband(); }));
   fs::remove_all(root);
 }
 
@@ -709,10 +753,11 @@ static void test_infiniband_port_mtu_comes_from_the_ibverbs_query() {
   auto name = std::string{"1"};
   const auto port = SmiInfiniBandPort(netdev, name, port_dir.string());
 
-  check("the query names the RDMA device of the port", asked_device == "fakerdma0", asked_device);
-  check("the query names the port number", asked_port == 1, std::to_string(asked_port));
+  check("discovery already queried ibverbs", asked_device == "fakerdma0", asked_device);
   check("max MTU comes from ibverbs", port.max_mtu() == std::optional<uint16_t>(4096));
   check("active MTU comes from ibverbs", port.active_mtu() == std::optional<uint16_t>(1024));
+  check("the query names the RDMA device of the port", asked_device == "fakerdma0", asked_device);
+  check("the query names the port number", asked_port == 1, std::to_string(asked_port));
 
   smi_nic_set_port_mtu_query_for_testing({});
   std::filesystem::remove_all(root);
@@ -744,6 +789,191 @@ static void test_infiniband_port_mtu_falls_back_to_sysfs_without_an_ibverbs_answ
 
   smi_nic_set_port_mtu_query_for_testing({});
   std::filesystem::remove_all(root);
+}
+
+// smi_get_nic_rdma_dev_info_without_mtu() (the discovery path) must not probe;
+// smi_get_nic_rdma_mtu() does it once per port, outside the context lock, and fills what the old
+// eager getter returned.
+static void test_interface_rdma_mtu_is_probed_on_first_use() {
+  namespace fs = std::filesystem;
+  const fs::path root =
+      fs::temp_directory_path() / ("amdsmi-ibv-lazy-" + std::to_string(::getpid()));
+  fs::remove_all(root);
+  const auto ports_dir = root / "infiniband/fakerdma0/ports";
+  fs::create_directories(ports_dir / "1");
+  fs::create_directories(ports_dir / "2");
+  std::ofstream(ports_dir / "2" / "max_mtu") << "2048\n";
+  std::ofstream(ports_dir / "2" / "active_mtu") << "512\n";
+
+  smi_nic_defer_rdma_mtu(true);
+  auto query_count = 0;
+  smi_nic_set_port_mtu_query_for_testing(
+      [&](const std::string&, uint8_t port_num) -> std::optional<smi_ibverbs::PortMtu> {
+        query_count++;
+        if (port_num == 2) {
+          return std::nullopt;
+        }
+        return smi_ibverbs::PortMtu{1024, 4096};
+      });
+
+  std::string netdev = "faketh0";
+  std::string ib_name = "fakerdma0";
+  std::string ib_path = (root / "infiniband/fakerdma0").string();
+  SmiInfiniBand infiniband(ib_name, ib_path);
+  for (const std::string port_name : {"1", "2"}) {
+    auto name = port_name;
+    infiniband.add_port(SmiInfiniBandPort(netdev, name, (ports_dir / port_name).string()));
+  }
+  InterfaceFixture_t fixture("/tmp", std::make_shared<FakeTransport>(), &kTestTable, &infiniband);
+
+  check("discovery with deferral does not probe", query_count == 0, std::to_string(query_count));
+
+  constexpr auto kUnknownMtu = std::numeric_limits<uint16_t>::max();
+  auto info = std::make_unique<smi_nic_rdma_devices_info_t>();
+  check("the no-MTU rdma getter succeeds",
+        smi_get_nic_rdma_dev_info_without_mtu(fixture.ctx, kFakeNicBdf, info.get()) ==
+            SMI_NIC_STATUS_SUCCESS);
+  check("the no-MTU rdma getter does not query MTU", query_count == 0, std::to_string(query_count));
+  check("the no-MTU rdma getter leaves the MTU unknown",
+        (info->rdma_dev_info[0].rdma_port_info[0].max_mtu == kUnknownMtu) &&
+            (info->rdma_dev_info[0].rdma_port_info[0].active_mtu == kUnknownMtu));
+
+  check("the MTU fill succeeds",
+        smi_get_nic_rdma_mtu(fixture.ctx, kFakeNicBdf, info.get()) == SMI_NIC_STATUS_SUCCESS);
+  check("the MTU fill queries once per port", query_count == 2, std::to_string(query_count));
+  const auto& first = info->rdma_dev_info[0].rdma_port_info[0];
+  const auto& second = info->rdma_dev_info[0].rdma_port_info[1];
+  check("ibverbs MTU is filled", (first.max_mtu == 4096) && (first.active_mtu == 1024));
+  check("a failing query falls back to the sysfs MTU",
+        (second.max_mtu == 2048) && (second.active_mtu == 512));
+  check("the filled struct still names the port",
+        (first.rdma_port == 1) && (second.rdma_port == 2));
+
+  check("an unknown device is not found",
+        smi_get_nic_rdma_mtu(fixture.ctx, 0xdead, info.get()) == SMI_NIC_STATUS_NOT_FOUND);
+
+  smi_nic_defer_rdma_mtu(false);
+  smi_nic_set_port_mtu_query_for_testing({});
+  fs::remove_all(root);
+}
+
+// Entries are matched by RDMA device name and port, so a driver that unbinds between the info read
+// and the MTU fill leaves the other device's MTU where it belongs.
+static void test_interface_rdma_mtu_fill_follows_names_not_positions() {
+  namespace fs = std::filesystem;
+  const fs::path root =
+      fs::temp_directory_path() / ("amdsmi-ibv-two-" + std::to_string(::getpid()));
+  fs::remove_all(root);
+
+  auto query_count = 0;
+  smi_nic_defer_rdma_mtu(true);
+  smi_nic_set_port_mtu_query_for_testing(
+      [&](const std::string& rdma_dev, uint8_t) -> std::optional<smi_ibverbs::PortMtu> {
+        query_count++;
+        if (rdma_dev == "fakerdma1") {
+          return smi_ibverbs::PortMtu{512, 2048};
+        }
+        return smi_ibverbs::PortMtu{1024, 4096};
+      });
+
+  auto nic = std::make_unique<SmiNic>("faketh0", "0000:03:00.0");
+  const auto bdfs = std::array<std::string, 2>{"0000:03:00.1", "0000:03:00.2"};
+  for (auto n = size_t{0}; n < bdfs.size(); n++) {
+    const auto dev_name = "fakerdma" + std::to_string(n);
+    const auto dev_dir = root / "infiniband" / dev_name;
+    fs::create_directories(dev_dir / "ports/1");
+    std::string netdev = "faketh" + std::to_string(n);
+    std::string name = "1";
+    std::string ib_name = dev_name;
+    std::string ib_path = dev_dir.string();
+    SmiInfiniBand infiniband(ib_name, ib_path);
+    infiniband.add_port(SmiInfiniBandPort(netdev, name, (dev_dir / "ports/1").string()));
+    auto port =
+        SmiNicPort(netdev, bdfs[n], "/tmp", "/tmp", std::make_shared<FakeTransport>(), &kTestTable);
+    port.add_infiniband(infiniband);
+    nic->add_nic_port(std::move(port));
+  }
+  auto subsystem = std::make_unique<FakeSubsystem>();
+  auto* subsystem_view = subsystem.get();
+  subsystem->add(std::move(nic));
+  auto system = std::make_unique<SmiNicSystem>("/tmp", "/tmp");
+  system->register_subsystem(std::move(subsystem));
+  system->discover_nics();
+  smi_nic_ctx_t ctx = nullptr;
+  smi_nic_create_context_for_testing(&ctx, std::move(system));
+
+  constexpr auto kUnknownMtu = std::numeric_limits<uint16_t>::max();
+  auto info = std::make_unique<smi_nic_rdma_devices_info_t>();
+  check("two devices are listed", (smi_get_nic_rdma_dev_info_without_mtu(
+                                       ctx, kFakeNicBdf, info.get()) == SMI_NIC_STATUS_SUCCESS) &&
+                                      (info->num_rdma_dev == 2));
+  check("the listing probed nothing", query_count == 0, std::to_string(query_count));
+
+  auto both = std::make_unique<smi_nic_rdma_devices_info_t>(*info);
+  check("the fill succeeds",
+        smi_get_nic_rdma_mtu(ctx, kFakeNicBdf, both.get()) == SMI_NIC_STATUS_SUCCESS);
+  check("each device gets its own MTU",
+        (both->rdma_dev_info[0].rdma_port_info[0].max_mtu == 4096) &&
+            (both->rdma_dev_info[0].rdma_port_info[0].active_mtu == 1024) &&
+            (both->rdma_dev_info[1].rdma_port_info[0].max_mtu == 2048) &&
+            (both->rdma_dev_info[1].rdma_port_info[0].active_mtu == 512));
+  check("the fill probes once per port", query_count == 2, std::to_string(query_count));
+
+  subsystem_view->unbind(bdfs[0]);
+  query_count = 0;
+  check("the fill after an unbind succeeds",
+        smi_get_nic_rdma_mtu(ctx, kFakeNicBdf, info.get()) == SMI_NIC_STATUS_SUCCESS);
+  check("the unbound device keeps an unknown MTU",
+        (info->rdma_dev_info[0].rdma_port_info[0].max_mtu == kUnknownMtu) &&
+            (info->rdma_dev_info[0].rdma_port_info[0].active_mtu == kUnknownMtu));
+  check("the bound device keeps its own MTU",
+        (info->rdma_dev_info[1].rdma_port_info[0].max_mtu == 2048) &&
+            (info->rdma_dev_info[1].rdma_port_info[0].active_mtu == 512));
+  check("only the bound device is probed", query_count == 1, std::to_string(query_count));
+
+  smi_nic_destroy_context(ctx);
+  smi_nic_defer_rdma_mtu(false);
+  smi_nic_set_port_mtu_query_for_testing({});
+  fs::remove_all(root);
+}
+
+// The shared getter keeps its contract with amdsmi_unified: it returns the real MTU, probed at
+// discovery rather than when the getter runs.
+static void test_interface_shared_rdma_getter_returns_the_mtu() {
+  namespace fs = std::filesystem;
+  const fs::path root =
+      fs::temp_directory_path() / ("amdsmi-ibv-shared-" + std::to_string(::getpid()));
+  fs::remove_all(root);
+  const auto port_dir = root / "infiniband/fakerdma0/ports/1";
+  fs::create_directories(port_dir);
+
+  auto query_count = 0;
+  smi_nic_set_port_mtu_query_for_testing(
+      [&](const std::string&, uint8_t) -> std::optional<smi_ibverbs::PortMtu> {
+        query_count++;
+        return smi_ibverbs::PortMtu{1024, 4096};
+      });
+  std::string netdev = "faketh0";
+  std::string name = "1";
+  std::string ib_name = "fakerdma0";
+  std::string ib_path = (root / "infiniband/fakerdma0").string();
+  SmiInfiniBand infiniband(ib_name, ib_path);
+  infiniband.add_port(SmiInfiniBandPort(netdev, name, port_dir.string()));
+  InterfaceFixture_t fixture("/tmp", std::make_shared<FakeTransport>(), &kTestTable, &infiniband);
+
+  check("discovery probes once per port", query_count == 1, std::to_string(query_count));
+
+  auto info = std::make_unique<smi_nic_rdma_devices_info_t>();
+  check("the shared rdma getter succeeds",
+        smi_get_nic_rdma_dev_info(fixture.ctx, kFakeNicBdf, info.get()) == SMI_NIC_STATUS_SUCCESS);
+  const auto& port = info->rdma_dev_info[0].rdma_port_info[0];
+  check("the shared rdma getter returns the ibverbs MTU",
+        (port.max_mtu == 4096) && (port.active_mtu == 1024));
+  check("the shared rdma getter does not probe again", query_count == 1,
+        std::to_string(query_count));
+
+  smi_nic_set_port_mtu_query_for_testing({});
+  fs::remove_all(root);
 }
 
 static void test_interface_rdma_count_matches_the_cap_on_the_list() {
@@ -1146,6 +1376,9 @@ int main() {
   test_isolated_probe_gives_up_on_a_hung_provider_and_reaps_it();
   test_infiniband_port_mtu_comes_from_the_ibverbs_query();
   test_infiniband_port_mtu_falls_back_to_sysfs_without_an_ibverbs_answer();
+  test_interface_rdma_mtu_is_probed_on_first_use();
+  test_interface_rdma_mtu_fill_follows_names_not_positions();
+  test_interface_shared_rdma_getter_returns_the_mtu();
   test_interface_link_type_reports_unknown_for_a_device_outside_sysfs();
   test_interface_reports_each_nics_kind_and_capability();
   test_interface_vendor_statistics_scope_is_chosen_per_call();
@@ -1159,6 +1392,7 @@ int main() {
   test_fec_query_is_logged_with_interface_and_outcome();
   test_rdma_hw_counters_skip_lifespan_and_refresh();
   test_standard_statistics_survive_sysfs_errors();
+  test_infiniband_discovery_survives_sysfs_errors();
   test_rdma_hw_counters_survive_sysfs_errors();
   test_no_table_yields_empty_map();
   test_large_table_not_truncated_by_mechanism();

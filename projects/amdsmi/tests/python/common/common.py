@@ -212,7 +212,9 @@ def generated_version_stub(version="0.0.0+source"):
     stub mapping, or into ``sys.modules`` directly -- it is empty whenever the
     real module is importable, so it never shadows a build. No test reads it.
     """
-    if importlib.util.find_spec("_version") is not None:
+    # find_spec raises ValueError on a sys.modules entry with no __spec__, which an
+    # earlier module's import-time stub leaves behind until its tearDownModule runs.
+    if "_version" in sys.modules or importlib.util.find_spec("_version") is not None:
         return {}
     return {"_version": fake_module("_version", __version__=version)}
 
