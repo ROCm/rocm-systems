@@ -43,7 +43,6 @@
  *
  */
 
-#include <cstdlib>
 #include <string>
 #include <vector>
 #include <memory>
@@ -528,36 +527,10 @@ TEST(rocrtstFunc, Signal_Batch_Negative) {
     RunCustomTestEpilog(&batch_test);
 }
 
-// Copies HSA_ENABLE_INTERRUPT and puts it back when the test function returns,
-// including when an assertion returns early. Declared before the test object so
-// it runs after Close(), which restores the value captured at construction.
-namespace {
-class RestoreHsaEnableInterrupt {
- public:
-  RestoreHsaEnableInterrupt() {
-    const char* current = rocrtst::GetEnv("HSA_ENABLE_INTERRUPT");
-    was_set_ = current != nullptr;
-    if (was_set_) saved_ = current;
-  }
-
-  ~RestoreHsaEnableInterrupt() {
-    if (was_set_) {
-      rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", saved_.c_str());
-    } else {
-      unsetenv("HSA_ENABLE_INTERRUPT");
-    }
-  }
-
- private:
-  bool was_set_;
-  std::string saved_;
-};
-}  // namespace
-
 // Duplicate consumers stay invalid when interrupt waits are off. SetUp leaves
 // HSA_ENABLE_INTERRUPT alone because enable_interrupt() defaults to false.
 TEST(rocrtstFunc, Signal_Batch_Negative_InterruptDisabled) {
-    RestoreHsaEnableInterrupt restore_interrupt;
+    RestoreEnvironmentVariable restore_interrupt("HSA_ENABLE_INTERRUPT");
     rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", "0");
     SignalBatchTest batch_test;
     if (!RunCustomTestProlog(&batch_test)) return;
