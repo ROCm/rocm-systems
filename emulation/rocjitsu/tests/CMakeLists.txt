@@ -2112,9 +2112,7 @@ if(NOT RJ_ENABLE_TSAN)
 endif()
 rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 
-rj_add_interposer_test_suite(
-    InterposerDrmTest
-    AllocationFailsWhenBackingDescriptorsAreExhausted
+set(_rj_interposer_drm_tests
     CanonicalSysfsPathsRetainSimulatedDevice
     CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinary
     DeviceInfoReportsActiveCuCount
@@ -2135,7 +2133,6 @@ rj_add_interposer_test_suite(
     KfdExportFlagsSurviveDuplicationBeforeThePrimeImport
     KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
     KfdImportsRetainMetadataAfterTheOriginalOwnerCloses
-    MappingStillSucceedsAtTheDescriptorLimit
     MappingFlagsMatchBackingCapabilities
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
@@ -2146,6 +2143,17 @@ rj_add_interposer_test_suite(
     RenderNodePathMetadataMatchesDescriptor
     TimestampUsesAdvertisedNanosecondClock
 )
+# These tests use every file descriptor while emulator threads run. A UBSan
+# vptr cache miss on one of those threads opens a pipe to probe the vtable
+# address, and the sanitizer aborts when that fails.
+if(NOT (RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR))
+    list(
+        APPEND _rj_interposer_drm_tests
+        AllocationFailsWhenBackingDescriptorsAreExhausted
+        MappingStillSucceedsAtTheDescriptorLimit
+    )
+endif()
+rj_add_interposer_test_suite(InterposerDrmTest ${_rj_interposer_drm_tests})
 # Keep the partial-aperture regression on the shipped gfx1250 topology while
 # leaving its KFD visibility default unchanged. Reconfigure when that source
 # config changes, and install the generated variant with installed tests.
