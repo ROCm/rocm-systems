@@ -102,6 +102,30 @@ struct ProcessState {
     resources: Option<KfdContextResources>,
     /// Sessions that still require KFD runtime enablement.
     joined_sessions: u64,
+    /// The last session left, but KFD has not confirmed runtime disable.
+    pending_disable: bool,
+}
+
+impl ProcessState {
+    fn finish_pending_disable(&mut self) -> Result<(), Error> {
+        if !self.pending_disable {
+            return Ok(());
+        }
+        let kfd = self
+            .resources
+            .as_ref()
+            .and_then(|resources| resources.kfd.get())
+            .ok_or_else(|| {
+                error(
+                    ErrorKind::Internal,
+                    "pending KFD disable lost its connection",
+                )
+            })?;
+        kfd.disable_runtime()
+            .map_err(|source| native_error("AMDKFD_IOC_RUNTIME_ENABLE disable", source))?;
+        self.pending_disable = false;
+        Ok(())
+    }
 }
 
 /// Process-local lock and identity for the shared primary KFD context.
@@ -134,6 +158,7 @@ fn primary_slot() -> &'static ProcessSlot {
             state: Mutex::new(ProcessState {
                 resources: None,
                 joined_sessions: 0,
+                pending_disable: false,
             }),
         }));
         match PRIMARY_SLOT.compare_exchange(current, candidate, Ordering::AcqRel, Ordering::Acquire)
@@ -513,32 +538,33 @@ impl Driver for LinuxKfdDriver {
         if self.lifetime == DriverContextLifetime::Session {
             return self.local.shutdown();
         }
-        if !self.joined_primary.load(Ordering::Acquire) {
-            return Ok(());
-        }
         let slot = primary_slot();
         let mut state = slot
             .state
             .lock()
             .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
+        if !self.joined_primary.load(Ordering::Acquire) {
+            // A previous last-session disable may have failed after this
+            // session left. Its retry still owns the process-wide obligation.
+            return state.finish_pending_disable();
+        }
         if state.joined_sessions == 0 {
             return Err(error(
                 ErrorKind::Internal,
                 "KFD primary session accounting underflow",
             ));
         }
-        if state.joined_sessions == 1 {
-            if let Some(kfd) = state
+        let last = state.joined_sessions == 1;
+        state.joined_sessions -= 1;
+        self.joined_primary.store(false, Ordering::Release);
+        if last {
+            state.pending_disable = state
                 .resources
                 .as_ref()
                 .and_then(|resources| resources.kfd.get())
-            {
-                kfd.disable_runtime()
-                    .map_err(|source| native_error("AMDKFD_IOC_RUNTIME_ENABLE disable", source))?;
-            }
+                .is_some();
+            state.finish_pending_disable()?;
         }
-        state.joined_sessions -= 1;
-        self.joined_primary.store(false, Ordering::Release);
         Ok(())
     }
     fn enumerate(
@@ -632,6 +658,9 @@ impl Driver for LinuxKfdDriver {
                 .state
                 .lock()
                 .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
+            // A failed last-session disable must be resolved before another
+            // frontend can join and mask the outstanding cleanup obligation.
+            state.finish_pending_disable()?;
             if !self.joined_primary.load(Ordering::Acquire) {
                 state.joined_sessions = state.joined_sessions.checked_add(1).ok_or_else(|| {
                     error(
@@ -664,6 +693,8 @@ impl Driver for LinuxKfdDriver {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn marketing_name_matches_device_and_revision() {
@@ -721,5 +752,46 @@ mod tests {
 
         native.process = std::process::id();
         native.shutdown().unwrap();
+    }
+
+    #[test]
+    fn failed_primary_disable_stays_pending_until_kfd_confirms_it() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let file = std::fs::File::open("/dev/null").unwrap();
+        let mut kfd = sys::Kfd::with_hook(
+            file,
+            Arc::new(move |call| {
+                let sys::Call::RuntimeEnable(args) = call else {
+                    panic!("unexpected KFD call")
+                };
+                assert_eq!(args.mode_mask, 0);
+                if observed.fetch_add(1, Ordering::Relaxed) == 0 {
+                    Err(std::io::Error::from_raw_os_error(errno::EINTR))
+                } else {
+                    Ok(())
+                }
+            }),
+        );
+        kfd.mark_runtime_enabled_for_test();
+        let resources = KfdContextResources::new();
+        assert!(resources.kfd.set(Shared::new(kfd).unwrap()).is_ok());
+        let mut state = ProcessState {
+            resources: Some(resources),
+            joined_sessions: 0,
+            pending_disable: true,
+        };
+        assert_eq!(
+            state
+                .finish_pending_disable()
+                .unwrap_err()
+                .native_error_code(),
+            Some(errno::EINTR)
+        );
+        assert!(state.pending_disable);
+        state.finish_pending_disable().unwrap();
+        assert!(!state.pending_disable);
+        state.finish_pending_disable().unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
     }
 }
