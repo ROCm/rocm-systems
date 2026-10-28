@@ -477,7 +477,23 @@ TEST_F(SymKernelMicrotest, SymkImplemented_AllReduceFloat64_NotImplemented) {
 
 TEST_F(SymKernelMicrotest, SymkAvailable_AllReduceFloat64_NotAvailable) {
   comm_->isAllDirectNvlink = true;
+  comm_->symmetricSupport = 1;  // else the symmetric-support gate answers before the type check
   EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat64, /*nElts=*/1024));
+}
+
+// NCCL 2.32 gates on symmetric support first: an implemented collective on an all-direct-link comm
+// (NVLink, xGMI on AMD) is not offered the symmetric kernels when the comm has no symmetric memory.
+TEST_F(SymKernelMicrotest, SymkAvailable_NoSymmetricSupport_NotAvailable) {
+  comm_->isAllDirectNvlink = true;
+  comm_->symmetricSupport = 0;
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, /*nElts=*/1024));
+}
+
+// The same comm with symmetric support is offered them, so the flag alone makes the difference.
+TEST_F(SymKernelMicrotest, SymkAvailable_SymmetricSupport_Available) {
+  comm_->isAllDirectNvlink = true;
+  comm_->symmetricSupport = 1;
+  EXPECT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, /*nElts=*/1024));
 }
 
 }  // namespace
