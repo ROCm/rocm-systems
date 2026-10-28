@@ -875,7 +875,7 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_PacketRefresh) {
     hipGraphExecUpdateResult result = hipGraphExecUpdateError;
     const hipError_t update = hipGraphExecUpdate(exec, graph, &error_node, &result);
     const hipError_t query = hipStreamQuery(stream);
-    *release = 1;  // release the spin before any throwing check so cleanup can never hang
+    *release = 1;
     HIP_CHECK(set_params);
     HIP_CHECK(update);
     HIP_CHECK(hipGraphLaunch(exec, stream));
