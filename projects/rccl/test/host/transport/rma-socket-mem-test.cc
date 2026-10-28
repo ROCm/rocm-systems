@@ -129,11 +129,13 @@ TEST_F(RmaSocketMemMicrotest, Copy_CudaDirectionsPropagateCopyErrorAfterResolvin
   alignas(uint64_t) std::array<unsigned char, 8> data{};
   alignas(uint64_t) std::array<unsigned char, 8> bar{};
   std::array<unsigned char, 8> host{};
-  auto handle = Scene::MakeGdrMappedMr(data.data(), data.size(), bar.data());
-  ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [](gdr_mh_t, void*, const void*, size_t) {
+  auto handle = Scene::MakeGdrMappedMr(data.data(), data.size(), bar.data(), gdr_mh_t{11});
+  ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [](gdr_mh_t mh, void*, const void*, size_t) {
+    EXPECT_EQ(mh.h, 11u);
     return ncclInternalError;
   });
-  ScopedHook copyTo(g_wrapGdrCopyToMapping, [](gdr_mh_t, void*, const void*, size_t) {
+  ScopedHook copyTo(g_wrapGdrCopyToMapping, [](gdr_mh_t mh, void*, const void*, size_t) {
+    EXPECT_EQ(mh.h, 11u);
     return ncclInternalError;
   });
 
@@ -149,8 +151,10 @@ TEST_F(RmaSocketMemMicrotest, Copy_CudaToHostUsesFromMapping) {
   std::array<unsigned char, 4> data{};
   const std::array<unsigned char, 4> bar{{1, 2, 3, 4}};
   std::array<unsigned char, 4> host{};
-  auto handle = Scene::MakeGdrMappedMr(data.data(), data.size(), const_cast<unsigned char*>(bar.data()));
-  ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [&bar](gdr_mh_t, void* dst, const void* src, size_t size) {
+  auto handle =
+      Scene::MakeGdrMappedMr(data.data(), data.size(), const_cast<unsigned char*>(bar.data()), gdr_mh_t{12});
+  ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [&bar](gdr_mh_t mh, void* dst, const void* src, size_t size) {
+    EXPECT_EQ(mh.h, 12u);
     EXPECT_EQ(src, bar.data());
     std::memcpy(dst, src, size);
     return ncclSuccess;
@@ -172,12 +176,13 @@ TEST_F(RmaSocketMemMicrotest, Copy_HostToCudaUsesToMapping) {
   std::array<unsigned char, 4> data{};
   std::array<unsigned char, 4> bar{};
   const std::array<unsigned char, 4> host{{5, 6, 7, 8}};
-  auto handle = Scene::MakeGdrMappedMr(data.data(), data.size(), bar.data());
+  auto handle = Scene::MakeGdrMappedMr(data.data(), data.size(), bar.data(), gdr_mh_t{13});
   ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [](gdr_mh_t, void*, const void*, size_t) {
     ADD_FAILURE() << "host-to-GPU must not use copy-from-mapping";
     return ncclSuccess;
   });
-  ScopedHook copyTo(g_wrapGdrCopyToMapping, [](gdr_mh_t, void* dst, const void* src, size_t size) {
+  ScopedHook copyTo(g_wrapGdrCopyToMapping, [](gdr_mh_t mh, void* dst, const void* src, size_t size) {
+    EXPECT_EQ(mh.h, 13u);
     std::memcpy(dst, src, size);
     return ncclSuccess;
   });
@@ -242,8 +247,10 @@ TEST_F(RmaSocketMemMicrotest, FreeMr_MappedHandleIsUnmappedWhenGdrCopyIsActive) 
   handle->gdr.mapped = 1;
   handle->gdr.map = reinterpret_cast<void*>(0x1000);
   handle->gdr.mapSize = 4096;
+  handle->gdr.mh.h = 23;
   ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
-  ScopedHook unmap(g_ncclGdrCudaUnmapPointer, [](gdr_mh_t, void* map, size_t size) {
+  ScopedHook unmap(g_ncclGdrCudaUnmapPointer, [](gdr_mh_t mh, void* map, size_t size) {
+    EXPECT_EQ(mh.h, 23u);
     EXPECT_EQ(map, reinterpret_cast<void*>(0x1000));
     EXPECT_EQ(size, 4096u);
     return ncclSuccess;
@@ -359,13 +366,19 @@ TEST_F(RmaSocketMemMicrotest, RegMrSym_CudaMappingSuccessPublishesMappedHandle) 
                    info->va = reinterpret_cast<uint64_t>(data.data()) - 4;
                    return ncclSuccess;
                  });
-  ScopedHook unmap(g_ncclGdrCudaUnmapPointer, [](gdr_mh_t, void*, size_t) { return ncclSuccess; });
+  ScopedHook unmap(g_ncclGdrCudaUnmapPointer, [&bar](gdr_mh_t mh, void* map, size_t size) {
+    EXPECT_EQ(mh.h, 17u);
+    EXPECT_EQ(map, bar.data());
+    EXPECT_EQ(size, bar.size());
+    return ncclSuccess;
+  });
 
   ASSERT_EQ(ncclRmaSocketProxyRegMrSym(&scene.comm, data.data(), data.size(), NCCL_PTR_CUDA, 0, &opaque),
             ncclSuccess);
   auto* handle = static_cast<ncclRmaSocketProxyMrHandle*>(opaque);
   ASSERT_NE(handle, nullptr);
   EXPECT_EQ(handle->gdr.mapped, 1);
+  EXPECT_EQ(handle->gdr.mh.h, 17u);
   EXPECT_EQ(handle->gdr.map, bar.data());
   EXPECT_EQ(handle->gdr.barPtr, bar.data() + 4);
   EXPECT_EQ(handle->gdr.mapSize, bar.size());

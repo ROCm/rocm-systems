@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "ScopedHook.h"
+#include "fakes/gdrwrap_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/os_fakes.h"
@@ -38,10 +39,24 @@ class RmaSocketMicrotest : public ::testing::Test {
     ResetTransportNetSocketFakes();
     ResetSocketFakes();
     ResetOsFakes();
+    ResetGdrwrapFakes();
     ResetHipFakes();
     ResetNcclFakes();
   }
 };
+
+// A live request in slot 0 of context 0. Every receiver is closed so the
+// progress pass inside ncclRmaSocketProxyTest reads no socket.
+ncclRmaSocketProxyRequest& ArmRequest(Scene& scene, ncclRmaSocketProxyRequestType type, int peer, uint64_t id) {
+  for (auto& receiver : scene.receivers) receiver.recvState = ncclRmaSocketProxyRecvStateClosed;
+  auto& req = scene.requestStorage[0][0];
+  req.type = type;
+  req.ctx = &scene.contexts[0];
+  req.peer = peer;
+  req.globalRequestId = id;
+  scene.contexts[0].activeOps = 1;
+  return req;
+}
 
 TEST_F(RmaSocketMicrotest, Init_AmdPlatformReportsUnsupportedAndClearsContext) {
   ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
@@ -411,19 +426,33 @@ TEST_F(RmaSocketMicrotest, ProgressSendTask_InvalidOrClosedPutAckReturnsRemoteEr
   EXPECT_EQ(ncclRmaSocketProxyProgressSendTask(&scene.comm, 0, &task), ncclRemoteError);
 }
 
-TEST_F(RmaSocketMicrotest, ProgressSendTask_HostPayloadCopiesOneChunkAndCompletesTask) {
+TEST_F(RmaSocketMicrotest, ProgressSendTask_CudaPayloadReadsChunkThroughGdrMappingAndKeepsLocalWatermark) {
   Scene scene(/*nranks=*/1);
-  std::array<unsigned char, 8> source{{1, 2, 3, 4, 5, 6, 7, 8}};
+  std::array<unsigned char, 12> device{};
+  const std::array<unsigned char, 12> bar{{0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 0}};
+  auto source =
+      Scene::MakeGdrMappedMr(device.data(), device.size(), const_cast<unsigned char*>(bar.data()), gdr_mh_t{31});
   std::array<unsigned char, 8> staging{};
   auto& sender = scene.senders[0];
   sender.buffer = staging.data();
   sender.count = 1;
   auto& task = sender.tasks[0];
+  // The remote requester's id: completing the reply must not move this side's PUT watermark.
   task.controlMsg.type = ncclRmaSocketProxyMsgTypeRespondGetData;
+  task.controlMsg.requestId = 99;
   task.controlMsgOffset = sizeof(task.controlMsg);
-  task.srcPtr = source.data();
-  task.srcType = NCCL_PTR_HOST;
-  task.size = source.size();
+  task.srcPtr = device.data() + 2;
+  task.srcHandle = &source;
+  task.srcType = NCCL_PTR_CUDA;
+  task.size = staging.size();
+  ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [&bar, &staging](gdr_mh_t mh, void* host, const void* map,
+                                                                 size_t size) {
+    EXPECT_EQ(mh.h, 31u);
+    EXPECT_EQ(host, staging.data());
+    EXPECT_EQ(map, bar.data() + 2);
+    std::memcpy(host, map, size);
+    return ncclSuccess;
+  });
   ScopedHook progress(g_ncclSocketProgress, [&staging](int op, ncclSocket*, void* ptr, int size, int* offset,
                                                        bool* closed) {
     EXPECT_EQ(op, NCCL_SOCKET_SEND);
@@ -435,8 +464,10 @@ TEST_F(RmaSocketMicrotest, ProgressSendTask_HostPayloadCopiesOneChunkAndComplete
   });
 
   EXPECT_EQ(ncclRmaSocketProxyProgressSendTask(&scene.comm, 0, &task), ncclSuccess);
-  EXPECT_EQ(staging, source);
+  EXPECT_EQ(copyFrom.calls, 1);
+  EXPECT_EQ(staging, (std::array<unsigned char, 8>{{1, 2, 3, 4, 5, 6, 7, 8}}));
   EXPECT_EQ(sender.count, 0);
+  EXPECT_EQ(sender.lastCompletedRequestGlobalId, UINT64_MAX);
 }
 
 TEST_F(RmaSocketMicrotest, ProgressSendTask_MultiChunkPayloadAdvancesSourceAndCompletesOnSecondChunk) {
@@ -660,6 +691,8 @@ TEST_F(RmaSocketMicrotest, IPut_ValidRequestQueuesWireTaskAndReturnsCompletionOb
   EXPECT_EQ(task.srcType, NCCL_PTR_CUDA);
   EXPECT_EQ(task.size, 5u);
   EXPECT_EQ(task.controlMsg.type, ncclRmaSocketProxyMsgTypeIput);
+  EXPECT_EQ(task.controlMsg.size, 5u);
+  EXPECT_EQ(task.controlMsg.opFlags, 0u);
   EXPECT_EQ(task.controlMsg.mrId, 4u);
   EXPECT_EQ(task.controlMsg.dstOff, 4u);
   EXPECT_EQ(task.controlMsg.requestId, req->globalRequestId);
@@ -672,13 +705,14 @@ TEST_F(RmaSocketMicrotest, IPutSignal_ValidSignalOnlyRequestQueuesSignalHeader) 
   auto signal = scene.MakeMr(signalData.data(), signalData.size(), NCCL_PTR_CUDA, 9);
   void* request = nullptr;
 
-  ASSERT_EQ(ncclRmaSocketProxyIPutSignal(scene.contexts.data(), 0, 0, nullptr, 0, 0, nullptr, 1, 0, &signal, 6,
-                                        NCCL_NET_SIGNAL_OP_ADD, true, 0, &request),
+  ASSERT_EQ(ncclRmaSocketProxyIPutSignal(scene.contexts.data(), 0, 0, nullptr, 0, 0, nullptr, 1, sizeof(uint64_t),
+                                        &signal, 6, NCCL_NET_SIGNAL_OP_ADD, true, 0, &request),
             ncclSuccess);
   const auto& task = scene.senders[1].tasks[0];
   EXPECT_EQ(task.size, 0u);
   EXPECT_EQ(task.controlMsg.opFlags, NCCL_RMA_SOCKET_OP_HAS_SIGNAL);
   EXPECT_EQ(task.controlMsg.signalMrId, 9u);
+  EXPECT_EQ(task.controlMsg.signalOff, sizeof(uint64_t));
   EXPECT_EQ(task.controlMsg.signalValue, 6u);
   EXPECT_EQ(task.controlMsg.signalOp, NCCL_NET_SIGNAL_OP_ADD);
   ncclRmaSocketProxyReleaseRequest(static_cast<ncclRmaSocketProxyRequest*>(request));
@@ -854,20 +888,17 @@ TEST_F(RmaSocketMicrotest, IFlush_InvalidContextOrRankIsRejected) {
 
   EXPECT_EQ(ncclRmaSocketProxyIFlush(nullptr, 0, nullptr, 0, &request), ncclInvalidArgument);
   EXPECT_EQ(request, reinterpret_cast<void*>(0x1));
+  EXPECT_EQ(ncclRmaSocketProxyIFlush(scene.contexts.data(), 0, nullptr, 0, nullptr), ncclInvalidArgument);
   EXPECT_EQ(ncclRmaSocketProxyIFlush(scene.contexts.data(), -1, nullptr, 0, &request), ncclInvalidArgument);
+  EXPECT_EQ(ncclRmaSocketProxyIFlush(scene.contexts.data(), scene.contexts[0].nContexts, nullptr, 0, &request),
+            ncclInvalidArgument);
   EXPECT_EQ(ncclRmaSocketProxyIFlush(scene.contexts.data(), 0, nullptr, scene.comm.nranks, &request),
             ncclInvalidArgument);
 }
 
 TEST_F(RmaSocketMicrotest, Test_CompletedPutSetsDoneAndReleasesRequest) {
   Scene scene;
-  for (auto& receiver : scene.receivers) receiver.recvState = ncclRmaSocketProxyRecvStateClosed;
-  auto& req = scene.requestStorage[0][0];
-  req.type = ncclRmaSocketProxyRequestTypePut;
-  req.ctx = &scene.contexts[0];
-  req.peer = 1;
-  req.globalRequestId = 6;
-  scene.contexts[0].activeOps = 1;
+  auto& req = ArmRequest(scene, ncclRmaSocketProxyRequestTypePut, /*peer=*/1, /*id=*/6);
   scene.senders[1].lastCompletedRequestGlobalId = 6;
   int done = 0;
 
@@ -877,15 +908,22 @@ TEST_F(RmaSocketMicrotest, Test_CompletedPutSetsDoneAndReleasesRequest) {
   EXPECT_EQ(scene.contexts[0].activeOps, 0);
 }
 
+TEST_F(RmaSocketMicrotest, Test_CompletedGetReadsReceiverWatermark) {
+  Scene scene;
+  auto& req = ArmRequest(scene, ncclRmaSocketProxyRequestTypeGet, /*peer=*/1, /*id=*/6);
+  scene.receivers[1].lastCompletedRequestGlobalId = 6;
+  int done = 0;
+
+  EXPECT_EQ(ncclRmaSocketProxyTest(&scene.comm, &req, &done), ncclSuccess);
+  EXPECT_EQ(done, 1);
+  EXPECT_EQ(req.type, ncclRmaSocketProxyRequestTypeFree);
+  EXPECT_EQ(scene.contexts[0].activeOps, 0);
+  EXPECT_EQ(scene.senders[1].lastCompletedRequestGlobalId, UINT64_MAX);
+}
+
 TEST_F(RmaSocketMicrotest, Test_RequestIdBeforeWrappedWatermarkCompletes) {
   Scene scene;
-  for (auto& receiver : scene.receivers) receiver.recvState = ncclRmaSocketProxyRecvStateClosed;
-  auto& req = scene.requestStorage[0][0];
-  req.type = ncclRmaSocketProxyRequestTypePut;
-  req.ctx = &scene.contexts[0];
-  req.peer = 0;
-  req.globalRequestId = UINT64_MAX;
-  scene.contexts[0].activeOps = 1;
+  auto& req = ArmRequest(scene, ncclRmaSocketProxyRequestTypePut, /*peer=*/0, /*id=*/UINT64_MAX);
   scene.senders[0].lastCompletedRequestGlobalId = 0;
   int done = 0;
 
@@ -897,13 +935,7 @@ TEST_F(RmaSocketMicrotest, Test_RequestIdBeforeWrappedWatermarkCompletes) {
 
 TEST_F(RmaSocketMicrotest, Test_IncompleteRequestRemainsLive) {
   Scene scene;
-  for (auto& receiver : scene.receivers) receiver.recvState = ncclRmaSocketProxyRecvStateClosed;
-  auto& req = scene.requestStorage[0][0];
-  req.type = ncclRmaSocketProxyRequestTypePut;
-  req.ctx = &scene.contexts[0];
-  req.peer = 0;
-  req.globalRequestId = 7;
-  scene.contexts[0].activeOps = 1;
+  auto& req = ArmRequest(scene, ncclRmaSocketProxyRequestTypePut, /*peer=*/0, /*id=*/7);
   scene.senders[0].lastCompletedRequestGlobalId = 6;
   int done = -1;
 
@@ -915,13 +947,7 @@ TEST_F(RmaSocketMicrotest, Test_IncompleteRequestRemainsLive) {
 
 TEST_F(RmaSocketMicrotest, Test_IncompleteGetFromClosedPeerReturnsErrorAndReleasesRequest) {
   Scene scene;
-  for (auto& receiver : scene.receivers) receiver.recvState = ncclRmaSocketProxyRecvStateClosed;
-  auto& req = scene.requestStorage[0][0];
-  req.type = ncclRmaSocketProxyRequestTypeGet;
-  req.ctx = &scene.contexts[0];
-  req.peer = 0;
-  req.globalRequestId = 2;
-  scene.contexts[0].activeOps = 1;
+  auto& req = ArmRequest(scene, ncclRmaSocketProxyRequestTypeGet, /*peer=*/0, /*id=*/2);
   scene.receivers[0].lastCompletedRequestGlobalId = 1;
   int done = -1;
 
@@ -933,6 +959,7 @@ TEST_F(RmaSocketMicrotest, Test_IncompleteGetFromClosedPeerReturnsErrorAndReleas
 
 TEST_F(RmaSocketMicrotest, Test_InvalidPointersOrOwnershipAreRejected) {
   Scene scene;
+  for (auto& receiver : scene.receivers) receiver.recvState = ncclRmaSocketProxyRecvStateClosed;
   int done = 0;
   EXPECT_EQ(ncclRmaSocketProxyTest(&scene.comm, nullptr, nullptr), ncclInvalidArgument);
   EXPECT_EQ(ncclRmaSocketProxyTest(&scene.comm, nullptr, &done), ncclInternalError);
@@ -943,16 +970,18 @@ TEST_F(RmaSocketMicrotest, Test_InvalidPointersOrOwnershipAreRejected) {
   EXPECT_EQ(ncclRmaSocketProxyTest(nullptr, &req, &done), ncclInvalidArgument);
   ncclRmaSocketProxyCollComm other{};
   EXPECT_EQ(ncclRmaSocketProxyTest(&other, &req, &done), ncclInvalidArgument);
+
+  ncclRmaSocketProxyRequest freed{};
+  freed.ctx = &scene.contexts[0];
+  EXPECT_EQ(ncclRmaSocketProxyTest(&scene.comm, &freed, &done), ncclInvalidArgument);
+  ncclRmaSocketProxyRequest orphan{};
+  orphan.type = ncclRmaSocketProxyRequestTypePut;
+  EXPECT_EQ(ncclRmaSocketProxyTest(&scene.comm, &orphan, &done), ncclInvalidArgument);
 }
 
 TEST_F(RmaSocketMicrotest, Test_UnknownLiveRequestTypeReturnsErrorAndReleasesRequest) {
   Scene scene;
-  for (auto& receiver : scene.receivers) receiver.recvState = ncclRmaSocketProxyRecvStateClosed;
-  auto& req = scene.requestStorage[0][0];
-  req.type = static_cast<ncclRmaSocketProxyRequestType>(3);
-  req.ctx = &scene.contexts[0];
-  req.peer = 0;
-  scene.contexts[0].activeOps = 1;
+  auto& req = ArmRequest(scene, static_cast<ncclRmaSocketProxyRequestType>(3), /*peer=*/0, /*id=*/0);
   int done = -1;
 
   EXPECT_EQ(ncclRmaSocketProxyTest(&scene.comm, &req, &done), ncclInternalError);
@@ -1016,12 +1045,28 @@ TEST_F(RmaSocketMicrotest, QueryLastError_ReportsStoredTerminalError) {
 TEST_F(RmaSocketMicrotest, PluginTable_ExportsSocketRmaCallbacks) {
   EXPECT_STREQ(ncclRmaSocketProxy.name, "RMA_SOCKET_PROXY");
   EXPECT_EQ(ncclRmaSocketProxy.init, ncclRmaSocketProxyInit);
+  EXPECT_EQ(ncclRmaSocketProxy.devices, ncclRmaSocketProxyDevices);
+  EXPECT_EQ(ncclRmaSocketProxy.getRmaProperties, ncclRmaSocketProxyGetRmaProperties);
+  EXPECT_EQ(ncclRmaSocketProxy.getProperties, ncclRmaSocketProxyGetProperties);
+  EXPECT_EQ(ncclRmaSocketProxy.listen, ncclRmaSocketProxyListen);
   EXPECT_EQ(ncclRmaSocketProxy.connect, ncclRmaSocketProxyConnect);
+  EXPECT_EQ(ncclRmaSocketProxy.createContext, ncclRmaSocketProxyCreateContext);
   EXPECT_EQ(ncclRmaSocketProxy.regMrSym, ncclRmaSocketProxyRegMrSym);
+  EXPECT_EQ(ncclRmaSocketProxy.regMrSymDmaBuf, ncclRmaSocketProxyRegMrSymDmaBuf);
+  EXPECT_EQ(ncclRmaSocketProxy.deregMrSym, ncclRmaSocketProxyDeregMrSym);
+  EXPECT_EQ(ncclRmaSocketProxy.destroyContext, ncclRmaSocketProxyDestroyContext);
+  EXPECT_EQ(ncclRmaSocketProxy.closeColl, ncclRmaSocketProxyCloseColl);
+  EXPECT_EQ(ncclRmaSocketProxy.closeListen, ncclRmaSocketProxyCloseListen);
   EXPECT_EQ(ncclRmaSocketProxy.iput,
             static_cast<decltype(ncclRmaSocketProxy.iput)>(&ncclRmaSocketProxyIPut));
+  EXPECT_EQ(ncclRmaSocketProxy.iputSignal,
+            static_cast<decltype(ncclRmaSocketProxy.iputSignal)>(&ncclRmaSocketProxyIPutSignal));
   EXPECT_EQ(ncclRmaSocketProxy.iget,
             static_cast<decltype(ncclRmaSocketProxy.iget)>(&ncclRmaSocketProxyIGet));
+  EXPECT_EQ(ncclRmaSocketProxy.iflush, ncclRmaSocketProxyIFlush);
+  EXPECT_EQ(ncclRmaSocketProxy.test, ncclRmaSocketProxyTest);
+  EXPECT_EQ(ncclRmaSocketProxy.rmaProgress, ncclRmaSocketProxyProgress);
+  EXPECT_EQ(ncclRmaSocketProxy.queryLastError, ncclRmaSocketProxyQueryLastError);
   EXPECT_EQ(ncclRmaSocketProxy.finalize, ncclRmaSocketProxyFinalize);
 }
 
