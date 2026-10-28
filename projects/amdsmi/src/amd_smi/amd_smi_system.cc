@@ -267,25 +267,37 @@ std::vector<uint32_t> AMDSmiSystem::get_cpu_sockets_from_numa_node(int32_t numa_
 // (ras_features_test.cc) rely on this fall-through to init with no hardware.
 amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
   init_flag_ = flags;
-  amdsmi_status_t amd_smi_status;
+  auto amd_smi_status = AMDSMI_STATUS_SUCCESS;
 
   // populate GPU sockets and processors
   if (flags & AMDSMI_INIT_AMD_GPUS) {
     amd_smi_status = populate_amd_gpu_devices();
-    if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
   }
 #ifdef ENABLE_ESMI_LIB
   // populate CPU sockets and processors
-  if (flags & AMDSMI_INIT_AMD_CPUS) {
+  if ((amd_smi_status == AMDSMI_STATUS_SUCCESS) && (flags & AMDSMI_INIT_AMD_CPUS)) {
     amd_smi_status = populate_amd_cpus();
-    if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
   }
 #endif
-  if (flags & AMDSMI_INIT_AMD_NICS) {
+  if ((amd_smi_status == AMDSMI_STATUS_SUCCESS) && (flags & AMDSMI_INIT_AMD_NICS)) {
     amd_smi_status = populate_amd_ainic_devices();
-    if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
+    // GPUs and CPUs stay usable without NICs; a NIC-only init has nothing else to offer.
+    const auto has_other_processors =
+        ((flags & (AMDSMI_INIT_AMD_GPUS | AMDSMI_INIT_AMD_CPUS)) != 0);
+    if ((amd_smi_status != AMDSMI_STATUS_SUCCESS) && has_other_processors) {
+      std::ostringstream ss;
+      ss << __func__ << ": NIC discovery failed with amdsmi_status=" << amd_smi_status
+         << "; continuing without NICs";
+      LOG_WARN(ss);
+      amd_smi_status = AMDSMI_STATUS_SUCCESS;
+    }
   }
-  return AMDSMI_STATUS_SUCCESS;
+  if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
+    // A failed init is never shut down, so release what the steps before the failure built. A
+    // retry then starts from nothing.
+    cleanup();
+  }
+  return amd_smi_status;
 }
 
 #ifdef ENABLE_ESMI_LIB
@@ -682,6 +694,7 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
   if (init_flag_ & AMDSMI_INIT_AMD_NICS) {
     smi_nic_destroy_context(ainic_ctx_);
     ainic_ctx_ = nullptr;
+    amd::smi::nic::log::set_sink(nullptr);
     // The sockets own the devices. The GPU and CPU branches above already emptied sockets_, so
     // this frees them only for a NIC-only init; either way the set's pointers are now dangling.
     ainic_processors_.clear();

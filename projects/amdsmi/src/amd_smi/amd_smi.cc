@@ -806,6 +806,18 @@ amdsmi_status_t amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_hand
   return AMDSMI_STATUS_SUCCESS;
 }
 
+// The NIC's BDF, read without copying the AINICInfo (over 600 KB) that amdsmi_get_ainic_info()
+// fills.
+static amdsmi_status_t get_nic_bdf(amdsmi_processor_handle processor_handle, uint64_t* bdf) {
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+  *bdf = nic_device->bdf();
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t amdsmi_get_ainic_info(amdsmi_processor_handle processor_handle,
                                       amd::smi::AMDSmiAINICDevice::AINICInfo* info) {
   AMDSMI_CHECK_INIT();
@@ -843,6 +855,13 @@ static_assert(static_cast<int>(SMI_NIC_KIND_UNKNOWN) == static_cast<int>(AMDSMI_
 static_assert(static_cast<int>(SMI_NIC_KIND_AINIC) == static_cast<int>(AMDSMI_NIC_TYPE_AINIC));
 static_assert(static_cast<int>(SMI_NIC_KIND_UALOE) == static_cast<int>(AMDSMI_NIC_TYPE_UALOE));
 static_assert(static_cast<int>(SMI_NIC_KIND_OTHER) == static_cast<int>(AMDSMI_NIC_TYPE_OTHER));
+
+// The capability bitmask and the firmware entries are copied across as they are.
+static_assert(static_cast<uint32_t>(SMI_NIC_CAP_FWCTL) ==
+              static_cast<uint32_t>(AMDSMI_NIC_CAP_FWCTL));
+static_assert(static_cast<uint32_t>(SMI_NIC_CAP_NETDEV) ==
+              static_cast<uint32_t>(AMDSMI_NIC_CAP_NETDEV));
+static_assert(SMI_NIC_MAX_FW_VERSIONS <= AMDSMI_MAX_NIC_FW);
 
 amdsmi_status_t amdsmi_get_nic_type(amdsmi_processor_handle processor_handle,
                                     amdsmi_nic_type_t* type) {
@@ -992,15 +1011,15 @@ amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
     return AMDSMI_STATUS_INVAL;
   }
 
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  uint64_t bdf = 0;
+  amdsmi_status_t status = get_nic_bdf(processor_handle, &bdf);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
 
   smi_nic_fw_info_t shim_fw = {};
-  const smi_nic_status_t nic_status = smi_get_nic_fw_info(
-      amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(), ainic_info.bus.bdf.as_uint, &shim_fw);
+  const smi_nic_status_t nic_status =
+      smi_get_nic_fw_info(amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(), bdf, &shim_fw);
   if (nic_status != SMI_NIC_STATUS_SUCCESS) {
     return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
@@ -1024,16 +1043,15 @@ amdsmi_status_t amdsmi_get_nic_telemetry(amdsmi_processor_handle processor_handl
     return AMDSMI_STATUS_INVAL;
   }
 
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  uint64_t bdf = 0;
+  amdsmi_status_t status = get_nic_bdf(processor_handle, &bdf);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
 
   smi_nic_telemetry_t telemetry = {};
   const smi_nic_status_t nic_status =
-      smi_get_nic_telemetry(amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(),
-                            ainic_info.bus.bdf.as_uint, &telemetry);
+      smi_get_nic_telemetry(amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(), bdf, &telemetry);
   if (nic_status != SMI_NIC_STATUS_SUCCESS) {
     return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
@@ -1094,16 +1112,15 @@ amdsmi_status_t amdsmi_get_nic_hwmon_sensors(amdsmi_processor_handle processor_h
     return AMDSMI_STATUS_INVAL;
   }
 
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  uint64_t bdf = 0;
+  amdsmi_status_t status = get_nic_bdf(processor_handle, &bdf);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
 
   const auto records = std::make_unique<smi_nic_sensor_info_t>();
-  const smi_nic_status_t nic_status =
-      smi_get_nic_hwmon_sensors(amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(),
-                                ainic_info.bus.bdf.as_uint, records.get());
+  const smi_nic_status_t nic_status = smi_get_nic_hwmon_sensors(
+      amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(), bdf, records.get());
   if (nic_status != SMI_NIC_STATUS_SUCCESS) {
     return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
@@ -1126,14 +1143,14 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
     return AMDSMI_STATUS_INVAL;
   }
 
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  uint64_t bdf = 0;
+  amdsmi_status_t status = get_nic_bdf(processor_handle, &bdf);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
 
   smi_nic_ctx_t ctx = amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx();
-  const uint64_t device = ainic_info.bus.bdf.as_uint;
+  const uint64_t device = bdf;
 
   return amd::smi::get_nic_stats(
       [&](uint32_t* available) {
