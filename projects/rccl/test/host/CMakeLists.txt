@@ -231,7 +231,6 @@ unset(_rccl_src_root)
 function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicro -- the broad-coverage micro binary.
   set(TEST_MICRO_SOURCE_FILES
-    p2p-test.cc
     rma-proxy-launch-test.cc            # RMA proxy queue + stream-memop coverage
     rma-proxy-progress-test.cc
     gin-plugin-init-test.cc
@@ -270,6 +269,8 @@ function(rccl_define_micro_source_lists)
     rccl-graph-gen-test.cc               # src/graph/rccl_graph_gen.cc ring construction + cut balancing
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    # real ncclP2pImportShareableBuffer, for dev-runtime-test.cc's cuMem window import.
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc
     fakes/channel_fakes.cc
     fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc
@@ -1021,7 +1022,8 @@ function(rccl_define_micro_source_lists)
 
   # rccl-UnitTestsMicroTransport -- src/transport/. Tests mirror that tree
   # under test/host/transport; one binary owns the subsystem's shared socket,
-  # network and GDRCopy seams.
+  # network and GDRCopy seams. No two TUs share a basename (llvm-cov keys
+  # static functions by it), so net_ib/net-ib-p2p-test.cc carries a prefix.
   set(TEST_MICRO_TRANSPORT_SOURCE_FILES
     transport/coll-net-test.cc
     transport/net-socket-test.cc
@@ -1032,12 +1034,13 @@ function(rccl_define_micro_source_lists)
     transport/net_ib/gin-test.cc
     transport/net_ib/init-test.cc
     transport/net_ib/net-ib-gid-inspect-test.cc
-    transport/net_ib/p2p-test.cc
+    transport/net_ib/net-ib-p2p-test.cc
     transport/net_ib/p2p-resiliency-test.cc
     transport/net_ib/p2p-resiliency-recovery-test.cc
     transport/net_ib/reg-test.cc
     transport/net_ib/wqe-lat-mon-test.cc
     transport/nvls-test.cc
+    transport/p2p-test.cc
     transport/rma-socket-test.cc
     transport/rma-socket-mem-test.cc
     transport/rma-socket-progress-recver-test.cc
@@ -1067,6 +1070,7 @@ function(rccl_define_micro_source_lists)
     fakes/transport_net_socket_common_fakes.cc
     fakes/transport_net_socket_fakes.cc
     fakes/transport_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
     ../common/ProcessIsolatedTestRunner.cpp
@@ -1641,6 +1645,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicroBootstrap
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicro
 # ---------------------------------------------------------------------------
+set_source_files_properties(
+  ${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc
+  PROPERTIES GENERATED TRUE)
 rccl_add_micro_binary(rccl-UnitTestsMicro
   SOURCES ${TEST_MICRO_SOURCE_FILES}
   EXTRA_INCLUDES
@@ -1648,7 +1655,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # device.h includes rccl_ptr.h unqualified
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
     # collectives_tmp.cc, not collectives.cc: src/CMakeLists.txt lists src/collectives.cc first,
@@ -2403,6 +2409,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTransport
     NET_SOCKET_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket/common_tmp.cc"
     NET_TELEMETRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc"
     NVLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/nvls.cc"
+    P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
     RMA_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket.cc"
     RMA_SOCKET_MEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_mem.cc"
     RMA_SOCKET_PROGRESS_RECVER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_progress_recver.cc"

@@ -58,14 +58,12 @@ Units sharing a binary must be `#include`d from *different* test TUs and must no
 export colliding non-`static` symbols; otherwise a unit needs its own binary:
 
 - **`rccl-UnitTestsMicro`** — one unit per test TU:
-  - `p2p.cc` (`P2P_CC_PATH`, from `p2p-test.cc`); suites `P2p*`,
-    `FreshRegistration*`, `ConnStepAcquireMicrotest.*`.
   - `register/register.cc`, `register/coll_reg.cc` and `register/sendrecv_reg.cc`
     (`REGISTER_CC_PATH`, `COLL_REG_CC_PATH`, `SENDRECV_REG_CC_PATH`, from `register-test.cc`,
     `coll-reg-test.cc` and `sendrecv-reg-test.cc`); suites `Register*`. Their calls into `p2p.cc`,
     compiled here for real, go through `fakes/transport_p2p_reg_seam.h`. `fakes/register_seam.h`
     renames `register.cc`'s definitions of the three names `nccl_fakes.cc` keeps as seams for
-    `p2p-test.cc`.
+    `transport/p2p-test.cc`.
   - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
@@ -85,6 +83,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `DEV_RUNTIME_SEGMENTS_CC_PATH`, from `dev-runtime-test.cc`);
     suites `Alloc*`, `Comm*`, `Compute*`, `DeepCopy*`, `Dev*`, `Gin*`, `Nccl*`,
     `Sym*`, and `Win*`.
+    Its cuMem window-import tests run the real `transport/p2p.cc`, compiled
+    here as a plain source.
   - `include/nccl_device/utility.h` (header-only, from `nccl-utility-test.cc`);
     suite `NcclUtilityMicrotest.*`.
   - the generated `sym_kernels_host.cc` (`SYM_KERNELS_HOST_CC_PATH`, from
@@ -543,8 +543,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     suites `FabricInit*`, `HostAllocLedger*`.
 - **`rccl-UnitTestsMicroTransport`** — `src/transport/`, one binary for units
   sharing the socket, network-plugin and GDRCopy seams; tests mirror the source
-  tree under `test/host/transport/`. See
-  `test_categories_micro_transport.yaml`. The target defines
+  tree under `test/host/transport/`, and no two TUs share a basename (llvm-cov
+  keys `static` functions by it), so `net_ib/net-ib-p2p-test.cc` carries a
+  prefix. See `test_categories_micro_transport.yaml`. The target defines
   `ENABLE_FAULT_INJECTION` in both build modes so `net_ib_gid_inspect.cc` is
   present consistently.
   - `coll_net.cc` (`COLL_NET_CC_PATH`, from `coll-net-test.cc`); suites `CollNet*`,
@@ -556,7 +557,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `net_ib/connect.cc` (`NET_IB_CONNECT_CC_PATH`, from
     `net_ib/connect-test.cc`); suites `NetIbConnectMicrotest.*`.
   - `net_ib/p2p.cc` and host helpers in `net_ib/p2p.h`
-    (`NET_IB_P2P_CC_PATH`, from `net_ib/p2p-test.cc`); suites
+    (`NET_IB_P2P_CC_PATH`, from `net_ib/net-ib-p2p-test.cc`); suites
     `NetIbP2pMicrotest.*`.
   - `net_ib/p2p_resiliency.cc` (`NET_IB_P2P_RESILIENCY_CC_PATH`, from
     `net_ib/p2p-resiliency-test.cc`); suites
@@ -602,6 +603,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     names `nvls.cc` defines (the `ncclNvls*` entry points and `ncclParamNvlsEnable`),
     and the binary does not link `fakes/collective_stubs.cc`, which also fakes
     `ncclNvlsBufferSetup` and `ncclNvlsTreeConnect`.
+  - `p2p.cc` (`P2P_CC_PATH`, from `p2p-test.cc`); suites `P2p*`,
+    `FreshRegistration*`, `ConnStepAcquireMicrotest.*`,
+    `GuardOperands/P2pAllocateSkipMarkExport.*` and
+    `MappingStages/P2pImportMapStageFails.*`.
   - `rma_socket.cc` (`RMA_SOCKET_CC_PATH`, from `rma-socket-test.cc`);
     suites `RmaSocketMicrotest.*`.
   - `rma_socket_mem.cc` (`RMA_SOCKET_MEM_CC_PATH`, from
@@ -1036,8 +1041,8 @@ test reads as "force this precondition, then call the unit under test". Where a
 single branch depends on HIP version (only one arm is live per build, but the
 test can't know which at authoring time), pair the factories that drive each
 version's arm so the test passes regardless of the toolchain — see
-`ForceLegacyCudaRegister` in `p2p-test.cc` + `ForceLegacyIpcCapable` in
-`fakes/hip_fakes.h`.
+`ForceLegacyCudaRegister` in `transport/p2p-test.cc` +
+`ForceLegacyIpcCapable` in `fakes/hip_fakes.h`.
 
 ## Dealing with each kind of dependency
 
@@ -1087,7 +1092,7 @@ triage it into the right bucket:
 
 ## Coverage
 
-`rccl-UnitTestsMicro` always builds with llvm source-based coverage
+`rccl-UnitTestsMicroTransport` always builds with llvm source-based coverage
 (`-fprofile-instr-generate -fcoverage-mapping`). Render a report with ROCm's
 llvm tooling directly. Scope it to the unit under test -- the file compiled in
 via `P2P_CC_PATH`, i.e. the unroll-transformed
@@ -1097,7 +1102,7 @@ whole-binary totals).
 
 ```bash
 BD=build/release                        # or build/debug, or a standalone build dir
-BIN=$BD/test/host/rccl-UnitTestsMicro
+BIN=$BD/test/host/rccl-UnitTestsMicroTransport
 SRC=$BD/hipify/src/transport/p2p_tmp.cc
 LLVM=/opt/rocm/llvm/bin                 # ROCm's llvm-cov matches the build clang
 
@@ -1143,8 +1148,8 @@ The intended iteration loop for this directory:
 RCCL's canonical build entry point is `./install.sh` (never `cmake`
 directly). The two-phase pattern for this directory is: one full
 `install.sh` to configure + build everything, then a tight
-`make`-only inner loop for every subsequent edit to `p2p-test.cc` or
-the `fakes/*.cc` it links against.
+`make`-only inner loop for every subsequent edit to
+`transport/p2p-test.cc` or the `fakes/*.cc` it links against.
 
 ### Initial (one-time) build
 
@@ -1158,17 +1163,17 @@ Local-arch (`-l`), with tests (`-t`):
 
 ```bash
 cd build/release
-make -j $(nproc) rccl-UnitTestsMicro
+make -j $(nproc) rccl-UnitTestsMicroTransport
 ```
 
 ### Run
 
 ```bash
 # All tests:
-./build/release/test/host/rccl-UnitTestsMicro
+./build/release/test/host/rccl-UnitTestsMicroTransport
 
 # One test:
-./build/release/test/host/rccl-UnitTestsMicro \
+./build/release/test/host/rccl-UnitTestsMicroTransport \
     --gtest_filter='P2pMicrotest.IpcRegisterBuffer_NullRegRecordIsNoOp'
 
 # Coverage: see the Coverage section (run under LLVM_PROFILE_FILE, then llvm-cov).
@@ -1216,7 +1221,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DRCCL_BUILD_DIR=/path/to/projects/rccl/build/release
 cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroBootstrap          # src/bootstrap.cc tests
-./build/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
+./build/rccl-UnitTestsMicro          # broad-coverage binary, ldd shows no HIP/ROCm/HSA/RCCL
 ./build/rccl-UnitTestsMicroCollectives        # src/collectives.cc tests
 ./build/rccl-UnitTestsMicroOnerank            # src/device/onerank.cu tests
 ./build/rccl-UnitTestsMicroMgmtTaskEnq        # src/enqueue/mgmt_task_enq.cc tests
