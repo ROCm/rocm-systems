@@ -38,6 +38,28 @@ function(rj_add_object_library name)
     _rj_configure_object_library(${name} util simdojo_headers)
 endfunction()
 
+# Compile <sources> of <object-lib> without vptr checks as object library
+# <copy>, with the original's private link libraries. Sources are given as in
+# the definition of <object-lib>.
+function(_rj_add_vptr_free_copy copy object_lib)
+    get_target_property(_source_dir ${object_lib} SOURCE_DIR)
+    set(_absolute_sources)
+    foreach(_source IN LISTS ARGN)
+        cmake_path(
+            ABSOLUTE_PATH _source
+            BASE_DIRECTORY "${_source_dir}"
+            NORMALIZE
+        )
+        list(APPEND _absolute_sources "${_source}")
+    endforeach()
+    rj_add_object_library(${copy} ${_absolute_sources})
+    target_link_libraries(
+        ${copy}
+        PRIVATE $<TARGET_PROPERTY:${object_lib},LINK_LIBRARIES>
+    )
+    target_compile_options(${copy} PRIVATE -fno-sanitize=vptr)
+endfunction()
+
 # Select objects for a shared object that does not link the simulator image.
 # UBSan's vptr check references the RTTI of each class it checks, and a class
 # with a key function emits its RTTI only in the source that defines that
@@ -58,25 +80,45 @@ function(rj_vptr_free_object_library out_var object_lib)
     endif()
     set(_copy ${object_lib}_no_vptr)
     if(NOT TARGET ${_copy})
-        get_target_property(_source_dir ${object_lib} SOURCE_DIR)
         get_target_property(_sources ${object_lib} SOURCES)
-        set(_absolute_sources)
-        foreach(_source IN LISTS _sources)
-            cmake_path(
-                ABSOLUTE_PATH _source
-                BASE_DIRECTORY "${_source_dir}"
-                NORMALIZE
-            )
-            list(APPEND _absolute_sources "${_source}")
-        endforeach()
-        rj_add_object_library(${_copy} ${_absolute_sources})
-        target_link_libraries(
-            ${_copy}
-            PRIVATE $<TARGET_PROPERTY:${object_lib},LINK_LIBRARIES>
-        )
-        target_compile_options(${_copy} PRIVATE -fno-sanitize=vptr)
+        _rj_add_vptr_free_copy(${_copy} ${object_lib} ${_sources})
     endif()
     set(${out_var} ${_copy} PARENT_SCOPE)
+endfunction()
+
+# Set <out-var> to the objects of <object-lib> for a shared object in which only
+# the listed sources check classes whose RTTI it does not link. When vptr
+# checks are enabled, those sources are compiled again without the check and
+# replace their original objects; the other objects keep the check. Sources are
+# given as in the definition of <object-lib>.
+#
+# Usage: rj_vptr_free_sources(<out-var> <object-lib> <source>...)
+function(rj_vptr_free_sources out_var object_lib)
+    if(NOT (RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR))
+        set(${out_var} $<TARGET_OBJECTS:${object_lib}> PARENT_SCOPE)
+        return()
+    endif()
+    get_target_property(_sources ${object_lib} SOURCES)
+    set(_patterns)
+    foreach(_source IN LISTS ARGN)
+        if(NOT _source IN_LIST _sources)
+            message(FATAL_ERROR "${_source} is not a source of ${object_lib}")
+        endif()
+        string(REPLACE "." "\\." _pattern "${_source}")
+        list(APPEND _patterns "${_pattern}")
+    endforeach()
+    list(JOIN _patterns "|" _pattern)
+    string(MAKE_C_IDENTIFIER "${object_lib}_no_vptr_${ARGN}" _copy)
+    if(NOT TARGET ${_copy})
+        _rj_add_vptr_free_copy(${_copy} ${object_lib} ${ARGN})
+    endif()
+    # Object paths end with the source path and the object suffix. A pattern
+    # that misses leaves duplicate definitions, which fail the link.
+    set(${out_var}
+        "$<FILTER:$<TARGET_OBJECTS:${object_lib}>,EXCLUDE,/(${_pattern})\\.o$>"
+        "$<TARGET_OBJECTS:${_copy}>"
+        PARENT_SCOPE
+    )
 endfunction()
 
 # Mark an existing ISA implementation target as a statically linked provider.
