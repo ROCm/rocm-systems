@@ -332,7 +332,7 @@ def load_aggregated_pc_sampling(
 
 
 def aggregate_instruction_lines(
-    instruction_lines: List[InstructionLineRecord],
+    instruction_records: List[InstructionLineRecord],
 ) -> SourceLineRecord:
     """Aggregate the counts of the instruction lines of one source line.
 
@@ -341,19 +341,19 @@ def aggregate_instruction_lines(
     the percentage adds no weight.
     """
     stall_reasons = Counter()
-    for line in instruction_lines:
-        stall_reasons.update(line.stall_reasons)
+    for instruction_record in instruction_records:
+        stall_reasons.update(instruction_record.stall_reasons)
 
     return SourceLineRecord(
-        total_count=sum(line.total_count for line in instruction_lines),
-        issue_count=_sum_known([line.issue_count for line in instruction_lines]),
-        stall_count=_sum_known([line.stall_count for line in instruction_lines]),
+        total_count=sum(record.total_count for record in instruction_records),
+        issue_count=_sum_known([record.issue_count for record in instruction_records]),
+        stall_count=_sum_known([record.stall_count for record in instruction_records]),
         stall_reasons=dict(stall_reasons),
         active_thread_percent=_sample_weighted_average(
-            instruction_lines, lambda line: line.active_thread_percent
+            instruction_records, lambda record: record.active_thread_percent
         ),
         wave_occupancy_percent=_sample_weighted_average(
-            instruction_lines, lambda line: line.wave_occupancy_percent
+            instruction_records, lambda record: record.wave_occupancy_percent
         ),
     )
 
@@ -365,19 +365,19 @@ def _sum_known(counts: List[Optional[int]]) -> Optional[int]:
 
 
 def _sample_weighted_average(
-    instruction_lines: List[InstructionLineRecord],
+    instruction_records: List[InstructionLineRecord],
     percent_of: Callable[[InstructionLineRecord], Optional[float]],
 ) -> Optional[float]:
     """Average one percentage of instruction lines, weighted by sample count."""
-    weighted_lines = [
-        (percent_of(line), line.total_count)
-        for line in instruction_lines
-        if percent_of(line) is not None
+    weighted_percents = [
+        (percent_of(record), record.total_count)
+        for record in instruction_records
+        if percent_of(record) is not None
     ]
-    if not weighted_lines:
+    if not weighted_percents:
         return None
-    return sum(percent * count for percent, count in weighted_lines) / sum(
-        count for _, count in weighted_lines
+    return sum(percent * count for percent, count in weighted_percents) / sum(
+        count for _, count in weighted_percents
     )
 
 

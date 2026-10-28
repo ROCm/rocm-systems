@@ -3104,13 +3104,14 @@ def test_run_analysis_aggregates_each_source_line_over_all_processes(
 ):
     """Each source line aggregates the instructions of all processes.
 
-    An instruction counts toward each source line of its inline stack.
+    An instruction counts once toward each distinct source line of its inline
+    stack, even if a one-line lambda puts a source line twice in that stack.
     """
     workload_path = tmp_path / "workload"
     tool_data_records = make_source_workload_tool_data_records(
         workload_path,
         {"/s/a.cpp": "int first;\nint second;\n"},
-        ["/s/a.cpp:1 -> /s/a.cpp:2", "/s/a.cpp:2"],
+        ["/s/a.cpp:1 -> /s/a.cpp:2", "/s/a.cpp:2 -> /s/a.cpp:2"],
     )
     second_process_tool_data = copy.deepcopy(tool_data_records[0])
     second_process_tool_data["metadata"]["pid"] = 43

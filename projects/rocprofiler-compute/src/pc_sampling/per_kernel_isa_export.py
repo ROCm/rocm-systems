@@ -119,11 +119,11 @@ def _write_per_kernel_isa_files(
         len(per_kernel_isa_file_key_columns()),
         build_header(BASE_COLUMNS, stall_reasons, TRAILING_COLUMNS),
         partial(_resolve_isa_export_path, per_kernel_directory),
-        partial(_number_instruction_lines, isa_line_locations),
+        partial(_number_and_locate_instruction_lines, isa_line_locations),
     )
 
 
-def _number_instruction_lines(
+def _number_and_locate_instruction_lines(
     isa_line_locations: Dict[int, IsaLineLocation],
     file_key: FileKey,
     file_rows: List[Row],
@@ -136,6 +136,10 @@ def _number_instruction_lines(
     """
     _, _, *kernel_key = file_key
     isa_file = resolve_isa_relative_path(*kernel_key)
-    for line_number, (instruction_uuid, *cells) in enumerate(file_rows, start=1):
-        isa_line_locations[instruction_uuid] = IsaLineLocation(isa_file, line_number)
-        yield [line_number, *cells]
+    for instruction_line_number, (instruction_uuid, *cells) in enumerate(
+        file_rows, start=1
+    ):
+        isa_line_locations[instruction_uuid] = IsaLineLocation(
+            isa_file, instruction_line_number
+        )
+        yield [instruction_line_number, *cells]

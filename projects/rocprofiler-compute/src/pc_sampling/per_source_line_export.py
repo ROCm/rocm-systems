@@ -125,8 +125,8 @@ def _format_source_line_rows(
 ) -> Iterator[List[Any]]:
     """Replace the instruction uuids of each source line row with ISA references."""
     for (
-        line_number,
-        content,
+        source_line_number,
+        source_line_text,
         total_count,
         *other_cells,
         instruction_uuids,
@@ -134,7 +134,7 @@ def _format_source_line_rows(
         isa_references = _format_isa_references(instruction_uuids, isa_line_locations)
         # The "?" row has no source line number. It keeps only its total count,
         # which is the samples lost to instructions without a source line number.
-        if line_number is None:
+        if source_line_number is None:
             yield [
                 None,
                 UNATTRIBUTABLE_INSTRUCTIONS_LABEL,
@@ -143,7 +143,13 @@ def _format_source_line_rows(
                 isa_references,
             ]
         else:
-            yield [line_number, content, total_count, *other_cells, isa_references]
+            yield [
+                source_line_number,
+                source_line_text,
+                total_count,
+                *other_cells,
+                isa_references,
+            ]
 
 
 def _format_isa_references(

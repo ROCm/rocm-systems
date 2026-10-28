@@ -7,7 +7,7 @@ import re
 import warnings
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, DefaultDict, List, NamedTuple, Optional, Tuple, Union
+from typing import Any, DefaultDict, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -709,7 +709,7 @@ class db_analysis(OmniAnalyze_Base):
         row with nothing under it.
         """
         code_object_stores: dict[CodeObjectKey, orm.CodeObjectStore] = {}
-        sampled_instruction_lines: List[
+        sampled_instructions: List[
             Tuple[orm.InstructionLine, InstructionLineRecord]
         ] = []
         tool_data_records = self._pc_sampling_tool_data_per_workload.get(
@@ -720,14 +720,15 @@ class db_analysis(OmniAnalyze_Base):
             pid: int = tool_data["metadata"]["pid"]
 
             for code_object in load_aggregated_pc_sampling(tool_data, sys_info):
-                for line in code_object.instruction_lines:
-                    kernel = kernel_objs.get(line.kernel_name)
+                for instruction_record in code_object.instruction_lines:
+                    kernel = kernel_objs.get(instruction_record.kernel_name)
                     if kernel is None:
-                        # Drop lines whose kernel was filtered out or never mapped.
+                        # Drop instructions whose kernel was filtered out or never
+                        # mapped.
                         continue
 
-                    instruction_line = self._add_instruction_line(
-                        line,
+                    instruction_row = self._add_instruction_line(
+                        instruction_record,
                         self._get_or_create_code_object_store(
                             code_object_stores,
                             (pid, code_object.code_object_id),
@@ -739,11 +740,11 @@ class db_analysis(OmniAnalyze_Base):
                         source_frames,
                         sys_info.get("gpu_arch"),
                     )
-                    sampled_instruction_lines.append((instruction_line, line))
+                    sampled_instructions.append((instruction_row, instruction_record))
 
         # Source lines aggregate the instructions of all processes, so their
         # states are added once every process is loaded.
-        self._add_source_line_sample_states(sampled_instruction_lines)
+        self._add_source_line_sample_states(sampled_instructions)
         return code_object_stores
 
     @staticmethod
@@ -802,7 +803,7 @@ class db_analysis(OmniAnalyze_Base):
 
     @staticmethod
     def _add_instruction_line(
-        line: InstructionLineRecord,
+        instruction_record: InstructionLineRecord,
         code_object_store: orm.CodeObjectStore,
         kernel: orm.Kernel,
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
@@ -811,25 +812,25 @@ class db_analysis(OmniAnalyze_Base):
     ) -> orm.InstructionLine:
         """Insert one instruction line with its sample state.
 
-        Returns the inserted instruction line.
+        Returns the inserted instruction line row.
         """
-        instruction_line = orm.InstructionLine(
-            code_object_offset=line.code_object_offset,
-            instruction=line.instruction,
+        instruction_row = orm.InstructionLine(
+            code_object_offset=instruction_record.code_object_offset,
+            instruction=instruction_record.instruction,
             instruction_type_lookup=db_analysis._get_instruction_type(
-                line.instruction, gpu_arch
+                instruction_record.instruction, gpu_arch
             ),
             kernel_symbol=db_analysis._get_or_create_kernel_symbol(
                 code_object_store, kernel, kernel_symbols
             ),
         )
-        Database.get_session().add(instruction_line)
-        source_frames.add_instruction(instruction_line, line.source)
+        Database.get_session().add(instruction_row)
+        source_frames.add_instruction(instruction_row, instruction_record.source)
 
         sample_state = db_analysis._add_pc_sample_state(
-            line, instruction_line=instruction_line
+            instruction_record, instruction_row=instruction_row
         )
-        for text, count in line.inst_types.items():
+        for text, count in instruction_record.inst_types.items():
             Database.get_session().add(
                 orm.InstructionSample(
                     pc_sample_state=sample_state,
@@ -839,53 +840,61 @@ class db_analysis(OmniAnalyze_Base):
                     count=count,
                 )
             )
-        return instruction_line
+        return instruction_row
 
     @staticmethod
     def _add_source_line_sample_states(
-        sampled_instruction_lines: List[
-            Tuple[orm.InstructionLine, InstructionLineRecord]
-        ],
+        sampled_instructions: List[Tuple[orm.InstructionLine, InstructionLineRecord]],
     ) -> None:
         """Insert one sample state for each source line of the sampled instructions.
 
-        An instruction counts toward each source line of its inline stack.
+        An instruction counts once toward each distinct source line of its inline
+        stack.
         """
-        instruction_lines_by_source_line: DefaultDict[
-            orm.SourceLine, List[InstructionLineRecord]
-        ] = defaultdict(list)
-        for instruction_line, line in sampled_instruction_lines:
-            for frame in instruction_line.source_lines:
-                instruction_lines_by_source_line[frame.source_line].append(line)
+        # The dict keyed by instruction row counts each instruction once per
+        # source line, even if a one-line lambda puts that source line twice in
+        # the inline stack.
+        instruction_records_by_source_line: DefaultDict[
+            orm.SourceLine, Dict[orm.InstructionLine, InstructionLineRecord]
+        ] = defaultdict(dict)
+        for instruction_row, instruction_record in sampled_instructions:
+            for frame in instruction_row.source_lines:
+                instruction_records_by_source_line[frame.source_line][
+                    instruction_row
+                ] = instruction_record
 
-        for source_line, lines in instruction_lines_by_source_line.items():
+        for (
+            source_line_row,
+            instruction_records,
+        ) in instruction_records_by_source_line.items():
             db_analysis._add_pc_sample_state(
-                aggregate_instruction_lines(lines), source_line=source_line
+                aggregate_instruction_lines(list(instruction_records.values())),
+                source_line_row=source_line_row,
             )
 
     @staticmethod
     def _add_pc_sample_state(
-        samples: Union[InstructionLineRecord, SourceLineRecord],
+        sample_counts: Union[InstructionLineRecord, SourceLineRecord],
         *,
-        instruction_line: Optional[orm.InstructionLine] = None,
-        source_line: Optional[orm.SourceLine] = None,
+        instruction_row: Optional[orm.InstructionLine] = None,
+        source_line_row: Optional[orm.SourceLine] = None,
     ) -> orm.PCSampleState:
         """Insert the sample state of one instruction line or one source line.
 
         Also inserts the stall-reason counts of the sample state.
         """
         sample_state = orm.PCSampleState(
-            total_count=samples.total_count,
-            issue_count=samples.issue_count,
-            stall_count=samples.stall_count,
-            active_thread_percent=samples.active_thread_percent,
-            wave_occupancy_percent=samples.wave_occupancy_percent,
-            instruction_line=instruction_line,
-            source_line=source_line,
+            total_count=sample_counts.total_count,
+            issue_count=sample_counts.issue_count,
+            stall_count=sample_counts.stall_count,
+            active_thread_percent=sample_counts.active_thread_percent,
+            wave_occupancy_percent=sample_counts.wave_occupancy_percent,
+            instruction_line=instruction_row,
+            source_line=source_line_row,
         )
         Database.get_session().add(sample_state)
 
-        for text, count in samples.stall_reasons.items():
+        for text, count in sample_counts.stall_reasons.items():
             Database.get_session().add(
                 orm.PCSampleStallReason(
                     pc_sample_state=sample_state,
