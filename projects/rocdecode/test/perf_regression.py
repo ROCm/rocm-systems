@@ -493,6 +493,8 @@ def main():
             else:
                 summary_rows.append((f"{disp} ({compared} streams)", "PASSED"))
 
+    if measure_only:
+        print(f"\nWARNING: {measure_only_reason}")
     if detail_rows:
         out_dir.mkdir(parents=True, exist_ok=True)
         csv_path = out_dir / "perf_comparison.csv"
@@ -500,12 +502,10 @@ def main():
         summary_box(summary_rows, overall_ok, measure_only=measure_only)
         print(f"Results saved to: {out_dir}/")
         if measure_only:
-            print(f"NOTE: {measure_only_reason}")
             print("These measurements can serve as a future baseline for this GPU.")
     else:
         if measure_only:
             summary_box(summary_rows, overall_ok, measure_only=measure_only)
-            print(f"NOTE: {measure_only_reason}")
             print("ERROR: No streams were measured; no results CSV was saved.",
                   file=sys.stderr)
             return 1
