@@ -21,6 +21,7 @@
 #include "common/invoke.hpp"
 #include "common/path.hpp"
 #include "common/setup.hpp"
+#include "common/string_utility.hpp"
 #include "dl/dl.hpp"
 #include "rocprofiler-systems/annotation.h"
 #include "rocprofiler-systems/categories.h"
@@ -1612,14 +1613,14 @@ extern "C"
                 {
                     continue;
                 }
-                auto const _pos = _env_v.find('=');
-                if(_pos < _env_v.length())
+                if(auto const parsed =
+                       rocprofsys::utility::string::split_key_value(_env_v))
                 {
-                    auto const _var = std::string{ _env_v }.substr(0, _pos);
-                    auto const _val = std::string{ _env_v }.substr(_pos + 1);
+                    auto const key   = std::string{ parsed->key };
+                    auto const value = std::string{ parsed->value };
                     ROCPROFSYS_DL_LOG(1, "%s(%s, %s)\n", "rocprofsys_set_env",
-                                      _var.c_str(), _val.c_str());
-                    setenv(_var.c_str(), _val.c_str(), 0);
+                                      key.c_str(), value.c_str());
+                    setenv(key.c_str(), value.c_str(), 0);
                 }
             }
         }

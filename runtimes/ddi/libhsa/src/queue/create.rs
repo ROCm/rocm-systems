@@ -13,7 +13,7 @@ static COOPERATIVE_CREATE_GATE: Mutex<()> = Mutex::new(());
 /// callback and its data must remain valid until native queue teardown and
 /// completion of the final event callback.
 #[allow(clippy::too_many_arguments)]
-pub(super) unsafe fn create_hardware_queue(
+pub(crate) unsafe fn create_hardware_queue(
     expected_generation: Option<u64>,
     agent: HsaAgent,
     size: u32,
@@ -77,11 +77,14 @@ pub(super) unsafe fn create_hardware_queue(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
+        if runtime.stop_workers.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         let Some(index) = runtime.gpu_index(agent) else {
             return INVALID_AGENT;
         };
         if cooperative {
-            if runtime.gpus[index].info.gws_count == 0 {
+            if runtime.gpus[index].info().gws_count == 0 {
                 return INVALID_QUEUE_CREATION;
             }
             if runtime
@@ -148,7 +151,7 @@ pub(super) unsafe fn create_hardware_queue(
             generation,
             id,
             device: runtime.gpus[index].device.clone(),
-            gpu: runtime.gpus[index].info,
+            gpu: runtime.gpus[index].info(),
             event,
             host_page_size: runtime.host_page_size,
             stop: runtime.stop_workers.clone(),
@@ -237,15 +240,17 @@ pub(super) unsafe fn create_hardware_queue(
         }
     }
     let info = pending.info();
-    if info.write_index_host_address < WRITE_INDEX_OFFSET
-        || info.read_index_host_address < READ_INDEX_OFFSET
+    let Some(control) = info.aql_control else {
+        return abandon_unpublished_retained(pending, INVALID_QUEUE_CREATION, &mut creation_guard);
+    };
+    if control.alignment() < 256
+        || control.writable_prefix_bytes() < std::mem::size_of::<HsaQueue>()
+        || control.read_index_host_address() != info.read_index_host_address
+        || control.write_index_host_address() != info.write_index_host_address
     {
         return abandon_unpublished_retained(pending, ERROR, &mut creation_guard);
     }
-    let public = info.write_index_host_address - WRITE_INDEX_OFFSET;
-    if info.read_index_host_address - READ_INDEX_OFFSET != public || public % 256 != 0 {
-        return abandon_unpublished_retained(pending, ERROR, &mut creation_guard);
-    }
+    let public = control.host_base();
     *doorbell = AmdSignal::doorbell(info.doorbell_host_address, public);
     let doorbell_handle = (&raw mut *doorbell) as usize as u64;
     let mut guard = match lock() {
@@ -433,7 +438,7 @@ fn validated_sdma_engine(info: QueueTransport, size: u32) -> Option<u32> {
 /// # Safety
 /// `queue` addresses writable output storage. The caller serializes native
 /// queue publication and destruction with all producers.
-pub(super) unsafe fn create_sdma_queue(
+pub(crate) unsafe fn create_sdma_queue(
     expected_generation: Option<u64>,
     agent: HsaAgent,
     size_bytes: u32,
@@ -457,6 +462,9 @@ pub(super) unsafe fn create_sdma_queue(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
+        if runtime.stop_workers.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         let Some(index) = runtime.gpu_index(agent) else {
             return INVALID_AGENT;
         };

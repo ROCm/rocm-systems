@@ -36,6 +36,7 @@
 #include <linux/memfd.h>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <span>
 #include <string>
 #include <string_view>
@@ -2748,6 +2749,156 @@ TEST(L2CacheTest, ReorderedTransactionStopsAtCacheLineBoundary) {
             rocjitsu::amdgpu::VmAccessOutcome::Complete);
   EXPECT_EQ(l2.backing_read_transactions(), 2u);
   EXPECT_EQ(result, source);
+}
+
+TEST(L2CacheTest, SeededLaneTransfersMatchIndependentByteAndTransactionOracles) {
+  using Policy = rocjitsu::amdgpu::MemoryTransactionPolicy;
+  constexpr uint64_t kBase = 0x180000;
+  constexpr size_t kBytes = 2048;
+  constexpr uint32_t kSeed = 0x5e9d3147;
+  std::mt19937 random(kSeed);
+  for (auto policy : {Policy{}, Policy::unqualified_64()}) {
+    for (uint32_t wave_size : {32u, 64u}) {
+      for (uint32_t width : {1u, 2u, 4u, 8u, 12u, 16u}) {
+        for (uint32_t trial = 0; trial < 32; ++trial) {
+          SCOPED_TRACE(std::format("seed={} policy={} wave={} width={} trial={}", kSeed,
+                                   policy.bytes(), wave_size, width, trial));
+          const uint32_t offset = random() % 128;
+          std::array<uint32_t, 64> offsets{}, order{};
+          uint32_t cursor = offset;
+          for (uint32_t lane = 0; lane < wave_size; ++lane) {
+            offsets[lane] = cursor;
+            order[lane] = lane;
+            cursor += width + (trial % 4 == 0 ? 0 : random() % 8);
+          }
+          std::ranges::shuffle(std::span(order).first(wave_size), random);
+          uint64_t mask = (uint64_t{random()} << 32) | random();
+          if (wave_size == 32)
+            mask &= 0xffffffff;
+          if (trial % 8 == 0)
+            mask = wave_size == 64 ? ~uint64_t{0} : uint64_t{0xffffffff};
+          if (trial == 31)
+            mask = 0;
+          std::array<uint64_t, 64> addresses{};
+          std::array<uint8_t, 64 * 16> source{}, loaded{}, expected_load{};
+          std::array<uint8_t, kBytes> expected_store{}, actual{}, read_source{};
+          std::array<bool, kBytes> requested{};
+          expected_store.fill(0xa5);
+          loaded.fill(0xcd);
+          expected_load.fill(0xcd);
+          for (size_t byte = 0; byte < read_source.size(); ++byte)
+            read_source[byte] = static_cast<uint8_t>(random());
+          // The reference visits individual requested bytes, independently of
+          // lane grouping, gathering, scattering, and cache-line geometry.
+          for (uint32_t lane = 0; lane < wave_size; ++lane) {
+            addresses[lane] = kBase + offsets[order[lane]];
+            for (uint32_t byte = 0; byte < width; ++byte) {
+              source[lane * width + byte] = static_cast<uint8_t>(random());
+              if (!(mask & (uint64_t{1} << lane)))
+                continue;
+              const size_t at = addresses[lane] - kBase + byte;
+              ASSERT_LT(at, kBytes);
+              requested[at] = true;
+              expected_store[at] = source[lane * width + byte];
+              expected_load[lane * width + byte] = read_source[at];
+            }
+          }
+          uint64_t active_address = kBase;
+          for (uint32_t lane = 0; lane < wave_size; ++lane)
+            if (mask & (uint64_t{1} << lane)) {
+              active_address = addresses[lane];
+              break;
+            }
+          for (uint32_t lane = 0; lane < wave_size; ++lane)
+            if (!(mask & (uint64_t{1} << lane)))
+              addresses[lane] = trial % 2 ? active_address : UINT64_MAX;
+          uint64_t expected_transactions = 0;
+          for (size_t byte = 0; byte < requested.size(); ++byte)
+            if (requested[byte] &&
+                (byte == 0 || !requested[byte - 1] || (kBase + byte) % policy.bytes() == 0))
+              ++expected_transactions;
+
+          GpuMemory memory("memory", policy);
+          L2Cache l2("l2");
+          l2.set_backing_memory(&memory);
+          L1VectorCache l1(&l2, policy);
+          actual.fill(0xa5);
+          memory.write_block(kBase, actual);
+          const uint32_t element_size = std::min(width, 4u);
+          ASSERT_EQ(l1.store(addresses.data(), mask, element_size, width / element_size,
+                             source.data(), Mtype::UC, false, wave_size),
+                    rocjitsu::amdgpu::VmAccessOutcome::Complete);
+          EXPECT_EQ(l2.backing_write_transactions(), expected_transactions);
+          memory.read_block(kBase, actual);
+          EXPECT_EQ(actual, expected_store);
+
+          // Load a different backing pattern so mutually inverse store/load
+          // mistakes cannot cancel each other in a round-trip comparison.
+          memory.write_block(kBase, read_source);
+          ASSERT_EQ(l1.load(addresses.data(), mask, element_size, width / element_size,
+                            loaded.data(), Mtype::UC, false, true, wave_size),
+                    rocjitsu::amdgpu::VmAccessOutcome::Complete);
+          EXPECT_EQ(l2.backing_read_transactions(), expected_transactions);
+          EXPECT_EQ(loaded, expected_load);
+        }
+      }
+    }
+  }
+}
+
+TEST(L2CacheTest, PartialOverlapWithEarlierActiveLaneMatchesByteOrder) {
+  using Policy = rocjitsu::amdgpu::MemoryTransactionPolicy;
+  constexpr uint64_t kBase = 0x180000;
+  for (auto policy : {Policy{}, Policy::unqualified_64()}) {
+    for (uint32_t width : {1u, 2u, 4u, 8u, 12u, 16u}) {
+      for (uint64_t mask : {uint64_t{0xff}, uint64_t{0xd7}}) {
+        SCOPED_TRACE(std::format("policy={} width={} mask={}", policy.bytes(), width, mask));
+        // The first descending operand overlaps an earlier active lane rather
+        // than its immediate predecessor, including under the sparse mask.
+        const std::array<uint32_t, 8> offsets{0,          3 * width,
+                                              6 * width,  width / 2,
+                                              9 * width,  3 * width + width / 2,
+                                              12 * width, 6 * width + width / 2};
+        std::array<uint64_t, 8> addresses{};
+        std::array<uint8_t, 8 * 16> source{}, loaded{}, expected_load{};
+        std::array<uint8_t, 256> actual{}, expected_store{}, read_source{};
+        actual.fill(0xa5);
+        expected_store = actual;
+        loaded.fill(0xcd);
+        expected_load = loaded;
+        for (size_t byte = 0; byte < read_source.size(); ++byte)
+          read_source[byte] = static_cast<uint8_t>(byte ^ 0x5a);
+        for (uint32_t lane = 0; lane < addresses.size(); ++lane) {
+          addresses[lane] = kBase + 5 + offsets[lane];
+          for (uint32_t byte = 0; byte < width; ++byte) {
+            source[lane * width + byte] = static_cast<uint8_t>(lane * 31 + byte);
+            if (!(mask & (uint64_t{1} << lane)))
+              continue;
+            const size_t at = addresses[lane] - kBase + byte;
+            ASSERT_LT(at, expected_store.size());
+            expected_store[at] = source[lane * width + byte];
+            expected_load[lane * width + byte] = read_source[at];
+          }
+        }
+        GpuMemory memory("memory", policy);
+        memory.write_block(kBase, actual);
+        L2Cache l2("l2");
+        l2.set_backing_memory(&memory);
+        L1VectorCache l1(&l2, policy);
+        const uint32_t element_size = std::min(width, 4u);
+        ASSERT_EQ(l1.store(addresses.data(), mask, element_size, width / element_size,
+                           source.data(), Mtype::UC, false, addresses.size()),
+                  rocjitsu::amdgpu::VmAccessOutcome::Complete);
+        memory.read_block(kBase, actual);
+        EXPECT_EQ(actual, expected_store);
+        memory.write_block(kBase, read_source);
+        ASSERT_EQ(l1.load(addresses.data(), mask, element_size, width / element_size, loaded.data(),
+                          Mtype::UC, false, true, addresses.size()),
+                  rocjitsu::amdgpu::VmAccessOutcome::Complete);
+        EXPECT_EQ(loaded, expected_load);
+      }
+    }
+  }
 }
 
 TEST(L2CacheTest, DisjointPartialStoresAcrossL2sNeverReadAllocate) {

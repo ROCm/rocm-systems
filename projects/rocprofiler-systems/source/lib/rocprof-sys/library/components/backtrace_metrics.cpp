@@ -16,6 +16,7 @@
 #include "library/tracing.hpp"
 #include <cstdint>
 
+#include <fmt/format.h>
 #include <functional>
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
@@ -48,6 +49,7 @@
 #include <mutex>
 #include <regex>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -55,6 +57,7 @@
 
 #include <pthread.h>
 #include <signal.h>
+#include <unistd.h>
 
 using rocprofsys::common::units::bytes;
 using rocprofsys::common::units::data_size_cast;
@@ -203,20 +206,25 @@ template <typename Category>
 void
 metadata_init_tracks(std::int64_t _tid)
 {
-    const auto& t_info    = thread_info::get(_tid, SequentTID);
-    auto        thread_id = static_cast<std::uint64_t>(t_info->index_data->system_value);
+    const auto& t_info = thread_info::get(_tid, SequentTID);
+    if(!t_info || !t_info->index_data)
+    {
+        throw std::logic_error(
+            fmt::format("thread_info with index data for tid {} not found", _tid));
+    }
+    auto thread_id = static_cast<std::uint64_t>(t_info->index_data->system_value);
 
-    trace_cache::get_metadata_registry().add_thread_info(
-        { .parent_process_id = getppid(),
-          .process_id        = getpid(),
-          .thread_id         = thread_id,
-          .start             = static_cast<std::uint32_t>(t_info->get_start()),
-          .end               = static_cast<std::uint32_t>(t_info->get_stop()),
-          .extdata           = "{}" });
+    trace_cache::get_metadata_registry().ensure_thread(thread_id, [&] {
+        return trace_cache::info::thread{ .parent_process_id = getppid(),
+                                          .process_id        = getpid(),
+                                          .thread_id         = thread_id,
+                                          .start             = t_info->get_start(),
+                                          .end               = t_info->get_stop(),
+                                          .extdata           = "{}" };
+    });
 
     apply_for_all_thread_names<Category>(_tid, [&](const std::string& _track_name) {
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = _track_name, .thread_id = thread_id, .extdata = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(_track_name, thread_id);
     });
 }
 

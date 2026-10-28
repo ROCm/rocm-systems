@@ -177,6 +177,8 @@ pub(super) struct Resources {
     lost: usize,
     /// Whether sampling is currently started.
     active: bool,
+    /// Final callback delivery has completed before legacy tool unload.
+    callbacks_quiesced: bool,
     /// Keeps backing alive when a handler update may have taken effect.
     trap_may_be_installed: bool,
 }
@@ -353,6 +355,7 @@ impl Resources {
             pending: VecDeque::new(),
             lost: 0,
             active: false,
+            callbacks_quiesced: false,
             trap_may_be_installed: false,
         })
     }
@@ -440,9 +443,11 @@ impl Resources {
 
     /// Stops sampling and retires the native trace and handler.
     fn destroy(&mut self) -> Status {
-        let status = self.stop();
-        if status != SUCCESS {
-            return status;
+        if !self.callbacks_quiesced {
+            let status = self.stop();
+            if status != SUCCESS {
+                return status;
+            }
         }
         if self.trap_may_be_installed {
             if let Err(status) = self.set_handler(0, 0) {
@@ -540,6 +545,9 @@ impl Resources {
 
     /// Delivers accumulated samples when the threshold or force flag is met.
     fn deliver(&mut self, force: bool) {
+        if self.callbacks_quiesced {
+            return;
+        }
         deliver_pending(
             &mut self.pending,
             &mut self.lost,
@@ -802,24 +810,56 @@ impl SessionHandle {
     }
 
     /// Starts this session.
-    pub(super) fn start(&self) -> Status {
+    pub(crate) fn start(&self) -> Status {
+        if self.stop_worker.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.start())
     }
 
     /// Stops this session.
-    pub(super) fn stop(&self) -> Status {
+    pub(crate) fn stop(&self) -> Status {
+        if self.stop_worker.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.stop())
     }
 
     /// Flushes pending samples through the synchronized session.
-    pub(super) fn flush(&self) -> Status {
+    pub(crate) fn flush(&self) -> Status {
+        if self.stop_worker.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.flush())
+    }
+
+    /// Stops callback delivery while native resources and public handles remain
+    /// available to a legacy tool's `OnUnload` callback.
+    pub(crate) fn quiesce_for_tool_unload(&self) -> Status {
+        self.stop_worker.store(true, Ordering::Release);
+        let worker = match self.worker.lock() {
+            Ok(mut worker) => worker.take(),
+            Err(_) => return ERROR,
+        };
+        if let Some(worker) = worker {
+            if worker.join().is_err() {
+                return ERROR;
+            }
+        }
+        let Ok(mut resources) = self.resources.lock() else {
+            return ERROR;
+        };
+        let status = resources.stop();
+        if status == SUCCESS {
+            resources.callbacks_quiesced = true;
+        }
+        status
     }
 
     /// Destroys the session and returns assets requiring deferred release.
