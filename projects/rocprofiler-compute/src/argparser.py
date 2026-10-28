@@ -687,6 +687,7 @@ Examples:
             "\t\tA pattern with no framework stays on the preceding one.\n"
             "\t\tSpaces or commas separate patterns.\n"
             "\t\tExample: --operator torch:*conv* *relu* triton:*matmul*\n"
+            "\t\tExample: --operator user:*UserDefined*\n"
             "\t\tWith no arguments, matches the collected stack.\n"
             "\t\tRequires --output-format stdout.\n"
             "\t\tIgnored when --list-operators is set.\n"

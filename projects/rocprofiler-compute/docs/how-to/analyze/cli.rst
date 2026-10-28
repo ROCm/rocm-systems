@@ -965,6 +965,28 @@ These options do not change the printed operator tree. Kernel IDs depend on
        --operator torch:*conv*,*relu*,triton:*matmul* --path ./workload
 
 
+User-defined regions
+--------------------
+
+``user`` is a range, not an ML API. Unlike framework-based selection, which
+drops non-matching child nodes, user region selection includes everything in
+that region. Work outside the range is ignored.
+
+``--list-operators user`` and ``--operator user:PATTERN`` use that range
+rule. A framework pattern given with ``user:`` adds those matching
+operators; it does not cut work out of the user region.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze --experimental --list-operators user torch --path ./workload
+
+   $ rocprof-compute analyze --experimental \
+       --operator user:*UserDefined* --path ./workload
+
+   $ rocprof-compute analyze --experimental \
+       --operator user:*UserDefined* torch:*relu* --path ./workload
+
+
 Triton operator analysis
 ========================
 

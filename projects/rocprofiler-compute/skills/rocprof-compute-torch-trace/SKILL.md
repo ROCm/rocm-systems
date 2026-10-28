@@ -48,8 +48,9 @@ rocprof-compute profile --experimental --trace-ml-api triton --name <name> -- py
 `torch.compile` / Inductor fused kernels use PyTorch's static launcher, so they
 do not get `|triton` ranges. Attribute them with `--trace-ml-api torch`.
 
-The two combine as `--trace-ml-api torch,triton`. A bare `--trace-ml-api`
-traces all supported ML frameworks and user-defined regions.
+The two combine as `--trace-ml-api torch,triton`. User-defined ROCTx regions
+are included with every `--trace-ml-api` run. A bare `--trace-ml-api` traces
+all supported ML frameworks as well.
 
 Tracing adds overhead on top of the usual counter replay. Profile a few
 iterations of a steady-state model rather than a full training run, and skip
@@ -85,6 +86,10 @@ launch statistics, so it also shows which operators are worth opening.
 
 The Triton equivalent is `--list-operators triton`.
 
+`--list-operators user` lists each user-defined ROCTx region. Unlike
+framework-based selection, which drops non-matching child nodes, user
+region selection includes everything in that region.
+
 ## 4. Filter to an operator
 
 ```bash
@@ -101,6 +106,10 @@ separated; a piece with no framework stays on the preceding one. Bare
 Quote patterns so the shell does not expand them.
 
 `--operator triton:*rmsnorm_kernel*` works the same way.
+
+`--operator user:*UserDefined*` selects matching user regions and includes
+everything in that region. A framework pattern given with `user:` adds those
+matching operators; it does not cut work out of the user region.
 
 Worked examples are in the PyTorch operator analysis section of
 [the analyze CLI guide](../../docs/how-to/analyze/cli.rst).
@@ -121,8 +130,9 @@ rocprof-compute uses ROCTx internally: torch tracing injects ROCTx regions to
 annotate operators, which is what makes attribution possible. That is the only
 place ROCTx is involved.
 
-rocprof-compute does not support ROCTx-range-based profiling control, such as
-starting, stopping, or resuming collection at a user-authored ROCTx range.
-User-defined ranges in the marker CSV are labeled `user`. If the user wants
-ROCTx start/stop control, say so plainly and offer kernel filtering with
-`-k` or dispatch filtering with `-d` instead.
+rocprof-compute does not start, stop, or resume collection at a user-authored
+ROCTx range. User-defined ROCTx regions are selected later, at analyze time,
+with `--list-operators user` and `--operator user:PATTERN`. That keeps the
+range and nested GPU work; it does not control when profiling ran.
+To keep only some kernels or dispatches from an already collected profile,
+use `-k` or `-d`.

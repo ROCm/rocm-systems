@@ -1174,6 +1174,8 @@ User-defined regions are included with every ``--trace-ml-api`` run.
 The output is identical to enabling each named selector individually.
 Each kernel is attributed to the framework that launched it. Analyze with
 ``--list-operators`` and ``--operator`` (see :doc:`../analyze/cli`).
+To select a user-defined range and the GPU work nested under it, use
+``--list-operators user`` or ``--operator user:PATTERN``.
 
 .. _profile-vllm-workloads:
 
