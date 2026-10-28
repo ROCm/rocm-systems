@@ -309,7 +309,7 @@ def test_apply_operator_filter_user_region_keeps_nested_work_and_unions_relu():
     union_workload = schema.Workload()
     union_workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu()
     union_args = argparse.Namespace(
-        operator_patterns=resolve_operator_patterns(["user:region1 torch:*relu*"])
+        operator_patterns=resolve_operator_patterns(["user:region1", "torch:*relu*"])
     )
     union_keys = cli_analysis(union_args, {}).apply_operator_filter(
         union_args, union_workload, "/workload", ["user", "torch"]

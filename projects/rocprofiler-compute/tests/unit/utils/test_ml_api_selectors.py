@@ -23,10 +23,8 @@ def test_bare_profile_selection_saves_known_backends():
     assert resolve_profile_selection([]) == list(KNOWN_ML_API_BACKENDS)
 
 
-def test_comma_and_space_profile_tokens_save_the_same_pair():
-    comma = resolve_profile_selection(["torch,triton"])
-    space = resolve_profile_selection(["torch", "triton"])
-    assert comma == space == ["torch", "triton"]
+def test_space_profile_tokens_save_known_backends():
+    assert resolve_profile_selection(["torch", "triton"]) == ["torch", "triton"]
 
 
 def test_double_colon_stays_in_the_operator_pattern():
@@ -38,19 +36,18 @@ def test_double_colon_stays_in_the_operator_pattern():
     }
 
 
-def test_operator_space_and_comma_forms_select_the_same_patterns():
+def test_operator_space_separated_patterns_keep_prefix():
     expected = {
         "torch": ["*conv*", "*relu*"],
         "triton": ["*matmul*"],
     }
-    forms = [
-        "torch:*conv* *relu* triton:*matmul*",
-        "torch:*conv* *relu*,triton:*matmul*",
-        "torch:*conv*,*relu* triton:*matmul*",
-        "torch:*conv*,*relu*,triton:*matmul*",
-    ]
-    for form in forms:
-        assert resolve_operator_patterns([form]) == expected
+    assert (
+        resolve_operator_patterns(["torch:*conv*", "*relu*", "triton:*matmul*"])
+        == expected
+    )
+    assert resolve_operator_patterns(["torch:*conv*,*relu*,triton:*matmul*"]) == {
+        "torch": ["*conv*,*relu*,triton:*matmul*"]
+    }
 
 
 def test_empty_operator_flag_is_unscoped_double_star():
