@@ -953,8 +953,12 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
         } else {
           newComm->nRanks = collComm->nRanks + msgComm->nRanks;
         }
-        // Merge the ranks.
-        for (int newRankIdx = 0, collRankIdx = 0, msgRankIdx = 0;
+        // Merge the ranks.  newRankIdx outlives the loop: the loop can write fewer ranks than the count
+        // above anticipates (a duplicate rank consumes two inputs for one output, and the skips below bail
+        // out early), and a count that overstates what was written would break the
+        // commNRanks >= nRanks + nMissingRanks invariant for the next hop, which rejects the whole response.
+        int newRankIdx = 0;
+        for (int collRankIdx = 0, msgRankIdx = 0;
              collRankIdx < collComm->nRanks || msgRankIdx < msgComm->nRanks; newRankIdx++) {
           int cmpRank;
           if (newRankIdx == newComm->commNRanks) break; // Short of failing, the best we can do is skip...
@@ -1008,6 +1012,7 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
             } // if (collComm->nMissingRanks > 0)
           } // if (cmpRank > 0)
         } // for (newRankIdx)
+        newComm->nRanks = newRankIdx;
         if (collComm->nMissingRanks > 0) {
           // Copy the missingRanks to newComm, skipping over any no longer needed entries.
           struct rasCollCommsMissingRank* collMissingRanks;

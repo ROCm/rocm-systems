@@ -1915,14 +1915,35 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_DuplicateRankIsLoggedAndSkipped) {
   EXPECT_EQ(ncclSuccess, DeliverResp(msg, respConn));
   auto* merged = reinterpret_cast<struct rasCollComms*>(coll->data);
   ASSERT_EQ(1, merged->nComms);
-  // Only one rank struct is actually written (the msg-side duplicate is skipped, not
-  // appended) -- but newComm->nRanks is set to collComm->nRanks + msgComm->nRanks up front
-  // and is never corrected back down when a collision shortens the real merged count. This
-  // is current (not fixed here) production behavior for a path its own comments already
-  // flag as "should never happen" / "possible hash collision".
-  EXPECT_EQ(2, merged->comms[0].nRanks);
-  EXPECT_EQ(3, merged->comms[0].ranks[0].peerIdx);
-  EXPECT_EQ(0, merged->comms[0].ranks[1].peerIdx);
+  // Only one rank struct is written (the msg-side duplicate is skipped, not appended), and nRanks
+  // reports that rather than the two the counts anticipated.
+  EXPECT_EQ(1, merged->comms[0].nRanks);
+  EXPECT_EQ(3, merged->comms[0].ranks[0].peerIdx);  // The coll-side copy is the one that survives.
+}
+
+// A record the merge emits has to satisfy the same commNRanks >= nRanks + nMissingRanks invariant that the
+// next hop holds its peers to, or a duplicate rank anywhere in the tree would cost the whole response.
+TEST_F(RasCollectivesMicrotest, CommsMerge_DuplicateRankLeavesTheMergedRecordAcceptableToTheNextHop) {
+  union ncclSocketAddress root = MakeAddr(9);
+  auto* respConn = MakeConn(2);
+  auto* coll = MakeCollective(RAS_COLL_COMMS, root, 5);
+  coll->fwdConns[coll->nFwdSent++] = respConn;
+  SetPeers(coll, {MakeAddr(1)});
+
+  // Ranks 0 and 1 known locally, 2 and 3 missing; the peer reports 1 (a duplicate) and 2.
+  CommSpec collSpec = MakeCommSpec(0x8100, /*commNRanks*/ 4, {{0, 0}, {1, 0}});
+  collSpec.missingRanks = {2, 3};
+  collSpec.missingAddrs = {MakeAddr(52), MakeAddr(53)};
+  SetData(coll, BuildRasCollComms({collSpec}));
+  auto msgBlob = BuildRasCollComms({MakeCommSpec(0x8100, 4, {{1, 0}, {2, 0}})});
+  auto* msg = MakeCollRespMsg(root, 5, 0, {MakeAddr(200)}, msgBlob);
+  EXPECT_EQ(ncclSuccess, DeliverResp(msg, respConn));
+
+  auto* merged = reinterpret_cast<struct rasCollComms*>(coll->data);
+  ASSERT_EQ(1, merged->nComms);
+  EXPECT_EQ(3, merged->comms[0].nRanks);         // 0, 1 and 2: the duplicate 1 was skipped.
+  EXPECT_EQ(1, merged->comms[0].nMissingRanks);  // Only rank 3 is still missing.
+  EXPECT_LE(merged->comms[0].nRanks + merged->comms[0].nMissingRanks, merged->comms[0].commNRanks);
 }
 
 TEST_F(RasCollectivesMicrotest, CommsMerge_RankCountOverflowClampsToCommNRanks) {
