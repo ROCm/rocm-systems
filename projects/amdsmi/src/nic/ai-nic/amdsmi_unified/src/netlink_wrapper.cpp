@@ -8,7 +8,11 @@
 #include "netlink_wrapper.h"
 
 #include <netlink/errno.h>
+#include <netlink/socket.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
@@ -64,6 +68,18 @@ void NLSocket::disable_auto_ack() {
     return;
   }
   nl_socket_disable_auto_ack(sock_);
+}
+
+int NLSocket::set_recv_timeout(int seconds) {
+  if (!sock_) {
+    return -NLE_BAD_SOCK;
+  }
+  auto timeout = timeval{};
+  timeout.tv_sec = seconds;
+  if (setsockopt(nl_socket_get_fd(sock_), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+    return -nl_syserr2nlerr(errno);
+  }
+  return 0;
 }
 
 NLMessage::NLMessage() : msg_(nlmsg_alloc()) {

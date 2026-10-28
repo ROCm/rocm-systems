@@ -34,6 +34,40 @@ smi_nic_status_t smi_get_nic_kind(smi_nic_ctx_t ctx, uint64_t device, uint8_t* k
 smi_nic_status_t smi_get_nic_capability(smi_nic_ctx_t ctx, uint64_t device, uint32_t* capability);
 
 /**
+ * @brief Move the RDMA MTU probe from NIC discovery to the first MTU read.
+ *
+ * The probe forks once per RDMA port. Call it before ::smi_nic_create_context; it applies to every
+ * context created afterwards in the process. The default, probing at discovery, is what the shared
+ * ::smi_get_nic_rdma_dev_info relies on.
+ */
+void smi_nic_defer_rdma_mtu(bool is_deferred);
+
+/** Whether ::smi_nic_defer_rdma_mtu is in effect. */
+bool smi_nic_is_rdma_mtu_deferred();
+
+/**
+ * @brief ::smi_get_nic_rdma_dev_info without the MTU: every port reports max_mtu and active_mtu as
+ * UINT16_MAX, because probing the MTU forks per port. ::smi_get_nic_rdma_mtu fills them later.
+ */
+smi_nic_status_t smi_get_nic_rdma_dev_info_without_mtu(smi_nic_ctx_t ctx, uint64_t device,
+                                                       smi_nic_rdma_devices_info_t* info);
+
+/**
+ * @brief Fill the MTU of every RDMA port in @p info, which
+ * ::smi_get_nic_rdma_dev_info_without_mtu filled.
+ *
+ * The probe runs without the context lock.
+ *
+ * @param ctx Context returned by ::smi_nic_create_context.
+ * @param device Packed BDF, in the ::amdsmi_bdf_t as_uint encoding.
+ * @param info In: the RDMA info of @p device. Out: max_mtu and active_mtu of each port, UINT16_MAX
+ * when unknown.
+ * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
+ */
+smi_nic_status_t smi_get_nic_rdma_mtu(smi_nic_ctx_t ctx, uint64_t device,
+                                      smi_nic_rdma_devices_info_t* info);
+
+/**
  * @brief Retrieve the full interface index of one NIC port.
  *
  * smi_nic_port_t holds the index in one byte; this returns the whole value.
@@ -167,6 +201,22 @@ smi_nic_status_t smi_get_nic_vendor_statistics_list_with_scope(smi_nic_ctx_t ctx
 
 #ifdef __cplusplus
 }  // extern "C"
+#endif
+
+#ifdef __cplusplus
+/** Defers the RDMA MTU probe for its lifetime and restores the previous setting after. */
+class ScopedRdmaMtuDeferral_t {
+ public:
+  ScopedRdmaMtuDeferral_t() : m_was_deferred(smi_nic_is_rdma_mtu_deferred()) {
+    smi_nic_defer_rdma_mtu(true);
+  }
+  ~ScopedRdmaMtuDeferral_t() { smi_nic_defer_rdma_mtu(m_was_deferred); }
+  ScopedRdmaMtuDeferral_t(const ScopedRdmaMtuDeferral_t&) = delete;
+  ScopedRdmaMtuDeferral_t& operator=(const ScopedRdmaMtuDeferral_t&) = delete;
+
+ private:
+  bool m_was_deferred;
+};
 #endif
 
 #endif  // __AMD_SMI_NIC_INTERFACE_H__

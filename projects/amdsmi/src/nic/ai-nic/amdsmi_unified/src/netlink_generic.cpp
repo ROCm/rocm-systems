@@ -9,6 +9,7 @@
 
 #include <netlink/errno.h>
 #include <netlink/genl/ctrl.h>
+#include <netlink/socket.h>
 
 #include <cerrno>
 #include <cstdint>
@@ -56,13 +57,10 @@ int nle_to_errno(int nl_error) {
   }
 }
 
-GenericNetlinkClient::GenericNetlinkClient() : socket_(), is_connected_(false) {}
+GenericNetlinkClient::GenericNetlinkClient()
+    : socket_(), is_connected_(false), is_reconnect_pending_(false) {}
 
-int GenericNetlinkClient::connect() {
-  if (is_connected_) {
-    return 0;  // Already connected
-  }
-
+int GenericNetlinkClient::open_socket() {
   int ret = socket_.connect(NETLINK_GENERIC);
   if (ret < 0) {
     return ret;
@@ -70,6 +68,24 @@ int GenericNetlinkClient::connect() {
 
   socket_.set_buffer_size(kNlBufferBytes, kNlBufferBytes);
   socket_.disable_auto_ack();
+  ret = socket_.set_recv_timeout(kNlRecvTimeoutSec);
+  if (ret < 0) {
+    // Leave no open descriptor behind, so a later attempt starts from a closed socket.
+    nl_close(socket_.get());
+    return ret;
+  }
+  return 0;
+}
+
+int GenericNetlinkClient::connect() {
+  if (is_connected_) {
+    return 0;  // Already connected
+  }
+
+  const int ret = open_socket();
+  if (ret < 0) {
+    return ret;
+  }
 
   is_connected_ = true;
   return 0;
@@ -129,6 +145,17 @@ int GenericNetlinkClient::query_impl(int family_id, uint8_t cmd, uint8_t version
     return -NLE_BAD_SOCK;
   }
 
+  // A timed-out query leaves its socket unusable; the replacement is opened here so a failed
+  // attempt (for example no free descriptors) is retried by the next query.
+  if (is_reconnect_pending_) {
+    socket_ = NLSocket();
+    const int reconnect_ret = open_socket();
+    if (reconnect_ret < 0) {
+      return reconnect_ret;
+    }
+    is_reconnect_pending_ = false;
+  }
+
   NLMessage msg;
 
   void* hdr = msg.put_genl_header(0, 0, family_id, 0, flags, cmd, version);
@@ -157,6 +184,12 @@ int GenericNetlinkClient::query_impl(int family_id, uint8_t cmd, uint8_t version
   }
 
   ret = nl_recvmsgs(socket_.get(), cb.get());
+  if (ret == -NLE_AGAIN) {
+    // A late reply must not reach the next query, and a fresh socket has a new port id. The same
+    // code can come from a kernel NLMSG_ERROR of -EAGAIN, where the replacement is harmless.
+    is_reconnect_pending_ = true;
+    return ret;
+  }
   if (ret < 0) {
     return ret;
   }

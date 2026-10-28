@@ -74,7 +74,8 @@ class SmiInfiniBandPort {
   std::optional<uint8_t> port_num() const;
   std::optional<std::string> state() const;
   // libibverbs answers first; the sysfs files are the fallback for a driver that exposes them. The
-  // libibverbs answer is read once at discovery, so it does not follow a later MTU change.
+  // libibverbs answer is read once, on the first call, so it does not follow a later MTU change.
+  // The first call may fork (see smi_ibverbs), so a port shared between threads needs a lock.
   std::optional<uint16_t> max_mtu() const;
   std::optional<uint16_t> active_mtu() const;
   // const: counters are re-read on every query, so the map is a mutable cache.
@@ -86,8 +87,10 @@ class SmiInfiniBandPort {
   std::string name_;
   std::string sysfs_path_;
   mutable std::map<std::string, uint64_t> hw_counters_map_;
-  std::optional<uint16_t> m_ibverbs_max_mtu;
-  std::optional<uint16_t> m_ibverbs_active_mtu;
+  void query_ibverbs_mtu_once() const;
+  mutable bool m_was_ibverbs_mtu_queried = false;
+  mutable std::optional<uint16_t> m_ibverbs_max_mtu;
+  mutable std::optional<uint16_t> m_ibverbs_active_mtu;
 };
 
 class SmiInfiniBand {
