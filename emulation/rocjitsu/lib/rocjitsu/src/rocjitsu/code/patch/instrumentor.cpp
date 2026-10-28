@@ -194,9 +194,9 @@ struct KernelVgprBounds {
 
 // Decode @p desc's VGPR allocation for @p arch.
 KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
-                                    const rocr::llvm::amdhsa::kernel_descriptor_t &desc) {
-  const uint32_t granulated = AMDHSA_BITS_GET(
-      desc.compute_pgm_rsrc1, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+                                    const rocjitsu::amdhsa::kernel_descriptor_t &desc) {
+  const uint32_t granulated = RJ_AMDHSA_BITS_GET(
+      desc.compute_pgm_rsrc1, rocjitsu::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   // The descriptor encoding granule is wave-size dependent on RDNA (8 for
   // Wave32, 4 for Wave64); using the Wave32 granule for a Wave64 kernel would
   // overcount the allocation and let the SGPR bridge scan pick an unallocated
@@ -209,8 +209,8 @@ KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
   // separately) have no ACCUM_OFFSET field, so the whole allocation is ordinary.
   const uint32_t accum_base =
       arch_has_unified_vgpr_allocation(arch)
-          ? (AMDHSA_BITS_GET(desc.compute_pgm_rsrc3,
-                             rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+          ? (RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc3,
+                                rocjitsu::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
              1) *
                 4
           : total;
@@ -798,6 +798,10 @@ void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKi
 }
 
 bool Instrumentor::ensure_blocks_built(std::string *error_out) {
+  if (!obj_.is_valid()) {
+    report(error_out, "cannot instrument an invalid code object");
+    return false;
+  }
   if (blocks_built_)
     return true;
   if (arch_ == ROCJITSU_CODE_ARCH_RV32I || arch_ == ROCJITSU_CODE_ARCH_RV64I) {
@@ -870,6 +874,20 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   if (obj_.text_sections().size() > 1) {
     out.errors.emplace_back("code object has multiple .text sections; currently supports only one");
     return out;
+  }
+  // A join keeps its fallthrough edge, but its SGPR-held resume edge to the waiting side
+  // is unknown. G_FORK also has an unknown SGPR-held target. Liveness can miss registers
+  // needed on those paths, allowing scratch allocation to clobber them.
+  for (const auto &block : blocks_) {
+    for (const Instruction &inst : block->instructions()) {
+      if (inst.flags() & BRANCH_STACK) {
+        out.errors.push_back("code object uses the conditional branch stack (" +
+                             std::string(inst.mnemonic()) + " at .text offset " +
+                             std::to_string(inst.src_loc()) +
+                             "); liveness across fork/join is not modelled");
+        return out;
+      }
+    }
   }
   const Section *text = obj_.text_sections().front();
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
@@ -1047,32 +1065,6 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
 }
 
 InstrumentedCodeObject Instrumentor::patch() {
-  // The entry prologue loads through a kernarg wrapper that only a dispatch-time
-  // runtime can build, and no runtime builds one for DBI. Without it both loads
-  // read past the kernarg allocation and the guest's kernarg pointer is
-  // overwritten, so patch() refuses any point that would need the prologue.
-  // patch_with_debug_summaries() still plans it, for callers that supply the
-  // wrapper themselves.
-  std::string readers;
-  for (const InstrumentationPoint &pt : points_) {
-    if (std::none_of(pt.probe_args.begin(), pt.probe_args.end(),
-                     [](const ProbeArgValue &arg) { return reads_entry_storage(arg.source); }))
-      continue;
-    if (readers.find("'" + pt.probe_symbol + "'") != std::string::npos)
-      continue;
-    if (!readers.empty())
-      readers += ", ";
-    readers += "'" + pt.probe_symbol + "'";
-  }
-  if (!patched_ && !readers.empty()) {
-    patched_ = true;
-    InstrumentedCodeObject result;
-    result.errors.emplace_back("a probe reads the framework's entry storage, which needs a kernarg "
-                               "wrapper that no runtime builds yet; requested by " +
-                               readers);
-    return result;
-  }
-
   // Slice off the debug summaries; move the base subobject into the return.
   auto debug = patch_with_debug_summaries();
   return std::move(static_cast<InstrumentedCodeObject &>(debug));
@@ -1091,6 +1083,32 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   if (points_.empty()) {
     result.errors.emplace_back("Instrumentor::patch requires at least one queued point; got zero");
     return result;
+  }
+
+  // The entry prologue loads through a kernarg wrapper that only a dispatch-time
+  // runtime can build, and no runtime builds one for DBI. Without it both loads
+  // read past the kernarg allocation and the guest's kernarg pointer is
+  // overwritten, so any point that would need the prologue is refused. This is a
+  // runtime-support gate: a test may skip it to exercise the prologue path, and
+  // plan_entry_prologue()'s checks below still run.
+  if (!skip_patch_gates_) {
+    std::string readers;
+    for (const InstrumentationPoint &pt : points_) {
+      if (std::none_of(pt.probe_args.begin(), pt.probe_args.end(),
+                       [](const ProbeArgValue &arg) { return reads_entry_storage(arg.source); }))
+        continue;
+      if (readers.find("'" + pt.probe_symbol + "'") != std::string::npos)
+        continue;
+      if (!readers.empty())
+        readers += ", ";
+      readers += "'" + pt.probe_symbol + "'";
+    }
+    if (!readers.empty()) {
+      result.errors.emplace_back("a probe reads the framework's entry storage, which needs a "
+                                 "kernarg wrapper that no runtime builds yet; requested by " +
+                                 readers);
+      return result;
+    }
   }
 
   ResolvedPoints resolved = resolve_points();
@@ -1176,7 +1194,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // The kernel-entry prologue, planned only for kernels whose probes ask for the
   // framework's entry storage. It runs before every site because dispatch
   // enters at it. The prologue needs a kernarg wrapper that no runtime
-  // builds yet, which patch() enforces by refusing these probes.
+  // builds yet, which the patch gate above enforces by refusing these probes.
   std::optional<EntryProloguePatch> entry_patch;
   std::optional<uint16_t> entry_storage_base;
   if (probes_read_entry_storage(resolved.probes)) {
@@ -1301,16 +1319,20 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.errors.emplace_back("internal: anchor instruction vanished after validation");
         continue;
       }
-      const RegisterSet &live = liveness.live_before(*anchor);
+      auto maybe_live = liveness.live_before(*anchor);
+      if (maybe_live.failed()) {
+        result.errors.emplace_back("internal: anchor liveness is unavailable");
+        continue;
+      }
+      const RegisterSet &live = *maybe_live.value();
 
       // Set the probe's offset
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);
       plan.probe_target_offset = probe.output_text_offset;
-      // Preserve special state the probe clobbers by saving it to a dead SGPR
-      // around the call. EXEC/VCC are saved unconditionally as a conservative
-      // policy: the summary detects the special-state writes the decoder exposes as
-      // operands, but always saving keeps correctness independent of per-opcode
-      // implicit-def coverage. M0 stays clobber-gated.
+      // Orchestrator policy: save EXEC/VCC unconditionally so correctness does
+      // not depend on complete per-opcode implicit-def coverage. The summary
+      // sees decoder-exposed operands; M0 follows touches_m0, which includes
+      // exposed reads as well as writes.
       plan.preserve_exec = true;
       plan.preserve_vcc = true;
       plan.preserve_m0 = summary->touches_m0;

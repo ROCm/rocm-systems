@@ -1900,6 +1900,49 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
         }
       }
 
+      // External variables, such as the control scratchpad, are defined by the application with
+      // hsa_executable_agent_global_variable_define before loading, like a GPU code object's
+      // undefined symbols. Their addresses are plain stores, so they are written in here.
+      for (const auto& [name, ext] : kernel.external_symbols) {
+        const auto var_it = agent_symbols_.find(std::make_pair(name, agent));
+        if (var_it == agent_symbols_.end() || !var_it->second->IsVariable() ||
+            var_it->second->address == 0) {
+          logger_ << "LoaderError: symbol \"" << name << "\" is undefined\n";
+          return HSA_STATUS_ERROR_VARIABLE_UNDEFINED;
+        }
+        void* va = reinterpret_cast<void*>(var_it->second->address);
+
+        // The NPU reaches the variable at its agent address, so all of it must lie in one
+        // allocation the driver knows. The extent is measured from the allocation base
+        // FindDriverMemoryHandle returns: for a VMM mapping, PtrInfo reports the queried pointer
+        // as the base but the whole mapping as the size.
+        auto* runtime = core::Runtime::runtime_singleton_;
+        hsa_amd_pointer_info_t info = {};
+        info.size = sizeof(info);
+        void* alloc_base = nullptr;
+        core::DriverMemoryHandle handle{};
+        bool known = runtime->PtrInfo(va, &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS;
+        known = known && info.type != HSA_EXT_POINTER_TYPE_UNKNOWN && info.agentBaseAddress;
+        known = known &&
+            runtime->FindDriverMemoryHandle(va, core_agent, &alloc_base, &handle) ==
+                HSA_STATUS_SUCCESS;
+        const auto offset_in_alloc =
+            reinterpret_cast<uintptr_t>(va) - reinterpret_cast<uintptr_t>(alloc_base);
+        if (!known || offset_in_alloc + ext.size > info.sizeInBytes) {
+          log_warning_n(10, "AIE: '%s' is not defined in %u bytes of AIE-accessible memory.\n",
+                        name.c_str(), ext.size);
+          return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+        }
+
+        const uint64_t dev_addr = reinterpret_cast<uint64_t>(info.agentBaseAddress) +
+            (reinterpret_cast<uintptr_t>(va) - reinterpret_cast<uintptr_t>(info.hostBaseAddress));
+        for (const AMD::aie_elf::PatchSite& site : ext.sites) {
+          const uint64_t value = dev_addr + site.addend;
+          std::memcpy(kernel.ctrl_code.data() + site.offset, &value, sizeof(value));
+        }
+        desc->external_variables.push_back({va, ext.size, static_cast<uint32_t>(handle.handle)});
+      }
+
       // The control code is only ever a memcpy source for a per-dispatch buffer, so it stays in
       // ordinary host memory rather than a device segment. Moved, not copied: the parsed kernel
       // is looked up once and is dead after this.
@@ -1980,7 +2023,11 @@ hsa_status_t ExecutableImpl::LoadSegmentsV2(hsa_agent_t agent,
   hsa_status_t status = HSA_STATUS_SUCCESS;
   for (size_t i = 0; i < c->DataSegmentCount(); ++i) {
     status = LoadSegmentV2(c->DataSegment(i), load_segment.get());
-    if (status != HSA_STATUS_SUCCESS) return status;
+    if (status != HSA_STATUS_SUCCESS) {
+      // Not yet in objects, so the executable destructor will not free it.
+      load_segment->Destroy();
+      return status;
+    }
   }
 
   objects.push_back(load_segment);
@@ -2037,10 +2084,12 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
   // The combined code segment allocation is sized from the last data segment
   // only (see LoadSegmentsV2). A crafted code object with non-monotonic,
   // overlapping, or out-of-range p_vaddr values could otherwise drive the copy
-  // below past the end of that allocation (heap OOB write). Bound the copy
-  // destination [offset, offset + imageSize) against the allocation explicitly,
-  // since Segment::Offset() only asserts the start address and compiles out
-  // under NDEBUG. See ROCM-26177 finding #1.
+  // below past the end of that allocation (heap OOB write). Bound the claimed
+  // extent [offset, offset + p_memsz) against the allocation. p_filesz <=
+  // p_memsz was checked above, so this also covers the copied range. An
+  // earlier PT_LOAD can have a p_memsz that extends past the allocation while
+  // its p_filesz still fits (ROCM-32935). Segment::Offset() only asserts the
+  // start address and that assert compiles out under NDEBUG.
   const uint64_t seg_vaddr = data_segment->vaddr();
   const uint64_t base_vaddr = load_segment->VAddr();
   const size_t alloc_size = load_segment->Size();
@@ -2049,7 +2098,7 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
   }
   const uint64_t offset = seg_vaddr - base_vaddr;
   if (offset > alloc_size ||
-      data_segment->imageSize() > alloc_size - offset) {
+      data_segment->memSize() > alloc_size - offset) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 

@@ -30,7 +30,6 @@
 #include <cstdint>
 #include "gda/gda_enums.hpp"
 #include "rocshmem/rocshmem_common.hpp"
-#include "util.hpp"
 
 namespace rocshmem {
 
@@ -46,6 +45,8 @@ struct constmem_t {
   size_t ipc_sdma_threshold;  // SDMA_THRESHOLD_DISABLED = SDMA disabled
   uintptr_t heap_base;  // Local symmetric heap base
   size_t heap_size;     // Local symmetric heap size in bytes
+  uint32_t tdm_tile_bytes;
+  size_t tdm_threshold;  // transfers smaller than this skip the TDM path
 } __attribute__ ((aligned (16)));
 
 extern __constant__ constmem_t constmem;
