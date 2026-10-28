@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "common/cli_dispatcher.hpp"
+#include "cli_dispatcher.hpp"
 
 #include <fmt/base.h>
 #include <fmt/format.h>

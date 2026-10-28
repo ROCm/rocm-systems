@@ -5,7 +5,27 @@
 #
 # rocprofiler-systems-exe target — unified CLI entry point (`rocsys`)
 #
+# The dispatcher lives in rocprofiler-systems-rocsys-core so the legacy tools,
+# which link rocprofiler-systems-bin-common, do not compile it.
+#
 # ------------------------------------------------------------------------------#
+
+add_library(rocprofiler-systems-rocsys-core STATIC cli_dispatcher.cpp)
+
+target_include_directories(
+    rocprofiler-systems-rocsys-core
+    PUBLIC ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/..
+)
+
+target_link_libraries(
+    rocprofiler-systems-rocsys-core
+    PUBLIC rocprofiler-systems::rocprofiler-systems-common-library
+)
+
+add_library(
+    rocprofiler-systems::rocprofiler-systems-rocsys-core
+    ALIAS rocprofiler-systems-rocsys-core
+)
 
 add_executable(
     rocprofiler-systems-exe
@@ -25,6 +45,7 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-headers
         rocprofiler-systems::rocprofiler-systems-common-library
         rocprofiler-systems::rocprofiler-systems-bin-common
+        rocprofiler-systems::rocprofiler-systems-rocsys-core
         rocprofiler-systems::rocprofiler-systems-core
         rocprofiler-systems::rocprofiler-systems-json
         rocprofiler-systems::rocprofiler-systems-sanitizer
@@ -53,3 +74,7 @@ foreach(
         add_dependencies(rocprofiler-systems-exe ${_dep})
     endif()
 endforeach()
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
