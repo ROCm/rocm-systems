@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_void};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use rocddi::memory::device::MemoryKind;
 #[cfg(test)]
@@ -32,9 +32,12 @@ use rocloader::{
 use crate::ffi::*;
 use crate::runtime::{HsaState, boundary, initialized_mut, lock, map_error};
 
+mod traversal;
+use traversal::ExecutableTraversalGate;
+
 /// Keeps executable handles stable across loader traversal callbacks.
 /// Acquire this before the lifecycle mutex; callbacks may query that mutex.
-pub(crate) static EXECUTABLE_TRAVERSAL: RwLock<()> = RwLock::new(());
+pub(crate) static EXECUTABLE_TRAVERSAL: ExecutableTraversalGate = ExecutableTraversalGate::new();
 
 /// Origin retained for loader queries after bytes have been snapshotted.
 #[derive(Clone)]
