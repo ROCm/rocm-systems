@@ -679,6 +679,8 @@ struct Info : public amd::EmbeddedObject {
   size_t virtualMemAllocGranularityMinimum_;  //!< minimum virtual memory allocation size/addr granularity
   size_t virtualMemAllocGranularityRecommended_;  //!< recommended virtual memory allocation size/addr granularity
   uint32_t driverNodeId_;
+  //! KFD gpu_id of this device (HSA_AMD_AGENT_INFO_DRIVER_UID), 0 when unavailable
+  uint32_t kfdGpuId_;
   //! Number of Physical SGPRs per SIMD
   uint32_t sgprsPerSimd_;
   //! SGPR allocation granularity. Zero if the backend does not report it.

@@ -1570,6 +1570,19 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 
   TrackQueueProgress(*packet, index);
 
+  // Runtime-contract kernel_dispatch tracepoint: one event per kernel packet, on the
+  // writing thread, after the packet index is known and before the header is published.
+  if constexpr (std::is_same_v<AqlPacket, hsa_kernel_dispatch_packet_t> ||
+                std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
+    auto report_dispatch =
+        amd::activity_prof::report_kernel_dispatch.load(std::memory_order_acquire);
+    if (report_dispatch != nullptr) {
+      report_dispatch(dev().info().kfdGpuId_, reinterpret_cast<uint64_t>(gpu_queue_->base_address),
+                      index, packet,
+                      std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>);
+    }
+  }
+
   AqlPacket* aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[index & queueMask];
   writePacketToRingBuffer(aql_loc, packet, header, rest, index & queueMask);
 
@@ -1816,6 +1829,15 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
 
   CompleteAqlSubmission(reservation);
   setFenceDirty(true);
+
+  // Runtime-contract kernel_dispatch tracepoint: one event per kernel packet of the batch,
+  // after the indices are reserved and before any packet header is published.
+  auto report_batch =
+      amd::activity_prof::report_kernel_dispatch_batch.load(std::memory_order_acquire);
+  if (report_batch != nullptr) {
+    report_batch(dev().info().kfdGpuId_, reinterpret_cast<uint64_t>(gpu_queue_->base_address),
+                 startIndex, flatPacketData.data(), validFullHeaders.data(), numPackets);
+  }
 
   // Update cached fence state from the last packet's release scope.
   // Clear fence dirty if the last packet has system-scope release, matching

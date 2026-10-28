@@ -28,6 +28,18 @@ namespace amd::activity_prof {
 extern std::atomic<int (*)(activity_domain_t domain, uint32_t operation_id, void* data)>
     report_activity;
 
+// Kernel AQL packet trace hooks for the runtime-contract kernel_dispatch tracepoint. The
+// HIP trace backend (hipamd/src/trace/hip_trace_etw.cpp) sets these while its provider is
+// registered; they are null when tracing is off or the backend is compiled out. Emit sites
+// pay one acquire load plus a branch when disabled.
+using kernel_dispatch_fn = void (*)(uint32_t gpu_id, uint64_t ring_va, uint64_t packet_index,
+                                    const void* aql_packet, bool ext);
+using kernel_dispatch_batch_fn = void (*)(uint32_t gpu_id, uint64_t ring_va,
+                                          uint64_t first_packet_index, const void* flat_packets,
+                                          const uint32_t* full_headers, size_t packet_count);
+extern std::atomic<kernel_dispatch_fn> report_kernel_dispatch;
+extern std::atomic<kernel_dispatch_batch_fn> report_kernel_dispatch_batch;
+
 #if defined(__linux__)
 extern __thread activity_correlation_id_t correlation_id __attribute__((tls_model("initial-exec")));
 #elif defined(_WIN32)

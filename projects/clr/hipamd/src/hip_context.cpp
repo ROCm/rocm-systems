@@ -15,6 +15,7 @@
 #include <hip/amd_detail/hip_api_trace.hpp>
 #include "hrr/hip_capture.h"
 #include "profiler/hip_clr_profiler.hpp"
+#include "trace/hip_trace_init.hpp"
 namespace hip {
 const HipToolsDispatchTable* GetHipToolsDispatchTable();
 }  // namespace hip
@@ -29,6 +30,10 @@ amd::Context* host_context = nullptr;
 // ================================================================================================
 // init() is only to be called from the HIP_INIT macro only once
 void init(bool* status) {
+  // First, so that the remainder of init() is observable. See hip_trace_init.hpp for
+  // why registration happens here rather than in DllMain.
+  hip::trace::initialize();
+
   // Configure HIP runtime mode
   amd::IS_HIP = true;
   GPU_NUM_MEM_DEPENDENCY = 0;
