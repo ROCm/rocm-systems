@@ -145,6 +145,99 @@ TEST_F(GinDeviceTest, ExplicitSignalActions) {
 }
 
 // ---------------------------------------------------------------------------
+// CBindingLegacySignals_*: the C bindings taking `bool isSignal` (ncclGinSignal, ncclGinPut, ncclGinPutValue and
+//   their _v2 forms) issue legacy indexed signals. Like ncclGin_SignalInc above, these must be strong exactly when
+//   the devComm sets ginStrongLegacySignals (NCCL 2.32). The proxy backend carries it in the GFD's isStrongSignal bit.
+// ---------------------------------------------------------------------------
+
+constexpr char kCBindingSkip[] = "rocSHMEM GIN on: ncclGin_C would instantiate its test stubs, linked only -fgpu-rdc";
+
+#if !NCCL_GIN_ROCSHMEM_GDA_ENABLE && !NCCL_GIN_ANVIL_SDMA_ENABLE
+// Signals peer 1 once through each C entry point, with signal ids 1..6 in call order.
+__global__ void kernelCBindingLegacySignals(ncclDevComm comm, ncclWindow_t win) {
+  ncclGin_C net(comm, NCCL_GIN_BACKEND_MASK_ALL, /*contextIndex=*/0);
+  const ncclTeam world = ncclTeamWorld(comm);
+  const ncclGinSignalOp_t inc = ncclGinSignalInc;
+  const cuda::thread_scope given = cuda::thread_scope_thread;
+  const cuda::thread_scope required = cuda::thread_scope_device;
+  ncclGinSignal(&net, world, 1, true, 1, inc, 1, ncclCoopThread(), false, nullptr, given, required);
+  ncclGinSignal_v2(&net, world, 1, true, 2, inc, 1, ncclCoopThread(), false, nullptr, given, required,
+                   ncclGinOptFlagsDefault);
+  ncclGinPut(&net, world, 1, win, 0, win, 64, 8, true, 3, inc, 1, false, 0, ncclCoopThread(), false, nullptr, given,
+             required);
+  ncclGinPut_v2(&net, world, 1, win, 0, win, 64, 8, true, 4, inc, 1, false, 0, ncclCoopThread(), false, nullptr,
+                given, required, ncclGinOptFlagsDefault);
+  ncclGinPutValue(&net, world, 1, win, 0, 0x1234, 8, true, 5, inc, 1, ncclCoopThread(), false, nullptr, given,
+                  required);
+  ncclGinPutValue_v2(&net, world, 1, win, 0, 0x1234, 8, true, 6, inc, 1, ncclCoopThread(), false, nullptr, given,
+                     required, ncclGinOptFlagsDefault);
+}
+#endif
+
+// Rank 0 of 2 runs the kernel on one proxy context, then checks the GFDs queued for peer 1, which no proxy thread
+// consumes. Returns false when the kernel is compiled out.
+static bool expectCBindingLegacySignals(bool ginStrongLegacySignals) {
+#if NCCL_GIN_ROCSHMEM_GDA_ENABLE || NCCL_GIN_ANVIL_SDMA_ENABLE
+  (void)ginStrongLegacySignals;
+  return false;
+#else
+  constexpr int kNranks = 2;
+  constexpr uint32_t kQueueSize = 8; // more slots than calls, so postGfd never waits for credits
+  constexpr uint32_t kCalls = 6;
+  DeviceBuffer<ncclGinProxyGfd_t> d_queues(kNranks * kQueueSize);
+  DeviceBuffer<uint32_t> d_pis(kNranks), d_cis(kNranks);
+  DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtx(1);
+  DeviceBuffer<ncclWindow_vidmem> d_win(1);
+  d_queues.zero();
+  d_pis.zero();
+  d_cis.zero();
+
+  ncclGinProxyGpuCtx_t proxyCtx{};
+  proxyCtx.nranks = kNranks;
+  proxyCtx.queueSize = kQueueSize;
+  proxyCtx.queues = d_queues.ptr;
+  proxyCtx.pis = d_pis.ptr;
+  proxyCtx.cis = d_cis.ptr;
+  d_proxyCtx.upload(proxyCtx);
+  ncclWindow_vidmem win{};
+  win.ginWinsDefaultBackend[0] = reinterpret_cast<ncclGinWindow_t>(0x12345000);
+  win.numSegments = 1;
+  d_win.upload(win);
+
+  ncclDevComm comm{};
+  comm.nRanks = kNranks;
+  comm.ginConnectionCount = 1;
+  comm.ginNetDeviceTypes[0] = NCCL_NET_DEVICE_GIN_PROXY;
+  comm.ginHandles[0] = d_proxyCtx.ptr;
+  comm.ginConnectionStride = 1;
+  comm.ginStrongLegacySignals = ginStrongLegacySignals;
+
+  kernelCBindingLegacySignals<<<1, 1>>>(comm, d_win.ptr);
+  EXPECT_EQ(hipGetLastError(), hipSuccess);
+  EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+  EXPECT_EQ(d_pis.copyTo(), (std::vector<uint32_t>{0u, kCalls})) << "one GFD per call, all to peer 1";
+  const std::vector<ncclGinProxyGfd_t> queues = d_queues.copyTo();
+  const char* const calls[kCalls] = {"ncclGinSignal", "ncclGinSignal_v2", "ncclGinPut",
+                                     "ncclGinPut_v2", "ncclGinPutValue",  "ncclGinPutValue_v2"};
+  for (uint32_t i = 0; i < kCalls; i++) {
+    const ncclGinProxyGfd_t& gfd = queues[kQueueSize + i];
+    EXPECT_EQ(static_cast<uint32_t>(gfd.qword[ncclGinProxyGfdCompletion].completion.signalId), i + 1) << calls[i];
+    EXPECT_EQ(static_cast<bool>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.isStrongSignal), ginStrongLegacySignals)
+        << calls[i] << " must follow ncclDevComm::ginStrongLegacySignals";
+  }
+  return true;
+#endif
+}
+
+TEST_F(GinDeviceTest, CBindingLegacySignals_Strong) {
+  if (!expectCBindingLegacySignals(/*ginStrongLegacySignals=*/true)) GTEST_SKIP() << kCBindingSkip;
+}
+
+TEST_F(GinDeviceTest, CBindingLegacySignals_Weak) {
+  if (!expectCBindingLegacySignals(/*ginStrongLegacySignals=*/false)) GTEST_SKIP() << kCBindingSkip;
+}
+
+// ---------------------------------------------------------------------------
 // ConstructProxyOp: pack (hasInline, hasSignal, signalOp, hasCounter) -> op byte
 // ---------------------------------------------------------------------------
 
