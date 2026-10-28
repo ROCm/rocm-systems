@@ -254,6 +254,8 @@ class NetIbCastSchedulerLogMicrotest : public NetIbCastSchedulerMicrotest {
   std::string LogFile() const { return dir_ + "/cast_log_nodeA_" + std::to_string(getpid()); }
 
   std::string dir_;
+  // The libc_fakes fopen default fails; these tests write a real file under dir_.
+  ScopedHook<FILE*(const char*, const char*)> fopen_{g_fopen, ::fopen};
   ScopedHook<int(char*, size_t)> hostname_{g_gethostname, [](char* name, size_t len) {
                                              snprintf(name, len, "nodeA");
                                              return 0;
