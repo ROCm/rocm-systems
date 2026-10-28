@@ -134,3 +134,22 @@ class TestFirmwareNicPrefetch(unittest.TestCase):
 
         stored = [c.args[2] for c in command.logger.store_ainic_output.call_args_list]
         self.assertEqual(stored, [{}, {"FW": "v1"}])
+
+    def test_prefetch_pool_is_capped(self):
+        module, amdsmi_stub = _load_firmware()
+        handles = [mock.Mock(value=i) for i in range(12)]
+        command = self._make_command(module, handles)
+        amdsmi_stub.amdsmi_interface.amdsmi_get_nic_fw_info = mock.Mock(return_value={})
+        real_pool = module.concurrent.futures.ThreadPoolExecutor
+        requested = []
+
+        def _recording_pool(max_workers):
+            requested.append(max_workers)
+            return real_pool(max_workers=max_workers)
+
+        args = types.SimpleNamespace(nic=None, fw_list=None)
+        with mock.patch.object(module.concurrent.futures, "ThreadPoolExecutor", _recording_pool):
+            command.firmware_nic(args)
+
+        self.assertEqual(len(requested), 1)
+        self.assertLessEqual(requested[0], 8)

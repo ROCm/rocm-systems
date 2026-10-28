@@ -141,5 +141,5 @@ class TestPrintNoAinicsFound(unittest.TestCase):
     def test_human_readable_output_says_no_nics_were_found(self) -> None:
         self.assertEqual(self._render("human_readable"), _NO_NICS_TEXT + "\n")
 
-    def test_json_output_is_still_a_valid_document(self) -> None:
-        self.assertIsInstance(json.loads(self._render("json")), list)
+    def test_json_output_is_an_empty_list(self) -> None:
+        self.assertEqual(json.loads(self._render("json")), [])

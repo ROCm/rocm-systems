@@ -642,7 +642,7 @@ class AMDSMILogger:
         if self.is_human_readable_format():
             print("No AI NICs found")
         else:
-            self.print_output(emit_empty=True)
+            self.print_output(multiple_device_enabled=True, emit_empty=True)
 
     def print_output(
         self,

@@ -146,6 +146,12 @@ class TestInitNicOnlyGating(unittest.TestCase):
         self.assertEqual(ctx.exception.code, int(module.AmdSmiExitCode.DRIVERS_NOT_LOADED))
         self.assertIn("Drivers not loaded", logs.output[0])
 
+    def test_driver_failure_message_does_not_name_the_removed_nic_probes(self):
+        module = self._init_raising(1)  # AMDSMI_STATUS_NOT_INIT in the stub
+        with self.assertLogs(level="ERROR") as logs, self.assertRaises(SystemExit):
+            module.amdsmi_cli_init()
+        self.assertNotIn("ionic", logs.output[0])
+
     def test_library_driver_not_loaded_exits_with_drivers_not_loaded(self):
         module = self._init_raising(2)  # AMDSMI_STATUS_DRIVER_NOT_LOADED in the stub
         with self.assertLogs(level="ERROR") as logs, self.assertRaises(SystemExit) as ctx:

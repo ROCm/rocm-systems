@@ -81,3 +81,38 @@ class TestListNicFallback(unittest.TestCase):
         command.list_devices(args)
 
         command.list_gpu.assert_called_once()
+
+
+class TestListNicOnlyHost(unittest.TestCase):
+    def _make_command(self, is_human_readable):
+        module = _load_list_devices()
+        nic = types.SimpleNamespace(value=1)
+
+        class _Command(module.ListDevicesCommands):
+            def __init__(self):
+                self.device_handles_gpus = []
+                self.device_handles_ainics = [nic]
+                self.helpers = mock.Mock()
+                self.helpers.is_ainic_initialized.return_value = True
+                self.logger = mock.Mock()
+                self.logger.is_human_readable_format.return_value = is_human_readable
+                self.list_gpu = mock.Mock()
+                self.list_ainic = mock.Mock()
+
+        return _Command()
+
+    def test_json_list_without_gpus_still_lists_the_nics(self):
+        command = self._make_command(is_human_readable=False)
+
+        command.list_devices(types.SimpleNamespace(gpu=None, nic=None))
+
+        command.list_ainic.assert_called_once()
+
+    def test_json_list_with_gpus_keeps_to_one_document(self):
+        command = self._make_command(is_human_readable=False)
+        command.device_handles_gpus = [object()]
+
+        command.list_devices(types.SimpleNamespace(gpu=None, nic=None))
+
+        command.list_gpu.assert_called_once()
+        command.list_ainic.assert_not_called()
