@@ -4,6 +4,7 @@
 #include "smi_nic_interface.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -556,8 +557,11 @@ smi_nic_status_t smi_get_nic_port_info(smi_nic_ctx_t ctx, uint64_t device,
   return SMI_NIC_STATUS_SUCCESS;
 }
 
-smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device,
-                                           smi_nic_rdma_devices_info_t* info) {
+// One walk for the shared getter and its no-MTU variant, so the two cannot drift. Probing the MTU
+// forks per port, which is why the variant exists.
+static smi_nic_status_t get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device,
+                                              smi_nic_rdma_devices_info_t* info,
+                                              bool is_mtu_included) {
   if (!ctx) {
     return SMI_NIC_STATUS_WRONG_PARAM;
   }
@@ -625,8 +629,13 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device,
         std::snprintf(port_info->state, SMI_NIC_MAX_STRING_LENGTH, "%s",
                       ib_port.state().value_or("N/A").c_str());
         port_info->rdma_port = ib_port.port_num().value_or(std::numeric_limits<uint8_t>::max());
-        port_info->max_mtu = ib_port.max_mtu().value_or(std::numeric_limits<uint16_t>::max());
-        port_info->active_mtu = ib_port.active_mtu().value_or(std::numeric_limits<uint16_t>::max());
+        port_info->max_mtu = std::numeric_limits<uint16_t>::max();
+        port_info->active_mtu = std::numeric_limits<uint16_t>::max();
+        if (is_mtu_included) {
+          port_info->max_mtu = ib_port.max_mtu().value_or(std::numeric_limits<uint16_t>::max());
+          port_info->active_mtu =
+              ib_port.active_mtu().value_or(std::numeric_limits<uint16_t>::max());
+        }
       }
       rdma_count++;
     }
@@ -641,6 +650,78 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device,
     return SMI_NIC_STATUS_NO_DATA;
   }
 
+  return SMI_NIC_STATUS_SUCCESS;
+}
+
+smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device,
+                                           smi_nic_rdma_devices_info_t* info) {
+  return get_nic_rdma_dev_info(ctx, device, info, true);
+}
+
+smi_nic_status_t smi_get_nic_rdma_dev_info_without_mtu(smi_nic_ctx_t ctx, uint64_t device,
+                                                       smi_nic_rdma_devices_info_t* info) {
+  return get_nic_rdma_dev_info(ctx, device, info, false);
+}
+
+smi_nic_status_t smi_get_nic_rdma_mtu(smi_nic_ctx_t ctx, uint64_t device,
+                                      smi_nic_rdma_devices_info_t* info) {
+  if (!ctx || !info) {
+    return SMI_NIC_STATUS_WRONG_PARAM;
+  }
+
+  auto* nic_system = get_nic_system_from_context(ctx);
+  if (!nic_system) {
+    return SMI_NIC_STATUS_NOT_INIT;
+  }
+
+  // Slots are matched to the entries of info by RDMA device name and port number, not by index:
+  // the driver check is live, so the walk can differ from the one that filled info.
+  struct PortSlot_t {
+    std::string rdma_dev;
+    SmiInfiniBandPort port;
+  };
+  auto slots = std::vector<PortSlot_t>{};
+  {
+    const auto lock = std::lock_guard<std::mutex>{ctx->ctx_mutex};
+    const SmiNic* nic = nic_system->get_nic_by_bdf(device);
+    if (!nic) {
+      return SMI_NIC_STATUS_NOT_FOUND;
+    }
+
+    for (const auto& port : nic->nic_ports()) {
+      if (!nic_system->driver_loaded(port.bdf(), DriverType::Rdma)) {
+        continue;
+      }
+      for (const auto& ib : port.infiniband()) {
+        for (const auto& ib_port : ib.ports()) {
+          slots.push_back({ib.rdma_dev(), ib_port});
+        }
+      }
+    }
+  }
+
+  const auto num_devices = std::min<size_t>(info->num_rdma_dev, SMI_NIC_MAX_RDMA_DEV);
+  for (const auto& slot : slots) {
+    const auto rdma_dev_name = slot.rdma_dev.substr(0, SMI_NIC_MAX_STRING_LENGTH - 1);
+    const auto port_num = slot.port.port_num().value_or(std::numeric_limits<uint8_t>::max());
+    for (size_t d = 0; d < num_devices; d++) {
+      auto& rdma_dev = info->rdma_dev_info[d];
+      if (rdma_dev_name != rdma_dev.rdma_dev) {
+        continue;
+      }
+      const auto num_ports = std::min<size_t>(rdma_dev.num_rdma_ports, SMI_NIC_MAX_PORTS);
+      for (size_t k = 0; k < num_ports; k++) {
+        auto& port_info = rdma_dev.rdma_port_info[k];
+        if (port_info.rdma_port != port_num) {
+          continue;
+        }
+        // The probe forks, so it runs on this copy without the context lock.
+        port_info.max_mtu = slot.port.max_mtu().value_or(std::numeric_limits<uint16_t>::max());
+        port_info.active_mtu =
+            slot.port.active_mtu().value_or(std::numeric_limits<uint16_t>::max());
+      }
+    }
+  }
   return SMI_NIC_STATUS_SUCCESS;
 }
 
@@ -1006,6 +1087,39 @@ void smi_nic_telemetry_from_snapshot_for_testing(
   telemetry->port_split.split_count = snapshot.port_split.split_count;
 }
 
+static DevlinkFactory_t g_devlink_factory;
+
+namespace {
+
+// What a telemetry read needs from a SmiNic, copied under the context lock. The constructor still
+// calls hwmon_temp_path() (directory scan and label reads); only the tempN_input read runs
+// unlocked.
+class TelemetryNic_t : public SmiNic {
+ public:
+  explicit TelemetryNic_t(const SmiNic& nic) : SmiNic("", nic.telemetry_bdf()) {
+    set_mgmt_bdf(nic.mgmt_bdf());
+    for (size_t i = 0; i < m_temp_paths.size(); ++i) {
+      m_temp_paths.at(i) = nic.hwmon_temp_path(static_cast<NicTempSensor>(i));
+    }
+  }
+
+  std::optional<std::string> hwmon_temp_path(NicTempSensor sensor) const override {
+    return m_temp_paths.at(static_cast<size_t>(sensor));
+  }
+
+ private:
+  // Board is the last NicTempSensor enumerator, so the array holds every sensor.
+  static_assert(static_cast<size_t>(NicTempSensor::Board) == 2, "NicTempSensor grew; resize");
+  std::array<std::optional<std::string>, static_cast<size_t>(NicTempSensor::Board) + 1>
+      m_temp_paths;
+};
+
+}  // namespace
+
+void smi_nic_set_devlink_factory_for_testing(DevlinkFactory_t factory) {
+  g_devlink_factory = std::move(factory);
+}
+
 smi_nic_status_t smi_get_nic_telemetry(smi_nic_ctx_t ctx, uint64_t device,
                                        smi_nic_telemetry_t* telemetry) {
   if (!ctx || !telemetry) {
@@ -1017,19 +1131,24 @@ smi_nic_status_t smi_get_nic_telemetry(smi_nic_ctx_t ctx, uint64_t device,
     return SMI_NIC_STATUS_NOT_INIT;
   }
 
-  std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
-  const SmiNic* nic = nic_system->get_nic_by_bdf(device);
-  if (!nic) {
-    return SMI_NIC_STATUS_NOT_FOUND;
-  }
-
   // get_snapshot is total: an unexposed metric comes back as its reserved value, never
   // as a failure, so there is no unsuccessful result to branch on here.
   // The devlink client allocates netlink messages that throw; keep that off the C ABI boundary.
   try {
+    // The hwmon reads and devlink round trips can block on firmware, so they run without the
+    // context lock, on a copy of the addresses; the devlink client is a fresh, unshared socket.
+    auto snapshot_nic = std::unique_ptr<TelemetryNic_t>{};
+    {
+      std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
+      const SmiNic* nic = nic_system->get_nic_by_bdf(device);
+      if (!nic) {
+        return SMI_NIC_STATUS_NOT_FOUND;
+      }
+      snapshot_nic = std::make_unique<TelemetryNic_t>(*nic);
+    }
     amd::smi::nic::telemetry::NicTelemetry telemetry_reader(
-        amd::nic::netlink::create_devlink_client());
-    const auto snapshot = telemetry_reader.get_snapshot(*nic).value;
+        g_devlink_factory ? g_devlink_factory() : amd::nic::netlink::create_devlink_client());
+    const auto snapshot = telemetry_reader.get_snapshot(*snapshot_nic).value;
     smi_nic_telemetry_from_snapshot_for_testing(snapshot, telemetry);
   } catch (const std::bad_alloc&) {
     return SMI_NIC_STATUS_NO_RESOURCE;

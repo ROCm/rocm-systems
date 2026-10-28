@@ -841,12 +841,12 @@ amdsmi_status_t amdsmi_get_nic_asic_info(amdsmi_processor_handle processor_handl
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  *info = ainic_info.asic;
+  *info = nic_device->asic();
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -902,12 +902,12 @@ amdsmi_status_t amdsmi_get_nic_bus_info(amdsmi_processor_handle processor_handle
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  *info = ainic_info.bus;
+  *info = nic_device->bus();
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -918,12 +918,12 @@ amdsmi_status_t amdsmi_get_nic_driver_info(amdsmi_processor_handle processor_han
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  *info = ainic_info.driver;
+  *info = nic_device->driver();
   return AMDSMI_STATUS_SUCCESS;
 }
 amdsmi_status_t amdsmi_get_nic_numa_info(amdsmi_processor_handle processor_handle,
@@ -933,12 +933,12 @@ amdsmi_status_t amdsmi_get_nic_numa_info(amdsmi_processor_handle processor_handl
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  *info = ainic_info.numa;
+  *info = nic_device->numa();
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -949,12 +949,12 @@ amdsmi_status_t amdsmi_get_nic_port_info(amdsmi_processor_handle processor_handl
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  *info = ainic_info.port;
+  *info = nic_device->port();
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -983,12 +983,12 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  *info = ainic_info.rdma_dev;
+  nic_device->get_rdma_dev(*info);
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -1220,8 +1220,8 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
     return AMDSMI_STATUS_INVAL;
   }
 
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
@@ -1229,8 +1229,8 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
   // No RDMA device and an index past the last RDMA port both keep the status this
   // function has always returned.
   amd::smi::RdmaPortRef_t ref = {};
-  if (!amd::smi::was_rdma_port_resolved(ainic_info.rdma_dev, ainic_info.port, rdma_port_index,
-                                        &ref)) {
+  if (!amd::smi::was_rdma_port_resolved(nic_device->rdma_dev_without_mtu(), nic_device->port(),
+                                        rdma_port_index, &ref)) {
     std::ostringstream ss;
     ss << __PRETTY_FUNCTION__ << " | No RDMA port at index " << rdma_port_index;
     LOG_ERROR(ss);
@@ -1238,7 +1238,7 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
   }
 
   smi_nic_ctx_t ctx = amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx();
-  const uint64_t device = ainic_info.bus.bdf.as_uint;
+  const uint64_t device = nic_device->bdf();
 
   return amd::smi::get_nic_stats(
       [&](uint32_t* available) {

@@ -47,6 +47,9 @@ class NLSocket {
   // query loop never reads, so the next query would consume it in place of its reply.
   void disable_auto_ack();
 
+  // Bounds each receive on the socket; nl_recvmsgs then fails with -NLE_AGAIN.
+  int set_recv_timeout(int seconds);
+
   // Non-owning; do not free.
   struct nl_sock* get() const { return sock_; }
 

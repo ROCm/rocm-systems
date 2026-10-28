@@ -20,6 +20,9 @@
 
 namespace amd::nic::netlink {
 
+// Per-receive limit on a query. A firmware-backed devlink reply takes about a second.
+constexpr int kNlRecvTimeoutSec = 5;
+
 // The netlink layer returns libnl NLE_* codes, but transport::Result reports errno.
 int nle_to_errno(int nl_error);
 
@@ -60,8 +63,11 @@ class GenericNetlinkClient {
                  std::function<int(NLMessage&)> build_fn, MessageHandler handler, void* arg,
                  uint16_t flags);
 
+  int open_socket();
+
   NLSocket socket_;
   bool is_connected_;
+  bool is_reconnect_pending_;
 };
 
 }  // namespace amd::nic::netlink

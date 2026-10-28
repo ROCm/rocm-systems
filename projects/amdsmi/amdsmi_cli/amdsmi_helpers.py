@@ -510,7 +510,12 @@ class AMDSMIHelpers:
             max_padding = int(math.log10(len(ainic_device_handles))) + 1
 
             for nic_id, device_handle in enumerate(ainic_device_handles):
-                nic_info = amdsmi_interface.amdsmi_get_ainic_info(device_handle)
+                try:
+                    nic_info = amdsmi_interface.amdsmi_get_ainic_info(device_handle)
+                except amdsmi_interface.AmdSmiLibraryException as e:
+                    # One failing NIC must not stop the parser, and every subcommand builds it.
+                    logging.debug(f"Unable to read NIC {nic_id} identity: {e}")
+                    nic_info = {"bdf": "N/A", "UUID": "N/A"}
                 nic_choices, nic_choices_str = self.nic_choices_from_nic_info(
                     nic_info, nic_id, device_handle, max_padding, nic_choices, nic_choices_str
                 )
@@ -678,7 +683,7 @@ class AMDSMIHelpers:
                     )
                 else:
                     for nic_info in nic_choices.values():
-                        if selected_bdf == BDF(nic_info["bdf"]):
+                        if nic_info["bdf"] != "N/A" and selected_bdf == BDF(nic_info["bdf"]):
                             selected_device_handles.append(nic_info["Device Handle"])
                             valid_nic_choice = True
                             break

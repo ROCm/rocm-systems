@@ -2686,7 +2686,9 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
 
 
 class ainic_info_t:
-    def __init__(self, processor_handle):
+    # The RDMA info is read only for the detail: reading it makes the library probe the MTU of every
+    # RDMA port, and the summary is built on every amd-smi run.
+    def __init__(self, processor_handle, detail=False):
         self.handle = processor_handle
         self.asic = amdsmi_wrapper.amdsmi_nic_asic_info_t()
         self.bus = amdsmi_wrapper.amdsmi_nic_bus_info_t()
@@ -2707,11 +2709,12 @@ class ainic_info_t:
         _check_res(
             amdsmi_wrapper.amdsmi_get_nic_port_info(processor_handle, ctypes.byref(self.port))
         )
-        _check_res(
-            amdsmi_wrapper.amdsmi_get_nic_rdma_dev_info(
-                processor_handle, ctypes.byref(self.rdma_dev)
+        if detail:
+            _check_res(
+                amdsmi_wrapper.amdsmi_get_nic_rdma_dev_info(
+                    processor_handle, ctypes.byref(self.rdma_dev)
+                )
             )
-        )
 
 
 def amdsmi_get_ainic_info(
@@ -2719,7 +2722,7 @@ def amdsmi_get_ainic_info(
 ) -> Dict[str, Any]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-    nic_info = ainic_info_t(processor_handle)
+    nic_info = ainic_info_t(processor_handle, detail)
     if detail:
         return amdsmi_get_ainic_info_detail(nic_info)
     else:

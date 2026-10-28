@@ -28,6 +28,11 @@ smi_nic_status_t smi_nic_create_context_for_testing(smi_nic_ctx_t* ctx,
 void smi_nic_fw_info_from_devlink_for_testing(const amd::nic::netlink::DevlinkDeviceInfo& device,
                                               smi_nic_fw_info_t* info);
 
+// Library-local test seam: replaces the devlink client smi_get_nic_telemetry() creates per call;
+// an empty function restores the real one.
+using DevlinkFactory_t = std::function<std::shared_ptr<amd::nic::netlink::IDevlinkClient>()>;
+void smi_nic_set_devlink_factory_for_testing(DevlinkFactory_t factory);
+
 // Library-local test seam: replaces the libibverbs MTU query behind SmiInfiniBandPort; an empty
 // function restores it.
 using PortMtuQuery_t =

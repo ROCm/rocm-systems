@@ -1420,7 +1420,9 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         parser.parse_known_args = _intercept
 
-    def _add_device_arguments(self, subcommand_parser: argparse.ArgumentParser, required=False):
+    def _add_device_arguments(
+        self, subcommand_parser: argparse.ArgumentParser, required=False, nic=False
+    ):
         # Device arguments help text
         gpu_help = (
             f"Select a GPU ID, BDF, or UUID from the possible choices:\n{self.gpu_choices_str}"
@@ -1466,7 +1468,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "-v", "--vf", action="store", nargs="+", help=vf_help, choices=self.vf_choices
             )
 
-        if self.helpers.is_ainic_initialized():
+        if nic and self.helpers.is_ainic_initialized():
             nic_help = (
                 "Select a NIC ID, BDF, or UUID from the possible choices; "
                 f"a bare --nic selects every NIC:\n{self.nic_choices_str}"
@@ -1603,7 +1605,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         list_parser.add_argument("-e", "--enumeration", action="store_true", help=enumeration_help)
 
         # Add Universal Arguments
-        self._add_device_arguments(list_parser, required=False)
+        self._add_device_arguments(list_parser, required=False, nic=True)
         self._add_command_modifiers(list_parser)
 
     def _add_static_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1795,7 +1797,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
 
         # Add Universal Arguments
-        self._add_device_arguments(static_parser, required=False)
+        self._add_device_arguments(static_parser, required=False, nic=True)
         self._add_command_modifiers(static_parser)
 
     def _add_firmware_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1839,7 +1841,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
 
         # Add Universal Arguments
-        self._add_device_arguments(firmware_parser, required=False)
+        self._add_device_arguments(firmware_parser, required=False, nic=True)
         self._add_command_modifiers(firmware_parser)
 
     def _add_bad_pages_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -2366,7 +2368,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(metric_parser)
-        self._add_device_arguments(metric_parser, required=False)
+        self._add_device_arguments(metric_parser, required=False, nic=True)
         command_modifier_group = self._add_command_modifiers(metric_parser)
         command_modifier_group.add_argument(
             "--show-unsupported", action="store_true", required=False, help=show_unsupported_help

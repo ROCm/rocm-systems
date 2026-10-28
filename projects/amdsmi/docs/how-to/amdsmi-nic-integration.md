@@ -166,6 +166,7 @@ enumerate one vendor's hardware.
                            std::shared_ptr<amd::smi::nic::transport::NicTransport> transport) = 0;
      virtual NicVendor vendor() const = 0;  // descriptive only
      virtual bool driver_loaded(const std::string& bdf, DriverType driver_type) const = 0;
+     virtual auto is_driver_present(DriverType driver_type) const -> bool { return false; }
      virtual const std::vector<std::unique_ptr<SmiNic>>& get_nics() const = 0;
 
     protected:
@@ -194,8 +195,7 @@ enumerate one vendor's hardware.
 4. **Ports reuse the shared ethtool transport.** ``SmiNicSystem`` creates one
    transport with ``create_transport(NicBackend_t::Auto)``
    (``inc/smi_nic_transport.h``) and passes it to every plugin and port. ``Auto``
-   tries the netlink backend first (kernel 5.13+ with libnl-3, built only when
-   ``HAVE_LIBNL3`` is defined) and falls back to the ioctl backend for pause and
+   tries the netlink backend first (kernel 5.6+ with libnl-3) and falls back to the ioctl backend for pause and
    link settings; driver info, ethtool statistics and the permanent address always
    use ioctl, and FEC statistics exist only on the netlink backend. A plugin that
    builds on ``SmiNic``/``SmiNicPort`` inherits all of these and does not need to
@@ -312,7 +312,11 @@ All APIs return `amdsmi_status_t`:
 | `AMDSMI_STATUS_NOT_SUPPORTED` | Feature not supported on this device |
 | `AMDSMI_STATUS_FILE_ERROR` | Failed to read sysfs file |
 | `AMDSMI_STATUS_NO_PERM` | Insufficient permissions |
-| `AMDSMI_STATUS_INIT_ERROR` | Library not initialized |
+| `AMDSMI_STATUS_NOT_INIT` | Library not initialized |
+| `AMDSMI_STATUS_NOT_FOUND` | Processor, port or counter not found |
+| `AMDSMI_STATUS_INSUFFICIENT_SIZE` | The caller's buffer is too small |
+| `AMDSMI_STATUS_NO_DATA` | No data was found for the given input |
+| `AMDSMI_STATUS_DRIVER_NOT_LOADED` | The device driver is not loaded |
 | `AMDSMI_STATUS_BUSY` | Device mutex could not be acquired |
 
 ### Unsupported or unavailable fields
@@ -347,6 +351,7 @@ rule and report emptiness through a count instead; see
 #define AMDSMI_MAX_STRING_LENGTH       256  // Max string buffer length
 #define AMDSMI_MAX_NIC_PORTS            32  // Max NIC ports
 #define AMDSMI_MAX_NIC_RDMA_DEV         32  // Max RDMA devices
+#define AMDSMI_MAX_NIC_FW               64  // Max firmware entries
 ```
 
 ### NIC ASIC information
@@ -867,7 +872,7 @@ The ``amdsminic`` static library exposes a vendor-neutral C interface,
 AMD SMI dispatch layer (``src/amd_smi/amd_smi.cc``) calls. It is context-based:
 
 ```c
-smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx, bool is_ainic_only);
+smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx);
 smi_nic_status_t smi_nic_destroy_context(smi_nic_ctx_t ctx);
 smi_nic_status_t smi_discover_nics(smi_nic_ctx_t ctx, smi_nic_discovery_t* discovery);
 
@@ -1252,7 +1257,7 @@ projects/amdsmi/
 │           ├── smi_nic_subsystem.cpp         # read_pci_ids() / resolve_bdf() / is_driver_bound_to_bdf() helpers
 │           ├── smi_nic_interface.cpp         # C interface implementation
 │           ├── smi_nic_transport_ioctl.cpp   # ioctl transport backend + create_transport() factory
-│           ├── smi_nic_transport_netlink.cpp # netlink transport backend and AutoBackend (built when HAVE_LIBNL3)
+│           ├── smi_nic_transport_netlink.cpp # netlink transport backend and AutoBackend
 │           ├── smi_nic_transport_log.cpp     # debug-log decorator applied to every transport backend
 │           ├── smi_nic_telemetry.cpp         # NicTelemetry implementation
 │           ├── smi_nic_hwmon.cpp             # hwmon scan: per-attribute records, label-based ASIC and BOARD lookup
@@ -1327,10 +1332,10 @@ projects/amdsmi/
 
 | Suite | Path | Run with | Covers |
 |-------|------|----------|--------|
-| C++ unit (``NicUnit``) | ``tests/amd_smi_test/unit/nic/`` | ``amdsmitst --gtest_filter='NicUnit.*'`` | transport parsing, NIC type layout, RDMA status, socket ownership, driver-statistics retry |
-| Standalone C++ suites | ``tests/nic/test_nic_*_suite.cpp`` | ``ctest -R nic``; installed beside ``amdsmitst`` | telemetry, discovery, statistics, statistics copy, RDMA resolver, log, VPD; no hardware |
+| C++ unit (``NicUnit``) | ``tests/amd_smi_test/unit/nic/`` | ``amdsmitst --gtest_filter='NicUnit.*'`` | transport parsing, NIC type layout, RDMA status and port resolver, statistics copy, socket ownership, driver-statistics retry, device text |
+| Standalone C++ suites | ``tests/nic/test_nic_*_suite.cpp`` | ``ctest -R nic``; installed beside ``amdsmitst`` | telemetry, discovery, statistics, log, VPD and the check suite; no hardware |
 | Python unit | ``tests/python/unit/system/`` | ``unit_tests.py -k nic`` | CLI and interface behavior against stubs |
-| Hardware | ``tests/amd_smi_test/functional/nic/``, ``tests/python/functional/`` | ``amdsmitst``, ``integration_test.py`` | need a NIC |
+| Hardware | ``tests/amd_smi_test/functional/nic/`` | ``amdsmitst`` | need a NIC |
 
 Tools that need a live interface (``test_nic_transport_suite``,
 ``benchmark_nic_transport``, ``probe_devlink_*``) are run by hand.
@@ -1466,6 +1471,8 @@ int main() {
 
 ```python
 import amdsmi
+# The NIC getters are not re-exported by the amdsmi package; call them from amdsmi_interface.
+from amdsmi import amdsmi_interface
 
 # Initialize with NIC support
 amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_NICS)
@@ -1480,9 +1487,9 @@ try:
             socket, amdsmi.AmdSmiProcessorType.AMD_AINIC
         )
 
-        for idx, nic in enumerate(nic_handles):
+        for idx, nic in enumerate(nic_handles["processor_handles"]):
             # Summary info: BDF, product name, part/serial number, vendor
-            info = amdsmi.amdsmi_get_ainic_info(nic)
+            info = amdsmi_interface.amdsmi_get_ainic_info(nic)
             print(f"NIC {idx}:")
             print(f"  BDF:           {info['bdf']}")
             print(f"  Product Name:  {info['Product Name']}")
@@ -1491,7 +1498,7 @@ try:
             print(f"  Vendor Name:   {info['Vendor Name']}")
 
             # Detailed info: pass detail=True for the full nested dict (ASIC IDs, etc.)
-            detail = amdsmi.amdsmi_get_ainic_info(nic, detail=True)
+            detail = amdsmi_interface.amdsmi_get_ainic_info(nic, detail=True)
             asic = detail["ASIC"]
             print(f"  Vendor ID:     {asic['VENDOR_ID']}")
             print(f"  Device ID:     {asic['DEVICE_ID']}")
@@ -1499,7 +1506,7 @@ try:
             print(f"  Capability:    {asic['CAPABILITY']}")  # e.g. ['FWCTL', 'NETDEV']
 
             # Firmware versions (name -> version).
-            fw = amdsmi.amdsmi_get_nic_fw_info(nic)
+            fw = amdsmi_interface.amdsmi_get_nic_fw_info(nic)
             for name, version in fw.items():
                 print(f"  FW {name}: {version}")
 finally:
@@ -1634,16 +1641,17 @@ be loaded on the platform performing the queries.
 
 ### Build system
 
-The BM AMD SMI library uses CMake (≥ 3.15) with a C++17-compatible compiler.
+The BM AMD SMI library uses CMake (≥ 3.20) with a C++17-compatible compiler.
 The NIC library (``amdsminic``) is built as part of the main library. The netlink
-transport backend is compiled only when libnl-3 is present (detected via
-``pkg-config``, guarded by ``HAVE_LIBNL3``); otherwise the ioctl backend is used.
-The netlink sources also need Linux UAPI headers from kernel 5.13 or newer
-(``linux/ethtool_netlink.h`` with ``ETHTOOL_A_FEC_STATS``, and the
-``DEVLINK_ATTR_PORT_SPLITTABLE`` and ``DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER``
-devlink attributes). The build does not
-detect their absence, so a build host with older headers, such as Ubuntu 20.04
-(kernel 5.4 headers), is not supported.
+transport backend links libnl-3, which the top-level build requires (a bundled
+copy or ``pkg-config``); the ioctl backend stays the runtime fallback.
+CMake also probes the Linux UAPI headers. Without ``linux/ethtool_netlink.h`` and
+``ETHTOOL_A_FEC_STAT_CORR_BITS`` (kernel 5.13 headers or newer), the build uses a stub
+ethtool client: the transport falls back to ioctl and FEC statistics are
+unavailable. Without the ``DEVLINK_ATTR_PORT_SPLITTABLE`` or
+``DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER`` devlink attribute, the port split
+state reads ``N/A`` and the board serial is empty. A build host with kernel 5.4
+headers, such as Ubuntu 20.04, therefore builds with this reduced data.
 The host AMD SMI library has its own build system, documented in its repository
 linked above.
 
@@ -1658,7 +1666,7 @@ linked above.
 The following runtime dependencies are relevant to the BM AMD SMI NIC library:
 
 - Linux kernel sysfs (PCIe device info, netdev, InfiniBand/RDMA, VPD)
-- libnl-3 (optional; enables the netlink ethtool transport backend; requires kernel UAPI headers 5.13 or newer at build time)
+- libnl-3 (required by the top-level build; the netlink ethtool transport backend uses it, and FEC statistics need kernel UAPI headers 5.13 or newer at build time)
 - libibverbs (optional; the build needs ``infiniband/verbs.h`` and the library is loaded at run time as ``libibverbs.so.1``; without either, the RDMA MTU falls back to sysfs or reads ``N/A``)
 - The relevant NIC vendor kernel driver (required for that vendor's device discovery)
 

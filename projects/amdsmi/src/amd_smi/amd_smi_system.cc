@@ -426,8 +426,10 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
 }
 
 static const nic_info_getters_t kRealNicInfoGetters = {
-    smi_get_nic_bus_info,  smi_get_nic_driver_info,   smi_get_nic_asic_info, smi_get_nic_numa_info,
-    smi_get_nic_port_info, smi_get_nic_rdma_dev_info, smi_get_nic_kind,      smi_get_nic_capability,
+    smi_get_nic_bus_info,   smi_get_nic_driver_info, smi_get_nic_asic_info,
+    smi_get_nic_numa_info,  smi_get_nic_port_info,   smi_get_nic_rdma_dev_info_without_mtu,
+    smi_get_nic_kind,       smi_get_nic_capability,  smi_get_nic_rdma_mtu,
+    smi_nic_create_context,
 };
 
 // Rebound only by nic_set_info_getters_for_testing(); production never writes it.
@@ -436,6 +438,15 @@ static const nic_info_getters_t* g_nic_info_getters = &kRealNicInfoGetters;
 // See amd_smi/impl/amd_smi_nic_testing.h for the contract.
 void nic_set_info_getters_for_testing(const nic_info_getters_t* getters) {
   g_nic_info_getters = getters ? getters : &kRealNicInfoGetters;
+}
+
+const nic_info_getters_t& nic_production_info_getters_for_testing() { return kRealNicInfoGetters; }
+
+smi_nic_status_t fill_ainic_rdma_mtu(smi_nic_ctx_t ctx, uint64_t bdf_int,
+                                     amdsmi_nic_rdma_devices_info_t& rdma_dev) {
+  static_assert(sizeof(smi_nic_rdma_devices_info_t) == sizeof(rdma_dev));
+  return g_nic_info_getters->rdma_mtu(ctx, bdf_int,
+                                      reinterpret_cast<smi_nic_rdma_devices_info_t*>(&rdma_dev));
 }
 
 // RDMA device info is optional for an AI-NIC; a missing RDMA/ionic driver or an
@@ -569,7 +580,12 @@ static void install_nic_debug_log() {
 
 amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
   install_nic_debug_log();
-  smi_nic_status_t status = smi_nic_create_context(&ainic_ctx_);
+  smi_nic_status_t status = SMI_NIC_STATUS_SUCCESS;
+  {
+    // amdsmi_init must not fork per RDMA port; the MTU is probed when something first reads it.
+    const auto deferral = ScopedRdmaMtuDeferral_t{};
+    status = g_nic_info_getters->create_context(&ainic_ctx_);
+  }
   CHK_AMDNIC_RET(status);
 
   smi_nic_discovery_t discovery = {};

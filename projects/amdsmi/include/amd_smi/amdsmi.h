@@ -3377,8 +3377,8 @@ typedef struct {
  * @brief NIC RDMA port information
  *
  * Integer fields are set to the maximum value of their type (0xFF / 0xFFFF)
- * when the corresponding attribute is unavailable. The MTU values are read once, when the
- * NIC is discovered, and do not follow a later change.
+ * when the corresponding attribute is unavailable. The MTU values are read once, the first time
+ * they are needed, and do not follow a later change.
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
@@ -7789,6 +7789,8 @@ amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handl
  *  @param[in] processor_handle The identifier of the given device.
  *
  *  @param[in] link_type The amdsmi_link_type_t level to search for nearest GPUs.
+ *             ::AMDSMI_LINK_TYPE_NUMA and ::AMDSMI_LINK_TYPE_XNUMA only relate a NIC to a GPU,
+ *             so they return ::AMDSMI_STATUS_INVAL here.
  *
  *  @param[in,out] topology_nearest_info
  *                 .count;
