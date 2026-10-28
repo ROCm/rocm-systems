@@ -29,6 +29,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Replaced the experimental `--torch-trace`, `--triton-trace`, `--ml-api-trace`, `--list-*-operators`, and `--*-operator` flags with `--trace-ml-api [torch triton]`, `--list-operators [torch triton user]`, and `--operator [FW:PATTERN]`. User-defined regions are included with every `--trace-ml-api` run. Older workloads remain valid counter profiles, but operator analyze rejects them on seeing stale operator flags.
 
+* `--list-operators user` and `--operator user:PATTERN` select a user-defined region. Unlike framework-based selection, which drops non-matching child nodes, user region selection includes everything in that region.
+
 * `--trace-ml-api triton` does not capture the Triton kernels that `torch.compile` generates. Use `--trace-ml-api torch` for those kernels.
 
 * The PyTorch and Triton operator call trees now show each operator's arguments. Torch and Triton selectors can be passed together to `--operator`.
