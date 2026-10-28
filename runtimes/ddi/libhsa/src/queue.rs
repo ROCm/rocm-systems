@@ -25,9 +25,9 @@ use std::time::Duration;
 
 use rocddi::device::Device;
 use rocddi::device::gpu::queue::{
-    AqlControlRegion, MAX_PRIVATE_SEGMENT_BYTES, QueueAccessWidth, QueueErrorEvent,
-    QueueParameters, QueuePriority, QueueProducerMode, QueueRequest, QueueRingMemory, QueueScratch,
-    QueueTransport, RetainedQueue, SdmaEngineSelection, plan_scratch,
+    AqlControlRegion, MAX_PRIVATE_SEGMENT_BYTES, QueueErrorEvent, QueueParameters, QueuePriority,
+    QueueProducerMode, QueueRequest, QueueRingMemory, QueueScratch, RetainedQueue,
+    SdmaEngineSelection, plan_scratch,
 };
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 use rocddi::topology::GpuInfo;

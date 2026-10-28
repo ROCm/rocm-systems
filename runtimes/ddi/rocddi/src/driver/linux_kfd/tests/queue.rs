@@ -14,7 +14,9 @@ use std::sync::Arc;
 fn shared<T>(value: T) -> Shared<T> {
     Shared::new(value).unwrap()
 }
-use crate::device::gpu::queue::{QueueProducerMode, QueueRingMemory, SdmaEngineSelection};
+use crate::device::gpu::queue::{
+    QueueProducerMode, QueueRingMemory, QueueTransportExpectation, SdmaEngineSelection,
+};
 use std::collections::{BTreeMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -965,6 +967,7 @@ fn all_formats_and_priorities_reach_native_queue_creation() {
         desc.priority = priority;
         let mut queue = fixture.create(desc).unwrap();
         let info = queue.info().unwrap();
+        assert!(info.valid_for(QueueTransportExpectation::new(desc)));
         assert_eq!(info.sdma_engine_id, None);
         assert_eq!(info.index_unit_bytes, unit);
         assert_eq!(info.read_index_width, read_width);
