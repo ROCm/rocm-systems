@@ -5025,6 +5025,8 @@ def test_generated_rdna_image_load_tracks_d16_destination_preservation(
     source = (
         amdgpu_generated_root / _generated_dir_name(arch) / f'{stem}.cpp'
     ).read_text()
+    assert '#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"' in source
+    assert '#include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"' not in source
     image_load_uses = _generated_function_body(
         source, f'void ImageLoad{suffix}::implicit_uses'
     )

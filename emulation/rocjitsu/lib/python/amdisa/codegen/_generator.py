@@ -14878,7 +14878,7 @@ class CodeGenerator:
                     ):
                         model_cpp_includes.append(
                             (
-                                'rocjitsu/isa/arch/amdgpu/shared/image_access.h',
+                                'rocjitsu/isa/arch/amdgpu/shared/image_address.h',
                                 False,
                             )
                         )
