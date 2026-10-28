@@ -47,6 +47,9 @@
 //   devices_fail  - init() succeeds but devices() reports an error, which is the
 //                   companion case where finalize() must still run.
 // Both new modes record via RCCL_NET_TEST_{INIT,FINALIZE}_FILE.
+//   shared_nic    - no failure: a second device named like the GIN/RMA stub's
+//                   only device, so one NIC is net device 1 but GIN/RMA device 0
+//                   (NetPluginSharedNic, NCCL 2.32.3 per-backend XML nodes).
 //
 // RCCL_GIN_TEST_PLUGIN_MODE selects a failure to inject on the GIN/RMA stub:
 //   init_fail     - init() reports an error (finalize must not run).
@@ -78,12 +81,15 @@
 #define NCCL_PLUGIN_MAX_RECVS 1
 
 static char kPluginName[] = "ReloadTest";
+// The GIN/RMA stub's only device (below). shared_nic gives net device 1 this name too.
+static char kRmaPluginName[] = "RmaReloadStub";
 
 enum PluginTestMode {
   kModeDefault,
   kModeAssignFail,
   kModeInitFail,
   kModeDevicesFail,
+  kModeSharedNic,
 };
 
 static void recordLine(const char* envVar) {
@@ -110,6 +116,7 @@ static PluginTestMode testMode() {
   if (strcmp(mode, "assign_fail") == 0) return kModeAssignFail;
   if (strcmp(mode, "init_fail") == 0) return kModeInitFail;
   if (strcmp(mode, "devices_fail") == 0) return kModeDevicesFail;
+  if (strcmp(mode, "shared_nic") == 0) return kModeSharedNic;
   return kModeDefault;
 }
 
@@ -134,12 +141,12 @@ __hidden ncclResult_t pluginFinalize(void* ctx) {
 
 __hidden ncclResult_t pluginDevices(int* ndev) {
   if (testMode() == kModeDevicesFail) return ncclSystemError;
-  *ndev = 1;
+  *ndev = (testMode() == kModeSharedNic) ? 2 : 1;
   return ncclSuccess;
 }
 
 __hidden ncclResult_t pluginGetProperties(int dev, ncclNetProperties_v12_t* props) {
-  props->name = kPluginName;
+  props->name = (testMode() == kModeSharedNic && dev == 1) ? kRmaPluginName : kPluginName;
   props->pciPath = nullptr;
   props->guid = 0;
   props->ptrSupport = NCCL_PTR_HOST;
@@ -213,8 +220,6 @@ extern "C" __exported const ncclNet_v12_t ncclNetPlugin_v12 = {
 // ---------------------------------------------------------------------------
 // One-sided RMA plugin (ncclGinPlugin_v13 / ncclRmaPlugin_v13)
 // ---------------------------------------------------------------------------
-//
-static char kRmaPluginName[] = "RmaReloadStub";
 
 struct RmaStubMr {
   void* base;

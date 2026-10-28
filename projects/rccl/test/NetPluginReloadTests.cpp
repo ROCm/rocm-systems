@@ -23,6 +23,12 @@
 // only fills ncclNet.finalize once ncclNet_v10->init() has succeeded, so the call
 // went through a null function pointer. The guard must suppress finalize() after a
 // failed init() while still running it when init() succeeded and devices() failed.
+//
+// NetPluginSharedNic — NCCL 2.32.3 "topo: create separate XML nodes for network backends"
+// (AICOMRCCL-3378): ncclTopoPopulateNics() gives GIN and RMA devices their own <gin> and <rma>
+// nodes instead of gin="1"/rma="1" on the <net> node of the same NIC name, so each backend keeps
+// its own "dev" index. The GIN/RMA stub's only NIC is net device 1 in shared_nic mode, and
+// NCCL_TOPO_DUMP_FILE shows the node and index each backend got for it.
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
@@ -32,6 +38,7 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <map>
 #include <string>
 
 #include "common/ProcessIsolatedTestRunner.hpp"
@@ -92,6 +99,51 @@ void initAndDestroyComm() {
   ncclComm_t comm = nullptr;
   ASSERT_EQ(ncclCommInitRank(&comm, 1, id, 0), ncclSuccess);
   ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
+}
+
+// The GIN/RMA stub's device name in plugin/net_reload_plugin.cpp.
+const char* const kSharedNic = "RmaReloadStub";
+
+// Value of attribute `key` in a dumped XML element, or "" when it has none.
+std::string xmlAttr(const std::string& element, const std::string& key) {
+  const std::string needle = " " + key + "=\"";
+  size_t start = element.find(needle);
+  if (start == std::string::npos) return "";
+  start += needle.size();
+  return element.substr(start, element.find('"', start) - start);
+}
+
+// Inits and destroys a single-rank comm whose NET, RMA and GIN backends all list kSharedNic, with
+// NCCL_TOPO_DUMP_FILE set, and returns the dumped elements named kSharedNic by tag ("net", ...).
+void dumpSharedNic(std::map<std::string, std::string>& nodes) {
+  ScopedTempFile dumpFile("/tmp/rccl_topo_dump_XXXXXX");
+  ASSERT_TRUE(dumpFile.valid()) << "failed to create topology dump file";
+  ASSERT_EQ(setenv("RCCL_NET_TEST_PLUGIN_MODE", "shared_nic", 1), 0);
+  ASSERT_EQ(setenv("NCCL_NET_PLUGIN", "STATIC_PLUGIN", 1), 0);
+  ASSERT_EQ(unsetenv("NCCL_NET"), 0);
+  // RMA comes from the stub; GIN from RCCL's GIN proxy, which runs over the RMA plugin.
+  ASSERT_EQ(setenv("NCCL_RMA_PLUGIN", "STATIC_PLUGIN", 1), 0);
+  ASSERT_EQ(setenv("NCCL_GIN_PLUGIN", "none", 1), 0);
+  ASSERT_EQ(setenv("NCCL_GIN_ENABLE", "1", 1), 0);
+  // Keep the two net devices separate: NIC fusion would try to merge them through makeVDevice.
+  ASSERT_EQ(setenv("NCCL_NET_MERGE_LEVEL", "LOC", 1), 0);
+  ASSERT_EQ(setenv("NCCL_TOPO_DUMP_FILE", dumpFile.path().c_str(), 1), 0);
+  ASSERT_NO_FATAL_FAILURE(initAndDestroyComm());
+
+  std::ifstream f(dumpFile.path());
+  std::string line;
+  while (std::getline(f, line)) {
+    if (xmlAttr(line, "name") != kSharedNic) continue;
+    size_t tag = line.find('<') + 1;
+    nodes[line.substr(tag, line.find(' ', tag) - tag)] = line.substr(tag - 1);
+  }
+}
+
+// All dumped elements, for failure messages.
+std::string describe(const std::map<std::string, std::string>& nodes) {
+  std::string all;
+  for (const auto& node : nodes) all += "\n  " + node.second;
+  return all.empty() ? " (none)" : all;
 }
 
 } // namespace
@@ -282,6 +334,41 @@ TEST(NetPluginInitFail, FinalizesWhenDevicesFailsAfterInit) {
         << "external plugin init must run before devices() is probed";
     EXPECT_EQ(countLines(finalizeFile.path()), 1)
         << "finalize() must release the context when devices() fails after a good init()";
+  });
+}
+
+TEST(NetPluginSharedNic, DumpMarksNicForEveryBackend) {
+  RUN_ISOLATED_TEST("NetPluginSharedNic.DumpMarksNicForEveryBackend", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    std::map<std::string, std::string> nodes;
+    ASSERT_NO_FATAL_FAILURE(dumpSharedNic(nodes));
+    // Holds whether the backends share one <net> node or each has a node of its own.
+    for (const char* backend : {"net", "gin", "rma"}) {
+      bool marked = false;
+      for (const auto& node : nodes) marked |= xmlAttr(node.second, backend) == "1";
+      EXPECT_TRUE(marked) << "the " << backend << " plugin did not import " << kSharedNic
+                          << " into the topology; dumped:" << describe(nodes);
+    }
+  });
+}
+
+TEST(NetPluginSharedNic, GinAndRmaKeepTheirOwnDevIndex) {
+  RUN_ISOLATED_TEST("NetPluginSharedNic.GinAndRmaKeepTheirOwnDevIndex", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    std::map<std::string, std::string> nodes;
+    ASSERT_NO_FATAL_FAILURE(dumpSharedNic(nodes));
+    // kSharedNic is GIN/RMA device 0 but net device 1. A <net> node shared by all three backends
+    // has one "dev", which the net plugin, imported last, sets to 1.
+    const std::pair<const char*, const char*> devByTag[] = {{"gin", "0"}, {"rma", "0"}, {"net", "1"}};
+    for (const auto& [tag, dev] : devByTag) {
+      auto it = nodes.find(tag);
+      EXPECT_EQ(it == nodes.end() ? "" : xmlAttr(it->second, "dev"), dev)
+          << "dev of the <" << tag << "> node for " << kSharedNic << " (\"\": no such node); dumped:" << describe(nodes);
+    }
   });
 }
 
