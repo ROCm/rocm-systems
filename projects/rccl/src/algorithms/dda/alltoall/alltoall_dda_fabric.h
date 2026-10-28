@@ -158,7 +158,7 @@ __device__ __forceinline__ void ddaA2APeerCopy(T* dst, const T* src, size_t begi
 // Peer-major push alltoall, out of place: block b pushes its slice of the chunk to peer (self + k) % nRanks, with
 // k = b / blocksPerPeer, and drains the slot of rank (self - k) % nRanks (written by that rank's block b).
 // The share is cut into `pieces` runs of rows: step p pushes piece p, drains the source's piece p - 1, then posts p.
-// Flags are epoch flags (see FabricGpuBarrier); scratch accesses are system-scope, so posts and waits need no fence.
+// The flags are of FabricGpuBarrier: epoch flags by default, CAS flags with RCCL_DDA_A2A_PUSH_PEER_EPOCH=0
 template <typename T>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
@@ -181,7 +181,7 @@ __launch_bounds__(512)
 
   // Entry handshake instead of a full barrier: only peer reads the slot this block writes, so wait for peer alone.
   const uint32_t epoch = barrier.epochBegin();
-  if (k != 0) barrier.epochSignalWait(srcRank, peer, epoch);
+  if (k != 0) barrier.signalWait(srcRank, peer, epoch);
 
   {
     // Every thread has at most nRows rows; pieces are whole unroll groups of rows. All ranks derive the same piece
@@ -196,18 +196,17 @@ __launch_bounds__(512)
       return {lo, hi < nLines ? hi : nLines};
     };
 
-    const FabricGpuBarrier::FlagType* const ready = barrier.epochFlagFrom(srcRank);
     for (size_t p = 0; p <= nPieces; ++p) {
       if (p < nPieces) {
          auto [lo, hi] = piece(p);
          ddaA2APeerCopy<false, true>(dst, src, lo, hi, stride);
       }
       if (p > 0) {
-        barrier.epochWaitPiece(ready, epoch, static_cast<unsigned>(p - 1));
+        barrier.waitPeer(srcRank, epoch, static_cast<unsigned>(p - 1));
         auto [lo, hi] = piece(p - 1);
         ddaA2APeerCopy<true, false>(recvbuff + slot, ipcbuffs[selfRank] + slot, lo, hi, stride);
       }
-      if (p < nPieces) barrier.epochPostPiece(peer, epoch, static_cast<unsigned>(p));
+      if (p < nPieces) barrier.postPeer(peer, epoch, static_cast<unsigned>(p));
     }
   }
   barrier.epochEnd(epoch, pieces);
