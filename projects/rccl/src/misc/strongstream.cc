@@ -367,6 +367,40 @@ ncclResult_t ncclStreamWaitStream(cudaStream_t a, cudaStream_t b, cudaEvent_t sc
   return ncclSuccess;
 }
 
+ncclResult_t ncclStreamAdvanceToStream(cudaStream_t s, cudaStream_t source) {
+  cudaStreamCaptureStatus status;
+  cudaGraphNode_t const* nodes = nullptr;
+  size_t count = 0;
+#if CUDART_VERSION >= 13000
+  cudaError_t res = hipStreamGetCaptureInfo_v3(source, &status, nullptr, nullptr, &nodes, nullptr, &count);
+#else
+  cudaError_t res = hipStreamGetCaptureInfo_v2(source, &status, nullptr, nullptr, &nodes, &count);
+#endif
+
+#if CUDART_VERSION >= 12030
+  if (res == cudaErrorLossyQuery) { // CUDA is telling us the dependencies have edge annotations.
+    cudaGraphEdgeData const* edges;
+    CUDACHECK(cudaStreamGetCaptureInfo_v3(source, &status, nullptr, nullptr, &nodes, &edges, &count));
+    CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(s, (cudaGraphNode_t*)nodes, edges, count,
+                                                     cudaStreamSetCaptureDependencies));
+  }
+#else
+  if (false) {
+  }
+#endif
+  else {
+    CUDACHECK(res /* = cudaStreamGetCaptureInfo_v2(...)*/);
+#if CUDART_VERSION >= 13000
+    CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(s, (cudaGraphNode_t*)nodes, nullptr, count,
+                                                     cudaStreamSetCaptureDependencies));
+#else
+    CUDACHECK(cudaStreamUpdateCaptureDependencies(s, (cudaGraphNode_t*)nodes, count,
+                                                  cudaStreamSetCaptureDependencies));
+#endif
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cudaEvent_t e) {
   if (g.graphId == ULLONG_MAX) {
     CUDACHECK(cudaStreamWaitEvent(s, e, 0));
@@ -374,38 +408,7 @@ ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cu
     cudaStream_t tmp;
     CUDACHECK(cudaStreamCreateWithFlags(&tmp, cudaStreamNonBlocking));
     CUDACHECK(cudaStreamWaitEvent(tmp, e, 0));
-
-    cudaStreamCaptureStatus status;
-    cudaGraphNode_t const* nodes;
-    size_t count = 0;
-#if CUDART_VERSION >= 13000
-    cudaError_t res = hipStreamGetCaptureInfo_v3(tmp, &status, nullptr, nullptr, &nodes, nullptr, &count);
-#else
-    cudaError_t res = hipStreamGetCaptureInfo_v2(tmp, &status, nullptr, nullptr, &nodes, &count);
-#endif
-
-#if CUDART_VERSION >= 12030
-    if (res == cudaErrorLossyQuery) { // CUDA is telling us the dependencies have edge annotations.
-      cudaGraphEdgeData const* edges;
-      CUDACHECK(cudaStreamGetCaptureInfo_v3(tmp, &status, nullptr, nullptr, &nodes, &edges, &count));
-      CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(s, (cudaGraphNode_t*)nodes, edges, count,
-                                                       cudaStreamSetCaptureDependencies));
-    }
-#else
-    if (false) {
-    }
-#endif
-    else {
-      CUDACHECK(res /* = cudaStreamGetCaptureInfo_v2(...)*/);
-#if CUDART_VERSION >= 13000
-      CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(s, (cudaGraphNode_t*)nodes, nullptr, count,
-                                                       cudaStreamSetCaptureDependencies));
-#else
-      CUDACHECK(cudaStreamUpdateCaptureDependencies(s, (cudaGraphNode_t*)nodes, count,
-                                                    cudaStreamSetCaptureDependencies));
-#endif
-    }
-
+    NCCLCHECK(ncclStreamAdvanceToStream(s, tmp));
     CUDACHECK(cudaStreamDestroy(tmp));
   }
   return ncclSuccess;
