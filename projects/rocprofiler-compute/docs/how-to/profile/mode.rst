@@ -956,7 +956,6 @@ option when profiling a PyTorch workload:
    INFO Path: /home/auser/workloads/simple_net/MI325X
    INFO Target: MI325X
    INFO Command: python simple_net.py
-   INFO Torch Trace: Enabled
    INFO Kernel Selection: None
    INFO Kernel Iteration Range: None
    INFO Hardware Blocks: All

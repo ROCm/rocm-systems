@@ -58,7 +58,9 @@ class SimpleNet(nn.Module):
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="SimpleNet torch-trace sample")
+    parser = argparse.ArgumentParser(
+        description="SimpleNet --trace-ml-api torch sample"
+    )
     parser.add_argument(
         "--user-range",
         action="store_true",
