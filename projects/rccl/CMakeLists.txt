@@ -815,8 +815,6 @@ set(RCCL_EMBEDDED_TUNER_HEADER ${PROJECT_BINARY_DIR}/include/rccl_tuner_embedded
 # when an input is newer than the output, so deleting a CSV would leave it
 # embedded. The script rewrites the header only when the content changes, so
 # running every build does not churn rebuilds.
-# CSV files are intentionally NOT in DEPENDS; the script's no-change guard
-# prevents spurious recompilation when content is identical.
 add_custom_target(rccl_embedded_tuner_configs
   ALL
   COMMAND ${Python3_EXECUTABLE} ${RCCL_EMBEDDED_TUNER_SCRIPT}
