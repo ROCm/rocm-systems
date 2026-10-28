@@ -209,7 +209,6 @@ class cli_analysis(OmniAnalyze_Base):
         operator_patterns = getattr(args, "operator_patterns", None)
         listing_requested = list_selectors is not None
         filter_requested = operator_patterns is not None and not listing_requested
-        list_backends = list_selectors if listing_requested else []
         filter_backends = (
             list(_restrict_patterns_to_operator_backends(operator_patterns))
             if filter_requested
@@ -258,7 +257,7 @@ class cli_analysis(OmniAnalyze_Base):
                 )
                 workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
                 workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
-                self.list_operators(path_info[0], kernel_top_df, list_backends)
+                self.list_operators(path_info[0], kernel_top_df, list_selectors)
                 continue
 
             if filter_requested:
