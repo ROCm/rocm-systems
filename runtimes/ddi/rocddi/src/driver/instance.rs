@@ -270,7 +270,7 @@ impl DeviceDriverState {
         match self {
             Self::LinuxKfd { driver, state } => Some(GpuDriverRef::LinuxKfd { driver, state }),
             #[cfg(test)]
-            Self::Test { .. } => None,
+            Self::Test { driver, state } => Some(GpuDriverRef::Test { driver, state }),
         }
     }
     /// Subscribes to the activated driver's retained system notifications.
@@ -427,6 +427,20 @@ pub(crate) enum GpuDriverRef<'a> {
         driver: &'a Shared<KfdDriver>,
         state: &'a KfdDeviceState,
     },
+    /// GPU capability exercised by the test driver without KFD.
+    #[cfg(test)]
+    Test {
+        driver: &'a Shared<test_driver::TestDriver>,
+        state: &'a test_driver::TestDevice,
+    },
+}
+
+#[cfg(test)]
+pub(crate) fn unsupported_test_gpu() -> Error {
+    Error::Operation {
+        kind: ErrorKind::Unsupported,
+        detail: "test GPU does not implement this native capability",
+    }
 }
 
 /// Routes GPU-only operations through a checked GPU driver projection.
@@ -434,36 +448,48 @@ impl GpuDriverRef<'_> {
     pub(crate) fn xnack_enabled(&self) -> Result<bool, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.xnack_enabled(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn supports_expert_scheduling(&self) -> Result<bool, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.supports_expert_scheduling(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn set_persisting_l2_cache_size(&self, size: u32) -> Result<(), Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.set_persisting_l2_cache_size(state, size),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn available_memory(&self) -> Result<u64, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.available_memory(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn available_sdma_engines(&self) -> Result<u32, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.available_sdma_engines(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn clock_counters(&self) -> Result<ClockCounters, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.clock_counters(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
@@ -473,12 +499,16 @@ impl GpuDriverRef<'_> {
     ) -> Result<Vec<PcSamplingConfiguration>, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.pc_sampling_configurations(state, set),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn surface_config(&self) -> Result<crate::device::gpu::GpuSurfaceConfig, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.surface_config(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
@@ -496,18 +526,24 @@ impl GpuDriverRef<'_> {
             Self::LinuxKfd { driver, state } => unsafe {
                 driver.set_trap_handler(state, handler_address, memory_address)
             },
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn spm_acquire(&self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.spm_acquire(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
     pub(crate) fn spm_release(&self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.spm_release(state),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
         }
     }
 
@@ -526,6 +562,11 @@ impl GpuDriverRef<'_> {
             Self::LinuxKfd { driver, state } => unsafe {
                 driver.spm_set_destination(state, size, timeout, destination)
             },
+            #[cfg(test)]
+            Self::Test { .. } => Err(SpmDestinationFailure {
+                error: unsupported_test_gpu(),
+                report: SpmDestinationReport::default(),
+            }),
         }
     }
 }
