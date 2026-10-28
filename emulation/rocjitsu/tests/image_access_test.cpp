@@ -362,6 +362,22 @@ TEST_F(Cdna2ImageAccessTest, XyzOneStoresRetainCompactedSelectorBehavior) {
   }
 }
 
+TEST_F(Cdna2ImageAccessTest, ArgbStoreRetainsCompactedSelectorBehavior) {
+  constexpr uint32_t kYzwx = 5 | (6 << 3) | (7 << 6) | (4 << 9);
+  Image image;
+  image.data_format = kDfmt8888;
+  image.num_format = kNfmtUint;
+  image.selectors = kYzwx;
+  bind(image);
+  wf->set_exec(1);
+  write_coordinates(0, {0, 0, 0});
+  for (uint32_t component = 0; component < 4; ++component)
+    cu->write_vgpr(vb + 8 + component, 0, 0x11 * (component + 1));
+
+  ASSERT_TRUE(issue(false, 15));
+  EXPECT_EQ(memory.read32(kBase), 0x33221144u);
+}
+
 TEST_F(Cdna2ImageAccessTest, LoadWithoutUnormStillUsesIntegerCoordinates) {
   Image image;
   image.width = 4;
