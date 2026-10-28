@@ -25,12 +25,6 @@
 
 __global__ void GraphExecUpdateStore(int* output, int value) { output[0] = value; }
 
-__global__ void GraphExecUpdateDelay(unsigned long long cycles) {
-  const unsigned long long start = clock64();
-  while (clock64() - start < cycles) {
-  }
-}
-
 __global__ void GraphExecUpdateDelayStore(int* output, int value, unsigned long long cycles) {
   const unsigned long long start = clock64();
   while (clock64() - start < cycles) {
@@ -836,6 +830,10 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_PacketRefresh) {
     HIP_CHECK(hipMemcpy(output_a.ptr(), &zero, sizeof(int), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(output_b.ptr(), &zero, sizeof(int), hipMemcpyHostToDevice));
 
+    int* release = nullptr;
+    HIP_CHECK(hipHostMalloc(&release, sizeof(int)));
+    *release = 0;
+
     hipStream_t stream = nullptr;
     hipGraph_t graph = nullptr;
     hipGraphExec_t exec = nullptr;
@@ -844,10 +842,9 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_PacketRefresh) {
     HIP_CHECK(hipStreamCreate(&stream));
     HIP_CHECK(hipGraphCreate(&graph, 0));
 
-    unsigned long long cycles = 50000000;
-    void* delay_args[] = {&cycles};
+    void* delay_args[] = {&release};
     hipKernelNodeParams delay_params{};
-    delay_params.func = reinterpret_cast<void*>(GraphExecUpdateDelay);
+    delay_params.func = reinterpret_cast<void*>(WaitForHostRelease);
     delay_params.gridDim = dim3(1);
     delay_params.blockDim = dim3(1);
     delay_params.kernelParams = delay_args;
@@ -871,8 +868,8 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_PacketRefresh) {
     hipGraphNode_t error_node = nullptr;
     hipGraphExecUpdateResult result = hipGraphExecUpdateError;
     HIP_CHECK(hipGraphExecUpdate(exec, graph, &error_node, &result));
-    REQUIRE(result == hipGraphExecUpdateSuccess);
-    REQUIRE(hipStreamQuery(stream) == hipErrorNotReady);
+    const hipError_t query = hipStreamQuery(stream);
+    *release = 1;  // release the spin before any throwing check so cleanup can never hang
     HIP_CHECK(hipGraphLaunch(exec, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -880,11 +877,14 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_PacketRefresh) {
     int actual_b = 0;
     HIP_CHECK(hipMemcpy(&actual_a, output_a.ptr(), sizeof(int), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(&actual_b, output_b.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+    REQUIRE(result == hipGraphExecUpdateSuccess);
+    REQUIRE(query == hipErrorNotReady);
     REQUIRE(actual_a == 11);
     REQUIRE(actual_b == 22);
     HIP_CHECK(hipGraphExecDestroy(exec));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipHostFree(release));
   }
 
   SECTION("extra kernel params") {
