@@ -1674,6 +1674,17 @@ class CodeGenerator:
             )
         )
 
+    @staticmethod
+    def _encoded_source_operands(inst: Instruction) -> list[Operand]:
+        # Read/write destinations such as V_FMAC's accumulator are semantic
+        # inputs, but they are not the encoded src0/src1 fields modified by
+        # DPP or SDWA.
+        return [
+            op
+            for op in inst.operands
+            if op.is_input and not op.is_output and not op.fieldless
+        ]
+
     def _instruction_supports_dpp8(self, inst: Instruction, enc_name: str) -> bool:
         supported = self._dpp_opcode_rule(
             inst, enc_name
@@ -1685,17 +1696,9 @@ class CodeGenerator:
             ),
         )
         if supported:
-            src0 = next(
-                (
-                    op
-                    for op in inst.operands
-                    if op.is_input and not op.is_output and not op.fieldless
-                ),
-                None,
-            )
-            # Both ordinary and MOVREL staging use this decoded source width.
+            sources = self._encoded_source_operands(inst)
             assert (
-                src0 is None or src0.size <= 32
+                not sources or sources[0].size <= 32
             ), f'{inst.name}: DPP8 requires a source no wider than 32 bits'
         return supported
 
@@ -7063,6 +7066,12 @@ class CodeGenerator:
             ),
             result_writer=result_writer,
         )
+        if ctx.supports_dpp8 and op in ('src', 'srcdst', 'srcdst2'):
+            # MOVREL builds rel_src from the semantic src[0], which can differ
+            # from the encoded source selected for ordinary DPP staging.
+            assert (
+                src_operands[0].size <= 32
+            ), f'{inst.name}: DPP8 requires a source no wider than 32 bits'
         handler = DISPATCH.get(cls)
         if handler is not None:
             return handler(ctx)
@@ -13244,15 +13253,7 @@ class CodeGenerator:
                             # permute path below therefore addresses the real
                             # sources by name and never replaces an architectural
                             # src_operands_[] entry.
-                            _src_input_ops = [
-                                o
-                                for o in inst.operands
-                                # Read/write destinations such as V_FMAC's
-                                # accumulator are semantic inputs, but they are
-                                # not the encoded src0/src1 fields modified by
-                                # DPP or SDWA.
-                                if o.is_input and not o.is_output and not o.fieldless
-                            ]
+                            _src_input_ops = self._encoded_source_operands(inst)
                             _src0_name = (
                                 _src_input_ops[0].name if _src_input_ops else None
                             )
