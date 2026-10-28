@@ -192,7 +192,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, DrainCq_RepostsOneReceiveForEveryDra
   ncclIbPortRecoveryContext context{};
   context.resCtx = &scene.recvRes;
   context.devIndex = 0;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
   ibv_wc completion{};
   completion.status = IBV_WC_SUCCESS;
   completion.opcode = IBV_WC_RECV;
@@ -215,7 +215,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, DISABLED_DrainCq_SendCompletionDoesN
   ncclIbPortRecoveryContext context{};
   context.resCtx = &scene.recvRes;
   context.devIndex = 0;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
   ibv_wc completion{};
   completion.status = IBV_WC_SUCCESS;
   completion.opcode = IBV_WC_SEND;
@@ -250,7 +250,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, ContextInit_ReceiverPostsAliveAndFin
 
   ASSERT_EQ(ncclIbPortRecoveryContextInit(&scene.recvRes, 1, &context), ncclSuccess);
   ASSERT_NE(context, nullptr);
-  EXPECT_EQ(context->recoveryCq, &scene.verbs[1].cq);
+  EXPECT_EQ(context->recoveryCq, &scene.recoveryCqs[1]);
   EXPECT_EQ(scene.verbs[1].postRecvQps.size(), NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX);
   for (auto* qp : scene.verbs[1].postRecvQps) EXPECT_EQ(qp, scene.recvRes.portRecoveryQps[1].qp);
   EXPECT_EQ(ncclIbPortRecoveryContextDestroy(context), ncclSuccess);
@@ -322,6 +322,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, SenderRecoveryQpsCreationPublishesSt
     const ncclIbQp& qp = scene.sendRes.base.portRecoveryQps[d];
     EXPECT_EQ(qp.devIndex, d);
     EXPECT_EQ(qp.qp->context, &scene.verbs[d].ctx);
+    EXPECT_EQ(qp.qp->send_cq, &scene.recoveryCqs[d]);
     EXPECT_EQ(qp.initAttr.portNum, d + 1);
     EXPECT_EQ(qp.initAttr.qpAccessFlags, IBV_ACCESS_LOCAL_WRITE);
     EXPECT_EQ(info[d].qpn, qp.qp->qp_num);
@@ -435,6 +436,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, ReceiverRecoveryQpsCreationTransitio
   const ncclIbQp& qp = scene.recvRes.portRecoveryQps[0];
   EXPECT_EQ(transitions, (std::vector<char>{'I', 'T', 'S'}));
   EXPECT_EQ(qp.qp->context, &scene.verbs[0].ctx);
+  EXPECT_EQ(qp.qp->send_cq, &scene.recoveryCqs[0]);
   EXPECT_EQ(qp.initAttr.portNum, 1);
   EXPECT_EQ(qp.initAttr.qpAccessFlags, IBV_ACCESS_LOCAL_WRITE);
   EXPECT_EQ(local[0].qpn, qp.qp->qp_num);
@@ -590,7 +592,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, CompletionSender_AliveSendAndAckMess
   context.resCtx = &scene.sendRes.base;
   context.devIndex = 0;
   context.state = ncclIbPortRecoveryStateAliveMessages;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
   ibv_wc completion{};
   completion.opcode = IBV_WC_SEND;
   bool success = false;
@@ -625,7 +627,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, PollCq_ErrorStatusReportsFailure) {
   ncclIbPortRecoveryContext context{};
   context.resCtx = &scene.sendRes.base;
   context.devIndex = 0;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
   ibv_wc completion{};
   completion.status = IBV_WC_REM_ACCESS_ERR;
   scene.verbs[0].wcs.push_back(completion);
@@ -740,7 +742,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, AliveProgress_SenderPostsThenComplet
   context.resCtx = &scene.sendRes.base;
   context.devIndex = 0;
   context.state = ncclIbPortRecoveryStateAliveMessages;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
   g_netIbNowNs = 10000;
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     if (std::strcmp(name, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_INTERVAL") == 0) return int64_t{0};
@@ -767,7 +769,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, AliveProgress_ReceiverBelowSequenceK
   context.resCtx = &scene.recvRes;
   context.devIndex = 0;
   context.state = ncclIbPortRecoveryStateAliveMessages;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
   context.recv.nInOrderMsgsReceived = 0;
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     return std::strcmp(name, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_SEQUENCE_SIZE") == 0 ? int64_t{1} : fallback;
@@ -787,7 +789,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, DISABLED_ContextProgress_ReceiverAck
   context.resCtx = &scene.recvRes;
   context.devIndex = 0;
   context.state = ncclIbPortRecoveryStateAliveMessages;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
   context.ackPosted = true;
   context.timeLastMsg = 0;
   g_netIbNowNs = 100;
@@ -816,7 +818,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest,
   context.resCtx = &scene.recvRes;
   context.devIndex = 0;
   context.state = ncclIbPortRecoveryStateAliveMessages;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
   context.recv.nInOrderMsgsReceived = 1;
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     return std::strcmp(name, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_SEQUENCE_SIZE") == 0 ? int64_t{1} : fallback;
@@ -834,7 +836,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, AckProgress_SenderWaitsInProgressFor
   context.resCtx = &scene.sendRes.base;
   context.devIndex = 0;
   context.state = ncclIbPortRecoveryStateAck;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
   ibv_wc ack{};
   ack.status = IBV_WC_SUCCESS;
   ack.opcode = IBV_WC_RECV;
@@ -857,7 +859,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, ContextProgress_SenderCompletesAlive
   context.resCtx = &scene.sendRes.base;
   context.devIndex = 0;
   context.state = ncclIbPortRecoveryStateAliveMessages;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
   context.send.aliveMsgPosted = true;
   ibv_wc alive{};
   alive.status = IBV_WC_SUCCESS;
@@ -891,7 +893,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, ContextProgress_ReceiverCompletesAli
   context.resCtx = &scene.recvRes;
   context.devIndex = 0;
   context.state = ncclIbPortRecoveryStateAliveMessages;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
   context.recv.nInOrderMsgsReceived = 2;
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     return std::strcmp(name, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_SEQUENCE_SIZE") == 0 ? int64_t{1} : fallback;
@@ -925,7 +927,9 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, ContextProgress_AckTimeoutRetriesThe
   context.resCtx = &scene.sendRes.base;
   context.devIndex = 0;
   context.state = ncclIbPortRecoveryStateAck;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
+  context.send.aliveMsgPosted = true;
+  context.send.aliveMsgCompleted = true;
   g_netIbNowNs = 100;
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     if (std::strcmp(name, "IB_RESILIENCY_PORT_RECOVERY_ACK_TIMEOUT") == 0) return int64_t{0};
@@ -938,6 +942,8 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, ContextProgress_AckTimeoutRetriesThe
   EXPECT_FALSE(done);
   EXPECT_EQ(context.state, ncclIbPortRecoveryStateAliveMessages);
   EXPECT_EQ(context.nFailedAttempts, 1);
+  EXPECT_FALSE(context.send.aliveMsgPosted);
+  EXPECT_FALSE(context.send.aliveMsgCompleted);
 
   context.state = ncclIbPortRecoveryStateAck;
   ASSERT_EQ(ncclIbPortRecoveryContextProgress(&context, &done), ncclSuccess);
@@ -953,7 +959,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, ContextProgress_ReceiverFinalAckTime
   context.resCtx = &scene.recvRes;
   context.devIndex = 0;
   context.state = ncclIbPortRecoveryStateAck;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
   context.ackPosted = true;
   context.ackCompleted = true;
   context.recv.nInOrderMsgsReceived = 6;
@@ -988,7 +994,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, HandleFailure_QueuesInitializedRecov
     EXPECT_EQ(context->resCtx, &scene.sendRes.base);
     EXPECT_EQ(context->devIndex, 0);
     EXPECT_EQ(context->state, ncclIbPortRecoveryStateInit);
-    EXPECT_EQ(context->recoveryCq, &scene.verbs[0].cq);
+    EXPECT_EQ(context->recoveryCq, &scene.recoveryCqs[0]);
     EXPECT_EQ(ncclIbPortRecoveryContextDestroy(context), ncclSuccess);
   }
 }
@@ -1057,7 +1063,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, ContextProgress_ReconfiguredSenderSt
   context.resCtx = &scene.sendRes.base;
   context.devIndex = 0;
   context.state = ncclIbPortRecoveryStateInit;
-  context.recoveryCq = &scene.verbs[0].cq;
+  context.recoveryCq = &scene.recoveryCqs[0];
   // Past the 200 ms start delay and the 500 ms alive-batch interval.
   g_netIbNowNs = 1000 * MSEC_TO_NSEC;
   ScopedHook reconfigure(g_ncclIbResiliencyQpsReconfigure, [](ncclIbResiliency*, int devIndex, bool* success) {

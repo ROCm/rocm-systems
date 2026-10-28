@@ -591,6 +591,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, SenderProbeQpsCreationStripesDevicesAndPubli
     const ncclIbQp& qp = scene.sendRes.base.probingQps[d];
     EXPECT_EQ(qp.devIndex, d);
     EXPECT_EQ(qp.qp->context, &scene.verbs[d].ctx);
+    EXPECT_EQ(qp.qp->send_cq, &scene.verbs[d].cq);
     EXPECT_EQ(qp.initAttr.pkeyIndex, 10 + d);
     EXPECT_EQ(qp.initAttr.portNum, d + 1);
     EXPECT_EQ(qp.initAttr.qpAccessFlags, IBV_ACCESS_LOCAL_WRITE);
@@ -722,6 +723,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, ReceiverProbeQpsCreationStripesAndTransition
     const ncclIbQp& qp = scene.recvRes.probingQps[i];
     EXPECT_EQ(qp.devIndex, i % 2);
     EXPECT_EQ(qp.qp->context, &scene.verbs[i % 2].ctx);
+    EXPECT_EQ(qp.qp->send_cq, &scene.verbs[i % 2].cq);
     EXPECT_EQ(qp.initAttr.portNum, i % 2 + 1);
     EXPECT_EQ(qp.initAttr.qpAccessFlags, IBV_ACCESS_REMOTE_READ);
     EXPECT_EQ(local.probingQpsInfo[i].qpn, qp.qp->qp_num);
@@ -993,6 +995,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, ProbeProgress_DrainsCompletionAndDecrementsO
 
   ASSERT_EQ(ncclIbResiliencyProbeProgress(&scene.sendRes), ncclSuccess);
   EXPECT_TRUE(scene.verbs[0].polledCqs.empty());
+  EXPECT_EQ(scene.verbs[1].polledCqs, (std::vector<ibv_cq*>{&scene.verbs[1].cq, &scene.verbs[1].cq}));
   EXPECT_EQ(scene.sendRes.base.devs[1].nOutstandingProbes, 0);
   EXPECT_EQ(scene.sendRes.failedRequests[5].state, ncclIbResiliencyRequestStateProbeCompleted);
 }
