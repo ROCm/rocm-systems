@@ -2763,6 +2763,8 @@ bool Device::virtualFree(void* addr) {
 // graph callers that manage the VA bookkeeping themselves.
 cl_int Device::MapPhysicalToVirtual(void* va, size_t size, amd::Memory* phys,
                                     bool track_mapping) const {
+  assert(phys != nullptr && "MapPhysicalToVirtual requires a physical memory object!");
+
   amd::Memory* vaddr_sub_obj = nullptr;
   if (track_mapping) {
     vaddr_sub_obj = MapMemObjBookkeeping(phys, va, size);
@@ -2817,6 +2819,7 @@ cl_int Device::UnmapVirtual(void* va, size_t size, bool track_mapping) const {
   }
 
   amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(va);
+  assert(vaddr_sub_obj != nullptr && "Tracked VA has no sub_obj in MemObjMap!");
   if (vaddr_sub_obj == nullptr) {
     LogPrintfError("UnmapVirtual: no sub_obj for va: %p", va);
     return CL_INVALID_VALUE;

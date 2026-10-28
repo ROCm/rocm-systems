@@ -4496,14 +4496,19 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   }
 
   void* va = const_cast<void*>(vcmd.ptr());
+  cl_int status = CL_SUCCESS;
   // If Physical address is set, then it is map command. If not set, it is unmap command.
   if (vcmd.memory() != nullptr) {
-    dev().MapPhysicalToVirtual(va, vcmd.size(), vcmd.memory(), vcmd.trackMapping());
+    status = dev().MapPhysicalToVirtual(va, vcmd.size(), vcmd.memory(), vcmd.trackMapping());
   } else {
     dispatchBarrierPacket(kBarrierPacketHeader, false);
     Barriers().WaitCurrent();
 
-    dev().UnmapVirtual(va, vcmd.size(), vcmd.trackMapping());
+    status = dev().UnmapVirtual(va, vcmd.size(), vcmd.trackMapping());
+  }
+
+  if (status != CL_SUCCESS) {
+    vcmd.setStatus(status);
   }
 
   // Since this is a memory operation, the HW event set for barrier packet
