@@ -270,6 +270,7 @@ if(BUILD_TESTS)
     DoneEventOrderingTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
+    LaunchCompletionEventTests.cpp
     NonBlockingTests.cpp
     RasJsonTests.cpp
     ReduceScatterTests.cpp
