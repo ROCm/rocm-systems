@@ -300,7 +300,14 @@ unsafe fn scratch_descriptor(
             device_address: resolved.device_address,
             byte_length: scratch.byte_length,
             maximum_private_segment_byte_length: scratch.maximum_private_segment_byte_length,
-            lanes_per_wave: 32,
+            lanes_per_wave: unsafe {
+                (*device)
+                    .native
+                    .endpoint()
+                    .gpu()
+                    .ok_or(UNSUPPORTED)?
+                    .wavefront_size
+            },
             maximum_wave_count: scratch.maximum_wave_count,
         }),
         resolved.memory,
