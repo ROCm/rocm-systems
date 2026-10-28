@@ -133,7 +133,7 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
         };
         (
             runtime.gpus[index].device.clone(),
-            runtime.gpus[index].info,
+            runtime.gpus[index].info(),
             queue.public_handle,
             private_segment_size,
             dispatch_id,

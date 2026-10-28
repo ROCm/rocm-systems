@@ -4,12 +4,14 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for the topology GPU id: src/graph/xml.cc, topo.cc, paths.cc, search.cc and rome_models.cc.
+// Host-only microtests for the topology GPU id and GPU-to-GPU paths: src/graph/xml.cc, topo.cc, paths.cc, search.cc
+// and rome_models.cc.
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <initializer_list>
@@ -31,6 +33,7 @@
 namespace {
 
 constexpr uint64_t kHostHash = 0x5eed;
+constexpr uint64_t kPeerHostHash = 0xfeed;
 constexpr int kMaxXmlNodes = 512;
 
 struct Gpu {
@@ -103,7 +106,7 @@ class TopoGpuDevMicrotest : public ::testing::Test {
   }
 
   // Runs ncclTopoFillGpu as `proc` would, over the sysfs view of its GPU, then stamps what ncclTopoGetSystem adds.
-  struct ncclXml* FillAs(const Proc& proc, bool fromTopoFile = false) {
+  struct ncclXml* FillAs(const Proc& proc, bool fromTopoFile = false, uint64_t hostHash = kHostHash) {
     ScopedHook count(g_hipGetDeviceCount, [&proc](int* n) {
       *n = proc.visible.size();
       return hipSuccess;
@@ -129,7 +132,7 @@ class TopoGpuDevMicrotest : public ::testing::Test {
     EXPECT_EQ(xmlAddNode(xml, nullptr, "system", &top), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(top, "version", NCCL_TOPO_XML_VERSION), ncclSuccess);
     EXPECT_EQ(xmlAddNode(xml, top, "cpu", &cpu), ncclSuccess);
-    EXPECT_EQ(xmlSetAttrLong(cpu, "host_hash", kHostHash), ncclSuccess);
+    EXPECT_EQ(xmlSetAttrLong(cpu, "host_hash", hostHash), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(cpu, "numaid", gpus_[proc.own].numa), ncclSuccess);
     SetAttrs(cpu, {"affinity=", "arch=x86_64", "vendor=AuthenticAMD", "familyid=26", "modelid=2"});
     EXPECT_EQ(xmlAddNode(xml, cpu, "pci", &pci), ncclSuccess);
@@ -231,6 +234,9 @@ class TopoGpuDevMicrotest : public ::testing::Test {
   }
 
   static bool AllLinked(int, int) { return true; }
+  static bool TwoHives(int a, int b) { return a / 2 == b / 2; }
+  // Every GPU links only to SMI 0, so any two others are two XGMI hops apart, through it.
+  static bool StarAroundSmi0(int a, int b) { return a == 0 || b == 0; }
 
   // Ranks 0-3, one per process, on SMI 4-7 of an 8-GPU node, so no rank equals its GPU's dev.
   bool TrimUpperHalfFlagsAllXgmi(std::function<bool(int, int)> linked) {
@@ -249,6 +255,46 @@ class TopoGpuDevMicrotest : public ::testing::Test {
     EXPECT_EQ(ncclTopoComputePaths(system, comm.get()), ncclSuccess);
     EXPECT_EQ(ncclTopoTrimSystem(system, comm.get()), ncclSuccess);
     return system->type & RCCL_TOPO_XGMI_ALL;
+  }
+
+  // Ranks 0-3, one per process on a 4-GPU node, and with peerLinked ranks 4-7 on a second node of the same MNNVL
+  // clique, through the path computation and trim initTransportsRank runs before ncclTopoPathAllDirectNVLink.
+  bool AllDirectNvlink(std::function<bool(int, int)> linked, std::function<bool(int, int)> peerLinked = nullptr) {
+    InstallNode(SpxNode(4), linked);
+    struct ncclXml* fused = FuseAll(OneGpuPerProcess({0, 1, 2, 3}));
+    int nRanks = 4;
+    if (peerLinked) {
+      InstallNode(SpxNode(4), peerLinked);
+      for (Proc proc : OneGpuPerProcess({0, 1, 2, 3})) {
+        proc.rank += 4;
+        EXPECT_EQ(ncclTopoFuseXml(fused, FillAs(proc, /*fromTopoFile=*/false, kPeerHostHash)), ncclSuccess);
+      }
+      nRanks = 8;
+    }
+    struct ncclTopoSystem* system = BuildSystem(fused);
+    EXPECT_NE(system, nullptr);
+    if (system == nullptr) {
+      return false;
+    }
+    auto comm = std::make_unique<ncclComm>();
+    std::vector<ncclPeerInfo> peers(nRanks);
+    for (int r = 0; r < nRanks; r++) {
+      peers[r].rank = r;
+      peers[r].hostHash = r < 4 ? kHostHash : kPeerHostHash;
+      peers[r].fabricInfo.clusterUuid[0] = 1;  // ncclTopoCheckMNNVL reads a zero UUID as no fabric info
+    }
+    comm->peerInfo = peers.data();
+    comm->nRanks = nRanks;
+    comm->MNNVL = peerLinked != nullptr;
+    comm->topo = system;
+    comm->pxnDisable = 1;
+    EXPECT_EQ(ncclTopoComputePaths(system, comm.get()), ncclSuccess);
+    EXPECT_EQ(ncclTopoTrimSystem(system, comm.get()), ncclSuccess);
+    EXPECT_EQ(system->nodes[GPU].count, nRanks);
+    EXPECT_EQ(ncclTopoComputePaths(system, comm.get()), ncclSuccess);
+    bool direct = false;
+    EXPECT_EQ(ncclTopoPathAllDirectNVLink(system, &direct), ncclSuccess);
+    return direct;
   }
 
   std::vector<int> propsOrdinals_;
@@ -368,7 +414,26 @@ TEST_F(TopoGpuDevMicrotest, TrimSystem_FlagsAllXgmiForOneGpuPerProcessOnTheUpper
 }
 
 TEST_F(TopoGpuDevMicrotest, TrimSystem_DoesNotFlagAllXgmiWhenTheUpperHalfIsTwoHives) {
-  EXPECT_FALSE(TrimUpperHalfFlagsAllXgmi([](int a, int b) { return a / 2 == b / 2; }));
+  EXPECT_FALSE(TrimUpperHalfFlagsAllXgmi(TwoHives));
 }
 
+TEST_F(TopoGpuDevMicrotest, AllDirectNvlink_TrueWhenEveryGpuOfTheNodeIsXgmiLinked) {
+  EXPECT_TRUE(AllDirectNvlink(AllLinked));
+}
+
+TEST_F(TopoGpuDevMicrotest, AllDirectNvlink_FalseWhenTheNodeIsTwoHives) {
+  EXPECT_FALSE(AllDirectNvlink(TwoHives));
+}
+
+TEST_F(TopoGpuDevMicrotest, AllDirectNvlink_TrueForAnMnnvlCliqueOfFullyXgmiLinkedNodes) {
+  EXPECT_TRUE(AllDirectNvlink(AllLinked, AllLinked));
+}
+
+TEST_F(TopoGpuDevMicrotest, AllDirectNvlink_FalseForAnMnnvlCliqueWhenOneNodeIsTwoHives) {
+  EXPECT_FALSE(AllDirectNvlink(AllLinked, TwoHives));
+}
+
+TEST_F(TopoGpuDevMicrotest, AllDirectNvlink_FalseForAnMnnvlCliqueWhenOneNodeNeedsAnIntermediateGpu) {
+  EXPECT_FALSE(AllDirectNvlink(AllLinked, StarAroundSmi0));
+}
 }  // namespace

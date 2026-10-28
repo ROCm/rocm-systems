@@ -1808,7 +1808,6 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
 
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
-  const uint32_t sw_queue_size = queueMask;
   static constexpr size_t kPacketSize = sizeof(hsa_kernel_dispatch_packet_t);
 
   // Unpack first/last headers; apply system-scope once for the whole batch.
@@ -1855,8 +1854,10 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   }
   fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
 
-  // A chunk is reserved whole, so it can never exceed the ring capacity.
-  const size_t kPeriod = std::min<size_t>(DEBUG_HIP_GRAPH_BATCH_SIZE, sw_queue_size);
+  // A chunk is reserved whole, so it can never exceed the ring capacity. Cap it at
+  // half the ring: a full-capacity chunk is only grantable once read_dispatch_id has
+  // caught up exactly.
+  const size_t kPeriod = std::min<size_t>(DEBUG_HIP_GRAPH_BATCH_SIZE, queueSize / 2);
   // Ramp-up: submit a small first (lead) chunk so the doorbell is rung after
   // copying only kLead packets instead of a full kPeriod, then double the chunk
   // size up to kPeriod. The GPU starts executing the lead while the CPU keeps
@@ -5168,11 +5169,36 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     }
 
     if (dev().settings().groupMemCarveout_) {
+      uint8_t percent;
+
       const int requestedPercent = devKernel->workGroupInfo()->groupMemCarveout_;
       // Signed storage preserves -1 (device default) and explicit 0; cast only resolved 0..100.
-      const uint8_t percent = requestedPercent >= 0
-                                  ? static_cast<uint8_t>(requestedPercent)
-                                  : dev().GetGroupMemCarveout();
+      percent = requestedPercent >= 0 ?
+                    static_cast<uint8_t>(requestedPercent) :
+                    dev().GetGroupMemCarveout();
+
+      if (!devKernel->workGroupInfo()->hasFuncPreferredShmemCarveout_) {
+        // hipFuncSetCacheConfig() has priority (regardless of being called before of after this
+        // function), so only use the coarse carveout if the former was not called
+        switch (devKernel->workGroupInfo()->coarseMemCarveout_) {
+        case 0:
+          // hipFuncCachePreferNone; the coarse setting is "off"
+          break;
+        case 1: // hipFuncCachePreferShared
+          percent = 100;
+          break;
+        case 2: // hipFuncCachePreferL1
+          percent = 0;
+          break;
+        case 3: // hipFuncCachePreferEqual
+          percent = 50;
+          break;
+        default:
+          assert(false && "Unexpected hipFuncCache_t value");
+          percent = 0;
+        }
+      }
+
       auto& dispatchPacketExt = dispatchPacketUnion.extKernelDispatch;
       // Encodings [1, 127] represent a range from 0% (no group memory) to 100% (maximum
       // group memory)
@@ -5430,14 +5456,15 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
         ClearStateFlag(kForceIrq);
         return;
       }
-      // IPC event record: if ipc_s is non-zero, first dispatch a NOP barrier with
-      // the IPC signal as completion_signal; it fires when prior work completes.
+      // IPC event record: the IPC barrier must resolve pending SDMA/blit
+      // dependency signals so that ipc_s fires only after all prior work
+      // (including cross-engine copies) has completed. (ROCM-30067)
       if (ipc_s.handle != 0) {
         if (settings.barrier_value_packet_) {
-          dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, false, hsa_signal_t{0}, 0,
+          dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true, hsa_signal_t{0}, 0,
                                      0, HSA_SIGNAL_CONDITION_EQ, true, ipc_s);
         } else {
-          dispatchBarrierPacket(kNopPacketHeader, true, ipc_s);
+          dispatchBarrierPacket(kNopPacketHeader, false, ipc_s);
         }
       }
 

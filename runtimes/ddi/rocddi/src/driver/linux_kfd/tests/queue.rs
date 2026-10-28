@@ -1132,7 +1132,24 @@ fn instance_aql_ring_uses_coherent_gtt_when_kfd_rejects_userptr() {
             DriverContextLifetime::Session,
         )
         .unwrap();
-    assert_eq!(queue.info().unwrap().index_unit_bytes, 64);
+    let info = queue.info().unwrap();
+    assert_eq!(info.index_unit_bytes, 64);
+    let control = info.aql_control.expect("AQL queue has a control view");
+    assert_eq!(control.host_base() % control.alignment(), 0);
+    assert_eq!(control.writable_prefix_bytes(), size_of::<AqlQueueHeader>());
+    assert_eq!(control.byte_length(), size_of::<AqlControlLayout>());
+    assert_eq!(
+        control.read_index_host_address(),
+        info.read_index_host_address
+    );
+    assert_eq!(
+        control.write_index_host_address(),
+        info.write_index_host_address
+    );
+    assert_eq!(
+        control.properties_host_address(),
+        control.host_base() + offset_of!(AqlControlLayout, queue_properties)
+    );
     queue.destroy().unwrap();
     drop(queue);
     fixture.assert_released();

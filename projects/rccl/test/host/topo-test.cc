@@ -44,7 +44,7 @@ void TopoSetNetDevsPolicy(enum netDevsPolicy policy, int num) {
 namespace {
 
 // ASan turns a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under it.
-#if TOPO_SCENE_ASAN
+#if RCCL_TEST_ASAN
 #define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
 #else
 #define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
