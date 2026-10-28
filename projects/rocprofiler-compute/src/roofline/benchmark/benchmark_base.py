@@ -32,6 +32,7 @@ from typing import Any
 import utils.hip_interface as hip
 import utils.hiprtc_interface as hiprtc
 from utils import utils_profile
+from utils.mi_gpu_spec import mi_gpu_specs
 
 # =============================================================================
 # GLOBAL VARIABLES
@@ -221,6 +222,18 @@ class Bench_base(ABC):
             shared_mem_size,
             stream,
             args_ptr,
+        )
+
+    def apply_roofline_spec(self, gpu_arch: str) -> None:
+        """Set the matrix type, each test's roofline.csv column, and the tests whose
+        column mi_gpu_spec.yaml does not list for gpu_arch, written as 0."""
+        self.MATRIX_OPS_TYPE = mi_gpu_specs.get_roofline_matrix_type(gpu_arch)
+        self.csv_cols_map = {
+            test: mi_gpu_specs.get_roofline_test_column(test) for test in self.tests
+        }
+        measured = mi_gpu_specs.get_roofline_columns(gpu_arch)
+        self.unsupported_data_types = tuple(
+            test for test, column in self.csv_cols_map.items() if column not in measured
         )
 
     def get_gfx_arch(self, device: int) -> str:

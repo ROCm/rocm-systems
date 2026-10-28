@@ -8,7 +8,7 @@
 #
 # -----------------------------------------------------------------------------
 
-from .. import benchmark_base, ceilings
+from .. import benchmark_base
 
 
 # =============================================================================
@@ -19,7 +19,6 @@ class Bench_gfx12(benchmark_base.Bench_base):
         super().__init__(device_id, cache_sizes)
 
         self.WAVEFRONT_SIZE = 32
-        self.MATRIX_OPS_TYPE = "WMMA"
 
         # gfx1250: 384KB shared LDS/GL0, with max. LDS being 320KB
         # Confirm if the default is 128KB, and if the amd-smi tools can read
@@ -62,8 +61,6 @@ class Bench_gfx12(benchmark_base.Bench_base):
             "WMMA-F64": super().matrix_f64_bench,
             "WMMA-I8": super().matrix_i8_bench,
         }
-
-        self.csv_cols_map = ceilings.FAMILY_CEILINGS["gfx12"]
 
     # -----------------------------------------------------------------------------
     # Benchmarking kernel source

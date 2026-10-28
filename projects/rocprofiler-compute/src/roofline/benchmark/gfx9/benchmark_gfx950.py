@@ -9,7 +9,6 @@
 #
 # -----------------------------------------------------------------------------
 
-from .. import ceilings
 from . import benchmark_gfx9_base
 
 
@@ -20,7 +19,7 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
     def __init__(self, device_id: int, cache_sizes: dict) -> None:
         super().__init__(device_id, cache_sizes)
 
-        self.unsupported_data_types = ceilings.UNSUPPORTED_DATA_TYPES["gfx950"]
+        self.apply_roofline_spec("gfx950")
 
         self.matrix_ops = {
             "F4": 131072,

@@ -8,7 +8,7 @@
 #
 # -----------------------------------------------------------------------------
 
-from .. import benchmark_base, ceilings
+from .. import benchmark_base
 
 
 # =============================================================================
@@ -19,7 +19,6 @@ class Bench_gfx9(benchmark_base.Bench_base):
         super().__init__(device_id, cache_sizes)
 
         self.WAVEFRONT_SIZE = 64
-        self.MATRIX_OPS_TYPE = "MFMA"
 
         self.matrix_kernel_selector = {
             "F4": "mfma_f8f6f4<FP4_E2M1>",
@@ -57,8 +56,6 @@ class Bench_gfx9(benchmark_base.Bench_base):
             "MFMA-F64": super().matrix_f64_bench,
             "MFMA-I8": super().matrix_i8_bench,
         }
-
-        self.csv_cols_map = ceilings.FAMILY_CEILINGS["gfx9"]
 
     # -----------------------------------------------------------------------------
     # Helper Methods and Classes

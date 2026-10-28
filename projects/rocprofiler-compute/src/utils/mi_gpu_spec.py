@@ -7,6 +7,40 @@ from typing import Any, Optional
 from utils.logger import console_debug, console_error, console_warning
 from vendored import yaml
 
+# The data types a roofline ceiling can have, in plot order.
+ROOFLINE_DATA_TYPES = (
+    "FP4",
+    "FP6",
+    "FP8",
+    "MXFP8",
+    "FP16",
+    "BF16",
+    "FP32",
+    "FP64",
+    "I8",
+    "I32",
+    "I64",
+)
+# The matrix instruction types; a roofline block lists its matrix data types under the
+# lowercase name, e.g. "mfma".
+ROOFLINE_MATRIX_TYPES = ("MFMA", "WMMA")
+
+
+def roofline_column(data_type: str, unit: str) -> str:
+    """Return the roofline.csv column of a ceiling.
+
+    unit is "bandwidth", "valu", or a matrix type ("MFMA", "WMMA"). For example
+    ("HBM", "bandwidth") -> "HBMBw", ("FP16", "valu") -> "FP16Flops",
+    ("MXFP8", "MFMA") -> "MFMAMXF8Flops", ("I8", "WMMA") -> "WMMAI8Ops".
+    """
+    if unit == "bandwidth":
+        return f"{data_type}Bw"
+    suffix = "Ops" if data_type.startswith("I") else "Flops"
+    if unit == "valu":
+        return f"{data_type}{suffix}"
+    return f"{unit}{data_type.replace('FP', 'F')}{suffix}"
+
+
 # ----------------------------
 # Data Class handling to preserve the hierarchical gpu information
 # ----------------------------
@@ -30,6 +64,11 @@ class MIGPUSpecs:
     _gpu_arch_to_compute_partition_dict: dict[str, dict[str, int]] = {}
 
     _all_gpu_models: list[str] = []
+
+    # key: gpu_arch, the arch's roofline block; only archs with a roofline benchmark
+    _roofline: dict[str, dict[str, Any]] = {}
+    # key: gpu_arch, the roofline.csv columns its benchmark measures
+    _roofline_columns: dict[str, frozenset[str]] = {}
 
     _initialized = False
 
@@ -86,6 +125,7 @@ class MIGPUSpecs:
                         | -- physical_aid (CDNA)
                         | -- logical_partitions_per_die (CDNA)
                         | -- memory_levels
+                    |-- roofline: what the roofline benchmark measures
         """
 
         current_dir = Path(__file__).parent
@@ -110,6 +150,8 @@ class MIGPUSpecs:
                 cls._gpu_series_dict[curr_gpu_arch] = curr_gpu_series
                 cls._perfmon_config[curr_gpu_arch] = archs.get("perfmon_config", {})
                 cls._gpu_model_dict[curr_gpu_arch] = []
+                if "roofline" in archs:
+                    cls._roofline[curr_gpu_arch] = archs["roofline"]
 
                 for models in archs.get("models", []):
                     curr_gpu_model = models["gpu_model"]
@@ -135,6 +177,11 @@ class MIGPUSpecs:
                     cls._gpu_design[curr_gpu_model] = models.get("design", {})
                     cls._gpu_design[curr_gpu_model]["gpu_arch"] = curr_gpu_arch
                     cls._gpu_design[curr_gpu_model]["gpu_series"] = curr_gpu_series
+
+        cls._roofline_columns = {
+            gpu_arch: cls._measured_roofline_columns(gpu_arch)
+            for gpu_arch in cls._roofline
+        }
 
         # detect gpu arch to compute partition relationships
         cls._populate_gpu_arch_to_compute_partition_dict()
@@ -397,6 +444,119 @@ class MIGPUSpecs:
     @classmethod
     def get_all_gpu_models(cls) -> list:
         return cls._all_gpu_models
+
+    @classmethod
+    def get_roofline_archs(cls) -> tuple[str, ...]:
+        """Return the archs the roofline benchmark runs on."""
+        return tuple(cls._roofline)
+
+    @classmethod
+    def get_roofline_benchmark(cls, gpu_arch: str) -> str:
+        """Return the arch whose benchmark class gpu_arch runs, e.g. "gfx942" for
+        "gfx940"."""
+        return cls._roofline[gpu_arch].get("benchmark", gpu_arch)
+
+    @classmethod
+    def get_roofline_family(cls, gpu_arch: str) -> str:
+        """Return the roofline/benchmark/ package of gpu_arch, e.g. "gfx9"."""
+        return cls.get_roofline_benchmark(gpu_arch)[:-2]
+
+    @classmethod
+    def get_roofline_matrix_type(cls, gpu_arch: str) -> str:
+        """Return gpu_arch's matrix instruction type, "MFMA" or "WMMA"."""
+        roofline = cls._roofline[gpu_arch]
+        return next(t for t in ROOFLINE_MATRIX_TYPES if t.lower() in roofline)
+
+    @classmethod
+    def get_roofline_bandwidth(cls, gpu_arch: str) -> tuple[str, ...]:
+        """Return the memory levels with a measured bandwidth ceiling on gpu_arch."""
+        return tuple(cls._roofline.get(gpu_arch, {}).get("bandwidth", []))
+
+    @classmethod
+    def get_roofline_data_types(
+        cls, gpu_arch: str
+    ) -> tuple[tuple[str, bool, bool], ...]:
+        """Return (data type, has VALU ceiling, has matrix ceiling) for each data type
+        measured on gpu_arch, in plot order. Mixed-precision matrix types such as F6F4
+        are left out: the roofline does not plot them."""
+        valu = cls._roofline_list(gpu_arch, "valu")
+        matrix = cls._roofline_list(gpu_arch, "matrix")
+        return tuple(
+            (data_type, data_type in valu, data_type in matrix)
+            for data_type in ROOFLINE_DATA_TYPES
+            if data_type in valu or data_type in matrix
+        )
+
+    @classmethod
+    def get_roofline_columns(cls, gpu_arch: str) -> frozenset[str]:
+        """Return the roofline.csv columns measured on gpu_arch; none for an arch
+        without a roofline benchmark, such as gfx908."""
+        return cls._roofline_columns.get(gpu_arch, frozenset())
+
+    @classmethod
+    def get_all_roofline_columns(cls) -> frozenset[str]:
+        """Return every roofline.csv column name of a known memory level or data type,
+        whether or not an arch measures it, so analyze can default each to NaN."""
+        levels = cls._all_memory_levels()
+        mixed = {
+            data_type
+            for gpu_arch in cls._roofline
+            for data_type in cls._roofline_list(gpu_arch, "mixed")
+        }
+        return frozenset({
+            *(roofline_column(level, "bandwidth") for level in levels),
+            *(roofline_column(dt, "valu") for dt in ROOFLINE_DATA_TYPES),
+            *(
+                roofline_column(dt, matrix_type)
+                for matrix_type in ROOFLINE_MATRIX_TYPES
+                for dt in (*ROOFLINE_DATA_TYPES, *sorted(mixed))
+            ),
+        })
+
+    @classmethod
+    def get_roofline_test_column(cls, test: str) -> str:
+        """Return the roofline.csv column a benchmark test writes, e.g. "HBM" ->
+        "HBMBw", "F16" -> "FP16Flops", "MFMA-F16" -> "MFMAF16Flops"."""
+        if "-" in test:
+            matrix_type, name = test.split("-", 1)
+            return roofline_column(name, matrix_type)
+        if test in cls._all_memory_levels():
+            return roofline_column(test, "bandwidth")
+        data_type = f"FP{test[1:]}" if test.startswith("F") else test
+        return roofline_column(data_type, "valu")
+
+    @classmethod
+    def _roofline_list(cls, gpu_arch: str, key: str) -> tuple[str, ...]:
+        """Return a list of gpu_arch's roofline block; "matrix" and "mixed" read the
+        key of the arch's matrix type, e.g. "mfma" and "mfma_mixed"."""
+        roofline = cls._roofline.get(gpu_arch, {})
+        if key in ("matrix", "mixed"):
+            if not roofline:
+                return ()
+            prefix = cls.get_roofline_matrix_type(gpu_arch).lower()
+            key = prefix if key == "matrix" else f"{prefix}_mixed"
+        return tuple(roofline.get(key, []))
+
+    @classmethod
+    def _all_memory_levels(cls) -> set[str]:
+        return {
+            level
+            for design in cls._gpu_design.values()
+            for level in design.get("memory_levels", [])
+        }
+
+    @classmethod
+    def _measured_roofline_columns(cls, gpu_arch: str) -> frozenset[str]:
+        matrix_type = cls.get_roofline_matrix_type(gpu_arch)
+        bandwidth = cls.get_roofline_bandwidth(gpu_arch)
+        valu = cls._roofline_list(gpu_arch, "valu")
+        matrix = cls._roofline_list(gpu_arch, "matrix")
+        matrix += cls._roofline_list(gpu_arch, "mixed")
+        return frozenset({
+            *(roofline_column(level, "bandwidth") for level in bandwidth),
+            *(roofline_column(dt, "valu") for dt in valu),
+            *(roofline_column(dt, matrix_type) for dt in matrix),
+        })
 
 
 # pre-initialize the instance when module loads

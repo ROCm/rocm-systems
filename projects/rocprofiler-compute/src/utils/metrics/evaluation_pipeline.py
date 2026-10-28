@@ -10,7 +10,6 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from roofline.benchmark import ceilings
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.metrics.common import ValuDualIssueDetector
@@ -33,7 +32,8 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
     if empirical_peaks_df.empty:
         # Without roofline.csv, every ceiling is NaN.
         return {
-            f"ammolite__{name}_empirical_peak": np.nan for name in ceilings.ALL_CEILINGS
+            f"ammolite__{name}_empirical_peak": np.nan
+            for name in mi_gpu_specs.get_all_roofline_columns()
         }
 
     peak_data_row = empirical_peaks_df.iloc[0]

@@ -21,12 +21,9 @@
 import importlib
 from pathlib import Path
 
-from roofline.benchmark import ceilings
+from utils.mi_gpu_spec import mi_gpu_specs
 
-BENCHMARKING_SUPPORTED = [
-    *ceilings.UNSUPPORTED_DATA_TYPES,
-    *ceilings.BENCH_DEVICE_ALIASES,
-]
+BENCHMARKING_SUPPORTED = mi_gpu_specs.get_roofline_archs()
 
 
 def run_roofline_benchmark(
@@ -40,10 +37,9 @@ def run_roofline_benchmark(
 
 def bench_class(gpu_arch: str) -> type:
     """Return the benchmark class of gpu_arch, e.g. Bench_gfx942 for "gfx940"."""
-    device = ceilings.BENCH_DEVICE_ALIASES.get(gpu_arch, gpu_arch)
-    module = importlib.import_module(
-        f"roofline.benchmark.{device[:-2]}.benchmark_{device}"
-    )
+    device = mi_gpu_specs.get_roofline_benchmark(gpu_arch)
+    family = mi_gpu_specs.get_roofline_family(gpu_arch)
+    module = importlib.import_module(f"roofline.benchmark.{family}.benchmark_{device}")
     return getattr(module, f"Bench_{device}")
 
 

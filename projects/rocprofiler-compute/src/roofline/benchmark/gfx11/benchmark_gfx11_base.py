@@ -8,7 +8,7 @@
 #
 # -----------------------------------------------------------------------------
 
-from .. import benchmark_base, ceilings
+from .. import benchmark_base
 
 
 # =============================================================================
@@ -21,7 +21,6 @@ class Bench_gfx11(benchmark_base.Bench_base):
         # TODO: there is potential wavefront size could be set to 64,
         # but default for gfx11 is 32
         self.WAVEFRONT_SIZE = 32
-        self.MATRIX_OPS_TYPE = "WMMA"
 
         self.matrix_kernel_selector = {}
         self.matrix_ops = {}
@@ -51,8 +50,6 @@ class Bench_gfx11(benchmark_base.Bench_base):
             "WMMA-F64": super().matrix_f64_bench,
             "WMMA-I8": super().matrix_i8_bench,
         }
-
-        self.csv_cols_map = ceilings.FAMILY_CEILINGS["gfx11"]
 
     # -----------------------------------------------------------------------------
     # Helper Methods and Classes

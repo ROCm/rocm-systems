@@ -22,13 +22,15 @@ import pytest
 import roofline.benchmark.benchmark_base as benchmark_base
 import utils.utils_profile as utils_profile
 from roofline import run_benchmark
-from roofline.benchmark import ceilings
+from utils.mi_gpu_spec import mi_gpu_specs
 
 try:
-    # Every device with a benchmark class, imported as load_bench() imports it.
-    BENCH_CLASSES = [
-        run_benchmark.bench_class(device) for device in ceilings.UNSUPPORTED_DATA_TYPES
-    ]
+    # The class of every arch the roofline benchmark runs on, imported as load_bench()
+    # imports it. gfx940 and gfx941 share the gfx942 class.
+    ROOFLINE_ARCHS = mi_gpu_specs.get_roofline_archs()
+    BENCH_CLASSES = list(
+        dict.fromkeys(run_benchmark.bench_class(arch) for arch in ROOFLINE_ARCHS)
+    )
 except OSError as hip_load_error:
     # hip_interface and hiprtc_interface dlopen the ROCm libraries at import.
     pytest.skip(
@@ -117,6 +119,18 @@ def runs_benchmark(bench, test_key):
 # =============================================================================
 # Tests
 # =============================================================================
+
+
+@pytest.mark.parametrize("gpu_arch", ROOFLINE_ARCHS)
+def test_spec_matches_the_benchmark_class(gpu_arch):
+    """Every ceiling mi_gpu_spec.yaml lists is a column the class writes, and the
+    class's matrix tests use the spec's matrix type; otherwise a ceiling is never
+    measured."""
+    bench = run_benchmark.bench_class(gpu_arch)(0, dict(CACHE_SIZES))
+    columns = mi_gpu_specs.get_roofline_columns(gpu_arch)
+    assert columns <= set(bench.csv_cols_map.values())
+    matrix_types = {test.split("-")[0] for test in bench.tests if "-" in test}
+    assert matrix_types == {mi_gpu_specs.get_roofline_matrix_type(gpu_arch)}
 
 
 @pytest.mark.parametrize("bench_class", BENCH_CLASSES, ids=lambda cls: cls.__name__)
