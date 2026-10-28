@@ -285,6 +285,7 @@ private:
   [[nodiscard]] amdgpu::QueueContextSaveResult save_context(const amdgpu::QueueIdentity &identity,
                                                             uint64_t address, uint32_t area_size,
                                                             uint32_t control_stack_size) override;
+  void cancel_context_save(const amdgpu::QueueIdentity &identity) override;
   void release_context(const amdgpu::QueueIdentity &identity) override;
   void resume_context(const amdgpu::QueueIdentity &identity) override;
   [[nodiscard]] amdgpu::VmAccessOutcome restore_context(const amdgpu::QueueIdentity &identity,

@@ -199,12 +199,19 @@ public:
   /// @brief Whether this CP currently owns any AQL or PM4 queue state.
   [[nodiscard]] bool has_registered_queues() const;
 
+  /// @brief Close admission and pause waves, retaining the original gates across retries.
+  /// @returns Unavailable while a trap handler must finish before its wave can pause.
+  [[nodiscard]] VmAccessOutcome suspend_queue_context(const QueueIdentity &identity);
+  /// @brief Undo only the suspension introduced by a save that did not release resources.
+  void cancel_queue_context_save(const QueueIdentity &identity);
+
   /// @brief Save progress and resource requirements of a suspended, non-fanned-out queue.
   /// @details The encoding is rocjitsu-private: public AMD documentation does not
   /// specify the complete CP firmware checkpoint format. No host pointers or VM
   /// leases are encoded. Wave/register state is saved separately through CWSR.
   /// The caller must quiesce waves and their memory accesses first. Host-owned
-  /// PM4 submissions and cross-XCD state are unsupported and return Faulted.
+  /// PM4 submissions, cross-XCD state, workgroup clusters, WGP LDS and GWS waits
+  /// are unsupported and return Faulted; their context models remain future work.
   /// Unavailable requires an outstanding publication to finish before retrying.
   [[nodiscard]] VmAccessOutcome save_queue_context(const QueueIdentity &identity,
                                                    std::vector<uint8_t> &context);

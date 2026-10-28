@@ -209,12 +209,69 @@ template <typename Archive, typename Wave> bool wave_fields(Archive &a, Wave &w)
 bool supported_dispatch(const DispatchEntry &entry) {
   // Current MES placement is not fanned out. Cross-XCD ownership and external
   // PM4 callbacks require their own context model rather than saving pointers.
+  // Cluster support does not yet cover the MES save/release/rebuild lifecycle.
+  // Cluster checkpoint support will be added separately.
   return !entry.grid_completion && !entry.enabled_cus && !entry.pm4_abi && !entry.pm4_failure &&
          !entry.pm4_scratch_pool && !entry.fanout_peer && entry.shard.is_unsharded() &&
          !entry.wgp_mode && entry.cluster_size() == 1;
 }
 
 } // namespace
+
+VmAccessOutcome CommandProcessor::suspend_queue_context(const QueueIdentity &identity) {
+  std::unique_lock structure_lock(queue_structure_mutex_);
+  std::lock_guard lock(hw_queue_mutex_);
+  auto *queue = find_compute_queue(identity.queue_id, identity.process_id);
+  if (!queue || queue->address_space != identity.address_space)
+    return VmAccessOutcome::Malformed;
+  if (!queue->context_save_suspension)
+    queue->context_save_suspension.emplace(queue->debug_suspended);
+  set_queue_debug_suspended(identity.queue_id, identity.process_id, true);
+  bool pending = false;
+  for (auto *cu : cus_)
+    cu->with_wave_state_locked([&] {
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        auto *wave = cu->wf(slot);
+        if (!wave || wave->is_halted() || wave->process_id() != identity.process_id ||
+            wave->queue_id() != identity.queue_id ||
+            wave->address_space() != identity.address_space)
+          continue;
+        // Let the handler return before freezing its architectural PC.
+        if (wave->in_trap_handler()) {
+          pending = true;
+          continue;
+        }
+        if (!wave->debug_suspended()) {
+          queue->context_save_suspension->newly_suspended.push_back(
+              {cu, slot, wave->dispatch_generation()});
+          wave->set_debug_suspended(true);
+        }
+      }
+    });
+  return pending ? VmAccessOutcome::Unavailable : VmAccessOutcome::Complete;
+}
+
+void CommandProcessor::cancel_queue_context_save(const QueueIdentity &identity) {
+  std::unique_lock structure_lock(queue_structure_mutex_);
+  std::lock_guard lock(hw_queue_mutex_);
+  auto *queue = find_compute_queue(identity.queue_id, identity.process_id);
+  if (!queue || queue->address_space != identity.address_space || !queue->context_save_suspension)
+    return;
+  auto suspension = std::move(*queue->context_save_suspension);
+  queue->context_save_suspension.reset();
+  for (const auto &saved : suspension.newly_suspended) {
+    saved.cu->with_wave_state_locked([&] {
+      auto *wave = saved.cu->wf(saved.slot);
+      // A slot may have been retired or reused while a save was pending.
+      if (wave && !wave->is_halted() && wave->dispatch_generation() == saved.generation &&
+          wave->process_id() == identity.process_id && wave->queue_id() == identity.queue_id &&
+          wave->address_space() == identity.address_space)
+        wave->set_debug_suspended(false);
+    });
+    saved.cu->schedule_work_async();
+  }
+  set_queue_debug_suspended(identity.queue_id, identity.process_id, suspension.debug_suspended);
+}
 
 VmAccessOutcome CommandProcessor::save_queue_context(const QueueIdentity &identity,
                                                      std::vector<uint8_t> &context) {
@@ -569,6 +626,9 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
 void CommandProcessor::release_queue_context(const QueueIdentity &identity) {
   std::unique_lock structure_lock(queue_structure_mutex_);
   std::lock_guard lock(hw_queue_mutex_);
+  if (auto *queue = find_compute_queue(identity.queue_id, identity.process_id);
+      queue && queue->address_space == identity.address_space)
+    queue->context_save_suspension.reset();
   for (auto *cu : cus_)
     cu->with_wave_state_locked([&] {
       struct Group {

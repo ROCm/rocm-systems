@@ -1469,6 +1469,118 @@ TEST_F(GpuDeviceMes, RemoveSavesProgressAndReleasesQueuesWithoutResidentWaves) {
   }
 }
 
+TEST_F(GpuDeviceMes, FailedRemoveRestoresPriorSuspensionAndPreservesUnfinishedWork) {
+  constexpr uint64_t kContext = 0x20000;
+  constexpr uint64_t kContextPhysical = 0x300000;
+  constexpr uint32_t kControlStack = 0x1000;
+  constexpr uint32_t kContextSize = 0x20000;
+  constexpr uint32_t kQueue = uint32_t{1} << 31;
+  enum class Failure { Capacity, HeaderRead, ImageWrite, ControlStackOffset, WaveStateOffset };
+  configure_compute_unit();
+  for (const auto failure : {Failure::Capacity, Failure::HeaderRead, Failure::ImageWrite,
+                             Failure::ControlStackOffset, Failure::WaveStateOffset}) {
+    for (const auto &[queue_paused, wave_paused] :
+         {std::pair{false, false}, std::pair{false, true}, std::pair{true, false}}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "failure=" << static_cast<int>(failure) << " queue_paused=" << queue_paused
+                   << " wave_paused=" << wave_paused);
+      store_dword(kSchedulerMqdPhysical + 171 * 4, kContext);
+      store_dword(kSchedulerMqdPhysical + 175 * 4, kControlStack);
+      store_dword(kSchedulerMqdPhysical + 177 * 4,
+                  failure == Failure::Capacity ? kControlStack : kContextSize);
+      store_dword(kDefaultComputeSecondPagePhysical + 0xff8 -
+                      offsetof(amd_queue_t, write_dispatch_id) + offsetof(amd_queue_v2_t, caps),
+                  AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM);
+      submit_default_compute_queue(true);
+      for (uint64_t offset = 0; offset < kContextSize; offset += 0x1000)
+        store_vram_qword(kDefaultProcessPtb + ((kContext + offset) >> 12) * sizeof(uint64_t),
+                         (kContextPhysical + offset) | kGfx12SystemLeafPteFlags);
+      const auto address_space = soc_.mes_engine().process_address_space_for_test(3);
+      ASSERT_TRUE(address_space);
+      ASSERT_TRUE(soc_.gpu_vm().invalidate(*address_space));
+      auto *wave = compute_unit_->dispatch_wf(0, kDefaultComputeRingGpu + 0x80, 106, 64);
+      ASSERT_NE(wave, nullptr);
+      wave->set_address_space(*address_space);
+      wave->set_process_id(3);
+      wave->set_queue_id(kQueue);
+      wave->set_dispatch_id(1);
+      wave->set_debug_suspended(wave_paused);
+      wave->debug_write_sgpr(0, 0x12345678);
+      wave->set_lds_base(compute_unit_->allocate_lds(256));
+      wave->set_lds_size(256);
+      const std::vector<uint8_t> expected_lds(256, 0x5a);
+      wave->lds().write(wave->lds_base(), expected_lds.data(), expected_lds.size());
+      rocjitsu::amdgpu::DispatchEntry entry{};
+      entry.kind = rocjitsu::amdgpu::DispatchPacketKind::Kernel;
+      entry.dispatch_id = 1;
+      entry.queue_id = kQueue;
+      entry.process_id = 3;
+      entry.address_space = *address_space;
+      entry.total_wgs = 2;
+      entry.dispatched_wgs = 1;
+      command_processor_.accept_fanout_shard(std::move(entry));
+      command_processor_.drain_fanout_inbox_for_test();
+      command_processor_.set_queue_debug_suspended(kQueue, 3, queue_paused);
+
+      constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+      store_dword(kRemove, 0x00040031);
+      store_dword(kRemove + 4, kDefaultComputeDoorbell / sizeof(uint32_t));
+      store_qword(kRemove + 6 * 4, kApiStatusGpu);
+      store_qword(kRemove + 8 * 4, 2);
+      auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+      // A pending attempt must retain its pause. A later failure must restore
+      // the state before this first attempt, not the already-paused retry state.
+      transport_.fail_next_read(kContextPhysical + 16, simdojo::DmaAccessOutcome::Unavailable);
+      ring_doorbell(0x60, doorbell);
+      ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+      EXPECT_TRUE(command_processor_.queue_debug_suspended_for_test(kQueue, 3));
+      EXPECT_TRUE(wave->debug_suspended());
+      switch (failure) {
+      case Failure::Capacity:
+        break;
+      case Failure::HeaderRead:
+        transport_.fail_next_read(kContextPhysical + 16, simdojo::DmaAccessOutcome::Faulted);
+        break;
+      case Failure::ImageWrite:
+        transport_.fail_next_write(kContextPhysical, simdojo::DmaAccessOutcome::Faulted);
+        break;
+      case Failure::ControlStackOffset:
+        transport_.fail_next_write(kSchedulerMqdPhysical + 174 * sizeof(uint32_t),
+                                   simdojo::DmaAccessOutcome::Faulted);
+        break;
+      case Failure::WaveStateOffset:
+        transport_.fail_next_write(kSchedulerMqdPhysical + 176 * sizeof(uint32_t),
+                                   simdojo::DmaAccessOutcome::Faulted);
+        break;
+      }
+      device_.drain_doorbell_inbox_for_test();
+      EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+      EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
+      EXPECT_EQ(command_processor_.queue_debug_suspended_for_test(kQueue, 3), queue_paused);
+      EXPECT_EQ(wave->debug_suspended(), wave_paused);
+      EXPECT_FALSE(wave->is_halted());
+      EXPECT_EQ(wave->debug_read_sgpr(0), 0x12345678u);
+      std::vector<uint8_t> actual_lds(expected_lds.size());
+      const auto &lds = wave->lds();
+      lds.read(wave->lds_base(), actual_lds.data(), actual_lds.size());
+      EXPECT_EQ(actual_lds, expected_lds);
+      EXPECT_TRUE(command_processor_.has_dispatch_for_test(kQueue, 3, 1));
+      EXPECT_FALSE(command_processor_.queue_faulted_for_test(kQueue, 3));
+      EXPECT_EQ(soc_.mes_engine().active_queues(), 1u);
+      EXPECT_EQ(soc_.queue_registry().active_queues(), 1u);
+      if (failure != Failure::Capacity) {
+        // Once the access fault is corrected, the same REMOVE can complete.
+        ring_doorbell(0x60, doorbell);
+        EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+        EXPECT_EQ(soc_.mes_engine().active_queues(), 0u);
+        EXPECT_FALSE(compute_unit_->has_active_wfs());
+      }
+      device_.reset(simdojo::ResetKind::FunctionLevel);
+      configure_gart();
+    }
+  }
+}
+
 TEST_F(GpuDeviceMes, RemoveAndReaddSaveAndRestoreAnUnfinishedWave) {
   constexpr uint64_t kKernel = kDefaultComputeRingGpu + 0x80;
   constexpr uint64_t kData = kDefaultComputeRingGpu + 0x1200;

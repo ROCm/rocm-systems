@@ -293,7 +293,7 @@ amdgpu::QueueContextSaveResult SoC::save_context(const amdgpu::QueueIdentity &id
                                                  uint32_t control_stack_size) {
   using amdgpu::VmAccessOutcome;
   const auto access = gpu_vm_.snapshot(identity.address_space);
-  if (!access || !amdgpu::cwsr_layout_modelled(arch_))
+  if (!access || !mes_queue_owner_ || !amdgpu::cwsr_layout_modelled(arch_))
     return {};
 
   std::vector<amdgpu::CwsrWaveState> states;
@@ -302,25 +302,10 @@ amdgpu::QueueContextSaveResult SoC::save_context(const amdgpu::QueueIdentity &id
     return wave && !wave->is_halted() && wave->process_id() == identity.process_id &&
            wave->queue_id() == identity.queue_id && wave->address_space() == identity.address_space;
   };
-  bool pending = false;
-  for_each_cp([&](amdgpu::CommandProcessor *cp) {
-    cp->set_queue_debug_suspended(identity.queue_id, identity.process_id, true);
-    for (auto *cu : cp->compute_units()) {
-      cu->with_wave_state_locked([&] {
-        for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
-          auto *wave = cu->wf(slot);
-          if (!belongs_to_queue(wave))
-            continue;
-          // Let the handler finish its return before freezing the architectural PC.
-          if (wave->in_trap_handler()) {
-            pending = true;
-            continue;
-          }
-          wave->set_debug_suspended(true);
-        }
-      });
-    }
-  });
+  const auto suspended = mes_queue_owner_->suspend_queue_context(identity);
+  if (suspended != VmAccessOutcome::Complete && suspended != VmAccessOutcome::Unavailable)
+    return {.outcome = suspended};
+  bool pending = suspended == VmAccessOutcome::Unavailable;
   for_each_cp([&](amdgpu::CommandProcessor *cp) {
     for (auto *cu : cp->compute_units()) {
       cu->retry_paused_queue_memory(identity.process_id, identity.queue_id, /*replay_loads=*/true);
@@ -356,8 +341,6 @@ amdgpu::QueueContextSaveResult SoC::save_context(const amdgpu::QueueIdentity &id
     if (status != VmAccessOutcome::Complete)
       return {.outcome = status};
   }
-  if (!mes_queue_owner_)
-    return {};
   std::vector<uint8_t> queue_context;
   const auto saved = mes_queue_owner_->save_queue_context(identity, queue_context);
   if (saved != VmAccessOutcome::Complete)
@@ -381,6 +364,11 @@ amdgpu::QueueContextSaveResult SoC::save_context(const amdgpu::QueueIdentity &id
   return {.outcome = status,
           .control_stack_offset = layout.control_stack_offset,
           .wave_state_offset = layout.wave_state_offset};
+}
+
+void SoC::cancel_context_save(const amdgpu::QueueIdentity &identity) {
+  if (mes_queue_owner_)
+    mes_queue_owner_->cancel_queue_context_save(identity);
 }
 
 void SoC::release_context(const amdgpu::QueueIdentity &identity) {

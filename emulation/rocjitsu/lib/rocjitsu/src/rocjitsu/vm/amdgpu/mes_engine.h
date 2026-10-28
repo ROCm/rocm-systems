@@ -58,20 +58,20 @@ public:
   /// @details address and area_size name the GPU virtual save area;
   /// control_stack_size is its control-stack capacity. Complete supplies the
   /// MQD offsets. Unavailable leaves the operation pending: retry with the same
-  /// identity and area, without acknowledging REMOVE. Other outcomes are failures.
+  /// identity and area, without acknowledging REMOVE. Until release_context(),
+  /// cancel_context_save() can undo the save's suspension without discarding work.
   [[nodiscard]] virtual QueueContextSaveResult save_context(const QueueIdentity &identity,
                                                             uint64_t address, uint32_t area_size,
-                                                            uint32_t control_stack_size) {
-    (void)identity;
-    (void)address;
-    (void)area_size;
-    (void)control_stack_size;
-    return {};
-  }
+                                                            uint32_t control_stack_size) = 0;
+  /// @brief Restore the pre-save suspension state after a terminal save or MQD failure.
+  /// @details Preserve unfinished work and any pre-existing pause. No-op if no
+  /// save is pending. Partial save-area/MQD writes are not rolled back; REMOVE
+  /// remains unacknowledged and a later attempt must publish a fresh snapshot.
+  virtual void cancel_context_save(const QueueIdentity &identity) = 0;
   /// @brief Release paused resident resources after MQD publication succeeds.
   /// @details Also used to roll back a failed restore. No normal WG completion
   /// is generated; queue deregistration remains owned by MES.
-  virtual void release_context(const QueueIdentity &identity) { (void)identity; }
+  virtual void release_context(const QueueIdentity &identity) = 0;
 
   /// @brief Apply saved state into a new binding, keeping execution suspended.
   /// @details identity names the new suspended binding; address, area_size and
@@ -81,15 +81,9 @@ public:
   /// retrying ADD. Other outcomes are failures and require the same cleanup.
   [[nodiscard]] virtual VmAccessOutcome restore_context(const QueueIdentity &identity,
                                                         uint64_t address, uint32_t area_size,
-                                                        uint32_t control_stack_size) {
-    (void)identity;
-    (void)address;
-    (void)area_size;
-    (void)control_stack_size;
-    return VmAccessOutcome::Faulted;
-  }
+                                                        uint32_t control_stack_size) = 0;
   /// @brief Make a queue runnable after MES publishes its mapping.
-  virtual void resume_context(const QueueIdentity &identity) { (void)identity; }
+  virtual void resume_context(const QueueIdentity &identity) = 0;
 };
 
 /// @brief Result of servicing one MES or MES-created queue doorbell.

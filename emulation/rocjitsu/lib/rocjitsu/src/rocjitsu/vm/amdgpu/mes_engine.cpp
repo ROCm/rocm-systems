@@ -703,10 +703,17 @@ VmAccessOutcome MesEngine::remove_queue(uint64_t doorbell_offset, const GpuVmAcc
     const QueueIdentity identity{.address_space = queue->address_space,
                                  .process_id = queue->process_id,
                                  .queue_id = queue->queue_id};
+    const auto fail_save = [&](VmAccessOutcome outcome) {
+      // Unsupported saves roll back like other terminal failures. Only
+      // Unavailable retains the save's suspension for a later attempt.
+      if (outcome != VmAccessOutcome::Unavailable)
+        compute_bindings_.cancel_context_save(identity);
+      return outcome;
+    };
     const QueueContextSaveResult saved = compute_bindings_.save_context(
         identity, queue->context_save_address, queue->context_save_size, queue->control_stack_size);
     if (saved.outcome != VmAccessOutcome::Complete)
-      return saved.outcome;
+      return fail_save(saved.outcome);
     // KFD derives its user header from these two firmware-updated MQD fields.
     for (const auto &[field, value] :
          {std::pair{kMqdControlStackOffsetDword, saved.control_stack_offset},
@@ -714,7 +721,7 @@ VmAccessOutcome MesEngine::remove_queue(uint64_t doorbell_offset, const GpuVmAcc
       const auto status = gart_access.write(queue->mqd_address + field * sizeof(uint32_t),
                                             std::as_bytes(std::span(&value, 1)));
       if (status != VmAccessOutcome::Complete)
-        return status;
+        return fail_save(status);
     }
     // The image and both MQD offsets are durable. Drop resident resources
     // without completing work, then remove the execution binding itself.

@@ -741,6 +741,17 @@ struct ComputeQueueRecord : ComputeQueueConfig {
   /// tears it down; fault notification is handled separately.
   bool faulted = false;
   bool debug_suspended = false;
+  /// Host-only rollback state for a pending MES save; never part of the CWSR image.
+  struct ContextSaveSuspension {
+    bool debug_suspended;
+    struct Wave {
+      ComputeUnitCore *cu;
+      uint32_t slot;
+      uint64_t generation;
+    };
+    std::vector<Wave> newly_suspended;
+  };
+  std::optional<ContextSaveSuspension> context_save_suspension;
   bool runtime_suspended = scheduling_percentage == 0;
   bool exception_suspended = false;
   [[nodiscard]] bool suspended() const {

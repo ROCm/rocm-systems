@@ -25,6 +25,10 @@ RJ_DIAGNOSTIC_POP
 
 namespace {
 
+// These MES unit-test providers reject or record bindings without creating
+// CP/CU wave contexts. Save/restore explicitly return Faulted, while
+// cancel/release/resume are no-ops because there are no resident wave resources.
+// Actual context lifecycles are tested through SoC/CP/CU in pci/gpu_pci_device_test.cpp.
 class RejectingComputeBindings final : public rocjitsu::amdgpu::ComputeQueueBindingProvider {
 public:
   std::optional<rocjitsu::amdgpu::ComputeQueueBindingPlan> make_aql(uint32_t) override {
@@ -35,6 +39,20 @@ public:
   make_pm4(uint32_t, rocjitsu::amdgpu::Pm4PacketCallbacks) override {
     return std::nullopt;
   }
+
+  rocjitsu::amdgpu::QueueContextSaveResult save_context(const rocjitsu::amdgpu::QueueIdentity &,
+                                                        uint64_t, uint32_t, uint32_t) override {
+    return {.outcome = rocjitsu::amdgpu::VmAccessOutcome::Faulted};
+  }
+
+  rocjitsu::amdgpu::VmAccessOutcome restore_context(const rocjitsu::amdgpu::QueueIdentity &,
+                                                    uint64_t, uint32_t, uint32_t) override {
+    return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+  }
+
+  void cancel_context_save(const rocjitsu::amdgpu::QueueIdentity &) override {}
+  void release_context(const rocjitsu::amdgpu::QueueIdentity &) override {}
+  void resume_context(const rocjitsu::amdgpu::QueueIdentity &) override {}
 };
 
 struct RecordingBindingState {
@@ -102,6 +120,20 @@ public:
     pm4_ordinals.push_back(ordinal);
     return rocjitsu::amdgpu::ComputeQueueBindingPlan{.factory = pm4_factory, .xcd_fanout = false};
   }
+
+  rocjitsu::amdgpu::QueueContextSaveResult save_context(const rocjitsu::amdgpu::QueueIdentity &,
+                                                        uint64_t, uint32_t, uint32_t) override {
+    return {.outcome = rocjitsu::amdgpu::VmAccessOutcome::Faulted};
+  }
+
+  rocjitsu::amdgpu::VmAccessOutcome restore_context(const rocjitsu::amdgpu::QueueIdentity &,
+                                                    uint64_t, uint32_t, uint32_t) override {
+    return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+  }
+
+  void cancel_context_save(const rocjitsu::amdgpu::QueueIdentity &) override {}
+  void release_context(const rocjitsu::amdgpu::QueueIdentity &) override {}
+  void resume_context(const rocjitsu::amdgpu::QueueIdentity &) override {}
 
   std::shared_ptr<RecordingBindingState> aql = std::make_shared<RecordingBindingState>();
   std::shared_ptr<RecordingBindingState> pm4 = std::make_shared<RecordingBindingState>();
