@@ -247,8 +247,8 @@ fn soft_queue_control_uses_the_direct_index_path() {
 }
 
 #[test]
-/// Verifies that counted queue index operations reach the hardware control.
-fn counted_queue_index_operations_reach_the_hardware_control() {
+/// Verifies counted inactivation rejects a handle without changing shared indices.
+fn counted_inactivation_rejects_without_stopping_shared_indices() {
     let mut hardware = PublicQueueStorage([0; 256]);
     let hardware_queue = hardware.0.as_mut_ptr().cast::<HsaQueue>();
     // SAFETY: The storage is aligned and retains the public header and
@@ -286,6 +286,15 @@ fn counted_queue_index_operations_reach_the_hardware_control() {
         assert_eq!(hsa_queue_add_write_index_relaxed(public, 2), 23);
         assert_eq!((*write).load(Ordering::Relaxed), 25);
         assert_eq!(hsa_queue_load_write_index_relaxed(public), 25);
+        let mut state = QueueState::new();
+        state.counted_queues.insert(public as usize, counted);
+        assert_eq!(
+            inactivate_unintercepted_queue(&mut state, public),
+            INVALID_QUEUE
+        );
+        assert_eq!((*write).load(Ordering::Relaxed), 25);
+        assert_eq!(hsa_queue_add_write_index_relaxed(public, 1), 25);
+        assert_eq!((*write).load(Ordering::Relaxed), 26);
     }
 }
 
