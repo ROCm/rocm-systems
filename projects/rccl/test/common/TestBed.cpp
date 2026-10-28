@@ -13,6 +13,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <thread>
 #include <unistd.h>
 #include "TestBed.hpp"
@@ -286,9 +287,9 @@ namespace RcclUnitTesting
     }
   }
 
-  std::string TestBed::AbandonChildren(int const lostChildId, bool const waitForExit)
+  std::string TestBed::AbandonChildren(int const lostChildId, bool const waitForExit, char const* what)
   {
-    std::string reason = "Child " + std::to_string(lostChildId) + " stopped responding";
+    std::string reason = "Child " + std::to_string(lostChildId) + " " + what;
     TestBedChild* const lost = (lostChildId >= 0 && lostChildId < static_cast<int>(childList.size()))
                                ? childList[lostChildId] : nullptr;
     if (lost != nullptr && lost->pid > 0)
@@ -644,7 +645,7 @@ namespace RcclUnitTesting
     std::vector<int> ackChildIds;
     for (int childId = 0; childId < this->numActiveChildren; ++childId)
       ackChildIds.push_back(childId);
-    CollectAcks(ackChildIds);
+    CollectAcks(ackChildIds, nullptr, /*peersInterlocked=*/true);
     InteractiveWait("Finishing InitComms");
   }
 
@@ -716,22 +717,96 @@ namespace RcclUnitTesting
     InteractiveWait("Finishing SetCollectiveArgs");
   }
 
-  void TestBed::CollectAcks(std::vector<int> const& childIds, bool* allSucceeded)
+  void TestBed::CollectAcks(std::vector<int> const& childIds, bool* allSucceeded, bool const peersInterlocked)
   {
     if (allSucceeded) *allSucceeded = false;
 
     // Read every acknowledgement before failing: stopping at the first failure
     // leaves the remaining acks queued, and the next command on those children
-    // would consume them as its own.
+    // would consume them as its own. Acks are taken in arrival order, so a
+    // failure is seen even while an earlier child is still blocked on the
+    // failed one.
+    using Clock = std::chrono::steady_clock;
+    std::map<int, int> pendingAcks;
+    for (int childId : childIds) ++pendingAcks[childId];
+    int const replyTimeoutSec = ChildReplyTimeoutSec();
+    auto const replyDeadline = Clock::now() + std::chrono::seconds(replyTimeoutSec);
     int numFailed = 0;
-    for (int childId : childIds)
+    while (!pendingAcks.empty())
     {
-      int response = 0;
-      PIPE_READ(childId, response);
-      if (response != TEST_SUCCESS)
+      // Watch every active child for a hangup: a dead peer can leave a pending
+      // child blocked forever. Only pending children are read.
+      std::vector<pollfd> fds;
+      std::vector<int> fdChildIds;
+      for (int c = 0; c < static_cast<int>(childList.size()); ++c)
       {
-        TEST_ERROR("Child %d reports failure", childId);
-        ++numFailed;
+        if (childList[c] == nullptr || childList[c]->parentReadFd < 0) continue;
+        fds.push_back({childList[c]->parentReadFd, static_cast<short>(pendingAcks.count(c) ? POLLIN : 0), 0});
+        fdChildIds.push_back(c);
+      }
+      for (auto const& pending : pendingAcks)
+      {
+        if (std::find(fdChildIds.begin(), fdChildIds.end(), pending.first) != fdChildIds.end()) continue;
+        TEST_ERROR("Child %d has no pipe to read its acknowledgement from", pending.first);
+        FAIL() << AbandonChildren(pending.first);
+      }
+
+      int pollTimeoutMs = -1;
+      if (replyTimeoutSec > 0)
+      {
+        auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+          replyDeadline - Clock::now());
+        pollTimeoutMs = static_cast<int>(std::clamp<long long>(remaining.count(), 0, INT_MAX));
+      }
+      int const pollResult = poll(fds.data(), fds.size(), pollTimeoutMs);
+      if (pollResult < 0)
+      {
+        if (errno == EINTR) continue;
+        TEST_ERROR("poll on child pipes failed: %s", strerror(errno));
+        FAIL() << AbandonChildren(pendingAcks.begin()->first);
+      }
+      if (pollResult == 0)
+      {
+        int const stuckChild = pendingAcks.begin()->first;
+        TEST_ERROR("Child %d did not reply within %d s (UT_CHILD_TIMEOUT_S)", stuckChild, replyTimeoutSec);
+        FAIL() << AbandonChildren(stuckChild, /*waitForExit=*/false);
+      }
+
+      for (size_t i = 0; i < fds.size(); ++i)
+      {
+        if (fds[i].revents == 0) continue;
+        int const childId = fdChildIds[i];
+        if (!pendingAcks.count(childId))
+        {
+          TEST_ERROR("Child %d pipe closed while waiting for child %d", childId, pendingAcks.begin()->first);
+          FAIL() << AbandonChildren(childId);
+        }
+        int response = 0;
+        ssize_t const retval = RcclUnitTesting::safe_pipe_read(fds[i].fd, &response, sizeof(response));
+        if (retval != static_cast<ssize_t>(sizeof(response)))
+        {
+          if (retval == -1)
+            TEST_ERROR("Unable to read from child %d: Error %s", childId, strerror(errno));
+          else
+            TEST_ERROR("Child %d pipe closed unexpectedly", childId);
+          FAIL() << AbandonChildren(childId);
+        }
+        if (--pendingAcks[childId] == 0) pendingAcks.erase(childId);
+        if (response != TEST_SUCCESS)
+        {
+          TEST_ERROR("Child %d reports failure", childId);
+          ++numFailed;
+          // Children still owing an ack may be blocked on this one and cannot
+          // read an abort request; stopping the workers is the only way out.
+          if (peersInterlocked && !pendingAcks.empty())
+          {
+            std::string waiting;
+            for (auto const& pending : pendingAcks)
+              waiting += (waiting.empty() ? "" : ", ") + std::to_string(pending.first);
+            TEST_ERROR("Not waiting for child(ren) %s after child %d failed", waiting.c_str(), childId);
+            FAIL() << AbandonChildren(childId, /*waitForExit=*/false, "reported failure");
+          }
+        }
       }
     }
     if (numFailed > 0)
@@ -831,7 +906,7 @@ namespace RcclUnitTesting
         if (!ranksPerChild[childId].empty()) ackChildIds.push_back(childId);
       }
       bool allAcked = false;
-      CollectAcks(ackChildIds, &allAcked);
+      CollectAcks(ackChildIds, &allAcked, this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN);
       if (!allAcked) return;
     }
     InteractiveWait("Finishing RegisterMemInternal");
@@ -943,7 +1018,7 @@ namespace RcclUnitTesting
         if ((currentRanks.size() == 0) || (ranksPerChild[childId].size() > 0)) ackChildIds.push_back(childId);
       }
       bool allAcked = false;
-      CollectAcks(ackChildIds, &allAcked);
+      CollectAcks(ackChildIds, &allAcked, /*peersInterlocked=*/true);
       if (!allAcked) return;
     }
 
@@ -1059,7 +1134,7 @@ namespace RcclUnitTesting
         if (!ranksPerChild[childId].empty()) deregAckChildIds.push_back(childId);
 
       bool allDeregistered = false;
-      CollectAcks(deregAckChildIds, &allDeregistered);
+      CollectAcks(deregAckChildIds, &allDeregistered, this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN);
       if (!allDeregistered) return;
 
       // Phase 2: now no selected communicator retains a window/registration
@@ -1132,7 +1207,7 @@ namespace RcclUnitTesting
       std::vector<int> ackChildIds;
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
         ackChildIds.push_back(childId);
-      CollectAcks(ackChildIds);
+      CollectAcks(ackChildIds, nullptr, /*peersInterlocked=*/true);
 
       if (ev.verbose)
       {

@@ -229,12 +229,14 @@ namespace RcclUnitTesting
     int WaitForChild(int childId);
 
     // Called when a child stops answering (it crashed, hung, or broke the
-    // protocol). Reports how it ended, kills and reaps every worker this TestBed
-    // owns or borrows, and resets it to no active children; the next InitComms
-    // starts fresh workers. waitForExit gives a dying child time to report its
-    // exit status; a hung child is killed immediately. Returns the report for
-    // the test failure message.
-    std::string AbandonChildren(int lostChildId, bool waitForExit = true);
+    // protocol), or fails while its peers may be blocked on it. Reports how it
+    // ended, kills and reaps every worker this TestBed owns or borrows, and
+    // resets it to no active children; the next InitComms starts fresh workers.
+    // waitForExit gives a dying child time to report its exit status; a hung
+    // child is killed immediately. what describes the child in the report.
+    // Returns the report for the test failure message.
+    std::string AbandonChildren(int lostChildId, bool waitForExit = true,
+                                char const* what = "stopped responding");
 
     // Fills workers with the pool worker serving each child of deviceIdsPerChild.
     // False when some child has no distinct live worker (fork-fresh path).
@@ -247,8 +249,12 @@ namespace RcclUnitTesting
     bool FinishWarmup(int worker);
 
     // Reads one acknowledgement from each listed child (a child may appear once
-    // per command it was sent), then fails if any reported failure.
-    void CollectAcks(std::vector<int> const& childIds, bool* allSucceeded = nullptr);
+    // per command it was sent), then fails if any reported failure. With
+    // peersInterlocked (the command makes children wait on each other: init,
+    // collectives, window registration, destroy), a failure while other acks
+    // are still owed stops every worker at once instead of waiting on them.
+    void CollectAcks(std::vector<int> const& childIds, bool* allSucceeded = nullptr,
+                     bool peersInterlocked = false);
 
     // AllocateMem is split into AllocateMemInternal + RegisterMemInternal to maintain
     // compatibility with existing tests, and extend registration for symmetric memory.

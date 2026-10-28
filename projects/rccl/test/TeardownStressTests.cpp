@@ -351,6 +351,78 @@ namespace RcclUnitTesting
     }
   }
 
+  // Rank 0 gets an out-of-range root, so its ncclBroadcast fails at once, while
+  // rank 1 runs a valid Broadcast that waits on rank 0. The parent must stop the
+  // workers on rank 0's failure, not wait for rank 1's own UT_TIMEOUT_US.
+  TEST(Teardown, FailedCollectiveStopsBlockedPeers)
+  {
+    TestBed testBed;
+    std::string skipReason;
+    if (!CanRunTwoProcessPool(testBed, skipReason)) GTEST_SKIP() << skipReason;
+    testBed.ev.childTimeoutSec = 60;
+    testBed.ev.timeoutUs = 5000000;
+
+    testBed.InitComms(TestBed::GetDeviceIdsList(2, 2, testBed.ev.GetGpuPriorityOrder()));
+    ASSERT_FALSE(testing::Test::HasFailure());
+    size_t const numElements = 1024 * 1024;
+    OptionalColArgs options;
+    options.root = 0;
+    testBed.SetCollectiveArgs(ncclCollBroadcast, ncclFloat32, numElements, numElements, options,
+                              /*collId*/ -1, /*groupId*/ 0, /*rank*/ 1);
+    options.root = 7;
+    testBed.SetCollectiveArgs(ncclCollBroadcast, ncclFloat32, numElements, numElements, options,
+                              /*collId*/ -1, /*groupId*/ 0, /*rank*/ 0);
+    testBed.AllocateMem(/*inPlace*/ false, /*useManagedMem*/ false);
+    ASSERT_FALSE(testing::Test::HasFailure());
+
+    ::testing::TestPartResultArray failures;
+    auto const start = std::chrono::steady_clock::now();
+    {
+      ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+      testBed.ExecuteCollectives();
+    }
+    auto const elapsed = std::chrono::steady_clock::now() - start;
+
+    EXPECT_EQ(failures.size(), 1);
+    EXPECT_TRUE(AnyFailureMentions(failures, "Child 0 reported failure"));
+    EXPECT_LT(elapsed, std::chrono::microseconds(testBed.ev.timeoutUs))
+      << "Waited for rank 1 to time out instead of stopping the workers";
+    EXPECT_TRUE(testBed.childList.empty());
+    EXPECT_EQ(testBed.numActiveChildren, 0);
+    testBed.Finalize();
+  }
+
+  // Child 1 fails InitComms before creating its comm (its GPU does not exist),
+  // while child 0 waits inside ncclCommInitRank for it to join, which nothing on
+  // the child side can end. The parent must stop the workers at once rather
+  // than wait out the reply timeout.
+  TEST(Teardown, FailedInitStopsWaitingPeers)
+  {
+    TestBed testBed;
+    std::string skipReason;
+    if (!CanRunTwoProcessPool(testBed, skipReason)) GTEST_SKIP() << skipReason;
+    int const replyTimeoutSec = 60;
+    testBed.ev.childTimeoutSec = replyTimeoutSec;
+    int const firstGpu = testBed.ev.GetGpuPriorityOrder()[0];
+
+    ::testing::TestPartResultArray failures;
+    auto const start = std::chrono::steady_clock::now();
+    {
+      ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+      testBed.InitComms({{firstGpu}, {9999}});
+    }
+    auto const elapsed = std::chrono::steady_clock::now() - start;
+
+    EXPECT_EQ(failures.size(), 1);
+    EXPECT_TRUE(AnyFailureMentions(failures, "Child 1 reported failure"));
+    EXPECT_LT(elapsed, std::chrono::seconds(10));
+    EXPECT_TRUE(testBed.childList.empty());
+    EXPECT_EQ(testBed.numActiveChildren, 0);
+    testBed.Finalize();
+  }
+
   // The next InitComms that uses a warming worker collects its reply first.
   TEST(Teardown, WarmedPoolWorkerIsReused)
   {
