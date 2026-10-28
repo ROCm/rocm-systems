@@ -2,7 +2,6 @@
  *
  * SPDX-License-Identifier: MIT
  */
-
 #include "backend/host.h"
 
 #include <hip/hip_runtime_api.h>
@@ -16,8 +15,6 @@
 #include <new>
 #include <stdexcept>
 #include <system_error>
-#include <utility>
-#include <variant>
 
 #include "async.h"
 #include "backend.h"
@@ -25,12 +22,9 @@
 #include "configuration.h"
 #include "context.h"
 #include "file.h"
-#include "hip.h"
 #include "io.h"
-#include "stats.h"
 #include "stream.h"
 #include "sys.h"
-#include "util.h"
 
 using namespace hipFile;
 
