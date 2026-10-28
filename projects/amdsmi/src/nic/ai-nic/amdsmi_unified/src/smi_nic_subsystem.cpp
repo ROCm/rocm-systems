@@ -42,7 +42,7 @@ std::pair<uint16_t, uint16_t> SmiNicSubsystem::read_pci_ids(
   return {vendor_id, device_id};
 }
 
-bool SmiNicSubsystem::was_bdf_resolved(const std::string& symlink, std::string& bdf) const {
+bool SmiNicSubsystem::resolve_bdf(const std::string& symlink, std::string& bdf) const {
   char resolved_path[PATH_MAX];
   ssize_t len = readlink(symlink.c_str(), resolved_path, sizeof(resolved_path) - 1);
 

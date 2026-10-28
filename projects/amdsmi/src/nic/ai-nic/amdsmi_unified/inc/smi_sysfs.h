@@ -21,7 +21,7 @@ class SmiSysfsReader {
   // failures are always logged. For high-volume scans such as PCI id discovery.
   static SysfsStatus readLine(const std::string& filepath, SysfsValue& content,
                               bool is_success_logged = true);
-  static bool is_readable(const std::string& filepath);
+  static bool exists(const std::string& filepath);
 
   SmiSysfsReader() = delete;
 };

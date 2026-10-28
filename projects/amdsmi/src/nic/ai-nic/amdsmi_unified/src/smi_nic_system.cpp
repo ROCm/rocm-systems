@@ -34,12 +34,12 @@ void SmiNicSystem::register_subsystem(std::unique_ptr<SmiNicSubsystem> subsystem
   subsystems_.push_back(std::move(subsystem));
 }
 
-bool SmiNicSystem::has_interface(const std::string& iface) const {
+bool SmiNicSystem::interface_exists(const std::string& iface) const {
   std::error_code ec;
   return fs::exists(fs::path(net_path_) / fs::path(iface).string(), ec);
 }
 
-bool SmiNicSystem::is_driver_loaded(const std::string& bdf, DriverType driver_type) const {
+bool SmiNicSystem::driver_loaded(const std::string& bdf, DriverType driver_type) const {
   const SmiNic* nic = nullptr;
 
   for (const auto& entry : nics_) {
@@ -71,7 +71,7 @@ bool SmiNicSystem::is_driver_loaded(const std::string& bdf, DriverType driver_ty
   for (const auto& subsystem : subsystems_) {
     for (const auto& owned : subsystem->get_nics()) {
       if (owned.get() == nic) {
-        return subsystem->is_driver_loaded(bdf, driver_type);
+        return subsystem->driver_loaded(bdf, driver_type);
       }
     }
   }

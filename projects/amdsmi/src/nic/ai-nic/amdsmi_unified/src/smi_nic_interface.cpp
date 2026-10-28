@@ -263,7 +263,7 @@ smi_nic_status_t smi_get_nic_driver_info(smi_nic_ctx_t ctx, uint64_t device,
     return SMI_NIC_STATUS_NO_DATA;
   }
 
-  if (!nic_system->is_driver_loaded(ports[0].bdf(), DriverType::Main)) {
+  if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -306,7 +306,7 @@ smi_nic_status_t smi_get_nic_asic_info(smi_nic_ctx_t ctx, uint64_t device,
   const auto& ports = nic->nic_ports();
   // A fwctl-only NIC (no host netdev) exposes no port; its PCI-sysfs identity is
   // still valid. Require a loaded netdev driver only when a port exists.
-  if (!ports.empty() && !nic_system->is_driver_loaded(ports[0].bdf(), DriverType::Main)) {
+  if (!ports.empty() && !nic_system->driver_loaded(ports[0].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -372,7 +372,7 @@ smi_nic_status_t smi_get_nic_bus_info(smi_nic_ctx_t ctx, uint64_t device,
   const auto& ports = nic->nic_ports();
   // A fwctl-only NIC (no host netdev) exposes no port; its PCI-sysfs identity is
   // still valid. Require a loaded netdev driver only when a port exists.
-  if (!ports.empty() && !nic_system->is_driver_loaded(ports[0].bdf(), DriverType::Main)) {
+  if (!ports.empty() && !nic_system->driver_loaded(ports[0].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -410,7 +410,7 @@ smi_nic_status_t smi_get_nic_numa_info(smi_nic_ctx_t ctx, uint64_t device,
   const auto& ports = nic->nic_ports();
   // A fwctl-only NIC (no host netdev) exposes no port; its PCI-sysfs identity is
   // still valid. Require a loaded netdev driver only when a port exists.
-  if (!ports.empty() && !nic_system->is_driver_loaded(ports[0].bdf(), DriverType::Main)) {
+  if (!ports.empty() && !nic_system->driver_loaded(ports[0].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -469,7 +469,7 @@ smi_nic_status_t smi_get_nic_port_info(smi_nic_ctx_t ctx, uint64_t device,
       port_info->port_num = port.port_num().value_or(std::numeric_limits<uint32_t>::max());
       copy_or_na(port_info->netdev, port.interface());
 
-      if (!nic_system->is_driver_loaded(port.bdf(), DriverType::Main)) {
+      if (!nic_system->driver_loaded(port.bdf(), DriverType::Main)) {
         // Keep the identity; everything the driver would answer reads N/A.
         copy_or_na(port_info->type, "");
         copy_or_na(port_info->flavour, "");
@@ -580,7 +580,7 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device,
   bool driver_not_loaded = false;
   for (uint32_t i = 0; i < ports.size() && rdma_count < SMI_NIC_MAX_RDMA_DEV; i++) {
     const auto& port = ports[i];
-    if (!nic_system->is_driver_loaded(port.bdf(), DriverType::Rdma)) {
+    if (!nic_system->driver_loaded(port.bdf(), DriverType::Rdma)) {
       driver_not_loaded = true;
       continue;
     }
@@ -688,7 +688,7 @@ smi_nic_status_t smi_get_nic_port_statistics_count(smi_nic_ctx_t ctx, uint64_t d
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
-  if (!nic_system->is_driver_loaded(ports[port_index].bdf(), DriverType::Main)) {
+  if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -726,7 +726,7 @@ smi_nic_status_t smi_get_nic_port_statistics_list(smi_nic_ctx_t ctx, uint64_t de
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
-  if (!nic_system->is_driver_loaded(ports[port_index].bdf(), DriverType::Main)) {
+  if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -782,7 +782,7 @@ smi_nic_status_t smi_get_nic_vendor_statistics_count_with_scope(smi_nic_ctx_t ct
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
-  if (!nic_system->is_driver_loaded(ports[port_index].bdf(), DriverType::Main)) {
+  if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -832,7 +832,7 @@ smi_nic_status_t smi_get_nic_vendor_statistics_list_with_scope(smi_nic_ctx_t ctx
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
-  if (!nic_system->is_driver_loaded(ports[port_index].bdf(), DriverType::Main)) {
+  if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -885,7 +885,7 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_count(smi_nic_ctx_t ctx, uint6
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
-  if (!nic_system->is_driver_loaded(ports[port_index].bdf(), DriverType::Rdma)) {
+  if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::Rdma)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -936,7 +936,7 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_list(smi_nic_ctx_t ctx, uint64
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
-  if (!nic_system->is_driver_loaded(ports[port_index].bdf(), DriverType::Rdma)) {
+  if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::Rdma)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
