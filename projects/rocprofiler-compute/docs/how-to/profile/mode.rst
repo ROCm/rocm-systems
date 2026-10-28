@@ -942,7 +942,7 @@ option when profiling a PyTorch workload:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --experimental --trace-ml-api torch --name mnist_torch -- python train.py
+   $ rocprof-compute profile --experimental --trace-ml-api torch --name simple_net -- python simple_net.py
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -953,9 +953,9 @@ option when profiling a PyTorch workload:
 
    INFO Rocprofiler-Compute version: 3.5.0
    INFO Profiler choice: rocprofiler-sdk
-   INFO Path: /home/auser/workloads/mnist_torch/MI325X
+   INFO Path: /home/auser/workloads/simple_net/MI325X
    INFO Target: MI325X
-   INFO Command: python train.py
+   INFO Command: python simple_net.py
    INFO Torch Trace: Enabled
    INFO Kernel Selection: None
    INFO Kernel Iteration Range: None
@@ -981,7 +981,7 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 
 .. code-block:: shell-session
 
-   $ ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0 rocprof-compute profile --experimental --trace-ml-api torch --name mnist_torch -- python train.py
+   $ ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0 rocprof-compute profile --experimental --trace-ml-api torch --name simple_net -- python simple_net.py
 
 Torch trace collector
 ---------------------
@@ -1094,13 +1094,13 @@ Torch operator mapping can be combined with other profiling options. Use
 .. code-block:: shell-session
 
    # Combine with block filtering for targeted counter collection
-   $ rocprof-compute profile -b 11 12 --experimental --trace-ml-api torch --name mnist -- python train.py
+   $ rocprof-compute profile -b 11 12 --experimental --trace-ml-api torch --name simple_net -- python simple_net.py
 
    # Combine with iteration multiplexing
-   $ rocprof-compute profile --experimental --trace-ml-api torch --name mnist --iteration-multiplexing kernel -- python train.py
+   $ rocprof-compute profile --experimental --trace-ml-api torch --name simple_net --iteration-multiplexing kernel -- python simple_net.py
 
    # Combine with kernel filtering (filters by GPU kernel name)
-   $ rocprof-compute profile --experimental --trace-ml-api torch --name mnist -k elementwise -- python train.py
+   $ rocprof-compute profile --experimental --trace-ml-api torch --name simple_net -k elementwise -- python simple_net.py
 
 .. _triton-trace:
 
@@ -1138,13 +1138,13 @@ To enable Triton kernel mapping, use ``--experimental`` with the
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --experimental --trace-ml-api triton --name triton_gemm -- python gemm.py
+   $ rocprof-compute profile --experimental --trace-ml-api triton --name triton_ffn -- python triton_ffn.py
 
 ``--trace-ml-api torch,triton`` instruments both frameworks in a single run:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --experimental --trace-ml-api torch,triton --name compiled_model -- python train.py
+   $ rocprof-compute profile --experimental --trace-ml-api torch,triton --name torch_triton_net -- python torch_triton_net.py
 
 Each captured operator records which framework it came from, so you can
 analyze each framework separately. To enable all supported backends at once,
@@ -1169,7 +1169,7 @@ User-defined regions are included with every ``--trace-ml-api`` run.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --experimental --trace-ml-api --name model -- python train.py
+   $ rocprof-compute profile --experimental --trace-ml-api --name torch_triton_net -- python torch_triton_net.py
 
 The output is identical to enabling each named selector individually.
 Each kernel is attributed to the framework that launched it. Analyze with
