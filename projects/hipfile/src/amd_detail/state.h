@@ -139,11 +139,6 @@ public:
     // @param [in] hip_stream A valid hipStream
     virtual void deregisterStream(const hipStream_t hip_stream);
 
-    // @brief Look up a stream given a hipStream_t
-    // @param [in] hip_stream A valid hipStream
-    // @return Return a shared pointer to the Stream
-    virtual std::shared_ptr<IStream> getStream(hipStream_t hip_stream);
-
     //
     // Buffer and file calls
     //
