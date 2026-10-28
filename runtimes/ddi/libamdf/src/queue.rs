@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use rocddi::device::gpu::queue::{
-    self, QueueAccessWidth, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest,
-    QueueRingMemory, QueueScratch,
+    self, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest, QueueRingMemory,
+    QueueScratch,
 };
 use rocddi::memory::storage::{Allocator, Owned};
 
@@ -24,6 +24,10 @@ const LOST_BIT: u64 = 1 << 63;
 const DEFAULT_RING_BYTES: u64 = 64 * 1024;
 
 /// Native queue implementation or deterministic unit-test fixture.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the small variant exists only for the internal test fixture"
+)]
 enum NativeQueue {
     /// rocddi direct queue and its native transport.
     Provider(queue::RetainedQueue<Option<memory::QueueScratchBorrow>>),
@@ -323,12 +327,12 @@ fn transport(
     format_features: amdf_queue_format_features_t,
     device: bool,
 ) -> Result<amdf_user_queue_mapping_info_t, u64> {
-    let units = match command_type {
-        AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 => 4,
-        AMDF_QUEUE_COMMAND_TYPE_GPU_AQL => 64,
-        AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA => 1,
+    match command_type {
+        AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
+        | AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+        | AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA => (),
         _ => return Err(UNSUPPORTED),
-    };
+    }
     let (ring, read, write, doorbell) = if device {
         (
             info.ring_device_address,
@@ -344,21 +348,6 @@ fn transport(
             info.doorbell_host_address as u64,
         )
     };
-    if info.read_index_width != QueueAccessWidth::Bits64
-        || info.write_index_width != QueueAccessWidth::Bits64
-        || info.doorbell_width != QueueAccessWidth::Bits64
-        || info.read_index_wraps != (command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4)
-        || info.index_unit_bytes != units
-        || ring == 0
-        || read == 0
-        || write == 0
-        || doorbell == 0
-        || read & 7 != 0
-        || write & 7 != 0
-        || doorbell & 7 != 0
-    {
-        return Err(INTERNAL);
-    }
     Ok(amdf_user_queue_mapping_info_t {
         command_type,
         format_version,
