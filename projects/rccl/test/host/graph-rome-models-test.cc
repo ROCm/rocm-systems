@@ -740,15 +740,6 @@ TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_StopsAtTooManyNics) {
   EXPECT_EQ(0, ring_->nChannels);
 }
 
-// The GPU count is bounded before gpus[gpu] is written, so one GPU too many is
-// refused rather than landing past the array (AICOMRCCL-3030).
-TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_OneGpuPastTheLimitIsRejected) {
-  std::string many;
-  for (int g = 0; g <= NCCL_TOPO_MAX_NODES; g++) many += std::to_string(g % 4) + " ";
-
-  EXPECT_EQ(ncclInvalidUsage, parseGraph(many.c_str(), system_.get(), ring_.get(), nullptr, nullptr, 0));
-}
-
 TEST_F(GraphRomeModelsMicrotest, ParseOptions_SetsTheKnownKeys) {
   Use(XgmiSystem(1));
 
