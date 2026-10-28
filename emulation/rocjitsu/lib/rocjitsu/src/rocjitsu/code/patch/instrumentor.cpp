@@ -906,6 +906,13 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   const Section *text = obj_.text_sections().front();
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                             text->size());
+  // A probe call is analyzed and planned at the wave size the object's kernels
+  // share, with temps bounded by their SGPR allocation. The point loop refuses a
+  // probe call before any of that when either is missing.
+  const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
+                                       obj_.image_size());
+  out.kernels = scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+  out.wave_size = common_wavefront_size(arch_, out.kernels);
 
   const auto &registry = default_isa_target_registry();
   const IsaTargetDescriptor *arch_descriptor = registry.find(arch_);
@@ -1000,7 +1007,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // which a trampoline at an arbitrary site cannot reproduce, so the probe
     // would read whatever the instrumented kernel left behind. An ordinary
     // uninitialized read lands here too, and is equally unusable.
-    auto live_ins = analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->abi, &perr);
+    auto live_ins =
+        analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->abi, *out.wave_size, &perr);
     if (!live_ins)
       return std::nullopt;
     if (!live_ins->none()) {
@@ -1050,6 +1058,21 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // Resolve the probe request. An unresolvable or non-relocatable probe is
     // a fatal, all-or-nothing validation error.
     if (pt.probe_obj != nullptr) {
+      // A temp past the kernel's .sgpr_count would be unallocated, so the call
+      // needs a descriptor to bound SGPR selection (growing the allocation is
+      // deferred).
+      if (out.kernels.empty()) {
+        out.errors.push_back("probe call at anchor_offset " + std::to_string(pt.anchor_offset) +
+                             " requires a discovered kernel descriptor to bound SGPR "
+                             "selection, but none was found");
+        continue;
+      }
+      if (!out.wave_size) {
+        out.errors.push_back("probe call at anchor_offset " + std::to_string(pt.anchor_offset) +
+                             " is in a code object whose kernels mix Wave32 and Wave64; "
+                             "liveness supports one wave size per code object");
+        continue;
+      }
       auto index = resolve_probe_index(pt, perr);
       if (!index) {
         out.errors.push_back(std::move(perr));
@@ -1137,25 +1160,24 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   CodeObjectPatcher patcher(obj_);
   const uint64_t cave_start = patcher.text_size();
 
-  const std::vector<KernelDescriptorInfo> kernels =
-      scan_kernel_descriptors(patcher.image_bytes(), patcher.text_offset(), patcher.text_size());
+  const std::vector<KernelDescriptorInfo> &kernels = resolved.kernels;
 
-  // Liveness over the decoded blocks, built once and reused by every probe-call
-  // site. validate_points() already built blocks_, and obj_ owns the
-  // Instructions live_before() is keyed on.
+  // Liveness over the decoded blocks, built only when a probe resolved (probe-call
+  // sites are the only ones that query it) and shared by all of them.
+  // resolve_points() built blocks_ and resolved those probes only because the
+  // kernels share a wave size. obj_ owns the Instructions live_before() is keyed
+  // on.
   // TODO: scope this to the kernel containing each anchor, like the DBT path,
   // rather than treating every decoded block as one CFG. Safe here: kernels end
   // in s_endpgm, so there are no false cross-kernel fallthrough edges.
   std::vector<BasicBlock *> liveness_scope;
-  liveness_scope.reserve(blocks_.size());
-  for (const auto &block : blocks_)
-    liveness_scope.push_back(block.get());
-  // Liveness needs the wave size because a Wave32 compare writes one SGPR of
-  // the pair its encoding names. The scope is the whole object, so the kernels
-  // must share one. Without it, every probe-call site fails below before
-  // querying liveness, so the 64 fallback is never read.
-  const std::optional<uint8_t> kernel_wave_size = common_wavefront_size(arch_, kernels);
-  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope), kernel_wave_size.value_or(64)};
+  std::optional<LivenessAnalysis> liveness;
+  if (!resolved.probes.empty()) {
+    liveness_scope.reserve(blocks_.size());
+    for (const auto &block : blocks_)
+      liveness_scope.push_back(block.get());
+    liveness.emplace(KernelBlockScope(liveness_scope), *resolved.wave_size);
+  }
 
   // Lay out the appended region as [probe bodies][s_nop padding][entry stub]
   // [trampolines], the padding and stub only when the kernel has an entry
@@ -1194,7 +1216,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   probe_summaries.reserve(resolved.probes.size());
   for (const ProbeCallable &probe : resolved.probes) {
     std::string probe_err;
-    auto summary = build_probe_clobber_summary(probe, &probe_err);
+    auto summary = build_probe_clobber_summary(probe, *resolved.wave_size, &probe_err);
     if (!summary) {
       result.errors.push_back(std::move(probe_err));
       continue;
@@ -1246,30 +1268,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     // clobber
     if (site.is_probe_call()) {
       const ProbeCallable &probe = resolved.probes[*site.probe_index];
-
-      // A probe call selects temp SGPRs (link/target/SCC/special-state) bounded by
-      // the kernel's own allocation. Without a discovered descriptor that bound is
-      // unknown, so a temp could land past the kernel's .sgpr_count; fail closed
-      // rather than fall back to the device-wide default (growing the allocation is
-      // deferred).
-      if (!kernel_sgpr_count) {
-        result.errors.push_back("probe call at anchor_offset " +
-                                std::to_string(site.anchor_offset) +
-                                " requires a discovered kernel descriptor to bound SGPR "
-                                "selection, but none was found");
-        continue;
-      }
-
-      // Liveness was configured with one wave size for the whole object. The
-      // SGPR-bound gate above proved kernels exist, so nullopt means they
-      // disagree and no one wave size is right for all of them.
-      if (!kernel_wave_size) {
-        result.errors.push_back("probe call at anchor_offset " +
-                                std::to_string(site.anchor_offset) +
-                                " is in a code object whose kernels mix Wave32 and Wave64; "
-                                "liveness supports one wave size per code object");
-        continue;
-      }
 
       // The kernel must own the fixed return-link pair.
       if (const uint16_t link_base = probe.abi.link_pair_base;
@@ -1349,7 +1347,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.errors.emplace_back("internal: anchor instruction vanished after validation");
         continue;
       }
-      auto maybe_live = liveness.live_before(*anchor);
+      auto maybe_live = liveness->live_before(*anchor);
       if (maybe_live.failed()) {
         result.errors.emplace_back("internal: anchor liveness is unavailable");
         continue;

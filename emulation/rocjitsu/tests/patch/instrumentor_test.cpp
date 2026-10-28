@@ -19,6 +19,8 @@
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
@@ -2480,6 +2482,134 @@ TEST(InstrumentorProbePatch, MixedWaveSizesFailClosed) {
     }
     ASSERT_FALSE(result.errors.empty());
     EXPECT_NE(result.errors.front().find("mix Wave32 and Wave64"), std::string::npos)
+        << result.errors.front();
+  }
+}
+
+namespace {
+
+// A probe-call point on @p target fails with @p error from both validate_points()
+// and patch(), while an inline-nop point at the same anchor passes both.
+void expect_only_probe_calls_refused(const std::vector<uint8_t> &target,
+                                     const std::vector<uint8_t> &probe, rj_code_arch_t arch,
+                                     uint64_t anchor_offset, std::string_view error) {
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  for (const bool validate : {true, false}) {
+    SCOPED_TRACE(validate ? "validate_points" : "patch");
+    Instrumentor probe_call(obj, arch);
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor_offset;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    probe_call.add_point(pt);
+    const std::vector<std::string> errors =
+        validate ? probe_call.validate_points().errors : probe_call.patch().errors;
+    ASSERT_FALSE(errors.empty());
+    EXPECT_NE(errors.front().find(error), std::string::npos) << errors.front();
+
+    Instrumentor inline_nop(obj, arch);
+    inline_nop.add_point_by_offset(anchor_offset);
+    const std::vector<std::string> nop_errors =
+        validate ? inline_nop.validate_points().errors : inline_nop.patch().errors;
+    EXPECT_TRUE(nop_errors.empty()) << nop_errors.front();
+  }
+}
+
+} // namespace
+
+// Both gates refuse a probe call before its body is analyzed. Each probe here
+// also reads s3 before defining it, and that must not be the error reported.
+TEST(InstrumentorProbePatch, ProbeCallGatesPrecedeProbeAnalysis) {
+  expect_only_probe_calls_refused(
+      make_gfx950_elf_with_two_nops(),
+      make_gfx950_probe_elf("rj_test_probe",
+                            {build_s_mov_b32(4, 3, ROCJITSU_CODE_ARCH_CDNA4), kProbeSetpcS30S31}),
+      ROCJITSU_CODE_ARCH_CDNA4, /*anchor_offset=*/4, "discovered kernel descriptor");
+  expect_only_probe_calls_refused(
+      make_amdgpu_two_kernel_elf(
+          {build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4), build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)},
+          /*private_bytes=*/0, /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1200,
+          {true, false}),
+      make_gfx1200_probe_elf("rj_test_probe", {build_s_mov_b32(4, 3, ROCJITSU_CODE_ARCH_RDNA4),
+                                               build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_RDNA4)}),
+      ROCJITSU_CODE_ARCH_RDNA4, /*anchor_offset=*/0, "mix Wave32 and Wave64");
+}
+
+// A Wave32 compare into s2 writes only s2, so a probe that then reads s3 reads a
+// register it never defined. The probe is analyzed at its kernel's wave size; at
+// Wave64 the compare writes s[2:3] and the same probe is admitted.
+TEST(InstrumentorProbePatch, ProbeReadingAboveAWave32CompareIsRefused) {
+  const auto compare =
+      rdna4::build_vop3(rdna4::kVCmpEqU32Vop3, {.vdst = 2, .src0 = 128, .src1 = 128});
+  const std::vector<uint32_t> body = {
+      compare[0],
+      compare[1],
+      rdna4::build_sop1(rdna4::kSMovB32Sop1, {.ssrc0 = 3, .sdst = 4})[0],
+      build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  for (const bool wave32 : {true, false}) {
+    SCOPED_TRACE(wave32 ? "Wave32" : "Wave64");
+    auto target = wave32 ? make_gfx1200_wave32_kernel_elf({0xBF800000u, 0xBF800000u}, 0)
+                         : make_gfx1200_kernel_elf({0xBF800000u, 0xBF800000u}, 0);
+    auto probe = make_gfx1200_probe_elf("rj_test_probe", body);
+    AmdGpuCodeObject obj(target.data(), target.size());
+    AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+    Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+    InstrumentationPoint pt;
+    pt.anchor_offset = 0;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    instr.add_point(pt);
+
+    auto result = instr.patch_with_debug_summaries();
+    if (!wave32) {
+      EXPECT_TRUE(result.errors.empty()) << result.errors.front();
+      continue;
+    }
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_NE(result.errors.front().find("reads s3 before defining it"), std::string::npos)
+        << result.errors.front();
+  }
+}
+
+// The kernel holds s3 across the call and has no scratch to spill into. A probe
+// comparing into s2 clobbers only s2 in Wave32, so nothing live needs a spill;
+// in Wave64 it clobbers s[2:3] and the site is refused for want of scratch.
+TEST(InstrumentorProbePatch, ProbeCompareClobbersTheSgprAboveOnlyInWave64) {
+  const std::vector<uint32_t> text = {
+      build_s_mov_b32(/*sdst=*/3, scalar_positive_inline_u32(42), ROCJITSU_CODE_ARCH_RDNA4),
+      0xBF800000u, // s_nop 0, the anchor.
+      rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 3, .vdst = 3})[0],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const auto compare =
+      rdna4::build_vop3(rdna4::kVCmpEqU32Vop3, {.vdst = 2, .src0 = 128, .src1 = 128});
+  const std::vector<uint32_t> body = {compare[0], compare[1],
+                                      build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4)};
+  for (const bool wave32 : {true, false}) {
+    SCOPED_TRACE(wave32 ? "Wave32" : "Wave64");
+    auto target = wave32 ? make_gfx1200_wave32_kernel_elf(text, /*private_bytes=*/0)
+                         : make_gfx1200_kernel_elf(text, /*private_bytes=*/0);
+    auto probe = make_gfx1200_probe_elf("rj_test_probe", body);
+    AmdGpuCodeObject obj(target.data(), target.size());
+    AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+    Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+    InstrumentationPoint pt;
+    pt.anchor_offset = sizeof(uint32_t);
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    instr.add_point(pt);
+
+    auto result = instr.patch_with_debug_summaries();
+    if (wave32) {
+      EXPECT_TRUE(result.errors.empty()) << result.errors.front();
+      continue;
+    }
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_NE(result.errors.front().find("must spill live registers"), std::string::npos)
         << result.errors.front();
   }
 }
