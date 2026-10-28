@@ -17,8 +17,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
 * Fixed `ncclCommShrink` accepting an exclusion list with negative, out-of-range or duplicate ranks and building a child communicator with an inconsistent rank count, which could hang or access memory out of bounds. Such a list now returns `ncclInvalidArgument`.
 * Fixed `ncclCommSplit` and `ncclCommShrink` crashing when `newcomm` is `NULL`. They now return `ncclInvalidArgument`.
-* Fixed communicator initialization skipping its error cleanup when a step after transport setup failed, for example an invalid `RCCL_UNROLL_FACTOR`. The error is now recorded in the communicator state and a split or shrink child communicator handle is still returned to the caller.
-* Fixed communicator initialization leaking the ring and tree scratch arrays when connecting rings or trees failed.
+* Fixed `ncclCommSplit` and `ncclCommShrink` leaking the child communicator when a late initialization step failed, for example with an invalid `RCCL_UNROLL_FACTOR`. The error is still returned, and the child handle is now returned too so it can be released with `ncclCommDestroy`.
+* Fixed communicator initialization leaking memory when connecting rings or trees failed.
 
 ### Known issues
 
