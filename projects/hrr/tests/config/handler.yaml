@@ -39,7 +39,8 @@ cases:
   Unit_HRR_HostBudget_DispatchFreesReplacedHostAllocation: {}
   Unit_HRR_HostBudget_DispatchTableUsesTheChargingHandlers: {}
   Unit_HRR_HostBudget_HostAllocationHandlersRefuseOverBudget: {}
-  Unit_HRR_HostBudget_LandingBufferChargesGrowthOnly: {}
+  Unit_HRR_HostBudget_LandingBufferChargesWholeBlock: {}
+  Unit_HRR_HostBudget_LandingBufferPointerSurvivesGrowth: {}
   Unit_HRR_Query_CompletingQueryReturnsSuccess: {}
   Unit_HRR_Query_DefaultHasNoAttemptBound: {}
   Unit_HRR_Query_NeverCompletingQueryEndsTheReplay: {}
