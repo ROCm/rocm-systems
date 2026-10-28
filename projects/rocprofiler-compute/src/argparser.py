@@ -514,7 +514,7 @@ Examples:
         required=False,
         default=None,
         nargs="*",
-        metavar="",
+        metavar="arg",
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
@@ -660,7 +660,7 @@ Examples:
         dest="list_operators",
         default=None,
         nargs="*",
-        metavar="",
+        metavar="arg",
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
@@ -674,7 +674,7 @@ Examples:
     )
     analyze_group.add_argument(
         "--operator",
-        metavar="",
+        metavar="arg",
         type=str,
         dest="operator",
         nargs="*",
