@@ -7,7 +7,6 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Added
 
 ### Changed
-* gfx950 tuner table: Broadcast and Reduce on 1 node x 8 GPUs from 512 KiB to 8 MiB now run Ring/LL (112 channels below 2 MiB), 1.5x to 3x faster than the previous Ring/Simple choice.
 
 ### Removed
 
