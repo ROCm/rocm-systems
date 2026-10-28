@@ -355,6 +355,13 @@ impl EventSubscription {
             Self::LinuxKfd(subscription) => subscription.poll(),
         }
     }
+
+    /// Blocks until a native event may be ready or the timeout expires.
+    pub(crate) fn wait_native(&self, timeout: std::time::Duration) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(subscription) => subscription.wait_native(timeout),
+        }
+    }
 }
 
 /// Driver-specific identity retained by a passive endpoint snapshot.
