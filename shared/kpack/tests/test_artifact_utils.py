@@ -342,6 +342,26 @@ class TestIsFatBinary:
             is_fat_binary(debug_copy, toolchain) is False
         ), "SHT_NOBITS .hip_fatbin must not be treated as device code"
 
+    def test_is_fat_binary_zero_size_hip_fatbin(
+        self, test_assets_dir, tmp_path, toolchain
+    ):
+        """A zero-sized .hip_fatbin is not device code.
+
+        hipcc --offload-host-only can leave a SHT_PROGBITS .hip_fatbin header
+        whose sh_size is 0. Parsing that payload raises
+        "Unrecognized fatbin format: first 4 bytes are b''".
+        """
+        source = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_single.exe"
+        assert source.exists(), f"Test asset not found: {source}"
+
+        empty_fatbin = patch_hip_fatbin_size(
+            source, tmp_path / "test_kernel_single.exe.empty", 0
+        )
+
+        assert (
+            is_fat_binary(empty_fatbin, toolchain) is False
+        ), "zero-sized .hip_fatbin must not be treated as device code"
+
     def test_is_fat_binary_elf_already_kpack_processed(
         self, test_assets_dir, tmp_path, toolchain
     ):

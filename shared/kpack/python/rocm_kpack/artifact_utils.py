@@ -101,10 +101,13 @@ def is_fat_binary(file_path: Path, toolchain: Toolchain) -> bool:
     For ELF binaries, checks for .hip_fatbin section.
     For PE/COFF binaries, checks for .hip_fat section.
 
-    An ELF whose .hip_fatbin section is SHT_NOBITS is *not* a fat binary: the
-    section header survives but the contents do not live in the file. This is
-    the shape of a separated debug file produced by `objcopy --only-keep-debug`
-    (TheRock's `*_dbg` artifacts), which carries no device code to split.
+    An ELF whose .hip_fatbin section is SHT_NOBITS, or whose section size is
+    zero, is *not* a fat binary: the header survives but the contents do not
+    live in the file. SHT_NOBITS is the shape of a separated debug file
+    produced by `objcopy --only-keep-debug` (TheRock's `*_dbg` artifacts).
+    A zero-sized SHT_PROGBITS section is what `hipcc --offload-host-only`
+    leaves in host-only test binaries. Neither has device code to split, and
+    parsing the empty payload fails with "Unrecognized fatbin format".
 
     A binary that already carries a kpack marker section (.rocm_kpack_ref for
     ELF, .kpackrf for COFF) is likewise *not* a fat binary: its device code has
@@ -144,9 +147,9 @@ def is_fat_binary(file_path: Path, toolchain: Toolchain) -> bool:
         if surgery.find_section(".rocm_kpack_ref") is not None:
             return False
         section = surgery.find_section(".hip_fatbin")
-        if section is None:
+        if section is None or section.header.is_nobits or section.header.sh_size == 0:
             return False
-        return not section.header.is_nobits
+        return True
     else:
         surgery = CoffSurgery.load(file_path)
         # .kpackrf is the 8-char PE spelling of .rocm_kpack_ref.
