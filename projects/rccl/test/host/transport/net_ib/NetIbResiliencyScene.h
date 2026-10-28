@@ -21,6 +21,8 @@
 //   2     the probing QP
 //   3     the port-recovery QP
 //   4..7  handed out by CreateQp
+// Probing completions use verbs[d].cq and port recovery its own recoveryCqs[d]; both drain verbs[d].wcs, and
+// polledCqs tells them apart.
 struct NetIbResiliencyScene {
   static constexpr int kDevs = 2;
   static constexpr int kDataQps = 2 * kDevs;
@@ -29,6 +31,7 @@ struct NetIbResiliencyScene {
   static constexpr int kFirstCreatedQp = 4;
 
   std::array<IbVerbsScene, kDevs> verbs{{IbVerbsScene("mlx5_0", 0x100), IbVerbsScene("mlx5_1", 0x200)}};
+  std::array<ibv_cq, kDevs> recoveryCqs{};
   ncclIbSendComm send{};
   ncclIbRecvComm recv{};
   ncclIbResiliencySend sendRes{};
@@ -51,6 +54,7 @@ struct NetIbResiliencyScene {
       }
     }
     for (int d = 0; d < kDevs; ++d) {
+      recoveryCqs[d].context = &verbs[d].ctx;
       for (ncclIbNetCommDevBase* dev : {&send.devs[d].base, &recv.devs[d].base}) {
         dev->ibDevN = d;
         dev->pd = &verbs[d].pd;
@@ -63,7 +67,7 @@ struct NetIbResiliencyScene {
       for (int d = 0; d < kDevs; ++d) {
         res->devs[d].state.store(ncclIbResiliencyDevStateOk, std::memory_order_release);
         res->devs[d].probingCq = &verbs[d].cq;
-        res->devs[d].portRecoveryCq = &verbs[d].cq;
+        res->devs[d].portRecoveryCq = &recoveryCqs[d];
         res->probingQps[d].qp = &verbs[d].qps[kProbingQp];
         res->probingQps[d].devIndex = d;
         res->portRecoveryQps[d].qp = &verbs[d].qps[kRecoveryQp];
@@ -74,7 +78,8 @@ struct NetIbResiliencyScene {
   NetIbResiliencyScene(const NetIbResiliencyScene&) = delete;
   NetIbResiliencyScene& operator=(const NetIbResiliencyScene&) = delete;
 
-  // g_netIbQpCreate stand-in. Like ibv_create_qp it wants the CQ and the PD on one device, and the QP lands there.
+  // g_netIbQpCreate stand-in. Like ibv_create_qp it wants the CQ and the PD on one device, and the QP lands there
+  // with attr->cq as its send and receive CQ.
   ncclResult_t CreateQp(ncclIbQp* qp, ncclIbQpCreateAttr* attr) {
     if (attr->pd == nullptr || attr->cq == nullptr || attr->pd->context == nullptr ||
         attr->cq->context != attr->pd->context) {
@@ -83,7 +88,9 @@ struct NetIbResiliencyScene {
     IbVerbsScene* dev = IbVerbsScene::Of(attr->pd->context);
     int& created = created_[dev - verbs.data()];
     if (kFirstCreatedQp + created >= IbVerbsScene::kQps) return ncclSystemError;
-    qp->qp = &dev->qps[kFirstCreatedQp + created++];
+    ibv_qp* verbsQp = &dev->qps[kFirstCreatedQp + created++];
+    verbsQp->send_cq = verbsQp->recv_cq = attr->cq;
+    qp->qp = verbsQp;
     return ncclSuccess;
   }
 
