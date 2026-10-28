@@ -1066,6 +1066,24 @@ function(rccl_define_micro_source_lists)
     ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # src/misc/ IB verbs and direct-verbs loaders
+  set(TEST_MICRO_MISC_SOURCE_FILES
+    misc/gdr-peermem-test.cc
+    misc/ibvsymbols-test.cc
+    misc/dvsymbols-test.cc               # mlx5dvsymbols.cc + ionicdvsymbols.cc
+    misc/ibvwrap-test.cc
+    misc/ionicdvwrap-test.cc
+    misc/mlx5dvwrap-test.cc
+    fakes/dl_fakes.cc                    # dlopen/dlvsym
+    fakes/env_fakes.cc                   # NCCL_IBVERBS_LIB
+    fakes/libc_fakes.cc                  # gdr_peermem.cc opendir
+    fakes/nccl_fakes.cc
+    fakes/net_ib_ops_fault_fakes.cc      # ibvwrap.cc fault shims
+    fakes/transport_stubs.cc             # rcclUseAinic
+    ../common/ProcessIsolatedTestRunner.cpp
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -2372,6 +2390,26 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNet
     # add_file_unique() renames this one. Re-check after any source-list reorder.
     NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_tmp.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroMisc
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroMisc
+  SOURCES ${TEST_MICRO_MISC_SOURCE_FILES}
+  REMOVE_DEFS ENABLE_QP_TRACKING  # its create/destroy QP prologue dereferences the fake QP and PD
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # net_ib_ops_fault.h, included unqualified
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ENABLE_FAULT_INJECTION  # FAULT_INJECTION defaults ON, so this is the ibvwrap.cc arm that ships
+    GDR_PEERMEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/gdr_peermem.cc"
+    IBVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvsymbols.cc"
+    IBVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvwrap.cc"
+    IONICDVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ionicdvsymbols.cc"
+    IONICDVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ionicdvwrap.cc"
+    MLX5DVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvsymbols.cc"
+    MLX5DVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvwrap.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_misc.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.
