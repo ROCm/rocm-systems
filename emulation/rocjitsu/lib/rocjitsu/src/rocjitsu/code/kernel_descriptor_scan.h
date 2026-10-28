@@ -132,8 +132,7 @@ kernarg_segment_ptr_sgpr(const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 [[nodiscard]] uint32_t kernarg_preload_offset(const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
 /// @brief Distance past the descriptor entry at which kernarg-preload-compatible
-///        firmware enters a preloading kernel, where
-///        uses_kernarg_preload_firmware_skip() holds.
+///        firmware enters a preloading kernel on CDNA2/CDNA3/CDNA4.
 inline constexpr uint64_t kKernargPreloadSkipBytes = 256;
 
 /// @brief Whether DBT treats a kernel of @p arch that preloads kernel arguments

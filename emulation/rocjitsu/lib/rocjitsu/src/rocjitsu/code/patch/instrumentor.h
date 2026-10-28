@@ -505,8 +505,8 @@ public:
   /// prologue those need loads through a kernarg wrapper that no runtime builds
   /// yet.
   ///
-  /// These refusals are the patch gates; only a test can skip them (see
-  /// `skip_patch_gates_`).
+  /// These refusals are the patch gates; only a test can skip them, through
+  /// InstrumentorTestAccess::skip_patch_gates().
   [[nodiscard]] InstrumentedCodeObject patch();
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
