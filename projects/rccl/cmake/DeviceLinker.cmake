@@ -116,16 +116,14 @@ foreach(_opt IN LISTS DL_INHERITED_FLAGS)
 endforeach()
 
 # ---------------------------------------------------------------------------
-# Parse GPU_TARGETS: strip target features, build offload-arch flag list
+# Parse GPU_TARGETS into a bare processor name plus the full target ID.
 # ---------------------------------------------------------------------------
-set(DL_GPU_TARGETS "")
-set(DL_OFFLOAD_ARCH_FLAGS "")
-foreach(_gpu_raw ${GPU_TARGETS})
-  string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
-  list(APPEND DL_GPU_TARGETS "${_gpu}")
-  list(APPEND DL_OFFLOAD_ARCH_FLAGS "--offload-arch=${_gpu}")
-endforeach()
-message(STATUS "Device Linker: GPU targets = ${DL_GPU_TARGETS}")
+include(${CMAKE_CURRENT_LIST_DIR}/DeviceLinkerTargets.cmake)
+dl_parse_gpu_targets(TARGETS ${GPU_TARGETS}
+  BARE_VAR DL_GPU_TARGETS
+  FLAGS_VAR DL_OFFLOAD_ARCH_FLAGS
+  ID_PREFIX DL_TARGET_ID_)
+message(STATUS "Device Linker: GPU targets = ${GPU_TARGETS}")
 
 # ---------------------------------------------------------------------------
 # Optimization flags (passed to both compile and link modes of the driver)
@@ -377,6 +375,8 @@ set(DL_BUNDLER_INPUTS "--input=/dev/null")
 set(ALL_IR_FILES "")
 
 foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
+  set(DL_TARGET_ID "${DL_TARGET_ID_${DL_GPU_TARGET}}")
+
   # Sort CDNA targets first for better build scheduling (see original rationale)
   if(DL_GPU_TARGET MATCHES "^gfx9")
     set(DL_ARCH_DIR "${DEVICE_BUILD_DIR}/-${DL_GPU_TARGET}")
@@ -425,6 +425,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
 
   target_compile_options(${_dev_target} PRIVATE
     --arch=${DL_GPU_TARGET}
+    --target-id=${DL_TARGET_ID}
     --clang=${DL_CLANG}
     ${DL_OPT_FLAGS}
     ${DL_COVERAGE_FLAGS}
@@ -528,6 +529,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     COMMAND ${CMAKE_RCCLDEV_COMPILER}
       --link
       --arch=${DL_GPU_TARGET}
+      --target-id=${DL_TARGET_ID}
       --clang=${DL_CLANG}
       ${DL_HIP_COMPILER_FLAGS}
       --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
@@ -549,7 +551,9 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   )
 
   list(APPEND ALL_DEVICE_ELFS "${ARCH_DEVICE_ELF}")
-  list(APPEND DL_BUNDLER_TARGETS "hip-amdgcn-amd-amdhsa--${DL_GPU_TARGET}")
+  # The runtime matches this entry against the agent at load time, so it needs
+  # the target ID, not the bare name.
+  list(APPEND DL_BUNDLER_TARGETS "hip-amdgcn-amd-amdhsa--${DL_TARGET_ID}")
   list(APPEND DL_BUNDLER_INPUTS "--input=${ARCH_DEVICE_ELF}")
 
   # Friendly symlink next to librccl.so: device-${arch}.elf -> device_build/<dir>/device.elf
@@ -595,7 +599,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
         -DRCCL_DEVICE_LINKER
         ${_link_def_flags}
         ${_link_inc_flags}
-        -x hip --offload-device-only --offload-arch=${DL_GPU_TARGET}
+        -x hip --offload-device-only --offload-arch=${DL_TARGET_ID}
         ${DL_HIP_COMPILER_FLAGS}
         -gline-tables-only
         -std=c++17 ${DL_OPT_FLAGS}
@@ -632,7 +636,7 @@ add_custom_command(
     --output=${DEVICE_HIPFB}
     ${DL_BUNDLER_COMPRESS}
   DEPENDS ${ALL_DEVICE_ELFS}
-  COMMENT "DL bundle: device.elf(s) -> device.hipfb [${DL_GPU_TARGETS}]"
+  COMMENT "DL bundle: device.elf(s) -> device.hipfb [${GPU_TARGETS}]"
   VERBATIM
 )
 
@@ -1332,7 +1336,7 @@ if(GENERATE_SYM_KERNELS)
     add_custom_command(
       OUTPUT ${_cm_bc}
       COMMAND ${DL_CLANG}
-        -x hip --cuda-device-only --offload-arch=${_bc_arch}
+        -x hip --cuda-device-only --offload-arch=${DL_TARGET_ID_${_bc_arch}}
         -emit-llvm -Xclang -disable-llvm-passes
         -std=c++17 -fPIC
         -I${ROCSHMEM_SOURCE_DIR}/src
