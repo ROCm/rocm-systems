@@ -667,6 +667,13 @@ static void CheckChunkedBatch(ncclComm* comm, hipStream_t stream)
     constexpr uint8_t kSentinelByte = 0xA5;
     constexpr int     kOps          = 3;
 
+    // RCCL_CE_BATCH_ASYNC_ENABLE=0 sends the launch down the non-batch path in
+    // ncclCeLaunchBatchOps. That copy is correct and never logs the round-robin marker.
+    if(MPIHelpers::getEnvParam("RCCL_CE_BATCH_ASYNC_ENABLE", -2) == 0)
+    {
+        GTEST_SKIP() << "RCCL_CE_BATCH_ASYNC_ENABLE=0 disables the chunked batch path";
+    }
+
     const int64_t chunkParam = ncclParamCeChunkSize();
     if(chunkParam <= static_cast<int64_t>(kShortOp))
     {
