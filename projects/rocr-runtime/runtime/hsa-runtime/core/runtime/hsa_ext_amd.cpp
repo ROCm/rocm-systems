@@ -1105,8 +1105,13 @@ hsa_status_t hsa_amd_signal_batch_create(uint32_t count,
     return static_cast<hsa_status_t>(HSA_STATUS_ERROR_INVALID_MEMORY_POOL);
   }
 
-  const bool host_access_via_hdp =
-      device_pool && static_cast<const AMD::GpuAgent*>(region->owner())->PcieStoresNeedFlush();
+  const auto* owner_gpu =
+      device_pool ? static_cast<const AMD::GpuAgent*>(region->owner()) : nullptr;
+  const bool host_access_via_hdp = device_pool && owner_gpu->PcieStoresNeedFlush();
+  // The host reaches a discrete GPU's memory across PCIe or XGMI, whether or not its stores need
+  // an HDP flush, so resolving a member through its slot would cost link round trips. An APU's
+  // device pool is in memory the host shares, where reading the slot is as cheap as the shadow.
+  const bool shadow_members = device_pool && !owner_gpu->properties().Integrated;
 
   bool use_interrupt;
   hsa_status_t status =
@@ -1128,7 +1133,7 @@ hsa_status_t hsa_amd_signal_batch_create(uint32_t count,
 
   core::SignalBatch* signal_batch;
   status = core::SignalBatch::Create(count, initial_values, use_interrupt, region, access_agents,
-                                     host_access_via_hdp, &signal_batch, signals);
+                                     host_access_via_hdp, shadow_members, &signal_batch, signals);
   if (status != HSA_STATUS_SUCCESS) return status;
 
   *batch = core::SignalBatch::Convert(signal_batch);
