@@ -4,6 +4,7 @@
 """Unit tests for src/rocprof_compute_analyze/analysis_base.py."""
 
 import argparse
+import functools
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +14,11 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils.ml_api_selectors import resolve_list_selectors, resolve_operator_patterns
+from utils.ml_api_selectors import (
+    UNSCOPED_OPERATOR_KEY,
+    resolve_list_selectors,
+    resolve_operator_patterns,
+)
 
 MODULE = "rocprof_compute_analyze.analysis_base"
 
@@ -24,6 +29,27 @@ PRE_PROCESSING_ARGS = {
     "gpu_id": None,
     "gpu_dispatch_id": None,
 }
+
+
+def write_traced_workload(parent: Path, workload_name: str, backend: str) -> Path:
+    """Create a workload directory with profiling_config.yaml for one ML backend."""
+    workload = parent / workload_name / "MI350"
+    workload.mkdir(parents=True)
+    (workload / "profiling_config.yaml").write_text(f"trace_ml_api:\n- {backend}\n")
+    return workload
+
+
+def record_error_and_exit(errors, *argv, **_kwargs):
+    """Stand-in for console_error: record the call, then exit like it does."""
+    errors.append(argv)
+    raise SystemExit(1)
+
+
+def mixed_path_orders(torch_workload: Path, triton_workload: Path):
+    return (
+        [[str(torch_workload)], [str(triton_workload)]],
+        [[str(triton_workload)], [str(torch_workload)]],
+    )
 
 
 def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -> None:
@@ -212,9 +238,9 @@ def test_sanitize_authorizes_trace_ml_api_selectors(tmp_path, monkeypatch) -> No
     run_sanitize(list_operators=[], operator=["triton:*matmul*"])
     run_sanitize(operator=["torch:*relu*"])
     unscoped = run_sanitize(operator=["*relu*"])
-    assert unscoped.operator_patterns == {"torch": ["*relu*"], "user": ["*relu*"]}
+    assert unscoped.operator_patterns == {UNSCOPED_OPERATOR_KEY: ["*relu*"]}
     bare = run_sanitize(operator=[])
-    assert bare.operator_patterns == {"torch": ["**"], "user": ["**"]}
+    assert bare.operator_patterns == {UNSCOPED_OPERATOR_KEY: ["**"]}
 
     with pytest.raises(SystemExit):
         run_sanitize(list_operators=["triton"])
@@ -223,3 +249,54 @@ def test_sanitize_authorizes_trace_ml_api_selectors(tmp_path, monkeypatch) -> No
     assert "triton" in errors[-1][1]
     with pytest.raises(SystemExit):
         run_sanitize(operator=["triton:*matmul*"])
+
+
+def test_sanitize_mixed_paths_bare_operator_accepts_either_order(
+    tmp_path, monkeypatch
+) -> None:
+    """Bare --operator on sn_torch + tf_triton is legal in both -p orders."""
+    torch_workload = write_traced_workload(tmp_path, "sn_torch", "torch")
+    triton_workload = write_traced_workload(tmp_path, "tf_triton", "triton")
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_base.validate_workload",
+        lambda path: None,
+    )
+    for paths in mixed_path_orders(torch_workload, triton_workload):
+        args = argparse.Namespace(
+            tui=False,
+            path=paths,
+            list_operators=None,
+            operator_patterns=resolve_operator_patterns([]),
+            output_name=None,
+        )
+        OmniAnalyze_Base(args, {}).sanitize()
+        assert args.operator_patterns == {UNSCOPED_OPERATOR_KEY: ["**"]}
+
+
+def test_sanitize_mixed_paths_list_torch_rejects_either_order(
+    tmp_path, monkeypatch
+) -> None:
+    """--list-operators torch on sn_torch + tf_triton fails in both -p orders."""
+    torch_workload = write_traced_workload(tmp_path, "sn_torch", "torch")
+    triton_workload = write_traced_workload(tmp_path, "tf_triton", "triton")
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_base.validate_workload",
+        lambda path: None,
+    )
+    errors = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_base.console_error",
+        functools.partial(record_error_and_exit, errors),
+    )
+    for paths in mixed_path_orders(torch_workload, triton_workload):
+        args = argparse.Namespace(
+            tui=False,
+            path=paths,
+            list_operators=resolve_list_selectors(["torch"]),
+            operator_patterns=None,
+            output_name=None,
+        )
+        with pytest.raises(SystemExit):
+            OmniAnalyze_Base(args, {}).sanitize()
+        assert "was not profiled" in errors[-1][1]
+        assert "tf_triton" in errors[-1][1]
