@@ -18,7 +18,7 @@ use std::ffi::c_void;
 use std::fmt::Arguments;
 use std::io::Write;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -31,7 +31,7 @@ use rocddi::device::event::{
 };
 use rocddi::device::gpu::profiling::{PcSamplingConfiguration, PcSamplingConfigurationSet};
 use rocddi::memory::device::Allocation;
-use rocddi::session::{DriverContextLifetime, Session};
+use rocddi::session::{DriverContextLifetime, Session, SessionRetirement};
 use rocddi::topology::host::{CpuCacheKind, CpuInfo};
 use rocddi::topology::{
     Endpoint, GpuInfo, MemoryBank, MemoryBankKind, MemoryLinkInfo, SourceKind, TopologySnapshot,
@@ -44,7 +44,9 @@ use crate::isa::isa_name;
 use crate::loader::LoaderState;
 use crate::memory::{CpuPoolKind, GpuPoolKind, MemoryState, POOL_HANDLE_STRIDE};
 use crate::pc_sampling::PcSamplingState;
+use crate::pc_sampling::session::SessionHandle;
 use crate::queue::QueueState;
+use crate::queue_intercept::InterceptQueue;
 use crate::signal::SignalState;
 
 mod agent;
@@ -63,13 +65,16 @@ use events::{hardware_exception_event, memory_fault_event, notify_system_event};
 mod lifecycle;
 #[cfg(test)]
 use clock::best_clock_sample;
-pub(crate) use clock::{clock_counters, translate_gpu_interval, translate_gpu_tick};
+pub(crate) use clock::{
+    clock_counters, enable_high_precision_timestamps, translate_gpu_interval, translate_gpu_tick,
+};
 mod logging;
 #[cfg(test)]
 pub(crate) use lifecycle::{HsaLifecycle, LIFECYCLE};
 pub(crate) use lifecycle::{
-    InFlightGeneration, InFlightToken, InFlightTracker, LifecycleTransition, VM_FAULT_CONDVAR,
-    boundary, initialized_mut, lock, map_error,
+    InFlightGeneration, InFlightToken, InFlightTracker, LifecycleTransition, ShutdownWork,
+    VM_FAULT_CONDVAR, boundary, close_public_raw_handles, enter_public_raw_handle, initialized_mut,
+    lock, map_error, public_raw_handle_access_allowed, wait_public_raw_handles_idle,
 };
 #[cfg(test)]
 use logging::logging_flag_enabled;
@@ -194,10 +199,94 @@ pub(crate) struct HsaState {
     /// Activated GPU agents and their native owners.
     pub(crate) gpus: Vec<Gpu>,
     /// Native session retained until all GPU and memory owners are gone.
-    pub(crate) session: Session,
+    pub(crate) session: Option<Session>,
     /// Lifetime policy for the KFD context used by this runtime generation.
     /// Memory-pool choices that require the primary context use this value.
     pub(crate) lifetime: DriverContextLifetime,
+}
+
+/// Callback work detached while HSA storage remains published for `OnUnload`.
+pub(crate) struct ToolShutdownWork {
+    /// Native operations admitted before the stop request.
+    inflight: Arc<InFlightTracker>,
+    /// Final event callbacks retained until synchronous notification.
+    system_handlers: Vec<(SystemEventHandler, CallbackArg)>,
+    /// Native system event callback worker.
+    system_worker: Option<JoinHandle<()>>,
+    /// Asynchronous memory operation workers.
+    memory_workers: Vec<JoinHandle<()>>,
+    /// Serialized signal callback worker.
+    signal_worker: Option<JoinHandle<()>>,
+    /// Per-queue error callback workers.
+    queue_workers: Vec<JoinHandle<()>>,
+    /// Proxy queues whose interception callbacks must stop.
+    intercept_queues: Vec<Arc<InterceptQueue>>,
+    /// Sampling sessions whose callbacks must finish before tool unload.
+    pc_sampling_sessions: Vec<Arc<SessionHandle>>,
+}
+
+impl ToolShutdownWork {
+    /// Joins every callback producer, then delivers the final system event.
+    pub(crate) fn quiesce(self) -> Status {
+        self.inflight.wait_idle();
+        let mut failed = false;
+        for queue in &self.intercept_queues {
+            failed |= queue.stop().is_err();
+        }
+        for worker in self.queue_workers {
+            failed |= worker.join().is_err();
+        }
+        if let Some(worker) = self.system_worker {
+            failed |= worker.join().is_err();
+        }
+        for worker in self.memory_workers {
+            failed |= worker.join().is_err();
+        }
+        if let Some(worker) = self.signal_worker {
+            failed |= worker.join().is_err();
+        }
+        for session in self.pc_sampling_sessions {
+            failed |= session.quiesce_for_tool_unload() != SUCCESS;
+        }
+        if failed {
+            return ERROR;
+        }
+        notify_system_shutdown(&self.system_handlers);
+        SUCCESS
+    }
+}
+
+/// Result of retiring one HSA generation. An unfinished native session stays
+/// owned while the process lifecycle is quarantined and can be retried.
+pub(crate) struct ShutdownOutcome {
+    /// Status reported for this shutdown attempt.
+    pub(crate) status: Status,
+    /// Native owner kept for another attempt when shutdown fails.
+    pub(crate) pending_session: Option<SessionRetirement>,
+}
+
+impl ShutdownOutcome {
+    /// Reports an HSA teardown failure with no independently retryable session.
+    fn failed(status: Status) -> Self {
+        Self {
+            status,
+            pending_session: None,
+        }
+    }
+
+    /// Retries a native session after all HSA objects have retired.
+    pub(crate) fn retry(mut retirement: SessionRetirement) -> Self {
+        match retirement.try_destroy() {
+            Ok(()) => Self {
+                status: SUCCESS,
+                pending_session: None,
+            },
+            Err(error) => Self {
+                status: map_error(error),
+                pending_session: Some(retirement),
+            },
+        }
+    }
 }
 
 /// Schedules cleanup after in-flight native work has released its borrows.
@@ -228,7 +317,18 @@ pub(crate) fn defer_cleanup<T: Send + 'static>(
     Ok(())
 }
 
+/// Publishes a shutdown request without waiting for the worker that called it.
+pub(crate) fn publish_stop_request(stop_workers: &AtomicBool, inflight: &InFlightTracker) {
+    stop_workers.store(true, Ordering::Release);
+    inflight.close();
+}
+
 impl HsaState {
+    /// Borrows the native session while this HSA generation is published.
+    pub(crate) fn session(&self) -> Option<&Session> {
+        self.session.as_ref()
+    }
+
     /// Checks whether the caller is one of this runtime’s callback workers.
     pub(crate) fn running_on_worker(&self) -> bool {
         self.signal_state.running_on_worker()
@@ -241,8 +341,24 @@ impl HsaState {
 
     /// Requests all runtime workers to stop before teardown.
     pub(crate) fn request_stop(&self) {
-        self.logging.stop();
-        self.stop_workers.store(true, Ordering::Release);
+        publish_stop_request(&self.stop_workers, &self.inflight);
+    }
+
+    /// Detaches callback workers under the lifecycle lock. Their joins and
+    /// the final event run after that lock is released, before tool `OnUnload`.
+    pub(crate) fn begin_tool_shutdown(&mut self) -> ToolShutdownWork {
+        self.request_stop();
+        let (queue_workers, intercept_queues) = self.queue_state.take_callback_workers();
+        ToolShutdownWork {
+            inflight: self.inflight.clone(),
+            system_handlers: std::mem::take(&mut self.system_event_handlers),
+            system_worker: self.system_event_worker.take(),
+            memory_workers: self.memory_state.take_workers(),
+            signal_worker: self.signal_state.take_worker(),
+            queue_workers,
+            intercept_queues,
+            pc_sampling_sessions: self.pc_sampling_state.sessions_for_tool_unload(),
+        }
     }
 
     /// Discovers host and GPU agents and constructs process HSA state.
@@ -414,8 +530,6 @@ impl HsaState {
                     u32::try_from(cache.size_bytes).unwrap_or(u32::MAX),
                 ));
             }
-            let asic_family_id = info.drm_asic_family_id.unwrap_or(info.asic_family_id);
-            let timestamp_frequency_hz = info.counter_frequency_hz.unwrap_or(0);
             if lifetime == DriverContextLifetime::Process {
                 // Activation may retain a primary VM even when it returns an
                 // error. A later generation must use a private context.
@@ -430,10 +544,6 @@ impl HsaState {
             } else {
                 false
             };
-            let product_name = endpoint
-                .product_name
-                .clone()
-                .unwrap_or_else(|| "AMD Radeon Graphics".to_owned());
             let mmio_remap = device.gpu().and_then(|gpu| gpu.map_mmio_remap()).ok();
             let hdp_flush = hdp_flush_pointers(
                 mmio_remap
@@ -448,13 +558,9 @@ impl HsaState {
                 }));
             pending.gpus.push(Gpu {
                 endpoint,
-                info,
                 xnack_enabled,
                 device,
                 name: name.into_boxed_str(),
-                product_name: product_name.into_boxed_str(),
-                asic_family_id,
-                timestamp_frequency_hz,
                 hdp_flush,
                 _mmio_remap: mmio_remap,
                 coherency_type: AMD_COHERENCY_TYPE_NONCOHERENT,
@@ -488,7 +594,7 @@ impl HsaState {
             caches,
             topology,
             gpus,
-            session,
+            session: Some(session),
             lifetime,
         })
     }
@@ -611,7 +717,7 @@ impl HsaState {
         let index = usize::try_from(offset / ISA_COUNT_PER_GPU).ok()?;
         let variant = offset % ISA_COUNT_PER_GPU;
         let gpu = self.gpus.get(index)?;
-        isa_name(&gpu.info, gpu.xnack_enabled, variant).map(|_| (index, variant))
+        isa_name(&gpu.info(), gpu.xnack_enabled, variant).map(|_| (index, variant))
     }
 
     /// Returns the GPU index associated with a valid ISA handle.
@@ -678,7 +784,7 @@ impl HsaState {
         // The allocation API cannot select a bank ordinal. For multiple
         // framebuffer reports use the driver's aggregate capacity instead.
         let bytes = if kind == GpuPoolKind::Group {
-            gpu.info.local_data_share_byte_length
+            gpu.info().local_data_share_byte_length
         } else {
             gpu.endpoint.local_memory_bytes
         };
@@ -720,7 +826,7 @@ impl HsaState {
         let exposed = match kind {
             GpuPoolKind::Fine => local && gpu.fine_grain_pool,
             GpuPoolKind::ExtendedFine => {
-                local && !(gpu.info.gfx_major == 12 && gpu.info.gfx_minor == 0)
+                local && !(gpu.info().gfx_major == 12 && gpu.info().gfx_minor == 0)
             }
             GpuPoolKind::Coarse | GpuPoolKind::Group => local,
         };
@@ -733,12 +839,13 @@ impl HsaState {
     }
 
     /// Stops this session.
-    pub(crate) fn stop(mut self) -> Status {
+    pub(crate) fn stop(mut self) -> ShutdownOutcome {
+        self.logging.stop();
         if self.running_on_worker() || CallbackScope::active() {
             // Releasing signal storage from its own callback worker is unsafe.
             self.request_stop();
             std::mem::forget(self);
-            return INVALID_RUNTIME_STATE;
+            return ShutdownOutcome::failed(INVALID_RUNTIME_STATE);
         }
         self.request_stop();
         // Multi-signal waits observe stop_workers and release their signal
@@ -746,7 +853,7 @@ impl HsaState {
         self.inflight.wait_idle();
         if self.inflight.is_quarantined() {
             std::mem::forget(self);
-            return INVALID_RUNTIME_STATE;
+            return ShutdownOutcome::failed(INVALID_RUNTIME_STATE);
         }
         notify_system_shutdown(&self.system_event_handlers);
         if let Some(worker) = self.system_event_worker.take() {
@@ -759,28 +866,42 @@ impl HsaState {
             // allocations and signals. Keep their entire ownership graph live.
             self.pc_sampling_state.quarantine_all();
             std::mem::forget(self);
-            return INVALID_RUNTIME_STATE;
+            return ShutdownOutcome::failed(INVALID_RUNTIME_STATE);
         }
         if !self.pc_sampling_state.shutdown() {
             std::mem::forget(self);
-            return INVALID_RUNTIME_STATE;
+            return ShutdownOutcome::failed(INVALID_RUNTIME_STATE);
         }
         if !self.queue_state.shutdown() {
             std::mem::forget(self);
-            return INVALID_RUNTIME_STATE;
+            return ShutdownOutcome::failed(INVALID_RUNTIME_STATE);
         }
         let signal_status = self.signal_state.destroy_events();
+        if signal_status != SUCCESS {
+            // A failed native event destroy can still retain its KFD context.
+            // Do not discard the session that owns the remaining driver state.
+            std::mem::forget(self);
+            return ShutdownOutcome::failed(signal_status);
+        }
         self.image_state.clear();
         self.loader.clear();
         self.memory_state.clear();
         self.signal_state.clear_storage();
         self.pc_sampling_state.clear_retired();
         self.gpus.clear();
-        let session_status = self.session.destroy().map_or_else(map_error, |()| SUCCESS);
-        if signal_status == SUCCESS {
-            session_status
-        } else {
-            signal_status
+        let Some(session) = self.session.take() else {
+            return ShutdownOutcome::failed(ERROR);
+        };
+        let mut retirement = session.into_retirement();
+        match retirement.try_destroy() {
+            Ok(()) => ShutdownOutcome {
+                status: SUCCESS,
+                pending_session: None,
+            },
+            Err(error) => ShutdownOutcome {
+                status: map_error(error),
+                pending_session: Some(retirement),
+            },
         }
     }
 }

@@ -1724,6 +1724,7 @@ bool Device::populateOCLDeviceConstants() {
     info_.asicRevision_ = asic_revision;
 
     info_.l2CacheSize_ = cache_sizes[1];
+    info_.persistingL2CacheMaxSize_ = PersistingL2CacheSizeMax();
     info_.timeStampFrequency_ = 1000000;
     info_.globalMemChannelBanks_ = 4;
     info_.globalMemChannelBankWidth_ = isa().memChannelBankWidth();
@@ -2791,6 +2792,12 @@ cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
 
   constexpr bool kImportVmmForInterprocess = true;
   FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
+  // Resolve owningAgent now that the handle is reachable, refresh every device view.
+  for (auto* device : vaddr_sub_obj->getContext().devices()) {
+    if (auto* devMem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(*device))) {
+      devMem->refreshOwningAgentFromPointerInfo();
+    }
+  }
   return CL_SUCCESS;
 }
 
@@ -3267,6 +3274,51 @@ bool Device::UpdateScratchLimitCurrent(size_t limit) const {
   hsa_status_t ret = Hsa::agent_set_async_scratch_limit(bkendDevice_, limit);
   if (HSA_STATUS_SUCCESS != ret) {
     LogPrintfError("hsa_amd_agent_set_async_scratch_limit(%zu) failed with err 0x%xh", limit, ret);
+    return false;
+  }
+  return true;
+};
+
+// ================================================================================================
+size_t Device::PersistingL2CacheSizeCurrent() const {
+  size_t persistingL2CacheSize = 0;
+  hsa_status_t ret =
+      Hsa::agent_get_info(bkendDevice_, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE,
+                         &persistingL2CacheSize);
+  if (HSA_STATUS_SUCCESS != ret) {
+    LogPrintfError("HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE cannot be queried! Err: 0x%xh", ret);
+    return 0;
+  }
+  return persistingL2CacheSize;
+};
+
+// ================================================================================================
+size_t Device::PersistingL2CacheSizeMax() const {
+  size_t persistingL2CacheSizeMax = 0;
+  hsa_status_t ret =
+      Hsa::agent_get_info(bkendDevice_, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE,
+                         &persistingL2CacheSizeMax);
+  if (HSA_STATUS_SUCCESS != ret) {
+    LogPrintfError("HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE cannot be queried! Err: 0x%xh", ret);
+    return 0;
+  }
+  return persistingL2CacheSizeMax;
+};
+
+// ================================================================================================
+bool Device::UpdatePersistingL2CacheSizeCurrent(size_t size) const {
+  const size_t max_size = PersistingL2CacheSizeMax();
+  if (size > max_size) {
+    LogPrintfError("Persisting L2 cache size %zu exceeds device max %zu", size, max_size);
+    return false;
+  }
+  // HSA API expects size_t* (not uint32_t*) per hsa_ext_amd.h documentation
+  // Make a mutable copy since HSA API takes non-const void*
+  size_t cache_size = size;
+  hsa_status_t ret = Hsa::agent_set_attribute(bkendDevice_,
+      HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE, &cache_size);
+  if (HSA_STATUS_SUCCESS != ret) {
+    LogPrintfError("hsa_amd_agent_set_attribute(PERSISTING_L2_CACHE_SIZE, %zu) failed with err 0x%xh", size, ret);
     return false;
   }
   return true;
