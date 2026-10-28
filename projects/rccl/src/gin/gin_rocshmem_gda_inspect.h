@@ -19,10 +19,10 @@ int ginTestIbvMtuToInt(int mtu);
 /* Returns -1 without touching *out_mtu if remote_mtu is invalid. */
 int ginTestNegotiatePathMtu(int local_mtu, int remote_mtu, int* out_mtu);
 
-/* Arrays describe n query_gid_table() entries; returns the gid_index that gin_select_ib_gid_pos()
- * would select for `port`. first_ib_pos is the array position of the first IB-type entry. */
-int ginTestSelectIbGidIndex(const unsigned char (*gid_raw)[16], const unsigned* gid_index, const unsigned* port_num,
-                            int n, int port, int first_ib_pos, int routable_gid_index);
+/* Arrays describe n query_gid_table() entries (gid_type: 0=IB, 1=RoCEv1, 2=RoCEv2). Returns the
+ * gid_index that gin_select_gid_pos() selects for `port`, or -1 if no entry is usable. */
+int ginTestSelectGidIndex(const unsigned char (*gid_raw)[16], const unsigned* gid_index, const unsigned* port_num,
+                          const unsigned* gid_type, int n, int port, int routable_gid_index);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -264,19 +264,46 @@ static GDAProvider gin_detect_provider(struct ibv_device_attr* attr) {
 
 NCCL_PARAM(GinRocshmemRoutableFlidGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
 
-// Mirrors ncclIbGetGidIndex()'s IB branch: prefer the routable-FLID GID when it has a nonzero FLID,
-// otherwise keep first_ib_pos. query_gid_table() returns only valid entries across all ports, so
-// the routable GID is matched on (port_num, gid_index) rather than by array position. Returns the
-// position of the chosen entry.
-static int gin_select_ib_gid_pos(const struct ibv_gid_entry* entries, int n, int port, int first_ib_pos,
-                                 int routable_gid_index) {
+// Selects a GID from query_gid_table() output (matches GDABackend::select_gid_index() logic):
+//   1. IB type: use immediately, preferring the routable-FLID GID when it has a nonzero FLID, as
+//      ncclIbGetGidIndex() does, so cross-subnet peers are reachable
+//   2. Skip link-local (FE80 prefix) and all-zero
+//   3. Prefer RoCEv2 over RoCEv1
+// The table spans all ports and may have holes, so entries are filtered on port_num and the
+// routable GID is matched on gid_index. Callers must use entries[pos].gid_index, never pos.
+// Returns the chosen position, or -1 if no entry is usable.
+static int gin_select_gid_pos(const struct ibv_gid_entry* entries, int n, int port, int routable_gid_index) {
+  const uint8_t local_gid_prefix[2] = {0xFE, 0x80};
+  int selected = -1;
+
   for (int i = 0; i < n; i++) {
-    if (entries[i].port_num == (uint32_t)port && entries[i].gid_index == (uint32_t)routable_gid_index &&
-        ncclIbGidFlid(entries[i].gid.raw) != 0) {
+    if (entries[i].port_num != (uint32_t)port) continue;
+    const union ibv_gid* g = &entries[i].gid;
+    uint32_t gtype = entries[i].gid_type;
+
+    if (gtype == IBV_GID_TYPE_IB) {
+      for (int j = 0; j < n; j++) {
+        if (entries[j].port_num == (uint32_t)port && entries[j].gid_index == (uint32_t)routable_gid_index &&
+            ncclIbGidFlid(entries[j].gid.raw) != 0) {
+          return j;
+        }
+      }
       return i;
     }
+
+    if (memcmp(g->raw, local_gid_prefix, 2) == 0) continue;
+    bool all_zero = true;
+    for (int b = 0; b < 16; b++) {
+      if (g->raw[b] != 0) {
+        all_zero = false;
+        break;
+      }
+    }
+    if (all_zero) continue;
+
+    if (selected == -1 || gtype > entries[selected].gid_type) selected = i;
   }
-  return first_ib_pos;
+  return selected;
 }
 
 static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
@@ -351,53 +378,16 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
     set->nic.nic_name = ibv.get_device_name(dev_list[d]);
     set->provider = provider;
 
-    // Select GID — matches GDABackend::select_gid_index() logic:
-    //   1. IB type → use immediately (non-Ethernet)
-    //   2. Skip link-local (FE80 prefix) and all-zero
-    //   3. Prefer RoCEv2 over RoCEv1
     {
-      const uint8_t local_gid_prefix[2] = {0xFE, 0x80};
       int gid_tbl_len = port_attr.gid_tbl_len;
       struct ibv_gid_entry* gid_entries = (struct ibv_gid_entry*)calloc(gid_tbl_len, sizeof(struct ibv_gid_entry));
       ssize_t n = ibv.query_gid_table(ctx, gid_entries, gid_tbl_len, 0);
-      int selected_idx = -1;
+      int pos = gin_select_gid_pos(gid_entries, (int)n, port, (int)ncclParamGinRocshmemRoutableFlidGidIndex());
       uint32_t selected_type = IBV_GID_TYPE_ROCE_V1;
-
-      for (int i = 0; i < n; i++) {
-        // The table spans all ports and may have holes; only this port's entries are usable.
-        if (gid_entries[i].port_num != (uint32_t)port) continue;
-        union ibv_gid* g = &gid_entries[i].gid;
-        uint32_t gtype = gid_entries[i].gid_type;
-
-        // IB mode: use immediately, preferring the routable-FLID GID so cross-subnet peers are reachable
-        if (gtype == IBV_GID_TYPE_IB) {
-          int pos = gin_select_ib_gid_pos(gid_entries, n, port, i, (int)ncclParamGinRocshmemRoutableFlidGidIndex());
-          selected_idx = pos;
-          selected_type = gid_entries[pos].gid_type;
-          set->nic.gid = gid_entries[pos].gid;
-          set->nic.gid_index = gid_entries[pos].gid_index;
-          break;
-        }
-
-        // Skip link-local
-        if (memcmp(g->raw, local_gid_prefix, 2) == 0) continue;
-        // Skip all-zero
-        bool all_zero = true;
-        for (int b = 0; b < 16; b++) {
-          if (g->raw[b] != 0) {
-            all_zero = false;
-            break;
-          }
-        }
-        if (all_zero) continue;
-
-        // First valid, or prefer higher type (RoCEv2 > RoCEv1)
-        if (selected_idx == -1 || gtype > selected_type) {
-          selected_idx = i;
-          selected_type = gtype;
-          set->nic.gid = *g;
-          set->nic.gid_index = gid_entries[i].gid_index;
-        }
+      if (pos >= 0) {
+        selected_type = gid_entries[pos].gid_type;
+        set->nic.gid = gid_entries[pos].gid;
+        set->nic.gid_index = gid_entries[pos].gid_index;
       }
       set->nic.gid_type = selected_type;
       free(gid_entries);
@@ -906,19 +896,22 @@ extern "C" int ginTestNegotiatePathMtu(int local_mtu, int remote_mtu, int* out_m
   return 0;
 }
 
-extern "C" int ginTestSelectIbGidIndex(const unsigned char (*gid_raw)[16], const unsigned* gid_index,
-                                       const unsigned* port_num, int n, int port, int first_ib_pos,
-                                       int routable_gid_index) {
+static_assert(IBV_GID_TYPE_IB == 0 && IBV_GID_TYPE_ROCE_V1 == 1 && IBV_GID_TYPE_ROCE_V2 == 2,
+              "ginTestSelectGidIndex callers pass these gid_type values");
+
+extern "C" int ginTestSelectGidIndex(const unsigned char (*gid_raw)[16], const unsigned* gid_index,
+                                     const unsigned* port_num, const unsigned* gid_type, int n, int port,
+                                     int routable_gid_index) {
   std::vector<struct ibv_gid_entry> entries(n);
   for (int i = 0; i < n; i++) {
     memset(&entries[i], 0, sizeof(entries[i]));
     memcpy(entries[i].gid.raw, gid_raw[i], 16);
     entries[i].gid_index = gid_index[i];
     entries[i].port_num = port_num[i];
-    entries[i].gid_type = IBV_GID_TYPE_IB;
+    entries[i].gid_type = gid_type[i];
   }
-  int pos = gin_select_ib_gid_pos(entries.data(), n, port, first_ib_pos, routable_gid_index);
-  return (int)entries[pos].gid_index;
+  int pos = gin_select_gid_pos(entries.data(), n, port, routable_gid_index);
+  return pos < 0 ? -1 : (int)entries[pos].gid_index;
 }
 
 static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_info* remote_info) {
