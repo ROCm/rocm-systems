@@ -32,6 +32,7 @@ THE SOFTWARE.
 
 #define HEVC_MAX_DPB_FRAMES 16  // (A-2)
 #define HEVC_MAX_NUM_REF_PICS 16
+#define HEVC_NO_REF_PIC 0xFF  // RefPicSetXxx[] entry equal to "no reference picture". 8.3.2
 // A.4.1 g): num_tile_columns_minus1 < MaxTileCols and num_tile_rows_minus1 < MaxTileRows. The largest
 // MaxTileCols and MaxTileRows in Table A.4 are those of levels 6, 6.1 and 6.2.
 #define HEVC_MAX_TILE_COLS 20

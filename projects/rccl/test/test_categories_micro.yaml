@@ -14,6 +14,8 @@ test_categories:
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
     # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
+      # transport/coll_net.cc
+      - "CollNet*"
       # transport/p2p.cc
       - "P2pMicrotest.*"
       - "P2pMicrotestIsolated.*"
@@ -51,8 +53,28 @@ test_categories:
       - "RasDiagnosticsEnvMicrotest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
+      # ras/client_support.cc
+      - "RasClientSupportMicrotest.*"
+      - "Commands/RasClientSupportEnqueueFailureMicrotest.*"
       # ras/ras_param.cc
       - "RasParamMicrotest.*"
+      # transport/net_telemetry.cc, include/net_telemetry.h
+      - "NetTelemetryInitMicrotest.*"
+      - "NetTelemetryRegisterMicrotest.*"
+      - "NetTelemetryChannelMicrotest.*"
+      - "NetTelemetryHooksMicrotest.*"
+      - "NetTelemetryQpHooksMicrotest.*"
+      - "NetTelemetryDeviceHooksMicrotest.*"
+      - "NetTelemetryCaptureMicrotest.*"
+      - "NetTelemetryCountersMicrotest.*"
+      - "NetTelemetryEthtoolMicrotest.*"
+      - "NetTelemetryDebugfsMicrotest.*"
+      - "NetTelemetryReadCountersMicrotest.*"
+      - "NetTelemetrySnapshotMicrotest.*"
+      - "NetTelemetryCollectMicrotest.*"
+      - "NetTelemetrySamplerMicrotest.*"
+      - "NetTelemetryJsonMicrotest.*"
+      - "NetTelemetryFlushMicrotest.*"
       # rma/rma_proxy_launch.cc
       - "RmaProxyBatchMemOpTest.*"
       - "RmaProxyDescriptorTest.*"
@@ -84,6 +106,16 @@ test_categories:
       - "TuningMicrotest.*"
       # plugin/tuner/csv_tuner.cc
       - "CsvTunerMicrotest.*"
+      # commDump.cc
+      - "CommDumpMicrotest.*"
+      # include/timer.h
+      - "TimerMicrotest.*"
+      # include/param/utils.h, include/param/parser_common.h
+      - "ParamUtilsMicrotest.*"
+      # include/param/parser_{default,enum,bitset,list}.h
+      - "ParamParsersMicrotest.*"
+      # param/param_registry.cc
+      - "ParamRegistryMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
       - "GroupCommHeadChainTest.*"
@@ -104,9 +136,26 @@ test_categories:
       - "WrapMicrotestIsolated.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
+      # transport/nvls.cc (rccl-UnitTestsMicroNvls)
+      - "NvlsHipStubTest.*"
+      # misc/ionicdvsymbols.cc, misc/mlx5dvsymbols.cc
+      - "DvSymbolsTestIsolated.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
       - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
+      # graph/rccl_graph_gen.cc
+      - "GraphGenPermuteTest.*"
+      - "GraphGenIsPrimeTest.*"
+      - "NodeCounts/GraphGenWaleckiTest.*"
+      - "EvenNodeCounts/GraphGenWaleckiEvenTest.*"
+      - "GraphGenWaleckiGuardTest.*"
+      - "Tables/GraphGenFixedRingTableTest.*"
+      - "PrimeNodeCounts/GraphGenPrimeRingTest.*"
+      - "GraphGenPrimeRingGuardTest.*"
+      - "GraphGenGreedyTest.*"
+      - "GraphGenGenerateRingsTest.*"
+      - "Constructions/GraphGenDispatchTest.*"
+      - "GraphGenCutIndicesTest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
@@ -119,6 +168,8 @@ test_categories:
       - "Win*"
       # test/common/ProcessIsolatedTestRunner.cpp
       - "ProcessIsolatedRunnerMicrotest.*"
+      # register/*.cc
+      - "Register*"
     exclude_windows:
       - "*"
     labels:

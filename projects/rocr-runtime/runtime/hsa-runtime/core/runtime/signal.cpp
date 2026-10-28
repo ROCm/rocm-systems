@@ -46,10 +46,13 @@
 #include "core/inc/signal.h"
 
 #include <algorithm>
+#include <atomic>
 #include <numeric>
 #include <vector>
 
 #include "core/util/timer.h"
+#include "core/inc/default_signal.h"
+#include "core/inc/interrupt_signal.h"
 #include "core/inc/runtime.h"
 #if defined(_WIN32)
 #include "malloc.h"
@@ -126,11 +129,24 @@ void SharedSignalPool_t::free(SharedSignal* ptr) {
   free_list_.push_back(ptr);
 }
 
-LocalSignal::LocalSignal(hsa_signal_value_t initial_value, bool exportable)
-    : local_signal_(exportable ? nullptr
-                               : core::Runtime::runtime_singleton_->GetSharedSignalPool(),
-                    exportable ? core::MemoryRegion::AllocateIPC : 0) {
-  local_signal_.shared_object()->amd_signal.value = initial_value;
+LocalSignal::LocalSignal(hsa_signal_value_t initial_value, bool exportable) {
+  shared_signal_ =
+      local_signal_
+          .emplace(exportable ? nullptr : core::Runtime::runtime_singleton_->GetSharedSignalPool(),
+                   exportable ? core::MemoryRegion::AllocateIPC : 0)
+          .shared_object();
+  shared_signal_->amd_signal.value = initial_value;
+}
+
+LocalSignal::LocalSignal(hsa_signal_value_t initial_value, SignalBatch* batch,
+                         SharedSignal* slot)
+    : batch_(batch), shared_signal_(slot) {
+  batch_->AcquireSlot();
+  shared_signal_->amd_signal.value = initial_value;
+}
+
+LocalSignal::~LocalSignal() {
+  if (batch_ != nullptr) batch_->ReleaseSlot(shared_signal_);
 }
 
 void Signal::registerIpc() {
@@ -187,7 +203,7 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
                               const hsa_signal_condition_t* conds, const hsa_signal_value_t* values,
                               uint64_t timeout, hsa_wait_state_t wait_hint,
                               std::vector<hsa_signal_value_t>& satisfying_values,
-                              bool wait_on_all) {
+                              bool wait_on_all, bool wake_async_monitor) {
   hsa_signal_handle* signals =
       reinterpret_cast<hsa_signal_handle*>(const_cast<hsa_signal_t*>(hsa_signals));
 
@@ -326,6 +342,17 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
       time_remaining).count();
     wait_ms = (ct>0xFFFFFFFEu) ? 0xFFFFFFFEu : ct;
     HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(evts, unique_evts, wait_on_all, wait_ms, event_age));
+
+    // As in InterruptSignal::WaitRelaxed(), this wait may have taken the notification the
+    // async event monitor is parked on.
+    if (wake_async_monitor && !core::Runtime::runtime_singleton_->KfdVersion().supports_event_age) {
+      for (uint32_t i = 0; i < signal_count; i++) {
+        if (signals[i]->waiting_ > 1) {
+          core::Runtime::runtime_singleton_->WakeAsyncSignalMonitor();
+          break;
+        }
+      }
+    }
   }
 }
 
@@ -446,6 +473,215 @@ SignalGroup::SignalGroup(uint32_t num_signals, const hsa_signal_t* hsa_signals)
   }
   if (signals == NULL) return;
   for (uint32_t i = 0; i < count; i++) signals[i] = hsa_signals[i];
+}
+
+void FlushDeviceStores(volatile int64_t* stored, int64_t value) {
+  store_fence();
+  *stored = value;
+  memory_fence();
+  (void)*stored;
+}
+
+int64_t Signal::UpdateValueWithoutRmw(ValueOp op, int64_t operand, int64_t expected) {
+  int64_t previous = 0;
+  int64_t next = operand;
+  if (op != ValueOp::kStore) {
+    previous = atomic::Load(&signal_.value, std::memory_order_acquire);
+    switch (op) {
+      case ValueOp::kAnd:
+        next = previous & operand;
+        break;
+      case ValueOp::kOr:
+        next = previous | operand;
+        break;
+      case ValueOp::kXor:
+        next = previous ^ operand;
+        break;
+      case ValueOp::kAdd:
+        next = previous + operand;
+        break;
+      case ValueOp::kSub:
+        next = previous - operand;
+        break;
+      case ValueOp::kCas:
+        if (previous != expected) return previous;
+        break;
+      case ValueOp::kStore:
+      case ValueOp::kExchange:
+        break;
+    }
+  }
+  atomic::Store(&signal_.value, next, std::memory_order_release);
+  FlushDeviceStores(&signal_.value, next);
+  return previous;
+}
+
+hsa_status_t SignalBatch::Create(uint32_t count, const hsa_signal_value_t* initial_values,
+                                 bool use_interrupt, const MemoryRegion* region,
+                                 const std::vector<hsa_agent_t>& access_agents,
+                                 bool host_access_via_hdp, bool shadow_members, SignalBatch** batch,
+                                 hsa_signal_t* signals) {
+  const size_t arena_bytes = size_t(count) * sizeof(SharedSignal);
+
+  void* arena = nullptr;
+  hsa_status_t status = Runtime::runtime_singleton_->AllocateMemory(
+      region, arena_bytes, MemoryRegion::AllocateNonPaged, &arena);
+  if (status != HSA_STATUS_SUCCESS) return status;
+  MAKE_NAMED_SCOPE_GUARD(arenaGuard, [&]() { Runtime::runtime_singleton_->FreeMemory(arena); });
+
+  if (!access_agents.empty()) {
+    status = Runtime::runtime_singleton_->AllowAccess(uint32_t(access_agents.size()),
+                                                      access_agents.data(), arena);
+    if (status != HSA_STATUS_SUCCESS) return status;
+  }
+  assert(IsMultipleOf(arena, alignof(SharedSignal)) && "Pool allocations are page aligned.");
+  memset(arena, 0, arena_bytes);
+
+  SignalBatch* new_batch = new SignalBatch(arena, count, host_access_via_hdp);
+  arenaGuard.Dismiss();
+  if (shadow_members) {
+    new_batch->shadow_members_.reset(new std::atomic<Signal*>[count]());
+    new_batch->RegisterShadow();
+  }
+
+  uint32_t num_created = 0;
+  MAKE_NAMED_SCOPE_GUARD(batchGuard, [&]() {
+    for (uint32_t slot_index = 0; slot_index < num_created; slot_index++)
+      Signal::Convert(signals[slot_index])->DestroySignal();
+    new_batch->ReleaseHandle();
+  });
+  for (uint32_t slot_index = 0; slot_index < count; slot_index++) {
+    SharedSignal* slot = new_batch->Slot(slot_index);
+    new (slot) SharedSignal();
+
+    Signal* member;
+    if (use_interrupt)
+      member = new InterruptSignal(initial_values[slot_index], new_batch, slot);
+    else
+      member = new DefaultSignal(initial_values[slot_index], new_batch, slot);
+
+    signals[slot_index] = Signal::Convert(member);
+    if (new_batch->shadow_members_ != nullptr)
+      new_batch->shadow_members_[slot_index].store(member, std::memory_order_relaxed);
+    num_created++;
+  }
+  batchGuard.Dismiss();
+  if (host_access_via_hdp)
+    FlushDeviceStores(&new_batch->Slot(count - 1)->amd_signal.value, initial_values[count - 1]);
+
+  *batch = new_batch;
+  return HSA_STATUS_SUCCESS;
+}
+
+void SignalBatch::ReleaseHandle() {
+  if (destroyed_.exchange(true)) return;
+  DropReference();
+}
+
+void SignalBatch::ReleaseSlot(SharedSignal* slot) {
+  if (shadow_members_ != nullptr)
+    shadow_members_[slot - Slot(0)].store(nullptr, std::memory_order_release);
+  slot->~SharedSignal();
+  DropReference();
+}
+
+void SignalBatch::DropReference() {
+  if (--references_ == 0) delete this;
+}
+
+SignalBatch::~SignalBatch() {
+  if (shadow_members_ != nullptr) UnregisterShadow();
+  Runtime::runtime_singleton_->FreeMemory(arena_);
+}
+
+namespace {
+/// Maps each page of a shadowed arena to its batch: a three-level radix tree on the page
+/// number, as in tcmalloc's PageMap. Arenas are page aligned and own their pages, so a page
+/// belongs to at most one batch. Readers never lock; nodes are created on first use and never
+/// freed, so a walk can always complete.
+constexpr uint32_t kShadowPageShift = 12;
+constexpr uint32_t kShadowLevelBits = 12;
+constexpr uintptr_t kShadowLevelEntries = uintptr_t(1) << kShadowLevelBits;
+constexpr uint32_t kShadowPageNumberBits = 3 * kShadowLevelBits;
+
+struct ShadowLeaf {
+  std::atomic<SignalBatch*> batches[kShadowLevelEntries];
+};
+
+struct ShadowMid {
+  std::atomic<ShadowLeaf*> leaves[kShadowLevelEntries];
+};
+
+std::mutex shadow_page_lock;
+std::atomic<ShadowMid*> shadow_page_root[kShadowLevelEntries];
+
+/// Returns nullptr when @p page_number is beyond the map, or when its leaf does not exist and
+/// @p create is false. Creating requires shadow_page_lock.
+std::atomic<SignalBatch*>* ShadowPageEntry(uintptr_t page_number, bool create) {
+  if ((page_number >> kShadowPageNumberBits) != 0) return nullptr;
+  std::atomic<ShadowMid*>& root_entry = shadow_page_root[page_number >> (2 * kShadowLevelBits)];
+  ShadowMid* mid = root_entry.load(std::memory_order_acquire);
+  if (mid == nullptr) {
+    if (!create) return nullptr;
+    mid = new ShadowMid();
+    root_entry.store(mid, std::memory_order_release);
+  }
+  std::atomic<ShadowLeaf*>& mid_entry =
+      mid->leaves[(page_number >> kShadowLevelBits) & (kShadowLevelEntries - 1)];
+  ShadowLeaf* leaf = mid_entry.load(std::memory_order_acquire);
+  if (leaf == nullptr) {
+    if (!create) return nullptr;
+    leaf = new ShadowLeaf();
+    mid_entry.store(leaf, std::memory_order_release);
+  }
+  return &leaf->batches[page_number & (kShadowLevelEntries - 1)];
+}
+}  // namespace
+
+std::atomic<uint32_t> SignalBatch::num_shadowed_arenas_{0};
+
+void SignalBatch::RegisterShadow() {
+  const uintptr_t arena_begin = reinterpret_cast<uintptr_t>(arena_);
+  const uintptr_t first_page = arena_begin >> kShadowPageShift;
+  const uintptr_t last_page =
+      (arena_begin + size_t(count_) * sizeof(SharedSignal) - 1) >> kShadowPageShift;
+  std::lock_guard<std::mutex> lock(shadow_page_lock);
+  if ((last_page >> kShadowPageNumberBits) != 0) {
+    shadow_members_.reset();
+    return;
+  }
+  for (uintptr_t page_number = first_page; page_number <= last_page; page_number++)
+    ShadowPageEntry(page_number, true)->store(this, std::memory_order_release);
+  num_shadowed_arenas_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void SignalBatch::UnregisterShadow() {
+  const uintptr_t arena_begin = reinterpret_cast<uintptr_t>(arena_);
+  const uintptr_t first_page = arena_begin >> kShadowPageShift;
+  const uintptr_t last_page =
+      (arena_begin + size_t(count_) * sizeof(SharedSignal) - 1) >> kShadowPageShift;
+  std::lock_guard<std::mutex> lock(shadow_page_lock);
+  for (uintptr_t page_number = first_page; page_number <= last_page; page_number++)
+    ShadowPageEntry(page_number, false)->store(nullptr, std::memory_order_release);
+  num_shadowed_arenas_.fetch_sub(1, std::memory_order_relaxed);
+}
+
+bool SignalBatch::FindShadowedMember(uint64_t handle, Signal** member) {
+  const uintptr_t address = static_cast<uintptr_t>(handle);
+  const std::atomic<SignalBatch*>* page_entry = ShadowPageEntry(address >> kShadowPageShift, false);
+  if (page_entry == nullptr) return false;
+  const SignalBatch* owner = page_entry->load(std::memory_order_acquire);
+  if (owner == nullptr) return false;
+
+  // owner outlives every live member: each member holds a batch reference until it is destroyed,
+  // and a handle must not be used concurrently with or after its destruction.
+  const uintptr_t slot_offset = address - reinterpret_cast<uintptr_t>(owner->arena_);
+  const uintptr_t slot_index = slot_offset / sizeof(SharedSignal);
+  if ((slot_offset % sizeof(SharedSignal) != offsetof(SharedSignal, amd_signal)) ||
+      (slot_index >= owner->count_))
+    return false;
+  *member = owner->shadow_members_[slot_index].load(std::memory_order_acquire);
+  return true;
 }
 
 }  // namespace core

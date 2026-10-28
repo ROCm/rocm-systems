@@ -225,13 +225,19 @@ void Runtime::RegisterAgent(Agent* agent, bool Enabled) {
       // Default system pool must support kernarg
       for (auto pool : system_regions_fine_) {
         if (pool->kernarg()) {
-          system_allocator_ = [pool](size_t size, size_t alignment,
-                                     MemoryRegion::AllocateFlags alloc_flags,
-                                     int agent_node_id) -> void* {
+          // Capture a raw pointer (not the shared_ptr) so the closure state is
+          // trivially destructible and stored inline in std::function.  The
+          // region outlives the closure via system_regions_fine_ and the owning
+          // CPU agent, and this avoids a heap-buffer-overflow when the closure
+          // copy held by BaseShared is torn down during Unload().
+          const core::MemoryRegion* pool_ptr = pool.get();
+          system_allocator_ = [pool_ptr](size_t size, size_t alignment,
+                                         MemoryRegion::AllocateFlags alloc_flags,
+                                         int agent_node_id) -> void* {
             assert(alignment <= 4096);
             void* ptr = NULL;
             return (HSA_STATUS_SUCCESS ==
-                    core::Runtime::runtime_singleton_->AllocateMemory(pool.get(), size, alloc_flags,
+                    core::Runtime::runtime_singleton_->AllocateMemory(pool_ptr, size, alloc_flags,
                                                                       &ptr, agent_node_id))
                 ? ptr
                 : NULL;
@@ -982,6 +988,13 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_cond
   hsa_signal_handle(asyncInfo->control.wake)->StoreReleaseAndNotify(1);
 
   return HSA_STATUS_SUCCESS;
+}
+
+void Runtime::WakeAsyncSignalMonitor() {
+  // Notify unconditionally, as SetAsyncSignalHandler() does, so a monitor about to park can't
+  // miss it. Like SetAsyncSignalHandler(), this assumes waiters are gone before teardown.
+  if (!asyncSignals_.empty())
+    hsa_signal_handle((*asyncSignals_)->control.wake)->StoreReleaseAndNotify(1);
 }
 
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
@@ -2144,7 +2157,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       if (core::Runtime::runtime_singleton_->flag().wait_any()) {
         index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
                                      &async_events_.cond_[0], &async_events_.value_[0],
-                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false);
+                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false,
+                                     /*wake_async_monitor=*/false);
       } else {
         // Skip wake-up signal logic
         index = 1;
@@ -2169,17 +2183,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // once per outer-loop iteration (one per new wait batch), so the backoff
       // only compounds within a single idle wait and every new wait starts
       // again at the floor -- the escalated value cannot carry across waits.
-      // The ceiling depends on why we would be polling: with interrupts
-      // unavailable globally (WSL/dxg, DTIF, KFD 1.0, HSA_ENABLE_INTERRUPT=0)
-      // every signal is polling-only and a long nap costs only the napping
-      // wait's own observation latency. With interrupts available, polling can
-      // still be forced by a single EopEvent-less signal in the batch (an IPC
-      // signal or an internal DefaultSignal such as gang-copy signals); the
-      // nap then delays unrelated interrupt-backed handlers on this shared
-      // thread, so it is capped at the interrupt path's 200us active-poll
-      // window instead.
-      const int poll_nap_ceiling_us =
-          g_use_interrupt_wait ? kPollNapCeilingMixedUs : kPollNapCeilingUs;
       int poll_nap_us = kPollNapFloorUs;
 
       while (!finish) {
@@ -2270,7 +2273,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             break;
           }
-        } else if (polling && !finish) {
+        } else if (polling && !finish && !g_use_interrupt_wait) {
           // No interrupt-backed event is available for at least one pending
           // signal (PrepareInterrupt forced polling) -- on the WSL/dxg thunk
           // that is every signal, since it implements no KFD events at all.
@@ -2280,15 +2283,13 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // process that has merely touched the GPU
           // (https://github.com/ROCm/librocdxg/issues/60). Nap between scans,
           // doubling from 20us up to poll_nap_ceiling_us (2ms when the whole
-          // runtime is polling-only, 200us when a mixed batch also carries
-          // interrupt-backed handlers this nap would delay -- see the ceiling
-          // selection above), so a wait that completes quickly keeps low
+          // runtime is polling-only, so a wait that completes quickly keeps low
           // observation latency while a long-lived idle wait costs almost no
           // CPU. The nap is re-initialized at the outer-loop boundary (see
           // poll_nap_us above), so the escalation only compounds within a
           // single idle wait batch.
           os::uSleep(poll_nap_us);
-          poll_nap_us = NextPollNapUs(poll_nap_us, poll_nap_ceiling_us);
+          poll_nap_us = NextPollNapUs(poll_nap_us, kPollNapCeilingUs);
         }
       }
     }
@@ -2947,6 +2948,13 @@ void Runtime::Unload() {
   SharedSignalPool.clear();
   EventPool.clear();
 
+  // Release static allocators while agents and the thunk are still valid so
+  // system memory regions kept alive by the allocator closures can run
+  // fragment heap teardown safely.
+  system_allocator_ = {};
+  system_deallocator_ = {};
+  BaseShared::SetAllocateAndFree({}, {});
+
   // Clear system regions before destroying agents to prevent use-after-free
   // when agent destructors access region memory.
   system_regions_fine_.clear();
@@ -3112,6 +3120,11 @@ void Runtime::LoadTools() {
   typedef Agent* (*tool_wrap_t)(Agent*);
   typedef void (*tool_add_t)(Runtime*);
 
+  // Set when a v3 tool owns the API table. Tools named in HSA_TOOLS_LIB are an
+  // explicit request and still load; tools that are merely loaded in the
+  // process are not picked up, since they would wrap the table a second time.
+  bool skip_loaded_tools = false;
+
 #if defined(HSA_ROCPROFILER_REGISTER) && HSA_ROCPROFILER_REGISTER > 0
   if (!flag().disable_tool_register()) {
     auto* profiler_api_table_ = static_cast<void*>(&hsa_api_table());
@@ -3142,9 +3155,7 @@ void Runtime::LoadTools() {
       }
     }
 
-    // if rocprofiler library supports registration and v1 support not explicitly requested,
-    // do not use old method
-    if (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration) return;
+    skip_loaded_tools = (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration);
   }
 #endif
 
@@ -3189,7 +3200,8 @@ void Runtime::LoadTools() {
   }
 
   // Discover loaded tools.
-  std::vector<os::LibHandle> loaded_hds = os::GetLoadedToolsLib();
+  std::vector<os::LibHandle> loaded_hds;
+  if (!skip_loaded_tools) loaded_hds = os::GetLoadedToolsLib();
   for (auto& handle : loaded_hds) {
     const uint32_t* order = (const uint32_t*)os::GetExportAddress(handle, "HSA_AMD_TOOL_PRIORITY");
     if (order) {

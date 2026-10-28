@@ -80,13 +80,14 @@ include(cmake/NcclCompat.cmake)
 rccl_define_nccl_compat_options()
 
 option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      ${RCCL_DEFAULT_BUILD_ADDRESS_SANITIZER})
-option(BUILD_ALL_UNROLLS                       "Generate every unroll factor (1,2,4,8,16,32) for the targeted GPU arch(es)" OFF)
+option(BUILD_ALL_UNROLLS                       "Also generate unroll factors 8 and 16 on top of the per-arch default set" OFF)
 option(BUILD_BFD                               "Enable custom backtrace (if bfd.h exists)"     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
+option(BUILD_PROFILER_ACCL                     "Build the ACCL timing-decomposition profiler"  ${NCCL_OS_LINUX})
 option(BUILD_PROFILER_INSPECTOR                "Build the NCCL Inspector profiler plugin"      ${BUILD_TESTS})
-option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env, gin, mixed, proxytrace, accl)" OFF)
+option(BUILD_PLUGIN_EXAMPLES                   "Build plugin example libraries (net, tuner, profiler, env, gin, mixed, proxytrace)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
 set(ENABLE_FULL_COVERAGE "OFF" CACHE STRING
@@ -112,7 +113,8 @@ option(BUILD_NCCL4PY                           "Build the nccl4py Python binding
 # layout for diagnostics.  See cmake/linker_scripts/hip_fatbin_tail.ld.
 option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
-option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy path" OFF)
+option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy and reduce paths" OFF)
+option(ENABLE_TDM_PRIM_LL128                   "Build the experimental gfx1250 TDM LL128 user-buffer path" OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
@@ -126,6 +128,10 @@ option(RCCL_POISON_HIP_ATOMICS                 "Reject __hip_atomic_* builtins i
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 if(ENABLE_TDM_SIMPLE)
   add_compile_definitions(ENABLE_TDM_SIMPLE=1)
+endif()
+
+if(ENABLE_TDM_PRIM_LL128)
+  add_compile_definitions(ENABLE_TDM_PRIM_LL128=1)
 endif()
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):
@@ -489,6 +495,17 @@ check_cxx_source_compiles("
   }
 " HIP_VMM_UNCACHED_MEMORY_AVAILABLE)
 
+### Check for host VMM location types (hipMemLocationTypeHost). Stock ROCm 7.0.2
+### shares the 7.0.2.x backport's HIP_VERSION but does not declare them.
+check_cxx_source_compiles("
+  #include <hip/hip_runtime_api.h>
+  int main() {
+    hipMemLocationType t = hipMemLocationTypeHost;
+    (void)t;
+    return 0;
+  }
+" HIP_MEM_LOCATION_TYPE_HOST)
+
 unset(CMAKE_REQUIRED_LIBRARIES)
 
 ### Check for indirect function call support
@@ -823,6 +840,14 @@ endif()
 option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
 add_subdirectory(src)
 
+# ACCL timing-decomposition profiler plugin. This is a separately loaded,
+# host-only shared library, so building it for every RCCL package does not add
+# instrumentation or runtime overhead to librccl.so. Set BUILD_PROFILER_ACCL=OFF
+# for installations that do not want to ship the optional plugin.
+if(BUILD_PROFILER_ACCL)
+  add_subdirectory(plugins/profiler/accl)
+endif()
+
 # NCCL Inspector profiler plugin. Built as its own .so and loaded at runtime via
 # NCCL_PROFILER_PLUGIN; the MPI tests pick up the in-tree build automatically.
 if(BUILD_PROFILER_INSPECTOR)
@@ -969,7 +994,6 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
-    add_subdirectory(plugins/profiler/accl)
     add_subdirectory(plugins/env/example)
     add_subdirectory(plugins/env/json)
     add_subdirectory(plugins/gin/example)

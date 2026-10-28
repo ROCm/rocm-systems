@@ -89,6 +89,9 @@ typedef enum {
   // Appended rather than grouped with the other Direct entries so existing
   // values stay stable.
   RCCL_DIRECT_ALLTOALL, // AlltoAll as per-peer Send/Recv (no collective kernel)
+  // Reporting only (rcclGetCollImplInfo / rcclSymKGetInfo): a symmetric dispatch that
+  // resolves to a Tensor Data Mover kernel. Live dispatch always tags RCCL_SYMMETRIC.
+  RCCL_SYMMETRIC_TDM,
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
@@ -155,12 +158,18 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct 
 // Arch-table channel cap for Ring Simple ReduceScatter
 // (rcclArchThresholds::rsRingSimpleCapped*). NCCL_MIN/MAX_NCHANNELS turn it off.
 void rcclUpdateCollectiveChannels(struct ncclComm* comm, size_t nBytes, const struct ncclTaskColl* info, int& nc);
+// gfx950 multi-node all_reduce/reduce_scatter choices measured with RCCL_IB_GDR_FLUSH_FLAG=1; a no-op
+// unless every rank of the comm uses the flag (comm->ibGdrFlushFlag). Call after
+// rcclUpdateCollectiveProtocol, whose choice it overrides.
+int rcclUpdateRemoteFlushAlgoProto(struct ncclComm* comm, size_t nBytes, struct ncclTaskColl* info,
+                                   float (*table)[NCCL_NUM_PROTOCOLS]);
 void rcclUpdateThreadThreshold(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info,
                                int& threadThreshold);
 void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info);
 void rcclGetMaxNthreads(struct ncclComm* comm, int maxNthreads[]);
 void rcclOptThreadBlockSize(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes, int& nThreads);
 void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]);
+void rcclScaleCollLl128BuffSize(struct ncclComm* comm);
 NCCL_API(ncclResult_t, rcclGetAlgoInfo, struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
          int collNetSupport, int nvlsSupport, int numPipeOps, int* algo, int* protocol, int* maxChannels);
 // Buffer/op-aware implementation query. Unlike rcclGetAlgoInfo(), this reports
@@ -180,7 +189,7 @@ NCCL_API(ncclResult_t, rcclGetCollImplInfo, struct ncclComm* comm, ncclFunc_t co
          int* protocol, int* maxChannels);
 // Single source of truth for AllReduce implementation selection. Runs the exact
 // priority chain (GIN-SDMA -> symmetric -> CE 2-shot -> DDA LL/LL128/VMM/IPC -> CE registered
-// -> kernel) and returns the decision.
+// -> kernel) and returns the decision. Under CTAPolicy=ZERO an available CE registered path beats symmetric.
 //   query=false : live dispatch path (ncclAllReduce_impl). ceCapturing is probed
 //                 from `stream`; the CE graph latch is ticked; graphCapturingHint
 //                 is ignored.
@@ -200,13 +209,16 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
                                  ncclDataType_t datatype, cudaStream_t stream, bool query, bool graphCapturingHint,
                                  struct rcclCollDecision* decision);
-// Single source of truth for ReduceScatter selection: symmetric -> DDA fabric
-// (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct -> native ring/pat kernel.
-// RS has no CE. Live enqueue carries the decision so taskAppend honors
-// RCCL_SYMMETRIC vs ring (symkExtract) instead of re-deriving it.
+// Single source of truth for ReduceScatter selection: symmetric -> CE (eager /
+// enqueue-init) -> DDA fabric (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct
+// -> CE registered -> symmetric -> native ring/pat kernel.
+// Live enqueue carries the decision so taskAppend honors RCCL_SYMMETRIC / CE
+// vs ring (symkExtract) instead of re-deriving it.
+// graphCapturingHint is used only when query=true (rcclGetCollImplInfo). The live
+// path ticks the shared CE graph latch in ncclReduceScatter_impl before calling.
 ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                      ncclDataType_t datatype, ncclRedOp_t op, bool query,
-                                     struct rcclCollDecision* decision);
+                                     struct rcclCollDecision* decision, bool graphCapturingHint = false);
 // Single source of truth for AlltoAll selection: Pivot -> GDA -> DDA (LL/LL128/VMM/IPC) ->
 // CE registered -> HierCE -> CE scratch -> Direct (per-peer Send/Recv).
 // Live enqueue carries the decision so taskAppend honors CE vs Direct instead of
@@ -245,6 +257,14 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm);
 // Pass the bias buffer as acc (nullptr when the caller is plain AllReduce).
 // Does NOT check ceARTmpBuf initialization; the caller is responsible.
 bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc);
+size_t rcclCeAr2ShotMax(const struct ncclComm* comm);
+size_t rcclCeAr2ShotMin(const struct ncclComm* comm);
+// Opt-in CE ReduceScatter gate (RCCL_CE_REDUCESCATTER=1). Staging path (scatter
+// into ceARTmpBuf, then local reduce). No message-size cap: large messages are
+// pipelined through staging slots. Pipeline chunks are rounded to 16 bytes in
+// ncclCeAllReduceChooseChunkBytes, and the reduce kernel scalar-reduces the
+// tail, so a shard that is not a multiple of 16 still runs.
+bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op);
 // Updates the CE AllReduce graph latch from this call's capture state.
 // Invoke once per collective (any type) at each CE AR decision point.
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
@@ -255,6 +275,7 @@ bool rcclCeArGraphSafe(struct ncclComm* comm);
 // params so an unset env var does not read as "disabled".
 RCCL_PARAM_DECLARE(CeAllReduce);
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
+RCCL_PARAM_DECLARE(CeReduceScatter);
 // Is CE AllReduce enabled for this comm? RCCL_CE_ALLREDUCE wins when set;
 // otherwise CE AllReduce is on only for the arch it is tuned for (gfx1250) and
 // off elsewhere, independent of that arch table's ceNonRegMax/ceRegMax entries.
@@ -266,15 +287,17 @@ bool rcclForceCeAllReduceEnabled(const struct ncclComm* comm);
 // RCCL_FORCE_CE=0 turns it off; otherwise NCCL_CTA_POLICY_ZERO forces it and
 // the arch table's forceCeScratch decides.
 bool rcclForceCeScratchEnabled(const struct ncclComm* comm);
+// Sets ceAllReduceFastPath on each queued CE task from its receive window; no bootstrap.
+void rcclSetCeAllReduceFastPath(struct ncclComm* comm);
 RCCL_PARAM_DECLARE(CeArMaxMsgBytes);     // -1 = use ceNonRegMax[AR] (2-shot) from arch table
 RCCL_PARAM_DECLARE(CeArRegMaxMsgBytes);  // -1 = use ceRegMax[AR] (registered) from arch table
 RCCL_PARAM_DECLARE(CeArStagingBytes);    // -1 = use NCCL_CE_AR_STAGING_BYTES; sizes ceARTmpBuf, not the cap
-// 2-shot AllReduce size cap: env RCCL_CE_AR_MAX_MSG_BYTES if set, else
-// ceNonRegMax[AR] from the arch table (0 = 2-shot disabled). A null table
-// (RCCL_IGNORE_ARCH_TABLE or unknown arch) restores the pre-table 256 MiB
-// window. Does not size ceARTmpBuf; that stays at
-// NCCL_CE_AR_TMPBUF_DEFAULT_BYTES unless this cap is larger.
-size_t rcclCeAr2ShotMax(const ncclComm* comm);
+RCCL_PARAM_DECLARE(CeCollMaxBytes);      // -1 = use arch table; overrides ceNonRegMax+ceRegMax for non-AR collectives
+RCCL_PARAM_DECLARE(SymKMaxBytes);       // -1 = use arch table; overrides symMaxR2+symMaxR2Graph for all collectives
+RCCL_PARAM_DECLARE(CeArMinMsgBytes);     // -1 = use arch table; AR CE non-reg lower bound
+RCCL_PARAM_DECLARE(CeCollMinBytes);      // -1 = use arch table; non-AR CE non-reg lower bound
+RCCL_PARAM_DECLARE(SymKMinBytes);        // -1 = use arch table; overrides symMinR2 for all collectives
+
 // True when NCCL_ALGO is set by the user. Used to skip CE/DDA/Symmetric in
 // both the selector (rccl_wrap.cc) and taskAppend (enqueue.cc).
 bool rcclNcclAlgoEnvIsSet();
@@ -299,6 +322,12 @@ bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm);
 bool ncclCommIsSuspended(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
+// Segments behind the whole NET registration, not the collective's slice (cached).
+ncclResult_t rcclNetRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments);
+// Graph variant: no-op for a NULL record; drops the graph reference on failure or when =0 skips a multi-segment record.
+ncclResult_t rcclNetGraphRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments);
+// Records an all-peers NET registration.
+void rcclNetRegCommit(struct ncclComm* comm, struct ncclReg* regRecord, int numSegments);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm);
 ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm);
@@ -386,6 +415,11 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm);
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
                     bool query = false, const char* prefix = nullptr);
 
+// Element types the DDA fabric kernels accept on this comm's arch: ncclSum for
+// the reducing collectives, a raw byte copy for AllGather and AlltoAll. fp8 is
+// gfx1250-only.
+bool rcclDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype);
+
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
 
@@ -462,6 +496,11 @@ inline int rcclAllocP2pNetLLBuffers(int cudaArch, int nNodes, int nRanks, int64_
   if (cudaArch == 1250 && enable > 0) return 1;
   return 0;
 }
+// Classifies a non-symmetric window and rejects host VMM across the LSA team (rccl_dev_runtime.cc).
+ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags);
+// GIN MR pointer type for a symmetric segment; host VMM needs DMA-BUF (rccl_dev_runtime.cc).
+ncclResult_t rcclDevrGinSegmentRegType(bool globalHasSysmemSegment, int maxGlobalNumSegments, int* ptrType,
+                                       bool* needDmabuf);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);

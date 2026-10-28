@@ -52,6 +52,7 @@ class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
 class BatchCopyMemoryCommand;
+class BatchCopyMemoryRectCommand;
 class BatchWriteMemoryCommand;
 class BatchReadMemoryCommand;
 class MapMemoryCommand;
@@ -356,6 +357,9 @@ struct Info : public amd::EmbeddedObject {
 
   //! Size of L2 Cache in bytes.
   uint32_t l2CacheSize_;
+
+  //! Maximum persisting L2 cache size in bytes.
+  size_t persistingL2CacheMaxSize_;
 
   //! Timestamp frequency in Hz.
   uint32_t timeStampFrequency_;
@@ -746,10 +750,11 @@ class Settings {
       uint kernel_arg_opt_ : 1;               //!< Enables kernel arg optimization for blit kernels
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
       uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
+      uint sdma_asymmetric_swap_supported_ : 1; //!< SDMA native asymmetric swap
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
       uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
       uint aql_device_ring_buf_ : 1;          //!< Place the AQL queue ring buffer in device memory
-      uint reserved_ : 8;
+      uint reserved_ : 7;
     };
     uint value_;
   };
@@ -1333,6 +1338,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
   virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd) = 0;
   virtual void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) = 0;
   virtual void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;
@@ -1340,6 +1346,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitKernel(amd::NDRangeKernelCommand& command) = 0;
   virtual void submitNativeFn(amd::NativeFnCommand& cmd) = 0;
   virtual void submitMarker(amd::Marker& cmd) = 0;
+  //! Waits for a marker with CPU wait, after Command::enqueue() released the lock (ROCm specific)
+  virtual void CompleteCpuWait(amd::Command& cmd) {}
   virtual void submitAccumulate(amd::AccumulateCommand& cmd) = 0;
   virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) = 0;
   virtual void submitFillMemory(amd::FillMemoryCommand& cmd) = 0;
@@ -1876,7 +1884,8 @@ class Device : public RuntimeObject {
   virtual device::Program* createProgram(amd::Program& owner, option::Options* options = NULL) = 0;
 
   //! Allocate a chunk of device memory as a cache for a CL memory object
-  virtual device::Memory* createMemory(Memory& owner) const = 0;
+  virtual device::Memory* createMemory(
+      Memory& owner, Memory::ErrorCode* errorCode = nullptr) const = 0;
 
   //! Allocate a chunk of device memory with address alignment
   virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const = 0;
@@ -2233,6 +2242,15 @@ class Device : public RuntimeObject {
   //! Sets the current scratch limit of the device. Valid only on rocm device.
   virtual bool UpdateScratchLimitCurrent(size_t limit) const { return true; }
 
+  //! Returns current persisting L2 cache size of the device. Valid only on rocm device.
+  virtual size_t PersistingL2CacheSizeCurrent() const { return 0; }
+
+  //! Returns maximum persisting L2 cache size of the device. Valid only on rocm device.
+  virtual size_t PersistingL2CacheSizeMax() const { return 0; }
+
+  //! Sets the current persisting L2 cache size of the device. Valid only on rocm device.
+  virtual bool UpdatePersistingL2CacheSizeCurrent(size_t size) const { return true; }
+
   //! Validate kernel
   virtual bool validateKernel(const amd::Kernel& kernel, const device::VirtualDevice* vdev,
                               bool coop_groups = false) {
@@ -2264,7 +2282,11 @@ class Device : public RuntimeObject {
   virtual void ReleaseGlobalSignal(void* signal) const {}
   virtual void RetainGlobalSignal(void* signal) const {}
 
-  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const { return false; }
+  //! batched allocates all events together, which is slower to create; use it for sets that are
+  //! pooled and reused. Only a batched set may be placed in device memory.
+  virtual bool CreateHwEvents(int count, bool batched, std::vector<void*>& hw_events) const {
+    return false;
+  }
   virtual void DestroyHwEvent(void* hw_event) const {}
 
   //! Re-arm already-allocated HW event signals so they can be reused by a new

@@ -8,6 +8,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/instruction.h"
+#include "util/host_target.h"
 
 #include <algorithm>
 #include <array>
@@ -35,9 +36,9 @@ inline constexpr unsigned spin_count() { return 512; }
 inline constexpr unsigned idle_spin_count() { return spin_count(); }
 inline constexpr unsigned completion_spin_count() { return spin_count(); }
 inline void relax_cpu() {
-#if defined(__x86_64__) || defined(__i386__)
+#if RJ_HOST_HAS_GNU_X86_PAUSE_BUILTIN
   __builtin_ia32_pause();
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
   asm volatile("yield");
 #else
   std::atomic_signal_fence(std::memory_order_seq_cst);
@@ -94,7 +95,15 @@ public:
 
 private:
   void publish(int value) {
-    state_.store(value, std::memory_order_release);
+    // A release store followed by notification is sufficient for this protocol
+    // under the C++ atomic wait/notify rules. The seq_cst store is a library
+    // workaround for libstdc++'s implementation.
+    // In libstdc++'s int-sized futex path, notify_one checks the bucket's
+    // waiter count before deciding whether to wake. Order publication before
+    // that check: on x86 a release store can remain buffered while the check
+    // sees no waiter and a newly registered waiter still sees the old state.
+    // Apply the ordering to job, completion, and shutdown publication.
+    state_.store(value, std::memory_order_seq_cst);
     state_.notify_one();
   }
 

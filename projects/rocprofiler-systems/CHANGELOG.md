@@ -22,9 +22,18 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `rocprof-sys-attach` finds the tool library in the target's own ROCm installation when the
   target cannot see this installation's library (for example, inside a container), so
   `ROCPROF_ATTACH_TOOL_LIBRARY` is no longer needed there.
+- Agent skills for choosing a profiling preset, discovering configuration options, and
+  instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
+  bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
+  agent's personal skills folder.
 
 ### Resolved issues
 
+- Fixed `rocprof-sys-instrument` aborting with `SIGABRT` on invalid input (non-ELF text
+  file, missing target, or already-instrumented binary). Uncaught `std::runtime_error`
+  exceptions from instrumentation setup are now caught in `main`, reported as
+  `[rocprof-sys] error: ...`, and the process exits with status 1 instead of
+  terminating.
 - Fixed a crash (`SIGSEGV`) in `rocprof-sys-instrument` when instrumenting Fortran+HIP
   programs compiled with `gfortran -g` or `-g -O0`. gfortran encodes assumed-shape and
   allocatable array bounds as DWARF location expression blocks rather than integer
@@ -35,6 +44,16 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   running in a different mount namespace (for example, a container). The tool library
   path is now validated against the target's mount namespace before attaching, failing
   cleanly with a diagnostic instead.
+
+### Removed
+
+- Legacy direct Perfetto tracing mode. Perfetto traces are now always generated from the
+  trace cache. `ROCPROFSYS_TRACE_LEGACY` and `--trace-legacy` / `-L` were removed (passing `-L` is
+  now an unknown-argument error); the `tracing.legacy` key was removed from JSON
+  configuration export.
+- Timemory component annotations (for example `thread_cpu_clock` and PAPI counter
+  values) are no longer attached to Perfetto slices. They will be available through the
+  timemory output formats.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 
