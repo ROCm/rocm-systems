@@ -85,7 +85,8 @@ def test_list_both_operators(
         "--experimental",
         "analyze",
         "--list-operators",
-        "torch,triton",
+        "torch",
+        "triton",
         "--path",
         ml_api_trace_profiled_workload,
     ])
