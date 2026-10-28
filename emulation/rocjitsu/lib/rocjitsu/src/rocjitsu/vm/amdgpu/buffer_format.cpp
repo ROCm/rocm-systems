@@ -256,9 +256,6 @@ bool qualified_store_selectors(const Format &f, uint32_t selectors, bool image_s
     return selectors == identity || selectors == reversed || selectors == bgra ||
            selectors == rgb || selectors == (rgb | (1 << 9)) || (image_store && selectors == zyx1);
   }
-  constexpr uint32_t x001 = 4 | (1 << 9);
-  if (image_store && channels == 1 && selectors == x001)
-    return true;
   if (channels == 1 && (selectors == identity || selectors == reversed || selectors == (4 << 9)))
     return true; // Single-channel identity, WZYX, and A8 views were measured.
   if (!channels)
