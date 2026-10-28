@@ -8,7 +8,6 @@
 #include "buffer.h"
 #include "context.h"
 #include "file.h"
-#include "hip.h"
 #include "hipfile.h"
 #include "hipfile-test.h"
 #include "hipfile-warnings.h"
@@ -32,7 +31,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
-#include <hip/driver_types.h>
 #include <memory>
 #include <stdexcept>
 #include <string>
