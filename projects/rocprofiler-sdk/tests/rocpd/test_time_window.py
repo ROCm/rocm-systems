@@ -31,6 +31,8 @@ from pathlib import Path
 
 import pytest
 
+SOURCE_TEST_DIR = Path("@CMAKE_CURRENT_SOURCE_DIR@")
+
 
 def load_time_window_module():
     """Import rocpd.time_window without the compiled libpyrocpd dependency."""
@@ -62,8 +64,12 @@ def load_time_window_module():
     source_path = test_dir.parents[1] / "source/lib/python/rocpd/time_window.py"
     if not source_path.is_file():
         package_spec = importlib.util.find_spec("rocpd")
-        assert package_spec is not None and package_spec.origin, "cannot locate rocpd"
-        source_path = Path(package_spec.origin).with_name("time_window.py")
+        if package_spec is not None and package_spec.origin:
+            source_path = Path(package_spec.origin).with_name("time_window.py")
+        else:
+            source_path = (
+                SOURCE_TEST_DIR.parent.parent / "source/lib/python/rocpd/time_window.py"
+            )
     assert source_path.is_file(), f"cannot locate {source_path}"
 
     spec = importlib.util.spec_from_file_location(
@@ -162,6 +168,28 @@ def test_loader_finds_installed_module_without_source(tmp_path, monkeypatch, int
 
     assert Path(module.__file__) == module_path
     assert "rocpd" not in sys.modules
+    assert module.percentages2timestamp(intervals, "50%", None) == (150, 200)
+
+
+def test_loader_finds_build_source_without_package(tmp_path, monkeypatch, intervals):
+    source_dir = tmp_path / "source tree" / "tests" / "rocpd"
+    module_path = source_dir.parents[1] / "source/lib/python/rocpd/time_window.py"
+    module_path.parent.mkdir(parents=True)
+    module_path.write_bytes(Path(time_window.__file__).read_bytes())
+    test_path = tmp_path / "build tree" / "tests" / "rocpd" / Path(__file__).name
+    monkeypatch.setitem(globals(), "__file__", str(test_path))
+    monkeypatch.setitem(globals(), "SOURCE_TEST_DIR", source_dir)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
+    for name in (
+        time_window.__package__,
+        time_window.__package__ + ".importer",
+        time_window.__name__,
+    ):
+        monkeypatch.setitem(sys.modules, name, sys.modules[name])
+
+    module = load_time_window_module()
+
+    assert Path(module.__file__).resolve() == module_path
     assert module.percentages2timestamp(intervals, "50%", None) == (150, 200)
 
 
