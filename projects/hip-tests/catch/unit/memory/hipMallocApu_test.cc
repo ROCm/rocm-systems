@@ -198,7 +198,9 @@ void CheckReportedFreeIsAllocatable(const OsMemory& os, size_t hostSize) {
 
   HeldAllocations held(AllocKind::Buffer);
   size_t allocated = 0;
-  while (allocated + step + kSizeTolerance <= freeMem) {
+  // Free memory adds the carve-out and host RAM pools, and each can end in a remainder smaller than
+  // a step, so leave one more step
+  while (allocated + 2 * step + kSizeTolerance <= freeMem) {
     REQUIRE(held.Add(step) == hipSuccess);
     allocated += step;
   }
