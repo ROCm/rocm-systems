@@ -14,6 +14,8 @@
 namespace amd::activity_prof {
 
 decltype(report_activity) report_activity{nullptr};
+decltype(report_kernel_dispatch) report_kernel_dispatch{nullptr};
+decltype(report_kernel_dispatch_batch) report_kernel_dispatch_batch{nullptr};
 
 // Reserved sentinel pointer value (0x1) used to signal roctracer that CLR commits
 // to delivering an activity record for this operation. roctracer's TracerCallback

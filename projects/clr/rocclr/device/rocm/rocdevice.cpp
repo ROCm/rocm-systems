@@ -1216,6 +1216,17 @@ bool Device::populateOCLDeviceConstants() {
     return false;
   }
 
+  // The KFD gpu_id reported in the runtime-contract tracepoints; 0 when the backend does
+  // not provide it.
+  uint32_t kfd_gpu_id = 0;
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::agent_get_info(bkendDevice_,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_UID),
+                          &kfd_gpu_id)) {
+    LogWarning("HSA_AMD_AGENT_INFO_DRIVER_UID cannot be queried. Ignored!");
+  }
+  info_.kfdGpuId_ = kfd_gpu_id;
+
   if (HSA_STATUS_SUCCESS !=
       Hsa::agent_get_info(bkendDevice_,
                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SDMA_ENG),
