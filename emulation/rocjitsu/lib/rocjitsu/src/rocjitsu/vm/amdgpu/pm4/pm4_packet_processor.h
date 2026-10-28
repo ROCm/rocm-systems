@@ -15,6 +15,7 @@ namespace rocjitsu::amdgpu {
 
 struct ComputeQueueRecord;
 class GpuVm;
+enum class VmAccessOutcome : uint8_t;
 
 /// @brief CP services used by packet execution.
 /// @details Queue state remains owned by CP. All callbacks must be populated and
@@ -27,7 +28,9 @@ struct Pm4ExecutionContext {
   /// @brief XCD index used by PRED_EXEC in CDNA vendor command buffers.
   uint32_t xcc_id = 0;
   /// @brief Flush GPU caches before packet memory effects and stream completion.
-  std::function<void()> flush_caches;
+  /// @details Any non-Complete outcome faults the queue without retiring the packet
+  /// or publishing successful completion, including transient Unavailable outcomes.
+  std::function<VmAccessOutcome()> flush_caches;
   /// @brief Admit a dispatch through CP using X, Y, Z, and the initiator word.
   /// @details The initiator determines whether dimensions count threads or groups.
   /// CP appends admitted work to queue.dispatches.entries; processing pauses
@@ -42,7 +45,7 @@ struct Pm4ExecutionContext {
   /// @details Reset retry backoff and arrange a scheduling turn without marking
   /// this queue blocked; packet processing may continue in the current turn.
   std::function<void()> wake;
-  /// @brief Cancel through CP at the original execution points, including exception scope.
+  /// @brief Cancel through CP at the original execution points, including packet rejection.
   /// @details Set queue.faulted, cancel pending work, and notify failed submissions.
   /// The processor sets queue.publication_faulted before calling this callback
   /// on terminal cursor-publication failures; CP preserves that failure state.
@@ -66,10 +69,7 @@ struct Pm4ExecutionContext {
 /// packet budget. Retry and fault handling are reported through context callbacks.
 /// Packet admission and execution failures emit a diagnostic and fault the queue
 /// without retiring the rejected packet. Effects preceding a failure are retained.
-/// Standard exceptions during execution (including allocations and callbacks) are still
-/// translated to fault_queue(); this function is not nonthrowing. Exceptions from
-/// cancellation before execution, after returned failure, or from the catch
-/// handler propagate.
+/// Host exceptions and unexpected callback exceptions propagate to the caller.
 /// @param queue CP-owned queue whose command state and cursor are updated in place.
 /// @param gpu_vm Borrowed VM used to acquire pinned access to the queue address space.
 /// @param context Borrowed architecture and synchronous CP services for this turn.

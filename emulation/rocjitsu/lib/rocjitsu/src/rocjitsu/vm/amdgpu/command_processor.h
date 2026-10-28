@@ -620,7 +620,7 @@ private:
   /// @brief Coarse writeback+invalidate of the GPU data caches (L1 K$/V$ + L2).
   /// @details Scalar and vector L1 are write-through and only need
   /// invalidation. Dirty L2 data is published under the owning VMID.
-  void flush_gpu_caches();
+  VmAccessOutcome flush_gpu_caches();
 
   /// @brief Ask ROCr to provision scratch while leaving the head packet unconsumed.
   [[nodiscard]] AqlAdmissionResult request_dynamic_scratch(ComputeQueueRecord &queue,

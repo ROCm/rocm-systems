@@ -2150,6 +2150,7 @@ set(_rj_interposer_pm4_tests
     UnmappedShaderFailsFence
     OversizedLdsFailsFence
     FailedFenceIsStillAvailable
+    FailedDependencyFailsFenceWithoutExecutingCommands
     MappedScalarLoadSucceeds
     UnmappedScalarLoadFailsFence
     MappedVectorLoadSucceeds

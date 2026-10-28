@@ -15,7 +15,6 @@
 #include <array>
 #include <atomic>
 #include <cstring>
-#include <exception>
 #include <format>
 #include <limits>
 #include <span>
@@ -61,12 +60,15 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
   }
   if (!queue.dispatches.entries.empty())
     return;
-  // Returned failures cancel outside exception containment, just as
-  // the former catch handler did. Allocations and callbacks still need the catch.
   const auto execute_packets = [&]() -> util::Result {
     const auto fail = [](std::string_view message) {
       util::Logger::warn("PM4 queue failed: ", message);
       return util::Result::failure();
+    };
+    const auto flush_caches = [&]() -> util::Result {
+      if (context.flush_caches() != VmAccessOutcome::Complete)
+        return fail("PM4 cache flush failed");
+      return util::Result::success();
     };
     if (!queue.command_access)
       queue.command_access = gpu_vm->snapshot_pinned(queue.address_space);
@@ -95,12 +97,19 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         return util::Result::success();
       }
       auto &submission = state.submissions.front();
-      if (submission.ready && !submission.ready()) {
-        context.retry();
-        return util::Result::success();
+      if (submission.ready) {
+        util::StringDiagnostic diagnostic;
+        util::FailureOr<bool> ready = submission.ready(diagnostic.emitter());
+        if (ready.failed())
+          return fail(diagnostic.message());
+        if (!ready.value()) {
+          context.retry();
+          return util::Result::success();
+        }
       }
       if (submission.buffers.empty()) {
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         if (submission.complete)
           submission.complete(true);
         // Completion can release an earlier queue in this same service pass.
@@ -235,7 +244,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           return util::Result::failure();
         if ((words[0] & 3) || words[2] || (words[3] & ~0x3fffu) || words[3] > ib.dwords)
           return fail("invalid COND_EXEC address, control, or extent");
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         uint32_t value = 0;
         if (access->read(address(0), {reinterpret_cast<std::byte *>(&value), sizeof(value)}) !=
             VmAccessOutcome::Complete)
@@ -258,7 +268,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           const size_t bytes = operation == 4 ? 4 : 8;
           if (address(1) % bytes)
             return fail("unaligned SET_PREDICATION address");
-          context.flush_caches();
+          if (flush_caches().failed())
+            return util::Result::failure();
           uint64_t value = 0;
           if (access->read(address(1), {reinterpret_cast<std::byte *>(&value), bytes}) !=
               VmAccessOutcome::Complete)
@@ -280,7 +291,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         const uint32_t destination = (words[0] >> 8) & 15;
         if ((destination != 1 && destination != 2 && destination != 5) || (words[0] & (1u << 16)))
           return fail("unsupported WRITE_DATA destination");
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         if (access->write(address(1), {reinterpret_cast<const std::byte *>(words.data() + 3),
                                        (words.size() - 3) * 4}) != VmAccessOutcome::Complete)
           return fail("PM4 WRITE_DATA failed");
@@ -299,7 +311,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         if ((operation != 7 && operation != 8 && (operation < 15 || operation > 25)) ||
             address(1) % width)
           return fail("unsupported ATOMIC_MEM operation or alignment");
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         // TC opcodes are shared by the ME and MEC. Reuse shader-memory atomic
         // arithmetic after decoding the packet's operation and operand order.
         static constexpr AtomicOp tc_operations[] = {AtomicOp::ADD,  AtomicOp::SUB,  AtomicOp::SMIN,
@@ -327,7 +340,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::ReleaseMem: {
         if (require(7).failed())
           return util::Result::failure();
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         const uint32_t selection = words[1] >> 29;
         uint64_t value = address(4);
         if (selection == 3)
@@ -347,7 +361,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         const size_t bytes = (words[0] & (1u << 16)) ? 8 : 4;
         if (destination != 1 && destination != 2 && destination != 5)
           return fail("unsupported COPY_DATA destination");
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         uint64_t value = 0;
         if (source == 0) {
           if (!submission.graphics_engine || words[2] || words[1] > 0x3ffff)
@@ -384,7 +399,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::WaitRegMem: {
         if (require(6).failed())
           return util::Result::failure();
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         uint32_t value = 0;
         const uint32_t space = (words[0] >> 4) & 3;
         const uint32_t operation = (words[0] >> 6) & 3;
@@ -468,7 +484,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
               count > registers.size() - first)
             return fail("invalid shadow register load range");
         }
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         for (size_t i = 2; i < words.size(); i += 2) {
           const uint32_t first = words[i], count = words[i + 1];
           // Shadow storage is indexed by the register offset, not packed by
@@ -494,7 +511,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         if ((words[0] & 3) || !count || first >= registers.size() ||
             count > registers.size() - first)
           return fail("unsupported register load range or mode");
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         if (access->read(address(0), {reinterpret_cast<std::byte *>(registers.data() + first),
                                       count * 4}) != VmAccessOutcome::Complete)
           return fail("PM4 register load read failed");
@@ -637,7 +655,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
                         : 7)
                 .failed())
           return util::Result::failure();
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         break;
       case Pm4Opcode::EventWrite: {
         const uint32_t event = words[0] & 0x3f;
@@ -651,7 +670,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           if (!submission.graphics_engine || !supports_streamout_query ||
               words[0] != (15 | (event_index << 8)) || (words[1] & 7))
             return fail("unsupported PM4 streamout query event");
-          context.flush_caches();
+          if (flush_caches().failed())
+            return util::Result::failure();
           // Compute execution has no streamout counter producer. Return valid
           // zero samples until graphics supplies the counters.
           constexpr uint64_t kSampleValid = uint64_t{1} << 63;
@@ -676,7 +696,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
               (event == 15 || event == 16 || event == 36 || event == 38 || event == 44 ||
                event == 46 || event == 49)))
           return fail(std::format("unsupported PM4 EVENT_WRITE event {}", event));
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         break;
       }
       case Pm4Opcode::StreamoutStatsQuery: {
@@ -688,7 +709,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           return fail("unsupported PM4 streamout statistics query");
         // GFX12 shaders maintain four needed/written counter pairs in ordinary memory,
         // following four dwords of streamout buffer offsets.
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         std::array<uint64_t, 2> values{};
         if (access->read(address(0) + 16 + 16 * words[2],
                          std::as_writable_bytes(std::span{values})) != VmAccessOutcome::Complete)
@@ -710,7 +732,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           break;
         if (dst_select != 0 && dst_select != 3)
           return fail("unsupported PM4 DMA destination");
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         if (src_select == 2) {
           std::vector<uint8_t> data(bytes);
           for (uint32_t i = 0; i < bytes; ++i)
@@ -776,7 +799,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
             submission.graphics_engine ? state.indirect_base + words[0] : address(0);
         if (arguments > UINT64_MAX - 11)
           return fail("PM4 DISPATCH_INDIRECT argument extent overflows");
-        context.flush_caches();
+        if (flush_caches().failed())
+          return util::Result::failure();
         std::array<uint32_t, 4> dimensions{0, 0, 0, words.back()};
         if (access->read(arguments, {reinterpret_cast<std::byte *>(dimensions.data()), 12}) !=
             VmAccessOutcome::Complete)
@@ -816,13 +840,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
     }
     return util::Result::success();
   };
-  try {
-    if (execute_packets().succeeded())
-      return;
-  } catch (const std::exception &error) {
-    util::Logger::warn("PM4 queue failed: ", error.what());
-  }
-  context.fault_queue();
+  if (execute_packets().failed())
+    context.fault_queue();
 }
 
 } // namespace rocjitsu::amdgpu

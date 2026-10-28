@@ -3828,6 +3828,26 @@ TEST_F(InterposerPm4Test, OversizedLdsFailsFence) {
   EXPECT_EQ(errno, EIO);
 }
 
+TEST_F(InterposerPm4Test, FailedDependencyFailsFenceWithoutExecutingCommands) {
+  memory_[0] = 0xc0033700;
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(1, false, &sequence), 0);
+  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), -1);
+  ASSERT_EQ(errno, EIO);
+  drm_syncobj_transfer transfer{};
+  transfer.src_handle = output_;
+  transfer.dst_handle = input_;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_TRANSFER, &transfer), 0);
+  const std::array packet{0xc0033700u, 0x100u, uint32_t(kAddress + 4096),
+                          uint32_t((kAddress + 4096) >> 32), 0xdeadbeefu};
+  std::memcpy(memory_, packet.data(), sizeof(packet));
+  ASSERT_EQ(submit(packet.size(), true, &sequence, AMDGPU_HW_IP_GFX), 0);
+  EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), -1);
+  EXPECT_EQ(errno, EIO);
+  EXPECT_EQ(memory_[1024], 0u);
+  EXPECT_EQ(memory_[1026], 0u);
+}
+
 TEST_F(InterposerPm4Test, FailedFenceIsStillAvailable) {
   memory_[0] = 0xc0033700;
   uint64_t sequence = 0;

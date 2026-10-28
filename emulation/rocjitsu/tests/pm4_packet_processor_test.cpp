@@ -15,7 +15,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -131,7 +130,7 @@ protected:
       status = Pm4TestStatus::Faulted;
     };
     context.wake = [] {};
-    context.flush_caches = [] {};
+    context.flush_caches = [] { return VmAccessOutcome::Complete; };
     context.dispatch = [this](const std::array<uint32_t, 4> &dimensions, util::DiagnosticEmitter) {
       dispatches.push_back(dimensions);
       queue.dispatches.push_entry({});
@@ -422,63 +421,73 @@ TEST_F(Pm4PacketProcessorTest, ReturnedDispatchFailureDoesNotRetireNativeRingPac
   EXPECT_FALSE(completed);
 }
 
-TEST_F(Pm4PacketProcessorTest, ReturnedDispatchFailureCancellationIsNotCaughtAgain) {
-  const std::array words{0xc0031500u, 2u, 3u, 4u, 1u};
-  submit(words);
-  context.dispatch = [](const std::array<uint32_t, 4> &,
-                        util::DiagnosticEmitter emit_error) -> util::Result {
-    return emit_error.emit() << "invalid test launch";
-  };
-  uint32_t cancellations = 0;
-  context.fault_queue = [&] {
-    ++cancellations;
-    throw std::runtime_error("cancellation callback failed");
-  };
-  EXPECT_THROW(service(), std::runtime_error);
-  EXPECT_EQ(cancellations, 1u);
-  EXPECT_FALSE(completed);
-}
-
-TEST_F(Pm4PacketProcessorTest, QueueCancellationKeepsThePacketExceptionScope) {
-  const std::array words{0xc0017900u, 0x40u, 7u};
+TEST_F(Pm4PacketProcessorTest, FailedDependencyDoesNotExecuteOrRetirePacket) {
+  const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
   submit(words, true);
-  queue.packet_callbacks.write_uconfig_register = [](uint64_t, uint32_t) {
-    return Pm4RegisterWriteStatus::Rejected;
+  queue.commands.submissions.front().ready =
+      [](util::DiagnosticEmitter emit_error) -> util::FailureOr<bool> {
+    return emit_error.emit() << "PM4 submission dependency failed";
   };
-  uint32_t cancellations = 0;
-  context.fault_queue = [&] {
-    if (++cancellations == 1)
-      throw std::runtime_error("cancellation callback failed once");
-  };
-  EXPECT_NO_THROW(service());
-  EXPECT_EQ(cancellations, 2u);
+  testing::internal::CaptureStderr();
+  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  EXPECT_EQ(testing::internal::GetCapturedStderr(),
+            "[rj warn] PM4 queue failed: PM4 submission dependency failed\n");
+  EXPECT_FALSE(queue.command_retry_pending);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
   EXPECT_FALSE(completed);
 }
 
-TEST_F(Pm4PacketProcessorTest, AlreadyFailedSubmissionCancellationRemainsOutsideTheTryBlock) {
+TEST_F(Pm4PacketProcessorTest, FlushFailurePreservesEarlierPacketEffectsAndRetirement) {
+  const std::array words{0xc0033700u, 0x100u, kOutput,     0u, 0x12345678u,
+                         0xc0033700u, 0x100u, kOutput + 4, 0u, 0xdeadbeefu};
+  submit(words, true);
+  uint32_t flushes = 0;
+  context.flush_caches = [&] {
+    return ++flushes == 1 ? VmAccessOutcome::Complete : VmAccessOutcome::Faulted;
+  };
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0x12345678u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput + 4), 0u);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 5u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 5u);
+  EXPECT_FALSE(completed);
+}
+
+class Pm4CacheFlushFailureTest : public Pm4PacketProcessorTest,
+                                 public ::testing::WithParamInterface<VmAccessOutcome> {};
+
+TEST_P(Pm4CacheFlushFailureTest, PreventsPacketEffectAndRetirement) {
+  const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
+  submit(words, true);
+  uint32_t flushes = 0;
+  context.flush_caches = [&] {
+    ++flushes;
+    return GetParam();
+  };
+  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  EXPECT_EQ(flushes, 1u);
+  EXPECT_FALSE(queue.command_retry_pending);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
+  EXPECT_FALSE(completed);
+}
+
+TEST_P(Pm4CacheFlushFailureTest, PreventsSuccessfulStreamCompletion) {
   const std::array words{0xffff1000u};
   submit(words);
-  queue.commands.submissions.front().failure->failed.store(true);
-  uint32_t cancellations = 0;
-  context.fault_queue = [&] {
-    ++cancellations;
-    throw std::runtime_error("cancellation callback failed");
-  };
-  EXPECT_THROW(service(), std::runtime_error);
-  EXPECT_EQ(cancellations, 1u);
+  context.flush_caches = [] { return GetParam(); };
+  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  EXPECT_FALSE(queue.command_retry_pending);
+  EXPECT_FALSE(completed);
+  EXPECT_EQ(queue.commands.submissions.size(), 1u);
 }
 
-TEST_F(Pm4PacketProcessorTest, CancellationFromTheCatchBlockIsNotCaughtAgain) {
-  const std::array words{0xc000ff00u, 0u};
-  submit(words);
-  uint32_t cancellations = 0;
-  context.fault_queue = [&] {
-    ++cancellations;
-    throw std::runtime_error("cancellation callback failed");
-  };
-  EXPECT_THROW(service(), std::runtime_error);
-  EXPECT_EQ(cancellations, 1u);
-}
+INSTANTIATE_TEST_SUITE_P(NonComplete, Pm4CacheFlushFailureTest,
+                         ::testing::Values(VmAccessOutcome::Unavailable, VmAccessOutcome::Faulted,
+                                           VmAccessOutcome::Malformed));
 
 // Each case reaches a distinct admission check before its packet effect.
 struct RejectedPm4Packet {
@@ -722,20 +731,6 @@ TEST_F(Pm4PacketProcessorTest, FaultedPayloadFetchDoesNotDispatchOrAdvance) {
   EXPECT_EQ(ib.address, 0u);
   EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
   EXPECT_FALSE(completed);
-}
-
-TEST_F(Pm4PacketProcessorTest, AdmissionCancellationRunsOnceOutsideExceptionContainment) {
-  const std::array words{0xc0001500u, 0u}; // DISPATCH_DIRECT requires four payload words.
-  submit(words, true);
-  uint32_t cancellations = 0;
-  context.fault_queue = [&] {
-    ++cancellations;
-    throw std::runtime_error("cancellation callback failed");
-  };
-  EXPECT_THROW(service(), std::runtime_error);
-  EXPECT_EQ(cancellations, 1u);
-  EXPECT_FALSE(completed);
-  EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
 }
 
 TEST_F(Pm4PacketProcessorTest, RegisterPairFailurePreservesValidPrefixWithoutRetiring) {
