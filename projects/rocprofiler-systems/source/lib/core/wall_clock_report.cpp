@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/wall_clock_report.hpp"
+#include "common/delimit.hpp"
+#include "common/string_utility.hpp"
 
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
@@ -78,17 +80,23 @@ struct timing_stats
     }
 };
 
+enum class call_kind
+{
+    cpu,
+    gpu
+};
+
 struct call_node
 {
     std::string          name;
-    bool                 is_gpu = false;
-    timing_stats         data   = {};
+    call_kind            kind = call_kind::cpu;
+    timing_stats         data = {};
     std::list<call_node> children;
 
     /// Returns the child called `child_name`. With `merge`, an existing child is
     /// reused (linear search: fan-out per node is small, so a map would only lose
     /// first-seen ordering); otherwise a new one is always appended.
-    call_node& child(std::string_view child_name, bool gpu, bool merge)
+    call_node& child(std::string_view child_name, call_kind child_kind, bool merge)
     {
         if(merge)
         {
@@ -99,8 +107,8 @@ struct call_node
                 return *existing;
             }
         }
-        return children.emplace_back(
-            call_node{ .name = std::string{ child_name }, .is_gpu = gpu });
+        return children.emplace_back(call_node{
+            .name = std::string{ child_name }, .kind = child_kind, .children = {} });
     }
 
     /// Share of this node's time not spent in CPU children. GPU children run
@@ -114,7 +122,7 @@ struct call_node
         auto cpu_children = 0.0;
         for(const auto& kid : children)
         {
-            cpu_children += kid.is_gpu ? 0.0 : kid.data.sum;
+            cpu_children += kid.kind == call_kind::gpu ? 0.0 : kid.data.sum;
         }
         return k_percent * (data.sum - cpu_children) / data.sum;
     }
@@ -222,7 +230,7 @@ build_thread_trees(const wall_clock_settings&              settings,
         auto& parent = (settings.flat || open_regions.empty())
                            ? tree_of(region->thread_id)
                            : *open_regions.back().first;
-        auto& entry  = parent.child(region->name, false, merge);
+        auto& entry  = parent.child(region->name, call_kind::cpu, merge);
         entry.data.add(region->end - region->begin);
         open_regions.emplace_back(&entry, region->end);
         if(region->correlation_id != k_no_correlation)
@@ -237,7 +245,8 @@ build_thread_trees(const wall_clock_settings&              settings,
         auto&      parent = (launch != launch_by_correlation_id.end() && !settings.flat)
                                 ? *launch->second
                                 : tree_of(activity.thread_id);
-        parent.child(activity.name, true, merge).data.add(activity.end - activity.begin);
+        parent.child(activity.name, call_kind::gpu, merge)
+            .data.add(activity.end - activity.begin);
     }
     trees.thread_count = threads.size();
     return trees;
@@ -249,13 +258,46 @@ std::optional<wall_clock_unit>
 find_wall_clock_unit(std::string_view name)
 {
     using namespace std::chrono_literals;
-    constexpr std::array k_units{
-        wall_clock_unit{ "ns", 1ns },   wall_clock_unit{ "us", 1us },
-        wall_clock_unit{ "ms", 1ms },   k_wall_clock_seconds,
-        wall_clock_unit{ "min", 1min }, wall_clock_unit{ "h", 1h },
+    struct unit_spellings
+    {
+        wall_clock_unit  unit;
+        std::string_view spellings;
     };
-    auto const found = std::ranges::find(k_units, name, &wall_clock_unit::name);
-    return found == k_units.end() ? std::nullopt : std::optional{ *found };
+    constexpr std::array k_units{
+        unit_spellings{ .unit      = { .name = "ns", .length = 1ns },
+                        .spellings = "nsec ns nanosecond nanoseconds" },
+        unit_spellings{ .unit      = { .name = "us", .length = 1us },
+                        .spellings = "usec us microsecond microseconds" },
+        unit_spellings{ .unit      = { .name = "ms", .length = 1ms },
+                        .spellings = "msec ms millisecond milliseconds" },
+        unit_spellings{
+            .unit      = { .name   = "cs",
+                           .length = std::chrono::duration<std::int64_t, std::centi>{ 1 } },
+            .spellings = "csec cs centisecond centiseconds" },
+        unit_spellings{
+            .unit      = { .name   = "ds",
+                           .length = std::chrono::duration<std::int64_t, std::deci>{ 1 } },
+            .spellings = "dsec ds decisecond deciseconds" },
+        unit_spellings{ .unit      = k_wall_clock_seconds,
+                        .spellings = "sec s second seconds" },
+        unit_spellings{ .unit      = { .name = "min", .length = 1min },
+                        .spellings = "min minute minutes" },
+        unit_spellings{ .unit      = { .name = "h", .length = 1h },
+                        .spellings = "hr hour hours" },
+    };
+    if(name.empty())
+    {
+        return k_wall_clock_seconds;
+    }
+    auto const is_spelling_of = [name](const unit_spellings& entry) {
+        return std::ranges::any_of(delimit(std::string{ entry.spellings }, " "),
+                                   [name](const std::string& spelling) {
+                                       return utility::string::equals_ignore_case(
+                                           spelling, name);
+                                   });
+    };
+    auto const found = std::ranges::find_if(k_units, is_spelling_of);
+    return found == k_units.end() ? std::nullopt : std::optional{ found->unit };
 }
 
 wall_clock_report::wall_clock_report(wall_clock_settings settings) noexcept
@@ -416,7 +458,7 @@ wall_clock_report::json() const
                   { { { "rank", m_settings.rank },
                       { "graph_size", rows.size() },
                       { "graph", graph } } } } } } } }
-    }.dump(4);
+    }.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
 }  // namespace rocprofsys

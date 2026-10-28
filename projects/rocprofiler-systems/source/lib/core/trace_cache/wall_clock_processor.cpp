@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/wall_clock_processor.hpp"
+#include "common/path.hpp"
 #include "core/agent_manager.hpp"
 #include "core/demangler.hpp"
 #include "core/output/output_summary.hpp"
@@ -14,15 +15,14 @@
 #include <fmt/format.h>
 
 #include <cstdint>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <sys/types.h>
-#include <system_error>
 #include <utility>
 
 namespace rocprofsys::trace_cache
@@ -30,14 +30,21 @@ namespace rocprofsys::trace_cache
 namespace
 {
 template <typename Sample>
-wall_clock_interval
+std::optional<wall_clock_interval>
 make_interval(const Sample& sample, std::string name)
 {
-    return { .thread_id      = sample.thread_id,
-             .name           = std::move(name),
-             .correlation_id = sample.correlation_id_internal,
-             .begin          = wall_clock_nanoseconds{ sample.start_timestamp },
-             .end            = wall_clock_nanoseconds{ sample.end_timestamp } };
+    if(sample.end_timestamp < sample.start_timestamp)
+    {
+        LOG_WARNING("wall_clock: skipping '{}' (thread {}), it ends at {} before it "
+                    "begins at {}",
+                    name, sample.thread_id, sample.end_timestamp, sample.start_timestamp);
+        return std::nullopt;
+    }
+    return wall_clock_interval{ .thread_id      = sample.thread_id,
+                                .name           = std::move(name),
+                                .correlation_id = sample.correlation_id_internal,
+                                .begin = wall_clock_nanoseconds{ sample.start_timestamp },
+                                .end   = wall_clock_nanoseconds{ sample.end_timestamp } };
 }
 
 bool
@@ -48,21 +55,23 @@ is_application_worker_thread(const thread_info& info)
 }
 
 void
-write_file(const std::string& path, std::string_view content, pid_t pid)
+write_file(const std::string& filepath, std::string_view content, pid_t pid)
 {
-    std::error_code ignored;
-    std::filesystem::create_directories(std::filesystem::path{ path }.parent_path(),
-                                        ignored);
-    std::ofstream file{ path };
+    std::ofstream file;
+    if(!path::create_parent_dirs_and_open_ofstream(file, filepath))
+    {
+        LOG_ERROR("Failed to open wall_clock output: {}", filepath);
+        return;
+    }
     file << content;
     file.close();
     if(file.fail())
     {
-        LOG_ERROR("Failed to write wall_clock output: {}", path);
+        LOG_ERROR("Failed to write wall_clock output: {}", filepath);
         return;
     }
-    output::registry::instance().register_file(path, pid);
-    LOG_INFO("wall_clock output written to: {}", path);
+    output::registry::instance().register_file(filepath, pid);
+    LOG_INFO("wall_clock output written to: {}", filepath);
 }
 }  // namespace
 
@@ -79,7 +88,11 @@ wall_clock_processor_t::wall_clock_processor_t(
 void
 wall_clock_processor_t::handle(const region_sample& sample)
 {
-    m_report.add_region(make_interval(sample, std::string{ sample.name }));
+    auto interval = make_interval(sample, std::string{ sample.name });
+    if(interval.has_value())
+    {
+        m_report.add_region(std::move(*interval));
+    }
 }
 
 void
@@ -98,7 +111,11 @@ wall_clock_processor_t::handle(const kernel_dispatch_sample& sample)
                             rocprofsys::utility::demangle(symbol->kernel_name))
                    .first;
     }
-    m_report.add_gpu_activity(make_interval(sample, name->second));
+    auto interval = make_interval(sample, name->second);
+    if(interval.has_value())
+    {
+        m_report.add_gpu_activity(std::move(*interval));
+    }
 }
 
 void
@@ -106,15 +123,23 @@ wall_clock_processor_t::handle(const memory_copy_sample& sample)
 {
     auto const& src = m_agents->get_agent_by_handle(sample.src_agent_id_handle);
     auto const& dst = m_agents->get_agent_by_handle(sample.dst_agent_id_handle);
-    m_report.add_gpu_activity(
+    auto        interval =
         make_interval(sample, fmt::format("memory_copy: {} -> {}", src.logical_node_id,
-                                          dst.logical_node_id)));
+                                          dst.logical_node_id));
+    if(interval.has_value())
+    {
+        m_report.add_gpu_activity(std::move(*interval));
+    }
 }
 
 void
 wall_clock_processor_t::handle(const scratch_memory_sample& sample)
 {
-    m_report.add_gpu_activity(make_interval(sample, std::string{ sample.name }));
+    auto interval = make_interval(sample, std::string{ sample.name });
+    if(interval.has_value())
+    {
+        m_report.add_gpu_activity(std::move(*interval));
+    }
 }
 
 void
