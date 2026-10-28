@@ -2,7 +2,6 @@
  *
  * SPDX-License-Identifier: MIT
  */
-#include "configuration.h"
 #include "context.h"
 #include "hip.h"
 #include "hipfile.h"
@@ -11,46 +10,24 @@
 #include "sys.h"
 
 #include <hip/hip_runtime_api.h>
-#include <memory>
 #include <mutex>
 #include <syslog.h>
 #include <stdexcept>
 #include <utility>
 
 namespace hipFile {
-static void
-hipHostDeleter(void *buffer)
-{
-    try {
-        Context<Hip>::get()->hipHostFree(buffer);
-    }
-    catch (...) {
-        Context<Sys>::get()->syslog(LOG_CRIT, "Error freeing pinned host memory.");
-    }
-}
 
 Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<StreamMap> &)
     : hip_stream{_hip_stream}, device_id{0}, fixed_buf_offset{(flags & HIPFILE_STREAM_FIXED_BUF_OFFSET) != 0},
       fixed_file_offset{(flags & HIPFILE_STREAM_FIXED_FILE_OFFSET) != 0},
       fixed_io_size{(flags & HIPFILE_STREAM_FIXED_FILE_SIZE) != 0},
-      page_aligned{(flags & HIPFILE_STREAM_PAGE_ALIGNED_INPUTS) != 0}, async_buffer{nullptr, hipHostDeleter},
-      async_buffer_dev_ptr{nullptr}, async_buffer_size{0}
-
+      page_aligned{(flags & HIPFILE_STREAM_PAGE_ALIGNED_INPUTS) != 0}
 {
     if ((flags & HIPFILE_STREAM_FLAGS_MASK) != flags) {
         throw std::invalid_argument("Invalid flags for stream");
     }
 
     device_id = Context<Hip>::get()->hipStreamGetDevice(hip_stream);
-
-    size_t buffer_size = Context<Configuration>::get()->asyncBufferSize();
-    void  *host_ptr    = Context<Hip>::get()->hipHostMalloc(buffer_size, 0);
-    if (!host_ptr) {
-        throw std::runtime_error("Failed to allocate pinned host memory for async buffer");
-    }
-    async_buffer.reset(host_ptr);
-    async_buffer_dev_ptr = Context<Hip>::get()->hipHostGetDevicePointer(async_buffer.get(), 0);
-    async_buffer_size    = buffer_size;
 }
 
 hipStream_t
@@ -120,24 +97,6 @@ StreamMap::getStream(hipStream_t hip_stream)
     }
 
     return itr->second;
-}
-
-void *
-Stream::asyncBufferHostPtr() const
-{
-    return async_buffer.get();
-}
-
-void *
-Stream::asyncBufferDevPtr() const
-{
-    return async_buffer_dev_ptr;
-}
-
-size_t
-Stream::asyncBufferSize() const
-{
-    return async_buffer_size;
 }
 
 StreamMap::~StreamMap()

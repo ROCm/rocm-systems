@@ -11,7 +11,6 @@ set(SHARED_SOURCE_FILES
 
 set(TEST_SOURCE_FILES
     api_trace.cpp
-    async.cpp
     backend.cpp
     batch/batch.cpp
     configuration.cpp
