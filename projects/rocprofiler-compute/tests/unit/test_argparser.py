@@ -191,15 +191,23 @@ def test_profile_kernel_iteration_range():
 
 
 @pytest.mark.parametrize(
-    "values",
+    "values, expected, deprecated",
     [
-        ["num_xcd:4", "cu_per_gpu:64"],
-        ["sbios:American Megatrends International, LLC.X"],
+        (["num_xcd:4", "cu_per_gpu:64"], ["num_xcd:4", "cu_per_gpu:64"], False),
+        (["num_xcd:4,cu_per_gpu:64"], ["num_xcd:4", "cu_per_gpu:64"], True),
+        (
+            ["sbios:American Megatrends International, LLC.X"],
+            ["sbios:American Megatrends International, LLC.X"],
+            False,
+        ),
     ],
 )
-def test_analyze_specs_correction_takes_space_separated_pairs(values):
+def test_analyze_specs_correction_takes_space_separated_pairs(
+    values, expected, deprecated, caplog
+):
     args = build_args(["analyze", "--specs-correction", *values])
-    assert args.specs_correction == values
+    assert args.specs_correction == expected
+    assert ("Comma-separated --specs-correction" in caplog.text) == deprecated
 
 
 def test_analyze_specs_correction_rejects_value_without_name(capsys):

@@ -878,8 +878,10 @@ Examples:
         metavar="<name:value>",
         nargs="+",
         type=spec_correction_pair,
+        action=SpecsCorrectionAction,
         help=(
-            "Correct system specs, given as name:value pairs.\n"
+            "Correct system specs, given as name:value pairs separated by spaces.\n"
+            "Quote a value that contains spaces.\n"
             "For example: --specs-correction num_xcd:4 cu_per_gpu:64.\n"
             "Run -s/--specs to see the spec names."
         ),
@@ -979,6 +981,33 @@ class ExperimentalAction(argparse.Action):
         )
 
         self._base_action_call(self, parser, namespace, values, option_string)
+
+
+class SpecsCorrectionAction(argparse.Action):
+    """Store --specs-correction pairs, splitting the deprecated comma-separated form."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: list[str],
+        option_string: Optional[str] = None,
+    ) -> None:
+        pairs: list[str] = []
+        for value in values:
+            pieces = value.split(",")
+            # Split only when every piece is a pair, so commas inside a value stay
+            if len(pieces) > 1 and all(SPEC_PAIR_RE.match(piece) for piece in pieces):
+                console_warning(
+                    "Comma-separated --specs-correction pairs are deprecated and "
+                    "will be removed in a future release. Separate name:value pairs "
+                    "with spaces, for example: "
+                    "--specs-correction num_xcd:4 cu_per_gpu:64"
+                )
+                pairs.extend(pieces)
+            else:
+                pairs.append(value)
+        setattr(namespace, self.dest, pairs)
 
 
 class CliHelpFormatter(argparse.RawTextHelpFormatter):
