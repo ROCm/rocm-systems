@@ -616,7 +616,8 @@ TEST_F(MemManagerMicrotest, Suspend_KnownBug_RetryAfterOffloadUnmapFailureLeaksT
   EXPECT_NE(offload->cpuBackup, first);
   EXPECT_TRUE(hostFrees_.empty());
   EXPECT_EQ(mgr_->cpuBackupUsage, 2 * kSize);
-  std::free(first);
+  // A fix either frees or reuses the first backup; only a leaked one is ours to free.
+  if (offload->cpuBackup != first && hostFrees_.empty()) std::free(first);
 }
 
 // Resume

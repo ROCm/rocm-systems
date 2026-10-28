@@ -587,7 +587,7 @@ TEST_F(AllocMicrotest, HostCalloc_Failures) {
   EXPECT_EQ(ncclCudaHostFree(p), ncclUnhandledCudaError);
 }
 
-#if ROCM_VERSION >= 71200
+#if NCCL_CUMEM_HOST_GATE
 
 // In this arm the ncclCuMemHostAlloc macro expands to an ncclCuMemHostAllocDebug nothing declares, so
 // the tests below call the function by its parenthesized name and the KnownBug test pins the macro.
@@ -615,6 +615,8 @@ TEST_F(AllocMicrotest, CuMemHostAlloc_MapsHostMemoryForTheDeviceAndTheCpu) {
   EXPECT_EQ(prop_.location.type, hipMemLocationTypeHost);
   EXPECT_EQ(prop_.location.id, 0);
   EXPECT_EQ(sizes_["create"], kGran);
+  EXPECT_EQ(Count("deviceGet"), 0);
+  EXPECT_EQ(Count("numa"), 0);
   EXPECT_EQ(access_, (std::vector<std::pair<hipMemLocationType, int>>{{hipMemLocationTypeDevice, kDev},
                                                                        {hipMemLocationTypeHost, 0}}));
   ASSERT_EQ(ncclCuMemHostFree(p), ncclSuccess);
@@ -625,7 +627,8 @@ TEST_F(AllocMicrotest, CuMemHostAlloc_MapsHostMemoryForTheDeviceAndTheCpu) {
 
 TEST_F(AllocMicrotest, CuMemHostAlloc_FailuresUnwind) {
   void* untouched = Va(1);
-  for (const char* step : {"getDevice", "deviceGet", "numa", "granularity"}) {
+  // AMD skips cuDeviceGet and the NUMA query, so only these steps can fail before the create.
+  for (const char* step : {"getDevice", "granularity"}) {
     failing_ = {step};
     EXPECT_EQ((ncclCuMemHostAlloc)(&untouched, nullptr, 1), ncclUnhandledCudaError) << step;
     EXPECT_EQ(untouched, Va(1)) << step;
@@ -651,14 +654,14 @@ TEST_F(AllocMicrotest, CuMemHostAlloc_FailuresUnwind) {
 
 #else
 
-TEST_F(AllocMicrotest, CuMemHost_UnsupportedBeforeRocm712) {
+TEST_F(AllocMicrotest, CuMemHost_UnsupportedOutsideTheHostGate) {
   void* p = nullptr;
   EXPECT_EQ(ncclCuMemHostAlloc(&p, nullptr, 100), ncclInternalError);
   EXPECT_EQ(ncclCuMemHostFree(p), ncclInternalError);
   EXPECT_TRUE(calls_.empty());
 }
 
-#endif  // ROCM_VERSION >= 71200
+#endif  // NCCL_CUMEM_HOST_GATE
 
 #if ROCM_VERSION >= 70000
 
@@ -949,11 +952,11 @@ TEST_F(AllocMicrotest, GetAddressRange_ProbesForSysmemUntilFound) {
   calls_.clear();
   handleLocation_ = static_cast<hipMemLocationType>(2);  // hipMemLocationTypeHost, missing from older HIP headers
   ASSERT_EQ(ncclCuMemGetAddressRange(Va(), 2 * kGran, &base, &total, nullptr, &sysmem), ncclSuccess);
-#if ROCM_VERSION >= 71200
+#if NCCL_CUMEM_HOST_GATE
   EXPECT_TRUE(sysmem);
   EXPECT_EQ(Count("retain"), 1);  // no more probing once a host segment is seen
 #else
-  EXPECT_FALSE(sysmem);  // host VMM segments only exist from ROCm 7.12
+  EXPECT_FALSE(sysmem);  // host VMM segments only exist inside the host gate
 #endif
   for (const char* step : {"retain", "props", "release"}) {
     failing_ = {step};

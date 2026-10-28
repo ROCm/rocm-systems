@@ -46,7 +46,17 @@ uint64_t ncclHashPointer(int hbits, void* key) {
 
 #include "fakes/param_redirect.h"
 #include "fakes/nvtx_redirect.h"
+
+// allocator.cc's malloc returns 0xff-filled memory, so the host-shadow zeroing check never relies on
+// the allocator handing back a dirty block.
+static void* DirtyMalloc(size_t n) {
+  void* p = std::malloc(n);
+  if (p != nullptr) std::memset(p, 0xff, n);
+  return p;
+}
+#define malloc(n) DirtyMalloc(n)
 #include ALLOCATOR_CC_PATH
+#undef malloc
 
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
@@ -694,6 +704,20 @@ TEST_F(AllocatorShadowPoolMicrotest, Alloc_KnownBug_FailedPageIsReusedWithoutDev
   EXPECT_EQ(mallocs_.size(), 1u);
   ASSERT_EQ(ncclShadowPoolFree(&pool_, dev, kStream), ncclSuccess);  // a null devObj is a no-op
   EXPECT_EQ(pool_.count, 1);
+}
+
+// A page whose zeroing failed stays listed, so the next allocation hands out its unzeroed slot.
+// Pins AICOMRCCL-3040; a fix flips this pin.
+TEST_F(AllocatorShadowPoolMicrotest, Alloc_KnownBug_PageWhoseZeroingFailedIsReusedUnzeroed) {
+  void* dev = nullptr;
+  memsetResult_ = hipErrorInvalidValue;
+  EXPECT_EQ(ncclShadowPoolAlloc(&pool_, 64, &dev, nullptr, kStream), ncclUnhandledCudaError);
+  memsetResult_ = hipSuccess;
+  ASSERT_EQ(ncclShadowPoolAlloc(&pool_, 64, &dev, nullptr, kStream), ncclSuccess);
+  ASSERT_EQ(allocated_.size(), 1u);
+  EXPECT_EQ(dev, allocated_[0]);
+  EXPECT_EQ(mallocs_.size(), 1u);
+  EXPECT_EQ(memsets_.size(), 1u);
 }
 
 TEST_F(AllocatorShadowPoolMicrotest, Page_FillsUpLeavesTheListAndReturnsWhenASlotFrees) {

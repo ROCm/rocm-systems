@@ -259,6 +259,7 @@ TEST_F(MnnvlMicrotest, Probe_ExportFailureFreesTheBufferAndFails) {
   EXPECT_EQ(ncclMnnvlCheck(comm_.get()), ncclSystemError);
   EXPECT_EQ(addressFrees_, std::vector<size_t>{reserved_});
   EXPECT_EQ(comm_->MNNVL, 0);
+  EXPECT_EQ(ncclCuMemHandleType, hipMemHandleTypePosixFileDescriptor);
 }
 
 TEST_F(MnnvlMicrotest, Probe_FreeFailureIsReturned) {
@@ -267,6 +268,7 @@ TEST_F(MnnvlMicrotest, Probe_FreeFailureIsReturned) {
                     [](hipMemGenericAllocationHandle_t*, void*) { return hipErrorInvalidValue; });
   EXPECT_EQ(ncclMnnvlCheck(comm_.get()), ncclUnhandledCudaError);
   EXPECT_EQ(comm_->MNNVL, 0);
+  EXPECT_EQ(ncclCuMemHandleType, hipMemHandleTypePosixFileDescriptor);
   exportResult_ = hipErrorNotSupported;
   Build(0, 2);
   EXPECT_EQ(ncclMnnvlCheck(comm_.get()), ncclUnhandledCudaError);
